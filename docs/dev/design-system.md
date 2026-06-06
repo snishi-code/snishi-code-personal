@@ -48,7 +48,9 @@ CSS variables による design tokens。正本は `simple-ledger-src/src/ui/toke
 
 - 文字列は i18n（`src/i18n`）、安定セレクタは UI contract（`src/ui-contract.ts`）。
 - 汎用部品: `Icon`（Lucide パスのインライン）、`Field`（ラベル+control を id で結合）、
+  `AccountPicker`（科目チップ=単一選択 radio。選択は枠+チェックで示し色のみに依存しない）、
   `Modal` / `ConfirmDialog`、`toast`、`money`（金額表示）。
+- 巨大な `<select>` を避け、選択はチップ（`.chip`、44px・`:has(input:checked)` で選択表示）に寄せる。
 - 色・余白・角丸はトークン参照。マジックナンバーや色のハードコードを避ける。
 - アイコンは **意味で参照**（`<Icon name="upload" />` 等）。新概念は既存トークンを再利用し、
   無ければ `Icon.tsx` に追加する（外部 CDN は読み込まない）。

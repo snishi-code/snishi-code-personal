@@ -70,6 +70,44 @@ PL も BS も **保存しない**。`Account` と `JournalEntry` から毎回計
 例: 現金 100,000 円を元入金として持っている →
 `借方 現金 100000 / 貸方 元入金(equity) 100000`（kind=opening）。
 
+## 日常入力（収入/支出/振替）→ 仕訳への変換
+
+ユーザーには借方/貸方を意識させず、意味のあるフィールドで 2 科目を選ばせる。内部では
+必ず複式へ変換する（対応は `src/ui/entryModes.ts`、入力方法は `JournalEntry.metadata.inputMode`）。
+
+| 入力 | フィールド（debit / credit） | 候補タイプ |
+|---|---|---|
+| 収入 | 入金先(debit) / カテゴリ(credit) | asset / revenue |
+| 支出 | カテゴリ(debit) / 支払元(credit) | expense / asset・liability |
+| 振替 | 振替先(debit) / 振替元(credit) | asset・liability・equity（両側） |
+| 詳細(manual) | 借方 / 貸方 | すべて |
+
+例（支出）: カテゴリ=食費・支払元=現金・1000 →
+`借方 食費(expense) 1000 / 貸方 現金(asset) 1000`（metadata.inputMode='expense'）。
+
+## 取消/返金（逆仕訳）
+
+実取引のキャンセル・返金は、元仕訳を**削除せず**、借方/貸方を入れ替えた逆仕訳を作る
+（`reversalInput`）。金額は既定で元と同額、編集可能（部分返金）。`metadata` に
+`inputMode='reversal'` と `reversalOfEntryId`（元仕訳 ID）を残す。入力ミス直後の訂正は
+編集/削除でよいが、実取引の取消は逆仕訳を推奨する。
+
+例: 元 `借方 食費 / 貸方 カード 1000` → 取消 `借方 カード / 貸方 食費 1000`。
+
+## 期間按分（将来拡張・データ構造のみ）
+
+`JournalEntry.metadata.allocationPlan`（`kind:'period'` / `startDate` / `endDate` /
+`method:'even-monthly'` / `recognitionAccountId` / `deferredAccountId` / `generatedEntryIds`）を
+用意してある。**MVP では保存・export/import・スキーマ検証が通るだけ**で、按分仕訳の自動
+生成ロジックと UI は未実装。
+
+## 勘定科目の変更ルール（`Account`）
+
+- 名前変更: 同一 `id` の表示名を変える。過去仕訳も新名称で表示。
+- 新規追加: 以後の科目として追加。
+- 物理削除: **未使用のみ可**（仕訳から参照中は不可・アーカイブを使う）。
+- 区分(type)変更: **未使用のみ可**（使用中は禁止）。UI で無効化し、`upsertAccount` でも fail-closed。
+
 ## 関連
 
 - データ形式・import ポリシー: [ledger-protocol.md](ledger-protocol.md)

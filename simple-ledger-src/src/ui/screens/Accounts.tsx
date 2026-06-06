@@ -24,6 +24,13 @@ export function Accounts() {
   const entries = ledger?.journalEntries ?? [];
   const currency = ledger?.settings.currency ?? 'JPY';
 
+  // 仕訳から参照されている科目（区分変更・削除ができない）。
+  const usedIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of ledger?.journalEntries ?? []) for (const l of e.lines) set.add(l.accountId);
+    return set;
+  }, [ledger]);
+
   const byType = useMemo(() => {
     const list = ledger?.accounts ?? [];
     return ACCOUNT_TYPES.map((type) => ({
@@ -81,6 +88,9 @@ export function Accounts() {
                     <div className="list__main">
                       <div className="list__title">
                         {account.name}{' '}
+                        {usedIds.has(account.id) ? (
+                          <span className="tag tag--teal">{t('accounts.inUse')}</span>
+                        ) : null}{' '}
                         {account.archived ? (
                           <span className="tag tag--neutral">{t('accounts.archived')}</span>
                         ) : null}

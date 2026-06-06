@@ -644,3 +644,149 @@ button.list__item:hover {
 .center {
   text-align: center;
 }
+
+/* ── Entry type buttons（収入/支出/振替） ── */
+.entry-types {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.entry-type-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 72px;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.entry-type-btn:hover {
+  border-color: var(--primary-border);
+  background: var(--primary-light);
+}
+.entry-type-btn__icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary-light);
+  color: var(--primary-strong);
+}
+
+/* ── Account picker（チップ） ── */
+.picker {
+  border: none;
+  padding: 0;
+  margin-bottom: var(--space-4);
+  min-width: 0;
+}
+.picker__group {
+  margin-top: var(--space-2);
+}
+.picker__group-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin: var(--space-2) 0 var(--space-1);
+}
+.picker__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--tap);
+  padding: 0 var(--space-3);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chip:hover {
+  background: var(--bg);
+}
+.chip__check {
+  display: none;
+  color: var(--primary-strong);
+}
+.chip:has(input:checked) {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary-strong);
+}
+.chip:has(input:checked) .chip__check {
+  display: inline-flex;
+}
+.chip:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ── Collapsible（詳細入力） ── */
+.collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--tap);
+  background: transparent;
+  border: none;
+  color: var(--primary-strong);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0;
+}
+
+/* ── Filter chip（一覧の絞り込み表示） ── */
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 12px;
+  border: 1px solid var(--primary-border);
+  background: var(--primary-light);
+  color: var(--primary-strong);
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  font-weight: 600;
+}
+.filter-chip button {
+  min-width: 28px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: inherit;
+  border-radius: var(--radius-pill);
+}
+
+/* クリック可能な財務諸表の行 */
+button.stmt-row {
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  min-height: var(--tap);
+}
+button.stmt-row:hover {
+  background: var(--bg);
+}

@@ -38,6 +38,24 @@ export const journalLineSchema = z.object({
   amount: amountSchema,
 });
 
+export const inputModeSchema = z.enum(['income', 'expense', 'transfer', 'manual', 'reversal']);
+
+export const allocationPlanSchema = z.object({
+  kind: z.literal('period'),
+  startDate: isoDate,
+  endDate: isoDate,
+  method: z.enum(['even-monthly']),
+  recognitionAccountId: z.string().min(1),
+  deferredAccountId: z.string().min(1),
+  generatedEntryIds: z.array(z.string().min(1)),
+});
+
+export const entryMetadataSchema = z.object({
+  inputMode: inputModeSchema.optional(),
+  reversalOfEntryId: z.string().min(1).optional(),
+  allocationPlan: allocationPlanSchema.optional(),
+});
+
 export const journalEntrySchema = z
   .object({
     id: z.string().min(1),
@@ -46,6 +64,7 @@ export const journalEntrySchema = z
     lines: z.array(journalLineSchema).min(2),
     memo: z.string().max(1000).optional(),
     kind: z.enum(['normal', 'opening']),
+    metadata: entryMetadataSchema.optional(),
     createdAt: isoDateTime,
     updatedAt: isoDateTime,
   })

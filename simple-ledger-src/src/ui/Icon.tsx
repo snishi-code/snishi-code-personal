@@ -24,9 +24,43 @@ export type IconName =
   | 'chart'
   | 'wallet'
   | 'settings'
-  | 'help';
+  | 'help'
+  | 'income'
+  | 'expense'
+  | 'transfer'
+  | 'chevronDown'
+  | 'reverse';
 
 const PATHS: Record<IconName, JSX.Element> = {
+  income: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 8v8" />
+      <path d="m8 12 4 4 4-4" />
+    </>
+  ),
+  expense: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16V8" />
+      <path d="m8 12 4-4 4 4" />
+    </>
+  ),
+  transfer: (
+    <>
+      <path d="m8 3-4 4 4 4" />
+      <path d="M4 7h16" />
+      <path d="m16 21 4-4-4-4" />
+      <path d="M20 17H4" />
+    </>
+  ),
+  chevronDown: <path d="m6 9 6 6 6-6" />,
+  reverse: (
+    <>
+      <path d="M3 7v6h6" />
+      <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+    </>
+  ),
   home: (
     <>
       <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />

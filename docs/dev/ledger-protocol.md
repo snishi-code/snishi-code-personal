@@ -32,6 +32,34 @@
 - `revision`: 端末ローカルの編集追跡。保存（仕訳/科目/設定の変更）のたびに +1。
 - 金額（`JournalLine.amount`）は **正の整数・最小通貨単位**（JPY なら円）。
 
+### `JournalEntry.metadata`（任意）
+
+仕訳の付帯情報。後方互換のため省略可能。
+
+```jsonc
+"metadata": {
+  "inputMode": "income | expense | transfer | manual | reversal",
+  "reversalOfEntryId": "<元仕訳 ID（reversal のとき）>",
+  // 期間按分（将来拡張・保存と検証のみ。生成ロジックは未実装）
+  "allocationPlan": {
+    "kind": "period",
+    "startDate": "2026-06-01",
+    "endDate": "2026-12-31",
+    "method": "even-monthly",
+    "recognitionAccountId": "<acc>",
+    "deferredAccountId": "<acc>",
+    "generatedEntryIds": []
+  }
+}
+```
+
+### 参照整合性（import 検証）
+
+`ledgerExportPackageSchema` は次も検証する（不一致は `validation-error`）:
+
+- すべての `journalEntries[].lines[].accountId` が `accounts[].id` に存在する。
+- `accounts[].id` は一意。
+
 ## import ポリシー（fail-closed）
 
 `importFromJsonText(text, { force })` の処理順（`src/data/exportImport.ts`）:

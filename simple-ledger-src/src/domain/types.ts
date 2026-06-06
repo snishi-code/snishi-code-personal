@@ -45,6 +45,41 @@ export interface JournalLine {
  */
 export type JournalEntryKind = 'normal' | 'opening';
 
+/**
+ * UI 上の入力方法。内部は常に debit/credit だが、どの導線で作られたかを記録する。
+ *  - income/expense/transfer: 日常入力の 3 種
+ *  - manual: 借方/貸方を直接指定した詳細入力
+ *  - reversal: 取消/返金（逆仕訳）
+ */
+export type InputMode = 'income' | 'expense' | 'transfer' | 'manual' | 'reversal';
+
+/**
+ * 期間按分の計画（将来実装用）。MVP では保存・export/import・検証が通るだけ。
+ * UI からは生成しない（按分仕訳の自動生成ロジックは未実装）。
+ */
+export interface AllocationPlan {
+  kind: 'period';
+  /** ISO 日付。 */
+  startDate: string;
+  endDate: string;
+  /** 按分方式。MVP は型のみ（'even-monthly' 等を想定）。 */
+  method: 'even-monthly';
+  /** 期間費用/収益として認識する科目。 */
+  recognitionAccountId: string;
+  /** 繰延（前払/前受）として保持する科目。 */
+  deferredAccountId: string;
+  /** この計画から生成された仕訳 ID（未生成なら空）。 */
+  generatedEntryIds: string[];
+}
+
+/** 仕訳の付帯情報。将来の取消/返金・期間按分に耐えるための拡張点。 */
+export interface EntryMetadata {
+  inputMode?: InputMode;
+  /** reversal のとき、元仕訳の ID。 */
+  reversalOfEntryId?: string;
+  allocationPlan?: AllocationPlan;
+}
+
 export interface JournalEntry {
   id: string;
   /** ISO 日付 (YYYY-MM-DD)。 */
@@ -54,6 +89,8 @@ export interface JournalEntry {
   memo?: string;
   /** 'opening' は UI で「初期残高」として見せる。集計上は通常の仕訳と同じ。 */
   kind: JournalEntryKind;
+  /** 付帯情報（入力方法・逆仕訳リンク・按分計画など）。任意。 */
+  metadata?: EntryMetadata;
   createdAt: string;
   updatedAt: string;
 }

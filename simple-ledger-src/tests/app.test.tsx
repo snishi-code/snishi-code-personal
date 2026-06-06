@@ -1,5 +1,6 @@
 /*
- * UI 統合テスト: アプリを描画し、仕訳を 1 件追加すると一覧と集計に反映されることを確認。
+ * UI 統合テスト: 「支出」入力フローで仕訳を 1 件追加すると一覧・集計に反映される。
+ * 借方/貸方を直接見せない（カテゴリ/支払元）日常入力を確認する。
  * 役割(getByRole)/ラベル(getByLabelText) を優先し、DOM 構造・CSS には依存しない。
  */
 import { describe, expect, it } from 'vitest';
@@ -19,31 +20,25 @@ function renderApp() {
   );
 }
 
-describe('App 仕訳追加フロー', () => {
-  it('仕訳を追加するとホームの一覧と費用集計に反映される', async () => {
+describe('App 支出入力フロー', () => {
+  it('支出を追加するとホームの一覧と費用集計に反映される', async () => {
     const user = userEvent.setup();
     renderApp();
 
-    // 初期化完了（ホーム見出し）を待つ
     expect(await screen.findByRole('heading', { name: 'ホーム' })).toBeInTheDocument();
 
-    // ヘッダーの「+ 仕訳を追加」を開く
-    await user.click(screen.getByRole('button', { name: '仕訳を追加' }));
+    // ホームの「支出」ボタンから入力（借方/貸方は出さず カテゴリ/支払元）
+    await user.click(screen.getByRole('button', { name: '支出' }));
 
-    // フォーム入力
-    await user.clear(screen.getByLabelText(/摘要/));
     await user.type(screen.getByLabelText(/摘要/), 'ランチ');
-    await user.selectOptions(screen.getByLabelText(/借方/), '食費');
-    await user.selectOptions(screen.getByLabelText(/貸方/), '現金');
+    // カテゴリ（支出）= 食費、支払元 = 現金 をチップ（radio）で選ぶ
+    await user.click(screen.getByRole('radio', { name: '食費' }));
+    await user.click(screen.getByRole('radio', { name: '現金' }));
     await user.type(screen.getByLabelText(/金額/), '1000');
 
-    // 保存
     await user.click(screen.getByRole('button', { name: '保存' }));
 
-    // ホームの最近の仕訳に表示される
     expect(await screen.findByText('ランチ')).toBeInTheDocument();
-
-    // 金額 ¥1,000 が（最近の仕訳・費用集計に）反映される
     const amounts = await screen.findAllByText((text) => text.includes('1,000'));
     expect(amounts.length).toBeGreaterThan(0);
   });
@@ -53,12 +48,10 @@ describe('App 仕訳追加フロー', () => {
     renderApp();
     await screen.findByRole('heading', { name: 'ホーム' });
 
-    await user.click(screen.getByRole('button', { name: '仕訳を追加' }));
-    // 摘要を空にして保存
-    await user.clear(screen.getByLabelText(/摘要/));
+    await user.click(screen.getByRole('button', { name: '支出' }));
+    // 摘要・科目・金額を未入力のまま保存
     await user.click(screen.getByRole('button', { name: '保存' }));
 
-    // ダイアログは開いたまま、エラーメッセージが出る
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText('摘要を入力してください。')).toBeInTheDocument();
   });

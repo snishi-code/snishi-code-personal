@@ -1,5 +1,5 @@
 /*
- * アプリ本体。ヘッダー + 画面切替 + メニュー + 仕訳シート + 更新バナー。
+ * アプリ本体。ヘッダー + 画面切替 + メニュー + 入力シート + 更新バナー。
  * ルーティングは MVP では state ベースの単純な画面切替。
  */
 import { useState } from 'react';
@@ -7,16 +7,18 @@ import { useLedger } from './state/store';
 import { Header } from './ui/Header';
 import { Menu } from './ui/Menu';
 import { Dashboard } from './ui/screens/Dashboard';
-import { Journal } from './ui/screens/Journal';
+import { Journal, type JournalFilter } from './ui/screens/Journal';
 import { Statements } from './ui/screens/Statements';
 import { Accounts } from './ui/screens/Accounts';
 import { Settings } from './ui/screens/Settings';
 import { Help } from './ui/screens/Help';
-import { EntrySheet } from './ui/screens/EntrySheet';
+import { EntrySheet, type EntryInit } from './ui/screens/EntrySheet';
+import { EntryTypeSheet } from './ui/screens/EntryTypeSheet';
 import { useServiceWorker } from './pwa/useServiceWorker';
 import { Icon } from './ui/Icon';
 import { t } from './i18n';
 import type { Screen } from './ui/navigation';
+import type { FormMode } from './ui/entryModes';
 import type { JournalEntry } from './domain/types';
 
 export function App() {
@@ -24,8 +26,9 @@ export function App() {
   const [screen, setScreen] = useState<Screen>('dashboard');
   const [menuOpen, setMenuOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
-  // entrySheet: false=閉, true=新規, JournalEntry=編集
-  const [entrySheet, setEntrySheet] = useState<JournalEntry | true | null>(null);
+  const [typePickerOpen, setTypePickerOpen] = useState(false);
+  const [entryInit, setEntryInit] = useState<EntryInit | null>(null);
+  const [journalFilter, setJournalFilter] = useState<JournalFilter | null>(null);
   const { updateReady, applyUpdate } = useServiceWorker();
 
   if (status === 'loading') {
@@ -47,8 +50,14 @@ export function App() {
     );
   }
 
-  const openCreate = () => setEntrySheet(true);
-  const openEdit = (entry: JournalEntry) => setEntrySheet(entry);
+  const openCreate = (mode: FormMode) => setEntryInit({ kind: 'create', mode });
+  const openEdit = (entry: JournalEntry) => setEntryInit({ kind: 'edit', entry });
+  const openReversal = (source: JournalEntry) => setEntryInit({ kind: 'reversal', source });
+
+  const goJournalFiltered = (filter: JournalFilter) => {
+    setJournalFilter(filter);
+    setScreen('journal');
+  };
 
   return (
     <>
@@ -58,7 +67,7 @@ export function App() {
       <Header
         ledgerName={ledger.settings.ledgerName}
         onHome={() => setScreen('dashboard')}
-        onAddEntry={openCreate}
+        onAddEntry={() => setTypePickerOpen(true)}
         onMenu={() => setMenuOpen(true)}
       />
 
@@ -76,8 +85,15 @@ export function App() {
         {screen === 'dashboard' ? (
           <Dashboard onAddEntry={openCreate} onEditEntry={openEdit} onNavigate={setScreen} />
         ) : null}
-        {screen === 'journal' ? <Journal onEditEntry={openEdit} /> : null}
-        {screen === 'statements' ? <Statements /> : null}
+        {screen === 'journal' ? (
+          <Journal
+            onEditEntry={openEdit}
+            onReverse={openReversal}
+            filter={journalFilter}
+            onClearAccountFilter={() => setJournalFilter(null)}
+          />
+        ) : null}
+        {screen === 'statements' ? <Statements onDrillDown={goJournalFiltered} /> : null}
         {screen === 'accounts' ? <Accounts /> : null}
         {screen === 'settings' ? <Settings /> : null}
       </main>
@@ -91,12 +107,17 @@ export function App() {
         />
       ) : null}
 
-      {entrySheet ? (
-        <EntrySheet
-          existing={entrySheet === true ? undefined : entrySheet}
-          onClose={() => setEntrySheet(null)}
+      {typePickerOpen ? (
+        <EntryTypeSheet
+          onPick={(mode) => {
+            setTypePickerOpen(false);
+            openCreate(mode);
+          }}
+          onClose={() => setTypePickerOpen(false)}
         />
       ) : null}
+
+      {entryInit ? <EntrySheet init={entryInit} onClose={() => setEntryInit(null)} /> : null}
 
       {helpOpen ? <Help onClose={() => setHelpOpen(false)} /> : null}
     </>

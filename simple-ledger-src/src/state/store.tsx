@@ -109,7 +109,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
-        toast.show(t('toast.error'), 'error');
+        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
         throw e;
       }
     },

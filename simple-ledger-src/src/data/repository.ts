@@ -74,6 +74,18 @@ async function bumpRevision(): Promise<void> {
 /* ── 勘定科目 ── */
 
 export async function upsertAccount(account: Account): Promise<void> {
+  // 使用中（仕訳から参照中）の科目は区分(type)を変更できない。fail-closed。
+  const [accounts, entries] = await Promise.all([
+    getAll<Account>(STORE.accounts),
+    getAll<JournalEntry>(STORE.journalEntries),
+  ]);
+  const prev = accounts.find((a) => a.id === account.id);
+  if (prev && prev.type !== account.type) {
+    const referenced = entries.some((e) => e.lines.some((l) => l.accountId === account.id));
+    if (referenced) {
+      throw new Error('使用中の科目は区分を変更できません。');
+    }
+  }
   await putRecord(STORE.accounts, account);
   await bumpRevision();
 }

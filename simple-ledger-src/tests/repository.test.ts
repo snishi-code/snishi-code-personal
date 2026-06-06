@@ -7,10 +7,23 @@ import {
   makeSnapshotId,
   resetAll,
   saveSnapshot,
+  upsertAccount,
   upsertEntry,
 } from '../src/data/repository';
 import { buildSimpleEntry } from '../src/domain/entry';
 import { buildExportPackage } from '../src/data/exportImport';
+
+async function addEntryRef(foodId: string, cashId: string) {
+  await upsertEntry(
+    buildSimpleEntry({
+      date: '2026-06-01',
+      description: 'x',
+      debitAccountId: foodId,
+      creditAccountId: cashId,
+      amount: 500,
+    }),
+  );
+}
 
 describe('repository 初期化', () => {
   it('初回 loadLedger で既定科目を投入し、revision は 0', async () => {
@@ -60,6 +73,34 @@ describe('科目削除の fail-closed', () => {
       }),
     );
     await expect(deleteAccount(food.id)).rejects.toThrow();
+  });
+});
+
+describe('科目区分(type)の変更ルール', () => {
+  it('未使用の科目は区分を変更できる', async () => {
+    const ledger = await loadLedger();
+    const acct = ledger.accounts.find((a) => a.name === 'その他収入')!; // 未使用(revenue)
+    await upsertAccount({ ...acct, type: 'expense', updatedAt: 'y' });
+    const after = await loadLedger();
+    expect(after.accounts.find((a) => a.id === acct.id)?.type).toBe('expense');
+  });
+
+  it('使用中の科目は区分を変更できない（fail-closed）', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    await addEntryRef(food.id, cash.id);
+    await expect(upsertAccount({ ...food, type: 'asset', updatedAt: 'y' })).rejects.toThrow();
+  });
+
+  it('使用中でも名前変更は許可する', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    await addEntryRef(food.id, cash.id);
+    await upsertAccount({ ...food, name: '外食費', updatedAt: 'y' });
+    const after = await loadLedger();
+    expect(after.accounts.find((a) => a.id === food.id)?.name).toBe('外食費');
   });
 });
 

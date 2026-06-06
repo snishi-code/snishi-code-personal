@@ -12,13 +12,27 @@ import { UI } from '../../ui-contract';
 import type { JournalEntry } from '../../domain/types';
 import { EntryListItem } from '../EntryListItem';
 import type { Screen } from '../navigation';
+import type { FormMode } from '../entryModes';
+import type { IconName } from '../Icon';
+import type { MessageKey } from '../../i18n';
+
+const ENTRY_TYPES: { mode: FormMode; labelKey: MessageKey; icon: IconName; ui: string }[] = [
+  { mode: 'income', labelKey: 'entry.type.income', icon: 'income', ui: UI.dashboard.income },
+  { mode: 'expense', labelKey: 'entry.type.expense', icon: 'expense', ui: UI.dashboard.expense },
+  {
+    mode: 'transfer',
+    labelKey: 'entry.type.transfer',
+    icon: 'transfer',
+    ui: UI.dashboard.transfer,
+  },
+];
 
 export function Dashboard({
   onAddEntry,
   onEditEntry,
   onNavigate,
 }: {
-  onAddEntry: () => void;
+  onAddEntry: (mode: FormMode) => void;
   onEditEntry: (entry: JournalEntry) => void;
   onNavigate: (screen: Screen) => void;
 }) {
@@ -45,21 +59,28 @@ export function Dashboard({
         {t('dashboard.title')}
       </h1>
 
+      {/* 日常入力の主導線（収入/支出/振替） */}
+      <div className="entry-types">
+        {ENTRY_TYPES.map((ty) => (
+          <button
+            key={ty.mode}
+            type="button"
+            className="entry-type-btn"
+            onClick={() => onAddEntry(ty.mode)}
+            data-ui={ty.ui}
+          >
+            <span className="entry-type-btn__icon">
+              <Icon name={ty.icon} size={20} />
+            </span>
+            {t(ty.labelKey)}
+          </button>
+        ))}
+      </div>
+
       {!hasEntries ? (
         <div className="card card--pad empty">
           <Icon name="sprout" size={32} />
           <p style={{ marginTop: 'var(--space-3)' }}>{t('dashboard.noEntries')}</p>
-          <div className="empty__cta">
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={onAddEntry}
-              data-ui={UI.dashboard.addEntry}
-            >
-              <Icon name="plus" size={18} />
-              {t('dashboard.emptyCta')}
-            </button>
-          </div>
         </div>
       ) : null}
 

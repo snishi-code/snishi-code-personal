@@ -1,7 +1,8 @@
 /*
- * 仕訳一覧。検索（摘要・メモ）と期間絞り込み、行タップで編集、削除は明示確認。
+ * 仕訳一覧。検索（摘要・メモ）・期間絞り込み・勘定科目絞り込み（PL/BS からの遷移）。
+ * 行タップで編集、各行に取消/返金（逆仕訳）と削除。削除は明示確認。
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLedger } from '../../state/store';
 import { Money } from '../money';
 import { Icon } from '../Icon';
@@ -10,6 +11,12 @@ import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import type { Account, JournalEntry } from '../../domain/types';
 
+export interface JournalFilter {
+  accountId?: string;
+  from?: string;
+  to?: string;
+}
+
 function flowText(map: Map<string, Account>, entry: JournalEntry): string {
   const debit = entry.lines.find((l) => l.side === 'debit');
   const credit = entry.lines.find((l) => l.side === 'credit');
@@ -17,19 +24,39 @@ function flowText(map: Map<string, Account>, entry: JournalEntry): string {
   return `${name(debit?.accountId)} → ${name(credit?.accountId)}`;
 }
 
-export function Journal({ onEditEntry }: { onEditEntry: (entry: JournalEntry) => void }) {
+export function Journal({
+  onEditEntry,
+  onReverse,
+  filter,
+  onClearAccountFilter,
+}: {
+  onEditEntry: (entry: JournalEntry) => void;
+  onReverse: (entry: JournalEntry) => void;
+  filter: JournalFilter | null;
+  onClearAccountFilter: () => void;
+}) {
   const { ledger, removeEntry } = useLedger();
   const [query, setQuery] = useState('');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  const [from, setFrom] = useState(filter?.from ?? '');
+  const [to, setTo] = useState(filter?.to ?? '');
   const [pendingDelete, setPendingDelete] = useState<JournalEntry | null>(null);
 
+  // PL からのドリルダウンで期間が渡されたら、日付絞り込みに反映する。
+  useEffect(() => {
+    if (!filter) return;
+    if (filter.from !== undefined) setFrom(filter.from);
+    if (filter.to !== undefined) setTo(filter.to);
+  }, [filter]);
+
+  const accountFilterId = filter?.accountId;
   const map = useMemo(() => new Map((ledger?.accounts ?? []).map((a) => [a.id, a])), [ledger]);
   const currency = ledger?.settings.currency ?? 'JPY';
+  const filterAccount = accountFilterId ? map.get(accountFilterId) : undefined;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (ledger?.journalEntries ?? []).filter((e) => {
+      if (accountFilterId && !e.lines.some((l) => l.accountId === accountFilterId)) return false;
       if (from && e.date < from) return false;
       if (to && e.date > to) return false;
       if (q) {
@@ -38,15 +65,31 @@ export function Journal({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =>
       }
       return true;
     });
-  }, [ledger, query, from, to]);
+  }, [ledger, query, from, to, accountFilterId]);
 
-  const hasFilter = query !== '' || from !== '' || to !== '';
+  const hasDateOrQuery = query !== '' || from !== '' || to !== '';
 
   return (
     <section aria-labelledby="journal-title" data-ui={UI.journal.view}>
       <h1 className="screen-title" id="journal-title">
         {t('journal.title')}
       </h1>
+
+      {filterAccount ? (
+        <div className="toolbar">
+          <span className="filter-chip">
+            {t('journal.filteredByAccount', { name: filterAccount.name })}
+            <button
+              type="button"
+              onClick={onClearAccountFilter}
+              aria-label={t('journal.clearAccountFilter')}
+              data-ui={UI.journal.clearAccountFilter}
+            >
+              <Icon name="close" size={16} />
+            </button>
+          </span>
+        </div>
+      ) : null}
 
       <div className="toolbar">
         <label className="sr-only" htmlFor="journal-search">
@@ -85,7 +128,7 @@ export function Journal({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =>
           aria-label={t('journal.to')}
           onChange={(e) => setTo(e.target.value)}
         />
-        {hasFilter ? (
+        {hasDateOrQuery ? (
           <button
             type="button"
             className="btn btn--ghost"
@@ -120,6 +163,9 @@ export function Journal({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =>
                 <div className="list__title">
                   {entry.kind === 'opening' ? (
                     <span className="tag tag--neutral">{t('journal.opening')}</span>
+                  ) : null}
+                  {entry.metadata?.inputMode === 'reversal' ? (
+                    <span className="tag tag--warning">{t('journal.reversalTag')}</span>
                   ) : null}{' '}
                   {entry.description}
                 </div>
@@ -133,6 +179,15 @@ export function Journal({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =>
                   currency={currency}
                 />
               </span>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => onReverse(entry)}
+                aria-label={`${t('journal.reverseAction')}: ${entry.description}`}
+                data-ui={UI.journal.entry.reverse}
+              >
+                <Icon name="reverse" size={18} />
+              </button>
               <button
                 type="button"
                 className="icon-btn"

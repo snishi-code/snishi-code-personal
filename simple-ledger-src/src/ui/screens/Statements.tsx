@@ -10,29 +10,45 @@ import { Icon } from '../Icon';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import type { AccountBalance } from '../../domain/types';
+import type { JournalFilter } from './Journal';
 
 type Tab = 'pl' | 'bs';
 type Period = 'all' | 'month' | 'year';
 
-function Rows({ items, currency }: { items: AccountBalance[]; currency: string }) {
+function Rows({
+  items,
+  currency,
+  onDrill,
+}: {
+  items: AccountBalance[];
+  currency: string;
+  onDrill: (accountId: string) => void;
+}) {
   if (items.length === 0) {
     return <div className="stmt-row muted">{t('statements.noData')}</div>;
   }
   return (
     <>
       {items.map((b) => (
-        <div className="stmt-row" key={b.account.id}>
+        <button
+          type="button"
+          className="stmt-row"
+          key={b.account.id}
+          onClick={() => onDrill(b.account.id)}
+          aria-label={t('statements.viewEntries', { name: b.account.name })}
+          data-ui={UI.statements.row}
+        >
           <span>{b.account.name}</span>
           <span className="stmt-row__num">
             <Money amount={b.balance} currency={currency} />
           </span>
-        </div>
+        </button>
       ))}
     </>
   );
 }
 
-export function Statements() {
+export function Statements({ onDrillDown }: { onDrillDown: (filter: JournalFilter) => void }) {
   const { ledger } = useLedger();
   const [tab, setTab] = useState<Tab>('pl');
   const [period, setPeriod] = useState<Period>('month');
@@ -53,6 +69,10 @@ export function Statements() {
     () => deriveBalanceSheet(ledger?.accounts ?? [], ledger?.journalEntries ?? []),
     [ledger],
   );
+
+  // PL は期間を、BS は全期間を引き継いで Journal へドリルダウンする。
+  const drillPL = (accountId: string) => onDrillDown({ accountId, ...(range ?? {}) });
+  const drillBS = (accountId: string) => onDrillDown({ accountId });
 
   return (
     <section aria-labelledby="statements-title" data-ui={UI.statements.view}>
@@ -88,6 +108,10 @@ export function Statements() {
         </button>
       </div>
 
+      <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
+        {t('statements.drilldownHint')}
+      </p>
+
       {tab === 'pl' ? (
         <div data-ui={UI.statements.profitAndLoss}>
           <div className="toolbar">
@@ -109,7 +133,7 @@ export function Statements() {
 
           <p className="section-label">{t('dashboard.revenue')}</p>
           <div className="card">
-            <Rows items={pl.revenues} currency={currency} />
+            <Rows items={pl.revenues} currency={currency} onDrill={drillPL} />
             <div className="stmt-row stmt-row--total">
               <span>{t('statements.totalRevenue')}</span>
               <span className="stmt-row__num">
@@ -120,7 +144,7 @@ export function Statements() {
 
           <p className="section-label">{t('dashboard.expense')}</p>
           <div className="card">
-            <Rows items={pl.expenses} currency={currency} />
+            <Rows items={pl.expenses} currency={currency} onDrill={drillPL} />
             <div className="stmt-row stmt-row--total">
               <span>{t('statements.totalExpense')}</span>
               <span className="stmt-row__num">
@@ -149,7 +173,7 @@ export function Statements() {
 
           <p className="section-label">{t('statements.assets')}</p>
           <div className="card">
-            <Rows items={bs.assets} currency={currency} />
+            <Rows items={bs.assets} currency={currency} onDrill={drillBS} />
             <div className="stmt-row stmt-row--total">
               <span>{t('statements.totalAssets')}</span>
               <span className="stmt-row__num">
@@ -160,7 +184,7 @@ export function Statements() {
 
           <p className="section-label">{t('statements.liabilities')}</p>
           <div className="card">
-            <Rows items={bs.liabilities} currency={currency} />
+            <Rows items={bs.liabilities} currency={currency} onDrill={drillBS} />
             <div className="stmt-row stmt-row--total">
               <span>{t('statements.totalLiabilities')}</span>
               <span className="stmt-row__num">
@@ -171,7 +195,7 @@ export function Statements() {
 
           <p className="section-label">{t('statements.equity')}</p>
           <div className="card">
-            <Rows items={bs.equity} currency={currency} />
+            <Rows items={bs.equity} currency={currency} onDrill={drillBS} />
             <div className="stmt-row">
               <span>{t('statements.retainedEarnings')}</span>
               <span className="stmt-row__num">

@@ -19,10 +19,17 @@ test('ホームに重大なアクセシビリティ違反がない', async ({ pa
   await checkNoSerious(() => new AxeBuilder({ page }));
 });
 
-test('仕訳追加シートに重大なアクセシビリティ違反がない', async ({ page }) => {
+test('支出入力シート（チップピッカー）に重大なアクセシビリティ違反がない', async ({ page }) => {
   await page.goto('./');
-  await page.locator('[data-ui="journal.entry.create"]').first().click();
+  await page.locator('[data-ui="dashboard.entry.expense"]').click();
   await page.getByRole('dialog').waitFor();
+  await checkNoSerious(() => new AxeBuilder({ page }));
+});
+
+test('入力の種類シートに重大なアクセシビリティ違反がない', async ({ page }) => {
+  await page.goto('./');
+  await page.locator('[data-ui="journal.entry.create"]').first().click(); // ヘッダー +
+  await page.locator('[data-ui="entry.type.sheet"]').waitFor();
   await checkNoSerious(() => new AxeBuilder({ page }));
 });
 

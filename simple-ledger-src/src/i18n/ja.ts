@@ -84,6 +84,32 @@ export const ja = {
   'entry.error.same-account': '借方と貸方に同じ科目は選べません。',
   'entry.error.amount-invalid': '金額は 1 以上の整数で入力してください。',
 
+  'entry.type.income': '収入',
+  'entry.type.expense': '支出',
+  'entry.type.transfer': '振替',
+  'entry.typePickTitle': '入力の種類',
+  'entry.income.title': '収入を記録',
+  'entry.expense.title': '支出を記録',
+  'entry.transfer.title': '振替を記録',
+  'entry.manual.title': '詳細入力',
+  'entry.income.target': '入金先',
+  'entry.income.category': 'カテゴリ（収入）',
+  'entry.expense.category': 'カテゴリ（支出）',
+  'entry.expense.source': '支払元',
+  'entry.transfer.from': '振替元',
+  'entry.transfer.to': '振替先',
+  'entry.detailToggle': '詳細入力（借方/貸方を直接指定）',
+  'entry.noAccounts': '候補の科目がありません。「勘定科目」で追加してください。',
+  'entry.reversalTitle': '取消/返金を記録',
+  'entry.reversalNote':
+    '元の仕訳は削除せず、反対の仕訳を作成します。金額を変えれば部分返金も記録できます。',
+
+  'journal.reverse': '取消/返金',
+  'journal.reverseAction': '取消/返金を記録',
+  'journal.reversalTag': '取消/返金',
+  'journal.filteredByAccount': '「{name}」で絞り込み中',
+  'journal.clearAccountFilter': '科目の絞り込みを解除',
+
   'statements.title': '財務諸表',
   'statements.pl': '損益計算書',
   'statements.bs': '貸借対照表',
@@ -108,6 +134,8 @@ export const ja = {
   'statements.noData': 'データがありません。',
   'statements.unbalanced': '貸借が一致していません。仕訳を確認してください。',
   'statements.balanced': '貸借一致',
+  'statements.drilldownHint': '科目をタップすると、その仕訳を一覧で確認できます。',
+  'statements.viewEntries': '「{name}」の仕訳を表示',
 
   'accounts.title': '勘定科目',
   'accounts.add': '科目を追加',
@@ -130,6 +158,9 @@ export const ja = {
   'accounts.type.revenue': '収益',
   'accounts.type.expense': '費用',
   'accounts.empty': '科目がありません。',
+  'accounts.typeLockedHint':
+    '使用中の科目は区分を変更できません（必要なら新しい科目を追加してください）。',
+  'accounts.inUse': '使用中',
 
   'settings.title': '設定',
   'settings.dataSection': 'データ',

@@ -107,3 +107,51 @@ describe('isCurrentSchema', () => {
     expect(isCurrentSchema(SCHEMA_VERSION + 1)).toBe(false);
   });
 });
+
+describe('entry metadata / allocationPlan', () => {
+  it('metadata なしの仕訳も有効', () => {
+    expect(journalEntrySchema.safeParse(validEntry).success).toBe(true);
+  });
+  it('inputMode と allocationPlan を含む仕訳を受け入れる（将来按分の拡張点）', () => {
+    const withMeta = {
+      ...validEntry,
+      metadata: {
+        inputMode: 'expense',
+        allocationPlan: {
+          kind: 'period',
+          startDate: '2026-06-01',
+          endDate: '2026-12-31',
+          method: 'even-monthly',
+          recognitionAccountId: 'a',
+          deferredAccountId: 'b',
+          generatedEntryIds: [],
+        },
+      },
+    };
+    expect(journalEntrySchema.safeParse(withMeta).success).toBe(true);
+  });
+  it('export パッケージで metadata が保持される（round-trip）', () => {
+    const pkg = {
+      appId: APP_ID,
+      schemaVersion: SCHEMA_VERSION,
+      ledgerId: 'ledger',
+      exportedAt: '2026-06-01T00:00:00.000Z',
+      deviceId: 'd',
+      baseRevision: 0,
+      currentRevision: 0,
+      accounts: [
+        { id: 'a', name: '現金', type: 'asset', archived: false, createdAt: 'x', updatedAt: 'x' },
+        { id: 'b', name: '食費', type: 'expense', archived: false, createdAt: 'x', updatedAt: 'x' },
+      ],
+      journalEntries: [
+        { ...validEntry, metadata: { inputMode: 'reversal', reversalOfEntryId: 'z' } },
+      ],
+      settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
+    };
+    const parsed = ledgerExportPackageSchema.safeParse(pkg);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.journalEntries[0]?.metadata?.inputMode).toBe('reversal');
+    }
+  });
+});

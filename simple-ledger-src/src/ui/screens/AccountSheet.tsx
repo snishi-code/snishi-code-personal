@@ -13,12 +13,17 @@ import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 
 export function AccountSheet({ existing, onClose }: { existing?: Account; onClose: () => void }) {
-  const { saveAccount } = useLedger();
+  const { ledger, saveAccount } = useLedger();
   const [name, setName] = useState(existing?.name ?? '');
   const [type, setType] = useState<AccountType>(existing?.type ?? 'expense');
   const [note, setNote] = useState(existing?.note ?? '');
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
+
+  // 使用中（仕訳から参照されている）科目は区分(type)を変更できない。
+  const inUse =
+    !!existing &&
+    (ledger?.journalEntries ?? []).some((e) => e.lines.some((l) => l.accountId === existing.id));
 
   async function onSave() {
     if (name.trim() === '') {
@@ -83,6 +88,8 @@ export function AccountSheet({ existing, onClose }: { existing?: Account; onClos
         value={type}
         onChange={(v) => setType(v as AccountType)}
         options={ACCOUNT_TYPES.map((tp) => ({ value: tp, label: accountTypeLabel(tp) }))}
+        disabled={inUse}
+        hint={inUse ? t('accounts.typeLockedHint') : undefined}
       />
       <TextArea label={t('accounts.note')} value={note} onChange={setNote} />
     </Modal>

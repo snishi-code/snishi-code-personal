@@ -1,5 +1,4 @@
 import { ACCOUNT_TYPES, type Account, type AccountType } from '../domain/types';
-import type { OptionGroup } from './Field';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
 
@@ -7,11 +6,28 @@ export function accountTypeLabel(type: AccountType): string {
   return t(`accounts.type.${type}` as MessageKey);
 }
 
-/** 借方/貸方の選択肢を勘定区分でグループ化する。アーカイブ済みは除外。 */
-export function groupedAccountOptions(accounts: Account[]): OptionGroup[] {
-  const active = accounts.filter((a) => !a.archived);
-  return ACCOUNT_TYPES.map((type) => ({
-    label: accountTypeLabel(type),
-    options: active.filter((a) => a.type === type).map((a) => ({ value: a.id, label: a.name })),
-  })).filter((g) => g.options.length > 0);
+export interface AccountGroup {
+  type: AccountType;
+  label: string;
+  accounts: Account[];
+}
+
+/**
+ * 科目を区分ごとにグループ化する（チップピッカー用）。
+ *  - allowedTypes 指定時はそのタイプのみ。
+ *  - アーカイブ済みは除外。ただし includeId（編集中の選択値）は型/アーカイブに関わらず残す。
+ */
+export function groupedAccounts(
+  accounts: Account[],
+  allowedTypes?: AccountType[],
+  includeId?: string,
+): AccountGroup[] {
+  const types = allowedTypes ?? [...ACCOUNT_TYPES];
+  return types
+    .map((type) => ({
+      type,
+      label: accountTypeLabel(type),
+      accounts: accounts.filter((a) => a.type === type && (!a.archived || a.id === includeId)),
+    }))
+    .filter((g) => g.accounts.length > 0);
 }

@@ -1,10 +1,13 @@
 /*
  * MVP の仕訳ヘルパ: 「1 借方・1 貸方・同額」の仕訳を組み立てる。
  * 内部表現は常に複式（debit/credit の 2 行）。将来の複合仕訳に備えて lines 配列のまま持つ。
+ *
+ * UI の「収入/支出/振替」は、どの科目を debit/credit に割り当てるかの違いでしかない。
+ * その割当は UI 層（EntrySheet の mode→roles）で行い、ここは debit/credit + metadata を受ける。
  */
 import { newId } from './ids';
-import type { JournalEntry, JournalEntryKind } from './types';
-import { nowIso } from '../util/time';
+import type { EntryMetadata, JournalEntry, JournalEntryKind } from './types';
+import { nowIso, todayLocal } from '../util/time';
 
 export interface SimpleEntryInput {
   date: string;
@@ -14,6 +17,7 @@ export interface SimpleEntryInput {
   amount: number;
   memo?: string;
   kind?: JournalEntryKind;
+  metadata?: EntryMetadata;
 }
 
 export type EntryValidationError =
@@ -44,12 +48,22 @@ export function validateSimpleEntry(input: Partial<SimpleEntryInput>): EntryVali
   return errors;
 }
 
+function cleanMetadata(meta: EntryMetadata | undefined): EntryMetadata | undefined {
+  if (!meta) return undefined;
+  const has =
+    meta.inputMode !== undefined ||
+    meta.reversalOfEntryId !== undefined ||
+    meta.allocationPlan !== undefined;
+  return has ? meta : undefined;
+}
+
 /** 既存仕訳を編集するとき、id/createdAt を引き継ぐ。新規なら省略。 */
 export function buildSimpleEntry(
   input: SimpleEntryInput,
   existing?: Pick<JournalEntry, 'id' | 'createdAt'>,
 ): JournalEntry {
   const ts = nowIso();
+  const metadata = cleanMetadata(input.metadata);
   return {
     id: existing?.id ?? newId(),
     date: input.date,
@@ -60,6 +74,7 @@ export function buildSimpleEntry(
     ],
     ...(input.memo && input.memo.trim() !== '' ? { memo: input.memo.trim() } : {}),
     kind: input.kind ?? 'normal',
+    ...(metadata ? { metadata } : {}),
     createdAt: existing?.createdAt ?? ts,
     updatedAt: ts,
   };
@@ -77,5 +92,26 @@ export function toSimpleInput(entry: JournalEntry): SimpleEntryInput {
     amount: debit?.amount ?? credit?.amount ?? 0,
     ...(entry.memo !== undefined ? { memo: entry.memo } : {}),
     kind: entry.kind,
+    ...(entry.metadata ? { metadata: entry.metadata } : {}),
+  };
+}
+
+/**
+ * 取消/返金（逆仕訳）の初期入力を作る。
+ * 元仕訳は削除せず、借方/貸方を入れ替えた新しい仕訳の入力値を返す。
+ * 金額・日付・摘要は編集可能（部分返金に対応）。
+ */
+export function reversalInput(source: JournalEntry): SimpleEntryInput {
+  const debit = source.lines.find((l) => l.side === 'debit');
+  const credit = source.lines.find((l) => l.side === 'credit');
+  return {
+    date: todayLocal(),
+    description: `取消: ${source.description}`,
+    // 入れ替え: 元の貸方が新しい借方、元の借方が新しい貸方。
+    debitAccountId: credit?.accountId ?? '',
+    creditAccountId: debit?.accountId ?? '',
+    amount: debit?.amount ?? credit?.amount ?? 0,
+    kind: 'normal',
+    metadata: { inputMode: 'reversal', reversalOfEntryId: source.id },
   };
 }

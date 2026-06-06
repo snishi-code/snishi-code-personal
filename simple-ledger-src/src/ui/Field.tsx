@@ -116,12 +116,14 @@ export function SelectInput({
   error,
   dataUi,
   placeholder,
+  disabled,
 }: BaseProps & {
   value: string;
   onChange: (v: string) => void;
   options?: Option[];
   groups?: OptionGroup[];
   placeholder?: string;
+  disabled?: boolean;
 }) {
   const id = useId();
   return (
@@ -130,6 +132,7 @@ export function SelectInput({
         id={id}
         className="select"
         value={value}
+        disabled={disabled}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? `${id}-err` : hint ? `${id}-hint` : undefined}
         onChange={(e) => onChange(e.target.value)}

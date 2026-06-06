@@ -10,16 +10,30 @@ export const UI = {
     view: 'dashboard.view',
     addEntry: 'dashboard.entry.create',
     recentList: 'dashboard.recent.list',
+    // 日常入力 3 種（ホーム上部の主導線）
+    income: 'dashboard.entry.income',
+    expense: 'dashboard.entry.expense',
+    transfer: 'dashboard.entry.transfer',
+  },
+  // ヘッダー + が開く「入力の種類」シートの各ボタン
+  entryType: {
+    sheet: 'entry.type.sheet',
+    income: 'entry.type.income',
+    expense: 'entry.type.expense',
+    transfer: 'entry.type.transfer',
   },
   journal: {
     view: 'journal.view',
     create: 'journal.entry.create',
     list: 'journal.entry.list',
     search: 'journal.search',
+    clearAccountFilter: 'journal.filter.clearAccount',
     entry: {
       save: 'journal.entry.save',
       cancel: 'journal.entry.cancel',
       delete: 'journal.entry.delete',
+      reverse: 'journal.entry.reverse',
+      detailToggle: 'journal.entry.detailToggle',
       date: 'journal.entry.date',
       description: 'journal.entry.description',
       debitAccount: 'journal.entry.debitAccount',
@@ -34,6 +48,8 @@ export const UI = {
     balanceSheet: 'statements.balanceSheet',
     tabPl: 'statements.tab.pl',
     tabBs: 'statements.tab.bs',
+    // 科目行（クリックで Journal へドリルダウン）
+    row: 'statements.row',
   },
   accounts: {
     view: 'accounts.view',
