@@ -21,6 +21,7 @@ export function AccountPicker({
   error,
   dataUi,
   emptyText,
+  flat,
 }: {
   label: string;
   groups: AccountGroup[];
@@ -31,10 +32,14 @@ export function AccountPicker({
   error?: string;
   dataUi?: string;
   emptyText?: string;
+  /** true なら区分見出しを出さず、全候補を 1 列のチップで並列表示する（お金の流れの選択肢用）。 */
+  flat?: boolean;
 }) {
   const name = useId();
   const errId = `${name}-err`;
   const isEmpty = groups.length === 0;
+  // flat: 区分ごとに分けず 1 列に並べる（現金/預金/カードを並列に）。
+  const flatAccounts = flat ? groups.flatMap((g) => g.accounts) : [];
 
   return (
     <fieldset
@@ -57,6 +62,25 @@ export function AccountPicker({
         <p className="muted" style={{ fontSize: 13 }}>
           {emptyText ?? t('entry.noAccounts')}
         </p>
+      ) : flat ? (
+        <div className="picker__chips">
+          {flatAccounts.map((a) => (
+            <label className="chip" key={a.id}>
+              <input
+                type="radio"
+                className="sr-only"
+                name={name}
+                value={a.id}
+                checked={value === a.id}
+                onChange={() => onChange(a.id)}
+              />
+              <span className="chip__check" aria-hidden="true">
+                <Icon name="check" size={14} />
+              </span>
+              <span className="chip__text">{a.name}</span>
+            </label>
+          ))}
+        </div>
       ) : (
         groups.map((g) => (
           <div className="picker__group" key={g.type} role="group" aria-label={g.label}>

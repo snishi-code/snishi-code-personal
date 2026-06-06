@@ -1,9 +1,10 @@
 /*
  * 仕訳の入力シート。
  *
- * 日常入力（収入/支出/振替）は借方/貸方を意識させず、意味のあるフィールド
- * （入金先・カテゴリ・支払元・振替元・振替先）で 2 科目を選ばせる。内部は常に複式。
- *  - 種別(normal/opening)は通常入力から隠す。
+ * 日常入力（収入/支出/振替）は借方/貸方を意識させず、「お金の流れ」`源泉 → 行き先` で見せる。
+ * 並びは人間の入力順: 日付 → 項目 → 金額 → お金の流れ(A → B) → 詳細。内部は常に複式で、
+ * source=貸方(credit) / destination=借方(debit) に対応する（MODE_FLOW）。
+ *  - 種別(normal/opening)・資産/負債/収益/費用の分類見出しは通常入力に出さない。
  *  - 「詳細入力」で借方/貸方を直接指定する manual モードへ切替できる（主導線ではない）。
  *  - 編集は元の入力モードを推定して開く。取消/返金(reversal)は manual で逆仕訳を見せる。
  */
@@ -14,7 +15,13 @@ import { AccountPicker } from '../AccountPicker';
 import { TagPicker } from '../TagPicker';
 import { groupedAccountsByRole } from '../accountOptions';
 import { tagsForScope } from '../tagOptions';
-import { FORM_MODE_TITLE, MODE_ROLES, type FormMode } from '../entryModes';
+import {
+  FORM_MODE_TITLE,
+  MODE_FLOW,
+  MODE_ROLES,
+  type FlowMode,
+  type FormMode,
+} from '../entryModes';
 import { monthOf } from '../../domain/allocation';
 import { inferMonthlyCostKind } from '../../domain/monthlyCost';
 import { useLedger } from '../../state/store';
@@ -135,8 +142,17 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     return mode; // create
   }
 
+  // 振替で項目未入力なら「移動元 → 移動先」を自動生成する。
+  function effectiveForm(): SimpleEntryInput {
+    if (mode !== 'transfer' || form.description.trim() !== '') return form;
+    const nameOf = (id: string) => accounts.find((a) => a.id === id)?.name ?? '—';
+    const auto = `${nameOf(form.creditAccountId)} → ${nameOf(form.debitAccountId)}`;
+    return { ...form, description: auto };
+  }
+
   async function onSave() {
-    const found = validateSimpleEntry(form);
+    const toSave = effectiveForm();
+    const found = validateSimpleEntry(toSave);
     setErrors(found);
     const useMonthly = canAllocate && allocate;
     // costMonths は 1 以上（サブスクは 1 か月）。
@@ -153,15 +169,15 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           isLiabilityPayment && repayToggle && repayAccountId !== '' && repayCount >= 1;
         // 支出フォームの debit=費用カテゴリ / credit=支払い元 をそのまま月額化に渡す。
         await createMonthlyCost({
-          name: form.description,
+          name: toSave.description,
           kind: inferMonthlyCostKind(months, repeat),
-          amount: form.amount,
+          amount: toSave.amount,
           costMonths: months,
           ...(repeat !== undefined ? { repeatEveryMonths: repeat } : {}),
-          startMonth: monthOf(form.date),
-          date: form.date,
-          expenseAccountId: form.debitAccountId,
-          paymentAccountId: form.creditAccountId,
+          startMonth: monthOf(toSave.date),
+          date: toSave.date,
+          expenseAccountId: toSave.debitAccountId,
+          paymentAccountId: toSave.creditAccountId,
           ...(useRepay
             ? {
                 repaymentAccountId: repayAccountId,
@@ -172,8 +188,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             : {}),
         });
       } else {
-        const metadata: EntryMetadata = { ...form.metadata, inputMode: resolveInputMode() };
-        await saveEntry({ ...form, metadata }, existing);
+        const metadata: EntryMetadata = { ...toSave.metadata, inputMode: resolveInputMode() };
+        await saveEntry({ ...toSave, metadata }, existing);
       }
       onClose();
     } catch {
@@ -205,6 +221,19 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       onChange={(v) => setForm((f) => ({ ...f, description: v }))}
       error={errorText(errors, 'description-required')}
       dataUi={UI.journal.entry.description}
+    />
+  );
+
+  // 日常入力では「摘要」をユーザー向けに「項目」と呼ぶ。振替は任意。
+  const itemField = (
+    <TextInput
+      label={t('entry.item')}
+      required={mode !== 'transfer'}
+      value={form.description}
+      placeholder={t('entry.itemPlaceholder')}
+      onChange={(v) => setForm((f) => ({ ...f, description: v }))}
+      error={errorText(errors, 'description-required')}
+      dataUi={UI.journal.entry.item}
     />
   );
 
@@ -255,6 +284,56 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           role.side === 'debit' ? UI.journal.entry.debitAccount : UI.journal.entry.creditAccount
         }
       />
+    );
+  };
+
+  // お金の流れ（源泉 → 行き先）。簿記用語を出さず、左=貸方 / 右=借方。
+  const flowDef = isManual ? null : MODE_FLOW[mode as FlowMode];
+  const renderFlow = () => {
+    if (!flowDef) return null;
+    const srcGroups = groupedAccountsByRole(
+      accounts,
+      [...flowDef.source.allowedRoles],
+      form.creditAccountId,
+    );
+    const dstGroups = groupedAccountsByRole(
+      accounts,
+      [...flowDef.destination.allowedRoles],
+      form.debitAccountId,
+    );
+    return (
+      <div className="field" data-ui={UI.journal.entry.flow}>
+        <span className="field__hint">{t(flowDef.flowLabelKey)}</span>
+        <div className="flow">
+          <div className="flow__side">
+            <AccountPicker
+              flat
+              label={t(flowDef.source.labelKey)}
+              required
+              value={form.creditAccountId}
+              groups={srcGroups}
+              onChange={(id) => setSide('credit', id)}
+              error={errorText(errors, 'credit-required') ?? sameAccount}
+              dataUi={UI.journal.entry.flowSource}
+            />
+          </div>
+          <div className="flow__arrow" aria-hidden="true">
+            →
+          </div>
+          <div className="flow__side">
+            <AccountPicker
+              flat
+              label={t(flowDef.destination.labelKey)}
+              required
+              value={form.debitAccountId}
+              groups={dstGroups}
+              onChange={(id) => setSide('debit', id)}
+              error={errorText(errors, 'debit-required')}
+              dataUi={UI.journal.entry.flowDestination}
+            />
+          </div>
+        </div>
+      </div>
     );
   };
 
@@ -440,15 +519,14 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         </>
       ) : (
         <>
-          {/* 日常入力は自然文の順: 金額 → 科目 → 日付 → 摘要 → 按分 → 詳細 */}
+          {/* 人間が入力する順: 日付 → 項目 → 金額 → お金の流れ(A → B) → 詳細 */}
+          {dateField}
+          {/* 振替は「項目」を必須にしない（未入力なら自動で「移動元 → 移動先」を付ける）。 */}
+          {mode === 'transfer' ? null : itemField}
           {amountField}
-          {roles.map((role) => (
-            <div key={role.side}>{renderAccountPicker(role)}</div>
-          ))}
+          {renderFlow()}
           {allocateField}
           {repaymentField}
-          {dateField}
-          {descriptionField}
 
           {allocationActive ? null : (
             <>
@@ -464,6 +542,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               </button>
               {showDetails ? (
                 <div className="stack">
+                  {/* 振替では「項目」を任意としてここに置く。 */}
+                  {mode === 'transfer' ? itemField : null}
                   {memoField}
                   {entryTagsField}
                   {roles.map((role) => (

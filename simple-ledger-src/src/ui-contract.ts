@@ -55,6 +55,11 @@ export const UI = {
       monthlyizeRepayStart: 'journal.entry.monthlyizeRepayStart',
       date: 'journal.entry.date',
       description: 'journal.entry.description',
+      item: 'journal.entry.item',
+      // お金の流れ（源泉 → 行き先）。source=貸方 / destination=借方。
+      flow: 'journal.entry.flow',
+      flowSource: 'journal.entry.flow.source',
+      flowDestination: 'journal.entry.flow.destination',
       debitAccount: 'journal.entry.debitAccount',
       creditAccount: 'journal.entry.creditAccount',
       amount: 'journal.entry.amount',

@@ -53,6 +53,52 @@ export const MODE_ROLES: Record<FormMode, readonly [EntryRole, EntryRole]> = {
   ],
 };
 
+/** 日常入力モード（manual 以外）。 */
+export type FlowMode = 'income' | 'expense' | 'transfer';
+
+/**
+ * 「お金の流れ」フォーム定義。簿記用語を出さず `源泉 → 行き先` で見せる。
+ * 内部対応は常に source=貸方(credit) / destination=借方(debit)。
+ *  - 収入: 収入元(income-category, credit) → 入る場所(daily-asset, debit)
+ *  - 支出: 支払い方法(daily-asset|payment-liability, credit) → 使い道(expense-category, debit)
+ *  - 振替: 移動元(daily-asset, credit) → 移動先(daily-asset, debit)
+ */
+export interface FlowDef {
+  source: EntryRole; // 左（貸方）
+  destination: EntryRole; // 右（借方）
+  flowLabelKey: MessageKey;
+}
+
+export const MODE_FLOW: Record<FlowMode, FlowDef> = {
+  income: {
+    source: { side: 'credit', labelKey: 'entry.source.income', allowedRoles: ['income-category'] },
+    destination: {
+      side: 'debit',
+      labelKey: 'entry.destination.income',
+      allowedRoles: ['daily-asset'],
+    },
+    flowLabelKey: 'entry.flow.income',
+  },
+  expense: {
+    source: {
+      side: 'credit',
+      labelKey: 'entry.source.expense',
+      allowedRoles: ['daily-asset', 'payment-liability'],
+    },
+    destination: {
+      side: 'debit',
+      labelKey: 'entry.destination.expense',
+      allowedRoles: ['expense-category'],
+    },
+    flowLabelKey: 'entry.flow.expense',
+  },
+  transfer: {
+    source: { side: 'credit', labelKey: 'entry.transfer.from', allowedRoles: ['daily-asset'] },
+    destination: { side: 'debit', labelKey: 'entry.transfer.to', allowedRoles: ['daily-asset'] },
+    flowLabelKey: 'entry.flow.transfer',
+  },
+};
+
 export const FORM_MODE_TITLE: Record<FormMode, MessageKey> = {
   income: 'entry.income.title',
   expense: 'entry.expense.title',

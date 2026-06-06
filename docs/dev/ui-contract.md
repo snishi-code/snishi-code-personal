@@ -42,8 +42,11 @@
 | `journal.entry.allocateMonths` | 按分月数 | 按分月数入力 |
 | `journal.entry.date` | Entry 日付 | 日付入力 |
 | `journal.entry.description` | Entry 摘要 | 摘要入力 |
-| `journal.entry.debitAccount` | Entry 借方役割のピッカー | 入金先/カテゴリ等（debit 側） |
-| `journal.entry.creditAccount` | Entry 貸方役割のピッカー | カテゴリ/支払元/振替元等（credit 側） |
+| `journal.entry.item` | Entry 項目（摘要のユーザー向け名） | 日常入力の「項目」 |
+| `journal.entry.flow` | お金の流れコンテナ | `源泉 → 行き先` |
+| `journal.entry.flow.source` / `journal.entry.flow.destination` | 流れの左/右ピッカー | source=貸方 / destination=借方 |
+| `journal.entry.debitAccount` | Entry 借方ピッカー（manual のみ） | 詳細入力（借方） |
+| `journal.entry.creditAccount` | Entry 貸方ピッカー（manual のみ） | 詳細入力（貸方） |
 | `journal.entry.amount` | Entry 金額 | 金額入力 |
 | `journal.entry.memo` | Entry メモ | メモ入力 |
 | `statements.view` | Statements ルート | 財務諸表の検出 |

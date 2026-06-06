@@ -497,6 +497,35 @@ button.list__item:hover {
   white-space: nowrap;
 }
 
+/* ── お金の流れ（源泉 → 行き先）の入力 ── */
+.flow {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--space-2);
+}
+.flow__side {
+  min-width: 0;
+}
+.flow__arrow {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--muted);
+  text-align: center;
+  align-self: center;
+}
+.flow .picker {
+  margin: 0;
+}
+@media (max-width: 480px) {
+  .flow {
+    grid-template-columns: 1fr;
+  }
+  .flow__arrow {
+    transform: rotate(90deg);
+  }
+}
+
 /* ── 財務諸表の左右対照レイアウト ── */
 .fs-cols {
   display: grid;

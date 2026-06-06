@@ -30,8 +30,8 @@ describe('App 支出入力フロー', () => {
     // ホームの「支出」ボタンから入力（借方/貸方は出さず カテゴリ/支払元）
     await user.click(screen.getByRole('button', { name: '支出' }));
 
-    await user.type(screen.getByLabelText(/摘要/), 'ランチ');
-    // カテゴリ（支出）= 食費、支払元 = 現金 をチップ（radio）で選ぶ
+    await user.type(screen.getByLabelText(/項目/), 'ランチ');
+    // お金の流れ: 支払い方法=現金 → 使い道=食費 をチップ（radio）で選ぶ
     await user.click(screen.getByRole('radio', { name: '食費' }));
     await user.click(screen.getByRole('radio', { name: '現金' }));
     await user.type(screen.getByLabelText(/金額/), '1000');
