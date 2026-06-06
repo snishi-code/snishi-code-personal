@@ -58,6 +58,6 @@ describe('App 支出入力フロー', () => {
     await user.click(screen.getByRole('button', { name: '保存' }));
 
     const dialog = screen.getByRole('dialog');
-    expect(within(dialog).getByText('摘要を入力してください。')).toBeInTheDocument();
+    expect(within(dialog).getByText('項目を入力してください。')).toBeInTheDocument();
   });
 });

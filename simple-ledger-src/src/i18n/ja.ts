@@ -296,7 +296,7 @@ export const ja = {
   'entry.selectAccount': '選択してください',
   'entry.hint': '借方に「増える側」、貸方に「減る側／支払い元」を選びます。',
   'entry.error.date-required': '日付を入力してください。',
-  'entry.error.description-required': '摘要を入力してください。',
+  'entry.error.description-required': '項目を入力してください。',
   'entry.error.debit-required': '借方の科目を選んでください。',
   'entry.error.credit-required': '貸方の科目を選んでください。',
   'entry.error.same-account': '借方と貸方に同じ科目は選べません。',

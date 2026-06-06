@@ -142,6 +142,18 @@ describe('reversalInput', () => {
     expect(input.metadata?.reversalOfEntryId).toBe('orig');
   });
 
+  it('初期日付は元仕訳と同じ（未来取引の取消が今日を汚さない）', () => {
+    const future = buildSimpleEntry({
+      date: '2036-06-01',
+      description: '車購入',
+      debitAccountId: 'car',
+      creditAccountId: 'card',
+      amount: 3000000,
+    });
+    expect(reversalInput(future).date).toBe('2036-06-01');
+    expect(reversalInput(source).date).toBe('2026-06-01');
+  });
+
   it('逆仕訳を仕訳化すると元と反対向き・同額で貸借一致する', () => {
     const reversal = buildSimpleEntry(reversalInput(source));
     const debit = reversal.lines.find((l) => l.side === 'debit');

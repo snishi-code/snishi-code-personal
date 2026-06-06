@@ -7,7 +7,7 @@
  */
 import { newId } from './ids';
 import type { EntryMetadata, JournalEntry, JournalEntryKind } from './types';
-import { nowIso, todayLocal } from '../util/time';
+import { nowIso } from '../util/time';
 
 export interface SimpleEntryInput {
   date: string;
@@ -111,12 +111,13 @@ export function toSimpleInput(entry: JournalEntry): SimpleEntryInput {
  * 取消/返金（逆仕訳）の初期入力を作る。
  * 元仕訳は削除せず、借方/貸方を入れ替えた新しい仕訳の入力値を返す。
  * 金額・日付・摘要は編集可能（部分返金に対応）。
+ * 初期日付は **元仕訳と同じ日付**（未来日付の取消が今日の集計を汚さないように）。
  */
 export function reversalInput(source: JournalEntry): SimpleEntryInput {
   const debit = source.lines.find((l) => l.side === 'debit');
   const credit = source.lines.find((l) => l.side === 'credit');
   return {
-    date: todayLocal(),
+    date: source.date,
     description: `取消: ${source.description}`,
     // 入れ替え: 元の貸方が新しい借方、元の借方が新しい貸方。
     debitAccountId: credit?.accountId ?? '',
