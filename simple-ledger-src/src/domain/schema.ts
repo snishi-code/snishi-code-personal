@@ -99,6 +99,7 @@ export const entryMetadataSchema = z.object({
   allocationId: z.string().min(1).optional(),
   allocationRole: z.enum(['source', 'recognition']).optional(),
   adjustment: adjustmentMetaSchema.optional(),
+  monthlyCostId: z.string().min(1).optional(),
 });
 
 const monthSchema = z.string().regex(/^\d{4}-\d{2}$/, '月は YYYY-MM 形式である必要があります');

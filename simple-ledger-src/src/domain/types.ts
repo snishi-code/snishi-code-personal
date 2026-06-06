@@ -113,6 +113,8 @@ export interface EntryMetadata {
   allocationRole?: 'source' | 'recognition';
   /** 残高補正（実残高との差分調整）で作られた仕訳の付帯情報。 */
   adjustment?: AdjustmentMeta;
+  /** 月額化コスト（負債計上）から生成された仕訳のとき、紐づく MonthlyCostItem の ID。 */
+  monthlyCostId?: string;
 }
 
 /**

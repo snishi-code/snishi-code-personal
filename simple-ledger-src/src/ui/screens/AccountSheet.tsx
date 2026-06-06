@@ -34,6 +34,7 @@ export function AccountSheet({ existing, onClose }: { existing?: Account; onClos
       schedules: ledger?.cashflowSchedules ?? [],
       reserves: ledger?.reserves ?? [],
       allocations: ledger?.allocations ?? [],
+      monthlyCostItems: ledger?.monthlyCostItems ?? [],
     });
 
   const onTypeChange = (next: AccountType) => {

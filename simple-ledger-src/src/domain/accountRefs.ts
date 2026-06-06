@@ -1,14 +1,26 @@
 /*
- * 勘定科目の「使用中」判定。仕訳・予定CF・目的別資金・按分のいずれかから参照されていれば使用中。
- * UI（科目一覧・編集シート）と repository（区分変更/削除の fail-closed）で同じ判定を使う。
+ * 勘定科目の「使用中」判定。仕訳・予定CF・目的別資金・按分・月額化コストのいずれかから
+ * 参照されていれば使用中。UI（科目一覧・編集シート）と repository（区分変更/削除の fail-closed）で
+ * 同じ判定を使う。
  */
-import type { AllocationItem, CashflowSchedule, JournalEntry, ReserveItem } from './types';
+import type {
+  AllocationItem,
+  CashflowSchedule,
+  JournalEntry,
+  MonthlyCostItem,
+  ReserveItem,
+} from './types';
 
 export interface AccountRefCollections {
   entries: JournalEntry[];
   schedules: CashflowSchedule[];
   reserves: ReserveItem[];
   allocations: AllocationItem[];
+  monthlyCostItems: MonthlyCostItem[];
+}
+
+function monthlyCostRefs(m: MonthlyCostItem): (string | undefined)[] {
+  return [m.expenseAccountId, m.paymentAccountId, m.repaymentAccountId];
 }
 
 export function isAccountReferenced(id: string, c: AccountRefCollections): boolean {
@@ -18,7 +30,8 @@ export function isAccountReferenced(id: string, c: AccountRefCollections): boole
     c.reserves.some((r) => r.reserveAccountId === id) ||
     c.allocations.some(
       (a) => a.expenseAccountId === id || a.paymentAccountId === id || a.deferredAccountId === id,
-    )
+    ) ||
+    c.monthlyCostItems.some((m) => monthlyCostRefs(m).includes(id))
   );
 }
 
@@ -35,6 +48,9 @@ export function referencedAccountIds(c: AccountRefCollections): Set<string> {
     set.add(a.expenseAccountId);
     set.add(a.paymentAccountId);
     set.add(a.deferredAccountId);
+  }
+  for (const m of c.monthlyCostItems) {
+    for (const ref of monthlyCostRefs(m)) if (ref) set.add(ref);
   }
   return set;
 }

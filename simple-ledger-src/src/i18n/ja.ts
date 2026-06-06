@@ -305,7 +305,7 @@ export const ja = {
   'entry.monthlyizeRepayAccount': '返済する口座',
   'entry.monthlyizeRepayCount': '返済回数',
   'entry.monthlyizeNote':
-    '月額化コストは「月あたりの生活コスト」を見るための登録です（仕訳は作りません）。返済の現金の動きは資金繰りで別に管理します。',
+    '月額化コストは「月あたりの生活コスト」を見るための登録です（生活コストは月割りで導出）。現金・預金払いは仕訳を作りません。負債払いで返済を入力した場合のみ、負債計上の仕訳と返済予定（資金繰り）を作ります。',
 
   'journal.reverse': '取消/返金',
   'journal.reverseAction': '取消/返金を記録',

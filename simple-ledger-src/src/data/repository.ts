@@ -181,13 +181,14 @@ async function writeWithRevision(
 /* ── 勘定科目 ── */
 
 async function loadReferencingCollections(): Promise<AccountRefCollections> {
-  const [entries, schedules, reserves, allocations] = await Promise.all([
+  const [entries, schedules, reserves, allocations, monthlyCostItems] = await Promise.all([
     getAll<JournalEntry>(STORE.journalEntries),
     getAll<CashflowSchedule>(STORE.cashflowSchedules),
     getAll<ReserveItem>(STORE.reserves),
     getAll<AllocationItem>(STORE.allocations),
+    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
   ]);
-  return { entries, schedules, reserves, allocations };
+  return { entries, schedules, reserves, allocations, monthlyCostItems };
 }
 
 export async function upsertAccount(account: Account): Promise<void> {
@@ -602,8 +603,13 @@ export interface MonthlyCostInput {
 }
 
 /**
- * 月額化コストを登録する（仕訳は作らない＝計画/可視化レイヤ）。
- * liability 払いで返済情報があれば、返済予定の CashflowSchedule を回数分作る（CF と生活コストは別物）。
+ * 月額化コストを登録する（生活コストは formula で導出。日常資産払い・登録のみは仕訳を作らない）。
+ *
+ * 負債(payment-liability)払い + 返済情報があるときは、会計残高を整合させるため:
+ *  - 購入仕訳 `借方 按分中資産(deferred) / 貸方 支払用負債` を作り、負債を BS に立てる（費用にはしない＝
+ *    生活コストの formula と二重計上しない）。
+ *  - 返済予定 `CashflowSchedule`(installment) を回数分作る。実績化で `借方 負債 / 貸方 資産` となり、
+ *    立てた負債を正しく取り崩す（CF と生活コストは別物）。
  * 1 トランザクションで保存し revision を進める。
  */
 export async function createMonthlyCost(input: MonthlyCostInput): Promise<MonthlyCostItem> {
@@ -652,8 +658,10 @@ export async function createMonthlyCost(input: MonthlyCostInput): Promise<Monthl
     updatedAt: ts,
   };
 
-  // liability 払い + 返済情報があれば返済 CF を作る。
+  // liability 払い + 返済情報があれば、購入仕訳（負債の発生）と返済 CF を作る。
   const schedules: CashflowSchedule[] = [];
+  let purchaseEntry: JournalEntry | null = null;
+  let newDeferred: Account | null = null;
   if (
     payment?.role === 'payment-liability' &&
     input.repaymentAccountId !== undefined &&
@@ -664,6 +672,37 @@ export async function createMonthlyCost(input: MonthlyCostInput): Promise<Monthl
     const repay = byId.get(input.repaymentAccountId);
     if (!repay || repay.role !== 'daily-asset')
       throw new Error('返済口座は日常資産を選んでください。');
+
+    // 按分中資産(deferred)科目を用意（費用にせず資産として立てる）。
+    let deferred = accounts.find((a) => a.type === 'asset' && a.name === DEFERRED_ACCOUNT_NAME);
+    if (!deferred) {
+      newDeferred = {
+        id: newId(),
+        name: DEFERRED_ACCOUNT_NAME,
+        type: 'asset',
+        role: 'deferred-asset',
+        archived: false,
+        createdAt: ts,
+        updatedAt: ts,
+      };
+      deferred = newDeferred;
+    }
+
+    // 購入仕訳: 借方 按分中資産 / 貸方 支払用負債（負債を BS に立てる。費用にはしない）。
+    purchaseEntry = {
+      id: newId(),
+      date: input.repaymentStartDate,
+      description: `${item.name}（月額化・負債計上）`,
+      kind: 'normal',
+      lines: [
+        { accountId: deferred.id, side: 'debit', amount: input.amount },
+        { accountId: input.paymentAccountId!, side: 'credit', amount: input.amount },
+      ],
+      metadata: { inputMode: 'manual', monthlyCostId: item.id },
+      createdAt: ts,
+      updatedAt: ts,
+    };
+
     const parts = monthlyAmounts(input.amount, input.repaymentCount);
     for (let i = 0; i < input.repaymentCount; i++) {
       schedules.push({
@@ -682,11 +721,16 @@ export async function createMonthlyCost(input: MonthlyCostInput): Promise<Monthl
     }
   }
 
-  await writeWithRevision([STORE.monthlyCostItems, STORE.cashflowSchedules], (t) => {
-    t.objectStore(STORE.monthlyCostItems).put(item);
-    const sStore = t.objectStore(STORE.cashflowSchedules);
-    for (const s of schedules) sStore.put(s);
-  });
+  await writeWithRevision(
+    [STORE.monthlyCostItems, STORE.cashflowSchedules, STORE.journalEntries, STORE.accounts],
+    (t) => {
+      t.objectStore(STORE.monthlyCostItems).put(item);
+      const sStore = t.objectStore(STORE.cashflowSchedules);
+      for (const s of schedules) sStore.put(s);
+      if (newDeferred) t.objectStore(STORE.accounts).put(newDeferred);
+      if (purchaseEntry) t.objectStore(STORE.journalEntries).put(purchaseEntry);
+    },
+  );
   return item;
 }
 
@@ -780,6 +824,7 @@ export async function resetAll(): Promise<void> {
       STORE.cashflowSchedules,
       STORE.reserves,
       STORE.tags,
+      STORE.monthlyCostItems,
       STORE.snapshots,
     ],
     (t) => {
@@ -790,6 +835,7 @@ export async function resetAll(): Promise<void> {
       t.objectStore(STORE.cashflowSchedules).clear();
       t.objectStore(STORE.reserves).clear();
       t.objectStore(STORE.tags).clear();
+      t.objectStore(STORE.monthlyCostItems).clear();
       t.objectStore(STORE.snapshots).clear();
       t.objectStore(STORE.kv).put(meta, KV_META);
       t.objectStore(STORE.kv).put(settings, KV_SETTINGS);

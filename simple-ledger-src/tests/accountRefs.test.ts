@@ -5,6 +5,7 @@ import type {
   AllocationItem,
   CashflowSchedule,
   JournalEntry,
+  MonthlyCostItem,
   ReserveItem,
 } from '../src/domain/types';
 
@@ -13,6 +14,22 @@ const empty: AccountRefCollections = {
   schedules: [],
   reserves: [],
   allocations: [],
+  monthlyCostItems: [],
+};
+
+const monthlyCost: MonthlyCostItem = {
+  id: 'mc1',
+  name: 'x',
+  kind: 'durable-asset',
+  amount: 1000,
+  costMonths: 10,
+  startMonth: '2026-06',
+  expenseAccountId: 'mc-exp',
+  paymentAccountId: 'mc-pay',
+  repaymentAccountId: 'mc-repay',
+  status: 'active',
+  createdAt: 'x',
+  updatedAt: 'x',
 };
 
 const entry: JournalEntry = {
@@ -84,6 +101,13 @@ describe('isAccountReferenced（仕訳/予定CF/目的別資金/按分）', () =
     expect(isAccountReferenced('alloc-pay', { ...empty, allocations: [allocation] })).toBe(true);
     expect(isAccountReferenced('alloc-def', { ...empty, allocations: [allocation] })).toBe(true);
   });
+  it('月額化コスト（expense/payment/repayment）の参照を検出する', () => {
+    expect(isAccountReferenced('mc-exp', { ...empty, monthlyCostItems: [monthlyCost] })).toBe(true);
+    expect(isAccountReferenced('mc-pay', { ...empty, monthlyCostItems: [monthlyCost] })).toBe(true);
+    expect(isAccountReferenced('mc-repay', { ...empty, monthlyCostItems: [monthlyCost] })).toBe(
+      true,
+    );
+  });
 });
 
 describe('referencedAccountIds', () => {
@@ -93,6 +117,7 @@ describe('referencedAccountIds', () => {
       schedules: [schedule],
       reserves: [reserve],
       allocations: [allocation],
+      monthlyCostItems: [monthlyCost],
     });
     for (const id of [
       'cash',
@@ -103,6 +128,9 @@ describe('referencedAccountIds', () => {
       'alloc-exp',
       'alloc-pay',
       'alloc-def',
+      'mc-exp',
+      'mc-pay',
+      'mc-repay',
     ]) {
       expect(ids.has(id)).toBe(true);
     }

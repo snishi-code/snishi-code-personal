@@ -235,12 +235,26 @@ describe('resetAll', () => {
     });
     expect((await listSnapshots()).length).toBeGreaterThan(0);
 
+    // 月額化コストも作っておき、消えることを確認する。
+    await createMonthlyCost({
+      name: 'Netflix',
+      kind: 'subscription',
+      amount: 1500,
+      costMonths: 1,
+      repeatEveryMonths: 1,
+      startMonth: '2026-06',
+      expenseAccountId: food.id,
+      paymentAccountId: cash.id,
+    });
+    expect((await loadLedger()).monthlyCostItems).toHaveLength(1);
+
     await resetAll();
     const after = await loadLedger();
     expect(after.journalEntries).toHaveLength(0);
     expect(after.accounts.length).toBeGreaterThan(0);
     expect(after.meta.revision).toBe(0); // 新しい meta で作り直されている
     expect(await listSnapshots()).toHaveLength(0); // snapshots も消える
+    expect(after.monthlyCostItems).toHaveLength(0); // 月額化コストも消える
   });
 });
 
@@ -526,11 +540,12 @@ describe('月額化コスト createMonthlyCost', () => {
     expect(after.cashflowSchedules).toHaveLength(0);
   });
 
-  it('負債払いは返済予定(CF)を回数分作る', async () => {
+  it('負債払いは購入仕訳（負債計上）と返済予定(CF)を回数分作る', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
     const card = ledger.accounts.find((a) => a.role === 'payment-liability')!;
     const food = ledger.accounts.find((a) => a.name === '食費')!;
+    const beforeEntries = ledger.journalEntries.length;
     await createMonthlyCost({
       name: '洗濯機',
       kind: 'durable-asset',
@@ -552,6 +567,20 @@ describe('月額化コスト createMonthlyCost', () => {
     // 返済は現金から出て、相手は負債（カード）。
     expect(schedules.every((s) => s.accountId === cash.id && s.counterAccountId === card.id)).toBe(
       true,
+    );
+    // 購入仕訳が 1 件: 借方 按分中資産(deferred) / 貸方 カード(負債)、費用にはしない。
+    expect(after.journalEntries.length).toBe(beforeEntries + 1);
+    const purchase = after.journalEntries.find((e) => e.metadata?.monthlyCostId !== undefined)!;
+    expect(purchase).toBeTruthy();
+    const debit = purchase.lines.find((l) => l.side === 'debit')!;
+    const credit = purchase.lines.find((l) => l.side === 'credit')!;
+    expect(credit.accountId).toBe(card.id);
+    expect(credit.amount).toBe(210000);
+    const deferred = after.accounts.find((a) => a.id === debit.accountId)!;
+    expect(deferred.role).toBe('deferred-asset');
+    // 費用カテゴリには計上していない（生活コストは formula 側で見る）。
+    expect(after.journalEntries.some((e) => e.lines.some((l) => l.accountId === food.id))).toBe(
+      false,
     );
   });
 

@@ -146,13 +146,17 @@ PL も BS も **保存しない**。`Account` と `JournalEntry` から毎回計
 レイヤ（`src/domain/monthlyCost.ts`、`MonthlyCostItem`）。サブスク・年払い/前払い・耐久財の
 買い替え・定期イベントを **同じ構造** で扱う。
 
-- **これ自体は仕訳を生成しない**（計画/可視化レイヤ。会計の正本は仕訳）。月額は formula で導出:
-  `monthlyAmounts(amount, costMonths)`（合計は必ず `amount` に一致）。`repeatEveryMonths` ありは
-  周期ごとに先頭 `costMonths` か月だけ計上（隙間は 0）。例: サブスク `costMonths=1/repeat=1`、
-  年払い `12/12`、耐久財 `210,000/84`、車検 `120,000/24`。
-- **支払い元が負債**(payment-liability)のときは、返済予定 `CashflowSchedule`(installment) を回数分
-  作る。**返済 CF と月額化コストは別物**（CF=いつ現金が動くか / 月額化=月あたりの生活コスト）。
-  例: 洗濯機 21 万円を 12 回払いでも、7 年使うなら生活コストは月 2,500 円、CF は 12 か月に分かれる。
+- 月額は formula で導出: `monthlyAmounts(amount, costMonths)`（合計は必ず `amount` に一致）。
+  `repeatEveryMonths` ありは周期ごとに先頭 `costMonths` か月だけ計上（隙間は 0）。例: サブスク
+  `costMonths=1/repeat=1`、年払い `12/12`、耐久財 `210,000/84`、車検 `120,000/24`。
+- **現金・預金(daily-asset)払い・登録のみは仕訳を作らない**（計画/可視化レイヤ。会計の正本は仕訳）。
+- **支払い元が負債**(payment-liability)で返済を入力したときは、会計残高を整合させるため:
+  - **購入仕訳** `借方 按分中資産(deferred) / 貸方 支払用負債` を作り、負債を BS に立てる
+    （**費用にはしない**＝生活コストの formula と二重計上しない）。仕訳は `metadata.monthlyCostId` を持つ。
+  - **返済予定** `CashflowSchedule`(installment) を回数分作る。実績化で `借方 負債 / 貸方 資産` となり、
+    立てた負債を正しく取り崩す。**返済 CF と月額化コストは別物**（CF=いつ現金が動くか /
+    月額化=月あたりの生活コスト）。例: 洗濯機 21 万円を 12 回払いでも、7 年使うなら生活コストは
+    月 2,500 円、CF は 12 か月に分かれ、負債は購入で +21 万 → 返済で 0 に向かう。
 - 既存按分(allocations)は v6→v7 で `MonthlyCostItem`（`sourceAllocationId` 付き）へ移行する。
   既存の按分仕訳（原始/認識）は履歴として残す。
 
