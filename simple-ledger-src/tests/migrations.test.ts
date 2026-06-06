@@ -135,4 +135,11 @@ describe('migrateToCurrent', () => {
     expect(r.ok).toBe(true);
     expect(r.data?.fundingGoals).toEqual([]);
   });
+  it('v8 → v9 は恒等移行（version だけ前進し内容は不変）', () => {
+    const v8 = pkg(8);
+    const r = migrateToCurrent(v8);
+    expect(r.ok).toBe(true);
+    expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(r.data?.cashflowSchedules).toEqual(v8.cashflowSchedules);
+  });
 });

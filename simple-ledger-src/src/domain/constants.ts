@@ -8,5 +8,8 @@ export const APP_ID = 'snishi-code.simple-ledger' as const;
  *  v4 → v5: 残高補正（metadata.adjustment）の永続化に伴う版上げ（構造変更なし＝恒等移行）。
  *  v5 → v6: 勘定科目に role（UI 用の役割）を追加。既存科目は type 等から推定して補完。
  *  v6 → v7: 月額化コスト（monthlyCostItems）を追加。既存按分から移行生成する。
- *  v7 → v8: 資金目標（fundingGoals）を追加（空配列補完）。 */
-export const SCHEMA_VERSION = 8 as const;
+ *  v7 → v8: 資金目標（fundingGoals）を追加（空配列補完）。
+ *  v8 → v9: 予定CFの direction に transfer（口座間移動）を追加。許容値が増える＝
+ *           新しい JSON を旧 v8 アプリが読むと validation error になり得るため版を上げる
+ *           （既存データの構造変更はなし＝恒等移行）。 */
+export const SCHEMA_VERSION = 9 as const;

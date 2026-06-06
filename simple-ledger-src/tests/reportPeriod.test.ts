@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  availableYears,
   dataMonthsOf,
   periodAsOf,
   periodBuckets,
@@ -61,13 +62,36 @@ describe('periodBuckets（トレンド月次バケット）', () => {
     expect(b[11]?.ym).toBe('2026-12');
     expect(b[11]?.asOf).toBe('2026-12-31');
   });
-  it('all はデータのある月だけ（昇順・重複排除）', () => {
+  it('all は最初〜最後のデータ月を連続で（空白月も埋める・年跨ぎ）', () => {
     const p: ReportPeriod = { mode: 'all' };
     const b = periodBuckets(p, { dataMonths: ['2026-03', '2026-01', '2026-03'] });
-    expect(b.map((x) => x.ym)).toEqual(['2026-01', '2026-03']);
+    expect(b.map((x) => x.ym)).toEqual(['2026-01', '2026-02', '2026-03']);
+    const cross = periodBuckets(p, { dataMonths: ['2025-11', '2026-02'] });
+    expect(cross.map((x) => x.ym)).toEqual(['2025-11', '2025-12', '2026-01', '2026-02']);
   });
   it('all でデータが無ければ空配列', () => {
     expect(periodBuckets({ mode: 'all' }, { dataMonths: [] })).toEqual([]);
+  });
+});
+
+describe('availableYears（年別セレクトの選択肢）', () => {
+  it('データが無くても現在年と翌年は含む（降順）', () => {
+    expect(availableYears([], 2026)).toEqual([2027, 2026]);
+  });
+  it('データのある年〜翌年を連続・降順で返す', () => {
+    const ys = availableYears(['2024-05-01', '2026-03-10'], 2026);
+    expect(ys).toEqual([2027, 2026, 2025, 2024]);
+  });
+  it('長期の資金目標（数十年先）にも追従する', () => {
+    const ys = availableYears(['2026-01-01', '2056-12-31'], 2026);
+    expect(ys[0]).toBe(2056);
+    expect(ys.at(-1)).toBe(2026);
+    expect(ys).toContain(2040);
+  });
+  it('異常値は現在年±50 にクランプする（選択中の年は必ず含む）', () => {
+    const ys = availableYears(['9999-01-01'], 2026, 2026);
+    expect(ys[0]).toBe(2076); // 2026 + 50
+    expect(ys).toContain(2026);
   });
 });
 

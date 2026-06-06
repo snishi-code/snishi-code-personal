@@ -16,15 +16,16 @@ export function PeriodSwitcher({
   value,
   onChange,
   today,
+  years,
 }: {
   value: ReportPeriod;
   onChange: (p: ReportPeriod) => void;
   today: string;
+  /** 年別セレクトの選択肢（降順）。データ・予定・資金目標から導出して渡す。 */
+  years: number[];
 }) {
   const thisYear = Number.parseInt(today.slice(0, 4), 10);
   const thisMonth = Number.parseInt(today.slice(5, 7), 10);
-  // 直近 6 年 + 翌年（将来の按分/予定を見るため）。
-  const years = Array.from({ length: 8 }, (_, i) => thisYear + 1 - i);
 
   const curYear = value.mode === 'all' ? thisYear : value.year;
   const curMonth = value.mode === 'month' ? value.month : thisMonth;

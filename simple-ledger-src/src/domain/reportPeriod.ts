@@ -68,11 +68,24 @@ export function periodLabel(p: ReportPeriod): string {
   return '全期間';
 }
 
+/** from〜to（'YYYY-MM'）を含む連続月の列（昇順）。from > to なら空。 */
+function monthsBetween(from: string, to: string): string[] {
+  const out: string[] = [];
+  let cur = from;
+  // 上限ガード（最長でも数百年）。実データ規模では到達しない。
+  for (let i = 0; i < 12000 && cur <= to; i++) {
+    out.push(cur);
+    cur = addMonths(cur, 1);
+  }
+  return out;
+}
+
 /**
  * トレンド用の月次バケット列。
  *  - month: その月 1 つ。
  *  - year:  その年の 1〜12 月（12 個）。
- *  - all:   データのある月（dataMonths, 'YYYY-MM'）を昇順に。空なら空配列。
+ *  - all:   最初のデータ月〜最後のデータ月を**連続**で（空白月も含む）。データが無ければ空配列。
+ *           空白月を落とさないのは、家計の推移として連続した時間軸で見たいため。
  */
 export function periodBuckets(
   p: ReportPeriod,
@@ -92,9 +105,11 @@ export function periodBuckets(
   if (p.mode === 'year') {
     return Array.from({ length: 12 }, (_, i) => bucket(p.year, i + 1, false));
   }
-  // all: データのある月だけ（昇順・重複排除）。
+  // all: 最初〜最後のデータ月を連続で（空白月も埋める）。
   const months = Array.from(new Set(opts.dataMonths ?? [])).sort();
-  return months.map((ym) => {
+  if (months.length === 0) return [];
+  const filled = monthsBetween(months[0]!, months[months.length - 1]!);
+  return filled.map((ym) => {
     const { year, month } = ymParts(ym);
     return bucket(year, month, true);
   });
@@ -103,6 +118,31 @@ export function periodBuckets(
 /** 'YYYY-MM-DD' の配列から、データのある月 'YYYY-MM' を昇順・重複排除で返す。 */
 export function dataMonthsOf(dates: string[]): string[] {
   return Array.from(new Set(dates.map((d) => d.slice(0, 7)))).sort();
+}
+
+/**
+ * 年別セレクトの選択肢（降順）。データ（仕訳・予定・資金目標の日付）がある年、現在年、翌年、
+ * 選択中の年を含む連続範囲を返す。長期の資金計画（数十年）にも追従する。
+ * 異常値での暴発を防ぐため現在年 ±50 にクランプする（選択中の年は必ず含める）。
+ */
+export function availableYears(
+  dates: string[],
+  currentYear: number,
+  selectedYear?: number,
+): number[] {
+  const ys = dates
+    .map((d) => Number.parseInt(d.slice(0, 4), 10))
+    .filter((y) => Number.isFinite(y) && y > 0);
+  const candidates = [...ys, currentYear, currentYear + 1];
+  let lo = Math.max(Math.min(...candidates), currentYear - 50);
+  let hi = Math.min(Math.max(...candidates), currentYear + 50);
+  if (selectedYear) {
+    lo = Math.min(lo, selectedYear);
+    hi = Math.max(hi, selectedYear);
+  }
+  const out: number[] = [];
+  for (let y = hi; y >= lo; y--) out.push(y);
+  return out;
 }
 
 /** n か月ぶん次の ym（'YYYY-MM'）。期間移動の UI 用。 */

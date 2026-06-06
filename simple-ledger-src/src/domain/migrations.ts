@@ -102,6 +102,13 @@ const STEPS: Step[] = [
       fundingGoals: Array.isArray(pkg.fundingGoals) ? pkg.fundingGoals : [],
     }),
   },
+  {
+    // v8 → v9: 予定CF direction に transfer を追加（許容値拡張）。既存データは
+    // transfer を含まないため構造変更なし＝恒等移行（version だけ前進させる）。
+    from: 8,
+    to: 9,
+    migrate: (pkg) => pkg,
+  },
 ];
 
 /**

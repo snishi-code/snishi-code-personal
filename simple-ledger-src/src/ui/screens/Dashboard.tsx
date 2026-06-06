@@ -8,6 +8,7 @@ import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../../domain/accounting';
 import { totalMonthlyCostForMonth } from '../../domain/monthlyCost';
 import {
+  availableYears,
   dataMonthsOf,
   periodAsOf,
   periodBuckets,
@@ -143,6 +144,20 @@ export function Dashboard({
     }));
   }, [ledger, period]);
 
+  // 年別セレクトの選択肢: 仕訳・予定CF・資金目標の日付がある年 + 現在/翌年 + 選択中の年。
+  const years = useMemo(() => {
+    const dates = [
+      ...(ledger?.journalEntries ?? []).map((e) => e.date),
+      ...(ledger?.cashflowSchedules ?? []).map((s) => s.dueDate),
+      ...(ledger?.fundingGoals ?? []).map((g) => g.targetDate),
+    ];
+    return availableYears(
+      dates,
+      Number.parseInt(today.slice(0, 4), 10),
+      period.mode !== 'all' ? period.year : undefined,
+    );
+  }, [ledger, today, period]);
+
   const currency = ledger?.settings.currency ?? 'JPY';
   const hasEntries = (ledger?.journalEntries.length ?? 0) > 0;
   // 通常支出 = 今月の費用 − 既存按分の認識 − 調整用費用 − 月額化の実支払い
@@ -181,7 +196,7 @@ export function Dashboard({
       ) : null}
 
       {/* 期間切替（月別 / 年別 / 全体）。以下の集計・推移に反映される。 */}
-      <PeriodSwitcher value={period} onChange={onPeriodChange} today={today} />
+      <PeriodSwitcher value={period} onChange={onPeriodChange} today={today} years={years} />
 
       {/* 期間の収支（各項目から損益計算書の該当セクションへ） */}
       <p className="section-label">{t('dashboard.flowOf', { label })}</p>

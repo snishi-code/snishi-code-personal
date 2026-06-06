@@ -420,10 +420,7 @@ export function Cashflow() {
           accounts={ledger?.accounts ?? []}
           tags={ledger?.tags ?? []}
           onClose={() => setScheduleOpen(false)}
-          onSave={async (list) => {
-            await saveSchedules(list).catch(() => undefined);
-            setScheduleOpen(false);
-          }}
+          onSave={(list) => saveSchedules(list)}
         />
       ) : null}
 
@@ -431,10 +428,7 @@ export function Cashflow() {
         <FundingGoalSheet
           accounts={ledger?.accounts ?? []}
           onClose={() => setGoalOpen(false)}
-          onSave={async (input) => {
-            await createFundingGoal(input).catch(() => undefined);
-            setGoalOpen(false);
-          }}
+          onSave={(input) => createFundingGoal(input)}
         />
       ) : null}
 
@@ -456,10 +450,7 @@ export function Cashflow() {
       {reserveOpen ? (
         <ReserveSheet
           onClose={() => setReserveOpen(false)}
-          onSave={async (input) => {
-            await createReserve(input).catch(() => undefined);
-            setReserveOpen(false);
-          }}
+          onSave={(input) => createReserve(input)}
         />
       ) : null}
 
@@ -507,7 +498,7 @@ function ScheduleSheet({
   accounts: Account[];
   tags: Tag[];
   onClose: () => void;
-  onSave: (list: CashflowSchedule[]) => void;
+  onSave: (list: CashflowSchedule[]) => Promise<void> | void;
 }) {
   const [title, setTitle] = useState('');
   const [dueDate, setDueDate] = useState(todayLocal());
@@ -603,7 +594,13 @@ function ScheduleSheet({
     setErrors(found);
     if (found.length > 0) return;
     setSubmitting(true);
-    onSave(build());
+    try {
+      await onSave(build());
+      onClose(); // 成功時のみ閉じる
+    } catch {
+      // 保存失敗時は閉じない（store 層が error toast）。再入力できるよう戻す。
+      setSubmitting(false);
+    }
   }
 
   const snapshot = JSON.stringify({
@@ -760,7 +757,7 @@ function ReserveSheet({
   onSave,
 }: {
   onClose: () => void;
-  onSave: (input: { name: string; targetAmount?: number; note?: string }) => void;
+  onSave: (input: { name: string; targetAmount?: number; note?: string }) => Promise<void> | void;
 }) {
   const [name, setName] = useState('');
   const [targetText, setTargetText] = useState('');
@@ -768,7 +765,7 @@ function ReserveSheet({
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  function submit() {
+  async function submit() {
     if (name.trim() === '') {
       setError(t('reserves.error.name'));
       return;
@@ -776,11 +773,16 @@ function ReserveSheet({
     setSubmitting(true);
     const target =
       targetText === '' ? undefined : Number.parseInt(targetText.replace(/[^\d]/g, ''), 10);
-    onSave({
-      name: name.trim(),
-      ...(target && target > 0 ? { targetAmount: target } : {}),
-      ...(note.trim() !== '' ? { note: note.trim() } : {}),
-    });
+    try {
+      await onSave({
+        name: name.trim(),
+        ...(target && target > 0 ? { targetAmount: target } : {}),
+        ...(note.trim() !== '' ? { note: note.trim() } : {}),
+      });
+      onClose(); // 成功時のみ閉じる
+    } catch {
+      setSubmitting(false); // 保存失敗時は閉じない
+    }
   }
 
   const snapshot = JSON.stringify({ name, targetText, note });
@@ -844,7 +846,7 @@ function FundingGoalSheet({
 }: {
   accounts: Account[];
   onClose: () => void;
-  onSave: (input: FundingGoalInput) => void;
+  onSave: (input: FundingGoalInput) => Promise<void> | void;
 }) {
   const [name, setName] = useState('');
   const [targetText, setTargetText] = useState('');
@@ -855,7 +857,7 @@ function FundingGoalSheet({
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  function submit() {
+  async function submit() {
     if (name.trim() === '') {
       setError(t('fundingGoal.error.name'));
       return;
@@ -867,14 +869,19 @@ function FundingGoalSheet({
     }
     setSubmitting(true);
     const current = currentText === '' ? 0 : Number.parseInt(currentText, 10);
-    onSave({
-      name: name.trim(),
-      targetAmount: target,
-      targetDate,
-      currentAmount: current,
-      ...(sourceId !== '' ? { sourceAccountId: sourceId } : {}),
-      ...(note.trim() !== '' ? { note: note.trim() } : {}),
-    });
+    try {
+      await onSave({
+        name: name.trim(),
+        targetAmount: target,
+        targetDate,
+        currentAmount: current,
+        ...(sourceId !== '' ? { sourceAccountId: sourceId } : {}),
+        ...(note.trim() !== '' ? { note: note.trim() } : {}),
+      });
+      onClose(); // 成功時のみ閉じる
+    } catch {
+      setSubmitting(false); // 保存失敗時は閉じない
+    }
   }
 
   const snapshot = JSON.stringify({

@@ -4,7 +4,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../../domain/accounting';
-import { periodAsOf, periodRange, type ReportPeriod } from '../../domain/reportPeriod';
+import {
+  availableYears,
+  periodAsOf,
+  periodRange,
+  type ReportPeriod,
+} from '../../domain/reportPeriod';
 import { todayLocal } from '../../util/time';
 import { Money } from '../money';
 import { Icon } from '../Icon';
@@ -75,6 +80,20 @@ export function Statements({
     return periodAsOf(period, today, lastDataDate);
   }, [ledger, period, today]);
 
+  // 年別セレクトの選択肢（ホームと同じ導出）。
+  const years = useMemo(() => {
+    const dates = [
+      ...(ledger?.journalEntries ?? []).map((e) => e.date),
+      ...(ledger?.cashflowSchedules ?? []).map((s) => s.dueDate),
+      ...(ledger?.fundingGoals ?? []).map((g) => g.targetDate),
+    ];
+    return availableYears(
+      dates,
+      Number.parseInt(today.slice(0, 4), 10),
+      period.mode !== 'all' ? period.year : undefined,
+    );
+  }, [ledger, today, period]);
+
   // ホームの項目別遷移で渡されたセクションへスクロールする。
   useEffect(() => {
     if (!initialSection) return;
@@ -135,7 +154,7 @@ export function Statements({
       </p>
 
       {/* 期間切替（ホームと共有）。PL は期間合計、BS は期間末時点。 */}
-      <PeriodSwitcher value={period} onChange={onPeriodChange} today={today} />
+      <PeriodSwitcher value={period} onChange={onPeriodChange} today={today} years={years} />
 
       {tab === 'pl' ? (
         <div data-ui={UI.statements.profitAndLoss}>
