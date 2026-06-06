@@ -215,12 +215,14 @@ export const ledgerExportPackageSchema = z
     const issue = (message: string, path: (string | number)[]) =>
       ctx.addIssue({ code: z.ZodIssueCode.custom, message, path });
 
-    // 勘定科目 ID は一意 + type マップ。
+    // 勘定科目 ID は一意 + type / role マップ。
     const accountType = new Map<string, string>();
+    const accountRole = new Map<string, string>();
     pkg.accounts.forEach((a, i) => {
       if (accountType.has(a.id))
         issue(`勘定科目 ID が重複しています(${a.id})`, ['accounts', i, 'id']);
       accountType.set(a.id, a.type);
+      accountRole.set(a.id, a.role);
     });
     const hasAccount = (id: string) => accountType.has(id);
 
@@ -313,7 +315,7 @@ export const ledgerExportPackageSchema = z
       claimedEntryIds.add(al.sourceEntryId);
       al.recognitionEntryIds.forEach((rid) => claimedEntryIds.add(rid));
 
-      // 科目の存在と type（expense=費用 / payment=資産か負債 / deferred=資産）。
+      // 科目の存在と type（expense=費用 / payment=資産か負債 / deferred=資産）+ role 整合。
       const expType = accountType.get(al.expenseAccountId);
       if (expType === undefined)
         issue(`按分「${al.name}」の expenseAccountId が存在しません`, at('expenseAccountId'));
@@ -322,13 +324,24 @@ export const ledgerExportPackageSchema = z
           `按分「${al.name}」の expenseAccountId は費用科目である必要があります`,
           at('expenseAccountId'),
         );
+      else if (accountRole.get(al.expenseAccountId) !== 'expense-category')
+        issue(
+          `按分「${al.name}」の expenseAccountId は支出カテゴリ(expense-category)である必要があります`,
+          at('expenseAccountId'),
+        );
 
       const payType = accountType.get(al.paymentAccountId);
+      const payRole = accountRole.get(al.paymentAccountId);
       if (payType === undefined)
         issue(`按分「${al.name}」の paymentAccountId が存在しません`, at('paymentAccountId'));
       else if (payType !== 'asset' && payType !== 'liability')
         issue(
           `按分「${al.name}」の paymentAccountId は資産または負債である必要があります`,
+          at('paymentAccountId'),
+        );
+      else if (payRole !== 'daily-asset' && payRole !== 'payment-liability')
+        issue(
+          `按分「${al.name}」の paymentAccountId は日常資産または支払用負債である必要があります`,
           at('paymentAccountId'),
         );
 
@@ -338,6 +351,11 @@ export const ledgerExportPackageSchema = z
       else if (defType !== 'asset')
         issue(
           `按分「${al.name}」の deferredAccountId は資産科目である必要があります`,
+          at('deferredAccountId'),
+        );
+      else if (accountRole.get(al.deferredAccountId) !== 'deferred-asset')
+        issue(
+          `按分「${al.name}」の deferredAccountId は按分中資産(deferred-asset)である必要があります`,
           at('deferredAccountId'),
         );
 
@@ -464,6 +482,11 @@ export const ledgerExportPackageSchema = z
       else if (accType !== 'asset')
         issue(
           `目的別資金「${r.name}」の科目は資産科目である必要があります`,
+          at('reserveAccountId'),
+        );
+      else if (accountRole.get(r.reserveAccountId) !== 'reserve-asset')
+        issue(
+          `目的別資金「${r.name}」の科目は目的別資金(reserve-asset)である必要があります`,
           at('reserveAccountId'),
         );
     });

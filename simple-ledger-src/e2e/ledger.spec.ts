@@ -175,7 +175,8 @@ test('損益計算書の科目から仕訳一覧へドリルダウンできる',
   await page.goto('./');
   await addExpense(page, 'コーヒー', '500');
 
-  await openManagement(page, 'statements');
+  // 財務諸表はホームの損益サマリーから開く（管理メニューには無い）。
+  await page.locator(ui('dashboard.openPl')).click();
   await page.locator(ui('statements.row')).filter({ hasText: '食費' }).first().click();
 
   await expect(page.locator(ui('journal.view'))).toBeVisible();

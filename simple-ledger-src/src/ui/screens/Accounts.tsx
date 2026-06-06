@@ -4,6 +4,7 @@
 import { useMemo, useState } from 'react';
 import { useLedger } from '../../state/store';
 import { accountBalance } from '../../domain/accounting';
+import { referencedAccountIds } from '../../domain/accountRefs';
 import { ACCOUNT_TYPES, type Account } from '../../domain/types';
 import { accountRoleLabel, accountTypeLabel } from '../accountOptions';
 import { AccountSheet } from './AccountSheet';
@@ -24,12 +25,17 @@ export function Accounts() {
   const entries = ledger?.journalEntries ?? [];
   const currency = ledger?.settings.currency ?? 'JPY';
 
-  // 仕訳から参照されている科目（区分変更・削除ができない）。
-  const usedIds = useMemo(() => {
-    const set = new Set<string>();
-    for (const e of ledger?.journalEntries ?? []) for (const l of e.lines) set.add(l.accountId);
-    return set;
-  }, [ledger]);
+  // 使用中の科目（仕訳/予定CF/目的別資金/按分から参照）。区分変更・削除ができない。
+  const usedIds = useMemo(
+    () =>
+      referencedAccountIds({
+        entries: ledger?.journalEntries ?? [],
+        schedules: ledger?.cashflowSchedules ?? [],
+        reserves: ledger?.reserves ?? [],
+        allocations: ledger?.allocations ?? [],
+      }),
+    [ledger],
+  );
 
   const byType = useMemo(() => {
     const list = ledger?.accounts ?? [];

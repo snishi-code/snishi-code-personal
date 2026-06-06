@@ -342,7 +342,7 @@ describe('按分(allocations) の深い整合性検証（package）', () => {
           id: 'def',
           name: '按分中資産',
           type: 'asset',
-          role: 'daily-asset',
+          role: 'deferred-asset',
           archived: false,
           createdAt: 'x',
           updatedAt: 'x',
@@ -399,6 +399,40 @@ describe('按分(allocations) の深い整合性検証（package）', () => {
     });
     expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
   });
+  it('deferred の role が deferred-asset でないと invalid（asset だが daily-asset）', () => {
+    const bad = allocPkg({
+      accounts: [
+        {
+          id: 'exp',
+          name: '食費',
+          type: 'expense',
+          role: 'expense-category',
+          archived: false,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+        {
+          id: 'pay',
+          name: '現金',
+          type: 'asset',
+          role: 'daily-asset',
+          archived: false,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+        {
+          id: 'def',
+          name: '按分中資産',
+          type: 'asset',
+          role: 'daily-asset', // type は asset だが role が deferred-asset でない
+          archived: false,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+    });
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
   it('孤立した按分仕訳（どの台帳からも参照されない）は invalid', () => {
     const ghost = {
       ...built.recognitionEntries[0],
@@ -446,6 +480,15 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
     createdAt: 'x',
     updatedAt: 'x',
   };
+  const reserveAcc = {
+    id: 'reserveAcc',
+    name: '結婚資金口座',
+    type: 'asset',
+    role: 'reserve-asset',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
   function cfPkg(over: Record<string, unknown> = {}) {
     return {
       appId: APP_ID,
@@ -455,7 +498,7 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
       deviceId: 'd',
       baseRevision: 0,
       currentRevision: 0,
-      accounts: [bank, card],
+      accounts: [bank, card, reserveAcc],
       journalEntries: [],
       allocations: [],
       cashflowSchedules: [
@@ -474,7 +517,13 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
         },
       ],
       reserves: [
-        { id: 'r1', name: '結婚資金', reserveAccountId: 'bank', createdAt: 'x', updatedAt: 'x' },
+        {
+          id: 'r1',
+          name: '結婚資金',
+          reserveAccountId: 'reserveAcc',
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
       ],
       tags: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
@@ -527,6 +576,12 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
   it('目的別資金の科目が資産でないと invalid', () => {
     const bad = cfPkg({
       reserves: [{ id: 'r1', name: 'x', reserveAccountId: 'card', createdAt: 'x', updatedAt: 'x' }],
+    });
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+  it('目的別資金の科目の role が reserve-asset でないと invalid（bank は daily-asset）', () => {
+    const bad = cfPkg({
+      reserves: [{ id: 'r1', name: 'x', reserveAccountId: 'bank', createdAt: 'x', updatedAt: 'x' }],
     });
     expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
   });

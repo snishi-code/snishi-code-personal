@@ -8,6 +8,7 @@ import { SelectInput, TextArea, TextInput } from '../Field';
 import { useLedger } from '../../state/store';
 import { ACCOUNT_TYPES, type Account, type AccountType } from '../../domain/types';
 import { defaultRoleForType, rolesForType, type AccountRole } from '../../domain/accountRoles';
+import { isAccountReferenced } from '../../domain/accountRefs';
 import { newId } from '../../domain/ids';
 import { nowIso } from '../../util/time';
 import { accountRoleLabel, accountTypeLabel } from '../accountOptions';
@@ -25,10 +26,15 @@ export function AccountSheet({ existing, onClose }: { existing?: Account; onClos
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  // 使用中（仕訳から参照されている）科目は区分(type)を変更できない（role は変更可）。
+  // 使用中（仕訳/予定CF/目的別資金/按分から参照）の科目は区分(type)を変更できない（role は変更可）。
   const inUse =
     !!existing &&
-    (ledger?.journalEntries ?? []).some((e) => e.lines.some((l) => l.accountId === existing.id));
+    isAccountReferenced(existing.id, {
+      entries: ledger?.journalEntries ?? [],
+      schedules: ledger?.cashflowSchedules ?? [],
+      reserves: ledger?.reserves ?? [],
+      allocations: ledger?.allocations ?? [],
+    });
 
   const onTypeChange = (next: AccountType) => {
     setType(next);

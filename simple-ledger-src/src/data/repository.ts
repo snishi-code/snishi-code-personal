@@ -11,6 +11,7 @@ import { defaultAccounts, defaultSettings, newMeta } from './seed';
 import { newId } from '../domain/ids';
 import { SCHEMA_VERSION } from '../domain/constants';
 import { inferRole, roleAllowsType } from '../domain/accountRoles';
+import { isAccountReferenced, type AccountRefCollections } from '../domain/accountRefs';
 import type {
   Account,
   AdjustmentKind,
@@ -158,30 +159,7 @@ async function writeWithRevision(
 
 /* ── 勘定科目 ── */
 
-/** 科目が「使用中」か（仕訳明細・予定CF・目的別資金・按分のいずれかから参照されている）。 */
-function isAccountReferenced(
-  id: string,
-  entries: JournalEntry[],
-  schedules: CashflowSchedule[],
-  reserves: ReserveItem[],
-  allocations: AllocationItem[],
-): boolean {
-  return (
-    entries.some((e) => e.lines.some((l) => l.accountId === id)) ||
-    schedules.some((s) => s.accountId === id || s.counterAccountId === id) ||
-    reserves.some((r) => r.reserveAccountId === id) ||
-    allocations.some(
-      (a) => a.expenseAccountId === id || a.paymentAccountId === id || a.deferredAccountId === id,
-    )
-  );
-}
-
-async function loadReferencingCollections(): Promise<{
-  entries: JournalEntry[];
-  schedules: CashflowSchedule[];
-  reserves: ReserveItem[];
-  allocations: AllocationItem[];
-}> {
+async function loadReferencingCollections(): Promise<AccountRefCollections> {
   const [entries, schedules, reserves, allocations] = await Promise.all([
     getAll<JournalEntry>(STORE.journalEntries),
     getAll<CashflowSchedule>(STORE.cashflowSchedules),
@@ -204,9 +182,7 @@ export async function upsertAccount(account: Account): Promise<void> {
   ]);
   const prev = accounts.find((a) => a.id === account.id);
   if (prev && prev.type !== account.type) {
-    if (
-      isAccountReferenced(account.id, refs.entries, refs.schedules, refs.reserves, refs.allocations)
-    ) {
+    if (isAccountReferenced(account.id, refs)) {
       throw new Error('使用中の科目は区分を変更できません。');
     }
   }
@@ -217,8 +193,8 @@ export async function upsertAccount(account: Account): Promise<void> {
 
 /** 使用中（仕訳/予定CF/目的別資金から参照中）の科目は削除できない（アーカイブを使う）。fail-closed。 */
 export async function deleteAccount(id: string): Promise<void> {
-  const { entries, schedules, reserves, allocations } = await loadReferencingCollections();
-  if (isAccountReferenced(id, entries, schedules, reserves, allocations)) {
+  const refs = await loadReferencingCollections();
+  if (isAccountReferenced(id, refs)) {
     throw new Error('この科目は使用中のため削除できません。アーカイブしてください。');
   }
   await writeWithRevision([STORE.accounts], (t) => {

@@ -31,9 +31,11 @@ export const NAV_ITEMS: NavItem[] = [
   { screen: 'settings', labelKey: 'nav.settings', icon: 'settings' },
 ];
 
-/** 設定画面「管理」セクションから遷移する補助画面。 */
+/**
+ * 設定画面「管理」セクションから遷移する補助画面。
+ * 財務諸表(statements)はここに含めない（ホームの PL/BS サマリーから辿る）。
+ */
 export const MANAGEMENT_ITEMS: NavItem[] = [
-  { screen: 'statements', labelKey: 'nav.statements', icon: 'chart' },
   { screen: 'accounts', labelKey: 'nav.accounts', icon: 'wallet' },
   { screen: 'tags', labelKey: 'nav.tags', icon: 'tag' },
   { screen: 'adjustments', labelKey: 'nav.adjustments', icon: 'adjust' },

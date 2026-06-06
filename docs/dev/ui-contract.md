@@ -52,7 +52,7 @@
 | `accounts.role` | 科目シートの役割セレクト | role 選択 |
 | `settings.view` | Settings ルート | 設定の検出 |
 | `settings.manage.list` | 設定「管理」リスト | 補助画面への遷移リスト |
-| `settings.manage.<screen>` | 管理リストの各行 | 例 `settings.manage.statements`（statements/accounts/tags/adjustments） |
+| `settings.manage.<screen>` | 管理リストの各行 | 例 `settings.manage.accounts`（accounts/tags/adjustments。財務諸表はホームから） |
 | `settings.exportJson` | export ボタン | JSON 書き出し |
 | `settings.importJson` | import ボタン | JSON 読み込み起動 |
 | `settings.importFile` | 隠しファイル入力 | ファイル選択 |
