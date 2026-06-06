@@ -603,24 +603,30 @@ export interface MonthlyCostInput {
   costMonths: number;
   repeatEveryMonths?: number;
   startMonth: string;
+  /** 購入/登録日（実際の支払い仕訳の日付）。 */
+  date: string;
   expenseAccountId: string;
-  paymentAccountId?: string;
+  /** 支払い元（daily-asset または payment-liability）。必須。 */
+  paymentAccountId: string;
   /** liability 払いのとき: 返済 CF を作る口座（daily-asset）。 */
   repaymentAccountId?: string;
   /** 返済回数（>=1）。 */
   repaymentCount?: number;
-  /** 返済開始日 ISO。未指定なら作らない。 */
+  /** 初回引落日 ISO（返済 CF だけに使う。購入仕訳の日付には使わない）。 */
   repaymentStartDate?: string;
 }
 
 /**
- * 月額化コストを登録する（生活コストは formula で導出。日常資産払い・登録のみは仕訳を作らない）。
+ * 月額化コストを登録する。
  *
- * 負債(payment-liability)払い + 返済情報があるときは、会計残高を整合させるため:
- *  - 購入仕訳 `借方 按分中資産(deferred) / 貸方 支払用負債` を作り、負債を BS に立てる（費用にはしない＝
- *    生活コストの formula と二重計上しない）。
- *  - 返済予定 `CashflowSchedule`(installment) を回数分作る。実績化で `借方 負債 / 貸方 資産` となり、
- *    立てた負債を正しく取り崩す（CF と生活コストは別物）。
+ * 「実際の支払い事実」と「生活コストとしての月割り認識」を分けて扱う:
+ *  - **支払い仕訳**: 登録日(date)に `借方 費用カテゴリ / 貸方 支払い元`（daily-asset でも
+ *    payment-liability でも作る）。`metadata.monthlyCostId` を持ち、通常編集/削除は不可（fail-closed）。
+ *    負債払いなら登録日に負債が立ち、返済 CF で取り崩す。
+ *  - **生活コスト認識**: 仕訳の正本ではなく `MonthlyCostItem` の formula から導出する分析レイヤ。
+ *    ダッシュボードは支払い仕訳を二重計上しないよう除外し、`monthlyCostForMonth` を足す。
+ *  - 負債(payment-liability)払い + 返済情報があれば、返済予定 CF を **初回引落日(repaymentStartDate)**
+ *    から回数分作る（購入日とは別）。
  * 1 トランザクションで保存し revision を進める。
  */
 export async function createMonthlyCost(input: MonthlyCostInput): Promise<MonthlyCostItem> {
@@ -634,6 +640,7 @@ export async function createMonthlyCost(input: MonthlyCostInput): Promise<Monthl
     (!Number.isInteger(input.repeatEveryMonths) || input.repeatEveryMonths < input.costMonths)
   )
     throw new Error('更新周期は月数以上である必要があります。');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) throw new Error('購入日を入力してください。');
 
   const accounts = await getAll<Account>(STORE.accounts);
   const byId = new Map(accounts.map((a) => [a.id, a]));
@@ -641,12 +648,9 @@ export async function createMonthlyCost(input: MonthlyCostInput): Promise<Monthl
   if (!expense || expense.role !== 'expense-category')
     throw new Error('費用カテゴリ（支出カテゴリの科目）を選んでください。');
 
-  let payment: Account | undefined;
-  if (input.paymentAccountId !== undefined) {
-    payment = byId.get(input.paymentAccountId);
-    if (!payment || (payment.role !== 'daily-asset' && payment.role !== 'payment-liability'))
-      throw new Error('支払い元は日常資産または支払用負債を選んでください。');
-  }
+  const payment = byId.get(input.paymentAccountId);
+  if (!payment || (payment.role !== 'daily-asset' && payment.role !== 'payment-liability'))
+    throw new Error('支払い元は日常資産または支払用負債を選んでください。');
 
   const ts = nowIso();
   const item: MonthlyCostItem = {
@@ -660,7 +664,7 @@ export async function createMonthlyCost(input: MonthlyCostInput): Promise<Monthl
       : {}),
     startMonth: input.startMonth,
     expenseAccountId: input.expenseAccountId,
-    ...(input.paymentAccountId !== undefined ? { paymentAccountId: input.paymentAccountId } : {}),
+    paymentAccountId: input.paymentAccountId,
     ...(input.repaymentAccountId !== undefined
       ? { repaymentAccountId: input.repaymentAccountId }
       : {}),
@@ -669,12 +673,25 @@ export async function createMonthlyCost(input: MonthlyCostInput): Promise<Monthl
     updatedAt: ts,
   };
 
-  // liability 払い + 返済情報があれば、購入仕訳（負債の発生）と返済 CF を作る。
+  // 実際の支払い仕訳: 借方 費用カテゴリ / 貸方 支払い元（登録日 date で記録）。
+  const paymentEntry: JournalEntry = {
+    id: newId(),
+    date: input.date,
+    description: item.name,
+    kind: 'normal',
+    lines: [
+      { accountId: input.expenseAccountId, side: 'debit', amount: input.amount },
+      { accountId: input.paymentAccountId, side: 'credit', amount: input.amount },
+    ],
+    metadata: { inputMode: 'expense', monthlyCostId: item.id },
+    createdAt: ts,
+    updatedAt: ts,
+  };
+
+  // 負債払い + 返済情報があれば、返済予定 CF を初回引落日から回数分作る（購入日とは別）。
   const schedules: CashflowSchedule[] = [];
-  let purchaseEntry: JournalEntry | null = null;
-  let newDeferred: Account | null = null;
   if (
-    payment?.role === 'payment-liability' &&
+    payment.role === 'payment-liability' &&
     input.repaymentAccountId !== undefined &&
     input.repaymentCount !== undefined &&
     input.repaymentCount >= 1 &&
@@ -683,37 +700,6 @@ export async function createMonthlyCost(input: MonthlyCostInput): Promise<Monthl
     const repay = byId.get(input.repaymentAccountId);
     if (!repay || repay.role !== 'daily-asset')
       throw new Error('返済口座は日常資産を選んでください。');
-
-    // 按分中資産(deferred)科目を用意（費用にせず資産として立てる）。
-    let deferred = accounts.find((a) => a.type === 'asset' && a.name === DEFERRED_ACCOUNT_NAME);
-    if (!deferred) {
-      newDeferred = {
-        id: newId(),
-        name: DEFERRED_ACCOUNT_NAME,
-        type: 'asset',
-        role: 'deferred-asset',
-        archived: false,
-        createdAt: ts,
-        updatedAt: ts,
-      };
-      deferred = newDeferred;
-    }
-
-    // 購入仕訳: 借方 按分中資産 / 貸方 支払用負債（負債を BS に立てる。費用にはしない）。
-    purchaseEntry = {
-      id: newId(),
-      date: input.repaymentStartDate,
-      description: `${item.name}（月額化・負債計上）`,
-      kind: 'normal',
-      lines: [
-        { accountId: deferred.id, side: 'debit', amount: input.amount },
-        { accountId: input.paymentAccountId!, side: 'credit', amount: input.amount },
-      ],
-      metadata: { inputMode: 'manual', monthlyCostId: item.id },
-      createdAt: ts,
-      updatedAt: ts,
-    };
-
     const parts = monthlyAmounts(input.amount, input.repaymentCount);
     for (let i = 0; i < input.repaymentCount; i++) {
       schedules.push({
@@ -734,13 +720,12 @@ export async function createMonthlyCost(input: MonthlyCostInput): Promise<Monthl
   }
 
   await writeWithRevision(
-    [STORE.monthlyCostItems, STORE.cashflowSchedules, STORE.journalEntries, STORE.accounts],
+    [STORE.monthlyCostItems, STORE.cashflowSchedules, STORE.journalEntries],
     (t) => {
       t.objectStore(STORE.monthlyCostItems).put(item);
+      t.objectStore(STORE.journalEntries).put(paymentEntry);
       const sStore = t.objectStore(STORE.cashflowSchedules);
       for (const s of schedules) sStore.put(s);
-      if (newDeferred) t.objectStore(STORE.accounts).put(newDeferred);
-      if (purchaseEntry) t.objectStore(STORE.journalEntries).put(purchaseEntry);
     },
   );
   return item;

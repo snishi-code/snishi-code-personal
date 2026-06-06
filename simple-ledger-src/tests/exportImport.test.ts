@@ -145,6 +145,7 @@ describe('月額化コストの export/import', () => {
       costMonths: 1,
       repeatEveryMonths: 1,
       startMonth: '2026-06',
+      date: '2026-06-15',
       expenseAccountId: food.id,
       paymentAccountId: cash.id,
     });

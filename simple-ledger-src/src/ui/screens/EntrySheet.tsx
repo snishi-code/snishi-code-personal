@@ -159,6 +159,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           costMonths: months,
           ...(repeat !== undefined ? { repeatEveryMonths: repeat } : {}),
           startMonth: monthOf(form.date),
+          date: form.date,
           expenseAccountId: form.debitAccountId,
           paymentAccountId: form.creditAccountId,
           ...(useRepay

@@ -82,16 +82,24 @@ export function Journal({
 
   const hasDateOrQuery = query !== '' || from !== '' || to !== '';
 
-  // 今月の月額化認識（読み取り専用。仕訳ではなく MonthlyCostItem の formula から導出）。
-  // 既定の月ビュー（科目/タグ/期間で絞っていない）でだけ出す。
+  // 月額化認識（読み取り専用。仕訳ではなく MonthlyCostItem の formula から導出）。
+  // 期間フィルタに追従する: フィルタなし=今月 / from・to が同一月=その月 / それ以外の範囲は非表示。
+  // 科目フィルタが費用カテゴリならその科目の月額化だけ。タグフィルタ時は非表示（月額化にタグなし）。
   const { year, month } = currentYearMonth();
   const currentYm = `${year}-${String(month).padStart(2, '0')}`;
-  const monthRecognitions = useMemo(() => {
-    if (accountFilterId || tagFilter || from !== '' || to !== '') return [];
-    return (ledger?.monthlyCostItems ?? [])
-      .map((m) => ({ id: m.id, name: m.name, amount: monthlyCostForMonth(m, currentYm) }))
+  const { recognitionYm, monthRecognitions } = useMemo(() => {
+    let ym: string | null = null;
+    if (from === '' && to === '') ym = currentYm;
+    else if (from !== '' && to !== '' && from.slice(0, 7) === to.slice(0, 7)) ym = from.slice(0, 7);
+    if (tagFilter) ym = null;
+    if (!ym) return { recognitionYm: null, monthRecognitions: [] };
+    const rows = (ledger?.monthlyCostItems ?? [])
+      .filter((m) => !accountFilterId || m.expenseAccountId === accountFilterId)
+      .map((m) => ({ id: m.id, name: m.name, amount: monthlyCostForMonth(m, ym!) }))
       .filter((r) => r.amount > 0);
+    return { recognitionYm: ym, monthRecognitions: rows };
   }, [ledger, accountFilterId, tagFilter, from, to, currentYm]);
+  const recognitionMonthLabel = recognitionYm ?? currentYm;
   const monthRecognitionTotal = monthRecognitions.reduce((s, r) => s + r.amount, 0);
 
   return (
@@ -218,7 +226,12 @@ export function Journal({
       {monthRecognitions.length > 0 ? (
         <div className="card" data-ui={UI.journal.monthlyRecognition}>
           <div className="stmt-row stmt-row--total">
-            <span>{t('journal.monthlyRecognitionTitle', { year, month })}</span>
+            <span>
+              {t('journal.monthlyRecognitionTitle', {
+                year: Number(recognitionMonthLabel.slice(0, 4)),
+                month: Number(recognitionMonthLabel.slice(5, 7)),
+              })}
+            </span>
             <span className="stmt-row__num">
               <Money amount={monthRecognitionTotal} currency={currency} />
             </span>

@@ -246,6 +246,7 @@ describe('resetAll', () => {
       costMonths: 1,
       repeatEveryMonths: 1,
       startMonth: '2026-06',
+      date: '2026-06-15',
       expenseAccountId: food.id,
       paymentAccountId: cash.id,
     });
@@ -523,41 +524,46 @@ describe('起動時 schemaVersion 追従', () => {
 });
 
 describe('月額化コスト createMonthlyCost', () => {
-  it('サブスクは登録のみ（仕訳・予定CFを作らない）', async () => {
+  it('日常資産払いは支払い仕訳（借方 費用 / 貸方 資産）を登録日に作る', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
     const food = ledger.accounts.find((a) => a.name === '食費')!;
     const beforeEntries = ledger.journalEntries.length;
-    await createMonthlyCost({
+    const item = await createMonthlyCost({
       name: 'Netflix',
       kind: 'subscription',
       amount: 1500,
       costMonths: 1,
       repeatEveryMonths: 1,
       startMonth: '2026-06',
+      date: '2026-06-15',
       expenseAccountId: food.id,
       paymentAccountId: cash.id,
     });
     const after = await loadLedger();
     expect(after.monthlyCostItems).toHaveLength(1);
-    expect(after.monthlyCostItems[0]).toMatchObject({ name: 'Netflix', amount: 1500 });
-    // 仕訳は増えない（登録簿）。
-    expect(after.journalEntries.length).toBe(beforeEntries);
+    // 支払い事実が仕訳に出る: 借方 食費 / 貸方 現金、登録日、monthlyCostId 付き。
+    expect(after.journalEntries.length).toBe(beforeEntries + 1);
+    const pay = after.journalEntries.find((e) => e.metadata?.monthlyCostId === item.id)!;
+    expect(pay.date).toBe('2026-06-15');
+    expect(pay.lines.find((l) => l.side === 'debit')?.accountId).toBe(food.id);
+    expect(pay.lines.find((l) => l.side === 'credit')?.accountId).toBe(cash.id);
     expect(after.cashflowSchedules).toHaveLength(0);
   });
 
-  it('負債払いは購入仕訳（負債計上）と返済予定(CF)を回数分作る', async () => {
+  it('負債払いは支払い仕訳（借方 費用 / 貸方 負債）を登録日に作り、返済CFは初回引落日から', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
     const card = ledger.accounts.find((a) => a.role === 'payment-liability')!;
     const food = ledger.accounts.find((a) => a.name === '食費')!;
     const beforeEntries = ledger.journalEntries.length;
-    await createMonthlyCost({
+    const item = await createMonthlyCost({
       name: '洗濯機',
       kind: 'durable-asset',
       amount: 210000,
       costMonths: 84,
       startMonth: '2026-06',
+      date: '2026-06-15',
       expenseAccountId: food.id,
       paymentAccountId: card.id,
       repaymentAccountId: cash.id,
@@ -568,26 +574,18 @@ describe('月額化コスト createMonthlyCost', () => {
     expect(after.monthlyCostItems).toHaveLength(1);
     const schedules = after.cashflowSchedules;
     expect(schedules).toHaveLength(12);
-    // 合計は総額に一致（端数調整）。
     expect(schedules.reduce((s, x) => s + x.amount, 0)).toBe(210000);
-    // 返済は現金から出て、相手は負債（カード）。
+    // 返済は現金から出て相手は負債、初回引落日（購入日と別）から始まる。
     expect(schedules.every((s) => s.accountId === cash.id && s.counterAccountId === card.id)).toBe(
       true,
     );
-    // 購入仕訳が 1 件: 借方 按分中資産(deferred) / 貸方 カード(負債)、費用にはしない。
+    expect(schedules.some((s) => s.dueDate === '2026-07-27')).toBe(true);
+    // 支払い仕訳: 借方 食費(費用) / 貸方 カード(負債)、登録日に負債が立つ。
     expect(after.journalEntries.length).toBe(beforeEntries + 1);
-    const purchase = after.journalEntries.find((e) => e.metadata?.monthlyCostId !== undefined)!;
-    expect(purchase).toBeTruthy();
-    const debit = purchase.lines.find((l) => l.side === 'debit')!;
-    const credit = purchase.lines.find((l) => l.side === 'credit')!;
-    expect(credit.accountId).toBe(card.id);
-    expect(credit.amount).toBe(210000);
-    const deferred = after.accounts.find((a) => a.id === debit.accountId)!;
-    expect(deferred.role).toBe('deferred-asset');
-    // 費用カテゴリには計上していない（生活コストは formula 側で見る）。
-    expect(after.journalEntries.some((e) => e.lines.some((l) => l.accountId === food.id))).toBe(
-      false,
-    );
+    const pay = after.journalEntries.find((e) => e.metadata?.monthlyCostId === item.id)!;
+    expect(pay.date).toBe('2026-06-15');
+    expect(pay.lines.find((l) => l.side === 'debit')?.accountId).toBe(food.id);
+    expect(pay.lines.find((l) => l.side === 'credit')?.accountId).toBe(card.id);
   });
 
   it('費用カテゴリでない科目を費用に指定すると拒否', async () => {
@@ -600,7 +598,9 @@ describe('月額化コスト createMonthlyCost', () => {
         amount: 100,
         costMonths: 1,
         startMonth: '2026-06',
+        date: '2026-06-15',
         expenseAccountId: cash.id, // asset を費用に → 拒否
+        paymentAccountId: cash.id,
       }),
     ).rejects.toThrow();
   });
@@ -652,6 +652,7 @@ describe('月額化コストの整合性（生成仕訳・削除）', () => {
       amount: 120000,
       costMonths: 84,
       startMonth: '2026-06',
+      date: '2026-06-15',
       expenseAccountId: food.id,
       paymentAccountId: card.id,
       repaymentAccountId: cash.id,

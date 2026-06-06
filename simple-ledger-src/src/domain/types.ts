@@ -113,7 +113,7 @@ export interface EntryMetadata {
   allocationRole?: 'source' | 'recognition';
   /** 残高補正（実残高との差分調整）で作られた仕訳の付帯情報。 */
   adjustment?: AdjustmentMeta;
-  /** 月額化コスト（負債計上）から生成された仕訳のとき、紐づく MonthlyCostItem の ID。 */
+  /** 月額化コストの実支払い仕訳のとき、紐づく MonthlyCostItem の ID（通常編集/削除は不可）。 */
   monthlyCostId?: string;
 }
 
@@ -168,10 +168,11 @@ export interface AllocationItem {
 }
 
 /**
- * 月額化コスト。サブスク・年払い/前払い・耐久財・定期イベントを統一して扱い、
- * 「現在の生活水準を維持するための月あたりコスト」を可視化するための登録簿。
- * これ自体は仕訳を生成しない（純粋な計画/可視化レイヤ。会計の正本は仕訳）。
- * 月額は formula（amount / costMonths を端数調整）で導出し、ダッシュボードの生活コストに足す。
+ * 月額化コスト。サブスク・年払い/前払い・耐久財・定期イベントを統一して扱う。
+ * 登録時に「実際の支払い仕訳」（借方 費用カテゴリ / 貸方 支払い元、metadata.monthlyCostId 付き）を
+ * 作る。一方で「生活コストとしての月割り認識」は仕訳ではなく、この項目の formula
+ * （amount / costMonths を端数調整）から導出する分析レイヤで、ダッシュボードの生活コストに足す
+ * （実支払い仕訳は二重計上しないよう除外する）。
  * 既存の按分(allocations)から移行した項目は sourceAllocationId を持つ。
  */
 export type MonthlyCostKind =

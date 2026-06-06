@@ -41,51 +41,65 @@ export function Dashboard({
   const { ledger } = useLedger();
   const { year, month } = currentYearMonth();
 
-  const { pl, bs, monthlyCost, investmentValuation, recognition, systemAdjExpense, activeCount } =
-    useMemo(() => {
-      const accounts = ledger?.accounts ?? [];
-      const entries = ledger?.journalEntries ?? [];
-      const monthlyCostItems = ledger?.monthlyCostItems ?? [];
-      const range = monthRange(year, month);
-      const currentYm = `${year}-${String(month).padStart(2, '0')}`;
-      const inMonth = (e: JournalEntry) => e.date >= range.from && e.date <= range.to;
-      const roleById = new Map(accounts.map((a) => [a.id, a.role]));
-      const expenseIds = new Set(accounts.filter((a) => a.type === 'expense').map((a) => a.id));
-      // 既存按分の今月の認識額（移行済み項目は formula で数えるため normalExpense から除く）。
-      const recognitionAmt = entries
-        .filter((e) => e.metadata?.allocationRole === 'recognition' && inMonth(e))
-        .reduce((s, e) => s + (e.lines.find((l) => l.side === 'debit')?.amount ?? 0), 0);
-      // 今月の調整用(system-adjustment)費用（残高調整費・投資評価損）。生活コストから除外する。
-      let systemAdj = 0;
-      let investmentLoss = 0;
-      let investmentGain = 0;
-      for (const e of entries) {
-        if (!inMonth(e)) continue;
-        const debit = e.lines.find((l) => l.side === 'debit');
-        const credit = e.lines.find((l) => l.side === 'credit');
-        if (debit && roleById.get(debit.accountId) === 'system-adjustment')
-          systemAdj += debit.amount;
-        if (e.metadata?.adjustment?.kind === 'investment-valuation') {
-          if (debit && expenseIds.has(debit.accountId)) investmentLoss += debit.amount;
-          else if (credit) investmentGain += credit.amount; // 評価益は revenue 貸方
-        }
+  const {
+    pl,
+    bs,
+    monthlyCost,
+    investmentValuation,
+    recognition,
+    systemAdjExpense,
+    monthlyCostPaid,
+    activeCount,
+  } = useMemo(() => {
+    const accounts = ledger?.accounts ?? [];
+    const entries = ledger?.journalEntries ?? [];
+    const monthlyCostItems = ledger?.monthlyCostItems ?? [];
+    const range = monthRange(year, month);
+    const currentYm = `${year}-${String(month).padStart(2, '0')}`;
+    const inMonth = (e: JournalEntry) => e.date >= range.from && e.date <= range.to;
+    const roleById = new Map(accounts.map((a) => [a.id, a.role]));
+    const expenseIds = new Set(accounts.filter((a) => a.type === 'expense').map((a) => a.id));
+    // 既存按分の今月の認識額（移行済み項目は formula で数えるため normalExpense から除く）。
+    const recognitionAmt = entries
+      .filter((e) => e.metadata?.allocationRole === 'recognition' && inMonth(e))
+      .reduce((s, e) => s + (e.lines.find((l) => l.side === 'debit')?.amount ?? 0), 0);
+    // 今月の調整用(system-adjustment)費用（残高調整費・投資評価損）。生活コストから除外する。
+    let systemAdj = 0;
+    let investmentLoss = 0;
+    let investmentGain = 0;
+    // 月額化コストの実支払い仕訳（monthlyCostId 付き）の今月の費用。生活コストでは formula 側で
+    // 数えるため、ここで除外して二重計上を防ぐ。
+    let monthlyCostPaid = 0;
+    for (const e of entries) {
+      if (!inMonth(e)) continue;
+      const debit = e.lines.find((l) => l.side === 'debit');
+      const credit = e.lines.find((l) => l.side === 'credit');
+      if (debit && roleById.get(debit.accountId) === 'system-adjustment') systemAdj += debit.amount;
+      if (e.metadata?.monthlyCostId && debit && expenseIds.has(debit.accountId))
+        monthlyCostPaid += debit.amount;
+      if (e.metadata?.adjustment?.kind === 'investment-valuation') {
+        if (debit && expenseIds.has(debit.accountId)) investmentLoss += debit.amount;
+        else if (credit) investmentGain += credit.amount; // 評価益は revenue 貸方
       }
-      return {
-        pl: deriveProfitAndLoss(accounts, entries, range),
-        bs: deriveBalanceSheet(accounts, entries, todayLocal()),
-        // 月額化コスト = MonthlyCostItem の formula（仕訳ではなく登録簿から導出）。
-        monthlyCost: totalMonthlyCostForMonth(monthlyCostItems, currentYm),
-        investmentValuation: { loss: investmentLoss, gain: investmentGain },
-        recognition: recognitionAmt,
-        systemAdjExpense: systemAdj,
-        activeCount: monthlyCostItems.filter((m) => m.status === 'active').length,
-      };
-    }, [ledger, year, month]);
+    }
+    return {
+      pl: deriveProfitAndLoss(accounts, entries, range),
+      bs: deriveBalanceSheet(accounts, entries, todayLocal()),
+      // 月額化コスト = MonthlyCostItem の formula（仕訳ではなく登録簿から導出）。
+      monthlyCost: totalMonthlyCostForMonth(monthlyCostItems, currentYm),
+      investmentValuation: { loss: investmentLoss, gain: investmentGain },
+      recognition: recognitionAmt,
+      systemAdjExpense: systemAdj,
+      monthlyCostPaid,
+      activeCount: monthlyCostItems.filter((m) => m.status === 'active').length,
+    };
+  }, [ledger, year, month]);
 
   const currency = ledger?.settings.currency ?? 'JPY';
   const hasEntries = (ledger?.journalEntries.length ?? 0) > 0;
-  // 通常支出 = 今月の費用 − 既存按分の認識 − 調整用費用（= 月額化と二重計上しない）。
-  const normalExpense = pl.totalExpense - recognition - systemAdjExpense;
+  // 通常支出 = 今月の費用 − 既存按分の認識 − 調整用費用 − 月額化の実支払い
+  // （月額化は formula で別途足すため二重計上しない）。
+  const normalExpense = pl.totalExpense - recognition - systemAdjExpense - monthlyCostPaid;
 
   return (
     <section aria-labelledby="dashboard-title" data-ui={UI.dashboard.view}>
