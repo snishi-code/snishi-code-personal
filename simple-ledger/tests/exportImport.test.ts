@@ -1,0 +1,137 @@
+/*
+ * import/export の統合テスト（fake-indexeddb 上）。
+ * fail-closed・スナップショット・revision 競合の不変条件を検証する。
+ */
+import { describe, expect, it } from 'vitest';
+import { loadLedger, upsertEntry, listSnapshots } from '../src/data/repository';
+import { buildExportPackage, exportToJsonText, importFromJsonText } from '../src/data/exportImport';
+import { buildSimpleEntry } from '../src/domain/entry';
+import { APP_ID } from '../src/domain/constants';
+
+async function seedWithEntry() {
+  const ledger = await loadLedger(); // 既定科目を投入
+  const cash = ledger.accounts.find((a) => a.name === '現金')!;
+  const food = ledger.accounts.find((a) => a.name === '食費')!;
+  await upsertEntry(
+    buildSimpleEntry({
+      date: '2026-06-01',
+      description: 'ランチ',
+      debitAccountId: food.id,
+      creditAccountId: cash.id,
+      amount: 1000,
+    }),
+  );
+  return loadLedger();
+}
+
+describe('export/import round trip', () => {
+  it('有効な JSON を取り込める（ok）', async () => {
+    const ledger = await seedWithEntry();
+    const text = exportToJsonText(ledger);
+    const outcome = await importFromJsonText(text);
+    expect(outcome.kind).toBe('ok');
+    if (outcome.kind === 'ok') {
+      expect(outcome.counts.entries).toBe(1);
+    }
+  });
+
+  it('取り込み成功時に import 前スナップショットが作られる', async () => {
+    const ledger = await seedWithEntry();
+    const text = exportToJsonText(ledger);
+    await importFromJsonText(text);
+    const snaps = await listSnapshots();
+    expect(snaps.length).toBeGreaterThan(0);
+    expect(snaps[0]?.reason).toBe('import前');
+  });
+});
+
+describe('fail-closed', () => {
+  it('壊れた JSON は取り込まれず、既存データを保持する', async () => {
+    const before = await seedWithEntry();
+    const outcome = await importFromJsonText('{ this is not json');
+    expect(outcome.kind).toBe('parse-error');
+    const after = await loadLedger();
+    expect(after.journalEntries.length).toBe(before.journalEntries.length);
+  });
+
+  it('別アプリのファイルは not-our-file', async () => {
+    await seedWithEntry();
+    const outcome = await importFromJsonText(JSON.stringify({ appId: 'other', schemaVersion: 1 }));
+    expect(outcome.kind).toBe('not-our-file');
+  });
+
+  it('スキーマ違反（借方≠貸方）は validation-error、既存データ保持', async () => {
+    const ledger = await seedWithEntry();
+    const pkg = buildExportPackage(ledger);
+    pkg.journalEntries.push({
+      id: 'bad',
+      date: '2026-06-02',
+      description: 'broken',
+      kind: 'normal',
+      lines: [
+        { accountId: 'a', side: 'debit', amount: 100 },
+        { accountId: 'b', side: 'credit', amount: 90 },
+      ],
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    const outcome = await importFromJsonText(JSON.stringify(pkg));
+    expect(outcome.kind).toBe('validation-error');
+    const after = await loadLedger();
+    expect(after.journalEntries.some((e) => e.id === 'bad')).toBe(false);
+  });
+
+  it('未対応の新しいスキーマ版は unsupported-version（too-new）', async () => {
+    const ledger = await seedWithEntry();
+    const pkg = buildExportPackage(ledger);
+    const outcome = await importFromJsonText(
+      JSON.stringify({ ...pkg, schemaVersion: pkg.schemaVersion + 1 }),
+    );
+    expect(outcome.kind).toBe('unsupported-version');
+  });
+});
+
+describe('revision 競合', () => {
+  it('baseRevision が現在と異なると revision-conflict、force で上書き', async () => {
+    const ledger = await seedWithEntry();
+    const text = exportToJsonText(ledger); // baseRevision = 現在の rev
+
+    // ローカルをさらに編集して rev を進める
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const salary = ledger.accounts.find((a) => a.name === '給与収入')!;
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2026-06-05',
+        description: '給料',
+        debitAccountId: cash.id,
+        creditAccountId: salary.id,
+        amount: 300000,
+      }),
+    );
+
+    const conflict = await importFromJsonText(text);
+    expect(conflict.kind).toBe('revision-conflict');
+
+    const forced = await importFromJsonText(text, { force: true });
+    expect(forced.kind).toBe('ok');
+    // 古い版で上書きされ、給料の仕訳は消えている（自動マージしない）
+    const after = await loadLedger();
+    expect(after.journalEntries.some((e) => e.description === '給料')).toBe(false);
+    expect(after.journalEntries.some((e) => e.description === 'ランチ')).toBe(true);
+  });
+});
+
+describe('export package 形状', () => {
+  it('必須フィールドを含む', async () => {
+    const ledger = await seedWithEntry();
+    const pkg = buildExportPackage(ledger);
+    expect(pkg.appId).toBe(APP_ID);
+    expect(pkg).toHaveProperty('schemaVersion');
+    expect(pkg).toHaveProperty('ledgerId');
+    expect(pkg).toHaveProperty('exportedAt');
+    expect(pkg).toHaveProperty('deviceId');
+    expect(pkg).toHaveProperty('baseRevision');
+    expect(pkg).toHaveProperty('currentRevision');
+    expect(pkg).toHaveProperty('settings');
+  });
+});

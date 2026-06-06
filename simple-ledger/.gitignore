@@ -1,0 +1,12 @@
+node_modules
+dist
+*.local
+.vite
+
+# Playwright
+playwright-report
+test-results
+/playwright/.cache
+
+# coverage
+coverage
