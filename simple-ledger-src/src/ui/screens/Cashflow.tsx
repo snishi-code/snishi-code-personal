@@ -522,18 +522,21 @@ function ScheduleSheet({
         tags={tagsForScope(tags, 'entry', entryTagIds)}
         value={entryTagIds}
         onChange={setEntryTagIds}
+        dataUi={UI.cashflow.scheduleEntryTags}
       />
       <TagPicker
         label={t('cashflow.form.accountTags')}
         tags={tagsForScope(tags, 'line', accountTagIds)}
         value={accountTagIds}
         onChange={setAccountTagIds}
+        dataUi={UI.cashflow.scheduleAccountTags}
       />
       <TagPicker
         label={t('cashflow.form.counterTags')}
         tags={tagsForScope(tags, 'line', counterTagIds)}
         value={counterTagIds}
         onChange={setCounterTagIds}
+        dataUi={UI.cashflow.scheduleCounterTags}
       />
       <SelectInput
         label={t('cashflow.form.source')}

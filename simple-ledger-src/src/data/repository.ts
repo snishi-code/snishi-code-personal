@@ -9,6 +9,7 @@
 import { STORE, deleteRecord, getAll, getKv, putRecord, runWrite, type StoreName } from './db';
 import { defaultAccounts, defaultSettings, newMeta } from './seed';
 import { newId } from '../domain/ids';
+import { SCHEMA_VERSION } from '../domain/constants';
 import type {
   Account,
   AdjustmentKind,
@@ -26,7 +27,19 @@ import { buildAllocation, type AllocationInput } from '../domain/allocation';
 import { buildScheduleEntry } from '../domain/cashflow';
 import { buildAdjustmentEntry, counterpartName, counterpartRole } from '../domain/adjustment';
 import { accountBalance, filterByDateRange } from '../domain/accounting';
+import {
+  isTagReferenced,
+  tagAllowsEntry,
+  tagAllowsLine,
+  tagAssignmentError,
+  tagUsage,
+} from '../domain/tags';
 import { nowIso } from '../util/time';
+
+async function tagMap(): Promise<Map<string, Tag>> {
+  const tags = await getAll<Tag>(STORE.tags);
+  return new Map(tags.map((t) => [t.id, t]));
+}
 
 /** 按分中資産（繰延）科目の既定名。初回利用時に asset 科目として作る/再利用する。 */
 const DEFERRED_ACCOUNT_NAME = '按分中資産';
@@ -42,10 +55,20 @@ async function getSettings(): Promise<Settings | undefined> {
   return getKv<Settings>(KV_SETTINGS);
 }
 
-/** 初回だけ既定データを投入する。 */
+/** 初回だけ既定データを投入する。既存DBは現行スキーマ版へ追従させる。 */
 export async function ensureInitialized(): Promise<void> {
   const meta = await getMeta();
-  if (meta) return;
+  if (meta) {
+    // 既存DBの meta.schemaVersion を現行へ前進させる（恒等移行のため構造変更なし）。
+    // 編集追跡(revision)は変えない＝import の競合判定に影響させない。
+    if (meta.schemaVersion < SCHEMA_VERSION) {
+      const bumped: LedgerMeta = { ...meta, schemaVersion: SCHEMA_VERSION };
+      await runWrite([STORE.kv], (t) => {
+        t.objectStore(STORE.kv).put(bumped, KV_META);
+      });
+    }
+    return;
+  }
   const accounts = defaultAccounts();
   const settings = defaultSettings();
   const meta0 = newMeta();
@@ -199,11 +222,23 @@ async function assertNotScheduleLinked(id: string): Promise<void> {
   }
 }
 
+/** 仕訳のタグ代入を import 検証と同じ不変条件で確認する（保存時 fail-closed）。 */
+async function assertEntryTagsValid(entry: JournalEntry): Promise<void> {
+  const tags = await tagMap();
+  const e1 = tagAssignmentError(entry.tagIds, 'entry', tags);
+  if (e1) throw new Error(e1);
+  for (const line of entry.lines) {
+    const e2 = tagAssignmentError(line.tagIds, 'line', tags);
+    if (e2) throw new Error(e2);
+  }
+}
+
 export async function upsertEntry(entry: JournalEntry): Promise<void> {
   // 既存が按分生成仕訳/予定リンク仕訳なら上書き禁止。新規入力に allocationId は付かない。
   await assertNotAllocationEntry(entry.id);
   await assertNotScheduleLinked(entry.id);
   if (entry.metadata?.allocationId) throw new Error(GENERATED_ENTRY_MSG);
+  await assertEntryTagsValid(entry);
   await writeWithRevision([STORE.journalEntries], (t) => {
     t.objectStore(STORE.journalEntries).put(entry);
   });
@@ -289,14 +324,26 @@ export async function createAllocation(
 
 /* ── 予定キャッシュフロー ── */
 
+/** 予定 CF のタグ代入を import 検証と同じ不変条件で確認する。 */
+async function assertScheduleTagsValid(schedules: CashflowSchedule[]): Promise<void> {
+  const tags = await tagMap();
+  for (const s of schedules) {
+    const e1 = tagAssignmentError(s.entryTagIds, 'entry', tags);
+    if (e1) throw new Error(e1);
+    const e2 = tagAssignmentError(s.accountLineTagIds, 'line', tags);
+    if (e2) throw new Error(e2);
+    const e3 = tagAssignmentError(s.counterLineTagIds, 'line', tags);
+    if (e3) throw new Error(e3);
+  }
+}
+
 export async function upsertSchedule(schedule: CashflowSchedule): Promise<void> {
-  await writeWithRevision([STORE.cashflowSchedules], (t) => {
-    t.objectStore(STORE.cashflowSchedules).put(schedule);
-  });
+  await upsertSchedules([schedule]);
 }
 
 /** 複数の予定（分割払い等）を 1 トランザクションで保存する。 */
 export async function upsertSchedules(schedules: CashflowSchedule[]): Promise<void> {
+  await assertScheduleTagsValid(schedules);
   await writeWithRevision([STORE.cashflowSchedules], (t) => {
     const store = t.objectStore(STORE.cashflowSchedules);
     for (const s of schedules) store.put(s);
@@ -379,22 +426,6 @@ export async function createReserve(input: {
 
 /* ── タグ ── */
 
-function isTagReferenced(
-  id: string,
-  entries: JournalEntry[],
-  schedules: CashflowSchedule[],
-): boolean {
-  return (
-    entries.some((e) => e.tagIds?.includes(id) || e.lines.some((l) => l.tagIds?.includes(id))) ||
-    schedules.some(
-      (s) =>
-        s.entryTagIds?.includes(id) ||
-        s.accountLineTagIds?.includes(id) ||
-        s.counterLineTagIds?.includes(id),
-    )
-  );
-}
-
 export async function upsertTag(tag: Tag): Promise<void> {
   const [tags, entries, schedules] = await Promise.all([
     getAll<Tag>(STORE.tags),
@@ -410,17 +441,11 @@ export async function upsertTag(tag: Tag): Promise<void> {
   // 使用中タグの scope 変更が、付与済みの用途と矛盾する場合は不可（狭める変更を防ぐ）。
   const prev = tags.find((x) => x.id === tag.id);
   if (prev && prev.scope !== tag.scope) {
-    const usedAsEntry =
-      entries.some((e) => e.tagIds?.includes(tag.id)) ||
-      schedules.some((s) => s.entryTagIds?.includes(tag.id));
-    const usedAsLine =
-      entries.some((e) => e.lines.some((l) => l.tagIds?.includes(tag.id))) ||
-      schedules.some(
-        (s) => s.accountLineTagIds?.includes(tag.id) || s.counterLineTagIds?.includes(tag.id),
-      );
-    const allowsEntry = tag.scope === 'entry' || tag.scope === 'both';
-    const allowsLine = tag.scope === 'line' || tag.scope === 'both';
-    if ((usedAsEntry && !allowsEntry) || (usedAsLine && !allowsLine)) {
+    const usage = tagUsage(tag.id, entries, schedules);
+    if (
+      (usage.usedAsEntry && !tagAllowsEntry(tag.scope)) ||
+      (usage.usedAsLine && !tagAllowsLine(tag.scope))
+    ) {
       throw new Error('使用中のタグは、付与済みの用途に合わない対象へ変更できません。');
     }
   }

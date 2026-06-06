@@ -26,7 +26,7 @@
 | `source` / `dest`, `+/-` | `JournalLine.side`（`debit`/`credit`） | 独自符号は使わない |
 | `PL` シート | `ProfitAndLoss`（導出） | 保存しない。毎回計算 |
 | `BS` シート | `BalanceSheet`（導出） | 保存しない。毎回計算 |
-| `CF` | （将来）`cashFlow` | MVP 対象外 |
+| `CF` | `CashflowSchedule`（予定キャッシュフロー）/ 資金繰り画面 | 実装済み（予定→実績化） |
 | `INVENTORY` | （将来）`fixedAssets` / `assetRegister` | MVP 対象外 |
 
 ## 中核モデル

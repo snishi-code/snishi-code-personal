@@ -88,6 +88,9 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   // 按分支出（expense の create のみ）
   const canAllocate = init.kind === 'create' && mode === 'expense';
   const [allocate, setAllocate] = useState(false);
+  // 按分 ON のときはタグを付けられない（createAllocation はタグを受け取らないため、
+  // 付けても黙って失われる）。タグ欄自体を隠して取り違えを防ぐ。
+  const allocationActive = canAllocate && allocate;
   const [monthsText, setMonthsText] = useState('');
   const [monthsError, setMonthsError] = useState(false);
   const months = monthsText === '' ? 0 : Number.parseInt(monthsText, 10);
@@ -203,14 +206,16 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         dataUi={UI.journal.entry.description}
       />
 
-      <TagPicker
-        label={t('entry.tags')}
-        hint={t('entry.tagsHint')}
-        tags={tagsForScope(tags, 'entry', form.tagIds ?? [])}
-        value={form.tagIds ?? []}
-        onChange={(ids) => setForm((f) => ({ ...f, tagIds: ids }))}
-        dataUi={UI.journal.entry.tags}
-      />
+      {allocationActive ? null : (
+        <TagPicker
+          label={t('entry.tags')}
+          hint={t('entry.tagsHint')}
+          tags={tagsForScope(tags, 'entry', form.tagIds ?? [])}
+          value={form.tagIds ?? []}
+          onChange={(ids) => setForm((f) => ({ ...f, tagIds: ids }))}
+          dataUi={UI.journal.entry.tags}
+        />
+      )}
 
       {roles.map((role) => {
         const value = role.side === 'debit' ? form.debitAccountId : form.creditAccountId;
@@ -240,20 +245,22 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                   : UI.journal.entry.creditAccount
               }
             />
-            <TagPicker
-              label={lineTagLabel}
-              tags={tagsForScope(tags, 'line', lineTagValue)}
-              value={lineTagValue}
-              onChange={(ids) =>
-                setForm((f) => ({
-                  ...f,
-                  [role.side === 'debit' ? 'debitTagIds' : 'creditTagIds']: ids,
-                }))
-              }
-              dataUi={
-                role.side === 'debit' ? UI.journal.entry.debitTags : UI.journal.entry.creditTags
-              }
-            />
+            {allocationActive ? null : (
+              <TagPicker
+                label={lineTagLabel}
+                tags={tagsForScope(tags, 'line', lineTagValue)}
+                value={lineTagValue}
+                onChange={(ids) =>
+                  setForm((f) => ({
+                    ...f,
+                    [role.side === 'debit' ? 'debitTagIds' : 'creditTagIds']: ids,
+                  }))
+                }
+                dataUi={
+                  role.side === 'debit' ? UI.journal.entry.debitTags : UI.journal.entry.creditTags
+                }
+              />
+            )}
           </div>
         );
       })}

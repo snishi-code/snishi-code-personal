@@ -99,6 +99,10 @@ export const UI = {
     scheduleAccount: 'cashflow.schedule.account',
     scheduleCounter: 'cashflow.schedule.counter',
     scheduleInstallments: 'cashflow.schedule.installments',
+    // 予定CF のタグ欄（実績化時に仕訳へコピーされる）
+    scheduleEntryTags: 'cashflow.schedule.entryTags',
+    scheduleAccountTags: 'cashflow.schedule.accountTags',
+    scheduleCounterTags: 'cashflow.schedule.counterTags',
     summary: 'cashflow.summary',
     addReserve: 'cashflow.reserve.create',
     reserveList: 'cashflow.reserve.list',

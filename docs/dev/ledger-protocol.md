@@ -6,7 +6,8 @@
 ## 保存方針
 
 - **実行時の正本 = IndexedDB**（`DB_NAME = "simple-ledger"`）。ストア:
-  `kv`（meta / settings）、`accounts`、`journalEntries`、`snapshots`。
+  `kv`（meta / settings）、`accounts`、`journalEntries`、`allocations`、
+  `cashflowSchedules`、`reserves`、`tags`、`snapshots`。
 - **公式交換形式 = JSON**（端末間共有・バックアップ）。JSON をDB代わりに常用しない。
 
 ## JSON export パッケージ
@@ -16,7 +17,7 @@
 ```jsonc
 {
   "appId": "snishi-code.simple-ledger",
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "ledgerId": "ledger",
   "exportedAt": "2026-06-06T00:00:00.000Z",
   "deviceId": "<uuid>",
@@ -32,8 +33,9 @@
 }
 ```
 
-- `schemaVersion`: スキーマ版。現行は **`4`**（v1→v2 `allocations`、v2→v3
-  `cashflowSchedules`/`reserves`、v3→v4 `tags` を追加）。
+- `schemaVersion`: スキーマ版。現行は **`5`**（v1→v2 `allocations`、v2→v3
+  `cashflowSchedules`/`reserves`、v3→v4 `tags`、v4→v5 残高補正 `metadata.adjustment`
+  永続化に伴う版上げ＝恒等移行を追加）。
 - `revision`: 端末ローカルの編集追跡。保存（仕訳/科目/設定/按分/予定CF/目的別資金/タグ）のたびに +1。
 - 金額（`JournalLine.amount`）は **正の整数・最小通貨単位**（JPY なら円）。
 
@@ -142,16 +144,21 @@ revision は import の競合判定に使うため、本体と必ず歩調を合
 
 ## migration ポリシー
 
-- `schemaVersion` を必ず持つ。現行は `4`。
+- `schemaVersion` を必ず持つ。現行は `5`。
 - migration 関数の置き場は `src/domain/migrations.ts` の `STEPS`（`{ from, to, migrate }`）。
   - **v1 → v2**: `allocations: []` を補う（v1 JSON は按分を持たない）。
   - **v2 → v3**: `cashflowSchedules: []` / `reserves: []` を補う。
   - **v3 → v4**: `tags: []` を補う。
+  - **v4 → v5**: 残高補正（`metadata.adjustment`）の永続化に伴う版上げ。構造は変えない＝
+    恒等移行（version だけ前進）。
 - 未対応版は **fail-closed**（取り込まない）。
 - migration 失敗時は既存データを保持し、UI に失敗を通知する（握りつぶさない）。
 - version を上げるときは `SCHEMA_VERSION` を +1 し、`STEPS` に旧→新の手順を追加する。
-  IndexedDB も `DB_VERSION` を上げ、`onupgradeneeded` でストアを追加する（v2 で `allocations`、
-  v3 で `cashflowSchedules` / `reserves`、v4 で `tags` を追加）。
+  新ストアを足すときだけ `DB_VERSION` を上げ、`onupgradeneeded` でストアを追加する（v2 で
+  `allocations`、v3 で `cashflowSchedules` / `reserves`、v4 で `tags`）。v5 は既存ストア内の
+  項目（`metadata.adjustment`）追加のみのため `DB_VERSION` は据え置き（4 のまま）。
+- 既存 IndexedDB の `meta.schemaVersion` は起動時（`ensureInitialized`）に現行版へ前進させる。
+  恒等移行なので **編集リビジョン（`revision`）は変えない**（import の競合判定に影響させない）。
 
 ## 外部送信ゼロとの関係
 

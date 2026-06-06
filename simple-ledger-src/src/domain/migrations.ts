@@ -54,6 +54,13 @@ const STEPS: Step[] = [
     to: 4,
     migrate: (pkg) => ({ ...pkg, tags: Array.isArray(pkg.tags) ? pkg.tags : [] }),
   },
+  {
+    // v4 → v5: 残高補正(metadata.adjustment)の永続化に伴う版上げ。
+    // 既存データの構造は変えない＝恒等移行（version だけ前進させる）。
+    from: 4,
+    to: 5,
+    migrate: (pkg) => pkg,
+  },
 ];
 
 /**

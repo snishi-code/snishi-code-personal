@@ -48,4 +48,13 @@ describe('migrateToCurrent', () => {
     expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
     expect(r.data?.allocations).toEqual([]);
   });
+  it('v4 → v5 は恒等移行（構造は変えず version だけ前進）', () => {
+    const v4 = pkg(4);
+    const r = migrateToCurrent(v4);
+    expect(r.ok).toBe(true);
+    expect(r.data?.schemaVersion).toBe(5);
+    // 既存配列はそのまま（補完だけで内容は不変）。
+    expect(r.data?.tags).toEqual([]);
+    expect(r.data?.cashflowSchedules).toEqual([]);
+  });
 });

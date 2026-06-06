@@ -27,6 +27,8 @@
   --primary-light: #f0fdfa; /* teal-50 */
   --primary-border: #5eead4; /* teal-300 */
   --on-primary: #ffffff;
+  /* 濃色の塗り（toast / danger ボタン等）に載せる文字色（白）。 */
+  --on-solid: #ffffff;
 
   /* ── 状態色（色だけに依存しない: 文言/アイコンと併用する） ── */
   --danger: #dc2626; /* red-600 */
@@ -41,6 +43,9 @@
   /* 金額の増減表示（緑/赤に依存しすぎない: 記号 +/- も併記する） */
   --pos: #0f766e; /* teal-700（白地で 4.9:1） */
   --neg: #dc2626;
+
+  /* モーダル/シートの背面オーバーレイ（slate-900 40%）。 */
+  --overlay: rgba(15, 23, 42, 0.4);
 
   /* ── フォーカス ── */
   --focus: #14b8a6;

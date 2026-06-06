@@ -4,7 +4,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useLedger } from '../../state/store';
-import { aggregateEntryTags, aggregateLineTags } from '../../domain/tags';
+import { aggregateEntryTags, aggregateLineTags, tagUsage } from '../../domain/tags';
 import { monthRange } from '../../domain/accounting';
 import { currentYearMonth, nowIso } from '../../util/time';
 import { newId } from '../../domain/ids';
@@ -232,12 +232,17 @@ function TagSheet({ existing, onClose }: { existing?: Tag; onClose: () => void }
   const [submitting, setSubmitting] = useState(false);
 
   // 使用中タグは対象(scope)を狭める変更ができない（repository が fail-closed）。
+  // 判定は repository と同じ共通ヘルパ（仕訳 + 予定CF）に寄せて UI と挙動を一致させる。
   const inUse =
     !!existing &&
-    (ledger?.journalEntries ?? []).some(
-      (e) =>
-        e.tagIds?.includes(existing.id) || e.lines.some((l) => l.tagIds?.includes(existing.id)),
-    );
+    (() => {
+      const u = tagUsage(
+        existing.id,
+        ledger?.journalEntries ?? [],
+        ledger?.cashflowSchedules ?? [],
+      );
+      return u.usedAsEntry || u.usedAsLine;
+    })();
 
   async function submit() {
     if (name.trim() === '') {
@@ -257,7 +262,9 @@ function TagSheet({ existing, onClose }: { existing?: Tag; onClose: () => void }
     try {
       await saveTag(tag);
       onClose();
-    } catch {
+    } catch (e) {
+      // 保存拒否（同名重複・scope 変更不可など）は TagSheet 内にインラインで出す。
+      setError(e instanceof Error ? e.message : t('tags.error.save'));
       setSubmitting(false);
     }
   }

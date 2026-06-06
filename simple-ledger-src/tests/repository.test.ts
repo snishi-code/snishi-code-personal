@@ -20,8 +20,10 @@ import {
 } from '../src/data/repository';
 import { buildSimpleEntry } from '../src/domain/entry';
 import { buildExportPackage } from '../src/data/exportImport';
+import { getKv, putKv } from '../src/data/db';
+import { SCHEMA_VERSION } from '../src/domain/constants';
 import { newId } from '../src/domain/ids';
-import type { CashflowSchedule, Tag } from '../src/domain/types';
+import type { CashflowSchedule, LedgerMeta, Tag } from '../src/domain/types';
 
 async function addEntryRef(foodId: string, cashId: string) {
   await upsertEntry(
@@ -430,6 +432,96 @@ describe('タグ不変条件（保存時）', () => {
     // entry を許容する 'entry' への変更は可
     await upsertTag({ ...tg, scope: 'entry', updatedAt: 'y' });
     expect((await loadLedger()).tags.find((x) => x.id === tg.id)?.scope).toBe('entry');
+  });
+});
+
+describe('起動時 schemaVersion 追従', () => {
+  it('既存DBの古い schemaVersion を現行へ前進させ、revision は変えない', async () => {
+    // まず既定データを投入（settings/accounts/meta を作る）。
+    const init = await loadLedger();
+    // 旧版(v4)の meta へ書き換える（既存ユーザの IndexedDB を模す）。
+    const oldMeta: LedgerMeta = { ...init.meta, schemaVersion: 4, revision: 7 };
+    await putKv('meta', oldMeta);
+
+    // 次回起動で現行版へ追従する（恒等移行のため revision は不変）。
+    const ledger = await loadLedger();
+    expect(ledger.meta.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(ledger.meta.revision).toBe(7);
+
+    const persisted = await getKv<LedgerMeta>('meta');
+    expect(persisted?.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(persisted?.revision).toBe(7);
+  });
+});
+
+describe('タグ実行時検証（保存前）', () => {
+  const mkTag = (over: Partial<Tag> = {}): Tag => ({
+    id: newId(),
+    name: '楽天カード',
+    scope: 'line',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+    ...over,
+  });
+
+  it('upsertEntry: 存在しないタグ参照は拒否', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    await expect(
+      upsertEntry(
+        buildSimpleEntry({
+          date: '2026-06-01',
+          description: 'x',
+          debitAccountId: food.id,
+          creditAccountId: cash.id,
+          amount: 100,
+          tagIds: ['no-such-tag'],
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('upsertEntry: scope 不整合（line タグを全体タグ欄）は拒否', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    const lineOnly = mkTag({ scope: 'line' });
+    await upsertTag(lineOnly);
+    await expect(
+      upsertEntry(
+        buildSimpleEntry({
+          date: '2026-06-01',
+          description: 'x',
+          debitAccountId: food.id,
+          creditAccountId: cash.id,
+          amount: 100,
+          tagIds: [lineOnly.id], // 全体タグ欄に line スコープは不可
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('upsertSchedules: 存在しないタグ参照は拒否', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const card = ledger.accounts.find((a) => a.type === 'liability')!;
+    const schedule: CashflowSchedule = {
+      id: newId(),
+      title: 'x',
+      dueDate: '2026-07-10',
+      amount: 100,
+      direction: 'outflow',
+      accountId: cash.id,
+      counterAccountId: card.id,
+      source: 'manual',
+      status: 'planned',
+      entryTagIds: ['no-such-tag'],
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    await expect(upsertSchedule(schedule)).rejects.toThrow();
   });
 });
 

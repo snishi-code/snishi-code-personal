@@ -233,7 +233,7 @@ button {
 }
 .btn--danger {
   background: var(--danger);
-  color: #fff;
+  color: var(--on-solid);
   border-color: var(--danger);
 }
 .btn--danger:hover {
@@ -449,7 +449,7 @@ button.list__item:hover {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.4);
+  background: var(--overlay);
   z-index: 30;
   display: flex;
 }
@@ -502,7 +502,7 @@ button.list__item:hover {
 .sheet-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.4);
+  background: var(--overlay);
   z-index: 40;
   display: flex;
   align-items: flex-end;
@@ -587,7 +587,7 @@ button.list__item:hover {
   border-radius: var(--radius);
   box-shadow: var(--shadow-pop);
   background: var(--text);
-  color: #fff;
+  color: var(--on-solid);
   font-size: 14px;
   font-weight: 600;
 }

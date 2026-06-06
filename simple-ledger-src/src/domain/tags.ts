@@ -3,7 +3,7 @@
  *  - 全体タグ(entry): 仕訳全体に付く（旅行・学会 等）
  *  - 明細タグ(line):  借方/貸方の明細に付く（カード名・銀行名 等）
  */
-import type { JournalEntry, Tag, TagScope } from './types';
+import type { CashflowSchedule, JournalEntry, Tag, TagScope } from './types';
 import { filterByDateRange } from './accounting';
 
 export function tagAllowsEntry(scope: TagScope): boolean {
@@ -11,6 +11,57 @@ export function tagAllowsEntry(scope: TagScope): boolean {
 }
 export function tagAllowsLine(scope: TagScope): boolean {
   return scope === 'line' || scope === 'both';
+}
+
+/* ── 使用状況・代入検証（UI と repository で共通の不変条件を使う） ── */
+
+export interface TagUsage {
+  usedAsEntry: boolean;
+  usedAsLine: boolean;
+}
+
+/** タグが「全体タグ」「明細タグ」として使われているか（仕訳 + 予定CF を見る）。 */
+export function tagUsage(
+  tagId: string,
+  entries: JournalEntry[],
+  schedules: CashflowSchedule[],
+): TagUsage {
+  const usedAsEntry =
+    entries.some((e) => e.tagIds?.includes(tagId)) ||
+    schedules.some((s) => s.entryTagIds?.includes(tagId));
+  const usedAsLine =
+    entries.some((e) => e.lines.some((l) => l.tagIds?.includes(tagId))) ||
+    schedules.some(
+      (s) => s.accountLineTagIds?.includes(tagId) || s.counterLineTagIds?.includes(tagId),
+    );
+  return { usedAsEntry, usedAsLine };
+}
+
+export function isTagReferenced(
+  tagId: string,
+  entries: JournalEntry[],
+  schedules: CashflowSchedule[],
+): boolean {
+  const u = tagUsage(tagId, entries, schedules);
+  return u.usedAsEntry || u.usedAsLine;
+}
+
+/**
+ * タグ代入（tagIds）が scope と存在の不変条件を満たすか検証する。
+ * 違反があればエラーメッセージ、無ければ null。import 検証と同じルールを保存時にも使う。
+ */
+export function tagAssignmentError(
+  tagIds: string[] | undefined,
+  kind: 'entry' | 'line',
+  tagById: Map<string, Tag>,
+): string | null {
+  for (const id of tagIds ?? []) {
+    const tg = tagById.get(id);
+    if (!tg) return `存在しないタグ(${id})を参照しています。`;
+    if (kind === 'entry' && !tagAllowsEntry(tg.scope)) return '全体タグに使えないタグがあります。';
+    if (kind === 'line' && !tagAllowsLine(tg.scope)) return '明細タグに使えないタグがあります。';
+  }
+  return null;
 }
 
 /** 仕訳の代表額（2 行前提なので借方額 = 貸方額）。 */
