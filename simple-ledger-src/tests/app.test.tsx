@@ -38,13 +38,14 @@ describe('App 支出入力フロー', () => {
 
     await user.click(screen.getByRole('button', { name: '保存' }));
 
-    // ホームには最近の仕訳一覧を置かない。仕訳画面へ移動して反映を確認する。
-    await user.click(screen.getByRole('button', { name: 'メニューを開く' }));
-    await user.click(screen.getByRole('button', { name: '仕訳' }));
-
+    // ホーム下部「当月の仕訳」に当月の仕訳が出る。
     expect(await screen.findByText('ランチ')).toBeInTheDocument();
     const amounts = await screen.findAllByText((text) => text.includes('1,000'));
     expect(amounts.length).toBeGreaterThan(0);
+
+    // 「すべて見る」で仕訳画面（当月フィルタ）へ遷移して確認できる。
+    await user.click(screen.getByRole('button', { name: /すべて見る/ }));
+    expect(await screen.findByText('ランチ')).toBeInTheDocument();
   });
 
   it('必須未入力だと検証エラーを表示し、保存しない', async () => {

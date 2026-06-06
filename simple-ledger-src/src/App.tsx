@@ -94,8 +94,10 @@ export function App() {
         {screen === 'dashboard' ? (
           <Dashboard
             onAddEntry={openCreate}
+            onEditEntry={openEdit}
             onNavigate={setScreen}
             onOpenStatement={openStatements}
+            onOpenJournal={goJournalFiltered}
           />
         ) : null}
         {screen === 'journal' ? (

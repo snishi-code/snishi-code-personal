@@ -19,13 +19,12 @@ export interface NavItem {
 }
 
 /**
- * ハンバーガーメニューのトップレベル項目。
- * 主要動線だけに絞り、財務諸表/勘定科目/タグ/残高補正は設定配下へ移す
- * （画面自体は残し、Settings の「管理」セクションから遷移する）。
+ * ハンバーガーメニューのトップレベル項目（管理・補助機能に絞る）。
+ * ホーム=ヘッダーのホームアイコン、仕訳=ホーム下部「当月の仕訳」やドリルダウン、
+ * 財務諸表=ホームの PL/BS から辿るため、メニューには置かない。
+ * 勘定科目/タグ/残高補正は Settings の「管理」セクション。
  */
 export const NAV_ITEMS: NavItem[] = [
-  { screen: 'dashboard', labelKey: 'nav.dashboard', icon: 'home' },
-  { screen: 'journal', labelKey: 'nav.journal', icon: 'list' },
   { screen: 'allocations', labelKey: 'nav.allocations', icon: 'calendar' },
   { screen: 'cashflow', labelKey: 'nav.cashflow', icon: 'trending' },
   { screen: 'settings', labelKey: 'nav.settings', icon: 'settings' },

@@ -30,8 +30,8 @@ export function Header({
           <Icon name="home" />
         </button>
         <div className="app-header__title">
-          <span className="app-header__name">{ledgerName}</span>
-          <span className="app-header__sub">{t('dashboard.thisMonth', { year, month })}</span>
+          <span className="app-header__name">{t('header.yearMonth', { year, month })}</span>
+          <span className="app-header__sub">{ledgerName}</span>
         </div>
         <button
           type="button"

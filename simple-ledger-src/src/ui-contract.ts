@@ -12,11 +12,21 @@ export const UI = {
     income: 'dashboard.entry.income',
     expense: 'dashboard.entry.expense',
     transfer: 'dashboard.entry.transfer',
-    // 損益/資産負債サマリー（タップで財務諸表へ）
-    openPl: 'dashboard.openPl',
-    openBs: 'dashboard.openBs',
-    // 生活コスト領域（タップで資金繰りへ）
+    // 損益/資産負債サマリーの項目別ボタン（タップで財務諸表の該当セクションへ）
+    statRevenue: 'dashboard.stat.revenue',
+    statExpense: 'dashboard.stat.expense',
+    statNetIncome: 'dashboard.stat.netIncome',
+    statAssets: 'dashboard.stat.assets',
+    statLiabilities: 'dashboard.stat.liabilities',
+    statNetAssets: 'dashboard.stat.netAssets',
+    // 後方互換（旧 e2e 用に維持）: 収益=PL入口 / 資産=BS入口
+    openPl: 'dashboard.stat.revenue',
+    openBs: 'dashboard.stat.assets',
+    // 生活コスト領域（タップで資金計画・負債へ）
     openCashflow: 'dashboard.openCashflow',
+    // 当月の仕訳プレビュー
+    journalPreview: 'dashboard.journal.preview',
+    journalOpenAll: 'dashboard.journal.openAll',
   },
   journal: {
     view: 'journal.view',
@@ -103,6 +113,7 @@ export const UI = {
     scheduleAccount: 'cashflow.schedule.account',
     scheduleCounter: 'cashflow.schedule.counter',
     scheduleInstallments: 'cashflow.schedule.installments',
+    liabilityList: 'cashflow.liability.list',
     // 予定CF のタグ欄（実績化時に仕訳へコピーされる）
     scheduleEntryTags: 'cashflow.schedule.entryTags',
     scheduleAccountTags: 'cashflow.schedule.accountTags',

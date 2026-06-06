@@ -17,8 +17,10 @@
 |---|---|---|
 | `dashboard.view` | Dashboard ルート | ホーム表示の検出 |
 | `dashboard.entry.income` / `.expense` / `.transfer` | ホーム 3 ボタン | 日常入力の主導線（唯一の入力起点） |
-| `dashboard.openPl` / `dashboard.openBs` | ホーム損益/資産サマリーの項目 | 財務諸表(PL/BS)の該当セクションへ |
-| `dashboard.openCashflow` | ホーム生活コスト領域 | 資金繰り（資金計画）へ遷移 |
+| `dashboard.stat.revenue` / `.expense` / `.netIncome` | ホーム損益の項目別ボタン | PL の該当セクションへ |
+| `dashboard.stat.assets` / `.liabilities` / `.netAssets` | ホーム財政状態の項目別ボタン | BS の該当セクションへ |
+| `dashboard.openCashflow` | ホーム生活コスト領域 | 資金計画・負債へ遷移 |
+| `dashboard.journal.preview` / `dashboard.journal.openAll` | ホーム下部「当月の仕訳」 | プレビュー / すべて見る（当月フィルタ） |
 | `journal.view` | Journal ルート | 仕訳画面の検出 |
 | `journal.entry.list` | Journal 一覧 | 仕訳一覧 |
 | `journal.monthlyRecognition` | 今月の月額化認識カード | 読み取り専用（仕訳ではない月割り表示） |
@@ -68,7 +70,7 @@
 | `nav.home` | ヘッダーホーム | Dashboard へ |
 | `nav.menu.button` | ヘッダー `≡` | メニュー開閉 |
 | `nav.menu` | ドロワー nav | メニュー本体 |
-| `nav.<screen>` | メニュー各項目（主要動線のみ） | `dashboard` / `journal` / `allocations` / `cashflow` / `settings` |
+| `nav.<screen>` | メニュー各項目（管理・補助のみ） | `allocations`（月額化コスト）/ `cashflow`（資金計画・負債）/ `settings` |
 | `dialog.confirm` / `dialog.cancel` | ConfirmDialog | 確定 / キャンセル |
 | `toast` | toast 領域 | 通知の検出 |
 

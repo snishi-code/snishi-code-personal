@@ -23,9 +23,10 @@ async function addExpense(page: Page, description: string, amount: string) {
   await page.locator(ui('journal.entry.save')).click();
 }
 
+/** 仕訳画面はホーム下部「当月の仕訳」の「すべて見る」から開く（メニューには無い）。 */
 async function openJournal(page: Page) {
-  await page.locator(ui('nav.menu.button')).click();
-  await page.locator(ui('nav.journal')).click();
+  await page.locator(ui('nav.home')).click();
+  await page.locator(ui('dashboard.journal.openAll')).click();
 }
 
 /** 財務諸表/勘定科目/タグ/残高補正は設定の「管理」セクションから開く。 */
@@ -174,7 +175,7 @@ test('損益計算書の科目から仕訳一覧へドリルダウンできる',
   await addExpense(page, 'コーヒー', '500');
 
   // 財務諸表はホームの損益サマリーから開く（管理メニューには無い）。
-  await page.locator(ui('dashboard.openPl')).click();
+  await page.locator(ui('dashboard.stat.revenue')).click();
   await page.locator(ui('statements.row')).filter({ hasText: '食費' }).first().click();
 
   await expect(page.locator(ui('journal.view'))).toBeVisible();
@@ -185,11 +186,11 @@ test('損益計算書の科目から仕訳一覧へドリルダウンできる',
 test('ホームの損益/資産サマリーから財務諸表(PL/BS)を開ける', async ({ page }) => {
   await page.goto('./');
   // 損益サマリー → 損益計算書
-  await page.locator(ui('dashboard.openPl')).click();
+  await page.locator(ui('dashboard.stat.revenue')).click();
   await expect(page.locator(ui('statements.profitAndLoss'))).toBeVisible();
   // ホームへ戻り、資産負債サマリー → 貸借対照表
   await page.locator(ui('nav.home')).click();
-  await page.locator(ui('dashboard.openBs')).click();
+  await page.locator(ui('dashboard.stat.assets')).click();
   await expect(page.locator(ui('statements.balanceSheet'))).toBeVisible();
   // タブ切替も従来どおり動く
   await page.locator(ui('statements.tab.pl')).click();

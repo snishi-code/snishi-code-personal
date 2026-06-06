@@ -91,6 +91,24 @@ export function Cashflow() {
   const reserves = ledger?.reserves ?? [];
   const maxFree = Math.max(1, ...projection.points.map((p) => Math.abs(p.free)));
 
+  // 負債・分割払いの集約: 支払用負債ごとに、相手とする未実績の outflow 予定から
+  // 次回支払日・残額・件数を見せる（既存 CashflowSchedule と負債科目から導出）。
+  const liabilitySummary = useMemo(() => {
+    const accounts = ledger?.accounts ?? [];
+    const schedules = ledger?.cashflowSchedules ?? [];
+    return accounts
+      .filter((a) => a.role === 'payment-liability')
+      .map((a) => {
+        const related = schedules.filter(
+          (s) => s.counterAccountId === a.id && s.status === 'planned',
+        );
+        const remaining = related.reduce((sum, s) => sum + s.amount, 0);
+        const nextDue = related.map((s) => s.dueDate).sort()[0];
+        return { id: a.id, name: a.name, count: related.length, remaining, nextDue };
+      })
+      .filter((x) => x.count > 0);
+  }, [ledger]);
+
   return (
     <section aria-labelledby="cashflow-title" data-ui={UI.cashflow.view}>
       <h1 className="screen-title" id="cashflow-title">
@@ -304,6 +322,29 @@ export function Cashflow() {
           ))}
         </ul>
       )}
+
+      {/* 負債・分割払い（支払用負債ごとの集約） */}
+      {liabilitySummary.length > 0 ? (
+        <>
+          <p className="section-label">{t('cashflow.liabilitiesTitle')}</p>
+          <ul className="card list" data-ui={UI.cashflow.liabilityList}>
+            {liabilitySummary.map((l) => (
+              <li key={l.id} className="list__item">
+                <div className="list__main">
+                  <div className="list__title">{l.name}</div>
+                  <div className="list__sub">
+                    {t('cashflow.nextDue')}: {l.nextDue ?? '—'}・
+                    {t('cashflow.installmentsLeft', { count: l.count })}
+                  </div>
+                </div>
+                <span className="list__amount">
+                  <Money amount={l.remaining} currency={currency} />
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
 
       {/* 資金目標（長期の積立計画） */}
       <div

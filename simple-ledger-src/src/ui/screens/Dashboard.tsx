@@ -10,6 +10,7 @@ import { totalMonthlyCostForMonth } from '../../domain/monthlyCost';
 import { currentYearMonth, todayLocal } from '../../util/time';
 import { Money } from '../money';
 import { Icon } from '../Icon';
+import { EntryListItem } from '../EntryListItem';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import type { JournalEntry } from '../../domain/types';
@@ -31,15 +32,24 @@ const ENTRY_TYPES: { mode: FormMode; labelKey: MessageKey; icon: IconName; ui: s
 
 export function Dashboard({
   onAddEntry,
+  onEditEntry,
   onNavigate,
   onOpenStatement,
+  onOpenJournal,
 }: {
   onAddEntry: (mode: FormMode) => void;
+  onEditEntry: (entry: JournalEntry) => void;
   onNavigate: (screen: Screen) => void;
   onOpenStatement: (tab: 'pl' | 'bs', section?: string) => void;
+  onOpenJournal: (filter: { from?: string; to?: string }) => void;
 }) {
   const { ledger } = useLedger();
   const { year, month } = currentYearMonth();
+  const monthRangeValue = monthRange(year, month);
+  // 当月の仕訳（日付降順。loadLedger で既にソート済み）の先頭 5 件。
+  const monthEntries = (ledger?.journalEntries ?? [])
+    .filter((e) => e.date >= monthRangeValue.from && e.date <= monthRangeValue.to)
+    .slice(0, 5);
 
   const {
     pl,
@@ -103,8 +113,8 @@ export function Dashboard({
 
   return (
     <section aria-labelledby="dashboard-title" data-ui={UI.dashboard.view}>
-      <h1 className="screen-title" id="dashboard-title">
-        {t('dashboard.title')}
+      <h1 className="screen-title" id="dashboard-title" aria-label={t('dashboard.title')}>
+        {t('header.yearMonth', { year, month })}
       </h1>
 
       {/* 日常入力の主導線（収入/支出/振替） */}
@@ -138,14 +148,22 @@ export function Dashboard({
         <StatButton
           label={t('dashboard.revenue')}
           onClick={() => onOpenStatement('pl', 'revenue')}
-          dataUi={UI.dashboard.openPl}
+          dataUi={UI.dashboard.statRevenue}
         >
           <Money amount={pl.totalRevenue} currency={currency} />
         </StatButton>
-        <StatButton label={t('dashboard.expense')} onClick={() => onOpenStatement('pl', 'expense')}>
+        <StatButton
+          label={t('dashboard.expense')}
+          onClick={() => onOpenStatement('pl', 'expense')}
+          dataUi={UI.dashboard.statExpense}
+        >
           <Money amount={pl.totalExpense} currency={currency} />
         </StatButton>
-        <StatButton label={t('dashboard.netIncome')} onClick={() => onOpenStatement('pl', 'net')}>
+        <StatButton
+          label={t('dashboard.netIncome')}
+          onClick={() => onOpenStatement('pl', 'net')}
+          dataUi={UI.dashboard.statNetIncome}
+        >
           <Money amount={pl.netIncome} currency={currency} signed />
         </StatButton>
       </div>
@@ -156,19 +174,21 @@ export function Dashboard({
         <StatButton
           label={t('dashboard.assets')}
           onClick={() => onOpenStatement('bs', 'assets')}
-          dataUi={UI.dashboard.openBs}
+          dataUi={UI.dashboard.statAssets}
         >
           <Money amount={bs.totalAssets} currency={currency} />
         </StatButton>
         <StatButton
           label={t('dashboard.liabilities')}
           onClick={() => onOpenStatement('bs', 'liabilities')}
+          dataUi={UI.dashboard.statLiabilities}
         >
           <Money amount={bs.totalLiabilities} currency={currency} />
         </StatButton>
         <StatButton
           label={t('dashboard.netAssets')}
           onClick={() => onOpenStatement('bs', 'equity')}
+          dataUi={UI.dashboard.statNetAssets}
         >
           <Money amount={bs.netAssets} currency={currency} signed />
         </StatButton>
@@ -222,6 +242,49 @@ export function Dashboard({
           ) : null}
         </div>
       </button>
+
+      {/* 当月の仕訳（下部・スクロールで見える）。詳細は仕訳画面へ。 */}
+      <div
+        className="section-label"
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+      >
+        <span>{t('dashboard.thisMonthEntries')}</span>
+        {monthEntries.length > 0 ? (
+          <button
+            type="button"
+            className="btn btn--ghost"
+            style={{ minHeight: 32 }}
+            onClick={() => onOpenJournal({ from: monthRangeValue.from, to: monthRangeValue.to })}
+            data-ui={UI.dashboard.journalOpenAll}
+          >
+            {t('dashboard.viewAll')}
+            <Icon name="chevronRight" size={16} />
+          </button>
+        ) : null}
+      </div>
+      {monthEntries.length === 0 ? (
+        <div className="card card--pad muted">{t('dashboard.noMonthEntries')}</div>
+      ) : (
+        <ul className="card list" data-ui={UI.dashboard.journalPreview}>
+          {monthEntries.map((entry) => {
+            // 生成仕訳（按分/月額化）は編集不可なので、タップは仕訳画面へ。
+            const generated = !!(entry.metadata?.allocationId || entry.metadata?.monthlyCostId);
+            return (
+              <EntryListItem
+                key={entry.id}
+                entry={entry}
+                accounts={ledger?.accounts ?? []}
+                currency={currency}
+                onClick={() =>
+                  generated
+                    ? onOpenJournal({ from: monthRangeValue.from, to: monthRangeValue.to })
+                    : onEditEntry(entry)
+                }
+              />
+            );
+          })}
+        </ul>
+      )}
     </section>
   );
 }

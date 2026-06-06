@@ -739,10 +739,12 @@ export async function upsertMonthlyCost(item: MonthlyCostItem): Promise<void> {
 }
 
 /**
- * 月額化コストを削除する。関連（負債計上の購入仕訳・返済 CF）も一括で扱う fail-closed。
- *  - 返済 CF が 1 件でも実績化(posted)済みなら、立てた負債が取り崩し済みのため物理削除は禁止。
+ * 月額化コストを削除する。関連（実支払い仕訳・返済 CF）も一括で扱う fail-closed。
+ *  - 現行設計では「実際の支払い仕訳（借方 費用 / 貸方 支払い元）」と「生活コスト認識の分析レイヤ
+ *    （formula）」を分離している。削除では支払い仕訳と返済 CF を扱う。
+ *  - 返済 CF が 1 件でも実績化(posted)済みなら、現金/負債が動いているため物理削除は禁止。
  *    `status='ended'` で終了させること（履歴と整合を壊さない）。
- *  - すべて未実績なら、購入仕訳・未実績 CF・本体を 1 トランザクションで同時削除する（孤立を残さない）。
+ *  - すべて未実績なら、実支払い仕訳・未実績 CF・本体を 1 トランザクションで同時削除する（孤立を残さない）。
  */
 export async function deleteMonthlyCost(id: string): Promise<void> {
   const [entries, schedules] = await Promise.all([
