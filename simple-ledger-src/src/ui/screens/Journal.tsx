@@ -224,6 +224,9 @@ export function Journal({
                   ) : null}
                   {generated ? (
                     <span className="tag tag--teal">{t('journal.allocationTag')}</span>
+                  ) : null}
+                  {entry.metadata?.adjustment ? (
+                    <span className="tag tag--neutral">{t('journal.adjustmentTag')}</span>
                   ) : null}{' '}
                   {entry.description}
                 </div>

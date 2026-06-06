@@ -149,6 +149,22 @@ test('タグ: 作成 → 支出に付与 → Journal で抽出できる', async 
   await expect(page.locator(ui('journal.entry.list'))).toContainText('旅行の食事');
 });
 
+test('残高補正: 実残高を入力すると補正仕訳ができる', async ({ page }) => {
+  await page.goto('./');
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.adjustments')).click();
+  await expect(page.locator(ui('adjustments.view'))).toBeVisible();
+
+  // 現金の実残高を 8000 として補正（理論残高 0 → +8000）
+  await pick(page, 'adjust.account', '現金');
+  await page.locator(ui('adjust.actual')).fill('8000');
+  await page.locator(ui('adjust.save')).click();
+
+  // Journal に補正仕訳が出る
+  await openJournal(page);
+  await expect(page.locator(ui('journal.entry.list'))).toContainText('残高補正');
+});
+
 test('損益計算書の科目から仕訳一覧へドリルダウンできる', async ({ page }) => {
   await page.goto('./');
   await addExpense(page, 'コーヒー', '500');

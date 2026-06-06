@@ -40,34 +40,41 @@ export function Dashboard({
   const { ledger } = useLedger();
   const { year, month } = currentYearMonth();
 
-  const { pl, bs, recent, recognition, activeCount } = useMemo(() => {
+  const { pl, bs, recent, recognition, investmentValuation, activeCount } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     const entries = ledger?.journalEntries ?? [];
     const range = monthRange(year, month);
     const currentYm = `${year}-${String(month).padStart(2, '0')}`;
+    const inMonth = (e: JournalEntry) => e.date >= range.from && e.date <= range.to;
+    const expenseIds = new Set(accounts.filter((a) => a.type === 'expense').map((a) => a.id));
     // 今月の按分認識額（recognition 仕訳の費用＝借方額）。
     const recognitionAmt = entries
-      .filter(
-        (e) =>
-          e.metadata?.allocationRole === 'recognition' &&
-          e.date >= range.from &&
-          e.date <= range.to,
-      )
+      .filter((e) => e.metadata?.allocationRole === 'recognition' && inMonth(e))
       .reduce((s, e) => s + (e.lines.find((l) => l.side === 'debit')?.amount ?? 0), 0);
+    // 今月の投資評価損益（生活コストから除外する）。費用側=損、収益側=益。
+    let investmentLoss = 0;
+    let investmentGain = 0;
+    for (const e of entries) {
+      if (e.metadata?.adjustment?.kind !== 'investment-valuation' || !inMonth(e)) continue;
+      const debit = e.lines.find((l) => l.side === 'debit');
+      const credit = e.lines.find((l) => l.side === 'credit');
+      if (debit && expenseIds.has(debit.accountId)) investmentLoss += debit.amount;
+      else if (credit) investmentGain += credit.amount; // 評価益は revenue 貸方
+    }
     return {
       pl: deriveProfitAndLoss(accounts, entries, range),
-      // BS は「今日時点」で切る。未来月の按分認識仕訳を現在残高に含めない。
       bs: deriveBalanceSheet(accounts, entries, todayLocal()),
-      // 最近の仕訳も今日以前に限定（未来の按分認識仕訳を先頭に出さない）。
       recent: entries.filter((e) => e.date <= todayLocal()).slice(0, 5),
       recognition: recognitionAmt,
+      investmentValuation: { loss: investmentLoss, gain: investmentGain },
       activeCount: (ledger?.allocations ?? []).filter((a) => !isCompleted(a, currentYm)).length,
     };
   }, [ledger, year, month]);
 
   const currency = ledger?.settings.currency ?? 'JPY';
   const hasEntries = (ledger?.journalEntries.length ?? 0) > 0;
-  const normalExpense = pl.totalExpense - recognition;
+  // 生活コストの費用から、按分認識と投資評価損を除いた「通常費用」。
+  const normalExpense = pl.totalExpense - recognition - investmentValuation.loss;
 
   return (
     <section aria-labelledby="dashboard-title" data-ui={UI.dashboard.view}>
@@ -161,9 +168,21 @@ export function Dashboard({
         <div className="stat">
           <span className="stat__label">{t('dashboard.livingCostTotal')}</span>
           <span className="stat__value">
-            <Money amount={pl.totalExpense} currency={currency} />
+            <Money amount={normalExpense + recognition} currency={currency} />
           </span>
         </div>
+        {investmentValuation.loss > 0 || investmentValuation.gain > 0 ? (
+          <div className="stat">
+            <span className="stat__label">{t('dashboard.investmentValuation')}</span>
+            <span className="stat__value">
+              <Money
+                amount={investmentValuation.gain - investmentValuation.loss}
+                currency={currency}
+                signed
+              />
+            </span>
+          </div>
+        ) : null}
       </div>
       <button
         type="button"

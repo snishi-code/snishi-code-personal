@@ -104,6 +104,29 @@ export interface EntryMetadata {
   allocationId?: string;
   /** 按分仕訳の役割。source=原始仕訳 / recognition=月次認識仕訳。 */
   allocationRole?: 'source' | 'recognition';
+  /** 残高補正（実残高との差分調整）で作られた仕訳の付帯情報。 */
+  adjustment?: AdjustmentMeta;
+}
+
+/**
+ * 残高補正。任意の日に実残高との差分を補正する（「締め」は作らない）。
+ *  - unknown-balance: 通常の現金/預金差額 → 残高調整費/収入
+ *  - investment-valuation: 投資残高差額 → 投資評価損/益（生活コストとは別）
+ */
+export type AdjustmentKind = 'unknown-balance' | 'investment-valuation';
+
+export interface AdjustmentMeta {
+  kind: AdjustmentKind;
+  /** 補正対象の科目（asset または liability）。 */
+  accountId: string;
+  /** アプリ上の理論残高。 */
+  expectedBalance: number;
+  /** ユーザーが入力した実残高。 */
+  actualBalance: number;
+  /** actual - expected。 */
+  delta: number;
+  /** 相手科目（残高調整費/収入 or 投資評価損/益）。 */
+  counterpartAccountId: string;
 }
 
 /** 按分支出（長期の生活コストを月割りで費用認識する）。 */

@@ -8,6 +8,7 @@ export type Screen =
   | 'allocations'
   | 'cashflow'
   | 'tags'
+  | 'adjustments'
   | 'accounts'
   | 'settings';
 
@@ -24,6 +25,7 @@ export const NAV_ITEMS: NavItem[] = [
   { screen: 'allocations', labelKey: 'nav.allocations', icon: 'calendar' },
   { screen: 'cashflow', labelKey: 'nav.cashflow', icon: 'trending' },
   { screen: 'tags', labelKey: 'nav.tags', icon: 'tag' },
+  { screen: 'adjustments', labelKey: 'nav.adjustments', icon: 'adjust' },
   { screen: 'accounts', labelKey: 'nav.accounts', icon: 'wallet' },
   { screen: 'settings', labelKey: 'nav.settings', icon: 'settings' },
 ];

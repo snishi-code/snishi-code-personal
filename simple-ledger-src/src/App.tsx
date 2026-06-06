@@ -12,6 +12,7 @@ import { Statements } from './ui/screens/Statements';
 import { Allocations } from './ui/screens/Allocations';
 import { Cashflow } from './ui/screens/Cashflow';
 import { Tags } from './ui/screens/Tags';
+import { Adjustments } from './ui/screens/Adjustments';
 import { Accounts } from './ui/screens/Accounts';
 import { Settings } from './ui/screens/Settings';
 import { Help } from './ui/screens/Help';
@@ -100,6 +101,7 @@ export function App() {
         {screen === 'allocations' ? <Allocations /> : null}
         {screen === 'cashflow' ? <Cashflow /> : null}
         {screen === 'tags' ? <Tags /> : null}
+        {screen === 'adjustments' ? <Adjustments /> : null}
         {screen === 'accounts' ? <Accounts /> : null}
         {screen === 'settings' ? <Settings /> : null}
       </main>

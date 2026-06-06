@@ -11,6 +11,7 @@ import { defaultAccounts, defaultSettings, newMeta } from './seed';
 import { newId } from '../domain/ids';
 import type {
   Account,
+  AdjustmentKind,
   AllocationItem,
   CashflowSchedule,
   JournalEntry,
@@ -23,6 +24,8 @@ import type {
 } from '../domain/types';
 import { buildAllocation, type AllocationInput } from '../domain/allocation';
 import { buildScheduleEntry } from '../domain/cashflow';
+import { buildAdjustmentEntry, counterpartName, counterpartRole } from '../domain/adjustment';
+import { accountBalance, filterByDateRange } from '../domain/accounting';
 import { nowIso } from '../util/time';
 
 /** 按分中資産（繰延）科目の既定名。初回利用時に asset 科目として作る/再利用する。 */
@@ -439,6 +442,68 @@ export async function deleteTag(id: string): Promise<void> {
   await writeWithRevision([STORE.tags], (t) => {
     t.objectStore(STORE.tags).delete(id);
   });
+}
+
+/* ── 残高補正 ── */
+
+/**
+ * 実残高との差分を補正する 2 行仕訳を作る（「締め」は作らない）。
+ * 相手科目（残高調整費/収入 or 投資評価損/益）が無ければ同じトランザクションで作る。
+ * delta=0 なら何も作らず null を返す。
+ */
+export async function createAdjustment(input: {
+  kind: AdjustmentKind;
+  accountId: string;
+  date: string;
+  actualBalance: number;
+  description?: string;
+}): Promise<JournalEntry | null> {
+  const [accounts, entries] = await Promise.all([
+    getAll<Account>(STORE.accounts),
+    getAll<JournalEntry>(STORE.journalEntries),
+  ]);
+  const target = accounts.find((a) => a.id === input.accountId);
+  if (!target) throw new Error('対象科目が見つかりません。');
+  if (target.type !== 'asset' && target.type !== 'liability') {
+    throw new Error('残高補正できるのは資産・負債の科目です。');
+  }
+
+  const expected = accountBalance(
+    input.accountId,
+    target.type,
+    filterByDateRange(entries, undefined, input.date),
+  );
+  const delta = input.actualBalance - expected;
+  if (delta === 0) return null;
+
+  const role = counterpartRole(target.type, delta);
+  const ctype: 'expense' | 'revenue' = role;
+  const name = counterpartName(input.kind, role);
+  let counter = accounts.find((a) => a.type === ctype && a.name === name && !a.archived);
+  let newCounter: Account | null = null;
+  if (!counter) {
+    const ts = nowIso();
+    newCounter = { id: newId(), name, type: ctype, archived: false, createdAt: ts, updatedAt: ts };
+    counter = newCounter;
+  }
+
+  const entry = buildAdjustmentEntry({
+    kind: input.kind,
+    accountId: input.accountId,
+    accountType: target.type,
+    date: input.date,
+    description: input.description ?? `残高補正: ${target.name}`,
+    expectedBalance: expected,
+    actualBalance: input.actualBalance,
+    counterpartAccountId: counter.id,
+  });
+  if (!entry) return null;
+
+  await writeWithRevision([STORE.accounts, STORE.journalEntries], (t) => {
+    if (newCounter) t.objectStore(STORE.accounts).put(newCounter);
+    t.objectStore(STORE.journalEntries).put(entry);
+  });
+  return entry;
 }
 
 /* ── 一括置換（import / restore で使う原子的操作） ── */

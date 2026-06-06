@@ -66,12 +66,22 @@ export const allocationPlanSchema = z.object({
   generatedEntryIds: z.array(z.string().min(1)),
 });
 
+export const adjustmentMetaSchema = z.object({
+  kind: z.enum(['unknown-balance', 'investment-valuation']),
+  accountId: z.string().min(1),
+  expectedBalance: z.number().int().finite(),
+  actualBalance: z.number().int().finite(),
+  delta: z.number().int().finite(),
+  counterpartAccountId: z.string().min(1),
+});
+
 export const entryMetadataSchema = z.object({
   inputMode: inputModeSchema.optional(),
   reversalOfEntryId: z.string().min(1).optional(),
   allocationPlan: allocationPlanSchema.optional(),
   allocationId: z.string().min(1).optional(),
   allocationRole: z.enum(['source', 'recognition']).optional(),
+  adjustment: adjustmentMetaSchema.optional(),
 });
 
 const monthSchema = z.string().regex(/^\d{4}-\d{2}$/, '月は YYYY-MM 形式である必要があります');
@@ -262,6 +272,17 @@ export const ledgerExportPackageSchema = z
             ]);
           }
         });
+      }
+
+      // 残高補正(adjustment)の参照整合性 + delta の一貫性。
+      const adj = e.metadata?.adjustment;
+      if (adj) {
+        const ap = (field: string) => ['journalEntries', ei, 'metadata', 'adjustment', field];
+        if (!hasAccount(adj.accountId)) issue('補正の対象科目が存在しません', ap('accountId'));
+        if (!hasAccount(adj.counterpartAccountId))
+          issue('補正の相手科目が存在しません', ap('counterpartAccountId'));
+        if (adj.delta !== adj.actualBalance - adj.expectedBalance)
+          issue('補正の delta が actual − expected と一致しません', ap('delta'));
       }
     });
 

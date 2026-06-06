@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createAdjustment,
   createAllocation,
   createReserve,
   deleteAccount,
@@ -429,5 +430,123 @@ describe('タグ不変条件（保存時）', () => {
     // entry を許容する 'entry' への変更は可
     await upsertTag({ ...tg, scope: 'entry', updatedAt: 'y' });
     expect((await loadLedger()).tags.find((x) => x.id === tg.id)?.scope).toBe('entry');
+  });
+});
+
+describe('残高補正 createAdjustment', () => {
+  async function setBalance(accountName: string, amount: number) {
+    const ledger = await loadLedger();
+    const acc = ledger.accounts.find((a) => a.name === accountName)!;
+    const capital = ledger.accounts.find((a) => a.name === '元入金')!;
+    // 資産を増やす: 借方 資産 / 貸方 元入金
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2026-06-01',
+        description: '初期',
+        debitAccountId: acc.id,
+        creditAccountId: capital.id,
+        amount,
+      }),
+    );
+    return acc;
+  }
+
+  it('現金 理論10000・実8000 → 借方 残高調整費 / 貸方 現金 2000', async () => {
+    const cash = await setBalance('現金', 10000);
+    const entry = await createAdjustment({
+      kind: 'unknown-balance',
+      accountId: cash.id,
+      date: '2026-06-30',
+      actualBalance: 8000,
+    });
+    expect(entry).not.toBeNull();
+    const after = await loadLedger();
+    const adj = after.accounts.find((a) => a.name === '残高調整費' && a.type === 'expense')!;
+    expect(adj).toBeTruthy();
+    expect(entry!.lines.find((l) => l.side === 'debit')).toMatchObject({
+      accountId: adj.id,
+      amount: 2000,
+    });
+    expect(entry!.lines.find((l) => l.side === 'credit')).toMatchObject({
+      accountId: cash.id,
+      amount: 2000,
+    });
+    expect(entry!.metadata?.adjustment?.delta).toBe(-2000);
+  });
+
+  it('普通預金 理論10000・実12000 → 借方 普通預金 / 貸方 残高調整収入 2000', async () => {
+    const bank = await setBalance('普通預金', 10000);
+    const entry = await createAdjustment({
+      kind: 'unknown-balance',
+      accountId: bank.id,
+      date: '2026-06-30',
+      actualBalance: 12000,
+    });
+    const after = await loadLedger();
+    const rev = after.accounts.find((a) => a.name === '残高調整収入' && a.type === 'revenue')!;
+    expect(entry!.lines.find((l) => l.side === 'debit')).toMatchObject({
+      accountId: bank.id,
+      amount: 2000,
+    });
+    expect(entry!.lines.find((l) => l.side === 'credit')).toMatchObject({
+      accountId: rev.id,
+      amount: 2000,
+    });
+  });
+
+  it('投資評価は投資評価損/益で処理する', async () => {
+    const ledger = await loadLedger();
+    const capital = ledger.accounts.find((a) => a.name === '元入金')!;
+    // 投資資産を作る
+    await upsertAccount({
+      id: 'inv',
+      name: '投資',
+      type: 'asset',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2026-06-01',
+        description: '投資',
+        debitAccountId: 'inv',
+        creditAccountId: capital.id,
+        amount: 100000,
+      }),
+    );
+    const entry = await createAdjustment({
+      kind: 'investment-valuation',
+      accountId: 'inv',
+      date: '2026-06-30',
+      actualBalance: 90000,
+    });
+    const after = await loadLedger();
+    const loss = after.accounts.find((a) => a.name === '投資評価損' && a.type === 'expense')!;
+    expect(loss).toBeTruthy();
+    expect(entry!.lines.find((l) => l.side === 'debit')?.accountId).toBe(loss.id);
+    expect(entry!.metadata?.adjustment?.kind).toBe('investment-valuation');
+  });
+
+  it('差額が無ければ仕訳を作らず null', async () => {
+    const cash = await setBalance('現金', 5000);
+    const entry = await createAdjustment({
+      kind: 'unknown-balance',
+      accountId: cash.id,
+      date: '2026-06-30',
+      actualBalance: 5000,
+    });
+    expect(entry).toBeNull();
+  });
+
+  it('過去日付の補正もできる', async () => {
+    const cash = await setBalance('現金', 10000);
+    const entry = await createAdjustment({
+      kind: 'unknown-balance',
+      accountId: cash.id,
+      date: '2026-06-15',
+      actualBalance: 9000,
+    });
+    expect(entry?.date).toBe('2026-06-15');
   });
 });

@@ -4,7 +4,15 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { Account, CashflowSchedule, Ledger, Settings, Snapshot, Tag } from '../domain/types';
+import type {
+  Account,
+  AdjustmentKind,
+  CashflowSchedule,
+  Ledger,
+  Settings,
+  Snapshot,
+  Tag,
+} from '../domain/types';
 import { buildSimpleEntry, type SimpleEntryInput } from '../domain/entry';
 import type { AllocationInput } from '../domain/allocation';
 import * as repo from '../data/repository';
@@ -41,6 +49,13 @@ interface LedgerContextValue {
   removeReserve: (id: string) => Promise<void>;
   saveTag: (tag: Tag) => Promise<void>;
   removeTag: (id: string) => Promise<void>;
+  createAdjustment: (input: {
+    kind: AdjustmentKind;
+    accountId: string;
+    date: string;
+    actualBalance: number;
+    description?: string;
+  }) => Promise<void>;
   saveAccount: (account: Account) => Promise<void>;
   removeAccount: (id: string) => Promise<void>;
   saveSettings: (settings: Settings) => Promise<void>;
@@ -228,6 +243,21 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [refresh, toast],
   );
 
+  const createAdjustment = useCallback<LedgerContextValue['createAdjustment']>(
+    async (input) => {
+      try {
+        const entry = await repo.createAdjustment(input);
+        await refresh();
+        if (entry) toast.show(t('toast.saved'), 'success');
+        else toast.show(t('adjust.noChange'), 'info');
+      } catch (e) {
+        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
   const saveAccount = useCallback<LedgerContextValue['saveAccount']>(
     async (account) => {
       try {
@@ -358,6 +388,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       removeReserve,
       saveTag,
       removeTag,
+      createAdjustment,
       saveAccount,
       removeAccount,
       saveSettings,
@@ -383,6 +414,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       removeReserve,
       saveTag,
       removeTag,
+      createAdjustment,
       saveAccount,
       removeAccount,
       saveSettings,

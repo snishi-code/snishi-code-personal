@@ -80,6 +80,14 @@ export const UI = {
     entrySummary: 'tags.summary.entry',
     lineSummary: 'tags.summary.line',
   },
+  adjustments: {
+    view: 'adjustments.view',
+    account: 'adjust.account',
+    date: 'adjust.date',
+    kind: 'adjust.kind',
+    actual: 'adjust.actual',
+    save: 'adjust.save',
+  },
   cashflow: {
     view: 'cashflow.view',
     addSchedule: 'cashflow.schedule.create',
