@@ -11,7 +11,21 @@
  * 端数は monthlyAmounts(amount, costMonths) と同じ配分（合計が必ず amount に一致）を使う。
  */
 import { monthlyAmounts, monthsBetween } from './allocation';
-import type { MonthlyCostItem } from './types';
+import type { MonthlyCostItem, MonthlyCostKind } from './types';
+
+/**
+ * 入力（何か月分 / 更新周期）から種類(kind)を推定する。
+ * 入力 UI から「種類」選択を省くため。表示・将来拡張のための分類で、計算には使わない。
+ */
+export function inferMonthlyCostKind(
+  costMonths: number,
+  repeatEveryMonths: number | undefined,
+): MonthlyCostKind {
+  if (costMonths === 1 && repeatEveryMonths === 1) return 'subscription';
+  if (costMonths === 12) return 'prepaid-service';
+  if (costMonths > 12) return 'durable-asset';
+  return 'recurring-event';
+}
 
 /** 代表的な月額（表示用）。amount を costMonths で割った端数調整の先頭月額。 */
 export function representativeMonthlyAmount(item: MonthlyCostItem): number {

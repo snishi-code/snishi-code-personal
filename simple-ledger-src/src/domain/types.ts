@@ -279,6 +279,11 @@ export interface Settings {
   /** ISO 4217 風のコード。MVP は表示用途のみ（換算はしない）。 */
   currency: string;
   locale: 'ja';
+  /**
+   * 期待年利（basis point 整数。例: 5% = 500）。未指定は 0。
+   * 資金目標の必要積立額の参考計算にのみ使う（投資助言ではない）。
+   */
+  expectedAnnualReturnBps?: number;
 }
 
 export interface LedgerMeta {

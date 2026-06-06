@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  inferMonthlyCostKind,
   monthlyCostForMonth,
   representativeMonthlyAmount,
   totalMonthlyCostForMonth,
@@ -79,5 +80,16 @@ describe('totalMonthlyCostForMonth / representativeMonthlyAmount', () => {
   });
   it('representativeMonthlyAmount は端数調整の先頭月額', () => {
     expect(representativeMonthlyAmount(item({ amount: 1000, costMonths: 3 }))).toBe(334);
+  });
+});
+
+describe('inferMonthlyCostKind', () => {
+  it('入力から種類を推定する', () => {
+    expect(inferMonthlyCostKind(1, 1)).toBe('subscription');
+    expect(inferMonthlyCostKind(12, 12)).toBe('prepaid-service');
+    expect(inferMonthlyCostKind(12, undefined)).toBe('prepaid-service');
+    expect(inferMonthlyCostKind(84, 84)).toBe('durable-asset');
+    expect(inferMonthlyCostKind(6, undefined)).toBe('recurring-event');
+    expect(inferMonthlyCostKind(1, undefined)).toBe('recurring-event'); // 1回限りの単月
   });
 });

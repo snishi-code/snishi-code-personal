@@ -29,9 +29,10 @@
 | `journal.entry.detailToggle` | 詳細（メモ・タグ）開閉 | 日常入力の詳細を折りたたみ表示 |
 | `journal.entry.manualSwitch` | 詳細入力（借方/貸方）へ切替 | manual モードへ切替 |
 | `journal.entry.allocateToggle` | 月額化するトグル | 月額化コストに切替（支出のみ） |
-| `journal.entry.monthlyizeKind` | 月額化の種類 | サブスク/年払い/耐久財/定期イベント |
-| `journal.entry.monthlyizeContinue` | 継続・更新トグル | 周期更新の有無 |
-| `journal.entry.monthlyizeRepayAccount` / `...RepayCount` | 負債払いの返済口座/回数 | 返済 CF の生成 |
+| `journal.entry.monthlyizeContinue` | 継続・買い替えトグル | ON で repeatEveryMonths=costMonths |
+| `journal.entry.monthlyizeRepayToggle` | 分割/後日引落を資金繰りに入れる | 負債払いのみ表示 |
+| `journal.entry.monthlyizeRepayAccount` / `...RepayCount` / `...RepayStart` | 引落口座/回数/初回引落日 | 返済 CF の生成（購入日と別） |
+| `settings.expectedReturn` | 期待年利(%) | 資金目標の必要月額の参考計算 |
 | `journal.entry.allocateMonths` | 按分月数 | 按分月数入力 |
 | `journal.entry.date` | Entry 日付 | 日付入力 |
 | `journal.entry.description` | Entry 摘要 | 摘要入力 |

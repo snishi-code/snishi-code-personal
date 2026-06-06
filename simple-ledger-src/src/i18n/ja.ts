@@ -297,15 +297,15 @@ export const ja = {
   'entry.error.months-invalid': '月数は 1 以上の整数で入力してください。',
   // 月額化コスト
   'entry.monthlyizeToggle': 'この支出を月額化する（生活コストで見る）',
-  'entry.monthlyizeKind': '種類',
   'entry.monthlyizeMonths': '何か月分として見るか',
   'entry.monthlyizeMonthsHint': 'サブスクは 1。年払いは 12、耐久財は使う年数×12 など。',
-  'entry.monthlyizeContinue': '継続・更新する',
-  'entry.monthlyizeRepeat': '何か月ごとに更新するか',
-  'entry.monthlyizeRepeatHint': '空欄なら「何か月分」と同じ（連続）。年払いの更新なら 12 など。',
+  'entry.monthlyizeContinue': '継続・買い替えする',
+  'entry.monthlyizeRepayToggle': '分割・後日引落を資金繰りに入れる',
   'entry.monthlyizeRepayNote': '支払い元が負債のため、返済予定（資金繰り）を作成できます。',
-  'entry.monthlyizeRepayAccount': '返済する口座',
+  'entry.monthlyizeRepayAccount': '引落口座',
   'entry.monthlyizeRepayCount': '返済回数',
+  'entry.monthlyizeRepayStart': '初回引落日',
+  'entry.monthlyizeRepayStartHint': '購入日とは別に、最初に現金が引き落とされる日を入れます。',
   'entry.monthlyizeNote':
     '月額化コストは「月あたりの生活コスト」を見るための登録です（生活コストは月割りで導出）。現金・預金払いは仕訳を作りません。負債払いで返済を入力した場合のみ、負債計上の仕訳と返済予定（資金繰り）を作ります。',
 
@@ -398,6 +398,9 @@ export const ja = {
   'settings.about': 'アプリ情報',
   'settings.ledgerName': '台帳名',
   'settings.currency': '通貨コード',
+  'settings.expectedReturn': '期待年利（%）',
+  'settings.expectedReturnHint':
+    '資金目標の必要積立額の参考計算に使います。投資助言ではありません。0 でも使えます。',
   'settings.version': 'バージョン',
   'settings.schemaVersion': 'スキーマ版',
   'settings.revision': 'リビジョン',

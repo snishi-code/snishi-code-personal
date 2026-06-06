@@ -208,6 +208,8 @@ export const settingsSchema = z.object({
   ledgerName: z.string().min(1).max(120),
   currency: z.string().min(1).max(8),
   locale: z.literal('ja'),
+  // 期待年利(bps)。古い JSON には無いので任意。0〜100%（10000bps）に制限。
+  expectedAnnualReturnBps: z.number().int().min(0).max(10000).optional(),
 });
 
 /**

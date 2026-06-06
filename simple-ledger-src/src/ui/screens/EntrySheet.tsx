@@ -9,13 +9,14 @@
  */
 import { useState } from 'react';
 import { Modal } from '../Modal';
-import { SelectInput, TextArea, TextInput } from '../Field';
+import { TextArea, TextInput } from '../Field';
 import { AccountPicker } from '../AccountPicker';
 import { TagPicker } from '../TagPicker';
 import { groupedAccountsByRole } from '../accountOptions';
 import { tagsForScope } from '../tagOptions';
 import { FORM_MODE_TITLE, MODE_ROLES, type FormMode } from '../entryModes';
 import { monthOf } from '../../domain/allocation';
+import { inferMonthlyCostKind } from '../../domain/monthlyCost';
 import { useLedger } from '../../state/store';
 import {
   reversalInput,
@@ -24,7 +25,7 @@ import {
   type EntryValidationError,
   type SimpleEntryInput,
 } from '../../domain/entry';
-import type { EntryMetadata, InputMode, JournalEntry, MonthlyCostKind } from '../../domain/types';
+import type { EntryMetadata, InputMode, JournalEntry } from '../../domain/types';
 import { Icon } from '../Icon';
 import { t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
@@ -94,13 +95,13 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [monthsText, setMonthsText] = useState('');
   const [monthsError, setMonthsError] = useState(false);
   const months = monthsText === '' ? 0 : Number.parseInt(monthsText, 10);
-  // 月額化の詳細
-  const [costKind, setCostKind] = useState<MonthlyCostKind>('durable-asset');
+  // 月額化の詳細（種類は入力から推定する）
   const [continueCost, setContinueCost] = useState(false);
-  const [repeatText, setRepeatText] = useState('');
-  // liability 払いの返済 CF
+  // liability 払いの返済 CF（支払い元の近くで入力する）
+  const [repayToggle, setRepayToggle] = useState(false);
   const [repayAccountId, setRepayAccountId] = useState('');
   const [repayCountText, setRepayCountText] = useState('');
+  const [repayStartDate, setRepayStartDate] = useState('');
   // 支払い元(credit)が支払用負債なら返済 CF を入力できる。
   const paymentRole = accounts.find((a) => a.id === form.creditAccountId)?.role;
   const isLiabilityPayment = paymentRole === 'payment-liability';
@@ -145,27 +146,27 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     setSubmitting(true);
     try {
       if (useMonthly) {
-        const repeat = continueCost
-          ? repeatText === ''
-            ? months
-            : Number.parseInt(repeatText, 10)
-          : undefined;
+        // 「継続・買い替えする」= 周期更新（repeatEveryMonths = costMonths）。
+        const repeat = continueCost ? months : undefined;
         const repayCount = repayCountText === '' ? 0 : Number.parseInt(repayCountText, 10);
+        const useRepay =
+          isLiabilityPayment && repayToggle && repayAccountId !== '' && repayCount >= 1;
         // 支出フォームの debit=費用カテゴリ / credit=支払い元 をそのまま月額化に渡す。
         await createMonthlyCost({
           name: form.description,
-          kind: costKind,
+          kind: inferMonthlyCostKind(months, repeat),
           amount: form.amount,
           costMonths: months,
           ...(repeat !== undefined ? { repeatEveryMonths: repeat } : {}),
           startMonth: monthOf(form.date),
           expenseAccountId: form.debitAccountId,
           paymentAccountId: form.creditAccountId,
-          ...(isLiabilityPayment && repayAccountId !== '' && repayCount >= 1
+          ...(useRepay
             ? {
                 repaymentAccountId: repayAccountId,
                 repaymentCount: repayCount,
-                repaymentStartDate: form.date,
+                // 購入日(form.date)とは別に、初回引落日を使う。
+                repaymentStartDate: repayStartDate || form.date,
               }
             : {}),
         });
@@ -296,18 +297,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       </label>
       {allocate ? (
         <>
-          <SelectInput
-            label={t('entry.monthlyizeKind')}
-            value={costKind}
-            onChange={(v) => setCostKind(v as MonthlyCostKind)}
-            options={[
-              { value: 'subscription', label: t('monthlyCost.kind.subscription') },
-              { value: 'prepaid-service', label: t('monthlyCost.kind.prepaid-service') },
-              { value: 'durable-asset', label: t('monthlyCost.kind.durable-asset') },
-              { value: 'recurring-event', label: t('monthlyCost.kind.recurring-event') },
-            ]}
-            dataUi={UI.journal.entry.monthlyizeKind}
-          />
           <TextInput
             label={t('entry.monthlyizeMonths')}
             required
@@ -334,41 +323,58 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             />
             {t('entry.monthlyizeContinue')}
           </label>
-          {continueCost ? (
-            <TextInput
-              label={t('entry.monthlyizeRepeat')}
-              inputMode="numeric"
-              value={repeatText}
-              hint={t('entry.monthlyizeRepeatHint')}
-              onChange={(v) => setRepeatText(v.replace(/[^\d]/g, ''))}
-            />
-          ) : null}
-          {isLiabilityPayment ? (
-            <div className="card card--pad" style={{ marginTop: 'var(--space-2)' }}>
-              <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
-                {t('entry.monthlyizeRepayNote')}
-              </p>
-              <AccountPicker
-                label={t('entry.monthlyizeRepayAccount')}
-                value={repayAccountId}
-                groups={groupedAccountsByRole(accounts, ['daily-asset'], repayAccountId)}
-                onChange={setRepayAccountId}
-                dataUi={UI.journal.entry.monthlyizeRepayAccount}
-              />
-              <TextInput
-                label={t('entry.monthlyizeRepayCount')}
-                inputMode="numeric"
-                value={repayCountText}
-                onChange={(v) => setRepayCountText(v.replace(/[^\d]/g, ''))}
-                dataUi={UI.journal.entry.monthlyizeRepayCount}
-              />
-            </div>
-          ) : null}
           <p className="field__hint">{t('entry.monthlyizeNote')}</p>
         </>
       ) : null}
     </div>
   ) : null;
+
+  // 支払い元が負債のときだけ、支払い元の近くに「分割/後日引落を資金繰りに入れる」を出す。
+  const repaymentField =
+    allocationActive && isLiabilityPayment ? (
+      <div className="field">
+        <label
+          style={{ display: 'inline-flex', gap: 8, alignItems: 'center', minHeight: 'var(--tap)' }}
+        >
+          <input
+            type="checkbox"
+            checked={repayToggle}
+            onChange={(e) => setRepayToggle(e.target.checked)}
+            data-ui={UI.journal.entry.monthlyizeRepayToggle}
+          />
+          {t('entry.monthlyizeRepayToggle')}
+        </label>
+        {repayToggle ? (
+          <div className="card card--pad" style={{ marginTop: 'var(--space-2)' }}>
+            <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
+              {t('entry.monthlyizeRepayNote')}
+            </p>
+            <AccountPicker
+              label={t('entry.monthlyizeRepayAccount')}
+              value={repayAccountId}
+              groups={groupedAccountsByRole(accounts, ['daily-asset'], repayAccountId)}
+              onChange={setRepayAccountId}
+              dataUi={UI.journal.entry.monthlyizeRepayAccount}
+            />
+            <TextInput
+              label={t('entry.monthlyizeRepayCount')}
+              inputMode="numeric"
+              value={repayCountText}
+              onChange={(v) => setRepayCountText(v.replace(/[^\d]/g, ''))}
+              dataUi={UI.journal.entry.monthlyizeRepayCount}
+            />
+            <TextInput
+              label={t('entry.monthlyizeRepayStart')}
+              type="date"
+              value={repayStartDate}
+              hint={t('entry.monthlyizeRepayStartHint')}
+              onChange={setRepayStartDate}
+              dataUi={UI.journal.entry.monthlyizeRepayStart}
+            />
+          </div>
+        ) : null}
+      </div>
+    ) : null;
 
   const manualSwitch =
     init.kind === 'create' && mode !== 'manual' && !allocate ? (
@@ -438,9 +444,10 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           {roles.map((role) => (
             <div key={role.side}>{renderAccountPicker(role)}</div>
           ))}
+          {allocateField}
+          {repaymentField}
           {dateField}
           {descriptionField}
-          {allocateField}
 
           {allocationActive ? null : (
             <>

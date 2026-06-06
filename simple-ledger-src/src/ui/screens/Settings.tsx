@@ -56,6 +56,10 @@ export function Settings({ onNavigate }: { onNavigate: (screen: Screen) => void 
   // 台帳設定の編集（ローカル）
   const [ledgerName, setLedgerName] = useState(ledger?.settings.ledgerName ?? '');
   const [currency, setCurrency] = useState(ledger?.settings.currency ?? 'JPY');
+  // 期待年利は %（保存は bps 整数）。
+  const [returnPct, setReturnPct] = useState(
+    String((ledger?.settings.expectedAnnualReturnBps ?? 0) / 100),
+  );
 
   const refreshSnapshots = () => {
     listSnapshots()
@@ -72,6 +76,7 @@ export function Settings({ onNavigate }: { onNavigate: (screen: Screen) => void 
     if (ledger) {
       setLedgerName(ledger.settings.ledgerName);
       setCurrency(ledger.settings.currency);
+      setReturnPct(String((ledger.settings.expectedAnnualReturnBps ?? 0) / 100));
     }
   }, [ledger]);
 
@@ -102,10 +107,14 @@ export function Settings({ onNavigate }: { onNavigate: (screen: Screen) => void 
   }
 
   function saveLedgerSettings() {
+    // % 入力 → bps 整数（0〜100% にクランプ）。
+    const pct = Number.parseFloat(returnPct);
+    const bps = Number.isFinite(pct) ? Math.round(Math.min(Math.max(pct, 0), 100) * 100) : 0;
     const next: LedgerSettings = {
       ledgerName: ledgerName.trim() || '家計簿',
       currency: currency.trim() || 'JPY',
       locale: 'ja',
+      expectedAnnualReturnBps: bps,
     };
     saveSettings(next).catch(() => undefined);
   }
@@ -226,6 +235,14 @@ export function Settings({ onNavigate }: { onNavigate: (screen: Screen) => void 
       <div className="card card--pad">
         <TextInput label={t('settings.ledgerName')} value={ledgerName} onChange={setLedgerName} />
         <TextInput label={t('settings.currency')} value={currency} onChange={setCurrency} />
+        <TextInput
+          label={t('settings.expectedReturn')}
+          inputMode="numeric"
+          value={returnPct}
+          hint={t('settings.expectedReturnHint')}
+          onChange={(v) => setReturnPct(v.replace(/[^\d.]/g, ''))}
+          dataUi={UI.settings.expectedReturn}
+        />
         <button type="button" className="btn" onClick={saveLedgerSettings}>
           {t('common.save')}
         </button>
