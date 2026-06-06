@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createAdjustment,
   createAllocation,
+  createMonthlyCost,
   createReserve,
   deleteAccount,
   deleteEntry,
@@ -20,7 +21,7 @@ import {
 } from '../src/data/repository';
 import { buildSimpleEntry } from '../src/domain/entry';
 import { buildExportPackage } from '../src/data/exportImport';
-import { getKv, putKv } from '../src/data/db';
+import { getKv, putKv, runWrite, STORE } from '../src/data/db';
 import { SCHEMA_VERSION } from '../src/domain/constants';
 import { newId } from '../src/domain/ids';
 import type { CashflowSchedule, LedgerMeta, Tag } from '../src/domain/types';
@@ -474,6 +475,99 @@ describe('起動時 schemaVersion 追従', () => {
     const persisted = await getKv<LedgerMeta>('meta');
     expect(persisted?.schemaVersion).toBe(SCHEMA_VERSION);
     expect(persisted?.revision).toBe(7);
+  });
+
+  it('v6→v7 追従で既存按分から月額化コストを補完する（revision 不変）', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    await createAllocation({
+      date: '2026-06-15',
+      description: 'PC',
+      totalAmount: 900,
+      months: 3,
+      expenseAccountId: food.id,
+      paymentAccountId: cash.id,
+    });
+    const before = await loadLedger();
+    // 旧版(v6)へ巻き戻し、月額化コストは未生成の状態を模す。
+    await putKv('meta', { ...before.meta, schemaVersion: 6 });
+    await runWrite([STORE.monthlyCostItems], (t) => t.objectStore(STORE.monthlyCostItems).clear());
+
+    const after = await loadLedger();
+    expect(after.meta.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(after.meta.revision).toBe(before.meta.revision); // 追従は revision を変えない
+    expect(after.monthlyCostItems).toHaveLength(1);
+    expect(after.monthlyCostItems[0]).toMatchObject({ name: 'PC', amount: 900, costMonths: 3 });
+  });
+});
+
+describe('月額化コスト createMonthlyCost', () => {
+  it('サブスクは登録のみ（仕訳・予定CFを作らない）', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    const beforeEntries = ledger.journalEntries.length;
+    await createMonthlyCost({
+      name: 'Netflix',
+      kind: 'subscription',
+      amount: 1500,
+      costMonths: 1,
+      repeatEveryMonths: 1,
+      startMonth: '2026-06',
+      expenseAccountId: food.id,
+      paymentAccountId: cash.id,
+    });
+    const after = await loadLedger();
+    expect(after.monthlyCostItems).toHaveLength(1);
+    expect(after.monthlyCostItems[0]).toMatchObject({ name: 'Netflix', amount: 1500 });
+    // 仕訳は増えない（登録簿）。
+    expect(after.journalEntries.length).toBe(beforeEntries);
+    expect(after.cashflowSchedules).toHaveLength(0);
+  });
+
+  it('負債払いは返済予定(CF)を回数分作る', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const card = ledger.accounts.find((a) => a.role === 'payment-liability')!;
+    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    await createMonthlyCost({
+      name: '洗濯機',
+      kind: 'durable-asset',
+      amount: 210000,
+      costMonths: 84,
+      startMonth: '2026-06',
+      expenseAccountId: food.id,
+      paymentAccountId: card.id,
+      repaymentAccountId: cash.id,
+      repaymentCount: 12,
+      repaymentStartDate: '2026-07-27',
+    });
+    const after = await loadLedger();
+    expect(after.monthlyCostItems).toHaveLength(1);
+    const schedules = after.cashflowSchedules;
+    expect(schedules).toHaveLength(12);
+    // 合計は総額に一致（端数調整）。
+    expect(schedules.reduce((s, x) => s + x.amount, 0)).toBe(210000);
+    // 返済は現金から出て、相手は負債（カード）。
+    expect(schedules.every((s) => s.accountId === cash.id && s.counterAccountId === card.id)).toBe(
+      true,
+    );
+  });
+
+  it('費用カテゴリでない科目を費用に指定すると拒否', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    await expect(
+      createMonthlyCost({
+        name: 'x',
+        kind: 'subscription',
+        amount: 100,
+        costMonths: 1,
+        startMonth: '2026-06',
+        expenseAccountId: cash.id, // asset を費用に → 拒否
+      }),
+    ).rejects.toThrow();
   });
 });
 

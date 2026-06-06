@@ -166,6 +166,48 @@ export interface AllocationItem {
 }
 
 /**
+ * 月額化コスト。サブスク・年払い/前払い・耐久財・定期イベントを統一して扱い、
+ * 「現在の生活水準を維持するための月あたりコスト」を可視化するための登録簿。
+ * これ自体は仕訳を生成しない（純粋な計画/可視化レイヤ。会計の正本は仕訳）。
+ * 月額は formula（amount / costMonths を端数調整）で導出し、ダッシュボードの生活コストに足す。
+ * 既存の按分(allocations)から移行した項目は sourceAllocationId を持つ。
+ */
+export type MonthlyCostKind =
+  | 'subscription' // サブスク（月課金）
+  | 'prepaid-service' // 年払い/前払いサービス
+  | 'durable-asset' // 耐久財・買い替え
+  | 'recurring-event'; // 定期イベント（車検等）
+
+export type MonthlyCostStatus = 'active' | 'paused' | 'ended';
+
+export interface MonthlyCostItem {
+  id: string;
+  name: string;
+  kind: MonthlyCostKind;
+  /** 1 回の契約・購入・更新で発生する総額（正の整数）。 */
+  amount: number;
+  /** その金額を何か月分の生活コストとして見るか（1 以上）。 */
+  costMonths: number;
+  /** 継続/更新する場合、何か月ごとに同じコストが再発するか。未指定なら 1 回限り（costMonths で終了）。 */
+  repeatEveryMonths?: number;
+  /** 初回の月 'YYYY-MM'。 */
+  startMonth: string;
+  /** 終了月 'YYYY-MM'。継続中なら未指定。 */
+  endMonth?: string;
+  /** 月額化先の費用カテゴリ（role: expense-category）。 */
+  expenseAccountId: string;
+  /** 実際の支払い元（role: daily-asset または payment-liability）。 */
+  paymentAccountId?: string;
+  /** liability 払いのとき、返済 CF を作るための支払い口座（role: daily-asset）。 */
+  repaymentAccountId?: string;
+  /** 既存 AllocationItem 由来なら紐づける。 */
+  sourceAllocationId?: string;
+  status: MonthlyCostStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
  * 予定キャッシュフロー（将来の現金の出入り）。
  * 「いつ費用認識するか(allocation)」とは別概念で、「いつ現金が動くか」を保持する。
  * 予定は通常仕訳一覧へ大量生成せず、ここに置く。実績化で 1 件の仕訳を作る。
@@ -269,6 +311,7 @@ export interface LedgerExportPackage {
   cashflowSchedules: CashflowSchedule[];
   reserves: ReserveItem[];
   tags: Tag[];
+  monthlyCostItems: MonthlyCostItem[];
   settings: Settings;
 }
 
@@ -319,4 +362,5 @@ export interface Ledger {
   cashflowSchedules: CashflowSchedule[];
   reserves: ReserveItem[];
   tags: Tag[];
+  monthlyCostItems: MonthlyCostItem[];
 }

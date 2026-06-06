@@ -1,24 +1,27 @@
 /*
- * 按分台帳。按分中(active)の項目を既定表示し、完了(completed)はトグルで表示。
- * 完了済みは削除せず履歴として残し、既定一覧からは自動で外れる（完了は現在月から導出）。
+ * 月額化コスト。サブスク・年払い・耐久財・定期イベントを統一して「月あたりコスト」で見る。
+ * 既定は active のみ表示。一時停止/終了はトグルで表示。これ自体は仕訳を生成しない登録簿。
  */
 import { useMemo, useState } from 'react';
 import { useLedger } from '../../state/store';
-import {
-  isCompleted,
-  monthlyAmount,
-  remainingMonths,
-  unrecognizedBalance,
-} from '../../domain/allocation';
-import { currentYearMonth } from '../../util/time';
+import { monthlyCostForMonth, representativeMonthlyAmount } from '../../domain/monthlyCost';
+import { currentYearMonth, nowIso } from '../../util/time';
 import { Money } from '../money';
 import { Icon } from '../Icon';
+import { ConfirmDialog } from '../ConfirmDialog';
 import { t } from '../../i18n';
+import type { MessageKey } from '../../i18n';
 import { UI } from '../../ui-contract';
+import type { MonthlyCostItem, MonthlyCostKind } from '../../domain/types';
+
+function kindLabel(kind: MonthlyCostKind): string {
+  return t(`monthlyCost.kind.${kind}` as MessageKey);
+}
 
 export function Allocations() {
-  const { ledger } = useLedger();
-  const [showCompleted, setShowCompleted] = useState(false);
+  const { ledger, saveMonthlyCost, removeMonthlyCost } = useLedger();
+  const [showInactive, setShowInactive] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<MonthlyCostItem | null>(null);
   const { year, month } = currentYearMonth();
   const currentYm = `${year}-${String(month).padStart(2, '0')}`;
   const currency = ledger?.settings.currency ?? 'JPY';
@@ -27,20 +30,26 @@ export function Allocations() {
     () => new Map((ledger?.accounts ?? []).map((a) => [a.id, a] as const)),
     [ledger],
   );
-  const name = (id: string): string => accountsMap.get(id)?.name ?? '—';
+  const name = (id?: string): string => (id ? (accountsMap.get(id)?.name ?? '—') : '—');
 
-  const items = useMemo(() => {
-    return (ledger?.allocations ?? []).filter((a) => showCompleted || !isCompleted(a, currentYm));
-  }, [ledger, showCompleted, currentYm]);
+  const items = useMemo(
+    () => (ledger?.monthlyCostItems ?? []).filter((m) => showInactive || m.status === 'active'),
+    [ledger, showInactive],
+  );
+
+  async function togglePause(item: MonthlyCostItem) {
+    const next = item.status === 'active' ? 'paused' : 'active';
+    await saveMonthlyCost({ ...item, status: next, updatedAt: nowIso() }).catch(() => undefined);
+  }
 
   return (
     <section aria-labelledby="allocations-title" data-ui={UI.allocations.view}>
       <h1 className="screen-title" id="allocations-title">
-        {t('allocations.title')}
+        {t('monthlyCost.title')}
       </h1>
 
       <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
-        {t('allocations.recognitionNote')}
+        {t('monthlyCost.intro')}
       </p>
 
       <label
@@ -53,72 +62,118 @@ export function Allocations() {
       >
         <input
           type="checkbox"
-          checked={showCompleted}
-          onChange={(e) => setShowCompleted(e.target.checked)}
+          checked={showInactive}
+          onChange={(e) => setShowInactive(e.target.checked)}
           data-ui={UI.allocations.showCompleted}
         />
-        {t('allocations.showCompleted')}
+        {t('monthlyCost.showInactive')}
       </label>
 
       {items.length === 0 ? (
         <div className="card card--pad empty">
           <Icon name="calendar" size={28} />
-          <p style={{ marginTop: 'var(--space-3)' }}>{t('allocations.empty')}</p>
+          <p style={{ marginTop: 'var(--space-3)' }}>{t('monthlyCost.empty')}</p>
         </div>
       ) : (
         <div className="stack" data-ui={UI.allocations.list}>
-          {items.map((a) => {
-            const completed = isCompleted(a, currentYm);
-            const remaining = remainingMonths(a, currentYm);
+          {items.map((m) => {
+            const thisMonth = monthlyCostForMonth(m, currentYm);
             return (
-              <div className="card card--pad" key={a.id}>
-                <div className="list__title" style={{ marginBottom: 'var(--space-2)' }}>
-                  {a.name}{' '}
-                  <span className={`tag ${completed ? 'tag--neutral' : 'tag--teal'}`}>
-                    {completed ? t('allocations.statusCompleted') : t('allocations.statusActive')}
-                  </span>
-                </div>
-                <div className="kv">
-                  <span className="muted">{t('allocations.total')}</span>
+              <div className="card card--pad" key={m.id}>
+                <div
+                  className="list__title"
+                  style={{
+                    marginBottom: 'var(--space-2)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
                   <span>
-                    <Money amount={a.totalAmount} currency={currency} />
-                  </span>
-                </div>
-                <div className="kv">
-                  <span className="muted">{t('allocations.months')}</span>
-                  <span>{t('allocations.monthsUnit', { count: a.months })}</span>
-                </div>
-                <div className="kv">
-                  <span className="muted">{t('allocations.monthly')}</span>
-                  <span>
-                    <Money amount={monthlyAmount(a)} currency={currency} />
-                  </span>
-                </div>
-                <div className="kv">
-                  <span className="muted">
-                    {t('allocations.remainingMonths', { count: remaining })}
-                  </span>
-                  <span>
-                    <Money amount={unrecognizedBalance(a, currentYm)} currency={currency} />
-                    <span className="muted" style={{ fontSize: 12 }}>
-                      {' '}
-                      / {t('allocations.unrecognized')}
+                    {m.name}{' '}
+                    <span className={`tag ${m.status === 'active' ? 'tag--teal' : 'tag--neutral'}`}>
+                      {t(`monthlyCost.status.${m.status}` as MessageKey)}
                     </span>
                   </span>
+                  <span className="row-actions">
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      onClick={() => togglePause(m)}
+                      aria-label={`${m.status === 'active' ? t('monthlyCost.pause') : t('monthlyCost.resume')}: ${m.name}`}
+                    >
+                      <Icon name={m.status === 'active' ? 'archive' : 'restore'} size={18} />
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      onClick={() => setPendingDelete(m)}
+                      aria-label={`${t('common.delete')}: ${m.name}`}
+                    >
+                      <Icon name="trash" size={18} />
+                    </button>
+                  </span>
                 </div>
                 <div className="kv">
-                  <span className="muted">{t('allocations.expenseCategory')}</span>
-                  <span>{name(a.expenseAccountId)}</span>
+                  <span className="muted">{t('monthlyCost.kindLabel')}</span>
+                  <span>{kindLabel(m.kind)}</span>
                 </div>
                 <div className="kv">
-                  <span className="muted">{t('allocations.payment')}</span>
-                  <span>{name(a.paymentAccountId)}</span>
+                  <span className="muted">{t('monthlyCost.amount')}</span>
+                  <span>
+                    <Money amount={m.amount} currency={currency} />
+                  </span>
+                </div>
+                <div className="kv">
+                  <span className="muted">{t('monthlyCost.monthly')}</span>
+                  <span>
+                    <Money amount={representativeMonthlyAmount(m)} currency={currency} />
+                  </span>
+                </div>
+                <div className="kv">
+                  <span className="muted">{t('monthlyCost.costMonths')}</span>
+                  <span>{t('monthlyCost.monthsUnit', { count: m.costMonths })}</span>
+                </div>
+                {m.repeatEveryMonths !== undefined ? (
+                  <div className="kv">
+                    <span className="muted">{t('monthlyCost.repeat')}</span>
+                    <span>{t('monthlyCost.repeatUnit', { count: m.repeatEveryMonths })}</span>
+                  </div>
+                ) : null}
+                <div className="kv">
+                  <span className="muted">{t('monthlyCost.thisMonth')}</span>
+                  <span>
+                    <Money amount={thisMonth} currency={currency} />
+                  </span>
+                </div>
+                <div className="kv">
+                  <span className="muted">{t('monthlyCost.expenseCategory')}</span>
+                  <span>{name(m.expenseAccountId)}</span>
+                </div>
+                <div className="kv">
+                  <span className="muted">{t('monthlyCost.payment')}</span>
+                  <span>{name(m.paymentAccountId)}</span>
                 </div>
               </div>
             );
           })}
         </div>
       )}
+
+      {pendingDelete ? (
+        <ConfirmDialog
+          title={t('monthlyCost.deleteConfirmTitle')}
+          body={t('monthlyCost.deleteConfirmBody', { name: pendingDelete.name })}
+          confirmLabel={t('common.delete')}
+          danger
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={async () => {
+            const m = pendingDelete;
+            setPendingDelete(null);
+            await removeMonthlyCost(m.id).catch(() => undefined);
+          }}
+        />
+      ) : null}
     </section>
   );
 }

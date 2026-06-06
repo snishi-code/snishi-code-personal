@@ -11,6 +11,7 @@
  */
 import { SCHEMA_VERSION } from './constants';
 import { inferRole } from './accountRoles';
+import { monthlyCostItemsFromAllocations } from './monthlyCostMigration';
 import type { Account, LedgerExportPackage } from './types';
 
 export interface MigrationResult {
@@ -76,6 +77,19 @@ const STEPS: Step[] = [
         return { ...acc, role: inferRole(acc as Account, { deferredIds, reserveIds }) } as Account;
       });
       return { ...pkg, accounts };
+    },
+  },
+  {
+    // v6 → v7: 月額化コストを追加。既存按分(allocations)から移行生成する。
+    // 既存 allocations と生成済み仕訳は消さない（履歴保持）。
+    from: 6,
+    to: 7,
+    migrate: (pkg) => {
+      const existing = Array.isArray(pkg.monthlyCostItems) ? pkg.monthlyCostItems : [];
+      // 再 migrate の冪等性: 既にあればそのまま、無ければ allocations から作る。
+      const monthlyCostItems =
+        existing.length > 0 ? existing : monthlyCostItemsFromAllocations(pkg.allocations ?? []);
+      return { ...pkg, monthlyCostItems };
     },
   },
 ];

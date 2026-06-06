@@ -147,6 +147,24 @@ export const reserveItemSchema = z.object({
   updatedAt: isoDateTime,
 });
 
+export const monthlyCostItemSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(120),
+  kind: z.enum(['subscription', 'prepaid-service', 'durable-asset', 'recurring-event']),
+  amount: amountSchema,
+  costMonths: z.number().int().min(1),
+  repeatEveryMonths: z.number().int().min(1).optional(),
+  startMonth: monthSchema,
+  endMonth: monthSchema.optional(),
+  expenseAccountId: z.string().min(1),
+  paymentAccountId: z.string().min(1).optional(),
+  repaymentAccountId: z.string().min(1).optional(),
+  sourceAllocationId: z.string().min(1).optional(),
+  status: z.enum(['active', 'paused', 'ended']),
+  createdAt: isoDateTime,
+  updatedAt: isoDateTime,
+});
+
 export const journalEntrySchema = z
   .object({
     id: z.string().min(1),
@@ -209,6 +227,7 @@ export const ledgerExportPackageSchema = z
     cashflowSchedules: z.array(cashflowScheduleSchema),
     reserves: z.array(reserveItemSchema),
     tags: z.array(tagSchema),
+    monthlyCostItems: z.array(monthlyCostItemSchema),
     settings: settingsSchema,
   })
   .superRefine((pkg, ctx) => {
@@ -489,6 +508,61 @@ export const ledgerExportPackageSchema = z
           `目的別資金「${r.name}」の科目は目的別資金(reserve-asset)である必要があります`,
           at('reserveAccountId'),
         );
+    });
+
+    // 月額化コスト(monthlyCostItems)の参照整合性。
+    const monthlyCostIds = new Set<string>();
+    pkg.monthlyCostItems.forEach((mc, mi) => {
+      const at = (...p: (string | number)[]) => ['monthlyCostItems', mi, ...p];
+      if (monthlyCostIds.has(mc.id))
+        issue(`月額化コストの ID が重複しています(${mc.id})`, at('id'));
+      monthlyCostIds.add(mc.id);
+
+      // 費用カテゴリ: 存在 + role expense-category。
+      if (!accountType.has(mc.expenseAccountId))
+        issue(`月額化「${mc.name}」の expenseAccountId が存在しません`, at('expenseAccountId'));
+      else if (accountRole.get(mc.expenseAccountId) !== 'expense-category')
+        issue(
+          `月額化「${mc.name}」の expenseAccountId は支出カテゴリである必要があります`,
+          at('expenseAccountId'),
+        );
+
+      // 支払い元: 任意。あれば daily-asset または payment-liability。
+      if (mc.paymentAccountId !== undefined) {
+        const payRole = accountRole.get(mc.paymentAccountId);
+        if (!accountType.has(mc.paymentAccountId))
+          issue(`月額化「${mc.name}」の paymentAccountId が存在しません`, at('paymentAccountId'));
+        else if (payRole !== 'daily-asset' && payRole !== 'payment-liability')
+          issue(
+            `月額化「${mc.name}」の paymentAccountId は日常資産または支払用負債である必要があります`,
+            at('paymentAccountId'),
+          );
+      }
+
+      // 返済口座: 任意。あれば daily-asset。
+      if (mc.repaymentAccountId !== undefined) {
+        if (!accountType.has(mc.repaymentAccountId))
+          issue(
+            `月額化「${mc.name}」の repaymentAccountId が存在しません`,
+            at('repaymentAccountId'),
+          );
+        else if (accountRole.get(mc.repaymentAccountId) !== 'daily-asset')
+          issue(
+            `月額化「${mc.name}」の repaymentAccountId は日常資産である必要があります`,
+            at('repaymentAccountId'),
+          );
+      }
+
+      // 周期は costMonths 以上（束が重ならない）。
+      if (mc.repeatEveryMonths !== undefined && mc.repeatEveryMonths < mc.costMonths)
+        issue(
+          `月額化「${mc.name}」の repeatEveryMonths は costMonths 以上である必要があります`,
+          at('repeatEveryMonths'),
+        );
+
+      // 既存按分との紐づけがあれば、その allocation が存在する。
+      if (mc.sourceAllocationId !== undefined && !allocationIds.has(mc.sourceAllocationId))
+        issue(`月額化「${mc.name}」の sourceAllocationId が存在しません`, at('sourceAllocationId'));
     });
 
     // タグ(tags): id 一意 + active な同名重複なし + scope マップ。

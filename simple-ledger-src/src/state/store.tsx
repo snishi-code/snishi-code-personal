@@ -9,6 +9,7 @@ import type {
   AdjustmentKind,
   CashflowSchedule,
   Ledger,
+  MonthlyCostItem,
   Settings,
   Snapshot,
   Tag,
@@ -16,6 +17,7 @@ import type {
 import { buildSimpleEntry, type SimpleEntryInput } from '../domain/entry';
 import type { AllocationInput } from '../domain/allocation';
 import * as repo from '../data/repository';
+import type { MonthlyCostInput } from '../data/repository';
 import {
   exportFileName,
   exportToJsonText,
@@ -37,6 +39,9 @@ interface LedgerContextValue {
   ) => Promise<void>;
   removeEntry: (id: string, description: string) => Promise<void>;
   createAllocation: (input: Omit<AllocationInput, 'deferredAccountId'>) => Promise<void>;
+  createMonthlyCost: (input: MonthlyCostInput) => Promise<void>;
+  saveMonthlyCost: (item: MonthlyCostItem) => Promise<void>;
+  removeMonthlyCost: (id: string) => Promise<void>;
   saveSchedules: (schedules: CashflowSchedule[]) => Promise<void>;
   postSchedule: (id: string) => Promise<void>;
   removeSchedule: (id: string) => Promise<void>;
@@ -137,6 +142,48 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await repo.createAllocation(input);
         await refresh();
         toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const createMonthlyCost = useCallback<LedgerContextValue['createMonthlyCost']>(
+    async (input) => {
+      try {
+        await repo.createMonthlyCost(input);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const saveMonthlyCost = useCallback<LedgerContextValue['saveMonthlyCost']>(
+    async (item) => {
+      try {
+        await repo.upsertMonthlyCost(item);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const removeMonthlyCost = useCallback<LedgerContextValue['removeMonthlyCost']>(
+    async (id) => {
+      try {
+        await repo.deleteMonthlyCost(id);
+        await refresh();
+        toast.show(t('toast.deleted'), 'success');
       } catch (e) {
         toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
         throw e;
@@ -381,6 +428,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveEntry,
       removeEntry,
       createAllocation,
+      createMonthlyCost,
+      saveMonthlyCost,
+      removeMonthlyCost,
       saveSchedules,
       postSchedule,
       removeSchedule,
@@ -407,6 +457,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveEntry,
       removeEntry,
       createAllocation,
+      createMonthlyCost,
+      saveMonthlyCost,
+      removeMonthlyCost,
       saveSchedules,
       postSchedule,
       removeSchedule,

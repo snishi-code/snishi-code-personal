@@ -28,7 +28,10 @@
 | `journal.entry.reverse` | Journal 行の取消/返金 | 逆仕訳の起動 |
 | `journal.entry.detailToggle` | 詳細（メモ・タグ）開閉 | 日常入力の詳細を折りたたみ表示 |
 | `journal.entry.manualSwitch` | 詳細入力（借方/貸方）へ切替 | manual モードへ切替 |
-| `journal.entry.allocateToggle` | 按分するトグル | 按分支出に切替（支出のみ） |
+| `journal.entry.allocateToggle` | 月額化するトグル | 月額化コストに切替（支出のみ） |
+| `journal.entry.monthlyizeKind` | 月額化の種類 | サブスク/年払い/耐久財/定期イベント |
+| `journal.entry.monthlyizeContinue` | 継続・更新トグル | 周期更新の有無 |
+| `journal.entry.monthlyizeRepayAccount` / `...RepayCount` | 負債払いの返済口座/回数 | 返済 CF の生成 |
 | `journal.entry.allocateMonths` | 按分月数 | 按分月数入力 |
 | `journal.entry.date` | Entry 日付 | 日付入力 |
 | `journal.entry.description` | Entry 摘要 | 摘要入力 |
@@ -41,9 +44,9 @@
 | `statements.balanceSheet` | BS コンテナ | 貸借対照表 |
 | `statements.tab.pl` / `statements.tab.bs` | セグメント | PL/BS 切替 |
 | `statements.row` | 科目行 | Journal へドリルダウン |
-| `allocations.view` | Allocations ルート | 按分台帳の検出 |
-| `allocations.list` | 按分台帳の一覧 | 按分項目一覧 |
-| `allocations.showCompleted` | 完了表示トグル | 完了分の表示切替 |
+| `allocations.view` | 月額化コスト ルート | 画面の検出（screen 名は歴史的に allocations） |
+| `allocations.list` | 月額化コストの一覧 | 月額化コスト項目一覧 |
+| `allocations.showCompleted` | 停止/終了表示トグル | 非 active の表示切替 |
 | `accounts.view` | Accounts ルート | 勘定科目の検出 |
 | `accounts.create` | 科目追加ボタン | 追加起動 |
 | `accounts.save` | 科目シート保存 | 保存 |

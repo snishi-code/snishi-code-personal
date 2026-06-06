@@ -63,33 +63,33 @@ test('取消/返金で逆仕訳が作られ、元仕訳は残る', async ({ page
   await expect(page.getByText('取消: ランチ代')).toBeVisible();
 });
 
-test('按分支出を作成すると按分台帳と生活コストに反映される', async ({ page }) => {
+test('月額化コストを作成すると一覧と生活コストに反映される', async ({ page }) => {
   await page.goto('./');
   await page.locator(ui('dashboard.entry.expense')).click();
   await page.locator(ui('journal.entry.description')).fill('ノートPC');
   await pick(page, 'journal.entry.debitAccount', '食費');
   await pick(page, 'journal.entry.creditAccount', '現金');
   await page.locator(ui('journal.entry.amount')).fill('240000');
-  await page.locator(ui('journal.entry.allocateToggle')).check();
+  await page.locator(ui('journal.entry.allocateToggle')).check(); // 「月額化する」
   await page.locator(ui('journal.entry.allocateMonths')).fill('48');
   await page.locator(ui('journal.entry.save')).click();
 
-  // 按分台帳に出る（月額目安 5,000）
+  // 月額化コスト一覧に出る（月額目安 5,000）
   await page.locator(ui('nav.menu.button')).click();
   await page.locator(ui('nav.allocations')).click();
   await expect(page.locator(ui('allocations.view'))).toBeVisible();
   await expect(page.locator(ui('allocations.list'))).toContainText('ノートPC');
   await expect(page.locator(ui('allocations.list'))).toContainText('5,000');
 
-  // ダッシュボードの生活コストに月額按分額が反映（240,000 そのものは費用にしない）
+  // ホームの生活コストに月額化額が反映（240,000 そのものは費用にしない）
   await page.locator(ui('nav.home')).click();
   await expect(page.locator(ui('dashboard.view'))).toContainText('5,000');
 });
 
-test('Journal は既定で未来の按分仕訳を隠し、トグルで表示する', async ({ page }) => {
+test('月額化コストは仕訳を作らない（登録簿）', async ({ page }) => {
   await page.goto('./');
   await page.locator(ui('dashboard.entry.expense')).click();
-  await page.locator(ui('journal.entry.description')).fill('スマホ分割');
+  await page.locator(ui('journal.entry.description')).fill('スマホ年払い');
   await pick(page, 'journal.entry.debitAccount', '食費');
   await pick(page, 'journal.entry.creditAccount', '現金');
   await page.locator(ui('journal.entry.amount')).fill('120000');
@@ -97,14 +97,9 @@ test('Journal は既定で未来の按分仕訳を隠し、トグルで表示す
   await page.locator(ui('journal.entry.allocateMonths')).fill('12');
   await page.locator(ui('journal.entry.save')).click();
 
+  // 仕訳一覧には何も増えない（月額化は仕訳を生成しない）。
   await openJournal(page);
-  // 既定（今日まで）: 原始仕訳 + 当月認識 のみ。未来 11 か月の認識は隠れる。
-  const defaultCount = await page.locator(`${ui('journal.entry.list')} > li`).count();
-  expect(defaultCount).toBeLessThanOrEqual(3);
-
-  // 「将来予定も表示」で全件（原始 1 + 認識 12 = 13）になる。
-  await page.locator(ui('journal.filter.showFuture')).check();
-  await expect(page.locator(`${ui('journal.entry.list')} > li`)).toHaveCount(13);
+  await expect(page.locator(`${ui('journal.entry.list')} > li`)).toHaveCount(0);
 });
 
 test('資金繰り: 予定と目的別資金を作成できる', async ({ page }) => {

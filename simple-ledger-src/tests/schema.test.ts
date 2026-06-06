@@ -94,6 +94,7 @@ describe('ledgerExportPackageSchema', () => {
     cashflowSchedules: [],
     reserves: [],
     tags: [],
+    monthlyCostItems: [],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
   };
 
@@ -195,6 +196,7 @@ describe('entry metadata / allocationPlan', () => {
       cashflowSchedules: [],
       reserves: [],
       tags: [],
+      monthlyCostItems: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
     const parsed = ledgerExportPackageSchema.safeParse(pkg);
@@ -264,6 +266,7 @@ describe('allocationPlan の参照整合性（package 検証）', () => {
       cashflowSchedules: [],
       reserves: [],
       tags: [],
+      monthlyCostItems: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
   }
@@ -353,6 +356,7 @@ describe('按分(allocations) の深い整合性検証（package）', () => {
       cashflowSchedules: [],
       reserves: [],
       tags: [],
+      monthlyCostItems: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
       ...overrides,
     };
@@ -526,6 +530,7 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
         },
       ],
       tags: [],
+      monthlyCostItems: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
       ...over,
     };
@@ -663,6 +668,7 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
           updatedAt: 'x',
         },
       ],
+      monthlyCostItems: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
       ...over,
     };
@@ -727,6 +733,79 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
       ],
       journalEntries: [],
     });
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+});
+
+describe('月額化コスト(monthlyCostItems) の参照・role 検証（package）', () => {
+  const cash = {
+    id: 'cash',
+    name: '現金',
+    type: 'asset',
+    role: 'daily-asset',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  const food = {
+    id: 'food',
+    name: '食費',
+    type: 'expense',
+    role: 'expense-category',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  function mcPkg(items: Record<string, unknown>[]) {
+    return {
+      appId: APP_ID,
+      schemaVersion: SCHEMA_VERSION,
+      ledgerId: 'ledger',
+      exportedAt: '2026-06-01T00:00:00.000Z',
+      deviceId: 'd',
+      baseRevision: 0,
+      currentRevision: 0,
+      accounts: [cash, food],
+      journalEntries: [],
+      allocations: [],
+      cashflowSchedules: [],
+      reserves: [],
+      tags: [],
+      monthlyCostItems: items,
+      settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
+    };
+  }
+  const base = {
+    id: 'm1',
+    name: 'Netflix',
+    kind: 'subscription',
+    amount: 1500,
+    costMonths: 1,
+    startMonth: '2026-06',
+    expenseAccountId: 'food',
+    paymentAccountId: 'cash',
+    status: 'active',
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+
+  it('正しい月額化コストは valid', () => {
+    expect(ledgerExportPackageSchema.safeParse(mcPkg([base])).success).toBe(true);
+  });
+  it('expenseAccountId が支出カテゴリでないと invalid', () => {
+    const bad = mcPkg([{ ...base, expenseAccountId: 'cash' }]);
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+  it('paymentAccountId が日常資産/支払用負債でないと invalid', () => {
+    const bad = mcPkg([{ ...base, paymentAccountId: 'food' }]);
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+  it('存在しない sourceAllocationId は invalid', () => {
+    const bad = mcPkg([{ ...base, sourceAllocationId: 'nope' }]);
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+  it('repeatEveryMonths < costMonths は invalid', () => {
+    const bad = mcPkg([{ ...base, costMonths: 12, repeatEveryMonths: 6 }]);
     expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
   });
 });

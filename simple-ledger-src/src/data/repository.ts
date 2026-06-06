@@ -20,12 +20,15 @@ import type {
   JournalEntry,
   Ledger,
   LedgerMeta,
+  MonthlyCostItem,
+  MonthlyCostKind,
   ReserveItem,
   Settings,
   Snapshot,
   Tag,
 } from '../domain/types';
-import { buildAllocation, type AllocationInput } from '../domain/allocation';
+import { monthlyCostItemsFromAllocations } from '../domain/monthlyCostMigration';
+import { buildAllocation, monthlyAmounts, type AllocationInput } from '../domain/allocation';
 import { buildScheduleEntry } from '../domain/cashflow';
 import { buildAdjustmentEntry, counterpartName, counterpartRole } from '../domain/adjustment';
 import { accountBalance, filterByDateRange } from '../domain/accounting';
@@ -64,10 +67,11 @@ export async function ensureInitialized(): Promise<void> {
     // 既存DBの meta.schemaVersion を現行へ前進させる（恒等移行 + role 補完）。
     // 編集追跡(revision)は変えない＝import の競合判定に影響させない。
     if (meta.schemaVersion < SCHEMA_VERSION) {
-      const [accounts, allocations, reserves] = await Promise.all([
+      const [accounts, allocations, reserves, monthlyCostItems] = await Promise.all([
         getAll<Account>(STORE.accounts),
         getAll<AllocationItem>(STORE.allocations),
         getAll<ReserveItem>(STORE.reserves),
+        getAll<MonthlyCostItem>(STORE.monthlyCostItems),
       ]);
       // v5→v6: role の無い既存科目を type・参照集合から推定して補う。
       const deferredIds = new Set(allocations.map((a) => a.deferredAccountId));
@@ -75,13 +79,18 @@ export async function ensureInitialized(): Promise<void> {
       const patched = accounts.filter(
         (a) => typeof (a as Account & { role?: unknown }).role !== 'string',
       );
+      // v6→v7: 月額化コストが空なら既存按分から移行生成する。
+      const newMonthlyCosts =
+        monthlyCostItems.length === 0 ? monthlyCostItemsFromAllocations(allocations) : [];
       const bumped: LedgerMeta = { ...meta, schemaVersion: SCHEMA_VERSION };
-      await runWrite([STORE.kv, STORE.accounts], (t) => {
+      await runWrite([STORE.kv, STORE.accounts, STORE.monthlyCostItems], (t) => {
         t.objectStore(STORE.kv).put(bumped, KV_META);
         const store = t.objectStore(STORE.accounts);
         for (const a of patched) {
           store.put({ ...a, role: inferRole(a, { deferredIds, reserveIds }) });
         }
+        const mcStore = t.objectStore(STORE.monthlyCostItems);
+        for (const mc of newMonthlyCosts) mcStore.put(mc);
       });
     }
     return;
@@ -99,17 +108,27 @@ export async function ensureInitialized(): Promise<void> {
 
 export async function loadLedger(): Promise<Ledger> {
   await ensureInitialized();
-  const [meta, settings, accounts, journalEntries, allocations, cashflowSchedules, reserves, tags] =
-    await Promise.all([
-      getMeta(),
-      getSettings(),
-      getAll<Account>(STORE.accounts),
-      getAll<JournalEntry>(STORE.journalEntries),
-      getAll<AllocationItem>(STORE.allocations),
-      getAll<CashflowSchedule>(STORE.cashflowSchedules),
-      getAll<ReserveItem>(STORE.reserves),
-      getAll<Tag>(STORE.tags),
-    ]);
+  const [
+    meta,
+    settings,
+    accounts,
+    journalEntries,
+    allocations,
+    cashflowSchedules,
+    reserves,
+    tags,
+    monthlyCostItems,
+  ] = await Promise.all([
+    getMeta(),
+    getSettings(),
+    getAll<Account>(STORE.accounts),
+    getAll<JournalEntry>(STORE.journalEntries),
+    getAll<AllocationItem>(STORE.allocations),
+    getAll<CashflowSchedule>(STORE.cashflowSchedules),
+    getAll<ReserveItem>(STORE.reserves),
+    getAll<Tag>(STORE.tags),
+    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
+  ]);
   if (!meta || !settings) throw new Error('台帳の初期化に失敗しました');
   // 一覧の安定した既定順: 仕訳は日付降順 → 作成降順。
   journalEntries.sort((a, b) =>
@@ -120,6 +139,7 @@ export async function loadLedger(): Promise<Ledger> {
   cashflowSchedules.sort((a, b) => cmp(a.dueDate, b.dueDate));
   reserves.sort((a, b) => cmp(a.createdAt, b.createdAt));
   tags.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+  monthlyCostItems.sort((a, b) => cmp(b.createdAt, a.createdAt));
   return {
     meta,
     settings,
@@ -129,6 +149,7 @@ export async function loadLedger(): Promise<Ledger> {
     cashflowSchedules,
     reserves,
     tags,
+    monthlyCostItems,
   };
 }
 
@@ -546,6 +567,142 @@ export async function createAdjustment(input: {
   return entry;
 }
 
+/* ── 月額化コスト ── */
+
+function daysInMonth(year: number, month1to12: number): number {
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  return [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month1to12 - 1] ?? 30;
+}
+
+/** ISO 日付に n か月加える（末日は月末へクランプ）。Date を使わず決定的に計算する。 */
+function addMonthsToDate(iso: string, n: number): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const total = (y ?? 0) * 12 + ((m ?? 1) - 1) + n;
+  const ny = Math.floor(total / 12);
+  const nm = (total % 12) + 1;
+  const day = Math.min(d ?? 1, daysInMonth(ny, nm));
+  return `${ny}-${String(nm).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+export interface MonthlyCostInput {
+  name: string;
+  kind: MonthlyCostKind;
+  amount: number;
+  costMonths: number;
+  repeatEveryMonths?: number;
+  startMonth: string;
+  expenseAccountId: string;
+  paymentAccountId?: string;
+  /** liability 払いのとき: 返済 CF を作る口座（daily-asset）。 */
+  repaymentAccountId?: string;
+  /** 返済回数（>=1）。 */
+  repaymentCount?: number;
+  /** 返済開始日 ISO。未指定なら作らない。 */
+  repaymentStartDate?: string;
+}
+
+/**
+ * 月額化コストを登録する（仕訳は作らない＝計画/可視化レイヤ）。
+ * liability 払いで返済情報があれば、返済予定の CashflowSchedule を回数分作る（CF と生活コストは別物）。
+ * 1 トランザクションで保存し revision を進める。
+ */
+export async function createMonthlyCost(input: MonthlyCostInput): Promise<MonthlyCostItem> {
+  if (input.name.trim() === '') throw new Error('名称を入力してください。');
+  if (!Number.isInteger(input.amount) || input.amount <= 0)
+    throw new Error('金額は 1 以上の整数で入力してください。');
+  if (!Number.isInteger(input.costMonths) || input.costMonths < 1)
+    throw new Error('月数は 1 以上で入力してください。');
+  if (
+    input.repeatEveryMonths !== undefined &&
+    (!Number.isInteger(input.repeatEveryMonths) || input.repeatEveryMonths < input.costMonths)
+  )
+    throw new Error('更新周期は月数以上である必要があります。');
+
+  const accounts = await getAll<Account>(STORE.accounts);
+  const byId = new Map(accounts.map((a) => [a.id, a]));
+  const expense = byId.get(input.expenseAccountId);
+  if (!expense || expense.role !== 'expense-category')
+    throw new Error('費用カテゴリ（支出カテゴリの科目）を選んでください。');
+
+  let payment: Account | undefined;
+  if (input.paymentAccountId !== undefined) {
+    payment = byId.get(input.paymentAccountId);
+    if (!payment || (payment.role !== 'daily-asset' && payment.role !== 'payment-liability'))
+      throw new Error('支払い元は日常資産または支払用負債を選んでください。');
+  }
+
+  const ts = nowIso();
+  const item: MonthlyCostItem = {
+    id: newId(),
+    name: input.name.trim(),
+    kind: input.kind,
+    amount: input.amount,
+    costMonths: input.costMonths,
+    ...(input.repeatEveryMonths !== undefined
+      ? { repeatEveryMonths: input.repeatEveryMonths }
+      : {}),
+    startMonth: input.startMonth,
+    expenseAccountId: input.expenseAccountId,
+    ...(input.paymentAccountId !== undefined ? { paymentAccountId: input.paymentAccountId } : {}),
+    ...(input.repaymentAccountId !== undefined
+      ? { repaymentAccountId: input.repaymentAccountId }
+      : {}),
+    status: 'active',
+    createdAt: ts,
+    updatedAt: ts,
+  };
+
+  // liability 払い + 返済情報があれば返済 CF を作る。
+  const schedules: CashflowSchedule[] = [];
+  if (
+    payment?.role === 'payment-liability' &&
+    input.repaymentAccountId !== undefined &&
+    input.repaymentCount !== undefined &&
+    input.repaymentCount >= 1 &&
+    input.repaymentStartDate
+  ) {
+    const repay = byId.get(input.repaymentAccountId);
+    if (!repay || repay.role !== 'daily-asset')
+      throw new Error('返済口座は日常資産を選んでください。');
+    const parts = monthlyAmounts(input.amount, input.repaymentCount);
+    for (let i = 0; i < input.repaymentCount; i++) {
+      schedules.push({
+        id: newId(),
+        title: `${item.name} 返済 ${i + 1}/${input.repaymentCount}`,
+        dueDate: addMonthsToDate(input.repaymentStartDate, i),
+        amount: parts[i] ?? 0,
+        direction: 'outflow',
+        accountId: input.repaymentAccountId,
+        counterAccountId: input.paymentAccountId,
+        source: 'installment',
+        status: 'planned',
+        createdAt: ts,
+        updatedAt: ts,
+      });
+    }
+  }
+
+  await writeWithRevision([STORE.monthlyCostItems, STORE.cashflowSchedules], (t) => {
+    t.objectStore(STORE.monthlyCostItems).put(item);
+    const sStore = t.objectStore(STORE.cashflowSchedules);
+    for (const s of schedules) sStore.put(s);
+  });
+  return item;
+}
+
+/** 月額化コストの更新（編集・一時停止・終了）。 */
+export async function upsertMonthlyCost(item: MonthlyCostItem): Promise<void> {
+  await writeWithRevision([STORE.monthlyCostItems], (t) => {
+    t.objectStore(STORE.monthlyCostItems).put(item);
+  });
+}
+
+export async function deleteMonthlyCost(id: string): Promise<void> {
+  await writeWithRevision([STORE.monthlyCostItems], (t) => {
+    t.objectStore(STORE.monthlyCostItems).delete(id);
+  });
+}
+
 /* ── 一括置換（import / restore で使う原子的操作） ── */
 
 export interface ReplacePayload {
@@ -557,6 +714,7 @@ export interface ReplacePayload {
   cashflowSchedules: CashflowSchedule[];
   reserves: ReserveItem[];
   tags: Tag[];
+  monthlyCostItems: MonthlyCostItem[];
 }
 
 /**
@@ -573,6 +731,7 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       STORE.cashflowSchedules,
       STORE.reserves,
       STORE.tags,
+      STORE.monthlyCostItems,
     ],
     (t) => {
       const accounts = t.objectStore(STORE.accounts);
@@ -581,18 +740,21 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       const schedules = t.objectStore(STORE.cashflowSchedules);
       const reserves = t.objectStore(STORE.reserves);
       const tags = t.objectStore(STORE.tags);
+      const monthlyCosts = t.objectStore(STORE.monthlyCostItems);
       accounts.clear();
       entries.clear();
       allocations.clear();
       schedules.clear();
       reserves.clear();
       tags.clear();
+      monthlyCosts.clear();
       for (const a of payload.accounts) accounts.put(a);
       for (const e of payload.journalEntries) entries.put(e);
       for (const al of payload.allocations) allocations.put(al);
       for (const s of payload.cashflowSchedules) schedules.put(s);
       for (const r of payload.reserves) reserves.put(r);
       for (const tag of payload.tags) tags.put(tag);
+      for (const mc of payload.monthlyCostItems) monthlyCosts.put(mc);
       t.objectStore(STORE.kv).put(payload.meta, KV_META);
       t.objectStore(STORE.kv).put(payload.settings, KV_SETTINGS);
     },

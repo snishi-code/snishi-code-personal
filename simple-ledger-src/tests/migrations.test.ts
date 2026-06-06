@@ -18,6 +18,7 @@ function pkg(version: number): LedgerExportPackage {
     cashflowSchedules: [],
     reserves: [],
     tags: [],
+    monthlyCostItems: [],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
   };
 }
@@ -93,5 +94,37 @@ describe('migrateToCurrent', () => {
     expect(byId.def).toBe('deferred-asset');
     expect(byId.card).toBe('payment-liability');
     expect(byId.food).toBe('expense-category');
+  });
+  it('v6 → v7 で既存按分から月額化コストを生成する', () => {
+    const v6 = pkg(6) as unknown as Record<string, unknown>;
+    v6.allocations = [
+      {
+        id: 'al1',
+        name: 'ノートPC',
+        totalAmount: 240000,
+        months: 48,
+        startMonth: '2026-01',
+        expenseAccountId: 'exp',
+        paymentAccountId: 'pay',
+        deferredAccountId: 'def',
+        sourceEntryId: 'se',
+        recognitionEntryIds: [],
+        status: 'active',
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+    ];
+    const r = migrateToCurrent(v6 as unknown as LedgerExportPackage);
+    expect(r.ok).toBe(true);
+    const mcs = r.data?.monthlyCostItems ?? [];
+    expect(mcs).toHaveLength(1);
+    expect(mcs[0]).toMatchObject({
+      name: 'ノートPC',
+      amount: 240000,
+      costMonths: 48,
+      startMonth: '2026-01',
+      sourceAllocationId: 'al1',
+      status: 'active',
+    });
   });
 });

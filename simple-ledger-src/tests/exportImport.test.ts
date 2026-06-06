@@ -3,7 +3,13 @@
  * fail-closed・スナップショット・revision 競合の不変条件を検証する。
  */
 import { describe, expect, it } from 'vitest';
-import { createAllocation, loadLedger, upsertEntry, listSnapshots } from '../src/data/repository';
+import {
+  createAllocation,
+  createMonthlyCost,
+  loadLedger,
+  upsertEntry,
+  listSnapshots,
+} from '../src/data/repository';
 import {
   buildExportPackage,
   exportToJsonText,
@@ -123,6 +129,32 @@ describe('revision 競合', () => {
     const after = await loadLedger();
     expect(after.journalEntries.some((e) => e.description === '給料')).toBe(false);
     expect(after.journalEntries.some((e) => e.description === 'ランチ')).toBe(true);
+  });
+});
+
+describe('月額化コストの export/import', () => {
+  it('月額化コストを含む台帳を round-trip できる', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    await createMonthlyCost({
+      name: 'Netflix',
+      kind: 'subscription',
+      amount: 1500,
+      costMonths: 1,
+      repeatEveryMonths: 1,
+      startMonth: '2026-06',
+      expenseAccountId: food.id,
+      paymentAccountId: cash.id,
+    });
+    const seeded = await loadLedger();
+    expect(seeded.monthlyCostItems).toHaveLength(1);
+    const text = exportToJsonText(seeded);
+    const outcome = await importFromJsonText(text);
+    expect(outcome.kind).toBe('ok');
+    const reloaded = await loadLedger();
+    expect(reloaded.monthlyCostItems).toHaveLength(1);
+    expect(reloaded.monthlyCostItems[0]).toMatchObject({ name: 'Netflix', amount: 1500 });
   });
 });
 
