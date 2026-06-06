@@ -71,18 +71,47 @@ export const settingsSchema = z.object({
  * エクスポートパッケージ。import の入口検証。
  * appId / schemaVersion は厳格に確認する（未対応版は取り込まない=fail-closed）。
  */
-export const ledgerExportPackageSchema = z.object({
-  appId: z.literal(APP_ID),
-  schemaVersion: z.number().int().positive(),
-  ledgerId: z.string().min(1),
-  exportedAt: isoDateTime,
-  deviceId: z.string().min(1),
-  baseRevision: z.number().int().nonnegative(),
-  currentRevision: z.number().int().nonnegative(),
-  accounts: z.array(accountSchema),
-  journalEntries: z.array(journalEntrySchema),
-  settings: settingsSchema,
-});
+export const ledgerExportPackageSchema = z
+  .object({
+    appId: z.literal(APP_ID),
+    schemaVersion: z.number().int().positive(),
+    ledgerId: z.string().min(1),
+    exportedAt: isoDateTime,
+    deviceId: z.string().min(1),
+    baseRevision: z.number().int().nonnegative(),
+    currentRevision: z.number().int().nonnegative(),
+    accounts: z.array(accountSchema),
+    journalEntries: z.array(journalEntrySchema),
+    settings: settingsSchema,
+  })
+  .superRefine((pkg, ctx) => {
+    // 勘定科目 ID は一意であること。
+    const seen = new Set<string>();
+    pkg.accounts.forEach((a, i) => {
+      if (seen.has(a.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `勘定科目 ID が重複しています(${a.id})`,
+          path: ['accounts', i, 'id'],
+        });
+      }
+      seen.add(a.id);
+    });
+
+    // 参照整合性: すべての仕訳明細の accountId が accounts に存在すること。
+    // これを通さないと、存在しない科目を参照する仕訳が PL/BS から消えてしまう。
+    pkg.journalEntries.forEach((e, ei) => {
+      e.lines.forEach((l, li) => {
+        if (!seen.has(l.accountId)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `仕訳「${e.description}」が存在しない勘定科目(${l.accountId})を参照しています`,
+            path: ['journalEntries', ei, 'lines', li, 'accountId'],
+          });
+        }
+      });
+    });
+  });
 
 export type LedgerExportPackageInput = z.infer<typeof ledgerExportPackageSchema>;
 

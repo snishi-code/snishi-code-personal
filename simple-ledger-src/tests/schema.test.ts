@@ -70,6 +70,7 @@ describe('ledgerExportPackageSchema', () => {
     currentRevision: 0,
     accounts: [
       { id: 'a', name: '現金', type: 'asset', archived: false, createdAt: 'x', updatedAt: 'x' },
+      { id: 'b', name: '食費', type: 'expense', archived: false, createdAt: 'x', updatedAt: 'x' },
     ],
     journalEntries: [validEntry],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
@@ -82,6 +83,21 @@ describe('ledgerExportPackageSchema', () => {
     expect(ledgerExportPackageSchema.safeParse({ ...validPkg, appId: 'other' }).success).toBe(
       false,
     );
+  });
+  it('存在しない勘定科目を参照する仕訳は拒否する（参照整合性）', () => {
+    // account 'b' を取り除くと、validEntry の貸方 'b' が宙吊りになる
+    const dangling = {
+      ...validPkg,
+      accounts: [validPkg.accounts[0]],
+    };
+    expect(ledgerExportPackageSchema.safeParse(dangling).success).toBe(false);
+  });
+  it('勘定科目 ID の重複は拒否する', () => {
+    const dup = {
+      ...validPkg,
+      accounts: [...validPkg.accounts, validPkg.accounts[0]],
+    };
+    expect(ledgerExportPackageSchema.safeParse(dup).success).toBe(false);
   });
 });
 

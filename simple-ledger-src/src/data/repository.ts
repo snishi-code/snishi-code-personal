@@ -6,7 +6,7 @@
  *  - 変更のたびに meta.revision を +1 する（端末ローカルの編集追跡）。
  *  - 削除/全消去/復元は fail-closed（呼び出し側で確認 UI を出す）。
  */
-import { STORE, clearStore, deleteRecord, getAll, getKv, putKv, putRecord, runWrite } from './db';
+import { STORE, deleteRecord, getAll, getKv, putKv, putRecord, runWrite } from './db';
 import { defaultAccounts, defaultSettings, newMeta } from './seed';
 import { newId } from '../domain/ids';
 import type {
@@ -150,15 +150,26 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
   });
 }
 
-/** 全データ削除（snapshots も含む）→ 既定データで作り直す。fail-closed の確認は UI 側。 */
+/**
+ * 全データ削除（snapshots も含む）→ 既定データで作り直す。fail-closed の確認は UI 側。
+ *
+ * 破壊操作なので「全 clear + 初期 seed」を **単一トランザクション** で行う。
+ * 途中失敗時はトランザクションが abort し、一部だけ消えた半壊状態にはならない。
+ */
 export async function resetAll(): Promise<void> {
-  await Promise.all([
-    clearStore(STORE.accounts),
-    clearStore(STORE.journalEntries),
-    clearStore(STORE.snapshots),
-    clearStore(STORE.kv),
-  ]);
-  await ensureInitialized();
+  const accounts = defaultAccounts();
+  const settings = defaultSettings();
+  const meta = newMeta();
+  await runWrite([STORE.kv, STORE.accounts, STORE.journalEntries, STORE.snapshots], (t) => {
+    t.objectStore(STORE.kv).clear();
+    t.objectStore(STORE.accounts).clear();
+    t.objectStore(STORE.journalEntries).clear();
+    t.objectStore(STORE.snapshots).clear();
+    t.objectStore(STORE.kv).put(meta, KV_META);
+    t.objectStore(STORE.kv).put(settings, KV_SETTINGS);
+    const store = t.objectStore(STORE.accounts);
+    for (const a of accounts) store.put(a);
+  });
 }
 
 /** 新規スナップショットの ID/時刻を採番する補助。 */

@@ -1,0 +1,82 @@
+name: simple-ledger CI
+
+# simple-ledger（家計簿アプリ）の品質ゲート。
+# typecheck / lint / format / test / build と、配信ビルドの最新性、E2E を検証する。
+on:
+  push:
+    paths:
+      - 'simple-ledger-src/**'
+      - 'simple-ledger/**'
+      - '.github/workflows/simple-ledger-ci.yml'
+  pull_request:
+    paths:
+      - 'simple-ledger-src/**'
+      - 'simple-ledger/**'
+      - '.github/workflows/simple-ledger-ci.yml'
+
+defaults:
+  run:
+    working-directory: simple-ledger-src
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: simple-ledger-src/package-lock.json
+      - run: npm ci
+      - name: typecheck
+        run: npm run typecheck
+      - name: lint
+        run: npm run lint
+      - name: format:check
+        run: npm run format:check
+      - name: test (Vitest)
+        run: npm test
+      - name: build（配信物 ../simple-ledger/ を生成）
+        run: npm run build
+      - name: 配信ビルドがソースと一致しているか（ビルド忘れ＝本番真っ白の検出）
+        working-directory: ${{ github.workspace }}
+        run: |
+          if ! git diff --quiet -- simple-ledger/; then
+            echo "::error::配信物 simple-ledger/ がソースと一致しません。'cd simple-ledger-src && npm run build' を実行して再コミットしてください。"
+            git --no-pager diff --stat -- simple-ledger/
+            exit 1
+          fi
+      - name: 配信 index.html が成果物を参照しているか（ソース配信の検出）
+        working-directory: ${{ github.workspace }}
+        run: |
+          if grep -q 'src/main.tsx' simple-ledger/index.html; then
+            echo "::error::simple-ledger/index.html がビルド前ソース(/src/main.tsx)を参照しています。"
+            exit 1
+          fi
+          grep -q 'simple-ledger/assets/' simple-ledger/index.html || {
+            echo "::error::simple-ledger/index.html がビルド済みアセットを参照していません。"
+            exit 1
+          }
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: simple-ledger-src/package-lock.json
+      - run: npm ci
+      - name: Playwright ブラウザ導入（chromium）
+        run: npx playwright install --with-deps chromium
+      - name: E2E（主要フロー / PL・BS / a11y axe / PWA / 外部送信ゼロ）
+        run: npm run test:e2e -- --project=chromium
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: simple-ledger-src/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore

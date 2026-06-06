@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   deleteAccount,
   deleteEntry,
+  listSnapshots,
   loadLedger,
+  makeSnapshotId,
   resetAll,
+  saveSnapshot,
   upsertEntry,
 } from '../src/data/repository';
 import { buildSimpleEntry } from '../src/domain/entry';
+import { buildExportPackage } from '../src/data/exportImport';
 
 describe('repository 初期化', () => {
   it('初回 loadLedger で既定科目を投入し、revision は 0', async () => {
@@ -73,9 +77,20 @@ describe('resetAll', () => {
         amount: 500,
       }),
     );
+    // スナップショットも作っておき、全ストアが一括で消えることを確認する
+    await saveSnapshot({
+      id: makeSnapshotId(),
+      createdAt: '2026-06-01T00:00:00.000Z',
+      reason: 'test',
+      data: buildExportPackage(ledger),
+    });
+    expect((await listSnapshots()).length).toBeGreaterThan(0);
+
     await resetAll();
     const after = await loadLedger();
     expect(after.journalEntries).toHaveLength(0);
     expect(after.accounts.length).toBeGreaterThan(0);
+    expect(after.meta.revision).toBe(0); // 新しい meta で作り直されている
+    expect(await listSnapshots()).toHaveLength(0); // snapshots も消える
   });
 });
