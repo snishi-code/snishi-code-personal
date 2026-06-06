@@ -4,7 +4,7 @@
 import { useMemo, useState } from 'react';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, deriveProfitAndLoss, monthRange } from '../../domain/accounting';
-import { currentYearMonth } from '../../util/time';
+import { currentYearMonth, todayLocal } from '../../util/time';
 import { Money } from '../money';
 import { Icon } from '../Icon';
 import { t } from '../../i18n';
@@ -52,6 +52,8 @@ export function Statements({ onDrillDown }: { onDrillDown: (filter: JournalFilte
   const { ledger } = useLedger();
   const [tab, setTab] = useState<Tab>('pl');
   const [period, setPeriod] = useState<Period>('month');
+  // BS の基準日。既定は今日（未来月の按分認識仕訳を現在残高に含めない）。
+  const [asOf, setAsOf] = useState<string>(todayLocal());
   const { year, month } = currentYearMonth();
   const currency = ledger?.settings.currency ?? 'JPY';
 
@@ -66,13 +68,14 @@ export function Statements({ onDrillDown }: { onDrillDown: (filter: JournalFilte
     [ledger, range],
   );
   const bs = useMemo(
-    () => deriveBalanceSheet(ledger?.accounts ?? [], ledger?.journalEntries ?? []),
-    [ledger],
+    () =>
+      deriveBalanceSheet(ledger?.accounts ?? [], ledger?.journalEntries ?? [], asOf || undefined),
+    [ledger, asOf],
   );
 
-  // PL は期間を、BS は全期間を引き継いで Journal へドリルダウンする。
+  // PL は期間を、BS は基準日(asOf)を引き継いで Journal へドリルダウンする。
   const drillPL = (accountId: string) => onDrillDown({ accountId, ...(range ?? {}) });
-  const drillBS = (accountId: string) => onDrillDown({ accountId });
+  const drillBS = (accountId: string) => onDrillDown({ accountId, ...(asOf ? { to: asOf } : {}) });
 
   return (
     <section aria-labelledby="statements-title" data-ui={UI.statements.view}>
@@ -164,6 +167,24 @@ export function Statements({ onDrillDown }: { onDrillDown: (filter: JournalFilte
         </div>
       ) : (
         <div data-ui={UI.statements.balanceSheet}>
+          <div className="toolbar">
+            <label className="sr-only" htmlFor="bs-asof">
+              {t('statements.asOf')}
+            </label>
+            <input
+              id="bs-asof"
+              className="input"
+              type="date"
+              value={asOf}
+              aria-label={t('statements.asOf')}
+              onChange={(e) => setAsOf(e.target.value)}
+              data-ui={UI.statements.asOf}
+            />
+          </div>
+          <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
+            {t('statements.asOfHint')}
+          </p>
+
           {!bs.balanced ? (
             <div className="banner" role="alert">
               <Icon name="alert" size={18} />

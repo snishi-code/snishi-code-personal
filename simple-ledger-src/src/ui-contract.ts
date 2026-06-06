@@ -28,6 +28,7 @@ export const UI = {
     list: 'journal.entry.list',
     search: 'journal.search',
     clearAccountFilter: 'journal.filter.clearAccount',
+    showFuture: 'journal.filter.showFuture',
     entry: {
       save: 'journal.entry.save',
       cancel: 'journal.entry.cancel',
@@ -50,6 +51,7 @@ export const UI = {
     balanceSheet: 'statements.balanceSheet',
     tabPl: 'statements.tab.pl',
     tabBs: 'statements.tab.bs',
+    asOf: 'statements.asOf',
     // 科目行（クリックで Journal へドリルダウン）
     row: 'statements.row',
   },

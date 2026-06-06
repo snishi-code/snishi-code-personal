@@ -118,3 +118,37 @@ describe('按分の導出（現在月から）', () => {
     expect(remainingMonths(item, '2026-05')).toBe(48);
   });
 });
+
+describe('BS は as-of 日付で未来の按分認識を含めない', () => {
+  const acc = (id: string, type: 'asset' | 'expense') => ({
+    id,
+    name: id,
+    type,
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  });
+  const built = buildAllocation({
+    date: '2026-06-15',
+    description: 'PC',
+    totalAmount: 120000,
+    months: 12,
+    expenseAccountId: 'exp',
+    paymentAccountId: 'pay',
+    deferredAccountId: 'def',
+  });
+  const accounts = [acc('exp', 'expense'), acc('pay', 'asset'), acc('def', 'asset')];
+  const entries = [built.sourceEntry, ...built.recognitionEntries];
+
+  it('当月末時点では按分中資産に未認識残高が残る', async () => {
+    const { deriveBalanceSheet } = await import('../src/domain/accounting');
+    const bs = deriveBalanceSheet(accounts, entries, '2026-06-30');
+    // 6月分(10000)のみ認識 → def = 120000 - 10000 = 110000
+    expect(bs.assets.find((a) => a.account.id === 'def')?.balance).toBe(110000);
+  });
+  it('全期間（asOf なし）では按分中資産は 0 に取り崩される', async () => {
+    const { deriveBalanceSheet } = await import('../src/domain/accounting');
+    const bs = deriveBalanceSheet(accounts, entries);
+    expect(bs.assets.find((a) => a.account.id === 'def')?.balance ?? 0).toBe(0);
+  });
+});

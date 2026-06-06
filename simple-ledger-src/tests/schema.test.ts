@@ -5,6 +5,7 @@ import {
   ledgerExportPackageSchema,
 } from '../src/domain/schema';
 import { APP_ID, SCHEMA_VERSION } from '../src/domain/constants';
+import { buildAllocation } from '../src/domain/allocation';
 
 const validEntry = {
   id: 'e1',
@@ -231,5 +232,109 @@ describe('allocationPlan の参照整合性（package 検証）', () => {
       ledgerExportPackageSchema.safeParse(pkgWithPlan({ ...base, generatedEntryIds: ['e1'] }))
         .success,
     ).toBe(true);
+  });
+});
+
+describe('按分(allocations) の深い整合性検証（package）', () => {
+  const built = buildAllocation({
+    date: '2026-06-15',
+    description: 'PC',
+    totalAmount: 1000,
+    months: 3,
+    expenseAccountId: 'exp',
+    paymentAccountId: 'pay',
+    deferredAccountId: 'def',
+  });
+  function allocPkg(overrides: Record<string, unknown> = {}) {
+    return {
+      appId: APP_ID,
+      schemaVersion: SCHEMA_VERSION,
+      ledgerId: 'ledger',
+      exportedAt: '2026-06-01T00:00:00.000Z',
+      deviceId: 'd',
+      baseRevision: 0,
+      currentRevision: 0,
+      accounts: [
+        {
+          id: 'exp',
+          name: '食費',
+          type: 'expense',
+          archived: false,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+        { id: 'pay', name: '現金', type: 'asset', archived: false, createdAt: 'x', updatedAt: 'x' },
+        {
+          id: 'def',
+          name: '按分中資産',
+          type: 'asset',
+          archived: false,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+      journalEntries: [built.sourceEntry, ...built.recognitionEntries],
+      allocations: [built.item],
+      settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
+      ...overrides,
+    };
+  }
+
+  it('buildAllocation 由来の正しいパッケージは valid', () => {
+    expect(ledgerExportPackageSchema.safeParse(allocPkg()).success).toBe(true);
+  });
+  it('認識仕訳数が月数と不一致なら invalid', () => {
+    const bad = allocPkg({ allocations: [{ ...built.item, months: 2 }] });
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+  it('deferred が資産科目でないと invalid', () => {
+    const bad = allocPkg({
+      accounts: [
+        {
+          id: 'exp',
+          name: '食費',
+          type: 'expense',
+          archived: false,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+        { id: 'pay', name: '現金', type: 'asset', archived: false, createdAt: 'x', updatedAt: 'x' },
+        {
+          id: 'def',
+          name: '誤区分',
+          type: 'expense',
+          archived: false,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+    });
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+  it('孤立した按分仕訳（どの台帳からも参照されない）は invalid', () => {
+    const ghost = {
+      ...built.recognitionEntries[0],
+      id: 'ghost',
+      metadata: { allocationId: 'zzz', allocationRole: 'recognition' },
+    };
+    const bad = allocPkg({
+      journalEntries: [built.sourceEntry, ...built.recognitionEntries, ghost],
+    });
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+  it('認識仕訳の金額を改ざんすると invalid（合計/月額不一致）', () => {
+    const tampered = built.recognitionEntries.map((e, i) =>
+      i === 0
+        ? {
+            ...e,
+            lines: [
+              { ...e.lines[0]!, amount: e.lines[0]!.amount + 100 },
+              { ...e.lines[1]!, amount: e.lines[1]!.amount + 100 },
+            ],
+          }
+        : e,
+    );
+    const bad = allocPkg({ journalEntries: [built.sourceEntry, ...tampered] });
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
   });
 });

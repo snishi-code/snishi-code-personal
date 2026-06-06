@@ -39,6 +39,10 @@ export function Allocations() {
         {t('allocations.title')}
       </h1>
 
+      <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
+        {t('allocations.recognitionNote')}
+      </p>
+
       <label
         style={{
           display: 'inline-flex',

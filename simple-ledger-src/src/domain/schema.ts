@@ -4,6 +4,7 @@
  */
 import { z } from 'zod';
 import { APP_ID, SCHEMA_VERSION } from './constants';
+import { addMonths, monthlyAmounts } from './allocation';
 
 const isoDate = z
   .string()
@@ -137,31 +138,37 @@ export const ledgerExportPackageSchema = z
     settings: settingsSchema,
   })
   .superRefine((pkg, ctx) => {
-    // 勘定科目 ID は一意であること。
-    const seen = new Set<string>();
+    const issue = (message: string, path: (string | number)[]) =>
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message, path });
+
+    // 勘定科目 ID は一意 + type マップ。
+    const accountType = new Map<string, string>();
     pkg.accounts.forEach((a, i) => {
-      if (seen.has(a.id)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `勘定科目 ID が重複しています(${a.id})`,
-          path: ['accounts', i, 'id'],
-        });
-      }
-      seen.add(a.id);
+      if (accountType.has(a.id))
+        issue(`勘定科目 ID が重複しています(${a.id})`, ['accounts', i, 'id']);
+      accountType.set(a.id, a.type);
+    });
+    const hasAccount = (id: string) => accountType.has(id);
+
+    // 仕訳 ID は一意 + map。
+    const entryById = new Map<string, (typeof pkg.journalEntries)[number]>();
+    pkg.journalEntries.forEach((e, ei) => {
+      if (entryById.has(e.id))
+        issue(`仕訳 ID が重複しています(${e.id})`, ['journalEntries', ei, 'id']);
+      entryById.set(e.id, e);
     });
 
-    const entryIds = new Set(pkg.journalEntries.map((e) => e.id));
-
     // 参照整合性: すべての仕訳明細の accountId が accounts に存在すること。
-    // これを通さないと、存在しない科目を参照する仕訳が PL/BS から消えてしまう。
     pkg.journalEntries.forEach((e, ei) => {
       e.lines.forEach((l, li) => {
-        if (!seen.has(l.accountId)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `仕訳「${e.description}」が存在しない勘定科目(${l.accountId})を参照しています`,
-            path: ['journalEntries', ei, 'lines', li, 'accountId'],
-          });
+        if (!hasAccount(l.accountId)) {
+          issue(`仕訳「${e.description}」が存在しない勘定科目(${l.accountId})を参照しています`, [
+            'journalEntries',
+            ei,
+            'lines',
+            li,
+            'accountId',
+          ]);
         }
       });
 
@@ -174,70 +181,155 @@ export const ledgerExportPackageSchema = z
             ['deferredAccountId', plan.deferredAccountId],
           ] as const
         ).forEach(([field, id]) => {
-          if (!seen.has(id)) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: `按分計画の ${field} が存在しない勘定科目(${id})を参照しています`,
-              path: ['journalEntries', ei, 'metadata', 'allocationPlan', field],
-            });
+          if (!hasAccount(id)) {
+            issue(`按分計画の ${field} が存在しない勘定科目(${id})を参照しています`, [
+              'journalEntries',
+              ei,
+              'metadata',
+              'allocationPlan',
+              field,
+            ]);
           }
         });
         plan.generatedEntryIds.forEach((gid, gi) => {
-          if (!entryIds.has(gid)) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: `按分計画の生成仕訳 ID(${gid})が存在しません`,
-              path: ['journalEntries', ei, 'metadata', 'allocationPlan', 'generatedEntryIds', gi],
-            });
+          if (!entryById.has(gid)) {
+            issue(`按分計画の生成仕訳 ID(${gid})が存在しません`, [
+              'journalEntries',
+              ei,
+              'metadata',
+              'allocationPlan',
+              'generatedEntryIds',
+              gi,
+            ]);
           }
         });
       }
     });
 
-    // 按分支出(allocations)の参照整合性。
+    // 按分支出(allocations)の深い整合性検証。壊れた JSON を取り込まない。
     const allocationIds = new Set<string>();
+    const claimedEntryIds = new Set<string>();
     pkg.allocations.forEach((al, ai) => {
-      if (allocationIds.has(al.id)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `按分 ID が重複しています(${al.id})`,
-          path: ['allocations', ai, 'id'],
-        });
-      }
+      const at = (...p: (string | number)[]) => ['allocations', ai, ...p];
+      if (allocationIds.has(al.id)) issue(`按分 ID が重複しています(${al.id})`, at('id'));
       allocationIds.add(al.id);
+      claimedEntryIds.add(al.sourceEntryId);
+      al.recognitionEntryIds.forEach((rid) => claimedEntryIds.add(rid));
 
-      (
-        [
-          ['expenseAccountId', al.expenseAccountId],
-          ['paymentAccountId', al.paymentAccountId],
-          ['deferredAccountId', al.deferredAccountId],
-        ] as const
-      ).forEach(([field, id]) => {
-        if (!seen.has(id)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `按分「${al.name}」の ${field} が存在しない勘定科目(${id})を参照しています`,
-            path: ['allocations', ai, field],
-          });
-        }
-      });
+      // 科目の存在と type（expense=費用 / payment=資産か負債 / deferred=資産）。
+      const expType = accountType.get(al.expenseAccountId);
+      if (expType === undefined)
+        issue(`按分「${al.name}」の expenseAccountId が存在しません`, at('expenseAccountId'));
+      else if (expType !== 'expense')
+        issue(
+          `按分「${al.name}」の expenseAccountId は費用科目である必要があります`,
+          at('expenseAccountId'),
+        );
 
-      if (!entryIds.has(al.sourceEntryId)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `按分「${al.name}」の原始仕訳(${al.sourceEntryId})が存在しません`,
-          path: ['allocations', ai, 'sourceEntryId'],
-        });
+      const payType = accountType.get(al.paymentAccountId);
+      if (payType === undefined)
+        issue(`按分「${al.name}」の paymentAccountId が存在しません`, at('paymentAccountId'));
+      else if (payType !== 'asset' && payType !== 'liability')
+        issue(
+          `按分「${al.name}」の paymentAccountId は資産または負債である必要があります`,
+          at('paymentAccountId'),
+        );
+
+      const defType = accountType.get(al.deferredAccountId);
+      if (defType === undefined)
+        issue(`按分「${al.name}」の deferredAccountId が存在しません`, at('deferredAccountId'));
+      else if (defType !== 'asset')
+        issue(
+          `按分「${al.name}」の deferredAccountId は資産科目である必要があります`,
+          at('deferredAccountId'),
+        );
+
+      // 認識仕訳の本数 = months、ID 重複なし。
+      if (al.recognitionEntryIds.length !== al.months) {
+        issue(
+          `按分「${al.name}」の認識仕訳数(${al.recognitionEntryIds.length})が按分月数(${al.months})と一致しません`,
+          at('recognitionEntryIds'),
+        );
       }
-      al.recognitionEntryIds.forEach((rid, ri) => {
-        if (!entryIds.has(rid)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `按分「${al.name}」の認識仕訳(${rid})が存在しません`,
-            path: ['allocations', ai, 'recognitionEntryIds', ri],
-          });
+      if (new Set(al.recognitionEntryIds).size !== al.recognitionEntryIds.length) {
+        issue(`按分「${al.name}」の認識仕訳 ID が重複しています`, at('recognitionEntryIds'));
+      }
+
+      // 原始仕訳: メタ一致 + 借方 deferred / 貸方 payment / 金額 totalAmount。
+      const src = entryById.get(al.sourceEntryId);
+      if (!src) {
+        issue(
+          `按分「${al.name}」の原始仕訳(${al.sourceEntryId})が存在しません`,
+          at('sourceEntryId'),
+        );
+      } else {
+        if (src.metadata?.allocationId !== al.id || src.metadata?.allocationRole !== 'source')
+          issue(`按分「${al.name}」の原始仕訳のメタ情報が一致しません`, at('sourceEntryId'));
+        const d = src.lines.find((l) => l.side === 'debit');
+        const c = src.lines.find((l) => l.side === 'credit');
+        if (
+          d?.accountId !== al.deferredAccountId ||
+          c?.accountId !== al.paymentAccountId ||
+          d?.amount !== al.totalAmount
+        ) {
+          issue(
+            `按分「${al.name}」の原始仕訳の借方/貸方/金額が定義と一致しません`,
+            at('sourceEntryId'),
+          );
         }
+      }
+
+      // 月次認識仕訳: メタ・借方 expense / 貸方 deferred・金額列・日付列・合計が定義どおり。
+      const amounts = monthlyAmounts(al.totalAmount, al.months);
+      let sum = 0;
+      let allRecognitionOk = al.recognitionEntryIds.length === al.months;
+      al.recognitionEntryIds.forEach((rid, i) => {
+        const re = entryById.get(rid);
+        if (!re) {
+          issue(`按分「${al.name}」の認識仕訳(${rid})が存在しません`, at('recognitionEntryIds', i));
+          allRecognitionOk = false;
+          return;
+        }
+        if (re.metadata?.allocationId !== al.id || re.metadata?.allocationRole !== 'recognition')
+          issue(
+            `按分「${al.name}」の認識仕訳のメタ情報が一致しません`,
+            at('recognitionEntryIds', i),
+          );
+        const d = re.lines.find((l) => l.side === 'debit');
+        const c = re.lines.find((l) => l.side === 'credit');
+        const expectedDate = `${addMonths(al.startMonth, i)}-01`;
+        if (
+          d?.accountId !== al.expenseAccountId ||
+          c?.accountId !== al.deferredAccountId ||
+          d?.amount !== amounts[i] ||
+          re.date !== expectedDate
+        ) {
+          issue(
+            `按分「${al.name}」の認識仕訳の科目/金額/日付が定義と一致しません`,
+            at('recognitionEntryIds', i),
+          );
+          allRecognitionOk = false;
+        }
+        if (d) sum += d.amount;
       });
+      if (allRecognitionOk && sum !== al.totalAmount) {
+        issue(
+          `按分「${al.name}」の認識仕訳の合計(${sum})が総額(${al.totalAmount})と一致しません`,
+          at('recognitionEntryIds'),
+        );
+      }
+    });
+
+    // 孤立した按分仕訳（どの AllocationItem からも参照されない allocationId 付き仕訳）。
+    pkg.journalEntries.forEach((e, ei) => {
+      if (e.metadata?.allocationId && !claimedEntryIds.has(e.id)) {
+        issue(`按分仕訳「${e.description}」がどの按分台帳からも参照されていません`, [
+          'journalEntries',
+          ei,
+          'metadata',
+          'allocationId',
+        ]);
+      }
     });
   });
 

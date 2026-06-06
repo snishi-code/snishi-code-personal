@@ -9,6 +9,7 @@ import { Icon } from '../Icon';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
+import { todayLocal } from '../../util/time';
 import type { Account, JournalEntry } from '../../domain/types';
 
 export interface JournalFilter {
@@ -39,6 +40,8 @@ export function Journal({
   const [query, setQuery] = useState('');
   const [from, setFrom] = useState(filter?.from ?? '');
   const [to, setTo] = useState(filter?.to ?? '');
+  // 既定では未来の按分認識仕訳を隠す（今日まで）。トグルで将来予定も表示。
+  const [showFuture, setShowFuture] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<JournalEntry | null>(null);
 
   // PL からのドリルダウンで期間が渡されたら、日付絞り込みに反映する。
@@ -53,19 +56,22 @@ export function Journal({
   const currency = ledger?.settings.currency ?? 'JPY';
   const filterAccount = accountFilterId ? map.get(accountFilterId) : undefined;
 
+  // 上限日: 明示 to があれば優先。無ければ既定は今日まで（showFuture で解除）。
+  const effectiveTo = to !== '' ? to : showFuture ? '' : todayLocal();
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (ledger?.journalEntries ?? []).filter((e) => {
       if (accountFilterId && !e.lines.some((l) => l.accountId === accountFilterId)) return false;
       if (from && e.date < from) return false;
-      if (to && e.date > to) return false;
+      if (effectiveTo && e.date > effectiveTo) return false;
       if (q) {
         const hay = `${e.description} ${e.memo ?? ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [ledger, query, from, to, accountFilterId]);
+  }, [ledger, query, from, effectiveTo, accountFilterId]);
 
   const hasDateOrQuery = query !== '' || from !== '' || to !== '';
 
@@ -143,9 +149,28 @@ export function Journal({
         ) : null}
       </div>
 
-      <p className="muted" style={{ fontSize: 13, margin: 'var(--space-2) 0' }}>
-        {t('journal.count', { count: filtered.length })}
-      </p>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 'var(--space-3)',
+          margin: 'var(--space-2) 0',
+        }}
+      >
+        <span className="muted" style={{ fontSize: 13 }}>
+          {t('journal.count', { count: filtered.length })}
+        </span>
+        <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
+          <input
+            type="checkbox"
+            checked={showFuture}
+            onChange={(e) => setShowFuture(e.target.checked)}
+            data-ui={UI.journal.showFuture}
+          />
+          {t('journal.showFuture')}
+        </label>
+      </div>
 
       {filtered.length === 0 ? (
         <div className="card card--pad empty">{t('journal.empty')}</div>

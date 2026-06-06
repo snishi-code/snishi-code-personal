@@ -72,7 +72,9 @@ export const ja = {
   'allocations.payment': '支払元',
   'allocations.monthsUnit': '{count} か月',
   'allocations.statusActive': '按分中',
-  'allocations.statusCompleted': '完了',
+  'allocations.statusCompleted': '認識完了',
+  'allocations.recognitionNote':
+    '「認識完了」は毎月の費用認識が終わった状態です。クレジットカード等（負債）で支払った場合、負債の返済は別です（返済予定は未実装）。',
 
   'journal.title': '仕訳',
   'journal.searchPlaceholder': '摘要・メモで検索',
@@ -139,6 +141,7 @@ export const ja = {
   'journal.reversalTag': '取消/返金',
   'journal.filteredByAccount': '「{name}」で絞り込み中',
   'journal.clearAccountFilter': '科目の絞り込みを解除',
+  'journal.showFuture': '将来予定も表示',
 
   'statements.title': '財務諸表',
   'statements.pl': '損益計算書',
@@ -166,6 +169,9 @@ export const ja = {
   'statements.balanced': '貸借一致',
   'statements.drilldownHint': '科目をタップすると、その仕訳を一覧で確認できます。',
   'statements.viewEntries': '「{name}」の仕訳を表示',
+  'statements.asOf': '基準日',
+  'statements.asOfHint':
+    'この日付時点の残高を表示します（既定は今日）。未来月の按分認識は含めません。',
 
   'accounts.title': '勘定科目',
   'accounts.add': '科目を追加',

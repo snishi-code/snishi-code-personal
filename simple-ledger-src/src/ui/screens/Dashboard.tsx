@@ -5,7 +5,7 @@ import { useMemo } from 'react';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, deriveProfitAndLoss, monthRange } from '../../domain/accounting';
 import { isCompleted } from '../../domain/allocation';
-import { currentYearMonth } from '../../util/time';
+import { currentYearMonth, todayLocal } from '../../util/time';
 import { Money } from '../money';
 import { Icon } from '../Icon';
 import { t } from '../../i18n';
@@ -56,8 +56,10 @@ export function Dashboard({
       .reduce((s, e) => s + (e.lines.find((l) => l.side === 'debit')?.amount ?? 0), 0);
     return {
       pl: deriveProfitAndLoss(accounts, entries, range),
-      bs: deriveBalanceSheet(accounts, entries),
-      recent: entries.slice(0, 5),
+      // BS は「今日時点」で切る。未来月の按分認識仕訳を現在残高に含めない。
+      bs: deriveBalanceSheet(accounts, entries, todayLocal()),
+      // 最近の仕訳も今日以前に限定（未来の按分認識仕訳を先頭に出さない）。
+      recent: entries.filter((e) => e.date <= todayLocal()).slice(0, 5),
       recognition: recognitionAmt,
       activeCount: (ledger?.allocations ?? []).filter((a) => !isCompleted(a, currentYm)).length,
     };
