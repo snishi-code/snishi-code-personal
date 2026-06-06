@@ -94,12 +94,35 @@ PL も BS も **保存しない**。`Account` と `JournalEntry` から毎回計
 
 例: 元 `借方 食費 / 貸方 カード 1000` → 取消 `借方 カード / 貸方 食費 1000`。
 
-## 期間按分（将来拡張・データ構造のみ）
+## 按分支出（長期の生活コスト）
 
-`JournalEntry.metadata.allocationPlan`（`kind:'period'` / `startDate` / `endDate` /
-`method:'even-monthly'` / `recognitionAccountId` / `deferredAccountId` / `generatedEntryIds`）を
-用意してある。**MVP では保存・export/import・スキーマ検証が通るだけ**で、按分仕訳の自動
-生成ロジックと UI は未実装。
+高額・長期の支出（例: PC 240,000 円 / 48 か月）を月割りで費用認識する。実装は
+`src/domain/allocation.ts` と `AllocationItem`（`src/domain/types.ts`）。
+
+仕訳生成（すべて 2 行・単一トランザクションで保存。`repository.createAllocation`）:
+
+- **原始仕訳**（購入時・費用にしない）: `借方 按分中資産(deferred) / 貸方 支払元(payment)` … 総額
+- **月次認識仕訳 ×months**: `借方 費用カテゴリ(expense) / 貸方 按分中資産` … 総額 ÷ months
+  - 端数は **合計が必ず総額に一致** するよう先頭月から 1 円ずつ配分（`monthlyAmounts`）。
+  - 各仕訳の日付は開始月（＝支出日の月）から 1 か月ずつ。`metadata.allocationId` /
+    `allocationRole`（`source`/`recognition`）を持つ。
+
+これにより PL/BS は変更不要のまま、月次認識仕訳が各月の費用として自然に集計される
+（生活コスト = 通常費用 + 按分認識額）。
+
+- **按分中資産**（繰延）科目は初回利用時に asset 科目として自動作成し、以後再利用。
+- 生成仕訳は **通常の編集・削除では壊せない**（`metadata.allocationId` を持つ仕訳は fail-closed）。按分台帳で管理する。
+- 完了（全認識月が経過）は現在月から導出し、台帳の既定表示から外す。**物理削除はしない**。
+
+### 期間按分プラン（`metadata.allocationPlan`）
+
+別系統の将来拡張点（前払/前受の期間按分）。型・スキーマ・検証のみ用意し、UI と生成は未実装。
+
+### 次フェーズ（未実装）
+
+資産売却・一括返済は今回実装しない。売却損益は複数仕訳の生成が必要で、MVP の 2 行仕訳制約と
+衝突しやすいため。支払元が liability（クレカ等）の場合も、返済は別の振替/将来機能として扱い、
+按分の費用認識とは混ぜない。
 
 ## 勘定科目の変更ルール（`Account`）
 

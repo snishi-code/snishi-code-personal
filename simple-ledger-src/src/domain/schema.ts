@@ -54,6 +54,26 @@ export const entryMetadataSchema = z.object({
   inputMode: inputModeSchema.optional(),
   reversalOfEntryId: z.string().min(1).optional(),
   allocationPlan: allocationPlanSchema.optional(),
+  allocationId: z.string().min(1).optional(),
+  allocationRole: z.enum(['source', 'recognition']).optional(),
+});
+
+const monthSchema = z.string().regex(/^\d{4}-\d{2}$/, '月は YYYY-MM 形式である必要があります');
+
+export const allocationItemSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(120),
+  totalAmount: amountSchema,
+  months: z.number().int().min(2),
+  startMonth: monthSchema,
+  expenseAccountId: z.string().min(1),
+  paymentAccountId: z.string().min(1),
+  deferredAccountId: z.string().min(1),
+  sourceEntryId: z.string().min(1),
+  recognitionEntryIds: z.array(z.string().min(1)),
+  status: z.enum(['active', 'completed', 'disposed', 'settled']),
+  createdAt: isoDateTime,
+  updatedAt: isoDateTime,
 });
 
 export const journalEntrySchema = z
@@ -113,6 +133,7 @@ export const ledgerExportPackageSchema = z
     currentRevision: z.number().int().nonnegative(),
     accounts: z.array(accountSchema),
     journalEntries: z.array(journalEntrySchema),
+    allocations: z.array(allocationItemSchema),
     settings: settingsSchema,
   })
   .superRefine((pkg, ctx) => {
@@ -171,6 +192,52 @@ export const ledgerExportPackageSchema = z
           }
         });
       }
+    });
+
+    // 按分支出(allocations)の参照整合性。
+    const allocationIds = new Set<string>();
+    pkg.allocations.forEach((al, ai) => {
+      if (allocationIds.has(al.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `按分 ID が重複しています(${al.id})`,
+          path: ['allocations', ai, 'id'],
+        });
+      }
+      allocationIds.add(al.id);
+
+      (
+        [
+          ['expenseAccountId', al.expenseAccountId],
+          ['paymentAccountId', al.paymentAccountId],
+          ['deferredAccountId', al.deferredAccountId],
+        ] as const
+      ).forEach(([field, id]) => {
+        if (!seen.has(id)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `按分「${al.name}」の ${field} が存在しない勘定科目(${id})を参照しています`,
+            path: ['allocations', ai, field],
+          });
+        }
+      });
+
+      if (!entryIds.has(al.sourceEntryId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `按分「${al.name}」の原始仕訳(${al.sourceEntryId})が存在しません`,
+          path: ['allocations', ai, 'sourceEntryId'],
+        });
+      }
+      al.recognitionEntryIds.forEach((rid, ri) => {
+        if (!entryIds.has(rid)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `按分「${al.name}」の認識仕訳(${rid})が存在しません`,
+            path: ['allocations', ai, 'recognitionEntryIds', ri],
+          });
+        }
+      });
     });
   });
 

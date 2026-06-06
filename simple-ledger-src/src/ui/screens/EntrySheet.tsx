@@ -59,7 +59,7 @@ function errorText(
 }
 
 export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => void }) {
-  const { ledger, saveEntry } = useLedger();
+  const { ledger, saveEntry, createAllocation } = useLedger();
   const accounts = ledger?.accounts ?? [];
 
   const [mode, setMode] = useState<FormMode>(
@@ -81,6 +81,13 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   );
   const [errors, setErrors] = useState<EntryValidationError[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // 按分支出（expense の create のみ）
+  const canAllocate = init.kind === 'create' && mode === 'expense';
+  const [allocate, setAllocate] = useState(false);
+  const [monthsText, setMonthsText] = useState('');
+  const [monthsError, setMonthsError] = useState(false);
+  const months = monthsText === '' ? 0 : Number.parseInt(monthsText, 10);
 
   const existing =
     init.kind === 'edit' ? { id: init.entry.id, createdAt: init.entry.createdAt } : undefined;
@@ -112,11 +119,26 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   async function onSave() {
     const found = validateSimpleEntry(form);
     setErrors(found);
-    if (found.length > 0) return;
+    const useAllocation = canAllocate && allocate;
+    const monthsBad = useAllocation && (!Number.isInteger(months) || months < 2);
+    setMonthsError(monthsBad);
+    if (found.length > 0 || monthsBad) return;
     setSubmitting(true);
-    const metadata: EntryMetadata = { ...form.metadata, inputMode: resolveInputMode() };
     try {
-      await saveEntry({ ...form, metadata }, existing);
+      if (useAllocation) {
+        // 支出フォームの debit=費用カテゴリ / credit=支払元 をそのまま按分に渡す。
+        await createAllocation({
+          date: form.date,
+          description: form.description,
+          totalAmount: form.amount,
+          months,
+          expenseAccountId: form.debitAccountId,
+          paymentAccountId: form.creditAccountId,
+        });
+      } else {
+        const metadata: EntryMetadata = { ...form.metadata, inputMode: resolveInputMode() };
+        await saveEntry({ ...form, metadata }, existing);
+      }
       onClose();
     } catch {
       setSubmitting(false);
@@ -210,6 +232,42 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         dataUi={UI.journal.entry.amount}
       />
 
+      {canAllocate ? (
+        <div className="field">
+          <label
+            style={{
+              display: 'inline-flex',
+              gap: 8,
+              alignItems: 'center',
+              minHeight: 'var(--tap)',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={allocate}
+              onChange={(e) => setAllocate(e.target.checked)}
+              data-ui={UI.journal.entry.allocateToggle}
+            />
+            {t('entry.allocateToggle')}
+          </label>
+          {allocate ? (
+            <>
+              <TextInput
+                label={t('entry.allocateMonths')}
+                required
+                inputMode="numeric"
+                value={monthsText}
+                hint={t('entry.allocateMonthsHint')}
+                onChange={(v) => setMonthsText(v.replace(/[^\d]/g, ''))}
+                error={monthsError ? t('entry.error.months-invalid') : undefined}
+                dataUi={UI.journal.entry.allocateMonths}
+              />
+              <p className="field__hint">{t('entry.allocateNote')}</p>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+
       <TextArea
         label={t('entry.memo')}
         value={form.memo ?? ''}
@@ -217,7 +275,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         dataUi={UI.journal.entry.memo}
       />
 
-      {init.kind === 'create' && mode !== 'manual' ? (
+      {init.kind === 'create' && mode !== 'manual' && !allocate ? (
         <button
           type="button"
           className="collapse-toggle"

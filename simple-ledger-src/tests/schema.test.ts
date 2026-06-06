@@ -73,6 +73,7 @@ describe('ledgerExportPackageSchema', () => {
       { id: 'b', name: '食費', type: 'expense', archived: false, createdAt: 'x', updatedAt: 'x' },
     ],
     journalEntries: [validEntry],
+    allocations: [],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
   };
 
@@ -146,6 +147,7 @@ describe('entry metadata / allocationPlan', () => {
       journalEntries: [
         { ...validEntry, metadata: { inputMode: 'reversal', reversalOfEntryId: 'z' } },
       ],
+      allocations: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
     const parsed = ledgerExportPackageSchema.safeParse(pkg);
@@ -195,6 +197,7 @@ describe('allocationPlan の参照整合性（package 検証）', () => {
         { id: 'b', name: '食費', type: 'expense', archived: false, createdAt: 'x', updatedAt: 'x' },
       ],
       journalEntries: [{ ...validEntry, metadata: { allocationPlan: plan } }],
+      allocations: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
   }

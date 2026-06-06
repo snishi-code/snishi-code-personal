@@ -27,8 +27,18 @@ type Step = {
   migrate: (pkg: LedgerExportPackage) => LedgerExportPackage;
 };
 
-// version を上げるたびにここへ追加していく。現状は空（v1 のみ）。
-const STEPS: Step[] = [];
+// version を上げるたびにここへ追加していく。
+const STEPS: Step[] = [
+  {
+    // v1 → v2: 按分支出(allocations)を追加。v1 JSON には無いので空配列を付ける。
+    from: 1,
+    to: 2,
+    migrate: (pkg) => ({
+      ...pkg,
+      allocations: Array.isArray(pkg.allocations) ? pkg.allocations : [],
+    }),
+  },
+];
 
 /**
  * 取り込んだパッケージを現行スキーマまで前進させる。

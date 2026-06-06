@@ -151,54 +151,76 @@ export function Journal({
         <div className="card card--pad empty">{t('journal.empty')}</div>
       ) : (
         <ul className="card list" data-ui={UI.journal.list}>
-          {filtered.map((entry) => (
-            <li key={entry.id} className="list__item">
-              <button
-                type="button"
-                className="list__main"
-                onClick={() => onEditEntry(entry)}
-                style={{ background: 'transparent', border: 'none', textAlign: 'left' }}
-                aria-label={`${t('common.edit')}: ${entry.description}`}
-              >
+          {filtered.map((entry) => {
+            const generated = !!entry.metadata?.allocationId;
+            const title = (
+              <>
                 <div className="list__title">
                   {entry.kind === 'opening' ? (
                     <span className="tag tag--neutral">{t('journal.opening')}</span>
                   ) : null}
                   {entry.metadata?.inputMode === 'reversal' ? (
                     <span className="tag tag--warning">{t('journal.reversalTag')}</span>
+                  ) : null}
+                  {generated ? (
+                    <span className="tag tag--teal">{t('journal.allocationTag')}</span>
                   ) : null}{' '}
                   {entry.description}
                 </div>
                 <div className="list__sub">
                   {entry.date}・{flowText(map, entry)}
                 </div>
-              </button>
-              <span className="list__amount">
-                <Money
-                  amount={entry.lines.find((l) => l.side === 'debit')?.amount ?? 0}
-                  currency={currency}
-                />
-              </span>
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={() => onReverse(entry)}
-                aria-label={`${t('journal.reverseAction')}: ${entry.description}`}
-                data-ui={UI.journal.entry.reverse}
-              >
-                <Icon name="reverse" size={18} />
-              </button>
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={() => setPendingDelete(entry)}
-                aria-label={`${t('common.delete')}: ${entry.description}`}
-                data-ui={UI.journal.entry.delete}
-              >
-                <Icon name="trash" size={18} />
-              </button>
-            </li>
-          ))}
+              </>
+            );
+            return (
+              <li key={entry.id} className="list__item">
+                {generated ? (
+                  // 按分生成仕訳は読み取り専用（編集/取消/削除はしない。按分台帳で管理）。
+                  <div className="list__main" title={t('journal.generatedNotice')}>
+                    {title}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="list__main"
+                    onClick={() => onEditEntry(entry)}
+                    style={{ background: 'transparent', border: 'none', textAlign: 'left' }}
+                    aria-label={`${t('common.edit')}: ${entry.description}`}
+                  >
+                    {title}
+                  </button>
+                )}
+                <span className="list__amount">
+                  <Money
+                    amount={entry.lines.find((l) => l.side === 'debit')?.amount ?? 0}
+                    currency={currency}
+                  />
+                </span>
+                {generated ? null : (
+                  <>
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      onClick={() => onReverse(entry)}
+                      aria-label={`${t('journal.reverseAction')}: ${entry.description}`}
+                      data-ui={UI.journal.entry.reverse}
+                    >
+                      <Icon name="reverse" size={18} />
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      onClick={() => setPendingDelete(entry)}
+                      aria-label={`${t('common.delete')}: ${entry.description}`}
+                      data-ui={UI.journal.entry.delete}
+                    >
+                      <Icon name="trash" size={18} />
+                    </button>
+                  </>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
 

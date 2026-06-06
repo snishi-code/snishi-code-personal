@@ -4,6 +4,7 @@
 import { useMemo } from 'react';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, deriveProfitAndLoss, monthRange } from '../../domain/accounting';
+import { isCompleted } from '../../domain/allocation';
 import { currentYearMonth } from '../../util/time';
 import { Money } from '../money';
 import { Icon } from '../Icon';
@@ -39,19 +40,32 @@ export function Dashboard({
   const { ledger } = useLedger();
   const { year, month } = currentYearMonth();
 
-  const { pl, bs, recent } = useMemo(() => {
+  const { pl, bs, recent, recognition, activeCount } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     const entries = ledger?.journalEntries ?? [];
     const range = monthRange(year, month);
+    const currentYm = `${year}-${String(month).padStart(2, '0')}`;
+    // 今月の按分認識額（recognition 仕訳の費用＝借方額）。
+    const recognitionAmt = entries
+      .filter(
+        (e) =>
+          e.metadata?.allocationRole === 'recognition' &&
+          e.date >= range.from &&
+          e.date <= range.to,
+      )
+      .reduce((s, e) => s + (e.lines.find((l) => l.side === 'debit')?.amount ?? 0), 0);
     return {
       pl: deriveProfitAndLoss(accounts, entries, range),
       bs: deriveBalanceSheet(accounts, entries),
       recent: entries.slice(0, 5),
+      recognition: recognitionAmt,
+      activeCount: (ledger?.allocations ?? []).filter((a) => !isCompleted(a, currentYm)).length,
     };
   }, [ledger, year, month]);
 
   const currency = ledger?.settings.currency ?? 'JPY';
   const hasEntries = (ledger?.journalEntries.length ?? 0) > 0;
+  const normalExpense = pl.totalExpense - recognition;
 
   return (
     <section aria-labelledby="dashboard-title" data-ui={UI.dashboard.view}>
@@ -127,6 +141,40 @@ export function Dashboard({
           </span>
         </div>
       </div>
+
+      <p className="section-label">{t('dashboard.livingCost')}</p>
+      <div className="stat-grid">
+        <div className="stat">
+          <span className="stat__label">{t('dashboard.normalExpense')}</span>
+          <span className="stat__value">
+            <Money amount={normalExpense} currency={currency} />
+          </span>
+        </div>
+        <div className="stat">
+          <span className="stat__label">{t('dashboard.allocatedExpense')}</span>
+          <span className="stat__value">
+            <Money amount={recognition} currency={currency} />
+          </span>
+        </div>
+        <div className="stat">
+          <span className="stat__label">{t('dashboard.livingCostTotal')}</span>
+          <span className="stat__value">
+            <Money amount={pl.totalExpense} currency={currency} />
+          </span>
+        </div>
+      </div>
+      <button
+        type="button"
+        className="btn btn--ghost btn--block"
+        style={{ marginTop: 'var(--space-2)', justifyContent: 'space-between' }}
+        onClick={() => onNavigate('allocations')}
+      >
+        <span>{t('dashboard.activeAllocations', { count: activeCount })}</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          {t('dashboard.viewAllocations')}
+          <Icon name="chevronRight" size={16} />
+        </span>
+      </button>
 
       {hasEntries ? (
         <>

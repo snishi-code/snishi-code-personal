@@ -57,6 +57,29 @@ test('取消/返金で逆仕訳が作られ、元仕訳は残る', async ({ page
   await expect(page.getByText('取消: ランチ代')).toBeVisible();
 });
 
+test('按分支出を作成すると按分台帳と生活コストに反映される', async ({ page }) => {
+  await page.goto('./');
+  await page.locator(ui('dashboard.entry.expense')).click();
+  await page.locator(ui('journal.entry.description')).fill('ノートPC');
+  await pick(page, 'journal.entry.debitAccount', '食費');
+  await pick(page, 'journal.entry.creditAccount', '現金');
+  await page.locator(ui('journal.entry.amount')).fill('240000');
+  await page.locator(ui('journal.entry.allocateToggle')).check();
+  await page.locator(ui('journal.entry.allocateMonths')).fill('48');
+  await page.locator(ui('journal.entry.save')).click();
+
+  // 按分台帳に出る（月額目安 5,000）
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.allocations')).click();
+  await expect(page.locator(ui('allocations.view'))).toBeVisible();
+  await expect(page.locator(ui('allocations.list'))).toContainText('ノートPC');
+  await expect(page.locator(ui('allocations.list'))).toContainText('5,000');
+
+  // ダッシュボードの生活コストに月額按分額が反映（240,000 そのものは費用にしない）
+  await page.locator(ui('nav.home')).click();
+  await expect(page.locator(ui('dashboard.view'))).toContainText('5,000');
+});
+
 test('損益計算書の科目から仕訳一覧へドリルダウンできる', async ({ page }) => {
   await page.goto('./');
   await addExpense(page, 'コーヒー', '500');

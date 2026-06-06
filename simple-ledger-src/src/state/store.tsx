@@ -6,6 +6,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from 'react';
 import type { Account, Ledger, Settings, Snapshot } from '../domain/types';
 import { buildSimpleEntry, type SimpleEntryInput } from '../domain/entry';
+import type { AllocationInput } from '../domain/allocation';
 import * as repo from '../data/repository';
 import {
   exportFileName,
@@ -27,6 +28,7 @@ interface LedgerContextValue {
     existing?: { id: string; createdAt: string },
   ) => Promise<void>;
   removeEntry: (id: string, description: string) => Promise<void>;
+  createAllocation: (input: Omit<AllocationInput, 'deferredAccountId'>) => Promise<void>;
   saveAccount: (account: Account) => Promise<void>;
   removeAccount: (id: string) => Promise<void>;
   saveSettings: (settings: Settings) => Promise<void>;
@@ -95,7 +97,21 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.deleted'), 'success');
       } catch (e) {
-        toast.show(t('toast.error'), 'error');
+        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const createAllocation = useCallback<LedgerContextValue['createAllocation']>(
+    async (input) => {
+      try {
+        await repo.createAllocation(input);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
         throw e;
       }
     },
@@ -224,6 +240,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       refresh,
       saveEntry,
       removeEntry,
+      createAllocation,
       saveAccount,
       removeAccount,
       saveSettings,
@@ -241,6 +258,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       refresh,
       saveEntry,
       removeEntry,
+      createAllocation,
       saveAccount,
       removeAccount,
       saveSettings,

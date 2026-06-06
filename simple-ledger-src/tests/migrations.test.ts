@@ -14,6 +14,7 @@ function pkg(version: number): LedgerExportPackage {
     currentRevision: 0,
     accounts: [],
     journalEntries: [],
+    allocations: [],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
   };
 }
@@ -30,10 +31,18 @@ describe('migrateToCurrent', () => {
     expect(r.reason).toBe('too-new');
   });
   it('変換手順が無い旧版は unknown-version', () => {
-    // 現状 v1 のみ。v0 のような未知の旧版は手順が無く fail-closed。
+    // v0 のような未知の旧版は手順が無く fail-closed。
     const r = migrateToCurrent(pkg(0));
     expect(r.ok).toBe(false);
-    // 0 < SCHEMA_VERSION なので migration を試み、手順が無いため unknown-version
     expect(r.reason).toBe('unknown-version');
+  });
+  it('v1 → 現行へ migrate し、allocations を補う', () => {
+    // v1 JSON は allocations を持たない想定。
+    const v1 = { ...pkg(1) } as Record<string, unknown>;
+    delete v1.allocations;
+    const r = migrateToCurrent(v1 as unknown as LedgerExportPackage);
+    expect(r.ok).toBe(true);
+    expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(r.data?.allocations).toEqual([]);
   });
 });

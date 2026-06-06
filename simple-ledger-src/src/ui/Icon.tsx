@@ -29,7 +29,8 @@ export type IconName =
   | 'expense'
   | 'transfer'
   | 'chevronDown'
-  | 'reverse';
+  | 'reverse'
+  | 'calendar';
 
 const PATHS: Record<IconName, JSX.Element> = {
   income: (
@@ -55,6 +56,14 @@ const PATHS: Record<IconName, JSX.Element> = {
     </>
   ),
   chevronDown: <path d="m6 9 6 6 6-6" />,
+  calendar: (
+    <>
+      <rect width="18" height="18" x="3" y="4" rx="2" />
+      <path d="M3 10h18" />
+      <path d="M8 2v4" />
+      <path d="M16 2v4" />
+    </>
+  ),
   reverse: (
     <>
       <path d="M3 7v6h6" />

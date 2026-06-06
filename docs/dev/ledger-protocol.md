@@ -16,7 +16,7 @@
 ```jsonc
 {
   "appId": "snishi-code.simple-ledger",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "ledgerId": "ledger",
   "exportedAt": "2026-06-06T00:00:00.000Z",
   "deviceId": "<uuid>",
@@ -24,13 +24,22 @@
   "currentRevision": 12,   // エクスポート時点のリビジョン
   "accounts": [ /* Account[] */ ],
   "journalEntries": [ /* JournalEntry[] */ ],
+  "allocations": [ /* AllocationItem[]（按分支出） */ ],
   "settings": { "ledgerName": "家計簿", "currency": "JPY", "locale": "ja" }
 }
 ```
 
-- `schemaVersion`: スキーマ版。MVP 初期は `1`。
-- `revision`: 端末ローカルの編集追跡。保存（仕訳/科目/設定の変更）のたびに +1。
+- `schemaVersion`: スキーマ版。現行は **`2`**（v1→v2 で `allocations` を追加）。
+- `revision`: 端末ローカルの編集追跡。保存（仕訳/科目/設定/按分の変更）のたびに +1。
 - 金額（`JournalLine.amount`）は **正の整数・最小通貨単位**（JPY なら円）。
+
+### `AllocationItem`（按分支出）
+
+`id` / `name` / `totalAmount` / `months` / `startMonth`('YYYY-MM') / `expenseAccountId` /
+`paymentAccountId` / `deferredAccountId` / `sourceEntryId` / `recognitionEntryIds[]` /
+`status`('active'|'completed'|'disposed'|'settled') / `createdAt` / `updatedAt`。
+関連仕訳は `metadata.allocationId` / `allocationRole`('source'|'recognition') を持つ。詳細は
+[ledger-concept.md](ledger-concept.md#按分支出長期の生活コスト)。
 
 ### `JournalEntry.metadata`（任意）
 
@@ -62,6 +71,8 @@
 - `accounts[].id` は一意。
 - `metadata.allocationPlan` の `recognitionAccountId` / `deferredAccountId` が `accounts[].id` に存在し、
   `generatedEntryIds` の各 ID が `journalEntries[].id` に存在する。
+- **`allocations[]`**: `id` は一意。`expenseAccountId` / `paymentAccountId` / `deferredAccountId` が
+  `accounts[].id` に、`sourceEntryId` / `recognitionEntryIds[]` が `journalEntries[].id` に存在する。
 
 ### revision の原子性
 
@@ -91,11 +102,13 @@ revision は import の競合判定に使うため、本体と必ず歩調を合
 
 ## migration ポリシー
 
-- `schemaVersion` を必ず持つ。MVP 初期は `1`。
+- `schemaVersion` を必ず持つ。現行は `2`。
 - migration 関数の置き場は `src/domain/migrations.ts` の `STEPS`（`{ from, to, migrate }`）。
+  - **v1 → v2**: `allocations: []` を補う（v1 JSON は按分を持たない）。
 - 未対応版は **fail-closed**（取り込まない）。
 - migration 失敗時は既存データを保持し、UI に失敗を通知する（握りつぶさない）。
 - version を上げるときは `SCHEMA_VERSION` を +1 し、`STEPS` に旧→新の手順を追加する。
+  IndexedDB も `DB_VERSION` を上げ、`onupgradeneeded` でストアを追加する（v2 で `allocations` を追加）。
 
 ## 外部送信ゼロとの関係
 

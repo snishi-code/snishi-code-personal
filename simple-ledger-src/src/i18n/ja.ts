@@ -12,6 +12,7 @@ export const ja = {
   'nav.journal': '仕訳',
   'nav.statements': '財務諸表',
   'nav.accounts': '勘定科目',
+  'nav.allocations': '按分台帳',
   'nav.settings': '設定',
   'nav.help': 'ヘルプ',
 
@@ -49,6 +50,29 @@ export const ja = {
   'dashboard.emptyCta': '最初の仕訳を追加',
   'dashboard.monthlySummary': '今月のサマリー',
   'dashboard.position': '財政状態',
+  'dashboard.livingCost': '今月の生活コスト',
+  'dashboard.normalExpense': '通常費用',
+  'dashboard.allocatedExpense': '按分認識額',
+  'dashboard.livingCostTotal': '生活コスト合計',
+  'dashboard.activeAllocations': '按分中 {count} 件',
+  'dashboard.viewAllocations': '按分台帳を見る',
+
+  'journal.allocationTag': '按分',
+  'journal.generatedNotice': '按分仕訳は按分台帳で管理します（直接の編集・削除はできません）。',
+
+  'allocations.title': '按分台帳',
+  'allocations.empty': '按分中の項目はありません。支出入力で「按分する」を使うと作成できます。',
+  'allocations.showCompleted': '完了分も表示',
+  'allocations.total': '総額',
+  'allocations.months': '按分月数',
+  'allocations.monthly': '月額目安',
+  'allocations.remainingMonths': '残り {count} か月',
+  'allocations.unrecognized': '未認識残高',
+  'allocations.expenseCategory': '費用カテゴリ',
+  'allocations.payment': '支払元',
+  'allocations.monthsUnit': '{count} か月',
+  'allocations.statusActive': '按分中',
+  'allocations.statusCompleted': '完了',
 
   'journal.title': '仕訳',
   'journal.searchPlaceholder': '摘要・メモで検索',
@@ -103,6 +127,12 @@ export const ja = {
   'entry.reversalTitle': '取消/返金を記録',
   'entry.reversalNote':
     '元の仕訳は削除せず、反対の仕訳を作成します。金額を変えれば部分返金も記録できます。',
+  'entry.allocateToggle': 'この支出を按分する（長期の生活コスト）',
+  'entry.allocateMonths': '按分月数',
+  'entry.allocateMonthsHint': '2 か月以上。総額を月割りして毎月の費用に計上します。',
+  'entry.allocateNote':
+    '購入時は「按分中資産」に計上し、毎月この費用カテゴリへ振り替えます。月次の認識仕訳は自動生成され、按分台帳で管理します。',
+  'entry.error.months-invalid': '按分月数は 2 以上の整数で入力してください。',
 
   'journal.reverse': '取消/返金',
   'journal.reverseAction': '取消/返金を記録',

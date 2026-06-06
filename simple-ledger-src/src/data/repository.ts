@@ -11,13 +11,18 @@ import { defaultAccounts, defaultSettings, newMeta } from './seed';
 import { newId } from '../domain/ids';
 import type {
   Account,
+  AllocationItem,
   JournalEntry,
   Ledger,
   LedgerMeta,
   Settings,
   Snapshot,
 } from '../domain/types';
+import { buildAllocation, type AllocationInput } from '../domain/allocation';
 import { nowIso } from '../util/time';
+
+/** 按分中資産（繰延）科目の既定名。初回利用時に asset 科目として作る/再利用する。 */
+const DEFERRED_ACCOUNT_NAME = '按分中資産';
 
 const KV_META = 'meta';
 const KV_SETTINGS = 'settings';
@@ -47,18 +52,20 @@ export async function ensureInitialized(): Promise<void> {
 
 export async function loadLedger(): Promise<Ledger> {
   await ensureInitialized();
-  const [meta, settings, accounts, journalEntries] = await Promise.all([
+  const [meta, settings, accounts, journalEntries, allocations] = await Promise.all([
     getMeta(),
     getSettings(),
     getAll<Account>(STORE.accounts),
     getAll<JournalEntry>(STORE.journalEntries),
+    getAll<AllocationItem>(STORE.allocations),
   ]);
   if (!meta || !settings) throw new Error('台帳の初期化に失敗しました');
   // 一覧の安定した既定順: 仕訳は日付降順 → 作成降順。
   journalEntries.sort((a, b) =>
     a.date === b.date ? cmp(b.createdAt, a.createdAt) : cmp(b.date, a.date),
   );
-  return { meta, settings, accounts, journalEntries };
+  allocations.sort((a, b) => cmp(b.createdAt, a.createdAt));
+  return { meta, settings, accounts, journalEntries, allocations };
 }
 
 function cmp(a: string, b: string): number {
@@ -120,13 +127,29 @@ export async function deleteAccount(id: string): Promise<void> {
 
 /* ── 仕訳 ── */
 
+const GENERATED_ENTRY_MSG =
+  '按分から生成された仕訳は編集・削除できません。按分台帳で管理してください。';
+
+/** 按分生成仕訳（allocationId 付き）は通常の編集・削除では壊せない。fail-closed。 */
+async function assertNotAllocationEntry(id: string): Promise<void> {
+  const entries = await getAll<JournalEntry>(STORE.journalEntries);
+  const target = entries.find((e) => e.id === id);
+  if (target?.metadata?.allocationId) {
+    throw new Error(GENERATED_ENTRY_MSG);
+  }
+}
+
 export async function upsertEntry(entry: JournalEntry): Promise<void> {
+  // 既存が按分生成仕訳なら上書き禁止。新規入力に allocationId は付かない。
+  await assertNotAllocationEntry(entry.id);
+  if (entry.metadata?.allocationId) throw new Error(GENERATED_ENTRY_MSG);
   await writeWithRevision([STORE.journalEntries], (t) => {
     t.objectStore(STORE.journalEntries).put(entry);
   });
 }
 
 export async function deleteEntry(id: string): Promise<void> {
+  await assertNotAllocationEntry(id);
   await writeWithRevision([STORE.journalEntries], (t) => {
     t.objectStore(STORE.journalEntries).delete(id);
   });
@@ -156,6 +179,52 @@ export async function deleteSnapshot(id: string): Promise<void> {
   await deleteRecord(STORE.snapshots, id);
 }
 
+/* ── 按分支出 ── */
+
+export async function listAllocations(): Promise<AllocationItem[]> {
+  const all = await getAll<AllocationItem>(STORE.allocations);
+  all.sort((a, b) => cmp(b.createdAt, a.createdAt));
+  return all;
+}
+
+/**
+ * 按分支出を作成する。原始仕訳・月次認識仕訳・AllocationItem を **単一トランザクション** で
+ * 保存し、revision も同時に進める（途中失敗で半端な仕訳が残らない）。
+ * 按分中資産(deferred)科目が無ければ同じトランザクションで作る。
+ */
+export async function createAllocation(
+  input: Omit<AllocationInput, 'deferredAccountId'>,
+): Promise<AllocationItem> {
+  const accounts = await getAll<Account>(STORE.accounts);
+  let deferred = accounts.find((a) => a.type === 'asset' && a.name === DEFERRED_ACCOUNT_NAME);
+  const ts = nowIso();
+  const newDeferred = deferred
+    ? null
+    : ({
+        id: newId(),
+        name: DEFERRED_ACCOUNT_NAME,
+        type: 'asset',
+        archived: false,
+        createdAt: ts,
+        updatedAt: ts,
+      } satisfies Account);
+  if (!deferred) deferred = newDeferred!;
+
+  const { item, sourceEntry, recognitionEntries } = buildAllocation({
+    ...input,
+    deferredAccountId: deferred.id,
+  });
+
+  await writeWithRevision([STORE.accounts, STORE.journalEntries, STORE.allocations], (t) => {
+    if (newDeferred) t.objectStore(STORE.accounts).put(newDeferred);
+    const entries = t.objectStore(STORE.journalEntries);
+    entries.put(sourceEntry);
+    for (const e of recognitionEntries) entries.put(e);
+    t.objectStore(STORE.allocations).put(item);
+  });
+  return item;
+}
+
 /* ── 一括置換（import / restore で使う原子的操作） ── */
 
 export interface ReplacePayload {
@@ -163,20 +232,24 @@ export interface ReplacePayload {
   settings: Settings;
   accounts: Account[];
   journalEntries: JournalEntry[];
+  allocations: AllocationItem[];
 }
 
 /**
- * 台帳本体（meta/settings/accounts/journalEntries）を 1 トランザクションで置換する。
+ * 台帳本体（meta/settings/accounts/journalEntries/allocations）を 1 トランザクションで置換する。
  * snapshots は保持する（復元元を消さない）。成功するまで既存は壊さない。
  */
 export async function replaceLedger(payload: ReplacePayload): Promise<void> {
-  await runWrite([STORE.kv, STORE.accounts, STORE.journalEntries], (t) => {
+  await runWrite([STORE.kv, STORE.accounts, STORE.journalEntries, STORE.allocations], (t) => {
     const accounts = t.objectStore(STORE.accounts);
     const entries = t.objectStore(STORE.journalEntries);
+    const allocations = t.objectStore(STORE.allocations);
     accounts.clear();
     entries.clear();
+    allocations.clear();
     for (const a of payload.accounts) accounts.put(a);
     for (const e of payload.journalEntries) entries.put(e);
+    for (const al of payload.allocations) allocations.put(al);
     t.objectStore(STORE.kv).put(payload.meta, KV_META);
     t.objectStore(STORE.kv).put(payload.settings, KV_SETTINGS);
   });
@@ -192,16 +265,20 @@ export async function resetAll(): Promise<void> {
   const accounts = defaultAccounts();
   const settings = defaultSettings();
   const meta = newMeta();
-  await runWrite([STORE.kv, STORE.accounts, STORE.journalEntries, STORE.snapshots], (t) => {
-    t.objectStore(STORE.kv).clear();
-    t.objectStore(STORE.accounts).clear();
-    t.objectStore(STORE.journalEntries).clear();
-    t.objectStore(STORE.snapshots).clear();
-    t.objectStore(STORE.kv).put(meta, KV_META);
-    t.objectStore(STORE.kv).put(settings, KV_SETTINGS);
-    const store = t.objectStore(STORE.accounts);
-    for (const a of accounts) store.put(a);
-  });
+  await runWrite(
+    [STORE.kv, STORE.accounts, STORE.journalEntries, STORE.allocations, STORE.snapshots],
+    (t) => {
+      t.objectStore(STORE.kv).clear();
+      t.objectStore(STORE.accounts).clear();
+      t.objectStore(STORE.journalEntries).clear();
+      t.objectStore(STORE.allocations).clear();
+      t.objectStore(STORE.snapshots).clear();
+      t.objectStore(STORE.kv).put(meta, KV_META);
+      t.objectStore(STORE.kv).put(settings, KV_SETTINGS);
+      const store = t.objectStore(STORE.accounts);
+      for (const a of accounts) store.put(a);
+    },
+  );
 }
 
 /** 新規スナップショットの ID/時刻を採番する補助。 */

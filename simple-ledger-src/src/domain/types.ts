@@ -78,6 +78,39 @@ export interface EntryMetadata {
   /** reversal のとき、元仕訳の ID。 */
   reversalOfEntryId?: string;
   allocationPlan?: AllocationPlan;
+  /** 按分支出から生成された仕訳のとき、紐づく AllocationItem の ID。 */
+  allocationId?: string;
+  /** 按分仕訳の役割。source=原始仕訳 / recognition=月次認識仕訳。 */
+  allocationRole?: 'source' | 'recognition';
+}
+
+/** 按分支出（長期の生活コストを月割りで費用認識する）。 */
+export type AllocationStatus = 'active' | 'completed' | 'disposed' | 'settled';
+
+export interface AllocationItem {
+  id: string;
+  /** 表示名（例: PC）。 */
+  name: string;
+  /** 総額（最小通貨単位の整数）。 */
+  totalAmount: number;
+  /** 按分月数（2 以上）。 */
+  months: number;
+  /** 認識開始月 'YYYY-MM'。 */
+  startMonth: string;
+  /** 月次認識の費用カテゴリ。 */
+  expenseAccountId: string;
+  /** 支払元（asset または liability）。 */
+  paymentAccountId: string;
+  /** 按分中資産（繰延）科目。 */
+  deferredAccountId: string;
+  /** 原始仕訳（按分中資産 / 支払元）の ID。 */
+  sourceEntryId: string;
+  /** 月次認識仕訳の ID（months 件）。 */
+  recognitionEntryIds: string[];
+  /** MVP は active を基本。disposed/settled は次フェーズ。 */
+  status: AllocationStatus;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface JournalEntry {
@@ -132,6 +165,7 @@ export interface LedgerExportPackage {
   currentRevision: number;
   accounts: Account[];
   journalEntries: JournalEntry[];
+  allocations: AllocationItem[];
   settings: Settings;
 }
 
@@ -178,4 +212,5 @@ export interface Ledger {
   settings: Settings;
   accounts: Account[];
   journalEntries: JournalEntry[];
+  allocations: AllocationItem[];
 }

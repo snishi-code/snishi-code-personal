@@ -34,6 +34,8 @@ export const UI = {
       delete: 'journal.entry.delete',
       reverse: 'journal.entry.reverse',
       detailToggle: 'journal.entry.detailToggle',
+      allocateToggle: 'journal.entry.allocateToggle',
+      allocateMonths: 'journal.entry.allocateMonths',
       date: 'journal.entry.date',
       description: 'journal.entry.description',
       debitAccount: 'journal.entry.debitAccount',
@@ -56,6 +58,11 @@ export const UI = {
     create: 'accounts.create',
     save: 'accounts.save',
     list: 'accounts.list',
+  },
+  allocations: {
+    view: 'allocations.view',
+    list: 'allocations.list',
+    showCompleted: 'allocations.showCompleted',
   },
   settings: {
     view: 'settings.view',

@@ -31,6 +31,8 @@
 | `journal.entry.delete` | Journal 行の削除 | 削除 |
 | `journal.entry.reverse` | Journal 行の取消/返金 | 逆仕訳の起動 |
 | `journal.entry.detailToggle` | 詳細入力トグル | manual へ切替 |
+| `journal.entry.allocateToggle` | 按分するトグル | 按分支出に切替（支出のみ） |
+| `journal.entry.allocateMonths` | 按分月数 | 按分月数入力 |
 | `journal.entry.date` | Entry 日付 | 日付入力 |
 | `journal.entry.description` | Entry 摘要 | 摘要入力 |
 | `journal.entry.debitAccount` | Entry 借方役割のピッカー | 入金先/カテゴリ等（debit 側） |
@@ -42,6 +44,9 @@
 | `statements.balanceSheet` | BS コンテナ | 貸借対照表 |
 | `statements.tab.pl` / `statements.tab.bs` | セグメント | PL/BS 切替 |
 | `statements.row` | 科目行 | Journal へドリルダウン |
+| `allocations.view` | Allocations ルート | 按分台帳の検出 |
+| `allocations.list` | 按分台帳の一覧 | 按分項目一覧 |
+| `allocations.showCompleted` | 完了表示トグル | 完了分の表示切替 |
 | `accounts.view` | Accounts ルート | 勘定科目の検出 |
 | `accounts.create` | 科目追加ボタン | 追加起動 |
 | `accounts.save` | 科目シート保存 | 保存 |

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createAllocation,
   deleteAccount,
   deleteEntry,
   listSnapshots,
@@ -130,6 +131,50 @@ describe('科目区分(type)の変更ルール', () => {
     await upsertAccount({ ...food, name: '外食費', updatedAt: 'y' });
     const after = await loadLedger();
     expect(after.accounts.find((a) => a.id === food.id)?.name).toBe('外食費');
+  });
+});
+
+describe('按分支出 createAllocation', () => {
+  async function makeAlloc(months = 48, total = 240000) {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    await createAllocation({
+      date: '2026-06-15',
+      description: 'PC',
+      totalAmount: total,
+      months,
+      expenseAccountId: food.id,
+      paymentAccountId: cash.id,
+    });
+    return loadLedger();
+  }
+
+  it('原始仕訳 + 月次認識仕訳 + 按分中資産 + AllocationItem を単一操作で作る', async () => {
+    const before = await loadLedger();
+    const after = await makeAlloc(48);
+    expect(after.allocations).toHaveLength(1);
+    expect(after.allocations[0]?.months).toBe(48);
+    // 1 source + 48 recognition
+    expect(after.journalEntries).toHaveLength(49);
+    expect(after.accounts.some((a) => a.name === '按分中資産' && a.type === 'asset')).toBe(true);
+    // 単一トランザクションなので revision は 1 回だけ進む
+    expect(after.meta.revision).toBe(before.meta.revision + 1);
+  });
+
+  it('生成された仕訳は削除も上書きもできない（fail-closed）', async () => {
+    const after = await makeAlloc(3, 1000);
+    const gen = after.journalEntries.find((e) => e.metadata?.allocationId)!;
+    await expect(deleteEntry(gen.id)).rejects.toThrow();
+    await expect(upsertEntry({ ...gen, description: '改ざん' })).rejects.toThrow();
+  });
+
+  it('按分中資産は 2 回目以降に再利用される', async () => {
+    await makeAlloc(2, 1000);
+    await makeAlloc(2, 1000);
+    const after = await loadLedger();
+    expect(after.accounts.filter((a) => a.name === '按分中資産')).toHaveLength(1);
+    expect(after.allocations).toHaveLength(2);
   });
 });
 
