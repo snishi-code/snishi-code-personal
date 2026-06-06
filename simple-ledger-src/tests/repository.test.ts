@@ -4,6 +4,7 @@ import {
   createReserve,
   deleteAccount,
   deleteEntry,
+  deleteTag,
   listSnapshots,
   loadLedger,
   makeSnapshotId,
@@ -14,11 +15,12 @@ import {
   upsertAccount,
   upsertEntry,
   upsertSchedule,
+  upsertTag,
 } from '../src/data/repository';
 import { buildSimpleEntry } from '../src/domain/entry';
 import { buildExportPackage } from '../src/data/exportImport';
 import { newId } from '../src/domain/ids';
-import type { CashflowSchedule } from '../src/domain/types';
+import type { CashflowSchedule, Tag } from '../src/domain/types';
 
 async function addEntryRef(foodId: string, cashId: string) {
   await upsertEntry(
@@ -325,5 +327,66 @@ describe('予定CF・目的別資金が参照する科目の保護', () => {
     const entry = await postSchedule(s.id);
     await expect(deleteEntry(entry.id)).rejects.toThrow();
     await expect(upsertEntry({ ...entry, description: '改ざん' })).rejects.toThrow();
+  });
+});
+
+describe('タグ', () => {
+  function tag(): Tag {
+    return {
+      id: newId(),
+      name: '2026 北海道旅行',
+      scope: 'both',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+  }
+
+  it('未使用のタグは削除でき、使用中は削除できない', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    const tg = tag();
+    await upsertTag(tg);
+
+    // 未使用 → 別タグを作って削除できることを確認
+    const unused = { ...tag(), id: newId(), name: '一時' };
+    await upsertTag(unused);
+    await deleteTag(unused.id);
+    expect((await loadLedger()).tags.some((x) => x.id === unused.id)).toBe(false);
+
+    // tg を仕訳に付ける → 使用中で削除不可
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2026-06-01',
+        description: '旅行費',
+        debitAccountId: food.id,
+        creditAccountId: cash.id,
+        amount: 1000,
+        tagIds: [tg.id],
+      }),
+    );
+    await expect(deleteTag(tg.id)).rejects.toThrow();
+  });
+
+  it('明細タグを借方/貸方に付けて保存できる', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    const cardTag = { ...tag(), id: newId(), name: '楽天カード', scope: 'line' as const };
+    await upsertTag(cardTag);
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2026-06-01',
+        description: 'カード払い',
+        debitAccountId: food.id,
+        creditAccountId: cash.id,
+        amount: 2000,
+        creditTagIds: [cardTag.id],
+      }),
+    );
+    const after = await loadLedger();
+    const e = after.journalEntries.find((x) => x.description === 'カード払い')!;
+    expect(e.lines.find((l) => l.side === 'credit')?.tagIds).toEqual([cardTag.id]);
   });
 });

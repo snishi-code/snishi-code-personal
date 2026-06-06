@@ -31,13 +31,20 @@ export type IconName =
   | 'chevronDown'
   | 'reverse'
   | 'calendar'
-  | 'trending';
+  | 'trending'
+  | 'tag';
 
 const PATHS: Record<IconName, JSX.Element> = {
   trending: (
     <>
       <path d="M3 17l6-6 4 4 8-8" />
       <path d="M15 7h6v6" />
+    </>
+  ),
+  tag: (
+    <>
+      <path d="M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2v7.17a2 2 0 0 0 .59 1.42l8 8a2 2 0 0 0 2.82 0l7.17-7.17a2 2 0 0 0 0-2.82z" />
+      <path d="M7 7h.01" />
     </>
   ),
   income: (

@@ -18,6 +18,11 @@ export interface SimpleEntryInput {
   memo?: string;
   kind?: JournalEntryKind;
   metadata?: EntryMetadata;
+  /** 仕訳全体タグ。 */
+  tagIds?: string[];
+  /** 借方明細タグ / 貸方明細タグ。 */
+  debitTagIds?: string[];
+  creditTagIds?: string[];
 }
 
 export type EntryValidationError =
@@ -64,17 +69,20 @@ export function buildSimpleEntry(
 ): JournalEntry {
   const ts = nowIso();
   const metadata = cleanMetadata(input.metadata);
+  const debitTags = input.debitTagIds?.length ? { tagIds: input.debitTagIds } : {};
+  const creditTags = input.creditTagIds?.length ? { tagIds: input.creditTagIds } : {};
   return {
     id: existing?.id ?? newId(),
     date: input.date,
     description: input.description.trim(),
     lines: [
-      { accountId: input.debitAccountId, side: 'debit', amount: input.amount },
-      { accountId: input.creditAccountId, side: 'credit', amount: input.amount },
+      { accountId: input.debitAccountId, side: 'debit', amount: input.amount, ...debitTags },
+      { accountId: input.creditAccountId, side: 'credit', amount: input.amount, ...creditTags },
     ],
     ...(input.memo && input.memo.trim() !== '' ? { memo: input.memo.trim() } : {}),
     kind: input.kind ?? 'normal',
     ...(metadata ? { metadata } : {}),
+    ...(input.tagIds?.length ? { tagIds: input.tagIds } : {}),
     createdAt: existing?.createdAt ?? ts,
     updatedAt: ts,
   };
@@ -93,6 +101,9 @@ export function toSimpleInput(entry: JournalEntry): SimpleEntryInput {
     ...(entry.memo !== undefined ? { memo: entry.memo } : {}),
     kind: entry.kind,
     ...(entry.metadata ? { metadata: entry.metadata } : {}),
+    ...(entry.tagIds ? { tagIds: entry.tagIds } : {}),
+    ...(debit?.tagIds ? { debitTagIds: debit.tagIds } : {}),
+    ...(credit?.tagIds ? { creditTagIds: credit.tagIds } : {}),
   };
 }
 

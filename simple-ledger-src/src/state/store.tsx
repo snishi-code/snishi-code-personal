@@ -4,7 +4,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { Account, CashflowSchedule, Ledger, Settings, Snapshot } from '../domain/types';
+import type { Account, CashflowSchedule, Ledger, Settings, Snapshot, Tag } from '../domain/types';
 import { buildSimpleEntry, type SimpleEntryInput } from '../domain/entry';
 import type { AllocationInput } from '../domain/allocation';
 import * as repo from '../data/repository';
@@ -39,6 +39,8 @@ interface LedgerContextValue {
     existingAccountId?: string;
   }) => Promise<void>;
   removeReserve: (id: string) => Promise<void>;
+  saveTag: (tag: Tag) => Promise<void>;
+  removeTag: (id: string) => Promise<void>;
   saveAccount: (account: Account) => Promise<void>;
   removeAccount: (id: string) => Promise<void>;
   saveSettings: (settings: Settings) => Promise<void>;
@@ -198,6 +200,34 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [refresh, toast],
   );
 
+  const saveTag = useCallback<LedgerContextValue['saveTag']>(
+    async (tag) => {
+      try {
+        await repo.upsertTag(tag);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const removeTag = useCallback<LedgerContextValue['removeTag']>(
+    async (id) => {
+      try {
+        await repo.deleteTag(id);
+        await refresh();
+        toast.show(t('toast.deleted'), 'success');
+      } catch (e) {
+        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
   const saveAccount = useCallback<LedgerContextValue['saveAccount']>(
     async (account) => {
       try {
@@ -326,6 +356,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       removeSchedule,
       createReserve,
       removeReserve,
+      saveTag,
+      removeTag,
       saveAccount,
       removeAccount,
       saveSettings,
@@ -349,6 +381,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       removeSchedule,
       createReserve,
       removeReserve,
+      saveTag,
+      removeTag,
       saveAccount,
       removeAccount,
       saveSettings,

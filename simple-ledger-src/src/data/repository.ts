@@ -19,6 +19,7 @@ import type {
   ReserveItem,
   Settings,
   Snapshot,
+  Tag,
 } from '../domain/types';
 import { buildAllocation, type AllocationInput } from '../domain/allocation';
 import { buildScheduleEntry } from '../domain/cashflow';
@@ -55,7 +56,7 @@ export async function ensureInitialized(): Promise<void> {
 
 export async function loadLedger(): Promise<Ledger> {
   await ensureInitialized();
-  const [meta, settings, accounts, journalEntries, allocations, cashflowSchedules, reserves] =
+  const [meta, settings, accounts, journalEntries, allocations, cashflowSchedules, reserves, tags] =
     await Promise.all([
       getMeta(),
       getSettings(),
@@ -64,6 +65,7 @@ export async function loadLedger(): Promise<Ledger> {
       getAll<AllocationItem>(STORE.allocations),
       getAll<CashflowSchedule>(STORE.cashflowSchedules),
       getAll<ReserveItem>(STORE.reserves),
+      getAll<Tag>(STORE.tags),
     ]);
   if (!meta || !settings) throw new Error('台帳の初期化に失敗しました');
   // 一覧の安定した既定順: 仕訳は日付降順 → 作成降順。
@@ -74,7 +76,17 @@ export async function loadLedger(): Promise<Ledger> {
   // 予定 CF は期日昇順。
   cashflowSchedules.sort((a, b) => cmp(a.dueDate, b.dueDate));
   reserves.sort((a, b) => cmp(a.createdAt, b.createdAt));
-  return { meta, settings, accounts, journalEntries, allocations, cashflowSchedules, reserves };
+  tags.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+  return {
+    meta,
+    settings,
+    accounts,
+    journalEntries,
+    allocations,
+    cashflowSchedules,
+    reserves,
+    tags,
+  };
 }
 
 function cmp(a: string, b: string): number {
@@ -362,6 +374,44 @@ export async function createReserve(input: {
   return reserve;
 }
 
+/* ── タグ ── */
+
+function isTagReferenced(
+  id: string,
+  entries: JournalEntry[],
+  schedules: CashflowSchedule[],
+): boolean {
+  return (
+    entries.some((e) => e.tagIds?.includes(id) || e.lines.some((l) => l.tagIds?.includes(id))) ||
+    schedules.some(
+      (s) =>
+        s.entryTagIds?.includes(id) ||
+        s.accountLineTagIds?.includes(id) ||
+        s.counterLineTagIds?.includes(id),
+    )
+  );
+}
+
+export async function upsertTag(tag: Tag): Promise<void> {
+  await writeWithRevision([STORE.tags], (t) => {
+    t.objectStore(STORE.tags).put(tag);
+  });
+}
+
+/** 使用中のタグは物理削除できない（アーカイブを使う）。fail-closed。 */
+export async function deleteTag(id: string): Promise<void> {
+  const [entries, schedules] = await Promise.all([
+    getAll<JournalEntry>(STORE.journalEntries),
+    getAll<CashflowSchedule>(STORE.cashflowSchedules),
+  ]);
+  if (isTagReferenced(id, entries, schedules)) {
+    throw new Error('このタグは使用中のため削除できません。アーカイブしてください。');
+  }
+  await writeWithRevision([STORE.tags], (t) => {
+    t.objectStore(STORE.tags).delete(id);
+  });
+}
+
 /* ── 一括置換（import / restore で使う原子的操作） ── */
 
 export interface ReplacePayload {
@@ -372,6 +422,7 @@ export interface ReplacePayload {
   allocations: AllocationItem[];
   cashflowSchedules: CashflowSchedule[];
   reserves: ReserveItem[];
+  tags: Tag[];
 }
 
 /**
@@ -387,6 +438,7 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       STORE.allocations,
       STORE.cashflowSchedules,
       STORE.reserves,
+      STORE.tags,
     ],
     (t) => {
       const accounts = t.objectStore(STORE.accounts);
@@ -394,16 +446,19 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       const allocations = t.objectStore(STORE.allocations);
       const schedules = t.objectStore(STORE.cashflowSchedules);
       const reserves = t.objectStore(STORE.reserves);
+      const tags = t.objectStore(STORE.tags);
       accounts.clear();
       entries.clear();
       allocations.clear();
       schedules.clear();
       reserves.clear();
+      tags.clear();
       for (const a of payload.accounts) accounts.put(a);
       for (const e of payload.journalEntries) entries.put(e);
       for (const al of payload.allocations) allocations.put(al);
       for (const s of payload.cashflowSchedules) schedules.put(s);
       for (const r of payload.reserves) reserves.put(r);
+      for (const tag of payload.tags) tags.put(tag);
       t.objectStore(STORE.kv).put(payload.meta, KV_META);
       t.objectStore(STORE.kv).put(payload.settings, KV_SETTINGS);
     },
@@ -428,6 +483,7 @@ export async function resetAll(): Promise<void> {
       STORE.allocations,
       STORE.cashflowSchedules,
       STORE.reserves,
+      STORE.tags,
       STORE.snapshots,
     ],
     (t) => {
@@ -437,6 +493,7 @@ export async function resetAll(): Promise<void> {
       t.objectStore(STORE.allocations).clear();
       t.objectStore(STORE.cashflowSchedules).clear();
       t.objectStore(STORE.reserves).clear();
+      t.objectStore(STORE.tags).clear();
       t.objectStore(STORE.snapshots).clear();
       t.objectStore(STORE.kv).put(meta, KV_META);
       t.objectStore(STORE.kv).put(settings, KV_SETTINGS);

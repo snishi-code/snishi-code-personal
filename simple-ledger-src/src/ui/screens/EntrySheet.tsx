@@ -11,7 +11,9 @@ import { useState } from 'react';
 import { Modal } from '../Modal';
 import { TextArea, TextInput } from '../Field';
 import { AccountPicker } from '../AccountPicker';
+import { TagPicker } from '../TagPicker';
 import { groupedAccounts } from '../accountOptions';
+import { tagsForScope } from '../tagOptions';
 import { FORM_MODE_TITLE, MODE_ROLES, type FormMode } from '../entryModes';
 import { useLedger } from '../../state/store';
 import {
@@ -61,6 +63,7 @@ function errorText(
 export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => void }) {
   const { ledger, saveEntry, createAllocation } = useLedger();
   const accounts = ledger?.accounts ?? [];
+  const tags = ledger?.tags ?? [];
 
   const [mode, setMode] = useState<FormMode>(
     init.kind === 'create'
@@ -200,25 +203,58 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         dataUi={UI.journal.entry.description}
       />
 
+      <TagPicker
+        label={t('entry.tags')}
+        hint={t('entry.tagsHint')}
+        tags={tagsForScope(tags, 'entry', form.tagIds ?? [])}
+        value={form.tagIds ?? []}
+        onChange={(ids) => setForm((f) => ({ ...f, tagIds: ids }))}
+        dataUi={UI.journal.entry.tags}
+      />
+
       {roles.map((role) => {
         const value = role.side === 'debit' ? form.debitAccountId : form.creditAccountId;
         const reqErr = errorText(
           errors,
           role.side === 'debit' ? 'debit-required' : 'credit-required',
         );
+        const lineTagValue = (role.side === 'debit' ? form.debitTagIds : form.creditTagIds) ?? [];
+        const lineTagLabel =
+          mode === 'expense' && role.side === 'credit'
+            ? t('entry.paymentTags')
+            : role.side === 'debit'
+              ? t('entry.debitTags')
+              : t('entry.creditTags');
         return (
-          <AccountPicker
-            key={role.side}
-            label={t(role.labelKey)}
-            required
-            value={value}
-            groups={groupedAccounts(accounts, role.allowedTypes, value)}
-            onChange={(id) => setSide(role.side, id)}
-            error={reqErr ?? sameAccount}
-            dataUi={
-              role.side === 'debit' ? UI.journal.entry.debitAccount : UI.journal.entry.creditAccount
-            }
-          />
+          <div key={role.side}>
+            <AccountPicker
+              label={t(role.labelKey)}
+              required
+              value={value}
+              groups={groupedAccounts(accounts, role.allowedTypes, value)}
+              onChange={(id) => setSide(role.side, id)}
+              error={reqErr ?? sameAccount}
+              dataUi={
+                role.side === 'debit'
+                  ? UI.journal.entry.debitAccount
+                  : UI.journal.entry.creditAccount
+              }
+            />
+            <TagPicker
+              label={lineTagLabel}
+              tags={tagsForScope(tags, 'line', lineTagValue)}
+              value={lineTagValue}
+              onChange={(ids) =>
+                setForm((f) => ({
+                  ...f,
+                  [role.side === 'debit' ? 'debitTagIds' : 'creditTagIds']: ids,
+                }))
+              }
+              dataUi={
+                role.side === 'debit' ? UI.journal.entry.debitTags : UI.journal.entry.creditTags
+              }
+            />
+          </div>
         );
       })}
 

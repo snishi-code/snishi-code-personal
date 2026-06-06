@@ -31,6 +31,7 @@ export function buildExportPackage(ledger: Ledger): LedgerExportPackage {
     allocations: ledger.allocations,
     cashflowSchedules: ledger.cashflowSchedules,
     reserves: ledger.reserves,
+    tags: ledger.tags,
     settings: ledger.settings,
   };
 }
@@ -165,6 +166,7 @@ export async function importFromJsonText(
     allocations: pkg.allocations,
     cashflowSchedules: pkg.cashflowSchedules,
     reserves: pkg.reserves,
+    tags: pkg.tags,
   });
 
   const ledger = await loadLedger();
@@ -198,6 +200,7 @@ export async function restoreFromSnapshot(snapshotData: LedgerExportPackage): Pr
     allocations: snapshotData.allocations,
     cashflowSchedules: snapshotData.cashflowSchedules,
     reserves: snapshotData.reserves,
+    tags: snapshotData.tags,
   });
   return loadLedger();
 }

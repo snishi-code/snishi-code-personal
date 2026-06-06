@@ -16,25 +16,33 @@
 ```jsonc
 {
   "appId": "snishi-code.simple-ledger",
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "ledgerId": "ledger",
   "exportedAt": "2026-06-06T00:00:00.000Z",
   "deviceId": "<uuid>",
   "baseRevision": 12,      // このエクスポートが基づくリビジョン
   "currentRevision": 12,   // エクスポート時点のリビジョン
   "accounts": [ /* Account[] */ ],
-  "journalEntries": [ /* JournalEntry[] */ ],
+  "journalEntries": [ /* JournalEntry[]（tagIds / lines[].tagIds 付き） */ ],
   "allocations": [ /* AllocationItem[]（按分支出） */ ],
   "cashflowSchedules": [ /* CashflowSchedule[]（予定キャッシュフロー） */ ],
   "reserves": [ /* ReserveItem[]（目的別資金） */ ],
+  "tags": [ /* Tag[]（分析タグ） */ ],
   "settings": { "ledgerName": "家計簿", "currency": "JPY", "locale": "ja" }
 }
 ```
 
-- `schemaVersion`: スキーマ版。現行は **`3`**（v1→v2 で `allocations`、v2→v3 で
-  `cashflowSchedules` / `reserves` を追加）。
-- `revision`: 端末ローカルの編集追跡。保存（仕訳/科目/設定/按分/予定CF/目的別資金）のたびに +1。
+- `schemaVersion`: スキーマ版。現行は **`4`**（v1→v2 `allocations`、v2→v3
+  `cashflowSchedules`/`reserves`、v3→v4 `tags` を追加）。
+- `revision`: 端末ローカルの編集追跡。保存（仕訳/科目/設定/按分/予定CF/目的別資金/タグ）のたびに +1。
 - 金額（`JournalLine.amount`）は **正の整数・最小通貨単位**（JPY なら円）。
+
+### `Tag`（分析タグ）
+
+`id` / `name` / `scope`('entry'|'line'|'both') / `color?` / `archived`。勘定科目を増やさずに
+旅行・カード名・銀行名などで抽出する分析軸。**PL/BS は変えない**。`JournalEntry.tagIds`（全体タグ、
+scope entry|both）、`JournalLine.tagIds`（明細タグ、scope line|both）、`CashflowSchedule` の
+`entryTagIds`/`accountLineTagIds`/`counterLineTagIds`（実績化時に仕訳へコピー）。
 
 ### `CashflowSchedule`（予定キャッシュフロー）/ `ReserveItem`（目的別資金）
 
@@ -92,6 +100,8 @@
 - **`cashflowSchedules[]`**: `id` 一意。`accountId` は asset、`counterAccountId?` は存在する科目、
   `status: 'posted'` は存在する `linkedEntryId` を持つ。
 - **`reserves[]`**: `id` 一意。`reserveAccountId` は asset。
+- **`tags[]`**: `id` 一意・active な同名重複なし。`tagIds` 参照は存在必須かつ scope 整合
+  （全体タグ欄=entry|both、明細タグ欄=line|both）。仕訳・予定CF のタグ欄も同様に検証。
 
 ### revision の原子性
 
@@ -121,15 +131,16 @@ revision は import の競合判定に使うため、本体と必ず歩調を合
 
 ## migration ポリシー
 
-- `schemaVersion` を必ず持つ。現行は `3`。
+- `schemaVersion` を必ず持つ。現行は `4`。
 - migration 関数の置き場は `src/domain/migrations.ts` の `STEPS`（`{ from, to, migrate }`）。
   - **v1 → v2**: `allocations: []` を補う（v1 JSON は按分を持たない）。
   - **v2 → v3**: `cashflowSchedules: []` / `reserves: []` を補う。
+  - **v3 → v4**: `tags: []` を補う。
 - 未対応版は **fail-closed**（取り込まない）。
 - migration 失敗時は既存データを保持し、UI に失敗を通知する（握りつぶさない）。
 - version を上げるときは `SCHEMA_VERSION` を +1 し、`STEPS` に旧→新の手順を追加する。
   IndexedDB も `DB_VERSION` を上げ、`onupgradeneeded` でストアを追加する（v2 で `allocations`、
-  v3 で `cashflowSchedules` / `reserves` を追加）。
+  v3 で `cashflowSchedules` / `reserves`、v4 で `tags` を追加）。
 
 ## 外部送信ゼロとの関係
 

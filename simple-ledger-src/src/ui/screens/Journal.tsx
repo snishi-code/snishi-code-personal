@@ -10,6 +10,8 @@ import { ConfirmDialog } from '../ConfirmDialog';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import { todayLocal } from '../../util/time';
+import { entryHasTag } from '../../domain/tags';
+import { tagNames } from '../tagOptions';
 import type { Account, JournalEntry } from '../../domain/types';
 
 export interface JournalFilter {
@@ -42,6 +44,7 @@ export function Journal({
   const [to, setTo] = useState(filter?.to ?? '');
   // 既定では未来の按分認識仕訳を隠す（今日まで）。トグルで将来予定も表示。
   const [showFuture, setShowFuture] = useState(false);
+  const [tagFilter, setTagFilter] = useState('');
   const [pendingDelete, setPendingDelete] = useState<JournalEntry | null>(null);
 
   // PL からのドリルダウンで期間が渡されたら、日付絞り込みに反映する。
@@ -59,10 +62,13 @@ export function Journal({
   // 上限日: 明示 to があれば優先。無ければ既定は今日まで（showFuture で解除）。
   const effectiveTo = to !== '' ? to : showFuture ? '' : todayLocal();
 
+  const allTags = ledger?.tags ?? [];
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (ledger?.journalEntries ?? []).filter((e) => {
       if (accountFilterId && !e.lines.some((l) => l.accountId === accountFilterId)) return false;
+      if (tagFilter && !entryHasTag(e, tagFilter)) return false;
       if (from && e.date < from) return false;
       if (effectiveTo && e.date > effectiveTo) return false;
       if (q) {
@@ -71,7 +77,7 @@ export function Journal({
       }
       return true;
     });
-  }, [ledger, query, from, effectiveTo, accountFilterId]);
+  }, [ledger, query, from, effectiveTo, accountFilterId, tagFilter]);
 
   const hasDateOrQuery = query !== '' || from !== '' || to !== '';
 
@@ -110,6 +116,30 @@ export function Journal({
           onChange={(e) => setQuery(e.target.value)}
           data-ui={UI.journal.search}
         />
+        {allTags.length > 0 ? (
+          <>
+            <label className="sr-only" htmlFor="journal-tag">
+              {t('journal.filterTag')}
+            </label>
+            <select
+              id="journal-tag"
+              className="select"
+              value={tagFilter}
+              aria-label={t('journal.filterTag')}
+              onChange={(e) => setTagFilter(e.target.value)}
+              data-ui={UI.journal.filterTag}
+            >
+              <option value="">{t('journal.allTags')}</option>
+              {allTags
+                .filter((tg) => !tg.archived || tg.id === tagFilter)
+                .map((tg) => (
+                  <option key={tg.id} value={tg.id}>
+                    {tg.name}
+                  </option>
+                ))}
+            </select>
+          </>
+        ) : null}
       </div>
       <div className="toolbar">
         <label className="sr-only" htmlFor="journal-from">
@@ -178,6 +208,11 @@ export function Journal({
         <ul className="card list" data-ui={UI.journal.list}>
           {filtered.map((entry) => {
             const generated = !!entry.metadata?.allocationId;
+            const entryTagNames = tagNames(allTags, entry.tagIds);
+            const lineTagNames = tagNames(
+              allTags,
+              entry.lines.flatMap((l) => l.tagIds ?? []),
+            );
             const title = (
               <>
                 <div className="list__title">
@@ -195,6 +230,20 @@ export function Journal({
                 <div className="list__sub">
                   {entry.date}・{flowText(map, entry)}
                 </div>
+                {entryTagNames.length > 0 || lineTagNames.length > 0 ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                    {entryTagNames.map((n) => (
+                      <span key={`e-${n}`} className="tag tag--teal">
+                        {n}
+                      </span>
+                    ))}
+                    {lineTagNames.map((n) => (
+                      <span key={`l-${n}`} className="tag tag--neutral">
+                        {n}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
               </>
             );
             return (

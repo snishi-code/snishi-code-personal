@@ -77,6 +77,7 @@ describe('ledgerExportPackageSchema', () => {
     allocations: [],
     cashflowSchedules: [],
     reserves: [],
+    tags: [],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
   };
 
@@ -153,6 +154,7 @@ describe('entry metadata / allocationPlan', () => {
       allocations: [],
       cashflowSchedules: [],
       reserves: [],
+      tags: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
     const parsed = ledgerExportPackageSchema.safeParse(pkg);
@@ -205,6 +207,7 @@ describe('allocationPlan の参照整合性（package 検証）', () => {
       allocations: [],
       cashflowSchedules: [],
       reserves: [],
+      tags: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
   }
@@ -283,6 +286,7 @@ describe('按分(allocations) の深い整合性検証（package）', () => {
       allocations: [built.item],
       cashflowSchedules: [],
       reserves: [],
+      tags: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
       ...overrides,
     };
@@ -394,6 +398,7 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
       reserves: [
         { id: 'r1', name: '結婚資金', reserveAccountId: 'bank', createdAt: 'x', updatedAt: 'x' },
       ],
+      tags: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
       ...over,
     };
@@ -464,6 +469,129 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
           updatedAt: 'x',
         },
       ],
+    });
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+});
+
+describe('タグ(tags) の scope・参照検証（package）', () => {
+  const acc = (id: string, type: string) => ({
+    id,
+    name: id,
+    type,
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  });
+  function tagPkg(over: Record<string, unknown> = {}) {
+    return {
+      appId: APP_ID,
+      schemaVersion: SCHEMA_VERSION,
+      ledgerId: 'ledger',
+      exportedAt: '2026-06-01T00:00:00.000Z',
+      deviceId: 'd',
+      baseRevision: 0,
+      currentRevision: 0,
+      accounts: [acc('food', 'expense'), acc('cash', 'asset')],
+      journalEntries: [
+        {
+          id: 'e1',
+          date: '2026-06-01',
+          description: 'x',
+          kind: 'normal',
+          tagIds: ['trip'],
+          lines: [
+            { accountId: 'food', side: 'debit', amount: 1000, tagIds: ['card'] },
+            { accountId: 'cash', side: 'credit', amount: 1000 },
+          ],
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+      allocations: [],
+      cashflowSchedules: [],
+      reserves: [],
+      tags: [
+        {
+          id: 'trip',
+          name: '旅行',
+          scope: 'entry',
+          archived: false,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+        {
+          id: 'card',
+          name: 'カード',
+          scope: 'line',
+          archived: false,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+      settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
+      ...over,
+    };
+  }
+
+  it('scope 通りのタグ付けは valid', () => {
+    expect(ledgerExportPackageSchema.safeParse(tagPkg()).success).toBe(true);
+  });
+  it('全体タグ欄に明細専用タグを使うと invalid', () => {
+    const bad = tagPkg({
+      journalEntries: [
+        {
+          id: 'e1',
+          date: '2026-06-01',
+          description: 'x',
+          kind: 'normal',
+          tagIds: ['card'], // card は scope:line
+          lines: [
+            { accountId: 'food', side: 'debit', amount: 1000 },
+            { accountId: 'cash', side: 'credit', amount: 1000 },
+          ],
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+    });
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+  it('存在しないタグ参照は invalid', () => {
+    const bad = tagPkg({
+      journalEntries: [
+        {
+          id: 'e1',
+          date: '2026-06-01',
+          description: 'x',
+          kind: 'normal',
+          tagIds: ['nope'],
+          lines: [
+            { accountId: 'food', side: 'debit', amount: 1000 },
+            { accountId: 'cash', side: 'credit', amount: 1000 },
+          ],
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+    });
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+  it('有効な同名タグの重複は invalid', () => {
+    const bad = tagPkg({
+      tags: [
+        { id: 't1', name: '旅行', scope: 'entry', archived: false, createdAt: 'x', updatedAt: 'x' },
+        { id: 't2', name: '旅行', scope: 'entry', archived: false, createdAt: 'x', updatedAt: 'x' },
+        {
+          id: 'card',
+          name: 'カード',
+          scope: 'line',
+          archived: false,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+      journalEntries: [],
     });
     expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
   });

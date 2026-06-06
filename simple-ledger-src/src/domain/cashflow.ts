@@ -36,16 +36,25 @@ export function buildScheduleEntry(schedule: CashflowSchedule): JournalEntry {
   // inflow（現金が入る）:       借方 asset   / 貸方 counter
   const debit = schedule.direction === 'outflow' ? counter : asset;
   const credit = schedule.direction === 'outflow' ? asset : counter;
+  // 各明細タグは「口座側 / 相手科目側」を口座 ID で判定して付け替える。
+  const lineTags = (accountId: string): { tagIds?: string[] } => {
+    if (accountId === asset && schedule.accountLineTagIds?.length)
+      return { tagIds: schedule.accountLineTagIds };
+    if (accountId === counter && schedule.counterLineTagIds?.length)
+      return { tagIds: schedule.counterLineTagIds };
+    return {};
+  };
   return {
     id: newId(),
     date: schedule.dueDate,
     description: schedule.title,
     kind: 'normal',
     lines: [
-      { accountId: debit, side: 'debit', amount: schedule.amount },
-      { accountId: credit, side: 'credit', amount: schedule.amount },
+      { accountId: debit, side: 'debit', amount: schedule.amount, ...lineTags(debit) },
+      { accountId: credit, side: 'credit', amount: schedule.amount, ...lineTags(credit) },
     ],
     metadata: { inputMode: 'manual' },
+    ...(schedule.entryTagIds?.length ? { tagIds: schedule.entryTagIds } : {}),
     createdAt: ts,
     updatedAt: ts,
   };

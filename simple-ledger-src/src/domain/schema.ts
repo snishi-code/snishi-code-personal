@@ -33,10 +33,25 @@ export const accountSchema = z.object({
   updatedAt: isoDateTime,
 });
 
+const tagIdList = z.array(z.string().min(1));
+
 export const journalLineSchema = z.object({
   accountId: z.string().min(1),
   side: sideSchema,
   amount: amountSchema,
+  tagIds: tagIdList.optional(),
+});
+
+export const tagScopeSchema = z.enum(['entry', 'line', 'both']);
+
+export const tagSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(60),
+  scope: tagScopeSchema,
+  color: z.string().min(1).max(40).optional(),
+  archived: z.boolean(),
+  createdAt: isoDateTime,
+  updatedAt: isoDateTime,
 });
 
 export const inputModeSchema = z.enum(['income', 'expense', 'transfer', 'manual', 'reversal']);
@@ -88,6 +103,9 @@ export const cashflowScheduleSchema = z.object({
   source: z.enum(['manual', 'credit-card', 'installment', 'reserve']),
   status: z.enum(['planned', 'posted', 'cancelled']),
   linkedEntryId: z.string().min(1).optional(),
+  entryTagIds: tagIdList.optional(),
+  accountLineTagIds: tagIdList.optional(),
+  counterLineTagIds: tagIdList.optional(),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
 });
@@ -111,6 +129,7 @@ export const journalEntrySchema = z
     memo: z.string().max(1000).optional(),
     kind: z.enum(['normal', 'opening']),
     metadata: entryMetadataSchema.optional(),
+    tagIds: tagIdList.optional(),
     createdAt: isoDateTime,
     updatedAt: isoDateTime,
   })
@@ -162,6 +181,7 @@ export const ledgerExportPackageSchema = z
     allocations: z.array(allocationItemSchema),
     cashflowSchedules: z.array(cashflowScheduleSchema),
     reserves: z.array(reserveItemSchema),
+    tags: z.array(tagSchema),
     settings: settingsSchema,
   })
   .superRefine((pkg, ctx) => {
@@ -408,6 +428,48 @@ export const ledgerExportPackageSchema = z
           `目的別資金「${r.name}」の科目は資産科目である必要があります`,
           at('reserveAccountId'),
         );
+    });
+
+    // タグ(tags): id 一意 + active な同名重複なし + scope マップ。
+    const tagScope = new Map<string, 'entry' | 'line' | 'both'>();
+    const activeNames = new Set<string>();
+    pkg.tags.forEach((tag, ti) => {
+      if (tagScope.has(tag.id)) issue(`タグ ID が重複しています(${tag.id})`, ['tags', ti, 'id']);
+      tagScope.set(tag.id, tag.scope);
+      if (!tag.archived) {
+        if (activeNames.has(tag.name))
+          issue(`同名の有効なタグが重複しています(${tag.name})`, ['tags', ti, 'name']);
+        activeNames.add(tag.name);
+      }
+    });
+
+    const allowsEntry = (id: string) => tagScope.get(id) === 'entry' || tagScope.get(id) === 'both';
+    const allowsLine = (id: string) => tagScope.get(id) === 'line' || tagScope.get(id) === 'both';
+
+    const checkTags = (
+      ids: string[] | undefined,
+      kind: 'entry' | 'line',
+      path: (string | number)[],
+    ) => {
+      ids?.forEach((id, i) => {
+        if (!tagScope.has(id)) issue(`存在しないタグ(${id})を参照しています`, [...path, i]);
+        else if (kind === 'entry' && !allowsEntry(id))
+          issue(`全体タグに使えないタグ(${id})です`, [...path, i]);
+        else if (kind === 'line' && !allowsLine(id))
+          issue(`明細タグに使えないタグ(${id})です`, [...path, i]);
+      });
+    };
+
+    pkg.journalEntries.forEach((e, ei) => {
+      checkTags(e.tagIds, 'entry', ['journalEntries', ei, 'tagIds']);
+      e.lines.forEach((l, li) =>
+        checkTags(l.tagIds, 'line', ['journalEntries', ei, 'lines', li, 'tagIds']),
+      );
+    });
+    pkg.cashflowSchedules.forEach((s, si) => {
+      checkTags(s.entryTagIds, 'entry', ['cashflowSchedules', si, 'entryTagIds']);
+      checkTags(s.accountLineTagIds, 'line', ['cashflowSchedules', si, 'accountLineTagIds']);
+      checkTags(s.counterLineTagIds, 'line', ['cashflowSchedules', si, 'counterLineTagIds']);
     });
   });
 

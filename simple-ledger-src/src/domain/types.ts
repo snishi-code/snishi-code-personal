@@ -37,6 +37,28 @@ export interface JournalLine {
   side: Side;
   /** 正の整数（最小通貨単位）。 */
   amount: number;
+  /** 明細タグ（楽天カード・楽天銀行など、借方/貸方側に付く補助タグ）。scope: line|both。 */
+  tagIds?: string[];
+}
+
+/**
+ * タグ。勘定科目を増やさずに、旅行・イベント・カード名・銀行名などを後から抽出する分析軸。
+ * PL/BS の会計ロジックは変えない。
+ *  - scope=entry: 仕訳全体タグ（旅行・学会 等）
+ *  - scope=line:  明細タグ（カード名・銀行名 等、借方/貸方側に付く）
+ *  - scope=both:  どちらにも付けられる
+ */
+export type TagScope = 'entry' | 'line' | 'both';
+
+export interface Tag {
+  id: string;
+  name: string;
+  scope: TagScope;
+  /** 表示色（CSS トークン名など）。任意。 */
+  color?: string;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /**
@@ -138,6 +160,10 @@ export interface CashflowSchedule {
   status: CashflowStatus;
   /** posted のとき、作成された仕訳の ID。 */
   linkedEntryId?: string;
+  /** 実績化時に仕訳へコピーするタグ。 */
+  entryTagIds?: string[];
+  accountLineTagIds?: string[];
+  counterLineTagIds?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -166,6 +192,8 @@ export interface JournalEntry {
   kind: JournalEntryKind;
   /** 付帯情報（入力方法・逆仕訳リンク・按分計画など）。任意。 */
   metadata?: EntryMetadata;
+  /** 仕訳全体タグ（旅行・学会・プロポーズ等）。scope: entry|both。 */
+  tagIds?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -210,6 +238,7 @@ export interface LedgerExportPackage {
   allocations: AllocationItem[];
   cashflowSchedules: CashflowSchedule[];
   reserves: ReserveItem[];
+  tags: Tag[];
   settings: Settings;
 }
 
@@ -259,4 +288,5 @@ export interface Ledger {
   allocations: AllocationItem[];
   cashflowSchedules: CashflowSchedule[];
   reserves: ReserveItem[];
+  tags: Tag[];
 }

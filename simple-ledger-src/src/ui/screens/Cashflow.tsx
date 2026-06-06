@@ -15,11 +15,14 @@ import type {
   CashflowSchedule,
   CashflowSource,
   ReserveItem,
+  Tag,
 } from '../../domain/types';
 import { Modal } from '../Modal';
 import { AccountPicker } from '../AccountPicker';
+import { TagPicker } from '../TagPicker';
 import { SelectInput, TextArea, TextInput } from '../Field';
 import { groupedAccounts } from '../accountOptions';
+import { tagsForScope } from '../tagOptions';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { Money } from '../money';
 import { Icon } from '../Icon';
@@ -286,6 +289,7 @@ export function Cashflow() {
       {scheduleOpen ? (
         <ScheduleSheet
           accounts={ledger?.accounts ?? []}
+          tags={ledger?.tags ?? []}
           onClose={() => setScheduleOpen(false)}
           onSave={async (list) => {
             await saveSchedules(list).catch(() => undefined);
@@ -342,10 +346,12 @@ export function Cashflow() {
 
 function ScheduleSheet({
   accounts,
+  tags,
   onClose,
   onSave,
 }: {
   accounts: { id: string; name: string; type: string; archived: boolean }[];
+  tags: Tag[];
   onClose: () => void;
   onSave: (list: CashflowSchedule[]) => void;
 }) {
@@ -357,6 +363,9 @@ function ScheduleSheet({
   const [counterAccountId, setCounterAccountId] = useState('');
   const [source, setSource] = useState<CashflowSource>('manual');
   const [installmentsText, setInstallmentsText] = useState('2');
+  const [entryTagIds, setEntryTagIds] = useState<string[]>([]);
+  const [accountTagIds, setAccountTagIds] = useState<string[]>([]);
+  const [counterTagIds, setCounterTagIds] = useState<string[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
@@ -383,6 +392,11 @@ function ScheduleSheet({
   function build(): CashflowSchedule[] {
     const ts = nowIso();
     const counter = counterAccountId ? { counterAccountId } : {};
+    const tagFields = {
+      ...(entryTagIds.length ? { entryTagIds } : {}),
+      ...(accountTagIds.length ? { accountLineTagIds: accountTagIds } : {}),
+      ...(counterTagIds.length ? { counterLineTagIds: counterTagIds } : {}),
+    };
     if (source === 'installment' && installments >= 2) {
       const amts = monthlyAmounts(amount, installments);
       const day = dueDate.slice(8, 10);
@@ -395,6 +409,7 @@ function ScheduleSheet({
         direction,
         accountId,
         ...counter,
+        ...tagFields,
         source: 'installment',
         status: 'planned',
         createdAt: ts,
@@ -410,6 +425,7 @@ function ScheduleSheet({
         direction,
         accountId,
         ...counter,
+        ...tagFields,
         source,
         status: 'planned',
         createdAt: ts,
@@ -500,6 +516,24 @@ function ScheduleSheet({
         groups={counterGroups}
         onChange={setCounterAccountId}
         dataUi={UI.cashflow.scheduleCounter}
+      />
+      <TagPicker
+        label={t('cashflow.form.entryTags')}
+        tags={tagsForScope(tags, 'entry', entryTagIds)}
+        value={entryTagIds}
+        onChange={setEntryTagIds}
+      />
+      <TagPicker
+        label={t('cashflow.form.accountTags')}
+        tags={tagsForScope(tags, 'line', accountTagIds)}
+        value={accountTagIds}
+        onChange={setAccountTagIds}
+      />
+      <TagPicker
+        label={t('cashflow.form.counterTags')}
+        tags={tagsForScope(tags, 'line', counterTagIds)}
+        value={counterTagIds}
+        onChange={setCounterTagIds}
       />
       <SelectInput
         label={t('cashflow.form.source')}

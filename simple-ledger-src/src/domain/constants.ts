@@ -3,5 +3,6 @@ export const APP_ID = 'snishi-code.simple-ledger' as const;
 
 /** 現行スキーマ版。互換性のない変更ごとに +1 し、migrations を追加する。
  *  v1 → v2: 按分支出（allocations）を追加。
- *  v2 → v3: 予定キャッシュフロー（cashflowSchedules）と目的別資金（reserves）を追加。 */
-export const SCHEMA_VERSION = 3 as const;
+ *  v2 → v3: 予定キャッシュフロー（cashflowSchedules）と目的別資金（reserves）を追加。
+ *  v3 → v4: タグ（tags）を追加。 */
+export const SCHEMA_VERSION = 4 as const;

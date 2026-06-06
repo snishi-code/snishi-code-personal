@@ -122,6 +122,33 @@ test('資金繰り: 予定と目的別資金を作成できる', async ({ page }
   await expect(page.locator(ui('cashflow.reserve.list'))).toContainText('結婚資金');
 });
 
+test('タグ: 作成 → 支出に付与 → Journal で抽出できる', async ({ page }) => {
+  await page.goto('./');
+
+  // タグ画面でタグを作成
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.tags')).click();
+  await page.locator(ui('tags.create')).click();
+  await page.locator(ui('tags.name')).fill('北海道旅行');
+  await page.locator(ui('tags.save')).click();
+  await expect(page.locator(ui('tags.list'))).toContainText('北海道旅行');
+
+  // 支出にタグを付与
+  await page.locator(ui('nav.home')).click();
+  await page.locator(ui('dashboard.entry.expense')).click();
+  await page.locator(ui('journal.entry.description')).fill('旅行の食事');
+  await pick(page, 'journal.entry.debitAccount', '食費');
+  await pick(page, 'journal.entry.creditAccount', '現金');
+  await page.locator(ui('journal.entry.amount')).fill('5000');
+  await page.locator(ui('journal.entry.tags')).getByText('北海道旅行', { exact: true }).click();
+  await page.locator(ui('journal.entry.save')).click();
+
+  // Journal でタグ絞り込み
+  await openJournal(page);
+  await page.locator(ui('journal.filter.tag')).selectOption({ label: '北海道旅行' });
+  await expect(page.locator(ui('journal.entry.list'))).toContainText('旅行の食事');
+});
+
 test('損益計算書の科目から仕訳一覧へドリルダウンできる', async ({ page }) => {
   await page.goto('./');
   await addExpense(page, 'コーヒー', '500');

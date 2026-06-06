@@ -48,6 +48,12 @@ const STEPS: Step[] = [
       reserves: Array.isArray(pkg.reserves) ? pkg.reserves : [],
     }),
   },
+  {
+    // v3 → v4: タグを追加。v3 JSON には無いので空配列を付ける。
+    from: 3,
+    to: 4,
+    migrate: (pkg) => ({ ...pkg, tags: Array.isArray(pkg.tags) ? pkg.tags : [] }),
+  },
 ];
 
 /**
