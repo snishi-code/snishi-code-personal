@@ -229,16 +229,18 @@ export async function deleteAccount(id: string): Promise<void> {
 const GENERATED_ENTRY_MSG =
   '按分から生成された仕訳は編集・削除できません。按分台帳で管理してください。';
 
+const MONTHLY_COST_ENTRY_MSG =
+  '月額化コストから生成された仕訳は直接編集・削除できません。月額化コスト画面で管理してください。';
+
 const LINKED_ENTRY_MSG =
   '実績化済みの予定に紐づく仕訳は編集・削除できません。資金繰りの予定から操作してください。';
 
-/** 按分生成仕訳（allocationId 付き）は通常の編集・削除では壊せない。fail-closed。 */
-async function assertNotAllocationEntry(id: string): Promise<void> {
+/** 生成仕訳（按分=allocationId / 月額化=monthlyCostId 付き）は通常の編集・削除では壊せない。fail-closed。 */
+async function assertNotGeneratedEntry(id: string): Promise<void> {
   const entries = await getAll<JournalEntry>(STORE.journalEntries);
   const target = entries.find((e) => e.id === id);
-  if (target?.metadata?.allocationId) {
-    throw new Error(GENERATED_ENTRY_MSG);
-  }
+  if (target?.metadata?.allocationId) throw new Error(GENERATED_ENTRY_MSG);
+  if (target?.metadata?.monthlyCostId) throw new Error(MONTHLY_COST_ENTRY_MSG);
 }
 
 /** 実績化済み予定の linkedEntry は通常の編集・削除では壊せない。fail-closed。 */
@@ -261,10 +263,12 @@ async function assertEntryTagsValid(entry: JournalEntry): Promise<void> {
 }
 
 export async function upsertEntry(entry: JournalEntry): Promise<void> {
-  // 既存が按分生成仕訳/予定リンク仕訳なら上書き禁止。新規入力に allocationId は付かない。
-  await assertNotAllocationEntry(entry.id);
+  // 既存が生成仕訳/予定リンク仕訳なら上書き禁止。
+  await assertNotGeneratedEntry(entry.id);
   await assertNotScheduleLinked(entry.id);
+  // ユーザー入力から生成メタ（allocationId / monthlyCostId）を持つ仕訳は作れない。
   if (entry.metadata?.allocationId) throw new Error(GENERATED_ENTRY_MSG);
+  if (entry.metadata?.monthlyCostId) throw new Error(MONTHLY_COST_ENTRY_MSG);
   await assertEntryTagsValid(entry);
   await writeWithRevision([STORE.journalEntries], (t) => {
     t.objectStore(STORE.journalEntries).put(entry);
@@ -272,7 +276,7 @@ export async function upsertEntry(entry: JournalEntry): Promise<void> {
 }
 
 export async function deleteEntry(id: string): Promise<void> {
-  await assertNotAllocationEntry(id);
+  await assertNotGeneratedEntry(id);
   await assertNotScheduleLinked(id);
   await writeWithRevision([STORE.journalEntries], (t) => {
     t.objectStore(STORE.journalEntries).delete(id);
@@ -715,6 +719,7 @@ export async function createMonthlyCost(input: MonthlyCostInput): Promise<Monthl
         counterAccountId: input.paymentAccountId,
         source: 'installment',
         status: 'planned',
+        monthlyCostId: item.id,
         createdAt: ts,
         updatedAt: ts,
       });
@@ -741,10 +746,34 @@ export async function upsertMonthlyCost(item: MonthlyCostItem): Promise<void> {
   });
 }
 
+/**
+ * 月額化コストを削除する。関連（負債計上の購入仕訳・返済 CF）も一括で扱う fail-closed。
+ *  - 返済 CF が 1 件でも実績化(posted)済みなら、立てた負債が取り崩し済みのため物理削除は禁止。
+ *    `status='ended'` で終了させること（履歴と整合を壊さない）。
+ *  - すべて未実績なら、購入仕訳・未実績 CF・本体を 1 トランザクションで同時削除する（孤立を残さない）。
+ */
 export async function deleteMonthlyCost(id: string): Promise<void> {
-  await writeWithRevision([STORE.monthlyCostItems], (t) => {
-    t.objectStore(STORE.monthlyCostItems).delete(id);
-  });
+  const [entries, schedules] = await Promise.all([
+    getAll<JournalEntry>(STORE.journalEntries),
+    getAll<CashflowSchedule>(STORE.cashflowSchedules),
+  ]);
+  const relatedSchedules = schedules.filter((s) => s.monthlyCostId === id);
+  const relatedEntries = entries.filter((e) => e.metadata?.monthlyCostId === id);
+  if (relatedSchedules.some((s) => s.status === 'posted')) {
+    throw new Error(
+      '返済が実績化済みのため削除できません。月額化コスト画面で「終了」にしてください。',
+    );
+  }
+  await writeWithRevision(
+    [STORE.monthlyCostItems, STORE.cashflowSchedules, STORE.journalEntries],
+    (t) => {
+      t.objectStore(STORE.monthlyCostItems).delete(id);
+      const sStore = t.objectStore(STORE.cashflowSchedules);
+      for (const s of relatedSchedules) sStore.delete(s.id);
+      const eStore = t.objectStore(STORE.journalEntries);
+      for (const e of relatedEntries) eStore.delete(e.id);
+    },
+  );
 }
 
 /* ── 一括置換（import / restore で使う原子的操作） ── */

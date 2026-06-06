@@ -134,6 +134,7 @@ export const cashflowScheduleSchema = z.object({
   entryTagIds: tagIdList.optional(),
   accountLineTagIds: tagIdList.optional(),
   counterLineTagIds: tagIdList.optional(),
+  monthlyCostId: z.string().min(1).optional(),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
 });
@@ -246,6 +247,9 @@ export const ledgerExportPackageSchema = z
     });
     const hasAccount = (id: string) => accountType.has(id);
 
+    // 月額化コスト ID 集合（仕訳・予定CF の monthlyCostId 参照検証に使う）。
+    const monthlyCostIdSet = new Set(pkg.monthlyCostItems.map((m) => m.id));
+
     // 仕訳 ID は一意 + map。
     const entryById = new Map<string, (typeof pkg.journalEntries)[number]>();
     pkg.journalEntries.forEach((e, ei) => {
@@ -322,6 +326,17 @@ export const ledgerExportPackageSchema = z
           issue('補正の相手科目が存在しません', ap('counterpartAccountId'));
         if (adj.delta !== adj.actualBalance - adj.expectedBalance)
           issue('補正の delta が actual − expected と一致しません', ap('delta'));
+      }
+
+      // 月額化コスト由来の仕訳は、紐づく monthlyCostItem が存在すること。
+      const mcId = e.metadata?.monthlyCostId;
+      if (mcId !== undefined && !monthlyCostIdSet.has(mcId)) {
+        issue(`仕訳の monthlyCostId(${mcId})が存在しません`, [
+          'journalEntries',
+          ei,
+          'metadata',
+          'monthlyCostId',
+        ]);
       }
     });
 
@@ -488,6 +503,8 @@ export const ledgerExportPackageSchema = z
           `posted の予定 CF「${s.title}」は存在する仕訳に紐づく必要があります`,
           at('linkedEntryId'),
         );
+      if (s.monthlyCostId !== undefined && !monthlyCostIdSet.has(s.monthlyCostId))
+        issue(`予定 CF「${s.title}」の monthlyCostId が存在しません`, at('monthlyCostId'));
     });
 
     // 目的別資金(reserves)の参照整合性。

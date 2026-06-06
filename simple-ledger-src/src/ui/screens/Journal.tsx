@@ -207,7 +207,10 @@ export function Journal({
       ) : (
         <ul className="card list" data-ui={UI.journal.list}>
           {filtered.map((entry) => {
-            const generated = !!entry.metadata?.allocationId;
+            const isAllocation = !!entry.metadata?.allocationId;
+            const isMonthlyCost = !!entry.metadata?.monthlyCostId;
+            // 生成仕訳（按分 / 月額化）は読み取り専用（編集・削除・取消を出さない）。
+            const generated = isAllocation || isMonthlyCost;
             const entryTagNames = tagNames(allTags, entry.tagIds);
             const lineTagNames = tagNames(
               allTags,
@@ -222,8 +225,11 @@ export function Journal({
                   {entry.metadata?.inputMode === 'reversal' ? (
                     <span className="tag tag--warning">{t('journal.reversalTag')}</span>
                   ) : null}
-                  {generated ? (
+                  {isAllocation ? (
                     <span className="tag tag--teal">{t('journal.allocationTag')}</span>
+                  ) : null}
+                  {isMonthlyCost ? (
+                    <span className="tag tag--teal">{t('journal.monthlyCostTag')}</span>
                   ) : null}
                   {entry.metadata?.adjustment ? (
                     <span className="tag tag--neutral">{t('journal.adjustmentTag')}</span>

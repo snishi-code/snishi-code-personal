@@ -6,6 +6,7 @@ import {
   createReserve,
   deleteAccount,
   deleteEntry,
+  deleteMonthlyCost,
   deleteTag,
   listSnapshots,
   loadLedger,
@@ -597,6 +598,72 @@ describe('月額化コスト createMonthlyCost', () => {
         expenseAccountId: cash.id, // asset を費用に → 拒否
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe('月額化コストの整合性（生成仕訳・削除）', () => {
+  async function makeLiabilityMonthlyCost() {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const card = ledger.accounts.find((a) => a.role === 'payment-liability')!;
+    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    const item = await createMonthlyCost({
+      name: '洗濯機',
+      kind: 'durable-asset',
+      amount: 120000,
+      costMonths: 84,
+      startMonth: '2026-06',
+      expenseAccountId: food.id,
+      paymentAccountId: card.id,
+      repaymentAccountId: cash.id,
+      repaymentCount: 12,
+      repaymentStartDate: '2026-07-27',
+    });
+    return { item, cash, card, food };
+  }
+
+  it('monthlyCostId 付き購入仕訳は編集・削除できない（fail-closed）', async () => {
+    await makeLiabilityMonthlyCost();
+    const after = await loadLedger();
+    const purchase = after.journalEntries.find((e) => e.metadata?.monthlyCostId)!;
+    await expect(deleteEntry(purchase.id)).rejects.toThrow();
+    await expect(upsertEntry({ ...purchase, description: '改ざん' })).rejects.toThrow();
+  });
+
+  it('ユーザー入力に monthlyCostId が付いた仕訳は保存できない', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    const entry = buildSimpleEntry({
+      date: '2026-06-01',
+      description: 'x',
+      debitAccountId: food.id,
+      creditAccountId: cash.id,
+      amount: 100,
+    });
+    await expect(
+      upsertEntry({ ...entry, metadata: { inputMode: 'manual', monthlyCostId: 'mc-x' } }),
+    ).rejects.toThrow();
+  });
+
+  it('未実績なら削除で購入仕訳・返済CFも一括で消える（孤立を残さない）', async () => {
+    const { item } = await makeLiabilityMonthlyCost();
+    await deleteMonthlyCost(item.id);
+    const after = await loadLedger();
+    expect(after.monthlyCostItems.some((m) => m.id === item.id)).toBe(false);
+    expect(after.journalEntries.some((e) => e.metadata?.monthlyCostId === item.id)).toBe(false);
+    expect(after.cashflowSchedules.some((s) => s.monthlyCostId === item.id)).toBe(false);
+  });
+
+  it('返済が実績化済みなら削除できない（終了を使う）', async () => {
+    const { item } = await makeLiabilityMonthlyCost();
+    const before = await loadLedger();
+    const sched = before.cashflowSchedules.find((s) => s.monthlyCostId === item.id)!;
+    await postSchedule(sched.id);
+    await expect(deleteMonthlyCost(item.id)).rejects.toThrow();
+    // 本体・購入仕訳は残っている。
+    const after = await loadLedger();
+    expect(after.monthlyCostItems.some((m) => m.id === item.id)).toBe(true);
   });
 });
 

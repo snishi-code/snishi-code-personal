@@ -238,6 +238,8 @@ export interface CashflowSchedule {
   entryTagIds?: string[];
   accountLineTagIds?: string[];
   counterLineTagIds?: string[];
+  /** 月額化コスト（負債払い）の返済予定として生成されたとき、紐づく MonthlyCostItem の ID。 */
+  monthlyCostId?: string;
   createdAt: string;
   updatedAt: string;
 }

@@ -808,4 +808,43 @@ describe('月額化コスト(monthlyCostItems) の参照・role 検証（package
     const bad = mcPkg([{ ...base, costMonths: 12, repeatEveryMonths: 6 }]);
     expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
   });
+  it('仕訳の monthlyCostId が存在しないと invalid', () => {
+    const pkg = mcPkg([base]) as Record<string, unknown>;
+    pkg.journalEntries = [
+      {
+        id: 'e1',
+        date: '2026-06-01',
+        description: '購入',
+        kind: 'normal',
+        lines: [
+          { accountId: 'food', side: 'debit', amount: 100 },
+          { accountId: 'cash', side: 'credit', amount: 100 },
+        ],
+        metadata: { inputMode: 'manual', monthlyCostId: 'nope' },
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+    ];
+    expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(false);
+  });
+  it('予定CF の monthlyCostId が存在しないと invalid', () => {
+    const pkg = mcPkg([base]) as Record<string, unknown>;
+    pkg.cashflowSchedules = [
+      {
+        id: 's1',
+        title: '返済',
+        dueDate: '2026-07-10',
+        amount: 100,
+        direction: 'outflow',
+        accountId: 'cash',
+        counterAccountId: 'cash',
+        source: 'installment',
+        status: 'planned',
+        monthlyCostId: 'nope',
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+    ];
+    expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(false);
+  });
 });

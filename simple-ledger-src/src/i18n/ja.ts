@@ -63,7 +63,9 @@ export const ja = {
   'dashboard.openBs': '貸借対照表を開く',
 
   'journal.allocationTag': '按分',
-  'journal.generatedNotice': '按分仕訳は按分台帳で管理します（直接の編集・削除はできません）。',
+  'journal.monthlyCostTag': '月額化',
+  'journal.generatedNotice':
+    '生成された仕訳（按分・月額化コスト）は各画面で管理します（直接の編集・削除はできません）。',
 
   'allocations.title': '按分台帳',
   'allocations.empty': '按分中の項目はありません。支出入力で「按分する」を使うと作成できます。',
