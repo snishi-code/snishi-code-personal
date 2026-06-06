@@ -17,7 +17,8 @@
 |---|---|---|
 | `dashboard.view` | Dashboard ルート | ホーム表示の検出 |
 | `dashboard.entry.income` / `.expense` / `.transfer` | ホーム 3 ボタン | 日常入力の主導線（唯一の入力起点） |
-| `dashboard.openPl` / `dashboard.openBs` | ホーム損益/資産負債サマリー | 財務諸表(PL/BS)へ遷移 |
+| `dashboard.openPl` / `dashboard.openBs` | ホーム損益/資産サマリーの項目 | 財務諸表(PL/BS)の該当セクションへ |
+| `dashboard.openCashflow` | ホーム生活コスト領域 | 資金繰り（資金計画）へ遷移 |
 | `journal.view` | Journal ルート | 仕訳画面の検出 |
 | `journal.entry.list` | Journal 一覧 | 仕訳一覧 |
 | `journal.monthlyRecognition` | 今月の月額化認識カード | 読み取り専用（仕訳ではない月割り表示） |

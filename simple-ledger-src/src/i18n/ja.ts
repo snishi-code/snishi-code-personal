@@ -61,6 +61,7 @@ export const ja = {
   'dashboard.viewMonthlyCosts': '月額化コストを見る',
   'dashboard.openPl': '損益計算書を開く',
   'dashboard.openBs': '貸借対照表を開く',
+  'dashboard.openCashflow': '資金繰り・資金計画を開く',
 
   'journal.allocationTag': '按分',
   'journal.monthlyCostTag': '月額化',
@@ -354,6 +355,9 @@ export const ja = {
   'statements.totalRevenue': '収益合計',
   'statements.totalExpense': '費用合計',
   'statements.netIncome': '当期純損益',
+  'statements.netProfit': '当期純利益',
+  'statements.netLoss': '当期純損失',
+  'statements.total': '合計',
   'statements.assets': '資産',
   'statements.liabilities': '負債',
   'statements.equity': '純資産（資本）',

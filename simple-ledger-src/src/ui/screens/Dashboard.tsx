@@ -3,7 +3,7 @@
  * 生活コスト。最近の仕訳一覧は仕訳画面に集約し、ここには置かない。
  * 損益サマリー→PL / 資産負債サマリー→BS へ遷移できる。
  */
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, deriveProfitAndLoss, monthRange } from '../../domain/accounting';
 import { totalMonthlyCostForMonth } from '../../domain/monthlyCost';
@@ -36,7 +36,7 @@ export function Dashboard({
 }: {
   onAddEntry: (mode: FormMode) => void;
   onNavigate: (screen: Screen) => void;
-  onOpenStatement: (tab: 'pl' | 'bs') => void;
+  onOpenStatement: (tab: 'pl' | 'bs', section?: string) => void;
 }) {
   const { ledger } = useLedger();
   const { year, month } = currentYearMonth();
@@ -132,123 +132,124 @@ export function Dashboard({
         </div>
       ) : null}
 
-      {/* 今月の損益（クリックで損益計算書へ） */}
-      <button
-        type="button"
-        className="summary-card"
-        onClick={() => onOpenStatement('pl')}
-        aria-label={t('dashboard.openPl')}
-        data-ui={UI.dashboard.openPl}
-      >
-        <div className="summary-card__head">
-          <span className="section-label" style={{ margin: 0 }}>
-            {t('dashboard.thisMonth', { year, month })}
-          </span>
-          <Icon name="chevronRight" size={16} />
-        </div>
-        <div className="stat-grid">
-          <div className="stat">
-            <span className="stat__label">{t('dashboard.revenue')}</span>
-            <span className="stat__value">
-              <Money amount={pl.totalRevenue} currency={currency} />
-            </span>
-          </div>
-          <div className="stat">
-            <span className="stat__label">{t('dashboard.expense')}</span>
-            <span className="stat__value">
-              <Money amount={pl.totalExpense} currency={currency} />
-            </span>
-          </div>
-          <div className="stat">
-            <span className="stat__label">{t('dashboard.netIncome')}</span>
-            <span className="stat__value">
-              <Money amount={pl.netIncome} currency={currency} signed />
-            </span>
-          </div>
-        </div>
-      </button>
-
-      {/* 資産と負債（クリックで貸借対照表へ） */}
-      <button
-        type="button"
-        className="summary-card"
-        onClick={() => onOpenStatement('bs')}
-        aria-label={t('dashboard.openBs')}
-        data-ui={UI.dashboard.openBs}
-      >
-        <div className="summary-card__head">
-          <span className="section-label" style={{ margin: 0 }}>
-            {t('dashboard.position')}
-          </span>
-          <Icon name="chevronRight" size={16} />
-        </div>
-        <div className="stat-grid">
-          <div className="stat">
-            <span className="stat__label">{t('dashboard.assets')}</span>
-            <span className="stat__value">
-              <Money amount={bs.totalAssets} currency={currency} />
-            </span>
-          </div>
-          <div className="stat">
-            <span className="stat__label">{t('dashboard.liabilities')}</span>
-            <span className="stat__value">
-              <Money amount={bs.totalLiabilities} currency={currency} />
-            </span>
-          </div>
-          <div className="stat">
-            <span className="stat__label">{t('dashboard.netAssets')}</span>
-            <span className="stat__value">
-              <Money amount={bs.netAssets} currency={currency} signed />
-            </span>
-          </div>
-        </div>
-      </button>
-
-      <p className="section-label">{t('dashboard.livingCost')}</p>
+      {/* 今月の損益（各項目から損益計算書の該当セクションへ） */}
+      <p className="section-label">{t('dashboard.thisMonth', { year, month })}</p>
       <div className="stat-grid">
-        <div className="stat">
-          <span className="stat__label">{t('dashboard.normalExpense')}</span>
-          <span className="stat__value">
-            <Money amount={normalExpense} currency={currency} />
-          </span>
-        </div>
-        <div className="stat">
-          <span className="stat__label">{t('dashboard.monthlyCost')}</span>
-          <span className="stat__value">
-            <Money amount={monthlyCost} currency={currency} />
-          </span>
-        </div>
-        <div className="stat">
-          <span className="stat__label">{t('dashboard.livingCostTotal')}</span>
-          <span className="stat__value">
-            <Money amount={normalExpense + monthlyCost} currency={currency} />
-          </span>
-        </div>
-        {investmentValuation.loss > 0 || investmentValuation.gain > 0 ? (
-          <div className="stat">
-            <span className="stat__label">{t('dashboard.investmentValuation')}</span>
-            <span className="stat__value">
-              <Money
-                amount={investmentValuation.gain - investmentValuation.loss}
-                currency={currency}
-                signed
-              />
-            </span>
-          </div>
-        ) : null}
+        <StatButton
+          label={t('dashboard.revenue')}
+          onClick={() => onOpenStatement('pl', 'revenue')}
+          dataUi={UI.dashboard.openPl}
+        >
+          <Money amount={pl.totalRevenue} currency={currency} />
+        </StatButton>
+        <StatButton label={t('dashboard.expense')} onClick={() => onOpenStatement('pl', 'expense')}>
+          <Money amount={pl.totalExpense} currency={currency} />
+        </StatButton>
+        <StatButton label={t('dashboard.netIncome')} onClick={() => onOpenStatement('pl', 'net')}>
+          <Money amount={pl.netIncome} currency={currency} signed />
+        </StatButton>
       </div>
+
+      {/* 財政状態（各項目から貸借対照表の該当セクションへ） */}
+      <p className="section-label">{t('dashboard.position')}</p>
+      <div className="stat-grid">
+        <StatButton
+          label={t('dashboard.assets')}
+          onClick={() => onOpenStatement('bs', 'assets')}
+          dataUi={UI.dashboard.openBs}
+        >
+          <Money amount={bs.totalAssets} currency={currency} />
+        </StatButton>
+        <StatButton
+          label={t('dashboard.liabilities')}
+          onClick={() => onOpenStatement('bs', 'liabilities')}
+        >
+          <Money amount={bs.totalLiabilities} currency={currency} />
+        </StatButton>
+        <StatButton
+          label={t('dashboard.netAssets')}
+          onClick={() => onOpenStatement('bs', 'equity')}
+        >
+          <Money amount={bs.netAssets} currency={currency} signed />
+        </StatButton>
+      </div>
+
+      {/* 生活コスト（領域全体が資金繰り/資金計画への導線） */}
+      <p className="section-label">{t('dashboard.livingCost')}</p>
       <button
         type="button"
-        className="btn btn--ghost btn--block"
-        style={{ marginTop: 'var(--space-2)', justifyContent: 'space-between' }}
-        onClick={() => onNavigate('allocations')}
+        className="summary-card"
+        onClick={() => onNavigate('cashflow')}
+        aria-label={t('dashboard.openCashflow')}
+        data-ui={UI.dashboard.openCashflow}
       >
-        <span>{t('dashboard.activeMonthlyCosts', { count: activeCount })}</span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-          {t('dashboard.viewMonthlyCosts')}
+        <div className="summary-card__head">
+          <span className="muted" style={{ fontSize: 13 }}>
+            {t('dashboard.activeMonthlyCosts', { count: activeCount })}
+          </span>
           <Icon name="chevronRight" size={16} />
-        </span>
+        </div>
+        <div className="stat-grid">
+          <div className="stat">
+            <span className="stat__label">{t('dashboard.normalExpense')}</span>
+            <span className="stat__value">
+              <Money amount={normalExpense} currency={currency} />
+            </span>
+          </div>
+          <div className="stat">
+            <span className="stat__label">{t('dashboard.monthlyCost')}</span>
+            <span className="stat__value">
+              <Money amount={monthlyCost} currency={currency} />
+            </span>
+          </div>
+          <div className="stat">
+            <span className="stat__label">{t('dashboard.livingCostTotal')}</span>
+            <span className="stat__value">
+              <Money amount={normalExpense + monthlyCost} currency={currency} />
+            </span>
+          </div>
+          {investmentValuation.loss > 0 || investmentValuation.gain > 0 ? (
+            <div className="stat">
+              <span className="stat__label">{t('dashboard.investmentValuation')}</span>
+              <span className="stat__value">
+                <Money
+                  amount={investmentValuation.gain - investmentValuation.loss}
+                  currency={currency}
+                  signed
+                />
+              </span>
+            </div>
+          ) : null}
+        </div>
       </button>
     </section>
+  );
+}
+
+/** タップで遷移する stat。見た目はカード、role はボタン。 */
+function StatButton({
+  label,
+  onClick,
+  dataUi,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  dataUi?: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className="stat stat--btn"
+      onClick={onClick}
+      aria-label={label}
+      data-ui={dataUi}
+    >
+      <span className="stat__label">
+        {label} <Icon name="chevronRight" size={12} />
+      </span>
+      <span className="stat__value">{children}</span>
+    </button>
   );
 }

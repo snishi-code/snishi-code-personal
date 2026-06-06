@@ -47,6 +47,14 @@
   /* モーダル/シートの背面オーバーレイ（slate-900 40%）。 */
   --overlay: rgba(15, 23, 42, 0.4);
 
+  /* 財務諸表の区分色（意味づけ。既存トークンを参照し新しい色を散らさない）。
+   * 資産/収益=teal、負債/費用=amber/red、純資産=neutral。 */
+  --fs-asset: var(--primary);
+  --fs-liability: var(--warning);
+  --fs-equity: var(--muted);
+  --fs-revenue: var(--primary);
+  --fs-expense: var(--danger);
+
   /* ── フォーカス ── */
   --focus: #14b8a6;
   --focus-ring: 0 0 0 3px rgba(20, 184, 166, 0.35);

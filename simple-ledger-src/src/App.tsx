@@ -32,6 +32,7 @@ export function App() {
   const [entryInit, setEntryInit] = useState<EntryInit | null>(null);
   const [journalFilter, setJournalFilter] = useState<JournalFilter | null>(null);
   const [statementsTab, setStatementsTab] = useState<'pl' | 'bs'>('pl');
+  const [statementsSection, setStatementsSection] = useState<string | undefined>(undefined);
   const { updateReady, applyUpdate } = useServiceWorker();
 
   if (status === 'loading') {
@@ -62,8 +63,9 @@ export function App() {
     setScreen('journal');
   };
 
-  const openStatements = (tab: 'pl' | 'bs') => {
+  const openStatements = (tab: 'pl' | 'bs', section?: string) => {
     setStatementsTab(tab);
+    setStatementsSection(section);
     setScreen('statements');
   };
 
@@ -105,7 +107,11 @@ export function App() {
           />
         ) : null}
         {screen === 'statements' ? (
-          <Statements initialTab={statementsTab} onDrillDown={goJournalFiltered} />
+          <Statements
+            initialTab={statementsTab}
+            initialSection={statementsSection}
+            onDrillDown={goJournalFiltered}
+          />
         ) : null}
         {screen === 'allocations' ? <Allocations /> : null}
         {screen === 'cashflow' ? <Cashflow /> : null}

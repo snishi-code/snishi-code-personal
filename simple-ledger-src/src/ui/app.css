@@ -245,6 +245,21 @@ button {
   font-variant-numeric: tabular-nums;
   word-break: break-all;
 }
+/* タップ可能な stat（ホームの項目別遷移）。stat の見た目を保ちボタン化する。 */
+.stat--btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.stat--btn:hover {
+  background: var(--bg);
+}
+.stat--btn .stat__label {
+  justify-content: flex-start;
+}
 .amount--pos {
   color: var(--pos);
 }
@@ -480,6 +495,44 @@ button.list__item:hover {
 }
 .stmt-row__num {
   white-space: nowrap;
+}
+
+/* ── 財務諸表の左右対照レイアウト ── */
+.fs-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  align-items: start;
+}
+@media (max-width: 560px) {
+  .fs-cols {
+    grid-template-columns: 1fr;
+  }
+}
+.fs-col__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 700;
+  font-size: 14px;
+  padding: var(--space-2) var(--space-3);
+  border-left: 4px solid var(--fs-accent, var(--border));
+  margin-bottom: var(--space-2);
+}
+.fs-col--asset {
+  --fs-accent: var(--fs-asset);
+}
+.fs-col--liability {
+  --fs-accent: var(--fs-liability);
+}
+.fs-col--equity {
+  --fs-accent: var(--fs-equity);
+}
+.fs-col--revenue {
+  --fs-accent: var(--fs-revenue);
+}
+.fs-col--expense {
+  --fs-accent: var(--fs-expense);
 }
 
 /* ── Toolbar / filters ── */

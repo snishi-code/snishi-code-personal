@@ -1,7 +1,7 @@
 /*
  * 財務諸表。損益計算書(PL)と貸借対照表(BS)を切替表示。いずれも仕訳から毎回導出。
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, deriveProfitAndLoss, monthRange } from '../../domain/accounting';
 import { currentYearMonth, todayLocal } from '../../util/time';
@@ -50,9 +50,11 @@ function Rows({
 
 export function Statements({
   initialTab = 'pl',
+  initialSection,
   onDrillDown,
 }: {
   initialTab?: Tab;
+  initialSection?: string;
   onDrillDown: (filter: JournalFilter) => void;
 }) {
   const { ledger } = useLedger();
@@ -62,6 +64,13 @@ export function Statements({
   const [asOf, setAsOf] = useState<string>(todayLocal());
   const { year, month } = currentYearMonth();
   const currency = ledger?.settings.currency ?? 'JPY';
+
+  // ホームの項目別遷移で渡されたセクションへスクロールする。
+  useEffect(() => {
+    if (!initialSection) return;
+    const el = document.getElementById(`fs-${initialSection}`);
+    el?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [initialSection, tab]);
 
   const range = useMemo(() => {
     if (period === 'all') return undefined;
@@ -140,34 +149,53 @@ export function Statements({
             </select>
           </div>
 
-          <p className="section-label">{t('dashboard.revenue')}</p>
-          <div className="card">
-            <Rows items={pl.revenues} currency={currency} onDrill={drillPL} />
-            <div className="stmt-row stmt-row--total">
-              <span>{t('statements.totalRevenue')}</span>
-              <span className="stmt-row__num">
-                <Money amount={pl.totalRevenue} currency={currency} />
-              </span>
+          {/* 左=費用 / 右=収益。当期純損益を差額として置き、左右合計を一致させる。 */}
+          <div className="fs-cols">
+            <div id="fs-expense">
+              <div className="fs-col__head fs-col--expense">{t('dashboard.expense')}</div>
+              <div className="card">
+                <Rows items={pl.expenses} currency={currency} onDrill={drillPL} />
+                {pl.netIncome >= 0 ? (
+                  <div className="stmt-row" id="fs-net">
+                    <span>{t('statements.netProfit')}</span>
+                    <span className="stmt-row__num">
+                      <Money amount={pl.netIncome} currency={currency} />
+                    </span>
+                  </div>
+                ) : null}
+                <div className="stmt-row stmt-row--total">
+                  <span>{t('statements.total')}</span>
+                  <span className="stmt-row__num">
+                    <Money
+                      amount={pl.totalExpense + Math.max(0, pl.netIncome)}
+                      currency={currency}
+                    />
+                  </span>
+                </div>
+              </div>
             </div>
-          </div>
-
-          <p className="section-label">{t('dashboard.expense')}</p>
-          <div className="card">
-            <Rows items={pl.expenses} currency={currency} onDrill={drillPL} />
-            <div className="stmt-row stmt-row--total">
-              <span>{t('statements.totalExpense')}</span>
-              <span className="stmt-row__num">
-                <Money amount={pl.totalExpense} currency={currency} />
-              </span>
-            </div>
-          </div>
-
-          <div className="card" style={{ marginTop: 'var(--space-4)' }}>
-            <div className="stmt-row stmt-row--total">
-              <span>{t('statements.netIncome')}</span>
-              <span className="stmt-row__num">
-                <Money amount={pl.netIncome} currency={currency} signed />
-              </span>
+            <div id="fs-revenue">
+              <div className="fs-col__head fs-col--revenue">{t('dashboard.revenue')}</div>
+              <div className="card">
+                <Rows items={pl.revenues} currency={currency} onDrill={drillPL} />
+                {pl.netIncome < 0 ? (
+                  <div className="stmt-row" id="fs-net">
+                    <span>{t('statements.netLoss')}</span>
+                    <span className="stmt-row__num">
+                      <Money amount={-pl.netIncome} currency={currency} />
+                    </span>
+                  </div>
+                ) : null}
+                <div className="stmt-row stmt-row--total">
+                  <span>{t('statements.total')}</span>
+                  <span className="stmt-row__num">
+                    <Money
+                      amount={pl.totalRevenue + Math.max(0, -pl.netIncome)}
+                      currency={currency}
+                    />
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -198,42 +226,57 @@ export function Statements({
             </div>
           ) : null}
 
-          <p className="section-label">{t('statements.assets')}</p>
-          <div className="card">
-            <Rows items={bs.assets} currency={currency} onDrill={drillBS} />
-            <div className="stmt-row stmt-row--total">
-              <span>{t('statements.totalAssets')}</span>
-              <span className="stmt-row__num">
-                <Money amount={bs.totalAssets} currency={currency} />
-              </span>
+          {/* 左=資産 / 右=負債＋純資産。左右合計が一致する。 */}
+          <div className="fs-cols">
+            <div id="fs-assets">
+              <div className="fs-col__head fs-col--asset">{t('statements.assets')}</div>
+              <div className="card">
+                <Rows items={bs.assets} currency={currency} onDrill={drillBS} />
+                <div className="stmt-row stmt-row--total">
+                  <span>{t('statements.total')}</span>
+                  <span className="stmt-row__num">
+                    <Money amount={bs.totalAssets} currency={currency} />
+                  </span>
+                </div>
+              </div>
             </div>
-          </div>
-
-          <p className="section-label">{t('statements.liabilities')}</p>
-          <div className="card">
-            <Rows items={bs.liabilities} currency={currency} onDrill={drillBS} />
-            <div className="stmt-row stmt-row--total">
-              <span>{t('statements.totalLiabilities')}</span>
-              <span className="stmt-row__num">
-                <Money amount={bs.totalLiabilities} currency={currency} />
-              </span>
-            </div>
-          </div>
-
-          <p className="section-label">{t('statements.equity')}</p>
-          <div className="card">
-            <Rows items={bs.equity} currency={currency} onDrill={drillBS} />
-            <div className="stmt-row">
-              <span>{t('statements.retainedEarnings')}</span>
-              <span className="stmt-row__num">
-                <Money amount={bs.retainedEarnings} currency={currency} signed />
-              </span>
-            </div>
-            <div className="stmt-row stmt-row--total">
-              <span>{t('statements.netAssets')}</span>
-              <span className="stmt-row__num">
-                <Money amount={bs.netAssets} currency={currency} signed />
-              </span>
+            <div>
+              <div id="fs-liabilities">
+                <div className="fs-col__head fs-col--liability">{t('statements.liabilities')}</div>
+                <div className="card">
+                  <Rows items={bs.liabilities} currency={currency} onDrill={drillBS} />
+                  <div className="stmt-row stmt-row--total">
+                    <span>{t('statements.totalLiabilities')}</span>
+                    <span className="stmt-row__num">
+                      <Money amount={bs.totalLiabilities} currency={currency} />
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div id="fs-equity" style={{ marginTop: 'var(--space-3)' }}>
+                <div className="fs-col__head fs-col--equity">{t('statements.equity')}</div>
+                <div className="card">
+                  <Rows items={bs.equity} currency={currency} onDrill={drillBS} />
+                  <div className="stmt-row">
+                    <span>{t('statements.retainedEarnings')}</span>
+                    <span className="stmt-row__num">
+                      <Money amount={bs.retainedEarnings} currency={currency} signed />
+                    </span>
+                  </div>
+                  <div className="stmt-row stmt-row--total">
+                    <span>{t('statements.netAssets')}</span>
+                    <span className="stmt-row__num">
+                      <Money amount={bs.netAssets} currency={currency} signed />
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="stmt-row stmt-row--total" style={{ marginTop: 'var(--space-3)' }}>
+                <span>{t('statements.total')}</span>
+                <span className="stmt-row__num">
+                  <Money amount={bs.totalLiabilities + bs.netAssets} currency={currency} />
+                </span>
+              </div>
             </div>
           </div>
         </div>

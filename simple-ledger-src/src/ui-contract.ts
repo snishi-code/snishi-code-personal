@@ -15,6 +15,8 @@ export const UI = {
     // 損益/資産負債サマリー（タップで財務諸表へ）
     openPl: 'dashboard.openPl',
     openBs: 'dashboard.openBs',
+    // 生活コスト領域（タップで資金繰りへ）
+    openCashflow: 'dashboard.openCashflow',
   },
   journal: {
     view: 'journal.view',
