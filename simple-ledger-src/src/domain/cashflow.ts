@@ -9,7 +9,35 @@
 import { newId } from './ids';
 import { nowIso } from '../util/time';
 import { addMonths, monthOf } from './allocation';
-import type { AccountBalance, CashflowSchedule, JournalEntry } from './types';
+import type {
+  Account,
+  AccountBalance,
+  CashflowDirection,
+  CashflowSchedule,
+  JournalEntry,
+} from './types';
+
+/**
+ * 予定 CF の「源泉 → 行き先」(A → B) から、保存する {現金が動く口座 accountId / 相手 counter /
+ * 入金 or 出金 direction} を role から推定する。日常入力と同じ A → B 形にするための変換。
+ *  - 収入カテゴリ → 日常資産: 入金(inflow)。現金が動くのは日常資産。
+ *  - 日常資産 → 費用カテゴリ: 出金(outflow)。
+ *  - 日常資産 → 支払用負債: 返済/支払い(outflow)。
+ * 上記以外（口座間移動・負債→費用など現金移動が一意でない組み合わせ）は推定不能として null。
+ */
+export function inferScheduleFlow(
+  src: Account,
+  dst: Account,
+): { accountId: string; counterAccountId: string; direction: CashflowDirection } | null {
+  if (src.role === 'income-category' && dst.role === 'daily-asset')
+    return { accountId: dst.id, counterAccountId: src.id, direction: 'inflow' };
+  if (
+    src.role === 'daily-asset' &&
+    (dst.role === 'expense-category' || dst.role === 'payment-liability')
+  )
+    return { accountId: src.id, counterAccountId: dst.id, direction: 'outflow' };
+  return null;
+}
 
 /**
  * 資金繰りの「総資金」= 流動資産のみ。按分中資産・固定資産・投資など、現金化を伴わない

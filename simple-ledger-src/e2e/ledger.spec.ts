@@ -2,7 +2,7 @@
  * E2E: 主要フロー（起動 → 支出入力 → 集計反映 → 取消/返金 → ドリルダウン → 財務諸表）。
  * 外部送信ゼロも検証する（同一オリジン以外へのリクエストが無いこと）。
  *
- * 借方/貸方は日常入力に出さない。カテゴリ/支払元などのチップ(radio)で選ぶ。
+ * 借方/貸方は日常入力に出さない。お金の流れ（源泉 → 行き先）をチップ(radio)で選ぶ。
  */
 import { test, expect, type Page, type Request } from '@playwright/test';
 
@@ -46,7 +46,7 @@ test('支出を追加するとホームと一覧に反映される', async ({ pa
   await page.goto('./');
   await addExpense(page, 'テスト支出', '2500');
 
-  // ホームには最近の仕訳一覧を置かない。仕訳画面で反映を確認する。
+  // ホーム下部「当月の仕訳」→「すべて見る」で仕訳画面に反映を確認する。
   await openJournal(page);
   await expect(page.locator(ui('journal.entry.list'))).toContainText('テスト支出');
 });
@@ -125,11 +125,12 @@ test('資金繰り: 予定と目的別資金を作成できる', async ({ page }
   await page.locator(ui('nav.cashflow')).click();
   await expect(page.locator(ui('cashflow.view'))).toBeVisible();
 
-  // 入出金予定（支出予定 / 対象口座=現金）を追加
+  // 予定（お金の流れ: 現金 → 食費 ＝ 出金と自動判定）を追加
   await page.locator(ui('cashflow.schedule.create')).click();
   await page.locator(ui('cashflow.schedule.name')).fill('カード引き落とし');
   await page.locator(ui('cashflow.schedule.amount')).fill('50000');
-  await pick(page, 'cashflow.schedule.account', '現金');
+  await pick(page, 'cashflow.schedule.flow.source', '現金');
+  await pick(page, 'cashflow.schedule.flow.destination', '食費');
   await page.locator(ui('cashflow.schedule.save')).click();
   await expect(page.locator(ui('cashflow.schedule.list'))).toContainText('カード引き落とし');
 

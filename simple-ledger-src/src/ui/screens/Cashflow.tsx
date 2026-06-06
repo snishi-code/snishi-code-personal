@@ -6,14 +6,13 @@
 import { useMemo, useState } from 'react';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet } from '../../domain/accounting';
-import { liquidAssetTotal, projectCashflow } from '../../domain/cashflow';
+import { inferScheduleFlow, liquidAssetTotal, projectCashflow } from '../../domain/cashflow';
 import { addMonths, monthOf, monthlyAmounts } from '../../domain/allocation';
 import { goalRequiredMonthly } from '../../domain/fundingGoal';
 import { newId } from '../../domain/ids';
 import { currentYearMonth, nowIso, todayLocal } from '../../util/time';
 import type {
   Account,
-  CashflowDirection,
   CashflowSchedule,
   CashflowSource,
   FundingGoal,
@@ -25,7 +24,7 @@ import { Modal } from '../Modal';
 import { AccountPicker } from '../AccountPicker';
 import { TagPicker } from '../TagPicker';
 import { SelectInput, TextArea, TextInput } from '../Field';
-import { groupedAccounts, groupedAccountsByRole } from '../accountOptions';
+import { groupedAccountsByRole } from '../accountOptions';
 import { tagsForScope } from '../tagOptions';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { Money } from '../money';
@@ -497,7 +496,7 @@ function ScheduleSheet({
   onClose,
   onSave,
 }: {
-  accounts: { id: string; name: string; type: string; archived: boolean }[];
+  accounts: Account[];
   tags: Tag[];
   onClose: () => void;
   onSave: (list: CashflowSchedule[]) => void;
@@ -505,9 +504,9 @@ function ScheduleSheet({
   const [title, setTitle] = useState('');
   const [dueDate, setDueDate] = useState(todayLocal());
   const [amountText, setAmountText] = useState('');
-  const [direction, setDirection] = useState<CashflowDirection>('outflow');
-  const [accountId, setAccountId] = useState('');
-  const [counterAccountId, setCounterAccountId] = useState('');
+  // 日常入力と同じ「源泉 → 行き先」(A → B)。入金/出金はロールから推定する。
+  const [srcId, setSrcId] = useState('');
+  const [dstId, setDstId] = useState('');
   const [source, setSource] = useState<CashflowSource>('manual');
   const [installmentsText, setInstallmentsText] = useState('2');
   const [entryTagIds, setEntryTagIds] = useState<string[]>([]);
@@ -516,9 +515,13 @@ function ScheduleSheet({
   const [errors, setErrors] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  const allAccounts = accounts as unknown as Parameters<typeof groupedAccounts>[0];
-  const assetGroups = groupedAccounts(allAccounts, ['asset'], accountId);
-  const counterGroups = groupedAccounts(allAccounts, undefined, counterAccountId);
+  // 左=源泉（収入カテゴリ / 日常資産）、右=行き先（日常資産 / 費用カテゴリ / 支払用負債）。
+  const srcGroups = groupedAccountsByRole(accounts, ['income-category', 'daily-asset'], srcId);
+  const dstGroups = groupedAccountsByRole(
+    accounts,
+    ['daily-asset', 'expense-category', 'payment-liability'],
+    dstId,
+  );
 
   const amount = amountText === '' ? 0 : Number.parseInt(amountText.replace(/[^\d]/g, ''), 10);
   const installments =
@@ -526,11 +529,16 @@ function ScheduleSheet({
       ? Number.parseInt(installmentsText.replace(/[^\d]/g, '') || '0', 10)
       : 1;
 
+  const src = accounts.find((a) => a.id === srcId);
+  const dst = accounts.find((a) => a.id === dstId);
+  const flow = src && dst ? inferScheduleFlow(src, dst) : null;
+
   function validate(): string[] {
     const e: string[] = [];
     if (title.trim() === '') e.push(t('cashflow.error.name'));
     if (!Number.isInteger(amount) || amount <= 0) e.push(t('cashflow.error.amount'));
-    if (!accountId) e.push(t('cashflow.error.account'));
+    if (!srcId || !dstId) e.push(t('cashflow.error.flow'));
+    else if (!flow) e.push(t('cashflow.error.flowInvalid'));
     if (source === 'installment' && (!Number.isInteger(installments) || installments < 2))
       e.push(t('cashflow.error.installments'));
     return e;
@@ -538,7 +546,8 @@ function ScheduleSheet({
 
   function build(): CashflowSchedule[] {
     const ts = nowIso();
-    const counter = counterAccountId ? { counterAccountId } : {};
+    // validate 済みなので flow は非 null。
+    const { accountId, counterAccountId, direction } = flow!;
     const tagFields = {
       ...(entryTagIds.length ? { entryTagIds } : {}),
       ...(accountTagIds.length ? { accountLineTagIds: accountTagIds } : {}),
@@ -555,7 +564,7 @@ function ScheduleSheet({
         amount: amt,
         direction,
         accountId,
-        ...counter,
+        counterAccountId,
         ...tagFields,
         source: 'installment',
         status: 'planned',
@@ -571,7 +580,7 @@ function ScheduleSheet({
         amount,
         direction,
         accountId,
-        ...counter,
+        counterAccountId,
         ...tagFields,
         source,
         status: 'planned',
@@ -618,6 +627,13 @@ function ScheduleSheet({
         </div>
       ) : null}
 
+      {/* 日常入力と同じ並び: 日付 → 項目 → 金額 → お金の流れ(A → B) */}
+      <TextInput
+        label={t('cashflow.form.dueDate')}
+        type="date"
+        value={dueDate}
+        onChange={setDueDate}
+      />
       <TextInput
         label={t('cashflow.form.name')}
         required
@@ -625,21 +641,6 @@ function ScheduleSheet({
         placeholder={t('cashflow.form.namePlaceholder')}
         onChange={setTitle}
         dataUi={UI.cashflow.scheduleName}
-      />
-      <SelectInput
-        label={t('cashflow.form.direction')}
-        value={direction}
-        onChange={(v) => setDirection(v as CashflowDirection)}
-        options={[
-          { value: 'outflow', label: t('cashflow.dir.outflow') },
-          { value: 'inflow', label: t('cashflow.dir.inflow') },
-        ]}
-      />
-      <TextInput
-        label={t('cashflow.form.dueDate')}
-        type="date"
-        value={dueDate}
-        onChange={setDueDate}
       />
       <TextInput
         label={t('cashflow.form.amount')}
@@ -649,21 +650,36 @@ function ScheduleSheet({
         onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
         dataUi={UI.cashflow.scheduleAmount}
       />
-      <AccountPicker
-        label={t('cashflow.form.account')}
-        required
-        value={accountId}
-        groups={assetGroups}
-        onChange={setAccountId}
-        dataUi={UI.cashflow.scheduleAccount}
-      />
-      <AccountPicker
-        label={t('cashflow.form.counter')}
-        value={counterAccountId}
-        groups={counterGroups}
-        onChange={setCounterAccountId}
-        dataUi={UI.cashflow.scheduleCounter}
-      />
+      <div className="field">
+        <span className="field__hint">{t('cashflow.form.flowHint')}</span>
+        <div className="flow">
+          <div className="flow__side">
+            <AccountPicker
+              flat
+              label={t('cashflow.form.flowSource')}
+              required
+              value={srcId}
+              groups={srcGroups}
+              onChange={setSrcId}
+              dataUi={UI.cashflow.scheduleFlowSource}
+            />
+          </div>
+          <div className="flow__arrow" aria-hidden="true">
+            →
+          </div>
+          <div className="flow__side">
+            <AccountPicker
+              flat
+              label={t('cashflow.form.flowDestination')}
+              required
+              value={dstId}
+              groups={dstGroups}
+              onChange={setDstId}
+              dataUi={UI.cashflow.scheduleFlowDestination}
+            />
+          </div>
+        </div>
+      </div>
       <TagPicker
         label={t('cashflow.form.entryTags')}
         tags={tagsForScope(tags, 'entry', entryTagIds)}

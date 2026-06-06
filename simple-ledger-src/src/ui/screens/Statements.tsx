@@ -149,53 +149,41 @@ export function Statements({
             </select>
           </div>
 
-          {/* 左=費用 / 右=収益。当期純損益を差額として置き、左右合計を一致させる。 */}
+          {/* 個人家計向け: 収入 / 支出 を独立表示し、差引収支は別枠サマリー（混ぜない）。 */}
           <div className="fs-cols">
-            <div id="fs-expense">
-              <div className="fs-col__head fs-col--expense">{t('dashboard.expense')}</div>
-              <div className="card">
-                <Rows items={pl.expenses} currency={currency} onDrill={drillPL} />
-                {pl.netIncome >= 0 ? (
-                  <div className="stmt-row" id="fs-net">
-                    <span>{t('statements.netProfit')}</span>
-                    <span className="stmt-row__num">
-                      <Money amount={pl.netIncome} currency={currency} />
-                    </span>
-                  </div>
-                ) : null}
-                <div className="stmt-row stmt-row--total">
-                  <span>{t('statements.total')}</span>
-                  <span className="stmt-row__num">
-                    <Money
-                      amount={pl.totalExpense + Math.max(0, pl.netIncome)}
-                      currency={currency}
-                    />
-                  </span>
-                </div>
-              </div>
-            </div>
             <div id="fs-revenue">
               <div className="fs-col__head fs-col--revenue">{t('dashboard.revenue')}</div>
               <div className="card">
                 <Rows items={pl.revenues} currency={currency} onDrill={drillPL} />
-                {pl.netIncome < 0 ? (
-                  <div className="stmt-row" id="fs-net">
-                    <span>{t('statements.netLoss')}</span>
-                    <span className="stmt-row__num">
-                      <Money amount={-pl.netIncome} currency={currency} />
-                    </span>
-                  </div>
-                ) : null}
                 <div className="stmt-row stmt-row--total">
-                  <span>{t('statements.total')}</span>
+                  <span>{t('statements.totalRevenue')}</span>
                   <span className="stmt-row__num">
-                    <Money
-                      amount={pl.totalRevenue + Math.max(0, -pl.netIncome)}
-                      currency={currency}
-                    />
+                    <Money amount={pl.totalRevenue} currency={currency} />
                   </span>
                 </div>
               </div>
+            </div>
+            <div id="fs-expense">
+              <div className="fs-col__head fs-col--expense">{t('dashboard.expense')}</div>
+              <div className="card">
+                <Rows items={pl.expenses} currency={currency} onDrill={drillPL} />
+                <div className="stmt-row stmt-row--total">
+                  <span>{t('statements.totalExpense')}</span>
+                  <span className="stmt-row__num">
+                    <Money amount={pl.totalExpense} currency={currency} />
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 差引収支（収入合計 − 支出合計）。特定科目ではないのでドリルダウンしない。 */}
+          <div className="card" id="fs-net" style={{ marginTop: 'var(--space-3)' }}>
+            <div className="stmt-row stmt-row--total">
+              <span>{t('statements.netIncome')}</span>
+              <span className="stmt-row__num">
+                <Money amount={pl.netIncome} currency={currency} signed />
+              </span>
             </div>
           </div>
         </div>

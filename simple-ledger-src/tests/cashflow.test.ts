@@ -2,10 +2,51 @@ import { describe, expect, it } from 'vitest';
 import {
   buildScheduleEntry,
   horizonEnd,
+  inferScheduleFlow,
   liquidAssetTotal,
   projectCashflow,
 } from '../src/domain/cashflow';
-import type { AccountBalance, CashflowSchedule } from '../src/domain/types';
+import type { Account, AccountBalance, CashflowSchedule } from '../src/domain/types';
+import type { AccountRole } from '../src/domain/accountRoles';
+
+function acc(id: string, role: AccountRole, type: Account['type']): Account {
+  return { id, name: id, type, role, archived: false, createdAt: 'x', updatedAt: 'x' };
+}
+
+describe('inferScheduleFlow（A → B から入金/出金を推定）', () => {
+  it('収入カテゴリ → 日常資産 = inflow（現金が動くのは資産）', () => {
+    const r = inferScheduleFlow(
+      acc('salary', 'income-category', 'revenue'),
+      acc('bank', 'daily-asset', 'asset'),
+    );
+    expect(r).toEqual({ accountId: 'bank', counterAccountId: 'salary', direction: 'inflow' });
+  });
+  it('日常資産 → 費用カテゴリ = outflow', () => {
+    const r = inferScheduleFlow(
+      acc('cash', 'daily-asset', 'asset'),
+      acc('food', 'expense-category', 'expense'),
+    );
+    expect(r).toEqual({ accountId: 'cash', counterAccountId: 'food', direction: 'outflow' });
+  });
+  it('日常資産 → 支払用負債 = outflow（返済）', () => {
+    const r = inferScheduleFlow(
+      acc('cash', 'daily-asset', 'asset'),
+      acc('card', 'payment-liability', 'liability'),
+    );
+    expect(r).toEqual({ accountId: 'cash', counterAccountId: 'card', direction: 'outflow' });
+  });
+  it('推定不能な組み合わせは null（口座間移動・負債→費用）', () => {
+    expect(
+      inferScheduleFlow(acc('a', 'daily-asset', 'asset'), acc('b', 'daily-asset', 'asset')),
+    ).toBeNull();
+    expect(
+      inferScheduleFlow(
+        acc('card', 'payment-liability', 'liability'),
+        acc('food', 'expense-category', 'expense'),
+      ),
+    ).toBeNull();
+  });
+});
 
 function bal(id: string, balance: number): AccountBalance {
   return {

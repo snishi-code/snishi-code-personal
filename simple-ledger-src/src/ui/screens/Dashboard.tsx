@@ -306,7 +306,7 @@ function StatButton({
       type="button"
       className="stat stat--btn"
       onClick={onClick}
-      aria-label={label}
+      aria-label={t('dashboard.statDetail', { label })}
       data-ui={dataUi}
     >
       <span className="stat__label">

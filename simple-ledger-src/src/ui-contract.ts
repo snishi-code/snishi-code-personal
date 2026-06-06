@@ -117,6 +117,9 @@ export const UI = {
     scheduleAmount: 'cashflow.schedule.amount',
     scheduleAccount: 'cashflow.schedule.account',
     scheduleCounter: 'cashflow.schedule.counter',
+    // 予定入力のお金の流れ（源泉 → 行き先）。入金/出金はロールから推定。
+    scheduleFlowSource: 'cashflow.schedule.flow.source',
+    scheduleFlowDestination: 'cashflow.schedule.flow.destination',
     scheduleInstallments: 'cashflow.schedule.installments',
     liabilityList: 'cashflow.liability.list',
     // 予定CF のタグ欄（実績化時に仕訳へコピーされる）
