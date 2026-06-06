@@ -20,7 +20,10 @@
 | `dashboard.stat.revenue` / `.expense` / `.netIncome` | ホーム損益の項目別ボタン | PL の該当セクションへ |
 | `dashboard.stat.assets` / `.liabilities` / `.netAssets` | ホーム財政状態の項目別ボタン | BS の該当セクションへ |
 | `dashboard.openCashflow` | ホーム生活コスト領域 | 資金計画・負債へ遷移 |
-| `dashboard.journal.preview` / `dashboard.journal.openAll` | ホーム下部「当月の仕訳」 | プレビュー / すべて見る（当月フィルタ） |
+| `dashboard.journal.preview` / `dashboard.journal.openAll` | ホーム下部「期間内の仕訳」 | プレビュー / すべて見る（期間フィルタ） |
+| `period.mode.month` / `.year` / `.all` | 期間切替セグメント（ホーム/財務諸表 共有） | 月別 / 年別 / 全体 |
+| `period.input.month` / `period.input.year` | 期間の月入力 / 年セレクト | 月別=`input[type=month]` / 年別=select |
+| `period.trend` | 年別・全体の推移ブロック | 収支バー + 各月末純資産バー（CSS のみ） |
 | `journal.view` | Journal ルート | 仕訳画面の検出 |
 | `journal.entry.list` | Journal 一覧 | 仕訳一覧 |
 | `journal.monthlyRecognition` | 今月の月額化認識カード | 読み取り専用（仕訳ではない月割り表示） |

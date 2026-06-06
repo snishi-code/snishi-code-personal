@@ -6,6 +6,15 @@
  * - 詳細とポリシーは docs/dev/ui-contract.md。
  */
 export const UI = {
+  // 期間切替（ホーム/財務諸表で共有）
+  period: {
+    modeMonth: 'period.mode.month',
+    modeYear: 'period.mode.year',
+    modeAll: 'period.mode.all',
+    month: 'period.input.month',
+    year: 'period.input.year',
+    trend: 'period.trend',
+  },
   dashboard: {
     view: 'dashboard.view',
     // 日常入力 3 種（ホーム上部の主導線）

@@ -211,6 +211,29 @@ test('ホームの損益/資産サマリーから財務諸表(PL/BS)を開ける
   await expect(page.locator(ui('statements.profitAndLoss'))).toBeVisible();
 });
 
+test('期間切替（月別 / 年別 / 全体）でホームの集計が切り替わる', async ({ page }) => {
+  await page.goto('./');
+  await addExpense(page, '期間テスト支出', '1500');
+
+  // 既定は月別（月入力が出ている）。
+  await expect(page.locator(ui('period.input.month'))).toBeVisible();
+
+  // 年別へ: 年セレクトが出て、推移ブロックが表示される。
+  await page.locator(ui('period.mode.year')).click();
+  await expect(page.locator(ui('period.input.year'))).toBeVisible();
+  await expect(page.locator(ui('period.trend'))).toBeVisible();
+
+  // 全体へ: 月入力も年セレクトも出ない。推移は表示される。
+  await page.locator(ui('period.mode.all')).click();
+  await expect(page.locator(ui('period.input.month'))).toHaveCount(0);
+  await expect(page.locator(ui('period.input.year'))).toHaveCount(0);
+  await expect(page.locator(ui('period.trend'))).toBeVisible();
+
+  // 月別へ戻すと推移は消える（単月は推移を出さない）。
+  await page.locator(ui('period.mode.month')).click();
+  await expect(page.locator(ui('period.trend'))).toHaveCount(0);
+});
+
 test('外部オリジンへのリクエストが発生しない（外部送信ゼロ）', async ({ page, baseURL }) => {
   const external: string[] = [];
   const origin = new URL(baseURL ?? 'http://localhost:4173').origin;

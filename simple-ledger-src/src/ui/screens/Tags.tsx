@@ -2,8 +2,9 @@
  * タグ画面。タグの作成/編集/アーカイブ/削除と、期間内の簡易集計。
  * タグは PL/BS を変えない分析軸（全体タグ / 明細タグ）。
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useLedger } from '../../state/store';
+import { useDirtyGuard } from '../useDirtyGuard';
 import { aggregateEntryTags, aggregateLineTags, tagUsage } from '../../domain/tags';
 import { monthRange } from '../../domain/accounting';
 import { currentYearMonth, nowIso } from '../../util/time';
@@ -269,51 +270,60 @@ function TagSheet({ existing, onClose }: { existing?: Tag; onClose: () => void }
     }
   }
 
+  const snapshot = JSON.stringify({ name, scope });
+  const initialSnapshotRef = useRef<string | null>(null);
+  if (initialSnapshotRef.current === null) initialSnapshotRef.current = snapshot;
+  const dirty = snapshot !== initialSnapshotRef.current;
+  const { requestClose, discardConfirm } = useDirtyGuard(dirty, onClose);
+
   return (
-    <Modal
-      title={existing ? t('tags.edit') : t('tags.add')}
-      onClose={onClose}
-      dismissable={false}
-      footer={
-        <>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={submit}
-            disabled={submitting}
-            data-ui={UI.tags.save}
-          >
-            {t('common.save')}
-          </button>
-        </>
-      }
-    >
-      <TextInput
-        label={t('tags.name')}
-        required
-        value={name}
-        placeholder={t('tags.namePlaceholder')}
-        onChange={(v) => {
-          setName(v);
-          setError(undefined);
-        }}
-        error={error}
-        dataUi={UI.tags.name}
-      />
-      <SelectInput
-        label={t('tags.scope')}
-        value={scope}
-        onChange={(v) => setScope(v as TagScope)}
-        options={[
-          { value: 'both', label: t('tags.scope.both') },
-          { value: 'entry', label: t('tags.scope.entry') },
-          { value: 'line', label: t('tags.scope.line') },
-        ]}
-        hint={inUse ? t('tags.scopeLockedHint') : undefined}
-      />
-    </Modal>
+    <>
+      <Modal
+        title={existing ? t('tags.edit') : t('tags.add')}
+        onClose={requestClose}
+        dismissMode="if-clean"
+        footer={
+          <>
+            <button type="button" className="btn btn--ghost" onClick={requestClose}>
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={submit}
+              disabled={submitting}
+              data-ui={UI.tags.save}
+            >
+              {t('common.save')}
+            </button>
+          </>
+        }
+      >
+        <TextInput
+          label={t('tags.name')}
+          required
+          value={name}
+          placeholder={t('tags.namePlaceholder')}
+          onChange={(v) => {
+            setName(v);
+            setError(undefined);
+          }}
+          error={error}
+          dataUi={UI.tags.name}
+        />
+        <SelectInput
+          label={t('tags.scope')}
+          value={scope}
+          onChange={(v) => setScope(v as TagScope)}
+          options={[
+            { value: 'both', label: t('tags.scope.both') },
+            { value: 'entry', label: t('tags.scope.entry') },
+            { value: 'line', label: t('tags.scope.line') },
+          ]}
+          hint={inUse ? t('tags.scopeLockedHint') : undefined}
+        />
+      </Modal>
+      {discardConfirm}
+    </>
   );
 }

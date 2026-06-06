@@ -35,16 +35,48 @@ describe('inferScheduleFlow（A → B から入金/出金を推定）', () => {
     );
     expect(r).toEqual({ accountId: 'cash', counterAccountId: 'card', direction: 'outflow' });
   });
-  it('推定不能な組み合わせは null（口座間移動・負債→費用）', () => {
-    expect(
-      inferScheduleFlow(acc('a', 'daily-asset', 'asset'), acc('b', 'daily-asset', 'asset')),
-    ).toBeNull();
+  it('日常資産 → 日常資産 = transfer（口座間移動。accountId=移動元）', () => {
+    const r = inferScheduleFlow(
+      acc('bank', 'daily-asset', 'asset'),
+      acc('cash', 'daily-asset', 'asset'),
+    );
+    expect(r).toEqual({ accountId: 'bank', counterAccountId: 'cash', direction: 'transfer' });
+  });
+  it('推定不能な組み合わせは null（負債→費用）', () => {
     expect(
       inferScheduleFlow(
         acc('card', 'payment-liability', 'liability'),
         acc('food', 'expense-category', 'expense'),
       ),
     ).toBeNull();
+  });
+});
+
+describe('buildScheduleEntry transfer / projectCashflow transfer', () => {
+  it('transfer は 借方 移動先(counter) / 貸方 移動元(account)', () => {
+    const e = buildScheduleEntry(
+      sched({ accountId: 'bank', counterAccountId: 'cash', direction: 'transfer' }),
+    );
+    expect(e.lines.find((l) => l.side === 'debit')).toMatchObject({ accountId: 'cash' });
+    expect(e.lines.find((l) => l.side === 'credit')).toMatchObject({ accountId: 'bank' });
+  });
+  it('transfer は自由資金の総額を変えない', () => {
+    const proj = projectCashflow({
+      totalAssets: 100000,
+      reserveBalance: 0,
+      schedules: [
+        sched({
+          dueDate: '2026-06-20',
+          amount: 30000,
+          direction: 'transfer',
+          counterAccountId: 'cash',
+        }),
+      ],
+      today: '2026-06-15',
+      months: 3,
+    });
+    expect(proj.points.at(-1)?.free).toBe(100000);
+    expect(proj.minFree).toBe(100000);
   });
 });
 

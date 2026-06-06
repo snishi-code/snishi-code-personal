@@ -2,10 +2,11 @@
  * 危険操作の明示確認ダイアログ。
  *  - danger=true で確定ボタンを警告色に。
  *  - requireKeyword を渡すと、キーワード入力一致まで確定を無効化（全削除など）。
- *  - dismissable=false で背景タップ無効（破壊的操作の既定）。
+ *  - dismissMode は既定 'never'（背景タップ/Escape で閉じない＝破壊的操作の既定）。
  */
 import { useId, useState } from 'react';
 import { Modal } from './Modal';
+import type { DismissMode } from './Modal';
 import { Icon } from './Icon';
 import { t } from '../i18n';
 import { UI } from '../ui-contract';
@@ -16,7 +17,7 @@ export function ConfirmDialog({
   confirmLabel = t('common.proceed'),
   cancelLabel = t('common.cancel'),
   danger = false,
-  dismissable = false,
+  dismissMode = 'never',
   requireKeyword,
   keywordPrompt,
   onConfirm,
@@ -28,7 +29,7 @@ export function ConfirmDialog({
   confirmLabel?: string;
   cancelLabel?: string;
   danger?: boolean;
-  dismissable?: boolean;
+  dismissMode?: DismissMode;
   requireKeyword?: string;
   keywordPrompt?: string;
   onConfirm: () => void;
@@ -43,7 +44,7 @@ export function ConfirmDialog({
     <Modal
       title={title}
       onClose={onCancel}
-      dismissable={dismissable}
+      dismissMode={dismissMode}
       variant="dialog"
       dataUi={dataUi}
       footer={

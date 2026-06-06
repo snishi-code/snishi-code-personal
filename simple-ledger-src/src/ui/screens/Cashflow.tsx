@@ -3,8 +3,9 @@
  * 予定の追加・実績化・削除、目的別資金（取り置き枠）の管理を行う。
  * 「いつ費用認識するか(按分)」とは別概念で、「いつ現金が動くか」を扱う。
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useLedger } from '../../state/store';
+import { useDirtyGuard } from '../useDirtyGuard';
 import { deriveBalanceSheet } from '../../domain/accounting';
 import { inferScheduleFlow, liquidAssetTotal, projectCashflow } from '../../domain/cashflow';
 import { addMonths, monthOf, monthlyAmounts } from '../../domain/allocation';
@@ -243,8 +244,16 @@ export function Cashflow() {
                   {s.counterAccountId ? ` ↔ ${accountName(s.counterAccountId)}` : ''}
                 </div>
               </div>
-              <span className={`list__amount amount--${s.direction === 'inflow' ? 'pos' : 'neg'}`}>
-                {s.direction === 'inflow' ? '+' : '−'}
+              <span
+                className={`list__amount ${
+                  s.direction === 'inflow'
+                    ? 'amount--pos'
+                    : s.direction === 'transfer'
+                      ? 'muted'
+                      : 'amount--neg'
+                }`}
+              >
+                {s.direction === 'inflow' ? '+' : s.direction === 'transfer' ? '→ ' : '−'}
                 <Money amount={s.amount} currency={currency} />
               </span>
               <button
@@ -460,7 +469,6 @@ export function Cashflow() {
           body={pendingSchedule.title}
           confirmLabel={t('common.delete')}
           danger
-          dismissable
           onCancel={() => setPendingSchedule(null)}
           onConfirm={async () => {
             const s = pendingSchedule;
@@ -598,130 +606,150 @@ function ScheduleSheet({
     onSave(build());
   }
 
-  return (
-    <Modal
-      title={t('cashflow.form.title')}
-      onClose={onClose}
-      dismissable={false}
-      footer={
-        <>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={submit}
-            disabled={submitting}
-            data-ui={UI.cashflow.scheduleSave}
-          >
-            {t('common.save')}
-          </button>
-        </>
-      }
-    >
-      {errors.length > 0 ? (
-        <div className="field__error" role="alert" style={{ marginBottom: 'var(--space-3)' }}>
-          <Icon name="alert" size={14} />
-          {errors[0]}
-        </div>
-      ) : null}
+  const snapshot = JSON.stringify({
+    title,
+    dueDate,
+    amountText,
+    srcId,
+    dstId,
+    source,
+    installmentsText,
+    entryTagIds,
+    accountTagIds,
+    counterTagIds,
+  });
+  const initialSnapshotRef = useRef<string | null>(null);
+  if (initialSnapshotRef.current === null) initialSnapshotRef.current = snapshot;
+  const dirty = snapshot !== initialSnapshotRef.current;
+  const { requestClose, discardConfirm } = useDirtyGuard(dirty, onClose);
 
-      {/* 日常入力と同じ並び: 日付 → 項目 → 金額 → お金の流れ(A → B) */}
-      <TextInput
-        label={t('cashflow.form.dueDate')}
-        type="date"
-        value={dueDate}
-        onChange={setDueDate}
-      />
-      <TextInput
-        label={t('cashflow.form.name')}
-        required
-        value={title}
-        placeholder={t('cashflow.form.namePlaceholder')}
-        onChange={setTitle}
-        dataUi={UI.cashflow.scheduleName}
-      />
-      <TextInput
-        label={t('cashflow.form.amount')}
-        required
-        inputMode="numeric"
-        value={amountText}
-        onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
-        dataUi={UI.cashflow.scheduleAmount}
-      />
-      <div className="field">
-        <span className="field__hint">{t('cashflow.form.flowHint')}</span>
-        <div className="flow">
-          <div className="flow__side">
-            <AccountPicker
-              flat
-              label={t('cashflow.form.flowSource')}
-              required
-              value={srcId}
-              groups={srcGroups}
-              onChange={setSrcId}
-              dataUi={UI.cashflow.scheduleFlowSource}
-            />
+  return (
+    <>
+      <Modal
+        title={t('cashflow.form.title')}
+        onClose={requestClose}
+        dismissMode="if-clean"
+        footer={
+          <>
+            <button type="button" className="btn btn--ghost" onClick={requestClose}>
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={submit}
+              disabled={submitting}
+              data-ui={UI.cashflow.scheduleSave}
+            >
+              {t('common.save')}
+            </button>
+          </>
+        }
+      >
+        {errors.length > 0 ? (
+          <div className="field__error" role="alert" style={{ marginBottom: 'var(--space-3)' }}>
+            <Icon name="alert" size={14} />
+            {errors[0]}
           </div>
-          <div className="flow__arrow" aria-hidden="true">
-            →
-          </div>
-          <div className="flow__side">
-            <AccountPicker
-              flat
-              label={t('cashflow.form.flowDestination')}
-              required
-              value={dstId}
-              groups={dstGroups}
-              onChange={setDstId}
-              dataUi={UI.cashflow.scheduleFlowDestination}
-            />
-          </div>
-        </div>
-      </div>
-      <TagPicker
-        label={t('cashflow.form.entryTags')}
-        tags={tagsForScope(tags, 'entry', entryTagIds)}
-        value={entryTagIds}
-        onChange={setEntryTagIds}
-        dataUi={UI.cashflow.scheduleEntryTags}
-      />
-      <TagPicker
-        label={t('cashflow.form.accountTags')}
-        tags={tagsForScope(tags, 'line', accountTagIds)}
-        value={accountTagIds}
-        onChange={setAccountTagIds}
-        dataUi={UI.cashflow.scheduleAccountTags}
-      />
-      <TagPicker
-        label={t('cashflow.form.counterTags')}
-        tags={tagsForScope(tags, 'line', counterTagIds)}
-        value={counterTagIds}
-        onChange={setCounterTagIds}
-        dataUi={UI.cashflow.scheduleCounterTags}
-      />
-      <SelectInput
-        label={t('cashflow.form.source')}
-        value={source}
-        onChange={(v) => setSource(v as CashflowSource)}
-        options={[
-          { value: 'manual', label: t('cashflow.src.manual') },
-          { value: 'credit-card', label: t('cashflow.src.creditCard') },
-          { value: 'installment', label: t('cashflow.src.installment') },
-        ]}
-      />
-      {source === 'installment' ? (
+        ) : null}
+
+        {/* 日常入力と同じ並び: 日付 → 項目 → 金額 → お金の流れ(A → B) */}
         <TextInput
-          label={t('cashflow.form.installments')}
+          label={t('cashflow.form.dueDate')}
+          type="date"
+          value={dueDate}
+          onChange={setDueDate}
+        />
+        <TextInput
+          label={t('cashflow.form.name')}
+          required
+          value={title}
+          placeholder={t('cashflow.form.namePlaceholder')}
+          onChange={setTitle}
+          dataUi={UI.cashflow.scheduleName}
+        />
+        <TextInput
+          label={t('cashflow.form.amount')}
           required
           inputMode="numeric"
-          value={installmentsText}
-          onChange={(v) => setInstallmentsText(v.replace(/[^\d]/g, ''))}
-          dataUi={UI.cashflow.scheduleInstallments}
+          value={amountText}
+          onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
+          dataUi={UI.cashflow.scheduleAmount}
         />
-      ) : null}
-    </Modal>
+        <div className="field">
+          <span className="field__hint">{t('cashflow.form.flowHint')}</span>
+          <div className="flow">
+            <div className="flow__side">
+              <AccountPicker
+                flat
+                label={t('cashflow.form.flowSource')}
+                required
+                value={srcId}
+                groups={srcGroups}
+                onChange={setSrcId}
+                dataUi={UI.cashflow.scheduleFlowSource}
+              />
+            </div>
+            <div className="flow__arrow" aria-hidden="true">
+              →
+            </div>
+            <div className="flow__side">
+              <AccountPicker
+                flat
+                label={t('cashflow.form.flowDestination')}
+                required
+                value={dstId}
+                groups={dstGroups}
+                onChange={setDstId}
+                dataUi={UI.cashflow.scheduleFlowDestination}
+              />
+            </div>
+          </div>
+        </div>
+        <TagPicker
+          label={t('cashflow.form.entryTags')}
+          tags={tagsForScope(tags, 'entry', entryTagIds)}
+          value={entryTagIds}
+          onChange={setEntryTagIds}
+          dataUi={UI.cashflow.scheduleEntryTags}
+        />
+        <TagPicker
+          label={t('cashflow.form.accountTags')}
+          tags={tagsForScope(tags, 'line', accountTagIds)}
+          value={accountTagIds}
+          onChange={setAccountTagIds}
+          dataUi={UI.cashflow.scheduleAccountTags}
+        />
+        <TagPicker
+          label={t('cashflow.form.counterTags')}
+          tags={tagsForScope(tags, 'line', counterTagIds)}
+          value={counterTagIds}
+          onChange={setCounterTagIds}
+          dataUi={UI.cashflow.scheduleCounterTags}
+        />
+        <SelectInput
+          label={t('cashflow.form.source')}
+          value={source}
+          onChange={(v) => setSource(v as CashflowSource)}
+          options={[
+            { value: 'manual', label: t('cashflow.src.manual') },
+            { value: 'credit-card', label: t('cashflow.src.creditCard') },
+            { value: 'installment', label: t('cashflow.src.installment') },
+          ]}
+        />
+        {source === 'installment' ? (
+          <TextInput
+            label={t('cashflow.form.installments')}
+            required
+            inputMode="numeric"
+            value={installmentsText}
+            onChange={(v) => setInstallmentsText(v.replace(/[^\d]/g, ''))}
+            dataUi={UI.cashflow.scheduleInstallments}
+          />
+        ) : null}
+      </Modal>
+      {discardConfirm}
+    </>
   );
 }
 
@@ -755,48 +783,57 @@ function ReserveSheet({
     });
   }
 
+  const snapshot = JSON.stringify({ name, targetText, note });
+  const initialSnapshotRef = useRef<string | null>(null);
+  if (initialSnapshotRef.current === null) initialSnapshotRef.current = snapshot;
+  const dirty = snapshot !== initialSnapshotRef.current;
+  const { requestClose, discardConfirm } = useDirtyGuard(dirty, onClose);
+
   return (
-    <Modal
-      title={t('reserves.form.title')}
-      onClose={onClose}
-      dismissable={false}
-      footer={
-        <>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={submit}
-            disabled={submitting}
-            data-ui={UI.cashflow.reserveSave}
-          >
-            {t('common.save')}
-          </button>
-        </>
-      }
-    >
-      <TextInput
-        label={t('reserves.name')}
-        required
-        value={name}
-        placeholder={t('reserves.namePlaceholder')}
-        onChange={(v) => {
-          setName(v);
-          setError(undefined);
-        }}
-        error={error}
-        dataUi={UI.cashflow.reserveName}
-      />
-      <TextInput
-        label={t('reserves.target')}
-        inputMode="numeric"
-        value={targetText}
-        onChange={(v) => setTargetText(v.replace(/[^\d]/g, ''))}
-      />
-      <TextArea label={t('reserves.note')} value={note} onChange={setNote} />
-    </Modal>
+    <>
+      <Modal
+        title={t('reserves.form.title')}
+        onClose={requestClose}
+        dismissMode="if-clean"
+        footer={
+          <>
+            <button type="button" className="btn btn--ghost" onClick={requestClose}>
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={submit}
+              disabled={submitting}
+              data-ui={UI.cashflow.reserveSave}
+            >
+              {t('common.save')}
+            </button>
+          </>
+        }
+      >
+        <TextInput
+          label={t('reserves.name')}
+          required
+          value={name}
+          placeholder={t('reserves.namePlaceholder')}
+          onChange={(v) => {
+            setName(v);
+            setError(undefined);
+          }}
+          error={error}
+          dataUi={UI.cashflow.reserveName}
+        />
+        <TextInput
+          label={t('reserves.target')}
+          inputMode="numeric"
+          value={targetText}
+          onChange={(v) => setTargetText(v.replace(/[^\d]/g, ''))}
+        />
+        <TextArea label={t('reserves.note')} value={note} onChange={setNote} />
+      </Modal>
+      {discardConfirm}
+    </>
   );
 }
 
@@ -840,70 +877,86 @@ function FundingGoalSheet({
     });
   }
 
+  const snapshot = JSON.stringify({
+    name,
+    targetText,
+    targetDate,
+    currentText,
+    sourceId,
+    note,
+  });
+  const initialSnapshotRef = useRef<string | null>(null);
+  if (initialSnapshotRef.current === null) initialSnapshotRef.current = snapshot;
+  const dirty = snapshot !== initialSnapshotRef.current;
+  const { requestClose, discardConfirm } = useDirtyGuard(dirty, onClose);
+
   return (
-    <Modal
-      title={t('fundingGoal.form.title')}
-      onClose={onClose}
-      dismissable={false}
-      footer={
-        <>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={submit}
-            disabled={submitting}
-            data-ui={UI.cashflow.goalSave}
-          >
-            {t('common.save')}
-          </button>
-        </>
-      }
-    >
-      <TextInput
-        label={t('fundingGoal.name')}
-        required
-        value={name}
-        placeholder={t('fundingGoal.namePlaceholder')}
-        onChange={(v) => {
-          setName(v);
-          setError(undefined);
-        }}
-        error={error}
-        dataUi={UI.cashflow.goalName}
-      />
-      <TextInput
-        label={t('fundingGoal.targetAmount')}
-        required
-        inputMode="numeric"
-        value={targetText}
-        onChange={(v) => setTargetText(v.replace(/[^\d]/g, ''))}
-        dataUi={UI.cashflow.goalAmount}
-      />
-      <TextInput
-        label={t('fundingGoal.targetDate')}
-        required
-        type="date"
-        value={targetDate}
-        onChange={setTargetDate}
-        dataUi={UI.cashflow.goalDate}
-      />
-      <TextInput
-        label={t('fundingGoal.currentAmount')}
-        inputMode="numeric"
-        value={currentText}
-        hint={t('fundingGoal.currentHint')}
-        onChange={(v) => setCurrentText(v.replace(/[^\d]/g, ''))}
-      />
-      <AccountPicker
-        label={t('fundingGoal.source')}
-        value={sourceId}
-        groups={groupedAccountsByRole(accounts, ['daily-asset', 'reserve-asset'], sourceId)}
-        onChange={setSourceId}
-      />
-      <TextArea label={t('fundingGoal.note')} value={note} onChange={setNote} />
-    </Modal>
+    <>
+      <Modal
+        title={t('fundingGoal.form.title')}
+        onClose={requestClose}
+        dismissMode="if-clean"
+        footer={
+          <>
+            <button type="button" className="btn btn--ghost" onClick={requestClose}>
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={submit}
+              disabled={submitting}
+              data-ui={UI.cashflow.goalSave}
+            >
+              {t('common.save')}
+            </button>
+          </>
+        }
+      >
+        <TextInput
+          label={t('fundingGoal.name')}
+          required
+          value={name}
+          placeholder={t('fundingGoal.namePlaceholder')}
+          onChange={(v) => {
+            setName(v);
+            setError(undefined);
+          }}
+          error={error}
+          dataUi={UI.cashflow.goalName}
+        />
+        <TextInput
+          label={t('fundingGoal.targetAmount')}
+          required
+          inputMode="numeric"
+          value={targetText}
+          onChange={(v) => setTargetText(v.replace(/[^\d]/g, ''))}
+          dataUi={UI.cashflow.goalAmount}
+        />
+        <TextInput
+          label={t('fundingGoal.targetDate')}
+          required
+          type="date"
+          value={targetDate}
+          onChange={setTargetDate}
+          dataUi={UI.cashflow.goalDate}
+        />
+        <TextInput
+          label={t('fundingGoal.currentAmount')}
+          inputMode="numeric"
+          value={currentText}
+          hint={t('fundingGoal.currentHint')}
+          onChange={(v) => setCurrentText(v.replace(/[^\d]/g, ''))}
+        />
+        <AccountPicker
+          label={t('fundingGoal.source')}
+          value={sourceId}
+          groups={groupedAccountsByRole(accounts, ['daily-asset', 'reserve-asset'], sourceId)}
+          onChange={setSourceId}
+        />
+        <TextArea label={t('fundingGoal.note')} value={note} onChange={setNote} />
+      </Modal>
+      {discardConfirm}
+    </>
   );
 }

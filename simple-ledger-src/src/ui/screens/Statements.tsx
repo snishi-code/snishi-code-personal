@@ -3,17 +3,18 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useLedger } from '../../state/store';
-import { deriveBalanceSheet, deriveProfitAndLoss, monthRange } from '../../domain/accounting';
-import { currentYearMonth, todayLocal } from '../../util/time';
+import { deriveBalanceSheet, deriveProfitAndLoss } from '../../domain/accounting';
+import { periodAsOf, periodRange, type ReportPeriod } from '../../domain/reportPeriod';
+import { todayLocal } from '../../util/time';
 import { Money } from '../money';
 import { Icon } from '../Icon';
+import { PeriodSwitcher } from '../PeriodSwitcher';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import type { AccountBalance } from '../../domain/types';
 import type { JournalFilter } from './Journal';
 
 type Tab = 'pl' | 'bs';
-type Period = 'all' | 'month' | 'year';
 
 function Rows({
   items,
@@ -51,19 +52,28 @@ function Rows({
 export function Statements({
   initialTab = 'pl',
   initialSection,
+  period,
+  onPeriodChange,
   onDrillDown,
 }: {
   initialTab?: Tab;
   initialSection?: string;
+  period: ReportPeriod;
+  onPeriodChange: (p: ReportPeriod) => void;
   onDrillDown: (filter: JournalFilter) => void;
 }) {
   const { ledger } = useLedger();
   const [tab, setTab] = useState<Tab>(initialTab);
-  const [period, setPeriod] = useState<Period>('month');
-  // BS の基準日。既定は今日（未来月の按分認識仕訳を現在残高に含めない）。
-  const [asOf, setAsOf] = useState<string>(todayLocal());
-  const { year, month } = currentYearMonth();
+  const today = todayLocal();
   const currency = ledger?.settings.currency ?? 'JPY';
+
+  // フロー（PL）は期間、ストック（BS）は期間末の基準日。
+  const range = useMemo(() => periodRange(period), [period]);
+  const asOf = useMemo(() => {
+    const entries = ledger?.journalEntries ?? [];
+    const lastDataDate = entries.reduce((m, e) => (e.date > m ? e.date : m), '');
+    return periodAsOf(period, today, lastDataDate);
+  }, [ledger, period, today]);
 
   // ホームの項目別遷移で渡されたセクションへスクロールする。
   useEffect(() => {
@@ -71,12 +81,6 @@ export function Statements({
     const el = document.getElementById(`fs-${initialSection}`);
     el?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }, [initialSection, tab]);
-
-  const range = useMemo(() => {
-    if (period === 'all') return undefined;
-    if (period === 'year') return { from: `${year}-01-01`, to: `${year}-12-31` };
-    return monthRange(year, month);
-  }, [period, year, month]);
 
   const pl = useMemo(
     () => deriveProfitAndLoss(ledger?.accounts ?? [], ledger?.journalEntries ?? [], range),
@@ -130,25 +134,11 @@ export function Statements({
         {t('statements.drilldownHint')}
       </p>
 
+      {/* 期間切替（ホームと共有）。PL は期間合計、BS は期間末時点。 */}
+      <PeriodSwitcher value={period} onChange={onPeriodChange} today={today} />
+
       {tab === 'pl' ? (
         <div data-ui={UI.statements.profitAndLoss}>
-          <div className="toolbar">
-            <label className="sr-only" htmlFor="pl-period">
-              {t('statements.period')}
-            </label>
-            <select
-              id="pl-period"
-              className="select"
-              value={period}
-              aria-label={t('statements.period')}
-              onChange={(e) => setPeriod(e.target.value as Period)}
-            >
-              <option value="month">{t('statements.thisMonth')}</option>
-              <option value="year">{t('statements.thisYear')}</option>
-              <option value="all">{t('statements.allPeriods')}</option>
-            </select>
-          </div>
-
           {/* 個人家計向け: 収入 / 支出 を独立表示し、差引収支は別枠サマリー（混ぜない）。 */}
           <div className="fs-cols">
             <div id="fs-revenue">
@@ -189,22 +179,12 @@ export function Statements({
         </div>
       ) : (
         <div data-ui={UI.statements.balanceSheet}>
-          <div className="toolbar">
-            <label className="sr-only" htmlFor="bs-asof">
-              {t('statements.asOf')}
-            </label>
-            <input
-              id="bs-asof"
-              className="input"
-              type="date"
-              value={asOf}
-              aria-label={t('statements.asOf')}
-              onChange={(e) => setAsOf(e.target.value)}
-              data-ui={UI.statements.asOf}
-            />
-          </div>
-          <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
-            {t('statements.asOfHint')}
+          <p
+            className="field__hint"
+            style={{ marginBottom: 'var(--space-3)' }}
+            data-ui={UI.statements.asOf}
+          >
+            {t('statements.asOfDate', { date: asOf })}
           </p>
 
           {!bs.balanced ? (

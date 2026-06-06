@@ -215,7 +215,7 @@ export interface MonthlyCostItem {
  * 「いつ費用認識するか(allocation)」とは別概念で、「いつ現金が動くか」を保持する。
  * 予定は通常仕訳一覧へ大量生成せず、ここに置く。実績化で 1 件の仕訳を作る。
  */
-export type CashflowDirection = 'inflow' | 'outflow';
+export type CashflowDirection = 'inflow' | 'outflow' | 'transfer';
 export type CashflowSource = 'manual' | 'credit-card' | 'installment' | 'reserve';
 export type CashflowStatus = 'planned' | 'posted' | 'cancelled';
 

@@ -1,9 +1,11 @@
 /*
  * Sheet/Modal の共通土台。
- * 規約:
- *  - 閉じるだけ/フォームは右上 × で閉じる。
- *  - dismissable=false（import・全削除・復元）は背景タップで閉じない。
- *  - Escape はキャンセル相当（onClose）。フォーカストラップと復帰を行う。
+ * 閉じ方は dismissMode で統一する:
+ *  - 'always': メニュー/ヘルプ/軽い選択。背景タップ/Escape で閉じる。
+ *  - 'if-clean': 入力フォーム。未編集なら閉じ、編集済みは破棄確認（onClose を useDirtyGuard で包む）。
+ *  - 'never':   削除/全削除/import/復元など破壊的操作。背景タップ/Escape で閉じない。
+ * 背景タップ判定は onPointerDown かつ target===currentTarget のときだけ（内部タップでは閉じない）。
+ * Escape はキャンセル相当（onClose）。フォーカストラップと復帰を行う。
  */
 import { useCallback, useEffect, useId, useRef } from 'react';
 import type { ReactNode } from 'react';
@@ -13,12 +15,15 @@ import { t } from '../i18n';
 const FOCUSABLE =
   'a[href],button:not([disabled]),textarea,input,select,[tabindex]:not([tabindex="-1"])';
 
+export type DismissMode = 'always' | 'if-clean' | 'never';
+
 export function Modal({
   title,
   onClose,
   children,
   footer,
-  dismissable = true,
+  dismissable,
+  dismissMode,
   variant = 'sheet',
   dataUi,
 }: {
@@ -26,10 +31,15 @@ export function Modal({
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
+  /** @deprecated dismissMode を使う。false は 'never' 相当（後方互換）。 */
   dismissable?: boolean;
+  dismissMode?: DismissMode;
   variant?: 'sheet' | 'dialog';
   dataUi?: string;
 }) {
+  // 後方互換: dismissMode 未指定なら dismissable から導出（既定は 'always'）。
+  const mode: DismissMode = dismissMode ?? (dismissable === false ? 'never' : 'always');
+  const allowOutsideClose = mode !== 'never';
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const restoreRef = useRef<Element | null>(null);
@@ -48,7 +58,7 @@ export function Modal({
     (e: React.KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose();
+        if (allowOutsideClose) onClose();
         return;
       }
       if (e.key !== 'Tab') return;
@@ -68,14 +78,15 @@ export function Modal({
         firstEl.focus();
       }
     },
-    [onClose],
+    [onClose, allowOutsideClose],
   );
 
   return (
     <div
       className="sheet-overlay"
-      onMouseDown={(e) => {
-        if (dismissable && e.target === e.currentTarget) onClose();
+      onPointerDown={(e) => {
+        // 背景（オーバーレイ自身）を直接押したときだけ閉じる。内部要素からの伝播では閉じない。
+        if (allowOutsideClose && e.target === e.currentTarget) onClose();
       }}
     >
       <div

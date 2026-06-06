@@ -20,9 +20,11 @@ import { EntrySheet, type EntryInit } from './ui/screens/EntrySheet';
 import { useServiceWorker } from './pwa/useServiceWorker';
 import { Icon } from './ui/Icon';
 import { t } from './i18n';
+import { currentYearMonth } from './util/time';
 import type { Screen } from './ui/navigation';
 import type { FormMode } from './ui/entryModes';
 import type { JournalEntry } from './domain/types';
+import type { ReportPeriod } from './domain/reportPeriod';
 
 export function App() {
   const { status, ledger, error } = useLedger();
@@ -33,6 +35,11 @@ export function App() {
   const [journalFilter, setJournalFilter] = useState<JournalFilter | null>(null);
   const [statementsTab, setStatementsTab] = useState<'pl' | 'bs'>('pl');
   const [statementsSection, setStatementsSection] = useState<string | undefined>(undefined);
+  // レポート期間（ホーム/財務諸表/仕訳で共有）。既定は今月。
+  const [period, setPeriod] = useState<ReportPeriod>(() => {
+    const { year, month } = currentYearMonth();
+    return { mode: 'month', year, month };
+  });
   const { updateReady, applyUpdate } = useServiceWorker();
 
   if (status === 'loading') {
@@ -93,6 +100,8 @@ export function App() {
 
         {screen === 'dashboard' ? (
           <Dashboard
+            period={period}
+            onPeriodChange={setPeriod}
             onAddEntry={openCreate}
             onEditEntry={openEdit}
             onNavigate={setScreen}
@@ -112,6 +121,8 @@ export function App() {
           <Statements
             initialTab={statementsTab}
             initialSection={statementsSection}
+            period={period}
+            onPeriodChange={setPeriod}
             onDrillDown={goJournalFiltered}
           />
         ) : null}

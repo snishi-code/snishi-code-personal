@@ -8,8 +8,9 @@
  *  - 「詳細入力」で借方/貸方を直接指定する manual モードへ切替できる（主導線ではない）。
  *  - 編集は元の入力モードを推定して開く。取消/返金(reversal)は manual で逆仕訳を見せる。
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Modal } from '../Modal';
+import { useDirtyGuard } from '../useDirtyGuard';
 import { TextArea, TextInput } from '../Field';
 import { AccountPicker } from '../AccountPicker';
 import { TagPicker } from '../TagPicker';
@@ -114,6 +115,23 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const isLiabilityPayment = paymentRole === 'payment-liability';
   // 詳細（メモ・タグ）は折りたたみ。編集時は既存値が見えるよう開いておく。
   const [showDetails, setShowDetails] = useState(init.kind === 'edit');
+
+  // 編集状態の検出: 入力フィールドのスナップショットを初期値と比較する。
+  const snapshot = JSON.stringify({
+    form,
+    amountText,
+    allocate,
+    monthsText,
+    continueCost,
+    repayToggle,
+    repayAccountId,
+    repayCountText,
+    repayStartDate,
+  });
+  const initialSnapshotRef = useRef<string | null>(null);
+  if (initialSnapshotRef.current === null) initialSnapshotRef.current = snapshot;
+  const dirty = snapshot !== initialSnapshotRef.current;
+  const { requestClose, discardConfirm } = useDirtyGuard(dirty, onClose);
 
   const existing =
     init.kind === 'edit' ? { id: init.entry.id, createdAt: init.entry.createdAt } : undefined;
@@ -470,93 +488,96 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     ) : null;
 
   return (
-    <Modal
-      title={title}
-      onClose={onClose}
-      dismissable={false}
-      footer={
-        <>
-          <button
-            type="button"
-            className="btn btn--ghost"
-            onClick={onClose}
-            data-ui={UI.journal.entry.cancel}
-          >
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={onSave}
-            disabled={submitting}
-            data-ui={UI.journal.entry.save}
-          >
-            {t('common.save')}
-          </button>
-        </>
-      }
-    >
-      {init.kind === 'reversal' ? (
-        <div className="banner" role="note" style={{ marginBottom: 'var(--space-4)' }}>
-          <Icon name="reverse" size={18} />
-          {t('entry.reversalNote')}
-        </div>
-      ) : null}
+    <>
+      <Modal
+        title={title}
+        onClose={requestClose}
+        dismissMode="if-clean"
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={requestClose}
+              data-ui={UI.journal.entry.cancel}
+            >
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={onSave}
+              disabled={submitting}
+              data-ui={UI.journal.entry.save}
+            >
+              {t('common.save')}
+            </button>
+          </>
+        }
+      >
+        {init.kind === 'reversal' ? (
+          <div className="banner" role="note" style={{ marginBottom: 'var(--space-4)' }}>
+            <Icon name="reverse" size={18} />
+            {t('entry.reversalNote')}
+          </div>
+        ) : null}
 
-      {isManual ? (
-        <>
-          {dateField}
-          {descriptionField}
-          {entryTagsField}
-          {roles.map((role) => (
-            <div key={role.side}>
-              {renderAccountPicker(role)}
-              {renderLineTags(role)}
-            </div>
-          ))}
-          {amountField}
-          {memoField}
-        </>
-      ) : (
-        <>
-          {/* 人間が入力する順: 日付 → 項目 → 金額 → お金の流れ(A → B) → 詳細 */}
-          {dateField}
-          {/* 振替は「項目」を必須にしない（未入力なら自動で「移動元 → 移動先」を付ける）。 */}
-          {mode === 'transfer' ? null : itemField}
-          {amountField}
-          {renderFlow()}
-          {allocateField}
-          {repaymentField}
+        {isManual ? (
+          <>
+            {dateField}
+            {descriptionField}
+            {entryTagsField}
+            {roles.map((role) => (
+              <div key={role.side}>
+                {renderAccountPicker(role)}
+                {renderLineTags(role)}
+              </div>
+            ))}
+            {amountField}
+            {memoField}
+          </>
+        ) : (
+          <>
+            {/* 人間が入力する順: 日付 → 項目 → 金額 → お金の流れ(A → B) → 詳細 */}
+            {dateField}
+            {/* 振替は「項目」を必須にしない（未入力なら自動で「移動元 → 移動先」を付ける）。 */}
+            {mode === 'transfer' ? null : itemField}
+            {amountField}
+            {renderFlow()}
+            {allocateField}
+            {repaymentField}
 
-          {allocationActive ? null : (
-            <>
-              <button
-                type="button"
-                className="collapse-toggle"
-                aria-expanded={showDetails}
-                onClick={() => setShowDetails((v) => !v)}
-                data-ui={UI.journal.entry.detailToggle}
-              >
-                <Icon name={showDetails ? 'chevronDown' : 'chevronRight'} size={16} />
-                {t('entry.detailToggle')}
-              </button>
-              {showDetails ? (
-                <div className="stack">
-                  {/* 振替では「項目」を任意としてここに置く。 */}
-                  {mode === 'transfer' ? itemField : null}
-                  {memoField}
-                  {entryTagsField}
-                  {roles.map((role) => (
-                    <div key={role.side}>{renderLineTags(role)}</div>
-                  ))}
-                </div>
-              ) : null}
-            </>
-          )}
+            {allocationActive ? null : (
+              <>
+                <button
+                  type="button"
+                  className="collapse-toggle"
+                  aria-expanded={showDetails}
+                  onClick={() => setShowDetails((v) => !v)}
+                  data-ui={UI.journal.entry.detailToggle}
+                >
+                  <Icon name={showDetails ? 'chevronDown' : 'chevronRight'} size={16} />
+                  {t('entry.detailToggle')}
+                </button>
+                {showDetails ? (
+                  <div className="stack">
+                    {/* 振替では「項目」を任意としてここに置く。 */}
+                    {mode === 'transfer' ? itemField : null}
+                    {memoField}
+                    {entryTagsField}
+                    {roles.map((role) => (
+                      <div key={role.side}>{renderLineTags(role)}</div>
+                    ))}
+                  </div>
+                ) : null}
+              </>
+            )}
 
-          {manualSwitch}
-        </>
-      )}
-    </Modal>
+            {manualSwitch}
+          </>
+        )}
+      </Modal>
+      {discardConfirm}
+    </>
   );
 }

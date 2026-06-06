@@ -2,8 +2,9 @@
  * 勘定科目の追加/編集シート。
  * type（会計分類）と role（UI 用の役割）を持つ。type を変えると role は既定へリセットする。
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Modal } from '../Modal';
+import { useDirtyGuard } from '../useDirtyGuard';
 import { SelectInput, TextArea, TextInput } from '../Field';
 import { useLedger } from '../../state/store';
 import { ACCOUNT_TYPES, type Account, type AccountType } from '../../domain/types';
@@ -70,59 +71,68 @@ export function AccountSheet({ existing, onClose }: { existing?: Account; onClos
     }
   }
 
+  const snapshot = JSON.stringify({ name, type, role, note });
+  const initialSnapshotRef = useRef<string | null>(null);
+  if (initialSnapshotRef.current === null) initialSnapshotRef.current = snapshot;
+  const dirty = snapshot !== initialSnapshotRef.current;
+  const { requestClose, discardConfirm } = useDirtyGuard(dirty, onClose);
+
   return (
-    <Modal
-      title={existing ? t('accounts.edit') : t('accounts.add')}
-      onClose={onClose}
-      dismissable={false}
-      dataUi={existing ? undefined : UI.accounts.create}
-      footer={
-        <>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={onSave}
-            disabled={submitting}
-            data-ui={UI.accounts.save}
-          >
-            {t('common.save')}
-          </button>
-        </>
-      }
-    >
-      <TextInput
-        label={t('accounts.name')}
-        required
-        value={name}
-        onChange={(v) => {
-          setName(v);
-          setError(undefined);
-        }}
-        error={error}
-      />
-      <SelectInput
-        label={t('accounts.type')}
-        required
-        value={type}
-        onChange={(v) => onTypeChange(v as AccountType)}
-        options={ACCOUNT_TYPES.map((tp) => ({ value: tp, label: accountTypeLabel(tp) }))}
-        disabled={inUse}
-        hint={inUse ? t('accounts.typeLockedHint') : undefined}
-        dataUi={UI.accounts.type}
-      />
-      <SelectInput
-        label={t('accounts.role')}
-        required
-        value={role}
-        onChange={(v) => setRole(v as AccountRole)}
-        options={rolesForType(type).map((r) => ({ value: r, label: accountRoleLabel(r) }))}
-        hint={t('accounts.roleHint')}
-        dataUi={UI.accounts.role}
-      />
-      <TextArea label={t('accounts.note')} value={note} onChange={setNote} />
-    </Modal>
+    <>
+      <Modal
+        title={existing ? t('accounts.edit') : t('accounts.add')}
+        onClose={requestClose}
+        dismissMode="if-clean"
+        dataUi={existing ? undefined : UI.accounts.create}
+        footer={
+          <>
+            <button type="button" className="btn btn--ghost" onClick={requestClose}>
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={onSave}
+              disabled={submitting}
+              data-ui={UI.accounts.save}
+            >
+              {t('common.save')}
+            </button>
+          </>
+        }
+      >
+        <TextInput
+          label={t('accounts.name')}
+          required
+          value={name}
+          onChange={(v) => {
+            setName(v);
+            setError(undefined);
+          }}
+          error={error}
+        />
+        <SelectInput
+          label={t('accounts.type')}
+          required
+          value={type}
+          onChange={(v) => onTypeChange(v as AccountType)}
+          options={ACCOUNT_TYPES.map((tp) => ({ value: tp, label: accountTypeLabel(tp) }))}
+          disabled={inUse}
+          hint={inUse ? t('accounts.typeLockedHint') : undefined}
+          dataUi={UI.accounts.type}
+        />
+        <SelectInput
+          label={t('accounts.role')}
+          required
+          value={role}
+          onChange={(v) => setRole(v as AccountRole)}
+          options={rolesForType(type).map((r) => ({ value: r, label: accountRoleLabel(r) }))}
+          hint={t('accounts.roleHint')}
+          dataUi={UI.accounts.role}
+        />
+        <TextArea label={t('accounts.note')} value={note} onChange={setNote} />
+      </Modal>
+      {discardConfirm}
+    </>
   );
 }

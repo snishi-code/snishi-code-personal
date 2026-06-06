@@ -23,7 +23,9 @@ import type {
  *  - 収入カテゴリ → 日常資産: 入金(inflow)。現金が動くのは日常資産。
  *  - 日常資産 → 費用カテゴリ: 出金(outflow)。
  *  - 日常資産 → 支払用負債: 返済/支払い(outflow)。
- * 上記以外（口座間移動・負債→費用など現金移動が一意でない組み合わせ）は推定不能として null。
+ *  - 日常資産 → 日常資産: 口座間移動(transfer)。自由資金の総額は変えない。
+ *    accountId=移動元、counterAccountId=移動先。実績化は 借方 移動先 / 貸方 移動元。
+ * 上記以外（負債→費用など現金移動が一意でない組み合わせ）は推定不能として null。
  */
 export function inferScheduleFlow(
   src: Account,
@@ -36,6 +38,8 @@ export function inferScheduleFlow(
     (dst.role === 'expense-category' || dst.role === 'payment-liability')
   )
     return { accountId: src.id, counterAccountId: dst.id, direction: 'outflow' };
+  if (src.role === 'daily-asset' && dst.role === 'daily-asset')
+    return { accountId: src.id, counterAccountId: dst.id, direction: 'transfer' };
   return null;
 }
 
@@ -52,7 +56,12 @@ export function liquidAssetTotal(
     .reduce((s, a) => s + a.balance, 0);
 }
 
-/** 予定 CF を実績化する仕訳。outflow: 借方 counter / 貸方 account、inflow: その逆。 */
+/**
+ * 予定 CF を実績化する仕訳。
+ *  - outflow（現金が出ていく）/ transfer（口座間移動）: 借方 counter / 貸方 account
+ *  - inflow（現金が入る）:                              借方 account / 貸方 counter
+ * transfer は accountId=移動元 / counterAccountId=移動先 なので、借方 移動先 / 貸方 移動元 になる。
+ */
 export function buildScheduleEntry(schedule: CashflowSchedule): JournalEntry {
   if (!schedule.counterAccountId) {
     throw new Error('相手科目が未設定の予定は実績化できません。');
@@ -60,10 +69,8 @@ export function buildScheduleEntry(schedule: CashflowSchedule): JournalEntry {
   const ts = nowIso();
   const asset = schedule.accountId;
   const counter = schedule.counterAccountId;
-  // outflow（現金が出ていく）: 借方 counter / 貸方 asset
-  // inflow（現金が入る）:       借方 asset   / 貸方 counter
-  const debit = schedule.direction === 'outflow' ? counter : asset;
-  const credit = schedule.direction === 'outflow' ? asset : counter;
+  const debit = schedule.direction === 'inflow' ? asset : counter;
+  const credit = schedule.direction === 'inflow' ? counter : asset;
   // 各明細タグは「口座側 / 相手科目側」を口座 ID で判定して付け替える。
   const lineTags = (accountId: string): { tagIds?: string[] } => {
     if (accountId === asset && schedule.accountLineTagIds?.length)
@@ -135,7 +142,8 @@ export function projectCashflow(params: {
 
   let total = startTotal;
   for (const s of planned) {
-    total += s.direction === 'inflow' ? s.amount : -s.amount;
+    // transfer（口座間移動）は自由資金の総額を変えない。
+    total += s.direction === 'inflow' ? s.amount : s.direction === 'outflow' ? -s.amount : 0;
     points.push({ date: s.dueDate, total, free: total - reserveBalance });
   }
 

@@ -125,7 +125,7 @@ export const cashflowScheduleSchema = z.object({
   title: z.string().min(1).max(120),
   dueDate: isoDate,
   amount: amountSchema,
-  direction: z.enum(['inflow', 'outflow']),
+  direction: z.enum(['inflow', 'outflow', 'transfer']),
   accountId: z.string().min(1),
   counterAccountId: z.string().min(1).optional(),
   source: z.enum(['manual', 'credit-card', 'installment', 'reserve']),

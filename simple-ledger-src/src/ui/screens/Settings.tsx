@@ -328,7 +328,6 @@ export function Settings({ onNavigate }: { onNavigate: (screen: Screen) => void 
           body={pendingDeleteSnap.reason}
           confirmLabel={t('common.delete')}
           danger
-          dismissable
           onCancel={() => setPendingDeleteSnap(null)}
           onConfirm={async () => {
             const snap = pendingDeleteSnap;
