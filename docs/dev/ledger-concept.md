@@ -1,7 +1,7 @@
 # simple-ledger — 会計コンセプト
 
 個人カテゴリの家計簿アプリ `simple-ledger` の会計モデル。実装は
-`simple-ledger/src/domain/`。
+`simple-ledger-src/src/domain/`。
 
 ## なぜ Spreadsheet ではなく PWA か
 

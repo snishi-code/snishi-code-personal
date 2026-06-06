@@ -1,6 +1,6 @@
 # simple-ledger — データ形式と import ポリシー
 
-実装: `simple-ledger/src/domain/schema.ts`（Zod）、`src/domain/migrations.ts`、
+実装: `simple-ledger-src/src/domain/schema.ts`（Zod）、`src/domain/migrations.ts`、
 `src/data/exportImport.ts`、`src/data/repository.ts`。
 
 ## 保存方針

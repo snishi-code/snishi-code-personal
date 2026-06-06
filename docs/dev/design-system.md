@@ -1,6 +1,6 @@
 # simple-ledger — Design system（tokens）
 
-CSS variables による design tokens。正本は `simple-ledger/src/ui/tokens.css`。
+CSS variables による design tokens。正本は `simple-ledger-src/src/ui/tokens.css`。
 色値はコンポーネントに直書きしない（`var(--*)` 参照のみ）。
 
 > サイト全体の色の正本は各リポ `shared.css` の `:root`（`--bg` / `--surface` /

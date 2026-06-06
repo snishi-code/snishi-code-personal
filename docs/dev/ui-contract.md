@@ -1,6 +1,6 @@
 # simple-ledger — UI contract（テスト安定名）
 
-テストが依存してよい **安定名** の一覧。正本は `simple-ledger/src/ui-contract.ts`
+テストが依存してよい **安定名** の一覧。正本は `simple-ledger-src/src/ui-contract.ts`
 （`UI` オブジェクト）。各 React コンポーネントは必要最小限の `data-ui` 属性を付ける。
 
 ## ポリシー

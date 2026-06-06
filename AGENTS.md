@@ -42,7 +42,8 @@ apex ↔ medical ↔ personal の絶対 URL は `site-links.js` の1箇所で管
 ## このリポジトリ固有（personal = 個人カテゴリ）
 
 - 個人向けのシンプルなウェブアプリを開発・配信する。
-- **`simple-ledger/`** = 家計簿アプリ（複式簿記・Vite+React+TS・**IndexedDB 主体**・JSON 交換形式・**外部送信ゼロ**・PWA）。詳細は `docs/dev/ledger-*.md` / `docs/dev/{ui-contract,design-system}.md` / `docs/adr/0001-local-first-ledger.md` をポインタ参照（AGENTS.md には複製しない）。アプリ内同期・送信は実装しない（共有は JSON 書き出し → アプリ外手段）。
+- **家計簿アプリ（simple-ledger）**: ソースは **`simple-ledger-src/`**（Vite+React+TS strict・**IndexedDB 主体**・JSON 交換形式・**外部送信ゼロ**・PWA）。詳細は `docs/dev/ledger-*.md` / `docs/dev/{ui-contract,design-system}.md` / `docs/adr/0001-local-first-ledger.md` をポインタ参照（AGENTS.md には複製しない）。アプリ内同期・送信は実装しない（共有は JSON 書き出し → アプリ外手段）。
+- **配信は「リポジトリのファイルをそのまま静的配信（ビルドなし）」**。よって simple-ledger は**ビルド成果物を配信パス `simple-ledger/` に出力してコミットする**（`cd simple-ledger-src && npm run build` が `../simple-ledger/` を再生成）。`simple-ledger/` 配下の生成物は直接編集せず、必ずソースを直して再ビルド→コミットする。**ソースだけ更新してビルドを忘れると本番が真っ白になる**。
 - **teal 系で統一**。`badge-green` / `cat-card-green` / `app-icon-green` 等のクラスを使う（クラス名は歴史的経緯で `green` だが、実値は teal）。
 - 個別アプリのアイコンは**カテゴリ色 + 固有の形**（カテゴリ色だけの汎用アイコンは禁止）。
 - **同期は「アプリ内で外部送信」ではなく、JSON 書き出し + Obsidian sync 等のアプリ外手段で実現する**。これにより個人アプリも「外部送信ゼロ」を維持できる（憲法どおり）。送信ありの機能が本当に必要になったら、サイトの約束を濁さないよう別途設計を相談すること。
