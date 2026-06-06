@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { buildScheduleEntry, horizonEnd, projectCashflow } from '../src/domain/cashflow';
-import type { CashflowSchedule } from '../src/domain/types';
+import {
+  buildScheduleEntry,
+  horizonEnd,
+  liquidAssetTotal,
+  projectCashflow,
+} from '../src/domain/cashflow';
+import type { AccountBalance, CashflowSchedule } from '../src/domain/types';
+
+function bal(id: string, balance: number): AccountBalance {
+  return {
+    account: { id, name: id, type: 'asset', archived: false, createdAt: 'x', updatedAt: 'x' },
+    balance,
+  };
+}
 
 function sched(over: Partial<CashflowSchedule>): CashflowSchedule {
   return {
@@ -95,5 +107,13 @@ describe('horizonEnd', () => {
   it('月数ぶん先の上限', () => {
     expect(horizonEnd('2026-06-15', 3)).toBe('2026-09-31');
     expect(horizonEnd('2026-11-01', 3)).toBe('2027-02-31');
+  });
+});
+
+describe('liquidAssetTotal', () => {
+  it('除外指定した資産（按分中資産など）を総資金から外す', () => {
+    const assets = [bal('cash', 100000), bal('bank', 50000), bal('def', 30000)];
+    expect(liquidAssetTotal(assets, new Set())).toBe(180000);
+    expect(liquidAssetTotal(assets, new Set(['def']))).toBe(150000);
   });
 });

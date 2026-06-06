@@ -9,7 +9,20 @@
 import { newId } from './ids';
 import { nowIso } from '../util/time';
 import { addMonths, monthOf } from './allocation';
-import type { CashflowSchedule, JournalEntry } from './types';
+import type { AccountBalance, CashflowSchedule, JournalEntry } from './types';
+
+/**
+ * 資金繰りの「総資金」= 流動資産のみ。按分中資産・固定資産・投資など、現金化を伴わない
+ * asset は除外する（excludedAccountIds で指定）。目的別資金は流動なので含める（自由資金で控除）。
+ */
+export function liquidAssetTotal(
+  assets: AccountBalance[],
+  excludedAccountIds: Set<string>,
+): number {
+  return assets
+    .filter((a) => !excludedAccountIds.has(a.account.id))
+    .reduce((s, a) => s + a.balance, 0);
+}
 
 /** 予定 CF を実績化する仕訳。outflow: 借方 counter / 貸方 account、inflow: その逆。 */
 export function buildScheduleEntry(schedule: CashflowSchedule): JournalEntry {

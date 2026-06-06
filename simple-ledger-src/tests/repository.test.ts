@@ -278,3 +278,52 @@ describe('予定キャッシュフロー / 目的別資金', () => {
     expect(acc.name).toBe('結婚資金');
   });
 });
+
+describe('予定CF・目的別資金が参照する科目の保護', () => {
+  function plannedSchedule(accountId: string, counterAccountId?: string): CashflowSchedule {
+    return {
+      id: newId(),
+      title: 'x',
+      dueDate: '2026-07-10',
+      amount: 1000,
+      direction: 'outflow',
+      accountId,
+      ...(counterAccountId ? { counterAccountId } : {}),
+      source: 'manual',
+      status: 'planned',
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+  }
+
+  it('予定CF が参照する科目は削除できない', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    await upsertSchedule(plannedSchedule(cash.id));
+    await expect(deleteAccount(cash.id)).rejects.toThrow();
+  });
+
+  it('予定CF が参照する科目は区分変更できない', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    await upsertSchedule(plannedSchedule(cash.id));
+    await expect(upsertAccount({ ...cash, type: 'expense', updatedAt: 'y' })).rejects.toThrow();
+  });
+
+  it('目的別資金が参照する科目は削除できない', async () => {
+    await loadLedger();
+    const r = await createReserve({ name: '結婚資金' });
+    await expect(deleteAccount(r.reserveAccountId)).rejects.toThrow();
+  });
+
+  it('実績化済み予定に紐づく仕訳は通常削除・上書きできない', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const card = ledger.accounts.find((a) => a.type === 'liability')!;
+    const s = plannedSchedule(cash.id, card.id);
+    await upsertSchedule(s);
+    const entry = await postSchedule(s.id);
+    await expect(deleteEntry(entry.id)).rejects.toThrow();
+    await expect(upsertEntry({ ...entry, description: '改ざん' })).rejects.toThrow();
+  });
+});

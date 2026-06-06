@@ -104,16 +104,42 @@ async function writeWithRevision(
 
 /* ── 勘定科目 ── */
 
-export async function upsertAccount(account: Account): Promise<void> {
-  // 使用中（仕訳から参照中）の科目は区分(type)を変更できない。fail-closed。
-  const [accounts, entries] = await Promise.all([
-    getAll<Account>(STORE.accounts),
+/** 科目が「使用中」か（仕訳明細・予定CF・目的別資金のいずれかから参照されている）。 */
+function isAccountReferenced(
+  id: string,
+  entries: JournalEntry[],
+  schedules: CashflowSchedule[],
+  reserves: ReserveItem[],
+): boolean {
+  return (
+    entries.some((e) => e.lines.some((l) => l.accountId === id)) ||
+    schedules.some((s) => s.accountId === id || s.counterAccountId === id) ||
+    reserves.some((r) => r.reserveAccountId === id)
+  );
+}
+
+async function loadReferencingCollections(): Promise<{
+  entries: JournalEntry[];
+  schedules: CashflowSchedule[];
+  reserves: ReserveItem[];
+}> {
+  const [entries, schedules, reserves] = await Promise.all([
     getAll<JournalEntry>(STORE.journalEntries),
+    getAll<CashflowSchedule>(STORE.cashflowSchedules),
+    getAll<ReserveItem>(STORE.reserves),
+  ]);
+  return { entries, schedules, reserves };
+}
+
+export async function upsertAccount(account: Account): Promise<void> {
+  // 使用中（仕訳/予定CF/目的別資金から参照中）の科目は区分(type)を変更できない。fail-closed。
+  const [accounts, refs] = await Promise.all([
+    getAll<Account>(STORE.accounts),
+    loadReferencingCollections(),
   ]);
   const prev = accounts.find((a) => a.id === account.id);
   if (prev && prev.type !== account.type) {
-    const referenced = entries.some((e) => e.lines.some((l) => l.accountId === account.id));
-    if (referenced) {
+    if (isAccountReferenced(account.id, refs.entries, refs.schedules, refs.reserves)) {
       throw new Error('使用中の科目は区分を変更できません。');
     }
   }
@@ -122,12 +148,11 @@ export async function upsertAccount(account: Account): Promise<void> {
   });
 }
 
-/** 仕訳から参照されている科目は削除できない（アーカイブを使う）。fail-closed。 */
+/** 使用中（仕訳/予定CF/目的別資金から参照中）の科目は削除できない（アーカイブを使う）。fail-closed。 */
 export async function deleteAccount(id: string): Promise<void> {
-  const entries = await getAll<JournalEntry>(STORE.journalEntries);
-  const referenced = entries.some((e) => e.lines.some((l) => l.accountId === id));
-  if (referenced) {
-    throw new Error('この科目は仕訳で使われているため削除できません。アーカイブしてください。');
+  const { entries, schedules, reserves } = await loadReferencingCollections();
+  if (isAccountReferenced(id, entries, schedules, reserves)) {
+    throw new Error('この科目は使用中のため削除できません。アーカイブしてください。');
   }
   await writeWithRevision([STORE.accounts], (t) => {
     t.objectStore(STORE.accounts).delete(id);
@@ -139,6 +164,9 @@ export async function deleteAccount(id: string): Promise<void> {
 const GENERATED_ENTRY_MSG =
   '按分から生成された仕訳は編集・削除できません。按分台帳で管理してください。';
 
+const LINKED_ENTRY_MSG =
+  '実績化済みの予定に紐づく仕訳は編集・削除できません。資金繰りの予定から操作してください。';
+
 /** 按分生成仕訳（allocationId 付き）は通常の編集・削除では壊せない。fail-closed。 */
 async function assertNotAllocationEntry(id: string): Promise<void> {
   const entries = await getAll<JournalEntry>(STORE.journalEntries);
@@ -148,9 +176,18 @@ async function assertNotAllocationEntry(id: string): Promise<void> {
   }
 }
 
+/** 実績化済み予定の linkedEntry は通常の編集・削除では壊せない。fail-closed。 */
+async function assertNotScheduleLinked(id: string): Promise<void> {
+  const schedules = await getAll<CashflowSchedule>(STORE.cashflowSchedules);
+  if (schedules.some((s) => s.linkedEntryId === id)) {
+    throw new Error(LINKED_ENTRY_MSG);
+  }
+}
+
 export async function upsertEntry(entry: JournalEntry): Promise<void> {
-  // 既存が按分生成仕訳なら上書き禁止。新規入力に allocationId は付かない。
+  // 既存が按分生成仕訳/予定リンク仕訳なら上書き禁止。新規入力に allocationId は付かない。
   await assertNotAllocationEntry(entry.id);
+  await assertNotScheduleLinked(entry.id);
   if (entry.metadata?.allocationId) throw new Error(GENERATED_ENTRY_MSG);
   await writeWithRevision([STORE.journalEntries], (t) => {
     t.objectStore(STORE.journalEntries).put(entry);
@@ -159,6 +196,7 @@ export async function upsertEntry(entry: JournalEntry): Promise<void> {
 
 export async function deleteEntry(id: string): Promise<void> {
   await assertNotAllocationEntry(id);
+  await assertNotScheduleLinked(id);
   await writeWithRevision([STORE.journalEntries], (t) => {
     t.objectStore(STORE.journalEntries).delete(id);
   });

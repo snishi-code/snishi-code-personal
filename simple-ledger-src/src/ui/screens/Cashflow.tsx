@@ -6,7 +6,7 @@
 import { useMemo, useState } from 'react';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet } from '../../domain/accounting';
-import { projectCashflow } from '../../domain/cashflow';
+import { liquidAssetTotal, projectCashflow } from '../../domain/cashflow';
 import { addMonths, monthOf, monthlyAmounts } from '../../domain/allocation';
 import { newId } from '../../domain/ids';
 import { nowIso, todayLocal } from '../../util/time';
@@ -45,13 +45,17 @@ export function Cashflow() {
     const entries = ledger?.journalEntries ?? [];
     const reserves = ledger?.reserves ?? [];
     const schedules = ledger?.cashflowSchedules ?? [];
+    const allocations = ledger?.allocations ?? [];
     const bs = deriveBalanceSheet(accounts, entries, today);
     const byId = new Map(bs.assets.map((a) => [a.account.id, a.balance] as const));
+    // 按分中資産（現金ではない繰延資産）は総資金から除外する。
+    const excluded = new Set(allocations.map((a) => a.deferredAccountId));
+    const totalAssets = liquidAssetTotal(bs.assets, excluded);
     const reserveBalance = reserves.reduce((s, r) => s + (byId.get(r.reserveAccountId) ?? 0), 0);
     return {
       balById: byId,
       projection: projectCashflow({
-        totalAssets: bs.totalAssets,
+        totalAssets,
         reserveBalance,
         schedules,
         today,
@@ -114,6 +118,10 @@ export function Cashflow() {
           </span>
         </div>
       </div>
+
+      <p className="field__hint" style={{ marginTop: 'var(--space-2)' }}>
+        {t('cashflow.liquidNote')}
+      </p>
 
       <div className="card card--pad" style={{ marginTop: 'var(--space-3)' }}>
         <div className="kv">
