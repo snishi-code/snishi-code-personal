@@ -178,8 +178,40 @@ export async function importFromJsonText(
   };
 }
 
-/** スナップショットから台帳を復元する（現状を上書き）。復元前に現状の保険スナップショットを取る。 */
+/**
+ * スナップショットを現行スキーマへ前進させ、完全検証して返す（fail-closed）。
+ * import と同じ不変条件（migration → Zod）を復元にも適用し、古い/壊れた
+ * スナップショットを黙って取り込まないようにする。違反は Error。
+ */
+function migrateAndValidateSnapshot(snapshotData: LedgerExportPackage): LedgerExportPackage {
+  let candidate: unknown = snapshotData;
+  if (snapshotData.schemaVersion !== SCHEMA_VERSION) {
+    const result = migrateToCurrent(snapshotData);
+    if (!result.ok || !result.data) {
+      throw new Error(
+        `スナップショットを現行スキーマへ更新できません: ${result.detail ?? '未対応の版です。'}`,
+      );
+    }
+    candidate = result.data;
+  }
+  const validated = ledgerExportPackageSchema.safeParse(candidate);
+  if (!validated.success) {
+    const first = validated.error.issues[0];
+    const where = first?.path.join('.') ?? '';
+    throw new Error(
+      `スナップショットの形式が不正です: ${where ? where + ': ' : ''}${first?.message ?? ''}`,
+    );
+  }
+  return validated.data;
+}
+
+/**
+ * スナップショットから台帳を復元する（現状を上書き）。復元前に現状の保険スナップショットを取る。
+ * import 同様に migration + Zod 検証を通し、検証成功まで既存 DB を壊さない（fail-closed）。
+ */
 export async function restoreFromSnapshot(snapshotData: LedgerExportPackage): Promise<Ledger> {
+  // 先に検証する（失敗時は既存データを一切変更しない）。
+  const pkg = migrateAndValidateSnapshot(snapshotData);
   const current = await loadLedger();
   await saveSnapshot({
     id: makeSnapshotId(),
@@ -194,13 +226,13 @@ export async function restoreFromSnapshot(snapshotData: LedgerExportPackage): Pr
       revision: current.meta.revision + 1,
       updatedAt: nowIso(),
     },
-    settings: snapshotData.settings,
-    accounts: snapshotData.accounts,
-    journalEntries: snapshotData.journalEntries,
-    allocations: snapshotData.allocations,
-    cashflowSchedules: snapshotData.cashflowSchedules,
-    reserves: snapshotData.reserves,
-    tags: snapshotData.tags,
+    settings: pkg.settings,
+    accounts: pkg.accounts,
+    journalEntries: pkg.journalEntries,
+    allocations: pkg.allocations,
+    cashflowSchedules: pkg.cashflowSchedules,
+    reserves: pkg.reserves,
+    tags: pkg.tags,
   });
   return loadLedger();
 }

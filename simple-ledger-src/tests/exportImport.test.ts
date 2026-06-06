@@ -4,7 +4,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import { createAllocation, loadLedger, upsertEntry, listSnapshots } from '../src/data/repository';
-import { buildExportPackage, exportToJsonText, importFromJsonText } from '../src/data/exportImport';
+import {
+  buildExportPackage,
+  exportToJsonText,
+  importFromJsonText,
+  restoreFromSnapshot,
+} from '../src/data/exportImport';
 import { buildSimpleEntry } from '../src/domain/entry';
 import { APP_ID } from '../src/domain/constants';
 
@@ -118,6 +123,51 @@ describe('revision 競合', () => {
     const after = await loadLedger();
     expect(after.journalEntries.some((e) => e.description === '給料')).toBe(false);
     expect(after.journalEntries.some((e) => e.description === 'ランチ')).toBe(true);
+  });
+});
+
+describe('restoreFromSnapshot（fail-closed）', () => {
+  it('有効なスナップショットを復元できる', async () => {
+    const ledger = await seedWithEntry();
+    const snap = buildExportPackage(ledger);
+    // いったん別の編集をしてから復元する。
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const salary = ledger.accounts.find((a) => a.name === '給与収入')!;
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2026-06-05',
+        description: '給料',
+        debitAccountId: cash.id,
+        creditAccountId: salary.id,
+        amount: 300000,
+      }),
+    );
+    const restored = await restoreFromSnapshot(snap);
+    expect(restored.journalEntries.some((e) => e.description === 'ランチ')).toBe(true);
+    expect(restored.journalEntries.some((e) => e.description === '給料')).toBe(false);
+  });
+
+  it('壊れたスナップショットは復元せず既存データを保持する（throw）', async () => {
+    const before = await seedWithEntry();
+    const beforeCount = before.journalEntries.length;
+    const broken = buildExportPackage(before);
+    // 借方≠貸方の不正仕訳を混ぜる。
+    broken.journalEntries.push({
+      id: 'bad',
+      date: '2026-06-02',
+      description: 'broken',
+      kind: 'normal',
+      lines: [
+        { accountId: 'a', side: 'debit', amount: 100 },
+        { accountId: 'b', side: 'credit', amount: 90 },
+      ],
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    await expect(restoreFromSnapshot(broken)).rejects.toThrow();
+    const after = await loadLedger();
+    expect(after.journalEntries.some((e) => e.id === 'bad')).toBe(false);
+    expect(after.journalEntries.length).toBe(beforeCount);
   });
 });
 
