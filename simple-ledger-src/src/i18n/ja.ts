@@ -64,6 +64,9 @@ export const ja = {
 
   'journal.allocationTag': '按分',
   'journal.monthlyCostTag': '月額化',
+  'journal.monthlyRecognitionTitle': '{year}年{month}月の月額化認識',
+  'journal.monthlyRecognitionNote':
+    '月額化コストの当月分です（仕訳ではなく月割りの参考表示。生活コストに計上されます）。',
   'journal.generatedNotice':
     '生成された仕訳（按分・月額化コスト）は各画面で管理します（直接の編集・削除はできません）。',
 

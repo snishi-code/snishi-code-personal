@@ -9,8 +9,9 @@ import { Icon } from '../Icon';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
-import { todayLocal } from '../../util/time';
+import { currentYearMonth, todayLocal } from '../../util/time';
 import { entryHasTag } from '../../domain/tags';
+import { monthlyCostForMonth } from '../../domain/monthlyCost';
 import { tagNames } from '../tagOptions';
 import type { Account, JournalEntry } from '../../domain/types';
 
@@ -80,6 +81,18 @@ export function Journal({
   }, [ledger, query, from, effectiveTo, accountFilterId, tagFilter]);
 
   const hasDateOrQuery = query !== '' || from !== '' || to !== '';
+
+  // 今月の月額化認識（読み取り専用。仕訳ではなく MonthlyCostItem の formula から導出）。
+  // 既定の月ビュー（科目/タグ/期間で絞っていない）でだけ出す。
+  const { year, month } = currentYearMonth();
+  const currentYm = `${year}-${String(month).padStart(2, '0')}`;
+  const monthRecognitions = useMemo(() => {
+    if (accountFilterId || tagFilter || from !== '' || to !== '') return [];
+    return (ledger?.monthlyCostItems ?? [])
+      .map((m) => ({ id: m.id, name: m.name, amount: monthlyCostForMonth(m, currentYm) }))
+      .filter((r) => r.amount > 0);
+  }, [ledger, accountFilterId, tagFilter, from, to, currentYm]);
+  const monthRecognitionTotal = monthRecognitions.reduce((s, r) => s + r.amount, 0);
 
   return (
     <section aria-labelledby="journal-title" data-ui={UI.journal.view}>
@@ -201,6 +214,30 @@ export function Journal({
           {t('journal.showFuture')}
         </label>
       </div>
+
+      {monthRecognitions.length > 0 ? (
+        <div className="card" data-ui={UI.journal.monthlyRecognition}>
+          <div className="stmt-row stmt-row--total">
+            <span>{t('journal.monthlyRecognitionTitle', { year, month })}</span>
+            <span className="stmt-row__num">
+              <Money amount={monthRecognitionTotal} currency={currency} />
+            </span>
+          </div>
+          {monthRecognitions.map((r) => (
+            <div className="stmt-row" key={r.id}>
+              <span>
+                {r.name} <span className="tag tag--teal">{t('journal.monthlyCostTag')}</span>
+              </span>
+              <span className="stmt-row__num">
+                <Money amount={r.amount} currency={currency} />
+              </span>
+            </div>
+          ))}
+          <div className="stmt-row muted" style={{ fontSize: 12 }}>
+            {t('journal.monthlyRecognitionNote')}
+          </div>
+        </div>
+      ) : null}
 
       {filtered.length === 0 ? (
         <div className="card card--pad empty">{t('journal.empty')}</div>

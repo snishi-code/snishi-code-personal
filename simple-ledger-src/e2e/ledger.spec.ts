@@ -100,6 +100,9 @@ test('月額化コストは仕訳を作らない（登録簿）', async ({ page 
   // 仕訳一覧には何も増えない（月額化は仕訳を生成しない）。
   await openJournal(page);
   await expect(page.locator(`${ui('journal.entry.list')} > li`)).toHaveCount(0);
+  // ただし当月の月額化認識は読み取り専用で見える（120,000/12 = 10,000）。
+  await expect(page.locator(ui('journal.monthlyRecognition'))).toContainText('スマホ年払い');
+  await expect(page.locator(ui('journal.monthlyRecognition'))).toContainText('10,000');
 });
 
 test('資金繰り: 予定と目的別資金を作成できる', async ({ page }) => {

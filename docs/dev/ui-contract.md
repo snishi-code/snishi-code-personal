@@ -20,6 +20,7 @@
 | `dashboard.openPl` / `dashboard.openBs` | ホーム損益/資産負債サマリー | 財務諸表(PL/BS)へ遷移 |
 | `journal.view` | Journal ルート | 仕訳画面の検出 |
 | `journal.entry.list` | Journal 一覧 | 仕訳一覧 |
+| `journal.monthlyRecognition` | 今月の月額化認識カード | 読み取り専用（仕訳ではない月割り表示） |
 | `journal.search` | Journal 検索入力 | 検索 |
 | `journal.filter.clearAccount` | 科目絞り込み解除 | ドリルダウン解除 |
 | `journal.entry.save` | Entry シート保存 | 保存 |

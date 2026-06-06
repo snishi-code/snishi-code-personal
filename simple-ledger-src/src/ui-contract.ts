@@ -19,6 +19,7 @@ export const UI = {
   journal: {
     view: 'journal.view',
     list: 'journal.entry.list',
+    monthlyRecognition: 'journal.monthlyRecognition',
     search: 'journal.search',
     clearAccountFilter: 'journal.filter.clearAccount',
     showFuture: 'journal.filter.showFuture',
