@@ -53,12 +53,21 @@
 }
 ```
 
-### 参照整合性（import 検証）
+### 構造・参照整合性（import 検証）
 
-`ledgerExportPackageSchema` は次も検証する（不一致は `validation-error`）:
+`journalEntrySchema` / `ledgerExportPackageSchema` は次も検証する（不一致は `validation-error`）:
 
+- **仕訳は「1 借方・1 貸方・同額」の 2 行のみ**（MVP は複合仕訳 UI 未対応のため fail-closed）。
 - すべての `journalEntries[].lines[].accountId` が `accounts[].id` に存在する。
 - `accounts[].id` は一意。
+- `metadata.allocationPlan` の `recognitionAccountId` / `deferredAccountId` が `accounts[].id` に存在し、
+  `generatedEntryIds` の各 ID が `journalEntries[].id` に存在する。
+
+### revision の原子性
+
+本体（仕訳/科目/設定）の変更と `meta.revision` の +1 は **同一 IndexedDB トランザクション** で行う
+（`repository.writeWithRevision`）。途中失敗で「本体だけ変わって revision が進まない」状態を作らない。
+revision は import の競合判定に使うため、本体と必ず歩調を合わせる。
 
 ## import ポリシー（fail-closed）
 

@@ -69,8 +69,20 @@ export const journalEntrySchema = z
     updatedAt: isoDateTime,
   })
   .superRefine((entry, ctx) => {
-    const debit = entry.lines.filter((l) => l.side === 'debit').reduce((s, l) => s + l.amount, 0);
-    const credit = entry.lines.filter((l) => l.side === 'credit').reduce((s, l) => s + l.amount, 0);
+    const debits = entry.lines.filter((l) => l.side === 'debit');
+    const credits = entry.lines.filter((l) => l.side === 'credit');
+    // MVP は「1 借方・1 貸方・同額」のみ。複合仕訳(3 行以上や片側 0/複数)は UI 未対応のため
+    // fail-closed で取り込まない（型は将来拡張に備え lines 配列のまま）。
+    if (entry.lines.length !== 2 || debits.length !== 1 || credits.length !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'MVP では 1 借方・1 貸方の 2 行仕訳のみ対応しています',
+        path: ['lines'],
+      });
+      return;
+    }
+    const debit = debits.reduce((s, l) => s + l.amount, 0);
+    const credit = credits.reduce((s, l) => s + l.amount, 0);
     if (debit !== credit) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -117,6 +129,8 @@ export const ledgerExportPackageSchema = z
       seen.add(a.id);
     });
 
+    const entryIds = new Set(pkg.journalEntries.map((e) => e.id));
+
     // 参照整合性: すべての仕訳明細の accountId が accounts に存在すること。
     // これを通さないと、存在しない科目を参照する仕訳が PL/BS から消えてしまう。
     pkg.journalEntries.forEach((e, ei) => {
@@ -129,6 +143,34 @@ export const ledgerExportPackageSchema = z
           });
         }
       });
+
+      // 按分計画(allocationPlan)の参照整合性（将来拡張の土台でも壊れた参照は取り込まない）。
+      const plan = e.metadata?.allocationPlan;
+      if (plan) {
+        (
+          [
+            ['recognitionAccountId', plan.recognitionAccountId],
+            ['deferredAccountId', plan.deferredAccountId],
+          ] as const
+        ).forEach(([field, id]) => {
+          if (!seen.has(id)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `按分計画の ${field} が存在しない勘定科目(${id})を参照しています`,
+              path: ['journalEntries', ei, 'metadata', 'allocationPlan', field],
+            });
+          }
+        });
+        plan.generatedEntryIds.forEach((gid, gi) => {
+          if (!entryIds.has(gid)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `按分計画の生成仕訳 ID(${gid})が存在しません`,
+              path: ['journalEntries', ei, 'metadata', 'allocationPlan', 'generatedEntryIds', gi],
+            });
+          }
+        });
+      }
     });
   });
 

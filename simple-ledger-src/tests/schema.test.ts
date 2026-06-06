@@ -155,3 +155,78 @@ describe('entry metadata / allocationPlan', () => {
     }
   });
 });
+
+describe('journalEntrySchema 行数ルール（MVP: 1 借方・1 貸方）', () => {
+  it('3 行以上の複合仕訳は拒否する', () => {
+    const threeLines = {
+      ...validEntry,
+      lines: [
+        { accountId: 'a', side: 'debit', amount: 600 },
+        { accountId: 'b', side: 'credit', amount: 1000 },
+        { accountId: 'c', side: 'debit', amount: 400 },
+      ],
+    };
+    expect(journalEntrySchema.safeParse(threeLines).success).toBe(false);
+  });
+  it('片側に偏った 2 行（借方2/貸方0）は拒否する', () => {
+    const bothDebit = {
+      ...validEntry,
+      lines: [
+        { accountId: 'a', side: 'debit', amount: 500 },
+        { accountId: 'b', side: 'debit', amount: 500 },
+      ],
+    };
+    expect(journalEntrySchema.safeParse(bothDebit).success).toBe(false);
+  });
+});
+
+describe('allocationPlan の参照整合性（package 検証）', () => {
+  function pkgWithPlan(plan: Record<string, unknown>) {
+    return {
+      appId: APP_ID,
+      schemaVersion: SCHEMA_VERSION,
+      ledgerId: 'ledger',
+      exportedAt: '2026-06-01T00:00:00.000Z',
+      deviceId: 'd',
+      baseRevision: 0,
+      currentRevision: 0,
+      accounts: [
+        { id: 'a', name: '現金', type: 'asset', archived: false, createdAt: 'x', updatedAt: 'x' },
+        { id: 'b', name: '食費', type: 'expense', archived: false, createdAt: 'x', updatedAt: 'x' },
+      ],
+      journalEntries: [{ ...validEntry, metadata: { allocationPlan: plan } }],
+      settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
+    };
+  }
+  const base = {
+    kind: 'period',
+    startDate: '2026-06-01',
+    endDate: '2026-12-31',
+    method: 'even-monthly',
+    recognitionAccountId: 'b',
+    deferredAccountId: 'a',
+    generatedEntryIds: [] as string[],
+  };
+
+  it('科目参照が揃っていれば有効', () => {
+    expect(ledgerExportPackageSchema.safeParse(pkgWithPlan(base)).success).toBe(true);
+  });
+  it('存在しない recognition/deferred 科目は拒否する', () => {
+    expect(
+      ledgerExportPackageSchema.safeParse(pkgWithPlan({ ...base, recognitionAccountId: 'zzz' }))
+        .success,
+    ).toBe(false);
+  });
+  it('存在しない generatedEntryIds は拒否する', () => {
+    expect(
+      ledgerExportPackageSchema.safeParse(pkgWithPlan({ ...base, generatedEntryIds: ['nope'] }))
+        .success,
+    ).toBe(false);
+  });
+  it('既存仕訳 ID を指す generatedEntryIds は許可する', () => {
+    expect(
+      ledgerExportPackageSchema.safeParse(pkgWithPlan({ ...base, generatedEntryIds: ['e1'] }))
+        .success,
+    ).toBe(true);
+  });
+});

@@ -7,6 +7,7 @@ import {
   makeSnapshotId,
   resetAll,
   saveSnapshot,
+  updateSettings,
   upsertAccount,
   upsertEntry,
 } from '../src/data/repository';
@@ -73,6 +74,34 @@ describe('科目削除の fail-closed', () => {
       }),
     );
     await expect(deleteAccount(food.id)).rejects.toThrow();
+  });
+});
+
+describe('revision と本体の原子的更新', () => {
+  it('updateSettings は revision を進め、設定も保存する', async () => {
+    const before = await loadLedger();
+    await updateSettings({ ...before.settings, ledgerName: '家計' });
+    const after = await loadLedger();
+    expect(after.settings.ledgerName).toBe('家計');
+    expect(after.meta.revision).toBe(before.meta.revision + 1);
+  });
+
+  it('複数の変更で revision が変更回数ぶん進む（各操作で本体と meta が一緒に進む）', async () => {
+    const ledger = await loadLedger();
+    expect(ledger.meta.revision).toBe(0);
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    const other = ledger.accounts.find((a) => a.name === 'その他収入')!;
+
+    await addEntryRef(food.id, cash.id); // +1
+    await updateSettings({ ...ledger.settings, currency: 'USD' }); // +1
+    await upsertAccount({ ...other, name: '雑収入', updatedAt: 'y' }); // +1
+
+    const after = await loadLedger();
+    expect(after.meta.revision).toBe(3);
+    expect(after.settings.currency).toBe('USD');
+    expect(after.journalEntries).toHaveLength(1);
+    expect(after.accounts.find((a) => a.id === other.id)?.name).toBe('雑収入');
   });
 });
 

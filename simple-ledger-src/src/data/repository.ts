@@ -6,7 +6,7 @@
  *  - 変更のたびに meta.revision を +1 する（端末ローカルの編集追跡）。
  *  - 削除/全消去/復元は fail-closed（呼び出し側で確認 UI を出す）。
  */
-import { STORE, deleteRecord, getAll, getKv, putKv, putRecord, runWrite } from './db';
+import { STORE, deleteRecord, getAll, getKv, putRecord, runWrite, type StoreName } from './db';
 import { defaultAccounts, defaultSettings, newMeta } from './seed';
 import { newId } from '../domain/ids';
 import type {
@@ -65,10 +65,25 @@ function cmp(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-async function bumpRevision(): Promise<void> {
-  const m = await getMeta();
-  if (!m) return;
-  await putKv<LedgerMeta>(KV_META, { ...m, revision: m.revision + 1, updatedAt: nowIso() });
+/**
+ * 本体の変更と meta.revision の更新を **同一トランザクション** で行う。
+ * 後段だけ失敗して「データは変わったが revision は進まない」状態を防ぐ。
+ * revision は JSON import の競合判定に使うため、本体と必ず歩調を合わせる。
+ */
+async function writeWithRevision(
+  stores: StoreName[],
+  apply: (t: IDBTransaction) => void,
+): Promise<void> {
+  const all = stores.includes(STORE.kv) ? stores : [...stores, STORE.kv];
+  await runWrite(all, (t) => {
+    apply(t);
+    const kv = t.objectStore(STORE.kv);
+    const req = kv.get(KV_META);
+    req.onsuccess = () => {
+      const m = req.result as LedgerMeta | undefined;
+      if (m) kv.put({ ...m, revision: m.revision + 1, updatedAt: nowIso() }, KV_META);
+    };
+  });
 }
 
 /* ── 勘定科目 ── */
@@ -86,8 +101,9 @@ export async function upsertAccount(account: Account): Promise<void> {
       throw new Error('使用中の科目は区分を変更できません。');
     }
   }
-  await putRecord(STORE.accounts, account);
-  await bumpRevision();
+  await writeWithRevision([STORE.accounts], (t) => {
+    t.objectStore(STORE.accounts).put(account);
+  });
 }
 
 /** 仕訳から参照されている科目は削除できない（アーカイブを使う）。fail-closed。 */
@@ -97,27 +113,31 @@ export async function deleteAccount(id: string): Promise<void> {
   if (referenced) {
     throw new Error('この科目は仕訳で使われているため削除できません。アーカイブしてください。');
   }
-  await deleteRecord(STORE.accounts, id);
-  await bumpRevision();
+  await writeWithRevision([STORE.accounts], (t) => {
+    t.objectStore(STORE.accounts).delete(id);
+  });
 }
 
 /* ── 仕訳 ── */
 
 export async function upsertEntry(entry: JournalEntry): Promise<void> {
-  await putRecord(STORE.journalEntries, entry);
-  await bumpRevision();
+  await writeWithRevision([STORE.journalEntries], (t) => {
+    t.objectStore(STORE.journalEntries).put(entry);
+  });
 }
 
 export async function deleteEntry(id: string): Promise<void> {
-  await deleteRecord(STORE.journalEntries, id);
-  await bumpRevision();
+  await writeWithRevision([STORE.journalEntries], (t) => {
+    t.objectStore(STORE.journalEntries).delete(id);
+  });
 }
 
 /* ── 設定 ── */
 
 export async function updateSettings(settings: Settings): Promise<void> {
-  await putKv<Settings>(KV_SETTINGS, settings);
-  await bumpRevision();
+  await writeWithRevision([STORE.kv], (t) => {
+    t.objectStore(STORE.kv).put(settings, KV_SETTINGS);
+  });
 }
 
 /* ── スナップショット ── */
