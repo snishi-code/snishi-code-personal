@@ -12,7 +12,7 @@ import { Modal } from '../Modal';
 import { TextArea, TextInput } from '../Field';
 import { AccountPicker } from '../AccountPicker';
 import { TagPicker } from '../TagPicker';
-import { groupedAccounts } from '../accountOptions';
+import { groupedAccountsByRole } from '../accountOptions';
 import { tagsForScope } from '../tagOptions';
 import { FORM_MODE_TITLE, MODE_ROLES, type FormMode } from '../entryModes';
 import { useLedger } from '../../state/store';
@@ -94,6 +94,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [monthsText, setMonthsText] = useState('');
   const [monthsError, setMonthsError] = useState(false);
   const months = monthsText === '' ? 0 : Number.parseInt(monthsText, 10);
+  // 詳細（メモ・タグ）は折りたたみ。編集時は既存値が見えるよう開いておく。
+  const [showDetails, setShowDetails] = useState(init.kind === 'edit');
 
   const existing =
     init.kind === 'edit' ? { id: init.entry.id, createdAt: init.entry.createdAt } : undefined;
@@ -152,6 +154,150 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   }
 
   const sameAccount = errorText(errors, 'same-account');
+  const isManual = mode === 'manual';
+
+  const dateField = (
+    <TextInput
+      label={t('entry.date')}
+      type="date"
+      required
+      value={form.date}
+      onChange={(v) => setForm((f) => ({ ...f, date: v }))}
+      error={errorText(errors, 'date-required')}
+      dataUi={UI.journal.entry.date}
+    />
+  );
+
+  const descriptionField = (
+    <TextInput
+      label={t('entry.description')}
+      required
+      value={form.description}
+      placeholder={t('entry.descriptionPlaceholder')}
+      onChange={(v) => setForm((f) => ({ ...f, description: v }))}
+      error={errorText(errors, 'description-required')}
+      dataUi={UI.journal.entry.description}
+    />
+  );
+
+  const amountField = (
+    <TextInput
+      label={t('entry.amount')}
+      required
+      inputMode="numeric"
+      value={amountText}
+      onChange={onAmountChange}
+      error={errorText(errors, 'amount-invalid')}
+      dataUi={UI.journal.entry.amount}
+    />
+  );
+
+  const entryTagsField = allocationActive ? null : (
+    <TagPicker
+      label={t('entry.tags')}
+      hint={t('entry.tagsHint')}
+      tags={tagsForScope(tags, 'entry', form.tagIds ?? [])}
+      value={form.tagIds ?? []}
+      onChange={(ids) => setForm((f) => ({ ...f, tagIds: ids }))}
+      dataUi={UI.journal.entry.tags}
+    />
+  );
+
+  const memoField = (
+    <TextArea
+      label={t('entry.memo')}
+      value={form.memo ?? ''}
+      onChange={(v) => setForm((f) => ({ ...f, memo: v }))}
+      dataUi={UI.journal.entry.memo}
+    />
+  );
+
+  const renderAccountPicker = (role: (typeof roles)[number]) => {
+    const value = role.side === 'debit' ? form.debitAccountId : form.creditAccountId;
+    const reqErr = errorText(errors, role.side === 'debit' ? 'debit-required' : 'credit-required');
+    return (
+      <AccountPicker
+        label={t(role.labelKey)}
+        required
+        value={value}
+        groups={groupedAccountsByRole(accounts, [...role.allowedRoles], value)}
+        onChange={(id) => setSide(role.side, id)}
+        error={reqErr ?? sameAccount}
+        dataUi={
+          role.side === 'debit' ? UI.journal.entry.debitAccount : UI.journal.entry.creditAccount
+        }
+      />
+    );
+  };
+
+  const renderLineTags = (role: (typeof roles)[number]) => {
+    if (allocationActive) return null;
+    const lineTagValue = (role.side === 'debit' ? form.debitTagIds : form.creditTagIds) ?? [];
+    const lineTagLabel =
+      mode === 'expense' && role.side === 'credit'
+        ? t('entry.paymentTags')
+        : role.side === 'debit'
+          ? t('entry.debitTags')
+          : t('entry.creditTags');
+    return (
+      <TagPicker
+        label={lineTagLabel}
+        tags={tagsForScope(tags, 'line', lineTagValue)}
+        value={lineTagValue}
+        onChange={(ids) =>
+          setForm((f) => ({
+            ...f,
+            [role.side === 'debit' ? 'debitTagIds' : 'creditTagIds']: ids,
+          }))
+        }
+        dataUi={role.side === 'debit' ? UI.journal.entry.debitTags : UI.journal.entry.creditTags}
+      />
+    );
+  };
+
+  const allocateField = canAllocate ? (
+    <div className="field">
+      <label
+        style={{ display: 'inline-flex', gap: 8, alignItems: 'center', minHeight: 'var(--tap)' }}
+      >
+        <input
+          type="checkbox"
+          checked={allocate}
+          onChange={(e) => setAllocate(e.target.checked)}
+          data-ui={UI.journal.entry.allocateToggle}
+        />
+        {t('entry.allocateToggle')}
+      </label>
+      {allocate ? (
+        <>
+          <TextInput
+            label={t('entry.allocateMonths')}
+            required
+            inputMode="numeric"
+            value={monthsText}
+            hint={t('entry.allocateMonthsHint')}
+            onChange={(v) => setMonthsText(v.replace(/[^\d]/g, ''))}
+            error={monthsError ? t('entry.error.months-invalid') : undefined}
+            dataUi={UI.journal.entry.allocateMonths}
+          />
+          <p className="field__hint">{t('entry.allocateNote')}</p>
+        </>
+      ) : null}
+    </div>
+  ) : null;
+
+  const manualSwitch =
+    init.kind === 'create' && mode !== 'manual' && !allocate ? (
+      <button
+        type="button"
+        className="collapse-toggle"
+        onClick={() => setMode('manual')}
+        data-ui={UI.journal.entry.manualSwitch}
+      >
+        <Icon name="chevronDown" size={16} />
+        {t('entry.manualSwitch')}
+      </button>
+    ) : null;
 
   return (
     <Modal
@@ -187,148 +333,58 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         </div>
       ) : null}
 
-      <TextInput
-        label={t('entry.date')}
-        type="date"
-        required
-        value={form.date}
-        onChange={(v) => setForm((f) => ({ ...f, date: v }))}
-        error={errorText(errors, 'date-required')}
-        dataUi={UI.journal.entry.date}
-      />
-      <TextInput
-        label={t('entry.description')}
-        required
-        value={form.description}
-        placeholder={t('entry.descriptionPlaceholder')}
-        onChange={(v) => setForm((f) => ({ ...f, description: v }))}
-        error={errorText(errors, 'description-required')}
-        dataUi={UI.journal.entry.description}
-      />
+      {isManual ? (
+        <>
+          {dateField}
+          {descriptionField}
+          {entryTagsField}
+          {roles.map((role) => (
+            <div key={role.side}>
+              {renderAccountPicker(role)}
+              {renderLineTags(role)}
+            </div>
+          ))}
+          {amountField}
+          {memoField}
+        </>
+      ) : (
+        <>
+          {/* 日常入力は自然文の順: 金額 → 科目 → 日付 → 摘要 → 按分 → 詳細 */}
+          {amountField}
+          {roles.map((role) => (
+            <div key={role.side}>{renderAccountPicker(role)}</div>
+          ))}
+          {dateField}
+          {descriptionField}
+          {allocateField}
 
-      {allocationActive ? null : (
-        <TagPicker
-          label={t('entry.tags')}
-          hint={t('entry.tagsHint')}
-          tags={tagsForScope(tags, 'entry', form.tagIds ?? [])}
-          value={form.tagIds ?? []}
-          onChange={(ids) => setForm((f) => ({ ...f, tagIds: ids }))}
-          dataUi={UI.journal.entry.tags}
-        />
-      )}
-
-      {roles.map((role) => {
-        const value = role.side === 'debit' ? form.debitAccountId : form.creditAccountId;
-        const reqErr = errorText(
-          errors,
-          role.side === 'debit' ? 'debit-required' : 'credit-required',
-        );
-        const lineTagValue = (role.side === 'debit' ? form.debitTagIds : form.creditTagIds) ?? [];
-        const lineTagLabel =
-          mode === 'expense' && role.side === 'credit'
-            ? t('entry.paymentTags')
-            : role.side === 'debit'
-              ? t('entry.debitTags')
-              : t('entry.creditTags');
-        return (
-          <div key={role.side}>
-            <AccountPicker
-              label={t(role.labelKey)}
-              required
-              value={value}
-              groups={groupedAccounts(accounts, role.allowedTypes, value)}
-              onChange={(id) => setSide(role.side, id)}
-              error={reqErr ?? sameAccount}
-              dataUi={
-                role.side === 'debit'
-                  ? UI.journal.entry.debitAccount
-                  : UI.journal.entry.creditAccount
-              }
-            />
-            {allocationActive ? null : (
-              <TagPicker
-                label={lineTagLabel}
-                tags={tagsForScope(tags, 'line', lineTagValue)}
-                value={lineTagValue}
-                onChange={(ids) =>
-                  setForm((f) => ({
-                    ...f,
-                    [role.side === 'debit' ? 'debitTagIds' : 'creditTagIds']: ids,
-                  }))
-                }
-                dataUi={
-                  role.side === 'debit' ? UI.journal.entry.debitTags : UI.journal.entry.creditTags
-                }
-              />
-            )}
-          </div>
-        );
-      })}
-
-      <TextInput
-        label={t('entry.amount')}
-        required
-        inputMode="numeric"
-        value={amountText}
-        onChange={onAmountChange}
-        error={errorText(errors, 'amount-invalid')}
-        dataUi={UI.journal.entry.amount}
-      />
-
-      {canAllocate ? (
-        <div className="field">
-          <label
-            style={{
-              display: 'inline-flex',
-              gap: 8,
-              alignItems: 'center',
-              minHeight: 'var(--tap)',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={allocate}
-              onChange={(e) => setAllocate(e.target.checked)}
-              data-ui={UI.journal.entry.allocateToggle}
-            />
-            {t('entry.allocateToggle')}
-          </label>
-          {allocate ? (
+          {allocationActive ? null : (
             <>
-              <TextInput
-                label={t('entry.allocateMonths')}
-                required
-                inputMode="numeric"
-                value={monthsText}
-                hint={t('entry.allocateMonthsHint')}
-                onChange={(v) => setMonthsText(v.replace(/[^\d]/g, ''))}
-                error={monthsError ? t('entry.error.months-invalid') : undefined}
-                dataUi={UI.journal.entry.allocateMonths}
-              />
-              <p className="field__hint">{t('entry.allocateNote')}</p>
+              <button
+                type="button"
+                className="collapse-toggle"
+                aria-expanded={showDetails}
+                onClick={() => setShowDetails((v) => !v)}
+                data-ui={UI.journal.entry.detailToggle}
+              >
+                <Icon name={showDetails ? 'chevronDown' : 'chevronRight'} size={16} />
+                {t('entry.detailToggle')}
+              </button>
+              {showDetails ? (
+                <div className="stack">
+                  {memoField}
+                  {entryTagsField}
+                  {roles.map((role) => (
+                    <div key={role.side}>{renderLineTags(role)}</div>
+                  ))}
+                </div>
+              ) : null}
             </>
-          ) : null}
-        </div>
-      ) : null}
+          )}
 
-      <TextArea
-        label={t('entry.memo')}
-        value={form.memo ?? ''}
-        onChange={(v) => setForm((f) => ({ ...f, memo: v }))}
-        dataUi={UI.journal.entry.memo}
-      />
-
-      {init.kind === 'create' && mode !== 'manual' && !allocate ? (
-        <button
-          type="button"
-          className="collapse-toggle"
-          onClick={() => setMode('manual')}
-          data-ui={UI.journal.entry.detailToggle}
-        >
-          <Icon name="chevronDown" size={16} />
-          {t('entry.detailToggle')}
-        </button>
-      ) : null}
+          {manualSwitch}
+        </>
+      )}
     </Modal>
   );
 }

@@ -8,6 +8,8 @@
  * これにより浮動小数の誤差を避ける。通貨は settings.currency。
  */
 
+import type { AccountRole } from './accountRoles';
+
 export type AccountType = 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
 
 export const ACCOUNT_TYPES: readonly AccountType[] = [
@@ -25,6 +27,11 @@ export interface Account {
   id: string;
   name: string;
   type: AccountType;
+  /**
+   * UI 用の役割。type（会計分類）とは別に、日常入力の候補制御に使う。
+   * type と整合する必要がある（src/domain/accountRoles.ts の roleAllowsType）。
+   */
+  role: AccountRole;
   /** アーカイブ済みの科目は新規仕訳の選択肢から外すが、過去仕訳の集計には残る。 */
   archived: boolean;
   note?: string;

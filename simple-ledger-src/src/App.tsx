@@ -17,7 +17,6 @@ import { Accounts } from './ui/screens/Accounts';
 import { Settings } from './ui/screens/Settings';
 import { Help } from './ui/screens/Help';
 import { EntrySheet, type EntryInit } from './ui/screens/EntrySheet';
-import { EntryTypeSheet } from './ui/screens/EntryTypeSheet';
 import { useServiceWorker } from './pwa/useServiceWorker';
 import { Icon } from './ui/Icon';
 import { t } from './i18n';
@@ -30,9 +29,9 @@ export function App() {
   const [screen, setScreen] = useState<Screen>('dashboard');
   const [menuOpen, setMenuOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [typePickerOpen, setTypePickerOpen] = useState(false);
   const [entryInit, setEntryInit] = useState<EntryInit | null>(null);
   const [journalFilter, setJournalFilter] = useState<JournalFilter | null>(null);
+  const [statementsTab, setStatementsTab] = useState<'pl' | 'bs'>('pl');
   const { updateReady, applyUpdate } = useServiceWorker();
 
   if (status === 'loading') {
@@ -63,6 +62,11 @@ export function App() {
     setScreen('journal');
   };
 
+  const openStatements = (tab: 'pl' | 'bs') => {
+    setStatementsTab(tab);
+    setScreen('statements');
+  };
+
   return (
     <>
       <a className="skip-link" href="#main">
@@ -71,7 +75,6 @@ export function App() {
       <Header
         ledgerName={ledger.settings.ledgerName}
         onHome={() => setScreen('dashboard')}
-        onAddEntry={() => setTypePickerOpen(true)}
         onMenu={() => setMenuOpen(true)}
       />
 
@@ -87,7 +90,11 @@ export function App() {
         ) : null}
 
         {screen === 'dashboard' ? (
-          <Dashboard onAddEntry={openCreate} onEditEntry={openEdit} onNavigate={setScreen} />
+          <Dashboard
+            onAddEntry={openCreate}
+            onNavigate={setScreen}
+            onOpenStatement={openStatements}
+          />
         ) : null}
         {screen === 'journal' ? (
           <Journal
@@ -97,13 +104,15 @@ export function App() {
             onClearAccountFilter={() => setJournalFilter(null)}
           />
         ) : null}
-        {screen === 'statements' ? <Statements onDrillDown={goJournalFiltered} /> : null}
+        {screen === 'statements' ? (
+          <Statements initialTab={statementsTab} onDrillDown={goJournalFiltered} />
+        ) : null}
         {screen === 'allocations' ? <Allocations /> : null}
         {screen === 'cashflow' ? <Cashflow /> : null}
         {screen === 'tags' ? <Tags /> : null}
         {screen === 'adjustments' ? <Adjustments /> : null}
         {screen === 'accounts' ? <Accounts /> : null}
-        {screen === 'settings' ? <Settings /> : null}
+        {screen === 'settings' ? <Settings onNavigate={setScreen} /> : null}
       </main>
 
       {menuOpen ? (
@@ -112,16 +121,6 @@ export function App() {
           onNavigate={setScreen}
           onClose={() => setMenuOpen(false)}
           onHelp={() => setHelpOpen(true)}
-        />
-      ) : null}
-
-      {typePickerOpen ? (
-        <EntryTypeSheet
-          onPick={(mode) => {
-            setTypePickerOpen(false);
-            openCreate(mode);
-          }}
-          onClose={() => setTypePickerOpen(false)}
         />
       ) : null}
 

@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import { APP_ID, SCHEMA_VERSION } from './constants';
 import { addMonths, monthlyAmounts } from './allocation';
+import { ACCOUNT_ROLES, roleAllowsType } from './accountRoles';
 
 const isoDate = z
   .string()
@@ -23,15 +24,31 @@ const amountSchema = z
   .positive('金額は 1 以上で入力してください')
   .finite();
 
-export const accountSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1).max(120),
-  type: accountTypeSchema,
-  archived: z.boolean(),
-  note: z.string().max(500).optional(),
-  createdAt: isoDateTime,
-  updatedAt: isoDateTime,
-});
+export const accountRoleSchema = z.enum(
+  ACCOUNT_ROLES as unknown as [string, ...string[]],
+) as z.ZodType<(typeof ACCOUNT_ROLES)[number]>;
+
+export const accountSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1).max(120),
+    type: accountTypeSchema,
+    role: accountRoleSchema,
+    archived: z.boolean(),
+    note: z.string().max(500).optional(),
+    createdAt: isoDateTime,
+    updatedAt: isoDateTime,
+  })
+  .superRefine((a, ctx) => {
+    // role は type と整合する必要がある（例: daily-asset は asset のみ）。
+    if (!roleAllowsType(a.role, a.type)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `役割(${a.role})が区分(${a.type})と一致しません。`,
+        path: ['role'],
+      });
+    }
+  });
 
 const tagIdList = z.array(z.string().min(1));
 

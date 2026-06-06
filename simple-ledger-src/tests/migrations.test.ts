@@ -48,13 +48,50 @@ describe('migrateToCurrent', () => {
     expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
     expect(r.data?.allocations).toEqual([]);
   });
-  it('v4 → v5 は恒等移行（構造は変えず version だけ前進）', () => {
+  it('v4 → 現行へ migrate（v4→v5 恒等 + v5→v6 role 補完で停止しない）', () => {
     const v4 = pkg(4);
     const r = migrateToCurrent(v4);
     expect(r.ok).toBe(true);
-    expect(r.data?.schemaVersion).toBe(5);
+    expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
     // 既存配列はそのまま（補完だけで内容は不変）。
     expect(r.data?.tags).toEqual([]);
     expect(r.data?.cashflowSchedules).toEqual([]);
+  });
+  it('v5 → v6 で account に role を type・参照集合から補う', () => {
+    const v5 = pkg(5) as unknown as Record<string, unknown>;
+    v5.accounts = [
+      { id: 'cash', name: '現金', type: 'asset', archived: false, createdAt: 'x', updatedAt: 'x' },
+      {
+        id: 'def',
+        name: '按分中資産',
+        type: 'asset',
+        archived: false,
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+      {
+        id: 'card',
+        name: 'クレジットカード',
+        type: 'liability',
+        archived: false,
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+      {
+        id: 'food',
+        name: '食費',
+        type: 'expense',
+        archived: false,
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+    ];
+    const r = migrateToCurrent(v5 as unknown as LedgerExportPackage);
+    expect(r.ok).toBe(true);
+    const byId = Object.fromEntries((r.data?.accounts ?? []).map((a) => [a.id, a.role]));
+    expect(byId.cash).toBe('daily-asset');
+    expect(byId.def).toBe('deferred-asset');
+    expect(byId.card).toBe('payment-liability');
+    expect(byId.food).toBe('expense-category');
   });
 });

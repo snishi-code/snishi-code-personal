@@ -120,7 +120,8 @@ describe('科目区分(type)の変更ルール', () => {
   it('未使用の科目は区分を変更できる', async () => {
     const ledger = await loadLedger();
     const acct = ledger.accounts.find((a) => a.name === 'その他収入')!; // 未使用(revenue)
-    await upsertAccount({ ...acct, type: 'expense', updatedAt: 'y' });
+    // type を変えるときは role も整合させる（income-category → expense-category）。
+    await upsertAccount({ ...acct, type: 'expense', role: 'expense-category', updatedAt: 'y' });
     const after = await loadLedger();
     expect(after.accounts.find((a) => a.id === acct.id)?.type).toBe('expense');
   });
@@ -130,7 +131,9 @@ describe('科目区分(type)の変更ルール', () => {
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
     const food = ledger.accounts.find((a) => a.name === '食費')!;
     await addEntryRef(food.id, cash.id);
-    await expect(upsertAccount({ ...food, type: 'asset', updatedAt: 'y' })).rejects.toThrow();
+    await expect(
+      upsertAccount({ ...food, type: 'asset', role: 'daily-asset', updatedAt: 'y' }),
+    ).rejects.toThrow();
   });
 
   it('使用中でも名前変更は許可する', async () => {
@@ -141,6 +144,26 @@ describe('科目区分(type)の変更ルール', () => {
     await upsertAccount({ ...food, name: '外食費', updatedAt: 'y' });
     const after = await loadLedger();
     expect(after.accounts.find((a) => a.id === food.id)?.name).toBe('外食費');
+  });
+
+  it('role が type と矛盾する保存は拒否する', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!; // asset
+    // asset に expense-category を付ける → 不整合で拒否
+    await expect(
+      upsertAccount({ ...cash, role: 'expense-category', updatedAt: 'y' }),
+    ).rejects.toThrow();
+  });
+
+  it('使用中でも role 変更は許可する（会計残高は変わらない）', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    await addEntryRef(food.id, cash.id);
+    // 現金(daily-asset) を investment-asset へ（type は asset のまま）
+    await upsertAccount({ ...cash, role: 'investment-asset', updatedAt: 'y' });
+    const after = await loadLedger();
+    expect(after.accounts.find((a) => a.id === cash.id)?.role).toBe('investment-asset');
   });
 });
 
@@ -594,6 +617,7 @@ describe('残高補正 createAdjustment', () => {
       id: 'inv',
       name: '投資',
       type: 'asset',
+      role: 'investment-asset',
       archived: false,
       createdAt: 'x',
       updatedAt: 'x',

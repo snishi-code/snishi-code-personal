@@ -169,6 +169,56 @@ button {
   padding: var(--space-4);
 }
 
+/* ── Summary card (tappable: ホームの損益/資産負債サマリー) ── */
+.summary-card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  margin-bottom: var(--space-3);
+  cursor: pointer;
+}
+.summary-card:hover {
+  background: var(--bg);
+}
+.summary-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+  color: var(--muted);
+}
+
+/* ── List row button (設定の「管理」遷移リスト) ── */
+.list__row-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: var(--space-3) var(--space-4);
+  min-height: var(--tap);
+  cursor: pointer;
+  color: var(--text);
+}
+.list__row-btn:hover {
+  background: var(--bg);
+}
+.list__row-btn__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  font-size: 14px;
+}
+
 /* ── Stat grid ── */
 .stat-grid {
   display: grid;

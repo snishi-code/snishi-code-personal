@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 import { useLedger } from '../../state/store';
 import { accountBalance } from '../../domain/accounting';
 import { ACCOUNT_TYPES, type Account } from '../../domain/types';
-import { accountTypeLabel } from '../accountOptions';
+import { accountRoleLabel, accountTypeLabel } from '../accountOptions';
 import { AccountSheet } from './AccountSheet';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { Money } from '../money';
@@ -96,7 +96,7 @@ export function Accounts() {
                         ) : null}
                       </div>
                       <div className="list__sub">
-                        {t('accounts.balance')}:{' '}
+                        {accountRoleLabel(account.role)}・{t('accounts.balance')}:{' '}
                         <Money
                           amount={accountBalance(account.id, account.type, entries)}
                           currency={currency}

@@ -11,6 +11,7 @@ import { Icon } from '../Icon';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import { APP_ID } from '../../domain/constants';
+import { MANAGEMENT_ITEMS, type Screen } from '../navigation';
 import type { ImportOutcome } from '../../data/exportImport';
 import type { Settings as LedgerSettings, Snapshot } from '../../domain/types';
 
@@ -31,7 +32,7 @@ function importErrorMessage(outcome: Exclude<ImportOutcome, { kind: 'ok' | 'revi
   }
 }
 
-export function Settings() {
+export function Settings({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
   const {
     ledger,
     exportJson,
@@ -114,6 +115,27 @@ export function Settings() {
       <h1 className="screen-title" id="settings-title">
         {t('settings.title')}
       </h1>
+
+      {/* 管理（補助画面へ） */}
+      <p className="section-label">{t('settings.manageSection')}</p>
+      <ul className="card list" data-ui={UI.settings.manageList}>
+        {MANAGEMENT_ITEMS.map((item) => (
+          <li key={item.screen}>
+            <button
+              type="button"
+              className="list__row-btn"
+              onClick={() => onNavigate(item.screen)}
+              data-ui={`settings.manage.${item.screen}`}
+            >
+              <span className="list__row-btn__label">
+                <Icon name={item.icon} size={18} />
+                {t(item.labelKey)}
+              </span>
+              <Icon name="chevronRight" size={16} />
+            </button>
+          </li>
+        ))}
+      </ul>
 
       {/* データ */}
       <p className="section-label">{t('settings.dataSection')}</p>

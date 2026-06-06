@@ -10,6 +10,7 @@ import { STORE, deleteRecord, getAll, getKv, putRecord, runWrite, type StoreName
 import { defaultAccounts, defaultSettings, newMeta } from './seed';
 import { newId } from '../domain/ids';
 import { SCHEMA_VERSION } from '../domain/constants';
+import { inferRole, roleAllowsType } from '../domain/accountRoles';
 import type {
   Account,
   AdjustmentKind,
@@ -59,12 +60,27 @@ async function getSettings(): Promise<Settings | undefined> {
 export async function ensureInitialized(): Promise<void> {
   const meta = await getMeta();
   if (meta) {
-    // 既存DBの meta.schemaVersion を現行へ前進させる（恒等移行のため構造変更なし）。
+    // 既存DBの meta.schemaVersion を現行へ前進させる（恒等移行 + role 補完）。
     // 編集追跡(revision)は変えない＝import の競合判定に影響させない。
     if (meta.schemaVersion < SCHEMA_VERSION) {
+      const [accounts, allocations, reserves] = await Promise.all([
+        getAll<Account>(STORE.accounts),
+        getAll<AllocationItem>(STORE.allocations),
+        getAll<ReserveItem>(STORE.reserves),
+      ]);
+      // v5→v6: role の無い既存科目を type・参照集合から推定して補う。
+      const deferredIds = new Set(allocations.map((a) => a.deferredAccountId));
+      const reserveIds = new Set(reserves.map((r) => r.reserveAccountId));
+      const patched = accounts.filter(
+        (a) => typeof (a as Account & { role?: unknown }).role !== 'string',
+      );
       const bumped: LedgerMeta = { ...meta, schemaVersion: SCHEMA_VERSION };
-      await runWrite([STORE.kv], (t) => {
+      await runWrite([STORE.kv, STORE.accounts], (t) => {
         t.objectStore(STORE.kv).put(bumped, KV_META);
+        const store = t.objectStore(STORE.accounts);
+        for (const a of patched) {
+          store.put({ ...a, role: inferRole(a, { deferredIds, reserveIds }) });
+        }
       });
     }
     return;
@@ -142,17 +158,21 @@ async function writeWithRevision(
 
 /* ── 勘定科目 ── */
 
-/** 科目が「使用中」か（仕訳明細・予定CF・目的別資金のいずれかから参照されている）。 */
+/** 科目が「使用中」か（仕訳明細・予定CF・目的別資金・按分のいずれかから参照されている）。 */
 function isAccountReferenced(
   id: string,
   entries: JournalEntry[],
   schedules: CashflowSchedule[],
   reserves: ReserveItem[],
+  allocations: AllocationItem[],
 ): boolean {
   return (
     entries.some((e) => e.lines.some((l) => l.accountId === id)) ||
     schedules.some((s) => s.accountId === id || s.counterAccountId === id) ||
-    reserves.some((r) => r.reserveAccountId === id)
+    reserves.some((r) => r.reserveAccountId === id) ||
+    allocations.some(
+      (a) => a.expenseAccountId === id || a.paymentAccountId === id || a.deferredAccountId === id,
+    )
   );
 }
 
@@ -160,24 +180,33 @@ async function loadReferencingCollections(): Promise<{
   entries: JournalEntry[];
   schedules: CashflowSchedule[];
   reserves: ReserveItem[];
+  allocations: AllocationItem[];
 }> {
-  const [entries, schedules, reserves] = await Promise.all([
+  const [entries, schedules, reserves, allocations] = await Promise.all([
     getAll<JournalEntry>(STORE.journalEntries),
     getAll<CashflowSchedule>(STORE.cashflowSchedules),
     getAll<ReserveItem>(STORE.reserves),
+    getAll<AllocationItem>(STORE.allocations),
   ]);
-  return { entries, schedules, reserves };
+  return { entries, schedules, reserves, allocations };
 }
 
 export async function upsertAccount(account: Account): Promise<void> {
+  // role は type と整合する必要がある（import 検証と同じ不変条件を保存時にも守る）。
+  if (!roleAllowsType(account.role, account.type)) {
+    throw new Error('役割が区分と一致しません。');
+  }
   // 使用中（仕訳/予定CF/目的別資金から参照中）の科目は区分(type)を変更できない。fail-closed。
+  // role 変更は会計残高を変えない（入力候補が変わるだけ）ので使用中でも許可する。
   const [accounts, refs] = await Promise.all([
     getAll<Account>(STORE.accounts),
     loadReferencingCollections(),
   ]);
   const prev = accounts.find((a) => a.id === account.id);
   if (prev && prev.type !== account.type) {
-    if (isAccountReferenced(account.id, refs.entries, refs.schedules, refs.reserves)) {
+    if (
+      isAccountReferenced(account.id, refs.entries, refs.schedules, refs.reserves, refs.allocations)
+    ) {
       throw new Error('使用中の科目は区分を変更できません。');
     }
   }
@@ -188,8 +217,8 @@ export async function upsertAccount(account: Account): Promise<void> {
 
 /** 使用中（仕訳/予定CF/目的別資金から参照中）の科目は削除できない（アーカイブを使う）。fail-closed。 */
 export async function deleteAccount(id: string): Promise<void> {
-  const { entries, schedules, reserves } = await loadReferencingCollections();
-  if (isAccountReferenced(id, entries, schedules, reserves)) {
+  const { entries, schedules, reserves, allocations } = await loadReferencingCollections();
+  if (isAccountReferenced(id, entries, schedules, reserves, allocations)) {
     throw new Error('この科目は使用中のため削除できません。アーカイブしてください。');
   }
   await writeWithRevision([STORE.accounts], (t) => {
@@ -301,6 +330,7 @@ export async function createAllocation(
         id: newId(),
         name: DEFERRED_ACCOUNT_NAME,
         type: 'asset',
+        role: 'deferred-asset',
         archived: false,
         createdAt: ts,
         updatedAt: ts,
@@ -402,6 +432,7 @@ export async function createReserve(input: {
       id: newId(),
       name: input.name,
       type: 'asset',
+      role: 'reserve-asset',
       archived: false,
       createdAt: ts,
       updatedAt: ts,
@@ -508,7 +539,15 @@ export async function createAdjustment(input: {
   let newCounter: Account | null = null;
   if (!counter) {
     const ts = nowIso();
-    newCounter = { id: newId(), name, type: ctype, archived: false, createdAt: ts, updatedAt: ts };
+    newCounter = {
+      id: newId(),
+      name,
+      type: ctype,
+      role: 'system-adjustment',
+      archived: false,
+      createdAt: ts,
+      updatedAt: ts,
+    };
     counter = newCounter;
   }
 

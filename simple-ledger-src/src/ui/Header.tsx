@@ -1,6 +1,6 @@
 /*
- * ヘッダー: 左=ホーム / 中央=台帳名・年月 / 右=+(仕訳追加)・≡(メニュー)。
- * + は MVP 最重要操作なのでメニューに埋めず常に表に出す。
+ * ヘッダー: 左=ホーム / 中央=台帳名・年月 / 右=≡(メニュー)。
+ * 入力導線はホームの 収入/支出/振替 ボタンに集約し、ヘッダーには + を置かない。
  */
 import { Icon } from './Icon';
 import { t } from '../i18n';
@@ -10,12 +10,10 @@ import { currentYearMonth } from '../util/time';
 export function Header({
   ledgerName,
   onHome,
-  onAddEntry,
   onMenu,
 }: {
   ledgerName: string;
   onHome: () => void;
-  onAddEntry: () => void;
   onMenu: () => void;
 }) {
   const { year, month } = currentYearMonth();
@@ -35,15 +33,6 @@ export function Header({
           <span className="app-header__name">{ledgerName}</span>
           <span className="app-header__sub">{t('dashboard.thisMonth', { year, month })}</span>
         </div>
-        <button
-          type="button"
-          className="icon-btn icon-btn--primary"
-          onClick={onAddEntry}
-          aria-label={t('header.addEntry')}
-          data-ui={UI.journal.create}
-        >
-          <Icon name="plus" />
-        </button>
         <button
           type="button"
           className="icon-btn"

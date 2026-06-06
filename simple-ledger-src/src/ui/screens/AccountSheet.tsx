@@ -1,14 +1,16 @@
 /*
  * 勘定科目の追加/編集シート。
+ * type（会計分類）と role（UI 用の役割）を持つ。type を変えると role は既定へリセットする。
  */
 import { useState } from 'react';
 import { Modal } from '../Modal';
 import { SelectInput, TextArea, TextInput } from '../Field';
 import { useLedger } from '../../state/store';
 import { ACCOUNT_TYPES, type Account, type AccountType } from '../../domain/types';
+import { defaultRoleForType, rolesForType, type AccountRole } from '../../domain/accountRoles';
 import { newId } from '../../domain/ids';
 import { nowIso } from '../../util/time';
-import { accountTypeLabel } from '../accountOptions';
+import { accountRoleLabel, accountTypeLabel } from '../accountOptions';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 
@@ -16,14 +18,23 @@ export function AccountSheet({ existing, onClose }: { existing?: Account; onClos
   const { ledger, saveAccount } = useLedger();
   const [name, setName] = useState(existing?.name ?? '');
   const [type, setType] = useState<AccountType>(existing?.type ?? 'expense');
+  const [role, setRole] = useState<AccountRole>(
+    existing?.role ?? defaultRoleForType(existing?.type ?? 'expense'),
+  );
   const [note, setNote] = useState(existing?.note ?? '');
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  // 使用中（仕訳から参照されている）科目は区分(type)を変更できない。
+  // 使用中（仕訳から参照されている）科目は区分(type)を変更できない（role は変更可）。
   const inUse =
     !!existing &&
     (ledger?.journalEntries ?? []).some((e) => e.lines.some((l) => l.accountId === existing.id));
+
+  const onTypeChange = (next: AccountType) => {
+    setType(next);
+    // type を変えたら role を、その type の既定へリセットする（不整合を防ぐ）。
+    setRole(defaultRoleForType(next));
+  };
 
   async function onSave() {
     if (name.trim() === '') {
@@ -36,6 +47,7 @@ export function AccountSheet({ existing, onClose }: { existing?: Account; onClos
       id: existing?.id ?? newId(),
       name: name.trim(),
       type,
+      role,
       archived: existing?.archived ?? false,
       ...(note.trim() !== '' ? { note: note.trim() } : {}),
       createdAt: existing?.createdAt ?? ts,
@@ -44,7 +56,8 @@ export function AccountSheet({ existing, onClose }: { existing?: Account; onClos
     try {
       await saveAccount(account);
       onClose();
-    } catch {
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('toast.error'));
       setSubmitting(false);
     }
   }
@@ -86,10 +99,20 @@ export function AccountSheet({ existing, onClose }: { existing?: Account; onClos
         label={t('accounts.type')}
         required
         value={type}
-        onChange={(v) => setType(v as AccountType)}
+        onChange={(v) => onTypeChange(v as AccountType)}
         options={ACCOUNT_TYPES.map((tp) => ({ value: tp, label: accountTypeLabel(tp) }))}
         disabled={inUse}
         hint={inUse ? t('accounts.typeLockedHint') : undefined}
+        dataUi={UI.accounts.type}
+      />
+      <SelectInput
+        label={t('accounts.role')}
+        required
+        value={role}
+        onChange={(v) => setRole(v as AccountRole)}
+        options={rolesForType(type).map((r) => ({ value: r, label: accountRoleLabel(r) }))}
+        hint={t('accounts.roleHint')}
+        dataUi={UI.accounts.role}
       />
       <TextArea label={t('accounts.note')} value={note} onChange={setNote} />
     </Modal>

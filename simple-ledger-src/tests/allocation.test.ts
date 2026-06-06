@@ -10,6 +10,7 @@ import {
   unrecognizedBalance,
 } from '../src/domain/allocation';
 import { journalEntrySchema } from '../src/domain/schema';
+import type { Account } from '../src/domain/types';
 
 describe('monthlyAmounts', () => {
   it('割り切れる場合は均等', () => {
@@ -120,10 +121,11 @@ describe('按分の導出（現在月から）', () => {
 });
 
 describe('BS は as-of 日付で未来の按分認識を含めない', () => {
-  const acc = (id: string, type: 'asset' | 'expense') => ({
+  const acc = (id: string, type: 'asset' | 'expense'): Account => ({
     id,
     name: id,
     type,
+    role: type === 'asset' ? 'daily-asset' : 'expense-category',
     archived: false,
     createdAt: 'x',
     updatedAt: 'x',

@@ -16,13 +16,9 @@
 | 名前 | 位置 | 用途 |
 |---|---|---|
 | `dashboard.view` | Dashboard ルート | ホーム表示の検出 |
-| `dashboard.entry.create` | Dashboard 空状態 CTA | 最初の仕訳追加 |
-| `dashboard.recent.list` | Dashboard 最近の仕訳 | 一覧 |
+| `dashboard.entry.income` / `.expense` / `.transfer` | ホーム 3 ボタン | 日常入力の主導線（唯一の入力起点） |
+| `dashboard.openPl` / `dashboard.openBs` | ホーム損益/資産負債サマリー | 財務諸表(PL/BS)へ遷移 |
 | `journal.view` | Journal ルート | 仕訳画面の検出 |
-| `dashboard.entry.income` / `.expense` / `.transfer` | ホーム 3 ボタン | 日常入力の主導線 |
-| `entry.type.sheet` | 入力種類シート | ヘッダー `+` が開くシート |
-| `entry.type.income` / `.expense` / `.transfer` | 種類シートの各ボタン | 入力モード選択 |
-| `journal.entry.create` | ヘッダー `+` ボタン | 入力起動（種類シートを開く） |
 | `journal.entry.list` | Journal 一覧 | 仕訳一覧 |
 | `journal.search` | Journal 検索入力 | 検索 |
 | `journal.filter.clearAccount` | 科目絞り込み解除 | ドリルダウン解除 |
@@ -30,7 +26,8 @@
 | `journal.entry.cancel` | Entry シートキャンセル | キャンセル |
 | `journal.entry.delete` | Journal 行の削除 | 削除 |
 | `journal.entry.reverse` | Journal 行の取消/返金 | 逆仕訳の起動 |
-| `journal.entry.detailToggle` | 詳細入力トグル | manual へ切替 |
+| `journal.entry.detailToggle` | 詳細（メモ・タグ）開閉 | 日常入力の詳細を折りたたみ表示 |
+| `journal.entry.manualSwitch` | 詳細入力（借方/貸方）へ切替 | manual モードへ切替 |
 | `journal.entry.allocateToggle` | 按分するトグル | 按分支出に切替（支出のみ） |
 | `journal.entry.allocateMonths` | 按分月数 | 按分月数入力 |
 | `journal.entry.date` | Entry 日付 | 日付入力 |
@@ -51,7 +48,11 @@
 | `accounts.create` | 科目追加ボタン | 追加起動 |
 | `accounts.save` | 科目シート保存 | 保存 |
 | `accounts.list` | 科目一覧 | 一覧 |
+| `accounts.type` | 科目シートの区分セレクト | type 選択 |
+| `accounts.role` | 科目シートの役割セレクト | role 選択 |
 | `settings.view` | Settings ルート | 設定の検出 |
+| `settings.manage.list` | 設定「管理」リスト | 補助画面への遷移リスト |
+| `settings.manage.<screen>` | 管理リストの各行 | 例 `settings.manage.statements`（statements/accounts/tags/adjustments） |
 | `settings.exportJson` | export ボタン | JSON 書き出し |
 | `settings.importJson` | import ボタン | JSON 読み込み起動 |
 | `settings.importFile` | 隠しファイル入力 | ファイル選択 |
@@ -59,7 +60,7 @@
 | `nav.home` | ヘッダーホーム | Dashboard へ |
 | `nav.menu.button` | ヘッダー `≡` | メニュー開閉 |
 | `nav.menu` | ドロワー nav | メニュー本体 |
-| `nav.<screen>` | メニュー各項目 | 例 `nav.journal`（`navigation.ts` の screen 名） |
+| `nav.<screen>` | メニュー各項目（主要動線のみ） | `dashboard` / `journal` / `allocations` / `cashflow` / `settings` |
 | `dialog.confirm` / `dialog.cancel` | ConfirmDialog | 確定 / キャンセル |
 | `toast` | toast 領域 | 通知の検出 |
 

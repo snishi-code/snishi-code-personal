@@ -9,7 +9,15 @@ import type { AccountBalance, CashflowSchedule } from '../src/domain/types';
 
 function bal(id: string, balance: number): AccountBalance {
   return {
-    account: { id, name: id, type: 'asset', archived: false, createdAt: 'x', updatedAt: 'x' },
+    account: {
+      id,
+      name: id,
+      type: 'asset',
+      role: 'daily-asset',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    },
     balance,
   };
 }

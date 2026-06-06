@@ -31,8 +31,20 @@
 
 ## 中核モデル
 
-- **`Account`（勘定科目）**: `id` / `name` / `type` / `archived`。
-  `type` は `asset` / `liability` / `equity` / `revenue` / `expense`。
+- **`Account`（勘定科目）**: `id` / `name` / `type` / `role` / `archived`。
+  `type` は `asset` / `liability` / `equity` / `revenue` / `expense`（会計分類）。
+  `role` は UI 用の役割で、日常入力（収入/支出/振替）の候補制御に使う（`type` だけだと
+  按分中資産・目的別資金・投資資産・残高調整科目をすべて asset/expense/revenue として
+  混ぜてしまうため）。正本は [`src/domain/accountRoles.ts`](../../simple-ledger-src/src/domain/accountRoles.ts)。
+  `role` は `type` と整合する（`roleAllowsType`）。
+  - `daily-asset`（現金・預金）/ `reserve-asset`（目的別資金）/ `deferred-asset`（按分中資産）/
+    `investment-asset`（投資）… いずれも `type=asset`
+  - `payment-liability`（カード未払等）/ `other-liability`（ローン等）… `type=liability`
+  - `income-category`（`revenue`）/ `expense-category`（`expense`）/ `equity`（`equity`）
+  - `system-adjustment`（残高調整費/収入・投資評価損益。`expense|revenue`。自動生成・通常入力に出さない）
+  - 日常入力候補: 入金先/振替元/振替先=`daily-asset`、支払元=`daily-asset`+`payment-liability`、
+    収入カテゴリ=`income-category`、支出カテゴリ=`expense-category`。
+    按分中資産・目的別資金・投資資産・調整科目は通常入力に出さない（manual/詳細入力では全件可）。
 - **`JournalEntry`（仕訳）**: `date` / `description` / `lines[]` / `kind` / `memo`。
   MVP では `lines` は「1 借方・1 貸方・同額」の 2 行のみ（型は複数行を許し将来拡張可能）。
   `kind` は `normal` / `opening`（初期残高）。

@@ -10,7 +10,8 @@
  * migrations に { from: 1, to: 2, migrate } を登録する。
  */
 import { SCHEMA_VERSION } from './constants';
-import type { LedgerExportPackage } from './types';
+import { inferRole } from './accountRoles';
+import type { Account, LedgerExportPackage } from './types';
 
 export interface MigrationResult {
   ok: boolean;
@@ -60,6 +61,22 @@ const STEPS: Step[] = [
     from: 4,
     to: 5,
     migrate: (pkg) => pkg,
+  },
+  {
+    // v5 → v6: 勘定科目に role を追加。type・参照集合（按分中資産/目的別資金）から推定する。
+    from: 5,
+    to: 6,
+    migrate: (pkg) => {
+      const deferredIds = new Set((pkg.allocations ?? []).map((a) => a.deferredAccountId));
+      const reserveIds = new Set((pkg.reserves ?? []).map((r) => r.reserveAccountId));
+      const accounts: Account[] = (pkg.accounts ?? []).map((a) => {
+        const acc = a as Account & { role?: unknown };
+        // 既に role があればそれを尊重（再 migrate の冪等性）。
+        if (typeof acc.role === 'string') return acc as Account;
+        return { ...acc, role: inferRole(acc as Account, { deferredIds, reserveIds }) } as Account;
+      });
+      return { ...pkg, accounts };
+    },
   },
 ];
 

@@ -48,9 +48,15 @@ function Rows({
   );
 }
 
-export function Statements({ onDrillDown }: { onDrillDown: (filter: JournalFilter) => void }) {
+export function Statements({
+  initialTab = 'pl',
+  onDrillDown,
+}: {
+  initialTab?: Tab;
+  onDrillDown: (filter: JournalFilter) => void;
+}) {
   const { ledger } = useLedger();
-  const [tab, setTab] = useState<Tab>('pl');
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [period, setPeriod] = useState<Period>('month');
   // BS の基準日。既定は今日（未来月の按分認識仕訳を現在残高に含めない）。
   const [asOf, setAsOf] = useState<string>(todayLocal());

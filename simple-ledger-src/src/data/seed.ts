@@ -4,31 +4,33 @@
  */
 import { SCHEMA_VERSION } from '../domain/constants';
 import { newId } from '../domain/ids';
+import type { AccountRole } from '../domain/accountRoles';
 import type { Account, AccountType, LedgerMeta, Settings } from '../domain/types';
 import { nowIso } from '../util/time';
 
 interface SeedAccount {
   name: string;
   type: AccountType;
+  role: AccountRole;
 }
 
 const SEED_ACCOUNTS: SeedAccount[] = [
-  { name: '現金', type: 'asset' },
-  { name: '普通預金', type: 'asset' },
-  { name: 'クレジットカード（未払）', type: 'liability' },
-  { name: '元入金', type: 'equity' },
-  { name: '給与収入', type: 'revenue' },
-  { name: 'その他収入', type: 'revenue' },
-  { name: '食費', type: 'expense' },
-  { name: '日用品', type: 'expense' },
-  { name: '住居費', type: 'expense' },
-  { name: '水道光熱費', type: 'expense' },
-  { name: '交通費', type: 'expense' },
-  { name: '通信費', type: 'expense' },
-  { name: '交際費', type: 'expense' },
-  { name: '医療費', type: 'expense' },
-  { name: '趣味・娯楽', type: 'expense' },
-  { name: 'その他支出', type: 'expense' },
+  { name: '現金', type: 'asset', role: 'daily-asset' },
+  { name: '普通預金', type: 'asset', role: 'daily-asset' },
+  { name: 'クレジットカード（未払）', type: 'liability', role: 'payment-liability' },
+  { name: '元入金', type: 'equity', role: 'equity' },
+  { name: '給与収入', type: 'revenue', role: 'income-category' },
+  { name: 'その他収入', type: 'revenue', role: 'income-category' },
+  { name: '食費', type: 'expense', role: 'expense-category' },
+  { name: '日用品', type: 'expense', role: 'expense-category' },
+  { name: '住居費', type: 'expense', role: 'expense-category' },
+  { name: '水道光熱費', type: 'expense', role: 'expense-category' },
+  { name: '交通費', type: 'expense', role: 'expense-category' },
+  { name: '通信費', type: 'expense', role: 'expense-category' },
+  { name: '交際費', type: 'expense', role: 'expense-category' },
+  { name: '医療費', type: 'expense', role: 'expense-category' },
+  { name: '趣味・娯楽', type: 'expense', role: 'expense-category' },
+  { name: 'その他支出', type: 'expense', role: 'expense-category' },
 ];
 
 export function defaultAccounts(): Account[] {
@@ -37,6 +39,7 @@ export function defaultAccounts(): Account[] {
     id: newId(),
     name: a.name,
     type: a.type,
+    role: a.role,
     archived: false,
     createdAt: ts,
     updatedAt: ts,

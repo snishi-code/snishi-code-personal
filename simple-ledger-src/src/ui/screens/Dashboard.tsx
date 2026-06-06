@@ -1,5 +1,7 @@
 /*
- * ホーム（初期表示）。今月の収益/費用/純損益と、資産/負債/純資産、最近の仕訳。
+ * ホーム（初期表示）。日常入力の主導線（収入/支出/振替）、今月の損益・資産負債サマリー、
+ * 生活コスト。最近の仕訳一覧は仕訳画面に集約し、ここには置かない。
+ * 損益サマリー→PL / 資産負債サマリー→BS へ遷移できる。
  */
 import { useMemo } from 'react';
 import { useLedger } from '../../state/store';
@@ -11,7 +13,6 @@ import { Icon } from '../Icon';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import type { JournalEntry } from '../../domain/types';
-import { EntryListItem } from '../EntryListItem';
 import type { Screen } from '../navigation';
 import type { FormMode } from '../entryModes';
 import type { IconName } from '../Icon';
@@ -30,17 +31,17 @@ const ENTRY_TYPES: { mode: FormMode; labelKey: MessageKey; icon: IconName; ui: s
 
 export function Dashboard({
   onAddEntry,
-  onEditEntry,
   onNavigate,
+  onOpenStatement,
 }: {
   onAddEntry: (mode: FormMode) => void;
-  onEditEntry: (entry: JournalEntry) => void;
   onNavigate: (screen: Screen) => void;
+  onOpenStatement: (tab: 'pl' | 'bs') => void;
 }) {
   const { ledger } = useLedger();
   const { year, month } = currentYearMonth();
 
-  const { pl, bs, recent, recognition, investmentValuation, activeCount } = useMemo(() => {
+  const { pl, bs, recognition, investmentValuation, activeCount } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     const entries = ledger?.journalEntries ?? [];
     const range = monthRange(year, month);
@@ -64,7 +65,6 @@ export function Dashboard({
     return {
       pl: deriveProfitAndLoss(accounts, entries, range),
       bs: deriveBalanceSheet(accounts, entries, todayLocal()),
-      recent: entries.filter((e) => e.date <= todayLocal()).slice(0, 5),
       recognition: recognitionAmt,
       investmentValuation: { loss: investmentLoss, gain: investmentGain },
       activeCount: (ledger?.allocations ?? []).filter((a) => !isCompleted(a, currentYm)).length,
@@ -107,49 +107,77 @@ export function Dashboard({
         </div>
       ) : null}
 
-      <p className="section-label">{t('dashboard.thisMonth', { year, month })}</p>
-      <div className="stat-grid">
-        <div className="stat">
-          <span className="stat__label">{t('dashboard.revenue')}</span>
-          <span className="stat__value">
-            <Money amount={pl.totalRevenue} currency={currency} />
+      {/* 今月の損益（クリックで損益計算書へ） */}
+      <button
+        type="button"
+        className="summary-card"
+        onClick={() => onOpenStatement('pl')}
+        aria-label={t('dashboard.openPl')}
+        data-ui={UI.dashboard.openPl}
+      >
+        <div className="summary-card__head">
+          <span className="section-label" style={{ margin: 0 }}>
+            {t('dashboard.thisMonth', { year, month })}
           </span>
+          <Icon name="chevronRight" size={16} />
         </div>
-        <div className="stat">
-          <span className="stat__label">{t('dashboard.expense')}</span>
-          <span className="stat__value">
-            <Money amount={pl.totalExpense} currency={currency} />
-          </span>
+        <div className="stat-grid">
+          <div className="stat">
+            <span className="stat__label">{t('dashboard.revenue')}</span>
+            <span className="stat__value">
+              <Money amount={pl.totalRevenue} currency={currency} />
+            </span>
+          </div>
+          <div className="stat">
+            <span className="stat__label">{t('dashboard.expense')}</span>
+            <span className="stat__value">
+              <Money amount={pl.totalExpense} currency={currency} />
+            </span>
+          </div>
+          <div className="stat">
+            <span className="stat__label">{t('dashboard.netIncome')}</span>
+            <span className="stat__value">
+              <Money amount={pl.netIncome} currency={currency} signed />
+            </span>
+          </div>
         </div>
-        <div className="stat">
-          <span className="stat__label">{t('dashboard.netIncome')}</span>
-          <span className="stat__value">
-            <Money amount={pl.netIncome} currency={currency} signed />
-          </span>
-        </div>
-      </div>
+      </button>
 
-      <p className="section-label">{t('dashboard.position')}</p>
-      <div className="stat-grid">
-        <div className="stat">
-          <span className="stat__label">{t('dashboard.assets')}</span>
-          <span className="stat__value">
-            <Money amount={bs.totalAssets} currency={currency} />
+      {/* 資産と負債（クリックで貸借対照表へ） */}
+      <button
+        type="button"
+        className="summary-card"
+        onClick={() => onOpenStatement('bs')}
+        aria-label={t('dashboard.openBs')}
+        data-ui={UI.dashboard.openBs}
+      >
+        <div className="summary-card__head">
+          <span className="section-label" style={{ margin: 0 }}>
+            {t('dashboard.position')}
           </span>
+          <Icon name="chevronRight" size={16} />
         </div>
-        <div className="stat">
-          <span className="stat__label">{t('dashboard.liabilities')}</span>
-          <span className="stat__value">
-            <Money amount={bs.totalLiabilities} currency={currency} />
-          </span>
+        <div className="stat-grid">
+          <div className="stat">
+            <span className="stat__label">{t('dashboard.assets')}</span>
+            <span className="stat__value">
+              <Money amount={bs.totalAssets} currency={currency} />
+            </span>
+          </div>
+          <div className="stat">
+            <span className="stat__label">{t('dashboard.liabilities')}</span>
+            <span className="stat__value">
+              <Money amount={bs.totalLiabilities} currency={currency} />
+            </span>
+          </div>
+          <div className="stat">
+            <span className="stat__label">{t('dashboard.netAssets')}</span>
+            <span className="stat__value">
+              <Money amount={bs.netAssets} currency={currency} signed />
+            </span>
+          </div>
         </div>
-        <div className="stat">
-          <span className="stat__label">{t('dashboard.netAssets')}</span>
-          <span className="stat__value">
-            <Money amount={bs.netAssets} currency={currency} signed />
-          </span>
-        </div>
-      </div>
+      </button>
 
       <p className="section-label">{t('dashboard.livingCost')}</p>
       <div className="stat-grid">
@@ -196,37 +224,6 @@ export function Dashboard({
           <Icon name="chevronRight" size={16} />
         </span>
       </button>
-
-      {hasEntries ? (
-        <>
-          <div
-            className="section-label"
-            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-          >
-            <span>{t('dashboard.recentEntries')}</span>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              style={{ minHeight: 32 }}
-              onClick={() => onNavigate('journal')}
-            >
-              {t('dashboard.viewAll')}
-              <Icon name="chevronRight" size={16} />
-            </button>
-          </div>
-          <ul className="card list" data-ui={UI.dashboard.recentList}>
-            {recent.map((entry) => (
-              <EntryListItem
-                key={entry.id}
-                entry={entry}
-                accounts={ledger?.accounts ?? []}
-                currency={currency}
-                onClick={() => onEditEntry(entry)}
-              />
-            ))}
-          </ul>
-        </>
-      ) : null}
     </section>
   );
 }

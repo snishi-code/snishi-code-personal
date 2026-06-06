@@ -21,7 +21,7 @@ function renderApp() {
 }
 
 describe('App 支出入力フロー', () => {
-  it('支出を追加するとホームの一覧と費用集計に反映される', async () => {
+  it('支出を追加し、仕訳画面で確認できる', async () => {
     const user = userEvent.setup();
     renderApp();
 
@@ -37,6 +37,10 @@ describe('App 支出入力フロー', () => {
     await user.type(screen.getByLabelText(/金額/), '1000');
 
     await user.click(screen.getByRole('button', { name: '保存' }));
+
+    // ホームには最近の仕訳一覧を置かない。仕訳画面へ移動して反映を確認する。
+    await user.click(screen.getByRole('button', { name: 'メニューを開く' }));
+    await user.click(screen.getByRole('button', { name: '仕訳' }));
 
     expect(await screen.findByText('ランチ')).toBeInTheDocument();
     const amounts = await screen.findAllByText((text) => text.includes('1,000'));

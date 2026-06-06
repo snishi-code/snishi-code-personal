@@ -8,23 +8,16 @@
 export const UI = {
   dashboard: {
     view: 'dashboard.view',
-    addEntry: 'dashboard.entry.create',
-    recentList: 'dashboard.recent.list',
     // 日常入力 3 種（ホーム上部の主導線）
     income: 'dashboard.entry.income',
     expense: 'dashboard.entry.expense',
     transfer: 'dashboard.entry.transfer',
-  },
-  // ヘッダー + が開く「入力の種類」シートの各ボタン
-  entryType: {
-    sheet: 'entry.type.sheet',
-    income: 'entry.type.income',
-    expense: 'entry.type.expense',
-    transfer: 'entry.type.transfer',
+    // 損益/資産負債サマリー（タップで財務諸表へ）
+    openPl: 'dashboard.openPl',
+    openBs: 'dashboard.openBs',
   },
   journal: {
     view: 'journal.view',
-    create: 'journal.entry.create',
     list: 'journal.entry.list',
     search: 'journal.search',
     clearAccountFilter: 'journal.filter.clearAccount',
@@ -36,6 +29,7 @@ export const UI = {
       delete: 'journal.entry.delete',
       reverse: 'journal.entry.reverse',
       detailToggle: 'journal.entry.detailToggle',
+      manualSwitch: 'journal.entry.manualSwitch',
       tags: 'journal.entry.tags',
       debitTags: 'journal.entry.debitTags',
       creditTags: 'journal.entry.creditTags',
@@ -64,6 +58,8 @@ export const UI = {
     create: 'accounts.create',
     save: 'accounts.save',
     list: 'accounts.list',
+    type: 'accounts.type',
+    role: 'accounts.role',
   },
   allocations: {
     view: 'allocations.view',
@@ -111,6 +107,8 @@ export const UI = {
   },
   settings: {
     view: 'settings.view',
+    // 管理セクション（補助画面への遷移リスト）。各行は settings.manage.<screen>
+    manageList: 'settings.manage.list',
     exportJson: 'settings.exportJson',
     importJson: 'settings.importJson',
     importFile: 'settings.importFile',

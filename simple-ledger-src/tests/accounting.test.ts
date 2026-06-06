@@ -7,10 +7,19 @@ import {
   isDebitNormal,
   monthRange,
 } from '../src/domain/accounting';
+import { defaultRoleForType } from '../src/domain/accountRoles';
 import type { Account, JournalEntry } from '../src/domain/types';
 
 function acc(id: string, name: string, type: Account['type']): Account {
-  return { id, name, type, archived: false, createdAt: '2026-01-01', updatedAt: '2026-01-01' };
+  return {
+    id,
+    name,
+    type,
+    role: defaultRoleForType(type),
+    archived: false,
+    createdAt: '2026-01-01',
+    updatedAt: '2026-01-01',
+  };
 }
 
 function entry(
