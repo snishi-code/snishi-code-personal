@@ -17,6 +17,7 @@ import type {
   AdjustmentKind,
   AllocationItem,
   CashflowSchedule,
+  FundingGoal,
   JournalEntry,
   Ledger,
   LedgerMeta,
@@ -118,6 +119,7 @@ export async function loadLedger(): Promise<Ledger> {
     reserves,
     tags,
     monthlyCostItems,
+    fundingGoals,
   ] = await Promise.all([
     getMeta(),
     getSettings(),
@@ -128,6 +130,7 @@ export async function loadLedger(): Promise<Ledger> {
     getAll<ReserveItem>(STORE.reserves),
     getAll<Tag>(STORE.tags),
     getAll<MonthlyCostItem>(STORE.monthlyCostItems),
+    getAll<FundingGoal>(STORE.fundingGoals),
   ]);
   if (!meta || !settings) throw new Error('台帳の初期化に失敗しました');
   // 一覧の安定した既定順: 仕訳は日付降順 → 作成降順。
@@ -140,6 +143,7 @@ export async function loadLedger(): Promise<Ledger> {
   reserves.sort((a, b) => cmp(a.createdAt, b.createdAt));
   tags.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
   monthlyCostItems.sort((a, b) => cmp(b.createdAt, a.createdAt));
+  fundingGoals.sort((a, b) => cmp(a.targetDate, b.targetDate));
   return {
     meta,
     settings,
@@ -150,6 +154,7 @@ export async function loadLedger(): Promise<Ledger> {
     reserves,
     tags,
     monthlyCostItems,
+    fundingGoals,
   };
 }
 
@@ -181,14 +186,16 @@ async function writeWithRevision(
 /* ── 勘定科目 ── */
 
 async function loadReferencingCollections(): Promise<AccountRefCollections> {
-  const [entries, schedules, reserves, allocations, monthlyCostItems] = await Promise.all([
-    getAll<JournalEntry>(STORE.journalEntries),
-    getAll<CashflowSchedule>(STORE.cashflowSchedules),
-    getAll<ReserveItem>(STORE.reserves),
-    getAll<AllocationItem>(STORE.allocations),
-    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
-  ]);
-  return { entries, schedules, reserves, allocations, monthlyCostItems };
+  const [entries, schedules, reserves, allocations, monthlyCostItems, fundingGoals] =
+    await Promise.all([
+      getAll<JournalEntry>(STORE.journalEntries),
+      getAll<CashflowSchedule>(STORE.cashflowSchedules),
+      getAll<ReserveItem>(STORE.reserves),
+      getAll<AllocationItem>(STORE.allocations),
+      getAll<MonthlyCostItem>(STORE.monthlyCostItems),
+      getAll<FundingGoal>(STORE.fundingGoals),
+    ]);
+  return { entries, schedules, reserves, allocations, monthlyCostItems, fundingGoals };
 }
 
 export async function upsertAccount(account: Account): Promise<void> {
@@ -776,6 +783,63 @@ export async function deleteMonthlyCost(id: string): Promise<void> {
   );
 }
 
+/* ── 資金目標 ── */
+
+export interface FundingGoalInput {
+  name: string;
+  targetAmount: number;
+  targetDate: string;
+  currentAmount?: number;
+  sourceAccountId?: string;
+  note?: string;
+}
+
+export async function createFundingGoal(input: FundingGoalInput): Promise<FundingGoal> {
+  if (input.name.trim() === '') throw new Error('名称を入力してください。');
+  if (!Number.isInteger(input.targetAmount) || input.targetAmount <= 0)
+    throw new Error('目標額は 1 以上の整数で入力してください。');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.targetDate))
+    throw new Error('目標期限を入力してください。');
+  const current = input.currentAmount ?? 0;
+  if (!Number.isInteger(current) || current < 0)
+    throw new Error('現在額は 0 以上の整数で入力してください。');
+  if (input.sourceAccountId !== undefined) {
+    const accounts = await getAll<Account>(STORE.accounts);
+    const acc = accounts.find((a) => a.id === input.sourceAccountId);
+    if (!acc || (acc.role !== 'daily-asset' && acc.role !== 'reserve-asset'))
+      throw new Error('積立元は日常資産または目的別資金を選んでください。');
+  }
+  const ts = nowIso();
+  const goal: FundingGoal = {
+    id: newId(),
+    name: input.name.trim(),
+    targetAmount: input.targetAmount,
+    targetDate: input.targetDate,
+    currentAmount: current,
+    ...(input.sourceAccountId !== undefined ? { sourceAccountId: input.sourceAccountId } : {}),
+    ...(input.note && input.note.trim() !== '' ? { note: input.note.trim() } : {}),
+    status: 'active',
+    createdAt: ts,
+    updatedAt: ts,
+  };
+  await writeWithRevision([STORE.fundingGoals], (t) => {
+    t.objectStore(STORE.fundingGoals).put(goal);
+  });
+  return goal;
+}
+
+export async function upsertFundingGoal(goal: FundingGoal): Promise<void> {
+  await writeWithRevision([STORE.fundingGoals], (t) => {
+    t.objectStore(STORE.fundingGoals).put(goal);
+  });
+}
+
+export async function deleteFundingGoal(id: string): Promise<void> {
+  await writeWithRevision([STORE.fundingGoals], (t) => {
+    t.objectStore(STORE.fundingGoals).delete(id);
+  });
+}
+
 /* ── 一括置換（import / restore で使う原子的操作） ── */
 
 export interface ReplacePayload {
@@ -788,6 +852,7 @@ export interface ReplacePayload {
   reserves: ReserveItem[];
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
+  fundingGoals: FundingGoal[];
 }
 
 /**
@@ -805,6 +870,7 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       STORE.reserves,
       STORE.tags,
       STORE.monthlyCostItems,
+      STORE.fundingGoals,
     ],
     (t) => {
       const accounts = t.objectStore(STORE.accounts);
@@ -814,6 +880,7 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       const reserves = t.objectStore(STORE.reserves);
       const tags = t.objectStore(STORE.tags);
       const monthlyCosts = t.objectStore(STORE.monthlyCostItems);
+      const fundingGoals = t.objectStore(STORE.fundingGoals);
       accounts.clear();
       entries.clear();
       allocations.clear();
@@ -821,6 +888,7 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       reserves.clear();
       tags.clear();
       monthlyCosts.clear();
+      fundingGoals.clear();
       for (const a of payload.accounts) accounts.put(a);
       for (const e of payload.journalEntries) entries.put(e);
       for (const al of payload.allocations) allocations.put(al);
@@ -828,6 +896,7 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       for (const r of payload.reserves) reserves.put(r);
       for (const tag of payload.tags) tags.put(tag);
       for (const mc of payload.monthlyCostItems) monthlyCosts.put(mc);
+      for (const g of payload.fundingGoals) fundingGoals.put(g);
       t.objectStore(STORE.kv).put(payload.meta, KV_META);
       t.objectStore(STORE.kv).put(payload.settings, KV_SETTINGS);
     },
@@ -854,6 +923,7 @@ export async function resetAll(): Promise<void> {
       STORE.reserves,
       STORE.tags,
       STORE.monthlyCostItems,
+      STORE.fundingGoals,
       STORE.snapshots,
     ],
     (t) => {
@@ -865,6 +935,7 @@ export async function resetAll(): Promise<void> {
       t.objectStore(STORE.reserves).clear();
       t.objectStore(STORE.tags).clear();
       t.objectStore(STORE.monthlyCostItems).clear();
+      t.objectStore(STORE.fundingGoals).clear();
       t.objectStore(STORE.snapshots).clear();
       t.objectStore(STORE.kv).put(meta, KV_META);
       t.objectStore(STORE.kv).put(settings, KV_SETTINGS);

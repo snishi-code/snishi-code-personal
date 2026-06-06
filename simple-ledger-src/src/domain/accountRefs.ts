@@ -6,6 +6,7 @@
 import type {
   AllocationItem,
   CashflowSchedule,
+  FundingGoal,
   JournalEntry,
   MonthlyCostItem,
   ReserveItem,
@@ -17,6 +18,7 @@ export interface AccountRefCollections {
   reserves: ReserveItem[];
   allocations: AllocationItem[];
   monthlyCostItems: MonthlyCostItem[];
+  fundingGoals: FundingGoal[];
 }
 
 function monthlyCostRefs(m: MonthlyCostItem): (string | undefined)[] {
@@ -31,7 +33,8 @@ export function isAccountReferenced(id: string, c: AccountRefCollections): boole
     c.allocations.some(
       (a) => a.expenseAccountId === id || a.paymentAccountId === id || a.deferredAccountId === id,
     ) ||
-    c.monthlyCostItems.some((m) => monthlyCostRefs(m).includes(id))
+    c.monthlyCostItems.some((m) => monthlyCostRefs(m).includes(id)) ||
+    c.fundingGoals.some((g) => g.sourceAccountId === id)
   );
 }
 
@@ -52,5 +55,6 @@ export function referencedAccountIds(c: AccountRefCollections): Set<string> {
   for (const m of c.monthlyCostItems) {
     for (const ref of monthlyCostRefs(m)) if (ref) set.add(ref);
   }
+  for (const g of c.fundingGoals) if (g.sourceAccountId) set.add(g.sourceAccountId);
   return set;
 }

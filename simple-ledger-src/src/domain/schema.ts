@@ -167,6 +167,19 @@ export const monthlyCostItemSchema = z.object({
   updatedAt: isoDateTime,
 });
 
+export const fundingGoalSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(120),
+  targetAmount: amountSchema,
+  targetDate: isoDate,
+  currentAmount: z.number().int().nonnegative(),
+  sourceAccountId: z.string().min(1).optional(),
+  status: z.enum(['active', 'achieved', 'archived']),
+  note: z.string().max(500).optional(),
+  createdAt: isoDateTime,
+  updatedAt: isoDateTime,
+});
+
 export const journalEntrySchema = z
   .object({
     id: z.string().min(1),
@@ -232,6 +245,7 @@ export const ledgerExportPackageSchema = z
     reserves: z.array(reserveItemSchema),
     tags: z.array(tagSchema),
     monthlyCostItems: z.array(monthlyCostItemSchema),
+    fundingGoals: z.array(fundingGoalSchema),
     settings: settingsSchema,
   })
   .superRefine((pkg, ctx) => {
@@ -583,6 +597,27 @@ export const ledgerExportPackageSchema = z
       // 既存按分との紐づけがあれば、その allocation が存在する。
       if (mc.sourceAllocationId !== undefined && !allocationIds.has(mc.sourceAllocationId))
         issue(`月額化「${mc.name}」の sourceAllocationId が存在しません`, at('sourceAllocationId'));
+    });
+
+    // 資金目標(fundingGoals)の参照整合性。
+    const fundingGoalIds = new Set<string>();
+    pkg.fundingGoals.forEach((g, gi) => {
+      const at = (...p: (string | number)[]) => ['fundingGoals', gi, ...p];
+      if (fundingGoalIds.has(g.id)) issue(`資金目標の ID が重複しています(${g.id})`, at('id'));
+      fundingGoalIds.add(g.id);
+      if (g.currentAmount > g.targetAmount) {
+        // 既に到達は許容（必要月額 0）。ここでは構造のみ確認。
+      }
+      if (g.sourceAccountId !== undefined) {
+        const role = accountRole.get(g.sourceAccountId);
+        if (!accountType.has(g.sourceAccountId))
+          issue(`資金目標「${g.name}」の積立元口座が存在しません`, at('sourceAccountId'));
+        else if (role !== 'daily-asset' && role !== 'reserve-asset')
+          issue(
+            `資金目標「${g.name}」の積立元口座は日常資産または目的別資金である必要があります`,
+            at('sourceAccountId'),
+          );
+      }
     });
 
     // タグ(tags): id 一意 + active な同名重複なし + scope マップ。

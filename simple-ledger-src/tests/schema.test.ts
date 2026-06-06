@@ -95,6 +95,7 @@ describe('ledgerExportPackageSchema', () => {
     reserves: [],
     tags: [],
     monthlyCostItems: [],
+    fundingGoals: [],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
   };
 
@@ -197,6 +198,7 @@ describe('entry metadata / allocationPlan', () => {
       reserves: [],
       tags: [],
       monthlyCostItems: [],
+      fundingGoals: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
     const parsed = ledgerExportPackageSchema.safeParse(pkg);
@@ -267,6 +269,7 @@ describe('allocationPlan の参照整合性（package 検証）', () => {
       reserves: [],
       tags: [],
       monthlyCostItems: [],
+      fundingGoals: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
   }
@@ -357,6 +360,7 @@ describe('按分(allocations) の深い整合性検証（package）', () => {
       reserves: [],
       tags: [],
       monthlyCostItems: [],
+      fundingGoals: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
       ...overrides,
     };
@@ -531,6 +535,7 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
       ],
       tags: [],
       monthlyCostItems: [],
+      fundingGoals: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
       ...over,
     };
@@ -669,6 +674,7 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
         },
       ],
       monthlyCostItems: [],
+      fundingGoals: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
       ...over,
     };
@@ -772,6 +778,7 @@ describe('月額化コスト(monthlyCostItems) の参照・role 検証（package
       reserves: [],
       tags: [],
       monthlyCostItems: items,
+      fundingGoals: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
   }

@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   createAdjustment,
   createAllocation,
+  createFundingGoal,
   createMonthlyCost,
   createReserve,
   deleteAccount,
   deleteEntry,
+  deleteFundingGoal,
   deleteMonthlyCost,
   deleteTag,
   listSnapshots,
@@ -248,6 +250,8 @@ describe('resetAll', () => {
       paymentAccountId: cash.id,
     });
     expect((await loadLedger()).monthlyCostItems).toHaveLength(1);
+    await createFundingGoal({ name: '車', targetAmount: 1000, targetDate: '2030-01-01' });
+    expect((await loadLedger()).fundingGoals).toHaveLength(1);
 
     await resetAll();
     const after = await loadLedger();
@@ -256,6 +260,7 @@ describe('resetAll', () => {
     expect(after.meta.revision).toBe(0); // 新しい meta で作り直されている
     expect(await listSnapshots()).toHaveLength(0); // snapshots も消える
     expect(after.monthlyCostItems).toHaveLength(0); // 月額化コストも消える
+    expect(after.fundingGoals).toHaveLength(0); // 資金目標も消える
   });
 });
 
@@ -596,6 +601,40 @@ describe('月額化コスト createMonthlyCost', () => {
         costMonths: 1,
         startMonth: '2026-06',
         expenseAccountId: cash.id, // asset を費用に → 拒否
+      }),
+    ).rejects.toThrow();
+  });
+});
+
+describe('資金目標 createFundingGoal', () => {
+  it('目標を作成できる', async () => {
+    await loadLedger();
+    const g = await createFundingGoal({
+      name: '車',
+      targetAmount: 3000000,
+      targetDate: '2031-06-30',
+      currentAmount: 500000,
+    });
+    const after = await loadLedger();
+    expect(after.fundingGoals).toHaveLength(1);
+    expect(after.fundingGoals[0]).toMatchObject({
+      name: '車',
+      targetAmount: 3000000,
+      status: 'active',
+    });
+    await deleteFundingGoal(g.id);
+    expect((await loadLedger()).fundingGoals).toHaveLength(0);
+  });
+
+  it('積立元が日常資産/目的別資金でないと拒否', async () => {
+    const ledger = await loadLedger();
+    const card = ledger.accounts.find((a) => a.role === 'payment-liability')!;
+    await expect(
+      createFundingGoal({
+        name: 'x',
+        targetAmount: 1000,
+        targetDate: '2030-01-01',
+        sourceAccountId: card.id, // 負債は不可
       }),
     ).rejects.toThrow();
   });

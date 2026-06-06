@@ -19,6 +19,7 @@ function pkg(version: number): LedgerExportPackage {
     reserves: [],
     tags: [],
     monthlyCostItems: [],
+    fundingGoals: [],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
   };
 }
@@ -126,5 +127,12 @@ describe('migrateToCurrent', () => {
       sourceAllocationId: 'al1',
       status: 'active',
     });
+  });
+  it('v7 → v8 で fundingGoals を空配列で補う', () => {
+    const v7 = { ...pkg(7) } as Record<string, unknown>;
+    delete v7.fundingGoals;
+    const r = migrateToCurrent(v7 as unknown as LedgerExportPackage);
+    expect(r.ok).toBe(true);
+    expect(r.data?.fundingGoals).toEqual([]);
   });
 });

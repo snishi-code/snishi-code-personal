@@ -167,6 +167,29 @@ export const ja = {
   'reserves.deleteConfirmBody':
     '「{name}」の枠を削除します。取り置いた資金や仕訳は残ります（科目は残ります）。',
 
+  // 資金目標（長期の積立計画）
+  'fundingGoal.title': '資金目標',
+  'fundingGoal.intro':
+    '将来の大きな支出（車・老後・入院費など）に向けて、目標額・期限から必要な毎月の積立額を見ます。',
+  'fundingGoal.add': '目標を追加',
+  'fundingGoal.empty': '資金目標はありません。「目標を追加」から作成できます。',
+  'fundingGoal.target': '目標',
+  'fundingGoal.current': '現在',
+  'fundingGoal.requiredMonthly': '必要な毎月の積立額',
+  'fundingGoal.form.title': '資金目標を追加',
+  'fundingGoal.name': '名称',
+  'fundingGoal.namePlaceholder': '例: 5年後に車 / 老後資金',
+  'fundingGoal.targetAmount': '目標額',
+  'fundingGoal.targetDate': '目標期限',
+  'fundingGoal.currentAmount': '現在確保できている額',
+  'fundingGoal.currentHint': '空欄なら 0。すでに貯めてある分があれば入れます。',
+  'fundingGoal.source': '積立元の口座（任意）',
+  'fundingGoal.note': 'メモ',
+  'fundingGoal.error.name': '名称を入力してください。',
+  'fundingGoal.error.target': '目標額（1 以上）と目標期限を入力してください。',
+  'fundingGoal.deleteConfirmTitle': '資金目標を削除しますか？',
+  'fundingGoal.deleteConfirmBody': '「{name}」を削除します。仕訳や口座は変更しません。',
+
   'cashflow.form.entryTags': 'タグ（全体）',
   'cashflow.form.accountTags': '口座側タグ',
   'cashflow.form.counterTags': '相手科目側タグ',

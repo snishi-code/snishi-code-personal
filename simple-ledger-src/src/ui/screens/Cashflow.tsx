@@ -8,20 +8,24 @@ import { useLedger } from '../../state/store';
 import { deriveBalanceSheet } from '../../domain/accounting';
 import { liquidAssetTotal, projectCashflow } from '../../domain/cashflow';
 import { addMonths, monthOf, monthlyAmounts } from '../../domain/allocation';
+import { goalRequiredMonthly } from '../../domain/fundingGoal';
 import { newId } from '../../domain/ids';
-import { nowIso, todayLocal } from '../../util/time';
+import { currentYearMonth, nowIso, todayLocal } from '../../util/time';
 import type {
+  Account,
   CashflowDirection,
   CashflowSchedule,
   CashflowSource,
+  FundingGoal,
   ReserveItem,
   Tag,
 } from '../../domain/types';
+import type { FundingGoalInput } from '../../data/repository';
 import { Modal } from '../Modal';
 import { AccountPicker } from '../AccountPicker';
 import { TagPicker } from '../TagPicker';
 import { SelectInput, TextArea, TextInput } from '../Field';
-import { groupedAccounts } from '../accountOptions';
+import { groupedAccounts, groupedAccountsByRole } from '../accountOptions';
 import { tagsForScope } from '../tagOptions';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { Money } from '../money';
@@ -32,13 +36,28 @@ import { UI } from '../../ui-contract';
 const HORIZONS = [3, 6, 12];
 
 export function Cashflow() {
-  const { ledger, saveSchedules, postSchedule, removeSchedule, createReserve, removeReserve } =
-    useLedger();
+  const {
+    ledger,
+    saveSchedules,
+    postSchedule,
+    removeSchedule,
+    createReserve,
+    removeReserve,
+    createFundingGoal,
+    removeFundingGoal,
+  } = useLedger();
   const [horizon, setHorizon] = useState(6);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [reserveOpen, setReserveOpen] = useState(false);
+  const [goalOpen, setGoalOpen] = useState(false);
   const [pendingSchedule, setPendingSchedule] = useState<CashflowSchedule | null>(null);
   const [pendingReserve, setPendingReserve] = useState<ReserveItem | null>(null);
+  const [pendingGoal, setPendingGoal] = useState<FundingGoal | null>(null);
+
+  const { year, month } = currentYearMonth();
+  const currentYm = `${year}-${String(month).padStart(2, '0')}`;
+  const returnBps = ledger?.settings.expectedAnnualReturnBps ?? 0;
+  const goals = ledger?.fundingGoals ?? [];
 
   const currency = ledger?.settings.currency ?? 'JPY';
   const today = todayLocal();
@@ -286,6 +305,67 @@ export function Cashflow() {
         </ul>
       )}
 
+      {/* 資金目標（長期の積立計画） */}
+      <div
+        className="section-label"
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+      >
+        <span>{t('fundingGoal.title')}</span>
+        <button
+          type="button"
+          className="btn"
+          style={{ minHeight: 36 }}
+          onClick={() => setGoalOpen(true)}
+          data-ui={UI.cashflow.addGoal}
+        >
+          <Icon name="plus" size={16} />
+          {t('fundingGoal.add')}
+        </button>
+      </div>
+      <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
+        {t('fundingGoal.intro')}
+      </p>
+
+      {goals.length === 0 ? (
+        <div className="card card--pad empty">{t('fundingGoal.empty')}</div>
+      ) : (
+        <ul className="card list" data-ui={UI.cashflow.goalList}>
+          {goals.map((g) => (
+            <li key={g.id} className="list__item">
+              <div className="list__main">
+                <div className="list__title">{g.name}</div>
+                <div className="list__sub">
+                  {g.targetDate}・{t('fundingGoal.target')}{' '}
+                  <Money amount={g.targetAmount} currency={currency} />
+                  {g.currentAmount > 0 ? (
+                    <>
+                      {' '}
+                      / {t('fundingGoal.current')}{' '}
+                      <Money amount={g.currentAmount} currency={currency} />
+                    </>
+                  ) : null}
+                </div>
+                <div className="list__sub">
+                  {t('fundingGoal.requiredMonthly')}:{' '}
+                  <Money
+                    amount={goalRequiredMonthly(g, currentYm, returnBps)}
+                    currency={currency}
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => setPendingGoal(g)}
+                aria-label={`${t('common.delete')}: ${g.name}`}
+              >
+                <Icon name="trash" size={18} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
       {scheduleOpen ? (
         <ScheduleSheet
           accounts={ledger?.accounts ?? []}
@@ -294,6 +374,32 @@ export function Cashflow() {
           onSave={async (list) => {
             await saveSchedules(list).catch(() => undefined);
             setScheduleOpen(false);
+          }}
+        />
+      ) : null}
+
+      {goalOpen ? (
+        <FundingGoalSheet
+          accounts={ledger?.accounts ?? []}
+          onClose={() => setGoalOpen(false)}
+          onSave={async (input) => {
+            await createFundingGoal(input).catch(() => undefined);
+            setGoalOpen(false);
+          }}
+        />
+      ) : null}
+
+      {pendingGoal ? (
+        <ConfirmDialog
+          title={t('fundingGoal.deleteConfirmTitle')}
+          body={t('fundingGoal.deleteConfirmBody', { name: pendingGoal.name })}
+          confirmLabel={t('common.delete')}
+          danger
+          onCancel={() => setPendingGoal(null)}
+          onConfirm={async () => {
+            const g = pendingGoal;
+            setPendingGoal(null);
+            await removeFundingGoal(g.id).catch(() => undefined);
           }}
         />
       ) : null}
@@ -633,6 +739,114 @@ function ReserveSheet({
         onChange={(v) => setTargetText(v.replace(/[^\d]/g, ''))}
       />
       <TextArea label={t('reserves.note')} value={note} onChange={setNote} />
+    </Modal>
+  );
+}
+
+function FundingGoalSheet({
+  accounts,
+  onClose,
+  onSave,
+}: {
+  accounts: Account[];
+  onClose: () => void;
+  onSave: (input: FundingGoalInput) => void;
+}) {
+  const [name, setName] = useState('');
+  const [targetText, setTargetText] = useState('');
+  const [targetDate, setTargetDate] = useState('');
+  const [currentText, setCurrentText] = useState('');
+  const [sourceId, setSourceId] = useState('');
+  const [note, setNote] = useState('');
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [submitting, setSubmitting] = useState(false);
+
+  function submit() {
+    if (name.trim() === '') {
+      setError(t('fundingGoal.error.name'));
+      return;
+    }
+    const target = targetText === '' ? 0 : Number.parseInt(targetText, 10);
+    if (target <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+      setError(t('fundingGoal.error.target'));
+      return;
+    }
+    setSubmitting(true);
+    const current = currentText === '' ? 0 : Number.parseInt(currentText, 10);
+    onSave({
+      name: name.trim(),
+      targetAmount: target,
+      targetDate,
+      currentAmount: current,
+      ...(sourceId !== '' ? { sourceAccountId: sourceId } : {}),
+      ...(note.trim() !== '' ? { note: note.trim() } : {}),
+    });
+  }
+
+  return (
+    <Modal
+      title={t('fundingGoal.form.title')}
+      onClose={onClose}
+      dismissable={false}
+      footer={
+        <>
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={submit}
+            disabled={submitting}
+            data-ui={UI.cashflow.goalSave}
+          >
+            {t('common.save')}
+          </button>
+        </>
+      }
+    >
+      <TextInput
+        label={t('fundingGoal.name')}
+        required
+        value={name}
+        placeholder={t('fundingGoal.namePlaceholder')}
+        onChange={(v) => {
+          setName(v);
+          setError(undefined);
+        }}
+        error={error}
+        dataUi={UI.cashflow.goalName}
+      />
+      <TextInput
+        label={t('fundingGoal.targetAmount')}
+        required
+        inputMode="numeric"
+        value={targetText}
+        onChange={(v) => setTargetText(v.replace(/[^\d]/g, ''))}
+        dataUi={UI.cashflow.goalAmount}
+      />
+      <TextInput
+        label={t('fundingGoal.targetDate')}
+        required
+        type="date"
+        value={targetDate}
+        onChange={setTargetDate}
+        dataUi={UI.cashflow.goalDate}
+      />
+      <TextInput
+        label={t('fundingGoal.currentAmount')}
+        inputMode="numeric"
+        value={currentText}
+        hint={t('fundingGoal.currentHint')}
+        onChange={(v) => setCurrentText(v.replace(/[^\d]/g, ''))}
+      />
+      <AccountPicker
+        label={t('fundingGoal.source')}
+        value={sourceId}
+        groups={groupedAccountsByRole(accounts, ['daily-asset', 'reserve-asset'], sourceId)}
+        onChange={setSourceId}
+      />
+      <TextArea label={t('fundingGoal.note')} value={note} onChange={setNote} />
     </Modal>
   );
 }

@@ -92,6 +92,16 @@ const STEPS: Step[] = [
       return { ...pkg, monthlyCostItems };
     },
   },
+  {
+    // v7 → v8: 資金目標(fundingGoals)を追加。既存 JSON には無いので空配列を補う。
+    // ReserveItem は targetDate を持たないため自動移行はせず、既存データは保持する。
+    from: 7,
+    to: 8,
+    migrate: (pkg) => ({
+      ...pkg,
+      fundingGoals: Array.isArray(pkg.fundingGoals) ? pkg.fundingGoals : [],
+    }),
+  },
 ];
 
 /**

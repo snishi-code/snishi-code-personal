@@ -244,6 +244,29 @@ export interface CashflowSchedule {
   updatedAt: string;
 }
 
+/**
+ * 資金目標。将来の大きな支出（車・老後・入院費など）へ向けた積立計画。
+ * 費用項目ではない（支出カテゴリを持たない）。必要月額は期待年利を仮定して導出する。
+ */
+export type FundingGoalStatus = 'active' | 'achieved' | 'archived';
+
+export interface FundingGoal {
+  id: string;
+  name: string;
+  /** 目標額（正の整数）。 */
+  targetAmount: number;
+  /** 目標期限 'YYYY-MM-DD'。 */
+  targetDate: string;
+  /** 現在確保できている額（手入力）。 */
+  currentAmount: number;
+  /** どの口座/資金から積み立てるか（任意）。role: daily-asset | reserve-asset。 */
+  sourceAccountId?: string;
+  status: FundingGoalStatus;
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** 目的別資金（取り置き）。自由資金から除外して見るための asset 科目の目印。 */
 export interface ReserveItem {
   id: string;
@@ -321,6 +344,7 @@ export interface LedgerExportPackage {
   reserves: ReserveItem[];
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
+  fundingGoals: FundingGoal[];
   settings: Settings;
 }
 
@@ -372,4 +396,5 @@ export interface Ledger {
   reserves: ReserveItem[];
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
+  fundingGoals: FundingGoal[];
 }
