@@ -38,6 +38,16 @@ const STEPS: Step[] = [
       allocations: Array.isArray(pkg.allocations) ? pkg.allocations : [],
     }),
   },
+  {
+    // v2 → v3: 予定キャッシュフロー・目的別資金を追加。v2 JSON には無いので空配列を付ける。
+    from: 2,
+    to: 3,
+    migrate: (pkg) => ({
+      ...pkg,
+      cashflowSchedules: Array.isArray(pkg.cashflowSchedules) ? pkg.cashflowSchedules : [],
+      reserves: Array.isArray(pkg.reserves) ? pkg.reserves : [],
+    }),
+  },
 ];
 
 /**

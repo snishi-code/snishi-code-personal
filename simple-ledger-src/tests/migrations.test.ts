@@ -15,6 +15,8 @@ function pkg(version: number): LedgerExportPackage {
     accounts: [],
     journalEntries: [],
     allocations: [],
+    cashflowSchedules: [],
+    reserves: [],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
   };
 }

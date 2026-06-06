@@ -12,13 +12,16 @@ import { newId } from '../domain/ids';
 import type {
   Account,
   AllocationItem,
+  CashflowSchedule,
   JournalEntry,
   Ledger,
   LedgerMeta,
+  ReserveItem,
   Settings,
   Snapshot,
 } from '../domain/types';
 import { buildAllocation, type AllocationInput } from '../domain/allocation';
+import { buildScheduleEntry } from '../domain/cashflow';
 import { nowIso } from '../util/time';
 
 /** 按分中資産（繰延）科目の既定名。初回利用時に asset 科目として作る/再利用する。 */
@@ -52,20 +55,26 @@ export async function ensureInitialized(): Promise<void> {
 
 export async function loadLedger(): Promise<Ledger> {
   await ensureInitialized();
-  const [meta, settings, accounts, journalEntries, allocations] = await Promise.all([
-    getMeta(),
-    getSettings(),
-    getAll<Account>(STORE.accounts),
-    getAll<JournalEntry>(STORE.journalEntries),
-    getAll<AllocationItem>(STORE.allocations),
-  ]);
+  const [meta, settings, accounts, journalEntries, allocations, cashflowSchedules, reserves] =
+    await Promise.all([
+      getMeta(),
+      getSettings(),
+      getAll<Account>(STORE.accounts),
+      getAll<JournalEntry>(STORE.journalEntries),
+      getAll<AllocationItem>(STORE.allocations),
+      getAll<CashflowSchedule>(STORE.cashflowSchedules),
+      getAll<ReserveItem>(STORE.reserves),
+    ]);
   if (!meta || !settings) throw new Error('台帳の初期化に失敗しました');
   // 一覧の安定した既定順: 仕訳は日付降順 → 作成降順。
   journalEntries.sort((a, b) =>
     a.date === b.date ? cmp(b.createdAt, a.createdAt) : cmp(b.date, a.date),
   );
   allocations.sort((a, b) => cmp(b.createdAt, a.createdAt));
-  return { meta, settings, accounts, journalEntries, allocations };
+  // 予定 CF は期日昇順。
+  cashflowSchedules.sort((a, b) => cmp(a.dueDate, b.dueDate));
+  reserves.sort((a, b) => cmp(a.createdAt, b.createdAt));
+  return { meta, settings, accounts, journalEntries, allocations, cashflowSchedules, reserves };
 }
 
 function cmp(a: string, b: string): number {
@@ -225,6 +234,96 @@ export async function createAllocation(
   return item;
 }
 
+/* ── 予定キャッシュフロー ── */
+
+export async function upsertSchedule(schedule: CashflowSchedule): Promise<void> {
+  await writeWithRevision([STORE.cashflowSchedules], (t) => {
+    t.objectStore(STORE.cashflowSchedules).put(schedule);
+  });
+}
+
+/** 複数の予定（分割払い等）を 1 トランザクションで保存する。 */
+export async function upsertSchedules(schedules: CashflowSchedule[]): Promise<void> {
+  await writeWithRevision([STORE.cashflowSchedules], (t) => {
+    const store = t.objectStore(STORE.cashflowSchedules);
+    for (const s of schedules) store.put(s);
+  });
+}
+
+export async function deleteSchedule(id: string): Promise<void> {
+  await writeWithRevision([STORE.cashflowSchedules], (t) => {
+    t.objectStore(STORE.cashflowSchedules).delete(id);
+  });
+}
+
+/** 予定を実績化: 仕訳を作り、schedule を posted にする（単一トランザクション）。 */
+export async function postSchedule(id: string): Promise<JournalEntry> {
+  const schedules = await getAll<CashflowSchedule>(STORE.cashflowSchedules);
+  const schedule = schedules.find((s) => s.id === id);
+  if (!schedule) throw new Error('予定が見つかりません。');
+  if (schedule.status !== 'planned') throw new Error('この予定は既に処理済みです。');
+  const entry = buildScheduleEntry(schedule); // counter 未設定なら throw
+  const updated: CashflowSchedule = {
+    ...schedule,
+    status: 'posted',
+    linkedEntryId: entry.id,
+    updatedAt: nowIso(),
+  };
+  await writeWithRevision([STORE.journalEntries, STORE.cashflowSchedules], (t) => {
+    t.objectStore(STORE.journalEntries).put(entry);
+    t.objectStore(STORE.cashflowSchedules).put(updated);
+  });
+  return entry;
+}
+
+/* ── 目的別資金 ── */
+
+export async function deleteReserve(id: string): Promise<void> {
+  await writeWithRevision([STORE.reserves], (t) => {
+    t.objectStore(STORE.reserves).delete(id);
+  });
+}
+
+/**
+ * 目的別資金を作成する。既存 asset を紐づけるか、無ければ同名の asset 科目を作る。
+ * 取り置き自体は通常の振替（普通預金 → 目的別資金）で行う（このメソッドは枠の登録のみ）。
+ */
+export async function createReserve(input: {
+  name: string;
+  targetAmount?: number;
+  note?: string;
+  existingAccountId?: string;
+}): Promise<ReserveItem> {
+  const ts = nowIso();
+  let newAccount: Account | null = null;
+  let accountId = input.existingAccountId;
+  if (!accountId) {
+    newAccount = {
+      id: newId(),
+      name: input.name,
+      type: 'asset',
+      archived: false,
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    accountId = newAccount.id;
+  }
+  const reserve: ReserveItem = {
+    id: newId(),
+    name: input.name,
+    reserveAccountId: accountId,
+    ...(input.targetAmount !== undefined ? { targetAmount: input.targetAmount } : {}),
+    ...(input.note && input.note.trim() !== '' ? { note: input.note.trim() } : {}),
+    createdAt: ts,
+    updatedAt: ts,
+  };
+  await writeWithRevision([STORE.accounts, STORE.reserves], (t) => {
+    if (newAccount) t.objectStore(STORE.accounts).put(newAccount);
+    t.objectStore(STORE.reserves).put(reserve);
+  });
+  return reserve;
+}
+
 /* ── 一括置換（import / restore で使う原子的操作） ── */
 
 export interface ReplacePayload {
@@ -233,26 +332,44 @@ export interface ReplacePayload {
   accounts: Account[];
   journalEntries: JournalEntry[];
   allocations: AllocationItem[];
+  cashflowSchedules: CashflowSchedule[];
+  reserves: ReserveItem[];
 }
 
 /**
- * 台帳本体（meta/settings/accounts/journalEntries/allocations）を 1 トランザクションで置換する。
- * snapshots は保持する（復元元を消さない）。成功するまで既存は壊さない。
+ * 台帳本体を 1 トランザクションで置換する。snapshots は保持する（復元元を消さない）。
+ * 成功するまで既存は壊さない。
  */
 export async function replaceLedger(payload: ReplacePayload): Promise<void> {
-  await runWrite([STORE.kv, STORE.accounts, STORE.journalEntries, STORE.allocations], (t) => {
-    const accounts = t.objectStore(STORE.accounts);
-    const entries = t.objectStore(STORE.journalEntries);
-    const allocations = t.objectStore(STORE.allocations);
-    accounts.clear();
-    entries.clear();
-    allocations.clear();
-    for (const a of payload.accounts) accounts.put(a);
-    for (const e of payload.journalEntries) entries.put(e);
-    for (const al of payload.allocations) allocations.put(al);
-    t.objectStore(STORE.kv).put(payload.meta, KV_META);
-    t.objectStore(STORE.kv).put(payload.settings, KV_SETTINGS);
-  });
+  await runWrite(
+    [
+      STORE.kv,
+      STORE.accounts,
+      STORE.journalEntries,
+      STORE.allocations,
+      STORE.cashflowSchedules,
+      STORE.reserves,
+    ],
+    (t) => {
+      const accounts = t.objectStore(STORE.accounts);
+      const entries = t.objectStore(STORE.journalEntries);
+      const allocations = t.objectStore(STORE.allocations);
+      const schedules = t.objectStore(STORE.cashflowSchedules);
+      const reserves = t.objectStore(STORE.reserves);
+      accounts.clear();
+      entries.clear();
+      allocations.clear();
+      schedules.clear();
+      reserves.clear();
+      for (const a of payload.accounts) accounts.put(a);
+      for (const e of payload.journalEntries) entries.put(e);
+      for (const al of payload.allocations) allocations.put(al);
+      for (const s of payload.cashflowSchedules) schedules.put(s);
+      for (const r of payload.reserves) reserves.put(r);
+      t.objectStore(STORE.kv).put(payload.meta, KV_META);
+      t.objectStore(STORE.kv).put(payload.settings, KV_SETTINGS);
+    },
+  );
 }
 
 /**
@@ -266,12 +383,22 @@ export async function resetAll(): Promise<void> {
   const settings = defaultSettings();
   const meta = newMeta();
   await runWrite(
-    [STORE.kv, STORE.accounts, STORE.journalEntries, STORE.allocations, STORE.snapshots],
+    [
+      STORE.kv,
+      STORE.accounts,
+      STORE.journalEntries,
+      STORE.allocations,
+      STORE.cashflowSchedules,
+      STORE.reserves,
+      STORE.snapshots,
+    ],
     (t) => {
       t.objectStore(STORE.kv).clear();
       t.objectStore(STORE.accounts).clear();
       t.objectStore(STORE.journalEntries).clear();
       t.objectStore(STORE.allocations).clear();
+      t.objectStore(STORE.cashflowSchedules).clear();
+      t.objectStore(STORE.reserves).clear();
       t.objectStore(STORE.snapshots).clear();
       t.objectStore(STORE.kv).put(meta, KV_META);
       t.objectStore(STORE.kv).put(settings, KV_SETTINGS);

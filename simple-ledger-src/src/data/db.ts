@@ -6,13 +6,15 @@
  */
 
 export const DB_NAME = 'simple-ledger';
-export const DB_VERSION = 2; // v2: allocations ストアを追加
+export const DB_VERSION = 3; // v2: allocations / v3: cashflowSchedules, reserves
 
 export const STORE = {
   kv: 'kv', // meta / settings の単一レコード置き場（out-of-line key）
   accounts: 'accounts',
   journalEntries: 'journalEntries',
   allocations: 'allocations',
+  cashflowSchedules: 'cashflowSchedules',
+  reserves: 'reserves',
   snapshots: 'snapshots',
 } as const;
 
@@ -45,6 +47,13 @@ export function openDB(): Promise<IDBDatabase> {
       // v2 で追加。既存 DB の upgrade でも作られる。
       if (!db.objectStoreNames.contains(STORE.allocations)) {
         db.createObjectStore(STORE.allocations, { keyPath: 'id' });
+      }
+      // v3 で追加。
+      if (!db.objectStoreNames.contains(STORE.cashflowSchedules)) {
+        db.createObjectStore(STORE.cashflowSchedules, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(STORE.reserves)) {
+        db.createObjectStore(STORE.reserves, { keyPath: 'id' });
       }
       if (!db.objectStoreNames.contains(STORE.snapshots)) {
         db.createObjectStore(STORE.snapshots, { keyPath: 'id' });

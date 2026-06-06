@@ -4,7 +4,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { Account, Ledger, Settings, Snapshot } from '../domain/types';
+import type { Account, CashflowSchedule, Ledger, Settings, Snapshot } from '../domain/types';
 import { buildSimpleEntry, type SimpleEntryInput } from '../domain/entry';
 import type { AllocationInput } from '../domain/allocation';
 import * as repo from '../data/repository';
@@ -29,6 +29,16 @@ interface LedgerContextValue {
   ) => Promise<void>;
   removeEntry: (id: string, description: string) => Promise<void>;
   createAllocation: (input: Omit<AllocationInput, 'deferredAccountId'>) => Promise<void>;
+  saveSchedules: (schedules: CashflowSchedule[]) => Promise<void>;
+  postSchedule: (id: string) => Promise<void>;
+  removeSchedule: (id: string) => Promise<void>;
+  createReserve: (input: {
+    name: string;
+    targetAmount?: number;
+    note?: string;
+    existingAccountId?: string;
+  }) => Promise<void>;
+  removeReserve: (id: string) => Promise<void>;
   saveAccount: (account: Account) => Promise<void>;
   removeAccount: (id: string) => Promise<void>;
   saveSettings: (settings: Settings) => Promise<void>;
@@ -110,6 +120,76 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await repo.createAllocation(input);
         await refresh();
         toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const saveSchedules = useCallback<LedgerContextValue['saveSchedules']>(
+    async (schedules) => {
+      try {
+        await repo.upsertSchedules(schedules);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const postSchedule = useCallback<LedgerContextValue['postSchedule']>(
+    async (id) => {
+      try {
+        await repo.postSchedule(id);
+        await refresh();
+        toast.show(t('toast.posted'), 'success');
+      } catch (e) {
+        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const removeSchedule = useCallback<LedgerContextValue['removeSchedule']>(
+    async (id) => {
+      try {
+        await repo.deleteSchedule(id);
+        await refresh();
+        toast.show(t('toast.deleted'), 'success');
+      } catch (e) {
+        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const createReserve = useCallback<LedgerContextValue['createReserve']>(
+    async (input) => {
+      try {
+        await repo.createReserve(input);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const removeReserve = useCallback<LedgerContextValue['removeReserve']>(
+    async (id) => {
+      try {
+        await repo.deleteReserve(id);
+        await refresh();
+        toast.show(t('toast.deleted'), 'success');
       } catch (e) {
         toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
         throw e;
@@ -241,6 +321,11 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveEntry,
       removeEntry,
       createAllocation,
+      saveSchedules,
+      postSchedule,
+      removeSchedule,
+      createReserve,
+      removeReserve,
       saveAccount,
       removeAccount,
       saveSettings,
@@ -259,6 +344,11 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveEntry,
       removeEntry,
       createAllocation,
+      saveSchedules,
+      postSchedule,
+      removeSchedule,
+      createReserve,
+      removeReserve,
       saveAccount,
       removeAccount,
       saveSettings,

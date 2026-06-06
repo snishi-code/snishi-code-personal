@@ -113,6 +113,48 @@ export interface AllocationItem {
   updatedAt: string;
 }
 
+/**
+ * 予定キャッシュフロー（将来の現金の出入り）。
+ * 「いつ費用認識するか(allocation)」とは別概念で、「いつ現金が動くか」を保持する。
+ * 予定は通常仕訳一覧へ大量生成せず、ここに置く。実績化で 1 件の仕訳を作る。
+ */
+export type CashflowDirection = 'inflow' | 'outflow';
+export type CashflowSource = 'manual' | 'credit-card' | 'installment' | 'reserve';
+export type CashflowStatus = 'planned' | 'posted' | 'cancelled';
+
+export interface CashflowSchedule {
+  id: string;
+  title: string;
+  /** ISO 日付 (YYYY-MM-DD)。 */
+  dueDate: string;
+  /** 正の整数（最小通貨単位）。 */
+  amount: number;
+  direction: CashflowDirection;
+  /** 現金が出入りする口座（asset）。 */
+  accountId: string;
+  /** 相手科目。負債返済なら liability、収入予定なら revenue 等。実績化に必要。 */
+  counterAccountId?: string;
+  source: CashflowSource;
+  status: CashflowStatus;
+  /** posted のとき、作成された仕訳の ID。 */
+  linkedEntryId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 目的別資金（取り置き）。自由資金から除外して見るための asset 科目の目印。 */
+export interface ReserveItem {
+  id: string;
+  name: string;
+  /** 取り置き先の asset 科目。 */
+  reserveAccountId: string;
+  /** 目標額（任意）。 */
+  targetAmount?: number;
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface JournalEntry {
   id: string;
   /** ISO 日付 (YYYY-MM-DD)。 */
@@ -166,6 +208,8 @@ export interface LedgerExportPackage {
   accounts: Account[];
   journalEntries: JournalEntry[];
   allocations: AllocationItem[];
+  cashflowSchedules: CashflowSchedule[];
+  reserves: ReserveItem[];
   settings: Settings;
 }
 
@@ -213,4 +257,6 @@ export interface Ledger {
   accounts: Account[];
   journalEntries: JournalEntry[];
   allocations: AllocationItem[];
+  cashflowSchedules: CashflowSchedule[];
+  reserves: ReserveItem[];
 }

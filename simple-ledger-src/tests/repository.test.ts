@@ -1,19 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import {
   createAllocation,
+  createReserve,
   deleteAccount,
   deleteEntry,
   listSnapshots,
   loadLedger,
   makeSnapshotId,
+  postSchedule,
   resetAll,
   saveSnapshot,
   updateSettings,
   upsertAccount,
   upsertEntry,
+  upsertSchedule,
 } from '../src/data/repository';
 import { buildSimpleEntry } from '../src/domain/entry';
 import { buildExportPackage } from '../src/data/exportImport';
+import { newId } from '../src/domain/ids';
+import type { CashflowSchedule } from '../src/domain/types';
 
 async function addEntryRef(foodId: string, cashId: string) {
   await upsertEntry(
@@ -207,5 +212,69 @@ describe('resetAll', () => {
     expect(after.accounts.length).toBeGreaterThan(0);
     expect(after.meta.revision).toBe(0); // 新しい meta で作り直されている
     expect(await listSnapshots()).toHaveLength(0); // snapshots も消える
+  });
+});
+
+describe('予定キャッシュフロー / 目的別資金', () => {
+  it('予定の実績化で仕訳が作られ posted になる（単一トランザクション）', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const card = ledger.accounts.find((a) => a.type === 'liability')!;
+    const schedule: CashflowSchedule = {
+      id: newId(),
+      title: 'カード返済',
+      dueDate: '2026-07-10',
+      amount: 30000,
+      direction: 'outflow',
+      accountId: cash.id,
+      counterAccountId: card.id,
+      source: 'credit-card',
+      status: 'planned',
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    await upsertSchedule(schedule);
+    const entry = await postSchedule(schedule.id);
+    // outflow: 借方 counter(負債) / 貸方 account(資産)
+    expect(entry.lines.find((l) => l.side === 'debit')?.accountId).toBe(card.id);
+    expect(entry.lines.find((l) => l.side === 'credit')?.accountId).toBe(cash.id);
+
+    const after = await loadLedger();
+    const s = after.cashflowSchedules.find((x) => x.id === schedule.id)!;
+    expect(s.status).toBe('posted');
+    expect(s.linkedEntryId).toBe(entry.id);
+    expect(after.journalEntries.some((e) => e.id === entry.id)).toBe(true);
+  });
+
+  it('実績化済みの予定は再実績化できない', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const card = ledger.accounts.find((a) => a.type === 'liability')!;
+    const schedule: CashflowSchedule = {
+      id: newId(),
+      title: 'x',
+      dueDate: '2026-07-10',
+      amount: 100,
+      direction: 'outflow',
+      accountId: cash.id,
+      counterAccountId: card.id,
+      source: 'manual',
+      status: 'planned',
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    await upsertSchedule(schedule);
+    await postSchedule(schedule.id);
+    await expect(postSchedule(schedule.id)).rejects.toThrow();
+  });
+
+  it('目的別資金の作成で asset 科目と枠ができる', async () => {
+    await loadLedger();
+    const r = await createReserve({ name: '結婚資金', targetAmount: 700000 });
+    const after = await loadLedger();
+    expect(after.reserves.some((x) => x.id === r.id)).toBe(true);
+    const acc = after.accounts.find((a) => a.id === r.reserveAccountId)!;
+    expect(acc.type).toBe('asset');
+    expect(acc.name).toBe('結婚資金');
   });
 });

@@ -77,6 +77,31 @@ export const allocationItemSchema = z.object({
   updatedAt: isoDateTime,
 });
 
+export const cashflowScheduleSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1).max(120),
+  dueDate: isoDate,
+  amount: amountSchema,
+  direction: z.enum(['inflow', 'outflow']),
+  accountId: z.string().min(1),
+  counterAccountId: z.string().min(1).optional(),
+  source: z.enum(['manual', 'credit-card', 'installment', 'reserve']),
+  status: z.enum(['planned', 'posted', 'cancelled']),
+  linkedEntryId: z.string().min(1).optional(),
+  createdAt: isoDateTime,
+  updatedAt: isoDateTime,
+});
+
+export const reserveItemSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(120),
+  reserveAccountId: z.string().min(1),
+  targetAmount: amountSchema.optional(),
+  note: z.string().max(500).optional(),
+  createdAt: isoDateTime,
+  updatedAt: isoDateTime,
+});
+
 export const journalEntrySchema = z
   .object({
     id: z.string().min(1),
@@ -135,6 +160,8 @@ export const ledgerExportPackageSchema = z
     accounts: z.array(accountSchema),
     journalEntries: z.array(journalEntrySchema),
     allocations: z.array(allocationItemSchema),
+    cashflowSchedules: z.array(cashflowScheduleSchema),
+    reserves: z.array(reserveItemSchema),
     settings: settingsSchema,
   })
   .superRefine((pkg, ctx) => {
@@ -171,6 +198,18 @@ export const ledgerExportPackageSchema = z
           ]);
         }
       });
+
+      // allocationId と allocationRole は必ず同時に存在する（role 単独で按分認識額へ
+      // 混ざるのを防ぐ。さらに後段の孤立チェックで AllocationItem 参照も必須にする）。
+      const hasAllocId = e.metadata?.allocationId !== undefined;
+      const hasAllocRole = e.metadata?.allocationRole !== undefined;
+      if (hasAllocId !== hasAllocRole) {
+        issue('allocationId と allocationRole は同時に指定する必要があります', [
+          'journalEntries',
+          ei,
+          'metadata',
+        ]);
+      }
 
       // 按分計画(allocationPlan)の参照整合性（将来拡張の土台でも壊れた参照は取り込まない）。
       const plan = e.metadata?.allocationPlan;
@@ -330,6 +369,45 @@ export const ledgerExportPackageSchema = z
           'allocationId',
         ]);
       }
+    });
+
+    // 予定キャッシュフロー(cashflowSchedules)の参照整合性。
+    const scheduleIds = new Set<string>();
+    pkg.cashflowSchedules.forEach((s, si) => {
+      const at = (...p: (string | number)[]) => ['cashflowSchedules', si, ...p];
+      if (scheduleIds.has(s.id)) issue(`予定 CF の ID が重複しています(${s.id})`, at('id'));
+      scheduleIds.add(s.id);
+      const accType = accountType.get(s.accountId);
+      if (accType === undefined)
+        issue(`予定 CF「${s.title}」の口座が存在しません`, at('accountId'));
+      else if (accType !== 'asset')
+        issue(`予定 CF「${s.title}」の口座は資産科目である必要があります`, at('accountId'));
+      if (s.counterAccountId !== undefined && !accountType.has(s.counterAccountId))
+        issue(`予定 CF「${s.title}」の相手科目が存在しません`, at('counterAccountId'));
+      if (
+        s.status === 'posted' &&
+        (s.linkedEntryId === undefined || !entryById.has(s.linkedEntryId))
+      )
+        issue(
+          `posted の予定 CF「${s.title}」は存在する仕訳に紐づく必要があります`,
+          at('linkedEntryId'),
+        );
+    });
+
+    // 目的別資金(reserves)の参照整合性。
+    const reserveIds = new Set<string>();
+    pkg.reserves.forEach((r, ri) => {
+      const at = (...p: (string | number)[]) => ['reserves', ri, ...p];
+      if (reserveIds.has(r.id)) issue(`目的別資金の ID が重複しています(${r.id})`, at('id'));
+      reserveIds.add(r.id);
+      const accType = accountType.get(r.reserveAccountId);
+      if (accType === undefined)
+        issue(`目的別資金「${r.name}」の科目が存在しません`, at('reserveAccountId'));
+      else if (accType !== 'asset')
+        issue(
+          `目的別資金「${r.name}」の科目は資産科目である必要があります`,
+          at('reserveAccountId'),
+        );
     });
   });
 

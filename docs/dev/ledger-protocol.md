@@ -16,7 +16,7 @@
 ```jsonc
 {
   "appId": "snishi-code.simple-ledger",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "ledgerId": "ledger",
   "exportedAt": "2026-06-06T00:00:00.000Z",
   "deviceId": "<uuid>",
@@ -25,13 +25,26 @@
   "accounts": [ /* Account[] */ ],
   "journalEntries": [ /* JournalEntry[] */ ],
   "allocations": [ /* AllocationItem[]（按分支出） */ ],
+  "cashflowSchedules": [ /* CashflowSchedule[]（予定キャッシュフロー） */ ],
+  "reserves": [ /* ReserveItem[]（目的別資金） */ ],
   "settings": { "ledgerName": "家計簿", "currency": "JPY", "locale": "ja" }
 }
 ```
 
-- `schemaVersion`: スキーマ版。現行は **`2`**（v1→v2 で `allocations` を追加）。
-- `revision`: 端末ローカルの編集追跡。保存（仕訳/科目/設定/按分の変更）のたびに +1。
+- `schemaVersion`: スキーマ版。現行は **`3`**（v1→v2 で `allocations`、v2→v3 で
+  `cashflowSchedules` / `reserves` を追加）。
+- `revision`: 端末ローカルの編集追跡。保存（仕訳/科目/設定/按分/予定CF/目的別資金）のたびに +1。
 - 金額（`JournalLine.amount`）は **正の整数・最小通貨単位**（JPY なら円）。
+
+### `CashflowSchedule`（予定キャッシュフロー）/ `ReserveItem`（目的別資金）
+
+- `CashflowSchedule`: `id` / `title` / `dueDate` / `amount` / `direction`('inflow'|'outflow') /
+  `accountId`(asset) / `counterAccountId?` / `source`('manual'|'credit-card'|'installment'|'reserve') /
+  `status`('planned'|'posted'|'cancelled') / `linkedEntryId?`。「いつ現金が動くか」を保持し、
+  実績化で 1 件の 2 行仕訳（outflow: 借方 counter / 貸方 account）を作る。**予定は仕訳一覧へ
+  大量生成しない**。
+- `ReserveItem`: `id` / `name` / `reserveAccountId`(asset) / `targetAmount?` / `note?`。取り置きは
+  通常の振替で行い、資金繰り画面で自由資金から除外して見る（総資産は不変）。
 
 ### `AllocationItem`（按分支出）
 
@@ -73,6 +86,12 @@
   `generatedEntryIds` の各 ID が `journalEntries[].id` に存在する。
 - **`allocations[]`**: `id` は一意。`expenseAccountId` / `paymentAccountId` / `deferredAccountId` が
   `accounts[].id` に、`sourceEntryId` / `recognitionEntryIds[]` が `journalEntries[].id` に存在する。
+  さらに科目 type（expense / payment=asset|liability / deferred=asset）、本数 = months、原始/認識
+  仕訳のメタ・借方貸方・金額列・日付列・合計まで一致を検証。`allocationId` と `allocationRole` は
+  必ず同時に存在し、`allocationId` 付き仕訳はいずれかの AllocationItem から参照される。
+- **`cashflowSchedules[]`**: `id` 一意。`accountId` は asset、`counterAccountId?` は存在する科目、
+  `status: 'posted'` は存在する `linkedEntryId` を持つ。
+- **`reserves[]`**: `id` 一意。`reserveAccountId` は asset。
 
 ### revision の原子性
 
@@ -102,13 +121,15 @@ revision は import の競合判定に使うため、本体と必ず歩調を合
 
 ## migration ポリシー
 
-- `schemaVersion` を必ず持つ。現行は `2`。
+- `schemaVersion` を必ず持つ。現行は `3`。
 - migration 関数の置き場は `src/domain/migrations.ts` の `STEPS`（`{ from, to, migrate }`）。
   - **v1 → v2**: `allocations: []` を補う（v1 JSON は按分を持たない）。
+  - **v2 → v3**: `cashflowSchedules: []` / `reserves: []` を補う。
 - 未対応版は **fail-closed**（取り込まない）。
 - migration 失敗時は既存データを保持し、UI に失敗を通知する（握りつぶさない）。
 - version を上げるときは `SCHEMA_VERSION` を +1 し、`STEPS` に旧→新の手順を追加する。
-  IndexedDB も `DB_VERSION` を上げ、`onupgradeneeded` でストアを追加する（v2 で `allocations` を追加）。
+  IndexedDB も `DB_VERSION` を上げ、`onupgradeneeded` でストアを追加する（v2 で `allocations`、
+  v3 で `cashflowSchedules` / `reserves` を追加）。
 
 ## 外部送信ゼロとの関係
 

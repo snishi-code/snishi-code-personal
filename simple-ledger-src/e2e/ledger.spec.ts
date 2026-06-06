@@ -101,6 +101,27 @@ test('Journal は既定で未来の按分仕訳を隠し、トグルで表示す
   await expect(page.locator(`${ui('journal.entry.list')} > li`)).toHaveCount(13);
 });
 
+test('資金繰り: 予定と目的別資金を作成できる', async ({ page }) => {
+  await page.goto('./');
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.cashflow')).click();
+  await expect(page.locator(ui('cashflow.view'))).toBeVisible();
+
+  // 入出金予定（支出予定 / 対象口座=現金）を追加
+  await page.locator(ui('cashflow.schedule.create')).click();
+  await page.locator(ui('cashflow.schedule.name')).fill('カード引き落とし');
+  await page.locator(ui('cashflow.schedule.amount')).fill('50000');
+  await pick(page, 'cashflow.schedule.account', '現金');
+  await page.locator(ui('cashflow.schedule.save')).click();
+  await expect(page.locator(ui('cashflow.schedule.list'))).toContainText('カード引き落とし');
+
+  // 目的別資金を追加
+  await page.locator(ui('cashflow.reserve.create')).click();
+  await page.locator(ui('cashflow.reserve.name')).fill('結婚資金');
+  await page.locator(ui('cashflow.reserve.save')).click();
+  await expect(page.locator(ui('cashflow.reserve.list'))).toContainText('結婚資金');
+});
+
 test('損益計算書の科目から仕訳一覧へドリルダウンできる', async ({ page }) => {
   await page.goto('./');
   await addExpense(page, 'コーヒー', '500');

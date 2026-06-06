@@ -10,6 +10,7 @@ import { Dashboard } from './ui/screens/Dashboard';
 import { Journal, type JournalFilter } from './ui/screens/Journal';
 import { Statements } from './ui/screens/Statements';
 import { Allocations } from './ui/screens/Allocations';
+import { Cashflow } from './ui/screens/Cashflow';
 import { Accounts } from './ui/screens/Accounts';
 import { Settings } from './ui/screens/Settings';
 import { Help } from './ui/screens/Help';
@@ -96,6 +97,7 @@ export function App() {
         ) : null}
         {screen === 'statements' ? <Statements onDrillDown={goJournalFiltered} /> : null}
         {screen === 'allocations' ? <Allocations /> : null}
+        {screen === 'cashflow' ? <Cashflow /> : null}
         {screen === 'accounts' ? <Accounts /> : null}
         {screen === 'settings' ? <Settings /> : null}
       </main>

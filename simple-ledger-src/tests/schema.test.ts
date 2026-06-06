@@ -75,6 +75,8 @@ describe('ledgerExportPackageSchema', () => {
     ],
     journalEntries: [validEntry],
     allocations: [],
+    cashflowSchedules: [],
+    reserves: [],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
   };
 
@@ -149,6 +151,8 @@ describe('entry metadata / allocationPlan', () => {
         { ...validEntry, metadata: { inputMode: 'reversal', reversalOfEntryId: 'z' } },
       ],
       allocations: [],
+      cashflowSchedules: [],
+      reserves: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
     const parsed = ledgerExportPackageSchema.safeParse(pkg);
@@ -199,6 +203,8 @@ describe('allocationPlan の参照整合性（package 検証）', () => {
       ],
       journalEntries: [{ ...validEntry, metadata: { allocationPlan: plan } }],
       allocations: [],
+      cashflowSchedules: [],
+      reserves: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
   }
@@ -275,6 +281,8 @@ describe('按分(allocations) の深い整合性検証（package）', () => {
       ],
       journalEntries: [built.sourceEntry, ...built.recognitionEntries],
       allocations: [built.item],
+      cashflowSchedules: [],
+      reserves: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
       ...overrides,
     };
@@ -335,6 +343,128 @@ describe('按分(allocations) の深い整合性検証（package）', () => {
         : e,
     );
     const bad = allocPkg({ journalEntries: [built.sourceEntry, ...tampered] });
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+});
+
+describe('予定CF・目的別資金・allocation メタの検証（package）', () => {
+  const bank = {
+    id: 'bank',
+    name: '普通預金',
+    type: 'asset',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  const card = {
+    id: 'card',
+    name: 'カード',
+    type: 'liability',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  function cfPkg(over: Record<string, unknown> = {}) {
+    return {
+      appId: APP_ID,
+      schemaVersion: SCHEMA_VERSION,
+      ledgerId: 'ledger',
+      exportedAt: '2026-06-01T00:00:00.000Z',
+      deviceId: 'd',
+      baseRevision: 0,
+      currentRevision: 0,
+      accounts: [bank, card],
+      journalEntries: [],
+      allocations: [],
+      cashflowSchedules: [
+        {
+          id: 's1',
+          title: 'カード引き落とし',
+          dueDate: '2026-07-10',
+          amount: 50000,
+          direction: 'outflow',
+          accountId: 'bank',
+          counterAccountId: 'card',
+          source: 'credit-card',
+          status: 'planned',
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+      reserves: [
+        { id: 'r1', name: '結婚資金', reserveAccountId: 'bank', createdAt: 'x', updatedAt: 'x' },
+      ],
+      settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
+      ...over,
+    };
+  }
+
+  it('正しい予定CF・目的別資金は valid', () => {
+    expect(ledgerExportPackageSchema.safeParse(cfPkg()).success).toBe(true);
+  });
+  it('予定CF の口座が資産でないと invalid', () => {
+    const bad = cfPkg({
+      cashflowSchedules: [
+        {
+          id: 's1',
+          title: 'x',
+          dueDate: '2026-07-10',
+          amount: 100,
+          direction: 'outflow',
+          accountId: 'card',
+          source: 'manual',
+          status: 'planned',
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+    });
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+  it('posted の予定CF が仕訳に紐づかないと invalid', () => {
+    const bad = cfPkg({
+      cashflowSchedules: [
+        {
+          id: 's1',
+          title: 'x',
+          dueDate: '2026-07-10',
+          amount: 100,
+          direction: 'outflow',
+          accountId: 'bank',
+          counterAccountId: 'card',
+          source: 'manual',
+          status: 'posted',
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+    });
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+  it('目的別資金の科目が資産でないと invalid', () => {
+    const bad = cfPkg({
+      reserves: [{ id: 'r1', name: 'x', reserveAccountId: 'card', createdAt: 'x', updatedAt: 'x' }],
+    });
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+  it('allocationRole 単独（allocationId なし）の仕訳は invalid', () => {
+    const bad = cfPkg({
+      journalEntries: [
+        {
+          id: 'x1',
+          date: '2026-06-01',
+          description: '混入',
+          kind: 'normal',
+          lines: [
+            { accountId: 'bank', side: 'debit', amount: 100 },
+            { accountId: 'card', side: 'credit', amount: 100 },
+          ],
+          metadata: { allocationRole: 'recognition' },
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+    });
     expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
   });
 });
