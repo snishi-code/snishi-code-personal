@@ -123,6 +123,10 @@ export function reversalInput(source: JournalEntry): SimpleEntryInput {
     creditAccountId: debit?.accountId ?? '',
     amount: debit?.amount ?? credit?.amount ?? 0,
     kind: 'normal',
+    // タグも引き継ぐ（タグ別集計に取消を反映させるため）。明細タグは side 入れ替えに合わせる。
+    ...(source.tagIds?.length ? { tagIds: source.tagIds } : {}),
+    ...(credit?.tagIds?.length ? { debitTagIds: credit.tagIds } : {}),
+    ...(debit?.tagIds?.length ? { creditTagIds: debit.tagIds } : {}),
     metadata: { inputMode: 'reversal', reversalOfEntryId: source.id },
   };
 }

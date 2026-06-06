@@ -393,6 +393,35 @@ function isTagReferenced(
 }
 
 export async function upsertTag(tag: Tag): Promise<void> {
+  const [tags, entries, schedules] = await Promise.all([
+    getAll<Tag>(STORE.tags),
+    getAll<JournalEntry>(STORE.journalEntries),
+    getAll<CashflowSchedule>(STORE.cashflowSchedules),
+  ]);
+
+  // active な同名タグ重複は禁止（import 検証と同じ不変条件をアプリ内でも守る）。
+  if (!tag.archived && tags.some((x) => x.id !== tag.id && !x.archived && x.name === tag.name)) {
+    throw new Error('同じ名前の有効なタグが既にあります。');
+  }
+
+  // 使用中タグの scope 変更が、付与済みの用途と矛盾する場合は不可（狭める変更を防ぐ）。
+  const prev = tags.find((x) => x.id === tag.id);
+  if (prev && prev.scope !== tag.scope) {
+    const usedAsEntry =
+      entries.some((e) => e.tagIds?.includes(tag.id)) ||
+      schedules.some((s) => s.entryTagIds?.includes(tag.id));
+    const usedAsLine =
+      entries.some((e) => e.lines.some((l) => l.tagIds?.includes(tag.id))) ||
+      schedules.some(
+        (s) => s.accountLineTagIds?.includes(tag.id) || s.counterLineTagIds?.includes(tag.id),
+      );
+    const allowsEntry = tag.scope === 'entry' || tag.scope === 'both';
+    const allowsLine = tag.scope === 'line' || tag.scope === 'both';
+    if ((usedAsEntry && !allowsEntry) || (usedAsLine && !allowsLine)) {
+      throw new Error('使用中のタグは、付与済みの用途に合わない対象へ変更できません。');
+    }
+  }
+
   await writeWithRevision([STORE.tags], (t) => {
     t.objectStore(STORE.tags).put(tag);
   });

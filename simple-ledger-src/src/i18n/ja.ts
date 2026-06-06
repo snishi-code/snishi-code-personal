@@ -161,6 +161,7 @@ export const ja = {
   'tags.deleteConfirmBody':
     '「{name}」を削除します。使用中の場合は削除できません（アーカイブしてください）。',
   'tags.error.name': '名称を入力してください。',
+  'tags.scopeLockedHint': '使用中のタグは、付与済みの用途に合わない対象へ変更できません。',
   'tags.summary': 'タグ集計',
   'tags.period': '対象期間',
   'tags.entryTags': '全体タグ',

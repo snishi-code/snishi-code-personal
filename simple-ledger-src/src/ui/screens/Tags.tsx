@@ -225,11 +225,19 @@ export function Tags() {
 }
 
 function TagSheet({ existing, onClose }: { existing?: Tag; onClose: () => void }) {
-  const { saveTag } = useLedger();
+  const { ledger, saveTag } = useLedger();
   const [name, setName] = useState(existing?.name ?? '');
   const [scope, setScope] = useState<TagScope>(existing?.scope ?? 'both');
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
+
+  // 使用中タグは対象(scope)を狭める変更ができない（repository が fail-closed）。
+  const inUse =
+    !!existing &&
+    (ledger?.journalEntries ?? []).some(
+      (e) =>
+        e.tagIds?.includes(existing.id) || e.lines.some((l) => l.tagIds?.includes(existing.id)),
+    );
 
   async function submit() {
     if (name.trim() === '') {
@@ -297,6 +305,7 @@ function TagSheet({ existing, onClose }: { existing?: Tag; onClose: () => void }
           { value: 'entry', label: t('tags.scope.entry') },
           { value: 'line', label: t('tags.scope.line') },
         ]}
+        hint={inUse ? t('tags.scopeLockedHint') : undefined}
       />
     </Modal>
   );

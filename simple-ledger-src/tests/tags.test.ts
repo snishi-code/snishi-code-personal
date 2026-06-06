@@ -84,3 +84,24 @@ describe('aggregateLineTags', () => {
     expect(bank.credit).toBe(3000);
   });
 });
+
+describe('reversal はタグ集計で負に扱う', () => {
+  it('取消仕訳が全体タグ合計から差し引かれる', () => {
+    const rev: JournalEntry = {
+      id: 'r1',
+      date: '2026-06-15',
+      description: '取消: 北海道',
+      kind: 'normal',
+      tagIds: ['trip'],
+      metadata: { inputMode: 'reversal', reversalOfEntryId: 'e1' },
+      lines: [
+        { accountId: 'cash', side: 'debit', amount: 1000 },
+        { accountId: 'food', side: 'credit', amount: 1000 },
+      ],
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const r = aggregateEntryTags([e1, rev], tags);
+    expect(r.find((x) => x.tag.id === 'trip')?.total).toBe(0);
+  });
+});

@@ -390,3 +390,44 @@ describe('タグ', () => {
     expect(e.lines.find((l) => l.side === 'credit')?.tagIds).toEqual([cardTag.id]);
   });
 });
+
+describe('タグ不変条件（保存時）', () => {
+  const mkTag = (over: Partial<Tag> = {}): Tag => ({
+    id: newId(),
+    name: '旅行',
+    scope: 'both',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+    ...over,
+  });
+
+  it('active な同名タグは作れない', async () => {
+    await loadLedger();
+    await upsertTag(mkTag());
+    await expect(upsertTag(mkTag())).rejects.toThrow();
+  });
+
+  it('使用中タグの対象(scope)を矛盾する方向へ変更できない', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    const tg = mkTag({ scope: 'both' });
+    await upsertTag(tg);
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2026-06-01',
+        description: '旅行費',
+        debitAccountId: food.id,
+        creditAccountId: cash.id,
+        amount: 1000,
+        tagIds: [tg.id],
+      }),
+    );
+    // 全体タグとして使用中 → scope 'line' へは不可
+    await expect(upsertTag({ ...tg, scope: 'line', updatedAt: 'y' })).rejects.toThrow();
+    // entry を許容する 'entry' への変更は可
+    await upsertTag({ ...tg, scope: 'entry', updatedAt: 'y' });
+    expect((await loadLedger()).tags.find((x) => x.id === tg.id)?.scope).toBe('entry');
+  });
+});

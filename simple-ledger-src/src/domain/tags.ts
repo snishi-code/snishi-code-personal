@@ -18,6 +18,18 @@ export function entryAmount(entry: JournalEntry): number {
   return entry.lines.find((l) => l.side === 'debit')?.amount ?? entry.lines[0]?.amount ?? 0;
 }
 
+/** 取消/返金（逆仕訳）か。タグ集計では金額を負に扱う。 */
+export function isReversalEntry(entry: JournalEntry): boolean {
+  return (
+    entry.metadata?.inputMode === 'reversal' || entry.metadata?.reversalOfEntryId !== undefined
+  );
+}
+
+/** タグ集計での符号付き代表額（reversal は負）。 */
+export function signedEntryAmount(entry: JournalEntry): number {
+  return isReversalEntry(entry) ? -entryAmount(entry) : entryAmount(entry);
+}
+
 /** 仕訳が指定タグを（全体 or いずれかの明細で）持つか。 */
 export function entryHasTag(entry: JournalEntry, tagId: string): boolean {
   if (entry.tagIds?.includes(tagId)) return true;
@@ -50,7 +62,8 @@ export function aggregateEntryTags(
       return {
         tag,
         count: tagged.length,
-        total: tagged.reduce((s, e) => s + entryAmount(e), 0),
+        // 取消/返金は負で集計（旅行費などから返金が差し引かれる）。
+        total: tagged.reduce((s, e) => s + signedEntryAmount(e), 0),
       };
     });
 }
