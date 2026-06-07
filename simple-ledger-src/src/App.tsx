@@ -99,6 +99,8 @@ export function App() {
       </a>
       <Header
         period={period}
+        today={today}
+        onPeriodChange={setPeriod}
         onHome={() => setScreen('dashboard')}
         onOpenPeriod={() => setPeriodMenuOpen(true)}
         onMenu={() => setMenuOpen(true)}

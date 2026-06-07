@@ -460,6 +460,13 @@ export const ja = {
   // 期間メニュー（ヘッダー中央から開く）。年を選ぶ → 月/年全体、または全期間。
   'period.open': '期間を変更',
   'period.title': '期間を選ぶ',
+  // ヘッダーの直接操作（前後移動・粒度切替）
+  'period.prev': '前の期間',
+  'period.next': '次の期間',
+  'period.grainSwitch': '表示の粒度を切り替える',
+  'period.toMonth': '月',
+  'period.toYear': '年',
+  'period.toAll': '全期間',
   'period.kind.year': '年を選ぶ',
   'period.kind.all': '全期間',
   'period.grain.month': '月',

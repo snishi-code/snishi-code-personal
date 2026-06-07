@@ -6,9 +6,16 @@
  * - 詳細とポリシーは docs/dev/ui-contract.md。
  */
 export const UI = {
-  // 期間切替（ヘッダー中央の期間ボタン → 期間メニュー。ホーム/財務諸表で共有）
+  // 期間切替（ヘッダー中央で年/月/年全体/全期間を直接操作。ホーム/財務諸表/仕訳で共有）
   period: {
-    // ヘッダー中央の期間ラベルボタン（押すと期間メニューを開く）
+    // ヘッダー: 期間を前後に動かす ‹ ›（現在の粒度ぶん）
+    prev: 'period.prev',
+    next: 'period.next',
+    // ヘッダー: 粒度の直接切替（月 / 年 / 全期間）
+    toMonth: 'period.toMonth',
+    toYear: 'period.toYear',
+    toAll: 'period.toAll',
+    // ヘッダー中央の期間ラベルボタン（押すと期間メニューを開く＝正確な年/月選択の補助）
     button: 'period.button',
     // 期間メニュー内: 年を選ぶ / 全期間
     kindYear: 'period.kind.year',

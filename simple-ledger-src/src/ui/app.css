@@ -86,11 +86,36 @@ button {
 .app-header__inner {
   max-width: var(--maxw);
   margin: 0 auto;
-  height: var(--header-h);
+  min-height: var(--header-h);
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 0 var(--space-3);
+  padding: var(--space-1) var(--space-3);
+}
+/* ヘッダー中央: 期間ステッパー（上段）+ 粒度切替（下段）の直接操作。 */
+.app-header__center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+}
+.period-stepper {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+}
+.period-grain {
+  width: 100%;
+  max-width: 300px;
+}
+.period-grain .segmented__btn {
+  min-height: 30px;
+  padding: 2px var(--space-2);
+  font-size: 13px;
 }
 /* ヘッダー中央の期間ボタン（押すと期間メニュー）。 */
 .app-header__period {
@@ -489,7 +514,8 @@ button.list__item:hover {
   font-weight: 600;
   color: var(--muted);
 }
-.segmented__btn[aria-selected='true'] {
+.segmented__btn[aria-selected='true'],
+.segmented__btn[aria-pressed='true'] {
   background: var(--surface);
   color: var(--text);
   box-shadow: var(--shadow);
@@ -531,6 +557,8 @@ button.list__item:hover {
   color: var(--muted);
   text-align: center;
   align-self: center;
+  /* 装飾（aria-hidden）。狭い画面で隣の科目チップに重なってもクリックを奪わない。 */
+  pointer-events: none;
 }
 .flow .picker {
   margin: 0;

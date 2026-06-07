@@ -208,3 +208,33 @@ export function availableYears(
 export function shiftYm(ym: string, n: number): string {
   return addMonths(ym, n);
 }
+
+/** 期間の粒度（ヘッダーの直接切替に使う）。mode と 1:1。 */
+export type PeriodGrain = 'month' | 'year' | 'all';
+
+/**
+ * 期間を delta ぶん前後に動かす（ヘッダーの ‹ › 用）。
+ *  - month: ±delta か月（年をまたいで繰り上げ/繰り下げ）。
+ *  - year:  ±delta 年。
+ *  - all:   全期間は範囲が無いので動かさない。
+ */
+export function stepPeriod(p: ReportPeriod, delta: number): ReportPeriod {
+  if (p.mode === 'all') return p;
+  if (p.mode === 'year') return { mode: 'year', year: p.year + delta };
+  const { year, month } = ymParts(shiftYm(`${p.year}-${pad2(p.month)}`, delta));
+  return { mode: 'month', year, month };
+}
+
+/**
+ * 粒度（月/年/全期間）を直接切り替える（ヘッダーの月/年/全期間チップ用）。年・月はなるべく保持し、
+ * 全期間からの復帰や情報が無いときは today で補う。periodRange/periodAsOf の意味は変えない。
+ */
+export function withGrain(p: ReportPeriod, grain: PeriodGrain, today: string): ReportPeriod {
+  if (grain === 'all') return { mode: 'all' };
+  const thisYear = Number.parseInt(today.slice(0, 4), 10);
+  const thisMonth = Number.parseInt(today.slice(5, 7), 10);
+  const year = p.mode === 'all' ? thisYear : p.year;
+  if (grain === 'year') return { mode: 'year', year };
+  const month = p.mode === 'month' ? p.month : thisMonth;
+  return { mode: 'month', year, month };
+}

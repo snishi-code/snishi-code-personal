@@ -7,7 +7,9 @@ import {
   periodBuckets,
   periodLabel,
   periodRange,
+  stepPeriod,
   trendBuckets,
+  withGrain,
   type ReportPeriod,
 } from '../src/domain/reportPeriod';
 
@@ -40,6 +42,53 @@ describe('periodAsOf（BS 基準日）', () => {
   it('all は最終データ日。無ければ今日', () => {
     expect(periodAsOf({ mode: 'all' }, today, '2027-03-10')).toBe('2027-03-10');
     expect(periodAsOf({ mode: 'all' }, today)).toBe(today);
+  });
+});
+
+describe('stepPeriod（ヘッダーの前後移動）', () => {
+  it('月別は ±1 か月で年をまたぐ', () => {
+    expect(stepPeriod({ mode: 'month', year: 2026, month: 6 }, 1)).toEqual({
+      mode: 'month',
+      year: 2026,
+      month: 7,
+    });
+    expect(stepPeriod({ mode: 'month', year: 2026, month: 12 }, 1)).toEqual({
+      mode: 'month',
+      year: 2027,
+      month: 1,
+    });
+    expect(stepPeriod({ mode: 'month', year: 2026, month: 1 }, -1)).toEqual({
+      mode: 'month',
+      year: 2025,
+      month: 12,
+    });
+  });
+  it('年別は ±1 年', () => {
+    expect(stepPeriod({ mode: 'year', year: 2026 }, 1)).toEqual({ mode: 'year', year: 2027 });
+    expect(stepPeriod({ mode: 'year', year: 2026 }, -1)).toEqual({ mode: 'year', year: 2025 });
+  });
+  it('全期間は移動しない', () => {
+    expect(stepPeriod({ mode: 'all' }, 1)).toEqual({ mode: 'all' });
+  });
+});
+
+describe('withGrain（ヘッダーの粒度直接切替）', () => {
+  const today = '2026-06-15';
+  it('月→年→全期間で年を保持し、全期間からは today で補う', () => {
+    const m: ReportPeriod = { mode: 'month', year: 2024, month: 3 };
+    expect(withGrain(m, 'year', today)).toEqual({ mode: 'year', year: 2024 });
+    expect(withGrain(m, 'all', today)).toEqual({ mode: 'all' });
+    expect(withGrain({ mode: 'year', year: 2024 }, 'month', today)).toEqual({
+      mode: 'month',
+      year: 2024,
+      month: 6, // 月情報が無いので today の月で補う
+    });
+    expect(withGrain({ mode: 'all' }, 'year', today)).toEqual({ mode: 'year', year: 2026 });
+    expect(withGrain({ mode: 'all' }, 'month', today)).toEqual({
+      mode: 'month',
+      year: 2026,
+      month: 6,
+    });
   });
 });
 
