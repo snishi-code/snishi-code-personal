@@ -38,8 +38,10 @@ export const UI = {
     // 後方互換（旧 e2e 用に維持）: 収益=PL入口 / 資産=BS入口
     openPl: 'dashboard.stat.revenue',
     openBs: 'dashboard.stat.assets',
-    // 生活コスト領域（タップで資金計画・負債へ）
-    openCashflow: 'dashboard.openCashflow',
+    // 生活コスト（収支/財政状態と同じ stat。月額化コストは月額化コスト画面へ）
+    statNormalExpense: 'dashboard.stat.normalExpense',
+    openMonthlyCost: 'dashboard.openMonthlyCost',
+    statLivingCostTotal: 'dashboard.stat.livingCostTotal',
     // 当月の仕訳プレビュー
     journalPreview: 'dashboard.journal.preview',
     journalOpenAll: 'dashboard.journal.openAll',

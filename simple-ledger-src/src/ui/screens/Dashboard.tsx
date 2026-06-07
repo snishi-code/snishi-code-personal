@@ -106,7 +106,6 @@ export function Dashboard({
     recognition,
     systemAdjExpense,
     monthlyCostPaid,
-    activeCount,
   } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     const entries = ledger?.journalEntries ?? [];
@@ -155,7 +154,6 @@ export function Dashboard({
       recognition: recognitionAmt,
       systemAdjExpense: systemAdj,
       monthlyCostPaid,
-      activeCount: monthlyCostItems.filter((m) => m.status === 'active').length,
     };
   }, [ledger, period, range, today]);
 
@@ -197,7 +195,6 @@ export function Dashboard({
   }, [ledger, period]);
 
   const currency = ledger?.settings.currency ?? 'JPY';
-  const hasEntries = (ledger?.journalEntries.length ?? 0) > 0;
   // 通常支出 = 今月の費用 − 既存按分の認識 − 調整用費用 − 月額化の実支払い
   // （月額化は formula で別途足すため二重計上しない）。
   const normalExpense = pl.totalExpense - recognition - systemAdjExpense - monthlyCostPaid;
@@ -225,13 +222,6 @@ export function Dashboard({
           </button>
         ))}
       </div>
-
-      {!hasEntries ? (
-        <div className="card card--pad empty">
-          <Icon name="sprout" size={32} />
-          <p style={{ marginTop: 'var(--space-3)' }}>{t('dashboard.noEntries')}</p>
-        </div>
-      ) : null}
 
       {/* 期間の切替はヘッダー中央の期間ボタンから（正本）。ここでは結果だけを見せる。 */}
 
@@ -310,54 +300,43 @@ export function Dashboard({
         </div>
       ) : null}
 
-      {/* 生活コスト（領域全体が資金繰り/資金計画への導線） */}
+      {/* 生活コスト（収支/財政状態と同じ stat-grid。月額化コストは月額化コスト画面へ。CF とは別概念） */}
       <p className="section-label">{t('dashboard.livingCostOf', { label })}</p>
-      <button
-        type="button"
-        className="summary-card"
-        onClick={() => onNavigate('cashflow')}
-        aria-label={t('dashboard.openCashflow')}
-        data-ui={UI.dashboard.openCashflow}
-      >
-        <div className="summary-card__head">
-          <span className="muted" style={{ fontSize: 13 }}>
-            {t('dashboard.activeMonthlyCosts', { count: activeCount })}
-          </span>
-          <Icon name="chevronRight" size={16} />
-        </div>
-        <div className="stat-grid">
+      <div className="stat-grid">
+        <StatButton
+          label={t('dashboard.normalExpense')}
+          onClick={() => onOpenStatement('pl', 'expense')}
+          dataUi={UI.dashboard.statNormalExpense}
+        >
+          <Money amount={normalExpense} currency={currency} />
+        </StatButton>
+        <StatButton
+          label={t('dashboard.monthlyCost')}
+          onClick={() => onNavigate('allocations')}
+          dataUi={UI.dashboard.openMonthlyCost}
+        >
+          <Money amount={monthlyCost} currency={currency} />
+        </StatButton>
+        <StatButton
+          label={t('dashboard.livingCostTotal')}
+          onClick={() => onNavigate('allocations')}
+          dataUi={UI.dashboard.statLivingCostTotal}
+        >
+          <Money amount={normalExpense + monthlyCost} currency={currency} />
+        </StatButton>
+        {investmentValuation.loss > 0 || investmentValuation.gain > 0 ? (
           <div className="stat">
-            <span className="stat__label">{t('dashboard.normalExpense')}</span>
+            <span className="stat__label">{t('dashboard.investmentValuation')}</span>
             <span className="stat__value">
-              <Money amount={normalExpense} currency={currency} />
+              <Money
+                amount={investmentValuation.gain - investmentValuation.loss}
+                currency={currency}
+                signed
+              />
             </span>
           </div>
-          <div className="stat">
-            <span className="stat__label">{t('dashboard.monthlyCost')}</span>
-            <span className="stat__value">
-              <Money amount={monthlyCost} currency={currency} />
-            </span>
-          </div>
-          <div className="stat">
-            <span className="stat__label">{t('dashboard.livingCostTotal')}</span>
-            <span className="stat__value">
-              <Money amount={normalExpense + monthlyCost} currency={currency} />
-            </span>
-          </div>
-          {investmentValuation.loss > 0 || investmentValuation.gain > 0 ? (
-            <div className="stat">
-              <span className="stat__label">{t('dashboard.investmentValuation')}</span>
-              <span className="stat__value">
-                <Money
-                  amount={investmentValuation.gain - investmentValuation.loss}
-                  currency={currency}
-                  signed
-                />
-              </span>
-            </div>
-          ) : null}
-        </div>
-      </button>
+        ) : null}
+      </div>
 
       {/* 期間内の仕訳（下部・スクロールで見える）。詳細は仕訳画面へ。 */}
       <div

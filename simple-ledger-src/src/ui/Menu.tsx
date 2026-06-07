@@ -22,7 +22,13 @@ export function Menu({
   onHelp: () => void;
 }) {
   return (
-    <Modal title={t('common.menu')} onClose={onClose} dismissMode="always" variant="dialog">
+    <Modal
+      title={t('common.menu')}
+      onClose={onClose}
+      dismissMode="always"
+      variant="dialog"
+      titleVariant="sr-only"
+    >
       <nav className="menu-list" aria-label={t('common.menu')} data-ui={UI.nav.menu}>
         {NAV_ITEMS.map((item) => (
           <button

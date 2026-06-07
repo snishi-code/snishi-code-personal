@@ -298,6 +298,21 @@ test('ホームの損益/資産サマリーから財務諸表(PL/BS)を開ける
   await expect(page.locator(ui('statements.profitAndLoss'))).toBeVisible();
 });
 
+test('ホーム上部の入力ボタン直下に誤解を招く空カードを出さない', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible();
+  // 入力導線の直下に「まだ仕訳がありません」カードは出さない（入力位置に仕訳が入るわけではない）。
+  await expect(page.getByText('まだ仕訳がありません')).toHaveCount(0);
+});
+
+test('生活コストの月額化コストをタップすると月額化コスト画面へ遷移する（CF ではない）', async ({
+  page,
+}) => {
+  await page.goto('./');
+  await page.locator(ui('dashboard.openMonthlyCost')).click();
+  await expect(page.locator(ui('allocations.view'))).toBeVisible();
+});
+
 test('期間切替（ヘッダーの期間メニュー）でホームの集計・推移が切り替わる', async ({ page }) => {
   await page.goto('./');
   await addExpense(page, '期間テスト支出', '1500');

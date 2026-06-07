@@ -25,6 +25,7 @@ export function Modal({
   dismissable,
   dismissMode,
   variant = 'sheet',
+  titleVariant = 'visible',
   dataUi,
 }: {
   title: string;
@@ -35,6 +36,11 @@ export function Modal({
   dismissable?: boolean;
   dismissMode?: DismissMode;
   variant?: 'sheet' | 'dialog';
+  /**
+   * 見出しの見せ方。'sr-only' は視覚的に隠しつつ aria 上の名前（aria-labelledby）は維持する。
+   * 入力フォームやメニューなど自明な非破壊ポップアップで使う。判断が要るダイアログは 'visible'。
+   */
+  titleVariant?: 'visible' | 'sr-only';
   dataUi?: string;
 }) {
   // 後方互換: dismissMode 未指定なら dismissable から導出（既定は 'always'）。
@@ -100,7 +106,10 @@ export function Modal({
         data-ui={dataUi}
       >
         <div className="sheet__header">
-          <h2 className="sheet__title" id={titleId}>
+          <h2
+            className={`sheet__title${titleVariant === 'sr-only' ? ' sr-only' : ''}`}
+            id={titleId}
+          >
             {title}
           </h2>
           <button
@@ -108,6 +117,8 @@ export function Modal({
             className="icon-btn"
             onClick={onClose}
             aria-label={t('a11y.closeDialog')}
+            // 見出しを視覚的に隠したときは閉じるボタンを右端へ寄せる。
+            style={titleVariant === 'sr-only' ? { marginLeft: 'auto' } : undefined}
           >
             <Icon name="close" />
           </button>

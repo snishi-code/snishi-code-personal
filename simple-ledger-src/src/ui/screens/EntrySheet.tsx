@@ -777,6 +777,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         title={title}
         onClose={requestClose}
         dismissMode="if-clean"
+        titleVariant="sr-only"
         footer={
           <>
             <button

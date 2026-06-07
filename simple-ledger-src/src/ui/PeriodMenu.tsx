@@ -28,6 +28,7 @@ export function PeriodMenu({
       onClose={onClose}
       dismissMode="always"
       variant="dialog"
+      titleVariant="sr-only"
       footer={
         <button type="button" className="btn btn--primary" onClick={onClose}>
           {t('common.close')}
