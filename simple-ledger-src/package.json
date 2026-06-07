@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
+    "no-exfil": "../tools/no-exfil-guard.sh",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
