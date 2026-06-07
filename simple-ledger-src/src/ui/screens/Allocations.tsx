@@ -145,14 +145,17 @@ export function Allocations() {
                     >
                       <Icon name={m.status === 'active' ? 'archive' : 'restore'} size={18} />
                     </button>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => setPendingDelete(m)}
-                      aria-label={`${t('common.delete')}: ${m.name}`}
-                    >
-                      <Icon name="trash" size={18} />
-                    </button>
+                    {/* 固定資産由来は削除不可（購入仕訳・処分履歴が孤立する）。売却/故障で処分する。 */}
+                    {isFixedAssetItem(m) ? null : (
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        onClick={() => setPendingDelete(m)}
+                        aria-label={`${t('common.delete')}: ${m.name}`}
+                      >
+                        <Icon name="trash" size={18} />
+                      </button>
+                    )}
                   </span>
                 </div>
                 <div className="kv">

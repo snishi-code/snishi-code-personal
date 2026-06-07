@@ -1221,15 +1221,26 @@ export async function upsertMonthlyCost(item: MonthlyCostItem): Promise<void> {
  * 月額化コストを削除する。関連（実支払い仕訳・返済 CF）も一括で扱う fail-closed。
  *  - 現行設計では「実際の支払い仕訳（借方 費用 / 貸方 支払い元）」と「生活コスト認識の分析レイヤ
  *    （formula）」を分離している。削除では支払い仕訳と返済 CF を扱う。
+ *  - **固定資産由来（購入仕訳 + recognitionCreditAccountId）/ 処分済み（AssetDisposal が参照）は削除禁止。**
+ *    本体だけ消すと購入仕訳や AssetDisposal.monthlyCostId が孤立する。履歴は「終了」/「売却・故障処分」で残す。
  *  - 返済 CF が 1 件でも実績化(posted)済みなら、現金/負債が動いているため物理削除は禁止。
  *    `status='ended'` で終了させること（履歴と整合を壊さない）。
  *  - すべて未実績なら、実支払い仕訳・未実績 CF・本体を 1 トランザクションで同時削除する（孤立を残さない）。
  */
 export async function deleteMonthlyCost(id: string): Promise<void> {
-  const [entries, schedules] = await Promise.all([
+  const [items, entries, schedules, disposals] = await Promise.all([
+    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
     getAll<JournalEntry>(STORE.journalEntries),
     getAll<CashflowSchedule>(STORE.cashflowSchedules),
+    getAll<AssetDisposal>(STORE.assetDisposals),
   ]);
+  const item = items.find((m) => m.id === id);
+  // 固定資産由来は購入仕訳を持つため削除しない（売却/故障で処分し履歴を残す）。
+  if (item && item.sourceEntryId !== undefined && item.recognitionCreditAccountId !== undefined)
+    throw new LedgerError('error.monthlyCost.deleteFixedAsset');
+  // 処分済み（AssetDisposal が参照）も削除しない（参照が孤立する）。
+  if (disposals.some((d) => d.monthlyCostId === id))
+    throw new LedgerError('error.monthlyCost.deleteFixedAsset');
   const relatedSchedules = schedules.filter((s) => s.monthlyCostId === id);
   const relatedEntries = entries.filter((e) => e.metadata?.monthlyCostId === id);
   if (relatedSchedules.some((s) => s.status === 'posted')) {

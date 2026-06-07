@@ -738,6 +738,8 @@ export const ja = {
     '返済が実績化済みのため総額を変更できません。終了して新規に作成してください。',
   'error.monthlyCost.deletePosted':
     '返済が実績化済みのため削除できません。月額化コスト画面で「終了」にしてください。',
+  'error.monthlyCost.deleteFixedAsset':
+    '固定資産由来の月額化コストは削除できません。「売却/故障」で処分してください。',
   'error.disposal.dateRequired': '処分日を YYYY-MM-DD で入力してください。',
   'error.disposal.proceedsInvalid': '売却額は 0 以上の整数で入力してください。',
   'error.disposal.notFixedAsset': 'この月額化コストは固定資産由来ではないため処分できません。',

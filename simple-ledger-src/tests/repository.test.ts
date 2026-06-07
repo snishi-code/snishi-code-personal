@@ -1718,4 +1718,23 @@ describe('固定資産の売却・故障処分（disposeFixedAsset）', () => {
       true,
     );
   });
+
+  it('固定資産由来の月額化コストは削除できない（処分で履歴を残す）', async () => {
+    const { item } = await makeFixedAssetMonthly();
+    const e = await caught(deleteMonthlyCost(item.id));
+    expect(e).toBeInstanceOf(LedgerError);
+    expect(e.code).toBe('error.monthlyCost.deleteFixedAsset');
+  });
+
+  it('処分済みの月額化コストも削除できない（AssetDisposal の孤立を防ぐ）', async () => {
+    const { item } = await makeFixedAssetMonthly();
+    await disposeFixedAsset({
+      monthlyCostId: item.id,
+      disposalDate: '2031-01-15',
+      proceedsAmount: 0,
+    });
+    const e = await caught(deleteMonthlyCost(item.id));
+    expect(e).toBeInstanceOf(LedgerError);
+    expect(e.code).toBe('error.monthlyCost.deleteFixedAsset');
+  });
 });

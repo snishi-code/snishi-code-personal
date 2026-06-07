@@ -1,7 +1,17 @@
 # 固定資産の売却・故障処理
 
-この文書は、固定資産購入を月額化した `MonthlyCostItem` を、売却・故障・廃棄で途中終了するための次フェーズ仕様。
-実装前の設計メモであり、現行実装にはまだこの操作はない。
+この文書は、固定資産購入を月額化した `MonthlyCostItem` を、売却・故障・廃棄で途中終了する処理の仕様。
+
+**実装状況: v1 実装済み（schema v12）。** 本文の設計どおり実装されている。実装の要点:
+
+- 独立エンティティ `AssetDisposal`（ストア `assetDisposals`）に処分記録を残す（`monthlyCostId` / `fixedAccountId` / `disposalDate` / `proceedsAmount` / `destinationAccountId?` / `recognizedAmount` / `remainingAmount` / `generatedEntryIds`）。
+- 生成仕訳は `metadata.assetDisposalId` で `AssetDisposal` に紐づき、通常編集・削除は不可（`assertNotGeneratedEntry`）。
+  - **設計判断**: 生成仕訳には `monthlyCostId` を付けない。ダッシュボードは `monthlyCostId` 付き費用を生活コストから除外するため、付けると「売却損を生活コストに含める」要件に反し、かつ system-adjustment 科目（type=expense）が二重控除される。紐づけ・監査は `assetDisposalId` + `AssetDisposal` レコードで担保する。
+- 入口は `repository.disposeFixedAsset(input)`、状態配線は `store.disposeFixedAsset`、UI は月額化コスト画面（`Allocations`）の固定資産由来アイテムの「売却/故障」。
+- 固定資産由来 / 処分済みの `MonthlyCostItem` は削除禁止（`deleteMonthlyCost` が `error.monthlyCost.deleteFixedAsset`）。履歴は「終了」/「売却・故障処分」で残す。
+- 残存損益の純粋計算は `domain/assetDisposal.ts`（`computeRecognizedAmount` / `disposalOutcome`）。
+
+v1 で未対応: 部分売却、支払い元・返済口座の変更、負債一括返済（本文「対象外」を参照）。
 
 ## 目的
 
