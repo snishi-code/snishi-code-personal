@@ -123,6 +123,20 @@ export const ja = {
   'monthlyCost.payment': '支払い元',
   'monthlyCost.pause': '一時停止',
   'monthlyCost.resume': '再開',
+  'monthlyCost.edit': '編集',
+  'monthlyCost.editTitle': '月額化コストを編集',
+  'monthlyCost.name': '名称',
+  'monthlyCost.startMonth': '開始月',
+  'monthlyCost.endMonth': '終了月（任意）',
+  'monthlyCost.endMonthHint':
+    '空欄なら継続中。指定すると、その月を最後に生活コストへ計上しません。',
+  'monthlyCost.statusLabel': '状態',
+  'monthlyCost.repeatField': '更新周期（か月・任意）',
+  'monthlyCost.repeatFieldHint':
+    '空欄なら 1 回限り。指定すると、その月数ごとに同じコストが再発します。',
+  'monthlyCost.amountLockedFixed': '固定資産・按分由来のため総額は変更できません。',
+  'monthlyCost.amountLockedPosted': '返済が実績化済みのため総額は変更できません。',
+  'monthlyCost.paymentLocked': '支払い元・返済口座は変更できません（会計事実を保つため）。',
   'monthlyCost.deleteConfirmTitle': '月額化コストを削除しますか？',
   'monthlyCost.deleteConfirmBody':
     '「{name}」を削除します。関連する月額化の支払い仕訳と未実績の返済予定も削除されます。',
@@ -692,6 +706,12 @@ export const ja = {
   'error.monthlyCost.expenseCategory': '費用カテゴリ（支出カテゴリの科目）を選んでください。',
   'error.monthlyCost.paymentSource': '支払い元は日常資産または支払用負債を選んでください。',
   'error.monthlyCost.repaymentAccount': '返済口座は日常資産を選んでください。',
+  'error.monthlyCost.notFound': '対象の月額化コストが見つかりません。',
+  'error.monthlyCost.invalidStructure': '月額化コストの内容が不正です。',
+  'error.monthlyCost.endBeforeStart': '終了月は開始月以降にしてください。',
+  'error.monthlyCost.editAmountLinked': '固定資産・按分由来の月額化コストは総額を変更できません。',
+  'error.monthlyCost.editAmountPosted':
+    '返済が実績化済みのため総額を変更できません。終了して新規に作成してください。',
   'error.monthlyCost.deletePosted':
     '返済が実績化済みのため削除できません。月額化コスト画面で「終了」にしてください。',
   'error.fixedAsset.expenseCategory': '月額化先の費用カテゴリを選んでください。',
