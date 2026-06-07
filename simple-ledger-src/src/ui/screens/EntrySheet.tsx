@@ -29,6 +29,7 @@ import { useLedger } from '../../state/store';
 import {
   reversalInput,
   toSimpleInput,
+  transferFlowValid,
   validateSimpleEntry,
   type EntryValidationError,
   type SimpleEntryInput,
@@ -93,10 +94,14 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     init.kind === 'create' ? '' : String(form.amount || ''),
   );
   const [errors, setErrors] = useState<EntryValidationError[]>([]);
+  const [flowError, setFlowError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  // 月額化コスト（expense の create のみ）
-  const canAllocate = init.kind === 'create' && mode === 'expense';
+  // 行き先(debit)の役割。費用カテゴリのときだけ「月額化」（通常費用版）を出す。
+  const destRole = accounts.find((a) => a.id === form.debitAccountId)?.role;
+  // 月額化コスト（expense × 費用カテゴリ × create のみ）。固定資産購入の月額化は別扱い（P7）。
+  const canAllocate =
+    init.kind === 'create' && mode === 'expense' && destRole === 'expense-category';
   const [allocate, setAllocate] = useState(false);
   // 月額化 ON のときはタグを付けられない（createMonthlyCost はタグを受け取らないため）。
   const allocationActive = canAllocate && allocate;
@@ -177,6 +182,16 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     const monthsBad = useMonthly && (!Number.isInteger(months) || months < 1);
     setMonthsError(monthsBad);
     if (found.length > 0 || monthsBad) return;
+    // 振替は役割の組み合わせを検証する（資金↔資金 / 資金→負債返済 / 負債→資金借入のみ）。
+    if (mode === 'transfer') {
+      const srcRole = accounts.find((a) => a.id === toSave.creditAccountId)?.role;
+      const dstRole = accounts.find((a) => a.id === toSave.debitAccountId)?.role;
+      const ok = !!srcRole && !!dstRole && transferFlowValid(srcRole, dstRole);
+      setFlowError(ok ? undefined : t('entry.error.invalid-transfer'));
+      if (!ok) return;
+    } else {
+      setFlowError(undefined);
+    }
     setSubmitting(true);
     try {
       if (useMonthly) {
@@ -519,6 +534,18 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           <div className="banner" role="note" style={{ marginBottom: 'var(--space-4)' }}>
             <Icon name="reverse" size={18} />
             {t('entry.reversalNote')}
+          </div>
+        ) : null}
+
+        {flowError ? (
+          <div
+            className="field__error"
+            role="alert"
+            style={{ marginBottom: 'var(--space-3)' }}
+            data-ui={UI.journal.entry.flowError}
+          >
+            <Icon name="alert" size={14} />
+            {flowError}
           </div>
         ) : null}
 

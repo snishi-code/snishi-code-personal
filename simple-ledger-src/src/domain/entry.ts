@@ -6,8 +6,29 @@
  * その割当は UI 層（EntrySheet の mode→roles）で行い、ここは debit/credit + metadata を受ける。
  */
 import { newId } from './ids';
+import type { AccountRole } from './accountRoles';
 import type { EntryMetadata, JournalEntry, JournalEntryKind } from './types';
 import { nowIso } from '../util/time';
+
+const TRANSFER_FUND_ROLES: AccountRole[] = ['daily-asset', 'reserve-asset'];
+const TRANSFER_LIABILITY_ROLES: AccountRole[] = ['payment-liability', 'other-liability'];
+
+/**
+ * 振替（資金移動）として成立する役割の組み合わせか。
+ *  - 資金 → 資金（口座間・目的別資金へ/から）
+ *  - 資金 → 負債（返済）
+ *  - 負債 → 資金（借入・ローン実行）
+ * それ以外（負債→負債、費用/収入カテゴリが絡む等）は不正。
+ */
+export function transferFlowValid(srcRole: AccountRole, dstRole: AccountRole): boolean {
+  if (TRANSFER_FUND_ROLES.includes(srcRole)) {
+    return TRANSFER_FUND_ROLES.includes(dstRole) || TRANSFER_LIABILITY_ROLES.includes(dstRole);
+  }
+  if (TRANSFER_LIABILITY_ROLES.includes(srcRole)) {
+    return TRANSFER_FUND_ROLES.includes(dstRole);
+  }
+  return false;
+}
 
 export interface SimpleEntryInput {
   date: string;

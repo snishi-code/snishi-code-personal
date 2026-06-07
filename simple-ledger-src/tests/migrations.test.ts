@@ -142,4 +142,11 @@ describe('migrateToCurrent', () => {
     expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
     expect(r.data?.cashflowSchedules).toEqual(v8.cashflowSchedules);
   });
+  it('v9 → v10 は恒等移行（fixed-asset role / MonthlyCostItem 拡張の版上げ）', () => {
+    const v9 = pkg(9);
+    const r = migrateToCurrent(v9);
+    expect(r.ok).toBe(true);
+    expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(r.data?.accounts).toEqual(v9.accounts);
+  });
 });

@@ -76,6 +76,7 @@ export const UI = {
       flow: 'journal.entry.flow',
       flowSource: 'journal.entry.flow.source',
       flowDestination: 'journal.entry.flow.destination',
+      flowError: 'journal.entry.flow.error',
       debitAccount: 'journal.entry.debitAccount',
       creditAccount: 'journal.entry.creditAccount',
       amount: 'journal.entry.amount',

@@ -36,16 +36,30 @@ export const MODE_ROLES: Record<FormMode, readonly [EntryRole, EntryRole]> = {
     { side: 'credit', labelKey: 'entry.income.category', allowedRoles: ['income-category'] },
   ],
   expense: [
-    { side: 'debit', labelKey: 'entry.expense.category', allowedRoles: ['expense-category'] },
+    // 使い道は費用カテゴリのほか、固定資産（車・家財など）の購入先も選べる。
+    {
+      side: 'debit',
+      labelKey: 'entry.expense.category',
+      allowedRoles: ['expense-category', 'fixed-asset'],
+    },
     {
       side: 'credit',
       labelKey: 'entry.expense.source',
-      allowedRoles: ['daily-asset', 'payment-liability'],
+      allowedRoles: ['daily-asset', 'reserve-asset', 'payment-liability'],
     },
   ],
   transfer: [
-    { side: 'credit', labelKey: 'entry.transfer.from', allowedRoles: ['daily-asset'] },
-    { side: 'debit', labelKey: 'entry.transfer.to', allowedRoles: ['daily-asset'] },
+    // 資金移動: 日常/目的別資金 ↔ 資金、資金→負債（返済）、負債→資金（借入実行）。
+    {
+      side: 'credit',
+      labelKey: 'entry.transfer.from',
+      allowedRoles: ['daily-asset', 'reserve-asset', 'payment-liability', 'other-liability'],
+    },
+    {
+      side: 'debit',
+      labelKey: 'entry.transfer.to',
+      allowedRoles: ['daily-asset', 'reserve-asset', 'payment-liability', 'other-liability'],
+    },
   ],
   manual: [
     { side: 'debit', labelKey: 'entry.debitAccount', allowedRoles: ALL_ROLES },
@@ -83,18 +97,26 @@ export const MODE_FLOW: Record<FlowMode, FlowDef> = {
     source: {
       side: 'credit',
       labelKey: 'entry.source.expense',
-      allowedRoles: ['daily-asset', 'payment-liability'],
+      allowedRoles: ['daily-asset', 'reserve-asset', 'payment-liability'],
     },
     destination: {
       side: 'debit',
       labelKey: 'entry.destination.expense',
-      allowedRoles: ['expense-category'],
+      allowedRoles: ['expense-category', 'fixed-asset'],
     },
     flowLabelKey: 'entry.flow.expense',
   },
   transfer: {
-    source: { side: 'credit', labelKey: 'entry.transfer.from', allowedRoles: ['daily-asset'] },
-    destination: { side: 'debit', labelKey: 'entry.transfer.to', allowedRoles: ['daily-asset'] },
+    source: {
+      side: 'credit',
+      labelKey: 'entry.transfer.from',
+      allowedRoles: ['daily-asset', 'reserve-asset', 'payment-liability', 'other-liability'],
+    },
+    destination: {
+      side: 'debit',
+      labelKey: 'entry.transfer.to',
+      allowedRoles: ['daily-asset', 'reserve-asset', 'payment-liability', 'other-liability'],
+    },
     flowLabelKey: 'entry.flow.transfer',
   },
 };

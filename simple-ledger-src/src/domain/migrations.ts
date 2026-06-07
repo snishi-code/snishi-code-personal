@@ -109,6 +109,13 @@ const STEPS: Step[] = [
     to: 9,
     migrate: (pkg) => pkg,
   },
+  {
+    // v9 → v10: AccountRole に fixed-asset、MonthlyCostItem に任意フィールドを追加（拡張のみ）。
+    // 既存データはこれらを含まないため構造変更なし＝恒等移行。
+    from: 9,
+    to: 10,
+    migrate: (pkg) => pkg,
+  },
 ];
 
 /**

@@ -341,6 +341,8 @@ export const ja = {
   'entry.error.credit-required': '貸方の科目を選んでください。',
   'entry.error.same-account': '借方と貸方に同じ科目は選べません。',
   'entry.error.amount-invalid': '金額は 1 以上の整数で入力してください。',
+  'entry.error.invalid-transfer':
+    'この振替の組み合わせは登録できません。資金どうしの移動、資金からの返済、借入の実行のいずれかにしてください。',
 
   'entry.type.income': '収入',
   'entry.type.expense': '支出',
@@ -482,6 +484,7 @@ export const ja = {
   'accounts.role.reserve-asset': '目的別資金',
   'accounts.role.deferred-asset': '按分中資産',
   'accounts.role.investment-asset': '投資資産',
+  'accounts.role.fixed-asset': '固定資産（車・家財など）',
   'accounts.role.payment-liability': '支払用負債（カード未払等）',
   'accounts.role.other-liability': 'その他の負債（ローン等）',
   'accounts.role.equity': '純資産（元入金等）',

@@ -3,9 +3,33 @@ import {
   buildSimpleEntry,
   reversalInput,
   toSimpleInput,
+  transferFlowValid,
   validateSimpleEntry,
 } from '../src/domain/entry';
 import type { JournalEntry } from '../src/domain/types';
+
+describe('transferFlowValid（振替の役割組み合わせ）', () => {
+  it('資金 ↔ 資金（日常/目的別）は valid', () => {
+    expect(transferFlowValid('daily-asset', 'daily-asset')).toBe(true);
+    expect(transferFlowValid('daily-asset', 'reserve-asset')).toBe(true);
+    expect(transferFlowValid('reserve-asset', 'daily-asset')).toBe(true);
+  });
+  it('資金 → 負債（返済）は valid', () => {
+    expect(transferFlowValid('daily-asset', 'payment-liability')).toBe(true);
+    expect(transferFlowValid('reserve-asset', 'other-liability')).toBe(true);
+  });
+  it('負債 → 資金（借入・ローン実行）は valid', () => {
+    expect(transferFlowValid('other-liability', 'reserve-asset')).toBe(true);
+    expect(transferFlowValid('payment-liability', 'daily-asset')).toBe(true);
+  });
+  it('負債 → 負債 や 費用/収入/固定資産が絡む組み合わせは invalid', () => {
+    expect(transferFlowValid('other-liability', 'payment-liability')).toBe(false);
+    expect(transferFlowValid('expense-category', 'daily-asset')).toBe(false);
+    expect(transferFlowValid('daily-asset', 'expense-category')).toBe(false);
+    expect(transferFlowValid('income-category', 'daily-asset')).toBe(false);
+    expect(transferFlowValid('daily-asset', 'fixed-asset')).toBe(false);
+  });
+});
 
 describe('validateSimpleEntry', () => {
   it('完全な入力はエラーなし', () => {

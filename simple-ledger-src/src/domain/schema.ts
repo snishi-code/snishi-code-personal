@@ -162,6 +162,8 @@ export const monthlyCostItemSchema = z.object({
   paymentAccountId: z.string().min(1).optional(),
   repaymentAccountId: z.string().min(1).optional(),
   sourceAllocationId: z.string().min(1).optional(),
+  sourceEntryId: z.string().min(1).optional(),
+  recognitionCreditAccountId: z.string().min(1).optional(),
   status: z.enum(['active', 'paused', 'ended']),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
@@ -597,6 +599,16 @@ export const ledgerExportPackageSchema = z
       // 既存按分との紐づけがあれば、その allocation が存在する。
       if (mc.sourceAllocationId !== undefined && !allocationIds.has(mc.sourceAllocationId))
         issue(`月額化「${mc.name}」の sourceAllocationId が存在しません`, at('sourceAllocationId'));
+
+      // 仮想認識の貸方科目（固定資産など）があれば、その科目が存在する。
+      if (
+        mc.recognitionCreditAccountId !== undefined &&
+        !accountType.has(mc.recognitionCreditAccountId)
+      )
+        issue(
+          `月額化「${mc.name}」の recognitionCreditAccountId が存在しません`,
+          at('recognitionCreditAccountId'),
+        );
     });
 
     // 資金目標(fundingGoals)の参照整合性。

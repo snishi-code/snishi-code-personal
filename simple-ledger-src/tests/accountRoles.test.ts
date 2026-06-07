@@ -42,8 +42,14 @@ describe('role と type の整合', () => {
       'reserve-asset',
       'deferred-asset',
       'investment-asset',
+      'fixed-asset',
     ]);
     expect(rolesForType('liability')).toEqual(['payment-liability', 'other-liability']);
+  });
+  it('fixed-asset は asset のみ許可（現金ではない資産）', () => {
+    expect(roleAllowsType('fixed-asset', 'asset')).toBe(true);
+    expect(roleAllowsType('fixed-asset', 'expense')).toBe(false);
+    expect(roleAllowsType('fixed-asset', 'liability')).toBe(false);
   });
 });
 

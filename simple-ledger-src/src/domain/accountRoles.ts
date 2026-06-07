@@ -17,6 +17,7 @@ export type AccountRole =
   | 'reserve-asset'
   | 'deferred-asset'
   | 'investment-asset'
+  | 'fixed-asset'
   | 'payment-liability'
   | 'other-liability'
   | 'equity'
@@ -29,6 +30,7 @@ export const ACCOUNT_ROLES: readonly AccountRole[] = [
   'reserve-asset',
   'deferred-asset',
   'investment-asset',
+  'fixed-asset',
   'payment-liability',
   'other-liability',
   'equity',
@@ -43,6 +45,8 @@ export const ROLE_TYPES: Record<AccountRole, AccountType[]> = {
   'reserve-asset': ['asset'],
   'deferred-asset': ['asset'],
   'investment-asset': ['asset'],
+  // 固定資産（車・家財など）。現金ではない asset。CF 総資金には含めない。
+  'fixed-asset': ['asset'],
   'payment-liability': ['liability'],
   'other-liability': ['liability'],
   equity: ['equity'],

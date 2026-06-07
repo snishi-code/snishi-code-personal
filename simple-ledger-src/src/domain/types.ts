@@ -205,6 +205,10 @@ export interface MonthlyCostItem {
   repaymentAccountId?: string;
   /** 既存 AllocationItem 由来なら紐づける。 */
   sourceAllocationId?: string;
+  /** この月額化のもとになった実仕訳（固定資産購入など）。Journal 仮想行の由来表示に使う。 */
+  sourceEntryId?: string;
+  /** 仮想認識で貸方側に見せる科目（固定資産など）。指定時、Journal 仮想行は「この科目 → 費用」で表示。 */
+  recognitionCreditAccountId?: string;
   status: MonthlyCostStatus;
   createdAt: string;
   updatedAt: string;

@@ -11,5 +11,8 @@ export const APP_ID = 'snishi-code.simple-ledger' as const;
  *  v7 → v8: 資金目標（fundingGoals）を追加（空配列補完）。
  *  v8 → v9: 予定CFの direction に transfer（口座間移動）を追加。許容値が増える＝
  *           新しい JSON を旧 v8 アプリが読むと validation error になり得るため版を上げる
- *           （既存データの構造変更はなし＝恒等移行）。 */
-export const SCHEMA_VERSION = 9 as const;
+ *           （既存データの構造変更はなし＝恒等移行）。
+ *  v9 → v10: AccountRole に fixed-asset（固定資産）を追加 + MonthlyCostItem に任意フィールド
+ *            （recognitionCreditAccountId / sourceEntryId）。許容値・任意項目が増えるため版を上げる
+ *            （既存データの構造変更はなし＝恒等移行）。 */
+export const SCHEMA_VERSION = 10 as const;
