@@ -19,8 +19,15 @@ import { ReserveSheet } from '../ReserveSheet';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { Money } from '../money';
 import { Icon } from '../Icon';
+import { TrendChart, type TrendPoint } from '../components/TrendChart';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
+
+function shortDateLabel(date: string): string {
+  const [, month, day] = date.split('-');
+  if (!month || !day) return date;
+  return `${Number.parseInt(month, 10)}/${Number.parseInt(day, 10)}`;
+}
 
 export function Cashflow() {
   const { ledger, postSchedule, removeSchedule, createReserve, removeReserve, removeFundingGoal } =
@@ -102,7 +109,11 @@ export function Cashflow() {
   const accountName = (id: string): string =>
     (ledger?.accounts ?? []).find((a) => a.id === id)?.name ?? '—';
   const reserves = ledger?.reserves ?? [];
-  const maxFree = Math.max(1, ...projection.points.map((p) => Math.abs(p.free)));
+  const freeTrend: TrendPoint[] = projection.points.map((p, i) => ({
+    key: `${p.date}-${i}`,
+    label: shortDateLabel(i === 0 ? today : p.date),
+    value: p.free,
+  }));
 
   // 支払用負債の集約: 負債ごとに 残高 + 未実績の返済予定（次回支払日・残額・件数）を見せる。
   // 予定が無くても残高がある負債は「返済予定が未登録」として注意表示する。
@@ -192,46 +203,15 @@ export function Cashflow() {
         </div>
       ) : null}
 
-      {/* 自由資金の推移（軽量・自由資金のバー） */}
-      {projection.points.length > 1 ? (
-        <>
-          <p className="section-label">{t('cashflow.freeTrendTitle')}</p>
-          <ul
-            className="card list"
-            data-ui={UI.cashflow.freeTrend}
-            style={{ marginTop: 'var(--space-2)' }}
-          >
-            {projection.points.map((p, i) => (
-              <li key={`${p.date}-${i}`} className="list__item">
-                <span className="list__sub" style={{ width: 90, flex: 'none' }}>
-                  {i === 0 ? today : p.date}
-                </span>
-                <span
-                  aria-hidden="true"
-                  style={{
-                    flex: 1,
-                    height: 10,
-                    borderRadius: 999,
-                    background: 'var(--bg)',
-                    overflow: 'hidden',
-                  }}
-                >
-                  <span
-                    style={{
-                      display: 'block',
-                      height: '100%',
-                      width: `${Math.max(2, (Math.max(0, p.free) / maxFree) * 100)}%`,
-                      background: p.free < 0 ? 'var(--neg)' : 'var(--primary)',
-                    }}
-                  />
-                </span>
-                <span className="list__amount">
-                  <Money amount={p.free} currency={currency} signed />
-                </span>
-              </li>
-            ))}
-          </ul>
-        </>
+      {/* 自由資金の推移（ストックなので折れ線で俯瞰する） */}
+      {freeTrend.length > 1 ? (
+        <TrendChart
+          title={t('cashflow.freeTrendTitle')}
+          data={freeTrend}
+          currency={currency}
+          variant="line"
+          dataUi={UI.cashflow.freeTrend}
+        />
       ) : null}
 
       {/* 支払用負債・返済予定（CF の主役その2） */}
