@@ -240,9 +240,11 @@ Dashboard の今月の生活コスト:
 
 ### 次フェーズ（未実装）
 
-資産売却・一括返済（返済スケジュールの自動化）・クレカ締め日ルールは今回実装しない。売却損益は
-複数仕訳が必要で 2 行仕訳制約と衝突しやすいため。支払元が liability（クレカ等）の場合も、按分の費用
-認識（いつ費用にするか）と返済（いつ現金が出るか＝資金繰りの予定 CF）は分けて扱う。
+資産売却・一括返済（返済スケジュールの自動化）・クレカ締め日ルールは今回実装しない。固定資産の
+売却/故障は [fixed-asset-disposal.md](fixed-asset-disposal.md) を次フェーズ仕様とする。売却損益は
+複数仕訳が必要で 2 行仕訳制約と衝突しやすいため、月額化で認識済みの生活コストと残存額を分けて扱う。
+支払元が liability（クレカ等）の場合も、按分の費用認識（いつ費用にするか）と返済（いつ現金が出るか＝
+資金繰りの予定 CF）は分けて扱う。
 
 ## 勘定科目の変更ルール（`Account`）
 
@@ -255,4 +257,5 @@ Dashboard の今月の生活コスト:
 
 - データ形式・import ポリシー: [ledger-protocol.md](ledger-protocol.md)
 - 画面/UX: [ledger-ui-ux.md](ledger-ui-ux.md)
+- 固定資産の売却・故障処理: [fixed-asset-disposal.md](fixed-asset-disposal.md)
 - 設計判断（ローカルファースト）: [../adr/0001-local-first-ledger.md](../adr/0001-local-first-ledger.md)
