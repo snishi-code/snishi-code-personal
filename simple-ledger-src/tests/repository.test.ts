@@ -1330,4 +1330,28 @@ describe('管理区分・支払い手段の保存境界', () => {
     const after = await loadLedger();
     expect(after.accountInstruments.find((i) => i.id === inst.id)?.accountId).toBe(bank.id);
   });
+
+  it('通常の月額化コストは選択中の管理区分を本体と生成支払い仕訳に引き継ぐ', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '変動費')!;
+    const biz = await createManagementScope('事業用'); // 既定でない区分
+    const item = await createMonthlyCost({
+      name: 'クラウドサブスク',
+      managementScopeId: biz.id,
+      kind: 'subscription',
+      amount: 1200,
+      costMonths: 1,
+      startMonth: '2026-06',
+      date: '2026-06-01',
+      expenseAccountId: food.id,
+      paymentAccountId: cash.id,
+    });
+    expect(item.managementScopeId).toBe(biz.id);
+    // 生成された支払い仕訳（metadata.monthlyCostId 紐づけ）も同じ区分であること。
+    const after = await loadLedger();
+    const payEntry = after.journalEntries.find((e) => e.metadata?.monthlyCostId === item.id);
+    expect(payEntry).toBeDefined();
+    expect(payEntry?.managementScopeId).toBe(biz.id);
+  });
 });

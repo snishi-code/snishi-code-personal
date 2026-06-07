@@ -250,8 +250,12 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         const useRepay =
           isLiabilityPayment && repayToggle && repayAccountId !== '' && repayCount >= 1;
         // 支出フォームの debit=費用カテゴリ / credit=支払い元 をそのまま月額化に渡す。
+        // 選択中の管理区分を月額化コスト本体・生成支払い仕訳へ引き継ぐ（未指定なら repository が既定区分）。
         await createMonthlyCost({
           name: toSave.description,
+          ...(toSave.managementScopeId !== undefined
+            ? { managementScopeId: toSave.managementScopeId }
+            : {}),
           kind: inferMonthlyCostKind(months, repeat),
           amount: toSave.amount,
           costMonths: months,
