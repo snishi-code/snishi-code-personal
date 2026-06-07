@@ -240,16 +240,22 @@ export function Dashboard({
           onClick={() => onOpenStatement('pl', 'expense')}
           dataUi={UI.dashboard.statExpense}
         >
-          {/* 「支出」は会計上の費用合計（タップ先の損益計算書と一致）。生活コストは下の生活コスト
-              セクション（通常支出 / 月額化 / 生活コスト合計）で見せる。 */}
-          <Money amount={pl.totalExpense} currency={currency} />
+          {/* 「支出」= 生活コスト（通常支出 + 月額化）。固定資産の購入額そのものや返済・振替は支出に
+              含めない（購入は資産取得、償却分の費用＝月額化として計上）。タップ先の損益計算書は
+              会計上の別ビュー（仕訳ベース）で、数字は必ずしも一致しない。 */}
+          <Money amount={normalExpense + monthlyCost} currency={currency} />
         </StatButton>
         <StatButton
           label={t('dashboard.netIncome')}
           onClick={() => onOpenStatement('pl', 'net')}
           dataUi={UI.dashboard.statNetIncome}
         >
-          <Money amount={pl.netIncome} currency={currency} signed />
+          {/* 収支 = 収入 − 支出（生活コスト）。生活余剰。 */}
+          <Money
+            amount={pl.totalRevenue - (normalExpense + monthlyCost)}
+            currency={currency}
+            signed
+          />
         </StatButton>
       </div>
 
@@ -332,13 +338,7 @@ export function Dashboard({
         >
           <Money amount={monthlyCost} currency={currency} />
         </StatButton>
-        <StatButton
-          label={t('dashboard.livingCostTotal')}
-          onClick={() => onNavigate('allocations')}
-          dataUi={UI.dashboard.statLivingCostTotal}
-        >
-          <Money amount={normalExpense + monthlyCost} currency={currency} />
-        </StatButton>
+        {/* 「生活コスト合計」カードは置かない（上段の「支出」= 通常支出 + 月額化 と同値のため）。 */}
         {investmentValuation.loss > 0 || investmentValuation.gain > 0 ? (
           <div className="stat">
             <span className="stat__label">{t('dashboard.investmentValuation')}</span>

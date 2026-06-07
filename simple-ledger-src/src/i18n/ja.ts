@@ -62,7 +62,6 @@ export const ja = {
   'dashboard.livingCost': '今月の生活コスト',
   'dashboard.normalExpense': '通常支出',
   'dashboard.monthlyCost': '月額化コスト',
-  'dashboard.livingCostTotal': '生活コスト合計',
   'dashboard.activeMonthlyCosts': '月額化コスト {count} 件',
   'dashboard.viewMonthlyCosts': '月額化コストを見る',
   'dashboard.openPl': '損益計算書を開く',
