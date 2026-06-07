@@ -420,13 +420,16 @@ export const ja = {
   'entry.flow.income': '収入元 → 入る場所',
   'entry.flow.expense': '支払い方法 → 使い道',
   'entry.flow.transfer': '移動元 → 移動先',
+  'entry.flow.manual': '貸方 → 借方',
   'entry.source.income': '収入元',
   'entry.destination.income': '入る場所',
   'entry.source.expense': '支払い方法',
   'entry.destination.expense': '使い道',
+  'entry.source.manual': '左側（貸方）',
+  'entry.destination.manual': '右側（借方）',
   'entry.detailToggle': '詳細（メモ・タグ）',
   // 逆仕訳・特殊編集は日常の「詳細」と分け、簿記編集として明示する。
-  'entry.manualSwitch': '簿記編集（借方/貸方を直接指定）',
+  'entry.manualSwitch': '簿記編集（左→右を直接指定）',
   'entry.noAccounts': '候補の科目がありません。「勘定科目」で追加してください。',
   'entry.reversalTitle': '取消/返金を記録',
   'entry.reversalNote':

@@ -274,6 +274,23 @@ test('金額欄は詳細を開いても主要入力順（金額 → お金の流
   expect(ab && db && ab.y < db.y).toBe(true);
 });
 
+test('簿記編集も左から右の流れで表示し、金額欄を下に落とさない', async ({ page }) => {
+  await page.goto('./');
+  await page.locator(ui('dashboard.entry.expense')).click();
+  await page.locator(ui('journal.entry.amount')).fill('1200');
+  await page.locator(ui('journal.entry.manualSwitch')).click();
+
+  const amount = page.locator(ui('journal.entry.amount'));
+  const flow = page.locator(ui('journal.entry.flow'));
+  await expect(flow).toContainText('貸方 → 借方');
+  await expect(page.locator(ui('journal.entry.flow.source'))).toContainText('左側（貸方）');
+  await expect(page.locator(ui('journal.entry.flow.destination'))).toContainText('右側（借方）');
+  await expect(amount).toHaveValue('1200');
+  const ab = await amount.boundingBox();
+  const fb = await flow.boundingBox();
+  expect(ab && fb && ab.y >= 0 && ab.y < fb.y).toBe(true);
+});
+
 test('入力中に新しい負債（ローン）を作り、分割返済が資金繰りに出る', async ({ page }) => {
   await page.goto('./');
   await page.locator(ui('dashboard.entry.transfer')).click();

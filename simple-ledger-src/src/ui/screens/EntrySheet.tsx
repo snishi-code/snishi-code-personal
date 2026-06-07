@@ -446,24 +446,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     );
   };
 
-  const renderAccountPicker = (role: (typeof roles)[number]) => {
-    const value = role.side === 'debit' ? form.debitAccountId : form.creditAccountId;
-    const reqErr = errorText(errors, role.side === 'debit' ? 'debit-required' : 'credit-required');
-    return (
-      <AccountPicker
-        label={t(role.labelKey)}
-        required
-        value={value}
-        groups={groupedAccountsByRole(accounts, [...role.allowedRoles], value)}
-        onChange={(id) => setSide(role.side, id)}
-        error={reqErr ?? sameAccount}
-        dataUi={
-          role.side === 'debit' ? UI.journal.entry.debitAccount : UI.journal.entry.creditAccount
-        }
-      />
-    );
-  };
-
   // お金の流れ（源泉 → 行き先）。簿記用語を出さず、左=貸方 / 右=借方。
   const flowDef = isManual ? null : MODE_FLOW[mode as FlowMode];
   const renderFlow = () => {
@@ -519,6 +501,58 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               error={errorText(errors, 'debit-required')}
               dataUi={UI.journal.entry.flowDestination}
             />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderManualFlow = () => {
+    const creditRole = roles.find((role) => role.side === 'credit');
+    const debitRole = roles.find((role) => role.side === 'debit');
+    if (!creditRole || !debitRole) return null;
+    const srcGroups = groupedAccountsByRole(
+      accounts,
+      [...creditRole.allowedRoles],
+      form.creditAccountId,
+    );
+    const dstGroups = groupedAccountsByRole(
+      accounts,
+      [...debitRole.allowedRoles],
+      form.debitAccountId,
+    );
+    return (
+      <div className="field" data-ui={UI.journal.entry.flow}>
+        <span className="field__hint">{t('entry.flow.manual')}</span>
+        <div className="flow">
+          <div className="flow__side">
+            <AccountPicker
+              flat
+              label={t('entry.source.manual')}
+              required
+              value={form.creditAccountId}
+              groups={srcGroups}
+              onChange={(id) => setSide('credit', id)}
+              error={errorText(errors, 'credit-required') ?? sameAccount}
+              dataUi={UI.journal.entry.flowSource}
+            />
+            {renderInstrument('credit')}
+          </div>
+          <div className="flow__arrow" aria-hidden="true">
+            →
+          </div>
+          <div className="flow__side">
+            <AccountPicker
+              flat
+              label={t('entry.destination.manual')}
+              required
+              value={form.debitAccountId}
+              groups={dstGroups}
+              onChange={(id) => setSide('debit', id)}
+              error={errorText(errors, 'debit-required')}
+              dataUi={UI.journal.entry.flowDestination}
+            />
+            {renderInstrument('debit')}
           </div>
         </div>
       </div>
@@ -814,6 +848,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         onClose={requestClose}
         dismissMode="if-clean"
         titleVariant="sr-only"
+        scrollKey={mode}
         footer={
           <>
             <button
@@ -857,18 +892,14 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
 
         {isManual ? (
           <>
+            {/* 簿記編集も左=貸方 / 右=借方の流れで扱い、金額を主要入力順から落とさない。 */}
             {dateField}
             {descriptionField}
+            {amountField}
+            {renderManualFlow()}
+            {memoField}
             {scopeField}
             {entryTagsField}
-            {roles.map((role) => (
-              <div key={role.side}>
-                {renderAccountPicker(role)}
-                {renderInstrument(role.side)}
-              </div>
-            ))}
-            {amountField}
-            {memoField}
           </>
         ) : (
           <>
