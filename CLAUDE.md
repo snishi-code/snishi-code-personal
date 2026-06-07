@@ -47,3 +47,4 @@ apex ↔ medical ↔ personal の絶対 URL は `site-links.js` の1箇所で管
 - **teal 系で統一**。`badge-green` / `cat-card-green` / `app-icon-green` 等のクラスを使う（クラス名は歴史的経緯で `green` だが、実値は teal）。
 - 個別アプリのアイコンは**カテゴリ色 + 固有の形**（カテゴリ色だけの汎用アイコンは禁止）。
 - **同期は「アプリ内で外部送信」ではなく、JSON 書き出し + Obsidian sync 等のアプリ外手段で実現する**。これにより個人アプリも「外部送信ゼロ」を維持できる（憲法どおり）。送信ありの機能が本当に必要になったら、サイトの約束を濁さないよう別途設計を相談すること。
+- **エージェント運用 / MCP handoff**: Codex は設計・指示書作成・監査を担当し、コード編集はしない。Claude は実装担当として、タスクごとに作成された専用 worktree / `claude/*` ブランチだけを編集する。MCP は自動実装ではなく handoff 補助として使い、Claude の実装開始は人間が承認する。詳細は `docs/dev/agent-handoff.md` を参照（CLAUDE.md には複製しない）。
