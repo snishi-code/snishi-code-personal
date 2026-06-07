@@ -26,7 +26,9 @@ function flowText(map: Map<string, Account>, entry: JournalEntry): string {
   const debit = entry.lines.find((l) => l.side === 'debit');
   const credit = entry.lines.find((l) => l.side === 'credit');
   const name = (id?: string) => (id ? (map.get(id)?.name ?? '—') : '—');
-  return `${name(debit?.accountId)} → ${name(credit?.accountId)}`;
+  // 「お金の流れ」は全画面で 源泉(credit) → 行き先(debit) に統一する。
+  // 例: クレジットカード → 固定資産 / 預金 → クレジットカード（費用→カードの逆順は出さない）。
+  return `${name(credit?.accountId)} → ${name(debit?.accountId)}`;
 }
 
 export function Journal({

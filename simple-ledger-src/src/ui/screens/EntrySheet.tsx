@@ -83,6 +83,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     saveEntryWithSchedules,
     saveEntryWithFixedAssetMonthly,
     createMonthlyCost,
+    createFixedAssetPurchaseMonthly,
     createReserve,
     saveAccount,
   } = useLedger();
@@ -118,6 +119,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const canAllocate =
     init.kind === 'create' && mode === 'expense' && destRole === 'expense-category';
   const [allocate, setAllocate] = useState(false);
+  // 月額化する支出の種類: 'living'=生活コスト化（借方 費用）/ 'fixed'=耐久財・固定資産（借方 固定資産・後で処分可）。
+  const [assetKind, setAssetKind] = useState<'living' | 'fixed'>('living');
   // 固定資産購入（expense × 固定資産 × create）は「生活コストとして月額化」できる（別トグル）。
   const canFixedMonthly =
     init.kind === 'create' && mode === 'expense' && destRole === 'fixed-asset';
@@ -170,6 +173,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     form,
     amountText,
     allocate,
+    assetKind,
     fixedMonthly,
     monthlyCategoryId,
     monthsText,
@@ -253,30 +257,50 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         const repayCount = repayCountText === '' ? 0 : Number.parseInt(repayCountText, 10);
         const useRepay =
           isLiabilityPayment && repayToggle && repayAccountId !== '' && repayCount >= 1;
-        // 支出フォームの debit=費用カテゴリ / credit=支払い元 をそのまま月額化に渡す。
-        // 選択中の管理区分を月額化コスト本体・生成支払い仕訳へ引き継ぐ（未指定なら repository が既定区分）。
-        await createMonthlyCost({
-          name: toSave.description,
-          ...(toSave.managementScopeId !== undefined
+        const repayFields = useRepay
+          ? {
+              repaymentAccountId: repayAccountId,
+              repaymentCount: repayCount,
+              // 購入日(form.date)とは別に、初回引落日を使う。
+              repaymentStartDate: repayStartDate || form.date,
+            }
+          : {};
+        const scopeField =
+          toSave.managementScopeId !== undefined
             ? { managementScopeId: toSave.managementScopeId }
-            : {}),
-          kind: inferMonthlyCostKind(months, repeat),
-          amount: toSave.amount,
-          costMonths: months,
-          ...(repeat !== undefined ? { repeatEveryMonths: repeat } : {}),
-          startMonth: monthOf(toSave.date),
-          date: toSave.date,
-          expenseAccountId: toSave.debitAccountId,
-          paymentAccountId: toSave.creditAccountId,
-          ...(useRepay
-            ? {
-                repaymentAccountId: repayAccountId,
-                repaymentCount: repayCount,
-                // 購入日(form.date)とは別に、初回引落日を使う。
-                repaymentStartDate: repayStartDate || form.date,
-              }
-            : {}),
-        });
+            : {};
+        if (assetKind === 'fixed') {
+          // 耐久財・固定資産: 使い道(debit)=認識先カテゴリ / 支払い元(credit) を渡す。固定資産科目は自動作成。
+          await createFixedAssetPurchaseMonthly({
+            name: toSave.description,
+            ...scopeField,
+            kind: inferMonthlyCostKind(months, repeat),
+            amount: toSave.amount,
+            costMonths: months,
+            ...(repeat !== undefined ? { repeatEveryMonths: repeat } : {}),
+            startMonth: monthOf(toSave.date),
+            date: toSave.date,
+            expenseAccountId: toSave.debitAccountId,
+            paymentAccountId: toSave.creditAccountId,
+            ...repayFields,
+          });
+        } else {
+          // 生活コスト化: 支出フォームの debit=費用カテゴリ / credit=支払い元 をそのまま月額化に渡す。
+          // 選択中の管理区分を月額化コスト本体・生成支払い仕訳へ引き継ぐ（未指定なら repository が既定区分）。
+          await createMonthlyCost({
+            name: toSave.description,
+            ...scopeField,
+            kind: inferMonthlyCostKind(months, repeat),
+            amount: toSave.amount,
+            costMonths: months,
+            ...(repeat !== undefined ? { repeatEveryMonths: repeat } : {}),
+            startMonth: monthOf(toSave.date),
+            date: toSave.date,
+            expenseAccountId: toSave.debitAccountId,
+            paymentAccountId: toSave.creditAccountId,
+            ...repayFields,
+          });
+        }
       } else if (useFixedMonthly) {
         // 固定資産購入（借方 固定資産 / 貸方 資金 or 負債）+ 月額化コストを一括保存。購入仕訳が実体で、
         // 月額化は支払い仕訳を作らず formula 認識のみ（recognitionCreditAccountId=固定資産）。
@@ -574,6 +598,18 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       </label>
       {allocate ? (
         <>
+          {/* 生活コスト化（費用）か、耐久財・固定資産（BS資産・後で売却/故障処分可）かを選ぶ。
+              固定資産科目を事前に作らなくても、ここから正規ルートへ入れる。 */}
+          <SelectInput
+            label={t('entry.assetKind')}
+            value={assetKind}
+            onChange={(v) => setAssetKind(v as 'living' | 'fixed')}
+            options={[
+              { value: 'living', label: t('entry.assetKind.living') },
+              { value: 'fixed', label: t('entry.assetKind.fixed') },
+            ]}
+            dataUi={UI.journal.entry.allocateAssetKind}
+          />
           <TextInput
             label={t('entry.monthlyizeMonths')}
             required

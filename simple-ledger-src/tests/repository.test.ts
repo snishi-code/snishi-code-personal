@@ -10,6 +10,7 @@ import {
   deleteAccount,
   deleteEntry,
   deleteFundingGoal,
+  createFixedAssetPurchaseMonthly,
   deleteManagementScope,
   deleteMonthlyCost,
   deleteTag,
@@ -1736,5 +1737,73 @@ describe('固定資産の売却・故障処分（disposeFixedAsset）', () => {
     const e = await caught(deleteMonthlyCost(item.id));
     expect(e).toBeInstanceOf(LedgerError);
     expect(e.code).toBe('error.monthlyCost.deleteFixedAsset');
+  });
+});
+
+describe('耐久財・固定資産として月額化（createFixedAssetPurchaseMonthly）', () => {
+  it('固定資産科目を自動作成し、購入仕訳・月額化・返済CFを作る（洗濯機 240,000/カード/84か月/固定費/2回）', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const card = ledger.accounts.find((a) => a.role === 'payment-liability')!;
+    const fixedCat = ledger.accounts.find((a) => a.name === '固定費')!;
+    const item = await createFixedAssetPurchaseMonthly({
+      name: '洗濯機',
+      kind: 'durable-asset',
+      amount: 240000,
+      costMonths: 84,
+      startMonth: '2026-06',
+      date: '2026-06-15',
+      expenseAccountId: fixedCat.id,
+      paymentAccountId: card.id,
+      repaymentAccountId: cash.id,
+      repaymentCount: 2,
+      repaymentStartDate: '2026-07-27',
+    });
+    const after = await loadLedger();
+    // 固定資産科目「洗濯機」が自動作成される。
+    const fixed = after.accounts.find((a) => a.name === '洗濯機' && a.role === 'fixed-asset')!;
+    expect(fixed).toBeTruthy();
+    // 月額化コストは固定資産由来（sourceEntryId + recognitionCreditAccountId=洗濯機）。
+    expect(item.recognitionCreditAccountId).toBe(fixed.id);
+    expect(item.sourceEntryId).toBeTruthy();
+    expect(item.expenseAccountId).toBe(fixedCat.id);
+    // 購入仕訳: 借方 洗濯機(固定資産) / 貸方 カード。
+    const purchase = after.journalEntries.find((e) => e.id === item.sourceEntryId)!;
+    expect(purchase.lines.find((l) => l.side === 'debit')?.accountId).toBe(fixed.id);
+    expect(purchase.lines.find((l) => l.side === 'credit')?.accountId).toBe(card.id);
+    expect(purchase.lines.find((l) => l.side === 'debit')?.amount).toBe(240000);
+    // 返済CFは 2 件、合計 240,000。
+    const schedules = after.cashflowSchedules.filter((s) => s.monthlyCostId === item.id);
+    expect(schedules).toHaveLength(2);
+    expect(schedules.reduce((s, x) => s + x.amount, 0)).toBe(240000);
+    // 以降は売却/故障で処分できる（固定資産由来）。
+    const disposal = await disposeFixedAsset({
+      monthlyCostId: item.id,
+      disposalDate: '2026-06-20',
+      proceedsAmount: 0,
+    });
+    expect(disposal.remainingAmount).toBe(240000); // 当月処分=未認識
+  });
+
+  it('費用カテゴリでない使い道は耐久財月額化にできない', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    let err: unknown;
+    try {
+      await createFixedAssetPurchaseMonthly({
+        name: '不正',
+        kind: 'durable-asset',
+        amount: 1000,
+        costMonths: 12,
+        startMonth: '2026-06',
+        date: '2026-06-15',
+        expenseAccountId: cash.id, // 費用カテゴリでない
+        paymentAccountId: cash.id,
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(LedgerError);
+    expect((err as LedgerError).code).toBe('error.fixedAsset.expenseCategory');
   });
 });

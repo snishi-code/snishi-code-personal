@@ -26,6 +26,7 @@ import type {
   AccountInstrumentInput,
   DisposeFixedAssetInput,
   FixedAssetMonthlyInput,
+  FixedAssetPurchaseMonthlyInput,
   FundingGoalInput,
   MonthlyCostInput,
 } from '../data/repository';
@@ -89,6 +90,7 @@ interface LedgerContextValue {
   createMonthlyCost: (input: MonthlyCostInput) => Promise<void>;
   saveMonthlyCost: (item: MonthlyCostItem) => Promise<void>;
   removeMonthlyCost: (id: string) => Promise<void>;
+  createFixedAssetPurchaseMonthly: (input: FixedAssetPurchaseMonthlyInput) => Promise<void>;
   disposeFixedAsset: (input: DisposeFixedAssetInput) => Promise<void>;
   createFundingGoal: (input: FundingGoalInput) => Promise<void>;
   saveFundingGoal: (goal: FundingGoal) => Promise<void>;
@@ -281,6 +283,22 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await repo.deleteMonthlyCost(id);
         await refresh();
         toast.show(t('toast.deleted'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const createFixedAssetPurchaseMonthly = useCallback<
+    LedgerContextValue['createFixedAssetPurchaseMonthly']
+  >(
+    async (input) => {
+      try {
+        await repo.createFixedAssetPurchaseMonthly(input);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
       } catch (e) {
         toast.show(errorText(e), 'error');
         throw e;
@@ -672,6 +690,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       createMonthlyCost,
       saveMonthlyCost,
       removeMonthlyCost,
+      createFixedAssetPurchaseMonthly,
       disposeFixedAsset,
       createFundingGoal,
       saveFundingGoal,
@@ -713,6 +732,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       createMonthlyCost,
       saveMonthlyCost,
       removeMonthlyCost,
+      createFixedAssetPurchaseMonthly,
       disposeFixedAsset,
       createFundingGoal,
       saveFundingGoal,

@@ -1098,6 +1098,158 @@ export async function saveEntryWithFixedAssetMonthly(
   return item;
 }
 
+export interface FixedAssetPurchaseMonthlyInput {
+  /** 品目名。固定資産科目の名前にもなる（個別に売却/故障処分できるよう 1 品目=1 科目）。 */
+  name: string;
+  kind: MonthlyCostKind;
+  amount: number;
+  costMonths: number;
+  repeatEveryMonths?: number;
+  startMonth: string;
+  /** 購入日 (YYYY-MM-DD)。 */
+  date: string;
+  managementScopeId?: string;
+  /** 月額化先の費用カテゴリ（expense-category）= 認識先。 */
+  expenseAccountId: string;
+  /** 支払い元（daily-asset | payment-liability）。 */
+  paymentAccountId: string;
+  repaymentAccountId?: string;
+  repaymentCount?: number;
+  repaymentStartDate?: string;
+}
+
+/**
+ * 「耐久財・固定資産」として購入を月額化する（固定資産科目を自動作成する版）。
+ * 使い道に費用カテゴリを選んだ通常の支出フローから、固定資産科目を事前に作らずに正規ルートへ入れる。
+ * 固定資産科目（name）を新規作成し、購入仕訳（借方 固定資産 / 貸方 支払い元）+ 月額化 + 返済 CF を
+ * 1 トランザクションで保存する。以降は売却/故障で処分できる（disposeFixedAsset）。
+ */
+export async function createFixedAssetPurchaseMonthly(
+  input: FixedAssetPurchaseMonthlyInput,
+): Promise<MonthlyCostItem> {
+  if (input.name.trim() === '') throw new LedgerError('error.common.nameRequired');
+  if (!Number.isInteger(input.amount) || input.amount <= 0)
+    throw new LedgerError('error.common.amountInvalid');
+  if (!Number.isInteger(input.costMonths) || input.costMonths < 1)
+    throw new LedgerError('error.monthlyCost.monthsInvalid');
+  if (
+    input.repeatEveryMonths !== undefined &&
+    (!Number.isInteger(input.repeatEveryMonths) || input.repeatEveryMonths < input.costMonths)
+  )
+    throw new LedgerError('error.monthlyCost.repeatInvalid');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date))
+    throw new LedgerError('error.monthlyCost.dateRequired');
+  if (!/^\d{4}-\d{2}$/.test(input.startMonth))
+    throw new LedgerError('error.monthlyCost.startMonthInvalid');
+
+  const ctx = await loadSaveContext();
+  const managementScopeId = input.managementScopeId ?? DEFAULT_MANAGEMENT_SCOPE_ID;
+  if (!ctx.scopeIds.has(managementScopeId)) throw new LedgerError('error.scope.unknown');
+  const expense = ctx.byId.get(input.expenseAccountId);
+  if (!expense || expense.role !== 'expense-category')
+    throw new LedgerError('error.fixedAsset.expenseCategory');
+  const payment = ctx.byId.get(input.paymentAccountId);
+  if (!payment || (payment.role !== 'daily-asset' && payment.role !== 'payment-liability'))
+    throw new LedgerError('error.monthlyCost.paymentSource');
+
+  const ts = nowIso();
+  // 1 品目 = 1 固定資産科目（個別に処分できるように）。自動作成する。
+  const fixedAccount: Account = {
+    id: newId(),
+    name: input.name.trim(),
+    type: 'asset',
+    role: 'fixed-asset',
+    archived: false,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+  ctx.byId.set(fixedAccount.id, fixedAccount); // assertEntrySavable 用に先に登録。
+
+  // 購入仕訳: 借方 固定資産 / 貸方 支払い元。
+  const entry: JournalEntry = {
+    id: newId(),
+    date: input.date,
+    description: input.name.trim(),
+    kind: 'normal',
+    managementScopeId,
+    lines: [
+      { accountId: fixedAccount.id, side: 'debit', amount: input.amount },
+      { accountId: input.paymentAccountId, side: 'credit', amount: input.amount },
+    ],
+    metadata: { inputMode: 'expense' },
+    createdAt: ts,
+    updatedAt: ts,
+  };
+  assertEntrySavable(entry, ctx);
+
+  const item: MonthlyCostItem = {
+    id: newId(),
+    name: input.name.trim(),
+    managementScopeId,
+    kind: input.kind,
+    amount: input.amount,
+    costMonths: input.costMonths,
+    ...(input.repeatEveryMonths !== undefined
+      ? { repeatEveryMonths: input.repeatEveryMonths }
+      : {}),
+    startMonth: input.startMonth,
+    expenseAccountId: input.expenseAccountId,
+    recognitionCreditAccountId: fixedAccount.id,
+    sourceEntryId: entry.id,
+    ...(input.repaymentAccountId !== undefined
+      ? { repaymentAccountId: input.repaymentAccountId }
+      : {}),
+    status: 'active',
+    createdAt: ts,
+    updatedAt: ts,
+  };
+
+  // 負債払い + 返済情報があれば、購入仕訳の貸方負債を取り崩す返済予定を作る。
+  const schedules: CashflowSchedule[] = [];
+  if (
+    payment.role === 'payment-liability' &&
+    input.repaymentAccountId !== undefined &&
+    input.repaymentCount !== undefined &&
+    input.repaymentCount >= 1 &&
+    input.repaymentStartDate
+  ) {
+    const repay = ctx.byId.get(input.repaymentAccountId);
+    if (!repay || repay.role !== 'daily-asset')
+      throw new LedgerError('error.monthlyCost.repaymentAccount');
+    const parts = monthlyAmounts(input.amount, input.repaymentCount);
+    for (let i = 0; i < input.repaymentCount; i++) {
+      schedules.push({
+        id: newId(),
+        title: `${item.name} 返済 ${i + 1}/${input.repaymentCount}`,
+        dueDate: addMonthsToDate(input.repaymentStartDate, i),
+        amount: parts[i] ?? 0,
+        direction: 'outflow',
+        accountId: input.repaymentAccountId,
+        counterAccountId: input.paymentAccountId,
+        source: 'installment',
+        status: 'planned',
+        managementScopeId,
+        monthlyCostId: item.id,
+        createdAt: ts,
+        updatedAt: ts,
+      });
+    }
+  }
+  assertSchedulesSavable(schedules, ctx);
+
+  await writeWithRevision(
+    [STORE.accounts, STORE.journalEntries, STORE.monthlyCostItems, STORE.cashflowSchedules],
+    (t) => {
+      t.objectStore(STORE.accounts).put(fixedAccount);
+      t.objectStore(STORE.journalEntries).put(entry);
+      t.objectStore(STORE.monthlyCostItems).put(item);
+      const sStore = t.objectStore(STORE.cashflowSchedules);
+      for (const s of schedules) sStore.put(s);
+    },
+  );
+  return item;
+}
+
 /**
  * 月額化コストの更新（後編集・一時停止・終了）。保存境界で fail-closed に検証し、必要なら
  * 関連（実支払い仕訳・未実績の返済 CF）を同じトランザクションで整合させる。

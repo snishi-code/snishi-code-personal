@@ -62,7 +62,6 @@ export const ja = {
   'dashboard.livingCost': '今月の生活コスト',
   'dashboard.normalExpense': '通常支出',
   'dashboard.monthlyCost': '月額化コスト',
-  'dashboard.livingCostTotal': '生活コスト合計',
   'dashboard.activeMonthlyCosts': '月額化コスト {count} 件',
   'dashboard.viewMonthlyCosts': '月額化コストを見る',
   'dashboard.openPl': '損益計算書を開く',
@@ -477,6 +476,9 @@ export const ja = {
   'entry.error.months-invalid': '月数は 1 以上の整数で入力してください。',
   // 月額化コスト
   'entry.monthlyizeToggle': 'この支出を月額化する（生活コストで見る）',
+  'entry.assetKind': '種類',
+  'entry.assetKind.living': '生活コスト化する（費用）',
+  'entry.assetKind.fixed': '耐久財・固定資産（あとで売却・故障で処分できる）',
   'entry.monthlyizeMonths': '何か月分として見るか',
   'entry.monthlyizeMonthsHint': 'サブスクは 1。年払いは 12、耐久財は使う年数×12 など。',
   'entry.monthlyizeContinue': '継続・買い替えする',

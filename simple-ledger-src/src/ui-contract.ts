@@ -43,7 +43,6 @@ export const UI = {
     // 生活コスト（収支/財政状態と同じ stat。月額化コストは月額化コスト画面へ）
     statNormalExpense: 'dashboard.stat.normalExpense',
     openMonthlyCost: 'dashboard.openMonthlyCost',
-    statLivingCostTotal: 'dashboard.stat.livingCostTotal',
     // 当月の仕訳プレビュー
     journalPreview: 'dashboard.journal.preview',
     journalOpenAll: 'dashboard.journal.openAll',
@@ -68,6 +67,7 @@ export const UI = {
       debitTags: 'journal.entry.debitTags',
       creditTags: 'journal.entry.creditTags',
       allocateToggle: 'journal.entry.allocateToggle',
+      allocateAssetKind: 'journal.entry.allocateAssetKind',
       allocateMonths: 'journal.entry.allocateMonths',
       monthlyizeContinue: 'journal.entry.monthlyizeContinue',
       monthlyizeRepayToggle: 'journal.entry.monthlyizeRepayToggle',
