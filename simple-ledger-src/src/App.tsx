@@ -130,6 +130,7 @@ export function App() {
             onEditEntry={openEdit}
             onReverse={openReversal}
             filter={journalFilter}
+            period={period}
             onClearAccountFilter={() => setJournalFilter(null)}
           />
         ) : null}

@@ -134,7 +134,8 @@ export const ja = {
   'cashflow.title': '資金計画・負債',
   'cashflow.intro':
     '将来の入出金予定から、自由資金の推移を見ます。予定は「実績化」すると仕訳になります。',
-  'cashflow.liquidNote': '総資金は現金・預金などの流動資金です（按分中資産は含めません）。',
+  'cashflow.liquidNote':
+    '総資金は現金・預金・取り置きなどの流動資金です（投資・固定資産・按分中資産は含めません）。',
   'cashflow.horizon': '表示期間',
   'cashflow.months': '{count}か月',
   'cashflow.totalFunds': '総資金',

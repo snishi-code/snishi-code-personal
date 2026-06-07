@@ -75,18 +75,25 @@ export function Cashflow({ onAddEntry }: { onAddEntry?: (mode: FormMode) => void
     const entries = ledger?.journalEntries ?? [];
     const reserves = ledger?.reserves ?? [];
     const schedules = ledger?.cashflowSchedules ?? [];
-    const allocations = ledger?.allocations ?? [];
     const bs = deriveBalanceSheet(accounts, entries, today);
     const byId = new Map(bs.assets.map((a) => [a.account.id, a.balance] as const));
     const liabById = new Map(bs.liabilities.map((l) => [l.account.id, l.balance] as const));
-    // 按分中資産（現金ではない繰延資産）は総資金から除外する。
-    const excluded = new Set(allocations.map((a) => a.deferredAccountId));
-    const totalAssets = liquidAssetTotal(bs.assets, excluded);
+    // 「総資金」= 流動資金のみ（現金・預金=daily-asset と取り置き=reserve-asset）。
+    // 投資資産・按分中資産・固定資産など非流動の asset は総資金に含めない（文言と一致させる）。
+    const liquidIds = new Set(
+      accounts
+        .filter((a) => a.role === 'daily-asset' || a.role === 'reserve-asset')
+        .map((a) => a.id),
+    );
+    const isLiquid = (id: string) => liquidIds.has(id);
+    // liquidAssetTotal は「除外集合」を取るので、流動でない資産科目を除外として渡す。
+    const nonLiquidAssetIds = new Set(
+      bs.assets.map((a) => a.account.id).filter((id) => !liquidIds.has(id)),
+    );
+    const totalAssets = liquidAssetTotal(bs.assets, nonLiquidAssetIds);
     const reserveBalance = reserves.reduce((s, r) => s + (byId.get(r.reserveAccountId) ?? 0), 0);
-    // 流動資産（現金など）= 資産科目で按分中でないもの。未来仕訳の現金デルタ判定に使う。
-    const assetIds = new Set(accounts.filter((a) => a.type === 'asset').map((a) => a.id));
-    const isLiquid = (id: string) => assetIds.has(id) && !excluded.has(id);
     // 未来日付（date > today）の仕訳で現金が動くもの = CF に取り込む（ホーム入力が自然に反映される）。
+    // delta=投影用の現金純増減（振替は 0）、amount=一覧表示用の取引金額（借方合計）。
     const end = horizonEnd(today, horizon);
     const future = entries
       .filter((e) => e.date > today && e.date <= end && e.lines.some((l) => isLiquid(l.accountId)))
@@ -95,6 +102,7 @@ export function Cashflow({ onAddEntry }: { onAddEntry?: (mode: FormMode) => void
         date: e.date,
         title: e.description,
         delta: cashDeltaOfEntry(e, isLiquid),
+        amount: e.lines.filter((l) => l.side === 'debit').reduce((s, l) => s + l.amount, 0),
       }))
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     return {
@@ -220,7 +228,6 @@ export function Cashflow({ onAddEntry }: { onAddEntry?: (mode: FormMode) => void
             className="card list"
             data-ui={UI.cashflow.freeTrend}
             style={{ marginTop: 'var(--space-2)' }}
-            aria-hidden="true"
           >
             {projection.points.map((p, i) => (
               <li key={`${p.date}-${i}`} className="list__item">
@@ -228,6 +235,7 @@ export function Cashflow({ onAddEntry }: { onAddEntry?: (mode: FormMode) => void
                   {i === 0 ? today : p.date}
                 </span>
                 <span
+                  aria-hidden="true"
                   style={{
                     flex: 1,
                     height: 10,
@@ -343,7 +351,8 @@ export function Cashflow({ onAddEntry }: { onAddEntry?: (mode: FormMode) => void
                 }`}
               >
                 {f.delta > 0 ? '+' : f.delta < 0 ? '−' : '→ '}
-                <Money amount={Math.abs(f.delta)} currency={currency} />
+                {/* 振替（delta=0）は取引金額 amount を中立表示。入出金は純増減の絶対値を出す。 */}
+                <Money amount={f.delta === 0 ? f.amount : Math.abs(f.delta)} currency={currency} />
               </span>
             </li>
           ))}

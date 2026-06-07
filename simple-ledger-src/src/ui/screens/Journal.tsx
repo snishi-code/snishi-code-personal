@@ -2,7 +2,7 @@
  * 仕訳一覧。検索（摘要・メモ）・期間絞り込み・勘定科目絞り込み（PL/BS からの遷移）。
  * 行タップで編集、各行に取消/返金（逆仕訳）と削除。削除は明示確認。
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLedger } from '../../state/store';
 import { Money } from '../money';
 import { Icon } from '../Icon';
@@ -12,6 +12,7 @@ import { UI } from '../../ui-contract';
 import { currentYearMonth, todayLocal } from '../../util/time';
 import { entryHasTag } from '../../domain/tags';
 import { monthlyCostForMonth } from '../../domain/monthlyCost';
+import { periodRange, type ReportPeriod } from '../../domain/reportPeriod';
 import { tagNames } from '../tagOptions';
 import type { Account, JournalEntry } from '../../domain/types';
 
@@ -32,11 +33,13 @@ export function Journal({
   onEditEntry,
   onReverse,
   filter,
+  period,
   onClearAccountFilter,
 }: {
   onEditEntry: (entry: JournalEntry) => void;
   onReverse: (entry: JournalEntry) => void;
   filter: JournalFilter | null;
+  period: ReportPeriod;
   onClearAccountFilter: () => void;
 }) {
   const { ledger, removeEntry } = useLedger();
@@ -54,6 +57,20 @@ export function Journal({
     if (filter.from !== undefined) setFrom(filter.from);
     if (filter.to !== undefined) setTo(filter.to);
   }, [filter]);
+
+  // ヘッダーの期間（正本）に追従する。ただし初回マウントでは適用しない
+  // （ドリルダウンで渡された from/to を上書きしないため）。以後ユーザーがヘッダー期間を
+  // 変えたときだけ、仕訳の日付絞り込みを期間に合わせる（全期間=制約なし）。
+  const periodMounted = useRef(false);
+  useEffect(() => {
+    if (!periodMounted.current) {
+      periodMounted.current = true;
+      return;
+    }
+    const r = periodRange(period);
+    setFrom(r?.from ?? '');
+    setTo(r?.to ?? '');
+  }, [period]);
 
   const accountFilterId = filter?.accountId;
   const map = useMemo(() => new Map((ledger?.accounts ?? []).map((a) => [a.id, a])), [ledger]);

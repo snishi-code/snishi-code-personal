@@ -679,10 +679,10 @@ button.list__item:hover {
 .trend-chart__bar {
   display: block;
   height: 100%;
-  background: var(--green);
+  background: var(--pos);
 }
 .trend-chart__bar--neg {
-  background: var(--neutral);
+  background: var(--neg);
 }
 .trend-chart__value {
   width: 104px;
