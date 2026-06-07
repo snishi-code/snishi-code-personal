@@ -18,7 +18,6 @@ export type IconName =
   | 'check'
   | 'sprout'
   | 'chevronRight'
-  | 'chevronLeft'
   | 'archive'
   | 'restore'
   | 'list'
@@ -175,7 +174,6 @@ const PATHS: Record<IconName, JSX.Element> = {
     </>
   ),
   chevronRight: <path d="m9 18 6-6-6-6" />,
-  chevronLeft: <path d="m15 18-6-6 6-6" />,
   archive: (
     <>
       <rect width="20" height="5" x="2" y="3" rx="1" />
