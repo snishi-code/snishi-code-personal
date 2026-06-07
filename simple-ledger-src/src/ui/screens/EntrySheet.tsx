@@ -153,11 +153,15 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [showReserve, setShowReserve] = useState(() =>
     [form.creditAccountId, form.debitAccountId].map(roleOf).includes('reserve-asset'),
   );
-  const [showLiability, setShowLiability] = useState(() =>
-    [form.creditAccountId, form.debitAccountId]
-      .map(roleOf)
-      .some((r) => r === 'payment-liability' || r === 'other-liability'),
-  );
+  const [showLiability, setShowLiability] = useState(() => {
+    const roles = [form.creditAccountId, form.debitAccountId].map(roleOf);
+    // 支出ではクレジットカード(payment-liability)は既定表示なのでトグル不要。
+    // トグルは other-liability(ローン等)用。振替では payment-liability も既定外なので選択時に開く。
+    return (
+      roles.includes('other-liability') ||
+      (mode !== 'expense' && roles.includes('payment-liability'))
+    );
+  });
   const [reserveSheetOpen, setReserveSheetOpen] = useState(false);
   const [liabilitySheetOpen, setLiabilitySheetOpen] = useState(false);
 
@@ -467,7 +471,11 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     // トグルで明示したときだけ目的別資金・負債を候補に足す（既選択は includeId で常に表示）。
     const extras: AccountRole[] = [];
     if (showReserve) extras.push('reserve-asset');
-    if (showLiability) extras.push('payment-liability', 'other-liability');
+    if (showLiability) {
+      // 支出は payment-liability が既定なのでトグルは other-liability(ローン等)を足す。振替は両方。
+      if (mode === 'expense') extras.push('other-liability');
+      else extras.push('payment-liability', 'other-liability');
+    }
     // 支出は支払い方法(source)のみ拡張。振替は源泉/行き先の両方を拡張。
     const srcExtra = mode === 'expense' || mode === 'transfer' ? extras : [];
     const dstExtra = mode === 'transfer' ? extras : [];
@@ -768,7 +776,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               onChange={(e) => setShowLiability(e.target.checked)}
               data-ui={UI.journal.entry.liabilityToggle}
             />
-            {t('entry.liabilityToggle')}
+            {/* 支出ではカードは既定表示。トグルは other-liability(ローン等)用に意味を変える。 */}
+            {mode === 'expense' ? t('entry.liabilityToggleLoan') : t('entry.liabilityToggle')}
           </label>
           <button
             type="button"
@@ -778,7 +787,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             data-ui={UI.journal.entry.liabilityCreate}
           >
             <Icon name="plus" size={16} />
-            {t('entry.liabilityCreate')}
+            {/* 支出ではクレジットカード(payment-liability)を作る導線。振替はローン等も作る。 */}
+            {mode === 'expense' ? t('entry.liabilityCreateCard') : t('entry.liabilityCreate')}
           </button>
         </div>
       </div>

@@ -406,7 +406,7 @@ export const ja = {
   'entry.income.title': '収入を記録',
   'entry.expense.title': '支出を記録',
   'entry.transfer.title': '振替を記録',
-  'entry.manual.title': '詳細入力',
+  'entry.manual.title': '簿記編集',
   'entry.income.target': '入金先',
   'entry.income.category': 'カテゴリ（収入）',
   'entry.expense.category': 'カテゴリ（支出）',
@@ -424,7 +424,8 @@ export const ja = {
   'entry.source.expense': '支払い方法',
   'entry.destination.expense': '使い道',
   'entry.detailToggle': '詳細（メモ・タグ）',
-  'entry.manualSwitch': '詳細入力（借方/貸方を直接指定）',
+  // 逆仕訳・特殊編集は日常の「詳細」と分け、簿記編集として明示する。
+  'entry.manualSwitch': '簿記編集（借方/貸方を直接指定）',
   'entry.noAccounts': '候補の科目がありません。「勘定科目」で追加してください。',
   'entry.reversalTitle': '取消/返金を記録',
   'entry.reversalNote':
@@ -464,7 +465,10 @@ export const ja = {
   'entry.reserveToggle': '目的別資金を使う',
   'entry.reserveCreate': '目的別資金を作成',
   'entry.liabilityToggle': '負債（カード・ローン）を使う',
+  // 支出ではカードは既定表示のため、トグルは「ローン等」を足す意味にする。
+  'entry.liabilityToggleLoan': 'ローン等の負債も使う',
   'entry.liabilityCreate': '新しい負債を作る',
+  'entry.liabilityCreateCard': '新しいカードを作る',
 
   'journal.reverse': '取消/返金',
   'journal.reverseAction': '取消/返金を記録',

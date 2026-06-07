@@ -74,13 +74,14 @@ export type FlowMode = 'income' | 'expense' | 'transfer';
  * 「お金の流れ」フォーム定義。簿記用語を出さず `源泉 → 行き先` で見せる。
  * 内部対応は常に source=貸方(credit) / destination=借方(debit)。
  *  - 収入: 収入元(income-category, credit) → 入る場所(daily-asset, debit)
- *  - 支出: 支払い方法(daily-asset, credit) → 使い道(expense-category, debit)
+ *  - 支出: 支払い方法(daily-asset|payment-liability, credit) → 使い道(expense-category, debit)
  *  - 振替: 移動元(daily-asset, credit) → 移動先(daily-asset, debit)
  *
- * 既定では daily-asset 中心に絞り、目的別資金(reserve-asset)・負債(payment/other-liability)は
- * 候補に出さない（増えるほど入力が重くなるため）。必要時は EntrySheet のトグル
- * （目的別資金を表示 / 負債を表示）で allowedRoles に追加する。編集中の既選択は
- * groupedAccountsByRole の includeId で常に表示維持される。
+ * 支出の支払い方法は、現金・預金などの資金(daily-asset)とクレジットカード(payment-liability)を
+ * 既定で出す（カードは日常の支払い手段なのでトグル無しで選べる）。それ以外の
+ * 目的別資金(reserve-asset)・ローン等(other-liability)、および振替での負債は候補を重くしないため
+ * 既定に出さず、EntrySheet のトグル（目的別資金を使う / ローン等の負債も使う）で allowedRoles に
+ * 追加する。編集中の既選択は groupedAccountsByRole の includeId で常に表示維持される。
  */
 export interface FlowDef {
   source: EntryRole; // 左（貸方）
@@ -102,7 +103,8 @@ export const MODE_FLOW: Record<FlowMode, FlowDef> = {
     source: {
       side: 'credit',
       labelKey: 'entry.source.expense',
-      allowedRoles: ['daily-asset'],
+      // 現金・預金など(daily-asset)に加え、クレジットカード(payment-liability)も既定で選べる。
+      allowedRoles: ['daily-asset', 'payment-liability'],
     },
     destination: {
       side: 'debit',
