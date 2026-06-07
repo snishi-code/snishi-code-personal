@@ -56,6 +56,9 @@ export function Cashflow() {
         .map((a) => a.id),
     );
     const isLiquid = (id: string) => liquidIds.has(id);
+    // 取り置き（reserve-asset）だけの集合。未来日の取り置き移動で自由資金を正しく動かすため。
+    const reserveIds = new Set(accounts.filter((a) => a.role === 'reserve-asset').map((a) => a.id));
+    const isReserve = (id: string) => reserveIds.has(id);
     // liquidAssetTotal は「除外集合」を取るので、流動でない資産科目を除外として渡す。
     const nonLiquidAssetIds = new Set(
       bs.assets.map((a) => a.account.id).filter((id) => !liquidIds.has(id)),
@@ -63,7 +66,8 @@ export function Cashflow() {
     const totalAssets = liquidAssetTotal(bs.assets, nonLiquidAssetIds);
     const reserveBalance = reserves.reduce((s, r) => s + (byId.get(r.reserveAccountId) ?? 0), 0);
     // 未来日付（date > today）の仕訳で現金が動くもの = CF に取り込む（ホーム入力が自然に反映される）。
-    // delta=投影用の現金純増減（振替は 0）、amount=一覧表示用の取引金額（借方合計）。
+    // delta=総資金の純増減（資金↔資金/資金↔取り置きの振替は 0）、reserveDelta=取り置き残高の純増減
+    //（普通預金→目的別資金 なら +amount で自由資金が減る）、amount=一覧表示用の取引金額（借方合計）。
     const end = untilDate;
     const future = entries
       .filter((e) => e.date > today && e.date <= end && e.lines.some((l) => isLiquid(l.accountId)))
@@ -72,6 +76,7 @@ export function Cashflow() {
         date: e.date,
         title: e.description,
         delta: cashDeltaOfEntry(e, isLiquid),
+        reserveDelta: cashDeltaOfEntry(e, isReserve),
         amount: e.lines.filter((l) => l.side === 'debit').reduce((s, l) => s + l.amount, 0),
       }))
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -85,7 +90,11 @@ export function Cashflow() {
         schedules,
         today,
         untilDate: end,
-        futureEvents: future.map((f) => ({ date: f.date, amount: f.delta })),
+        futureEvents: future.map((f) => ({
+          date: f.date,
+          amount: f.delta,
+          reserveAmount: f.reserveDelta,
+        })),
       }),
     };
   }, [ledger, untilDate, today]);
@@ -101,7 +110,7 @@ export function Cashflow() {
     const accounts = ledger?.accounts ?? [];
     const schedules = ledger?.cashflowSchedules ?? [];
     return accounts
-      .filter((a) => a.role === 'payment-liability')
+      .filter((a) => a.role === 'payment-liability' || a.role === 'other-liability')
       .map((a) => {
         const related = schedules.filter(
           (s) => s.counterAccountId === a.id && s.status === 'planned',

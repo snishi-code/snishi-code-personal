@@ -337,6 +337,47 @@ describe('projectCashflow（表示終了日 untilDate）', () => {
   });
 });
 
+describe('projectCashflow（取り置き移動が自由資金に反映される）', () => {
+  const today = '2026-06-15';
+  it('未来日の 普通預金→目的別資金（reserveAmount>0）は総資金を保ち自由資金を減らす', () => {
+    const proj = projectCashflow({
+      totalAssets: 100000,
+      reserveBalance: 0,
+      schedules: [],
+      today,
+      untilDate: '2026-12-31',
+      futureEvents: [{ date: '2026-07-01', amount: 0, reserveAmount: 30000 }],
+    });
+    expect(proj.startFree).toBe(100000);
+    expect(proj.points.at(-1)?.total).toBe(100000); // 総資金は不変
+    expect(proj.points.at(-1)?.free).toBe(70000); // 取り置き増で自由資金が減る
+    expect(proj.minFree).toBe(70000);
+  });
+  it('目的別資金→普通預金（reserveAmount<0）は自由資金を増やす', () => {
+    const proj = projectCashflow({
+      totalAssets: 100000,
+      reserveBalance: 40000,
+      schedules: [],
+      today,
+      untilDate: '2026-12-31',
+      futureEvents: [{ date: '2026-07-01', amount: 0, reserveAmount: -40000 }],
+    });
+    expect(proj.startFree).toBe(60000);
+    expect(proj.points.at(-1)?.free).toBe(100000);
+  });
+  it('reserveAmount 未指定は従来どおり自由資金一定（後方互換）', () => {
+    const proj = projectCashflow({
+      totalAssets: 100000,
+      reserveBalance: 0,
+      schedules: [],
+      today,
+      untilDate: '2026-12-31',
+      futureEvents: [{ date: '2026-07-01', amount: 0 }],
+    });
+    expect(proj.points.at(-1)?.free).toBe(100000);
+  });
+});
+
 describe('liquidAssetTotal', () => {
   it('除外指定した資産（按分中資産など）を総資金から外す', () => {
     const assets = [bal('cash', 100000), bal('bank', 50000), bal('def', 30000)];

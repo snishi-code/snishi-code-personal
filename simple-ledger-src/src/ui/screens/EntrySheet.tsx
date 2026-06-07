@@ -264,9 +264,13 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             : {}),
         });
       } else if (useFixedMonthly) {
-        // 固定資産購入（借方 固定資産 / 貸方 資金）+ 月額化コストを一括保存。購入仕訳が実体で、
+        // 固定資産購入（借方 固定資産 / 貸方 資金 or 負債）+ 月額化コストを一括保存。購入仕訳が実体で、
         // 月額化は支払い仕訳を作らず formula 認識のみ（recognitionCreditAccountId=固定資産）。
+        // 負債払いで返済入力があれば、購入仕訳の貸方負債を取り崩す返済予定 CF も同時に作る。
         const repeat = continueCost ? months : undefined;
+        const repayCount = repayCountText === '' ? 0 : Number.parseInt(repayCountText, 10);
+        const useRepay =
+          isLiabilityPayment && repayToggle && repayAccountId !== '' && repayCount >= 1;
         const metadata: EntryMetadata = { ...toSave.metadata, inputMode: 'expense' };
         await saveEntryWithFixedAssetMonthly(
           { ...toSave, metadata },
@@ -279,6 +283,14 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             startMonth: monthOf(toSave.date),
             expenseAccountId: monthlyCategoryId,
             recognitionCreditAccountId: toSave.debitAccountId,
+            ...(useRepay
+              ? {
+                  repaymentAccountId: repayAccountId,
+                  repaymentCount: repayCount,
+                  // 購入日(form.date)とは別に、初回引落日を使う。
+                  repaymentStartDate: repayStartDate || form.date,
+                }
+              : {}),
           },
         );
       } else {

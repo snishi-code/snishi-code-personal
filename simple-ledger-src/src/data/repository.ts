@@ -769,12 +769,21 @@ export interface FixedAssetMonthlyInput {
   expenseAccountId: string;
   /** 仮想認識で貸方に見せる固定資産（fixed-asset）。 */
   recognitionCreditAccountId: string;
+  /**
+   * 負債払い（購入仕訳の貸方が payment-liability）のとき: 返済 CF を作る口座（daily-asset）。
+   * 返済先の負債は購入仕訳の貸方科目を使う。回数・初回引落日と併せて指定する。
+   */
+  repaymentAccountId?: string;
+  repaymentCount?: number;
+  repaymentStartDate?: string;
 }
 
 /**
- * 固定資産の購入仕訳（借方 固定資産 / 貸方 資金）+ その月額化コストを 1 transaction で保存する。
+ * 固定資産の購入仕訳（借方 固定資産 / 貸方 資金 or 負債）+ その月額化コストを 1 transaction で保存する。
  * 月額化は **支払い仕訳を作らない**（購入仕訳が実体）。MonthlyCostItem.formula で生活コストに月割り反映し、
  * Journal では sourceEntryId / recognitionCreditAccountId を使って「固定資産 → 費用」の仮想行を見せる。
+ * 負債（payment-liability）払いで返済情報があれば、購入仕訳の貸方負債を取り崩す返済予定 CF を
+ * 初回引落日から回数分、同じ transaction で作る（資金繰り判断に必要なため取りこぼさない）。
  */
 export async function saveEntryWithFixedAssetMonthly(
   entry: JournalEntry,
@@ -820,15 +829,56 @@ export async function saveEntryWithFixedAssetMonthly(
     expenseAccountId: input.expenseAccountId,
     recognitionCreditAccountId: input.recognitionCreditAccountId,
     sourceEntryId: entry.id,
+    ...(input.repaymentAccountId !== undefined
+      ? { repaymentAccountId: input.repaymentAccountId }
+      : {}),
     status: 'active',
     createdAt: ts,
     updatedAt: ts,
   };
 
-  await writeWithRevision([STORE.journalEntries, STORE.monthlyCostItems], (t) => {
-    t.objectStore(STORE.journalEntries).put(entry);
-    t.objectStore(STORE.monthlyCostItems).put(item);
-  });
+  // 負債（payment-liability）払い + 返済情報があれば、購入仕訳の貸方負債を取り崩す返済予定を作る。
+  const liabilityAccountId = entry.lines.find((l) => l.side === 'credit')?.accountId;
+  const schedules: CashflowSchedule[] = [];
+  if (
+    liabilityAccountId !== undefined &&
+    byId.get(liabilityAccountId)?.role === 'payment-liability' &&
+    input.repaymentAccountId !== undefined &&
+    input.repaymentCount !== undefined &&
+    input.repaymentCount >= 1 &&
+    input.repaymentStartDate
+  ) {
+    const repay = byId.get(input.repaymentAccountId);
+    if (!repay || repay.role !== 'daily-asset')
+      throw new Error('返済口座は日常資産を選んでください。');
+    const parts = monthlyAmounts(input.amount, input.repaymentCount);
+    for (let i = 0; i < input.repaymentCount; i++) {
+      schedules.push({
+        id: newId(),
+        title: `${item.name} 返済 ${i + 1}/${input.repaymentCount}`,
+        dueDate: addMonthsToDate(input.repaymentStartDate, i),
+        amount: parts[i] ?? 0,
+        direction: 'outflow',
+        accountId: input.repaymentAccountId,
+        counterAccountId: liabilityAccountId,
+        source: 'installment',
+        status: 'planned',
+        monthlyCostId: item.id,
+        createdAt: ts,
+        updatedAt: ts,
+      });
+    }
+  }
+
+  await writeWithRevision(
+    [STORE.journalEntries, STORE.monthlyCostItems, STORE.cashflowSchedules],
+    (t) => {
+      t.objectStore(STORE.journalEntries).put(entry);
+      t.objectStore(STORE.monthlyCostItems).put(item);
+      const sStore = t.objectStore(STORE.cashflowSchedules);
+      for (const s of schedules) sStore.put(s);
+    },
+  );
   return item;
 }
 

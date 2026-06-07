@@ -969,6 +969,66 @@ describe('固定資産購入 + 月額化（saveEntryWithFixedAssetMonthly）', (
     expect(monthlyCostForMonth(saved, '2031-07')).toBe(25000);
     expect(monthlyCostForMonth(saved, '2031-06')).toBe(0);
   });
+
+  it('負債払い + 返済情報があれば、購入仕訳の貸方負債を取り崩す返済予定 CF を作る', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const card = ledger.accounts.find((a) => a.role === 'payment-liability')!;
+    const carId = newId();
+    const catId = newId();
+    await upsertAccount({
+      id: carId,
+      name: '自動車2',
+      type: 'asset',
+      role: 'fixed-asset',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    await upsertAccount({
+      id: catId,
+      name: '交通費2',
+      type: 'expense',
+      role: 'expense-category',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    // 借方 自動車(固定資産) / 貸方 カード負債 で 1,200,000 を購入し、12回返済を登録。
+    const entry = buildSimpleEntry({
+      date: '2031-07-15',
+      description: '自動車ローン購入',
+      debitAccountId: carId,
+      creditAccountId: card.id,
+      amount: 1_200_000,
+      metadata: { inputMode: 'expense' },
+    });
+    const item = await saveEntryWithFixedAssetMonthly(entry, {
+      name: '自動車2',
+      kind: 'durable-asset',
+      amount: 1_200_000,
+      costMonths: 120,
+      startMonth: '2031-07',
+      expenseAccountId: catId,
+      recognitionCreditAccountId: carId,
+      repaymentAccountId: cash.id,
+      repaymentCount: 12,
+      repaymentStartDate: '2031-08-10',
+    });
+
+    const after = await loadLedger();
+    const schedules = after.cashflowSchedules.filter((s) => s.monthlyCostId === item.id);
+    expect(schedules).toHaveLength(12);
+    // 返済合計は元本に一致（元本のみ・利息は含めない）。
+    expect(schedules.reduce((s, x) => s + x.amount, 0)).toBe(1_200_000);
+    // 返済元=現金（daily-asset）→ 返済先=カード負債（購入仕訳の貸方）。
+    expect(schedules.every((s) => s.accountId === cash.id && s.counterAccountId === card.id)).toBe(
+      true,
+    );
+    expect(schedules.every((s) => s.direction === 'outflow' && s.status === 'planned')).toBe(true);
+    expect(schedules[0]?.dueDate).toBe('2031-08-10');
+    expect(schedules[1]?.dueDate).toBe('2031-09-10');
+  });
 });
 
 describe('目的別資金(reserve-asset)の残高不足ガード', () => {

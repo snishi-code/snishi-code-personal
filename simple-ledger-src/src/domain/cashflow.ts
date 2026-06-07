@@ -175,8 +175,14 @@ export function cashDeltaOfEntry(
 /** 投影に積む将来の現金イベント（予定 CF と未来仕訳を統一して扱う）。 */
 export interface FutureCashEvent {
   date: string;
-  /** 現金（流動資産）の符号つき増減。 */
+  /** 総資金（流動資産＝daily-asset + reserve-asset）の符号つき増減。 */
   amount: number;
+  /**
+   * 取り置き（reserve-asset）残高の符号つき増減（任意・既定 0）。
+   * 自由資金 = 総資金 − 取り置き残高 なので、未来日の `普通預金 → 目的別資金` 振替のように
+   * 総資金は不変でも取り置きが増えるイベントは、これにより自由資金を正しく減らす。
+   */
+  reserveAmount?: number;
 }
 
 /**
@@ -207,10 +213,12 @@ export function projectCashflow(params: {
     .sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0));
 
   // 予定 CF と未来仕訳を 1 本のイベント列に統合し、期日順に積む。
+  // 予定 CF（planned）は資金↔資金/資金↔負債が主で取り置き残高を動かさない（reserveAmount=0）。
+  // 取り置き移動は未来日付の振替仕訳（futureEvents.reserveAmount）として入ってくる。
   const events: FutureCashEvent[] = [
     ...planned.map((s) => ({
       date: s.dueDate,
-      // transfer（口座間移動）は自由資金の総額を変えない。
+      // transfer（口座間移動）は総資金を変えない。
       amount: s.direction === 'inflow' ? s.amount : s.direction === 'outflow' ? -s.amount : 0,
     })),
     ...futureEvents.filter((e) => e.date > today && e.date <= end),
@@ -220,10 +228,13 @@ export function projectCashflow(params: {
   const startFree = totalAssets - reserveBalance;
   const points: CashflowPoint[] = [{ date: today, total: startTotal, free: startFree }];
 
+  // 総資金と取り置き残高を時系列で更新し、各時点の自由資金 = 総資金 − 取り置き を出す。
   let total = startTotal;
+  let reserve = reserveBalance;
   for (const e of events) {
     total += e.amount;
-    points.push({ date: e.date, total, free: total - reserveBalance });
+    reserve += e.reserveAmount ?? 0;
+    points.push({ date: e.date, total, free: total - reserve });
   }
 
   const minTotal = points.reduce((m, p) => Math.min(m, p.total), startTotal);

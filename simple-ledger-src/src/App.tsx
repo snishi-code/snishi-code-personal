@@ -78,13 +78,15 @@ export function App() {
     setScreen('statements');
   };
 
-  // 期間メニューの年セレクト候補（仕訳・予定CF・資金目標の年 + 現在/翌年 + 選択中の年）。
+  // 期間メニューの年セレクト候補（仕訳・予定CF・資金目標・目的別資金の目標日の年 + 現在/翌年 + 選択中の年）。
   const today = todayLocal();
   const periodYears = availableYears(
     [
       ...ledger.journalEntries.map((e) => e.date),
       ...ledger.cashflowSchedules.map((s) => s.dueDate),
       ...ledger.fundingGoals.map((g) => g.targetDate),
+      // 資金目標を統合した正本: 目的別資金の目標日（任意）。
+      ...ledger.reserves.flatMap((r) => (r.targetDate ? [r.targetDate] : [])),
     ],
     Number.parseInt(today.slice(0, 4), 10),
     period.mode !== 'all' ? period.year : undefined,
