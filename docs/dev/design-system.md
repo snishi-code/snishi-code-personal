@@ -43,6 +43,7 @@ CSS variables による design tokens。正本は `simple-ledger-src/src/ui/toke
   （塗りボタン・アイコンボタン・成功 toast）には **teal-700（`--primary-fill` / `--success`）** を使う。
 - teal-500 はアクセント（フォーカスリング、淡色背景の枠、テキストを載せないアイコン背景）に限定。
 - 状態は色のみで伝えない（アイコン + 文言、金額は +/− 記号を併記）。
+- 色覚多様性・宗教/文化配慮の監査観点は [inclusion-audit.md](inclusion-audit.md) にまとめる。
 
 ## React component 方針
 
