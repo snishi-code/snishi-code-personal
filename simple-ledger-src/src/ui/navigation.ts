@@ -10,6 +10,7 @@ export type Screen =
   | 'tags'
   | 'adjustments'
   | 'accounts'
+  | 'wallets'
   | 'settings';
 
 export interface NavItem {
@@ -36,6 +37,7 @@ export const NAV_ITEMS: NavItem[] = [
  */
 export const MANAGEMENT_ITEMS: NavItem[] = [
   { screen: 'accounts', labelKey: 'nav.accounts', icon: 'wallet' },
+  { screen: 'wallets', labelKey: 'nav.wallets', icon: 'wallet' },
   { screen: 'tags', labelKey: 'nav.tags', icon: 'tag' },
   { screen: 'adjustments', labelKey: 'nav.adjustments', icon: 'adjust' },
 ];

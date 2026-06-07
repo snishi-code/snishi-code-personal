@@ -6,10 +6,12 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from 'react';
 import type {
   Account,
+  AccountInstrument,
   AdjustmentKind,
   CashflowSchedule,
   FundingGoal,
   Ledger,
+  ManagementScope,
   MonthlyCostItem,
   ReserveItem,
   Settings,
@@ -21,6 +23,7 @@ import type { AllocationInput } from '../domain/allocation';
 import * as repo from '../data/repository';
 import { isDefaultSeedAccounts, isDefaultSettings } from '../data/seed';
 import type {
+  AccountInstrumentInput,
   FixedAssetMonthlyInput,
   FundingGoalInput,
   MonthlyCostInput,
@@ -102,6 +105,12 @@ interface LedgerContextValue {
   removeReserve: (id: string) => Promise<void>;
   saveTag: (tag: Tag) => Promise<void>;
   removeTag: (id: string) => Promise<void>;
+  createManagementScope: (name: string) => Promise<ManagementScope>;
+  saveManagementScope: (scope: ManagementScope) => Promise<void>;
+  removeManagementScope: (id: string) => Promise<void>;
+  createAccountInstrument: (input: AccountInstrumentInput) => Promise<AccountInstrument>;
+  saveAccountInstrument: (instrument: AccountInstrument) => Promise<void>;
+  removeAccountInstrument: (id: string) => Promise<void>;
   createAdjustment: (input: {
     kind: AdjustmentKind;
     accountId: string;
@@ -419,6 +428,92 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [refresh, toast],
   );
 
+  const createManagementScope = useCallback<LedgerContextValue['createManagementScope']>(
+    async (name) => {
+      try {
+        const scope = await repo.createManagementScope(name);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+        return scope;
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const saveManagementScope = useCallback<LedgerContextValue['saveManagementScope']>(
+    async (scope) => {
+      try {
+        await repo.upsertManagementScope(scope);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const removeManagementScope = useCallback<LedgerContextValue['removeManagementScope']>(
+    async (id) => {
+      try {
+        await repo.deleteManagementScope(id);
+        await refresh();
+        toast.show(t('toast.deleted'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const createAccountInstrument = useCallback<LedgerContextValue['createAccountInstrument']>(
+    async (input) => {
+      try {
+        const inst = await repo.createAccountInstrument(input);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+        return inst;
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const saveAccountInstrument = useCallback<LedgerContextValue['saveAccountInstrument']>(
+    async (instrument) => {
+      try {
+        await repo.upsertAccountInstrument(instrument);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const removeAccountInstrument = useCallback<LedgerContextValue['removeAccountInstrument']>(
+    async (id) => {
+      try {
+        await repo.deleteAccountInstrument(id);
+        await refresh();
+        toast.show(t('toast.deleted'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
   const createAdjustment = useCallback<LedgerContextValue['createAdjustment']>(
     async (input) => {
       try {
@@ -571,6 +666,12 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       removeReserve,
       saveTag,
       removeTag,
+      createManagementScope,
+      saveManagementScope,
+      removeManagementScope,
+      createAccountInstrument,
+      saveAccountInstrument,
+      removeAccountInstrument,
       createAdjustment,
       saveAccount,
       removeAccount,
@@ -605,6 +706,12 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       removeReserve,
       saveTag,
       removeTag,
+      createManagementScope,
+      saveManagementScope,
+      removeManagementScope,
+      createAccountInstrument,
+      saveAccountInstrument,
+      removeAccountInstrument,
       createAdjustment,
       saveAccount,
       removeAccount,
