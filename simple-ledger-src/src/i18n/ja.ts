@@ -124,7 +124,8 @@ export const ja = {
   'monthlyCost.pause': '一時停止',
   'monthlyCost.resume': '再開',
   'monthlyCost.deleteConfirmTitle': '月額化コストを削除しますか？',
-  'monthlyCost.deleteConfirmBody': '「{name}」を削除します。仕訳は変更しません。',
+  'monthlyCost.deleteConfirmBody':
+    '「{name}」を削除します。関連する月額化の支払い仕訳と未実績の返済予定も削除されます。',
   'monthlyCost.kind.subscription': 'サブスク（月課金）',
   'monthlyCost.kind.prepaid-service': '年払い・前払いサービス',
   'monthlyCost.kind.durable-asset': '耐久財・買い替え',
