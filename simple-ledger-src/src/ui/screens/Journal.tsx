@@ -110,9 +110,21 @@ export function Journal({
     else if (from !== '' && to !== '' && from.slice(0, 7) === to.slice(0, 7)) ym = from.slice(0, 7);
     if (tagFilter) ym = null;
     if (!ym) return { recognitionYm: null, monthRecognitions: [] };
+    const accById = new Map((ledger?.accounts ?? []).map((a) => [a.id, a]));
     const rows = (ledger?.monthlyCostItems ?? [])
       .filter((m) => !accountFilterId || m.expenseAccountId === accountFilterId)
-      .map((m) => ({ id: m.id, name: m.name, amount: monthlyCostForMonth(m, ym!) }))
+      .map((m) => {
+        // 固定資産由来（recognitionCreditAccountId あり）は「固定資産 → 費用カテゴリ」、
+        // それ以外（サブスク等）は「月額化: 名称」と表示する（いずれも仮想行・read-only）。
+        const recCredit = m.recognitionCreditAccountId
+          ? accById.get(m.recognitionCreditAccountId)?.name
+          : undefined;
+        const expName = accById.get(m.expenseAccountId)?.name;
+        const label = recCredit
+          ? `${recCredit} → ${expName ?? '—'}`
+          : t('journal.monthlyCostRow', { name: m.name });
+        return { id: m.id, label, amount: monthlyCostForMonth(m, ym!) };
+      })
       .filter((r) => r.amount > 0);
     return { recognitionYm: ym, monthRecognitions: rows };
   }, [ledger, accountFilterId, tagFilter, from, to, currentYm]);
@@ -254,9 +266,9 @@ export function Journal({
             </span>
           </div>
           {monthRecognitions.map((r) => (
-            <div className="stmt-row" key={r.id}>
+            <div className="stmt-row" key={r.id} data-ui={UI.journal.monthlyRecognitionRow}>
               <span>
-                {r.name} <span className="tag tag--teal">{t('journal.monthlyCostTag')}</span>
+                {r.label} <span className="tag tag--teal">{t('journal.monthlyCostTag')}</span>
               </span>
               <span className="stmt-row__num">
                 <Money amount={r.amount} currency={currency} />

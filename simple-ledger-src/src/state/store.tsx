@@ -18,7 +18,11 @@ import type {
 import { buildSimpleEntry, type SimpleEntryInput } from '../domain/entry';
 import type { AllocationInput } from '../domain/allocation';
 import * as repo from '../data/repository';
-import type { FundingGoalInput, MonthlyCostInput } from '../data/repository';
+import type {
+  FixedAssetMonthlyInput,
+  FundingGoalInput,
+  MonthlyCostInput,
+} from '../data/repository';
 import {
   exportFileName,
   exportToJsonText,
@@ -40,6 +44,11 @@ interface LedgerContextValue {
   ) => Promise<void>;
   /** 仕訳 + 返済予定など予定 CF をまとめて保存（借入実行 + 分割返済）。 */
   saveEntryWithSchedules: (input: SimpleEntryInput, schedules: CashflowSchedule[]) => Promise<void>;
+  /** 固定資産の購入仕訳 + その月額化コストをまとめて保存。 */
+  saveEntryWithFixedAssetMonthly: (
+    input: SimpleEntryInput,
+    monthly: FixedAssetMonthlyInput,
+  ) => Promise<void>;
   removeEntry: (id: string, description: string) => Promise<void>;
   createAllocation: (input: Omit<AllocationInput, 'deferredAccountId'>) => Promise<void>;
   createMonthlyCost: (input: MonthlyCostInput) => Promise<void>;
@@ -134,6 +143,23 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       try {
         const entry = buildSimpleEntry(input);
         await repo.saveEntryWithSchedules(entry, schedules);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const saveEntryWithFixedAssetMonthly = useCallback<
+    LedgerContextValue['saveEntryWithFixedAssetMonthly']
+  >(
+    async (input, monthly) => {
+      try {
+        const entry = buildSimpleEntry(input);
+        await repo.saveEntryWithFixedAssetMonthly(entry, monthly);
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
@@ -491,6 +517,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       refresh,
       saveEntry,
       saveEntryWithSchedules,
+      saveEntryWithFixedAssetMonthly,
       removeEntry,
       createAllocation,
       createMonthlyCost,
@@ -524,6 +551,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       refresh,
       saveEntry,
       saveEntryWithSchedules,
+      saveEntryWithFixedAssetMonthly,
       removeEntry,
       createAllocation,
       createMonthlyCost,

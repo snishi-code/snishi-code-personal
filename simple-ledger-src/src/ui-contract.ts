@@ -48,6 +48,7 @@ export const UI = {
     view: 'journal.view',
     list: 'journal.entry.list',
     monthlyRecognition: 'journal.monthlyRecognition',
+    monthlyRecognitionRow: 'journal.monthlyRecognition.row',
     search: 'journal.search',
     clearAccountFilter: 'journal.filter.clearAccount',
     showFuture: 'journal.filter.showFuture',
@@ -74,6 +75,9 @@ export const UI = {
       loanRepayAccount: 'journal.entry.loanRepayAccount',
       loanRepayCount: 'journal.entry.loanRepayCount',
       loanRepayStart: 'journal.entry.loanRepayStart',
+      // 固定資産購入の月額化
+      fixedMonthlyToggle: 'journal.entry.fixedMonthlyToggle',
+      fixedMonthlyCategory: 'journal.entry.fixedMonthlyCategory',
       date: 'journal.entry.date',
       description: 'journal.entry.description',
       item: 'journal.entry.item',

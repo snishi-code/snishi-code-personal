@@ -73,7 +73,13 @@ function errorText(
 }
 
 export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => void }) {
-  const { ledger, saveEntry, saveEntryWithSchedules, createMonthlyCost } = useLedger();
+  const {
+    ledger,
+    saveEntry,
+    saveEntryWithSchedules,
+    saveEntryWithFixedAssetMonthly,
+    createMonthlyCost,
+  } = useLedger();
   const accounts = ledger?.accounts ?? [];
   const tags = ledger?.tags ?? [];
 
@@ -104,8 +110,14 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const canAllocate =
     init.kind === 'create' && mode === 'expense' && destRole === 'expense-category';
   const [allocate, setAllocate] = useState(false);
+  // 固定資産購入（expense × 固定資産 × create）は「生活コストとして月額化」できる（別トグル）。
+  const canFixedMonthly =
+    init.kind === 'create' && mode === 'expense' && destRole === 'fixed-asset';
+  const [fixedMonthly, setFixedMonthly] = useState(false);
+  const [monthlyCategoryId, setMonthlyCategoryId] = useState('');
+  const [categoryError, setCategoryError] = useState(false);
   // 月額化 ON のときはタグを付けられない（createMonthlyCost はタグを受け取らないため）。
-  const allocationActive = canAllocate && allocate;
+  const allocationActive = (canAllocate && allocate) || (canFixedMonthly && fixedMonthly);
   const [monthsText, setMonthsText] = useState('');
   const [monthsError, setMonthsError] = useState(false);
   const months = monthsText === '' ? 0 : Number.parseInt(monthsText, 10);
@@ -132,6 +144,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     form,
     amountText,
     allocate,
+    fixedMonthly,
+    monthlyCategoryId,
     monthsText,
     continueCost,
     repayToggle,
@@ -184,10 +198,14 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     const found = validateSimpleEntry(toSave);
     setErrors(found);
     const useMonthly = canAllocate && allocate;
+    const useFixedMonthly = canFixedMonthly && fixedMonthly;
     // costMonths は 1 以上（サブスクは 1 か月）。
-    const monthsBad = useMonthly && (!Number.isInteger(months) || months < 1);
+    const monthsBad = (useMonthly || useFixedMonthly) && (!Number.isInteger(months) || months < 1);
     setMonthsError(monthsBad);
-    if (found.length > 0 || monthsBad) return;
+    // 固定資産の月額化は、月割り先の費用カテゴリが必須。
+    const categoryBad = useFixedMonthly && monthlyCategoryId === '';
+    setCategoryError(categoryBad);
+    if (found.length > 0 || monthsBad || categoryBad) return;
     // 振替は役割の組み合わせを検証する（資金↔資金 / 資金→負債返済 / 負債→資金借入のみ）。
     if (mode === 'transfer') {
       const srcRole = accounts.find((a) => a.id === toSave.creditAccountId)?.role;
@@ -226,6 +244,24 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               }
             : {}),
         });
+      } else if (useFixedMonthly) {
+        // 固定資産購入（借方 固定資産 / 貸方 資金）+ 月額化コストを一括保存。購入仕訳が実体で、
+        // 月額化は支払い仕訳を作らず formula 認識のみ（recognitionCreditAccountId=固定資産）。
+        const repeat = continueCost ? months : undefined;
+        const metadata: EntryMetadata = { ...toSave.metadata, inputMode: 'expense' };
+        await saveEntryWithFixedAssetMonthly(
+          { ...toSave, metadata },
+          {
+            name: toSave.description,
+            kind: inferMonthlyCostKind(months, repeat),
+            amount: toSave.amount,
+            costMonths: months,
+            ...(repeat !== undefined ? { repeatEveryMonths: repeat } : {}),
+            startMonth: monthOf(toSave.date),
+            expenseAccountId: monthlyCategoryId,
+            recognitionCreditAccountId: toSave.debitAccountId,
+          },
+        );
       } else {
         const metadata: EntryMetadata = { ...toSave.metadata, inputMode: resolveInputMode() };
         const entryInput = { ...toSave, metadata };
@@ -464,6 +500,64 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     </div>
   ) : null;
 
+  // 固定資産の購入を「生活コストとして月額化」する（購入仕訳とは別に formula 認識）。
+  const fixedMonthlyField = canFixedMonthly ? (
+    <div className="field">
+      <label
+        style={{ display: 'inline-flex', gap: 8, alignItems: 'center', minHeight: 'var(--tap)' }}
+      >
+        <input
+          type="checkbox"
+          checked={fixedMonthly}
+          onChange={(e) => setFixedMonthly(e.target.checked)}
+          data-ui={UI.journal.entry.fixedMonthlyToggle}
+        />
+        {t('entry.fixedMonthlyToggle')}
+      </label>
+      {fixedMonthly ? (
+        <div className="card card--pad" style={{ marginTop: 'var(--space-2)' }}>
+          <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
+            {t('entry.fixedMonthlyNote')}
+          </p>
+          <TextInput
+            label={t('entry.monthlyizeMonths')}
+            required
+            inputMode="numeric"
+            value={monthsText}
+            hint={t('entry.monthlyizeMonthsHint')}
+            onChange={(v) => setMonthsText(v.replace(/[^\d]/g, ''))}
+            error={monthsError ? t('entry.error.months-invalid') : undefined}
+            dataUi={UI.journal.entry.allocateMonths}
+          />
+          <AccountPicker
+            label={t('entry.fixedMonthlyCategory')}
+            required
+            value={monthlyCategoryId}
+            groups={groupedAccountsByRole(accounts, ['expense-category'], monthlyCategoryId)}
+            onChange={setMonthlyCategoryId}
+            error={categoryError ? t('entry.error.category-required') : undefined}
+            dataUi={UI.journal.entry.fixedMonthlyCategory}
+          />
+          <label
+            style={{
+              display: 'inline-flex',
+              gap: 8,
+              alignItems: 'center',
+              minHeight: 'var(--tap)',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={continueCost}
+              onChange={(e) => setContinueCost(e.target.checked)}
+            />
+            {t('entry.monthlyizeContinue')}
+          </label>
+        </div>
+      ) : null}
+    </div>
+  ) : null;
+
   // 支払い元が負債のときだけ、支払い元の近くに「分割/後日引落を資金繰りに入れる」を出す。
   const repaymentField =
     allocationActive && isLiabilityPayment ? (
@@ -639,6 +733,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             {amountField}
             {renderFlow()}
             {allocateField}
+            {fixedMonthlyField}
             {repaymentField}
             {loanRepaymentField}
 

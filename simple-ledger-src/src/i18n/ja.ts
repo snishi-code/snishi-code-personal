@@ -81,6 +81,7 @@ export const ja = {
 
   'journal.allocationTag': '按分',
   'journal.monthlyCostTag': '月額化',
+  'journal.monthlyCostRow': '月額化: {name}',
   'journal.monthlyRecognitionTitle': '{year}年{month}月の月額化認識',
   'journal.monthlyRecognitionNote':
     '月額化コストの当月分です（仕訳ではなく月割りの参考表示。生活コストに計上されます）。',
@@ -398,6 +399,11 @@ export const ja = {
   'entry.loanRepayCount': '返済回数',
   'entry.loanRepayStart': '初回返済日',
   'entry.loanRepayStartHint': '未入力なら借入日から毎月。',
+  'entry.fixedMonthlyToggle': '生活コストとして月額化する',
+  'entry.fixedMonthlyNote':
+    '購入額を何か月分の生活コストとして見るかを決めます（購入そのものは費用にしません）。',
+  'entry.fixedMonthlyCategory': '月額化先の費用カテゴリ',
+  'entry.error.category-required': '費用カテゴリを選んでください。',
   'entry.monthlyizeNote':
     '実際の支払いは仕訳に残し、生活コストは月あたりで見ます（月割りで導出・二重計上しません）。負債払いで返済を入力すると、返済予定（資金繰り）も作ります。',
 

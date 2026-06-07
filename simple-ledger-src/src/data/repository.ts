@@ -756,6 +756,80 @@ export async function createMonthlyCost(input: MonthlyCostInput): Promise<Monthl
   return item;
 }
 
+export interface FixedAssetMonthlyInput {
+  name: string;
+  amount: number;
+  costMonths: number;
+  repeatEveryMonths?: number;
+  startMonth: string;
+  kind: MonthlyCostKind;
+  /** 月額化先の費用カテゴリ（expense-category）。 */
+  expenseAccountId: string;
+  /** 仮想認識で貸方に見せる固定資産（fixed-asset）。 */
+  recognitionCreditAccountId: string;
+}
+
+/**
+ * 固定資産の購入仕訳（借方 固定資産 / 貸方 資金）+ その月額化コストを 1 transaction で保存する。
+ * 月額化は **支払い仕訳を作らない**（購入仕訳が実体）。MonthlyCostItem.formula で生活コストに月割り反映し、
+ * Journal では sourceEntryId / recognitionCreditAccountId を使って「固定資産 → 費用」の仮想行を見せる。
+ */
+export async function saveEntryWithFixedAssetMonthly(
+  entry: JournalEntry,
+  input: FixedAssetMonthlyInput,
+): Promise<MonthlyCostItem> {
+  await assertNotGeneratedEntry(entry.id);
+  await assertNotScheduleLinked(entry.id);
+  if (entry.metadata?.allocationId) throw new Error(GENERATED_ENTRY_MSG);
+  if (entry.metadata?.monthlyCostId) throw new Error(MONTHLY_COST_ENTRY_MSG);
+  await assertEntryTagsValid(entry);
+  await assertReserveSufficient(entry);
+
+  if (input.name.trim() === '') throw new Error('名称を入力してください。');
+  if (!Number.isInteger(input.amount) || input.amount <= 0)
+    throw new Error('金額は 1 以上の整数で入力してください。');
+  if (!Number.isInteger(input.costMonths) || input.costMonths < 1)
+    throw new Error('月数は 1 以上で入力してください。');
+  if (
+    input.repeatEveryMonths !== undefined &&
+    (!Number.isInteger(input.repeatEveryMonths) || input.repeatEveryMonths < input.costMonths)
+  )
+    throw new Error('更新周期は月数以上である必要があります。');
+
+  const accounts = await getAll<Account>(STORE.accounts);
+  const byId = new Map(accounts.map((a) => [a.id, a]));
+  const expense = byId.get(input.expenseAccountId);
+  if (!expense || expense.role !== 'expense-category')
+    throw new Error('月額化先の費用カテゴリを選んでください。');
+  const fixed = byId.get(input.recognitionCreditAccountId);
+  if (!fixed || fixed.role !== 'fixed-asset') throw new Error('固定資産の科目が不正です。');
+
+  const ts = nowIso();
+  const item: MonthlyCostItem = {
+    id: newId(),
+    name: input.name.trim(),
+    kind: input.kind,
+    amount: input.amount,
+    costMonths: input.costMonths,
+    ...(input.repeatEveryMonths !== undefined
+      ? { repeatEveryMonths: input.repeatEveryMonths }
+      : {}),
+    startMonth: input.startMonth,
+    expenseAccountId: input.expenseAccountId,
+    recognitionCreditAccountId: input.recognitionCreditAccountId,
+    sourceEntryId: entry.id,
+    status: 'active',
+    createdAt: ts,
+    updatedAt: ts,
+  };
+
+  await writeWithRevision([STORE.journalEntries, STORE.monthlyCostItems], (t) => {
+    t.objectStore(STORE.journalEntries).put(entry);
+    t.objectStore(STORE.monthlyCostItems).put(item);
+  });
+  return item;
+}
+
 /** 月額化コストの更新（編集・一時停止・終了）。 */
 export async function upsertMonthlyCost(item: MonthlyCostItem): Promise<void> {
   await writeWithRevision([STORE.monthlyCostItems], (t) => {

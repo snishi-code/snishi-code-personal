@@ -15,6 +15,7 @@ import {
   makeSnapshotId,
   postSchedule,
   resetAll,
+  saveEntryWithFixedAssetMonthly,
   saveSnapshot,
   updateSettings,
   upsertAccount,
@@ -23,6 +24,7 @@ import {
   upsertTag,
 } from '../src/data/repository';
 import { buildSimpleEntry } from '../src/domain/entry';
+import { monthlyCostForMonth } from '../src/domain/monthlyCost';
 import { buildExportPackage } from '../src/data/exportImport';
 import { getKv, putKv, runWrite, STORE } from '../src/data/db';
 import { SCHEMA_VERSION } from '../src/domain/constants';
@@ -894,6 +896,65 @@ describe('残高補正 createAdjustment', () => {
       actualBalance: 9000,
     });
     expect(entry?.date).toBe('2026-06-15');
+  });
+});
+
+describe('固定資産購入 + 月額化（saveEntryWithFixedAssetMonthly）', () => {
+  it('購入仕訳のみ保存・支払い仕訳は作らない / 月額化は formula で認識', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const carId = newId();
+    const catId = newId();
+    await upsertAccount({
+      id: carId,
+      name: '自動車',
+      type: 'asset',
+      role: 'fixed-asset',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    await upsertAccount({
+      id: catId,
+      name: '交通費',
+      type: 'expense',
+      role: 'expense-category',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    const before = (await loadLedger()).journalEntries.length;
+    // 借方 自動車(固定資産) / 貸方 現金 で 3,000,000 を購入。
+    const entry = buildSimpleEntry({
+      date: '2031-07-15',
+      description: '自動車購入',
+      debitAccountId: carId,
+      creditAccountId: cash.id,
+      amount: 3_000_000,
+      metadata: { inputMode: 'expense' },
+    });
+    const item = await saveEntryWithFixedAssetMonthly(entry, {
+      name: '自動車',
+      kind: 'durable-asset',
+      amount: 3_000_000,
+      costMonths: 120,
+      startMonth: '2031-07',
+      expenseAccountId: catId,
+      recognitionCreditAccountId: carId,
+    });
+
+    const after = await loadLedger();
+    // 購入仕訳 1 件だけ増える（支払い仕訳は作らない）。
+    expect(after.journalEntries.length).toBe(before + 1);
+    expect(after.journalEntries.filter((e) => e.metadata?.monthlyCostId)).toHaveLength(0);
+    // 月額化コストが 1 件でき、固定資産・購入仕訳に紐づく。
+    const saved = after.monthlyCostItems.find((m) => m.id === item.id)!;
+    expect(saved.recognitionCreditAccountId).toBe(carId);
+    expect(saved.sourceEntryId).toBe(entry.id);
+    expect(saved.paymentAccountId).toBeUndefined();
+    // 300万 / 120ヶ月 → 対象月 25,000 / 購入前月は 0。
+    expect(monthlyCostForMonth(saved, '2031-07')).toBe(25000);
+    expect(monthlyCostForMonth(saved, '2031-06')).toBe(0);
   });
 });
 
