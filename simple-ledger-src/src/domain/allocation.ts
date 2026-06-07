@@ -69,29 +69,6 @@ export interface AllocationInput {
   managementScopeId?: string;
 }
 
-export type AllocationValidationError =
-  | 'description-required'
-  | 'amount-invalid'
-  | 'months-invalid'
-  | 'expense-required'
-  | 'payment-required';
-
-export function validateAllocation(input: Partial<AllocationInput>): AllocationValidationError[] {
-  const errors: AllocationValidationError[] = [];
-  if (!input.description || input.description.trim() === '') errors.push('description-required');
-  if (
-    input.totalAmount === undefined ||
-    !Number.isInteger(input.totalAmount) ||
-    input.totalAmount <= 0
-  )
-    errors.push('amount-invalid');
-  if (input.months === undefined || !Number.isInteger(input.months) || input.months < 2)
-    errors.push('months-invalid');
-  if (!input.expenseAccountId) errors.push('expense-required');
-  if (!input.paymentAccountId) errors.push('payment-required');
-  return errors;
-}
-
 export interface BuiltAllocation {
   item: AllocationItem;
   sourceEntry: JournalEntry;
@@ -177,9 +154,4 @@ export function unrecognizedBalance(item: AllocationItem, currentYm: string): nu
   const amts = monthlyAmounts(item.totalAmount, item.months);
   const recognized = recognizedMonths(item, currentYm);
   return amts.slice(recognized).reduce((s, a) => s + a, 0);
-}
-
-/** 月額目安（先頭月の額。端数月は ±1 円）。 */
-export function monthlyAmount(item: AllocationItem): number {
-  return monthlyAmounts(item.totalAmount, item.months)[0] ?? 0;
 }
