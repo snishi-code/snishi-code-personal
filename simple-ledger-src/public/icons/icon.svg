@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="家計簿（芽）">
+  <rect width="512" height="512" rx="112" fill="#14b8a6" />
+  <!-- sprout: 個人カテゴリ代表アイコン（芽）。十字・宗教シンボルは避ける。 -->
+  <g fill="none" stroke="#ffffff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M256 392V236" />
+    <path d="M256 268c0-46-37-83-83-83-12 0-22 1-31 4-3 9-4 19-4 31 0 46 37 83 83 83 12 0 22-1 31-4 3-9 4-19 4-31z" />
+    <path d="M256 232c0-40 32-72 72-72 11 0 20 1 27 3 3 8 4 17 4 27 0 40-32 72-72 72-11 0-20-1-27-3-3-8-4-17-4-27z" />
+  </g>
+</svg>

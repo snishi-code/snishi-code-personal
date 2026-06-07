@@ -1,0 +1,21 @@
+{
+  "settings": { "ledgerName": "家計簿", "currency": "JPY", "locale": "ja" },
+  "accounts": [
+    { "name": "現金", "type": "asset", "role": "daily-asset" },
+    { "name": "預金", "type": "asset", "role": "daily-asset" },
+    { "name": "チャージ残高", "type": "asset", "role": "daily-asset" },
+    { "name": "投資", "type": "asset", "role": "investment-asset" },
+    { "name": "クレジットカード", "type": "liability", "role": "payment-liability" },
+    { "name": "開始残高", "type": "equity", "role": "equity" },
+    { "name": "給与", "type": "revenue", "role": "income-category" },
+    { "name": "その他収入", "type": "revenue", "role": "income-category" },
+    { "name": "固定費", "type": "expense", "role": "expense-category" },
+    { "name": "変動費", "type": "expense", "role": "expense-category" },
+    { "name": "健康", "type": "expense", "role": "expense-category" },
+    { "name": "交際費", "type": "expense", "role": "expense-category" },
+    { "name": "娯楽費", "type": "expense", "role": "expense-category" },
+    { "name": "税金", "type": "expense", "role": "expense-category" },
+    { "name": "経費", "type": "expense", "role": "expense-category" },
+    { "name": "その他支出", "type": "expense", "role": "expense-category" }
+  ]
+}

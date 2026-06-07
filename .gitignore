@@ -36,3 +36,12 @@ docs/*/images/
 
 # Claude Code session data
 .claude/
+
+# Agent handoff scratch space はリポ外（_agent-handoff/）が正だが、誤ってリポ内へ
+# コピーしてもコミットしないよう保険で除外する（指示書・作業報告・監査メモは push しない）。
+_agent-handoff/
+.agent-handoff/
+agent-handoff/
+current-task.md
+claude-report.md
+audit-note.md

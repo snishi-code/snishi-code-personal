@@ -1,0 +1,15 @@
+node_modules
+dist
+*.local
+.vite
+
+# TypeScript incremental build info (tsc -b の生成物)
+*.tsbuildinfo
+
+# Playwright
+playwright-report
+test-results
+/playwright/.cache
+
+# coverage
+coverage
