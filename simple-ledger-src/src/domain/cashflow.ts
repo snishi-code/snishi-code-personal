@@ -21,6 +21,11 @@ import type {
  * 返済予定（分割）を生成する。返済元 daily-asset → 負債（counter）への outflow を回数分。
  * 金額は monthlyAmounts で配分し、合計が total に一致する。初回返済日から毎月 1 件。
  * 借入実行（負債→資金）の振替と一緒に登録するのが主用途。
+ *
+ * 現状は **元本のみ** の単純配分（利息は考慮しない）。将来的に利息概念を入れる余地を残す:
+ *  - `total` を「総返済額（元本+利息）」とし、利息分を利息費用科目へ振り替える実績化に拡張する、
+ *    もしくは params に `interestAccountId` / `principalTotal` を足して各回を
+ *    `元本→負債 + 利息→費用` の複数行で表現する想定。今は呼び出し側が元本=total を渡す。
  */
 export function buildRepaymentSchedules(params: {
   title: string;

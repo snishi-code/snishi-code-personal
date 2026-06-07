@@ -1,12 +1,14 @@
 /*
- * 初期データ（家計簿向けの既定勘定科目）。
- * 旧 GAS の命名は引きずらない。すべて会計科目として再設計したもの。
+ * 初期データ（家計簿向けの既定勘定科目・既定設定）。
+ * 内容は初期設定 JSON（`./seed.json`）を正本とし、ここでは id / タイムスタンプなどの
+ * 実行時値を付与して組み立てる。旧 GAS の命名は引きずらない（会計科目として再設計）。
  */
 import { SCHEMA_VERSION } from '../domain/constants';
 import { newId } from '../domain/ids';
 import type { AccountRole } from '../domain/accountRoles';
 import type { Account, AccountType, LedgerMeta, Settings } from '../domain/types';
 import { nowIso } from '../util/time';
+import seed from './seed.json';
 
 interface SeedAccount {
   name: string;
@@ -14,24 +16,8 @@ interface SeedAccount {
   role: AccountRole;
 }
 
-const SEED_ACCOUNTS: SeedAccount[] = [
-  { name: '現金', type: 'asset', role: 'daily-asset' },
-  { name: '普通預金', type: 'asset', role: 'daily-asset' },
-  { name: 'クレジットカード（未払）', type: 'liability', role: 'payment-liability' },
-  { name: '元入金', type: 'equity', role: 'equity' },
-  { name: '給与収入', type: 'revenue', role: 'income-category' },
-  { name: 'その他収入', type: 'revenue', role: 'income-category' },
-  { name: '食費', type: 'expense', role: 'expense-category' },
-  { name: '日用品', type: 'expense', role: 'expense-category' },
-  { name: '住居費', type: 'expense', role: 'expense-category' },
-  { name: '水道光熱費', type: 'expense', role: 'expense-category' },
-  { name: '交通費', type: 'expense', role: 'expense-category' },
-  { name: '通信費', type: 'expense', role: 'expense-category' },
-  { name: '交際費', type: 'expense', role: 'expense-category' },
-  { name: '医療費', type: 'expense', role: 'expense-category' },
-  { name: '趣味・娯楽', type: 'expense', role: 'expense-category' },
-  { name: 'その他支出', type: 'expense', role: 'expense-category' },
-];
+// JSON は型が広く推論されるため、本ファイルの型へ寄せる（内容は seed.json が正本）。
+const SEED_ACCOUNTS = seed.accounts as SeedAccount[];
 
 export function defaultAccounts(): Account[] {
   const ts = nowIso();
@@ -47,7 +33,11 @@ export function defaultAccounts(): Account[] {
 }
 
 export function defaultSettings(): Settings {
-  return { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' };
+  return {
+    ledgerName: seed.settings.ledgerName,
+    currency: seed.settings.currency,
+    locale: 'ja',
+  };
 }
 
 export function newMeta(): LedgerMeta {

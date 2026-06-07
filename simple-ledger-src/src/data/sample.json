@@ -1,0 +1,104 @@
+{
+  "appId": "snishi-code.simple-ledger",
+  "schemaVersion": 10,
+  "ledgerId": "sample-ledger",
+  "exportedAt": "2026-01-01T00:00:00.000Z",
+  "deviceId": "sample-device",
+  "baseRevision": 0,
+  "currentRevision": 0,
+  "settings": { "ledgerName": "サンプル家計簿", "currency": "JPY", "locale": "ja" },
+  "accounts": [
+    {
+      "id": "acc-cash",
+      "name": "現金",
+      "type": "asset",
+      "role": "daily-asset",
+      "archived": false,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "acc-bank",
+      "name": "普通預金",
+      "type": "asset",
+      "role": "daily-asset",
+      "archived": false,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "acc-capital",
+      "name": "元入金",
+      "type": "equity",
+      "role": "equity",
+      "archived": false,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "acc-salary",
+      "name": "給与収入",
+      "type": "revenue",
+      "role": "income-category",
+      "archived": false,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "acc-food",
+      "name": "食費",
+      "type": "expense",
+      "role": "expense-category",
+      "archived": false,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "journalEntries": [
+    {
+      "id": "ent-opening",
+      "date": "2026-01-01",
+      "description": "初期残高",
+      "kind": "opening",
+      "lines": [
+        { "accountId": "acc-bank", "side": "debit", "amount": 500000 },
+        { "accountId": "acc-capital", "side": "credit", "amount": 500000 }
+      ],
+      "metadata": { "inputMode": "manual" },
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "ent-salary",
+      "date": "2026-01-25",
+      "description": "給与",
+      "kind": "normal",
+      "lines": [
+        { "accountId": "acc-bank", "side": "debit", "amount": 300000 },
+        { "accountId": "acc-salary", "side": "credit", "amount": 300000 }
+      ],
+      "metadata": { "inputMode": "income" },
+      "createdAt": "2026-01-25T00:00:00.000Z",
+      "updatedAt": "2026-01-25T00:00:00.000Z"
+    },
+    {
+      "id": "ent-food",
+      "date": "2026-01-26",
+      "description": "スーパー",
+      "kind": "normal",
+      "lines": [
+        { "accountId": "acc-food", "side": "debit", "amount": 2500 },
+        { "accountId": "acc-cash", "side": "credit", "amount": 2500 }
+      ],
+      "metadata": { "inputMode": "expense" },
+      "createdAt": "2026-01-26T00:00:00.000Z",
+      "updatedAt": "2026-01-26T00:00:00.000Z"
+    }
+  ],
+  "allocations": [],
+  "cashflowSchedules": [],
+  "reserves": [],
+  "tags": [],
+  "monthlyCostItems": [],
+  "fundingGoals": []
+}

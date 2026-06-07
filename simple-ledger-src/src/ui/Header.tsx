@@ -1,7 +1,8 @@
 /*
  * ヘッダー: 左=ホーム / 中央=期間ボタン（押すと期間メニュー）/ 右=≡(メニュー)。
- * 中央は選択中の期間ラベル（2026年6月 / 2026年 / 全期間）を表示し、台帳名を副題に出す。
+ * 中央は選択中の期間ラベル（2026年6月 / 2026年 / 全期間）を表示する。
  * 入力導線はホームの 収入/支出/振替 に集約し、ヘッダーに + は置かない。
+ * 台帳名はヘッダーに出さない（設定で編集・export 名に使う）。
  */
 import { Icon } from './Icon';
 import { t } from '../i18n';
@@ -9,13 +10,11 @@ import { UI } from '../ui-contract';
 import { periodLabel, type ReportPeriod } from '../domain/reportPeriod';
 
 export function Header({
-  ledgerName,
   period,
   onHome,
   onOpenPeriod,
   onMenu,
 }: {
-  ledgerName: string;
   period: ReportPeriod;
   onHome: () => void;
   onOpenPeriod: () => void;
@@ -43,7 +42,6 @@ export function Header({
         >
           <span className="app-header__period-text">
             <span className="app-header__name">{periodLabel(period)}</span>
-            <span className="app-header__sub">{ledgerName}</span>
           </span>
           <Icon name="chevronDown" size={14} />
         </button>

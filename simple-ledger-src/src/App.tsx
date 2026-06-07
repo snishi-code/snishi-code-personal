@@ -98,7 +98,6 @@ export function App() {
         {t('common.home')}
       </a>
       <Header
-        ledgerName={ledger.settings.ledgerName}
         period={period}
         onHome={() => setScreen('dashboard')}
         onOpenPeriod={() => setPeriodMenuOpen(true)}
