@@ -30,6 +30,19 @@ dev・main 保護 / ドキュメント原則）を上書きしない。
 - `claude-report.md`: Claude の作業報告。
 - `audit-note.md`: Codex の監査メモ。
 
+## 現況ファイル
+
+セッション横断の現況は、必要に応じて以下に置く。
+
+- `/Users/onishi/workspace/_agent-handoff/CURRENT_STATE.md`
+
+このファイルは、現在の作業状態・直近監査・未整理論点・一時的な運用許可を引き継ぐためのもの。
+恒久ルールの正本ではない（正本は `AGENTS.md` / `CLAUDE.md` / 本書）。リポジトリ内ドキュメントと
+衝突する場合・古い場合・存在しない場合は、仮定で進めず人間に確認する。
+
+Claude / Codex は新規セッション開始時、存在すればこのファイルを読む。タスク固有の実装は、人間が
+指定した task folder の `current-task.md` を優先する。
+
 ## Claude に渡す filesystem root
 
 原則として以下だけを渡す。
