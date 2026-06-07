@@ -329,6 +329,19 @@ describe('予定キャッシュフロー / 目的別資金', () => {
     expect(acc.type).toBe('asset');
     expect(acc.name).toBe('結婚資金');
   });
+
+  it('目的別資金に任意の目標額・目標日を持たせられる（資金目標を統合）', async () => {
+    await loadLedger();
+    const r = await createReserve({
+      name: '車買い替え',
+      targetAmount: 1500000,
+      targetDate: '2030-04-30',
+    });
+    const after = await loadLedger();
+    const saved = after.reserves.find((x) => x.id === r.id)!;
+    expect(saved.targetAmount).toBe(1500000);
+    expect(saved.targetDate).toBe('2030-04-30');
+  });
 });
 
 describe('予定CF・目的別資金が参照する科目の保護', () => {

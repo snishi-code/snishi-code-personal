@@ -78,6 +78,15 @@ export const UI = {
       // 固定資産購入の月額化
       fixedMonthlyToggle: 'journal.entry.fixedMonthlyToggle',
       fixedMonthlyCategory: 'journal.entry.fixedMonthlyCategory',
+      // 目的別資金（reserve-asset）を支出/振替の候補に出す・その場で作る
+      reserveToggle: 'journal.entry.reserveToggle',
+      reserveCreate: 'journal.entry.reserveCreate',
+      // 負債（payment/other-liability）を候補に出す・その場で作る
+      liabilityToggle: 'journal.entry.liabilityToggle',
+      liabilityCreate: 'journal.entry.liabilityCreate',
+      liabilityCreateName: 'journal.entry.liabilityCreate.name',
+      liabilityCreateRole: 'journal.entry.liabilityCreate.role',
+      liabilityCreateSave: 'journal.entry.liabilityCreate.save',
       date: 'journal.entry.date',
       description: 'journal.entry.description',
       item: 'journal.entry.item',
@@ -135,6 +144,8 @@ export const UI = {
   },
   cashflow: {
     view: 'cashflow.view',
+    // 表示終了日（任意日付まで投影する）
+    until: 'cashflow.until',
     addSchedule: 'cashflow.schedule.create',
     list: 'cashflow.schedule.list',
     scheduleSave: 'cashflow.schedule.save',
@@ -161,6 +172,8 @@ export const UI = {
     reserveList: 'cashflow.reserve.list',
     reserveSave: 'cashflow.reserve.save',
     reserveName: 'cashflow.reserve.name',
+    reserveTarget: 'cashflow.reserve.target',
+    reserveDate: 'cashflow.reserve.date',
     // 資金目標
     addGoal: 'cashflow.goal.create',
     goalList: 'cashflow.goal.list',

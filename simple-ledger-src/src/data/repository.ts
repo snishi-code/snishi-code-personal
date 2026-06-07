@@ -470,6 +470,7 @@ export async function deleteReserve(id: string): Promise<void> {
 export async function createReserve(input: {
   name: string;
   targetAmount?: number;
+  targetDate?: string;
   note?: string;
   existingAccountId?: string;
 }): Promise<ReserveItem> {
@@ -493,6 +494,7 @@ export async function createReserve(input: {
     name: input.name,
     reserveAccountId: accountId,
     ...(input.targetAmount !== undefined ? { targetAmount: input.targetAmount } : {}),
+    ...(input.targetDate !== undefined ? { targetDate: input.targetDate } : {}),
     ...(input.note && input.note.trim() !== '' ? { note: input.note.trim() } : {}),
     createdAt: ts,
     updatedAt: ts,

@@ -11,6 +11,7 @@ import type {
   FundingGoal,
   Ledger,
   MonthlyCostItem,
+  ReserveItem,
   Settings,
   Snapshot,
   Tag,
@@ -60,12 +61,14 @@ interface LedgerContextValue {
   saveSchedules: (schedules: CashflowSchedule[]) => Promise<void>;
   postSchedule: (id: string) => Promise<void>;
   removeSchedule: (id: string) => Promise<void>;
+  /** 目的別資金（枠 + reserve-asset 科目）を作成し、作成された ReserveItem を返す。 */
   createReserve: (input: {
     name: string;
     targetAmount?: number;
+    targetDate?: string;
     note?: string;
     existingAccountId?: string;
-  }) => Promise<void>;
+  }) => Promise<ReserveItem>;
   removeReserve: (id: string) => Promise<void>;
   saveTag: (tag: Tag) => Promise<void>;
   removeTag: (id: string) => Promise<void>;
@@ -327,9 +330,10 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const createReserve = useCallback<LedgerContextValue['createReserve']>(
     async (input) => {
       try {
-        await repo.createReserve(input);
+        const reserve = await repo.createReserve(input);
         await refresh();
         toast.show(t('toast.saved'), 'success');
+        return reserve;
       } catch (e) {
         toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
         throw e;

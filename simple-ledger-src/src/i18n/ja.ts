@@ -137,19 +137,19 @@ export const ja = {
     '将来の入出金予定から、自由資金の推移を見ます。予定は「実績化」すると仕訳になります。',
   'cashflow.liquidNote':
     '総資金は現金・預金・取り置きなどの流動資金です（投資・固定資産・按分中資産は含めません）。',
-  'cashflow.horizon': '表示期間',
-  'cashflow.months': '{count}か月',
+  'cashflow.until': '表示終了日',
+  'cashflow.untilHint': '今日からこの日までの入出金予定を投影します。',
   'cashflow.totalFunds': '総資金',
   'cashflow.reserved': '取り置き',
   'cashflow.freeFunds': '自由資金',
   'cashflow.minFree': '期間内の最低自由資金',
   'cashflow.depleteWarning': 'この期間に自由資金がマイナスになる予定があります。',
   'cashflow.planned': '今後の支払い予定',
-  'cashflow.emptyPlanned': '予定はありません。「予定を追加」から登録できます。',
+  'cashflow.emptyPlanned':
+    '分割・定期の返済予定はありません。ホームの支出・振替（借入の分割返済）から自動で作られます。',
   'cashflow.liabilitiesTitle': '負債・分割払い',
   'cashflow.nextDue': '次回支払日',
   'cashflow.installmentsLeft': '残り {count} 回',
-  'cashflow.addSchedule': '予定を追加',
   'cashflow.post': '実績化',
   'cashflow.postNeedsCounter': '相手科目を設定すると実績化できます。',
   'cashflow.deleteSchedule': '削除',
@@ -207,12 +207,26 @@ export const ja = {
   'reserves.name': '名称',
   'reserves.namePlaceholder': '例: プロポーズ資金',
   'reserves.target': '目標額（任意）',
+  'reserves.targetDate': '目標期限（任意）',
+  'reserves.targetDateHint': '目標額と併せて入れると、必要な毎月の積立額の目安を出します。',
   'reserves.note': 'メモ',
   'reserves.balance': '現在残高',
   'reserves.targetOf': '目標 {target}',
+  'reserves.requiredMonthly': '必要な毎月の積立額',
   'reserves.delete': '削除',
   'reserves.form.title': '目的別資金',
   'reserves.error.name': '名称を入力してください。',
+
+  // 負債の新規作成（支出の支払い方法 / 振替の源泉・行き先から）
+  'liability.form.title': '新しい負債を作る',
+  'liability.form.intro':
+    'カードの未払やローンなどの負債科目を作ります。残高や返済は通常の入力（振替・支出）で動かします。',
+  'liability.name': '名称',
+  'liability.namePlaceholder': '例: 楽天カード未払 / 自動車ローン',
+  'liability.kind': '種類',
+  'liability.role.card': 'カード等の支払用未払',
+  'liability.role.loan': '借入・ローン',
+  'liability.error.name': '名称を入力してください。',
   'reserves.deleteConfirmTitle': '目的別資金の枠を削除しますか？',
   'reserves.deleteConfirmBody':
     '「{name}」の枠を削除します。取り置いた資金や仕訳は残ります（科目は残ります）。',
@@ -222,7 +236,10 @@ export const ja = {
   'fundingGoal.intro':
     '将来の大きな支出（車・老後・入院費など）に向けて、目標額・期限から必要な毎月の積立額を見ます。',
   'fundingGoal.add': '目標を追加',
-  'fundingGoal.empty': '資金目標はありません。「目標を追加」から作成できます。',
+  'fundingGoal.empty':
+    '資金目標はありません。新しい目標は「目的別資金」に目標額・目標期限を付けて作成します。',
+  'fundingGoal.legacyHint':
+    '以前の「資金目標」です。新規は目的別資金に統合しました（目的別資金に目標額・目標期限を付けてください）。ここでは確認と削除のみできます。',
   'fundingGoal.target': '目標',
   'fundingGoal.current': '現在',
   'fundingGoal.requiredMonthly': '必要な毎月の積立額',
@@ -405,6 +422,11 @@ export const ja = {
   'entry.error.category-required': '費用カテゴリを選んでください。',
   'entry.monthlyizeNote':
     '実際の支払いは仕訳に残し、生活コストは月あたりで見ます（月割りで導出・二重計上しません）。負債払いで返済を入力すると、返済予定（資金繰り）も作ります。',
+  // 目的別資金・負債は既定で候補に出さない。必要時だけトグルで表示し、その場で作れる。
+  'entry.reserveToggle': '目的別資金を使う',
+  'entry.reserveCreate': '目的別資金を作成',
+  'entry.liabilityToggle': '負債（カード・ローン）を使う',
+  'entry.liabilityCreate': '新しい負債を作る',
 
   'journal.reverse': '取消/返金',
   'journal.reverseAction': '取消/返金を記録',

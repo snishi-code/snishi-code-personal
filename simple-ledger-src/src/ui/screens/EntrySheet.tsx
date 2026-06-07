@@ -14,7 +14,10 @@ import { useDirtyGuard } from '../useDirtyGuard';
 import { TextArea, TextInput } from '../Field';
 import { AccountPicker } from '../AccountPicker';
 import { TagPicker } from '../TagPicker';
+import { ReserveSheet } from '../ReserveSheet';
+import { LiabilitySheet } from '../LiabilitySheet';
 import { groupedAccountsByRole } from '../accountOptions';
+import type { AccountRole } from '../../domain/accountRoles';
 import { tagsForScope } from '../tagOptions';
 import {
   FORM_MODE_TITLE,
@@ -79,6 +82,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     saveEntryWithSchedules,
     saveEntryWithFixedAssetMonthly,
     createMonthlyCost,
+    createReserve,
+    saveAccount,
   } = useLedger();
   const accounts = ledger?.accounts ?? [];
   const tags = ledger?.tags ?? [];
@@ -138,6 +143,20 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     (paymentRole === 'payment-liability' || paymentRole === 'other-liability');
   // 詳細（メモ・タグ）は折りたたみ。編集時は既存値が見えるよう開いておく。
   const [showDetails, setShowDetails] = useState(init.kind === 'edit');
+
+  // 支出/振替で目的別資金・負債は既定で候補に出さない。必要時だけトグルで表示し、その場で作る。
+  // 編集時に既選択が reserve/liability なら初期表示（includeId で常に見えるが状態も合わせる）。
+  const roleOf = (id: string) => accounts.find((a) => a.id === id)?.role;
+  const [showReserve, setShowReserve] = useState(() =>
+    [form.creditAccountId, form.debitAccountId].map(roleOf).includes('reserve-asset'),
+  );
+  const [showLiability, setShowLiability] = useState(() =>
+    [form.creditAccountId, form.debitAccountId]
+      .map(roleOf)
+      .some((r) => r === 'payment-liability' || r === 'other-liability'),
+  );
+  const [reserveSheetOpen, setReserveSheetOpen] = useState(false);
+  const [liabilitySheetOpen, setLiabilitySheetOpen] = useState(false);
 
   // 編集状態の検出: 入力フィールドのスナップショットを初期値と比較する。
   const snapshot = JSON.stringify({
@@ -382,14 +401,21 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const flowDef = isManual ? null : MODE_FLOW[mode as FlowMode];
   const renderFlow = () => {
     if (!flowDef) return null;
+    // トグルで明示したときだけ目的別資金・負債を候補に足す（既選択は includeId で常に表示）。
+    const extras: AccountRole[] = [];
+    if (showReserve) extras.push('reserve-asset');
+    if (showLiability) extras.push('payment-liability', 'other-liability');
+    // 支出は支払い方法(source)のみ拡張。振替は源泉/行き先の両方を拡張。
+    const srcExtra = mode === 'expense' || mode === 'transfer' ? extras : [];
+    const dstExtra = mode === 'transfer' ? extras : [];
     const srcGroups = groupedAccountsByRole(
       accounts,
-      [...flowDef.source.allowedRoles],
+      [...flowDef.source.allowedRoles, ...srcExtra],
       form.creditAccountId,
     );
     const dstGroups = groupedAccountsByRole(
       accounts,
-      [...flowDef.destination.allowedRoles],
+      [...flowDef.destination.allowedRoles, ...dstExtra],
       form.debitAccountId,
     );
     return (
@@ -650,6 +676,76 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     </div>
   ) : null;
 
+  // 支出/振替で、目的別資金・負債を候補に出すトグルと、その場で作る導線。
+  // 既定では daily-asset 中心。目的別資金が増えても通常入力を軽く保つ。
+  const flowExtras =
+    mode === 'expense' || mode === 'transfer' ? (
+      <div className="field stack" style={{ gap: 'var(--space-2)' }}>
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}
+        >
+          <label
+            style={{
+              display: 'inline-flex',
+              gap: 8,
+              alignItems: 'center',
+              minHeight: 'var(--tap)',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={showReserve}
+              onChange={(e) => setShowReserve(e.target.checked)}
+              data-ui={UI.journal.entry.reserveToggle}
+            />
+            {t('entry.reserveToggle')}
+          </label>
+          {mode === 'transfer' ? (
+            <button
+              type="button"
+              className="btn btn--ghost"
+              style={{ minHeight: 36 }}
+              onClick={() => setReserveSheetOpen(true)}
+              data-ui={UI.journal.entry.reserveCreate}
+            >
+              <Icon name="plus" size={16} />
+              {t('entry.reserveCreate')}
+            </button>
+          ) : null}
+        </div>
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}
+        >
+          <label
+            style={{
+              display: 'inline-flex',
+              gap: 8,
+              alignItems: 'center',
+              minHeight: 'var(--tap)',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={showLiability}
+              onChange={(e) => setShowLiability(e.target.checked)}
+              data-ui={UI.journal.entry.liabilityToggle}
+            />
+            {t('entry.liabilityToggle')}
+          </label>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            style={{ minHeight: 36 }}
+            onClick={() => setLiabilitySheetOpen(true)}
+            data-ui={UI.journal.entry.liabilityCreate}
+          >
+            <Icon name="plus" size={16} />
+            {t('entry.liabilityCreate')}
+          </button>
+        </div>
+      </div>
+    ) : null;
+
   const manualSwitch =
     init.kind === 'create' && mode !== 'manual' && !allocate ? (
       <button
@@ -732,6 +828,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             {mode === 'transfer' ? null : itemField}
             {amountField}
             {renderFlow()}
+            {flowExtras}
             {allocateField}
             {fixedMonthlyField}
             {repaymentField}
@@ -768,6 +865,31 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         )}
       </Modal>
       {discardConfirm}
+
+      {/* 入力を中断せず、目的別資金（振替の行き先）を作って選択する。 */}
+      {reserveSheetOpen ? (
+        <ReserveSheet
+          onClose={() => setReserveSheetOpen(false)}
+          onSave={async (input) => {
+            const reserve = await createReserve(input);
+            setSide('debit', reserve.reserveAccountId);
+            setShowReserve(true);
+          }}
+        />
+      ) : null}
+
+      {/* 入力を中断せず、新しい負債（支払い方法 / 借入の源泉）を作って選択する。 */}
+      {liabilitySheetOpen ? (
+        <LiabilitySheet
+          defaultRole={mode === 'expense' ? 'payment-liability' : 'other-liability'}
+          onClose={() => setLiabilitySheetOpen(false)}
+          onSave={async (account) => {
+            await saveAccount(account);
+            setSide('credit', account.id);
+            setShowLiability(true);
+          }}
+        />
+      ) : null}
     </>
   );
 }

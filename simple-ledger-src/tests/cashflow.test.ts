@@ -296,6 +296,47 @@ describe('horizonEnd', () => {
   });
 });
 
+describe('projectCashflow（表示終了日 untilDate）', () => {
+  const today = '2026-06-15';
+  it('untilDate までの予定だけを取り込む（境界含む）', () => {
+    const proj = projectCashflow({
+      totalAssets: 100000,
+      reserveBalance: 0,
+      schedules: [
+        sched({ id: 'a', dueDate: '2026-07-31', amount: 10000, direction: 'outflow' }),
+        sched({ id: 'b', dueDate: '2026-08-01', amount: 20000, direction: 'outflow' }),
+      ],
+      today,
+      untilDate: '2026-07-31',
+    });
+    // 7-31 は含み、8-01 は範囲外。
+    expect(proj.schedules.map((s) => s.id)).toEqual(['a']);
+    expect(proj.points.at(-1)?.free).toBe(90000);
+  });
+  it('untilDate は months より優先される', () => {
+    const proj = projectCashflow({
+      totalAssets: 100000,
+      reserveBalance: 0,
+      schedules: [sched({ dueDate: '2027-01-10', amount: 5000, direction: 'outflow' })],
+      today,
+      months: 3, // この月数だと 2027-01 は範囲外だが、untilDate で含める。
+      untilDate: '2027-03-31',
+    });
+    expect(proj.schedules).toHaveLength(1);
+    expect(proj.points.at(-1)?.free).toBe(95000);
+  });
+  it('未指定なら既定 6 か月で投影する', () => {
+    const proj = projectCashflow({
+      totalAssets: 100000,
+      reserveBalance: 0,
+      schedules: [sched({ dueDate: '2026-09-10', amount: 1000, direction: 'outflow' })],
+      today,
+    });
+    // 既定 6 か月（2026-12-31 まで）に含まれる。
+    expect(proj.schedules).toHaveLength(1);
+  });
+});
+
 describe('liquidAssetTotal', () => {
   it('除外指定した資産（按分中資産など）を総資金から外す', () => {
     const assets = [bal('cash', 100000), bal('bank', 50000), bal('def', 30000)];

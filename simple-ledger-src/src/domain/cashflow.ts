@@ -185,17 +185,22 @@ export interface FutureCashEvent {
  *
  * futureEvents は「未来日付仕訳（date > today）の現金デルタ」。startTotal は today 時点の残高なので、
  * 未来仕訳はまだ含まれておらず、予定 CF と二重計上にならない（予定は status==='planned' で未実績）。
+ *
+ * 終端は `untilDate`（表示終了日）を指定すればそこまで、無ければ `months` ぶん先（既定 6 か月）。
  */
 export function projectCashflow(params: {
   totalAssets: number;
   reserveBalance: number;
   schedules: CashflowSchedule[];
   today: string;
-  months: number;
+  /** 月数ぶん先を終端にする（後方互換）。`untilDate` 指定時は無視される。 */
+  months?: number;
+  /** 表示終了日 'YYYY-MM-DD'。指定時はこの日までを投影する（months より優先）。 */
+  untilDate?: string;
   futureEvents?: FutureCashEvent[];
 }): CashflowProjection {
-  const { totalAssets, reserveBalance, schedules, today, months, futureEvents = [] } = params;
-  const end = horizonEnd(today, months);
+  const { totalAssets, reserveBalance, schedules, today, futureEvents = [] } = params;
+  const end = params.untilDate ?? horizonEnd(today, params.months ?? 6);
   const planned = schedules
     .filter((s) => s.status === 'planned' && s.dueDate >= today && s.dueDate <= end)
     .slice()

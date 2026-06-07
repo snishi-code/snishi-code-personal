@@ -272,7 +272,11 @@ export interface FundingGoal {
   updatedAt: string;
 }
 
-/** 目的別資金（取り置き）。自由資金から除外して見るための asset 科目の目印。 */
+/**
+ * 目的別資金（取り置き）。自由資金から除外して見るための asset 科目の目印。
+ * 任意で「目標額・目標日」を持つ（資金目標を統合した枠）。現在額は reserveAccountId の残高から
+ * 自動計算する（手入力しない）。
+ */
 export interface ReserveItem {
   id: string;
   name: string;
@@ -280,6 +284,8 @@ export interface ReserveItem {
   reserveAccountId: string;
   /** 目標額（任意）。 */
   targetAmount?: number;
+  /** 目標期限 'YYYY-MM-DD'（任意）。targetAmount と併せて必要な毎月の積立額を出す。 */
+  targetDate?: string;
   note?: string;
   createdAt: string;
   updatedAt: string;

@@ -144,6 +144,7 @@ export const reserveItemSchema = z.object({
   name: z.string().min(1).max(120),
   reserveAccountId: z.string().min(1),
   targetAmount: amountSchema.optional(),
+  targetDate: isoDate.optional(),
   note: z.string().max(500).optional(),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,

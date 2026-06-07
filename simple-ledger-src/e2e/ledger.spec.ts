@@ -138,6 +138,91 @@ test('資金繰り: 目的別資金を作成できる（CF は確認専用・予
   await expect(page.locator(ui('cashflow.reserve.list'))).toContainText('結婚資金');
 });
 
+/** 今日から days 日後の 'YYYY-MM-DD'。 */
+function isoOffset(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+test('資金繰り: 表示終了日を変えると未来予定の範囲が変わる', async ({ page }) => {
+  await page.goto('./');
+  // 未来日付（約100日後）の支出を登録（使い道=食費 / 支払い方法=現金）
+  await page.locator(ui('dashboard.entry.expense')).click();
+  await page.locator(ui('journal.entry.item')).fill('未来の支払い');
+  await page.locator(ui('journal.entry.date')).fill(isoOffset(100));
+  await pick(page, 'journal.entry.flow.destination', '食費');
+  await pick(page, 'journal.entry.flow.source', '現金');
+  await page.locator(ui('journal.entry.amount')).fill('5000');
+  await page.locator(ui('journal.entry.save')).click();
+
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.cashflow')).click();
+  // 既定の表示終了日（今日+6か月）には 100日後が含まれる
+  await expect(page.locator(ui('cashflow.future.list'))).toContainText('未来の支払い');
+
+  // 表示終了日を 30日後に縮めると範囲外になり、未来予定一覧から消える
+  await page.locator(ui('cashflow.until')).fill(isoOffset(30));
+  await expect(page.locator(ui('cashflow.future.list'))).toHaveCount(0);
+});
+
+test('振替入力から目的別資金を作成し、行き先に選べる', async ({ page }) => {
+  await page.goto('./');
+  await page.locator(ui('dashboard.entry.transfer')).click();
+  // 入力を中断せず目的別資金を作る → 行き先に自動選択される
+  await page.locator(ui('journal.entry.reserveCreate')).click();
+  await page.locator(ui('cashflow.reserve.name')).fill('新婚旅行');
+  await page.locator(ui('cashflow.reserve.save')).click();
+
+  await pick(page, 'journal.entry.flow.source', '普通預金');
+  await page.locator(ui('journal.entry.amount')).fill('100000');
+  await page.locator(ui('journal.entry.save')).click();
+
+  await openJournal(page);
+  await expect(page.locator(ui('journal.entry.list'))).toContainText('普通預金 → 新婚旅行');
+});
+
+test('目的別資金は支出の支払い方法に既定で出ず、トグルで出る', async ({ page }) => {
+  await page.goto('./');
+  // 先に目的別資金を作る（CF 補助セクション）
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.cashflow')).click();
+  await page.locator(ui('cashflow.advanced.toggle')).click();
+  await page.locator(ui('cashflow.reserve.create')).click();
+  await page.locator(ui('cashflow.reserve.name')).fill('旅行積立');
+  await page.locator(ui('cashflow.reserve.save')).click();
+
+  // 支出の支払い方法（source）には既定で出ない
+  await page.locator(ui('nav.home')).click();
+  await page.locator(ui('dashboard.entry.expense')).click();
+  await expect(page.locator(ui('journal.entry.flow.source'))).not.toContainText('旅行積立');
+  // 「目的別資金を使う」トグルで出る
+  await page.locator(ui('journal.entry.reserveToggle')).check();
+  await expect(page.locator(ui('journal.entry.flow.source'))).toContainText('旅行積立');
+});
+
+test('入力中に新しい負債（ローン）を作り、分割返済が資金繰りに出る', async ({ page }) => {
+  await page.goto('./');
+  await page.locator(ui('dashboard.entry.transfer')).click();
+  // 新しい負債（ローン=other-liability）を作る → 源泉（移動元）に選択 = 借入実行
+  await page.locator(ui('journal.entry.liabilityCreate')).click();
+  await page.locator(ui('journal.entry.liabilityCreate.name')).fill('自動車ローン');
+  await page.locator(ui('journal.entry.liabilityCreate.save')).click();
+
+  await pick(page, 'journal.entry.flow.destination', '普通預金');
+  await page.locator(ui('journal.entry.amount')).fill('1200000');
+  // 分割返済を資金繰りに入れる（返済元=普通預金 / 12回）
+  await page.locator(ui('journal.entry.loanRepayToggle')).locator('input').check();
+  await pick(page, 'journal.entry.loanRepayAccount', '普通預金');
+  await page.locator(ui('journal.entry.loanRepayCount')).fill('12');
+  await page.locator(ui('journal.entry.save')).click();
+
+  // CF の「分割・定期の返済予定」に出る
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.cashflow')).click();
+  await expect(page.locator(ui('cashflow.schedule.list'))).toContainText('自動車ローン');
+});
+
 test('タグ: 作成 → 支出に付与 → Journal で抽出できる', async ({ page }) => {
   await page.goto('./');
 

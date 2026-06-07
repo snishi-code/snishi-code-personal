@@ -1,47 +1,33 @@
 /*
- * 資金繰り（将来CF）。planned な予定から自由資金の推移・最低残高を投影し、
- * 予定の追加・実績化・削除、目的別資金（取り置き枠）の管理を行う。
+ * 資金繰り（将来CF）。planned な予定・未来日付の仕訳から自由資金の推移・最低残高を投影し、
+ * 目的別資金（取り置き枠）の管理を行う。入力はホームに一本化し、この画面は確認専用。
  * 「いつ費用認識するか(按分)」とは別概念で、「いつ現金が動くか」を扱う。
+ *
+ * 表示終了日（任意の日付）まで投影する。目的別資金は「資金目標」を統合した枠で、任意の
+ * 目標額・目標日から必要な毎月の積立額を出す（現在額は口座残高から自動）。
  */
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useLedger } from '../../state/store';
-import { useDirtyGuard } from '../useDirtyGuard';
 import { deriveBalanceSheet } from '../../domain/accounting';
-import {
-  cashDeltaOfEntry,
-  horizonEnd,
-  liquidAssetTotal,
-  projectCashflow,
-} from '../../domain/cashflow';
-import { goalRequiredMonthly } from '../../domain/fundingGoal';
+import { cashDeltaOfEntry, liquidAssetTotal, projectCashflow } from '../../domain/cashflow';
+import { goalRequiredMonthly, reserveRequiredMonthly } from '../../domain/fundingGoal';
+import { addMonthsToDate } from '../../domain/allocation';
 import { currentYearMonth, todayLocal } from '../../util/time';
-import type { Account, CashflowSchedule, FundingGoal, ReserveItem } from '../../domain/types';
-import type { FundingGoalInput } from '../../data/repository';
-import { Modal } from '../Modal';
-import { AccountPicker } from '../AccountPicker';
-import { TextArea, TextInput } from '../Field';
-import { groupedAccountsByRole } from '../accountOptions';
+import type { CashflowSchedule, FundingGoal, ReserveItem } from '../../domain/types';
+import { TextInput } from '../Field';
+import { ReserveSheet } from '../ReserveSheet';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { Money } from '../money';
 import { Icon } from '../Icon';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 
-const HORIZONS = [3, 6, 12, 24];
-
 export function Cashflow() {
-  const {
-    ledger,
-    postSchedule,
-    removeSchedule,
-    createReserve,
-    removeReserve,
-    createFundingGoal,
-    removeFundingGoal,
-  } = useLedger();
-  const [horizon, setHorizon] = useState(6);
+  const { ledger, postSchedule, removeSchedule, createReserve, removeReserve, removeFundingGoal } =
+    useLedger();
+  const today = todayLocal();
+  const [untilDate, setUntilDate] = useState(() => addMonthsToDate(todayLocal(), 6));
   const [reserveOpen, setReserveOpen] = useState(false);
-  const [goalOpen, setGoalOpen] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [pendingSchedule, setPendingSchedule] = useState<CashflowSchedule | null>(null);
   const [pendingReserve, setPendingReserve] = useState<ReserveItem | null>(null);
@@ -53,7 +39,6 @@ export function Cashflow() {
   const goals = ledger?.fundingGoals ?? [];
 
   const currency = ledger?.settings.currency ?? 'JPY';
-  const today = todayLocal();
 
   const { projection, balById, liabBalById, futureRows } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
@@ -79,7 +64,7 @@ export function Cashflow() {
     const reserveBalance = reserves.reduce((s, r) => s + (byId.get(r.reserveAccountId) ?? 0), 0);
     // 未来日付（date > today）の仕訳で現金が動くもの = CF に取り込む（ホーム入力が自然に反映される）。
     // delta=投影用の現金純増減（振替は 0）、amount=一覧表示用の取引金額（借方合計）。
-    const end = horizonEnd(today, horizon);
+    const end = untilDate;
     const future = entries
       .filter((e) => e.date > today && e.date <= end && e.lines.some((l) => isLiquid(l.accountId)))
       .map((e) => ({
@@ -99,11 +84,11 @@ export function Cashflow() {
         reserveBalance,
         schedules,
         today,
-        months: horizon,
+        untilDate: end,
         futureEvents: future.map((f) => ({ date: f.date, amount: f.delta })),
       }),
     };
-  }, [ledger, horizon, today]);
+  }, [ledger, untilDate, today]);
 
   const accountName = (id: string): string =>
     (ledger?.accounts ?? []).find((a) => a.id === id)?.name ?? '—';
@@ -144,27 +129,20 @@ export function Cashflow() {
         {t('cashflow.intro')}
       </p>
 
-      <div
-        className="segmented"
-        role="tablist"
-        aria-label={t('cashflow.horizon')}
-        style={{ marginBottom: 'var(--space-4)' }}
-      >
-        {HORIZONS.map((h) => (
-          <button
-            key={h}
-            type="button"
-            role="tab"
-            aria-selected={horizon === h}
-            className="segmented__btn"
-            onClick={() => setHorizon(h)}
-          >
-            {t('cashflow.months', { count: h })}
-          </button>
-        ))}
-      </div>
+      <TextInput
+        label={t('cashflow.until')}
+        type="date"
+        value={untilDate}
+        hint={t('cashflow.untilHint')}
+        onChange={setUntilDate}
+        dataUi={UI.cashflow.until}
+      />
 
-      <div className="stat-grid" data-ui={UI.cashflow.summary}>
+      <div
+        className="stat-grid"
+        data-ui={UI.cashflow.summary}
+        style={{ marginTop: 'var(--space-3)' }}
+      >
         <div className="stat">
           <span className="stat__label">{t('cashflow.totalFunds')}</span>
           <span className="stat__value">
@@ -378,7 +356,7 @@ export function Cashflow() {
         <div className="stack">
           <p className="field__hint">{t('cashflow.advancedHint')}</p>
 
-          {/* 目的別資金 */}
+          {/* 目的別資金（任意で目標額・目標日。現在額は口座残高から自動・必要月額を表示） */}
           <div
             className="section-label"
             style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
@@ -399,96 +377,87 @@ export function Cashflow() {
             <div className="card card--pad empty">{t('reserves.empty')}</div>
           ) : (
             <ul className="card list" data-ui={UI.cashflow.reserveList}>
-              {reserves.map((r) => (
-                <li key={r.id} className="list__item">
-                  <div className="list__main">
-                    <div className="list__title">{r.name}</div>
-                    <div className="list__sub">
-                      {t('reserves.balance')}:{' '}
-                      <Money amount={balById.get(r.reserveAccountId) ?? 0} currency={currency} />
-                      {r.targetAmount !== undefined
-                        ? `（${t('reserves.targetOf', { target: r.targetAmount.toLocaleString('ja-JP') })}）`
-                        : ''}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    onClick={() => setPendingReserve(r)}
-                    aria-label={`${t('reserves.delete')}: ${r.name}`}
-                  >
-                    <Icon name="trash" size={18} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {/* 資金目標 */}
-          <div
-            className="section-label"
-            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-          >
-            <span>{t('fundingGoal.title')}</span>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              style={{ minHeight: 36 }}
-              onClick={() => setGoalOpen(true)}
-              data-ui={UI.cashflow.addGoal}
-            >
-              <Icon name="plus" size={16} />
-              {t('fundingGoal.add')}
-            </button>
-          </div>
-          {goals.length === 0 ? (
-            <div className="card card--pad empty">{t('fundingGoal.empty')}</div>
-          ) : (
-            <ul className="card list" data-ui={UI.cashflow.goalList}>
-              {goals.map((g) => (
-                <li key={g.id} className="list__item">
-                  <div className="list__main">
-                    <div className="list__title">{g.name}</div>
-                    <div className="list__sub">
-                      {g.targetDate}・{t('fundingGoal.target')}{' '}
-                      <Money amount={g.targetAmount} currency={currency} />
-                      {g.currentAmount > 0 ? (
-                        <>
-                          {' '}
-                          / {t('fundingGoal.current')}{' '}
-                          <Money amount={g.currentAmount} currency={currency} />
-                        </>
+              {reserves.map((r) => {
+                const balance = balById.get(r.reserveAccountId) ?? 0;
+                const required = reserveRequiredMonthly(r, balance, currentYm, returnBps);
+                return (
+                  <li key={r.id} className="list__item">
+                    <div className="list__main">
+                      <div className="list__title">{r.name}</div>
+                      <div className="list__sub">
+                        {t('reserves.balance')}: <Money amount={balance} currency={currency} />
+                        {r.targetAmount !== undefined
+                          ? `（${t('reserves.targetOf', { target: r.targetAmount.toLocaleString('ja-JP') })}${
+                              r.targetDate ? `・${r.targetDate}` : ''
+                            }）`
+                          : ''}
+                      </div>
+                      {r.targetAmount !== undefined && r.targetDate !== undefined ? (
+                        <div className="list__sub">
+                          {t('reserves.requiredMonthly')}:{' '}
+                          <Money amount={required} currency={currency} />
+                        </div>
                       ) : null}
                     </div>
-                    <div className="list__sub">
-                      {t('fundingGoal.requiredMonthly')}:{' '}
-                      <Money
-                        amount={goalRequiredMonthly(g, currentYm, returnBps)}
-                        currency={currency}
-                      />
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    onClick={() => setPendingGoal(g)}
-                    aria-label={`${t('common.delete')}: ${g.name}`}
-                  >
-                    <Icon name="trash" size={18} />
-                  </button>
-                </li>
-              ))}
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      onClick={() => setPendingReserve(r)}
+                      aria-label={`${t('reserves.delete')}: ${r.name}`}
+                    >
+                      <Icon name="trash" size={18} />
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
-        </div>
-      ) : null}
 
-      {goalOpen ? (
-        <FundingGoalSheet
-          accounts={ledger?.accounts ?? []}
-          onClose={() => setGoalOpen(false)}
-          onSave={(input) => createFundingGoal(input)}
-        />
+          {/* 資金目標（旧概念・読み取り専用）。新規は目的別資金へ統合。残データの確認/削除のみ。 */}
+          {goals.length > 0 ? (
+            <>
+              <p className="section-label">{t('fundingGoal.title')}</p>
+              <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
+                {t('fundingGoal.legacyHint')}
+              </p>
+              <ul className="card list" data-ui={UI.cashflow.goalList}>
+                {goals.map((g) => (
+                  <li key={g.id} className="list__item">
+                    <div className="list__main">
+                      <div className="list__title">{g.name}</div>
+                      <div className="list__sub">
+                        {g.targetDate}・{t('fundingGoal.target')}{' '}
+                        <Money amount={g.targetAmount} currency={currency} />
+                        {g.currentAmount > 0 ? (
+                          <>
+                            {' '}
+                            / {t('fundingGoal.current')}{' '}
+                            <Money amount={g.currentAmount} currency={currency} />
+                          </>
+                        ) : null}
+                      </div>
+                      <div className="list__sub">
+                        {t('fundingGoal.requiredMonthly')}:{' '}
+                        <Money
+                          amount={goalRequiredMonthly(g, currentYm, returnBps)}
+                          currency={currency}
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      onClick={() => setPendingGoal(g)}
+                      aria-label={`${t('common.delete')}: ${g.name}`}
+                    >
+                      <Icon name="trash" size={18} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </div>
       ) : null}
 
       {pendingGoal ? (
@@ -543,223 +512,5 @@ export function Cashflow() {
         />
       ) : null}
     </section>
-  );
-}
-
-/* ── 目的別資金の追加シート ── */
-
-function ReserveSheet({
-  onClose,
-  onSave,
-}: {
-  onClose: () => void;
-  onSave: (input: { name: string; targetAmount?: number; note?: string }) => Promise<void> | void;
-}) {
-  const [name, setName] = useState('');
-  const [targetText, setTargetText] = useState('');
-  const [note, setNote] = useState('');
-  const [error, setError] = useState<string | undefined>(undefined);
-  const [submitting, setSubmitting] = useState(false);
-
-  async function submit() {
-    if (name.trim() === '') {
-      setError(t('reserves.error.name'));
-      return;
-    }
-    setSubmitting(true);
-    const target =
-      targetText === '' ? undefined : Number.parseInt(targetText.replace(/[^\d]/g, ''), 10);
-    try {
-      await onSave({
-        name: name.trim(),
-        ...(target && target > 0 ? { targetAmount: target } : {}),
-        ...(note.trim() !== '' ? { note: note.trim() } : {}),
-      });
-      onClose(); // 成功時のみ閉じる
-    } catch {
-      setSubmitting(false); // 保存失敗時は閉じない
-    }
-  }
-
-  const snapshot = JSON.stringify({ name, targetText, note });
-  const initialSnapshotRef = useRef<string | null>(null);
-  if (initialSnapshotRef.current === null) initialSnapshotRef.current = snapshot;
-  const dirty = snapshot !== initialSnapshotRef.current;
-  const { requestClose, discardConfirm } = useDirtyGuard(dirty, onClose);
-
-  return (
-    <>
-      <Modal
-        title={t('reserves.form.title')}
-        onClose={requestClose}
-        dismissMode="if-clean"
-        footer={
-          <>
-            <button type="button" className="btn btn--ghost" onClick={requestClose}>
-              {t('common.cancel')}
-            </button>
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={submit}
-              disabled={submitting}
-              data-ui={UI.cashflow.reserveSave}
-            >
-              {t('common.save')}
-            </button>
-          </>
-        }
-      >
-        <TextInput
-          label={t('reserves.name')}
-          required
-          value={name}
-          placeholder={t('reserves.namePlaceholder')}
-          onChange={(v) => {
-            setName(v);
-            setError(undefined);
-          }}
-          error={error}
-          dataUi={UI.cashflow.reserveName}
-        />
-        <TextInput
-          label={t('reserves.target')}
-          inputMode="numeric"
-          value={targetText}
-          onChange={(v) => setTargetText(v.replace(/[^\d]/g, ''))}
-        />
-        <TextArea label={t('reserves.note')} value={note} onChange={setNote} />
-      </Modal>
-      {discardConfirm}
-    </>
-  );
-}
-
-function FundingGoalSheet({
-  accounts,
-  onClose,
-  onSave,
-}: {
-  accounts: Account[];
-  onClose: () => void;
-  onSave: (input: FundingGoalInput) => Promise<void> | void;
-}) {
-  const [name, setName] = useState('');
-  const [targetText, setTargetText] = useState('');
-  const [targetDate, setTargetDate] = useState('');
-  const [currentText, setCurrentText] = useState('');
-  const [sourceId, setSourceId] = useState('');
-  const [note, setNote] = useState('');
-  const [error, setError] = useState<string | undefined>(undefined);
-  const [submitting, setSubmitting] = useState(false);
-
-  async function submit() {
-    if (name.trim() === '') {
-      setError(t('fundingGoal.error.name'));
-      return;
-    }
-    const target = targetText === '' ? 0 : Number.parseInt(targetText, 10);
-    if (target <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
-      setError(t('fundingGoal.error.target'));
-      return;
-    }
-    setSubmitting(true);
-    const current = currentText === '' ? 0 : Number.parseInt(currentText, 10);
-    try {
-      await onSave({
-        name: name.trim(),
-        targetAmount: target,
-        targetDate,
-        currentAmount: current,
-        ...(sourceId !== '' ? { sourceAccountId: sourceId } : {}),
-        ...(note.trim() !== '' ? { note: note.trim() } : {}),
-      });
-      onClose(); // 成功時のみ閉じる
-    } catch {
-      setSubmitting(false); // 保存失敗時は閉じない
-    }
-  }
-
-  const snapshot = JSON.stringify({
-    name,
-    targetText,
-    targetDate,
-    currentText,
-    sourceId,
-    note,
-  });
-  const initialSnapshotRef = useRef<string | null>(null);
-  if (initialSnapshotRef.current === null) initialSnapshotRef.current = snapshot;
-  const dirty = snapshot !== initialSnapshotRef.current;
-  const { requestClose, discardConfirm } = useDirtyGuard(dirty, onClose);
-
-  return (
-    <>
-      <Modal
-        title={t('fundingGoal.form.title')}
-        onClose={requestClose}
-        dismissMode="if-clean"
-        footer={
-          <>
-            <button type="button" className="btn btn--ghost" onClick={requestClose}>
-              {t('common.cancel')}
-            </button>
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={submit}
-              disabled={submitting}
-              data-ui={UI.cashflow.goalSave}
-            >
-              {t('common.save')}
-            </button>
-          </>
-        }
-      >
-        <TextInput
-          label={t('fundingGoal.name')}
-          required
-          value={name}
-          placeholder={t('fundingGoal.namePlaceholder')}
-          onChange={(v) => {
-            setName(v);
-            setError(undefined);
-          }}
-          error={error}
-          dataUi={UI.cashflow.goalName}
-        />
-        <TextInput
-          label={t('fundingGoal.targetAmount')}
-          required
-          inputMode="numeric"
-          value={targetText}
-          onChange={(v) => setTargetText(v.replace(/[^\d]/g, ''))}
-          dataUi={UI.cashflow.goalAmount}
-        />
-        <TextInput
-          label={t('fundingGoal.targetDate')}
-          required
-          type="date"
-          value={targetDate}
-          onChange={setTargetDate}
-          dataUi={UI.cashflow.goalDate}
-        />
-        <TextInput
-          label={t('fundingGoal.currentAmount')}
-          inputMode="numeric"
-          value={currentText}
-          hint={t('fundingGoal.currentHint')}
-          onChange={(v) => setCurrentText(v.replace(/[^\d]/g, ''))}
-        />
-        <AccountPicker
-          label={t('fundingGoal.source')}
-          value={sourceId}
-          groups={groupedAccountsByRole(accounts, ['daily-asset', 'reserve-asset'], sourceId)}
-          onChange={setSourceId}
-        />
-        <TextArea label={t('fundingGoal.note')} value={note} onChange={setNote} />
-      </Modal>
-      {discardConfirm}
-    </>
   );
 }
