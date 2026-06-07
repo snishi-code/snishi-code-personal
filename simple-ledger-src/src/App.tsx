@@ -143,7 +143,7 @@ export function App() {
           />
         ) : null}
         {screen === 'allocations' ? <Allocations /> : null}
-        {screen === 'cashflow' ? <Cashflow onAddEntry={openCreate} /> : null}
+        {screen === 'cashflow' ? <Cashflow /> : null}
         {screen === 'tags' ? <Tags /> : null}
         {screen === 'adjustments' ? <Adjustments /> : null}
         {screen === 'accounts' ? <Accounts /> : null}

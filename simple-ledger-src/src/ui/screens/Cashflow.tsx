@@ -10,30 +10,17 @@ import { deriveBalanceSheet } from '../../domain/accounting';
 import {
   cashDeltaOfEntry,
   horizonEnd,
-  inferScheduleFlow,
   liquidAssetTotal,
   projectCashflow,
 } from '../../domain/cashflow';
-import { addMonths, monthOf, monthlyAmounts } from '../../domain/allocation';
 import { goalRequiredMonthly } from '../../domain/fundingGoal';
-import { newId } from '../../domain/ids';
-import { currentYearMonth, nowIso, todayLocal } from '../../util/time';
-import type {
-  Account,
-  CashflowSchedule,
-  CashflowSource,
-  FundingGoal,
-  ReserveItem,
-  Tag,
-} from '../../domain/types';
+import { currentYearMonth, todayLocal } from '../../util/time';
+import type { Account, CashflowSchedule, FundingGoal, ReserveItem } from '../../domain/types';
 import type { FundingGoalInput } from '../../data/repository';
 import { Modal } from '../Modal';
 import { AccountPicker } from '../AccountPicker';
-import { TagPicker } from '../TagPicker';
-import { SelectInput, TextArea, TextInput } from '../Field';
+import { TextArea, TextInput } from '../Field';
 import { groupedAccountsByRole } from '../accountOptions';
-import { tagsForScope } from '../tagOptions';
-import type { FormMode } from '../entryModes';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { Money } from '../money';
 import { Icon } from '../Icon';
@@ -42,10 +29,9 @@ import { UI } from '../../ui-contract';
 
 const HORIZONS = [3, 6, 12, 24];
 
-export function Cashflow({ onAddEntry }: { onAddEntry?: (mode: FormMode) => void }) {
+export function Cashflow() {
   const {
     ledger,
-    saveSchedules,
     postSchedule,
     removeSchedule,
     createReserve,
@@ -54,7 +40,6 @@ export function Cashflow({ onAddEntry }: { onAddEntry?: (mode: FormMode) => void
     removeFundingGoal,
   } = useLedger();
   const [horizon, setHorizon] = useState(6);
-  const [scheduleOpen, setScheduleOpen] = useState(false);
   const [reserveOpen, setReserveOpen] = useState(false);
   const [goalOpen, setGoalOpen] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -293,48 +278,11 @@ export function Cashflow({ onAddEntry }: { onAddEntry?: (mode: FormMode) => void
         </ul>
       )}
 
-      {/* 未来の入出金・振替予定（ホーム入力が自然に反映される） */}
+      {/* 未来の入出金・振替予定（ホーム入力が自然に反映される。CF は確認専用で入力欄は持たない）。 */}
       <p className="section-label">{t('cashflow.futureTitle')}</p>
       <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
         {t('cashflow.futureIntro')}
       </p>
-      {onAddEntry ? (
-        <div className="entry-types" style={{ marginBottom: 'var(--space-3)' }}>
-          <button
-            type="button"
-            className="entry-type-btn"
-            onClick={() => onAddEntry('income')}
-            data-ui={UI.dashboard.income}
-          >
-            <span className="entry-type-btn__icon">
-              <Icon name="income" size={20} />
-            </span>
-            {t('entry.type.income')}
-          </button>
-          <button
-            type="button"
-            className="entry-type-btn"
-            onClick={() => onAddEntry('expense')}
-            data-ui={UI.dashboard.expense}
-          >
-            <span className="entry-type-btn__icon">
-              <Icon name="expense" size={20} />
-            </span>
-            {t('entry.type.expense')}
-          </button>
-          <button
-            type="button"
-            className="entry-type-btn"
-            onClick={() => onAddEntry('transfer')}
-            data-ui={UI.dashboard.transfer}
-          >
-            <span className="entry-type-btn__icon">
-              <Icon name="transfer" size={20} />
-            </span>
-            {t('entry.type.transfer')}
-          </button>
-        </div>
-      ) : null}
       {futureRows.length === 0 ? (
         <div className="card card--pad empty">{t('cashflow.futureEmpty')}</div>
       ) : (
@@ -359,23 +307,8 @@ export function Cashflow({ onAddEntry }: { onAddEntry?: (mode: FormMode) => void
         </ul>
       )}
 
-      {/* 分割・定期の予定（任意・控えめ）。回数のある予定だけここで登録する。 */}
-      <div
-        className="section-label"
-        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-      >
-        <span>{t('cashflow.scheduleSecondaryTitle')}</span>
-        <button
-          type="button"
-          className="btn btn--ghost"
-          style={{ minHeight: 36 }}
-          onClick={() => setScheduleOpen(true)}
-          data-ui={UI.cashflow.addSchedule}
-        >
-          <Icon name="plus" size={16} />
-          {t('cashflow.addScheduleSecondary')}
-        </button>
-      </div>
+      {/* 分割・定期の予定（読み取り専用）。月額化コストの負債払い・借入の分割返済から生成される。 */}
+      <p className="section-label">{t('cashflow.scheduleSecondaryTitle')}</p>
       <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
         {t('cashflow.scheduleSecondaryHint')}
       </p>
@@ -550,15 +483,6 @@ export function Cashflow({ onAddEntry }: { onAddEntry?: (mode: FormMode) => void
         </div>
       ) : null}
 
-      {scheduleOpen ? (
-        <ScheduleSheet
-          accounts={ledger?.accounts ?? []}
-          tags={ledger?.tags ?? []}
-          onClose={() => setScheduleOpen(false)}
-          onSave={(list) => saveSchedules(list)}
-        />
-      ) : null}
-
       {goalOpen ? (
         <FundingGoalSheet
           accounts={ledger?.accounts ?? []}
@@ -619,269 +543,6 @@ export function Cashflow({ onAddEntry }: { onAddEntry?: (mode: FormMode) => void
         />
       ) : null}
     </section>
-  );
-}
-
-/* ── 予定の追加シート ── */
-
-function ScheduleSheet({
-  accounts,
-  tags,
-  onClose,
-  onSave,
-}: {
-  accounts: Account[];
-  tags: Tag[];
-  onClose: () => void;
-  onSave: (list: CashflowSchedule[]) => Promise<void> | void;
-}) {
-  const [title, setTitle] = useState('');
-  const [dueDate, setDueDate] = useState(todayLocal());
-  const [amountText, setAmountText] = useState('');
-  // 日常入力と同じ「源泉 → 行き先」(A → B)。入金/出金はロールから推定する。
-  const [srcId, setSrcId] = useState('');
-  const [dstId, setDstId] = useState('');
-  const [source, setSource] = useState<CashflowSource>('manual');
-  const [installmentsText, setInstallmentsText] = useState('2');
-  const [entryTagIds, setEntryTagIds] = useState<string[]>([]);
-  const [accountTagIds, setAccountTagIds] = useState<string[]>([]);
-  const [counterTagIds, setCounterTagIds] = useState<string[]>([]);
-  const [errors, setErrors] = useState<string[]>([]);
-  const [submitting, setSubmitting] = useState(false);
-
-  // 左=源泉（収入カテゴリ / 日常資産）、右=行き先（日常資産 / 費用カテゴリ / 支払用負債）。
-  const srcGroups = groupedAccountsByRole(accounts, ['income-category', 'daily-asset'], srcId);
-  const dstGroups = groupedAccountsByRole(
-    accounts,
-    ['daily-asset', 'expense-category', 'payment-liability'],
-    dstId,
-  );
-
-  const amount = amountText === '' ? 0 : Number.parseInt(amountText.replace(/[^\d]/g, ''), 10);
-  const installments =
-    source === 'installment'
-      ? Number.parseInt(installmentsText.replace(/[^\d]/g, '') || '0', 10)
-      : 1;
-
-  const src = accounts.find((a) => a.id === srcId);
-  const dst = accounts.find((a) => a.id === dstId);
-  const flow = src && dst ? inferScheduleFlow(src, dst) : null;
-
-  function validate(): string[] {
-    const e: string[] = [];
-    if (title.trim() === '') e.push(t('cashflow.error.name'));
-    if (!Number.isInteger(amount) || amount <= 0) e.push(t('cashflow.error.amount'));
-    if (!srcId || !dstId) e.push(t('cashflow.error.flow'));
-    else if (!flow) e.push(t('cashflow.error.flowInvalid'));
-    if (source === 'installment' && (!Number.isInteger(installments) || installments < 2))
-      e.push(t('cashflow.error.installments'));
-    return e;
-  }
-
-  function build(): CashflowSchedule[] {
-    const ts = nowIso();
-    // validate 済みなので flow は非 null。
-    const { accountId, counterAccountId, direction } = flow!;
-    const tagFields = {
-      ...(entryTagIds.length ? { entryTagIds } : {}),
-      ...(accountTagIds.length ? { accountLineTagIds: accountTagIds } : {}),
-      ...(counterTagIds.length ? { counterLineTagIds: counterTagIds } : {}),
-    };
-    if (source === 'installment' && installments >= 2) {
-      const amts = monthlyAmounts(amount, installments);
-      const day = dueDate.slice(8, 10);
-      const startYm = monthOf(dueDate);
-      return amts.map((amt, i) => ({
-        id: newId(),
-        title: `${title.trim()}（${i + 1}/${installments}）`,
-        dueDate: `${addMonths(startYm, i)}-${day}`,
-        amount: amt,
-        direction,
-        accountId,
-        counterAccountId,
-        ...tagFields,
-        source: 'installment',
-        status: 'planned',
-        createdAt: ts,
-        updatedAt: ts,
-      }));
-    }
-    return [
-      {
-        id: newId(),
-        title: title.trim(),
-        dueDate,
-        amount,
-        direction,
-        accountId,
-        counterAccountId,
-        ...tagFields,
-        source,
-        status: 'planned',
-        createdAt: ts,
-        updatedAt: ts,
-      },
-    ];
-  }
-
-  async function submit() {
-    const found = validate();
-    setErrors(found);
-    if (found.length > 0) return;
-    setSubmitting(true);
-    try {
-      await onSave(build());
-      onClose(); // 成功時のみ閉じる
-    } catch {
-      // 保存失敗時は閉じない（store 層が error toast）。再入力できるよう戻す。
-      setSubmitting(false);
-    }
-  }
-
-  const snapshot = JSON.stringify({
-    title,
-    dueDate,
-    amountText,
-    srcId,
-    dstId,
-    source,
-    installmentsText,
-    entryTagIds,
-    accountTagIds,
-    counterTagIds,
-  });
-  const initialSnapshotRef = useRef<string | null>(null);
-  if (initialSnapshotRef.current === null) initialSnapshotRef.current = snapshot;
-  const dirty = snapshot !== initialSnapshotRef.current;
-  const { requestClose, discardConfirm } = useDirtyGuard(dirty, onClose);
-
-  return (
-    <>
-      <Modal
-        title={t('cashflow.form.title')}
-        onClose={requestClose}
-        dismissMode="if-clean"
-        footer={
-          <>
-            <button type="button" className="btn btn--ghost" onClick={requestClose}>
-              {t('common.cancel')}
-            </button>
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={submit}
-              disabled={submitting}
-              data-ui={UI.cashflow.scheduleSave}
-            >
-              {t('common.save')}
-            </button>
-          </>
-        }
-      >
-        {errors.length > 0 ? (
-          <div className="field__error" role="alert" style={{ marginBottom: 'var(--space-3)' }}>
-            <Icon name="alert" size={14} />
-            {errors[0]}
-          </div>
-        ) : null}
-
-        {/* 日常入力と同じ並び: 日付 → 項目 → 金額 → お金の流れ(A → B) */}
-        <TextInput
-          label={t('cashflow.form.dueDate')}
-          type="date"
-          value={dueDate}
-          onChange={setDueDate}
-        />
-        <TextInput
-          label={t('cashflow.form.name')}
-          required
-          value={title}
-          placeholder={t('cashflow.form.namePlaceholder')}
-          onChange={setTitle}
-          dataUi={UI.cashflow.scheduleName}
-        />
-        <TextInput
-          label={t('cashflow.form.amount')}
-          required
-          inputMode="numeric"
-          value={amountText}
-          onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
-          dataUi={UI.cashflow.scheduleAmount}
-        />
-        <div className="field">
-          <span className="field__hint">{t('cashflow.form.flowHint')}</span>
-          <div className="flow">
-            <div className="flow__side">
-              <AccountPicker
-                flat
-                label={t('cashflow.form.flowSource')}
-                required
-                value={srcId}
-                groups={srcGroups}
-                onChange={setSrcId}
-                dataUi={UI.cashflow.scheduleFlowSource}
-              />
-            </div>
-            <div className="flow__arrow" aria-hidden="true">
-              →
-            </div>
-            <div className="flow__side">
-              <AccountPicker
-                flat
-                label={t('cashflow.form.flowDestination')}
-                required
-                value={dstId}
-                groups={dstGroups}
-                onChange={setDstId}
-                dataUi={UI.cashflow.scheduleFlowDestination}
-              />
-            </div>
-          </div>
-        </div>
-        <TagPicker
-          label={t('cashflow.form.entryTags')}
-          tags={tagsForScope(tags, 'entry', entryTagIds)}
-          value={entryTagIds}
-          onChange={setEntryTagIds}
-          dataUi={UI.cashflow.scheduleEntryTags}
-        />
-        <TagPicker
-          label={t('cashflow.form.accountTags')}
-          tags={tagsForScope(tags, 'line', accountTagIds)}
-          value={accountTagIds}
-          onChange={setAccountTagIds}
-          dataUi={UI.cashflow.scheduleAccountTags}
-        />
-        <TagPicker
-          label={t('cashflow.form.counterTags')}
-          tags={tagsForScope(tags, 'line', counterTagIds)}
-          value={counterTagIds}
-          onChange={setCounterTagIds}
-          dataUi={UI.cashflow.scheduleCounterTags}
-        />
-        <SelectInput
-          label={t('cashflow.form.source')}
-          value={source}
-          onChange={(v) => setSource(v as CashflowSource)}
-          options={[
-            { value: 'manual', label: t('cashflow.src.manual') },
-            { value: 'credit-card', label: t('cashflow.src.creditCard') },
-            { value: 'installment', label: t('cashflow.src.installment') },
-          ]}
-        />
-        {source === 'installment' ? (
-          <TextInput
-            label={t('cashflow.form.installments')}
-            required
-            inputMode="numeric"
-            value={installmentsText}
-            onChange={(v) => setInstallmentsText(v.replace(/[^\d]/g, ''))}
-            dataUi={UI.cashflow.scheduleInstallments}
-          />
-        ) : null}
-      </Modal>
-      {discardConfirm}
-    </>
   );
 }
 

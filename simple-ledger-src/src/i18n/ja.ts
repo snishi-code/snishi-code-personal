@@ -166,10 +166,9 @@ export const ja = {
     'ホームの 収入 / 支出 / 振替 で未来日付を選ぶと、ここに表示され資金繰りに反映されます。',
   'cashflow.futureEmpty': '未来日付の予定はありません。',
   'cashflow.futureFromHome': 'ホームから未来日付で登録',
-  'cashflow.scheduleSecondaryTitle': '分割・定期の予定（任意）',
+  'cashflow.scheduleSecondaryTitle': '分割・定期の返済予定',
   'cashflow.scheduleSecondaryHint':
-    '分割払いやクレカ予定など、回数のある予定だけここで登録します。1 回限りの予定はホーム入力で十分です。',
-  'cashflow.addScheduleSecondary': '分割・定期の予定を追加',
+    '月額化コストの負債払いや、借入（振替）の分割返済から自動で作られる予定です（読み取り専用）。',
   'cashflow.advancedTitle': '目的別資金・資金目標',
   'cashflow.advancedHint':
     '自由資金から控除する取り置きと、長期の積立計画です（CF の主役ではなく補助情報）。',
