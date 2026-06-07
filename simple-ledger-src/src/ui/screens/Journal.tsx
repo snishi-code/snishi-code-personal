@@ -291,10 +291,6 @@ export function Journal({
             // 生成仕訳（按分 / 月額化）は読み取り専用（編集・削除・取消を出さない）。
             const generated = isAllocation || isMonthlyCost;
             const entryTagNames = tagNames(allTags, entry.tagIds);
-            const lineTagNames = tagNames(
-              allTags,
-              entry.lines.flatMap((l) => l.tagIds ?? []),
-            );
             const title = (
               <>
                 <div className="list__title">
@@ -318,15 +314,10 @@ export function Journal({
                 <div className="list__sub">
                   {entry.date}・{flowText(map, entry)}
                 </div>
-                {entryTagNames.length > 0 || lineTagNames.length > 0 ? (
+                {entryTagNames.length > 0 ? (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
                     {entryTagNames.map((n) => (
                       <span key={`e-${n}`} className="tag tag--teal">
-                        {n}
-                      </span>
-                    ))}
-                    {lineTagNames.map((n) => (
-                      <span key={`l-${n}`} className="tag tag--neutral">
                         {n}
                       </span>
                     ))}

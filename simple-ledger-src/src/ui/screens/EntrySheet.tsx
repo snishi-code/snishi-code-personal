@@ -18,7 +18,8 @@ import { ReserveSheet } from '../ReserveSheet';
 import { LiabilitySheet } from '../LiabilitySheet';
 import { groupedAccountsByRole } from '../accountOptions';
 import type { AccountRole } from '../../domain/accountRoles';
-import { tagsForScope } from '../tagOptions';
+import { tagsForEntry } from '../tagOptions';
+import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../../domain/constants';
 import {
   FORM_MODE_TITLE,
   MODE_FLOW,
@@ -307,6 +308,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             firstDueDate: repayStartDate || toSave.date,
             fromAccountId: repayAccountId,
             liabilityAccountId: toSave.creditAccountId,
+            managementScopeId: toSave.managementScopeId ?? DEFAULT_MANAGEMENT_SCOPE_ID,
           });
           await saveEntryWithSchedules(entryInput, schedules);
         } else {
@@ -375,7 +377,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     <TagPicker
       label={t('entry.tags')}
       hint={t('entry.tagsHint')}
-      tags={tagsForScope(tags, 'entry', form.tagIds ?? [])}
+      tags={tagsForEntry(tags, form.tagIds ?? [])}
       value={form.tagIds ?? []}
       onChange={(ids) => setForm((f) => ({ ...f, tagIds: ids }))}
       dataUi={UI.journal.entry.tags}
@@ -463,31 +465,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           </div>
         </div>
       </div>
-    );
-  };
-
-  const renderLineTags = (role: (typeof roles)[number]) => {
-    if (allocationActive) return null;
-    const lineTagValue = (role.side === 'debit' ? form.debitTagIds : form.creditTagIds) ?? [];
-    const lineTagLabel =
-      mode === 'expense' && role.side === 'credit'
-        ? t('entry.paymentTags')
-        : role.side === 'debit'
-          ? t('entry.debitTags')
-          : t('entry.creditTags');
-    return (
-      <TagPicker
-        label={lineTagLabel}
-        tags={tagsForScope(tags, 'line', lineTagValue)}
-        value={lineTagValue}
-        onChange={(ids) =>
-          setForm((f) => ({
-            ...f,
-            [role.side === 'debit' ? 'debitTagIds' : 'creditTagIds']: ids,
-          }))
-        }
-        dataUi={role.side === 'debit' ? UI.journal.entry.debitTags : UI.journal.entry.creditTags}
-      />
     );
   };
 
@@ -825,10 +802,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             {descriptionField}
             {entryTagsField}
             {roles.map((role) => (
-              <div key={role.side}>
-                {renderAccountPicker(role)}
-                {renderLineTags(role)}
-              </div>
+              <div key={role.side}>{renderAccountPicker(role)}</div>
             ))}
             {amountField}
             {memoField}
@@ -866,7 +840,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                     {memoField}
                     {entryTagsField}
                     {roles.map((role) => (
-                      <div key={role.side}>{renderLineTags(role)}</div>
+                      <div key={role.side} />
                     ))}
                   </div>
                 ) : null}

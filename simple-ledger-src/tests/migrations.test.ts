@@ -12,6 +12,8 @@ function pkg(version: number): LedgerExportPackage {
     deviceId: 'd',
     baseRevision: 0,
     currentRevision: 0,
+    managementScopes: [],
+    accountInstruments: [],
     accounts: [],
     journalEntries: [],
     allocations: [],

@@ -56,16 +56,39 @@ export const journalLineSchema = z.object({
   accountId: z.string().min(1),
   side: sideSchema,
   amount: amountSchema,
-  tagIds: tagIdList.optional(),
+  /** 支払い手段の細目（任意）。参照整合は export パッケージ側で検証する。 */
+  instrumentId: z.string().min(1).optional(),
 });
 
-export const tagScopeSchema = z.enum(['entry', 'line', 'both']);
+// タグは「仕訳全体のみ」。明細・両方 scope は廃止。
+export const tagScopeSchema = z.literal('entry');
 
 export const tagSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1).max(60),
   scope: tagScopeSchema,
   color: z.string().min(1).max(40).optional(),
+  archived: z.boolean(),
+  createdAt: isoDateTime,
+  updatedAt: isoDateTime,
+});
+
+export const managementScopeSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(60),
+  archived: z.boolean().optional(),
+  createdAt: isoDateTime,
+  updatedAt: isoDateTime,
+});
+
+export const accountInstrumentKindSchema = z.enum(['bank', 'card', 'prepaid', 'cash', 'other']);
+
+export const accountInstrumentSchema = z.object({
+  id: z.string().min(1),
+  managementScopeId: z.string().min(1),
+  accountId: z.string().min(1),
+  name: z.string().min(1).max(80),
+  kind: accountInstrumentKindSchema,
   archived: z.boolean(),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
@@ -130,10 +153,9 @@ export const cashflowScheduleSchema = z.object({
   counterAccountId: z.string().min(1).optional(),
   source: z.enum(['manual', 'credit-card', 'installment', 'reserve']),
   status: z.enum(['planned', 'posted', 'cancelled']),
+  managementScopeId: z.string().min(1),
   linkedEntryId: z.string().min(1).optional(),
   entryTagIds: tagIdList.optional(),
-  accountLineTagIds: tagIdList.optional(),
-  counterLineTagIds: tagIdList.optional(),
   monthlyCostId: z.string().min(1).optional(),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
@@ -153,6 +175,7 @@ export const reserveItemSchema = z.object({
 export const monthlyCostItemSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1).max(120),
+  managementScopeId: z.string().min(1),
   kind: z.enum(['subscription', 'prepaid-service', 'durable-asset', 'recurring-event']),
   amount: amountSchema,
   costMonths: z.number().int().min(1),
@@ -191,6 +214,7 @@ export const journalEntrySchema = z
     lines: z.array(journalLineSchema).min(2),
     memo: z.string().max(1000).optional(),
     kind: z.enum(['normal', 'opening']),
+    managementScopeId: z.string().min(1),
     metadata: entryMetadataSchema.optional(),
     tagIds: tagIdList.optional(),
     createdAt: isoDateTime,
@@ -241,6 +265,8 @@ export const ledgerExportPackageSchema = z
     deviceId: z.string().min(1),
     baseRevision: z.number().int().nonnegative(),
     currentRevision: z.number().int().nonnegative(),
+    managementScopes: z.array(managementScopeSchema),
+    accountInstruments: z.array(accountInstrumentSchema),
     accounts: z.array(accountSchema),
     journalEntries: z.array(journalEntrySchema),
     allocations: z.array(allocationItemSchema),
@@ -266,6 +292,28 @@ export const ledgerExportPackageSchema = z
     });
     const hasAccount = (id: string) => accountType.has(id);
 
+    // 管理区分 ID は一意。
+    const scopeIds = new Set<string>();
+    pkg.managementScopes.forEach((s, i) => {
+      if (scopeIds.has(s.id))
+        issue(`管理区分 ID が重複しています(${s.id})`, ['managementScopes', i, 'id']);
+      scopeIds.add(s.id);
+    });
+    const hasScope = (id: string) => scopeIds.has(id);
+
+    // 支払い手段の細目: ID 一意 + 管理区分・親科目の参照整合。account を引く map も作る。
+    const instrumentById = new Map<string, (typeof pkg.accountInstruments)[number]>();
+    pkg.accountInstruments.forEach((inst, i) => {
+      const at = (...p: (string | number)[]) => ['accountInstruments', i, ...p];
+      if (instrumentById.has(inst.id))
+        issue(`支払い手段 ID が重複しています(${inst.id})`, at('id'));
+      instrumentById.set(inst.id, inst);
+      if (!hasScope(inst.managementScopeId))
+        issue(`支払い手段「${inst.name}」の管理区分が存在しません`, at('managementScopeId'));
+      if (!hasAccount(inst.accountId))
+        issue(`支払い手段「${inst.name}」の親科目が存在しません`, at('accountId'));
+    });
+
     // 月額化コスト ID 集合（仕訳・予定CF の monthlyCostId 参照検証に使う）。
     const monthlyCostIdSet = new Set(pkg.monthlyCostItems.map((m) => m.id));
 
@@ -279,6 +327,14 @@ export const ledgerExportPackageSchema = z
 
     // 参照整合性: すべての仕訳明細の accountId が accounts に存在すること。
     pkg.journalEntries.forEach((e, ei) => {
+      // 管理区分の参照整合。
+      if (!hasScope(e.managementScopeId))
+        issue(`仕訳「${e.description}」の管理区分が存在しません`, [
+          'journalEntries',
+          ei,
+          'managementScopeId',
+        ]);
+
       e.lines.forEach((l, li) => {
         if (!hasAccount(l.accountId)) {
           issue(`仕訳「${e.description}」が存在しない勘定科目(${l.accountId})を参照しています`, [
@@ -288,6 +344,19 @@ export const ledgerExportPackageSchema = z
             li,
             'accountId',
           ]);
+        }
+        // 支払い手段の細目: 存在 + 親科目一致 + 管理区分一致。
+        if (l.instrumentId !== undefined) {
+          const inst = instrumentById.get(l.instrumentId);
+          const lp = (field: string) => ['journalEntries', ei, 'lines', li, field];
+          if (!inst)
+            issue(`仕訳「${e.description}」の支払い手段が存在しません`, lp('instrumentId'));
+          else {
+            if (inst.accountId !== l.accountId)
+              issue(`支払い手段「${inst.name}」が明細の科目と一致しません`, lp('instrumentId'));
+            if (inst.managementScopeId !== e.managementScopeId)
+              issue(`支払い手段「${inst.name}」が仕訳の管理区分と一致しません`, lp('instrumentId'));
+          }
         }
       });
 
@@ -507,6 +576,8 @@ export const ledgerExportPackageSchema = z
       const at = (...p: (string | number)[]) => ['cashflowSchedules', si, ...p];
       if (scheduleIds.has(s.id)) issue(`予定 CF の ID が重複しています(${s.id})`, at('id'));
       scheduleIds.add(s.id);
+      if (!hasScope(s.managementScopeId))
+        issue(`予定 CF「${s.title}」の管理区分が存在しません`, at('managementScopeId'));
       const accType = accountType.get(s.accountId);
       if (accType === undefined)
         issue(`予定 CF「${s.title}」の口座が存在しません`, at('accountId'));
@@ -554,6 +625,8 @@ export const ledgerExportPackageSchema = z
       if (monthlyCostIds.has(mc.id))
         issue(`月額化コストの ID が重複しています(${mc.id})`, at('id'));
       monthlyCostIds.add(mc.id);
+      if (!hasScope(mc.managementScopeId))
+        issue(`月額化「${mc.name}」の管理区分が存在しません`, at('managementScopeId'));
 
       // 費用カテゴリ: 存在 + role expense-category。
       if (!accountType.has(mc.expenseAccountId))
@@ -633,12 +706,12 @@ export const ledgerExportPackageSchema = z
       }
     });
 
-    // タグ(tags): id 一意 + active な同名重複なし + scope マップ。
-    const tagScope = new Map<string, 'entry' | 'line' | 'both'>();
+    // タグ(tags): id 一意 + active な同名重複なし。タグは「仕訳全体のみ」（明細タグは廃止）。
+    const tagIds = new Set<string>();
     const activeNames = new Set<string>();
     pkg.tags.forEach((tag, ti) => {
-      if (tagScope.has(tag.id)) issue(`タグ ID が重複しています(${tag.id})`, ['tags', ti, 'id']);
-      tagScope.set(tag.id, tag.scope);
+      if (tagIds.has(tag.id)) issue(`タグ ID が重複しています(${tag.id})`, ['tags', ti, 'id']);
+      tagIds.add(tag.id);
       if (!tag.archived) {
         if (activeNames.has(tag.name))
           issue(`同名の有効なタグが重複しています(${tag.name})`, ['tags', ti, 'name']);
@@ -646,33 +719,17 @@ export const ledgerExportPackageSchema = z
       }
     });
 
-    const allowsEntry = (id: string) => tagScope.get(id) === 'entry' || tagScope.get(id) === 'both';
-    const allowsLine = (id: string) => tagScope.get(id) === 'line' || tagScope.get(id) === 'both';
-
-    const checkTags = (
-      ids: string[] | undefined,
-      kind: 'entry' | 'line',
-      path: (string | number)[],
-    ) => {
+    const checkTags = (ids: string[] | undefined, path: (string | number)[]) => {
       ids?.forEach((id, i) => {
-        if (!tagScope.has(id)) issue(`存在しないタグ(${id})を参照しています`, [...path, i]);
-        else if (kind === 'entry' && !allowsEntry(id))
-          issue(`全体タグに使えないタグ(${id})です`, [...path, i]);
-        else if (kind === 'line' && !allowsLine(id))
-          issue(`明細タグに使えないタグ(${id})です`, [...path, i]);
+        if (!tagIds.has(id)) issue(`存在しないタグ(${id})を参照しています`, [...path, i]);
       });
     };
 
     pkg.journalEntries.forEach((e, ei) => {
-      checkTags(e.tagIds, 'entry', ['journalEntries', ei, 'tagIds']);
-      e.lines.forEach((l, li) =>
-        checkTags(l.tagIds, 'line', ['journalEntries', ei, 'lines', li, 'tagIds']),
-      );
+      checkTags(e.tagIds, ['journalEntries', ei, 'tagIds']);
     });
     pkg.cashflowSchedules.forEach((s, si) => {
-      checkTags(s.entryTagIds, 'entry', ['cashflowSchedules', si, 'entryTagIds']);
-      checkTags(s.accountLineTagIds, 'line', ['cashflowSchedules', si, 'accountLineTagIds']);
-      checkTags(s.counterLineTagIds, 'line', ['cashflowSchedules', si, 'counterLineTagIds']);
+      checkTags(s.entryTagIds, ['cashflowSchedules', si, 'entryTagIds']);
     });
   });
 

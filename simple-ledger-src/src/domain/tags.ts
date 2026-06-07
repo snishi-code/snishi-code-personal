@@ -1,67 +1,37 @@
 /*
  * タグのドメインヘルパ。タグは PL/BS を変えない分析軸。
- *  - 全体タグ(entry): 仕訳全体に付く（旅行・学会 等）
- *  - 明細タグ(line):  借方/貸方の明細に付く（カード名・銀行名 等）
+ * タグは常に「仕訳全体（entry）」に付く（旅行・帰省・学会 等のイベント/目的ラベル）。
+ * カード名・銀行名・Pay 系名はタグにしない（支払い手段の細目 = AccountInstrument で扱う）。
  */
-import type { CashflowSchedule, JournalEntry, Tag, TagScope } from './types';
+import type { CashflowSchedule, JournalEntry, Tag } from './types';
 import type { MessageKey } from '../i18n';
 import { filterByDateRange } from './accounting';
 
-export function tagAllowsEntry(scope: TagScope): boolean {
-  return scope === 'entry' || scope === 'both';
-}
-export function tagAllowsLine(scope: TagScope): boolean {
-  return scope === 'line' || scope === 'both';
-}
-
 /* ── 使用状況・代入検証（UI と repository で共通の不変条件を使う） ── */
 
-export interface TagUsage {
-  usedAsEntry: boolean;
-  usedAsLine: boolean;
-}
-
-/** タグが「全体タグ」「明細タグ」として使われているか（仕訳 + 予定CF を見る）。 */
-export function tagUsage(
-  tagId: string,
-  entries: JournalEntry[],
-  schedules: CashflowSchedule[],
-): TagUsage {
-  const usedAsEntry =
-    entries.some((e) => e.tagIds?.includes(tagId)) ||
-    schedules.some((s) => s.entryTagIds?.includes(tagId));
-  const usedAsLine =
-    entries.some((e) => e.lines.some((l) => l.tagIds?.includes(tagId))) ||
-    schedules.some(
-      (s) => s.accountLineTagIds?.includes(tagId) || s.counterLineTagIds?.includes(tagId),
-    );
-  return { usedAsEntry, usedAsLine };
-}
-
+/** タグが仕訳または予定CFから参照されているか（削除可否の判定に使う）。 */
 export function isTagReferenced(
   tagId: string,
   entries: JournalEntry[],
   schedules: CashflowSchedule[],
 ): boolean {
-  const u = tagUsage(tagId, entries, schedules);
-  return u.usedAsEntry || u.usedAsLine;
+  return (
+    entries.some((e) => e.tagIds?.includes(tagId)) ||
+    schedules.some((s) => s.entryTagIds?.includes(tagId))
+  );
 }
 
 /**
- * タグ代入（tagIds）が scope と存在の不変条件を満たすか検証する。
+ * タグ代入（tagIds）が存在の不変条件を満たすか検証する。
  * 違反があれば i18n エラーコード、無ければ null。import 検証と同じルールを保存時にも使う。
  * 文言は持たず code を返す（呼び出し側が LedgerError 化して UI で表示する）。
  */
 export function tagAssignmentError(
   tagIds: string[] | undefined,
-  kind: 'entry' | 'line',
   tagById: Map<string, Tag>,
 ): MessageKey | null {
   for (const id of tagIds ?? []) {
-    const tg = tagById.get(id);
-    if (!tg) return 'error.tag.unknown';
-    if (kind === 'entry' && !tagAllowsEntry(tg.scope)) return 'error.tag.notEntryScope';
-    if (kind === 'line' && !tagAllowsLine(tg.scope)) return 'error.tag.notLineScope';
+    if (!tagById.has(id)) return 'error.tag.unknown';
   }
   return null;
 }
@@ -83,10 +53,9 @@ export function signedEntryAmount(entry: JournalEntry): number {
   return isReversalEntry(entry) ? -entryAmount(entry) : entryAmount(entry);
 }
 
-/** 仕訳が指定タグを（全体 or いずれかの明細で）持つか。 */
+/** 仕訳が指定タグ（仕訳全体タグ）を持つか。 */
 export function entryHasTag(entry: JournalEntry, tagId: string): boolean {
-  if (entry.tagIds?.includes(tagId)) return true;
-  return entry.lines.some((l) => l.tagIds?.includes(tagId));
+  return entry.tagIds?.includes(tagId) ?? false;
 }
 
 export interface EntryTagTotal {
@@ -95,51 +64,20 @@ export interface EntryTagTotal {
   total: number;
 }
 
-export interface LineTagTotal {
-  tag: Tag;
-  debit: number;
-  credit: number;
-}
-
-/** 全体タグ（entry|both）の、期間内のタグ付き仕訳合計。 */
+/** 仕訳全体タグの、期間内のタグ付き仕訳合計。 */
 export function aggregateEntryTags(
   entries: JournalEntry[],
   tags: Tag[],
   range?: { from?: string; to?: string },
 ): EntryTagTotal[] {
   const inRange = filterByDateRange(entries, range?.from, range?.to);
-  return tags
-    .filter((t) => tagAllowsEntry(t.scope))
-    .map((tag) => {
-      const tagged = inRange.filter((e) => e.tagIds?.includes(tag.id));
-      return {
-        tag,
-        count: tagged.length,
-        // 取消/返金は負で集計（旅行費などから返金が差し引かれる）。
-        total: tagged.reduce((s, e) => s + signedEntryAmount(e), 0),
-      };
-    });
-}
-
-/** 明細タグ（line|both）の、期間内の借方/貸方合計。 */
-export function aggregateLineTags(
-  entries: JournalEntry[],
-  tags: Tag[],
-  range?: { from?: string; to?: string },
-): LineTagTotal[] {
-  const inRange = filterByDateRange(entries, range?.from, range?.to);
-  return tags
-    .filter((t) => tagAllowsLine(t.scope))
-    .map((tag) => {
-      let debit = 0;
-      let credit = 0;
-      for (const e of inRange) {
-        for (const l of e.lines) {
-          if (!l.tagIds?.includes(tag.id)) continue;
-          if (l.side === 'debit') debit += l.amount;
-          else credit += l.amount;
-        }
-      }
-      return { tag, debit, credit };
-    });
+  return tags.map((tag) => {
+    const tagged = inRange.filter((e) => e.tagIds?.includes(tag.id));
+    return {
+      tag,
+      count: tagged.length,
+      // 取消/返金は負で集計（旅行費などから返金が差し引かれる）。
+      total: tagged.reduce((s, e) => s + signedEntryAmount(e), 0),
+    };
+  });
 }

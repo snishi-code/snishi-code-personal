@@ -37,6 +37,8 @@ export function buildRepaymentSchedules(params: {
   fromAccountId: string;
   /** 返済先の負債科目（counterAccountId）。 */
   liabilityAccountId: string;
+  /** どの管理区分の予定か。 */
+  managementScopeId: string;
 }): CashflowSchedule[] {
   const ts = nowIso();
   const parts = monthlyAmounts(params.total, params.count);
@@ -50,6 +52,7 @@ export function buildRepaymentSchedules(params: {
     counterAccountId: params.liabilityAccountId,
     source: 'installment' as const,
     status: 'planned' as const,
+    managementScopeId: params.managementScopeId,
     createdAt: ts,
     updatedAt: ts,
   }));
@@ -109,22 +112,15 @@ export function buildScheduleEntry(schedule: CashflowSchedule): JournalEntry {
   const counter = schedule.counterAccountId;
   const debit = schedule.direction === 'inflow' ? asset : counter;
   const credit = schedule.direction === 'inflow' ? counter : asset;
-  // 各明細タグは「口座側 / 相手科目側」を口座 ID で判定して付け替える。
-  const lineTags = (accountId: string): { tagIds?: string[] } => {
-    if (accountId === asset && schedule.accountLineTagIds?.length)
-      return { tagIds: schedule.accountLineTagIds };
-    if (accountId === counter && schedule.counterLineTagIds?.length)
-      return { tagIds: schedule.counterLineTagIds };
-    return {};
-  };
   return {
     id: newId(),
     date: schedule.dueDate,
     description: schedule.title,
     kind: 'normal',
+    managementScopeId: schedule.managementScopeId,
     lines: [
-      { accountId: debit, side: 'debit', amount: schedule.amount, ...lineTags(debit) },
-      { accountId: credit, side: 'credit', amount: schedule.amount, ...lineTags(credit) },
+      { accountId: debit, side: 'debit', amount: schedule.amount },
+      { accountId: credit, side: 'credit', amount: schedule.amount },
     ],
     metadata: { inputMode: 'manual' },
     ...(schedule.entryTagIds?.length ? { tagIds: schedule.entryTagIds } : {}),

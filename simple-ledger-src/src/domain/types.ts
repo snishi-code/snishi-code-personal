@@ -39,27 +39,60 @@ export interface Account {
   updatedAt: string;
 }
 
+/**
+ * 管理区分。「楽天カードか JAL カードか」より先に「個人用/事業用/家族用のどの財布か」を扱う軸。
+ * 別会計ではなく、分析・入力候補を分けるための軸。グローバル PL/BS の複式整合は勘定科目で守る。
+ * 初期値は『個人用』1 件のみ。
+ */
+export interface ManagementScope {
+  id: string;
+  name: string;
+  archived?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 支払い手段の細目（任意）。粗い科目（クレジットカード/チャージ残高/預金）の下に、
+ * 楽天カード・三井住友カード・Suica・PayPay・楽天銀行などを任意で持つ。
+ * 細目別残高の厳密管理はまだ行わない（指定された行だけ細目別に集計できる程度）。
+ */
+export type AccountInstrumentKind = 'bank' | 'card' | 'prepaid' | 'cash' | 'other';
+
+export interface AccountInstrument {
+  id: string;
+  /** どの管理区分に属する細目か。 */
+  managementScopeId: string;
+  /** 親の粗い科目（例: クレジットカード / チャージ残高 / 預金）。 */
+  accountId: string;
+  name: string;
+  kind: AccountInstrumentKind;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface JournalLine {
   accountId: string;
   side: Side;
   /** 正の整数（最小通貨単位）。 */
   amount: number;
-  /** 明細タグ（楽天カード・楽天銀行など、借方/貸方側に付く補助タグ）。scope: line|both。 */
-  tagIds?: string[];
+  /** 支払い手段の細目（任意）。指定時、instrument.accountId === accountId である必要がある。 */
+  instrumentId?: string;
 }
 
 /**
- * タグ。勘定科目を増やさずに、旅行・イベント・カード名・銀行名などを後から抽出する分析軸。
- * PL/BS の会計ロジックは変えない。
- *  - scope=entry: 仕訳全体タグ（旅行・学会 等）
- *  - scope=line:  明細タグ（カード名・銀行名 等、借方/貸方側に付く）
- *  - scope=both:  どちらにも付けられる
+ * タグ。勘定科目を増やさずに、旅行・帰省・学会・引っ越しなどイベント/目的ラベルで
+ * 仕訳を後から抽出する分析軸。PL/BS の会計ロジックは変えない。
+ * タグは常に「仕訳全体（entry）」に付く。カード名・銀行名・Pay 系名はタグにしない
+ * （それらは支払い手段の細目 = AccountInstrument で扱う）。
  */
-export type TagScope = 'entry' | 'line' | 'both';
+export type TagScope = 'entry';
 
 export interface Tag {
   id: string;
   name: string;
+  /** 常に 'entry'（仕訳全体タグ）。互換のためフィールドは残す。 */
   scope: TagScope;
   /** 表示色（CSS トークン名など）。任意。 */
   color?: string;
@@ -186,6 +219,8 @@ export type MonthlyCostStatus = 'active' | 'paused' | 'ended';
 export interface MonthlyCostItem {
   id: string;
   name: string;
+  /** どの管理区分の月額化コストか。migration で既存は『個人用』に寄せる。 */
+  managementScopeId: string;
   kind: MonthlyCostKind;
   /** 1 回の契約・購入・更新で発生する総額（正の整数）。 */
   amount: number;
@@ -237,12 +272,12 @@ export interface CashflowSchedule {
   counterAccountId?: string;
   source: CashflowSource;
   status: CashflowStatus;
+  /** どの管理区分の予定か。実績化時に仕訳へ引き継ぐ。 */
+  managementScopeId: string;
   /** posted のとき、作成された仕訳の ID。 */
   linkedEntryId?: string;
-  /** 実績化時に仕訳へコピーするタグ。 */
+  /** 実績化時に仕訳へコピーする仕訳全体タグ。 */
   entryTagIds?: string[];
-  accountLineTagIds?: string[];
-  counterLineTagIds?: string[];
   /** 月額化コスト（負債払い）の返済予定として生成されたとき、紐づく MonthlyCostItem の ID。 */
   monthlyCostId?: string;
   createdAt: string;
@@ -300,9 +335,11 @@ export interface JournalEntry {
   memo?: string;
   /** 'opening' は UI で「初期残高」として見せる。集計上は通常の仕訳と同じ。 */
   kind: JournalEntryKind;
+  /** どの管理区分（個人用/事業用/家族用 等）の仕訳か。migration で既存は『個人用』に寄せる。 */
+  managementScopeId: string;
   /** 付帯情報（入力方法・逆仕訳リンク・按分計画など）。任意。 */
   metadata?: EntryMetadata;
-  /** 仕訳全体タグ（旅行・学会・プロポーズ等）。scope: entry|both。 */
+  /** 仕訳全体タグ（旅行・帰省・学会 等のイベント/目的ラベル）。 */
   tagIds?: string[];
   createdAt: string;
   updatedAt: string;
@@ -348,6 +385,8 @@ export interface LedgerExportPackage {
   deviceId: string;
   baseRevision: number;
   currentRevision: number;
+  managementScopes: ManagementScope[];
+  accountInstruments: AccountInstrument[];
   accounts: Account[];
   journalEntries: JournalEntry[];
   allocations: AllocationItem[];
@@ -400,6 +439,8 @@ export interface BalanceSheet {
 export interface Ledger {
   meta: LedgerMeta;
   settings: Settings;
+  managementScopes: ManagementScope[];
+  accountInstruments: AccountInstrument[];
   accounts: Account[];
   journalEntries: JournalEntry[];
   allocations: AllocationItem[];

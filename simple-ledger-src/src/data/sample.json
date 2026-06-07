@@ -1,12 +1,63 @@
 {
   "appId": "snishi-code.simple-ledger",
-  "schemaVersion": 10,
+  "schemaVersion": 11,
   "ledgerId": "sample-ledger",
   "exportedAt": "2026-04-01T00:00:00.000Z",
   "deviceId": "sample-device",
   "baseRevision": 0,
   "currentRevision": 1,
   "settings": { "ledgerName": "サンプル家計簿", "currency": "JPY", "locale": "ja" },
+  "managementScopes": [
+    {
+      "id": "scope-personal",
+      "name": "個人用",
+      "archived": false,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "accountInstruments": [
+    {
+      "id": "inst-rakuten-card",
+      "managementScopeId": "scope-personal",
+      "accountId": "acc-card",
+      "name": "楽天カード",
+      "kind": "card",
+      "archived": false,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "inst-rakuten-bank",
+      "managementScopeId": "scope-personal",
+      "accountId": "acc-bank",
+      "name": "楽天銀行",
+      "kind": "bank",
+      "archived": false,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "inst-suica",
+      "managementScopeId": "scope-personal",
+      "accountId": "acc-charge",
+      "name": "Suica",
+      "kind": "prepaid",
+      "archived": false,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "inst-paypay",
+      "managementScopeId": "scope-personal",
+      "accountId": "acc-charge",
+      "name": "PayPay",
+      "kind": "prepaid",
+      "archived": false,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
   "accounts": [
     {
       "id": "acc-cash",
@@ -168,8 +219,14 @@
       "date": "2026-01-01",
       "description": "開始残高（預金）",
       "kind": "opening",
+      "managementScopeId": "scope-personal",
       "lines": [
-        { "accountId": "acc-bank", "side": "debit", "amount": 500000 },
+        {
+          "accountId": "acc-bank",
+          "side": "debit",
+          "amount": 500000,
+          "instrumentId": "inst-rakuten-bank"
+        },
         { "accountId": "acc-open", "side": "credit", "amount": 500000 }
       ],
       "metadata": { "inputMode": "manual" },
@@ -181,6 +238,7 @@
       "date": "2026-01-01",
       "description": "開始残高（現金）",
       "kind": "opening",
+      "managementScopeId": "scope-personal",
       "lines": [
         { "accountId": "acc-cash", "side": "debit", "amount": 30000 },
         { "accountId": "acc-open", "side": "credit", "amount": 30000 }
@@ -194,9 +252,15 @@
       "date": "2026-01-01",
       "description": "家賃",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
         { "accountId": "acc-fixed", "side": "debit", "amount": 80000 },
-        { "accountId": "acc-bank", "side": "credit", "amount": 80000 }
+        {
+          "accountId": "acc-bank",
+          "side": "credit",
+          "amount": 80000,
+          "instrumentId": "inst-rakuten-bank"
+        }
       ],
       "metadata": { "inputMode": "expense", "monthlyCostId": "mc-rent" },
       "createdAt": "2026-01-01T00:00:00.000Z",
@@ -207,9 +271,15 @@
       "date": "2026-01-01",
       "description": "光熱・通信",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
         { "accountId": "acc-fixed", "side": "debit", "amount": 15000 },
-        { "accountId": "acc-bank", "side": "credit", "amount": 15000 }
+        {
+          "accountId": "acc-bank",
+          "side": "credit",
+          "amount": 15000,
+          "instrumentId": "inst-rakuten-bank"
+        }
       ],
       "metadata": { "inputMode": "expense", "monthlyCostId": "mc-utility" },
       "createdAt": "2026-01-01T00:00:00.000Z",
@@ -220,9 +290,15 @@
       "date": "2026-01-05",
       "description": "ジム",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
         { "accountId": "acc-health", "side": "debit", "amount": 7000 },
-        { "accountId": "acc-bank", "side": "credit", "amount": 7000 }
+        {
+          "accountId": "acc-bank",
+          "side": "credit",
+          "amount": 7000,
+          "instrumentId": "inst-rakuten-bank"
+        }
       ],
       "metadata": { "inputMode": "expense", "monthlyCostId": "mc-gym" },
       "createdAt": "2026-01-05T00:00:00.000Z",
@@ -233,9 +309,15 @@
       "date": "2026-01-05",
       "description": "動画サブスク",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
         { "accountId": "acc-fun", "side": "debit", "amount": 1500 },
-        { "accountId": "acc-card", "side": "credit", "amount": 1500, "tagIds": ["tag-card"] }
+        {
+          "accountId": "acc-card",
+          "side": "credit",
+          "amount": 1500,
+          "instrumentId": "inst-rakuten-card"
+        }
       ],
       "metadata": { "inputMode": "expense", "monthlyCostId": "mc-sub" },
       "createdAt": "2026-01-05T00:00:00.000Z",
@@ -246,9 +328,20 @@
       "date": "2026-01-10",
       "description": "チャージ",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
-        { "accountId": "acc-charge", "side": "debit", "amount": 20000 },
-        { "accountId": "acc-bank", "side": "credit", "amount": 20000 }
+        {
+          "accountId": "acc-charge",
+          "side": "debit",
+          "amount": 20000,
+          "instrumentId": "inst-suica"
+        },
+        {
+          "accountId": "acc-bank",
+          "side": "credit",
+          "amount": 20000,
+          "instrumentId": "inst-rakuten-bank"
+        }
       ],
       "metadata": { "inputMode": "transfer" },
       "createdAt": "2026-01-10T00:00:00.000Z",
@@ -259,9 +352,15 @@
       "date": "2026-01-12",
       "description": "スーパー",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
         { "accountId": "acc-variable", "side": "debit", "amount": 3500 },
-        { "accountId": "acc-charge", "side": "credit", "amount": 3500 }
+        {
+          "accountId": "acc-charge",
+          "side": "credit",
+          "amount": 3500,
+          "instrumentId": "inst-suica"
+        }
       ],
       "metadata": { "inputMode": "expense" },
       "createdAt": "2026-01-12T00:00:00.000Z",
@@ -272,9 +371,15 @@
       "date": "2026-01-15",
       "description": "映画",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
         { "accountId": "acc-fun", "side": "debit", "amount": 2000 },
-        { "accountId": "acc-charge", "side": "credit", "amount": 2000 }
+        {
+          "accountId": "acc-charge",
+          "side": "credit",
+          "amount": 2000,
+          "instrumentId": "inst-paypay"
+        }
       ],
       "metadata": { "inputMode": "expense" },
       "createdAt": "2026-01-15T00:00:00.000Z",
@@ -285,6 +390,7 @@
       "date": "2026-01-18",
       "description": "友人と食事",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
         { "accountId": "acc-social", "side": "debit", "amount": 5000 },
         { "accountId": "acc-cash", "side": "credit", "amount": 5000 }
@@ -298,9 +404,15 @@
       "date": "2026-01-20",
       "description": "積立投資",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
         { "accountId": "acc-invest", "side": "debit", "amount": 50000 },
-        { "accountId": "acc-bank", "side": "credit", "amount": 50000 }
+        {
+          "accountId": "acc-bank",
+          "side": "credit",
+          "amount": 50000,
+          "instrumentId": "inst-rakuten-bank"
+        }
       ],
       "metadata": { "inputMode": "transfer" },
       "createdAt": "2026-01-20T00:00:00.000Z",
@@ -311,9 +423,15 @@
       "date": "2026-01-22",
       "description": "ネット通販",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
         { "accountId": "acc-variable", "side": "debit", "amount": 8000 },
-        { "accountId": "acc-card", "side": "credit", "amount": 8000, "tagIds": ["tag-card"] }
+        {
+          "accountId": "acc-card",
+          "side": "credit",
+          "amount": 8000,
+          "instrumentId": "inst-rakuten-card"
+        }
       ],
       "metadata": { "inputMode": "expense" },
       "createdAt": "2026-01-22T00:00:00.000Z",
@@ -324,8 +442,14 @@
       "date": "2026-01-25",
       "description": "給与",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
-        { "accountId": "acc-bank", "side": "debit", "amount": 280000 },
+        {
+          "accountId": "acc-bank",
+          "side": "debit",
+          "amount": 280000,
+          "instrumentId": "inst-rakuten-bank"
+        },
         { "accountId": "acc-salary", "side": "credit", "amount": 280000 }
       ],
       "metadata": { "inputMode": "income" },
@@ -337,9 +461,15 @@
       "date": "2026-01-28",
       "description": "旅行資金へ取り置き",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
         { "accountId": "acc-travel", "side": "debit", "amount": 30000 },
-        { "accountId": "acc-bank", "side": "credit", "amount": 30000 }
+        {
+          "accountId": "acc-bank",
+          "side": "credit",
+          "amount": 30000,
+          "instrumentId": "inst-rakuten-bank"
+        }
       ],
       "metadata": { "inputMode": "transfer" },
       "tagIds": ["tag-travel"],
@@ -351,9 +481,15 @@
       "date": "2026-01-30",
       "description": "書籍（仕事）",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
         { "accountId": "acc-work", "side": "debit", "amount": 4000 },
-        { "accountId": "acc-bank", "side": "credit", "amount": 4000 }
+        {
+          "accountId": "acc-bank",
+          "side": "credit",
+          "amount": 4000,
+          "instrumentId": "inst-rakuten-bank"
+        }
       ],
       "metadata": { "inputMode": "expense" },
       "tagIds": ["tag-work"],
@@ -365,6 +501,7 @@
       "date": "2026-01-31",
       "description": "雑費",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
         { "accountId": "acc-other-expense", "side": "debit", "amount": 1500 },
         { "accountId": "acc-cash", "side": "credit", "amount": 1500 }
@@ -378,9 +515,15 @@
       "date": "2026-02-08",
       "description": "食料品まとめ買い",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
         { "accountId": "acc-variable", "side": "debit", "amount": 12000 },
-        { "accountId": "acc-bank", "side": "credit", "amount": 12000 }
+        {
+          "accountId": "acc-bank",
+          "side": "credit",
+          "amount": 12000,
+          "instrumentId": "inst-rakuten-bank"
+        }
       ],
       "metadata": { "inputMode": "expense" },
       "createdAt": "2026-02-08T00:00:00.000Z",
@@ -391,9 +534,20 @@
       "date": "2026-02-10",
       "description": "カード引き落とし（1月分）",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
-        { "accountId": "acc-card", "side": "debit", "amount": 9500 },
-        { "accountId": "acc-bank", "side": "credit", "amount": 9500 }
+        {
+          "accountId": "acc-card",
+          "side": "debit",
+          "amount": 9500,
+          "instrumentId": "inst-rakuten-card"
+        },
+        {
+          "accountId": "acc-bank",
+          "side": "credit",
+          "amount": 9500,
+          "instrumentId": "inst-rakuten-bank"
+        }
       ],
       "metadata": { "inputMode": "transfer" },
       "createdAt": "2026-02-10T00:00:00.000Z",
@@ -404,6 +558,7 @@
       "date": "2026-02-14",
       "description": "通院",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
         { "accountId": "acc-health", "side": "debit", "amount": 3000 },
         { "accountId": "acc-cash", "side": "credit", "amount": 3000 }
@@ -417,8 +572,14 @@
       "date": "2026-02-20",
       "description": "フリマ売上",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
-        { "accountId": "acc-bank", "side": "debit", "amount": 15000 },
+        {
+          "accountId": "acc-bank",
+          "side": "debit",
+          "amount": 15000,
+          "instrumentId": "inst-rakuten-bank"
+        },
         { "accountId": "acc-other-income", "side": "credit", "amount": 15000 }
       ],
       "metadata": { "inputMode": "income" },
@@ -430,8 +591,14 @@
       "date": "2026-02-25",
       "description": "給与",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
-        { "accountId": "acc-bank", "side": "debit", "amount": 280000 },
+        {
+          "accountId": "acc-bank",
+          "side": "debit",
+          "amount": 280000,
+          "instrumentId": "inst-rakuten-bank"
+        },
         { "accountId": "acc-salary", "side": "credit", "amount": 280000 }
       ],
       "metadata": { "inputMode": "income" },
@@ -443,9 +610,15 @@
       "date": "2026-03-15",
       "description": "国民健康保険",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
         { "accountId": "acc-tax", "side": "debit", "amount": 12000 },
-        { "accountId": "acc-bank", "side": "credit", "amount": 12000 }
+        {
+          "accountId": "acc-bank",
+          "side": "credit",
+          "amount": 12000,
+          "instrumentId": "inst-rakuten-bank"
+        }
       ],
       "metadata": { "inputMode": "expense" },
       "createdAt": "2026-03-15T00:00:00.000Z",
@@ -456,11 +629,18 @@
       "date": "2026-03-18",
       "description": "ライブ",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
         { "accountId": "acc-fun", "side": "debit", "amount": 6000 },
-        { "accountId": "acc-card", "side": "credit", "amount": 6000, "tagIds": ["tag-card"] }
+        {
+          "accountId": "acc-card",
+          "side": "credit",
+          "amount": 6000,
+          "instrumentId": "inst-rakuten-card"
+        }
       ],
       "metadata": { "inputMode": "expense" },
+      "tagIds": ["tag-travel"],
       "createdAt": "2026-03-18T00:00:00.000Z",
       "updatedAt": "2026-03-18T00:00:00.000Z"
     },
@@ -469,9 +649,15 @@
       "date": "2026-03-22",
       "description": "歓送迎会",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
         { "accountId": "acc-social", "side": "debit", "amount": 8000 },
-        { "accountId": "acc-bank", "side": "credit", "amount": 8000 }
+        {
+          "accountId": "acc-bank",
+          "side": "credit",
+          "amount": 8000,
+          "instrumentId": "inst-rakuten-bank"
+        }
       ],
       "metadata": { "inputMode": "expense" },
       "createdAt": "2026-03-22T00:00:00.000Z",
@@ -482,8 +668,14 @@
       "date": "2026-03-25",
       "description": "給与",
       "kind": "normal",
+      "managementScopeId": "scope-personal",
       "lines": [
-        { "accountId": "acc-bank", "side": "debit", "amount": 280000 },
+        {
+          "accountId": "acc-bank",
+          "side": "debit",
+          "amount": 280000,
+          "instrumentId": "inst-rakuten-bank"
+        },
         { "accountId": "acc-salary", "side": "credit", "amount": 280000 }
       ],
       "metadata": { "inputMode": "income" },
@@ -503,6 +695,7 @@
       "counterAccountId": "acc-card",
       "source": "credit-card",
       "status": "planned",
+      "managementScopeId": "scope-personal",
       "createdAt": "2026-03-19T00:00:00.000Z",
       "updatedAt": "2026-03-19T00:00:00.000Z"
     },
@@ -516,6 +709,7 @@
       "counterAccountId": "acc-tax",
       "source": "manual",
       "status": "planned",
+      "managementScopeId": "scope-personal",
       "createdAt": "2026-03-01T00:00:00.000Z",
       "updatedAt": "2026-03-01T00:00:00.000Z"
     }
@@ -536,15 +730,7 @@
     {
       "id": "tag-travel",
       "name": "旅行",
-      "scope": "both",
-      "archived": false,
-      "createdAt": "2026-01-01T00:00:00.000Z",
-      "updatedAt": "2026-01-01T00:00:00.000Z"
-    },
-    {
-      "id": "tag-card",
-      "name": "カード",
-      "scope": "line",
+      "scope": "entry",
       "archived": false,
       "createdAt": "2026-01-01T00:00:00.000Z",
       "updatedAt": "2026-01-01T00:00:00.000Z"
@@ -562,6 +748,7 @@
     {
       "id": "mc-rent",
       "name": "家賃",
+      "managementScopeId": "scope-personal",
       "kind": "subscription",
       "amount": 80000,
       "costMonths": 1,
@@ -575,6 +762,7 @@
     {
       "id": "mc-utility",
       "name": "光熱・通信",
+      "managementScopeId": "scope-personal",
       "kind": "subscription",
       "amount": 15000,
       "costMonths": 1,
@@ -588,6 +776,7 @@
     {
       "id": "mc-gym",
       "name": "ジム",
+      "managementScopeId": "scope-personal",
       "kind": "subscription",
       "amount": 7000,
       "costMonths": 1,
@@ -601,6 +790,7 @@
     {
       "id": "mc-sub",
       "name": "動画サブスク",
+      "managementScopeId": "scope-personal",
       "kind": "subscription",
       "amount": 1500,
       "costMonths": 1,

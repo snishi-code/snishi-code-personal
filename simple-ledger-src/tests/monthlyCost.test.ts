@@ -6,11 +6,13 @@ import {
   totalMonthlyCostForMonth,
 } from '../src/domain/monthlyCost';
 import type { MonthlyCostItem } from '../src/domain/types';
+import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
 
 function item(over: Partial<MonthlyCostItem>): MonthlyCostItem {
   return {
     id: 'm',
     name: 'x',
+    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     kind: 'subscription',
     amount: 1500,
     costMonths: 1,

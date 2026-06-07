@@ -8,6 +8,7 @@ import {
   liquidAssetTotal,
   projectCashflow,
 } from '../src/domain/cashflow';
+import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
 
 describe('buildRepaymentSchedules（分割返済の予定生成）', () => {
   it('200万円 / 60回 で 60 件、合計一致、各 daily→liability の outflow', () => {
@@ -18,6 +19,7 @@ describe('buildRepaymentSchedules（分割返済の予定生成）', () => {
       firstDueDate: '2031-07-10',
       fromAccountId: 'cash',
       liabilityAccountId: 'loan',
+      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     });
     expect(list).toHaveLength(60);
     expect(list.reduce((s, x) => s + x.amount, 0)).toBe(2_000_000);
@@ -128,6 +130,7 @@ function sched(over: Partial<CashflowSchedule>): CashflowSchedule {
     accountId: 'bank',
     source: 'manual',
     status: 'planned',
+    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     createdAt: 'x',
     updatedAt: 'x',
     ...over,
@@ -213,6 +216,7 @@ function entry(over: Partial<JournalEntry> & { lines: JournalEntry['lines'] }): 
     date: '2026-07-01',
     description: 'x',
     kind: 'normal',
+    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     metadata: { inputMode: 'manual' },
     createdAt: 'x',
     updatedAt: 'x',

@@ -1,29 +1,25 @@
 /*
  * タグ画面。タグの作成/編集/アーカイブ/削除と、期間内の簡易集計。
- * タグは PL/BS を変えない分析軸（全体タグ / 明細タグ）。
+ * タグは PL/BS を変えない分析軸で、常に仕訳全体に付く（旅行・帰省・学会 等のイベント/目的ラベル）。
+ * カード名・銀行名・Pay 系名はタグにしない（支払い手段の細目で扱う）。
  */
 import { useMemo, useRef, useState } from 'react';
 import { useLedger } from '../../state/store';
 import { useDirtyGuard } from '../useDirtyGuard';
-import { aggregateEntryTags, aggregateLineTags, tagUsage } from '../../domain/tags';
+import { aggregateEntryTags } from '../../domain/tags';
 import { monthRange } from '../../domain/accounting';
 import { currentYearMonth, nowIso } from '../../util/time';
 import { newId } from '../../domain/ids';
-import type { Tag, TagScope } from '../../domain/types';
+import type { Tag } from '../../domain/types';
 import { Modal } from '../Modal';
-import { SelectInput, TextInput } from '../Field';
+import { TextInput } from '../Field';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { Money } from '../money';
 import { Icon } from '../Icon';
 import { errorText, t } from '../../i18n';
-import type { MessageKey } from '../../i18n';
 import { UI } from '../../ui-contract';
 
 type Period = 'month' | 'year' | 'all';
-
-function scopeLabel(scope: TagScope): string {
-  return t(`tags.scope.${scope}` as MessageKey);
-}
 
 export function Tags() {
   const { ledger, saveTag, removeTag } = useLedger();
@@ -48,13 +44,6 @@ export function Tags() {
     () =>
       aggregateEntryTags(ledger?.journalEntries ?? [], ledger?.tags ?? [], range).filter(
         (x) => x.count > 0,
-      ),
-    [ledger, range],
-  );
-  const lineTotals = useMemo(
-    () =>
-      aggregateLineTags(ledger?.journalEntries ?? [], ledger?.tags ?? [], range).filter(
-        (x) => x.debit > 0 || x.credit > 0,
       ),
     [ledger, range],
   );
@@ -111,9 +100,6 @@ export function Tags() {
                   {tag.archived ? (
                     <span className="tag tag--neutral">{t('tags.archived')}</span>
                   ) : null}
-                </div>
-                <div className="list__sub">
-                  {t('tags.scopeLabel', { scope: scopeLabel(tag.scope) })}
                 </div>
               </div>
               <div className="row-actions">
@@ -188,23 +174,6 @@ export function Tags() {
         </div>
       )}
 
-      <p className="section-label">{t('tags.lineTags')}</p>
-      {lineTotals.length === 0 ? (
-        <div className="card card--pad muted">{t('tags.noTaggedData')}</div>
-      ) : (
-        <div className="card" data-ui={UI.tags.lineSummary}>
-          {lineTotals.map((x) => (
-            <div className="stmt-row" key={x.tag.id}>
-              <span>{x.tag.name}</span>
-              <span className="stmt-row__num">
-                {t('tags.debitTotal')} <Money amount={x.debit} currency={currency} /> ／{' '}
-                {t('tags.creditTotal')} <Money amount={x.credit} currency={currency} />
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
       {creating ? <TagSheet onClose={() => setCreating(false)} /> : null}
       {editing ? <TagSheet existing={editing} onClose={() => setEditing(null)} /> : null}
       {pendingDelete ? (
@@ -226,24 +195,10 @@ export function Tags() {
 }
 
 function TagSheet({ existing, onClose }: { existing?: Tag; onClose: () => void }) {
-  const { ledger, saveTag } = useLedger();
+  const { saveTag } = useLedger();
   const [name, setName] = useState(existing?.name ?? '');
-  const [scope, setScope] = useState<TagScope>(existing?.scope ?? 'both');
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
-
-  // 使用中タグは対象(scope)を狭める変更ができない（repository が fail-closed）。
-  // 判定は repository と同じ共通ヘルパ（仕訳 + 予定CF）に寄せて UI と挙動を一致させる。
-  const inUse =
-    !!existing &&
-    (() => {
-      const u = tagUsage(
-        existing.id,
-        ledger?.journalEntries ?? [],
-        ledger?.cashflowSchedules ?? [],
-      );
-      return u.usedAsEntry || u.usedAsLine;
-    })();
 
   async function submit() {
     if (name.trim() === '') {
@@ -252,10 +207,11 @@ function TagSheet({ existing, onClose }: { existing?: Tag; onClose: () => void }
     }
     setSubmitting(true);
     const ts = nowIso();
+    // タグは常に仕訳全体（entry）。scope 選択は廃止。
     const tag: Tag = {
       id: existing?.id ?? newId(),
       name: name.trim(),
-      scope,
+      scope: 'entry',
       archived: existing?.archived ?? false,
       createdAt: existing?.createdAt ?? ts,
       updatedAt: ts,
@@ -264,13 +220,13 @@ function TagSheet({ existing, onClose }: { existing?: Tag; onClose: () => void }
       await saveTag(tag);
       onClose();
     } catch (e) {
-      // 保存拒否（同名重複・scope 変更不可など）は TagSheet 内にインラインで出す。
+      // 保存拒否（同名重複など）は TagSheet 内にインラインで出す。
       setError(errorText(e, 'tags.error.save'));
       setSubmitting(false);
     }
   }
 
-  const snapshot = JSON.stringify({ name, scope });
+  const snapshot = JSON.stringify({ name });
   const initialSnapshotRef = useRef<string | null>(null);
   if (initialSnapshotRef.current === null) initialSnapshotRef.current = snapshot;
   const dirty = snapshot !== initialSnapshotRef.current;
@@ -311,17 +267,7 @@ function TagSheet({ existing, onClose }: { existing?: Tag; onClose: () => void }
           error={error}
           dataUi={UI.tags.name}
         />
-        <SelectInput
-          label={t('tags.scope')}
-          value={scope}
-          onChange={(v) => setScope(v as TagScope)}
-          options={[
-            { value: 'both', label: t('tags.scope.both') },
-            { value: 'entry', label: t('tags.scope.entry') },
-            { value: 'line', label: t('tags.scope.line') },
-          ]}
-          hint={inUse ? t('tags.scopeLockedHint') : undefined}
-        />
+        <p className="field__hint">{t('tags.entryOnlyHint')}</p>
       </Modal>
       {discardConfirm}
     </>
