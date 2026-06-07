@@ -391,6 +391,13 @@ export const ja = {
   'entry.monthlyizeRepayCount': '返済回数',
   'entry.monthlyizeRepayStart': '初回引落日',
   'entry.monthlyizeRepayStartHint': '購入日とは別に、最初に現金が引き落とされる日を入れます。',
+  'entry.loanRepayToggle': '分割返済を資金繰りに入れる',
+  'entry.loanRepayNote':
+    '毎月の返済予定（返済元の口座 → 負債）を作り、資金繰り（CF）に反映します。',
+  'entry.loanRepayAccount': '返済元の口座（日常資産）',
+  'entry.loanRepayCount': '返済回数',
+  'entry.loanRepayStart': '初回返済日',
+  'entry.loanRepayStartHint': '未入力なら借入日から毎月。',
   'entry.monthlyizeNote':
     '実際の支払いは仕訳に残し、生活コストは月あたりで見ます（月割りで導出・二重計上しません）。負債払いで返済を入力すると、返済予定（資金繰り）も作ります。',
 

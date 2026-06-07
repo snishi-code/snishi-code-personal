@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildRepaymentSchedules,
   buildScheduleEntry,
   cashDeltaOfEntry,
   horizonEnd,
@@ -7,6 +8,27 @@ import {
   liquidAssetTotal,
   projectCashflow,
 } from '../src/domain/cashflow';
+
+describe('buildRepaymentSchedules（分割返済の予定生成）', () => {
+  it('200万円 / 60回 で 60 件、合計一致、各 daily→liability の outflow', () => {
+    const list = buildRepaymentSchedules({
+      title: '自動車ローン',
+      total: 2_000_000,
+      count: 60,
+      firstDueDate: '2031-07-10',
+      fromAccountId: 'cash',
+      liabilityAccountId: 'loan',
+    });
+    expect(list).toHaveLength(60);
+    expect(list.reduce((s, x) => s + x.amount, 0)).toBe(2_000_000);
+    expect(list.every((x) => x.direction === 'outflow')).toBe(true);
+    expect(list.every((x) => x.accountId === 'cash' && x.counterAccountId === 'loan')).toBe(true);
+    expect(list.every((x) => x.source === 'installment' && x.status === 'planned')).toBe(true);
+    expect(list[0]?.dueDate).toBe('2031-07-10');
+    expect(list[1]?.dueDate).toBe('2031-08-10');
+    expect(list[11]?.dueDate).toBe('2032-06-10');
+  });
+});
 import type { Account, AccountBalance, CashflowSchedule, JournalEntry } from '../src/domain/types';
 import type { AccountRole } from '../src/domain/accountRoles';
 

@@ -38,6 +38,8 @@ interface LedgerContextValue {
     input: SimpleEntryInput,
     existing?: { id: string; createdAt: string },
   ) => Promise<void>;
+  /** 仕訳 + 返済予定など予定 CF をまとめて保存（借入実行 + 分割返済）。 */
+  saveEntryWithSchedules: (input: SimpleEntryInput, schedules: CashflowSchedule[]) => Promise<void>;
   removeEntry: (id: string, description: string) => Promise<void>;
   createAllocation: (input: Omit<AllocationInput, 'deferredAccountId'>) => Promise<void>;
   createMonthlyCost: (input: MonthlyCostInput) => Promise<void>;
@@ -120,6 +122,21 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
         // 保存拒否（目的別資金の残高不足など）は理由をそのまま伝える。
+        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const saveEntryWithSchedules = useCallback<LedgerContextValue['saveEntryWithSchedules']>(
+    async (input, schedules) => {
+      try {
+        const entry = buildSimpleEntry(input);
+        await repo.saveEntryWithSchedules(entry, schedules);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
         toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
         throw e;
       }
@@ -473,6 +490,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       ...(error !== undefined ? { error } : {}),
       refresh,
       saveEntry,
+      saveEntryWithSchedules,
       removeEntry,
       createAllocation,
       createMonthlyCost,
@@ -505,6 +523,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       error,
       refresh,
       saveEntry,
+      saveEntryWithSchedules,
       removeEntry,
       createAllocation,
       createMonthlyCost,

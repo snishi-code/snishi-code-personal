@@ -25,6 +25,7 @@ import {
 } from '../entryModes';
 import { monthOf } from '../../domain/allocation';
 import { inferMonthlyCostKind } from '../../domain/monthlyCost';
+import { buildRepaymentSchedules } from '../../domain/cashflow';
 import { useLedger } from '../../state/store';
 import {
   reversalInput,
@@ -72,7 +73,7 @@ function errorText(
 }
 
 export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => void }) {
-  const { ledger, saveEntry, createMonthlyCost } = useLedger();
+  const { ledger, saveEntry, saveEntryWithSchedules, createMonthlyCost } = useLedger();
   const accounts = ledger?.accounts ?? [];
   const tags = ledger?.tags ?? [];
 
@@ -118,6 +119,11 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   // 支払い元(credit)が支払用負債なら返済 CF を入力できる。
   const paymentRole = accounts.find((a) => a.id === form.creditAccountId)?.role;
   const isLiabilityPayment = paymentRole === 'payment-liability';
+  // 振替で源泉(credit)が負債 = 借入・ローン実行。任意で分割返済予定を一緒に登録できる。
+  const isLoanDraw =
+    init.kind === 'create' &&
+    mode === 'transfer' &&
+    (paymentRole === 'payment-liability' || paymentRole === 'other-liability');
   // 詳細（メモ・タグ）は折りたたみ。編集時は既存値が見えるよう開いておく。
   const [showDetails, setShowDetails] = useState(init.kind === 'edit');
 
@@ -222,7 +228,23 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         });
       } else {
         const metadata: EntryMetadata = { ...toSave.metadata, inputMode: resolveInputMode() };
-        await saveEntry({ ...toSave, metadata }, existing);
+        const entryInput = { ...toSave, metadata };
+        const repayCount = repayCountText === '' ? 0 : Number.parseInt(repayCountText, 10);
+        const useLoanRepay = isLoanDraw && repayToggle && repayAccountId !== '' && repayCount >= 1;
+        if (useLoanRepay) {
+          // 借入実行（借方 資金 / 貸方 負債）+ 分割返済予定（返済元 → 負債 の outflow）を一括保存。
+          const schedules = buildRepaymentSchedules({
+            title: toSave.description,
+            total: toSave.amount,
+            count: repayCount,
+            firstDueDate: repayStartDate || toSave.date,
+            fromAccountId: repayAccountId,
+            liabilityAccountId: toSave.creditAccountId,
+          });
+          await saveEntryWithSchedules(entryInput, schedules);
+        } else {
+          await saveEntry(entryInput, existing);
+        }
       }
       onClose();
     } catch {
@@ -489,6 +511,51 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       </div>
     ) : null;
 
+  // 借入・ローン実行（振替で源泉が負債）のとき、任意で分割返済予定を一緒に登録できる。
+  const loanRepaymentField = isLoanDraw ? (
+    <div className="field" data-ui={UI.journal.entry.loanRepayToggle}>
+      <label
+        style={{ display: 'inline-flex', gap: 8, alignItems: 'center', minHeight: 'var(--tap)' }}
+      >
+        <input
+          type="checkbox"
+          checked={repayToggle}
+          onChange={(e) => setRepayToggle(e.target.checked)}
+        />
+        {t('entry.loanRepayToggle')}
+      </label>
+      {repayToggle ? (
+        <div className="card card--pad" style={{ marginTop: 'var(--space-2)' }}>
+          <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
+            {t('entry.loanRepayNote')}
+          </p>
+          <AccountPicker
+            label={t('entry.loanRepayAccount')}
+            value={repayAccountId}
+            groups={groupedAccountsByRole(accounts, ['daily-asset'], repayAccountId)}
+            onChange={setRepayAccountId}
+            dataUi={UI.journal.entry.loanRepayAccount}
+          />
+          <TextInput
+            label={t('entry.loanRepayCount')}
+            inputMode="numeric"
+            value={repayCountText}
+            onChange={(v) => setRepayCountText(v.replace(/[^\d]/g, ''))}
+            dataUi={UI.journal.entry.loanRepayCount}
+          />
+          <TextInput
+            label={t('entry.loanRepayStart')}
+            type="date"
+            value={repayStartDate}
+            hint={t('entry.loanRepayStartHint')}
+            onChange={setRepayStartDate}
+            dataUi={UI.journal.entry.loanRepayStart}
+          />
+        </div>
+      ) : null}
+    </div>
+  ) : null;
+
   const manualSwitch =
     init.kind === 'create' && mode !== 'manual' && !allocate ? (
       <button
@@ -573,6 +640,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             {renderFlow()}
             {allocateField}
             {repaymentField}
+            {loanRepaymentField}
 
             {allocationActive ? null : (
               <>

@@ -29,7 +29,12 @@ import type {
   Tag,
 } from '../domain/types';
 import { monthlyCostItemsFromAllocations } from '../domain/monthlyCostMigration';
-import { buildAllocation, monthlyAmounts, type AllocationInput } from '../domain/allocation';
+import {
+  addMonthsToDate,
+  buildAllocation,
+  monthlyAmounts,
+  type AllocationInput,
+} from '../domain/allocation';
 import { buildScheduleEntry } from '../domain/cashflow';
 import { reserveBalanceShortfall } from '../domain/entry';
 import { buildAdjustmentEntry, counterpartName, counterpartRole } from '../domain/adjustment';
@@ -299,6 +304,29 @@ export async function deleteEntry(id: string): Promise<void> {
   await assertNotScheduleLinked(id);
   await writeWithRevision([STORE.journalEntries], (t) => {
     t.objectStore(STORE.journalEntries).delete(id);
+  });
+}
+
+/**
+ * 仕訳 + 予定 CF（分割返済など）を 1 トランザクションで保存する。
+ * 借入実行の振替（負債→資金）と、その返済予定をまとめて保存する用途。
+ * 仕訳だけ成功して予定が残らない中途半端な状態を避ける（fail-closed）。
+ */
+export async function saveEntryWithSchedules(
+  entry: JournalEntry,
+  schedules: CashflowSchedule[],
+): Promise<void> {
+  await assertNotGeneratedEntry(entry.id);
+  await assertNotScheduleLinked(entry.id);
+  if (entry.metadata?.allocationId) throw new Error(GENERATED_ENTRY_MSG);
+  if (entry.metadata?.monthlyCostId) throw new Error(MONTHLY_COST_ENTRY_MSG);
+  await assertEntryTagsValid(entry);
+  await assertReserveSufficient(entry);
+  await assertScheduleTagsValid(schedules);
+  await writeWithRevision([STORE.journalEntries, STORE.cashflowSchedules], (t) => {
+    t.objectStore(STORE.journalEntries).put(entry);
+    const sStore = t.objectStore(STORE.cashflowSchedules);
+    for (const s of schedules) sStore.put(s);
   });
 }
 
@@ -592,21 +620,6 @@ export async function createAdjustment(input: {
 }
 
 /* ── 月額化コスト ── */
-
-function daysInMonth(year: number, month1to12: number): number {
-  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
-  return [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month1to12 - 1] ?? 30;
-}
-
-/** ISO 日付に n か月加える（末日は月末へクランプ）。Date を使わず決定的に計算する。 */
-function addMonthsToDate(iso: string, n: number): string {
-  const [y, m, d] = iso.split('-').map(Number);
-  const total = (y ?? 0) * 12 + ((m ?? 1) - 1) + n;
-  const ny = Math.floor(total / 12);
-  const nm = (total % 12) + 1;
-  const day = Math.min(d ?? 1, daysInMonth(ny, nm));
-  return `${ny}-${String(nm).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-}
 
 export interface MonthlyCostInput {
   name: string;

@@ -69,6 +69,11 @@ export const UI = {
       monthlyizeRepayAccount: 'journal.entry.monthlyizeRepayAccount',
       monthlyizeRepayCount: 'journal.entry.monthlyizeRepayCount',
       monthlyizeRepayStart: 'journal.entry.monthlyizeRepayStart',
+      // 借入・ローン実行（振替）からの分割返済登録
+      loanRepayToggle: 'journal.entry.loanRepayToggle',
+      loanRepayAccount: 'journal.entry.loanRepayAccount',
+      loanRepayCount: 'journal.entry.loanRepayCount',
+      loanRepayStart: 'journal.entry.loanRepayStart',
       date: 'journal.entry.date',
       description: 'journal.entry.description',
       item: 'journal.entry.item',
