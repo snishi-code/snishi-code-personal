@@ -6,7 +6,6 @@ import { useState } from 'react';
 import { useLedger } from './state/store';
 import { Header } from './ui/Header';
 import { Menu } from './ui/Menu';
-import { PeriodMenu } from './ui/PeriodMenu';
 import { Dashboard } from './ui/screens/Dashboard';
 import { Journal, type JournalFilter } from './ui/screens/Journal';
 import { Statements } from './ui/screens/Statements';
@@ -41,7 +40,6 @@ export function App() {
     const { year, month } = currentYearMonth();
     return { mode: 'month', year, month };
   });
-  const [periodMenuOpen, setPeriodMenuOpen] = useState(false);
   const { updateReady, applyUpdate } = useServiceWorker();
 
   if (status === 'loading') {
@@ -100,9 +98,9 @@ export function App() {
       <Header
         period={period}
         today={today}
+        years={periodYears}
         onPeriodChange={setPeriod}
         onHome={() => setScreen('dashboard')}
-        onOpenPeriod={() => setPeriodMenuOpen(true)}
         onMenu={() => setMenuOpen(true)}
       />
 
@@ -152,16 +150,6 @@ export function App() {
         {screen === 'accounts' ? <Accounts /> : null}
         {screen === 'settings' ? <Settings onNavigate={setScreen} /> : null}
       </main>
-
-      {periodMenuOpen ? (
-        <PeriodMenu
-          value={period}
-          onChange={setPeriod}
-          onClose={() => setPeriodMenuOpen(false)}
-          today={today}
-          years={periodYears}
-        />
-      ) : null}
 
       {menuOpen ? (
         <Menu

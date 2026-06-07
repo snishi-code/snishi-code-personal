@@ -1,48 +1,39 @@
 /*
- * ヘッダー: 左=ホーム / 中央=期間コントロール / 右=≡(メニュー)。
- * 中央では年/月/年全体/全期間を「直接」操作できる:
- *   - ‹ › … 現在の粒度ぶん前後に移動（月別なら月、年別なら年。全期間は移動なし）。
- *   - 月 / 年 / 全期間 … 粒度の直接切替（年・月はなるべく保持）。
- *   - 中央ラベル … 期間メニューを開く（数十年先など正確な年/月選択の補助。主導線ではない）。
- * 期間は App の正本 state（ホーム/財務諸表/仕訳で共有）。入力導線はホームに集約しヘッダーに + は置かない。
+ * ヘッダー: 左=ホーム / 中央=現在の期間コンテキスト表示 / 右=≡(メニュー)。
+ * 中央はデータ抽出条件（期間）を小さく表示するだけ。タップで軽量ピッカーを開いて切り替える:
+ *   月表示: 「2026年 ▾ / 6月 ▾」   年表示: 「2026年 ▾ / 年全体 ▾」   全期間: 「全期間 ▾」
+ * 前後ボタンや粒度トグルなどの操作群はヘッダーに常設しない（操作はピッカー内で行う）。
+ * 期間は App の正本 state（ホーム/財務諸表/仕訳で共有）。入力導線はホームに集約。
  */
+import { useState } from 'react';
 import { Icon } from './Icon';
+import { PeriodMonthPicker, PeriodYearPicker } from './PeriodPickers';
 import { t } from '../i18n';
 import { UI } from '../ui-contract';
-import {
-  periodLabel,
-  stepPeriod,
-  withGrain,
-  type PeriodGrain,
-  type ReportPeriod,
-} from '../domain/reportPeriod';
-
-const GRAINS: {
-  grain: PeriodGrain;
-  labelKey: 'period.toMonth' | 'period.toYear' | 'period.toAll';
-  ui: string;
-}[] = [
-  { grain: 'month', labelKey: 'period.toMonth', ui: UI.period.toMonth },
-  { grain: 'year', labelKey: 'period.toYear', ui: UI.period.toYear },
-  { grain: 'all', labelKey: 'period.toAll', ui: UI.period.toAll },
-];
+import type { ReportPeriod } from '../domain/reportPeriod';
 
 export function Header({
   period,
   today,
+  years,
   onPeriodChange,
   onHome,
-  onOpenPeriod,
   onMenu,
 }: {
   period: ReportPeriod;
   today: string;
+  years: number[];
   onPeriodChange: (p: ReportPeriod) => void;
   onHome: () => void;
-  onOpenPeriod: () => void;
   onMenu: () => void;
 }) {
-  const isAll = period.mode === 'all';
+  const [picker, setPicker] = useState<'year' | 'month' | null>(null);
+
+  const yearLabel =
+    period.mode === 'all' ? t('period.allPeriod') : t('period.yearUnit', { year: period.year });
+  const monthLabel =
+    period.mode === 'month' ? t('period.monthUnit', { month: period.month }) : t('period.fullYear');
+
   return (
     <header className="app-header">
       <div className="app-header__inner">
@@ -56,55 +47,36 @@ export function Header({
           <Icon name="home" />
         </button>
 
-        <div className="app-header__center">
-          <div className="period-stepper">
-            <button
-              type="button"
-              className="icon-btn"
-              onClick={() => onPeriodChange(stepPeriod(period, -1))}
-              disabled={isAll}
-              aria-label={t('period.prev')}
-              data-ui={UI.period.prev}
-            >
-              <Icon name="chevronLeft" size={18} />
-            </button>
-            <button
-              type="button"
-              className="app-header__period"
-              onClick={onOpenPeriod}
-              aria-haspopup="dialog"
-              aria-label={`${periodLabel(period)} — ${t('period.open')}`}
-              data-ui={UI.period.button}
-            >
-              <span className="app-header__name">{periodLabel(period)}</span>
-              <Icon name="chevronDown" size={14} />
-            </button>
-            <button
-              type="button"
-              className="icon-btn"
-              onClick={() => onPeriodChange(stepPeriod(period, 1))}
-              disabled={isAll}
-              aria-label={t('period.next')}
-              data-ui={UI.period.next}
-            >
-              <Icon name="chevronRight" size={18} />
-            </button>
-          </div>
-
-          <div className="segmented period-grain" role="group" aria-label={t('period.grainSwitch')}>
-            {GRAINS.map((g) => (
+        <div className="period-context">
+          <button
+            type="button"
+            className="period-context__chip"
+            onClick={() => setPicker('year')}
+            aria-haspopup="dialog"
+            aria-label={`${yearLabel} — ${t('period.openYear')}`}
+            data-ui={UI.period.yearTrigger}
+          >
+            <span className="period-context__text">{yearLabel}</span>
+            <Icon name="chevronDown" size={14} />
+          </button>
+          {period.mode !== 'all' ? (
+            <>
+              <span className="period-context__sep" aria-hidden="true">
+                /
+              </span>
               <button
-                key={g.grain}
                 type="button"
-                aria-pressed={period.mode === g.grain}
-                className="segmented__btn"
-                onClick={() => onPeriodChange(withGrain(period, g.grain, today))}
-                data-ui={g.ui}
+                className="period-context__chip"
+                onClick={() => setPicker('month')}
+                aria-haspopup="dialog"
+                aria-label={`${monthLabel} — ${t('period.openMonth')}`}
+                data-ui={UI.period.monthTrigger}
               >
-                {t(g.labelKey)}
+                <span className="period-context__text">{monthLabel}</span>
+                <Icon name="chevronDown" size={14} />
               </button>
-            ))}
-          </div>
+            </>
+          ) : null}
         </div>
 
         <button
@@ -118,6 +90,23 @@ export function Header({
           <Icon name="menu" />
         </button>
       </div>
+
+      {picker === 'year' ? (
+        <PeriodYearPicker
+          period={period}
+          years={years}
+          onChange={onPeriodChange}
+          onClose={() => setPicker(null)}
+        />
+      ) : null}
+      {picker === 'month' ? (
+        <PeriodMonthPicker
+          period={period}
+          today={today}
+          onChange={onPeriodChange}
+          onClose={() => setPicker(null)}
+        />
+      ) : null}
     </header>
   );
 }

@@ -92,38 +92,18 @@ button {
   gap: var(--space-2);
   padding: var(--space-1) var(--space-3);
 }
-/* ヘッダー中央: 期間ステッパー（上段）+ 粒度切替（下段）の直接操作。 */
-.app-header__center {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-1);
-}
-.period-stepper {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-1);
-}
-.period-grain {
-  width: 100%;
-  max-width: 300px;
-}
-.period-grain .segmented__btn {
-  min-height: 30px;
-  padding: 2px var(--space-2);
-  font-size: 13px;
-}
-/* ヘッダー中央の期間ボタン（押すと期間メニュー）。 */
-.app-header__period {
+/* ヘッダー中央: 現在の期間コンテキスト表示（タップで軽量ピッカー）。操作群は常設しない。 */
+.period-context {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: var(--space-1);
+}
+.period-context__chip {
+  display: inline-flex;
+  align-items: center;
   gap: var(--space-1);
   min-height: var(--tap);
   padding: 0 var(--space-2);
@@ -131,24 +111,20 @@ button {
   border: none;
   border-radius: var(--radius-sm);
   color: inherit;
-  cursor: pointer;
-}
-.app-header__period:hover {
-  background: var(--bg);
-}
-.app-header__period-text {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  line-height: 1.2;
-  text-align: center;
-}
-.app-header__name {
   font-size: 15px;
   font-weight: 700;
+  cursor: pointer;
 }
-.app-header__sub {
-  font-size: 11px;
+.period-context__chip:hover {
+  background: var(--bg);
+}
+.period-context__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.period-context__sep {
   color: var(--muted);
 }
 
@@ -659,20 +635,102 @@ button.list__item:hover {
   gap: var(--space-3);
 }
 
-/* ── トレンドチャート（軽量・CSS バー） ── */
-.trend-chart {
-  list-style: none;
-  margin: 0;
+/* ── トレンドチャート（自前 SVG。軸・ゼロ線・目盛つき） ── */
+.trend-svg {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
   padding: var(--space-2);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  margin-bottom: var(--space-2);
 }
-.trend-chart__row {
+.trend-svg__svg {
   display: block;
+  width: 100%;
+  height: auto;
 }
-.trend-chart__btn,
-.trend-chart__static {
+.trend-svg__zero {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.trend-svg__tick {
+  fill: var(--muted);
+  font-size: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.trend-svg__bar {
+  fill: var(--primary);
+}
+.trend-svg__bar--neg {
+  fill: var(--neg);
+}
+.trend-svg__line {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.trend-svg__dot {
+  fill: var(--primary);
+}
+.trend-x {
+  display: flex;
+  gap: 2px;
+  margin-top: var(--space-1);
+}
+.trend-x__btn,
+.trend-x__label {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trend-x__btn {
+  min-height: 32px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--primary);
+  cursor: pointer;
+}
+.trend-x__btn:hover {
+  background: var(--bg);
+}
+.trend-svg__latest {
+  margin: 0 0 var(--space-3);
+  font-size: 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 軽量ポップアップ（期間ピッカー等） ── */
+.popup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+}
+.popup {
+  width: 100%;
+  max-width: 320px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--space-2);
+}
+.picker-row {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -681,42 +739,24 @@ button.list__item:hover {
   padding: 0 var(--space-2);
   border: none;
   background: transparent;
-  text-align: left;
   border-radius: var(--radius-sm);
+  text-align: left;
   color: inherit;
-}
-.trend-chart__btn {
+  font-size: 15px;
   cursor: pointer;
 }
-.trend-chart__btn:hover {
+.picker-row:hover {
   background: var(--bg);
 }
-.trend-chart__label {
-  width: 64px;
-  flex: none;
-  font-size: 12px;
-  color: var(--muted);
-}
-.trend-chart__track {
-  flex: 1;
-  height: 10px;
-  border-radius: 999px;
+.picker-row[aria-current='true'] {
   background: var(--bg);
-  overflow: hidden;
+  font-weight: 700;
 }
-.trend-chart__bar {
-  display: block;
-  height: 100%;
-  background: var(--pos);
-}
-.trend-chart__bar--neg {
-  background: var(--neg);
-}
-.trend-chart__value {
-  width: 104px;
+.picker-row__check {
+  width: 18px;
   flex: none;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  color: var(--primary);
 }
 
 /* ── Sheet / modal ── */

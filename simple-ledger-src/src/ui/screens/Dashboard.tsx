@@ -277,13 +277,16 @@ export function Dashboard({
         </StatButton>
       </div>
 
-      {/* 推移（年別=12ヶ月 / 全体=年集約）。グラフで俯瞰。全体は年バーをタップで年別へ。 */}
+      {/* 推移（年別=12ヶ月 / 全体=年集約）。SVG グラフで俯瞰。全体は年ラベルをタップで年別へ。 */}
       {trend ? (
         <div data-ui={UI.period.trend}>
           <TrendChart
             title={t('dashboard.trendNet')}
             data={trend.net}
             currency={currency}
+            variant="bar"
+            dataUi={UI.period.trendChart}
+            pointDataUi={UI.period.trendPoint}
             {...(period.mode === 'all'
               ? {
                   onSelect: (key: string) =>
@@ -292,8 +295,18 @@ export function Dashboard({
                 }
               : {})}
           />
-          <TrendChart title={t('dashboard.trendLiving')} data={trend.living} currency={currency} />
-          <TrendChart title={t('dashboard.trendAssets')} data={trend.assets} currency={currency} />
+          <TrendChart
+            title={t('dashboard.trendLiving')}
+            data={trend.living}
+            currency={currency}
+            variant="bar"
+          />
+          <TrendChart
+            title={t('dashboard.trendAssets')}
+            data={trend.assets}
+            currency={currency}
+            variant="line"
+          />
           {period.mode === 'all' ? (
             <p className="field__hint">{t('period.trendYearHint')}</p>
           ) : null}

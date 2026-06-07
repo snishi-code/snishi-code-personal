@@ -19,13 +19,13 @@
 | `dashboard.entry.income` / `.expense` / `.transfer` | ホーム 3 ボタン | 日常入力の主導線（唯一の入力起点） |
 | `dashboard.stat.revenue` / `.expense` / `.netIncome` | ホーム損益の項目別ボタン | PL の該当セクションへ |
 | `dashboard.stat.assets` / `.liabilities` / `.netAssets` | ホーム財政状態の項目別ボタン | BS の該当セクションへ |
-| `dashboard.openCashflow` | ホーム生活コスト領域 | 資金計画・負債へ遷移 |
+| `dashboard.statNormalExpense` / `dashboard.openMonthlyCost` / `dashboard.statLivingCostTotal` | ホーム生活コスト stat | 通常支出=PL費用 / 月額化コスト=月額化コスト画面 / 合計=月額化コスト画面（CF へは飛ばさない） |
 | `dashboard.journal.preview` / `dashboard.journal.openAll` | ホーム下部「期間内の仕訳」 | プレビュー / すべて見る（期間フィルタ） |
-| `period.button` | ヘッダー中央の期間ボタン | 押すと期間メニュー（`PeriodMenu`）を開く（期間切替の正本） |
-| `period.kind.year` / `period.kind.all` | 期間メニュー 1段目 | 年を選ぶ / 全期間 |
-| `period.grain.month` / `period.grain.fullYear` | 期間メニュー 2段目 | 月 / 年全体（年を選ぶときのみ） |
-| `period.input.year` / `period.input.month` | 年セレクト / 月セレクト | 独自カレンダーは作らない |
-| `period.trend` | 年別・全体の推移（`TrendChart`） | 収支 / 生活コスト / 純資産。年別=12ヶ月・全体=年集約 |
+| `period.year.trigger` / `period.month.trigger` | ヘッダー中央の期間コンテキスト表示 | タップで年/月の軽量ピッカーを開く（全期間時は月トリガー無し） |
+| `period.year.picker` / `period.month.picker` | 軽量ピッカー本体（`Popup`） | 背景タップ/Escape で閉じる。タイトル/閉じる/完了ボタン無し |
+| `period.all.row` / `period.year.row` | 年ピッカーの行 | 全期間 / 各年（選択で即反映して閉じる。現在行は `aria-current`） |
+| `period.fullYear.row` / `period.month.row` | 月ピッカーの行 | 年全体 / 各月（同上） |
+| `period.trend` / `period.trend.chart` / `period.trend.point` | 推移（自前 SVG・`TrendChart`） | 収支/生活コスト=bar・純資産=line。年別=12ヶ月・全体=年集約。`point` は全体→年のドリルダウン |
 | `cashflow.future.list` | CF 未来の入出金・振替予定 | ホーム未来日付入力が反映される一覧 |
 | `cashflow.advanced.toggle` | CF 目的別資金・資金目標の折りたたみ | 下部の補助情報を開閉 |
 | `journal.view` | Journal ルート | 仕訳画面の検出 |

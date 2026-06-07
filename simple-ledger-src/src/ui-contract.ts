@@ -6,28 +6,23 @@
  * - 詳細とポリシーは docs/dev/ui-contract.md。
  */
 export const UI = {
-  // 期間切替（ヘッダー中央で年/月/年全体/全期間を直接操作。ホーム/財務諸表/仕訳で共有）
+  // 期間（データ抽出条件）。ヘッダー中央の「現在コンテキスト表示」+ 軽量ピッカー。ホーム/財務諸表/仕訳で共有
   period: {
-    // ヘッダー: 期間を前後に動かす ‹ ›（現在の粒度ぶん）
-    prev: 'period.prev',
-    next: 'period.next',
-    // ヘッダー: 粒度の直接切替（月 / 年 / 全期間）
-    toMonth: 'period.toMonth',
-    toYear: 'period.toYear',
-    toAll: 'period.toAll',
-    // ヘッダー中央の期間ラベルボタン（押すと期間メニューを開く＝正確な年/月選択の補助）
-    button: 'period.button',
-    // 期間メニュー内: 年を選ぶ / 全期間
-    kindYear: 'period.kind.year',
-    kindAll: 'period.kind.all',
-    // 年セレクト + 粒度（月 / 年全体）+ 月セレクト
-    year: 'period.input.year',
-    grainMonth: 'period.grain.month',
-    grainFullYear: 'period.grain.fullYear',
-    month: 'period.input.month',
-    // トレンド（グラフ）
+    // ヘッダーの現在コンテキスト表示（タップで対応ピッカーを開く）
+    yearTrigger: 'period.year.trigger',
+    monthTrigger: 'period.month.trigger',
+    // 軽量ピッカー本体
+    yearPicker: 'period.year.picker',
+    monthPicker: 'period.month.picker',
+    // ピッカーの行（選択で即反映して閉じる）
+    yearRow: 'period.year.row',
+    monthRow: 'period.month.row',
+    allRow: 'period.all.row',
+    fullYearRow: 'period.fullYear.row',
+    // トレンド（SVG グラフ）
     trend: 'period.trend',
-    trendBar: 'period.trend.bar',
+    trendChart: 'period.trend.chart',
+    trendPoint: 'period.trend.point',
   },
   dashboard: {
     view: 'dashboard.view',
