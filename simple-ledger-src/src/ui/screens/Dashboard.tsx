@@ -8,22 +8,24 @@ import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../../domain/accounting';
 import { totalMonthlyCostForMonth } from '../../domain/monthlyCost';
 import {
-  availableYears,
   dataMonthsOf,
+  dataYearsOf,
   periodAsOf,
   periodBuckets,
   periodLabel,
   periodRange,
+  trendBuckets,
+  type DateRange,
   type ReportPeriod,
 } from '../../domain/reportPeriod';
 import { todayLocal } from '../../util/time';
 import { Money } from '../money';
 import { Icon } from '../Icon';
 import { EntryListItem } from '../EntryListItem';
-import { PeriodSwitcher } from '../PeriodSwitcher';
+import { TrendChart, type TrendPoint } from '../components/TrendChart';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
-import type { JournalEntry } from '../../domain/types';
+import type { Account, JournalEntry, MonthlyCostItem } from '../../domain/types';
 import type { Screen } from '../navigation';
 import type { FormMode } from '../entryModes';
 import type { IconName } from '../Icon';
@@ -39,6 +41,36 @@ const ENTRY_TYPES: { mode: FormMode; labelKey: MessageKey; icon: IconName; ui: s
     ui: UI.dashboard.transfer,
   },
 ];
+
+/**
+ * ある期間の「生活コスト」= 通常支出（費用 − 既存按分の認識 − 調整用費用 − 月額化の実支払い）
+ * + 月額化コスト formula（区間内の各月を合算）。ホームの当期計算と同じ定義をトレンドに使う。
+ */
+function livingCostForRange(
+  accounts: Account[],
+  entries: JournalEntry[],
+  items: MonthlyCostItem[],
+  range: DateRange,
+  months: string[],
+): number {
+  const roleById = new Map(accounts.map((a) => [a.id, a.role]));
+  const expenseIds = new Set(accounts.filter((a) => a.type === 'expense').map((a) => a.id));
+  const within = (e: JournalEntry) => e.date >= range.from && e.date <= range.to;
+  let recognition = 0;
+  let systemAdj = 0;
+  let monthlyCostPaid = 0;
+  for (const e of entries) {
+    if (!within(e)) continue;
+    const debit = e.lines.find((l) => l.side === 'debit');
+    if (e.metadata?.allocationRole === 'recognition') recognition += debit?.amount ?? 0;
+    if (debit && roleById.get(debit.accountId) === 'system-adjustment') systemAdj += debit.amount;
+    if (e.metadata?.monthlyCostId && debit && expenseIds.has(debit.accountId))
+      monthlyCostPaid += debit.amount;
+  }
+  const pl = deriveProfitAndLoss(accounts, entries, range);
+  const monthlyCostSum = months.reduce((s, ym) => s + totalMonthlyCostForMonth(items, ym), 0);
+  return pl.totalExpense - recognition - systemAdj - monthlyCostPaid + monthlyCostSum;
+}
 
 export function Dashboard({
   period,
@@ -127,36 +159,42 @@ export function Dashboard({
     };
   }, [ledger, period, range, today]);
 
-  // 推移（年別/全体）。フロー=各月の収支、ストック=各月末の純資産。
+  // 推移（年別=12ヶ月 / 全体=年集約）。グラフで俯瞰する（縦長リストにしない）。
+  // フロー=各区間の収支・生活コスト、ストック=各区間末の純資産。
   const trend = useMemo(() => {
     if (period.mode === 'month') return null;
     const accounts = ledger?.accounts ?? [];
     const entries = ledger?.journalEntries ?? [];
-    const buckets = periodBuckets(period, {
-      dataMonths: dataMonthsOf(entries.map((e) => e.date)),
-    });
-    if (buckets.length === 0) return [];
-    return buckets.map((b) => ({
-      ym: b.ym,
-      label: b.label,
-      net: deriveProfitAndLoss(accounts, entries, b.range).netIncome,
-      assets: deriveBalanceSheet(accounts, entries, b.asOf).netAssets,
-    }));
+    const items = ledger?.monthlyCostItems ?? [];
+    const buckets = trendBuckets(period, { dataYears: dataYearsOf(entries.map((e) => e.date)) });
+    if (buckets.length === 0) return null;
+    const net: TrendPoint[] = [];
+    const living: TrendPoint[] = [];
+    const assets: TrendPoint[] = [];
+    for (const b of buckets) {
+      // 年集約バケットは 12 ヶ月、月バケットは 1 ヶ月ぶんの月額化コストを数える。
+      const months =
+        b.key.length === 4
+          ? Array.from({ length: 12 }, (_, i) => `${b.year}-${String(i + 1).padStart(2, '0')}`)
+          : [b.key];
+      net.push({
+        key: b.key,
+        label: b.label,
+        value: deriveProfitAndLoss(accounts, entries, b.range).netIncome,
+      });
+      living.push({
+        key: b.key,
+        label: b.label,
+        value: livingCostForRange(accounts, entries, items, b.range, months),
+      });
+      assets.push({
+        key: b.key,
+        label: b.label,
+        value: deriveBalanceSheet(accounts, entries, b.asOf).netAssets,
+      });
+    }
+    return { net, living, assets };
   }, [ledger, period]);
-
-  // 年別セレクトの選択肢: 仕訳・予定CF・資金目標の日付がある年 + 現在/翌年 + 選択中の年。
-  const years = useMemo(() => {
-    const dates = [
-      ...(ledger?.journalEntries ?? []).map((e) => e.date),
-      ...(ledger?.cashflowSchedules ?? []).map((s) => s.dueDate),
-      ...(ledger?.fundingGoals ?? []).map((g) => g.targetDate),
-    ];
-    return availableYears(
-      dates,
-      Number.parseInt(today.slice(0, 4), 10),
-      period.mode !== 'all' ? period.year : undefined,
-    );
-  }, [ledger, today, period]);
 
   const currency = ledger?.settings.currency ?? 'JPY';
   const hasEntries = (ledger?.journalEntries.length ?? 0) > 0;
@@ -195,8 +233,7 @@ export function Dashboard({
         </div>
       ) : null}
 
-      {/* 期間切替（月別 / 年別 / 全体）。以下の集計・推移に反映される。 */}
-      <PeriodSwitcher value={period} onChange={onPeriodChange} today={today} years={years} />
+      {/* 期間の切替はヘッダー中央の期間ボタンから（正本）。ここでは結果だけを見せる。 */}
 
       {/* 期間の収支（各項目から損益計算書の該当セクションへ） */}
       <p className="section-label">{t('dashboard.flowOf', { label })}</p>
@@ -250,8 +287,28 @@ export function Dashboard({
         </StatButton>
       </div>
 
-      {/* 推移（年別/全体のみ）。収支=各月のフロー、純資産=各月末のストック。 */}
-      {trend ? <TrendBlock trend={trend} currency={currency} /> : null}
+      {/* 推移（年別=12ヶ月 / 全体=年集約）。グラフで俯瞰。全体は年バーをタップで年別へ。 */}
+      {trend ? (
+        <div data-ui={UI.period.trend}>
+          <TrendChart
+            title={t('dashboard.trendNet')}
+            data={trend.net}
+            currency={currency}
+            {...(period.mode === 'all'
+              ? {
+                  onSelect: (key: string) =>
+                    onPeriodChange({ mode: 'year', year: Number.parseInt(key, 10) }),
+                  selectHint: t('dashboard.trendDrillYear'),
+                }
+              : {})}
+          />
+          <TrendChart title={t('dashboard.trendLiving')} data={trend.living} currency={currency} />
+          <TrendChart title={t('dashboard.trendAssets')} data={trend.assets} currency={currency} />
+          {period.mode === 'all' ? (
+            <p className="field__hint">{t('period.trendYearHint')}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* 生活コスト（領域全体が資金繰り/資金計画への導線） */}
       <p className="section-label">{t('dashboard.livingCostOf', { label })}</p>
@@ -341,101 +398,6 @@ export function Dashboard({
         </ul>
       )}
     </section>
-  );
-}
-
-/** 推移ブロック（収支バー + 純資産バー）。色だけに依存せず数値も併記する。 */
-function TrendBlock({
-  trend,
-  currency,
-}: {
-  trend: { ym: string; label: string; net: number; assets: number }[];
-  currency: string;
-}) {
-  if (trend.length === 0) {
-    return (
-      <>
-        <p className="section-label">{t('dashboard.trendNet')}</p>
-        <div className="card card--pad muted">{t('period.noTrendData')}</div>
-      </>
-    );
-  }
-  const maxNet = Math.max(1, ...trend.map((p) => Math.abs(p.net)));
-  const maxAssets = Math.max(1, ...trend.map((p) => Math.abs(p.assets)));
-  return (
-    <div data-ui={UI.period.trend}>
-      <p className="section-label">{t('dashboard.trendNet')}</p>
-      <ul className="card list trend-list">
-        {trend.map((p) => (
-          <TrendBar
-            key={`net-${p.ym}`}
-            label={p.label}
-            value={p.net}
-            max={maxNet}
-            currency={currency}
-            negative={p.net < 0}
-          />
-        ))}
-      </ul>
-      <p className="section-label">{t('dashboard.trendAssets')}</p>
-      <ul className="card list trend-list">
-        {trend.map((p) => (
-          <TrendBar
-            key={`assets-${p.ym}`}
-            label={p.label}
-            value={p.assets}
-            max={maxAssets}
-            currency={currency}
-            negative={p.assets < 0}
-          />
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function TrendBar({
-  label,
-  value,
-  max,
-  currency,
-  negative,
-}: {
-  label: string;
-  value: number;
-  max: number;
-  currency: string;
-  negative: boolean;
-}) {
-  const pct = Math.round((Math.abs(value) / max) * 100);
-  return (
-    <li className="list__item">
-      <span className="list__sub" style={{ width: 64, flex: 'none' }}>
-        {label}
-      </span>
-      <span
-        aria-hidden="true"
-        style={{
-          flex: 1,
-          height: 10,
-          borderRadius: 999,
-          background: 'var(--bg)',
-          overflow: 'hidden',
-        }}
-      >
-        <span
-          style={{
-            display: 'block',
-            height: '100%',
-            width: `${pct}%`,
-            background: negative ? 'var(--neutral)' : 'var(--green)',
-          }}
-        />
-      </span>
-      <span className="list__amount" style={{ width: 96, flex: 'none', textAlign: 'right' }}>
-        <Money amount={value} currency={currency} signed />
-      </span>
-    </li>
   );
 }
 

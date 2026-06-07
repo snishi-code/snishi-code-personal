@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   availableYears,
   dataMonthsOf,
+  dataYearsOf,
   periodAsOf,
   periodBuckets,
   periodLabel,
   periodRange,
+  trendBuckets,
   type ReportPeriod,
 } from '../src/domain/reportPeriod';
 
@@ -92,6 +94,33 @@ describe('availableYears（年別セレクトの選択肢）', () => {
     const ys = availableYears(['9999-01-01'], 2026, 2026);
     expect(ys[0]).toBe(2076); // 2026 + 50
     expect(ys).toContain(2026);
+  });
+});
+
+describe('trendBuckets（グラフ用バケット）', () => {
+  it('month は推移を出さない（空配列）', () => {
+    expect(trendBuckets({ mode: 'month', year: 2026, month: 6 })).toEqual([]);
+  });
+  it('year は 12 本の月次バー', () => {
+    const b = trendBuckets({ mode: 'year', year: 2026 });
+    expect(b).toHaveLength(12);
+    expect(b[0]).toMatchObject({ key: '2026-01', label: '1月', year: 2026 });
+    expect(b[11]?.asOf).toBe('2026-12-31');
+  });
+  it('all はデータ年を最小〜最大で連続の年次バー（空白年も埋める）', () => {
+    const b = trendBuckets({ mode: 'all' }, { dataYears: [2024, 2026] });
+    expect(b.map((x) => x.key)).toEqual(['2024', '2025', '2026']);
+    expect(b[0]).toMatchObject({ label: '2024年', year: 2024, asOf: '2024-12-31' });
+    expect(b[0]?.range).toEqual({ from: '2024-01-01', to: '2024-12-31' });
+  });
+  it('all でデータが無ければ空配列', () => {
+    expect(trendBuckets({ mode: 'all' }, { dataYears: [] })).toEqual([]);
+  });
+});
+
+describe('dataYearsOf', () => {
+  it('日付配列から年を昇順・重複排除で抽出', () => {
+    expect(dataYearsOf(['2026-03-10', '2024-01-05', '2026-12-22'])).toEqual([2024, 2026]);
   });
 });
 

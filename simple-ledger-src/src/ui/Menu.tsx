@@ -1,8 +1,10 @@
 /*
- * メニュー（右からのドロワー）。Dashboard / Journal / Statements / Accounts / Settings / Help。
- * 補助操作はここに集約し、主要操作(+)はヘッダーに残す。
+ * メニュー（中央モーダル / モバイルは下部シート）。一時的な操作パネルとして開く。
+ * 右ドロワー（.drawer）はやめ、共通の Modal（dialog variant）を土台にする。
+ * 背景タップ・Escape で閉じ、メニュー内クリックでは閉じない（Modal が担保）。
+ * 項目: 月額化コスト / 資金計画・負債 / 設定 / ヘルプ。
  */
-import { useEffect, useRef } from 'react';
+import { Modal } from './Modal';
 import { Icon } from './Icon';
 import { NAV_ITEMS, type Screen } from './navigation';
 import { t } from '../i18n';
@@ -19,70 +21,37 @@ export function Menu({
   onClose: () => void;
   onHelp: () => void;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    ref.current?.querySelector<HTMLElement>('button')?.focus();
-  }, []);
-
   return (
-    <div
-      className="overlay"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        ref={ref}
-        className="drawer"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('common.menu')}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') onClose();
-        }}
-      >
-        <div className="drawer__header">
-          <span className="drawer__title">{t('common.menu')}</span>
+    <Modal title={t('common.menu')} onClose={onClose} dismissMode="always" variant="dialog">
+      <nav className="menu-list" aria-label={t('common.menu')} data-ui={UI.nav.menu}>
+        {NAV_ITEMS.map((item) => (
           <button
+            key={item.screen}
             type="button"
-            className="icon-btn"
-            onClick={onClose}
-            aria-label={t('a11y.closeMenu')}
-          >
-            <Icon name="close" />
-          </button>
-        </div>
-        <nav aria-label={t('common.menu')} data-ui={UI.nav.menu}>
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.screen}
-              type="button"
-              className="drawer__link"
-              aria-current={current === item.screen ? 'page' : undefined}
-              onClick={() => {
-                onNavigate(item.screen);
-                onClose();
-              }}
-              data-ui={`nav.${item.screen}`}
-            >
-              <Icon name={item.icon} size={18} />
-              {t(item.labelKey)}
-            </button>
-          ))}
-          <button
-            type="button"
-            className="drawer__link"
+            className="menu-item"
+            aria-current={current === item.screen ? 'page' : undefined}
             onClick={() => {
-              onHelp();
+              onNavigate(item.screen);
               onClose();
             }}
+            data-ui={`nav.${item.screen}`}
           >
-            <Icon name="help" size={18} />
-            {t('nav.help')}
+            <Icon name={item.icon} size={18} />
+            {t(item.labelKey)}
           </button>
-        </nav>
-      </div>
-    </div>
+        ))}
+        <button
+          type="button"
+          className="menu-item"
+          onClick={() => {
+            onHelp();
+            onClose();
+          }}
+        >
+          <Icon name="help" size={18} />
+          {t('nav.help')}
+        </button>
+      </nav>
+    </Modal>
   );
 }

@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { useLedger } from './state/store';
 import { Header } from './ui/Header';
 import { Menu } from './ui/Menu';
+import { PeriodMenu } from './ui/PeriodMenu';
 import { Dashboard } from './ui/screens/Dashboard';
 import { Journal, type JournalFilter } from './ui/screens/Journal';
 import { Statements } from './ui/screens/Statements';
@@ -20,11 +21,11 @@ import { EntrySheet, type EntryInit } from './ui/screens/EntrySheet';
 import { useServiceWorker } from './pwa/useServiceWorker';
 import { Icon } from './ui/Icon';
 import { t } from './i18n';
-import { currentYearMonth } from './util/time';
+import { currentYearMonth, todayLocal } from './util/time';
+import { availableYears, type ReportPeriod } from './domain/reportPeriod';
 import type { Screen } from './ui/navigation';
 import type { FormMode } from './ui/entryModes';
 import type { JournalEntry } from './domain/types';
-import type { ReportPeriod } from './domain/reportPeriod';
 
 export function App() {
   const { status, ledger, error } = useLedger();
@@ -35,11 +36,12 @@ export function App() {
   const [journalFilter, setJournalFilter] = useState<JournalFilter | null>(null);
   const [statementsTab, setStatementsTab] = useState<'pl' | 'bs'>('pl');
   const [statementsSection, setStatementsSection] = useState<string | undefined>(undefined);
-  // レポート期間（ホーム/財務諸表/仕訳で共有）。既定は今月。
+  // レポート期間（ホーム/財務諸表/仕訳で共有）。正本はヘッダー中央の期間メニュー。既定は今月。
   const [period, setPeriod] = useState<ReportPeriod>(() => {
     const { year, month } = currentYearMonth();
     return { mode: 'month', year, month };
   });
+  const [periodMenuOpen, setPeriodMenuOpen] = useState(false);
   const { updateReady, applyUpdate } = useServiceWorker();
 
   if (status === 'loading') {
@@ -76,6 +78,18 @@ export function App() {
     setScreen('statements');
   };
 
+  // 期間メニューの年セレクト候補（仕訳・予定CF・資金目標の年 + 現在/翌年 + 選択中の年）。
+  const today = todayLocal();
+  const periodYears = availableYears(
+    [
+      ...ledger.journalEntries.map((e) => e.date),
+      ...ledger.cashflowSchedules.map((s) => s.dueDate),
+      ...ledger.fundingGoals.map((g) => g.targetDate),
+    ],
+    Number.parseInt(today.slice(0, 4), 10),
+    period.mode !== 'all' ? period.year : undefined,
+  );
+
   return (
     <>
       <a className="skip-link" href="#main">
@@ -83,7 +97,9 @@ export function App() {
       </a>
       <Header
         ledgerName={ledger.settings.ledgerName}
+        period={period}
         onHome={() => setScreen('dashboard')}
+        onOpenPeriod={() => setPeriodMenuOpen(true)}
         onMenu={() => setMenuOpen(true)}
       />
 
@@ -122,17 +138,26 @@ export function App() {
             initialTab={statementsTab}
             initialSection={statementsSection}
             period={period}
-            onPeriodChange={setPeriod}
             onDrillDown={goJournalFiltered}
           />
         ) : null}
         {screen === 'allocations' ? <Allocations /> : null}
-        {screen === 'cashflow' ? <Cashflow /> : null}
+        {screen === 'cashflow' ? <Cashflow onAddEntry={openCreate} /> : null}
         {screen === 'tags' ? <Tags /> : null}
         {screen === 'adjustments' ? <Adjustments /> : null}
         {screen === 'accounts' ? <Accounts /> : null}
         {screen === 'settings' ? <Settings onNavigate={setScreen} /> : null}
       </main>
+
+      {periodMenuOpen ? (
+        <PeriodMenu
+          value={period}
+          onChange={setPeriod}
+          onClose={() => setPeriodMenuOpen(false)}
+          today={today}
+          years={periodYears}
+        />
+      ) : null}
 
       {menuOpen ? (
         <Menu

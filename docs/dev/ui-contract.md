@@ -21,9 +21,13 @@
 | `dashboard.stat.assets` / `.liabilities` / `.netAssets` | ホーム財政状態の項目別ボタン | BS の該当セクションへ |
 | `dashboard.openCashflow` | ホーム生活コスト領域 | 資金計画・負債へ遷移 |
 | `dashboard.journal.preview` / `dashboard.journal.openAll` | ホーム下部「期間内の仕訳」 | プレビュー / すべて見る（期間フィルタ） |
-| `period.mode.month` / `.year` / `.all` | 期間切替セグメント（ホーム/財務諸表 共有） | 月別 / 年別 / 全体 |
-| `period.input.month` / `period.input.year` | 期間の月入力 / 年セレクト | 月別=`input[type=month]` / 年別=select |
-| `period.trend` | 年別・全体の推移ブロック | 収支バー + 各月末純資産バー（CSS のみ） |
+| `period.button` | ヘッダー中央の期間ボタン | 押すと期間メニュー（`PeriodMenu`）を開く（期間切替の正本） |
+| `period.kind.year` / `period.kind.all` | 期間メニュー 1段目 | 年を選ぶ / 全期間 |
+| `period.grain.month` / `period.grain.fullYear` | 期間メニュー 2段目 | 月 / 年全体（年を選ぶときのみ） |
+| `period.input.year` / `period.input.month` | 年セレクト / 月セレクト | 独自カレンダーは作らない |
+| `period.trend` | 年別・全体の推移（`TrendChart`） | 収支 / 生活コスト / 純資産。年別=12ヶ月・全体=年集約 |
+| `cashflow.future.list` | CF 未来の入出金・振替予定 | ホーム未来日付入力が反映される一覧 |
+| `cashflow.advanced.toggle` | CF 目的別資金・資金目標の折りたたみ | 下部の補助情報を開閉 |
 | `journal.view` | Journal ルート | 仕訳画面の検出 |
 | `journal.entry.list` | Journal 一覧 | 仕訳一覧 |
 | `journal.monthlyRecognition` | 今月の月額化認識カード | 読み取り専用（仕訳ではない月割り表示） |

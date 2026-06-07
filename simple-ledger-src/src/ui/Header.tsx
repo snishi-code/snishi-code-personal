@@ -1,22 +1,26 @@
 /*
- * ヘッダー: 左=ホーム / 中央=台帳名・年月 / 右=≡(メニュー)。
- * 入力導線はホームの 収入/支出/振替 ボタンに集約し、ヘッダーには + を置かない。
+ * ヘッダー: 左=ホーム / 中央=期間ボタン（押すと期間メニュー）/ 右=≡(メニュー)。
+ * 中央は選択中の期間ラベル（2026年6月 / 2026年 / 全期間）を表示し、台帳名を副題に出す。
+ * 入力導線はホームの 収入/支出/振替 に集約し、ヘッダーに + は置かない。
  */
 import { Icon } from './Icon';
 import { t } from '../i18n';
 import { UI } from '../ui-contract';
-import { currentYearMonth } from '../util/time';
+import { periodLabel, type ReportPeriod } from '../domain/reportPeriod';
 
 export function Header({
   ledgerName,
+  period,
   onHome,
+  onOpenPeriod,
   onMenu,
 }: {
   ledgerName: string;
+  period: ReportPeriod;
   onHome: () => void;
+  onOpenPeriod: () => void;
   onMenu: () => void;
 }) {
-  const { year, month } = currentYearMonth();
   return (
     <header className="app-header">
       <div className="app-header__inner">
@@ -29,10 +33,20 @@ export function Header({
         >
           <Icon name="home" />
         </button>
-        <div className="app-header__title">
-          <span className="app-header__name">{t('header.yearMonth', { year, month })}</span>
-          <span className="app-header__sub">{ledgerName}</span>
-        </div>
+        <button
+          type="button"
+          className="app-header__period"
+          onClick={onOpenPeriod}
+          aria-haspopup="dialog"
+          aria-label={`${periodLabel(period)} — ${t('period.open')}`}
+          data-ui={UI.period.button}
+        >
+          <span className="app-header__period-text">
+            <span className="app-header__name">{periodLabel(period)}</span>
+            <span className="app-header__sub">{ledgerName}</span>
+          </span>
+          <Icon name="chevronDown" size={14} />
+        </button>
         <button
           type="button"
           className="icon-btn"

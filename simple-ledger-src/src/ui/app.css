@@ -92,13 +92,31 @@ button {
   gap: var(--space-2);
   padding: 0 var(--space-3);
 }
-.app-header__title {
+/* ヘッダー中央の期間ボタン（押すと期間メニュー）。 */
+.app-header__period {
   flex: 1;
   min-width: 0;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-height: var(--tap);
+  padding: 0 var(--space-2);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  cursor: pointer;
+}
+.app-header__period:hover {
+  background: var(--bg);
+}
+.app-header__period-text {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   line-height: 1.2;
+  text-align: center;
 }
 .app-header__name {
   font-size: 15px;
@@ -577,38 +595,13 @@ button.list__item:hover {
   min-width: 140px;
 }
 
-/* ── Drawer (menu) ── */
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--overlay);
-  z-index: 30;
-  display: flex;
-}
-.drawer {
-  margin-left: auto;
-  width: min(320px, 84vw);
-  height: 100%;
-  background: var(--surface);
-  box-shadow: var(--shadow-pop);
+/* ── Menu（中央モーダル。Modal dialog の body に置く一覧） ── */
+.menu-list {
   display: flex;
   flex-direction: column;
-  padding: var(--space-3);
+  gap: 2px;
 }
-.drawer__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-2) var(--space-2) var(--space-3);
-}
-.drawer__title {
-  font-weight: 700;
-}
-.drawer nav {
-  display: flex;
-  flex-direction: column;
-}
-.drawer__link {
+.menu-item {
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -621,13 +614,81 @@ button.list__item:hover {
   width: 100%;
   font-size: 15px;
   font-weight: 600;
+  cursor: pointer;
 }
-.drawer__link:hover {
+.menu-item:hover {
   background: var(--bg);
 }
-.drawer__link[aria-current='page'] {
+.menu-item[aria-current='page'] {
   background: var(--primary-light);
   color: var(--primary-strong);
+}
+
+/* ── 期間選択コントロール ── */
+.period-switcher .stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* ── トレンドチャート（軽量・CSS バー） ── */
+.trend-chart {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.trend-chart__row {
+  display: block;
+}
+.trend-chart__btn,
+.trend-chart__static {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 var(--space-2);
+  border: none;
+  background: transparent;
+  text-align: left;
+  border-radius: var(--radius-sm);
+  color: inherit;
+}
+.trend-chart__btn {
+  cursor: pointer;
+}
+.trend-chart__btn:hover {
+  background: var(--bg);
+}
+.trend-chart__label {
+  width: 64px;
+  flex: none;
+  font-size: 12px;
+  color: var(--muted);
+}
+.trend-chart__track {
+  flex: 1;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.trend-chart__bar {
+  display: block;
+  height: 100%;
+  background: var(--green);
+}
+.trend-chart__bar--neg {
+  background: var(--neutral);
+}
+.trend-chart__value {
+  width: 104px;
+  flex: none;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Sheet / modal ── */

@@ -4,16 +4,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../../domain/accounting';
-import {
-  availableYears,
-  periodAsOf,
-  periodRange,
-  type ReportPeriod,
-} from '../../domain/reportPeriod';
+import { periodAsOf, periodRange, type ReportPeriod } from '../../domain/reportPeriod';
 import { todayLocal } from '../../util/time';
 import { Money } from '../money';
 import { Icon } from '../Icon';
-import { PeriodSwitcher } from '../PeriodSwitcher';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import type { AccountBalance } from '../../domain/types';
@@ -58,13 +52,11 @@ export function Statements({
   initialTab = 'pl',
   initialSection,
   period,
-  onPeriodChange,
   onDrillDown,
 }: {
   initialTab?: Tab;
   initialSection?: string;
   period: ReportPeriod;
-  onPeriodChange: (p: ReportPeriod) => void;
   onDrillDown: (filter: JournalFilter) => void;
 }) {
   const { ledger } = useLedger();
@@ -79,20 +71,6 @@ export function Statements({
     const lastDataDate = entries.reduce((m, e) => (e.date > m ? e.date : m), '');
     return periodAsOf(period, today, lastDataDate);
   }, [ledger, period, today]);
-
-  // 年別セレクトの選択肢（ホームと同じ導出）。
-  const years = useMemo(() => {
-    const dates = [
-      ...(ledger?.journalEntries ?? []).map((e) => e.date),
-      ...(ledger?.cashflowSchedules ?? []).map((s) => s.dueDate),
-      ...(ledger?.fundingGoals ?? []).map((g) => g.targetDate),
-    ];
-    return availableYears(
-      dates,
-      Number.parseInt(today.slice(0, 4), 10),
-      period.mode !== 'all' ? period.year : undefined,
-    );
-  }, [ledger, today, period]);
 
   // ホームの項目別遷移で渡されたセクションへスクロールする。
   useEffect(() => {
@@ -153,8 +131,7 @@ export function Statements({
         {t('statements.drilldownHint')}
       </p>
 
-      {/* 期間切替（ホームと共有）。PL は期間合計、BS は期間末時点。 */}
-      <PeriodSwitcher value={period} onChange={onPeriodChange} today={today} years={years} />
+      {/* 期間はヘッダー中央の期間メニューで切り替える（PL=期間合計 / BS=期間末時点）。 */}
 
       {tab === 'pl' ? (
         <div data-ui={UI.statements.profitAndLoss}>

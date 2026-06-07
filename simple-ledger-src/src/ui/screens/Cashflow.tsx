@@ -7,7 +7,13 @@ import { useMemo, useRef, useState } from 'react';
 import { useLedger } from '../../state/store';
 import { useDirtyGuard } from '../useDirtyGuard';
 import { deriveBalanceSheet } from '../../domain/accounting';
-import { inferScheduleFlow, liquidAssetTotal, projectCashflow } from '../../domain/cashflow';
+import {
+  cashDeltaOfEntry,
+  horizonEnd,
+  inferScheduleFlow,
+  liquidAssetTotal,
+  projectCashflow,
+} from '../../domain/cashflow';
 import { addMonths, monthOf, monthlyAmounts } from '../../domain/allocation';
 import { goalRequiredMonthly } from '../../domain/fundingGoal';
 import { newId } from '../../domain/ids';
@@ -27,15 +33,16 @@ import { TagPicker } from '../TagPicker';
 import { SelectInput, TextArea, TextInput } from '../Field';
 import { groupedAccountsByRole } from '../accountOptions';
 import { tagsForScope } from '../tagOptions';
+import type { FormMode } from '../entryModes';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { Money } from '../money';
 import { Icon } from '../Icon';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 
-const HORIZONS = [3, 6, 12];
+const HORIZONS = [3, 6, 12, 24];
 
-export function Cashflow() {
+export function Cashflow({ onAddEntry }: { onAddEntry?: (mode: FormMode) => void }) {
   const {
     ledger,
     saveSchedules,
@@ -50,6 +57,7 @@ export function Cashflow() {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [reserveOpen, setReserveOpen] = useState(false);
   const [goalOpen, setGoalOpen] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [pendingSchedule, setPendingSchedule] = useState<CashflowSchedule | null>(null);
   const [pendingReserve, setPendingReserve] = useState<ReserveItem | null>(null);
   const [pendingGoal, setPendingGoal] = useState<FundingGoal | null>(null);
@@ -62,7 +70,7 @@ export function Cashflow() {
   const currency = ledger?.settings.currency ?? 'JPY';
   const today = todayLocal();
 
-  const { projection, balById } = useMemo(() => {
+  const { projection, balById, liabBalById, futureRows } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     const entries = ledger?.journalEntries ?? [];
     const reserves = ledger?.reserves ?? [];
@@ -70,18 +78,36 @@ export function Cashflow() {
     const allocations = ledger?.allocations ?? [];
     const bs = deriveBalanceSheet(accounts, entries, today);
     const byId = new Map(bs.assets.map((a) => [a.account.id, a.balance] as const));
+    const liabById = new Map(bs.liabilities.map((l) => [l.account.id, l.balance] as const));
     // 按分中資産（現金ではない繰延資産）は総資金から除外する。
     const excluded = new Set(allocations.map((a) => a.deferredAccountId));
     const totalAssets = liquidAssetTotal(bs.assets, excluded);
     const reserveBalance = reserves.reduce((s, r) => s + (byId.get(r.reserveAccountId) ?? 0), 0);
+    // 流動資産（現金など）= 資産科目で按分中でないもの。未来仕訳の現金デルタ判定に使う。
+    const assetIds = new Set(accounts.filter((a) => a.type === 'asset').map((a) => a.id));
+    const isLiquid = (id: string) => assetIds.has(id) && !excluded.has(id);
+    // 未来日付（date > today）の仕訳で現金が動くもの = CF に取り込む（ホーム入力が自然に反映される）。
+    const end = horizonEnd(today, horizon);
+    const future = entries
+      .filter((e) => e.date > today && e.date <= end && e.lines.some((l) => isLiquid(l.accountId)))
+      .map((e) => ({
+        id: e.id,
+        date: e.date,
+        title: e.description,
+        delta: cashDeltaOfEntry(e, isLiquid),
+      }))
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     return {
       balById: byId,
+      liabBalById: liabById,
+      futureRows: future,
       projection: projectCashflow({
         totalAssets,
         reserveBalance,
         schedules,
         today,
         months: horizon,
+        futureEvents: future.map((f) => ({ date: f.date, amount: f.delta })),
       }),
     };
   }, [ledger, horizon, today]);
@@ -91,8 +117,8 @@ export function Cashflow() {
   const reserves = ledger?.reserves ?? [];
   const maxFree = Math.max(1, ...projection.points.map((p) => Math.abs(p.free)));
 
-  // 負債・分割払いの集約: 支払用負債ごとに、相手とする未実績の outflow 予定から
-  // 次回支払日・残額・件数を見せる（既存 CashflowSchedule と負債科目から導出）。
+  // 支払用負債の集約: 負債ごとに 残高 + 未実績の返済予定（次回支払日・残額・件数）を見せる。
+  // 予定が無くても残高がある負債は「返済予定が未登録」として注意表示する。
   const liabilitySummary = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     const schedules = ledger?.cashflowSchedules ?? [];
@@ -104,10 +130,17 @@ export function Cashflow() {
         );
         const remaining = related.reduce((sum, s) => sum + s.amount, 0);
         const nextDue = related.map((s) => s.dueDate).sort()[0];
-        return { id: a.id, name: a.name, count: related.length, remaining, nextDue };
+        return {
+          id: a.id,
+          name: a.name,
+          count: related.length,
+          remaining,
+          nextDue,
+          balance: liabBalById.get(a.id) ?? 0,
+        };
       })
-      .filter((x) => x.count > 0);
-  }, [ledger]);
+      .filter((x) => x.count > 0 || x.balance !== 0);
+  }, [ledger, liabBalById]);
 
   return (
     <section aria-labelledby="cashflow-title" data-ui={UI.cashflow.view}>
@@ -179,58 +212,164 @@ export function Cashflow() {
         </div>
       ) : null}
 
-      {/* 残高推移（軽量・自由資金のバー） */}
+      {/* 自由資金の推移（軽量・自由資金のバー） */}
       {projection.points.length > 1 ? (
-        <ul className="card list" style={{ marginTop: 'var(--space-3)' }} aria-hidden="true">
-          {projection.points.map((p, i) => (
-            <li key={`${p.date}-${i}`} className="list__item">
-              <span className="list__sub" style={{ width: 90, flex: 'none' }}>
-                {i === 0 ? today : p.date}
-              </span>
-              <span
-                style={{
-                  flex: 1,
-                  height: 10,
-                  borderRadius: 999,
-                  background: 'var(--bg)',
-                  overflow: 'hidden',
-                }}
-              >
+        <>
+          <p className="section-label">{t('cashflow.freeTrendTitle')}</p>
+          <ul
+            className="card list"
+            data-ui={UI.cashflow.freeTrend}
+            style={{ marginTop: 'var(--space-2)' }}
+            aria-hidden="true"
+          >
+            {projection.points.map((p, i) => (
+              <li key={`${p.date}-${i}`} className="list__item">
+                <span className="list__sub" style={{ width: 90, flex: 'none' }}>
+                  {i === 0 ? today : p.date}
+                </span>
                 <span
                   style={{
-                    display: 'block',
-                    height: '100%',
-                    width: `${Math.max(2, (Math.max(0, p.free) / maxFree) * 100)}%`,
-                    background: p.free < 0 ? 'var(--neg)' : 'var(--primary)',
+                    flex: 1,
+                    height: 10,
+                    borderRadius: 999,
+                    background: 'var(--bg)',
+                    overflow: 'hidden',
                   }}
-                />
-              </span>
-              <span className="list__amount">
-                <Money amount={p.free} currency={currency} signed />
+                >
+                  <span
+                    style={{
+                      display: 'block',
+                      height: '100%',
+                      width: `${Math.max(2, (Math.max(0, p.free) / maxFree) * 100)}%`,
+                      background: p.free < 0 ? 'var(--neg)' : 'var(--primary)',
+                    }}
+                  />
+                </span>
+                <span className="list__amount">
+                  <Money amount={p.free} currency={currency} signed />
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+
+      {/* 支払用負債・返済予定（CF の主役その2） */}
+      <p className="section-label">{t('cashflow.debtTitle')}</p>
+      <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
+        {t('cashflow.debtIntro')}
+      </p>
+      {liabilitySummary.length === 0 ? (
+        <div className="card card--pad empty">{t('cashflow.debtNoPlan')}</div>
+      ) : (
+        <ul className="card list" data-ui={UI.cashflow.liabilityList}>
+          {liabilitySummary.map((l) => (
+            <li key={l.id} className="list__item">
+              <div className="list__main">
+                <div className="list__title">{l.name}</div>
+                <div className="list__sub">
+                  {t('cashflow.debtBalance')}: <Money amount={l.balance} currency={currency} />
+                </div>
+                {l.count > 0 ? (
+                  <div className="list__sub">
+                    {t('cashflow.nextDue')}: {l.nextDue ?? '—'}・
+                    {t('cashflow.installmentsLeft', { count: l.count })}・
+                    {t('cashflow.debtBalance')} <Money amount={l.remaining} currency={currency} />
+                  </div>
+                ) : (
+                  <div className="list__sub amount--neg">{t('cashflow.debtNoPlanHint')}</div>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* 未来の入出金・振替予定（ホーム入力が自然に反映される） */}
+      <p className="section-label">{t('cashflow.futureTitle')}</p>
+      <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
+        {t('cashflow.futureIntro')}
+      </p>
+      {onAddEntry ? (
+        <div className="entry-types" style={{ marginBottom: 'var(--space-3)' }}>
+          <button
+            type="button"
+            className="entry-type-btn"
+            onClick={() => onAddEntry('income')}
+            data-ui={UI.dashboard.income}
+          >
+            <span className="entry-type-btn__icon">
+              <Icon name="income" size={20} />
+            </span>
+            {t('entry.type.income')}
+          </button>
+          <button
+            type="button"
+            className="entry-type-btn"
+            onClick={() => onAddEntry('expense')}
+            data-ui={UI.dashboard.expense}
+          >
+            <span className="entry-type-btn__icon">
+              <Icon name="expense" size={20} />
+            </span>
+            {t('entry.type.expense')}
+          </button>
+          <button
+            type="button"
+            className="entry-type-btn"
+            onClick={() => onAddEntry('transfer')}
+            data-ui={UI.dashboard.transfer}
+          >
+            <span className="entry-type-btn__icon">
+              <Icon name="transfer" size={20} />
+            </span>
+            {t('entry.type.transfer')}
+          </button>
+        </div>
+      ) : null}
+      {futureRows.length === 0 ? (
+        <div className="card card--pad empty">{t('cashflow.futureEmpty')}</div>
+      ) : (
+        <ul className="card list" data-ui={UI.cashflow.futureList}>
+          {futureRows.map((f) => (
+            <li key={f.id} className="list__item">
+              <div className="list__main">
+                <div className="list__title">{f.title}</div>
+                <div className="list__sub">{f.date}</div>
+              </div>
+              <span
+                className={`list__amount ${
+                  f.delta > 0 ? 'amount--pos' : f.delta < 0 ? 'amount--neg' : 'muted'
+                }`}
+              >
+                {f.delta > 0 ? '+' : f.delta < 0 ? '−' : '→ '}
+                <Money amount={Math.abs(f.delta)} currency={currency} />
               </span>
             </li>
           ))}
         </ul>
-      ) : null}
+      )}
 
-      {/* 入出金予定 */}
+      {/* 分割・定期の予定（任意・控えめ）。回数のある予定だけここで登録する。 */}
       <div
         className="section-label"
         style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
       >
-        <span>{t('cashflow.planned')}</span>
+        <span>{t('cashflow.scheduleSecondaryTitle')}</span>
         <button
           type="button"
-          className="btn btn--primary"
+          className="btn btn--ghost"
           style={{ minHeight: 36 }}
           onClick={() => setScheduleOpen(true)}
           data-ui={UI.cashflow.addSchedule}
         >
           <Icon name="plus" size={16} />
-          {t('cashflow.addSchedule')}
+          {t('cashflow.addScheduleSecondary')}
         </button>
       </div>
-
+      <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
+        {t('cashflow.scheduleSecondaryHint')}
+      </p>
       {projection.schedules.length === 0 ? (
         <div className="card card--pad empty">{t('cashflow.emptyPlanned')}</div>
       ) : (
@@ -281,139 +420,126 @@ export function Cashflow() {
         </ul>
       )}
 
-      {/* 目的別資金 */}
-      <div
-        className="section-label"
-        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+      {/* 目的別資金・資金目標（補助情報・下部に畳む） */}
+      <button
+        type="button"
+        className="collapse-toggle"
+        aria-expanded={showAdvanced}
+        onClick={() => setShowAdvanced((v) => !v)}
+        data-ui={UI.cashflow.advancedToggle}
+        style={{ marginTop: 'var(--space-4)' }}
       >
-        <span>{t('reserves.title')}</span>
-        <button
-          type="button"
-          className="btn"
-          style={{ minHeight: 36 }}
-          onClick={() => setReserveOpen(true)}
-          data-ui={UI.cashflow.addReserve}
-        >
-          <Icon name="plus" size={16} />
-          {t('reserves.add')}
-        </button>
-      </div>
-      <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
-        {t('reserves.intro')}
-      </p>
+        <Icon name={showAdvanced ? 'chevronDown' : 'chevronRight'} size={16} />
+        {t('cashflow.advancedTitle')}
+      </button>
+      {showAdvanced ? (
+        <div className="stack">
+          <p className="field__hint">{t('cashflow.advancedHint')}</p>
 
-      {reserves.length === 0 ? (
-        <div className="card card--pad empty">{t('reserves.empty')}</div>
-      ) : (
-        <ul className="card list" data-ui={UI.cashflow.reserveList}>
-          {reserves.map((r) => (
-            <li key={r.id} className="list__item">
-              <div className="list__main">
-                <div className="list__title">{r.name}</div>
-                <div className="list__sub">
-                  {t('reserves.balance')}:{' '}
-                  <Money amount={balById.get(r.reserveAccountId) ?? 0} currency={currency} />
-                  {r.targetAmount !== undefined
-                    ? `（${t('reserves.targetOf', { target: r.targetAmount.toLocaleString('ja-JP') })}）`
-                    : ''}
-                </div>
-              </div>
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={() => setPendingReserve(r)}
-                aria-label={`${t('reserves.delete')}: ${r.name}`}
-              >
-                <Icon name="trash" size={18} />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {/* 負債・分割払い（支払用負債ごとの集約） */}
-      {liabilitySummary.length > 0 ? (
-        <>
-          <p className="section-label">{t('cashflow.liabilitiesTitle')}</p>
-          <ul className="card list" data-ui={UI.cashflow.liabilityList}>
-            {liabilitySummary.map((l) => (
-              <li key={l.id} className="list__item">
-                <div className="list__main">
-                  <div className="list__title">{l.name}</div>
-                  <div className="list__sub">
-                    {t('cashflow.nextDue')}: {l.nextDue ?? '—'}・
-                    {t('cashflow.installmentsLeft', { count: l.count })}
+          {/* 目的別資金 */}
+          <div
+            className="section-label"
+            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+          >
+            <span>{t('reserves.title')}</span>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              style={{ minHeight: 36 }}
+              onClick={() => setReserveOpen(true)}
+              data-ui={UI.cashflow.addReserve}
+            >
+              <Icon name="plus" size={16} />
+              {t('reserves.add')}
+            </button>
+          </div>
+          {reserves.length === 0 ? (
+            <div className="card card--pad empty">{t('reserves.empty')}</div>
+          ) : (
+            <ul className="card list" data-ui={UI.cashflow.reserveList}>
+              {reserves.map((r) => (
+                <li key={r.id} className="list__item">
+                  <div className="list__main">
+                    <div className="list__title">{r.name}</div>
+                    <div className="list__sub">
+                      {t('reserves.balance')}:{' '}
+                      <Money amount={balById.get(r.reserveAccountId) ?? 0} currency={currency} />
+                      {r.targetAmount !== undefined
+                        ? `（${t('reserves.targetOf', { target: r.targetAmount.toLocaleString('ja-JP') })}）`
+                        : ''}
+                    </div>
                   </div>
-                </div>
-                <span className="list__amount">
-                  <Money amount={l.remaining} currency={currency} />
-                </span>
-              </li>
-            ))}
-          </ul>
-        </>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    onClick={() => setPendingReserve(r)}
+                    aria-label={`${t('reserves.delete')}: ${r.name}`}
+                  >
+                    <Icon name="trash" size={18} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {/* 資金目標 */}
+          <div
+            className="section-label"
+            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+          >
+            <span>{t('fundingGoal.title')}</span>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              style={{ minHeight: 36 }}
+              onClick={() => setGoalOpen(true)}
+              data-ui={UI.cashflow.addGoal}
+            >
+              <Icon name="plus" size={16} />
+              {t('fundingGoal.add')}
+            </button>
+          </div>
+          {goals.length === 0 ? (
+            <div className="card card--pad empty">{t('fundingGoal.empty')}</div>
+          ) : (
+            <ul className="card list" data-ui={UI.cashflow.goalList}>
+              {goals.map((g) => (
+                <li key={g.id} className="list__item">
+                  <div className="list__main">
+                    <div className="list__title">{g.name}</div>
+                    <div className="list__sub">
+                      {g.targetDate}・{t('fundingGoal.target')}{' '}
+                      <Money amount={g.targetAmount} currency={currency} />
+                      {g.currentAmount > 0 ? (
+                        <>
+                          {' '}
+                          / {t('fundingGoal.current')}{' '}
+                          <Money amount={g.currentAmount} currency={currency} />
+                        </>
+                      ) : null}
+                    </div>
+                    <div className="list__sub">
+                      {t('fundingGoal.requiredMonthly')}:{' '}
+                      <Money
+                        amount={goalRequiredMonthly(g, currentYm, returnBps)}
+                        currency={currency}
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    onClick={() => setPendingGoal(g)}
+                    aria-label={`${t('common.delete')}: ${g.name}`}
+                  >
+                    <Icon name="trash" size={18} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       ) : null}
-
-      {/* 資金目標（長期の積立計画） */}
-      <div
-        className="section-label"
-        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-      >
-        <span>{t('fundingGoal.title')}</span>
-        <button
-          type="button"
-          className="btn"
-          style={{ minHeight: 36 }}
-          onClick={() => setGoalOpen(true)}
-          data-ui={UI.cashflow.addGoal}
-        >
-          <Icon name="plus" size={16} />
-          {t('fundingGoal.add')}
-        </button>
-      </div>
-      <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
-        {t('fundingGoal.intro')}
-      </p>
-
-      {goals.length === 0 ? (
-        <div className="card card--pad empty">{t('fundingGoal.empty')}</div>
-      ) : (
-        <ul className="card list" data-ui={UI.cashflow.goalList}>
-          {goals.map((g) => (
-            <li key={g.id} className="list__item">
-              <div className="list__main">
-                <div className="list__title">{g.name}</div>
-                <div className="list__sub">
-                  {g.targetDate}・{t('fundingGoal.target')}{' '}
-                  <Money amount={g.targetAmount} currency={currency} />
-                  {g.currentAmount > 0 ? (
-                    <>
-                      {' '}
-                      / {t('fundingGoal.current')}{' '}
-                      <Money amount={g.currentAmount} currency={currency} />
-                    </>
-                  ) : null}
-                </div>
-                <div className="list__sub">
-                  {t('fundingGoal.requiredMonthly')}:{' '}
-                  <Money
-                    amount={goalRequiredMonthly(g, currentYm, returnBps)}
-                    currency={currency}
-                  />
-                </div>
-              </div>
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={() => setPendingGoal(g)}
-                aria-label={`${t('common.delete')}: ${g.name}`}
-              >
-                <Icon name="trash" size={18} />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
 
       {scheduleOpen ? (
         <ScheduleSheet

@@ -120,6 +120,65 @@ export function dataMonthsOf(dates: string[]): string[] {
   return Array.from(new Set(dates.map((d) => d.slice(0, 7)))).sort();
 }
 
+/** 'YYYY-MM-DD' の配列から、データのある年（数値）を昇順・重複排除で返す。 */
+export function dataYearsOf(dates: string[]): number[] {
+  return Array.from(new Set(dates.map((d) => Number.parseInt(d.slice(0, 4), 10))))
+    .filter((y) => Number.isFinite(y) && y > 0)
+    .sort((a, b) => a - b);
+}
+
+/** トレンドの 1 バー分。年集約のときは key=年文字列・year で「その年へ切替」できる。 */
+export interface TrendBucket {
+  /** 月集約は 'YYYY-MM'、年集約は 'YYYY'。 */
+  key: string;
+  /** バーのラベル（年集約は 'YYYY年'、月集約は 'M月'）。 */
+  label: string;
+  /** この区間（年集約=その年、月集約=その月）。フロー集計に使う。 */
+  range: DateRange;
+  /** 区間末（年末/月末）。BS 時系列に使う基準日。 */
+  asOf: string;
+  /** この区間が属する年（年集約のクリック遷移に使う）。 */
+  year: number;
+}
+
+/**
+ * トレンド（グラフ）用のバケット列。縦長リストを避け、俯瞰しやすい粒度にする。
+ *  - month: 単月なので推移は出さない（空配列）。
+ *  - year:  その年の 1〜12 月（12 本の月次バー）。
+ *  - all:   最初〜最後のデータ年を**連続**で（年次バー。空白年も埋める）。データが無ければ空配列。
+ */
+export function trendBuckets(p: ReportPeriod, opts: { dataYears?: number[] } = {}): TrendBucket[] {
+  if (p.mode === 'month') return [];
+  if (p.mode === 'year') {
+    return Array.from({ length: 12 }, (_, i) => {
+      const range = monthRange(p.year, i + 1);
+      return {
+        key: `${p.year}-${pad2(i + 1)}`,
+        label: `${i + 1}月`,
+        range,
+        asOf: range.to,
+        year: p.year,
+      };
+    });
+  }
+  // all: データのある年を最小〜最大で連続に（年次バー）。
+  const years = (opts.dataYears ?? []).filter((y) => Number.isFinite(y) && y > 0);
+  if (years.length === 0) return [];
+  const lo = Math.min(...years);
+  const hi = Math.max(...years);
+  const out: TrendBucket[] = [];
+  for (let y = lo; y <= hi && out.length < 200; y++) {
+    out.push({
+      key: `${y}`,
+      label: `${y}年`,
+      range: { from: `${y}-01-01`, to: `${y}-12-31` },
+      asOf: `${y}-12-31`,
+      year: y,
+    });
+  }
+  return out;
+}
+
 /**
  * 年別セレクトの選択肢（降順）。データ（仕訳・予定・資金目標の日付）がある年、現在年、翌年、
  * 選択中の年を含む連続範囲を返す。長期の資金計画（数十年）にも追従する。

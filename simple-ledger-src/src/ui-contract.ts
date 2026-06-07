@@ -6,14 +6,21 @@
  * - 詳細とポリシーは docs/dev/ui-contract.md。
  */
 export const UI = {
-  // 期間切替（ホーム/財務諸表で共有）
+  // 期間切替（ヘッダー中央の期間ボタン → 期間メニュー。ホーム/財務諸表で共有）
   period: {
-    modeMonth: 'period.mode.month',
-    modeYear: 'period.mode.year',
-    modeAll: 'period.mode.all',
-    month: 'period.input.month',
+    // ヘッダー中央の期間ラベルボタン（押すと期間メニューを開く）
+    button: 'period.button',
+    // 期間メニュー内: 年を選ぶ / 全期間
+    kindYear: 'period.kind.year',
+    kindAll: 'period.kind.all',
+    // 年セレクト + 粒度（月 / 年全体）+ 月セレクト
     year: 'period.input.year',
+    grainMonth: 'period.grain.month',
+    grainFullYear: 'period.grain.fullYear',
+    month: 'period.input.month',
+    // トレンド（グラフ）
     trend: 'period.trend',
+    trendBar: 'period.trend.bar',
   },
   dashboard: {
     view: 'dashboard.view',
@@ -131,6 +138,10 @@ export const UI = {
     scheduleFlowDestination: 'cashflow.schedule.flow.destination',
     scheduleInstallments: 'cashflow.schedule.installments',
     liabilityList: 'cashflow.liability.list',
+    // CF 再構成: 自由資金推移 / 未来予定 / 目的別・目標の折りたたみ
+    freeTrend: 'cashflow.freeTrend',
+    futureList: 'cashflow.future.list',
+    advancedToggle: 'cashflow.advanced.toggle',
     // 予定CF のタグ欄（実績化時に仕訳へコピーされる）
     scheduleEntryTags: 'cashflow.schedule.entryTags',
     scheduleAccountTags: 'cashflow.schedule.accountTags',

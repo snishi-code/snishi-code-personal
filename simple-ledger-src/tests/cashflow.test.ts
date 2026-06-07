@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildScheduleEntry,
+  cashDeltaOfEntry,
   horizonEnd,
   inferScheduleFlow,
   liquidAssetTotal,
   projectCashflow,
 } from '../src/domain/cashflow';
-import type { Account, AccountBalance, CashflowSchedule } from '../src/domain/types';
+import type { Account, AccountBalance, CashflowSchedule, JournalEntry } from '../src/domain/types';
 import type { AccountRole } from '../src/domain/accountRoles';
 
 function acc(id: string, role: AccountRole, type: Account['type']): Account {
@@ -181,6 +182,88 @@ describe('projectCashflow', () => {
     // 10000 → 2000 → 32000。最低自由資金は 2000。
     expect(proj.minFree).toBe(2000);
     expect(proj.points.at(-1)?.free).toBe(32000);
+  });
+});
+
+function entry(over: Partial<JournalEntry> & { lines: JournalEntry['lines'] }): JournalEntry {
+  return {
+    id: 'e',
+    date: '2026-07-01',
+    description: 'x',
+    kind: 'normal',
+    metadata: { inputMode: 'manual' },
+    createdAt: 'x',
+    updatedAt: 'x',
+    ...over,
+  };
+}
+
+describe('cashDeltaOfEntry（未来仕訳の現金デルタ）', () => {
+  const liquid = new Set(['cash']);
+  const isLiquid = (id: string) => liquid.has(id);
+  it('支出（借方 費用 / 貸方 現金）は −amount', () => {
+    const e = entry({
+      lines: [
+        { accountId: 'food', side: 'debit', amount: 1000 },
+        { accountId: 'cash', side: 'credit', amount: 1000 },
+      ],
+    });
+    expect(cashDeltaOfEntry(e, isLiquid)).toBe(-1000);
+  });
+  it('収入（借方 現金 / 貸方 収入）は +amount', () => {
+    const e = entry({
+      lines: [
+        { accountId: 'cash', side: 'debit', amount: 5000 },
+        { accountId: 'salary', side: 'credit', amount: 5000 },
+      ],
+    });
+    expect(cashDeltaOfEntry(e, isLiquid)).toBe(5000);
+  });
+  it('振替（現金A→現金B）は 0、現金が動かない仕訳も 0', () => {
+    const transfer = entry({
+      lines: [
+        { accountId: 'cash', side: 'debit', amount: 3000 },
+        { accountId: 'cash', side: 'credit', amount: 3000 },
+      ],
+    });
+    expect(cashDeltaOfEntry(transfer, isLiquid)).toBe(0);
+    const noncash = entry({
+      lines: [
+        { accountId: 'food', side: 'debit', amount: 2000 },
+        { accountId: 'deferred', side: 'credit', amount: 2000 },
+      ],
+    });
+    expect(cashDeltaOfEntry(noncash, isLiquid)).toBe(0);
+  });
+});
+
+describe('projectCashflow + 未来仕訳(futureEvents)', () => {
+  it('未来日付の支出仕訳が自由資金を減らす（予定 CF と統合・二重計上なし）', () => {
+    const proj = projectCashflow({
+      totalAssets: 100000,
+      reserveBalance: 0,
+      schedules: [],
+      today: '2026-06-15',
+      months: 3,
+      futureEvents: [{ date: '2026-07-10', amount: -30000 }],
+    });
+    expect(proj.points.at(-1)?.free).toBe(70000);
+    expect(proj.minFree).toBe(70000);
+  });
+  it('today 以前 / 期間外の未来仕訳は無視する', () => {
+    const proj = projectCashflow({
+      totalAssets: 100000,
+      reserveBalance: 0,
+      schedules: [],
+      today: '2026-06-15',
+      months: 3,
+      futureEvents: [
+        { date: '2026-06-15', amount: -1000 }, // today は startTotal に含み済み
+        { date: '2027-01-10', amount: -1000 }, // 期間外
+      ],
+    });
+    expect(proj.points).toHaveLength(1);
+    expect(proj.points.at(-1)?.free).toBe(100000);
   });
 });
 

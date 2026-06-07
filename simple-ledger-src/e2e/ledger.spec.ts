@@ -134,7 +134,8 @@ test('資金繰り: 予定と目的別資金を作成できる', async ({ page }
   await page.locator(ui('cashflow.schedule.save')).click();
   await expect(page.locator(ui('cashflow.schedule.list'))).toContainText('カード引き落とし');
 
-  // 目的別資金を追加
+  // 目的別資金は下部の「目的別資金・資金目標」を開いてから追加する
+  await page.locator(ui('cashflow.advanced.toggle')).click();
   await page.locator(ui('cashflow.reserve.create')).click();
   await page.locator(ui('cashflow.reserve.name')).fill('結婚資金');
   await page.locator(ui('cashflow.reserve.save')).click();
@@ -211,26 +212,34 @@ test('ホームの損益/資産サマリーから財務諸表(PL/BS)を開ける
   await expect(page.locator(ui('statements.profitAndLoss'))).toBeVisible();
 });
 
-test('期間切替（月別 / 年別 / 全体）でホームの集計が切り替わる', async ({ page }) => {
+test('期間切替（ヘッダーの期間メニュー）でホームの集計・推移が切り替わる', async ({ page }) => {
   await page.goto('./');
   await addExpense(page, '期間テスト支出', '1500');
 
-  // 既定は月別（月入力が出ている）。
+  // ヘッダー中央の期間ボタンで期間メニューを開く（既定は月別 → 月セレクトが出る）。
+  await page.locator(ui('period.button')).click();
   await expect(page.locator(ui('period.input.month'))).toBeVisible();
 
-  // 年別へ: 年セレクトが出て、推移ブロックが表示される。
-  await page.locator(ui('period.mode.year')).click();
+  // 年全体へ: 月セレクトが消え、ホームに推移ブロックが出る（Escape でメニューを閉じる）。
+  await page.locator(ui('period.grain.fullYear')).click();
+  await expect(page.locator(ui('period.input.month'))).toHaveCount(0);
   await expect(page.locator(ui('period.input.year'))).toBeVisible();
+  await page.keyboard.press('Escape');
   await expect(page.locator(ui('period.trend'))).toBeVisible();
 
-  // 全体へ: 月入力も年セレクトも出ない。推移は表示される。
-  await page.locator(ui('period.mode.all')).click();
+  // 全期間へ: 年セレクトも月セレクトも出ない。推移は表示される。
+  await page.locator(ui('period.button')).click();
+  await page.locator(ui('period.kind.all')).click();
   await expect(page.locator(ui('period.input.month'))).toHaveCount(0);
   await expect(page.locator(ui('period.input.year'))).toHaveCount(0);
+  await page.keyboard.press('Escape');
   await expect(page.locator(ui('period.trend'))).toBeVisible();
 
-  // 月別へ戻すと推移は消える（単月は推移を出さない）。
-  await page.locator(ui('period.mode.month')).click();
+  // 月へ戻すと推移は消える（単月は推移を出さない）。
+  await page.locator(ui('period.button')).click();
+  await page.locator(ui('period.kind.year')).click();
+  await page.locator(ui('period.grain.month')).click();
+  await page.keyboard.press('Escape');
   await expect(page.locator(ui('period.trend'))).toHaveCount(0);
 });
 

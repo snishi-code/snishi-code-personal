@@ -119,8 +119,40 @@ export function horizonEnd(today: string, months: number): string {
 }
 
 /**
- * planned な予定を期日順に適用して将来残高を投影する。
+ * 1 件の仕訳が「流動資産（現金など）」に与える純増減を求める。
+ * 借方で流動資産が増えれば +、貸方で減れば −。流動でない明細（費用/収入/負債/按分中資産）は 0。
+ * これにより、未来日付の通常仕訳（ホームの収入/支出/振替）をそのまま CF 投影に取り込める。
+ *  - 収入: 借方 現金 / 貸方 収入 → +amount（inflow）
+ *  - 支出: 借方 費用 / 貸方 現金 → −amount（outflow）
+ *  - 返済: 借方 負債 / 貸方 現金 → −amount（負債は流動資産でない）
+ *  - 振替(日常→日常): 借方 現金A / 貸方 現金B → 0（自由資金は変わらない）
+ *  - 認識/按分(現金が動かない) → 0
+ */
+export function cashDeltaOfEntry(
+  entry: JournalEntry,
+  isLiquid: (accountId: string) => boolean,
+): number {
+  let delta = 0;
+  for (const line of entry.lines) {
+    if (!isLiquid(line.accountId)) continue;
+    delta += line.side === 'debit' ? line.amount : -line.amount;
+  }
+  return delta;
+}
+
+/** 投影に積む将来の現金イベント（予定 CF と未来仕訳を統一して扱う）。 */
+export interface FutureCashEvent {
+  date: string;
+  /** 現金（流動資産）の符号つき増減。 */
+  amount: number;
+}
+
+/**
+ * planned な予定 + 未来日付の通常仕訳を期日順に適用して将来残高を投影する。
  * reserveBalance（目的別資金の現在残高）は自由資金から差し引く（投影中は一定とみなす）。
+ *
+ * futureEvents は「未来日付仕訳（date > today）の現金デルタ」。startTotal は today 時点の残高なので、
+ * 未来仕訳はまだ含まれておらず、予定 CF と二重計上にならない（予定は status==='planned' で未実績）。
  */
 export function projectCashflow(params: {
   totalAssets: number;
@@ -128,23 +160,33 @@ export function projectCashflow(params: {
   schedules: CashflowSchedule[];
   today: string;
   months: number;
+  futureEvents?: FutureCashEvent[];
 }): CashflowProjection {
-  const { totalAssets, reserveBalance, schedules, today, months } = params;
+  const { totalAssets, reserveBalance, schedules, today, months, futureEvents = [] } = params;
   const end = horizonEnd(today, months);
   const planned = schedules
     .filter((s) => s.status === 'planned' && s.dueDate >= today && s.dueDate <= end)
     .slice()
     .sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0));
 
+  // 予定 CF と未来仕訳を 1 本のイベント列に統合し、期日順に積む。
+  const events: FutureCashEvent[] = [
+    ...planned.map((s) => ({
+      date: s.dueDate,
+      // transfer（口座間移動）は自由資金の総額を変えない。
+      amount: s.direction === 'inflow' ? s.amount : s.direction === 'outflow' ? -s.amount : 0,
+    })),
+    ...futureEvents.filter((e) => e.date > today && e.date <= end),
+  ].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
   const startTotal = totalAssets;
   const startFree = totalAssets - reserveBalance;
   const points: CashflowPoint[] = [{ date: today, total: startTotal, free: startFree }];
 
   let total = startTotal;
-  for (const s of planned) {
-    // transfer（口座間移動）は自由資金の総額を変えない。
-    total += s.direction === 'inflow' ? s.amount : s.direction === 'outflow' ? -s.amount : 0;
-    points.push({ date: s.dueDate, total, free: total - reserveBalance });
+  for (const e of events) {
+    total += e.amount;
+    points.push({ date: e.date, total, free: total - reserveBalance });
   }
 
   const minTotal = points.reduce((m, p) => Math.min(m, p.total), startTotal);
