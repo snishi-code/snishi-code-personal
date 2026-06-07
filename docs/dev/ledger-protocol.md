@@ -17,7 +17,7 @@
 ```jsonc
 {
   "appId": "snishi-code.simple-ledger",
-  "schemaVersion": 8,
+  "schemaVersion": 10,
   "ledgerId": "ledger",
   "exportedAt": "2026-06-06T00:00:00.000Z",
   "deviceId": "<uuid>",
@@ -35,14 +35,17 @@
 }
 ```
 
-- `schemaVersion`: スキーマ版。現行は **`8`**（v1→v2 `allocations`、v2→v3
+- `schemaVersion`: スキーマ版。現行は **`10`**（v1→v2 `allocations`、v2→v3
   `cashflowSchedules`/`reserves`、v3→v4 `tags`、v4→v5 残高補正 `metadata.adjustment`
   永続化＝恒等移行、v5→v6 勘定科目に `role`、v6→v7 月額化コスト `monthlyCostItems`、
-  v7→v8 資金目標 `fundingGoals` を追加）。
+  v7→v8 資金目標 `fundingGoals`、v8→v9 予定CF `direction` に `transfer`＝恒等移行、
+  v9→v10 `role` に `fixed-asset` + `MonthlyCostItem` に `sourceEntryId`/`recognitionCreditAccountId`
+  ＝恒等移行）。
 - `Settings.expectedAnnualReturnBps?`: 期待年利（bps 整数。例 5%=500、未指定 0）。資金目標の
   必要積立額の参考計算にのみ使う（投資助言ではない）。
 - `Account.role`: `type` と整合する UI 用役割（`daily-asset` / `reserve-asset` /
-  `deferred-asset` / `investment-asset` / `payment-liability` / `other-liability` / `equity` /
+  `deferred-asset` / `investment-asset` / `fixed-asset`（固定資産。現金でない asset・CF総資金外） /
+  `payment-liability` / `other-liability` / `equity` /
   `income-category` / `expense-category` / `system-adjustment`）。詳細は
   [ledger-concept.md](ledger-concept.md#中核モデル)。import 検証で `role` と `type` の整合も確認する。
 - `revision`: 端末ローカルの編集追跡。保存（仕訳/科目/設定/按分/予定CF/目的別資金/タグ）のたびに +1。
@@ -191,7 +194,7 @@ revision は import の競合判定に使うため、本体と必ず歩調を合
 
 ## migration ポリシー
 
-- `schemaVersion` を必ず持つ。現行は `8`。
+- `schemaVersion` を必ず持つ。現行は `10`。
 - migration 関数の置き場は `src/domain/migrations.ts` の `STEPS`（`{ from, to, migrate }`）。
   - **v1 → v2**: `allocations: []` を補う（v1 JSON は按分を持たない）。
   - **v2 → v3**: `cashflowSchedules: []` / `reserves: []` を補う。
@@ -205,6 +208,9 @@ revision は import の競合判定に使うため、本体と必ず歩調を合
     `sourceAllocationId` 付き）。既存 `allocations` と生成済み仕訳は消さない（履歴保持）。
   - **v7 → v8**: 資金目標 `fundingGoals: []` を補う。`ReserveItem` は `targetDate` を持たないため
     自動移行はしない（既存データは保持）。
+  - **v8 → v9**: 予定CF `direction` に `transfer`（口座間移動）を追加＝恒等移行（許容値拡張のみ）。
+  - **v9 → v10**: `AccountRole` に `fixed-asset`、`MonthlyCostItem` に `sourceEntryId` /
+    `recognitionCreditAccountId` を追加＝恒等移行（許容値・任意項目の拡張のみ）。
 - 未対応版は **fail-closed**（取り込まない）。
 - migration 失敗時は既存データを保持し、UI に失敗を通知する（握りつぶさない）。
 - version を上げるときは `SCHEMA_VERSION` を +1 し、`STEPS` に旧→新の手順を追加する。

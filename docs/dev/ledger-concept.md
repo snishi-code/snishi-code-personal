@@ -38,13 +38,16 @@
   混ぜてしまうため）。正本は [`src/domain/accountRoles.ts`](../../simple-ledger-src/src/domain/accountRoles.ts)。
   `role` は `type` と整合する（`roleAllowsType`）。
   - `daily-asset`（現金・預金）/ `reserve-asset`（目的別資金）/ `deferred-asset`（按分中資産）/
-    `investment-asset`（投資）… いずれも `type=asset`
+    `investment-asset`（投資）/ `fixed-asset`（固定資産＝車・家財など。現金でない・CF総資金外）… いずれも `type=asset`
   - `payment-liability`（カード未払等）/ `other-liability`（ローン等）… `type=liability`
   - `income-category`（`revenue`）/ `expense-category`（`expense`）/ `equity`（`equity`）
   - `system-adjustment`（残高調整費/収入・投資評価損益。`expense|revenue`。自動生成・通常入力に出さない）
-  - 日常入力候補: 入金先/振替元/振替先=`daily-asset`、支払元=`daily-asset`+`payment-liability`、
-    収入カテゴリ=`income-category`、支出カテゴリ=`expense-category`。
-    按分中資産・目的別資金・投資資産・調整科目は通常入力に出さない（manual/詳細入力では全件可）。
+  - 日常入力候補: 収入の入金先=`daily-asset`。支出の使い道=`expense-category`+`fixed-asset`（固定資産購入）、
+    支払元=`daily-asset`+`reserve-asset`+`payment-liability`。振替（資金移動）=`daily/reserve-asset` と
+    `payment/other-liability` の間（資金↔資金 / 資金→負債返済 / 負債→資金借入。負債→負債等は不正＝`transferFlowValid`）。
+    按分中資産・投資資産・調整科目は通常入力に出さない（manual/詳細入力では全件可）。
+  - **目的別資金からの支払い/移動は、その資金の残高不足を保存前に拒否する**（`reserveBalanceShortfall`、
+    entry.date 時点の残高で判定・fail-closed）。
 - **`JournalEntry`（仕訳）**: `date` / `description` / `lines[]` / `kind` / `memo`。
   MVP では `lines` は「1 借方・1 貸方・同額」の 2 行のみ（型は複数行を許し将来拡張可能）。
   `kind` は `normal` / `opening`（初期残高）。
@@ -87,15 +90,22 @@ PL も BS も **保存しない**。`Account` と `JournalEntry` から毎回計
 ユーザーには借方/貸方を意識させず、意味のあるフィールドで 2 科目を選ばせる。内部では
 必ず複式へ変換する（対応は `src/ui/entryModes.ts`、入力方法は `JournalEntry.metadata.inputMode`）。
 
-| 入力 | フィールド（debit / credit） | 候補タイプ |
+| 入力 | フィールド（debit / credit） | 候補ロール |
 |---|---|---|
-| 収入 | 入金先(debit) / カテゴリ(credit) | asset / revenue |
-| 支出 | カテゴリ(debit) / 支払元(credit) | expense / asset・liability |
-| 振替 | 振替先(debit) / 振替元(credit) | asset・liability・equity（両側） |
+| 収入 | 入金先(debit) / カテゴリ(credit) | daily-asset / income-category |
+| 支出 | 使い道(debit) / 支払元(credit) | expense-category・fixed-asset / daily・reserve-asset・payment-liability |
+| 振替 | 振替先(debit) / 振替元(credit) | daily/reserve-asset・payment/other-liability（資金移動・返済・借入。`transferFlowValid`） |
 | 詳細(manual) | 借方 / 貸方 | すべて |
 
 例（支出）: カテゴリ=食費・支払元=現金・1000 →
 `借方 食費(expense) 1000 / 貸方 現金(asset) 1000`（metadata.inputMode='expense'）。
+例（借入実行）: 振替 `ローン → 自動車購入資金` 2,000,000 →
+`借方 自動車購入資金(reserve-asset) / 貸方 ローン(liability)`。任意で分割返済予定（返済元→負債の outflow）を
+`buildRepaymentSchedules` で生成し、仕訳と同一 transaction（`saveEntryWithSchedules`）で保存する。
+例（固定資産購入）: 支出 `自動車購入資金 → 固定資産` 3,000,000 →
+`借方 固定資産(fixed-asset) / 貸方 自動車購入資金(reserve-asset)`（**PL 費用にしない**）。任意で「生活コストとして
+月額化」すると、購入仕訳とは別に `MonthlyCostItem`（`recognitionCreditAccountId=固定資産`・支払い仕訳なし）を作り、
+formula で月割り認識する（`saveEntryWithFixedAssetMonthly`）。
 
 ## 取消/返金（逆仕訳）
 
@@ -159,7 +169,13 @@ PL も BS も **保存しない**。`Account` と `JournalEntry` から毎回計
   **初回引落日(`repaymentStartDate`)** から回数分作る（購入日とは別）。実績化で `借方 負債 / 貸方 資産`
   となり、登録日に立てた負債を取り崩す。**返済 CF と月額化認識は別物**。例: 洗濯機 21 万円を 12 回
   払い・7 年使用なら、支払い仕訳は購入月に 21 万・負債 +21 万、生活コストは月 2,500 円、CF は 12 か月。
-- 固定資産・前払資産の厳密な償却（按分中資産での繰延）は次フェーズ。月額化は支払い事実＋月割り表示に割り切る。
+- **固定資産購入の月額化**（`saveEntryWithFixedAssetMonthly`）は支払い仕訳を作らない。購入仕訳
+  （`借方 固定資産 / 貸方 資金`）が実体で、`MonthlyCostItem` は `recognitionCreditAccountId=固定資産` /
+  `sourceEntryId=購入仕訳` を持ち formula で月割り認識する（購入そのものは PL 費用にしない）。
+- **Journal の月額化仮想行**: 月で絞ると、`monthlyCostForMonth` の当月認識を read-only の仮想行で見せる
+  （永続 `JournalEntry` を増やさない・編集/取消/削除なし）。固定資産由来は「固定資産 → 費用カテゴリ」、
+  それ以外は「月額化: 名称」。
+- 前払資産の厳密な償却（按分中資産での繰延）は次フェーズ。月額化は支払い事実＋月割り表示に割り切る。
 - 既存按分(allocations)は v6→v7 で `MonthlyCostItem`（`sourceAllocationId` 付き）へ移行する。
   既存の按分仕訳（原始/認識）は履歴として残す。
 
