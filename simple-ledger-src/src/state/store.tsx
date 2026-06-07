@@ -32,7 +32,7 @@ import {
   type ImportOutcome,
 } from '../data/exportImport';
 import { useToast } from '../ui/toast';
-import { t } from '../i18n';
+import { errorText, t } from '../i18n';
 
 interface LedgerContextValue {
   status: 'loading' | 'ready' | 'error';
@@ -134,7 +134,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
         // 保存拒否（目的別資金の残高不足など）は理由をそのまま伝える。
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -149,7 +149,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -166,7 +166,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -180,7 +180,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.deleted'), 'success');
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -194,7 +194,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -208,7 +208,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -222,7 +222,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -236,7 +236,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.deleted'), 'success');
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -250,7 +250,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -264,7 +264,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -278,7 +278,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.deleted'), 'success');
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -292,7 +292,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -306,7 +306,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.posted'), 'success');
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -320,7 +320,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.deleted'), 'success');
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -335,7 +335,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         toast.show(t('toast.saved'), 'success');
         return reserve;
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -349,7 +349,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.deleted'), 'success');
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -363,7 +363,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -377,7 +377,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.deleted'), 'success');
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -392,7 +392,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         if (entry) toast.show(t('toast.saved'), 'success');
         else toast.show(t('adjust.noChange'), 'info');
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -406,7 +406,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
-        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -420,8 +420,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.deleted'), 'success');
       } catch (e) {
-        const msg = e instanceof Error ? e.message : t('toast.error');
-        toast.show(msg, 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },

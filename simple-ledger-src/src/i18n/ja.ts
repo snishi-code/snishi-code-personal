@@ -589,6 +589,54 @@ export const ja = {
   'a11y.openMenu': 'メニューを開く',
   'a11y.closeMenu': 'メニューを閉じる',
   'a11y.closeDialog': '閉じる',
+
+  // ドメイン/リポジトリ由来のユーザー表示エラー。domain/repository は LedgerError(code, params)
+  // を投げ、表示は UI 層が errorText() で行う（保存境界の fail-closed なエラーも i18n に集約）。
+  'error.account.roleTypeMismatch': '役割が区分と一致しません。',
+  'error.account.typeLocked': '使用中の科目は区分を変更できません。',
+  'error.account.deleteInUse': 'この科目は使用中のため削除できません。アーカイブしてください。',
+  'error.entry.generated':
+    '按分から生成された仕訳は編集・削除できません。按分台帳で管理してください。',
+  'error.entry.monthlyCost':
+    '月額化コストから生成された仕訳は直接編集・削除できません。月額化コスト画面で管理してください。',
+  'error.entry.scheduleLinked':
+    '実績化済みの予定に紐づく仕訳は編集・削除できません。資金繰りの予定から操作してください。',
+  'error.entry.invalidStructure': '仕訳の形式が正しくないため保存できません。',
+  'error.entry.unknownAccount': '仕訳が存在しない勘定科目を参照しています。',
+  'error.entry.accountRoleMismatch': '仕訳の勘定科目の役割と区分が一致していません。',
+  'error.reserve.shortfall': '目的別資金「{name}」の残高が不足しています。',
+  'error.reserve.existingAccountInvalid':
+    '選んだ科目は目的別資金として使えません（資産かつ目的別資金の科目を選んでください）。',
+  'error.tag.unknown': '存在しないタグを参照しています。',
+  'error.tag.notEntryScope': '全体タグに使えないタグがあります。',
+  'error.tag.notLineScope': '明細タグに使えないタグがあります。',
+  'error.tag.duplicateName': '同じ名前の有効なタグが既にあります。',
+  'error.tag.scopeLocked': '使用中のタグは、付与済みの用途に合わない対象へ変更できません。',
+  'error.tag.deleteInUse': 'このタグは使用中のため削除できません。アーカイブしてください。',
+  'error.schedule.notFound': '予定が見つかりません。',
+  'error.schedule.alreadyProcessed': 'この予定は既に処理済みです。',
+  'error.schedule.counterRequired': '相手科目が未設定の予定は実績化できません。',
+  'error.schedule.invalidStructure': '予定の形式が正しくないため保存できません。',
+  'error.schedule.unknownAccount': '予定が存在しない口座を参照しています。',
+  'error.adjust.targetNotFound': '対象科目が見つかりません。',
+  'error.adjust.assetLiabilityOnly': '残高補正できるのは資産・負債の科目です。',
+  'error.common.nameRequired': '名称を入力してください。',
+  'error.common.amountInvalid': '金額は 1 以上の整数で入力してください。',
+  'error.monthlyCost.monthsInvalid': '月数は 1 以上で入力してください。',
+  'error.monthlyCost.repeatInvalid': '更新周期は月数以上である必要があります。',
+  'error.monthlyCost.dateRequired': '購入日を入力してください。',
+  'error.monthlyCost.startMonthInvalid': '開始月は YYYY-MM 形式で入力してください。',
+  'error.monthlyCost.expenseCategory': '費用カテゴリ（支出カテゴリの科目）を選んでください。',
+  'error.monthlyCost.paymentSource': '支払い元は日常資産または支払用負債を選んでください。',
+  'error.monthlyCost.repaymentAccount': '返済口座は日常資産を選んでください。',
+  'error.monthlyCost.deletePosted':
+    '返済が実績化済みのため削除できません。月額化コスト画面で「終了」にしてください。',
+  'error.fixedAsset.expenseCategory': '月額化先の費用カテゴリを選んでください。',
+  'error.fixedAsset.invalidAccount': '固定資産の科目が不正です。',
+  'error.fundingGoal.targetAmountInvalid': '目標額は 1 以上の整数で入力してください。',
+  'error.fundingGoal.targetDateRequired': '目標期限を入力してください。',
+  'error.fundingGoal.currentInvalid': '現在額は 0 以上の整数で入力してください。',
+  'error.fundingGoal.sourceInvalid': '積立元は日常資産または目的別資金を選んでください。',
 } as const;
 
 export type MessageKey = keyof typeof ja;

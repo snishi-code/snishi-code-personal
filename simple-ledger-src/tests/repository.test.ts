@@ -24,6 +24,7 @@ import {
   upsertTag,
 } from '../src/data/repository';
 import { buildSimpleEntry } from '../src/domain/entry';
+import { LedgerError } from '../src/domain/errors';
 import { monthlyCostForMonth } from '../src/domain/monthlyCost';
 import { buildExportPackage } from '../src/data/exportImport';
 import { getKv, putKv, runWrite, STORE } from '../src/data/db';
@@ -1078,5 +1079,158 @@ describe('目的別資金(reserve-asset)の残高不足ガード', () => {
         }),
       ),
     ).rejects.toThrow();
+  });
+});
+
+describe('保存境界の fail-closed（構造・参照検証 + i18n エラーコード）', () => {
+  /** 例外を捕捉して LedgerError として返す（throw しなければ失敗）。 */
+  async function caught(p: Promise<unknown>): Promise<LedgerError> {
+    try {
+      await p;
+    } catch (e) {
+      return e as LedgerError;
+    }
+    throw new Error('例外が送出されませんでした');
+  }
+
+  it('upsertEntry は存在しない勘定科目を参照する仕訳を保存しない', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const e = await caught(
+      upsertEntry(
+        buildSimpleEntry({
+          date: '2026-06-01',
+          description: '不正参照',
+          debitAccountId: 'no-such-account',
+          creditAccountId: cash.id,
+          amount: 500,
+        }),
+      ),
+    );
+    expect(e).toBeInstanceOf(LedgerError);
+    expect(e.code).toBe('error.entry.unknownAccount');
+  });
+
+  it('upsertEntry は構造が不正な仕訳（金額 0）を保存しない', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    const e = await caught(
+      upsertEntry(
+        buildSimpleEntry({
+          date: '2026-06-01',
+          description: 'ゼロ円',
+          debitAccountId: food.id,
+          creditAccountId: cash.id,
+          amount: 0,
+        }),
+      ),
+    );
+    expect(e).toBeInstanceOf(LedgerError);
+    expect(e.code).toBe('error.entry.invalidStructure');
+  });
+
+  it('upsertSchedule は存在しない口座を参照する予定を保存しない', async () => {
+    await loadLedger();
+    const schedule: CashflowSchedule = {
+      id: newId(),
+      title: '不正口座',
+      dueDate: '2026-07-10',
+      amount: 1000,
+      direction: 'outflow',
+      accountId: 'no-such-account',
+      source: 'manual',
+      status: 'planned',
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const e = await caught(upsertSchedule(schedule));
+    expect(e).toBeInstanceOf(LedgerError);
+    expect(e.code).toBe('error.schedule.unknownAccount');
+  });
+
+  it('upsertSchedule は構造が不正な予定（金額 0）を保存しない', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const schedule: CashflowSchedule = {
+      id: newId(),
+      title: 'ゼロ円予定',
+      dueDate: '2026-07-10',
+      amount: 0,
+      direction: 'outflow',
+      accountId: cash.id,
+      source: 'manual',
+      status: 'planned',
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const e = await caught(upsertSchedule(schedule));
+    expect(e).toBeInstanceOf(LedgerError);
+    expect(e.code).toBe('error.schedule.invalidStructure');
+  });
+
+  it('createReserve は目的別資金でない既存科目（日常資産）を紐づけない', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!; // daily-asset
+    const e = await caught(createReserve({ name: '誤接続', existingAccountId: cash.id }));
+    expect(e).toBeInstanceOf(LedgerError);
+    expect(e.code).toBe('error.reserve.existingAccountInvalid');
+  });
+
+  it('createReserve は reserve-asset の既存科目なら紐づけられる', async () => {
+    await loadLedger();
+    const resId = newId();
+    await upsertAccount({
+      id: resId,
+      name: '既存の取り置き科目',
+      type: 'asset',
+      role: 'reserve-asset',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    const reserve = await createReserve({ name: '旅行資金', existingAccountId: resId });
+    expect(reserve.reserveAccountId).toBe(resId);
+  });
+
+  it('createMonthlyCost は startMonth が YYYY-MM でないと保存しない', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    const e = await caught(
+      createMonthlyCost({
+        name: 'サブスク',
+        kind: 'subscription',
+        amount: 1000,
+        costMonths: 1,
+        startMonth: '2026/06', // 不正な形式
+        date: '2026-06-01',
+        expenseAccountId: food.id,
+        paymentAccountId: cash.id,
+      }),
+    );
+    expect(e).toBeInstanceOf(LedgerError);
+    expect(e.code).toBe('error.monthlyCost.startMonthInvalid');
+  });
+
+  it('LedgerError は i18n 表示できる（code が ja.ts に存在し errorText で文言化される）', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const e = await caught(
+      upsertEntry(
+        buildSimpleEntry({
+          date: '2026-06-01',
+          description: '不正参照',
+          debitAccountId: 'no-such-account',
+          creditAccountId: cash.id,
+          amount: 500,
+        }),
+      ),
+    );
+    const { errorText } = await import('../src/i18n');
+    const text = errorText(e);
+    expect(text).toBe('仕訳が存在しない勘定科目を参照しています。');
+    // code そのものではなく、翻訳済みの文言が返ること。
+    expect(text).not.toBe(e.code);
   });
 });

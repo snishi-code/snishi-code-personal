@@ -8,6 +8,7 @@
  */
 import { newId } from './ids';
 import { nowIso } from '../util/time';
+import { LedgerError } from './errors';
 import { addMonths, addMonthsToDate, monthOf, monthlyAmounts } from './allocation';
 import type {
   Account,
@@ -101,7 +102,7 @@ export function liquidAssetTotal(
  */
 export function buildScheduleEntry(schedule: CashflowSchedule): JournalEntry {
   if (!schedule.counterAccountId) {
-    throw new Error('相手科目が未設定の予定は実績化できません。');
+    throw new LedgerError('error.schedule.counterRequired');
   }
   const ts = nowIso();
   const asset = schedule.accountId;

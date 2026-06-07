@@ -13,7 +13,7 @@ import { isAccountReferenced } from '../../domain/accountRefs';
 import { newId } from '../../domain/ids';
 import { nowIso } from '../../util/time';
 import { accountRoleLabel, accountTypeLabel } from '../accountOptions';
-import { t } from '../../i18n';
+import { errorText, t } from '../../i18n';
 import { UI } from '../../ui-contract';
 
 export function AccountSheet({ existing, onClose }: { existing?: Account; onClose: () => void }) {
@@ -66,7 +66,7 @@ export function AccountSheet({ existing, onClose }: { existing?: Account; onClos
       await saveAccount(account);
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('toast.error'));
+      setError(errorText(e));
       setSubmitting(false);
     }
   }

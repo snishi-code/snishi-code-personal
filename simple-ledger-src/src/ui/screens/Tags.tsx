@@ -15,7 +15,7 @@ import { SelectInput, TextInput } from '../Field';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { Money } from '../money';
 import { Icon } from '../Icon';
-import { t } from '../../i18n';
+import { errorText, t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
 import { UI } from '../../ui-contract';
 
@@ -265,7 +265,7 @@ function TagSheet({ existing, onClose }: { existing?: Tag; onClose: () => void }
       onClose();
     } catch (e) {
       // 保存拒否（同名重複・scope 変更不可など）は TagSheet 内にインラインで出す。
-      setError(e instanceof Error ? e.message : t('tags.error.save'));
+      setError(errorText(e, 'tags.error.save'));
       setSubmitting(false);
     }
   }

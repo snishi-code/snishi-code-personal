@@ -4,6 +4,7 @@
  *  - 明細タグ(line):  借方/貸方の明細に付く（カード名・銀行名 等）
  */
 import type { CashflowSchedule, JournalEntry, Tag, TagScope } from './types';
+import type { MessageKey } from '../i18n';
 import { filterByDateRange } from './accounting';
 
 export function tagAllowsEntry(scope: TagScope): boolean {
@@ -48,18 +49,19 @@ export function isTagReferenced(
 
 /**
  * タグ代入（tagIds）が scope と存在の不変条件を満たすか検証する。
- * 違反があればエラーメッセージ、無ければ null。import 検証と同じルールを保存時にも使う。
+ * 違反があれば i18n エラーコード、無ければ null。import 検証と同じルールを保存時にも使う。
+ * 文言は持たず code を返す（呼び出し側が LedgerError 化して UI で表示する）。
  */
 export function tagAssignmentError(
   tagIds: string[] | undefined,
   kind: 'entry' | 'line',
   tagById: Map<string, Tag>,
-): string | null {
+): MessageKey | null {
   for (const id of tagIds ?? []) {
     const tg = tagById.get(id);
-    if (!tg) return `存在しないタグ(${id})を参照しています。`;
-    if (kind === 'entry' && !tagAllowsEntry(tg.scope)) return '全体タグに使えないタグがあります。';
-    if (kind === 'line' && !tagAllowsLine(tg.scope)) return '明細タグに使えないタグがあります。';
+    if (!tg) return 'error.tag.unknown';
+    if (kind === 'entry' && !tagAllowsEntry(tg.scope)) return 'error.tag.notEntryScope';
+    if (kind === 'line' && !tagAllowsLine(tg.scope)) return 'error.tag.notLineScope';
   }
   return null;
 }

@@ -10,8 +10,10 @@ import { STORE, deleteRecord, getAll, getKv, putRecord, runWrite, type StoreName
 import { defaultAccounts, defaultSettings, newMeta } from './seed';
 import { newId } from '../domain/ids';
 import { SCHEMA_VERSION } from '../domain/constants';
-import { inferRole, roleAllowsType } from '../domain/accountRoles';
+import { DEFERRED_ACCOUNT_NAME, inferRole, roleAllowsType } from '../domain/accountRoles';
 import { isAccountReferenced, type AccountRefCollections } from '../domain/accountRefs';
+import { LedgerError } from '../domain/errors';
+import { cashflowScheduleSchema, journalEntrySchema } from '../domain/schema';
 import type {
   Account,
   AdjustmentKind,
@@ -52,9 +54,6 @@ async function tagMap(): Promise<Map<string, Tag>> {
   const tags = await getAll<Tag>(STORE.tags);
   return new Map(tags.map((t) => [t.id, t]));
 }
-
-/** 按分中資産（繰延）科目の既定名。初回利用時に asset 科目として作る/再利用する。 */
-const DEFERRED_ACCOUNT_NAME = '按分中資産';
 
 const KV_META = 'meta';
 const KV_SETTINGS = 'settings';
@@ -189,6 +188,49 @@ async function writeWithRevision(
   });
 }
 
+/* ── 保存境界の共通バリデータ（import / schema と同じ不変条件をアプリ内保存でも守る） ── */
+
+function accountsById(accounts: Account[]): Map<string, Account> {
+  return new Map(accounts.map((a) => [a.id, a]));
+}
+
+/**
+ * 仕訳を IndexedDB へ保存する前の構造・参照検証（fail-closed）。
+ *  - journalEntrySchema（2 行・借方1/貸方1・同額・正の整数金額・ISO 日付）を満たすこと。
+ *  - 各明細の accountId が既存 Account を参照していること。
+ *  - 参照先 Account の role と type が整合（roleAllowsType）していること。
+ * UI で検証済みでも、repository を最後の保存境界として必ず通す。
+ */
+function assertEntrySavable(entry: JournalEntry, byId: Map<string, Account>): void {
+  if (!journalEntrySchema.safeParse(entry).success) {
+    throw new LedgerError('error.entry.invalidStructure');
+  }
+  for (const line of entry.lines) {
+    const account = byId.get(line.accountId);
+    if (!account) throw new LedgerError('error.entry.unknownAccount');
+    if (!roleAllowsType(account.role, account.type)) {
+      throw new LedgerError('error.entry.accountRoleMismatch');
+    }
+  }
+}
+
+/**
+ * 予定 CF を保存する前の構造・参照検証（fail-closed）。
+ *  - cashflowScheduleSchema（正の整数金額・ISO 期日・direction/source/status の enum 等）を満たすこと。
+ *  - accountId・counterAccountId（あれば）が既存 Account を参照していること。
+ */
+function assertSchedulesSavable(schedules: CashflowSchedule[], byId: Map<string, Account>): void {
+  for (const s of schedules) {
+    if (!cashflowScheduleSchema.safeParse(s).success) {
+      throw new LedgerError('error.schedule.invalidStructure');
+    }
+    if (!byId.has(s.accountId)) throw new LedgerError('error.schedule.unknownAccount');
+    if (s.counterAccountId !== undefined && !byId.has(s.counterAccountId)) {
+      throw new LedgerError('error.schedule.unknownAccount');
+    }
+  }
+}
+
 /* ── 勘定科目 ── */
 
 async function loadReferencingCollections(): Promise<AccountRefCollections> {
@@ -207,7 +249,7 @@ async function loadReferencingCollections(): Promise<AccountRefCollections> {
 export async function upsertAccount(account: Account): Promise<void> {
   // role は type と整合する必要がある（import 検証と同じ不変条件を保存時にも守る）。
   if (!roleAllowsType(account.role, account.type)) {
-    throw new Error('役割が区分と一致しません。');
+    throw new LedgerError('error.account.roleTypeMismatch');
   }
   // 使用中（仕訳/予定CF/目的別資金から参照中）の科目は区分(type)を変更できない。fail-closed。
   // role 変更は会計残高を変えない（入力候補が変わるだけ）ので使用中でも許可する。
@@ -218,7 +260,7 @@ export async function upsertAccount(account: Account): Promise<void> {
   const prev = accounts.find((a) => a.id === account.id);
   if (prev && prev.type !== account.type) {
     if (isAccountReferenced(account.id, refs)) {
-      throw new Error('使用中の科目は区分を変更できません。');
+      throw new LedgerError('error.account.typeLocked');
     }
   }
   await writeWithRevision([STORE.accounts], (t) => {
@@ -230,7 +272,7 @@ export async function upsertAccount(account: Account): Promise<void> {
 export async function deleteAccount(id: string): Promise<void> {
   const refs = await loadReferencingCollections();
   if (isAccountReferenced(id, refs)) {
-    throw new Error('この科目は使用中のため削除できません。アーカイブしてください。');
+    throw new LedgerError('error.account.deleteInUse');
   }
   await writeWithRevision([STORE.accounts], (t) => {
     t.objectStore(STORE.accounts).delete(id);
@@ -239,28 +281,19 @@ export async function deleteAccount(id: string): Promise<void> {
 
 /* ── 仕訳 ── */
 
-const GENERATED_ENTRY_MSG =
-  '按分から生成された仕訳は編集・削除できません。按分台帳で管理してください。';
-
-const MONTHLY_COST_ENTRY_MSG =
-  '月額化コストから生成された仕訳は直接編集・削除できません。月額化コスト画面で管理してください。';
-
-const LINKED_ENTRY_MSG =
-  '実績化済みの予定に紐づく仕訳は編集・削除できません。資金繰りの予定から操作してください。';
-
 /** 生成仕訳（按分=allocationId / 月額化=monthlyCostId 付き）は通常の編集・削除では壊せない。fail-closed。 */
 async function assertNotGeneratedEntry(id: string): Promise<void> {
   const entries = await getAll<JournalEntry>(STORE.journalEntries);
   const target = entries.find((e) => e.id === id);
-  if (target?.metadata?.allocationId) throw new Error(GENERATED_ENTRY_MSG);
-  if (target?.metadata?.monthlyCostId) throw new Error(MONTHLY_COST_ENTRY_MSG);
+  if (target?.metadata?.allocationId) throw new LedgerError('error.entry.generated');
+  if (target?.metadata?.monthlyCostId) throw new LedgerError('error.entry.monthlyCost');
 }
 
 /** 実績化済み予定の linkedEntry は通常の編集・削除では壊せない。fail-closed。 */
 async function assertNotScheduleLinked(id: string): Promise<void> {
   const schedules = await getAll<CashflowSchedule>(STORE.cashflowSchedules);
   if (schedules.some((s) => s.linkedEntryId === id)) {
-    throw new Error(LINKED_ENTRY_MSG);
+    throw new LedgerError('error.entry.scheduleLinked');
   }
 }
 
@@ -268,21 +301,20 @@ async function assertNotScheduleLinked(id: string): Promise<void> {
 async function assertEntryTagsValid(entry: JournalEntry): Promise<void> {
   const tags = await tagMap();
   const e1 = tagAssignmentError(entry.tagIds, 'entry', tags);
-  if (e1) throw new Error(e1);
+  if (e1) throw new LedgerError(e1);
   for (const line of entry.lines) {
     const e2 = tagAssignmentError(line.tagIds, 'line', tags);
-    if (e2) throw new Error(e2);
+    if (e2) throw new LedgerError(e2);
   }
 }
 
 /** 目的別資金(reserve-asset)を貸方で減らす仕訳は、その資金の残高不足を保存前に拒否する。 */
-async function assertReserveSufficient(entry: JournalEntry): Promise<void> {
-  const accounts = await getAll<Account>(STORE.accounts);
+async function assertReserveSufficient(entry: JournalEntry, accounts: Account[]): Promise<void> {
   if (!accounts.some((a) => a.role === 'reserve-asset')) return;
   const all = await getAll<JournalEntry>(STORE.journalEntries);
   const others = all.filter((e) => e.id !== entry.id); // 編集時は自分自身を二重計上しない
   const short = reserveBalanceShortfall(entry, accounts, others);
-  if (short) throw new Error(`目的別資金「${short.name}」の残高が不足しています。`);
+  if (short) throw new LedgerError('error.reserve.shortfall', { name: short.name });
 }
 
 export async function upsertEntry(entry: JournalEntry): Promise<void> {
@@ -290,10 +322,12 @@ export async function upsertEntry(entry: JournalEntry): Promise<void> {
   await assertNotGeneratedEntry(entry.id);
   await assertNotScheduleLinked(entry.id);
   // ユーザー入力から生成メタ（allocationId / monthlyCostId）を持つ仕訳は作れない。
-  if (entry.metadata?.allocationId) throw new Error(GENERATED_ENTRY_MSG);
-  if (entry.metadata?.monthlyCostId) throw new Error(MONTHLY_COST_ENTRY_MSG);
+  if (entry.metadata?.allocationId) throw new LedgerError('error.entry.generated');
+  if (entry.metadata?.monthlyCostId) throw new LedgerError('error.entry.monthlyCost');
+  const accounts = await getAll<Account>(STORE.accounts);
+  assertEntrySavable(entry, accountsById(accounts));
   await assertEntryTagsValid(entry);
-  await assertReserveSufficient(entry);
+  await assertReserveSufficient(entry, accounts);
   await writeWithRevision([STORE.journalEntries], (t) => {
     t.objectStore(STORE.journalEntries).put(entry);
   });
@@ -318,10 +352,14 @@ export async function saveEntryWithSchedules(
 ): Promise<void> {
   await assertNotGeneratedEntry(entry.id);
   await assertNotScheduleLinked(entry.id);
-  if (entry.metadata?.allocationId) throw new Error(GENERATED_ENTRY_MSG);
-  if (entry.metadata?.monthlyCostId) throw new Error(MONTHLY_COST_ENTRY_MSG);
+  if (entry.metadata?.allocationId) throw new LedgerError('error.entry.generated');
+  if (entry.metadata?.monthlyCostId) throw new LedgerError('error.entry.monthlyCost');
+  const accounts = await getAll<Account>(STORE.accounts);
+  const byId = accountsById(accounts);
+  assertEntrySavable(entry, byId);
+  assertSchedulesSavable(schedules, byId);
   await assertEntryTagsValid(entry);
-  await assertReserveSufficient(entry);
+  await assertReserveSufficient(entry, accounts);
   await assertScheduleTagsValid(schedules);
   await writeWithRevision([STORE.journalEntries, STORE.cashflowSchedules], (t) => {
     t.objectStore(STORE.journalEntries).put(entry);
@@ -408,11 +446,11 @@ async function assertScheduleTagsValid(schedules: CashflowSchedule[]): Promise<v
   const tags = await tagMap();
   for (const s of schedules) {
     const e1 = tagAssignmentError(s.entryTagIds, 'entry', tags);
-    if (e1) throw new Error(e1);
+    if (e1) throw new LedgerError(e1);
     const e2 = tagAssignmentError(s.accountLineTagIds, 'line', tags);
-    if (e2) throw new Error(e2);
+    if (e2) throw new LedgerError(e2);
     const e3 = tagAssignmentError(s.counterLineTagIds, 'line', tags);
-    if (e3) throw new Error(e3);
+    if (e3) throw new LedgerError(e3);
   }
 }
 
@@ -422,6 +460,8 @@ export async function upsertSchedule(schedule: CashflowSchedule): Promise<void> 
 
 /** 複数の予定（分割払い等）を 1 トランザクションで保存する。 */
 export async function upsertSchedules(schedules: CashflowSchedule[]): Promise<void> {
+  const accounts = await getAll<Account>(STORE.accounts);
+  assertSchedulesSavable(schedules, accountsById(accounts));
   await assertScheduleTagsValid(schedules);
   await writeWithRevision([STORE.cashflowSchedules], (t) => {
     const store = t.objectStore(STORE.cashflowSchedules);
@@ -439,9 +479,12 @@ export async function deleteSchedule(id: string): Promise<void> {
 export async function postSchedule(id: string): Promise<JournalEntry> {
   const schedules = await getAll<CashflowSchedule>(STORE.cashflowSchedules);
   const schedule = schedules.find((s) => s.id === id);
-  if (!schedule) throw new Error('予定が見つかりません。');
-  if (schedule.status !== 'planned') throw new Error('この予定は既に処理済みです。');
-  const entry = buildScheduleEntry(schedule); // counter 未設定なら throw
+  if (!schedule) throw new LedgerError('error.schedule.notFound');
+  if (schedule.status !== 'planned') throw new LedgerError('error.schedule.alreadyProcessed');
+  const entry = buildScheduleEntry(schedule); // counter 未設定なら LedgerError
+  // 生成した実績仕訳も通常仕訳と同じ保存境界を通す（fail-closed）。
+  const accounts = await getAll<Account>(STORE.accounts);
+  assertEntrySavable(entry, accountsById(accounts));
   const updated: CashflowSchedule = {
     ...schedule,
     status: 'posted',
@@ -477,6 +520,14 @@ export async function createReserve(input: {
   const ts = nowIso();
   let newAccount: Account | null = null;
   let accountId = input.existingAccountId;
+  if (accountId) {
+    // 既存科目を紐づける場合、目的別資金として正しい科目だけ許可する（日常資産等を誤接続しない）。
+    const accounts = await getAll<Account>(STORE.accounts);
+    const acc = accounts.find((a) => a.id === accountId);
+    if (!acc || acc.type !== 'asset' || acc.role !== 'reserve-asset') {
+      throw new LedgerError('error.reserve.existingAccountInvalid');
+    }
+  }
   if (!accountId) {
     newAccount = {
       id: newId(),
@@ -517,7 +568,7 @@ export async function upsertTag(tag: Tag): Promise<void> {
 
   // active な同名タグ重複は禁止（import 検証と同じ不変条件をアプリ内でも守る）。
   if (!tag.archived && tags.some((x) => x.id !== tag.id && !x.archived && x.name === tag.name)) {
-    throw new Error('同じ名前の有効なタグが既にあります。');
+    throw new LedgerError('error.tag.duplicateName');
   }
 
   // 使用中タグの scope 変更が、付与済みの用途と矛盾する場合は不可（狭める変更を防ぐ）。
@@ -528,7 +579,7 @@ export async function upsertTag(tag: Tag): Promise<void> {
       (usage.usedAsEntry && !tagAllowsEntry(tag.scope)) ||
       (usage.usedAsLine && !tagAllowsLine(tag.scope))
     ) {
-      throw new Error('使用中のタグは、付与済みの用途に合わない対象へ変更できません。');
+      throw new LedgerError('error.tag.scopeLocked');
     }
   }
 
@@ -544,7 +595,7 @@ export async function deleteTag(id: string): Promise<void> {
     getAll<CashflowSchedule>(STORE.cashflowSchedules),
   ]);
   if (isTagReferenced(id, entries, schedules)) {
-    throw new Error('このタグは使用中のため削除できません。アーカイブしてください。');
+    throw new LedgerError('error.tag.deleteInUse');
   }
   await writeWithRevision([STORE.tags], (t) => {
     t.objectStore(STORE.tags).delete(id);
@@ -570,9 +621,9 @@ export async function createAdjustment(input: {
     getAll<JournalEntry>(STORE.journalEntries),
   ]);
   const target = accounts.find((a) => a.id === input.accountId);
-  if (!target) throw new Error('対象科目が見つかりません。');
+  if (!target) throw new LedgerError('error.adjust.targetNotFound');
   if (target.type !== 'asset' && target.type !== 'liability') {
-    throw new Error('残高補正できるのは資産・負債の科目です。');
+    throw new LedgerError('error.adjust.assetLiabilityOnly');
   }
 
   const expected = accountBalance(
@@ -657,27 +708,31 @@ export interface MonthlyCostInput {
  * 1 トランザクションで保存し revision を進める。
  */
 export async function createMonthlyCost(input: MonthlyCostInput): Promise<MonthlyCostItem> {
-  if (input.name.trim() === '') throw new Error('名称を入力してください。');
+  if (input.name.trim() === '') throw new LedgerError('error.common.nameRequired');
   if (!Number.isInteger(input.amount) || input.amount <= 0)
-    throw new Error('金額は 1 以上の整数で入力してください。');
+    throw new LedgerError('error.common.amountInvalid');
   if (!Number.isInteger(input.costMonths) || input.costMonths < 1)
-    throw new Error('月数は 1 以上で入力してください。');
+    throw new LedgerError('error.monthlyCost.monthsInvalid');
   if (
     input.repeatEveryMonths !== undefined &&
     (!Number.isInteger(input.repeatEveryMonths) || input.repeatEveryMonths < input.costMonths)
   )
-    throw new Error('更新周期は月数以上である必要があります。');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) throw new Error('購入日を入力してください。');
+    throw new LedgerError('error.monthlyCost.repeatInvalid');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date))
+    throw new LedgerError('error.monthlyCost.dateRequired');
+  // startMonth は MonthlyCostItem schema と同じく YYYY-MM 形式（分析レイヤの月割り基点）。
+  if (!/^\d{4}-\d{2}$/.test(input.startMonth))
+    throw new LedgerError('error.monthlyCost.startMonthInvalid');
 
   const accounts = await getAll<Account>(STORE.accounts);
   const byId = new Map(accounts.map((a) => [a.id, a]));
   const expense = byId.get(input.expenseAccountId);
   if (!expense || expense.role !== 'expense-category')
-    throw new Error('費用カテゴリ（支出カテゴリの科目）を選んでください。');
+    throw new LedgerError('error.monthlyCost.expenseCategory');
 
   const payment = byId.get(input.paymentAccountId);
   if (!payment || (payment.role !== 'daily-asset' && payment.role !== 'payment-liability'))
-    throw new Error('支払い元は日常資産または支払用負債を選んでください。');
+    throw new LedgerError('error.monthlyCost.paymentSource');
 
   const ts = nowIso();
   const item: MonthlyCostItem = {
@@ -726,7 +781,7 @@ export async function createMonthlyCost(input: MonthlyCostInput): Promise<Monthl
   ) {
     const repay = byId.get(input.repaymentAccountId);
     if (!repay || repay.role !== 'daily-asset')
-      throw new Error('返済口座は日常資産を選んでください。');
+      throw new LedgerError('error.monthlyCost.repaymentAccount');
     const parts = monthlyAmounts(input.amount, input.repaymentCount);
     for (let i = 0; i < input.repaymentCount; i++) {
       schedules.push({
@@ -745,6 +800,10 @@ export async function createMonthlyCost(input: MonthlyCostInput): Promise<Monthl
       });
     }
   }
+
+  // 生成した支払い仕訳・返済予定も保存境界の検証を通す（fail-closed）。
+  assertEntrySavable(paymentEntry, byId);
+  assertSchedulesSavable(schedules, byId);
 
   await writeWithRevision(
     [STORE.monthlyCostItems, STORE.cashflowSchedules, STORE.journalEntries],
@@ -791,29 +850,34 @@ export async function saveEntryWithFixedAssetMonthly(
 ): Promise<MonthlyCostItem> {
   await assertNotGeneratedEntry(entry.id);
   await assertNotScheduleLinked(entry.id);
-  if (entry.metadata?.allocationId) throw new Error(GENERATED_ENTRY_MSG);
-  if (entry.metadata?.monthlyCostId) throw new Error(MONTHLY_COST_ENTRY_MSG);
-  await assertEntryTagsValid(entry);
-  await assertReserveSufficient(entry);
+  if (entry.metadata?.allocationId) throw new LedgerError('error.entry.generated');
+  if (entry.metadata?.monthlyCostId) throw new LedgerError('error.entry.monthlyCost');
 
-  if (input.name.trim() === '') throw new Error('名称を入力してください。');
+  if (input.name.trim() === '') throw new LedgerError('error.common.nameRequired');
   if (!Number.isInteger(input.amount) || input.amount <= 0)
-    throw new Error('金額は 1 以上の整数で入力してください。');
+    throw new LedgerError('error.common.amountInvalid');
   if (!Number.isInteger(input.costMonths) || input.costMonths < 1)
-    throw new Error('月数は 1 以上で入力してください。');
+    throw new LedgerError('error.monthlyCost.monthsInvalid');
   if (
     input.repeatEveryMonths !== undefined &&
     (!Number.isInteger(input.repeatEveryMonths) || input.repeatEveryMonths < input.costMonths)
   )
-    throw new Error('更新周期は月数以上である必要があります。');
+    throw new LedgerError('error.monthlyCost.repeatInvalid');
+  if (!/^\d{4}-\d{2}$/.test(input.startMonth))
+    throw new LedgerError('error.monthlyCost.startMonthInvalid');
 
   const accounts = await getAll<Account>(STORE.accounts);
   const byId = new Map(accounts.map((a) => [a.id, a]));
+  // 購入仕訳も保存境界の検証を通す（fail-closed）。
+  assertEntrySavable(entry, byId);
+  await assertEntryTagsValid(entry);
+  await assertReserveSufficient(entry, accounts);
   const expense = byId.get(input.expenseAccountId);
   if (!expense || expense.role !== 'expense-category')
-    throw new Error('月額化先の費用カテゴリを選んでください。');
+    throw new LedgerError('error.fixedAsset.expenseCategory');
   const fixed = byId.get(input.recognitionCreditAccountId);
-  if (!fixed || fixed.role !== 'fixed-asset') throw new Error('固定資産の科目が不正です。');
+  if (!fixed || fixed.role !== 'fixed-asset')
+    throw new LedgerError('error.fixedAsset.invalidAccount');
 
   const ts = nowIso();
   const item: MonthlyCostItem = {
@@ -850,7 +914,7 @@ export async function saveEntryWithFixedAssetMonthly(
   ) {
     const repay = byId.get(input.repaymentAccountId);
     if (!repay || repay.role !== 'daily-asset')
-      throw new Error('返済口座は日常資産を選んでください。');
+      throw new LedgerError('error.monthlyCost.repaymentAccount');
     const parts = monthlyAmounts(input.amount, input.repaymentCount);
     for (let i = 0; i < input.repaymentCount; i++) {
       schedules.push({
@@ -869,6 +933,9 @@ export async function saveEntryWithFixedAssetMonthly(
       });
     }
   }
+
+  // 生成した返済予定も保存境界の検証を通す（fail-closed）。
+  assertSchedulesSavable(schedules, byId);
 
   await writeWithRevision(
     [STORE.journalEntries, STORE.monthlyCostItems, STORE.cashflowSchedules],
@@ -905,9 +972,7 @@ export async function deleteMonthlyCost(id: string): Promise<void> {
   const relatedSchedules = schedules.filter((s) => s.monthlyCostId === id);
   const relatedEntries = entries.filter((e) => e.metadata?.monthlyCostId === id);
   if (relatedSchedules.some((s) => s.status === 'posted')) {
-    throw new Error(
-      '返済が実績化済みのため削除できません。月額化コスト画面で「終了」にしてください。',
-    );
+    throw new LedgerError('error.monthlyCost.deletePosted');
   }
   await writeWithRevision(
     [STORE.monthlyCostItems, STORE.cashflowSchedules, STORE.journalEntries],
@@ -933,19 +998,19 @@ export interface FundingGoalInput {
 }
 
 export async function createFundingGoal(input: FundingGoalInput): Promise<FundingGoal> {
-  if (input.name.trim() === '') throw new Error('名称を入力してください。');
+  if (input.name.trim() === '') throw new LedgerError('error.common.nameRequired');
   if (!Number.isInteger(input.targetAmount) || input.targetAmount <= 0)
-    throw new Error('目標額は 1 以上の整数で入力してください。');
+    throw new LedgerError('error.fundingGoal.targetAmountInvalid');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.targetDate))
-    throw new Error('目標期限を入力してください。');
+    throw new LedgerError('error.fundingGoal.targetDateRequired');
   const current = input.currentAmount ?? 0;
   if (!Number.isInteger(current) || current < 0)
-    throw new Error('現在額は 0 以上の整数で入力してください。');
+    throw new LedgerError('error.fundingGoal.currentInvalid');
   if (input.sourceAccountId !== undefined) {
     const accounts = await getAll<Account>(STORE.accounts);
     const acc = accounts.find((a) => a.id === input.sourceAccountId);
     if (!acc || (acc.role !== 'daily-asset' && acc.role !== 'reserve-asset'))
-      throw new Error('積立元は日常資産または目的別資金を選んでください。');
+      throw new LedgerError('error.fundingGoal.sourceInvalid');
   }
   const ts = nowIso();
   const goal: FundingGoal = {

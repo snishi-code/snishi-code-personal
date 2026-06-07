@@ -83,7 +83,7 @@ export function rolesForType(type: AccountType): AccountRole[] {
 /** 自動生成・移行で残高調整科目とみなす既定名。 */
 const ADJUSTMENT_NAMES = new Set<string>(Object.values(ADJUSTMENT_ACCOUNTS));
 
-/** 按分中資産の既定名（accountRole 推定で使う）。repository の定義と一致させる。 */
+/** 按分中資産（繰延）科目の既定名。accountRole 推定・按分作成の正本（repository はこれを参照する）。 */
 export const DEFERRED_ACCOUNT_NAME = '按分中資産';
 
 export interface RoleInferenceContext {
