@@ -26,9 +26,10 @@ export function EntryListItem({
   const debit = entry.lines.find((l) => l.side === 'debit');
   const credit = entry.lines.find((l) => l.side === 'credit');
   const amount = debit?.amount ?? credit?.amount ?? 0;
-  const flow = `${accountName(map, debit?.accountId ?? '')} → ${accountName(
+  // 「お金の流れ」は全画面で 源泉(credit) → 行き先(debit) に統一する。
+  const flow = `${accountName(map, credit?.accountId ?? '')} → ${accountName(
     map,
-    credit?.accountId ?? '',
+    debit?.accountId ?? '',
   )}`;
 
   const content = (
