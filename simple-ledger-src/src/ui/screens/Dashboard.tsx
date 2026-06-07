@@ -201,8 +201,8 @@ export function Dashboard({
 
   return (
     <section aria-labelledby="dashboard-title" data-ui={UI.dashboard.view}>
-      <h1 className="screen-title" id="dashboard-title" aria-label={t('dashboard.title')}>
-        {label}
+      <h1 className="sr-only" id="dashboard-title">
+        {t('dashboard.title')}
       </h1>
 
       {/* 日常入力の主導線（収入/支出/振替） */}

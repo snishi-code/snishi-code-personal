@@ -1,7 +1,7 @@
 /*
  * ヘッダー: 左=ホーム / 中央=現在の期間コンテキスト表示 / 右=≡(メニュー)。
- * 中央はデータ抽出条件（期間）を小さく表示するだけ。タップで軽量ピッカーを開いて切り替える:
- *   月表示: 「2026年 ▾ / 6月 ▾」   年表示: 「2026年 ▾ / 年全体 ▾」   全期間: 「全期間 ▾」
+ * 中央はデータ抽出条件（期間）を数字中心で小さく表示するだけ。タップで軽量ピッカーを開いて切り替える:
+ *   月表示: 「2026 ▾ / 6 ▾」   年表示: 「2026 ▾ / 全体 ▾」   全期間: 「全期間 ▾」
  * 前後ボタンや粒度トグルなどの操作群はヘッダーに常設しない（操作はピッカー内で行う）。
  * 期間は App の正本 state（ホーム/財務諸表/仕訳で共有）。入力導線はホームに集約。
  */
@@ -29,10 +29,12 @@ export function Header({
 }) {
   const [picker, setPicker] = useState<'year' | 'month' | null>(null);
 
-  const yearLabel =
+  const yearAriaLabel =
     period.mode === 'all' ? t('period.allPeriod') : t('period.yearUnit', { year: period.year });
-  const monthLabel =
+  const monthAriaLabel =
     period.mode === 'month' ? t('period.monthUnit', { month: period.month }) : t('period.fullYear');
+  const yearDisplay = period.mode === 'all' ? t('period.allPeriod') : String(period.year);
+  const monthDisplay = period.mode === 'month' ? String(period.month) : t('period.fullYearShort');
 
   return (
     <header className="app-header">
@@ -53,10 +55,10 @@ export function Header({
             className="period-context__chip"
             onClick={() => setPicker('year')}
             aria-haspopup="dialog"
-            aria-label={`${yearLabel} — ${t('period.openYear')}`}
+            aria-label={`${yearAriaLabel} — ${t('period.openYear')}`}
             data-ui={UI.period.yearTrigger}
           >
-            <span className="period-context__text">{yearLabel}</span>
+            <span className="period-context__text">{yearDisplay}</span>
             <Icon name="chevronDown" size={14} />
           </button>
           {period.mode !== 'all' ? (
@@ -69,10 +71,10 @@ export function Header({
                 className="period-context__chip"
                 onClick={() => setPicker('month')}
                 aria-haspopup="dialog"
-                aria-label={`${monthLabel} — ${t('period.openMonth')}`}
+                aria-label={`${monthAriaLabel} — ${t('period.openMonth')}`}
                 data-ui={UI.period.monthTrigger}
               >
-                <span className="period-context__text">{monthLabel}</span>
+                <span className="period-context__text">{monthDisplay}</span>
                 <Icon name="chevronDown" size={14} />
               </button>
             </>
