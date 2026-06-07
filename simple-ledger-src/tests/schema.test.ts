@@ -135,6 +135,54 @@ describe('ledgerExportPackageSchema', () => {
     };
     expect(ledgerExportPackageSchema.safeParse(dup).success).toBe(false);
   });
+  it('支払い手段の親科目が資金口座/クレジットカード以外（投資資産）は拒否する', () => {
+    const bad = {
+      ...validPkg,
+      accounts: [
+        ...validPkg.accounts,
+        {
+          id: 'inv',
+          name: '投資',
+          type: 'asset',
+          role: 'investment-asset',
+          archived: false,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+      accountInstruments: [
+        {
+          id: 'i1',
+          managementScopeId: 'scope-personal',
+          accountId: 'inv',
+          name: '証券口座',
+          kind: 'other',
+          archived: false,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+    };
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+  it('支払い手段の親科目が資金口座（daily-asset）なら受け入れる', () => {
+    const ok = {
+      ...validPkg,
+      accountInstruments: [
+        {
+          id: 'i1',
+          managementScopeId: 'scope-personal',
+          accountId: 'a',
+          name: '楽天銀行',
+          kind: 'bank',
+          archived: false,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+    };
+    expect(ledgerExportPackageSchema.safeParse(ok).success).toBe(true);
+  });
 });
 
 describe('isCurrentSchema', () => {

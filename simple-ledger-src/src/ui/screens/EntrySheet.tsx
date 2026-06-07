@@ -216,7 +216,10 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   }
 
   async function onSave() {
-    const toSave = effectiveForm();
+    // 保存時は常に「現在有効な管理区分」を明示的に載せる（区分セレクタが出ない単一区分でも
+    // 実在する区分 id で保存する）。DEFAULT_MANAGEMENT_SCOPE_ID は最終フォールバックに留める。
+    const base = effectiveForm();
+    const toSave = { ...base, managementScopeId: base.managementScopeId ?? scopes[0]?.id };
     const found = validateSimpleEntry(toSave);
     setErrors(found);
     const useMonthly = canAllocate && allocate;

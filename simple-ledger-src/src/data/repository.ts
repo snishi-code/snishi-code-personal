@@ -10,7 +10,12 @@ import { STORE, deleteRecord, getAll, getKv, putRecord, runWrite, type StoreName
 import { defaultAccounts, defaultManagementScopes, defaultSettings, newMeta } from './seed';
 import { newId } from '../domain/ids';
 import { DEFAULT_MANAGEMENT_SCOPE_ID, SCHEMA_VERSION } from '../domain/constants';
-import { DEFERRED_ACCOUNT_NAME, inferRole, roleAllowsType } from '../domain/accountRoles';
+import {
+  DEFERRED_ACCOUNT_NAME,
+  inferRole,
+  isInstrumentParentRole,
+  roleAllowsType,
+} from '../domain/accountRoles';
 import { isAccountReferenced, type AccountRefCollections } from '../domain/accountRefs';
 import { LedgerError } from '../domain/errors';
 import { cashflowScheduleSchema, journalEntrySchema } from '../domain/schema';
@@ -1197,8 +1202,14 @@ export async function upsertManagementScope(scope: ManagementScope): Promise<voi
   });
 }
 
-/** 管理区分は最低 1 つ必要。使用中（仕訳/予定CF/月額化/支払い手段が参照）は削除できない。fail-closed。 */
+/**
+ * 管理区分は最低 1 つ必要。既定区分（『個人用』）は削除できない（名称変更は upsert で可）。
+ * 使用中（仕訳/予定CF/月額化/支払い手段が参照）も削除できない。fail-closed。
+ * 既定区分を常設にすることで、保存時のフォールバック先（DEFAULT_MANAGEMENT_SCOPE_ID）が
+ * 必ず実在し、「区分セレクタが出ない単一区分」状態でも保存が壊れない。
+ */
 export async function deleteManagementScope(id: string): Promise<void> {
+  if (id === DEFAULT_MANAGEMENT_SCOPE_ID) throw new LedgerError('error.scope.deleteDefault');
   const [scopes, entries, schedules, monthlyCosts, instruments] = await Promise.all([
     getAll<ManagementScope>(STORE.managementScopes),
     getAll<JournalEntry>(STORE.journalEntries),
@@ -1238,8 +1249,9 @@ export async function createAccountInstrument(
   ]);
   if (!scopes.some((s) => s.id === input.managementScopeId))
     throw new LedgerError('error.instrument.scopeInvalid');
-  if (!accounts.some((a) => a.id === input.accountId))
-    throw new LedgerError('error.instrument.accountInvalid');
+  const account = accounts.find((a) => a.id === input.accountId);
+  if (!account) throw new LedgerError('error.instrument.accountInvalid');
+  if (!isInstrumentParentRole(account.role)) throw new LedgerError('error.instrument.accountRole');
   const ts = nowIso();
   const instrument: AccountInstrument = {
     id: newId(),
@@ -1259,14 +1271,29 @@ export async function createAccountInstrument(
 
 export async function upsertAccountInstrument(instrument: AccountInstrument): Promise<void> {
   if (instrument.name.trim() === '') throw new LedgerError('error.common.nameRequired');
-  const [accounts, scopes] = await Promise.all([
+  const [accounts, scopes, existing, entries] = await Promise.all([
     getAll<Account>(STORE.accounts),
     getAll<ManagementScope>(STORE.managementScopes),
+    getAll<AccountInstrument>(STORE.accountInstruments),
+    getAll<JournalEntry>(STORE.journalEntries),
   ]);
   if (!scopes.some((s) => s.id === instrument.managementScopeId))
     throw new LedgerError('error.instrument.scopeInvalid');
-  if (!accounts.some((a) => a.id === instrument.accountId))
-    throw new LedgerError('error.instrument.accountInvalid');
+  const account = accounts.find((a) => a.id === instrument.accountId);
+  if (!account) throw new LedgerError('error.instrument.accountInvalid');
+  if (!isInstrumentParentRole(account.role)) throw new LedgerError('error.instrument.accountRole');
+  // 使用中（いずれかの仕訳明細が参照）の細目は、親科目・管理区分を変更できない。
+  // 変更を許すと既存仕訳の instrumentId が後から不整合になり、export/import 検証で壊れる。
+  // 名称・種別・アーカイブの更新は許可する。
+  const prev = existing.find((i) => i.id === instrument.id);
+  if (
+    prev &&
+    (prev.accountId !== instrument.accountId ||
+      prev.managementScopeId !== instrument.managementScopeId)
+  ) {
+    const referenced = entries.some((e) => e.lines.some((l) => l.instrumentId === instrument.id));
+    if (referenced) throw new LedgerError('error.instrument.lockedInUse');
+  }
   await writeWithRevision([STORE.accountInstruments], (t) => {
     t.objectStore(STORE.accountInstruments).put(instrument);
   });

@@ -80,6 +80,18 @@ export function rolesForType(type: AccountType): AccountRole[] {
   return ACCOUNT_ROLES.filter((r) => roleAllowsType(r, type));
 }
 
+/**
+ * 支払い手段の細目（AccountInstrument）を持てる親科目の役割。
+ * 日常の支払い元になり得る「流動資産（現金・預金・チャージ残高）」と
+ * 「支払い負債（クレジットカード）」に限る。固定資産・投資・目的別資金・按分中資産・
+ * その他負債・純資産・収支カテゴリは支払い手段の親にしない（残高/PL/BS の正本を濁さない）。
+ */
+export const INSTRUMENT_PARENT_ROLES: readonly AccountRole[] = ['daily-asset', 'payment-liability'];
+
+export function isInstrumentParentRole(role: AccountRole): boolean {
+  return INSTRUMENT_PARENT_ROLES.includes(role);
+}
+
 /** 自動生成・移行で残高調整科目とみなす既定名。 */
 const ADJUSTMENT_NAMES = new Set<string>(Object.values(ADJUSTMENT_ACCOUNTS));
 

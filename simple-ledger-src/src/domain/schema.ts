@@ -5,7 +5,12 @@
 import { z } from 'zod';
 import { APP_ID, SCHEMA_VERSION } from './constants';
 import { addMonths, monthlyAmounts } from './allocation';
-import { ACCOUNT_ROLES, roleAllowsType } from './accountRoles';
+import {
+  ACCOUNT_ROLES,
+  isInstrumentParentRole,
+  roleAllowsType,
+  type AccountRole,
+} from './accountRoles';
 
 const isoDate = z
   .string()
@@ -312,6 +317,11 @@ export const ledgerExportPackageSchema = z
         issue(`支払い手段「${inst.name}」の管理区分が存在しません`, at('managementScopeId'));
       if (!hasAccount(inst.accountId))
         issue(`支払い手段「${inst.name}」の親科目が存在しません`, at('accountId'));
+      else if (!isInstrumentParentRole(accountRole.get(inst.accountId) as AccountRole))
+        issue(
+          `支払い手段「${inst.name}」の親科目は資金口座またはクレジットカードに限られます`,
+          at('accountId'),
+        );
     });
 
     // 月額化コスト ID 集合（仕訳・予定CF の monthlyCostId 参照検証に使う）。

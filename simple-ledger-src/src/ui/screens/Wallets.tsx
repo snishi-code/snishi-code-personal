@@ -6,6 +6,8 @@
 import { useState } from 'react';
 import { useLedger } from '../../state/store';
 import type { AccountInstrument, AccountInstrumentKind } from '../../domain/types';
+import { isInstrumentParentRole } from '../../domain/accountRoles';
+import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../../domain/constants';
 import { Modal } from '../Modal';
 import { SelectInput, TextInput } from '../Field';
 import { ConfirmDialog } from '../ConfirmDialog';
@@ -20,8 +22,9 @@ export function Wallets() {
   const { ledger, createManagementScope, removeManagementScope } = useLedger();
   const scopes = ledger?.managementScopes ?? [];
   const instruments = ledger?.accountInstruments ?? [];
+  // 支払い手段の親科目は資金口座（daily-asset）とクレジットカード（payment-liability）に限る。
   const accounts = (ledger?.accounts ?? []).filter(
-    (a) => (a.type === 'asset' || a.type === 'liability') && !a.archived,
+    (a) => isInstrumentParentRole(a.role) && !a.archived,
   );
   const accountName = (id: string) => accounts.find((a) => a.id === id)?.name ?? id;
   const scopeName = (id: string) => scopes.find((s) => s.id === id)?.name ?? id;
@@ -73,7 +76,7 @@ export function Wallets() {
                   className="icon-btn"
                   onClick={() => setPendingScopeDelete(s.id)}
                   aria-label={`${t('common.delete')}: ${s.name}`}
-                  disabled={scopes.length <= 1}
+                  disabled={scopes.length <= 1 || s.id === DEFAULT_MANAGEMENT_SCOPE_ID}
                 >
                   <Icon name="trash" size={18} />
                 </button>
@@ -206,7 +209,7 @@ function InstrumentSheet({ onClose }: { onClose: () => void }) {
   const { ledger, createAccountInstrument } = useLedger();
   const scopes = ledger?.managementScopes ?? [];
   const accounts = (ledger?.accounts ?? []).filter(
-    (a) => (a.type === 'asset' || a.type === 'liability') && !a.archived,
+    (a) => isInstrumentParentRole(a.role) && !a.archived,
   );
   const [name, setName] = useState('');
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? '');
