@@ -18,7 +18,11 @@ import {
 } from '../domain/accountRoles';
 import { isAccountReferenced, type AccountRefCollections } from '../domain/accountRefs';
 import { LedgerError } from '../domain/errors';
-import { cashflowScheduleSchema, journalEntrySchema } from '../domain/schema';
+import {
+  cashflowScheduleSchema,
+  journalEntrySchema,
+  monthlyCostItemSchema,
+} from '../domain/schema';
 import type {
   Account,
   AccountInstrument,
@@ -1076,11 +1080,123 @@ export async function saveEntryWithFixedAssetMonthly(
   return item;
 }
 
-/** 月額化コストの更新（編集・一時停止・終了）。 */
+/**
+ * 月額化コストの更新（後編集・一時停止・終了）。保存境界で fail-closed に検証し、必要なら
+ * 関連（実支払い仕訳・未実績の返済 CF）を同じトランザクションで整合させる。
+ *
+ * 設計上の不変条件:
+ *  - 「実際の支払い仕訳」と「生活コスト認識(formula)」を分離している。名称・期間・費用カテゴリ・
+ *    状態の編集は formula 側（分析レイヤ）だけを変える。
+ *  - **総額(amount)の変更**は会計事実に波及するため強く制御する。
+ *    - 由来あり（固定資産購入 sourceEntryId / 既存按分 sourceAllocationId）は拒否（実仕訳とズレるため）。
+ *    - 関連返済 CF が 1 件でも posted なら拒否（現金/負債が既に動いている）。
+ *    - 全て未実績なら、関連返済 CF を新総額で再配分し、生成支払い仕訳の借方/貸方金額も同時更新する。
+ *  - **費用カテゴリ(expenseAccountId)の変更**は、生成支払い仕訳の借方科目も同時更新する（PL 整合）。
+ *  - 管理区分・支払い元・返済口座・由来・recognition 科目・id・createdAt は変更不可（既存値を保持）。
+ */
 export async function upsertMonthlyCost(item: MonthlyCostItem): Promise<void> {
-  await writeWithRevision([STORE.monthlyCostItems], (t) => {
-    t.objectStore(STORE.monthlyCostItems).put(item);
-  });
+  const [items, entries, schedules] = await Promise.all([
+    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
+    getAll<JournalEntry>(STORE.journalEntries),
+    getAll<CashflowSchedule>(STORE.cashflowSchedules),
+  ]);
+  const existing = items.find((m) => m.id === item.id);
+  if (!existing) throw new LedgerError('error.monthlyCost.notFound');
+
+  // 変更不可フィールドは既存値を保持（UI が誤った値を送っても保存境界で固定する）。
+  const saved: MonthlyCostItem = {
+    ...item,
+    id: existing.id,
+    managementScopeId: existing.managementScopeId,
+    ...(existing.paymentAccountId !== undefined
+      ? { paymentAccountId: existing.paymentAccountId }
+      : {}),
+    ...(existing.repaymentAccountId !== undefined
+      ? { repaymentAccountId: existing.repaymentAccountId }
+      : {}),
+    ...(existing.recognitionCreditAccountId !== undefined
+      ? { recognitionCreditAccountId: existing.recognitionCreditAccountId }
+      : {}),
+    ...(existing.sourceEntryId !== undefined ? { sourceEntryId: existing.sourceEntryId } : {}),
+    ...(existing.sourceAllocationId !== undefined
+      ? { sourceAllocationId: existing.sourceAllocationId }
+      : {}),
+    createdAt: existing.createdAt,
+    updatedAt: nowIso(),
+  };
+  // UI 側で消し込めない optional を保持しないよう、locked 以外の undefined は素直に従う。
+
+  // 構造・期間検証（fail-closed）。
+  if (!monthlyCostItemSchema.safeParse(saved).success)
+    throw new LedgerError('error.monthlyCost.invalidStructure');
+  if (saved.repeatEveryMonths !== undefined && saved.repeatEveryMonths < saved.costMonths)
+    throw new LedgerError('error.monthlyCost.repeatInvalid');
+  if (saved.endMonth !== undefined && saved.endMonth < saved.startMonth)
+    throw new LedgerError('error.monthlyCost.endBeforeStart');
+
+  // 費用カテゴリは role: expense-category であること。
+  const ctx = await loadSaveContext();
+  const expense = ctx.byId.get(saved.expenseAccountId);
+  if (!expense || expense.role !== 'expense-category')
+    throw new LedgerError('error.monthlyCost.expenseCategory');
+
+  const relatedEntries = entries.filter((e) => e.metadata?.monthlyCostId === saved.id);
+  const relatedSchedules = schedules.filter((s) => s.monthlyCostId === saved.id);
+  const amountChanged = saved.amount !== existing.amount;
+  const expenseChanged = saved.expenseAccountId !== existing.expenseAccountId;
+
+  // 生成支払い仕訳に反映する変更（金額・費用カテゴリ）。固定資産由来は支払い仕訳が無い。
+  const updatedEntries: JournalEntry[] = [];
+  const updatedSchedules: CashflowSchedule[] = [];
+
+  if (amountChanged) {
+    // 由来あり（固定資産購入・既存按分）は実仕訳とズレるため総額変更を禁止。
+    if (existing.sourceEntryId !== undefined || existing.sourceAllocationId !== undefined)
+      throw new LedgerError('error.monthlyCost.editAmountLinked');
+    // 返済 CF が 1 件でも実績化済みなら、現金/負債が動いているため総額変更を禁止。
+    if (relatedSchedules.some((s) => s.status === 'posted'))
+      throw new LedgerError('error.monthlyCost.editAmountPosted');
+    // 未実績の返済 CF を新総額で再配分（合計＝新総額）。期日順に配る。
+    if (relatedSchedules.length > 0) {
+      const ordered = [...relatedSchedules].sort((a, b) =>
+        a.dueDate === b.dueDate ? a.id.localeCompare(b.id) : a.dueDate.localeCompare(b.dueDate),
+      );
+      const parts = monthlyAmounts(saved.amount, ordered.length);
+      ordered.forEach((s, i) => {
+        updatedSchedules.push({ ...s, amount: parts[i] ?? 0, updatedAt: saved.updatedAt });
+      });
+    }
+  }
+
+  if (amountChanged || expenseChanged) {
+    for (const e of relatedEntries) {
+      const lines = e.lines.map((l) => {
+        let next = l;
+        if (amountChanged) next = { ...next, amount: saved.amount };
+        // 借方（費用カテゴリ側）の科目を新カテゴリへ。貸方（支払い元）は変更しない。
+        if (expenseChanged && l.side === 'debit')
+          next = { ...next, accountId: saved.expenseAccountId };
+        return next;
+      });
+      const updated: JournalEntry = { ...e, lines, updatedAt: saved.updatedAt };
+      assertEntrySavable(updated, ctx); // 2 行・同額・正の整数・参照/役割整合を再検証。
+      updatedEntries.push(updated);
+    }
+  }
+
+  // 再配分後の返済 CF も保存境界を通す（再配分で 0 円が生じる等を fail-closed で弾く）。
+  if (updatedSchedules.length > 0) assertSchedulesSavable(updatedSchedules, ctx);
+
+  await writeWithRevision(
+    [STORE.monthlyCostItems, STORE.journalEntries, STORE.cashflowSchedules],
+    (t) => {
+      t.objectStore(STORE.monthlyCostItems).put(saved);
+      const eStore = t.objectStore(STORE.journalEntries);
+      for (const e of updatedEntries) eStore.put(e);
+      const sStore = t.objectStore(STORE.cashflowSchedules);
+      for (const s of updatedSchedules) sStore.put(s);
+    },
+  );
 }
 
 /**

@@ -8,11 +8,21 @@ import { monthlyCostForMonth, representativeMonthlyAmount } from '../../domain/m
 import { currentYearMonth, nowIso } from '../../util/time';
 import { Money } from '../money';
 import { Icon } from '../Icon';
+import { Modal } from '../Modal';
+import { SelectInput, TextInput } from '../Field';
 import { ConfirmDialog } from '../ConfirmDialog';
-import { t } from '../../i18n';
+import { errorText, t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
 import { UI } from '../../ui-contract';
-import type { MonthlyCostItem, MonthlyCostKind } from '../../domain/types';
+import type { MonthlyCostItem, MonthlyCostKind, MonthlyCostStatus } from '../../domain/types';
+
+const KINDS: MonthlyCostKind[] = [
+  'subscription',
+  'prepaid-service',
+  'durable-asset',
+  'recurring-event',
+];
+const STATUSES: MonthlyCostStatus[] = ['active', 'paused', 'ended'];
 
 function kindLabel(kind: MonthlyCostKind): string {
   return t(`monthlyCost.kind.${kind}` as MessageKey);
@@ -22,6 +32,7 @@ export function Allocations() {
   const { ledger, saveMonthlyCost, removeMonthlyCost } = useLedger();
   const [showInactive, setShowInactive] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<MonthlyCostItem | null>(null);
+  const [editing, setEditing] = useState<MonthlyCostItem | null>(null);
   const { year, month } = currentYearMonth();
   const currentYm = `${year}-${String(month).padStart(2, '0')}`;
   const currency = ledger?.settings.currency ?? 'JPY';
@@ -96,6 +107,15 @@ export function Allocations() {
                     </span>
                   </span>
                   <span className="row-actions">
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      onClick={() => setEditing(m)}
+                      aria-label={`${t('monthlyCost.edit')}: ${m.name}`}
+                      data-ui={UI.allocations.edit}
+                    >
+                      <Icon name="edit" size={18} />
+                    </button>
                     <button
                       type="button"
                       className="icon-btn"
@@ -174,6 +194,192 @@ export function Allocations() {
           }}
         />
       ) : null}
+
+      {editing ? <MonthlyCostEditSheet item={editing} onClose={() => setEditing(null)} /> : null}
     </section>
+  );
+}
+
+/**
+ * 月額化コストの後編集。名称・種類・期間・費用カテゴリ・状態を直す。
+ * 総額(amount)は会計事実に波及するため、固定資産/按分由来・返済実績化済みではロック表示にする。
+ * 支払い元・返済口座は v1 では変更不可（read-only 表示）。実際の整合は repository が保存境界で守る。
+ */
+function MonthlyCostEditSheet({ item, onClose }: { item: MonthlyCostItem; onClose: () => void }) {
+  const { ledger, saveMonthlyCost } = useLedger();
+  const accounts = ledger?.accounts ?? [];
+  const accountName = (id?: string) =>
+    id ? (accounts.find((a) => a.id === id)?.name ?? '—') : '—';
+
+  // 総額が変更できるか: 固定資産/按分由来は不可。返済 CF が実績化済みでも不可。
+  const linked = item.sourceEntryId !== undefined || item.sourceAllocationId !== undefined;
+  const hasPosted = (ledger?.cashflowSchedules ?? []).some(
+    (s) => s.monthlyCostId === item.id && s.status === 'posted',
+  );
+  const amountEditable = !linked && !hasPosted;
+
+  const [name, setName] = useState(item.name);
+  const [kind, setKind] = useState<MonthlyCostKind>(item.kind);
+  const [amountText, setAmountText] = useState(String(item.amount));
+  const [costMonthsText, setCostMonthsText] = useState(String(item.costMonths));
+  const [repeatText, setRepeatText] = useState(
+    item.repeatEveryMonths !== undefined ? String(item.repeatEveryMonths) : '',
+  );
+  const [startMonth, setStartMonth] = useState(item.startMonth);
+  const [endMonth, setEndMonth] = useState(item.endMonth ?? '');
+  const [expenseAccountId, setExpenseAccountId] = useState(item.expenseAccountId);
+  const [status, setStatus] = useState<MonthlyCostStatus>(item.status);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [submitting, setSubmitting] = useState(false);
+
+  const expenseOptions = accounts
+    .filter((a) => a.role === 'expense-category' && (!a.archived || a.id === item.expenseAccountId))
+    .map((a) => ({ value: a.id, label: a.name }));
+
+  async function submit() {
+    setSubmitting(true);
+    setError(undefined);
+    const next: MonthlyCostItem = {
+      ...item,
+      name: name.trim(),
+      kind,
+      amount: amountEditable && amountText !== '' ? Number.parseInt(amountText, 10) : item.amount,
+      costMonths: costMonthsText === '' ? item.costMonths : Number.parseInt(costMonthsText, 10),
+      startMonth: startMonth.trim(),
+      expenseAccountId,
+      status,
+      updatedAt: nowIso(),
+    };
+    if (repeatText.trim() === '') delete next.repeatEveryMonths;
+    else next.repeatEveryMonths = Number.parseInt(repeatText, 10);
+    if (endMonth.trim() === '') delete next.endMonth;
+    else next.endMonth = endMonth.trim();
+    try {
+      await saveMonthlyCost(next);
+      onClose();
+    } catch (e) {
+      setError(errorText(e));
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={t('monthlyCost.editTitle')}
+      onClose={onClose}
+      dismissMode="if-clean"
+      footer={
+        <>
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={submit}
+            disabled={submitting}
+            data-ui={UI.allocations.editSave}
+          >
+            {t('common.save')}
+          </button>
+        </>
+      }
+    >
+      <div className="stack" data-ui={UI.allocations.editDialog}>
+        {error ? (
+          <div className="field__error" role="alert">
+            <Icon name="alert" size={14} />
+            {error}
+          </div>
+        ) : null}
+        <TextInput
+          label={t('monthlyCost.name')}
+          required
+          value={name}
+          onChange={setName}
+          dataUi={UI.allocations.editName}
+        />
+        <SelectInput
+          label={t('monthlyCost.kindLabel')}
+          value={kind}
+          onChange={(v) => setKind(v as MonthlyCostKind)}
+          options={KINDS.map((k) => ({ value: k, label: kindLabel(k) }))}
+          dataUi={UI.allocations.editKind}
+        />
+        <TextInput
+          label={t('monthlyCost.amount')}
+          required
+          inputMode="numeric"
+          value={amountText}
+          // 由来あり・返済実績化済みは総額を固定（編集不可）。repository も保存境界で拒否する。
+          onChange={(v) => {
+            if (amountEditable) setAmountText(v.replace(/[^\d]/g, ''));
+          }}
+          hint={
+            amountEditable
+              ? undefined
+              : linked
+                ? t('monthlyCost.amountLockedFixed')
+                : t('monthlyCost.amountLockedPosted')
+          }
+          dataUi={UI.allocations.editAmount}
+        />
+        <TextInput
+          label={t('monthlyCost.costMonths')}
+          required
+          inputMode="numeric"
+          value={costMonthsText}
+          onChange={(v) => setCostMonthsText(v.replace(/[^\d]/g, ''))}
+          dataUi={UI.allocations.editCostMonths}
+        />
+        <TextInput
+          label={t('monthlyCost.repeatField')}
+          inputMode="numeric"
+          value={repeatText}
+          hint={t('monthlyCost.repeatFieldHint')}
+          onChange={(v) => setRepeatText(v.replace(/[^\d]/g, ''))}
+          dataUi={UI.allocations.editRepeat}
+        />
+        <TextInput
+          label={t('monthlyCost.startMonth')}
+          required
+          value={startMonth}
+          placeholder="YYYY-MM"
+          onChange={setStartMonth}
+          dataUi={UI.allocations.editStartMonth}
+        />
+        <TextInput
+          label={t('monthlyCost.endMonth')}
+          value={endMonth}
+          placeholder="YYYY-MM"
+          hint={t('monthlyCost.endMonthHint')}
+          onChange={setEndMonth}
+          dataUi={UI.allocations.editEndMonth}
+        />
+        <SelectInput
+          label={t('monthlyCost.expenseCategory')}
+          value={expenseAccountId}
+          onChange={setExpenseAccountId}
+          options={expenseOptions}
+          dataUi={UI.allocations.editExpense}
+        />
+        <SelectInput
+          label={t('monthlyCost.statusLabel')}
+          value={status}
+          onChange={(v) => setStatus(v as MonthlyCostStatus)}
+          options={STATUSES.map((s) => ({
+            value: s,
+            label: t(`monthlyCost.status.${s}` as MessageKey),
+          }))}
+          dataUi={UI.allocations.editStatus}
+        />
+        {/* 支払い元は v1 ではロック（会計事実を保つため）。 */}
+        <div className="kv">
+          <span className="muted">{t('monthlyCost.payment')}</span>
+          <span>{accountName(item.paymentAccountId)}</span>
+        </div>
+        <p className="field__hint">{t('monthlyCost.paymentLocked')}</p>
+      </div>
+    </Modal>
   );
 }
