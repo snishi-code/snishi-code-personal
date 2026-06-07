@@ -409,6 +409,16 @@ export async function createAllocation(
   input: Omit<AllocationInput, 'deferredAccountId'>,
 ): Promise<AllocationItem> {
   const accounts = await getAll<Account>(STORE.accounts);
+  const byId = accountsById(accounts);
+
+  // 支出カテゴリ・支払い元の役割を保存前に検証（fail-closed）。
+  const expense = byId.get(input.expenseAccountId);
+  if (!expense || expense.role !== 'expense-category')
+    throw new LedgerError('error.allocation.expenseCategory');
+  const payment = byId.get(input.paymentAccountId);
+  if (!payment || (payment.role !== 'daily-asset' && payment.role !== 'payment-liability'))
+    throw new LedgerError('error.allocation.paymentSource');
+
   let deferred = accounts.find((a) => a.type === 'asset' && a.name === DEFERRED_ACCOUNT_NAME);
   const ts = nowIso();
   const newDeferred = deferred
@@ -423,11 +433,19 @@ export async function createAllocation(
         updatedAt: ts,
       } satisfies Account);
   if (!deferred) deferred = newDeferred!;
+  // 既存の按分中資産を再利用する場合も、按分中資産(deferred-asset)であることを確認する。
+  if (deferred.role !== 'deferred-asset') throw new LedgerError('error.allocation.deferredInvalid');
 
   const { item, sourceEntry, recognitionEntries } = buildAllocation({
     ...input,
     deferredAccountId: deferred.id,
   });
+
+  // 生成した原始仕訳・月次認識仕訳も通常仕訳と同じ保存境界を通す（fail-closed）。
+  // 新規 deferred はまだ DB に無いので、検証用の科目集合に含める。
+  const byIdForSave = newDeferred ? new Map(byId).set(newDeferred.id, newDeferred) : byId;
+  assertEntrySavable(sourceEntry, byIdForSave);
+  for (const e of recognitionEntries) assertEntrySavable(e, byIdForSave);
 
   await writeWithRevision([STORE.accounts, STORE.journalEntries, STORE.allocations], (t) => {
     if (newDeferred) t.objectStore(STORE.accounts).put(newDeferred);

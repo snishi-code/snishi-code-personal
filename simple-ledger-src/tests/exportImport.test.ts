@@ -15,6 +15,7 @@ import {
   buildExportPackage,
   exportToJsonText,
   importFromJsonText,
+  loadSampleFixture,
   restoreFromSnapshot,
 } from '../src/data/exportImport';
 import { buildSimpleEntry } from '../src/domain/entry';
@@ -23,7 +24,7 @@ import { APP_ID } from '../src/domain/constants';
 async function seedWithEntry() {
   const ledger = await loadLedger(); // 既定科目を投入
   const cash = ledger.accounts.find((a) => a.name === '現金')!;
-  const food = ledger.accounts.find((a) => a.name === '食費')!;
+  const food = ledger.accounts.find((a) => a.name === '変動費')!;
   await upsertEntry(
     buildSimpleEntry({
       date: '2026-06-01',
@@ -110,7 +111,7 @@ describe('revision 競合', () => {
 
     // ローカルをさらに編集して rev を進める
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const salary = ledger.accounts.find((a) => a.name === '給与収入')!;
+    const salary = ledger.accounts.find((a) => a.name === '給与')!;
     await upsertEntry(
       buildSimpleEntry({
         date: '2026-06-05',
@@ -137,7 +138,7 @@ describe('月額化コストの export/import', () => {
   it('月額化コストを含む台帳を round-trip できる', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    const food = ledger.accounts.find((a) => a.name === '変動費')!;
     await createMonthlyCost({
       name: 'Netflix',
       kind: 'subscription',
@@ -185,7 +186,7 @@ describe('restoreFromSnapshot（fail-closed）', () => {
     const snap = buildExportPackage(ledger);
     // いったん別の編集をしてから復元する。
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const salary = ledger.accounts.find((a) => a.name === '給与収入')!;
+    const salary = ledger.accounts.find((a) => a.name === '給与')!;
     await upsertEntry(
       buildSimpleEntry({
         date: '2026-06-05',
@@ -243,7 +244,7 @@ describe('按分支出の export/import', () => {
   async function seedWithAllocation() {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '食費')!;
+    const food = ledger.accounts.find((a) => a.name === '変動費')!;
     await createAllocation({
       date: '2026-06-15',
       description: 'PC',
@@ -273,5 +274,25 @@ describe('按分支出の export/import', () => {
     pkg.allocations[0]!.expenseAccountId = 'nope';
     const outcome = await importFromJsonText(JSON.stringify(pkg));
     expect(outcome.kind).toBe('validation-error');
+  });
+});
+
+describe('テスト用フィクスチャ（loadSampleFixture）', () => {
+  it('空DBに sample.json を投入し、通常の台帳として読める', async () => {
+    const before = await loadLedger(); // 既定科目のみ（空）
+    expect(before.journalEntries).toHaveLength(0);
+
+    const after = await loadSampleFixture();
+    // sample.json の中身が IndexedDB 正本として入る。
+    expect(after.journalEntries.length).toBeGreaterThanOrEqual(15);
+    expect(after.monthlyCostItems.length).toBeGreaterThanOrEqual(1);
+    expect(after.reserves.length).toBeGreaterThanOrEqual(1);
+    expect(after.tags.length).toBeGreaterThanOrEqual(1);
+    expect(after.accounts.some((a) => a.name === '旅行資金' && a.role === 'reserve-asset')).toBe(
+      true,
+    );
+    // 再読込しても永続化されている。
+    const reloaded = await loadLedger();
+    expect(reloaded.journalEntries.length).toBe(after.journalEntries.length);
   });
 });

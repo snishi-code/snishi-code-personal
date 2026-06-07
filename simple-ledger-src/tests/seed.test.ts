@@ -29,4 +29,31 @@ describe('テスト用 JSON（sample.json）', () => {
     const result = ledgerExportPackageSchema.safeParse(sample);
     expect(result.success).toBe(true);
   });
+
+  it('手動テストに十分な量のデータを含む（仕訳・月額化・予定CF・目的別資金・タグ）', () => {
+    expect(sample.journalEntries.length).toBeGreaterThanOrEqual(15);
+    expect(sample.monthlyCostItems.length).toBeGreaterThanOrEqual(1);
+    expect(sample.cashflowSchedules.length).toBeGreaterThanOrEqual(1);
+    expect(sample.reserves.length).toBeGreaterThanOrEqual(1);
+    expect(sample.tags.length).toBeGreaterThanOrEqual(1);
+    // 全仕訳は MVP 仕様どおり 1 借方・1 貸方の 2 行。
+    for (const e of sample.journalEntries) {
+      expect(e.lines.length).toBe(2);
+    }
+  });
+
+  it('seed の粗いカテゴリ（収入/費用）を一通り使う', () => {
+    const seedCategoryNames = defaultAccounts()
+      .filter((a) => a.role === 'income-category' || a.role === 'expense-category')
+      .map((a) => a.name);
+    const idByName = new Map(sample.accounts.map((a) => [a.name, a.id]));
+    const usedAccountIds = new Set(
+      sample.journalEntries.flatMap((e) => e.lines.map((l) => l.accountId)),
+    );
+    for (const name of seedCategoryNames) {
+      const id = idByName.get(name);
+      expect(id, `sample.json に「${name}」科目が無い`).toBeDefined();
+      expect(usedAccountIds.has(id!), `「${name}」が仕訳で使われていない`).toBe(true);
+    }
+  });
 });

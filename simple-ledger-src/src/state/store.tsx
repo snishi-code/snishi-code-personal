@@ -28,11 +28,35 @@ import {
   exportFileName,
   exportToJsonText,
   importFromJsonText,
+  loadSampleFixture,
   restoreFromSnapshot,
   type ImportOutcome,
 } from '../data/exportImport';
 import { useToast } from '../ui/toast';
 import { errorText, t } from '../i18n';
+
+/** `?fixture=sample` が指定されているか（手動テスト用。本番通常起動では false）。 */
+function sampleFixtureRequested(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return new URLSearchParams(window.location.search).get('fixture') === 'sample';
+  } catch {
+    return false;
+  }
+}
+
+/** ユーザーデータが一切無い（既定科目だけの初期状態）か。フィクスチャ投入の安全判定に使う。 */
+function isEmptyLedger(l: Ledger): boolean {
+  return (
+    l.journalEntries.length === 0 &&
+    l.allocations.length === 0 &&
+    l.cashflowSchedules.length === 0 &&
+    l.reserves.length === 0 &&
+    l.monthlyCostItems.length === 0 &&
+    l.fundingGoals.length === 0 &&
+    l.tags.length === 0
+  );
+}
 
 interface LedgerContextValue {
   status: 'loading' | 'ready' | 'error';
@@ -108,7 +132,12 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     let active = true;
     (async () => {
       try {
-        const next = await repo.loadLedger();
+        let next = await repo.loadLedger();
+        // 手動テスト用: `?fixture=sample` かつ空DBのときだけサンプルデータを投入する。
+        // 本番通常起動や、既にユーザーデータがあるDBには投入しない（上書きしない）。外部送信なし。
+        if (sampleFixtureRequested() && isEmptyLedger(next)) {
+          next = await loadSampleFixture();
+        }
         if (active) {
           setLedger(next);
           setStatus('ready');

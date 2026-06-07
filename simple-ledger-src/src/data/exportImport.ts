@@ -242,3 +242,42 @@ export async function restoreFromSnapshot(snapshotData: LedgerExportPackage): Pr
   });
   return loadLedger();
 }
+
+/**
+ * 手動テスト用フィクスチャ（sample.json）を読み込む（`?fixture=sample` 用）。
+ *  - import と同じく `ledgerExportPackageSchema` で検証する（fail-closed）。
+ *  - 外部送信なし: sample.json はバンドルから動的 import する（fetch しない＝main チャンクにも載せない）。
+ *  - 呼び出し側が「空DBのときだけ」呼ぶこと（既存ユーザーデータを上書きしない）。
+ *  - 読み込み後は通常の IndexedDB 正本として扱う。
+ */
+export async function loadSampleFixture(): Promise<Ledger> {
+  const { default: sample } = await import('./sample.json');
+  const validated = ledgerExportPackageSchema.safeParse(sample);
+  if (!validated.success) {
+    const first = validated.error.issues[0];
+    const where = first?.path.join('.') ?? '';
+    throw new Error(
+      `サンプルデータの形式が不正です: ${where ? where + ': ' : ''}${first?.message ?? ''}`,
+    );
+  }
+  const pkg = validated.data;
+  const current = await loadLedger();
+  await replaceLedger({
+    meta: {
+      ...current.meta,
+      schemaVersion: SCHEMA_VERSION,
+      revision: pkg.currentRevision,
+      updatedAt: nowIso(),
+    },
+    settings: pkg.settings,
+    accounts: pkg.accounts,
+    journalEntries: pkg.journalEntries,
+    allocations: pkg.allocations,
+    cashflowSchedules: pkg.cashflowSchedules,
+    reserves: pkg.reserves,
+    tags: pkg.tags,
+    monthlyCostItems: pkg.monthlyCostItems,
+    fundingGoals: pkg.fundingGoals,
+  });
+  return loadLedger();
+}
