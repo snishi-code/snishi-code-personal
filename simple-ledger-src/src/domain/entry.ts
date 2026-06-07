@@ -6,8 +6,9 @@
  * その割当は UI 層（EntrySheet の mode→roles）で行い、ここは debit/credit + metadata を受ける。
  */
 import { newId } from './ids';
+import { accountBalance, filterByDateRange } from './accounting';
 import type { AccountRole } from './accountRoles';
-import type { EntryMetadata, JournalEntry, JournalEntryKind } from './types';
+import type { Account, EntryMetadata, JournalEntry, JournalEntryKind } from './types';
 import { nowIso } from '../util/time';
 
 const TRANSFER_FUND_ROLES: AccountRole[] = ['daily-asset', 'reserve-asset'];
@@ -28,6 +29,35 @@ export function transferFlowValid(srcRole: AccountRole, dstRole: AccountRole): b
     return TRANSFER_FUND_ROLES.includes(dstRole);
   }
   return false;
+}
+
+/**
+ * 目的別資金（reserve-asset）から支払う/移動する仕訳で、その資金の残高が不足しないかを判定する。
+ * entry が貸方で減らす reserve-asset 口座について、**entry.date 時点**の残高
+ *（その日までの既存仕訳 + この entry）が負になるなら不足。fail-closed の保存前チェックに使う。
+ *  - otherEntries は「保存対象 entry 以外」の全仕訳（編集時は自分自身を二重計上しない）。
+ *  - 未来日付でも、その日付までの既存仕訳を含めて判定する。
+ * 不足する口座があれば最初の 1 件を返す。無ければ null。
+ */
+export function reserveBalanceShortfall(
+  entry: JournalEntry,
+  accounts: Account[],
+  otherEntries: JournalEntry[],
+): { accountId: string; name: string } | null {
+  const byId = new Map(accounts.map((a) => [a.id, a]));
+  const reduced = new Set(
+    entry.lines
+      .filter((l) => l.side === 'credit' && byId.get(l.accountId)?.role === 'reserve-asset')
+      .map((l) => l.accountId),
+  );
+  if (reduced.size === 0) return null;
+  const asOf = filterByDateRange([...otherEntries, entry], undefined, entry.date);
+  for (const accId of reduced) {
+    if (accountBalance(accId, 'asset', asOf) < 0) {
+      return { accountId: accId, name: byId.get(accId)?.name ?? accId };
+    }
+  }
+  return null;
 }
 
 export interface SimpleEntryInput {

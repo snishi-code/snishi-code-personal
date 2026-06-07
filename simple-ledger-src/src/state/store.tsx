@@ -119,7 +119,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
-        toast.show(t('toast.error'), 'error');
+        // 保存拒否（目的別資金の残高不足など）は理由をそのまま伝える。
+        toast.show(e instanceof Error ? e.message : t('toast.error'), 'error');
         throw e;
       }
     },

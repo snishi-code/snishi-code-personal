@@ -31,6 +31,7 @@ import type {
 import { monthlyCostItemsFromAllocations } from '../domain/monthlyCostMigration';
 import { buildAllocation, monthlyAmounts, type AllocationInput } from '../domain/allocation';
 import { buildScheduleEntry } from '../domain/cashflow';
+import { reserveBalanceShortfall } from '../domain/entry';
 import { buildAdjustmentEntry, counterpartName, counterpartRole } from '../domain/adjustment';
 import { accountBalance, filterByDateRange } from '../domain/accounting';
 import {
@@ -269,6 +270,16 @@ async function assertEntryTagsValid(entry: JournalEntry): Promise<void> {
   }
 }
 
+/** 目的別資金(reserve-asset)を貸方で減らす仕訳は、その資金の残高不足を保存前に拒否する。 */
+async function assertReserveSufficient(entry: JournalEntry): Promise<void> {
+  const accounts = await getAll<Account>(STORE.accounts);
+  if (!accounts.some((a) => a.role === 'reserve-asset')) return;
+  const all = await getAll<JournalEntry>(STORE.journalEntries);
+  const others = all.filter((e) => e.id !== entry.id); // 編集時は自分自身を二重計上しない
+  const short = reserveBalanceShortfall(entry, accounts, others);
+  if (short) throw new Error(`目的別資金「${short.name}」の残高が不足しています。`);
+}
+
 export async function upsertEntry(entry: JournalEntry): Promise<void> {
   // 既存が生成仕訳/予定リンク仕訳なら上書き禁止。
   await assertNotGeneratedEntry(entry.id);
@@ -277,6 +288,7 @@ export async function upsertEntry(entry: JournalEntry): Promise<void> {
   if (entry.metadata?.allocationId) throw new Error(GENERATED_ENTRY_MSG);
   if (entry.metadata?.monthlyCostId) throw new Error(MONTHLY_COST_ENTRY_MSG);
   await assertEntryTagsValid(entry);
+  await assertReserveSufficient(entry);
   await writeWithRevision([STORE.journalEntries], (t) => {
     t.objectStore(STORE.journalEntries).put(entry);
   });

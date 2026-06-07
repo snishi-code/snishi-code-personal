@@ -896,3 +896,53 @@ describe('残高補正 createAdjustment', () => {
     expect(entry?.date).toBe('2026-06-15');
   });
 });
+
+describe('目的別資金(reserve-asset)の残高不足ガード', () => {
+  it('残高内は成功・超過は保存拒否', async () => {
+    const ledger = await loadLedger();
+    const capital = ledger.accounts.find((a) => a.name === '元入金')!;
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const resId = newId();
+    await upsertAccount({
+      id: resId,
+      name: '自動車購入資金',
+      type: 'asset',
+      role: 'reserve-asset',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    // 100,000 を積み立てる（借方 資金 / 貸方 元入金）。
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2026-01-10',
+        description: '積立',
+        debitAccountId: resId,
+        creditAccountId: capital.id,
+        amount: 100000,
+      }),
+    );
+    // 80,000 を資金 → 現金（残高内・成功）。
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2026-02-01',
+        description: '引出',
+        debitAccountId: cash.id,
+        creditAccountId: resId,
+        amount: 80000,
+      }),
+    );
+    // さらに 80,000（残高 20,000 しかない）→ 拒否。
+    await expect(
+      upsertEntry(
+        buildSimpleEntry({
+          date: '2026-02-02',
+          description: '引出2',
+          debitAccountId: cash.id,
+          creditAccountId: resId,
+          amount: 80000,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+});

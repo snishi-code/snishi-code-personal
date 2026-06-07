@@ -1,12 +1,99 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildSimpleEntry,
+  reserveBalanceShortfall,
   reversalInput,
   toSimpleInput,
   transferFlowValid,
   validateSimpleEntry,
 } from '../src/domain/entry';
-import type { JournalEntry } from '../src/domain/types';
+import type { Account, JournalEntry } from '../src/domain/types';
+
+describe('reserveBalanceShortfall（目的別資金の残高不足）', () => {
+  const accounts: Account[] = [
+    {
+      id: 'res',
+      name: '自動車購入資金',
+      type: 'asset',
+      role: 'reserve-asset',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    },
+    {
+      id: 'cash',
+      name: '現金',
+      type: 'asset',
+      role: 'daily-asset',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    },
+    {
+      id: 'fixed',
+      name: '固定資産',
+      type: 'asset',
+      role: 'fixed-asset',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    },
+  ];
+  // 既存: 現金 → 自動車購入資金 へ 100,000 を移し、res 残高 = 100,000。
+  const funding: JournalEntry = {
+    id: 'fund',
+    date: '2026-01-10',
+    description: '積立',
+    kind: 'normal',
+    lines: [
+      { accountId: 'res', side: 'debit', amount: 100000 },
+      { accountId: 'cash', side: 'credit', amount: 100000 },
+    ],
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  const purchase = (amount: number, date: string): JournalEntry => ({
+    id: 'buy',
+    date,
+    description: '自動車購入',
+    kind: 'normal',
+    lines: [
+      { accountId: 'fixed', side: 'debit', amount },
+      { accountId: 'res', side: 'credit', amount },
+    ],
+    createdAt: 'x',
+    updatedAt: 'x',
+  });
+
+  it('残高内の支出は null（不足なし）', () => {
+    expect(reserveBalanceShortfall(purchase(80000, '2026-02-01'), accounts, [funding])).toBeNull();
+  });
+  it('残高を超える支出は不足（その資金を返す）', () => {
+    const short = reserveBalanceShortfall(purchase(150000, '2026-02-01'), accounts, [funding]);
+    expect(short?.accountId).toBe('res');
+  });
+  it('未来日付でも、その日までの積立を含めて判定する', () => {
+    // 積立(1/10)より前の日付では残高 0 → 不足。
+    expect(
+      reserveBalanceShortfall(purchase(50000, '2026-01-05'), accounts, [funding]),
+    ).not.toBeNull();
+  });
+  it('reserve-asset を貸方で減らさない仕訳は対象外（null）', () => {
+    const incomeToReserve: JournalEntry = {
+      id: 'x',
+      date: '2026-02-01',
+      description: '入金',
+      kind: 'normal',
+      lines: [
+        { accountId: 'res', side: 'debit', amount: 5000 },
+        { accountId: 'cash', side: 'credit', amount: 5000 },
+      ],
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    expect(reserveBalanceShortfall(incomeToReserve, accounts, [funding])).toBeNull();
+  });
+});
 
 describe('transferFlowValid（振替の役割組み合わせ）', () => {
   it('資金 ↔ 資金（日常/目的別）は valid', () => {
