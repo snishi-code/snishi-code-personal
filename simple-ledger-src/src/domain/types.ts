@@ -148,6 +148,8 @@ export interface EntryMetadata {
   adjustment?: AdjustmentMeta;
   /** 月額化コストの実支払い仕訳のとき、紐づく MonthlyCostItem の ID（通常編集/削除は不可）。 */
   monthlyCostId?: string;
+  /** 固定資産の売却・故障処分で生成された仕訳のとき、紐づく AssetDisposal の ID（通常編集/削除は不可）。 */
+  assetDisposalId?: string;
 }
 
 /**
@@ -245,6 +247,34 @@ export interface MonthlyCostItem {
   /** 仮想認識で貸方側に見せる科目（固定資産など）。指定時、Journal 仮想行は「この科目 → 費用」で表示。 */
   recognitionCreditAccountId?: string;
   status: MonthlyCostStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 固定資産の売却・故障処分の記録（監査用の独立エンティティ）。
+ * 固定資産由来の MonthlyCostItem を途中終了し、未認識残高の消し込みと売却損益の仕訳を生成したときに作る。
+ * 生成仕訳は `metadata.assetDisposalId` でこのレコードに紐づき、通常編集/削除は不可（fail-closed）。
+ */
+export interface AssetDisposal {
+  id: string;
+  /** 処分した固定資産由来の MonthlyCostItem。 */
+  monthlyCostId: string;
+  /** 処分対象の固定資産科目（= MonthlyCostItem.recognitionCreditAccountId）。 */
+  fixedAccountId: string;
+  managementScopeId: string;
+  /** 処分日 (YYYY-MM-DD)。 */
+  disposalDate: string;
+  /** 売却額（故障・廃棄は 0）。正の整数または 0。 */
+  proceedsAmount: number;
+  /** 売却額の入金先（proceedsAmount > 0 のときのみ）。 */
+  destinationAccountId?: string;
+  /** 処分月の前月までに月額化 formula で認識済みの合計。 */
+  recognizedAmount: number;
+  /** amount - recognizedAmount（0 未満にしない）。 */
+  remainingAmount: number;
+  /** この処分で生成した仕訳の ID 群（監査・追跡用）。 */
+  generatedEntryIds: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -395,6 +425,7 @@ export interface LedgerExportPackage {
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   fundingGoals: FundingGoal[];
+  assetDisposals: AssetDisposal[];
   settings: Settings;
 }
 
@@ -449,4 +480,5 @@ export interface Ledger {
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   fundingGoals: FundingGoal[];
+  assetDisposals: AssetDisposal[];
 }

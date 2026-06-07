@@ -148,6 +148,27 @@ export const ja = {
   'monthlyCost.status.paused': '一時停止',
   'monthlyCost.status.ended': '終了',
 
+  // 固定資産の売却・故障処分
+  'disposal.action': '売却/故障',
+  'disposal.title': '固定資産を処分する',
+  'disposal.intro':
+    '売却または故障・廃棄で、この固定資産の月額化を終了します。未認識の残りを売却損益として精算し、固定資産の残高を消し込みます。',
+  'disposal.date': '処分日',
+  'disposal.proceeds': '売却額（故障・廃棄は 0）',
+  'disposal.destination': '入金先',
+  'disposal.recognized': '認識済み額',
+  'disposal.remaining': '残存額',
+  'disposal.gain': '売却益',
+  'disposal.loss': '売却損',
+  'disposal.none': 'なし',
+  'disposal.endsAt': '終了する月',
+  'disposal.preview': '生成される仕訳の概要',
+  'disposal.previewAdjust': '認識済み分の消し込み（生活コストには含めない）',
+  'disposal.previewProceeds': '売却額の入金',
+  'disposal.previewLoss': '売却損（その他支出・生活コストに含む）',
+  'disposal.previewGain': '売却益（その他収入）',
+  'disposal.confirm': '処分する',
+
   'cashflow.title': '資金計画・負債',
   'cashflow.intro':
     '将来の入出金予定から、自由資金の推移を見ます。予定は「実績化」すると仕訳になります。',
@@ -660,6 +681,8 @@ export const ja = {
     '按分から生成された仕訳は編集・削除できません。按分台帳で管理してください。',
   'error.entry.monthlyCost':
     '月額化コストから生成された仕訳は直接編集・削除できません。月額化コスト画面で管理してください。',
+  'error.entry.assetDisposal':
+    '固定資産の処分で生成された仕訳は直接編集・削除できません。月額化コスト画面で管理してください。',
   'error.entry.scheduleLinked':
     '実績化済みの予定に紐づく仕訳は編集・削除できません。資金繰りの予定から操作してください。',
   'error.entry.invalidStructure': '仕訳の形式が正しくないため保存できません。',
@@ -715,6 +738,16 @@ export const ja = {
     '返済が実績化済みのため総額を変更できません。終了して新規に作成してください。',
   'error.monthlyCost.deletePosted':
     '返済が実績化済みのため削除できません。月額化コスト画面で「終了」にしてください。',
+  'error.disposal.dateRequired': '処分日を YYYY-MM-DD で入力してください。',
+  'error.disposal.proceedsInvalid': '売却額は 0 以上の整数で入力してください。',
+  'error.disposal.notFixedAsset': 'この月額化コストは固定資産由来ではないため処分できません。',
+  'error.disposal.alreadyEnded': 'この月額化コストはすでに終了しています。',
+  'error.disposal.duplicate': 'この固定資産はすでに処分済みです。',
+  'error.disposal.destinationRequired': '売却額があるときは入金先を選んでください。',
+  'error.disposal.destinationInvalid': '入金先は資金口座または目的別資金を選んでください。',
+  'error.disposal.insufficientAsset': '固定資産の残高が不足しているため処分できません。',
+  'error.disposal.lossCategoryMissing': '売却損の計上先（その他支出）が見つかりません。',
+  'error.disposal.gainCategoryMissing': '売却益の計上先（その他収入）が見つかりません。',
   'error.fixedAsset.expenseCategory': '月額化先の費用カテゴリを選んでください。',
   'error.fixedAsset.invalidAccount': '固定資産の科目が不正です。',
   'error.fundingGoal.targetAmountInvalid': '目標額は 1 以上の整数で入力してください。',

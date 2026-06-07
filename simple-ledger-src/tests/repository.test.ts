@@ -13,6 +13,7 @@ import {
   deleteManagementScope,
   deleteMonthlyCost,
   deleteTag,
+  disposeFixedAsset,
   listSnapshots,
   loadLedger,
   makeSnapshotId,
@@ -32,7 +33,8 @@ import { buildSimpleEntry } from '../src/domain/entry';
 import { LedgerError } from '../src/domain/errors';
 import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
 import { monthlyCostForMonth } from '../src/domain/monthlyCost';
-import { buildExportPackage } from '../src/data/exportImport';
+import { accountBalance } from '../src/domain/accounting';
+import { buildExportPackage, exportToJsonText, importFromJsonText } from '../src/data/exportImport';
 import { getKv, putKv, runWrite, STORE } from '../src/data/db';
 import { SCHEMA_VERSION } from '../src/domain/constants';
 import { newId } from '../src/domain/ids';
@@ -1528,5 +1530,192 @@ describe('月額化コストの後編集（upsertMonthlyCost 保存境界）', (
     expect(after.monthlyCostItems.find((m) => m.id === item.id)?.status).toBe('paused');
     const payAfter = after.journalEntries.find((e) => e.metadata?.monthlyCostId === item.id)!;
     expect(payAfter.lines).toEqual(payBefore.lines);
+  });
+});
+
+describe('固定資産の売却・故障処分（disposeFixedAsset）', () => {
+  async function caught(p: Promise<unknown>): Promise<LedgerError> {
+    try {
+      await p;
+    } catch (e) {
+      return e as LedgerError;
+    }
+    throw new Error('例外が送出されませんでした');
+  }
+
+  /** 固定資産購入 + 月額化（300,000 / 120 か月・開始 2026-01・現金払い）を作る。 */
+  async function makeFixedAssetMonthly(
+    opts: { amount?: number; costMonths?: number; startMonth?: string } = {},
+  ) {
+    const amount = opts.amount ?? 300000;
+    const costMonths = opts.costMonths ?? 120;
+    const startMonth = opts.startMonth ?? '2026-01';
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '変動費')!;
+    const faId = newId();
+    await upsertAccount({
+      id: faId,
+      name: '車',
+      type: 'asset',
+      role: 'fixed-asset',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    const entry = buildSimpleEntry({
+      date: `${startMonth}-01`,
+      description: '車購入',
+      debitAccountId: faId,
+      creditAccountId: cash.id,
+      amount,
+    });
+    const item = await saveEntryWithFixedAssetMonthly(entry, {
+      name: '車の月額化',
+      kind: 'durable-asset',
+      amount,
+      costMonths,
+      startMonth,
+      expenseAccountId: food.id,
+      recognitionCreditAccountId: faId,
+    });
+    return { item, faId, cash, food };
+  }
+
+  it('0円故障で売却損が立ち、固定資産残高が 0、処分月以降の月額化が止まる', async () => {
+    const { item, faId } = await makeFixedAssetMonthly(); // 300000 / 120, start 2026-01
+    // 60 か月後（2026-01 → 2031-01）に 0 円故障。
+    const disposal = await disposeFixedAsset({
+      monthlyCostId: item.id,
+      disposalDate: '2031-01-15',
+      proceedsAmount: 0,
+    });
+    expect(disposal.recognizedAmount).toBe(150000);
+    expect(disposal.remainingAmount).toBe(150000);
+
+    const after = await loadLedger();
+    // 固定資産 BS 残高は 0。
+    expect(accountBalance(faId, 'asset', after.journalEntries)).toBe(0);
+    // 月額化コストは終了し、endMonth は処分月の前月。
+    const m = after.monthlyCostItems.find((x) => x.id === item.id)!;
+    expect(m.status).toBe('ended');
+    expect(m.endMonth).toBe('2030-12');
+    expect(monthlyCostForMonth(m, '2031-01')).toBe(0);
+    // 売却損 150,000 が「その他支出」に計上される。
+    const food = after.accounts.find((a) => a.name === '変動費'); // sanity（未使用回避）
+    expect(food).toBeTruthy();
+    const lossAcc = after.accounts.find((a) => a.name === 'その他支出')!;
+    const lossEntry = after.journalEntries.find(
+      (e) =>
+        e.metadata?.assetDisposalId === disposal.id &&
+        e.lines.some((l) => l.side === 'debit' && l.accountId === lossAcc.id),
+    )!;
+    expect(lossEntry.lines.find((l) => l.side === 'debit')?.amount).toBe(150000);
+  });
+
+  it('200,000 円売却で売却益 50,000 が立ち、固定資産残高が 0、入金先に入る', async () => {
+    const { item, faId, cash } = await makeFixedAssetMonthly();
+    const disposal = await disposeFixedAsset({
+      monthlyCostId: item.id,
+      disposalDate: '2031-01-15',
+      proceedsAmount: 200000,
+      destinationAccountId: cash.id,
+    });
+    expect(disposal.remainingAmount).toBe(150000);
+
+    const after = await loadLedger();
+    expect(accountBalance(faId, 'asset', after.journalEntries)).toBe(0);
+    // 売却益 50,000 が「その他収入」に計上される。
+    const gainAcc = after.accounts.find((a) => a.name === 'その他収入')!;
+    const gainEntry = after.journalEntries.find(
+      (e) =>
+        e.metadata?.assetDisposalId === disposal.id &&
+        e.lines.some((l) => l.side === 'credit' && l.accountId === gainAcc.id),
+    )!;
+    expect(gainEntry.lines.find((l) => l.side === 'credit')?.amount).toBe(50000);
+    // 入金先（現金）には売却額 200,000 が入る（処分による現金増分）。
+    const disposalEntries = after.journalEntries.filter(
+      (e) => e.metadata?.assetDisposalId === disposal.id,
+    );
+    const cashIn = disposalEntries
+      .flatMap((e) => e.lines)
+      .filter((l) => l.side === 'debit' && l.accountId === cash.id)
+      .reduce((s, l) => s + l.amount, 0);
+    expect(cashIn).toBe(200000);
+  });
+
+  it('処分で生成された仕訳は直接編集・削除できない（fail-closed）', async () => {
+    const { item } = await makeFixedAssetMonthly();
+    const disposal = await disposeFixedAsset({
+      monthlyCostId: item.id,
+      disposalDate: '2031-01-15',
+      proceedsAmount: 0,
+    });
+    const after = await loadLedger();
+    const gen = after.journalEntries.find((e) => e.metadata?.assetDisposalId === disposal.id)!;
+    await expect(deleteEntry(gen.id)).rejects.toThrow();
+    await expect(upsertEntry({ ...gen, description: '改ざん' })).rejects.toThrow();
+  });
+
+  it('終了済み（二重処分）・売却なのに入金先なし・非固定資産は拒否する', async () => {
+    const { item } = await makeFixedAssetMonthly();
+    await disposeFixedAsset({
+      monthlyCostId: item.id,
+      disposalDate: '2031-01-15',
+      proceedsAmount: 0,
+    });
+    // 2 回目は終了済みのため拒否。
+    const e1 = await caught(
+      disposeFixedAsset({ monthlyCostId: item.id, disposalDate: '2031-02-15', proceedsAmount: 0 }),
+    );
+    expect(e1.code).toBe('error.disposal.alreadyEnded');
+
+    // 売却額があるのに入金先がない。
+    const { item: item2 } = await makeFixedAssetMonthly();
+    const e2 = await caught(
+      disposeFixedAsset({
+        monthlyCostId: item2.id,
+        disposalDate: '2031-01-15',
+        proceedsAmount: 1000,
+      }),
+    );
+    expect(e2.code).toBe('error.disposal.destinationRequired');
+
+    // 非固定資産の月額化（現金払いサブスク）は処分できない。
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '変動費')!;
+    const sub = await createMonthlyCost({
+      name: 'Netflix',
+      kind: 'subscription',
+      amount: 1500,
+      costMonths: 1,
+      repeatEveryMonths: 1,
+      startMonth: '2026-06',
+      date: '2026-06-15',
+      expenseAccountId: food.id,
+      paymentAccountId: cash.id,
+    });
+    const e3 = await caught(
+      disposeFixedAsset({ monthlyCostId: sub.id, disposalDate: '2026-07-15', proceedsAmount: 0 }),
+    );
+    expect(e3.code).toBe('error.disposal.notFixedAsset');
+  });
+
+  it('export/import 後も処分履歴と生成仕訳が保持される', async () => {
+    const { item } = await makeFixedAssetMonthly();
+    const disposal = await disposeFixedAsset({
+      monthlyCostId: item.id,
+      disposalDate: '2031-01-15',
+      proceedsAmount: 0,
+    });
+    const text = exportToJsonText(await loadLedger());
+    const outcome = await importFromJsonText(text, { force: true });
+    expect(outcome.kind).toBe('ok');
+    const after = await loadLedger();
+    expect(after.assetDisposals.some((d) => d.id === disposal.id)).toBe(true);
+    expect(after.journalEntries.some((e) => e.metadata?.assetDisposalId === disposal.id)).toBe(
+      true,
+    );
   });
 });

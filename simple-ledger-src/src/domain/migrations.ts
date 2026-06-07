@@ -188,6 +188,15 @@ const STEPS: Step[] = [
       };
     },
   },
+  {
+    // v11 → v12: 固定資産の売却・故障処分(assetDisposals)を追加。既存 JSON には無いので空配列を補う。
+    from: 11,
+    to: 12,
+    migrate: (pkg) => ({
+      ...pkg,
+      assetDisposals: Array.isArray(pkg.assetDisposals) ? pkg.assetDisposals : [],
+    }),
+  },
 ];
 
 /**

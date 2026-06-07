@@ -139,6 +139,12 @@ export const UI = {
     editExpense: 'allocations.edit.expense',
     editStatus: 'allocations.edit.status',
     editSave: 'allocations.edit.save',
+    dispose: 'allocations.dispose',
+    disposeDialog: 'allocations.disposeDialog',
+    disposeDate: 'allocations.dispose.date',
+    disposeProceeds: 'allocations.dispose.proceeds',
+    disposeDestination: 'allocations.dispose.destination',
+    disposeConfirm: 'allocations.dispose.confirm',
   },
   tags: {
     view: 'tags.view',

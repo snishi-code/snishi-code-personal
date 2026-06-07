@@ -22,6 +22,7 @@ function pkg(version: number): LedgerExportPackage {
     tags: [],
     monthlyCostItems: [],
     fundingGoals: [],
+    assetDisposals: [],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
   };
 }
@@ -150,5 +151,13 @@ describe('migrateToCurrent', () => {
     expect(r.ok).toBe(true);
     expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
     expect(r.data?.accounts).toEqual(v9.accounts);
+  });
+  it('v11 → v12 で固定資産処分(assetDisposals)を空配列で補う', () => {
+    const v11 = pkg(11) as unknown as Record<string, unknown>;
+    delete v11.assetDisposals; // 旧 JSON には無い。
+    const r = migrateToCurrent(v11 as unknown as LedgerExportPackage);
+    expect(r.ok).toBe(true);
+    expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(r.data?.assetDisposals).toEqual([]);
   });
 });

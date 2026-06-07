@@ -1,6 +1,6 @@
 {
   "appId": "snishi-code.simple-ledger",
-  "schemaVersion": 11,
+  "schemaVersion": 12,
   "ledgerId": "sample-ledger",
   "exportedAt": "2026-04-01T00:00:00.000Z",
   "deviceId": "sample-device",
@@ -802,5 +802,6 @@
       "updatedAt": "2026-01-05T00:00:00.000Z"
     }
   ],
-  "fundingGoals": []
+  "fundingGoals": [],
+  "assetDisposals": []
 }

@@ -5,7 +5,9 @@
 import { useMemo, useState } from 'react';
 import { useLedger } from '../../state/store';
 import { monthlyCostForMonth, representativeMonthlyAmount } from '../../domain/monthlyCost';
-import { currentYearMonth, nowIso } from '../../util/time';
+import { disposalOutcome } from '../../domain/assetDisposal';
+import { addMonths, monthOf } from '../../domain/allocation';
+import { currentYearMonth, nowIso, todayLocal } from '../../util/time';
 import { Money } from '../money';
 import { Icon } from '../Icon';
 import { Modal } from '../Modal';
@@ -33,6 +35,7 @@ export function Allocations() {
   const [showInactive, setShowInactive] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<MonthlyCostItem | null>(null);
   const [editing, setEditing] = useState<MonthlyCostItem | null>(null);
+  const [disposing, setDisposing] = useState<MonthlyCostItem | null>(null);
   const { year, month } = currentYearMonth();
   const currentYm = `${year}-${String(month).padStart(2, '0')}`;
   const currency = ledger?.settings.currency ?? 'JPY';
@@ -52,6 +55,13 @@ export function Allocations() {
     const next = item.status === 'active' ? 'paused' : 'active';
     await saveMonthlyCost({ ...item, status: next, updatedAt: nowIso() }).catch(() => undefined);
   }
+
+  // 固定資産由来（購入仕訳 sourceEntryId + recognitionCreditAccountId が fixed-asset）かどうか。
+  // 終了していなければ「売却/故障」操作を出せる。
+  const isFixedAssetItem = (m: MonthlyCostItem): boolean =>
+    m.sourceEntryId !== undefined &&
+    m.recognitionCreditAccountId !== undefined &&
+    accountsMap.get(m.recognitionCreditAccountId)?.role === 'fixed-asset';
 
   return (
     <section aria-labelledby="allocations-title" data-ui={UI.allocations.view}>
@@ -107,6 +117,17 @@ export function Allocations() {
                     </span>
                   </span>
                   <span className="row-actions">
+                    {isFixedAssetItem(m) && m.status !== 'ended' ? (
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        onClick={() => setDisposing(m)}
+                        aria-label={`${t('disposal.action')}: ${m.name}`}
+                        data-ui={UI.allocations.dispose}
+                      >
+                        <Icon name="transfer" size={18} />
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className="icon-btn"
@@ -196,7 +217,156 @@ export function Allocations() {
       ) : null}
 
       {editing ? <MonthlyCostEditSheet item={editing} onClose={() => setEditing(null)} /> : null}
+
+      {disposing ? (
+        <MonthlyCostDisposeSheet item={disposing} onClose={() => setDisposing(null)} />
+      ) : null}
     </section>
+  );
+}
+
+/**
+ * 固定資産由来の月額化コストの売却・故障処分。残存額を基準に売却損益を計算し、固定資産残高を消し込む。
+ * 売却額 0 は故障・廃棄として扱う。保存前にプレビュー（残存額・損益・終了月）を出す。
+ */
+function MonthlyCostDisposeSheet({
+  item,
+  onClose,
+}: {
+  item: MonthlyCostItem;
+  onClose: () => void;
+}) {
+  const { ledger, disposeFixedAsset } = useLedger();
+  const accounts = ledger?.accounts ?? [];
+  const currency = ledger?.settings.currency ?? 'JPY';
+
+  const [date, setDate] = useState(todayLocal());
+  const [proceedsText, setProceedsText] = useState('0');
+  const destinationOptions = accounts
+    .filter((a) => (a.role === 'daily-asset' || a.role === 'reserve-asset') && !a.archived)
+    .map((a) => ({ value: a.id, label: a.name }));
+  const [destinationAccountId, setDestinationAccountId] = useState(
+    destinationOptions[0]?.value ?? '',
+  );
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [submitting, setSubmitting] = useState(false);
+
+  const proceeds = proceedsText === '' ? 0 : Number.parseInt(proceedsText, 10);
+  const disposalMonth = /^\d{4}-\d{2}-\d{2}$/.test(date) ? monthOf(date) : item.startMonth;
+  const outcome = disposalOutcome(item, disposalMonth, proceeds);
+  const endMonth = addMonths(disposalMonth, -1);
+
+  async function submit() {
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await disposeFixedAsset({
+        monthlyCostId: item.id,
+        disposalDate: date,
+        proceedsAmount: proceeds,
+        ...(proceeds > 0 ? { destinationAccountId } : {}),
+      });
+      onClose();
+    } catch (e) {
+      setError(errorText(e));
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={t('disposal.title')}
+      onClose={onClose}
+      dismissMode="if-clean"
+      footer={
+        <>
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={submit}
+            disabled={submitting}
+            data-ui={UI.allocations.disposeConfirm}
+          >
+            {t('disposal.confirm')}
+          </button>
+        </>
+      }
+    >
+      <div className="stack" data-ui={UI.allocations.disposeDialog}>
+        <p className="field__hint">{t('disposal.intro')}</p>
+        {error ? (
+          <div className="field__error" role="alert">
+            <Icon name="alert" size={14} />
+            {error}
+          </div>
+        ) : null}
+        <div className="list__title">{item.name}</div>
+        <TextInput
+          label={t('disposal.date')}
+          type="date"
+          required
+          value={date}
+          onChange={setDate}
+          dataUi={UI.allocations.disposeDate}
+        />
+        <TextInput
+          label={t('disposal.proceeds')}
+          inputMode="numeric"
+          value={proceedsText}
+          onChange={(v) => setProceedsText(v.replace(/[^\d]/g, ''))}
+          dataUi={UI.allocations.disposeProceeds}
+        />
+        {proceeds > 0 ? (
+          <SelectInput
+            label={t('disposal.destination')}
+            value={destinationAccountId}
+            onChange={setDestinationAccountId}
+            options={destinationOptions}
+            dataUi={UI.allocations.disposeDestination}
+          />
+        ) : null}
+
+        <div className="kv">
+          <span className="muted">{t('disposal.recognized')}</span>
+          <span>
+            <Money amount={outcome.recognizedAmount} currency={currency} />
+          </span>
+        </div>
+        <div className="kv">
+          <span className="muted">{t('disposal.remaining')}</span>
+          <span>
+            <Money amount={outcome.remainingAmount} currency={currency} />
+          </span>
+        </div>
+        <div className="kv">
+          <span className="muted">{t('disposal.gain')}</span>
+          <span>
+            {outcome.gain > 0 ? (
+              <Money amount={outcome.gain} currency={currency} />
+            ) : (
+              t('disposal.none')
+            )}
+          </span>
+        </div>
+        <div className="kv">
+          <span className="muted">{t('disposal.loss')}</span>
+          <span>
+            {outcome.loss > 0 ? (
+              <Money amount={outcome.loss} currency={currency} />
+            ) : (
+              t('disposal.none')
+            )}
+          </span>
+        </div>
+        <div className="kv">
+          <span className="muted">{t('disposal.endsAt')}</span>
+          <span>{endMonth}</span>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

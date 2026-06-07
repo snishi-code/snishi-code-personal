@@ -24,6 +24,7 @@ import * as repo from '../data/repository';
 import { isDefaultSeedAccounts, isDefaultSettings } from '../data/seed';
 import type {
   AccountInstrumentInput,
+  DisposeFixedAssetInput,
   FixedAssetMonthlyInput,
   FundingGoalInput,
   MonthlyCostInput,
@@ -88,6 +89,7 @@ interface LedgerContextValue {
   createMonthlyCost: (input: MonthlyCostInput) => Promise<void>;
   saveMonthlyCost: (item: MonthlyCostItem) => Promise<void>;
   removeMonthlyCost: (id: string) => Promise<void>;
+  disposeFixedAsset: (input: DisposeFixedAssetInput) => Promise<void>;
   createFundingGoal: (input: FundingGoalInput) => Promise<void>;
   saveFundingGoal: (goal: FundingGoal) => Promise<void>;
   removeFundingGoal: (id: string) => Promise<void>;
@@ -279,6 +281,20 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await repo.deleteMonthlyCost(id);
         await refresh();
         toast.show(t('toast.deleted'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const disposeFixedAsset = useCallback<LedgerContextValue['disposeFixedAsset']>(
+    async (input) => {
+      try {
+        await repo.disposeFixedAsset(input);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
       } catch (e) {
         toast.show(errorText(e), 'error');
         throw e;
@@ -656,6 +672,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       createMonthlyCost,
       saveMonthlyCost,
       removeMonthlyCost,
+      disposeFixedAsset,
       createFundingGoal,
       saveFundingGoal,
       removeFundingGoal,
@@ -696,6 +713,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       createMonthlyCost,
       saveMonthlyCost,
       removeMonthlyCost,
+      disposeFixedAsset,
       createFundingGoal,
       saveFundingGoal,
       removeFundingGoal,
