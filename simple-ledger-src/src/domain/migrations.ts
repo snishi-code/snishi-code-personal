@@ -9,10 +9,20 @@
  * MVP 初期は version 1 のみ。将来 version 2 を足すときは、
  * migrations に { from: 1, to: 2, migrate } を登録する。
  */
-import { SCHEMA_VERSION } from './constants';
+import {
+  DEFAULT_MANAGEMENT_SCOPE_ID,
+  DEFAULT_MANAGEMENT_SCOPE_NAME,
+  SCHEMA_VERSION,
+} from './constants';
 import { inferRole } from './accountRoles';
 import { monthlyCostItemsFromAllocations } from './monthlyCostMigration';
-import type { Account, LedgerExportPackage } from './types';
+import type {
+  Account,
+  CashflowSchedule,
+  JournalLine,
+  LedgerExportPackage,
+  ManagementScope,
+} from './types';
 
 export interface MigrationResult {
   ok: boolean;
@@ -115,6 +125,68 @@ const STEPS: Step[] = [
     from: 9,
     to: 10,
     migrate: (pkg) => pkg,
+  },
+  {
+    // v10 → v11: 管理区分(managementScopes)・支払い手段(accountInstruments)を追加。
+    // 仕訳/予定CF/月額化に managementScopeId を付与（既存は『個人用』へ寄せる）。
+    // タグを「仕訳全体のみ」に再設計: 明細タグ(line.tagIds / 予定CFの明細タグ)を破棄し、tag.scope を entry に固定。
+    from: 10,
+    to: 11,
+    migrate: (pkg) => {
+      const ts = pkg.exportedAt;
+      const raw = pkg as LedgerExportPackage & {
+        managementScopes?: ManagementScope[];
+        accountInstruments?: unknown[];
+      };
+      const existingScopes = Array.isArray(raw.managementScopes) ? raw.managementScopes : [];
+      const managementScopes: ManagementScope[] =
+        existingScopes.length > 0
+          ? existingScopes
+          : [
+              {
+                id: DEFAULT_MANAGEMENT_SCOPE_ID,
+                name: DEFAULT_MANAGEMENT_SCOPE_NAME,
+                archived: false,
+                createdAt: ts,
+                updatedAt: ts,
+              },
+            ];
+      const accountInstruments = Array.isArray(raw.accountInstruments)
+        ? raw.accountInstruments
+        : [];
+      const scopeId = managementScopes[0]?.id ?? DEFAULT_MANAGEMENT_SCOPE_ID;
+      const withScope = <T extends { managementScopeId?: string }>(x: T): T => ({
+        ...x,
+        managementScopeId: x.managementScopeId ?? scopeId,
+      });
+      // 明細タグ（JournalLine.tagIds）を破棄してクリーンな行に作り直す（タグは仕訳全体のみ）。
+      const cleanLine = (l: JournalLine): JournalLine => {
+        const line: JournalLine = { accountId: l.accountId, side: l.side, amount: l.amount };
+        if (l.instrumentId !== undefined) line.instrumentId = l.instrumentId;
+        return line;
+      };
+      const journalEntries = pkg.journalEntries.map((e) => ({
+        ...withScope(e),
+        lines: e.lines.map(cleanLine),
+      }));
+      const cashflowSchedules = pkg.cashflowSchedules.map((s) => {
+        const copy = { ...s } as Record<string, unknown>;
+        delete copy.accountLineTagIds; // 予定CFの明細タグを破棄。
+        delete copy.counterLineTagIds;
+        return withScope(copy as unknown as CashflowSchedule);
+      });
+      const monthlyCostItems = pkg.monthlyCostItems.map(withScope);
+      const tags = pkg.tags.map((t) => ({ ...t, scope: 'entry' as const }));
+      return {
+        ...pkg,
+        managementScopes,
+        accountInstruments,
+        journalEntries,
+        cashflowSchedules,
+        monthlyCostItems,
+        tags,
+      };
+    },
   },
 ];
 

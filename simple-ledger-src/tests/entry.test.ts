@@ -8,6 +8,7 @@ import {
   validateSimpleEntry,
 } from '../src/domain/entry';
 import type { Account, JournalEntry } from '../src/domain/types';
+import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
 
 describe('reserveBalanceShortfall（目的別資金の残高不足）', () => {
   const accounts: Account[] = [
@@ -45,6 +46,7 @@ describe('reserveBalanceShortfall（目的別資金の残高不足）', () => {
     date: '2026-01-10',
     description: '積立',
     kind: 'normal',
+    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     lines: [
       { accountId: 'res', side: 'debit', amount: 100000 },
       { accountId: 'cash', side: 'credit', amount: 100000 },
@@ -57,6 +59,7 @@ describe('reserveBalanceShortfall（目的別資金の残高不足）', () => {
     date,
     description: '自動車購入',
     kind: 'normal',
+    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     lines: [
       { accountId: 'fixed', side: 'debit', amount },
       { accountId: 'res', side: 'credit', amount },
@@ -84,6 +87,7 @@ describe('reserveBalanceShortfall（目的別資金の残高不足）', () => {
       date: '2026-02-01',
       description: '入金',
       kind: 'normal',
+      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
       lines: [
         { accountId: 'res', side: 'debit', amount: 5000 },
         { accountId: 'cash', side: 'credit', amount: 5000 },
@@ -234,6 +238,7 @@ describe('reversalInput', () => {
     date: '2026-06-01',
     description: 'クレジットで食費',
     kind: 'normal',
+    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     lines: [
       { accountId: 'food', side: 'debit', amount: 1000 },
       { accountId: 'card', side: 'credit', amount: 1000 },
@@ -275,25 +280,27 @@ describe('reversalInput', () => {
   });
 });
 
-describe('reversalInput はタグを引き継ぐ', () => {
-  it('全体タグを引き継ぎ、明細タグは借方/貸方の入れ替えに合わせる', () => {
+describe('reversalInput は仕訳全体タグ・管理区分・支払い手段を引き継ぐ', () => {
+  it('全体タグ・管理区分を引き継ぎ、支払い手段は借方/貸方の入れ替えに合わせる', () => {
     const source: JournalEntry = {
       id: 's',
       date: '2026-06-01',
       description: '旅行',
       kind: 'normal',
+      managementScopeId: 'scope-x',
       tagIds: ['trip'],
       lines: [
-        { accountId: 'food', side: 'debit', amount: 1000, tagIds: ['cat'] },
-        { accountId: 'cash', side: 'credit', amount: 1000, tagIds: ['pay'] },
+        { accountId: 'food', side: 'debit', amount: 1000, instrumentId: 'inst-food' },
+        { accountId: 'cash', side: 'credit', amount: 1000, instrumentId: 'inst-pay' },
       ],
       createdAt: 'x',
       updatedAt: 'x',
     };
     const input = reversalInput(source);
     expect(input.tagIds).toEqual(['trip']);
-    // 元の貸方(pay)が新しい借方、元の借方(cat)が新しい貸方
-    expect(input.debitTagIds).toEqual(['pay']);
-    expect(input.creditTagIds).toEqual(['cat']);
+    expect(input.managementScopeId).toBe('scope-x');
+    // 元の貸方(inst-pay)が新しい借方、元の借方(inst-food)が新しい貸方
+    expect(input.debitInstrumentId).toBe('inst-pay');
+    expect(input.creditInstrumentId).toBe('inst-food');
   });
 });

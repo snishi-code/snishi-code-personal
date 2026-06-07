@@ -14,5 +14,13 @@ export const APP_ID = 'snishi-code.simple-ledger' as const;
  *           （既存データの構造変更はなし＝恒等移行）。
  *  v9 → v10: AccountRole に fixed-asset（固定資産）を追加 + MonthlyCostItem に任意フィールド
  *            （recognitionCreditAccountId / sourceEntryId）。許容値・任意項目が増えるため版を上げる
- *            （既存データの構造変更はなし＝恒等移行）。 */
-export const SCHEMA_VERSION = 10 as const;
+ *            （既存データの構造変更はなし＝恒等移行）。
+ *  v10 → v11: 管理区分（managementScopes）と支払い手段の細目（accountInstruments）を追加。
+ *             仕訳・予定CF・月額化コストに managementScopeId を必須化（既存は『個人用』へ寄せる）。
+ *             タグは「仕訳全体のみ」に再設計（明細タグ JournalLine.tagIds / 予定CFの明細タグ /
+ *             tag.scope の line・both を廃止）。JournalLine に任意の instrumentId を追加。 */
+export const SCHEMA_VERSION = 11 as const;
+
+/** 既定の管理区分（『個人用』）。seed と migration で同じ id を使い、既存データを寄せる。 */
+export const DEFAULT_MANAGEMENT_SCOPE_ID = 'scope-personal' as const;
+export const DEFAULT_MANAGEMENT_SCOPE_NAME = '個人用' as const;

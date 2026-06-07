@@ -10,6 +10,7 @@
  */
 import { newId } from './ids';
 import { nowIso } from '../util/time';
+import { DEFAULT_MANAGEMENT_SCOPE_ID } from './constants';
 import type { AllocationItem, JournalEntry } from './types';
 
 /** total を months で割り、端数を先頭月から 1 ずつ配って合計を total に一致させる。 */
@@ -64,6 +65,8 @@ export interface AllocationInput {
   expenseAccountId: string;
   paymentAccountId: string;
   deferredAccountId: string;
+  /** 生成仕訳に付く管理区分。未指定なら既定（個人用）。 */
+  managementScopeId?: string;
 }
 
 export type AllocationValidationError =
@@ -102,12 +105,14 @@ export function buildAllocation(input: AllocationInput): BuiltAllocation {
   const amounts = monthlyAmounts(input.totalAmount, input.months);
   const allocationId = newId();
   const description = input.description.trim();
+  const managementScopeId = input.managementScopeId ?? DEFAULT_MANAGEMENT_SCOPE_ID;
 
   const sourceEntry: JournalEntry = {
     id: newId(),
     date: input.date,
     description,
     kind: 'normal',
+    managementScopeId,
     lines: [
       { accountId: input.deferredAccountId, side: 'debit', amount: input.totalAmount },
       { accountId: input.paymentAccountId, side: 'credit', amount: input.totalAmount },
@@ -122,6 +127,7 @@ export function buildAllocation(input: AllocationInput): BuiltAllocation {
     date: `${addMonths(startMonth, i)}-01`,
     description: `${description}（按分 ${i + 1}/${input.months}）`,
     kind: 'normal',
+    managementScopeId,
     lines: [
       { accountId: input.expenseAccountId, side: 'debit', amount },
       { accountId: input.deferredAccountId, side: 'credit', amount },

@@ -5,6 +5,7 @@
  */
 import { newId } from './ids';
 import { nowIso } from '../util/time';
+import { DEFAULT_MANAGEMENT_SCOPE_ID } from './constants';
 import type { AdjustmentKind, AdjustmentMeta, JournalEntry } from './types';
 
 /** 補正の相手科目の既定名（初回利用時に作成/再利用）。 */
@@ -46,6 +47,8 @@ export interface AdjustmentInput {
   actualBalance: number;
   /** 相手科目 ID（repository が役割に応じて選定/作成して渡す）。 */
   counterpartAccountId: string;
+  /** どの管理区分の補正か。未指定なら既定（個人用）。 */
+  managementScopeId?: string;
 }
 
 /**
@@ -95,6 +98,7 @@ export function buildAdjustmentEntry(input: AdjustmentInput): JournalEntry | nul
     date: input.date,
     description: input.description.trim() || '残高補正',
     kind: 'normal',
+    managementScopeId: input.managementScopeId ?? DEFAULT_MANAGEMENT_SCOPE_ID,
     lines: [
       { accountId: debit, side: 'debit', amount },
       { accountId: credit, side: 'credit', amount },

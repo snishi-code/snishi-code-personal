@@ -12,6 +12,7 @@ const validEntry = {
   date: '2026-06-01',
   description: 'ランチ',
   kind: 'normal',
+  managementScopeId: 'scope-personal',
   lines: [
     { accountId: 'a', side: 'debit', amount: 1000 },
     { accountId: 'b', side: 'credit', amount: 1000 },
@@ -69,6 +70,10 @@ describe('ledgerExportPackageSchema', () => {
     deviceId: 'dev1',
     baseRevision: 0,
     currentRevision: 0,
+    managementScopes: [
+      { id: 'scope-personal', name: '個人用', archived: false, createdAt: 'x', updatedAt: 'x' },
+    ],
+    accountInstruments: [],
     accounts: [
       {
         id: 'a',
@@ -170,6 +175,10 @@ describe('entry metadata / allocationPlan', () => {
       deviceId: 'd',
       baseRevision: 0,
       currentRevision: 0,
+      managementScopes: [
+        { id: 'scope-personal', name: '個人用', archived: false, createdAt: 'x', updatedAt: 'x' },
+      ],
+      accountInstruments: [],
       accounts: [
         {
           id: 'a',
@@ -243,6 +252,10 @@ describe('allocationPlan の参照整合性（package 検証）', () => {
       deviceId: 'd',
       baseRevision: 0,
       currentRevision: 0,
+      managementScopes: [
+        { id: 'scope-personal', name: '個人用', archived: false, createdAt: 'x', updatedAt: 'x' },
+      ],
+      accountInstruments: [],
       accounts: [
         {
           id: 'a',
@@ -325,6 +338,10 @@ describe('按分(allocations) の深い整合性検証（package）', () => {
       deviceId: 'd',
       baseRevision: 0,
       currentRevision: 0,
+      managementScopes: [
+        { id: 'scope-personal', name: '個人用', archived: false, createdAt: 'x', updatedAt: 'x' },
+      ],
+      accountInstruments: [],
       accounts: [
         {
           id: 'exp',
@@ -506,6 +523,10 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
       deviceId: 'd',
       baseRevision: 0,
       currentRevision: 0,
+      managementScopes: [
+        { id: 'scope-personal', name: '個人用', archived: false, createdAt: 'x', updatedAt: 'x' },
+      ],
+      accountInstruments: [],
       accounts: [bank, card, reserveAcc],
       journalEntries: [],
       allocations: [],
@@ -520,6 +541,7 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
           counterAccountId: 'card',
           source: 'credit-card',
           status: 'planned',
+          managementScopeId: 'scope-personal',
           createdAt: 'x',
           updatedAt: 'x',
         },
@@ -603,6 +625,7 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
           date: '2026-06-01',
           description: '混入',
           kind: 'normal',
+          managementScopeId: 'scope-personal',
           lines: [
             { accountId: 'bank', side: 'debit', amount: 100 },
             { accountId: 'card', side: 'credit', amount: 100 },
@@ -636,6 +659,10 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
       deviceId: 'd',
       baseRevision: 0,
       currentRevision: 0,
+      managementScopes: [
+        { id: 'scope-personal', name: '個人用', archived: false, createdAt: 'x', updatedAt: 'x' },
+      ],
+      accountInstruments: [],
       accounts: [acc('food', 'expense'), acc('cash', 'asset')],
       journalEntries: [
         {
@@ -643,9 +670,10 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
           date: '2026-06-01',
           description: 'x',
           kind: 'normal',
+          managementScopeId: 'scope-personal',
           tagIds: ['trip'],
           lines: [
-            { accountId: 'food', side: 'debit', amount: 1000, tagIds: ['card'] },
+            { accountId: 'food', side: 'debit', amount: 1000 },
             { accountId: 'cash', side: 'credit', amount: 1000 },
           ],
           createdAt: 'x',
@@ -664,14 +692,6 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
           createdAt: 'x',
           updatedAt: 'x',
         },
-        {
-          id: 'card',
-          name: 'カード',
-          scope: 'line',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
       ],
       monthlyCostItems: [],
       fundingGoals: [],
@@ -680,28 +700,8 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
     };
   }
 
-  it('scope 通りのタグ付けは valid', () => {
+  it('仕訳全体タグの付与は valid', () => {
     expect(ledgerExportPackageSchema.safeParse(tagPkg()).success).toBe(true);
-  });
-  it('全体タグ欄に明細専用タグを使うと invalid', () => {
-    const bad = tagPkg({
-      journalEntries: [
-        {
-          id: 'e1',
-          date: '2026-06-01',
-          description: 'x',
-          kind: 'normal',
-          tagIds: ['card'], // card は scope:line
-          lines: [
-            { accountId: 'food', side: 'debit', amount: 1000 },
-            { accountId: 'cash', side: 'credit', amount: 1000 },
-          ],
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-    });
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
   });
   it('存在しないタグ参照は invalid', () => {
     const bad = tagPkg({
@@ -711,6 +711,7 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
           date: '2026-06-01',
           description: 'x',
           kind: 'normal',
+          managementScopeId: 'scope-personal',
           tagIds: ['nope'],
           lines: [
             { accountId: 'food', side: 'debit', amount: 1000 },
@@ -728,14 +729,6 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
       tags: [
         { id: 't1', name: '旅行', scope: 'entry', archived: false, createdAt: 'x', updatedAt: 'x' },
         { id: 't2', name: '旅行', scope: 'entry', archived: false, createdAt: 'x', updatedAt: 'x' },
-        {
-          id: 'card',
-          name: 'カード',
-          scope: 'line',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
       ],
       journalEntries: [],
     });
@@ -771,6 +764,10 @@ describe('月額化コスト(monthlyCostItems) の参照・role 検証（package
       deviceId: 'd',
       baseRevision: 0,
       currentRevision: 0,
+      managementScopes: [
+        { id: 'scope-personal', name: '個人用', archived: false, createdAt: 'x', updatedAt: 'x' },
+      ],
+      accountInstruments: [],
       accounts: [cash, food],
       journalEntries: [],
       allocations: [],
@@ -785,6 +782,7 @@ describe('月額化コスト(monthlyCostItems) の参照・role 検証（package
   const base = {
     id: 'm1',
     name: 'Netflix',
+    managementScopeId: 'scope-personal',
     kind: 'subscription',
     amount: 1500,
     costMonths: 1,
@@ -823,6 +821,7 @@ describe('月額化コスト(monthlyCostItems) の参照・role 検証（package
         date: '2026-06-01',
         description: '購入',
         kind: 'normal',
+        managementScopeId: 'scope-personal',
         lines: [
           { accountId: 'food', side: 'debit', amount: 100 },
           { accountId: 'cash', side: 'credit', amount: 100 },
@@ -847,6 +846,7 @@ describe('月額化コスト(monthlyCostItems) の参照・role 検証（package
         counterAccountId: 'cash',
         source: 'installment',
         status: 'planned',
+        managementScopeId: 'scope-personal',
         monthlyCostId: 'nope',
         createdAt: 'x',
         updatedAt: 'x',

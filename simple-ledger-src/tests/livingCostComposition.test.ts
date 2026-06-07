@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { deriveProfitAndLoss } from '../src/domain/accounting';
 import { monthlyCostForMonth } from '../src/domain/monthlyCost';
 import { buildRepaymentSchedules } from '../src/domain/cashflow';
+import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
 import type { Account, JournalEntry, MonthlyCostItem } from '../src/domain/types';
 
 function acc(id: string, role: Account['role'], type: Account['type']): Account {
@@ -24,6 +25,7 @@ function entry(
     date,
     description: id,
     kind: 'normal',
+    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     lines: [
       { accountId: debit, side: 'debit', amount },
       { accountId: credit, side: 'credit', amount },
@@ -58,6 +60,7 @@ describe('生活コストの二重計上防止（PL 費用の構成）', () => {
     const car: MonthlyCostItem = {
       id: 'm',
       name: '自動車',
+      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
       kind: 'durable-asset',
       amount: 3_000_000,
       costMonths: 120,
@@ -80,6 +83,7 @@ describe('生活コストの二重計上防止（PL 費用の構成）', () => {
       firstDueDate: '2031-08-10',
       fromAccountId: 'cash',
       liabilityAccountId: 'loan',
+      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     });
     expect(repay).toHaveLength(60);
     // 返済は仕訳ではなく予定。PL には現れない（上の totalExpense=1000 が示す）。

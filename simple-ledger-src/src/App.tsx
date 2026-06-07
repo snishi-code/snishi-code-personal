@@ -14,6 +14,7 @@ import { Cashflow } from './ui/screens/Cashflow';
 import { Tags } from './ui/screens/Tags';
 import { Adjustments } from './ui/screens/Adjustments';
 import { Accounts } from './ui/screens/Accounts';
+import { Wallets } from './ui/screens/Wallets';
 import { Settings } from './ui/screens/Settings';
 import { Help } from './ui/screens/Help';
 import { EntrySheet, type EntryInit } from './ui/screens/EntrySheet';
@@ -148,6 +149,7 @@ export function App() {
         {screen === 'tags' ? <Tags /> : null}
         {screen === 'adjustments' ? <Adjustments /> : null}
         {screen === 'accounts' ? <Accounts /> : null}
+        {screen === 'wallets' ? <Wallets /> : null}
         {screen === 'settings' ? <Settings onNavigate={setScreen} /> : null}
       </main>
 

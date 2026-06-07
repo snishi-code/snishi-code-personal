@@ -6,10 +6,12 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from 'react';
 import type {
   Account,
+  AccountInstrument,
   AdjustmentKind,
   CashflowSchedule,
   FundingGoal,
   Ledger,
+  ManagementScope,
   MonthlyCostItem,
   ReserveItem,
   Settings,
@@ -19,7 +21,9 @@ import type {
 import { buildSimpleEntry, type SimpleEntryInput } from '../domain/entry';
 import type { AllocationInput } from '../domain/allocation';
 import * as repo from '../data/repository';
+import { isDefaultSeedAccounts, isDefaultSettings } from '../data/seed';
 import type {
+  AccountInstrumentInput,
   FixedAssetMonthlyInput,
   FundingGoalInput,
   MonthlyCostInput,
@@ -45,8 +49,11 @@ function sampleFixtureRequested(): boolean {
   }
 }
 
-/** ユーザーデータが一切無い（既定科目だけの初期状態）か。フィクスチャ投入の安全判定に使う。 */
-function isEmptyLedger(l: Ledger): boolean {
+/**
+ * 完全に初期 seed 状態か（ユーザーデータ皆無 + 既定科目・既定設定そのまま）。
+ * フィクスチャ投入の安全判定に使う。科目だけ整理した／設定を変えた台帳は上書きしない。
+ */
+function isPristineSeedLedger(l: Ledger): boolean {
   return (
     l.journalEntries.length === 0 &&
     l.allocations.length === 0 &&
@@ -54,7 +61,9 @@ function isEmptyLedger(l: Ledger): boolean {
     l.reserves.length === 0 &&
     l.monthlyCostItems.length === 0 &&
     l.fundingGoals.length === 0 &&
-    l.tags.length === 0
+    l.tags.length === 0 &&
+    isDefaultSettings(l.settings) &&
+    isDefaultSeedAccounts(l.accounts)
   );
 }
 
@@ -96,6 +105,12 @@ interface LedgerContextValue {
   removeReserve: (id: string) => Promise<void>;
   saveTag: (tag: Tag) => Promise<void>;
   removeTag: (id: string) => Promise<void>;
+  createManagementScope: (name: string) => Promise<ManagementScope>;
+  saveManagementScope: (scope: ManagementScope) => Promise<void>;
+  removeManagementScope: (id: string) => Promise<void>;
+  createAccountInstrument: (input: AccountInstrumentInput) => Promise<AccountInstrument>;
+  saveAccountInstrument: (instrument: AccountInstrument) => Promise<void>;
+  removeAccountInstrument: (id: string) => Promise<void>;
   createAdjustment: (input: {
     kind: AdjustmentKind;
     accountId: string;
@@ -133,9 +148,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     (async () => {
       try {
         let next = await repo.loadLedger();
-        // 手動テスト用: `?fixture=sample` かつ空DBのときだけサンプルデータを投入する。
-        // 本番通常起動や、既にユーザーデータがあるDBには投入しない（上書きしない）。外部送信なし。
-        if (sampleFixtureRequested() && isEmptyLedger(next)) {
+        // 手動テスト用: `?fixture=sample` かつ「完全な初期 seed 状態」のときだけサンプルを投入する。
+        // 本番通常起動や、科目/設定を編集済み・ユーザーデータありのDBには投入しない（上書きしない）。外部送信なし。
+        if (sampleFixtureRequested() && isPristineSeedLedger(next)) {
           next = await loadSampleFixture();
         }
         if (active) {
@@ -413,6 +428,92 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [refresh, toast],
   );
 
+  const createManagementScope = useCallback<LedgerContextValue['createManagementScope']>(
+    async (name) => {
+      try {
+        const scope = await repo.createManagementScope(name);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+        return scope;
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const saveManagementScope = useCallback<LedgerContextValue['saveManagementScope']>(
+    async (scope) => {
+      try {
+        await repo.upsertManagementScope(scope);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const removeManagementScope = useCallback<LedgerContextValue['removeManagementScope']>(
+    async (id) => {
+      try {
+        await repo.deleteManagementScope(id);
+        await refresh();
+        toast.show(t('toast.deleted'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const createAccountInstrument = useCallback<LedgerContextValue['createAccountInstrument']>(
+    async (input) => {
+      try {
+        const inst = await repo.createAccountInstrument(input);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+        return inst;
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const saveAccountInstrument = useCallback<LedgerContextValue['saveAccountInstrument']>(
+    async (instrument) => {
+      try {
+        await repo.upsertAccountInstrument(instrument);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const removeAccountInstrument = useCallback<LedgerContextValue['removeAccountInstrument']>(
+    async (id) => {
+      try {
+        await repo.deleteAccountInstrument(id);
+        await refresh();
+        toast.show(t('toast.deleted'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
   const createAdjustment = useCallback<LedgerContextValue['createAdjustment']>(
     async (input) => {
       try {
@@ -565,6 +666,12 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       removeReserve,
       saveTag,
       removeTag,
+      createManagementScope,
+      saveManagementScope,
+      removeManagementScope,
+      createAccountInstrument,
+      saveAccountInstrument,
+      removeAccountInstrument,
       createAdjustment,
       saveAccount,
       removeAccount,
@@ -599,6 +706,12 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       removeReserve,
       saveTag,
       removeTag,
+      createManagementScope,
+      saveManagementScope,
+      removeManagementScope,
+      createAccountInstrument,
+      saveAccountInstrument,
+      removeAccountInstrument,
       createAdjustment,
       saveAccount,
       removeAccount,

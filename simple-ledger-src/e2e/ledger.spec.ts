@@ -278,6 +278,18 @@ test('タグ: 作成 → 支出に付与 → Journal で抽出できる', async 
   await expect(page.locator(ui('journal.entry.list'))).toContainText('旅行の食事');
 });
 
+test('管理区分・支払い手段: 細目を追加できる', async ({ page }) => {
+  await page.goto('./');
+  await openManagement(page, 'wallets');
+  await expect(page.locator(ui('wallets.view'))).toBeVisible();
+
+  // 支払い手段の細目を 1 件追加（親科目=現金 など既定の資産）。
+  await page.locator(ui('wallets.instrument.create')).click();
+  await page.locator(ui('wallets.instrument.name')).fill('楽天カード');
+  await page.locator(ui('wallets.instrument.save')).click();
+  await expect(page.locator(ui('wallets.instrument.list'))).toContainText('楽天カード');
+});
+
 test('残高補正: 実残高を入力すると補正仕訳ができる', async ({ page }) => {
   await page.goto('./');
   await openManagement(page, 'adjustments');

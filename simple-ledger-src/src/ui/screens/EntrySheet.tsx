@@ -11,14 +11,15 @@
 import { useRef, useState } from 'react';
 import { Modal } from '../Modal';
 import { useDirtyGuard } from '../useDirtyGuard';
-import { TextArea, TextInput } from '../Field';
+import { SelectInput, TextArea, TextInput } from '../Field';
 import { AccountPicker } from '../AccountPicker';
 import { TagPicker } from '../TagPicker';
 import { ReserveSheet } from '../ReserveSheet';
 import { LiabilitySheet } from '../LiabilitySheet';
 import { groupedAccountsByRole } from '../accountOptions';
 import type { AccountRole } from '../../domain/accountRoles';
-import { tagsForScope } from '../tagOptions';
+import { tagsForEntry } from '../tagOptions';
+import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../../domain/constants';
 import {
   FORM_MODE_TITLE,
   MODE_FLOW,
@@ -87,6 +88,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   } = useLedger();
   const accounts = ledger?.accounts ?? [];
   const tags = ledger?.tags ?? [];
+  const scopes = ledger?.managementScopes ?? [];
+  const instruments = ledger?.accountInstruments ?? [];
 
   const [mode, setMode] = useState<FormMode>(
     init.kind === 'create'
@@ -307,6 +310,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             firstDueDate: repayStartDate || toSave.date,
             fromAccountId: repayAccountId,
             liabilityAccountId: toSave.creditAccountId,
+            managementScopeId: toSave.managementScopeId ?? DEFAULT_MANAGEMENT_SCOPE_ID,
           });
           await saveEntryWithSchedules(entryInput, schedules);
         } else {
@@ -375,7 +379,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     <TagPicker
       label={t('entry.tags')}
       hint={t('entry.tagsHint')}
-      tags={tagsForScope(tags, 'entry', form.tagIds ?? [])}
+      tags={tagsForEntry(tags, form.tagIds ?? [])}
       value={form.tagIds ?? []}
       onChange={(ids) => setForm((f) => ({ ...f, tagIds: ids }))}
       dataUi={UI.journal.entry.tags}
@@ -390,6 +394,46 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       dataUi={UI.journal.entry.memo}
     />
   );
+
+  // 管理区分は 2 つ以上あるときだけ選ばせる（1 つなら既定で隠す）。
+  const currentScopeId = form.managementScopeId ?? scopes[0]?.id;
+  const scopeField =
+    scopes.length > 1 ? (
+      <SelectInput
+        label={t('entry.managementScope')}
+        value={currentScopeId ?? ''}
+        onChange={(id) => setForm((f) => ({ ...f, managementScopeId: id }))}
+        options={scopes.map((s) => ({ value: s.id, label: s.name }))}
+      />
+    ) : null;
+
+  // 明細の支払い手段の細目（その科目・管理区分に細目が登録されているときだけ出す）。
+  const renderInstrument = (side: 'debit' | 'credit') => {
+    const accId = side === 'debit' ? form.debitAccountId : form.creditAccountId;
+    if (!accId) return null;
+    const opts = instruments.filter(
+      (i) => i.accountId === accId && i.managementScopeId === currentScopeId && !i.archived,
+    );
+    if (opts.length === 0) return null;
+    const accName = accounts.find((a) => a.id === accId)?.name ?? '';
+    const value = (side === 'debit' ? form.debitInstrumentId : form.creditInstrumentId) ?? '';
+    return (
+      <SelectInput
+        label={`${t('entry.instrument')}: ${accName}`}
+        value={value}
+        onChange={(id) =>
+          setForm((f) => ({
+            ...f,
+            [side === 'debit' ? 'debitInstrumentId' : 'creditInstrumentId']: id || undefined,
+          }))
+        }
+        options={[
+          { value: '', label: t('entry.instrumentNone') },
+          ...opts.map((i) => ({ value: i.id, label: i.name })),
+        ]}
+      />
+    );
+  };
 
   const renderAccountPicker = (role: (typeof roles)[number]) => {
     const value = role.side === 'debit' ? form.debitAccountId : form.creditAccountId;
@@ -463,31 +507,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           </div>
         </div>
       </div>
-    );
-  };
-
-  const renderLineTags = (role: (typeof roles)[number]) => {
-    if (allocationActive) return null;
-    const lineTagValue = (role.side === 'debit' ? form.debitTagIds : form.creditTagIds) ?? [];
-    const lineTagLabel =
-      mode === 'expense' && role.side === 'credit'
-        ? t('entry.paymentTags')
-        : role.side === 'debit'
-          ? t('entry.debitTags')
-          : t('entry.creditTags');
-    return (
-      <TagPicker
-        label={lineTagLabel}
-        tags={tagsForScope(tags, 'line', lineTagValue)}
-        value={lineTagValue}
-        onChange={(ids) =>
-          setForm((f) => ({
-            ...f,
-            [role.side === 'debit' ? 'debitTagIds' : 'creditTagIds']: ids,
-          }))
-        }
-        dataUi={role.side === 'debit' ? UI.journal.entry.debitTags : UI.journal.entry.creditTags}
-      />
     );
   };
 
@@ -823,11 +842,12 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           <>
             {dateField}
             {descriptionField}
+            {scopeField}
             {entryTagsField}
             {roles.map((role) => (
               <div key={role.side}>
                 {renderAccountPicker(role)}
-                {renderLineTags(role)}
+                {renderInstrument(role.side)}
               </div>
             ))}
             {amountField}
@@ -864,9 +884,10 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                     {/* 振替では「項目」を任意としてここに置く。 */}
                     {mode === 'transfer' ? itemField : null}
                     {memoField}
+                    {scopeField}
                     {entryTagsField}
                     {roles.map((role) => (
-                      <div key={role.side}>{renderLineTags(role)}</div>
+                      <div key={role.side}>{renderInstrument(role.side)}</div>
                     ))}
                   </div>
                 ) : null}
