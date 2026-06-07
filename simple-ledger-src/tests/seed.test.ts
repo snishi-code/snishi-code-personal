@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { defaultAccounts, defaultSettings } from '../src/data/seed';
+import {
+  defaultAccounts,
+  defaultSettings,
+  isDefaultSeedAccounts,
+  isDefaultSettings,
+} from '../src/data/seed';
 import { roleAllowsType } from '../src/domain/accountRoles';
 import { ledgerExportPackageSchema } from '../src/domain/schema';
 import sample from '../src/data/sample.json';
@@ -21,6 +26,36 @@ describe('初期設定 JSON（seed.json）', () => {
     expect(s.locale).toBe('ja');
     expect(s.currency).toBe('JPY');
     expect(s.ledgerName.length).toBeGreaterThan(0);
+  });
+});
+
+describe('fixture 投入の安全判定（初期 seed そのまま判定）', () => {
+  it('既定科目そのままなら isDefaultSeedAccounts は true', () => {
+    expect(isDefaultSeedAccounts(defaultAccounts())).toBe(true);
+  });
+
+  it('科目名の変更だけでも false（科目を整理した台帳を上書きしない）', () => {
+    const accounts = defaultAccounts();
+    accounts[0] = { ...accounts[0]!, name: 'メイン口座' };
+    expect(isDefaultSeedAccounts(accounts)).toBe(false);
+  });
+
+  it('科目の追加だけでも false', () => {
+    const accounts = defaultAccounts();
+    accounts.push({ ...accounts[0]!, name: '臨時口座' });
+    expect(isDefaultSeedAccounts(accounts)).toBe(false);
+  });
+
+  it('科目の削除（archived 化）でも false', () => {
+    const accounts = defaultAccounts();
+    accounts[0] = { ...accounts[0]!, archived: true };
+    expect(isDefaultSeedAccounts(accounts)).toBe(false);
+  });
+
+  it('既定設定そのままなら isDefaultSettings は true、変更で false', () => {
+    expect(isDefaultSettings(defaultSettings())).toBe(true);
+    expect(isDefaultSettings({ ...defaultSettings(), ledgerName: 'わが家の家計' })).toBe(false);
+    expect(isDefaultSettings({ ...defaultSettings(), expectedAnnualReturnBps: 300 })).toBe(false);
   });
 });
 

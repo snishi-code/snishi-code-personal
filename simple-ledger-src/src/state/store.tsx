@@ -19,6 +19,7 @@ import type {
 import { buildSimpleEntry, type SimpleEntryInput } from '../domain/entry';
 import type { AllocationInput } from '../domain/allocation';
 import * as repo from '../data/repository';
+import { isDefaultSeedAccounts, isDefaultSettings } from '../data/seed';
 import type {
   FixedAssetMonthlyInput,
   FundingGoalInput,
@@ -45,8 +46,11 @@ function sampleFixtureRequested(): boolean {
   }
 }
 
-/** ユーザーデータが一切無い（既定科目だけの初期状態）か。フィクスチャ投入の安全判定に使う。 */
-function isEmptyLedger(l: Ledger): boolean {
+/**
+ * 完全に初期 seed 状態か（ユーザーデータ皆無 + 既定科目・既定設定そのまま）。
+ * フィクスチャ投入の安全判定に使う。科目だけ整理した／設定を変えた台帳は上書きしない。
+ */
+function isPristineSeedLedger(l: Ledger): boolean {
   return (
     l.journalEntries.length === 0 &&
     l.allocations.length === 0 &&
@@ -54,7 +58,9 @@ function isEmptyLedger(l: Ledger): boolean {
     l.reserves.length === 0 &&
     l.monthlyCostItems.length === 0 &&
     l.fundingGoals.length === 0 &&
-    l.tags.length === 0
+    l.tags.length === 0 &&
+    isDefaultSettings(l.settings) &&
+    isDefaultSeedAccounts(l.accounts)
   );
 }
 
@@ -133,9 +139,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     (async () => {
       try {
         let next = await repo.loadLedger();
-        // 手動テスト用: `?fixture=sample` かつ空DBのときだけサンプルデータを投入する。
-        // 本番通常起動や、既にユーザーデータがあるDBには投入しない（上書きしない）。外部送信なし。
-        if (sampleFixtureRequested() && isEmptyLedger(next)) {
+        // 手動テスト用: `?fixture=sample` かつ「完全な初期 seed 状態」のときだけサンプルを投入する。
+        // 本番通常起動や、科目/設定を編集済み・ユーザーデータありのDBには投入しない（上書きしない）。外部送信なし。
+        if (sampleFixtureRequested() && isPristineSeedLedger(next)) {
           next = await loadSampleFixture();
         }
         if (active) {
