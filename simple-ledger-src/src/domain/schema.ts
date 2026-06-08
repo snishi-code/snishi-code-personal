@@ -689,6 +689,36 @@ export const ledgerExportPackageSchema = z
           );
       }
 
+      // 資産経由モデルの支払い元(資産化の貸方): 任意。あれば daily-asset または payment-liability。
+      if (mc.paymentSourceAccountId !== undefined) {
+        const srcRole = accountRole.get(mc.paymentSourceAccountId);
+        if (!accountType.has(mc.paymentSourceAccountId))
+          issue(
+            `継続コスト「${mc.name}」の paymentSourceAccountId が存在しません`,
+            at('paymentSourceAccountId'),
+          );
+        else if (srcRole !== 'daily-asset' && srcRole !== 'payment-liability')
+          issue(
+            `継続コスト「${mc.name}」の paymentSourceAccountId は日常資産または支払用負債である必要があります`,
+            at('paymentSourceAccountId'),
+          );
+      }
+
+      // 認識の貸方科目: 任意。あれば継続コスト対象資産(continuing-cost-asset)か固定資産(fixed-asset)。
+      if (mc.recognitionCreditAccountId !== undefined) {
+        const recRole = accountRole.get(mc.recognitionCreditAccountId);
+        if (!accountType.has(mc.recognitionCreditAccountId))
+          issue(
+            `継続コスト「${mc.name}」の recognitionCreditAccountId が存在しません`,
+            at('recognitionCreditAccountId'),
+          );
+        else if (recRole !== 'continuing-cost-asset' && recRole !== 'fixed-asset')
+          issue(
+            `継続コスト「${mc.name}」の recognitionCreditAccountId は継続コスト対象資産または固定資産である必要があります`,
+            at('recognitionCreditAccountId'),
+          );
+      }
+
       // 返済口座: 任意。あれば daily-asset。
       if (mc.repaymentAccountId !== undefined) {
         if (!accountType.has(mc.repaymentAccountId))

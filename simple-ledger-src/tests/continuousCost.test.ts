@@ -112,16 +112,23 @@ describe('continuousCost 仮想展開', () => {
     expect(accountBalance('washer', 'asset', es)).toBe(0);
   });
 
-  it('status!==active / 支払い元欠落 / 非対象 は展開しない', () => {
-    expect(
-      continuousCostEntriesForItem(item({ status: 'paused' }), byId, '2031-12-31'),
-    ).toHaveLength(0);
+  it('支払い元欠落 / 非対象 は展開しない', () => {
     expect(
       continuousCostEntriesForItem(item({ paymentSourceAccountId: undefined }), byId, '2031-12-31'),
     ).toHaveLength(0);
     expect(
       continuousCostEntriesForItem(item({ recognitionCreditAccountId: 'car' }), byId, '2031-12-31'),
     ).toHaveLength(0);
+  });
+
+  it('一時停止/終了（paused/ended）は status では過去を消さず、endMonth までで未来を止める', () => {
+    // status だけでは [] にしない（過去保持）。endMonth で停止する。
+    const paused = item({ status: 'paused', endMonth: '2031-02' });
+    const es = continuousCostEntriesForItem(paused, byId, '2031-12-31');
+    // 認識は endMonth(2031-02) まで = 2 件（1月・2月）、未来は止まる。
+    expect(es.filter((e) => e.metadata?.ccKind === 'recognition')).toHaveLength(2);
+    // 過去は保持: 資産 = 資産化 12,000 − 認識 2,000 = 10,000。
+    expect(accountBalance('youtube', 'asset', es)).toBe(10000);
   });
 
   it('entriesWithContinuousCost は実仕訳 + 仮想仕訳の連結', () => {

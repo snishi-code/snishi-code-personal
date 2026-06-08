@@ -34,7 +34,8 @@ export function continuousCostEntriesForItem(
   accountsById: Map<string, Account>,
   upTo: string,
 ): JournalEntry[] {
-  if (item.status !== 'active') return [];
+  // status だけで過去の資産化・認識を消さない（pause/ended は「未来を止める」＝ `endMonth` で表す）。
+  // 一時停止/終了は endMonth を立てて過去（<= endMonth）を保持し、未来サイクルだけ止める。
   if (!isContinuingCostItem(item, accountsById)) return [];
   const assetId = item.recognitionCreditAccountId;
   const payId = item.paymentSourceAccountId;

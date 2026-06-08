@@ -36,7 +36,8 @@ export function representativeMonthlyAmount(item: MonthlyCostItem): number {
  * 指定月 ym('YYYY-MM') にこの項目が生活コストへ寄与する額。寄与しない月は 0。
  */
 export function monthlyCostForMonth(item: MonthlyCostItem, ym: string): number {
-  if (item.status !== 'active') return 0;
+  // status だけで認識を消さない（過去を保持するため）。一時停止/終了は `endMonth` を立てて未来を止める。
+  // 認識の有無は startMonth/costMonths/repeat/endMonth のスケジュールだけで決める（engine と一致）。
   const since = monthsBetween(item.startMonth, ym);
   if (since < 0) return 0;
   if (item.endMonth && monthsBetween(ym, item.endMonth) < 0) return 0;

@@ -99,7 +99,9 @@ describe('migrateToCurrent', () => {
     expect(byId.card).toBe('payment-liability');
     expect(byId.food).toBe('expense-category');
   });
-  it('v6 → v7 で既存按分から月額化コストを生成する', () => {
+  it('v12 → v13（破壊的）: 旧モデルの継続コスト/按分の生成物をクリアし新モデルへ一本化する', () => {
+    // 旧按分 + 生成仕訳 + 月額化コスト + その返済CF を持つ v6 台帳を現行(v13)まで前進させると、
+    // v6→v7 で一旦生成された monthlyCostItems も含め、旧モデル由来は v13 ですべて落ちる。
     const v6 = pkg(6) as unknown as Record<string, unknown>;
     v6.allocations = [
       {
@@ -118,18 +120,44 @@ describe('migrateToCurrent', () => {
         updatedAt: 'x',
       },
     ];
+    v6.journalEntries = [
+      {
+        id: 'plain',
+        date: '2026-01-05',
+        description: '手入力支出',
+        kind: 'normal',
+        lines: [
+          { accountId: 'exp', side: 'debit', amount: 500 },
+          { accountId: 'pay', side: 'credit', amount: 500 },
+        ],
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+      {
+        id: 'gen',
+        date: '2026-01-06',
+        description: '生成（月額化の支払い）',
+        kind: 'normal',
+        metadata: { monthlyCostId: 'mc1' },
+        lines: [
+          { accountId: 'exp', side: 'debit', amount: 1000 },
+          { accountId: 'pay', side: 'credit', amount: 1000 },
+        ],
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+    ];
     const r = migrateToCurrent(v6 as unknown as LedgerExportPackage);
     expect(r.ok).toBe(true);
-    const mcs = r.data?.monthlyCostItems ?? [];
-    expect(mcs).toHaveLength(1);
-    expect(mcs[0]).toMatchObject({
-      name: 'ノートPC',
-      amount: 240000,
-      costMonths: 48,
-      startMonth: '2026-01',
-      sourceAllocationId: 'al1',
-      status: 'active',
-    });
+    expect(r.data?.schemaVersion).toBe(13);
+    // 旧モデルの登録簿は空に。
+    expect(r.data?.monthlyCostItems).toEqual([]);
+    expect(r.data?.allocations).toEqual([]);
+    expect(r.data?.assetDisposals).toEqual([]);
+    // 生成仕訳は落ち、手入力の通常仕訳は残る。
+    const ids = (r.data?.journalEntries ?? []).map((e) => e.id);
+    expect(ids).toContain('plain');
+    expect(ids).not.toContain('gen');
   });
   it('v7 → v8 で fundingGoals を空配列で補う', () => {
     const v7 = { ...pkg(7) } as Record<string, unknown>;

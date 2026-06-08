@@ -198,13 +198,30 @@ const STEPS: Step[] = [
     }),
   },
   {
-    // v12 → v13: 継続コストを資産経由モデルへ統一。AccountRole に continuing-cost-asset、
-    // MonthlyCostItem に任意 paymentSourceAccountId、EntryMetadata に continuousCostId/ccKind/virtual
-    // を追加（許容値・任意項目の拡張のみ）。既存データの構造は変えない＝恒等移行（version だけ前進）。
-    // 仮想仕訳は保存しない導出専用のため、移行で生成・変換するものはない。
+    // v12 → v13: 継続コストを資産経由モデルへ統一（AccountRole に continuing-cost-asset、
+    // MonthlyCostItem に任意 paymentSourceAccountId、EntryMetadata に continuousCostId/ccKind/virtual）。
+    // **破壊的（未実運用前提）**: 旧モデルの継続コスト/按分の生成物をクリアし、新モデルへ一本化する。
+    // これをしないと、集計が derivedEntries 前提に変わったため旧データが整合しない
+    // （旧 paymentAccountId 由来は実支払い月に全額費用化、旧固定資産由来は認識されない）。
+    // 生成仕訳（monthlyCostId / allocationId / allocationRole / assetDisposalId）と
+    // monthlyCostItems / allocations / assetDisposals を落とす（手入力の通常仕訳・科目は残す）。
     from: 12,
     to: 13,
-    migrate: (pkg) => pkg,
+    migrate: (pkg) => {
+      const journalEntries = pkg.journalEntries.filter((e) => {
+        const m = e.metadata;
+        return !m?.monthlyCostId && !m?.allocationId && !m?.allocationRole && !m?.assetDisposalId;
+      });
+      const cashflowSchedules = (pkg.cashflowSchedules ?? []).filter((s) => !s.monthlyCostId);
+      return {
+        ...pkg,
+        journalEntries,
+        cashflowSchedules,
+        monthlyCostItems: [],
+        allocations: [],
+        assetDisposals: [],
+      };
+    },
   },
 ];
 

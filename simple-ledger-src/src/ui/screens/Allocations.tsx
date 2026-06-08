@@ -52,8 +52,20 @@ export function Allocations() {
   );
 
   async function togglePause(item: MonthlyCostItem) {
-    const next = item.status === 'active' ? 'paused' : 'active';
-    await saveMonthlyCost({ ...item, status: next, updatedAt: nowIso() }).catch(() => undefined);
+    if (item.status === 'active') {
+      // 一時停止 = 未来を止める。前月までを最後に認識し、過去の資産化・認識は保持する（endMonth で表す）。
+      await saveMonthlyCost({
+        ...item,
+        status: 'paused',
+        endMonth: addMonths(currentYm, -1),
+        updatedAt: nowIso(),
+      }).catch(() => undefined);
+    } else {
+      // 再開 = 未来を再び認識する（endMonth を外す）。
+      const next: MonthlyCostItem = { ...item, status: 'active', updatedAt: nowIso() };
+      delete next.endMonth;
+      await saveMonthlyCost(next).catch(() => undefined);
+    }
   }
 
   // 固定資産由来（購入仕訳 sourceEntryId + recognitionCreditAccountId が fixed-asset）かどうか。

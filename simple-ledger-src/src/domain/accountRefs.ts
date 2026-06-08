@@ -22,7 +22,16 @@ export interface AccountRefCollections {
 }
 
 function monthlyCostRefs(m: MonthlyCostItem): (string | undefined)[] {
-  return [m.expenseAccountId, m.paymentAccountId, m.repaymentAccountId];
+  // 資産経由モデルの paymentSourceAccountId（支払い元）/ recognitionCreditAccountId（継続コスト対象資産・
+  // 固定資産）も参照に含める。これらを参照中の科目は削除/区分変更を fail-closed にする
+  // （消すと仮想展開が壊れる）。
+  return [
+    m.expenseAccountId,
+    m.paymentSourceAccountId,
+    m.paymentAccountId,
+    m.repaymentAccountId,
+    m.recognitionCreditAccountId,
+  ];
 }
 
 export function isAccountReferenced(id: string, c: AccountRefCollections): boolean {
