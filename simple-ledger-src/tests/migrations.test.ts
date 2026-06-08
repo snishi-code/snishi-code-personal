@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { migrateToCurrent } from '../src/domain/migrations';
-import { SCHEMA_VERSION } from '../src/domain/constants';
+import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID, SCHEMA_VERSION } from '../src/domain/constants';
 import type { LedgerExportPackage } from '../src/domain/types';
 
 function pkg(version: number): LedgerExportPackage {
@@ -149,7 +149,7 @@ describe('migrateToCurrent', () => {
     ];
     const r = migrateToCurrent(v6 as unknown as LedgerExportPackage);
     expect(r.ok).toBe(true);
-    expect(r.data?.schemaVersion).toBe(13);
+    expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
     // 旧モデルの登録簿は空に。
     expect(r.data?.monthlyCostItems).toEqual([]);
     expect(r.data?.allocations).toEqual([]);
@@ -187,5 +187,94 @@ describe('migrateToCurrent', () => {
     expect(r.ok).toBe(true);
     expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
     expect(r.data?.assetDisposals).toEqual([]);
+  });
+  it('v13 → v14 で品目別 continuing-cost-asset 科目を集約台帳口座へ寄せる', () => {
+    const v13 = pkg(13) as unknown as Record<string, unknown>;
+    v13.accounts = [
+      {
+        id: 'pay',
+        name: '現金',
+        type: 'asset',
+        role: 'daily-asset',
+        archived: false,
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+      {
+        id: 'exp',
+        name: '変動費',
+        type: 'expense',
+        role: 'expense-category',
+        archived: false,
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+      // 旧モデルの品目別資産科目（2 件）。
+      {
+        id: 'cc-washer',
+        name: '洗濯機',
+        type: 'asset',
+        role: 'continuing-cost-asset',
+        archived: false,
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+      {
+        id: 'cc-youtube',
+        name: 'YouTube',
+        type: 'asset',
+        role: 'continuing-cost-asset',
+        archived: false,
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+    ];
+    v13.monthlyCostItems = [
+      {
+        id: 'm1',
+        name: '洗濯機',
+        managementScopeId: 'scope-personal',
+        kind: 'durable-asset',
+        amount: 240000,
+        costMonths: 84,
+        startMonth: '2026-01',
+        expenseAccountId: 'exp',
+        paymentSourceAccountId: 'pay',
+        recognitionCreditAccountId: 'cc-washer',
+        status: 'active',
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+      {
+        id: 'm2',
+        name: 'YouTube',
+        managementScopeId: 'scope-personal',
+        kind: 'subscription',
+        amount: 12000,
+        costMonths: 12,
+        startMonth: '2026-01',
+        expenseAccountId: 'exp',
+        paymentSourceAccountId: 'pay',
+        recognitionCreditAccountId: 'cc-youtube',
+        status: 'active',
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+    ];
+    const r = migrateToCurrent(v13 as unknown as LedgerExportPackage);
+    expect(r.ok).toBe(true);
+    expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
+    // 旧品目別科目は消え、集約口座が 1 件だけ。
+    const ccAccounts = (r.data?.accounts ?? []).filter((a) => a.role === 'continuing-cost-asset');
+    expect(ccAccounts).toHaveLength(1);
+    expect(ccAccounts[0]?.id).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+    expect((r.data?.accounts ?? []).some((a) => a.id === 'cc-washer')).toBe(false);
+    expect((r.data?.accounts ?? []).some((a) => a.id === 'cc-youtube')).toBe(false);
+    // 品目名は失われず、recognitionCreditAccountId は集約口座へ付け替わる。
+    const items = r.data?.monthlyCostItems ?? [];
+    expect(items.map((m) => m.name).sort()).toEqual(['YouTube', '洗濯機']);
+    expect(
+      items.every((m) => m.recognitionCreditAccountId === CONTINUOUS_COST_LEDGER_ACCOUNT_ID),
+    ).toBe(true);
   });
 });

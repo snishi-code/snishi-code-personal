@@ -516,10 +516,11 @@ export const ja = {
   'entry.ccToggle': '継続コスト化',
   'entry.ccBackToCategory': '通常のカテゴリに戻す',
   'entry.ccTargetName': '継続コスト対象の名前',
-  'entry.ccTargetNameHint': '台帳に登録する名前を入れます（例: 自動車 / 洗濯機 / 家賃）。',
+  'entry.ccTargetNameHint':
+    '継続コスト台帳に登録する項目名です（例: 自動車 / 洗濯機 / 家賃）。勘定科目は増えません。',
   'entry.ccCategory': '認識先カテゴリ（費用）',
   'entry.ccNote':
-    '支払い元 → 継続コスト対象（資産）に計上し、選んだ月数で費用カテゴリへ認識します。',
+    '支払い元 → 継続コスト台帳（資産）に計上し、選んだ月数で費用カテゴリへ認識します。台帳項目として記録され、勘定科目は増えません。',
   'entry.error.loanNotExpense':
     'ローン（その他負債）は通常の支出の支払い元にできません。継続コスト化するか、借入として振替で実行してください。',
   // 返済を資金繰りに入れるトグル ON 時の必須検証（口座・回数が無いと CF が作られないため fail closed）。
@@ -665,6 +666,7 @@ export const ja = {
   'accounts.role.deferred-asset': '継続コストの未認識分',
   'accounts.role.investment-asset': '投資資産',
   'accounts.role.fixed-asset': '固定資産（車・家財など）',
+  'accounts.role.continuing-cost-asset': '継続コスト台帳（内部集約）',
   'accounts.role.payment-liability': '支払用負債（クレジットカード等）',
   'accounts.role.other-liability': 'その他の負債（ローン等）',
   'accounts.role.equity': '純資産（元入金等）',

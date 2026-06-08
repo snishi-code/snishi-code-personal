@@ -49,8 +49,9 @@ export const ROLE_TYPES: Record<AccountRole, AccountType[]> = {
   'investment-asset': ['asset'],
   // 固定資産（車・家財など）。現金ではない asset。CF 総資金には含めない。
   'fixed-asset': ['asset'],
-  // 継続コスト対象（YouTube/洗濯機/家賃 等の品目別資産）。支払いを資産化し、認識で費消する。
-  // 通常入力候補に出さない・CF 総資金に含めない。
+  // 継続コストの集約台帳口座（『継続コスト台帳』・内部集約・自動・ユーザー選択不可）。
+  // 品目ごとに作らず単一口座へ未消化残高を寄せる。支払いを資産化し、認識で費消する。
+  // 通常入力候補・勘定科目管理 UI に出さない・CF 総資金に含めない。
   'continuing-cost-asset': ['asset'],
   'payment-liability': ['liability'],
   'other-liability': ['liability'],
@@ -62,6 +63,17 @@ export const ROLE_TYPES: Record<AccountRole, AccountType[]> = {
 
 export function roleAllowsType(role: AccountRole, type: AccountType): boolean {
   return ROLE_TYPES[role].includes(type);
+}
+
+/**
+ * 内部集約・自動生成のロール。ユーザーが手で作る/編集する勘定科目ではない。
+ * 勘定科目管理一覧・ロール選択肢から除外する（BS / 資産内訳には残高として現れてよい）。
+ * 現状は継続コストの集約台帳口座（continuing-cost-asset）のみ。
+ */
+export const INTERNAL_ACCOUNT_ROLES: readonly AccountRole[] = ['continuing-cost-asset'];
+
+export function isInternalRole(role: AccountRole): boolean {
+  return INTERNAL_ACCOUNT_ROLES.includes(role);
 }
 
 /** type に対する既定 role（type 変更時のリセット先・migration の既定）。 */
@@ -80,9 +92,9 @@ export function defaultRoleForType(type: AccountType): AccountRole {
   }
 }
 
-/** その type で選べる role の一覧（科目編集 UI の選択肢）。 */
+/** その type で選べる role の一覧（科目編集 UI の選択肢）。内部集約ロールは除外する。 */
 export function rolesForType(type: AccountType): AccountRole[] {
-  return ACCOUNT_ROLES.filter((r) => roleAllowsType(r, type));
+  return ACCOUNT_ROLES.filter((r) => roleAllowsType(r, type) && !isInternalRole(r));
 }
 
 /**

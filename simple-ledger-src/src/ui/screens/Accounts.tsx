@@ -6,6 +6,7 @@ import { useLedger } from '../../state/store';
 import { accountBalance } from '../../domain/accounting';
 import { referencedAccountIds } from '../../domain/accountRefs';
 import { ACCOUNT_TYPES, type Account } from '../../domain/types';
+import { isInternalRole } from '../../domain/accountRoles';
 import { accountRoleLabel, accountTypeLabel } from '../accountOptions';
 import { AccountSheet } from './AccountSheet';
 import { ConfirmDialog } from '../ConfirmDialog';
@@ -41,10 +42,11 @@ export function Accounts() {
 
   const byType = useMemo(() => {
     const list = ledger?.accounts ?? [];
+    // 内部集約・自動生成の役割（継続コスト台帳など）はユーザー編集対象でないため管理一覧に出さない。
     return ACCOUNT_TYPES.map((type) => ({
       type,
       accounts: list
-        .filter((a) => a.type === type && (showArchived || !a.archived))
+        .filter((a) => a.type === type && !isInternalRole(a.role) && (showArchived || !a.archived))
         .sort((a, b) => a.name.localeCompare(b.name, 'ja')),
     })).filter((g) => g.accounts.length > 0);
   }, [ledger, showArchived]);

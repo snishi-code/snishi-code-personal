@@ -25,9 +25,23 @@ export const APP_ID = 'snishi-code.simple-ledger' as const;
  *             MonthlyCostItem に任意 paymentSourceAccountId を追加、EntryMetadata に
  *             continuousCostId/ccKind/virtual を追加（許容値・任意項目が増えるため版を上げる）。
  *             破壊的方針（未実運用）: 旧モデルの月額化/固定資産月額化の生成仕訳・MonthlyCostItem は
- *             混在を避けるため migration でクリアする。 */
-export const SCHEMA_VERSION = 13 as const;
+ *             混在を避けるため migration でクリアする。
+ *  v13 → v14: 勘定科目の聖域化。継続コスト対象（YouTube/洗濯機 等）を品目別の
+ *             continuing-cost-asset 科目として自動作成するのをやめ、未消化残高を単一の集約台帳口座
+ *             （CONTINUOUS_COST_LEDGER_ACCOUNT_ID『継続コスト台帳』）に寄せる。既存の品目別科目は
+ *             MonthlyCostItem.recognitionCreditAccountId を集約口座へ付け替え、参照されなくなった
+ *             旧科目を削除する（品目名は MonthlyCostItem.name に残るため失われない）。 */
+export const SCHEMA_VERSION = 14 as const;
 
 /** 既定の管理区分（『個人用』）。seed と migration で同じ id を使い、既存データを寄せる。 */
 export const DEFAULT_MANAGEMENT_SCOPE_ID = 'scope-personal' as const;
 export const DEFAULT_MANAGEMENT_SCOPE_NAME = '個人用' as const;
+
+/**
+ * 継続コストの未消化残高を寄せる単一の集約台帳口座（role=continuing-cost-asset・内部集約）。
+ * 品目ごとに資産科目を作らず、全継続コストの funding/recognition をこの 1 口座に通す。
+ * find-or-create で 1 つだけ存在させる（ADJUSTMENT_ACCOUNTS と同じシングルトン方針）。
+ * 勘定科目管理 UI には出さず、BS / 資産内訳には 1 行で表示する。
+ */
+export const CONTINUOUS_COST_LEDGER_ACCOUNT_ID = 'continuing-cost-ledger' as const;
+export const CONTINUOUS_COST_LEDGER_ACCOUNT_NAME = '継続コスト台帳' as const;
