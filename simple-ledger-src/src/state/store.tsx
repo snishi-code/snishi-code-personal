@@ -24,7 +24,10 @@ import * as repo from '../data/repository';
 import { isDefaultSeedAccounts, isDefaultSettings } from '../data/seed';
 import type {
   AccountInstrumentInput,
+  ContinuousCostInput,
+  DisposeFixedAssetInput,
   FixedAssetMonthlyInput,
+  FixedAssetPurchaseMonthlyInput,
   FundingGoalInput,
   MonthlyCostInput,
 } from '../data/repository';
@@ -86,8 +89,11 @@ interface LedgerContextValue {
   removeEntry: (id: string, description: string) => Promise<void>;
   createAllocation: (input: Omit<AllocationInput, 'deferredAccountId'>) => Promise<void>;
   createMonthlyCost: (input: MonthlyCostInput) => Promise<void>;
+  createContinuousCost: (input: ContinuousCostInput) => Promise<void>;
   saveMonthlyCost: (item: MonthlyCostItem) => Promise<void>;
   removeMonthlyCost: (id: string) => Promise<void>;
+  createFixedAssetPurchaseMonthly: (input: FixedAssetPurchaseMonthlyInput) => Promise<void>;
+  disposeFixedAsset: (input: DisposeFixedAssetInput) => Promise<void>;
   createFundingGoal: (input: FundingGoalInput) => Promise<void>;
   saveFundingGoal: (goal: FundingGoal) => Promise<void>;
   removeFundingGoal: (id: string) => Promise<void>;
@@ -118,6 +124,23 @@ interface LedgerContextValue {
     actualBalance: number;
     description?: string;
   }) => Promise<void>;
+  /** 既存の残高補正を編集する（理論残高は補正自身を除いて再計算）。差額消失なら削除になる。 */
+  updateAdjustment: (input: {
+    id: string;
+    kind: AdjustmentKind;
+    accountId: string;
+    date: string;
+    actualBalance: number;
+    description?: string;
+  }) => Promise<void>;
+  /** 残高補正を削除する（対象日以降の理論残高が補正前に戻る）。 */
+  deleteAdjustment: (id: string) => Promise<void>;
+  /** 初期残高（kind='opening'）を登録する（既存 BS 科目 or 新規科目）。 */
+  createOpening: (input: repo.OpeningInput) => Promise<void>;
+  /** 初期残高の金額・日付を編集する。 */
+  updateOpening: (input: { id: string; amount: number; date: string }) => Promise<void>;
+  /** 初期残高を削除する。 */
+  deleteOpening: (id: string) => Promise<void>;
   saveAccount: (account: Account) => Promise<void>;
   removeAccount: (id: string) => Promise<void>;
   saveSettings: (settings: Settings) => Promise<void>;
@@ -279,6 +302,50 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await repo.deleteMonthlyCost(id);
         await refresh();
         toast.show(t('toast.deleted'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const createContinuousCost = useCallback<LedgerContextValue['createContinuousCost']>(
+    async (input) => {
+      try {
+        await repo.createContinuousCost(input);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const createFixedAssetPurchaseMonthly = useCallback<
+    LedgerContextValue['createFixedAssetPurchaseMonthly']
+  >(
+    async (input) => {
+      try {
+        await repo.createFixedAssetPurchaseMonthly(input);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const disposeFixedAsset = useCallback<LedgerContextValue['disposeFixedAsset']>(
+    async (input) => {
+      try {
+        await repo.disposeFixedAsset(input);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
       } catch (e) {
         toast.show(errorText(e), 'error');
         throw e;
@@ -529,6 +596,78 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [refresh, toast],
   );
 
+  const updateAdjustment = useCallback<LedgerContextValue['updateAdjustment']>(
+    async (input) => {
+      try {
+        const entry = await repo.updateAdjustment(input);
+        await refresh();
+        // 差額が無くなると補正自体が削除される（現実アンカーとして無意味になるため）。
+        if (entry) toast.show(t('toast.saved'), 'success');
+        else toast.show(t('adjust.removedZero'), 'info');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const deleteAdjustment = useCallback<LedgerContextValue['deleteAdjustment']>(
+    async (id) => {
+      try {
+        await repo.deleteAdjustment(id);
+        await refresh();
+        toast.show(t('adjust.deleted'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const createOpening = useCallback<LedgerContextValue['createOpening']>(
+    async (input) => {
+      try {
+        await repo.createOpening(input);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const updateOpening = useCallback<LedgerContextValue['updateOpening']>(
+    async (input) => {
+      try {
+        await repo.updateOpening(input);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const deleteOpening = useCallback<LedgerContextValue['deleteOpening']>(
+    async (id) => {
+      try {
+        await repo.deleteOpening(id);
+        await refresh();
+        toast.show(t('opening.deleted'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
   const saveAccount = useCallback<LedgerContextValue['saveAccount']>(
     async (account) => {
       try {
@@ -654,8 +793,11 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       removeEntry,
       createAllocation,
       createMonthlyCost,
+      createContinuousCost,
       saveMonthlyCost,
       removeMonthlyCost,
+      createFixedAssetPurchaseMonthly,
+      disposeFixedAsset,
       createFundingGoal,
       saveFundingGoal,
       removeFundingGoal,
@@ -673,6 +815,11 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveAccountInstrument,
       removeAccountInstrument,
       createAdjustment,
+      updateAdjustment,
+      deleteAdjustment,
+      createOpening,
+      updateOpening,
+      deleteOpening,
       saveAccount,
       removeAccount,
       saveSettings,
@@ -694,8 +841,11 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       removeEntry,
       createAllocation,
       createMonthlyCost,
+      createContinuousCost,
       saveMonthlyCost,
       removeMonthlyCost,
+      createFixedAssetPurchaseMonthly,
+      disposeFixedAsset,
       createFundingGoal,
       saveFundingGoal,
       removeFundingGoal,
@@ -713,6 +863,11 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveAccountInstrument,
       removeAccountInstrument,
       createAdjustment,
+      updateAdjustment,
+      deleteAdjustment,
+      createOpening,
+      updateOpening,
+      deleteOpening,
       saveAccount,
       removeAccount,
       saveSettings,

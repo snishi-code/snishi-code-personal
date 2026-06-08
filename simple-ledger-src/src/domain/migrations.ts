@@ -188,6 +188,41 @@ const STEPS: Step[] = [
       };
     },
   },
+  {
+    // v11 → v12: 固定資産の売却・故障処分(assetDisposals)を追加。既存 JSON には無いので空配列を補う。
+    from: 11,
+    to: 12,
+    migrate: (pkg) => ({
+      ...pkg,
+      assetDisposals: Array.isArray(pkg.assetDisposals) ? pkg.assetDisposals : [],
+    }),
+  },
+  {
+    // v12 → v13: 継続コストを資産経由モデルへ統一（AccountRole に continuing-cost-asset、
+    // MonthlyCostItem に任意 paymentSourceAccountId、EntryMetadata に continuousCostId/ccKind/virtual）。
+    // **破壊的（未実運用前提）**: 旧モデルの継続コスト/按分の生成物をクリアし、新モデルへ一本化する。
+    // これをしないと、集計が derivedEntries 前提に変わったため旧データが整合しない
+    // （旧 paymentAccountId 由来は実支払い月に全額費用化、旧固定資産由来は認識されない）。
+    // 生成仕訳（monthlyCostId / allocationId / allocationRole / assetDisposalId）と
+    // monthlyCostItems / allocations / assetDisposals を落とす（手入力の通常仕訳・科目は残す）。
+    from: 12,
+    to: 13,
+    migrate: (pkg) => {
+      const journalEntries = pkg.journalEntries.filter((e) => {
+        const m = e.metadata;
+        return !m?.monthlyCostId && !m?.allocationId && !m?.allocationRole && !m?.assetDisposalId;
+      });
+      const cashflowSchedules = (pkg.cashflowSchedules ?? []).filter((s) => !s.monthlyCostId);
+      return {
+        ...pkg,
+        journalEntries,
+        cashflowSchedules,
+        monthlyCostItems: [],
+        allocations: [],
+        assetDisposals: [],
+      };
+    },
+  },
 ];
 
 /**

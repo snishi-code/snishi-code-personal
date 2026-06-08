@@ -7,8 +7,10 @@ import { useLedger } from './state/store';
 import { Header } from './ui/Header';
 import { Menu } from './ui/Menu';
 import { Dashboard } from './ui/screens/Dashboard';
+import { Breakdown } from './ui/screens/Breakdown';
+import { ExpenseBreakdown } from './ui/screens/ExpenseBreakdown';
+import { NetIncome } from './ui/screens/NetIncome';
 import { Journal, type JournalFilter } from './ui/screens/Journal';
-import { Statements } from './ui/screens/Statements';
 import { Allocations } from './ui/screens/Allocations';
 import { Cashflow } from './ui/screens/Cashflow';
 import { Tags } from './ui/screens/Tags';
@@ -34,9 +36,7 @@ export function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [entryInit, setEntryInit] = useState<EntryInit | null>(null);
   const [journalFilter, setJournalFilter] = useState<JournalFilter | null>(null);
-  const [statementsTab, setStatementsTab] = useState<'pl' | 'bs'>('pl');
-  const [statementsSection, setStatementsSection] = useState<string | undefined>(undefined);
-  // レポート期間（ホーム/財務諸表/仕訳で共有）。正本はヘッダー中央の期間メニュー。既定は今月。
+  // レポート期間（ホーム/各内訳ページ/仕訳で共有）。正本はヘッダー中央の期間メニュー。既定は今月。
   const [period, setPeriod] = useState<ReportPeriod>(() => {
     const { year, month } = currentYearMonth();
     return { mode: 'month', year, month };
@@ -69,12 +69,6 @@ export function App() {
   const goJournalFiltered = (filter: JournalFilter) => {
     setJournalFilter(filter);
     setScreen('journal');
-  };
-
-  const openStatements = (tab: 'pl' | 'bs', section?: string) => {
-    setStatementsTab(tab);
-    setStatementsSection(section);
-    setScreen('statements');
   };
 
   // 期間メニューの年セレクト候補（仕訳・予定CF・資金目標・目的別資金の目標日の年 + 現在/翌年 + 選択中の年）。
@@ -123,8 +117,47 @@ export function App() {
             onAddEntry={openCreate}
             onEditEntry={openEdit}
             onNavigate={setScreen}
-            onOpenStatement={openStatements}
             onOpenJournal={goJournalFiltered}
+          />
+        ) : null}
+        {screen === 'incomeBreakdown' ? (
+          <Breakdown
+            section="revenue"
+            period={period}
+            onPeriodChange={setPeriod}
+            onDrillDown={goJournalFiltered}
+            onNavigate={setScreen}
+          />
+        ) : null}
+        {screen === 'expenseBreakdown' ? (
+          <ExpenseBreakdown period={period} onPeriodChange={setPeriod} onNavigate={setScreen} />
+        ) : null}
+        {screen === 'netIncome' ? <NetIncome period={period} onPeriodChange={setPeriod} /> : null}
+        {screen === 'assetsBreakdown' ? (
+          <Breakdown
+            section="asset"
+            period={period}
+            onPeriodChange={setPeriod}
+            onDrillDown={goJournalFiltered}
+            onNavigate={setScreen}
+          />
+        ) : null}
+        {screen === 'liabilitiesBreakdown' ? (
+          <Breakdown
+            section="liability"
+            period={period}
+            onPeriodChange={setPeriod}
+            onDrillDown={goJournalFiltered}
+            onNavigate={setScreen}
+          />
+        ) : null}
+        {screen === 'netAssets' ? (
+          <Breakdown
+            section="equity"
+            period={period}
+            onPeriodChange={setPeriod}
+            onDrillDown={goJournalFiltered}
+            onNavigate={setScreen}
           />
         ) : null}
         {screen === 'journal' ? (
@@ -134,14 +167,6 @@ export function App() {
             filter={journalFilter}
             period={period}
             onClearAccountFilter={() => setJournalFilter(null)}
-          />
-        ) : null}
-        {screen === 'statements' ? (
-          <Statements
-            initialTab={statementsTab}
-            initialSection={statementsSection}
-            period={period}
-            onDrillDown={goJournalFiltered}
           />
         ) : null}
         {screen === 'allocations' ? <Allocations /> : null}

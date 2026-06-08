@@ -82,7 +82,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     saveEntry,
     saveEntryWithSchedules,
     saveEntryWithFixedAssetMonthly,
-    createMonthlyCost,
+    createContinuousCost,
     createReserve,
     saveAccount,
   } = useLedger();
@@ -112,33 +112,39 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [flowError, setFlowError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  // 行き先(debit)の役割。費用カテゴリのときだけ「月額化」（通常費用版）を出す。
   const destRole = accounts.find((a) => a.id === form.debitAccountId)?.role;
-  // 月額化コスト（expense × 費用カテゴリ × create のみ）。固定資産購入の月額化は別扱い（P7）。
-  const canAllocate =
-    init.kind === 'create' && mode === 'expense' && destRole === 'expense-category';
-  const [allocate, setAllocate] = useState(false);
-  // 固定資産購入（expense × 固定資産 × create）は「生活コストとして月額化」できる（別トグル）。
+  // 継続コスト（資産経由）: 支出入力の行き先を「継続コスト対象（資産）」に切り替えて自由入力する。
+  // 行き先の役割には依存しない（create × expense なら「継続コスト化」ボタンを出す）。
+  const canAllocate = init.kind === 'create' && mode === 'expense';
+  // ccMode = 行き先を継続コスト対象に切替え。ccTargetName=台帳に登録する対象名、ccCategoryId=認識先カテゴリ。
+  const [ccMode, setCcMode] = useState(false);
+  const [ccTargetName, setCcTargetName] = useState('');
+  const [ccCategoryId, setCcCategoryId] = useState('');
+  const [ccNameError, setCcNameError] = useState(false);
+  // 固定資産購入（expense × 固定資産 × create）の旧経路。継続コスト対象（ccMode）が主導線。
   const canFixedMonthly =
-    init.kind === 'create' && mode === 'expense' && destRole === 'fixed-asset';
+    init.kind === 'create' && mode === 'expense' && !ccMode && destRole === 'fixed-asset';
   const [fixedMonthly, setFixedMonthly] = useState(false);
   const [monthlyCategoryId, setMonthlyCategoryId] = useState('');
   const [categoryError, setCategoryError] = useState(false);
-  // 月額化 ON のときはタグを付けられない（createMonthlyCost はタグを受け取らないため）。
-  const allocationActive = (canAllocate && allocate) || (canFixedMonthly && fixedMonthly);
+  // 継続コスト ON のときはタグを付けられない（createContinuousCost はタグを受け取らないため）。
+  const allocationActive = (canAllocate && ccMode) || (canFixedMonthly && fixedMonthly);
   const [monthsText, setMonthsText] = useState('');
   const [monthsError, setMonthsError] = useState(false);
   const months = monthsText === '' ? 0 : Number.parseInt(monthsText, 10);
-  // 月額化の詳細（種類は入力から推定する）
+  // 継続コストの詳細（種類は入力から推定する）
   const [continueCost, setContinueCost] = useState(false);
   // liability 払いの返済 CF（支払い元の近くで入力する）
   const [repayToggle, setRepayToggle] = useState(false);
   const [repayAccountId, setRepayAccountId] = useState('');
   const [repayCountText, setRepayCountText] = useState('');
   const [repayStartDate, setRepayStartDate] = useState('');
-  // 支払い元(credit)が支払用負債なら返済 CF を入力できる。
+  const [repayAccountError, setRepayAccountError] = useState(false);
+  const [repayCountError, setRepayCountError] = useState(false);
+  // 支払い元(credit)が負債（カード=payment-liability / ローン=other-liability）なら返済 CF を入力できる。
   const paymentRole = accounts.find((a) => a.id === form.creditAccountId)?.role;
-  const isLiabilityPayment = paymentRole === 'payment-liability';
+  const isLiabilityPayment =
+    paymentRole === 'payment-liability' || paymentRole === 'other-liability';
   // 振替で源泉(credit)が負債 = 借入・ローン実行。任意で分割返済予定を一緒に登録できる。
   const isLoanDraw =
     init.kind === 'create' &&
@@ -147,7 +153,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   // 詳細（メモ・タグ）は折りたたみ。編集時は既存値が見えるよう開いておく。
   const [showDetails, setShowDetails] = useState(init.kind === 'edit');
 
-  // 支出/振替で目的別資金・負債は既定で候補に出さない。必要時だけトグルで表示し、その場で作る。
+  // 支出/振替で取り置き資金・負債は既定で候補に出さない。必要時だけトグルで表示し、その場で作る。
   // 編集時に既選択が reserve/liability なら初期表示（includeId で常に見えるが状態も合わせる）。
   const roleOf = (id: string) => accounts.find((a) => a.id === id)?.role;
   const [showReserve, setShowReserve] = useState(() =>
@@ -169,7 +175,9 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const snapshot = JSON.stringify({
     form,
     amountText,
-    allocate,
+    ccMode,
+    ccTargetName,
+    ccCategoryId,
     fixedMonthly,
     monthlyCategoryId,
     monthsText,
@@ -219,22 +227,100 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     return { ...form, description: auto };
   }
 
+  // 「返済を資金繰りに入れる」ON のとき、返済元口座・回数を必須にする（3 経路共通）。
+  // 空のまま保存すると CF 予定が静かに作られず、ユーザーの期待とズレるため fail-closed。
+  function validateRepay(blockActive: boolean): { accBad: boolean; countBad: boolean } {
+    const active = blockActive && repayToggle;
+    const count = repayCountText === '' ? 0 : Number.parseInt(repayCountText, 10);
+    const accBad = active && repayAccountId === '';
+    const countBad = active && (!Number.isInteger(count) || count < 1);
+    setRepayAccountError(accBad);
+    setRepayCountError(countBad);
+    return { accBad, countBad };
+  }
+
   async function onSave() {
     // 保存時は常に「現在有効な管理区分」を明示的に載せる（区分セレクタが出ない単一区分でも
     // 実在する区分 id で保存する）。DEFAULT_MANAGEMENT_SCOPE_ID は最終フォールバックに留める。
     const base = effectiveForm();
     const toSave = { ...base, managementScopeId: base.managementScopeId ?? scopes[0]?.id };
+
+    // 継続コスト（資産経由）: 行き先は「継続コスト対象（資産）」を自由入力し、認識先カテゴリは別フィールド。
+    // 通常の simple entry は保存せず、createContinuousCost にルールを渡す（funding/recognition は仮想展開）。
+    const ccActive = canAllocate && ccMode;
+    if (ccActive) {
+      const found: EntryValidationError[] = [];
+      if (toSave.date.trim() === '') found.push('date-required');
+      if (!Number.isInteger(toSave.amount) || toSave.amount < 1) found.push('amount-invalid');
+      if (toSave.creditAccountId === '') found.push('credit-required');
+      setErrors(found);
+      const nameBad = ccTargetName.trim() === '';
+      setCcNameError(nameBad);
+      const categoryBad = ccCategoryId === '';
+      setCategoryError(categoryBad);
+      const monthsBad = !Number.isInteger(months) || months < 1;
+      setMonthsError(monthsBad);
+      const { accBad, countBad } = validateRepay(isLiabilityPayment);
+      setFlowError(undefined);
+      if (found.length > 0 || nameBad || categoryBad || monthsBad || accBad || countBad) return;
+      setSubmitting(true);
+      try {
+        const repeat = continueCost ? months : undefined;
+        const repayCount = repayCountText === '' ? 0 : Number.parseInt(repayCountText, 10);
+        const useRepay =
+          isLiabilityPayment && repayToggle && repayAccountId !== '' && repayCount >= 1;
+        const repayFields = useRepay
+          ? {
+              repaymentAccountId: repayAccountId,
+              repaymentCount: repayCount,
+              repaymentStartDate: repayStartDate || toSave.date,
+            }
+          : {};
+        const scopeField =
+          toSave.managementScopeId !== undefined
+            ? { managementScopeId: toSave.managementScopeId }
+            : {};
+        // funding: `支払い元 → 継続コスト対象`、recognition: `継続コスト対象 → 認識先カテゴリ`。
+        // 支払い元が other-liability（自動車ローン等）でも資産取得の貸方として受ける。
+        await createContinuousCost({
+          name: ccTargetName.trim(),
+          ...scopeField,
+          kind: inferMonthlyCostKind(months, repeat),
+          amount: toSave.amount,
+          costMonths: months,
+          ...(repeat !== undefined ? { repeatEveryMonths: repeat } : {}),
+          startMonth: monthOf(toSave.date),
+          expenseAccountId: ccCategoryId,
+          paymentSourceAccountId: toSave.creditAccountId,
+          ...repayFields,
+        });
+        onClose();
+      } catch {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     const found = validateSimpleEntry(toSave);
     setErrors(found);
-    const useMonthly = canAllocate && allocate;
     const useFixedMonthly = canFixedMonthly && fixedMonthly;
     // costMonths は 1 以上（サブスクは 1 か月）。
-    const monthsBad = (useMonthly || useFixedMonthly) && (!Number.isInteger(months) || months < 1);
+    const monthsBad = useFixedMonthly && (!Number.isInteger(months) || months < 1);
     setMonthsError(monthsBad);
-    // 固定資産の月額化は、月割り先の費用カテゴリが必須。
+    // 固定資産の継続コストは、月割り先の費用カテゴリが必須。
     const categoryBad = useFixedMonthly && monthlyCategoryId === '';
     setCategoryError(categoryBad);
-    if (found.length > 0 || monthsBad || categoryBad) return;
+    // 返済トグルの必須検証: 固定資産月割り=負債払い / 借入振替=ローン実行。
+    const { accBad, countBad } = validateRepay(useFixedMonthly ? isLiabilityPayment : isLoanDraw);
+    if (found.length > 0 || monthsBad || categoryBad || accBad || countBad) return;
+    // 通常の支出でローン（other-liability）を支払い元にはできない（継続コスト化 or 借入の振替に限定）。
+    if (mode === 'expense' && !useFixedMonthly) {
+      const srcRole = accounts.find((a) => a.id === toSave.creditAccountId)?.role;
+      if (srcRole === 'other-liability') {
+        setFlowError(t('entry.error.loanNotExpense'));
+        return;
+      }
+    }
     // 振替は役割の組み合わせを検証する（資金↔資金 / 資金→負債返済 / 負債→資金借入のみ）。
     if (mode === 'transfer') {
       const srcRole = accounts.find((a) => a.id === toSave.creditAccountId)?.role;
@@ -247,39 +333,9 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     }
     setSubmitting(true);
     try {
-      if (useMonthly) {
-        // 「継続・買い替えする」= 周期更新（repeatEveryMonths = costMonths）。
-        const repeat = continueCost ? months : undefined;
-        const repayCount = repayCountText === '' ? 0 : Number.parseInt(repayCountText, 10);
-        const useRepay =
-          isLiabilityPayment && repayToggle && repayAccountId !== '' && repayCount >= 1;
-        // 支出フォームの debit=費用カテゴリ / credit=支払い元 をそのまま月額化に渡す。
-        // 選択中の管理区分を月額化コスト本体・生成支払い仕訳へ引き継ぐ（未指定なら repository が既定区分）。
-        await createMonthlyCost({
-          name: toSave.description,
-          ...(toSave.managementScopeId !== undefined
-            ? { managementScopeId: toSave.managementScopeId }
-            : {}),
-          kind: inferMonthlyCostKind(months, repeat),
-          amount: toSave.amount,
-          costMonths: months,
-          ...(repeat !== undefined ? { repeatEveryMonths: repeat } : {}),
-          startMonth: monthOf(toSave.date),
-          date: toSave.date,
-          expenseAccountId: toSave.debitAccountId,
-          paymentAccountId: toSave.creditAccountId,
-          ...(useRepay
-            ? {
-                repaymentAccountId: repayAccountId,
-                repaymentCount: repayCount,
-                // 購入日(form.date)とは別に、初回引落日を使う。
-                repaymentStartDate: repayStartDate || form.date,
-              }
-            : {}),
-        });
-      } else if (useFixedMonthly) {
-        // 固定資産購入（借方 固定資産 / 貸方 資金 or 負債）+ 月額化コストを一括保存。購入仕訳が実体で、
-        // 月額化は支払い仕訳を作らず formula 認識のみ（recognitionCreditAccountId=固定資産）。
+      if (useFixedMonthly) {
+        // 固定資産購入（借方 固定資産 / 貸方 資金 or 負債）+ 継続コストを一括保存。購入仕訳が実体で、
+        // 継続コストは支払い仕訳を作らず formula 認識のみ（recognitionCreditAccountId=固定資産）。
         // 負債払いで返済入力があれば、購入仕訳の貸方負債を取り崩す返済予定 CF も同時に作る。
         const repeat = continueCost ? months : undefined;
         const repayCount = repayCountText === '' ? 0 : Number.parseInt(repayCountText, 10);
@@ -446,29 +502,11 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     );
   };
 
-  const renderAccountPicker = (role: (typeof roles)[number]) => {
-    const value = role.side === 'debit' ? form.debitAccountId : form.creditAccountId;
-    const reqErr = errorText(errors, role.side === 'debit' ? 'debit-required' : 'credit-required');
-    return (
-      <AccountPicker
-        label={t(role.labelKey)}
-        required
-        value={value}
-        groups={groupedAccountsByRole(accounts, [...role.allowedRoles], value)}
-        onChange={(id) => setSide(role.side, id)}
-        error={reqErr ?? sameAccount}
-        dataUi={
-          role.side === 'debit' ? UI.journal.entry.debitAccount : UI.journal.entry.creditAccount
-        }
-      />
-    );
-  };
-
   // お金の流れ（源泉 → 行き先）。簿記用語を出さず、左=貸方 / 右=借方。
   const flowDef = isManual ? null : MODE_FLOW[mode as FlowMode];
   const renderFlow = () => {
     if (!flowDef) return null;
-    // トグルで明示したときだけ目的別資金・負債を候補に足す（既選択は includeId で常に表示）。
+    // トグルで明示したときだけ取り置き資金・負債を候補に足す（既選択は includeId で常に表示）。
     const extras: AccountRole[] = [];
     if (showReserve) extras.push('reserve-asset');
     if (showLiability) {
@@ -509,9 +547,96 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             →
           </div>
           <div className="flow__side">
+            {canAllocate && ccMode ? (
+              <>
+                {/* 行き先を「継続コスト対象（資産）」として自由入力する（台帳に登録する名前）。 */}
+                <TextInput
+                  label={t('entry.ccTargetName')}
+                  required
+                  value={ccTargetName}
+                  placeholder={t('entry.ccTargetName')}
+                  hint={t('entry.ccTargetNameHint')}
+                  onChange={setCcTargetName}
+                  error={ccNameError ? t('entry.error.description-required') : undefined}
+                  dataUi={UI.journal.entry.ccName}
+                />
+                <button type="button" className="collapse-toggle" onClick={() => setCcMode(false)}>
+                  {t('entry.ccBackToCategory')}
+                </button>
+              </>
+            ) : (
+              <>
+                <AccountPicker
+                  flat
+                  label={t(flowDef.destination.labelKey)}
+                  required
+                  value={form.debitAccountId}
+                  groups={dstGroups}
+                  onChange={(id) => setSide('debit', id)}
+                  error={errorText(errors, 'debit-required')}
+                  dataUi={UI.journal.entry.flowDestination}
+                />
+                {canAllocate ? (
+                  // 行き先を継続コスト対象に切り替える。タップで自由入力欄になる。
+                  <button
+                    type="button"
+                    className="collapse-toggle"
+                    onClick={() => {
+                      setCcMode(true);
+                      if (ccTargetName.trim() === '') setCcTargetName(form.description);
+                    }}
+                    data-ui={UI.journal.entry.ccToggle}
+                  >
+                    <Icon name="plus" size={16} />
+                    {t('entry.ccToggle')}
+                  </button>
+                ) : null}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderManualFlow = () => {
+    const creditRole = roles.find((role) => role.side === 'credit');
+    const debitRole = roles.find((role) => role.side === 'debit');
+    if (!creditRole || !debitRole) return null;
+    const srcGroups = groupedAccountsByRole(
+      accounts,
+      [...creditRole.allowedRoles],
+      form.creditAccountId,
+    );
+    const dstGroups = groupedAccountsByRole(
+      accounts,
+      [...debitRole.allowedRoles],
+      form.debitAccountId,
+    );
+    return (
+      <div className="field" data-ui={UI.journal.entry.flow}>
+        <span className="field__hint">{t('entry.flow.manual')}</span>
+        <div className="flow">
+          <div className="flow__side">
             <AccountPicker
               flat
-              label={t(flowDef.destination.labelKey)}
+              label={t('entry.source.manual')}
+              required
+              value={form.creditAccountId}
+              groups={srcGroups}
+              onChange={(id) => setSide('credit', id)}
+              error={errorText(errors, 'credit-required') ?? sameAccount}
+              dataUi={UI.journal.entry.flowSource}
+            />
+            {renderInstrument('credit')}
+          </div>
+          <div className="flow__arrow" aria-hidden="true">
+            →
+          </div>
+          <div className="flow__side">
+            <AccountPicker
+              flat
+              label={t('entry.destination.manual')}
               required
               value={form.debitAccountId}
               groups={dstGroups}
@@ -519,60 +644,52 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               error={errorText(errors, 'debit-required')}
               dataUi={UI.journal.entry.flowDestination}
             />
+            {renderInstrument('debit')}
           </div>
         </div>
       </div>
     );
   };
 
-  const allocateField = canAllocate ? (
-    <div className="field">
-      <label
-        style={{ display: 'inline-flex', gap: 8, alignItems: 'center', minHeight: 'var(--tap)' }}
-      >
-        <input
-          type="checkbox"
-          checked={allocate}
-          onChange={(e) => setAllocate(e.target.checked)}
-          data-ui={UI.journal.entry.allocateToggle}
+  // 行き先を「継続コスト対象」に切り替えたとき（ccMode）の詳細: 認識先カテゴリ・認識月数・継続購入。
+  const ccDetailField =
+    canAllocate && ccMode ? (
+      <div className="field">
+        <AccountPicker
+          label={t('entry.ccCategory')}
+          required
+          value={ccCategoryId}
+          groups={groupedAccountsByRole(accounts, ['expense-category'], ccCategoryId)}
+          onChange={setCcCategoryId}
+          error={categoryError ? t('entry.error.category-required') : undefined}
+          dataUi={UI.journal.entry.ccCategory}
         />
-        {t('entry.monthlyizeToggle')}
-      </label>
-      {allocate ? (
-        <>
-          <TextInput
-            label={t('entry.monthlyizeMonths')}
-            required
-            inputMode="numeric"
-            value={monthsText}
-            hint={t('entry.monthlyizeMonthsHint')}
-            onChange={(v) => setMonthsText(v.replace(/[^\d]/g, ''))}
-            error={monthsError ? t('entry.error.months-invalid') : undefined}
-            dataUi={UI.journal.entry.allocateMonths}
+        <TextInput
+          label={t('entry.monthlyizeMonths')}
+          required
+          inputMode="numeric"
+          value={monthsText}
+          hint={t('entry.monthlyizeMonthsHint')}
+          onChange={(v) => setMonthsText(v.replace(/[^\d]/g, ''))}
+          error={monthsError ? t('entry.error.months-invalid') : undefined}
+          dataUi={UI.journal.entry.allocateMonths}
+        />
+        <label
+          style={{ display: 'inline-flex', gap: 8, alignItems: 'center', minHeight: 'var(--tap)' }}
+        >
+          <input
+            type="checkbox"
+            checked={continueCost}
+            onChange={(e) => setContinueCost(e.target.checked)}
+            data-ui={UI.journal.entry.monthlyizeContinue}
           />
-          <label
-            style={{
-              display: 'inline-flex',
-              gap: 8,
-              alignItems: 'center',
-              minHeight: 'var(--tap)',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={continueCost}
-              onChange={(e) => setContinueCost(e.target.checked)}
-              data-ui={UI.journal.entry.monthlyizeContinue}
-            />
-            {t('entry.monthlyizeContinue')}
-          </label>
-          <p className="field__hint">{t('entry.monthlyizeNote')}</p>
-        </>
-      ) : null}
-    </div>
-  ) : null;
+          {t('entry.monthlyizeContinue')}
+        </label>
+        <p className="field__hint">{t('entry.ccNote')}</p>
+      </div>
+    ) : null;
 
-  // 固定資産の購入を「生活コストとして月額化」する（購入仕訳とは別に formula 認識）。
+  // 固定資産の購入を「支出として継続コスト」する（購入仕訳とは別に formula 認識）。
   const fixedMonthlyField = canFixedMonthly ? (
     <div className="field">
       <label
@@ -655,6 +772,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               value={repayAccountId}
               groups={groupedAccountsByRole(accounts, ['daily-asset'], repayAccountId)}
               onChange={setRepayAccountId}
+              error={repayAccountError ? t('entry.error.repayAccount') : undefined}
               dataUi={UI.journal.entry.monthlyizeRepayAccount}
             />
             <TextInput
@@ -662,6 +780,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               inputMode="numeric"
               value={repayCountText}
               onChange={(v) => setRepayCountText(v.replace(/[^\d]/g, ''))}
+              error={repayCountError ? t('entry.error.repayCount') : undefined}
               dataUi={UI.journal.entry.monthlyizeRepayCount}
             />
             <TextInput
@@ -700,6 +819,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             value={repayAccountId}
             groups={groupedAccountsByRole(accounts, ['daily-asset'], repayAccountId)}
             onChange={setRepayAccountId}
+            error={repayAccountError ? t('entry.error.repayAccount') : undefined}
             dataUi={UI.journal.entry.loanRepayAccount}
           />
           <TextInput
@@ -707,6 +827,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             inputMode="numeric"
             value={repayCountText}
             onChange={(v) => setRepayCountText(v.replace(/[^\d]/g, ''))}
+            error={repayCountError ? t('entry.error.repayCount') : undefined}
             dataUi={UI.journal.entry.loanRepayCount}
           />
           <TextInput
@@ -722,8 +843,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     </div>
   ) : null;
 
-  // 支出/振替で、目的別資金・負債を候補に出すトグルと、その場で作る導線。
-  // 既定では daily-asset 中心。目的別資金が増えても通常入力を軽く保つ。
+  // 支出/振替で、取り置き資金・負債を候補に出すトグルと、その場で作る導線。
+  // 既定では daily-asset 中心。取り置き資金が増えても通常入力を軽く保つ。
   const flowExtras =
     mode === 'expense' || mode === 'transfer' ? (
       <div className="field stack" style={{ gap: 'var(--space-2)' }}>
@@ -795,7 +916,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     ) : null;
 
   const manualSwitch =
-    init.kind === 'create' && mode !== 'manual' && !allocate ? (
+    init.kind === 'create' && mode !== 'manual' && !ccMode ? (
       <button
         type="button"
         className="collapse-toggle"
@@ -814,6 +935,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         onClose={requestClose}
         dismissMode="if-clean"
         titleVariant="sr-only"
+        scrollKey={mode}
         footer={
           <>
             <button
@@ -857,18 +979,14 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
 
         {isManual ? (
           <>
+            {/* 簿記編集も左=貸方 / 右=借方の流れで扱い、金額を主要入力順から落とさない。 */}
             {dateField}
             {descriptionField}
+            {amountField}
+            {renderManualFlow()}
+            {memoField}
             {scopeField}
             {entryTagsField}
-            {roles.map((role) => (
-              <div key={role.side}>
-                {renderAccountPicker(role)}
-                {renderInstrument(role.side)}
-              </div>
-            ))}
-            {amountField}
-            {memoField}
           </>
         ) : (
           <>
@@ -879,7 +997,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             {amountField}
             {renderFlow()}
             {flowExtras}
-            {allocateField}
+            {ccDetailField}
             {fixedMonthlyField}
             {repaymentField}
             {loanRepaymentField}
@@ -917,7 +1035,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       </Modal>
       {discardConfirm}
 
-      {/* 入力を中断せず、目的別資金（振替の行き先）を作って選択する。 */}
+      {/* 入力を中断せず、取り置き資金（振替の行き先）を作って選択する。 */}
       {reserveSheetOpen ? (
         <ReserveSheet
           onClose={() => setReserveSheetOpen(false)}

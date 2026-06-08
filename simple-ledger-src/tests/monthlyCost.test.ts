@@ -62,10 +62,11 @@ describe('monthlyCostForMonth', () => {
     expect(monthlyCostForMonth(ev, '2026-03')).toBe(0); // 隙間
     expect(monthlyCostForMonth(ev, '2028-01')).toBe(100); // 次周期の先頭
   });
-  it('paused / ended は 0、endMonth を過ぎても 0', () => {
-    expect(monthlyCostForMonth(item({ status: 'paused', repeatEveryMonths: 1 }), '2026-05')).toBe(
-      0,
-    );
+  it('認識は endMonth で止める（status だけでは過去を消さない）', () => {
+    // 一時停止/終了は endMonth を立てて未来だけ止める＝過去（<= endMonth）は保持する。
+    const paused = item({ status: 'paused', repeatEveryMonths: 1, endMonth: '2026-03' });
+    expect(monthlyCostForMonth(paused, '2026-03')).toBe(1500); // endMonth まで（過去保持）
+    expect(monthlyCostForMonth(paused, '2026-04')).toBe(0); // endMonth 超過で停止
     const ended = item({ repeatEveryMonths: 1, endMonth: '2026-03' });
     expect(monthlyCostForMonth(ended, '2026-03')).toBe(1500);
     expect(monthlyCostForMonth(ended, '2026-04')).toBe(0);

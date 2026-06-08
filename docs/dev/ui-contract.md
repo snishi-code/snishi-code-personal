@@ -17,20 +17,26 @@
 |---|---|---|
 | `dashboard.view` | Dashboard ルート | ホーム表示の検出 |
 | `dashboard.entry.income` / `.expense` / `.transfer` | ホーム 3 ボタン | 日常入力の主導線（唯一の入力起点） |
-| `dashboard.stat.revenue` / `.expense` / `.netIncome` | ホーム損益の項目別ボタン | PL の該当セクションへ |
-| `dashboard.stat.assets` / `.liabilities` / `.netAssets` | ホーム財政状態の項目別ボタン | BS の該当セクションへ |
-| `dashboard.stat.normalExpense` / `dashboard.openMonthlyCost` / `dashboard.stat.livingCostTotal` | ホーム生活コスト stat | 通常支出=PL費用 / 月額化コスト=月額化コスト画面 / 合計=月額化コスト画面（CF へは飛ばさない） |
+| `dashboard.stat.revenue` / `.expense` / `.netIncome` | ホーム収支の項目別ボタン | **それぞれ別ページへ**: 収入→収入の内訳 / 支出（=通常支出+継続コスト）→支出の内訳 / 収支→収支ページ |
+| `dashboard.stat.assets` / `.liabilities` / `.netAssets` | ホーム財政状態の項目別ボタン | **それぞれ別ページへ**: 資産→資産の内訳 / 負債→負債の内訳 / 純資産→純資産ページ（同じ財務諸表に集約しない） |
+| `incomeBreakdown.view` / `.row` / `.total` | 収入の内訳ルート / 科目行 / 合計 | ホーム「収入」のタップ先（フロー）。行タップで仕訳へドリル。収入の推移つき |
+| `expenseBreakdown.view` | 支出の内訳ルート | ホーム「支出」のタップ先。支出はホーム独立 stat にしない |
+| `expenseBreakdown.normalExpense` / `.monthlyCost` / `.total` | 支出の内訳の項目 | 通常支出 / 継続コスト（タップで継続コスト台帳へ）/ 支出合計。支出の推移つき |
+| `netIncome.view` / `.revenue` / `.expense` / `.result` | 収支ルート / 収入 / 支出 / 収支 | ホーム「収支」のタップ先。科目別ドリルはせず、月ごとの残り方（収支の推移）を見せる |
+| `assetsBreakdown.view` / `.row` / `.total` | 資産の内訳ルート / 科目行 / 合計 | ホーム「資産」のタップ先（ストック=期間末時点）。行タップで仕訳へドリル。資産の推移つき |
+| `liabilitiesBreakdown.view` / `.row` / `.total` / `.cashflowLink` | 負債の内訳ルート / 科目行 / 合計 / CF導線 | ホーム「負債」のタップ先（ストック）。`cashflowLink` で資金繰り・返済計画へ |
+| `netAssets.view` / `.row` / `.total` | 純資産ルート / 元手の科目行 / 合計 | ホーム「純資産」のタップ先（ストック）。元手 + 今期の損益 + 純資産の推移 |
 | `dashboard.journal.preview` / `dashboard.journal.openAll` | ホーム下部「期間内の仕訳」 | プレビュー / すべて見る（期間フィルタ） |
 | `period.year.trigger` / `period.month.trigger` | ヘッダー中央の期間コンテキスト表示 | タップで年/月の軽量ピッカーを開く（全期間時は月トリガー無し） |
 | `period.year.picker` / `period.month.picker` | 軽量ピッカー本体（`Popup`） | 背景タップ/Escape で閉じる。タイトル/閉じる/完了ボタン無し |
 | `period.all.row` / `period.year.row` | 年ピッカーの行 | 全期間 / 各年（選択で即反映して閉じる。現在行は `aria-current`） |
 | `period.fullYear.row` / `period.month.row` | 月ピッカーの行 | 年全体 / 各月（同上） |
-| `period.trend` / `period.trend.chart` / `period.trend.point` | 推移（自前 SVG・`TrendChart`） | 収支/生活コスト=bar・純資産=line。年別=12ヶ月・全体=年集約。`point` は全体→年のドリルダウン |
+| `period.trend` / `period.trend.chart` / `period.trend.point` | 推移（自前 SVG・`TrendChart`） | 収支/支出=bar・純資産=line。年別=12ヶ月・全体=年集約。`point` は全体→年のドリルダウン |
 | `cashflow.future.list` | CF 未来の入出金・振替予定 | ホーム未来日付入力が反映される一覧 |
-| `cashflow.advanced.toggle` | CF 目的別資金・資金目標の折りたたみ | 下部の補助情報を開閉 |
+| `cashflow.advanced.toggle` | CF 取り置き資金・資金目標の折りたたみ | 下部の補助情報を開閉 |
 | `journal.view` | Journal ルート | 仕訳画面の検出 |
 | `journal.entry.list` | Journal 一覧 | 仕訳一覧 |
-| `journal.monthlyRecognition` | 今月の月額化認識カード | 読み取り専用（仕訳ではない月割り表示） |
+| `journal.monthlyRecognition` | 今月の継続コスト認識カード | 読み取り専用（仕訳ではない月割り表示） |
 | `journal.search` | Journal 検索入力 | 検索 |
 | `journal.filter.clearAccount` | 科目絞り込み解除 | ドリルダウン解除 |
 | `journal.entry.save` | Entry シート保存 | 保存 |
@@ -39,7 +45,7 @@
 | `journal.entry.reverse` | Journal 行の取消/返金 | 逆仕訳の起動 |
 | `journal.entry.detailToggle` | 詳細（メモ・タグ）開閉 | 日常入力の詳細を折りたたみ表示 |
 | `journal.entry.manualSwitch` | 詳細入力（借方/貸方）へ切替 | manual モードへ切替 |
-| `journal.entry.allocateToggle` | 月額化するトグル | 月額化コストに切替（支出のみ） |
+| `journal.entry.allocateToggle` | 継続コスト化するトグル | 継続コストに切替（支出のみ） |
 | `journal.entry.monthlyizeContinue` | 継続・買い替えトグル | ON で repeatEveryMonths=costMonths |
 | `journal.entry.monthlyizeRepayToggle` | 分割/後日引落を資金繰りに入れる | 負債払いのみ表示 |
 | `journal.entry.monthlyizeRepayAccount` / `...RepayCount` / `...RepayStart` | 引落口座/回数/初回引落日 | 返済 CF の生成（購入日と別） |
@@ -47,7 +53,10 @@
 | `cashflow.schedule.flow.source` / `.destination` | 予定入力のお金の流れ | 源泉 → 行き先（入金/出金は自動判定） |
 | `cashflow.goal.create` / `.list` / `.save` | 資金目標の追加/一覧/保存 | 長期の積立計画 |
 | `cashflow.goal.name` / `.amount` / `.date` | 資金目標フォーム | 名称/目標額/期限 |
-| `journal.entry.allocateMonths` | 按分月数 | 按分月数入力 |
+| `journal.entry.ccToggle` | 行き先の「継続コスト化」ボタン | 行き先を継続コスト対象（自由入力）に切替 |
+| `journal.entry.ccName` | 継続コスト対象の名前 | 台帳に登録する対象名（自由入力） |
+| `journal.entry.ccCategory` | 認識先カテゴリ（費用） | 継続コストの月次認識先 |
+| `journal.entry.allocateMonths` | 継続する月数 | 継続する月数入力 |
 | `journal.entry.date` | Entry 日付 | 日付入力 |
 | `journal.entry.description` | Entry 摘要 | 摘要入力 |
 | `journal.entry.item` | Entry 項目（摘要のユーザー向け名） | 日常入力の「項目」 |
@@ -57,14 +66,19 @@
 | `journal.entry.creditAccount` | Entry 貸方ピッカー（manual のみ） | 詳細入力（貸方） |
 | `journal.entry.amount` | Entry 金額 | 金額入力 |
 | `journal.entry.memo` | Entry メモ | メモ入力 |
-| `statements.view` | Statements ルート | 財務諸表の検出 |
-| `statements.profitAndLoss` | PL コンテナ | 損益計算書 |
-| `statements.balanceSheet` | BS コンテナ | 貸借対照表 |
-| `statements.tab.pl` / `statements.tab.bs` | セグメント | PL/BS 切替 |
-| `statements.row` | 科目行 | Journal へドリルダウン |
-| `allocations.view` | 月額化コスト ルート | 画面の検出（screen 名は歴史的に allocations） |
-| `allocations.list` | 月額化コストの一覧 | 月額化コスト項目一覧 |
+| `allocations.view` | 継続コスト ルート | 画面の検出（screen 名は歴史的に allocations） |
+| `allocations.list` | 継続コストの一覧 | 継続コスト項目一覧 |
 | `allocations.showCompleted` | 停止/終了表示トグル | 非 active の表示切替 |
+| `allocations.edit.impactWarning` | 編集シートの過去再計算注意 | 総額/開始月/認識月数/周期/終了月/費用カテゴリ変更時に表示 |
+| `adjustments.view` | 補正・勘定科目 ルート | 画面の検出（screen 名は歴史的に adjustments） |
+| `adjustments.list` | 登録済み補正の一覧 | 現実アンカーの一覧 |
+| `adjustments.row.edit` / `adjustments.row.delete` | 一覧各行の編集 / 削除 | 補正の後編集・削除 |
+| `adjustments.edit.save` | 補正編集シートの更新 | 編集保存（理論残高は自身を除外） |
+| `adjustments.deleteConfirm` | 補正削除の確認ダイアログ | 削除確認 |
+| `opening.name` / `opening.role` / `opening.account` | 初期残高フォーム（新規/既存） | 新規 BS 科目名・役割 / 既存科目選択 |
+| `opening.amount` / `opening.date` / `opening.save` | 初期残高フォーム | 金額/基準日/登録（kind='opening'） |
+| `opening.list` / `opening.row.edit` / `opening.row.delete` | 初期残高の一覧/編集/削除 | 登録後の編集・削除 |
+| `opening.edit.save` / `opening.deleteConfirm` | 初期残高 編集保存 / 削除確認 | 金額・日付の編集 / 削除確認 |
 | `accounts.view` | Accounts ルート | 勘定科目の検出 |
 | `accounts.create` | 科目追加ボタン | 追加起動 |
 | `accounts.save` | 科目シート保存 | 保存 |
@@ -73,7 +87,7 @@
 | `accounts.role` | 科目シートの役割セレクト | role 選択 |
 | `settings.view` | Settings ルート | 設定の検出 |
 | `settings.manage.list` | 設定「管理」リスト | 補助画面への遷移リスト |
-| `settings.manage.<screen>` | 管理リストの各行 | 例 `settings.manage.accounts`（accounts/tags/adjustments。財務諸表はホームから） |
+| `settings.manage.<screen>` | 管理リストの各行 | 例 `settings.manage.accounts`（accounts/tags/adjustments。各内訳ページはホームの各項目から） |
 | `settings.exportJson` | export ボタン | JSON 書き出し |
 | `settings.importJson` | import ボタン | JSON 読み込み起動 |
 | `settings.importFile` | 隠しファイル入力 | ファイル選択 |
@@ -81,7 +95,7 @@
 | `nav.home` | ヘッダーホーム | Dashboard へ |
 | `nav.menu.button` | ヘッダー `≡` | メニュー開閉 |
 | `nav.menu` | ドロワー nav | メニュー本体 |
-| `nav.<screen>` | メニュー各項目（管理・補助のみ） | `allocations`（月額化コスト）/ `cashflow`（資金計画・負債）/ `settings` |
+| `nav.<screen>` | メニュー各項目（管理・補助のみ） | `allocations`（継続コスト）/ `cashflow`（資金繰り）/ `settings` |
 | `dialog.confirm` / `dialog.cancel` | ConfirmDialog | 確定 / キャンセル |
 | `toast` | toast 領域 | 通知の検出 |
 

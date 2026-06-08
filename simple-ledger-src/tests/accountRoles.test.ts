@@ -43,6 +43,7 @@ describe('role と type の整合', () => {
       'deferred-asset',
       'investment-asset',
       'fixed-asset',
+      'continuing-cost-asset',
     ]);
     expect(rolesForType('liability')).toEqual(['payment-liability', 'other-liability']);
   });

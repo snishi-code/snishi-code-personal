@@ -30,23 +30,56 @@ export const UI = {
     income: 'dashboard.entry.income',
     expense: 'dashboard.entry.expense',
     transfer: 'dashboard.entry.transfer',
-    // 損益/資産負債サマリーの項目別ボタン（タップで財務諸表の該当セクションへ）
-    statRevenue: 'dashboard.stat.revenue',
-    statExpense: 'dashboard.stat.expense',
-    statNetIncome: 'dashboard.stat.netIncome',
-    statAssets: 'dashboard.stat.assets',
-    statLiabilities: 'dashboard.stat.liabilities',
-    statNetAssets: 'dashboard.stat.netAssets',
-    // 後方互換（旧 e2e 用に維持）: 収益=PL入口 / 資産=BS入口
-    openPl: 'dashboard.stat.revenue',
-    openBs: 'dashboard.stat.assets',
-    // 生活コスト（収支/財政状態と同じ stat。月額化コストは月額化コスト画面へ）
-    statNormalExpense: 'dashboard.stat.normalExpense',
-    openMonthlyCost: 'dashboard.openMonthlyCost',
-    statLivingCostTotal: 'dashboard.stat.livingCostTotal',
+    // 収支/財政状態の項目別ボタン（タップで各項目の「内訳 + 推移」ページへ）。
+    // 旧・財務諸表（PL/BS トグル）を項目ごとの遷移先に分解した（同じページに集約しない）。
+    statRevenue: 'dashboard.stat.revenue', // → 収入の内訳
+    statExpense: 'dashboard.stat.expense', // → 支出の内訳
+    statNetIncome: 'dashboard.stat.netIncome', // → 収支
+    statAssets: 'dashboard.stat.assets', // → 資産の内訳
+    statLiabilities: 'dashboard.stat.liabilities', // → 負債の内訳
+    statNetAssets: 'dashboard.stat.netAssets', // → 純資産
     // 当月の仕訳プレビュー
     journalPreview: 'dashboard.journal.preview',
     journalOpenAll: 'dashboard.journal.openAll',
+  },
+  // 収入の内訳（ホーム「収入」のタップ先・フロー）。科目行は仕訳へドリル。
+  incomeBreakdown: {
+    view: 'incomeBreakdown.view',
+    row: 'incomeBreakdown.row',
+    total: 'incomeBreakdown.total',
+  },
+  // 支出の内訳（通常支出 + 月額化＝生活コスト）。月額化からは月額化コスト台帳へ。
+  expenseBreakdown: {
+    view: 'expenseBreakdown.view',
+    normalExpense: 'expenseBreakdown.normalExpense',
+    monthlyCost: 'expenseBreakdown.monthlyCost',
+    total: 'expenseBreakdown.total',
+  },
+  // 収支（ホーム「収支」のタップ先・フロー）。科目別ドリルはせず、月ごとの残り方を推移で見せる。
+  netIncome: {
+    view: 'netIncome.view',
+    revenue: 'netIncome.revenue',
+    expense: 'netIncome.expense',
+    result: 'netIncome.result',
+  },
+  // 資産の内訳（ホーム「資産」のタップ先・ストック）。科目行は仕訳へドリル。
+  assetsBreakdown: {
+    view: 'assetsBreakdown.view',
+    row: 'assetsBreakdown.row',
+    total: 'assetsBreakdown.total',
+  },
+  // 負債の内訳（ホーム「負債」のタップ先・ストック）。資金繰り/返済計画への導線を持つ。
+  liabilitiesBreakdown: {
+    view: 'liabilitiesBreakdown.view',
+    row: 'liabilitiesBreakdown.row',
+    total: 'liabilitiesBreakdown.total',
+    cashflowLink: 'liabilitiesBreakdown.cashflowLink',
+  },
+  // 純資産（ホーム「純資産」のタップ先・ストック）。元手 + 今期の損益 + 推移。
+  netAssets: {
+    view: 'netAssets.view',
+    row: 'netAssets.row',
+    total: 'netAssets.total',
   },
   journal: {
     view: 'journal.view',
@@ -79,6 +112,10 @@ export const UI = {
       loanRepayAccount: 'journal.entry.loanRepayAccount',
       loanRepayCount: 'journal.entry.loanRepayCount',
       loanRepayStart: 'journal.entry.loanRepayStart',
+      // 継続コスト（資産経由）: 行き先を「継続コスト対象」に切り替え、対象名を自由入力 + 認識先カテゴリ
+      ccToggle: 'journal.entry.ccToggle',
+      ccName: 'journal.entry.ccName',
+      ccCategory: 'journal.entry.ccCategory',
       // 固定資産購入の月額化
       fixedMonthlyToggle: 'journal.entry.fixedMonthlyToggle',
       fixedMonthlyCategory: 'journal.entry.fixedMonthlyCategory',
@@ -105,16 +142,6 @@ export const UI = {
       memo: 'journal.entry.memo',
     },
   },
-  statements: {
-    view: 'statements.view',
-    profitAndLoss: 'statements.profitAndLoss',
-    balanceSheet: 'statements.balanceSheet',
-    tabPl: 'statements.tab.pl',
-    tabBs: 'statements.tab.bs',
-    asOf: 'statements.asOf',
-    // 科目行（クリックで Journal へドリルダウン）
-    row: 'statements.row',
-  },
   accounts: {
     view: 'accounts.view',
     create: 'accounts.create',
@@ -127,6 +154,26 @@ export const UI = {
     view: 'allocations.view',
     list: 'allocations.list',
     showCompleted: 'allocations.showCompleted',
+    edit: 'allocations.edit',
+    editDialog: 'allocations.editDialog',
+    editName: 'allocations.edit.name',
+    editKind: 'allocations.edit.kind',
+    editAmount: 'allocations.edit.amount',
+    editCostMonths: 'allocations.edit.costMonths',
+    editRepeat: 'allocations.edit.repeat',
+    editStartMonth: 'allocations.edit.startMonth',
+    editEndMonth: 'allocations.edit.endMonth',
+    editExpense: 'allocations.edit.expense',
+    editStatus: 'allocations.edit.status',
+    editSave: 'allocations.edit.save',
+    // 過去から再計算される項目を変えたときの注意（資産経由モデルの後編集）。
+    editImpactWarning: 'allocations.edit.impactWarning',
+    dispose: 'allocations.dispose',
+    disposeDialog: 'allocations.disposeDialog',
+    disposeDate: 'allocations.dispose.date',
+    disposeProceeds: 'allocations.dispose.proceeds',
+    disposeDestination: 'allocations.dispose.destination',
+    disposeConfirm: 'allocations.dispose.confirm',
   },
   tags: {
     view: 'tags.view',
@@ -158,6 +205,35 @@ export const UI = {
     kind: 'adjust.kind',
     actual: 'adjust.actual',
     save: 'adjust.save',
+    // 登録済みの補正（現実アンカー）の一覧・編集・削除。
+    list: 'adjustments.list',
+    row: 'adjustments.row',
+    rowEdit: 'adjustments.row.edit',
+    rowDelete: 'adjustments.row.delete',
+    editDialog: 'adjustments.editDialog',
+    editAccount: 'adjustments.edit.account',
+    editDate: 'adjustments.edit.date',
+    editKind: 'adjustments.edit.kind',
+    editActual: 'adjustments.edit.actual',
+    editSave: 'adjustments.edit.save',
+    deleteConfirm: 'adjustments.deleteConfirm',
+    // 初期残高（kind='opening'）の登録・一覧・編集・削除（同じ「補正・勘定科目」画面）。
+    openingMode: 'opening.mode',
+    openingAccount: 'opening.account',
+    openingName: 'opening.name',
+    openingRole: 'opening.role',
+    openingAmount: 'opening.amount',
+    openingDate: 'opening.date',
+    openingSave: 'opening.save',
+    openingList: 'opening.list',
+    openingRow: 'opening.row',
+    openingRowEdit: 'opening.row.edit',
+    openingRowDelete: 'opening.row.delete',
+    openingEditDialog: 'opening.editDialog',
+    openingEditAmount: 'opening.edit.amount',
+    openingEditDate: 'opening.edit.date',
+    openingEditSave: 'opening.edit.save',
+    openingDeleteConfirm: 'opening.deleteConfirm',
   },
   cashflow: {
     view: 'cashflow.view',

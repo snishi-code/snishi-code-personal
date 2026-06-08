@@ -148,6 +148,17 @@ export interface EntryMetadata {
   adjustment?: AdjustmentMeta;
   /** 月額化コストの実支払い仕訳のとき、紐づく MonthlyCostItem の ID（通常編集/削除は不可）。 */
   monthlyCostId?: string;
+  /** 固定資産の売却・故障処分で生成された仕訳のとき、紐づく AssetDisposal の ID（通常編集/削除は不可）。 */
+  assetDisposalId?: string;
+  /**
+   * 継続コスト（資産経由モデル）の仮想仕訳の印。これらは **保存されない導出専用**で、
+   * `Ledger.derivedEntries` にのみ現れる。実仕訳(`journalEntries`)・保存系・export には入れない。
+   */
+  virtual?: true;
+  /** 仮想仕訳が属する MonthlyCostItem(継続コスト)の ID。 */
+  continuousCostId?: string;
+  /** 仮想仕訳の種別。funding=資産化(支払元→対象資産) / recognition=認識(対象資産→費用カテゴリ)。 */
+  ccKind?: 'funding' | 'recognition';
 }
 
 /**
@@ -234,7 +245,12 @@ export interface MonthlyCostItem {
   endMonth?: string;
   /** 月額化先の費用カテゴリ（role: expense-category）。 */
   expenseAccountId: string;
-  /** 実際の支払い元（role: daily-asset または payment-liability）。 */
+  /**
+   * 資産経由モデルの funding（資産化）仮想仕訳の貸方＝支払い元（role: daily-asset | payment-liability）。
+   * 継続コスト対象（recognitionCreditAccountId が continuing-cost-asset）で使う。
+   */
+  paymentSourceAccountId?: string;
+  /** 実際の支払い元（role: daily-asset または payment-liability）。旧モデル（実支払い仕訳あり）用。 */
   paymentAccountId?: string;
   /** liability 払いのとき、返済 CF を作るための支払い口座（role: daily-asset）。 */
   repaymentAccountId?: string;
@@ -245,6 +261,34 @@ export interface MonthlyCostItem {
   /** 仮想認識で貸方側に見せる科目（固定資産など）。指定時、Journal 仮想行は「この科目 → 費用」で表示。 */
   recognitionCreditAccountId?: string;
   status: MonthlyCostStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 固定資産の売却・故障処分の記録（監査用の独立エンティティ）。
+ * 固定資産由来の MonthlyCostItem を途中終了し、未認識残高の消し込みと売却損益の仕訳を生成したときに作る。
+ * 生成仕訳は `metadata.assetDisposalId` でこのレコードに紐づき、通常編集/削除は不可（fail-closed）。
+ */
+export interface AssetDisposal {
+  id: string;
+  /** 処分した固定資産由来の MonthlyCostItem。 */
+  monthlyCostId: string;
+  /** 処分対象の固定資産科目（= MonthlyCostItem.recognitionCreditAccountId）。 */
+  fixedAccountId: string;
+  managementScopeId: string;
+  /** 処分日 (YYYY-MM-DD)。 */
+  disposalDate: string;
+  /** 売却額（故障・廃棄は 0）。正の整数または 0。 */
+  proceedsAmount: number;
+  /** 売却額の入金先（proceedsAmount > 0 のときのみ）。 */
+  destinationAccountId?: string;
+  /** 処分月の前月までに月額化 formula で認識済みの合計。 */
+  recognizedAmount: number;
+  /** amount - recognizedAmount（0 未満にしない）。 */
+  remainingAmount: number;
+  /** この処分で生成した仕訳の ID 群（監査・追跡用）。 */
+  generatedEntryIds: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -395,6 +439,7 @@ export interface LedgerExportPackage {
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   fundingGoals: FundingGoal[];
+  assetDisposals: AssetDisposal[];
   settings: Settings;
 }
 
@@ -442,11 +487,18 @@ export interface Ledger {
   managementScopes: ManagementScope[];
   accountInstruments: AccountInstrument[];
   accounts: Account[];
+  /** 実仕訳（保存される正本）。保存系・export・残高チェックはこれだけを見る。 */
   journalEntries: JournalEntry[];
+  /**
+   * 導出専用の仕訳列 = 実仕訳 + 継続コストの仮想仕訳（funding/recognition）。
+   * PL/BS/支出/推移/Journal 表示など**集計はこれを使う**（単一正本）。保存されない。
+   */
+  derivedEntries: JournalEntry[];
   allocations: AllocationItem[];
   cashflowSchedules: CashflowSchedule[];
   reserves: ReserveItem[];
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   fundingGoals: FundingGoal[];
+  assetDisposals: AssetDisposal[];
 }

@@ -28,8 +28,10 @@ const monthlyCost: MonthlyCostItem = {
   costMonths: 10,
   startMonth: '2026-06',
   expenseAccountId: 'mc-exp',
+  paymentSourceAccountId: 'mc-src',
   paymentAccountId: 'mc-pay',
   repaymentAccountId: 'mc-repay',
+  recognitionCreditAccountId: 'mc-recog',
   status: 'active',
   createdAt: 'x',
   updatedAt: 'x',
@@ -106,10 +108,15 @@ describe('isAccountReferenced（仕訳/予定CF/目的別資金/按分）', () =
     expect(isAccountReferenced('alloc-pay', { ...empty, allocations: [allocation] })).toBe(true);
     expect(isAccountReferenced('alloc-def', { ...empty, allocations: [allocation] })).toBe(true);
   });
-  it('月額化コスト（expense/payment/repayment）の参照を検出する', () => {
+  it('継続コスト（expense/支払い元/返済/対象資産）の参照を検出する', () => {
     expect(isAccountReferenced('mc-exp', { ...empty, monthlyCostItems: [monthlyCost] })).toBe(true);
     expect(isAccountReferenced('mc-pay', { ...empty, monthlyCostItems: [monthlyCost] })).toBe(true);
     expect(isAccountReferenced('mc-repay', { ...empty, monthlyCostItems: [monthlyCost] })).toBe(
+      true,
+    );
+    // 資産経由モデルの支払い元(funding 貸方)と対象資産も参照中＝削除/区分変更を fail-closed に。
+    expect(isAccountReferenced('mc-src', { ...empty, monthlyCostItems: [monthlyCost] })).toBe(true);
+    expect(isAccountReferenced('mc-recog', { ...empty, monthlyCostItems: [monthlyCost] })).toBe(
       true,
     );
   });

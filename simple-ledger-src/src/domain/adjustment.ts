@@ -49,6 +49,11 @@ export interface AdjustmentInput {
   counterpartAccountId: string;
   /** どの管理区分の補正か。未指定なら既定（個人用）。 */
   managementScopeId?: string;
+  /**
+   * 既存補正の編集時に、その id / createdAt を引き継ぐ（同一仕訳を上書きする）。
+   * 未指定なら新規（id を採番し createdAt=updatedAt=now）。
+   */
+  existing?: { id: string; createdAt: string };
 }
 
 /**
@@ -94,7 +99,7 @@ export function buildAdjustmentEntry(input: AdjustmentInput): JournalEntry | nul
   };
 
   return {
-    id: newId(),
+    id: input.existing?.id ?? newId(),
     date: input.date,
     description: input.description.trim() || '残高補正',
     kind: 'normal',
@@ -104,7 +109,7 @@ export function buildAdjustmentEntry(input: AdjustmentInput): JournalEntry | nul
       { accountId: credit, side: 'credit', amount },
     ],
     metadata: { inputMode: 'manual', adjustment: meta },
-    createdAt: ts,
+    createdAt: input.existing?.createdAt ?? ts,
     updatedAt: ts,
   };
 }

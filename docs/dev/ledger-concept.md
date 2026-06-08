@@ -29,24 +29,42 @@
 | `CF` | `CashflowSchedule`（予定キャッシュフロー）/ 資金繰り画面 | 実装済み（予定→実績化） |
 | `INVENTORY` | （将来）`fixedAssets` / `assetRegister` | MVP 対象外 |
 
+## UI 表示用語 ↔ 内部用語
+
+ユーザー向け画面の用語は柔らかい具体名に統一した。内部の型名・会計概念は変えていない（本書は会計
+モデルの説明なので内部用語も併用する）。
+
+| UI 表示（新） | 本書/コードの内部用語 | 備考 |
+|---|---|---|
+| 継続コスト | `MonthlyCostItem`（月額化） + 按分（繰延認識） | サブスク/年払い/耐久財/長期支出を「月あたりコスト」で見せる総称。内部の 2 機構（formula 認識と繰延按分）はそのまま |
+| 継続コスト化する | 月額化する / 按分する | 入力時のトグル文言 |
+| 継続コスト台帳 | `allocations` 画面（`Allocations.tsx`） | screen 名は歴史的に allocations |
+| 取り置き資金 | `ReserveItem`（reserve-asset） | 旧「目的別資金」 |
+| 資金繰り | `Cashflow`（`CashflowSchedule`） | 旧「資金計画・負債」 |
+| 支出（ホーム指標） | 通常支出 + 継続コスト | 旧「生活コスト」。独立セクションにしない |
+| クレジットカード | payment-liability（カード未払） | 画面上は「未払」を出さず「クレジットカード」に寄せる |
+
+> 内部の繰延資産は `按分中資産`（`DEFERRED_ACCOUNT_NAME`）のまま。既存台帳との照合・role 推定に
+> 名前を使うため改名しない（互換コード）。勘定科目などの管理画面ではこの内部名が見えることがある。
+
 ## 中核モデル
 
 - **`Account`（勘定科目）**: `id` / `name` / `type` / `role` / `archived`。
   `type` は `asset` / `liability` / `equity` / `revenue` / `expense`（会計分類）。
   `role` は UI 用の役割で、日常入力（収入/支出/振替）の候補制御に使う（`type` だけだと
-  按分中資産・目的別資金・投資資産・残高調整科目をすべて asset/expense/revenue として
+  按分中資産・取り置き資金・投資資産・残高調整科目をすべて asset/expense/revenue として
   混ぜてしまうため）。正本は [`src/domain/accountRoles.ts`](../../simple-ledger-src/src/domain/accountRoles.ts)。
   `role` は `type` と整合する（`roleAllowsType`）。
-  - `daily-asset`（現金・預金）/ `reserve-asset`（目的別資金）/ `deferred-asset`（按分中資産）/
+  - `daily-asset`（現金・預金）/ `reserve-asset`（取り置き資金）/ `deferred-asset`（按分中資産）/
     `investment-asset`（投資）/ `fixed-asset`（固定資産＝車・家財など。現金でない・CF総資金外）… いずれも `type=asset`
-  - `payment-liability`（カード未払等）/ `other-liability`（ローン等）… `type=liability`
+  - `payment-liability`（クレジットカード等）/ `other-liability`（ローン等）… `type=liability`
   - `income-category`（`revenue`）/ `expense-category`（`expense`）/ `equity`（`equity`）
   - `system-adjustment`（残高調整費/収入・投資評価損益。`expense|revenue`。自動生成・通常入力に出さない）
   - 日常入力候補: 収入の入金先=`daily-asset`。支出の使い道=`expense-category`+`fixed-asset`（固定資産購入）、
     支払元=`daily-asset`+`reserve-asset`+`payment-liability`。振替（資金移動）=`daily/reserve-asset` と
     `payment/other-liability` の間（資金↔資金 / 資金→負債返済 / 負債→資金借入。負債→負債等は不正＝`transferFlowValid`）。
     按分中資産・投資資産・調整科目は通常入力に出さない（manual/詳細入力では全件可）。
-  - **目的別資金からの支払い/移動は、その資金の残高不足を保存前に拒否する**（`reserveBalanceShortfall`、
+  - **取り置き資金からの支払い/移動は、その資金の残高不足を保存前に拒否する**（`reserveBalanceShortfall`、
     entry.date 時点の残高で判定・fail-closed）。
 - **`JournalEntry`（仕訳）**: `date` / `description` / `lines[]` / `kind` / `memo`。
   MVP では `lines` は「1 借方・1 貸方・同額」の 2 行のみ（型は複数行を許し将来拡張可能）。
@@ -85,6 +103,11 @@ PL も BS も **保存しない**。`Account` と `JournalEntry` から毎回計
 例: 現金 100,000 円を開始残高として持っている →
 `借方 現金 100000 / 貸方 開始残高(equity) 100000`（kind=opening）。
 
+- **登録導線はホームの日常入力ではなく「補正・勘定科目」画面**（`createOpening` / `updateOpening` /
+  `deleteOpening`）。新規 BS 科目の作成 + 開始残高付与、既存科目への付与の両方に対応し、あとから
+  編集・削除できる。資産: `借方 科目 / 貸方 開始残高`、負債: `借方 開始残高 / 貸方 科目`。初回設定にも使える
+  （初回起動オンボーディング自体は別タスク）。資産・負債（投資資産含む）のみ。
+
 ## 日常入力（収入/支出/振替）→ 仕訳への変換
 
 ユーザーには借方/貸方を意識させず、意味のあるフィールドで 2 科目を選ばせる。内部では
@@ -103,8 +126,8 @@ PL も BS も **保存しない**。`Account` と `JournalEntry` から毎回計
 `借方 自動車購入資金(reserve-asset) / 貸方 ローン(liability)`。任意で分割返済予定（返済元→負債の outflow）を
 `buildRepaymentSchedules` で生成し、仕訳と同一 transaction（`saveEntryWithSchedules`）で保存する。
 例（固定資産購入）: 支出 `自動車購入資金 → 固定資産` 3,000,000 →
-`借方 固定資産(fixed-asset) / 貸方 自動車購入資金(reserve-asset)`（**PL 費用にしない**）。任意で「生活コストとして
-月額化」すると、購入仕訳とは別に `MonthlyCostItem`（`recognitionCreditAccountId=固定資産`・支払い仕訳なし）を作り、
+`借方 固定資産(fixed-asset) / 貸方 自動車購入資金(reserve-asset)`（**PL 費用にしない**）。任意で「支出として
+継続コスト」すると、購入仕訳とは別に `MonthlyCostItem`（`recognitionCreditAccountId=固定資産`・支払い仕訳なし）を作り、
 formula で月割り認識する（`saveEntryWithFixedAssetMonthly`）。
 
 ## 取消/返金（逆仕訳）
@@ -116,7 +139,7 @@ formula で月割り認識する（`saveEntryWithFixedAssetMonthly`）。
 
 例: 元 `借方 変動費 / 貸方 カード 1000` → 取消 `借方 カード / 貸方 変動費 1000`。
 
-## 按分支出（長期の生活コスト）
+## 按分支出（長期の支出）
 
 高額・長期の支出（例: PC 240,000 円 / 48 か月）を月割りで費用認識する。実装は
 `src/domain/allocation.ts` と `AllocationItem`（`src/domain/types.ts`）。
@@ -130,10 +153,10 @@ formula で月割り認識する（`saveEntryWithFixedAssetMonthly`）。
     `allocationRole`（`source`/`recognition`）を持つ。
 
 これにより PL/BS は変更不要のまま、月次認識仕訳が各月の費用として自然に集計される
-（生活コスト = 通常費用 + 按分認識額）。
+（支出 = 通常費用 + 按分認識額）。
 
 - **按分中資産**（繰延）科目は初回利用時に asset 科目として自動作成し、以後再利用。
-- 生成仕訳は **通常の編集・削除では壊せない**（`metadata.allocationId` を持つ仕訳は fail-closed）。按分台帳で管理する。
+- 生成仕訳は **通常の編集・削除では壊せない**（`metadata.allocationId` を持つ仕訳は fail-closed）。継続コスト台帳で管理する。
 - 完了（全認識月が経過）は現在月から導出し、台帳の既定表示から外す。**物理削除はしない**。
 
 #### 現在表示は必ず「今日時点」で切る（未来は予定）
@@ -142,7 +165,7 @@ formula で月割り認識する（`saveEntryWithFixedAssetMonthly`）。
 
 - **BS** は基準日で導出（`deriveBalanceSheet(..., asOf)`）。未来月の認識を現在残高に含めない。
   基準日は共有の `ReportPeriod` から `periodAsOf` で決める（月→月末 / 年→年末 / 全体→最終データ日 or
-  今日）。Dashboard / Statements は同じ期間 state を参照する。
+  今日）。Dashboard / 各内訳ページ（資産/負債/純資産）は同じ期間 state を参照する。
   → 120,000 円/12 か月なら、当月 BS では `按分中資産` に未認識残高（例 110,000）が残る。
 - **Journal** の既定表示は今日まで（未来の認識仕訳を隠す）。「将来予定も表示」で確認できる。
 - 完了ラベルは **「認識完了」**。クレカ等（負債）支払いでは費用認識完了 ≠ 返済完了。
@@ -151,50 +174,83 @@ formula で月割り認識する（`saveEntryWithFixedAssetMonthly`）。
 
 別系統の将来拡張点（前払/前受の期間按分）。型・スキーマ・検証のみ用意し、UI と生成は未実装。
 
-## 月額化コスト
+## 継続コスト
 
-按分という会計処理ではなく、「現在の生活水準を維持するための月あたりコスト」を見える化する
-レイヤ（`src/domain/monthlyCost.ts`、`MonthlyCostItem`）。サブスク・年払い/前払い・耐久財の
-買い替え・定期イベントを **同じ構造** で扱う。
+サブスク・年払い/前払い・耐久財の買い替え・家賃・保険などを **資産経由モデル** で統一して扱う
+（v13。正本ルール = `MonthlyCostItem`（台帳辞書）、仮想展開 = `src/domain/continuousCost.ts`）。
+**支払い時に費用へ直行させず、品目ごとの専用資産（role=`continuing-cost-asset`）にいったん計上し、
+必要な期間だけ `対象資産 → 費用カテゴリ` を仮想展開して認識する**。資産残高に未認識分が残る。
 
-- 月額は formula で導出: `monthlyAmounts(amount, costMonths)`（合計は必ず `amount` に一致）。
-  `repeatEveryMonths` ありは周期ごとに先頭 `costMonths` か月だけ計上（隙間は 0）。例: サブスク
-  `costMonths=1/repeat=1`、年払い `12/12`、耐久財 `210,000/84`、車検 `120,000/24`。
-- **実際の支払い事実は必ず仕訳に残す**: 登録日(`date`)に `借方 費用カテゴリ / 貸方 支払い元`
-  （daily-asset でも payment-liability でも）。`metadata.monthlyCostId` を持ち通常編集/削除は不可。
-  負債払いなら登録日に負債が立つ。
-- **生活コスト認識は仕訳ではなく formula** から導出する分析レイヤ。ダッシュボードは `monthlyCostId`
-  付き支払い仕訳を **通常支出から除外**し、`monthlyCostForMonth` を足す（**二重計上しない**）。
-- **負債(payment-liability)払い + 返済情報**があれば、返済予定 `CashflowSchedule`(installment) を
-  **初回引落日(`repaymentStartDate`)** から回数分作る（購入日とは別）。実績化で `借方 負債 / 貸方 資産`
-  となり、登録日に立てた負債を取り崩す。**返済 CF と月額化認識は別物**。例: 洗濯機 21 万円を 12 回
-  払い・7 年使用なら、支払い仕訳は購入月に 21 万・負債 +21 万、生活コストは月 2,500 円、CF は 12 か月。
-- **固定資産購入の月額化**（`saveEntryWithFixedAssetMonthly`）は支払い仕訳を作らない。購入仕訳
-  （`借方 固定資産 / 貸方 資金`）が実体で、`MonthlyCostItem` は `recognitionCreditAccountId=固定資産` /
-  `sourceEntryId=購入仕訳` を持ち formula で月割り認識する（購入そのものは PL 費用にしない）。
-- **Journal の月額化仮想行**: 月で絞ると、`monthlyCostForMonth` の当月認識を read-only の仮想行で見せる
-  （永続 `JournalEntry` を増やさない・編集/取消/削除なし）。固定資産由来は「固定資産 → 費用カテゴリ」、
-  それ以外は「月額化: 名称」。
-- 前払資産の厳密な償却（按分中資産での繰延）は次フェーズ。月額化は支払い事実＋月割り表示に割り切る。
-- 既存按分(allocations)は v6→v7 で `MonthlyCostItem`（`sourceAllocationId` 付き）へ移行する。
-  既存の按分仕訳（原始/認識）は履歴として残す。
+- **品目ごとに 1 資産科目**を自動作成（YouTube/洗濯機/家賃 等の個別名）。通常入力候補に出さない・
+  CF 総資金に含めない。
+- **保存するのはルールだけ**（`createContinuousCost`）: `MonthlyCostItem`（amount/costMonths/
+  `repeatEveryMonths?`/startMonth/expenseAccountId=認識先/`paymentSourceAccountId`=支払い元/
+  `recognitionCreditAccountId`=対象資産）+ 対象資産科目 +（負債資金で分割なら）返済CF。
+  **funding/recognition の実仕訳は保存しない**。
+- **三層構造**: 入力は `支払い元/借入元 → 継続コスト対象（資産）` を選び、別フィールドで `認識先カテゴリ（費用）`
+  を選ぶ。仕訳は `支払い元 → 対象資産（funding）` と `対象資産 → 費用カテゴリ（recognition）` に分かれる。
+  UI（支出入力）では行き先の「継続コスト化」ボタンで対象名を自由入力する（`EntrySheet`）。
+- **支払い元（funding の貸方）は資金・カード・ローンを許可**: `daily-asset` / `payment-liability`（カード）/
+  `other-liability`（ローン）。**自動車をローンで買う = 資産取得の貸方が負債**（`自動車ローン → 自動車`）。
+  通常の単なる費用払いに `other-liability` を使うのは UI で禁止（`entry.error.loanNotExpense`）。
+- **仮想展開**（`continuousCostEntriesForItem(item, accounts, upTo)`）: 1 サイクルにつき
+  - **funding**: `借方 対象資産 / 貸方 支払い元`（cycle 先頭月の 1 日）
+  - **recognition ×costMonths**: `借方 費用カテゴリ / 貸方 対象資産`（各認識月の 1 日・`monthlyAmounts`
+    で端数配分。合計 = `amount`）
+  funding が recognition より先行するので各時点 BS で **対象資産 >= 0（= 未認識残高）**。例: 12,000 を
+  払って 3 か月認識済みなら対象資産 = 9,000。
+- **辞書展開（永続仕訳を無限生成しない）**: `repeatEveryMonths` 指定は周期ごとに funding+recognition を
+  仮想展開する。実データは作らず、`upTo`（暫定上限 `2100-12-31`）まで必要範囲だけ展開する。各サイクルは
+  資産化→全額認識で閉じるので積み上がらない。
+- **導出専用 entries（`Ledger.derivedEntries` = 実仕訳 + 仮想仕訳）**: PL/BS/支出/推移/Journal/CF は
+  これを使う（単一正本）。`loadLedger` が `nowHorizon=max(今日, 最終データ日)` まで一度だけ展開する
+  （未来の更新を「今」の PL/BS に混ぜない）。仮想仕訳は `metadata.virtual` を持ち **保存系・export・
+  残高チェックには渡さない**（実仕訳 `journalEntries` と型で分離）。
+- **返済 CF は別物**: 負債（`payment-liability` カード / `other-liability` ローン）資金で返済情報があれば
+  返済予定 `CashflowSchedule`(installment) を作る（`預金 → 負債`）。**返済は費用(PL)ではなく資金繰り(CF)**。
+  継続コストの認識（費用）とは独立。未来の更新支払いは資金繰り画面が `untilDate` まで funding を仮想投影
+  する（永続化しない）。
 
-### 生活コストの集計（二重計上しない）
+### 支出の集計（二重計上しない）
 
-Dashboard の今月の生活コスト:
+`derivedEntries` には継続コストの認識が `借方 費用カテゴリ` で既に入るため、**formula を別途足さない**
+（`src/domain/livingCost.ts`）:
 
-- **通常支出** = 今月の費用 − 既存按分の認識額 − 調整用(system-adjustment)費用
-  （投資評価損・残高調整費）− 月額化コストの実支払い（`monthlyCostId` 付き仕訳の費用）。
-- **月額化コスト** = `MonthlyCostItem` の formula 合計（仕訳ではなく登録簿から導出）。
-- **生活コスト合計** = 通常支出 + 月額化コスト。
+- **継続コスト** = 期間内の仮想認識（`metadata.ccKind==='recognition'`）の合計。
+- **通常支出** = 期間内の費用合計 − 投資評価損等(system-adjustment) − 継続コスト認識。
+- **支出合計** = 通常支出 + 継続コスト（= 費用合計 − system-adjustment）。
 
-月額化の実支払い仕訳は通常支出から除いたうえで formula で月割りを足すため、**二重計上にならない**
-（移行済み按分も同様に既存認識を除いて formula で足す）。
+固定資産の購入額そのもの・返済・振替・資産化(funding)は費用ではないので含まれない。
 
-## 残高補正（「締め」なし）
+> **v1 でやらないこと**: 継続コスト対象（continuing-cost-asset）の途中売却/処分（未認識残高基準の損益・
+> 残高消し込み）／過去サイクルの funding 実体化（lazy materialization）。旧 `fixed-asset` + `disposeFixedAsset`
+> のコードは内部互換で残す（`saveEntryWithFixedAssetMonthly` 由来の固定資産月額化は formula 認識のままで、
+> 資産経由モデルとは別経路）。
+
+## 過去編集モデル（あとから意味を組み替える）
+
+simple-ledger は**監査証跡を固定する帳簿ではなく、生活上の意味をあとから組み替えられる台帳**。
+ユーザーが過去・現在・未来を行き来して見られることを重視し、**過去の入力や継続コスト定義を後から
+編集すると、その結果として過去の収支・支出推移・BS・未認識残高が再計算される**ことを仕様として許容する。
+
+- 例: 3 年前に 27 万円で買った洗濯機に、後から運搬費 3 万円も「洗濯機を持つコスト」として足したい
+  → 元々 30 万円だったかのように過去から計算し直せる余地を持たせる。
+- 継続コスト（資産経由モデル）は `MonthlyCostItem` を辞書として `derivedEntries` に仮想展開するので、
+  `amount` / `startMonth` / `costMonths` / `repeatEveryMonths` / `endMonth` / `expenseAccountId` を
+  後編集すれば**過去サイクルから展開し直され、過去集計も変わる**。これは不具合ではなく仕様。
+  - UI（継続コスト編集シート）はこれらの項目を変えると「過去から再計算されます」の注意を出す
+    （`monthlyCost.pastRecalcWarning` / `data-ui=allocations.edit.impactWarning`）。
+  - 固定資産由来・posted 返済 CF など会計事実が確定した範囲は従来どおり fail-closed（総額変更不可）。
+- 「過去から再計算」と「追加事象としてその日以降に足す」は概念上別物。v1 では**過去から再計算できる
+  導線とその影響の明示**を実装する（追加事象としての差分計上は将来の論点）。
+- ぐちゃぐちゃにならない現実アンカーが **残高補正**（下記）。締め処理ではなく、任意の日付で実残高と
+  理論残高をピン留めする。過去編集で理論残高がズレたら、補正自体も後から編集・削除して合わせ直す。
+
+## 残高補正（「締め」なし・現実アンカー）
 
 実残高との差分を任意の日に補正する（`src/domain/adjustment.ts`、`metadata.adjustment`）。
 **月次/年次の「締め」やロックは作らない**。集計は日付範囲から自動で行い、過去日付の入力・修正も許可する。
+残高補正は「ある日付の実残高に台帳をピン留めする現実アンカー」であり、**後から編集・削除できる**。
 
 - `unknown-balance`: 通常の現金/預金差額 → `残高調整費` / `残高調整収入`（初回利用時に自動作成・再利用）。
 - `investment-valuation`: 投資残高差額 → `投資評価損` / `投資評価益`。
@@ -202,8 +258,15 @@ Dashboard の今月の生活コスト:
 - 仕訳の向き（2 行のみ）:
   - asset 増: `借方 資産 / 貸方 収入(評価益)` ／ asset 減: `借方 費(評価損) / 貸方 資産`
   - liability 増: `借方 費 / 貸方 負債` ／ liability 減: `借方 負債 / 貸方 収入`
-- **投資評価損益は生活コストに含めない**（Dashboard の生活コスト合計から除外して表示）。残高調整費/収入は
+- **投資評価損益は支出に含めない**（Dashboard の支出合計から除外して表示）。残高調整費/収入は
   「調整」として見えるようにし、通常費用に完全には埋もれさせない。補正を毎回「開始残高」にはしない。
+- **後編集・削除**（`updateAdjustment` / `deleteAdjustment`、残高補正画面の一覧から）:
+  - **編集時の理論残高は、その補正自身を除いて計算し直す**（除外しないと補正が二重に効く＝最重要）。
+    id / createdAt は保持し、`updatedAt` と `metadata.adjustment` を更新する。
+  - 再計算後の `delta=0` になった補正は意味を失うので**削除する**（UI トースト = `adjust.removedZero`）。
+  - 削除すると対象日以降の理論残高が補正前に戻る。
+  - 補正仕訳は **Journal では読み取り専用**にし（`error.entry.adjustment` で fail-closed）、専用の
+    残高補正画面でだけ編集・削除する（現実アンカーを通常編集で壊さない）。
 
 ## タグ（分析軸）
 
@@ -218,7 +281,7 @@ Dashboard の今月の生活コスト:
 - 参照中タグの物理削除は禁止（アーカイブ）。タグ未入力はエラーにしない。
 - 楽天カード/楽天銀行などを**勘定科目として自動作成しない**（タグで扱う）。
 
-## 将来キャッシュフロー（資金繰り）と目的別資金
+## 将来キャッシュフロー（資金繰り）と取り置き資金
 
 「いつ費用認識するか(按分)」と「いつ現金が動くか(CF)」は**別概念**として保存する
 （`src/domain/cashflow.ts`、`CashflowSchedule` / `ReserveItem`）。
@@ -228,10 +291,10 @@ Dashboard の今月の生活コスト:
   `posted` にする（単一トランザクション）。outflow: `借方 counter / 貸方 account`。
 - **クレカ/分割払い**は自動ルールではなく、まず予定 CF として手入力/明示指定で扱う。一括=1 件、
   分割=N 件（端数は先頭月配分）。締め日/支払日の自動計算・カード会社別ルール・ボーナス払いは次フェーズ。
-- **目的別資金（`ReserveItem`）**: 取り置きは通常の振替（預金 → 目的別資金）で行い、資金繰りでは
+- **取り置き資金（`ReserveItem`）**: 取り置きは通常の振替（預金 → 取り置き資金）で行い、資金繰りでは
   その残高を**自由資金から除外**して見る（総資産は不変）。例: 結婚資金 70 万を取り置くと自由資金が
   70 万減る。
-- 生活コスト按分の月数と、負債返済の回数は**別概念**（同じ `months` に混ぜない）。
+- 支出按分の月数と、負債返済の回数は**別概念**（同じ `months` に混ぜない）。
 - **資金目標（`FundingGoal`）**: 将来の大きな支出（車・老後・入院費など）への積立計画
   （`src/domain/fundingGoal.ts`）。費用項目ではない。目標額・期限・現在確保額・期待年利
   （`Settings.expectedAnnualReturnBps`、参考計算・投資助言ではない）から「必要な毎月の積立額」を
@@ -240,9 +303,11 @@ Dashboard の今月の生活コスト:
 
 ### 次フェーズ（未実装）
 
-資産売却・一括返済（返済スケジュールの自動化）・クレカ締め日ルールは今回実装しない。売却損益は
-複数仕訳が必要で 2 行仕訳制約と衝突しやすいため。支払元が liability（クレカ等）の場合も、按分の費用
-認識（いつ費用にするか）と返済（いつ現金が出るか＝資金繰りの予定 CF）は分けて扱う。
+資産売却・一括返済（返済スケジュールの自動化）・クレカ締め日ルールは今回実装しない。固定資産の
+売却/故障は [fixed-asset-disposal.md](fixed-asset-disposal.md) を次フェーズ仕様とする。売却損益は
+複数仕訳が必要で 2 行仕訳制約と衝突しやすいため、継続コストで認識済みの支出と残存額を分けて扱う。
+支払元が liability（クレカ等）の場合も、按分の費用認識（いつ費用にするか）と返済（いつ現金が出るか＝
+資金繰りの予定 CF）は分けて扱う。
 
 ## 勘定科目の変更ルール（`Account`）
 
@@ -255,4 +320,5 @@ Dashboard の今月の生活コスト:
 
 - データ形式・import ポリシー: [ledger-protocol.md](ledger-protocol.md)
 - 画面/UX: [ledger-ui-ux.md](ledger-ui-ux.md)
+- 固定資産の売却・故障処理: [fixed-asset-disposal.md](fixed-asset-disposal.md)
 - 設計判断（ローカルファースト）: [../adr/0001-local-first-ledger.md](../adr/0001-local-first-ledger.md)

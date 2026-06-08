@@ -27,6 +27,7 @@ export function Modal({
   variant = 'sheet',
   titleVariant = 'visible',
   dataUi,
+  scrollKey,
 }: {
   title: string;
   onClose: () => void;
@@ -42,6 +43,8 @@ export function Modal({
    */
   titleVariant?: 'visible' | 'sr-only';
   dataUi?: string;
+  /** 指定した値が変わるたび、スクロール可能なシート本体を先頭へ戻す。 */
+  scrollKey?: unknown;
 }) {
   // 後方互換: dismissMode 未指定なら dismissable から導出（既定は 'always'）。
   const mode: DismissMode = dismissMode ?? (dismissable === false ? 'never' : 'always');
@@ -59,6 +62,14 @@ export function Modal({
       if (restoreRef.current instanceof HTMLElement) restoreRef.current.focus();
     };
   }, []);
+
+  useEffect(() => {
+    if (scrollKey === undefined) return;
+    const node = ref.current;
+    if (!node) return;
+    if (typeof node.scrollTo === 'function') node.scrollTo({ top: 0 });
+    else node.scrollTop = 0;
+  }, [scrollKey]);
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
