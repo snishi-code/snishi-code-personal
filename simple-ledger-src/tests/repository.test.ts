@@ -36,7 +36,7 @@ import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
 import { monthlyCostForMonth } from '../src/domain/monthlyCost';
 import { accountBalance } from '../src/domain/accounting';
 import { buildExportPackage, exportToJsonText, importFromJsonText } from '../src/data/exportImport';
-import { getKv, putKv, runWrite, STORE } from '../src/data/db';
+import { getKv, putKv } from '../src/data/db';
 import { SCHEMA_VERSION } from '../src/domain/constants';
 import { newId } from '../src/domain/ids';
 import type { CashflowSchedule, LedgerMeta, Tag } from '../src/domain/types';
@@ -510,10 +510,22 @@ describe('起動時 schemaVersion 追従', () => {
     expect(persisted?.revision).toBe(7);
   });
 
-  it('v6→v7 追従で既存按分から月額化コストを補完する（revision 不変）', async () => {
+  it('既存DBの v13 追従（破壊的）: 旧モデルの継続コスト/按分の生成物をクリアする（revision 不変）', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
     const food = ledger.accounts.find((a) => a.name === '変動費')!;
+    // 旧モデル: 月額化コスト（実支払い仕訳 monthlyCostId 付き）と按分（生成仕訳 allocationId 付き）。
+    await createMonthlyCost({
+      name: 'Netflix',
+      kind: 'subscription',
+      amount: 1500,
+      costMonths: 1,
+      repeatEveryMonths: 1,
+      startMonth: '2026-06',
+      date: '2026-06-15',
+      expenseAccountId: food.id,
+      paymentAccountId: cash.id,
+    });
     await createAllocation({
       date: '2026-06-15',
       description: 'PC',
@@ -523,15 +535,26 @@ describe('起動時 schemaVersion 追従', () => {
       paymentAccountId: cash.id,
     });
     const before = await loadLedger();
-    // 旧版(v6)へ巻き戻し、月額化コストは未生成の状態を模す。
-    await putKv('meta', { ...before.meta, schemaVersion: 6 });
-    await runWrite([STORE.monthlyCostItems], (t) => t.objectStore(STORE.monthlyCostItems).clear());
+    expect(before.monthlyCostItems.length).toBeGreaterThan(0);
+    expect(before.allocations.length).toBeGreaterThan(0);
+    // 旧版(v12)へ巻き戻し、既存ユーザの IndexedDB を模す。
+    await putKv('meta', { ...before.meta, schemaVersion: 12 });
 
+    // 通常起動の ensureInitialized が v13 へ追従し、旧モデルの生成物をクリアする。
     const after = await loadLedger();
     expect(after.meta.schemaVersion).toBe(SCHEMA_VERSION);
     expect(after.meta.revision).toBe(before.meta.revision); // 追従は revision を変えない
-    expect(after.monthlyCostItems).toHaveLength(1);
-    expect(after.monthlyCostItems[0]).toMatchObject({ name: 'PC', amount: 900, costMonths: 3 });
+    expect(after.monthlyCostItems).toEqual([]);
+    expect(after.allocations).toEqual([]);
+    expect(after.assetDisposals).toEqual([]);
+    // 生成仕訳（monthlyCostId / allocationId / allocationRole）は残らない。
+    expect(
+      after.journalEntries.some(
+        (e) => e.metadata?.monthlyCostId || e.metadata?.allocationId || e.metadata?.allocationRole,
+      ),
+    ).toBe(false);
+    // 返済CF（monthlyCostId 付き）も残らない。
+    expect(after.cashflowSchedules.some((s) => s.monthlyCostId)).toBe(false);
   });
 });
 

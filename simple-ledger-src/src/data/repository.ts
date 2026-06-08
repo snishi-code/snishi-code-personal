@@ -114,9 +114,32 @@ export async function ensureInitialized(): Promise<void> {
       const patched = accounts.filter(
         (a) => typeof (a as Account & { role?: unknown }).role !== 'string',
       );
-      // v6→v7: 月額化コストが空なら既存按分から移行生成する。
+      // v12→v13（破壊的・未実運用前提）: 既存 DB を開く本命経路でも import migration と同じく
+      // 旧モデルの継続コスト/按分の生成物をクリアし、新（資産経由）モデルへ一本化する。
+      // これをしないと旧 monthlyCostItems が derivedEntries 前提の集計に混ざる。
+      const isPreV13 = meta.schemaVersion < 13;
+      // v6→v7: 月額化コストが空なら既存按分から移行生成する（v13 クリア対象なので pre-v13 では生成しない）。
       const newMonthlyCostsRaw =
-        monthlyCostItems.length === 0 ? monthlyCostItemsFromAllocations(allocations) : [];
+        !isPreV13 && monthlyCostItems.length === 0
+          ? monthlyCostItemsFromAllocations(allocations)
+          : [];
+      // v13 で落とす生成仕訳 / 返済CF の id（put 後に delete する＝delete 優先）。
+      const v13DropEntryIds = isPreV13
+        ? journalEntries
+            .filter((e) => {
+              const m = e.metadata;
+              return !!(
+                m?.monthlyCostId ||
+                m?.allocationId ||
+                m?.allocationRole ||
+                m?.assetDisposalId
+              );
+            })
+            .map((e) => e.id)
+        : [];
+      const v13DropScheduleIds = isPreV13
+        ? cashflowSchedules.filter((s) => s.monthlyCostId).map((s) => s.id)
+        : [];
 
       // v10→v11: 管理区分を seed し、仕訳/予定CF/月額化に付与。明細タグを破棄し、tag.scope を entry に固定。
       const newScopes = managementScopes.length === 0 ? defaultManagementScopes() : [];
@@ -154,9 +177,12 @@ export async function ensureInitialized(): Promise<void> {
           return withScope(copy as unknown as CashflowSchedule);
         });
       const newMonthlyCosts = newMonthlyCostsRaw.map(withScope);
-      const patchedMonthlyCosts = monthlyCostItems
-        .filter((m) => (m as { managementScopeId?: string }).managementScopeId === undefined)
-        .map(withScope);
+      // v13 で monthlyCostItems を全クリアするため、pre-v13 では scope 補完の put をしない。
+      const patchedMonthlyCosts = isPreV13
+        ? []
+        : monthlyCostItems
+            .filter((m) => (m as { managementScopeId?: string }).managementScopeId === undefined)
+            .map(withScope);
       const patchedTags = tags
         .filter((tg) => tg.scope !== 'entry')
         .map((tg) => ({ ...tg, scope: 'entry' as const }));
@@ -171,6 +197,8 @@ export async function ensureInitialized(): Promise<void> {
           STORE.cashflowSchedules,
           STORE.tags,
           STORE.managementScopes,
+          STORE.allocations,
+          STORE.assetDisposals,
         ],
         (t) => {
           t.objectStore(STORE.kv).put(bumped, KV_META);
@@ -179,6 +207,12 @@ export async function ensureInitialized(): Promise<void> {
             store.put({ ...a, role: inferRole(a, { deferredIds, reserveIds }) });
           }
           const mcStore = t.objectStore(STORE.monthlyCostItems);
+          // v13（破壊的）: 旧モデルの継続コスト/按分の登録簿を全クリア。
+          if (isPreV13) {
+            mcStore.clear();
+            t.objectStore(STORE.allocations).clear();
+            t.objectStore(STORE.assetDisposals).clear();
+          }
           for (const mc of newMonthlyCosts) mcStore.put(mc);
           for (const mc of patchedMonthlyCosts) mcStore.put(mc);
           const jeStore = t.objectStore(STORE.journalEntries);
@@ -189,6 +223,9 @@ export async function ensureInitialized(): Promise<void> {
           for (const tg of patchedTags) tagStore.put(tg);
           const scopeStore = t.objectStore(STORE.managementScopes);
           for (const s of newScopes) scopeStore.put(s);
+          // v13: 生成仕訳・返済CF を削除（put 後に delete＝delete 優先）。
+          for (const id of v13DropEntryIds) jeStore.delete(id);
+          for (const id of v13DropScheduleIds) schStore.delete(id);
         },
       );
     }
@@ -1422,6 +1459,9 @@ export async function upsertMonthlyCost(item: MonthlyCostItem): Promise<void> {
     ...item,
     id: existing.id,
     managementScopeId: existing.managementScopeId,
+    ...(existing.paymentSourceAccountId !== undefined
+      ? { paymentSourceAccountId: existing.paymentSourceAccountId }
+      : {}),
     ...(existing.paymentAccountId !== undefined
       ? { paymentAccountId: existing.paymentAccountId }
       : {}),

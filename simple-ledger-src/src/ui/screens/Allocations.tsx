@@ -564,10 +564,10 @@ function MonthlyCostEditSheet({ item, onClose }: { item: MonthlyCostItem; onClos
           }))}
           dataUi={UI.allocations.editStatus}
         />
-        {/* 支払い元は v1 ではロック（会計事実を保つため）。 */}
+        {/* 支払い元は v1 ではロック（会計事実を保つため）。資産経由モデルは paymentSourceAccountId。 */}
         <div className="kv">
           <span className="muted">{t('monthlyCost.payment')}</span>
-          <span>{accountName(item.paymentAccountId)}</span>
+          <span>{accountName(item.paymentSourceAccountId ?? item.paymentAccountId)}</span>
         </div>
         <p className="field__hint">{t('monthlyCost.paymentLocked')}</p>
       </div>
