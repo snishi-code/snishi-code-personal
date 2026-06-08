@@ -9,7 +9,12 @@
 import { STORE, deleteRecord, getAll, getKv, putRecord, runWrite, type StoreName } from './db';
 import { defaultAccounts, defaultManagementScopes, defaultSettings, newMeta } from './seed';
 import { newId } from '../domain/ids';
-import { DEFAULT_MANAGEMENT_SCOPE_ID, SCHEMA_VERSION } from '../domain/constants';
+import {
+  CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+  CONTINUOUS_COST_LEDGER_ACCOUNT_NAME,
+  DEFAULT_MANAGEMENT_SCOPE_ID,
+  SCHEMA_VERSION,
+} from '../domain/constants';
 import {
   DEFERRED_ACCOUNT_NAME,
   inferRole,
@@ -46,6 +51,7 @@ import type {
   Tag,
 } from '../domain/types';
 import { monthlyCostItemsFromAllocations } from '../domain/monthlyCostMigration';
+import { consolidateContinuingCostAccounts } from '../domain/migrations';
 import {
   addMonths,
   addMonthsToDate,
@@ -189,6 +195,20 @@ export async function ensureInitialized(): Promise<void> {
         .filter((tg) => tg.scope !== 'entry')
         .map((tg) => ({ ...tg, scope: 'entry' as const }));
 
+      // v13→v14（勘定科目の聖域化）: 品目別 continuing-cost-asset 科目を集約台帳口座へ寄せる。
+      // pre-v13 では cc 科目も monthlyCostItems も無い（v13 で導入・クリア）ため実質 no-op。
+      const isPreV14 = meta.schemaVersion < 14;
+      const v14 = isPreV14
+        ? consolidateContinuingCostAccounts(
+            accounts,
+            monthlyCostItems,
+            journalEntries,
+            cashflowSchedules,
+            reserves,
+            nowIso(),
+          )
+        : null;
+
       const bumped: LedgerMeta = { ...meta, schemaVersion: SCHEMA_VERSION };
       await runWrite(
         [
@@ -228,6 +248,13 @@ export async function ensureInitialized(): Promise<void> {
           // v13: 生成仕訳・返済CF を削除（put 後に delete＝delete 優先）。
           for (const id of v13DropEntryIds) jeStore.delete(id);
           for (const id of v13DropScheduleIds) schStore.delete(id);
+          // v14: 品目別 continuing-cost-asset 科目を集約台帳口座へ寄せる。
+          if (v14) {
+            if (v14.ledgerCreated && v14.ledgerAccount) store.put(v14.ledgerAccount);
+            for (const a of v14.archivedAccounts) store.put(a);
+            for (const m of v14.repointedItems) mcStore.put(m);
+            for (const id of v14.dropAccountIds) store.delete(id);
+          }
         },
       );
     }
@@ -1527,10 +1554,36 @@ export interface ContinuousCostInput {
 }
 
 /**
+ * 継続コスト用の集約台帳口座（role=continuing-cost-asset・『継続コスト台帳』）を find-or-create する。
+ * 全継続コストの未消化残高を 1 口座に寄せる（品目ごとに資産科目を増やさない＝勘定科目の聖域化）。
+ * 既存があれば再利用し、無ければ well-known id で新規生成して返す（呼び出し側が新規時だけ put する）。
+ */
+function findOrCreateContinuousCostLedgerAccount(
+  ctx: SaveContext,
+  ts: string,
+): { account: Account; created: boolean } {
+  const existing = ctx.byId.get(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+  if (existing) return { account: existing, created: false };
+  return {
+    account: {
+      id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      name: CONTINUOUS_COST_LEDGER_ACCOUNT_NAME,
+      type: 'asset',
+      role: 'continuing-cost-asset',
+      archived: false,
+      createdAt: ts,
+      updatedAt: ts,
+    },
+    created: true,
+  };
+}
+
+/**
  * 継続コストを「資産経由モデル」で登録する（v1 の正本フロー）。
- * 品目ごとに専用資産科目（role=continuing-cost-asset）を自動作成し、台帳ルール(MonthlyCostItem)と
- * （負債資金なら）返済 CF を保存する。**funding/recognition の実仕訳は作らない**——
+ * 未消化残高は品目別の資産科目ではなく単一の集約台帳口座（『継続コスト台帳』）に寄せ、台帳ルール
+ * (MonthlyCostItem)と（負債資金なら）返済 CF を保存する。**funding/recognition の実仕訳は作らない**——
  * それらは `continuousCost.ts` が必要範囲だけ仮想展開する（辞書展開・永続仕訳を無限生成しない）。
+ * 品目名は MonthlyCostItem.name に保持し、勘定科目として自動作成しない。
  */
 export async function createContinuousCost(input: ContinuousCostInput): Promise<MonthlyCostItem> {
   if (input.name.trim() === '') throw new LedgerError('error.common.nameRequired');
@@ -1564,16 +1617,9 @@ export async function createContinuousCost(input: ContinuousCostInput): Promise<
   if (!paymentOk) throw new LedgerError('error.monthlyCost.paymentSource');
 
   const ts = nowIso();
-  // 1 品目 = 1 継続コスト対象の資産科目（個別名）。自動作成する。
-  const assetAccount: Account = {
-    id: newId(),
-    name: input.name.trim(),
-    type: 'asset',
-    role: 'continuing-cost-asset',
-    archived: false,
-    createdAt: ts,
-    updatedAt: ts,
-  };
+  // 未消化残高は品目別ではなく単一の集約台帳口座へ寄せる（勘定科目を品目数ぶん増やさない）。
+  const { account: ledgerAccount, created: ledgerCreated } =
+    findOrCreateContinuousCostLedgerAccount(ctx, ts);
 
   const item: MonthlyCostItem = {
     id: newId(),
@@ -1588,7 +1634,7 @@ export async function createContinuousCost(input: ContinuousCostInput): Promise<
     startMonth: input.startMonth,
     expenseAccountId: input.expenseAccountId,
     paymentSourceAccountId: input.paymentSourceAccountId,
-    recognitionCreditAccountId: assetAccount.id,
+    recognitionCreditAccountId: ledgerAccount.id,
     ...(input.repaymentAccountId !== undefined
       ? { repaymentAccountId: input.repaymentAccountId }
       : {}),
@@ -1634,7 +1680,8 @@ export async function createContinuousCost(input: ContinuousCostInput): Promise<
   await writeWithRevision(
     [STORE.accounts, STORE.monthlyCostItems, STORE.cashflowSchedules],
     (t) => {
-      t.objectStore(STORE.accounts).put(assetAccount);
+      // 集約台帳口座は新規作成された時だけ put（既存なら品目数ぶん増やさない）。
+      if (ledgerCreated) t.objectStore(STORE.accounts).put(ledgerAccount);
       t.objectStore(STORE.monthlyCostItems).put(item);
       const sStore = t.objectStore(STORE.cashflowSchedules);
       for (const s of schedules) sStore.put(s);

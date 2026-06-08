@@ -178,15 +178,18 @@ formula で月割り認識する（`saveEntryWithFixedAssetMonthly`）。
 
 サブスク・年払い/前払い・耐久財の買い替え・家賃・保険などを **資産経由モデル** で統一して扱う
 （v13。正本ルール = `MonthlyCostItem`（台帳辞書）、仮想展開 = `src/domain/continuousCost.ts`）。
-**支払い時に費用へ直行させず、品目ごとの専用資産（role=`continuing-cost-asset`）にいったん計上し、
-必要な期間だけ `対象資産 → 費用カテゴリ` を仮想展開して認識する**。資産残高に未認識分が残る。
+**支払い時に費用へ直行させず、単一の集約台帳口座（role=`continuing-cost-asset`・『継続コスト台帳』）に
+いったん計上し、必要な期間だけ `継続コスト台帳 → 費用カテゴリ` を仮想展開して認識する**。台帳口座残高に
+未消化分が残る。
 
-- **品目ごとに 1 資産科目**を自動作成（YouTube/洗濯機/家賃 等の個別名）。通常入力候補に出さない・
-  CF 総資金に含めない。
+- **勘定科目の聖域化（v14）**: 品目ごとに資産科目を自動作成しない。継続コスト対象名（YouTube/洗濯機/家賃 等）は
+  **勘定科目ではなく台帳項目（`MonthlyCostItem.name`）**として保持し、未消化残高は**単一の集約台帳口座**
+  （well-known id `continuing-cost-ledger`・`CONTINUOUS_COST_LEDGER_ACCOUNT_ID`）に寄せる。集約口座は
+  勘定科目管理 UI に出さず・通常入力候補に出さず・CF 総資金に含めないが、BS / 資産内訳には 1 行で表示する。
 - **保存するのはルールだけ**（`createContinuousCost`）: `MonthlyCostItem`（amount/costMonths/
   `repeatEveryMonths?`/startMonth/expenseAccountId=認識先/`paymentSourceAccountId`=支払い元/
-  `recognitionCreditAccountId`=対象資産）+ 対象資産科目 +（負債資金で分割なら）返済CF。
-  **funding/recognition の実仕訳は保存しない**。
+  `recognitionCreditAccountId`=集約台帳口座）+（集約口座が未作成なら）集約口座 +（負債資金で分割なら）返済CF。
+  **funding/recognition の実仕訳は保存しない**。集約口座は find-or-create で 1 つだけ作る。
 - **三層構造**: 入力は `支払い元/借入元 → 継続コスト対象（資産）` を選び、別フィールドで `認識先カテゴリ（費用）`
   を選ぶ。仕訳は `支払い元 → 対象資産（funding）` と `対象資産 → 費用カテゴリ（recognition）` に分かれる。
   UI（支出入力）では行き先の「継続コスト化」ボタンで対象名を自由入力する（`EntrySheet`）。

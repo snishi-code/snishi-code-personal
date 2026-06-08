@@ -10,18 +10,24 @@
  * migrations に { from: 1, to: 2, migrate } を登録する。
  */
 import {
+  CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+  CONTINUOUS_COST_LEDGER_ACCOUNT_NAME,
   DEFAULT_MANAGEMENT_SCOPE_ID,
   DEFAULT_MANAGEMENT_SCOPE_NAME,
   SCHEMA_VERSION,
 } from './constants';
 import { inferRole } from './accountRoles';
 import { monthlyCostItemsFromAllocations } from './monthlyCostMigration';
+import { nowIso } from '../util/time';
 import type {
   Account,
   CashflowSchedule,
+  JournalEntry,
   JournalLine,
   LedgerExportPackage,
   ManagementScope,
+  MonthlyCostItem,
+  ReserveItem,
 } from './types';
 
 export interface MigrationResult {
@@ -38,6 +44,111 @@ type Step = {
   to: number;
   migrate: (pkg: LedgerExportPackage) => LedgerExportPackage;
 };
+
+/**
+ * v13→v14（勘定科目の聖域化）の共通ロジック。import 経路と既存DB起動経路の両方から使う。
+ * 品目別の continuing-cost-asset 科目を単一の集約台帳口座（CONTINUOUS_COST_LEDGER_ACCOUNT_ID）へ寄せる:
+ *  - 旧品目別科目を指す MonthlyCostItem.recognitionCreditAccountId を集約口座へ付け替える（name は item 上に残る）。
+ *  - 参照されなくなった旧品目別科目は削除。万一 実仕訳/予定CF/取り置き資金から参照されていれば
+ *    削除せず archived にフォールバック（fail-safe・通常は起きない＝funding/recognition は仮想・非永続）。
+ *  - 付け替え後に集約口座を参照する item が 1 件でもあり、集約口座が未作成なら作成する。
+ *  - fixed-asset 由来（recognitionCreditAccountId が fixed-asset）は対象外（旧互換の別経路）。
+ */
+export interface ContinuingCostConsolidation {
+  /** ensure すべき集約台帳口座（既存または新規）。継続コスト item が無ければ null。 */
+  ledgerAccount: Account | null;
+  /** ledgerAccount を新規 put する必要があるか（既存再利用なら false）。 */
+  ledgerCreated: boolean;
+  /** 集約口座へ付け替えた MonthlyCostItem（recognitionCreditAccountId のみ変更）。 */
+  repointedItems: MonthlyCostItem[];
+  /** 削除してよい旧品目別 continuing-cost-asset 科目の id。 */
+  dropAccountIds: string[];
+  /** 参照中のため削除せず archived にした旧科目（fail-safe）。 */
+  archivedAccounts: Account[];
+}
+
+function newContinuousCostLedgerAccount(ts: string): Account {
+  return {
+    id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+    name: CONTINUOUS_COST_LEDGER_ACCOUNT_NAME,
+    type: 'asset',
+    role: 'continuing-cost-asset',
+    archived: false,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+}
+
+export function consolidateContinuingCostAccounts(
+  accounts: Account[],
+  monthlyCostItems: MonthlyCostItem[],
+  journalEntries: JournalEntry[],
+  cashflowSchedules: CashflowSchedule[],
+  reserves: ReserveItem[],
+  ts: string,
+): ContinuingCostConsolidation {
+  const ledgerId = CONTINUOUS_COST_LEDGER_ACCOUNT_ID;
+  const oldPerItem = accounts.filter(
+    (a) => a.role === 'continuing-cost-asset' && a.id !== ledgerId,
+  );
+  const oldIds = new Set(oldPerItem.map((a) => a.id));
+
+  const repointedItems = monthlyCostItems
+    .filter(
+      (m) => m.recognitionCreditAccountId !== undefined && oldIds.has(m.recognitionCreditAccountId),
+    )
+    .map((m) => ({ ...m, recognitionCreditAccountId: ledgerId }));
+
+  // 付け替え後に集約口座を参照する item があるか（＝集約口座が要るか）。
+  const repointedById = new Map(repointedItems.map((m) => [m.id, m]));
+  const needLedger = monthlyCostItems.some(
+    (m) => (repointedById.get(m.id) ?? m).recognitionCreditAccountId === ledgerId,
+  );
+
+  const existingLedger = accounts.find((a) => a.id === ledgerId) ?? null;
+  const ledgerAccount = existingLedger ?? (needLedger ? newContinuousCostLedgerAccount(ts) : null);
+  const ledgerCreated = existingLedger === null && ledgerAccount !== null;
+
+  // 旧品目別科目が monthlyCostItems 以外（実仕訳/予定CF/取り置き資金）から参照されていないか。
+  const referencedOutside = new Set<string>();
+  for (const e of journalEntries) for (const l of e.lines) referencedOutside.add(l.accountId);
+  for (const s of cashflowSchedules) {
+    referencedOutside.add(s.accountId);
+    if (s.counterAccountId !== undefined) referencedOutside.add(s.counterAccountId);
+  }
+  for (const r of reserves) referencedOutside.add(r.reserveAccountId);
+
+  const dropAccountIds: string[] = [];
+  const archivedAccounts: Account[] = [];
+  for (const a of oldPerItem) {
+    if (referencedOutside.has(a.id)) archivedAccounts.push({ ...a, archived: true, updatedAt: ts });
+    else dropAccountIds.push(a.id);
+  }
+
+  return { ledgerAccount, ledgerCreated, repointedItems, dropAccountIds, archivedAccounts };
+}
+
+/** consolidation を LedgerExportPackage に適用する（import 経路）。 */
+function applyContinuingCostConsolidation(pkg: LedgerExportPackage): LedgerExportPackage {
+  const items = pkg.monthlyCostItems ?? [];
+  const c = consolidateContinuingCostAccounts(
+    pkg.accounts,
+    items,
+    pkg.journalEntries,
+    pkg.cashflowSchedules ?? [],
+    pkg.reserves ?? [],
+    nowIso(),
+  );
+  const repointById = new Map(c.repointedItems.map((m) => [m.id, m]));
+  const archivedById = new Map(c.archivedAccounts.map((a) => [a.id, a]));
+  const dropSet = new Set(c.dropAccountIds);
+  let accounts = pkg.accounts
+    .filter((a) => !dropSet.has(a.id))
+    .map((a) => archivedById.get(a.id) ?? a);
+  if (c.ledgerCreated && c.ledgerAccount) accounts = [...accounts, c.ledgerAccount];
+  const monthlyCostItems = items.map((m) => repointById.get(m.id) ?? m);
+  return { ...pkg, accounts, monthlyCostItems };
+}
 
 // version を上げるたびにここへ追加していく。
 const STEPS: Step[] = [
@@ -222,6 +333,13 @@ const STEPS: Step[] = [
         assetDisposals: [],
       };
     },
+  },
+  {
+    // v13 → v14: 勘定科目の聖域化。品目別の continuing-cost-asset 科目を単一の集約台帳口座へ寄せ、
+    // 旧品目別科目を指す MonthlyCostItem を集約口座へ付け替え、参照されなくなった旧科目を削除する。
+    from: 13,
+    to: 14,
+    migrate: applyContinuingCostConsolidation,
   },
 ];
 
