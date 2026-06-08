@@ -427,6 +427,17 @@ function MonthlyCostEditSheet({ item, onClose }: { item: MonthlyCostItem; onClos
     .filter((a) => a.role === 'expense-category' && (!a.archived || a.id === item.expenseAccountId))
     .map((a) => ({ value: a.id, label: a.name }));
 
+  // 過去から再計算される項目（総額/開始月/認識月数/更新周期/終了月/費用カテゴリ）を 1 つでも
+  // 変えたら警告を出す。資産経由モデルは derivedEntries を辞書展開し直すため、過去の支出・収支・
+  // BS・未認識残高がさかのぼって変わる。これは不具合ではなく仕様。
+  const pastFieldsChanged =
+    (amountEditable && amountText !== String(item.amount)) ||
+    costMonthsText !== String(item.costMonths) ||
+    repeatText !== (item.repeatEveryMonths !== undefined ? String(item.repeatEveryMonths) : '') ||
+    startMonth.trim() !== item.startMonth ||
+    endMonth.trim() !== (item.endMonth ?? '') ||
+    expenseAccountId !== item.expenseAccountId;
+
   async function submit() {
     setSubmitting(true);
     setError(undefined);
@@ -481,6 +492,12 @@ function MonthlyCostEditSheet({ item, onClose }: { item: MonthlyCostItem; onClos
           <div className="field__error" role="alert">
             <Icon name="alert" size={14} />
             {error}
+          </div>
+        ) : null}
+        {pastFieldsChanged ? (
+          <div className="field__warning" role="status" data-ui={UI.allocations.editImpactWarning}>
+            <Icon name="alert" size={14} />
+            {t('monthlyCost.pastRecalcWarning')}
           </div>
         ) : null}
         <TextInput

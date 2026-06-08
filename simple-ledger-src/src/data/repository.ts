@@ -472,8 +472,9 @@ export async function deleteAccount(id: string): Promise<void> {
 /* ── 仕訳 ── */
 
 /**
- * 生成仕訳（按分=allocationId / 月額化=monthlyCostId / 固定資産処分=assetDisposalId 付き）は
- * 通常の編集・削除では壊せない。fail-closed。
+ * 生成仕訳（按分=allocationId / 月額化=monthlyCostId / 固定資産処分=assetDisposalId 付き）と
+ * 残高補正仕訳（adjustment 付き）は通常の編集・削除では壊せない。fail-closed。
+ * 残高補正は専用画面（updateAdjustment / deleteAdjustment）でだけ管理する（現実アンカーを保つ）。
  */
 async function assertNotGeneratedEntry(id: string): Promise<void> {
   const entries = await getAll<JournalEntry>(STORE.journalEntries);
@@ -481,6 +482,7 @@ async function assertNotGeneratedEntry(id: string): Promise<void> {
   if (target?.metadata?.allocationId) throw new LedgerError('error.entry.generated');
   if (target?.metadata?.monthlyCostId) throw new LedgerError('error.entry.monthlyCost');
   if (target?.metadata?.assetDisposalId) throw new LedgerError('error.entry.assetDisposal');
+  if (target?.metadata?.adjustment) throw new LedgerError('error.entry.adjustment');
 }
 
 /** 実績化済み予定の linkedEntry は通常の編集・削除では壊せない。fail-closed。 */
@@ -801,17 +803,26 @@ export async function deleteTag(id: string): Promise<void> {
  * 相手科目（残高調整費/収入 or 投資評価損/益）が無ければ同じトランザクションで作る。
  * delta=0 なら何も作らず null を返す。
  */
-export async function createAdjustment(input: {
+interface AdjustmentSaveInput {
   kind: AdjustmentKind;
   accountId: string;
   date: string;
   actualBalance: number;
   description?: string;
-}): Promise<JournalEntry | null> {
-  const [accounts, entries] = await Promise.all([
-    getAll<Account>(STORE.accounts),
-    getAll<JournalEntry>(STORE.journalEntries),
-  ]);
+}
+
+/**
+ * 補正の理論残高・相手科目・補正仕訳を組み立てる共通処理（新規 createAdjustment / 編集 updateAdjustment で共有）。
+ * `entries` は理論残高の母集合。**編集時は補正自身を除外して渡す**（補正の二重掛けを避ける＝最重要）。
+ * delta=0 のときは仕訳を作らず `{ entry: null }` を返す。
+ */
+function buildAdjustmentForSave(args: {
+  input: AdjustmentSaveInput;
+  accounts: Account[];
+  entries: JournalEntry[];
+  existing?: { id: string; createdAt: string };
+}): { entry: JournalEntry | null; newCounter: Account | null } {
+  const { input, accounts, entries, existing } = args;
   const target = accounts.find((a) => a.id === input.accountId);
   if (!target) throw new LedgerError('error.adjust.targetNotFound');
   if (target.type !== 'asset' && target.type !== 'liability') {
@@ -824,7 +835,7 @@ export async function createAdjustment(input: {
     filterByDateRange(entries, undefined, input.date),
   );
   const delta = input.actualBalance - expected;
-  if (delta === 0) return null;
+  if (delta === 0) return { entry: null, newCounter: null };
 
   const role = counterpartRole(target.type, delta);
   const ctype: 'expense' | 'revenue' = role;
@@ -854,7 +865,17 @@ export async function createAdjustment(input: {
     expectedBalance: expected,
     actualBalance: input.actualBalance,
     counterpartAccountId: counter.id,
+    ...(existing ? { existing } : {}),
   });
+  return { entry, newCounter };
+}
+
+export async function createAdjustment(input: AdjustmentSaveInput): Promise<JournalEntry | null> {
+  const [accounts, entries] = await Promise.all([
+    getAll<Account>(STORE.accounts),
+    getAll<JournalEntry>(STORE.journalEntries),
+  ]);
+  const { entry, newCounter } = buildAdjustmentForSave({ input, accounts, entries });
   if (!entry) return null;
 
   await writeWithRevision([STORE.accounts, STORE.journalEntries], (t) => {
@@ -862,6 +883,55 @@ export async function createAdjustment(input: {
     t.objectStore(STORE.journalEntries).put(entry);
   });
   return entry;
+}
+
+/**
+ * 既存の残高補正を編集する（現実アンカーの再ピン留め）。`id` で対象を特定し、id / createdAt を保つ。
+ * 理論残高は **編集中の補正自身を除いて** 再計算する（除外しないと補正が二重に効く）。
+ * 再計算後の delta=0 なら、その補正は意味を失うので削除する（戻り値 null）。
+ */
+export async function updateAdjustment(
+  input: AdjustmentSaveInput & { id: string },
+): Promise<JournalEntry | null> {
+  const [accounts, entries] = await Promise.all([
+    getAll<Account>(STORE.accounts),
+    getAll<JournalEntry>(STORE.journalEntries),
+  ]);
+  const existing = entries.find((e) => e.id === input.id);
+  if (!existing) throw new LedgerError('error.adjust.notFound');
+  if (!existing.metadata?.adjustment) throw new LedgerError('error.adjust.notAdjustment');
+
+  const others = entries.filter((e) => e.id !== input.id);
+  const { entry, newCounter } = buildAdjustmentForSave({
+    input: { ...input, description: input.description ?? existing.description },
+    accounts,
+    entries: others,
+    existing: { id: existing.id, createdAt: existing.createdAt },
+  });
+
+  if (!entry) {
+    await writeWithRevision([STORE.journalEntries], (t) => {
+      t.objectStore(STORE.journalEntries).delete(input.id);
+    });
+    return null;
+  }
+
+  await writeWithRevision([STORE.accounts, STORE.journalEntries], (t) => {
+    if (newCounter) t.objectStore(STORE.accounts).put(newCounter);
+    t.objectStore(STORE.journalEntries).put(entry);
+  });
+  return entry;
+}
+
+/** 残高補正を削除する（対象日以降の理論残高が補正前に戻る）。専用画面からのみ呼ぶ。 */
+export async function deleteAdjustment(id: string): Promise<void> {
+  const entries = await getAll<JournalEntry>(STORE.journalEntries);
+  const target = entries.find((e) => e.id === id);
+  if (!target) throw new LedgerError('error.adjust.notFound');
+  if (!target.metadata?.adjustment) throw new LedgerError('error.adjust.notAdjustment');
+  await writeWithRevision([STORE.journalEntries], (t) => {
+    t.objectStore(STORE.journalEntries).delete(id);
+  });
 }
 
 /* ── 月額化コスト ── */

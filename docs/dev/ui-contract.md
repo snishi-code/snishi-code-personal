@@ -66,6 +66,12 @@
 | `allocations.view` | 継続コスト ルート | 画面の検出（screen 名は歴史的に allocations） |
 | `allocations.list` | 継続コストの一覧 | 継続コスト項目一覧 |
 | `allocations.showCompleted` | 停止/終了表示トグル | 非 active の表示切替 |
+| `allocations.edit.impactWarning` | 編集シートの過去再計算注意 | 総額/開始月/認識月数/周期/終了月/費用カテゴリ変更時に表示 |
+| `adjustments.view` | 残高補正 ルート | 画面の検出 |
+| `adjustments.list` | 登録済み補正の一覧 | 現実アンカーの一覧 |
+| `adjustments.row.edit` / `adjustments.row.delete` | 一覧各行の編集 / 削除 | 補正の後編集・削除 |
+| `adjustments.edit.save` | 補正編集シートの更新 | 編集保存（理論残高は自身を除外） |
+| `adjustments.deleteConfirm` | 補正削除の確認ダイアログ | 削除確認 |
 | `accounts.view` | Accounts ルート | 勘定科目の検出 |
 | `accounts.create` | 科目追加ボタン | 追加起動 |
 | `accounts.save` | 科目シート保存 | 保存 |

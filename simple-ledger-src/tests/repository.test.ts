@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   createAccountInstrument,
   createAdjustment,
+  updateAdjustment,
+  deleteAdjustment,
+  createContinuousCost,
   createAllocation,
   createFundingGoal,
   createManagementScope,
@@ -900,6 +903,186 @@ describe('残高補正 createAdjustment', () => {
       actualBalance: 9000,
     });
     expect(entry?.date).toBe('2026-06-15');
+  });
+});
+
+describe('残高補正の編集・削除（updateAdjustment / deleteAdjustment）', () => {
+  async function setBalance(accountName: string, amount: number) {
+    const ledger = await loadLedger();
+    const acc = ledger.accounts.find((a) => a.name === accountName)!;
+    const capital = ledger.accounts.find((a) => a.name === '開始残高')!;
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2026-06-01',
+        description: '初期',
+        debitAccountId: acc.id,
+        creditAccountId: capital.id,
+        amount,
+      }),
+    );
+    return acc;
+  }
+
+  it('編集の理論残高は補正自身を除いて計算する（二重掛けしない）', async () => {
+    const cash = await setBalance('現金', 10000);
+    const created = await createAdjustment({
+      kind: 'unknown-balance',
+      accountId: cash.id,
+      date: '2026-06-30',
+      actualBalance: 8000,
+    });
+    expect(created!.metadata?.adjustment?.expectedBalance).toBe(10000);
+
+    // 実残高 9000 に修正。理論残高は補正自身を除く 10000 のまま（8000 にならない）。
+    const updated = await updateAdjustment({
+      id: created!.id,
+      kind: 'unknown-balance',
+      accountId: cash.id,
+      date: '2026-06-30',
+      actualBalance: 9000,
+    });
+    expect(updated!.id).toBe(created!.id);
+    expect(updated!.metadata?.adjustment?.expectedBalance).toBe(10000);
+    expect(updated!.metadata?.adjustment?.delta).toBe(-1000);
+    // 借方 残高調整費 1000 / 貸方 現金 1000。
+    expect(updated!.lines.find((l) => l.side === 'credit')).toMatchObject({
+      accountId: cash.id,
+      amount: 1000,
+    });
+    const after = await loadLedger();
+    expect(after.journalEntries.filter((e) => e.metadata?.adjustment)).toHaveLength(1);
+    expect(accountBalance(cash.id, 'asset', after.journalEntries)).toBe(9000);
+  });
+
+  it('編集で差額が 0 になると補正は削除される', async () => {
+    const cash = await setBalance('現金', 10000);
+    const created = await createAdjustment({
+      kind: 'unknown-balance',
+      accountId: cash.id,
+      date: '2026-06-30',
+      actualBalance: 8000,
+    });
+    const updated = await updateAdjustment({
+      id: created!.id,
+      kind: 'unknown-balance',
+      accountId: cash.id,
+      date: '2026-06-30',
+      actualBalance: 10000, // 理論残高（自身除外）= 10000 → delta 0
+    });
+    expect(updated).toBeNull();
+    const after = await loadLedger();
+    expect(after.journalEntries.some((e) => e.id === created!.id)).toBe(false);
+    expect(after.journalEntries.filter((e) => e.metadata?.adjustment)).toHaveLength(0);
+  });
+
+  it('削除で対象日以降の理論残高が補正前に戻る', async () => {
+    const cash = await setBalance('現金', 10000);
+    const created = await createAdjustment({
+      kind: 'unknown-balance',
+      accountId: cash.id,
+      date: '2026-06-30',
+      actualBalance: 8000,
+    });
+    expect(accountBalance(cash.id, 'asset', (await loadLedger()).journalEntries)).toBe(8000);
+    await deleteAdjustment(created!.id);
+    const after = await loadLedger();
+    expect(after.journalEntries.some((e) => e.id === created!.id)).toBe(false);
+    expect(accountBalance(cash.id, 'asset', after.journalEntries)).toBe(10000);
+  });
+
+  it('補正でない仕訳 / 存在しない id は編集・削除できない（fail-closed）', async () => {
+    const cash = await setBalance('現金', 10000);
+    await expect(deleteAdjustment('no-such-id')).rejects.toThrow();
+    await expect(
+      updateAdjustment({
+        id: 'no-such-id',
+        kind: 'unknown-balance',
+        accountId: cash.id,
+        date: '2026-06-30',
+        actualBalance: 9000,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('残高補正の仕訳は通常 Journal 経路（upsertEntry/deleteEntry）で壊せない', async () => {
+    const cash = await setBalance('現金', 10000);
+    const created = await createAdjustment({
+      kind: 'unknown-balance',
+      accountId: cash.id,
+      date: '2026-06-30',
+      actualBalance: 8000,
+    });
+    let delCode = '';
+    try {
+      await deleteEntry(created!.id);
+    } catch (e) {
+      delCode = (e as LedgerError).code;
+    }
+    expect(delCode).toBe('error.entry.adjustment');
+    await expect(upsertEntry({ ...created!, description: '改ざん' })).rejects.toThrow();
+  });
+});
+
+describe('継続コストの後編集で過去集計が再計算される（資産経由モデル）', () => {
+  async function setupContinuous() {
+    const ledger = await loadLedger();
+    const fun = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const item = await createContinuousCost({
+      name: 'サブスク',
+      kind: 'prepaid-service',
+      amount: 12000,
+      costMonths: 12,
+      startMonth: '2026-01',
+      expenseAccountId: fun.id,
+      paymentSourceAccountId: cash.id,
+    });
+    return { item, fun, cash };
+  }
+
+  it('総額を後編集すると、過去の認識額・対象資産（未認識）残高が再計算される', async () => {
+    const { item, fun } = await setupContinuous();
+
+    const before = await loadLedger();
+    const assetId = item.recognitionCreditAccountId!;
+    // 認識（費用）合計（仮想）と対象資産残高は amount=12000 を基準に展開される。
+    const recogBefore = before.derivedEntries
+      .filter(
+        (e) => e.metadata?.continuousCostId === item.id && e.metadata?.ccKind === 'recognition',
+      )
+      .reduce((s, e) => s + (e.lines.find((l) => l.side === 'debit')?.amount ?? 0), 0);
+    expect(recogBefore).toBeGreaterThan(0);
+    const expenseBefore = accountBalance(fun.id, 'expense', before.derivedEntries);
+
+    // 総額を 12000 → 24000 に後編集（過去サイクルからやり直す）。
+    await upsertMonthlyCost({ ...item, amount: 24000, updatedAt: 'y2' });
+
+    const after = await loadLedger();
+    const recogAfter = after.derivedEntries
+      .filter(
+        (e) => e.metadata?.continuousCostId === item.id && e.metadata?.ccKind === 'recognition',
+      )
+      .reduce((s, e) => s + (e.lines.find((l) => l.side === 'debit')?.amount ?? 0), 0);
+    const expenseAfter = accountBalance(fun.id, 'expense', after.derivedEntries);
+    // 月あたり認識が倍増 → 過去含めた認識費用合計が増える。
+    expect(recogAfter).toBeGreaterThan(recogBefore);
+    expect(expenseAfter).toBeGreaterThan(expenseBefore);
+    // funding(24000) は recognition 済み分を上回るので対象資産（未認識）残高 >= 0。
+    expect(accountBalance(assetId, 'asset', after.derivedEntries)).toBeGreaterThanOrEqual(0);
+  });
+
+  it('開始月・認識月数の後編集で対象期間が変わる', async () => {
+    const { item } = await setupContinuous();
+    await upsertMonthlyCost({ ...item, startMonth: '2026-03', costMonths: 6, updatedAt: 'y2' });
+    const after = await loadLedger();
+    const recog = after.derivedEntries
+      .filter(
+        (e) => e.metadata?.continuousCostId === item.id && e.metadata?.ccKind === 'recognition',
+      )
+      .map((e) => e.date)
+      .sort();
+    // 新しい開始月より前の認識は存在しない。
+    expect(recog.every((d) => d >= '2026-03-01')).toBe(true);
   });
 });
 

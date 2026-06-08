@@ -88,4 +88,16 @@ describe('buildAdjustmentEntry', () => {
   it('delta=0 は仕訳を作らない（null）', () => {
     expect(buildAdjustmentEntry(base({ expectedBalance: 5000, actualBalance: 5000 }))).toBeNull();
   });
+  it('existing 指定で id / createdAt を引き継ぎ、updatedAt は更新する（編集の上書き）', () => {
+    const e = buildAdjustmentEntry(
+      base({
+        expectedBalance: 10000,
+        actualBalance: 8000,
+        existing: { id: 'fixed-id', createdAt: '2026-01-01T00:00:00.000Z' },
+      }),
+    )!;
+    expect(e.id).toBe('fixed-id');
+    expect(e.createdAt).toBe('2026-01-01T00:00:00.000Z');
+    expect(e.updatedAt).not.toBe(e.createdAt);
+  });
 });

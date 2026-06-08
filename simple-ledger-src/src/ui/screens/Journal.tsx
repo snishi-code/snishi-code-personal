@@ -290,8 +290,11 @@ export function Journal({
           {filtered.map((entry) => {
             const isAllocation = !!entry.metadata?.allocationId;
             const isMonthlyCost = !!entry.metadata?.monthlyCostId;
+            const isAdjustment = !!entry.metadata?.adjustment;
             // 生成仕訳（按分 / 継続コスト）は読み取り専用（編集・削除・取消を出さない）。
+            // 残高補正も Journal では読み取り専用（現実アンカーは残高補正画面でだけ編集・削除する）。
             const generated = isAllocation || isMonthlyCost;
+            const readOnly = generated || isAdjustment;
             const entryTagNames = tagNames(allTags, entry.tagIds);
             const title = (
               <>
@@ -329,9 +332,14 @@ export function Journal({
             );
             return (
               <li key={entry.id} className="list__item">
-                {generated ? (
-                  // 按分生成仕訳は読み取り専用（編集/取消/削除はしない。按分台帳で管理）。
-                  <div className="list__main" title={t('journal.generatedNotice')}>
+                {readOnly ? (
+                  // 生成仕訳・残高補正は読み取り専用（編集/取消/削除はしない。各専用画面で管理）。
+                  <div
+                    className="list__main"
+                    title={
+                      isAdjustment ? t('journal.adjustmentNotice') : t('journal.generatedNotice')
+                    }
+                  >
                     {title}
                   </div>
                 ) : (
@@ -351,7 +359,7 @@ export function Journal({
                     currency={currency}
                   />
                 </span>
-                {generated ? null : (
+                {readOnly ? null : (
                   <>
                     <button
                       type="button"

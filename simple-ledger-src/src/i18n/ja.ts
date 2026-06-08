@@ -92,6 +92,7 @@ export const ja = {
     '継続コストの当月分です（仕訳ではなく月割りの参考表示。支出に計上されます）。',
   'journal.generatedNotice':
     '生成された仕訳（継続コスト）は各画面で管理します（直接の編集・削除はできません）。',
+  'journal.adjustmentNotice': '残高補正の仕訳は、残高補正画面で編集・削除します。',
 
   'allocations.title': '継続コスト台帳',
   'allocations.empty':
@@ -142,6 +143,9 @@ export const ja = {
   'monthlyCost.amountLockedFixed': '固定資産・継続コスト由来のため総額は変更できません。',
   'monthlyCost.amountLockedPosted': '返済が実績化済みのため総額は変更できません。',
   'monthlyCost.paymentLocked': '支払い元・返済口座は変更できません（会計事実を保つため）。',
+  // 過去から再計算される項目を変えたときの注意（不具合ではなく仕様）。
+  'monthlyCost.pastRecalcWarning':
+    '総額・開始月・認識月数・更新周期・終了月・費用カテゴリを変えると、過去の支出・収支・BS・未認識残高もさかのぼって再計算されます。',
   'monthlyCost.deleteConfirmTitle': '継続コストを削除しますか？',
   'monthlyCost.deleteConfirmBody':
     '「{name}」を削除します。関連する継続コストの支払い仕訳と未実績の返済予定も削除されます。',
@@ -385,6 +389,22 @@ export const ja = {
   'adjust.error.actual': '実残高を入力してください。',
   'adjust.noAccounts': '資産・負債の科目がありません。',
   'adjust.investmentNote': '投資評価損益は支出には含めません。',
+  // 登録済みの補正（現実アンカー）を一覧・編集・削除する。
+  'adjust.listTitle': '登録済みの残高補正',
+  'adjust.listIntro':
+    '残高補正は、ある日付の実残高に台帳をピン留めする「現実アンカー」です。後から編集・削除できます。',
+  'adjust.listEmpty': 'まだ残高補正はありません。',
+  'adjust.editTitle': '残高補正を編集',
+  'adjust.editIntro':
+    '理論残高は、この補正自身を除いて計算し直します（補正の二重掛けを避けるため）。',
+  'adjust.update': '更新する',
+  'adjust.removedZero': '差額がなくなったため、補正を削除しました。',
+  'adjust.deleted': '残高補正を削除しました。',
+  'adjust.deleteConfirmTitle': '残高補正を削除しますか？',
+  'adjust.deleteConfirmBody':
+    'この補正仕訳を削除します。対象日以降の理論残高は、補正前の状態に戻ります。',
+  'adjust.rowKind.unknown-balance': '残高調整',
+  'adjust.rowKind.investment-valuation': '投資評価',
 
   'journal.adjustmentTag': '補正',
   'dashboard.investmentValuation': '投資評価損益',
@@ -702,6 +722,7 @@ export const ja = {
     '固定資産の処分で生成された仕訳は直接編集・削除できません。継続コスト台帳で管理してください。',
   'error.entry.scheduleLinked':
     '実績化済みの予定に紐づく仕訳は編集・削除できません。資金繰りの予定から操作してください。',
+  'error.entry.adjustment': '残高補正の仕訳は、残高補正画面で編集・削除してください。',
   'error.entry.invalidStructure': '仕訳の形式が正しくないため保存できません。',
   'error.entry.unknownAccount': '仕訳が存在しない勘定科目を参照しています。',
   'error.entry.accountRoleMismatch': '仕訳の勘定科目の役割と区分が一致していません。',
@@ -738,6 +759,8 @@ export const ja = {
   'error.allocation.deferredInvalid': '継続コストの未認識分の科目が不正です。',
   'error.adjust.targetNotFound': '対象科目が見つかりません。',
   'error.adjust.assetLiabilityOnly': '残高補正できるのは資産・負債の科目です。',
+  'error.adjust.notFound': '対象の残高補正が見つかりません。',
+  'error.adjust.notAdjustment': 'この仕訳は残高補正ではありません。',
   'error.common.nameRequired': '名称を入力してください。',
   'error.common.amountInvalid': '金額は 1 以上の整数で入力してください。',
   'error.monthlyCost.monthsInvalid': '月数は 1 以上で入力してください。',

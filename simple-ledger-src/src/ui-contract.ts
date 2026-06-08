@@ -162,6 +162,8 @@ export const UI = {
     editExpense: 'allocations.edit.expense',
     editStatus: 'allocations.edit.status',
     editSave: 'allocations.edit.save',
+    // 過去から再計算される項目を変えたときの注意（資産経由モデルの後編集）。
+    editImpactWarning: 'allocations.edit.impactWarning',
     dispose: 'allocations.dispose',
     disposeDialog: 'allocations.disposeDialog',
     disposeDate: 'allocations.dispose.date',
@@ -199,6 +201,18 @@ export const UI = {
     kind: 'adjust.kind',
     actual: 'adjust.actual',
     save: 'adjust.save',
+    // 登録済みの補正（現実アンカー）の一覧・編集・削除。
+    list: 'adjustments.list',
+    row: 'adjustments.row',
+    rowEdit: 'adjustments.row.edit',
+    rowDelete: 'adjustments.row.delete',
+    editDialog: 'adjustments.editDialog',
+    editAccount: 'adjustments.edit.account',
+    editDate: 'adjustments.edit.date',
+    editKind: 'adjustments.edit.kind',
+    editActual: 'adjustments.edit.actual',
+    editSave: 'adjustments.edit.save',
+    deleteConfirm: 'adjustments.deleteConfirm',
   },
   cashflow: {
     view: 'cashflow.view',

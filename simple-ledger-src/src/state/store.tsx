@@ -124,6 +124,17 @@ interface LedgerContextValue {
     actualBalance: number;
     description?: string;
   }) => Promise<void>;
+  /** 既存の残高補正を編集する（理論残高は補正自身を除いて再計算）。差額消失なら削除になる。 */
+  updateAdjustment: (input: {
+    id: string;
+    kind: AdjustmentKind;
+    accountId: string;
+    date: string;
+    actualBalance: number;
+    description?: string;
+  }) => Promise<void>;
+  /** 残高補正を削除する（対象日以降の理論残高が補正前に戻る）。 */
+  deleteAdjustment: (id: string) => Promise<void>;
   saveAccount: (account: Account) => Promise<void>;
   removeAccount: (id: string) => Promise<void>;
   saveSettings: (settings: Settings) => Promise<void>;
@@ -579,6 +590,36 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [refresh, toast],
   );
 
+  const updateAdjustment = useCallback<LedgerContextValue['updateAdjustment']>(
+    async (input) => {
+      try {
+        const entry = await repo.updateAdjustment(input);
+        await refresh();
+        // 差額が無くなると補正自体が削除される（現実アンカーとして無意味になるため）。
+        if (entry) toast.show(t('toast.saved'), 'success');
+        else toast.show(t('adjust.removedZero'), 'info');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const deleteAdjustment = useCallback<LedgerContextValue['deleteAdjustment']>(
+    async (id) => {
+      try {
+        await repo.deleteAdjustment(id);
+        await refresh();
+        toast.show(t('adjust.deleted'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
   const saveAccount = useCallback<LedgerContextValue['saveAccount']>(
     async (account) => {
       try {
@@ -726,6 +767,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveAccountInstrument,
       removeAccountInstrument,
       createAdjustment,
+      updateAdjustment,
+      deleteAdjustment,
       saveAccount,
       removeAccount,
       saveSettings,
@@ -769,6 +812,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveAccountInstrument,
       removeAccountInstrument,
       createAdjustment,
+      updateAdjustment,
+      deleteAdjustment,
       saveAccount,
       removeAccount,
       saveSettings,
