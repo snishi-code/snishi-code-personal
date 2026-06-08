@@ -112,20 +112,23 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [flowError, setFlowError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  // 行き先(debit)の役割。費用カテゴリのときだけ「継続コスト」（通常費用版）を出す。
   const destRole = accounts.find((a) => a.id === form.debitAccountId)?.role;
-  // 継続コスト（expense × 費用カテゴリ × create のみ）。固定資産購入の継続コストは別扱い（P7）。
-  const canAllocate =
-    init.kind === 'create' && mode === 'expense' && destRole === 'expense-category';
-  const [allocate, setAllocate] = useState(false);
-  // 固定資産購入（expense × 固定資産 × create）は「支出として継続コスト」できる（別トグル）。
+  // 継続コスト（資産経由）: 支出入力の行き先を「継続コスト対象（資産）」に切り替えて自由入力する。
+  // 行き先の役割には依存しない（create × expense なら「継続コスト化」ボタンを出す）。
+  const canAllocate = init.kind === 'create' && mode === 'expense';
+  // ccMode = 行き先を継続コスト対象に切替え。ccTargetName=台帳に登録する対象名、ccCategoryId=認識先カテゴリ。
+  const [ccMode, setCcMode] = useState(false);
+  const [ccTargetName, setCcTargetName] = useState('');
+  const [ccCategoryId, setCcCategoryId] = useState('');
+  const [ccNameError, setCcNameError] = useState(false);
+  // 固定資産購入（expense × 固定資産 × create）の旧経路。継続コスト対象（ccMode）が主導線。
   const canFixedMonthly =
-    init.kind === 'create' && mode === 'expense' && destRole === 'fixed-asset';
+    init.kind === 'create' && mode === 'expense' && !ccMode && destRole === 'fixed-asset';
   const [fixedMonthly, setFixedMonthly] = useState(false);
   const [monthlyCategoryId, setMonthlyCategoryId] = useState('');
   const [categoryError, setCategoryError] = useState(false);
-  // 継続コスト ON のときはタグを付けられない（createMonthlyCost はタグを受け取らないため）。
-  const allocationActive = (canAllocate && allocate) || (canFixedMonthly && fixedMonthly);
+  // 継続コスト ON のときはタグを付けられない（createContinuousCost はタグを受け取らないため）。
+  const allocationActive = (canAllocate && ccMode) || (canFixedMonthly && fixedMonthly);
   const [monthsText, setMonthsText] = useState('');
   const [monthsError, setMonthsError] = useState(false);
   const months = monthsText === '' ? 0 : Number.parseInt(monthsText, 10);
@@ -136,9 +139,10 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [repayAccountId, setRepayAccountId] = useState('');
   const [repayCountText, setRepayCountText] = useState('');
   const [repayStartDate, setRepayStartDate] = useState('');
-  // 支払い元(credit)が支払用負債なら返済 CF を入力できる。
+  // 支払い元(credit)が負債（カード=payment-liability / ローン=other-liability）なら返済 CF を入力できる。
   const paymentRole = accounts.find((a) => a.id === form.creditAccountId)?.role;
-  const isLiabilityPayment = paymentRole === 'payment-liability';
+  const isLiabilityPayment =
+    paymentRole === 'payment-liability' || paymentRole === 'other-liability';
   // 振替で源泉(credit)が負債 = 借入・ローン実行。任意で分割返済予定を一緒に登録できる。
   const isLoanDraw =
     init.kind === 'create' &&
@@ -169,7 +173,9 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const snapshot = JSON.stringify({
     form,
     amountText,
-    allocate,
+    ccMode,
+    ccTargetName,
+    ccCategoryId,
     fixedMonthly,
     monthlyCategoryId,
     monthsText,
@@ -224,17 +230,80 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     // 実在する区分 id で保存する）。DEFAULT_MANAGEMENT_SCOPE_ID は最終フォールバックに留める。
     const base = effectiveForm();
     const toSave = { ...base, managementScopeId: base.managementScopeId ?? scopes[0]?.id };
+
+    // 継続コスト（資産経由）: 行き先は「継続コスト対象（資産）」を自由入力し、認識先カテゴリは別フィールド。
+    // 通常の simple entry は保存せず、createContinuousCost にルールを渡す（funding/recognition は仮想展開）。
+    const ccActive = canAllocate && ccMode;
+    if (ccActive) {
+      const found: EntryValidationError[] = [];
+      if (toSave.date.trim() === '') found.push('date-required');
+      if (!Number.isInteger(toSave.amount) || toSave.amount < 1) found.push('amount-invalid');
+      if (toSave.creditAccountId === '') found.push('credit-required');
+      setErrors(found);
+      const nameBad = ccTargetName.trim() === '';
+      setCcNameError(nameBad);
+      const categoryBad = ccCategoryId === '';
+      setCategoryError(categoryBad);
+      const monthsBad = !Number.isInteger(months) || months < 1;
+      setMonthsError(monthsBad);
+      setFlowError(undefined);
+      if (found.length > 0 || nameBad || categoryBad || monthsBad) return;
+      setSubmitting(true);
+      try {
+        const repeat = continueCost ? months : undefined;
+        const repayCount = repayCountText === '' ? 0 : Number.parseInt(repayCountText, 10);
+        const useRepay =
+          isLiabilityPayment && repayToggle && repayAccountId !== '' && repayCount >= 1;
+        const repayFields = useRepay
+          ? {
+              repaymentAccountId: repayAccountId,
+              repaymentCount: repayCount,
+              repaymentStartDate: repayStartDate || toSave.date,
+            }
+          : {};
+        const scopeField =
+          toSave.managementScopeId !== undefined
+            ? { managementScopeId: toSave.managementScopeId }
+            : {};
+        // funding: `支払い元 → 継続コスト対象`、recognition: `継続コスト対象 → 認識先カテゴリ`。
+        // 支払い元が other-liability（自動車ローン等）でも資産取得の貸方として受ける。
+        await createContinuousCost({
+          name: ccTargetName.trim(),
+          ...scopeField,
+          kind: inferMonthlyCostKind(months, repeat),
+          amount: toSave.amount,
+          costMonths: months,
+          ...(repeat !== undefined ? { repeatEveryMonths: repeat } : {}),
+          startMonth: monthOf(toSave.date),
+          expenseAccountId: ccCategoryId,
+          paymentSourceAccountId: toSave.creditAccountId,
+          ...repayFields,
+        });
+        onClose();
+      } catch {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     const found = validateSimpleEntry(toSave);
     setErrors(found);
-    const useMonthly = canAllocate && allocate;
     const useFixedMonthly = canFixedMonthly && fixedMonthly;
     // costMonths は 1 以上（サブスクは 1 か月）。
-    const monthsBad = (useMonthly || useFixedMonthly) && (!Number.isInteger(months) || months < 1);
+    const monthsBad = useFixedMonthly && (!Number.isInteger(months) || months < 1);
     setMonthsError(monthsBad);
     // 固定資産の継続コストは、月割り先の費用カテゴリが必須。
     const categoryBad = useFixedMonthly && monthlyCategoryId === '';
     setCategoryError(categoryBad);
     if (found.length > 0 || monthsBad || categoryBad) return;
+    // 通常の支出でローン（other-liability）を支払い元にはできない（継続コスト化 or 借入の振替に限定）。
+    if (mode === 'expense' && !useFixedMonthly) {
+      const srcRole = accounts.find((a) => a.id === toSave.creditAccountId)?.role;
+      if (srcRole === 'other-liability') {
+        setFlowError(t('entry.error.loanNotExpense'));
+        return;
+      }
+    }
     // 振替は役割の組み合わせを検証する（資金↔資金 / 資金→負債返済 / 負債→資金借入のみ）。
     if (mode === 'transfer') {
       const srcRole = accounts.find((a) => a.id === toSave.creditAccountId)?.role;
@@ -247,40 +316,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     }
     setSubmitting(true);
     try {
-      if (useMonthly) {
-        // 「継続・買い替えする」= 周期更新（repeatEveryMonths = costMonths）。
-        const repeat = continueCost ? months : undefined;
-        const repayCount = repayCountText === '' ? 0 : Number.parseInt(repayCountText, 10);
-        const useRepay =
-          isLiabilityPayment && repayToggle && repayAccountId !== '' && repayCount >= 1;
-        const repayFields = useRepay
-          ? {
-              repaymentAccountId: repayAccountId,
-              repaymentCount: repayCount,
-              // 購入日(form.date)とは別に、初回引落日を使う。
-              repaymentStartDate: repayStartDate || form.date,
-            }
-          : {};
-        const scopeField =
-          toSave.managementScopeId !== undefined
-            ? { managementScopeId: toSave.managementScopeId }
-            : {};
-        // 資産経由モデル: 品目名(description)で継続コスト対象資産を自動作成し、funding/recognition は
-        // 仮想展開する。debit=認識先カテゴリ / credit=支払い元（funding の貸方）。
-        // サブスク・年払い・耐久財（洗濯機等）をすべて同じルートで扱う（assetKind 分岐は廃止）。
-        await createContinuousCost({
-          name: toSave.description,
-          ...scopeField,
-          kind: inferMonthlyCostKind(months, repeat),
-          amount: toSave.amount,
-          costMonths: months,
-          ...(repeat !== undefined ? { repeatEveryMonths: repeat } : {}),
-          startMonth: monthOf(toSave.date),
-          expenseAccountId: toSave.debitAccountId,
-          paymentSourceAccountId: toSave.creditAccountId,
-          ...repayFields,
-        });
-      } else if (useFixedMonthly) {
+      if (useFixedMonthly) {
         // 固定資産購入（借方 固定資産 / 貸方 資金 or 負債）+ 継続コストを一括保存。購入仕訳が実体で、
         // 継続コストは支払い仕訳を作らず formula 認識のみ（recognitionCreditAccountId=固定資産）。
         // 負債払いで返済入力があれば、購入仕訳の貸方負債を取り崩す返済予定 CF も同時に作る。
@@ -494,16 +530,52 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             →
           </div>
           <div className="flow__side">
-            <AccountPicker
-              flat
-              label={t(flowDef.destination.labelKey)}
-              required
-              value={form.debitAccountId}
-              groups={dstGroups}
-              onChange={(id) => setSide('debit', id)}
-              error={errorText(errors, 'debit-required')}
-              dataUi={UI.journal.entry.flowDestination}
-            />
+            {canAllocate && ccMode ? (
+              <>
+                {/* 行き先を「継続コスト対象（資産）」として自由入力する（台帳に登録する名前）。 */}
+                <TextInput
+                  label={t('entry.ccTargetName')}
+                  required
+                  value={ccTargetName}
+                  placeholder={t('entry.ccTargetName')}
+                  hint={t('entry.ccTargetNameHint')}
+                  onChange={setCcTargetName}
+                  error={ccNameError ? t('entry.error.description-required') : undefined}
+                  dataUi={UI.journal.entry.ccName}
+                />
+                <button type="button" className="collapse-toggle" onClick={() => setCcMode(false)}>
+                  {t('entry.ccBackToCategory')}
+                </button>
+              </>
+            ) : (
+              <>
+                <AccountPicker
+                  flat
+                  label={t(flowDef.destination.labelKey)}
+                  required
+                  value={form.debitAccountId}
+                  groups={dstGroups}
+                  onChange={(id) => setSide('debit', id)}
+                  error={errorText(errors, 'debit-required')}
+                  dataUi={UI.journal.entry.flowDestination}
+                />
+                {canAllocate ? (
+                  // 行き先を継続コスト対象に切り替える。タップで自由入力欄になる。
+                  <button
+                    type="button"
+                    className="collapse-toggle"
+                    onClick={() => {
+                      setCcMode(true);
+                      if (ccTargetName.trim() === '') setCcTargetName(form.description);
+                    }}
+                    data-ui={UI.journal.entry.ccToggle}
+                  >
+                    <Icon name="plus" size={16} />
+                    {t('entry.ccToggle')}
+                  </button>
+                ) : null}
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -562,54 +634,43 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     );
   };
 
-  const allocateField = canAllocate ? (
-    <div className="field">
-      <label
-        style={{ display: 'inline-flex', gap: 8, alignItems: 'center', minHeight: 'var(--tap)' }}
-      >
-        <input
-          type="checkbox"
-          checked={allocate}
-          onChange={(e) => setAllocate(e.target.checked)}
-          data-ui={UI.journal.entry.allocateToggle}
+  // 行き先を「継続コスト対象」に切り替えたとき（ccMode）の詳細: 認識先カテゴリ・認識月数・継続購入。
+  const ccDetailField =
+    canAllocate && ccMode ? (
+      <div className="field">
+        <AccountPicker
+          label={t('entry.ccCategory')}
+          required
+          value={ccCategoryId}
+          groups={groupedAccountsByRole(accounts, ['expense-category'], ccCategoryId)}
+          onChange={setCcCategoryId}
+          error={categoryError ? t('entry.error.category-required') : undefined}
+          dataUi={UI.journal.entry.ccCategory}
         />
-        {t('entry.monthlyizeToggle')}
-      </label>
-      {allocate ? (
-        <>
-          {/* 資産経由モデル: 品目名（項目）で継続コスト対象を作り、何か月でどの費用カテゴリへ
-              認識するかを選ぶ。サブスク・年払い・耐久財をすべて同じルートで扱う。 */}
-          <TextInput
-            label={t('entry.monthlyizeMonths')}
-            required
-            inputMode="numeric"
-            value={monthsText}
-            hint={t('entry.monthlyizeMonthsHint')}
-            onChange={(v) => setMonthsText(v.replace(/[^\d]/g, ''))}
-            error={monthsError ? t('entry.error.months-invalid') : undefined}
-            dataUi={UI.journal.entry.allocateMonths}
+        <TextInput
+          label={t('entry.monthlyizeMonths')}
+          required
+          inputMode="numeric"
+          value={monthsText}
+          hint={t('entry.monthlyizeMonthsHint')}
+          onChange={(v) => setMonthsText(v.replace(/[^\d]/g, ''))}
+          error={monthsError ? t('entry.error.months-invalid') : undefined}
+          dataUi={UI.journal.entry.allocateMonths}
+        />
+        <label
+          style={{ display: 'inline-flex', gap: 8, alignItems: 'center', minHeight: 'var(--tap)' }}
+        >
+          <input
+            type="checkbox"
+            checked={continueCost}
+            onChange={(e) => setContinueCost(e.target.checked)}
+            data-ui={UI.journal.entry.monthlyizeContinue}
           />
-          <label
-            style={{
-              display: 'inline-flex',
-              gap: 8,
-              alignItems: 'center',
-              minHeight: 'var(--tap)',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={continueCost}
-              onChange={(e) => setContinueCost(e.target.checked)}
-              data-ui={UI.journal.entry.monthlyizeContinue}
-            />
-            {t('entry.monthlyizeContinue')}
-          </label>
-          <p className="field__hint">{t('entry.monthlyizeNote')}</p>
-        </>
-      ) : null}
-    </div>
-  ) : null;
+          {t('entry.monthlyizeContinue')}
+        </label>
+        <p className="field__hint">{t('entry.ccNote')}</p>
+      </div>
+    ) : null;
 
   // 固定資産の購入を「支出として継続コスト」する（購入仕訳とは別に formula 認識）。
   const fixedMonthlyField = canFixedMonthly ? (
@@ -834,7 +895,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     ) : null;
 
   const manualSwitch =
-    init.kind === 'create' && mode !== 'manual' && !allocate ? (
+    init.kind === 'create' && mode !== 'manual' && !ccMode ? (
       <button
         type="button"
         className="collapse-toggle"
@@ -915,7 +976,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             {amountField}
             {renderFlow()}
             {flowExtras}
-            {allocateField}
+            {ccDetailField}
             {fixedMonthlyField}
             {repaymentField}
             {loanRepaymentField}

@@ -103,6 +103,11 @@ PL も BS も **保存しない**。`Account` と `JournalEntry` から毎回計
 例: 現金 100,000 円を開始残高として持っている →
 `借方 現金 100000 / 貸方 開始残高(equity) 100000`（kind=opening）。
 
+- **登録導線はホームの日常入力ではなく「補正・勘定科目」画面**（`createOpening` / `updateOpening` /
+  `deleteOpening`）。新規 BS 科目の作成 + 開始残高付与、既存科目への付与の両方に対応し、あとから
+  編集・削除できる。資産: `借方 科目 / 貸方 開始残高`、負債: `借方 開始残高 / 貸方 科目`。初回設定にも使える
+  （初回起動オンボーディング自体は別タスク）。資産・負債（投資資産含む）のみ。
+
 ## 日常入力（収入/支出/振替）→ 仕訳への変換
 
 ユーザーには借方/貸方を意識させず、意味のあるフィールドで 2 科目を選ばせる。内部では
@@ -182,6 +187,12 @@ formula で月割り認識する（`saveEntryWithFixedAssetMonthly`）。
   `repeatEveryMonths?`/startMonth/expenseAccountId=認識先/`paymentSourceAccountId`=支払い元/
   `recognitionCreditAccountId`=対象資産）+ 対象資産科目 +（負債資金で分割なら）返済CF。
   **funding/recognition の実仕訳は保存しない**。
+- **三層構造**: 入力は `支払い元/借入元 → 継続コスト対象（資産）` を選び、別フィールドで `認識先カテゴリ（費用）`
+  を選ぶ。仕訳は `支払い元 → 対象資産（funding）` と `対象資産 → 費用カテゴリ（recognition）` に分かれる。
+  UI（支出入力）では行き先の「継続コスト化」ボタンで対象名を自由入力する（`EntrySheet`）。
+- **支払い元（funding の貸方）は資金・カード・ローンを許可**: `daily-asset` / `payment-liability`（カード）/
+  `other-liability`（ローン）。**自動車をローンで買う = 資産取得の貸方が負債**（`自動車ローン → 自動車`）。
+  通常の単なる費用払いに `other-liability` を使うのは UI で禁止（`entry.error.loanNotExpense`）。
 - **仮想展開**（`continuousCostEntriesForItem(item, accounts, upTo)`）: 1 サイクルにつき
   - **funding**: `借方 対象資産 / 貸方 支払い元`（cycle 先頭月の 1 日）
   - **recognition ×costMonths**: `借方 費用カテゴリ / 貸方 対象資産`（各認識月の 1 日・`monthlyAmounts`
@@ -195,9 +206,10 @@ formula で月割り認識する（`saveEntryWithFixedAssetMonthly`）。
   これを使う（単一正本）。`loadLedger` が `nowHorizon=max(今日, 最終データ日)` まで一度だけ展開する
   （未来の更新を「今」の PL/BS に混ぜない）。仮想仕訳は `metadata.virtual` を持ち **保存系・export・
   残高チェックには渡さない**（実仕訳 `journalEntries` と型で分離）。
-- **返済 CF は別物**: 負債(payment-liability)資金で返済情報があれば返済予定 `CashflowSchedule`(installment)
-  を作る（`預金 → 負債`）。継続コストの認識（費用）とは独立。未来の更新支払いは資金繰り画面が `untilDate`
-  まで funding を仮想投影する（永続化しない）。
+- **返済 CF は別物**: 負債（`payment-liability` カード / `other-liability` ローン）資金で返済情報があれば
+  返済予定 `CashflowSchedule`(installment) を作る（`預金 → 負債`）。**返済は費用(PL)ではなく資金繰り(CF)**。
+  継続コストの認識（費用）とは独立。未来の更新支払いは資金繰り画面が `untilDate` まで funding を仮想投影
+  する（永続化しない）。
 
 ### 支出の集計（二重計上しない）
 

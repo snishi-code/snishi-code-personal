@@ -15,6 +15,7 @@ import {
   inferRole,
   isInstrumentParentRole,
   roleAllowsType,
+  type AccountRole,
 } from '../domain/accountRoles';
 import { isAccountReferenced, type AccountRefCollections } from '../domain/accountRefs';
 import { LedgerError } from '../domain/errors';
@@ -26,6 +27,7 @@ import {
 import type {
   Account,
   AccountInstrument,
+  AccountType,
   AdjustmentKind,
   AllocationItem,
   AssetDisposal,
@@ -934,6 +936,138 @@ export async function deleteAdjustment(id: string): Promise<void> {
   });
 }
 
+/* ── 初期残高（opening） ── */
+
+const OPENING_EQUITY_NAME = '開始残高';
+
+export interface OpeningInput {
+  /** 既存 BS 科目に初期残高をつける場合の科目 id（指定時はこちら優先）。 */
+  accountId?: string;
+  /** 新規 BS 科目を作って初期残高をつける場合（資産/負債）。 */
+  newAccount?: { name: string; type: AccountType; role: AccountRole };
+  amount: number;
+  date: string;
+  managementScopeId?: string;
+}
+
+/**
+ * 開始時点の残高を `kind='opening'` の仕訳で登録する（初回設定にも使える・あとから編集/削除できる）。
+ * 資産: `借方 科目 / 貸方 開始残高(equity)`。負債: `借方 開始残高 / 貸方 科目`。
+ * 既存 BS 科目への付与と、新規 BS 科目の作成 + 付与の両方に対応する。ホームの日常入力経路では作らない。
+ */
+export async function createOpening(input: OpeningInput): Promise<JournalEntry> {
+  if (!Number.isInteger(input.amount) || input.amount <= 0)
+    throw new LedgerError('error.common.amountInvalid');
+  const accounts = await getAll<Account>(STORE.accounts);
+  const ts = nowIso();
+
+  // 対象 BS 科目を解決（既存 or 新規）。初期残高は資産・負債のみ。
+  let target: Account | null = null;
+  let createdTarget: Account | null = null;
+  if (input.accountId) {
+    target = accounts.find((a) => a.id === input.accountId) ?? null;
+    if (!target) throw new LedgerError('error.adjust.targetNotFound');
+  } else if (input.newAccount) {
+    const { name, type, role } = input.newAccount;
+    if (name.trim() === '') throw new LedgerError('error.common.nameRequired');
+    if (!roleAllowsType(role, type)) throw new LedgerError('error.account.roleTypeMismatch');
+    createdTarget = {
+      id: newId(),
+      name: name.trim(),
+      type,
+      role,
+      archived: false,
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    target = createdTarget;
+  } else {
+    throw new LedgerError('error.adjust.targetNotFound');
+  }
+  if (target.type !== 'asset' && target.type !== 'liability')
+    throw new LedgerError('error.opening.assetLiabilityOnly');
+
+  // 開始残高(equity) を確保（無ければ作る）。
+  let equity = accounts.find((a) => a.role === 'equity' && !a.archived) ?? null;
+  let createdEquity: Account | null = null;
+  if (!equity) {
+    createdEquity = {
+      id: newId(),
+      name: OPENING_EQUITY_NAME,
+      type: 'equity',
+      role: 'equity',
+      archived: false,
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    equity = createdEquity;
+  }
+
+  const lines: JournalLine[] =
+    target.type === 'asset'
+      ? [
+          { accountId: target.id, side: 'debit', amount: input.amount },
+          { accountId: equity.id, side: 'credit', amount: input.amount },
+        ]
+      : [
+          { accountId: equity.id, side: 'debit', amount: input.amount },
+          { accountId: target.id, side: 'credit', amount: input.amount },
+        ];
+  const entry: JournalEntry = {
+    id: newId(),
+    date: input.date,
+    description: `${OPENING_EQUITY_NAME}（${target.name}）`,
+    kind: 'opening',
+    managementScopeId: input.managementScopeId ?? DEFAULT_MANAGEMENT_SCOPE_ID,
+    lines,
+    metadata: { inputMode: 'manual' },
+    createdAt: ts,
+    updatedAt: ts,
+  };
+
+  await writeWithRevision([STORE.accounts, STORE.journalEntries], (t) => {
+    if (createdTarget) t.objectStore(STORE.accounts).put(createdTarget);
+    if (createdEquity) t.objectStore(STORE.accounts).put(createdEquity);
+    t.objectStore(STORE.journalEntries).put(entry);
+  });
+  return entry;
+}
+
+/** 初期残高の金額・日付を編集する（対象科目・向き・id は保持）。 */
+export async function updateOpening(input: {
+  id: string;
+  amount: number;
+  date: string;
+}): Promise<JournalEntry> {
+  if (!Number.isInteger(input.amount) || input.amount <= 0)
+    throw new LedgerError('error.common.amountInvalid');
+  const entries = await getAll<JournalEntry>(STORE.journalEntries);
+  const existing = entries.find((e) => e.id === input.id);
+  if (!existing) throw new LedgerError('error.adjust.notFound');
+  if (existing.kind !== 'opening') throw new LedgerError('error.opening.notOpening');
+  const entry: JournalEntry = {
+    ...existing,
+    date: input.date,
+    lines: existing.lines.map((l) => ({ ...l, amount: input.amount })),
+    updatedAt: nowIso(),
+  };
+  await writeWithRevision([STORE.journalEntries], (t) => {
+    t.objectStore(STORE.journalEntries).put(entry);
+  });
+  return entry;
+}
+
+/** 初期残高を削除する。 */
+export async function deleteOpening(id: string): Promise<void> {
+  const entries = await getAll<JournalEntry>(STORE.journalEntries);
+  const target = entries.find((e) => e.id === id);
+  if (!target) throw new LedgerError('error.adjust.notFound');
+  if (target.kind !== 'opening') throw new LedgerError('error.opening.notOpening');
+  await writeWithRevision([STORE.journalEntries], (t) => {
+    t.objectStore(STORE.journalEntries).delete(id);
+  });
+}
+
 /* ── 月額化コスト ── */
 
 export interface MonthlyCostInput {
@@ -1418,9 +1552,16 @@ export async function createContinuousCost(input: ContinuousCostInput): Promise<
   const expense = ctx.byId.get(input.expenseAccountId);
   if (!expense || expense.role !== 'expense-category')
     throw new LedgerError('error.fixedAsset.expenseCategory');
+  // 継続コスト資産化の資金源は、日常資産・支払用負債に加えて、ローン等の other-liability も許可する
+  // （自動車ローンで自動車を買う = 資産取得の貸方が負債）。通常の費用払いに other-liability を雑に
+  // 使えるようにするのは別経路（EntrySheet 側）で禁止し、ここでは資産化の funding 貸方として受ける。
   const payment = ctx.byId.get(input.paymentSourceAccountId);
-  if (!payment || (payment.role !== 'daily-asset' && payment.role !== 'payment-liability'))
-    throw new LedgerError('error.monthlyCost.paymentSource');
+  const paymentOk =
+    payment &&
+    (payment.role === 'daily-asset' ||
+      payment.role === 'payment-liability' ||
+      payment.role === 'other-liability');
+  if (!paymentOk) throw new LedgerError('error.monthlyCost.paymentSource');
 
   const ts = nowIso();
   // 1 品目 = 1 継続コスト対象の資産科目（個別名）。自動作成する。
@@ -1456,10 +1597,11 @@ export async function createContinuousCost(input: ContinuousCostInput): Promise<
     updatedAt: ts,
   };
 
-  // 負債資金 + 返済情報があれば、返済予定（返済口座 → 支払い元負債）を作る。
+  // 負債資金（カード=payment-liability / ローン=other-liability）+ 返済情報があれば、
+  // 返済予定（返済口座 → 支払い元負債）を作る。`預金 → 自動車ローン` の分割返済など。
   const schedules: CashflowSchedule[] = [];
   if (
-    payment.role === 'payment-liability' &&
+    (payment.role === 'payment-liability' || payment.role === 'other-liability') &&
     input.repaymentAccountId !== undefined &&
     input.repaymentCount !== undefined &&
     input.repaymentCount >= 1 &&

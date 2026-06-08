@@ -697,9 +697,13 @@ export const ledgerExportPackageSchema = z
             `継続コスト「${mc.name}」の paymentSourceAccountId が存在しません`,
             at('paymentSourceAccountId'),
           );
-        else if (srcRole !== 'daily-asset' && srcRole !== 'payment-liability')
+        else if (
+          srcRole !== 'daily-asset' &&
+          srcRole !== 'payment-liability' &&
+          srcRole !== 'other-liability'
+        )
           issue(
-            `継続コスト「${mc.name}」の paymentSourceAccountId は日常資産または支払用負債である必要があります`,
+            `継続コスト「${mc.name}」の paymentSourceAccountId は日常資産・支払用負債・その他負債のいずれかである必要があります`,
             at('paymentSourceAccountId'),
           );
       }

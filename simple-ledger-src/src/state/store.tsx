@@ -135,6 +135,12 @@ interface LedgerContextValue {
   }) => Promise<void>;
   /** 残高補正を削除する（対象日以降の理論残高が補正前に戻る）。 */
   deleteAdjustment: (id: string) => Promise<void>;
+  /** 初期残高（kind='opening'）を登録する（既存 BS 科目 or 新規科目）。 */
+  createOpening: (input: repo.OpeningInput) => Promise<void>;
+  /** 初期残高の金額・日付を編集する。 */
+  updateOpening: (input: { id: string; amount: number; date: string }) => Promise<void>;
+  /** 初期残高を削除する。 */
+  deleteOpening: (id: string) => Promise<void>;
   saveAccount: (account: Account) => Promise<void>;
   removeAccount: (id: string) => Promise<void>;
   saveSettings: (settings: Settings) => Promise<void>;
@@ -620,6 +626,48 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [refresh, toast],
   );
 
+  const createOpening = useCallback<LedgerContextValue['createOpening']>(
+    async (input) => {
+      try {
+        await repo.createOpening(input);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const updateOpening = useCallback<LedgerContextValue['updateOpening']>(
+    async (input) => {
+      try {
+        await repo.updateOpening(input);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const deleteOpening = useCallback<LedgerContextValue['deleteOpening']>(
+    async (id) => {
+      try {
+        await repo.deleteOpening(id);
+        await refresh();
+        toast.show(t('opening.deleted'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
   const saveAccount = useCallback<LedgerContextValue['saveAccount']>(
     async (account) => {
       try {
@@ -769,6 +817,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       createAdjustment,
       updateAdjustment,
       deleteAdjustment,
+      createOpening,
+      updateOpening,
+      deleteOpening,
       saveAccount,
       removeAccount,
       saveSettings,
@@ -814,6 +865,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       createAdjustment,
       updateAdjustment,
       deleteAdjustment,
+      createOpening,
+      updateOpening,
+      deleteOpening,
       saveAccount,
       removeAccount,
       saveSettings,

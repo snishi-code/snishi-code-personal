@@ -53,6 +53,9 @@
 | `cashflow.schedule.flow.source` / `.destination` | 予定入力のお金の流れ | 源泉 → 行き先（入金/出金は自動判定） |
 | `cashflow.goal.create` / `.list` / `.save` | 資金目標の追加/一覧/保存 | 長期の積立計画 |
 | `cashflow.goal.name` / `.amount` / `.date` | 資金目標フォーム | 名称/目標額/期限 |
+| `journal.entry.ccToggle` | 行き先の「継続コスト化」ボタン | 行き先を継続コスト対象（自由入力）に切替 |
+| `journal.entry.ccName` | 継続コスト対象の名前 | 台帳に登録する対象名（自由入力） |
+| `journal.entry.ccCategory` | 認識先カテゴリ（費用） | 継続コストの月次認識先 |
 | `journal.entry.allocateMonths` | 継続する月数 | 継続する月数入力 |
 | `journal.entry.date` | Entry 日付 | 日付入力 |
 | `journal.entry.description` | Entry 摘要 | 摘要入力 |
@@ -67,11 +70,15 @@
 | `allocations.list` | 継続コストの一覧 | 継続コスト項目一覧 |
 | `allocations.showCompleted` | 停止/終了表示トグル | 非 active の表示切替 |
 | `allocations.edit.impactWarning` | 編集シートの過去再計算注意 | 総額/開始月/認識月数/周期/終了月/費用カテゴリ変更時に表示 |
-| `adjustments.view` | 残高補正 ルート | 画面の検出 |
+| `adjustments.view` | 補正・勘定科目 ルート | 画面の検出（screen 名は歴史的に adjustments） |
 | `adjustments.list` | 登録済み補正の一覧 | 現実アンカーの一覧 |
 | `adjustments.row.edit` / `adjustments.row.delete` | 一覧各行の編集 / 削除 | 補正の後編集・削除 |
 | `adjustments.edit.save` | 補正編集シートの更新 | 編集保存（理論残高は自身を除外） |
 | `adjustments.deleteConfirm` | 補正削除の確認ダイアログ | 削除確認 |
+| `opening.name` / `opening.role` / `opening.account` | 初期残高フォーム（新規/既存） | 新規 BS 科目名・役割 / 既存科目選択 |
+| `opening.amount` / `opening.date` / `opening.save` | 初期残高フォーム | 金額/基準日/登録（kind='opening'） |
+| `opening.list` / `opening.row.edit` / `opening.row.delete` | 初期残高の一覧/編集/削除 | 登録後の編集・削除 |
+| `opening.edit.save` / `opening.deleteConfirm` | 初期残高 編集保存 / 削除確認 | 金額・日付の編集 / 削除確認 |
 | `accounts.view` | Accounts ルート | 勘定科目の検出 |
 | `accounts.create` | 科目追加ボタン | 追加起動 |
 | `accounts.save` | 科目シート保存 | 保存 |
