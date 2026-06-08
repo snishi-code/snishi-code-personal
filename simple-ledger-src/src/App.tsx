@@ -7,6 +7,7 @@ import { useLedger } from './state/store';
 import { Header } from './ui/Header';
 import { Menu } from './ui/Menu';
 import { Dashboard } from './ui/screens/Dashboard';
+import { ExpenseBreakdown } from './ui/screens/ExpenseBreakdown';
 import { Journal, type JournalFilter } from './ui/screens/Journal';
 import { Statements } from './ui/screens/Statements';
 import { Allocations } from './ui/screens/Allocations';
@@ -126,6 +127,9 @@ export function App() {
             onOpenStatement={openStatements}
             onOpenJournal={goJournalFiltered}
           />
+        ) : null}
+        {screen === 'expenseBreakdown' ? (
+          <ExpenseBreakdown period={period} onNavigate={setScreen} />
         ) : null}
         {screen === 'journal' ? (
           <Journal

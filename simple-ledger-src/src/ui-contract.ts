@@ -40,10 +40,17 @@ export const UI = {
     // 後方互換（旧 e2e 用に維持）: 収益=PL入口 / 資産=BS入口
     openPl: 'dashboard.stat.revenue',
     openBs: 'dashboard.stat.assets',
-    // 生活コスト（収支/財政状態と同じ stat。月額化コストは月額化コスト画面へ）
+    // 「支出」タップ先は「支出の内訳」画面（生活コストはホーム独立 stat にしない）。
     // 当月の仕訳プレビュー
     journalPreview: 'dashboard.journal.preview',
     journalOpenAll: 'dashboard.journal.openAll',
+  },
+  // 支出の内訳（通常支出 + 月額化＝生活コスト）。月額化からは月額化コスト台帳へ。
+  expenseBreakdown: {
+    view: 'expenseBreakdown.view',
+    normalExpense: 'expenseBreakdown.normalExpense',
+    monthlyCost: 'expenseBreakdown.monthlyCost',
+    total: 'expenseBreakdown.total',
   },
   journal: {
     view: 'journal.view',

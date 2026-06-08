@@ -17,9 +17,10 @@
 |---|---|---|
 | `dashboard.view` | Dashboard ルート | ホーム表示の検出 |
 | `dashboard.entry.income` / `.expense` / `.transfer` | ホーム 3 ボタン | 日常入力の主導線（唯一の入力起点） |
-| `dashboard.stat.revenue` / `.expense` / `.netIncome` | ホーム損益の項目別ボタン | PL の該当セクションへ |
+| `dashboard.stat.revenue` / `.expense` / `.netIncome` | ホーム収支の項目別 stat | 収入=PL収入へ。**支出（=生活コスト: 通常支出+月額化）はタップで「支出の内訳」へ**。収支（生活余剰）はドリルしない非ボタン表示 |
 | `dashboard.stat.assets` / `.liabilities` / `.netAssets` | ホーム財政状態の項目別ボタン | BS の該当セクションへ |
-| `dashboard.stat.normalExpense` / `dashboard.openMonthlyCost` / `dashboard.stat.livingCostTotal` | ホーム生活コスト stat | 通常支出=PL費用 / 月額化コスト=月額化コスト画面 / 合計=月額化コスト画面（CF へは飛ばさない） |
+| `expenseBreakdown.view` | 支出の内訳ルート | ホーム「支出」のタップ先。生活コストはホーム独立 stat にしない |
+| `expenseBreakdown.normalExpense` / `.monthlyCost` / `.total` | 支出の内訳の項目 | 通常支出 / 月額化コスト（タップで月額化コスト台帳へ）/ 支出合計 |
 | `dashboard.journal.preview` / `dashboard.journal.openAll` | ホーム下部「期間内の仕訳」 | プレビュー / すべて見る（期間フィルタ） |
 | `period.year.trigger` / `period.month.trigger` | ヘッダー中央の期間コンテキスト表示 | タップで年/月の軽量ピッカーを開く（全期間時は月トリガー無し） |
 | `period.year.picker` / `period.month.picker` | 軽量ピッカー本体（`Popup`） | 背景タップ/Escape で閉じる。タイトル/閉じる/完了ボタン無し |

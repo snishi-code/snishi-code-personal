@@ -3,6 +3,7 @@ import type { MessageKey } from '../i18n';
 
 export type Screen =
   | 'dashboard'
+  | 'expenseBreakdown'
   | 'journal'
   | 'statements'
   | 'allocations'

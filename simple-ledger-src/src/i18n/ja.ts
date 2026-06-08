@@ -71,6 +71,13 @@ export const ja = {
   'dashboard.entriesOf': '仕訳',
   'dashboard.flowOf': '収支',
   'dashboard.positionAsOf': '財務',
+  // 支出の内訳（ホーム「支出」のタップ先）
+  'expenseBreakdown.title': '支出の内訳',
+  'expenseBreakdown.intro':
+    '支出は「通常支出」と「月額化コスト（生活コスト）」に分かれます。月額化コストをタップすると台帳を開けます。',
+  'expenseBreakdown.normalExpense': '通常支出',
+  'expenseBreakdown.monthlyCost': '月額化コスト（生活コスト）',
+  'expenseBreakdown.total': '支出合計',
   'dashboard.trendNet': '収支の推移',
   'dashboard.trendLiving': '生活コストの推移',
   'dashboard.trendAssets': '純資産の推移',
