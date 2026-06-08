@@ -522,15 +522,15 @@ export const ledgerExportPackageSchema = z
           at('deferredAccountId'),
         );
 
-      // 認識仕訳の本数 = months、ID 重複なし。
+      // 計上仕訳の本数 = months、ID 重複なし。
       if (al.recognitionEntryIds.length !== al.months) {
         issue(
-          `按分「${al.name}」の認識仕訳数(${al.recognitionEntryIds.length})が按分月数(${al.months})と一致しません`,
+          `按分「${al.name}」の計上仕訳数(${al.recognitionEntryIds.length})が按分月数(${al.months})と一致しません`,
           at('recognitionEntryIds'),
         );
       }
       if (new Set(al.recognitionEntryIds).size !== al.recognitionEntryIds.length) {
-        issue(`按分「${al.name}」の認識仕訳 ID が重複しています`, at('recognitionEntryIds'));
+        issue(`按分「${al.name}」の計上仕訳 ID が重複しています`, at('recognitionEntryIds'));
       }
 
       // 原始仕訳: メタ一致 + 借方 deferred / 貸方 payment / 金額 totalAmount。
@@ -557,20 +557,20 @@ export const ledgerExportPackageSchema = z
         }
       }
 
-      // 月次認識仕訳: メタ・借方 expense / 貸方 deferred・金額列・日付列・合計が定義どおり。
+      // 月次計上仕訳: メタ・借方 expense / 貸方 deferred・金額列・日付列・合計が定義どおり。
       const amounts = monthlyAmounts(al.totalAmount, al.months);
       let sum = 0;
       let allRecognitionOk = al.recognitionEntryIds.length === al.months;
       al.recognitionEntryIds.forEach((rid, i) => {
         const re = entryById.get(rid);
         if (!re) {
-          issue(`按分「${al.name}」の認識仕訳(${rid})が存在しません`, at('recognitionEntryIds', i));
+          issue(`按分「${al.name}」の計上仕訳(${rid})が存在しません`, at('recognitionEntryIds', i));
           allRecognitionOk = false;
           return;
         }
         if (re.metadata?.allocationId !== al.id || re.metadata?.allocationRole !== 'recognition')
           issue(
-            `按分「${al.name}」の認識仕訳のメタ情報が一致しません`,
+            `按分「${al.name}」の計上仕訳のメタ情報が一致しません`,
             at('recognitionEntryIds', i),
           );
         const d = re.lines.find((l) => l.side === 'debit');
@@ -583,7 +583,7 @@ export const ledgerExportPackageSchema = z
           re.date !== expectedDate
         ) {
           issue(
-            `按分「${al.name}」の認識仕訳の科目/金額/日付が定義と一致しません`,
+            `按分「${al.name}」の計上仕訳の科目/金額/日付が定義と一致しません`,
             at('recognitionEntryIds', i),
           );
           allRecognitionOk = false;
@@ -592,7 +592,7 @@ export const ledgerExportPackageSchema = z
       });
       if (allRecognitionOk && sum !== al.totalAmount) {
         issue(
-          `按分「${al.name}」の認識仕訳の合計(${sum})が総額(${al.totalAmount})と一致しません`,
+          `按分「${al.name}」の計上仕訳の合計(${sum})が総額(${al.totalAmount})と一致しません`,
           at('recognitionEntryIds'),
         );
       }
