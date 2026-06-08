@@ -489,6 +489,21 @@ test('継続コスト入力の語彙・導線: 分類先カテゴリ／ローン
   await page.goto('./');
   await page.locator(ui('dashboard.entry.expense')).click();
 
+  // 入力順: 金額はお金の流れより上、項目はお金の流れより下（金額の前に項目を出さない）。
+  const amountBox = await page.locator(ui('journal.entry.amount')).boundingBox();
+  const flowBox = await page.locator(ui('journal.entry.flow')).boundingBox();
+  const itemBox = await page.locator(ui('journal.entry.item')).boundingBox();
+  expect(amountBox && flowBox && amountBox.y < flowBox.y).toBe(true);
+  expect(flowBox && itemBox && flowBox.y < itemBox.y).toBe(true);
+
+  // ローン/取り置きの導線は、フロー全体の下ではなく「お金の流れ（左辺=支払い元）」の中に置く。
+  await expect(
+    page.locator(ui('journal.entry.flow')).locator(ui('journal.entry.liabilityToggle')),
+  ).toBeVisible();
+  await expect(
+    page.locator(ui('journal.entry.flow')).locator(ui('journal.entry.reserveToggle')),
+  ).toBeVisible();
+
   // 支払い元側のローン導線は「ローンを組む」単一導線。旧「ローン等の負債も使う」「新しいカードを作る」は出さない。
   await expect(page.getByText('ローンを組む', { exact: true })).toBeVisible();
   await expect(page.getByText('ローン等の負債も使う')).toHaveCount(0);
@@ -498,10 +513,11 @@ test('継続コスト入力の語彙・導線: 分類先カテゴリ／ローン
   await page.locator(ui('journal.entry.liabilityToggle')).check();
   await expect(page.getByText('新しいローンを作成', { exact: true })).toBeVisible();
 
-  // 継続コスト化すると「分類先カテゴリ」を出す（「認識先カテゴリ」は使わない）。
+  // 継続コスト化すると「分類先カテゴリ」を出す（「認識先カテゴリ」は使わない）。対象名と重複する「項目」は隠す。
   await page.locator(ui('journal.entry.item')).fill('動画サブスク');
   await page.locator(ui('journal.entry.amount')).fill('12000');
   await page.locator(ui('journal.entry.ccToggle')).click();
+  await expect(page.locator(ui('journal.entry.item'))).toHaveCount(0);
   await expect(page.locator(ui('journal.entry.ccCategory'))).toContainText('分類先カテゴリ');
   await expect(page.getByText('認識先カテゴリ', { exact: false })).toHaveCount(0);
 });

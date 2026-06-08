@@ -542,6 +542,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               error={errorText(errors, 'credit-required') ?? sameAccount}
               dataUi={UI.journal.entry.flowSource}
             />
+            {/* 支払い元（左辺）直下にローン/取り置きの導線を置く。開くと同じ支払い元ピッカーに候補が増える。 */}
+            {flowExtras}
           </div>
           <div className="flow__arrow" aria-hidden="true">
             →
@@ -999,13 +1001,13 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           </>
         ) : (
           <>
-            {/* 人間が入力する順: 日付 → 項目 → 金額 → お金の流れ(A → B) → 詳細 */}
+            {/* 人間が入力する順: 日付 → 金額 → お金の流れ(左辺[+ローン/取り置き] → 右辺) → 項目 → 継続コスト詳細 */}
             {dateField}
-            {/* 振替は「項目」を必須にしない（未入力なら自動で「移動元 → 移動先」を付ける）。 */}
-            {mode === 'transfer' ? null : itemField}
             {amountField}
             {renderFlow()}
-            {flowExtras}
+            {/* 項目は流れの後に置く（金額より前に出さない）。振替は自動命名、継続コスト化中は対象名と
+                重複するため出さない（名称は流れの行き先＝継続コスト対象の名前で入力する）。 */}
+            {mode === 'transfer' || (canAllocate && ccMode) ? null : itemField}
             {ccDetailField}
             {fixedMonthlyField}
             {repaymentField}
