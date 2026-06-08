@@ -113,26 +113,26 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [flowError, setFlowError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  // 行き先(debit)の役割。費用カテゴリのときだけ「月額化」（通常費用版）を出す。
+  // 行き先(debit)の役割。費用カテゴリのときだけ「継続コスト」（通常費用版）を出す。
   const destRole = accounts.find((a) => a.id === form.debitAccountId)?.role;
-  // 月額化コスト（expense × 費用カテゴリ × create のみ）。固定資産購入の月額化は別扱い（P7）。
+  // 継続コスト（expense × 費用カテゴリ × create のみ）。固定資産購入の継続コストは別扱い（P7）。
   const canAllocate =
     init.kind === 'create' && mode === 'expense' && destRole === 'expense-category';
   const [allocate, setAllocate] = useState(false);
-  // 月額化する支出の種類: 'living'=生活コスト化（借方 費用）/ 'fixed'=耐久財・固定資産（借方 固定資産・後で処分可）。
+  // 継続コスト化する支出の種類: 'living'=支出化（借方 費用）/ 'fixed'=耐久財・固定資産（借方 固定資産・後で処分可）。
   const [assetKind, setAssetKind] = useState<'living' | 'fixed'>('living');
-  // 固定資産購入（expense × 固定資産 × create）は「生活コストとして月額化」できる（別トグル）。
+  // 固定資産購入（expense × 固定資産 × create）は「支出として継続コスト」できる（別トグル）。
   const canFixedMonthly =
     init.kind === 'create' && mode === 'expense' && destRole === 'fixed-asset';
   const [fixedMonthly, setFixedMonthly] = useState(false);
   const [monthlyCategoryId, setMonthlyCategoryId] = useState('');
   const [categoryError, setCategoryError] = useState(false);
-  // 月額化 ON のときはタグを付けられない（createMonthlyCost はタグを受け取らないため）。
+  // 継続コスト ON のときはタグを付けられない（createMonthlyCost はタグを受け取らないため）。
   const allocationActive = (canAllocate && allocate) || (canFixedMonthly && fixedMonthly);
   const [monthsText, setMonthsText] = useState('');
   const [monthsError, setMonthsError] = useState(false);
   const months = monthsText === '' ? 0 : Number.parseInt(monthsText, 10);
-  // 月額化の詳細（種類は入力から推定する）
+  // 継続コストの詳細（種類は入力から推定する）
   const [continueCost, setContinueCost] = useState(false);
   // liability 払いの返済 CF（支払い元の近くで入力する）
   const [repayToggle, setRepayToggle] = useState(false);
@@ -150,7 +150,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   // 詳細（メモ・タグ）は折りたたみ。編集時は既存値が見えるよう開いておく。
   const [showDetails, setShowDetails] = useState(init.kind === 'edit');
 
-  // 支出/振替で目的別資金・負債は既定で候補に出さない。必要時だけトグルで表示し、その場で作る。
+  // 支出/振替で取り置き資金・負債は既定で候補に出さない。必要時だけトグルで表示し、その場で作る。
   // 編集時に既選択が reserve/liability なら初期表示（includeId で常に見えるが状態も合わせる）。
   const roleOf = (id: string) => accounts.find((a) => a.id === id)?.role;
   const [showReserve, setShowReserve] = useState(() =>
@@ -235,7 +235,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     // costMonths は 1 以上（サブスクは 1 か月）。
     const monthsBad = (useMonthly || useFixedMonthly) && (!Number.isInteger(months) || months < 1);
     setMonthsError(monthsBad);
-    // 固定資産の月額化は、月割り先の費用カテゴリが必須。
+    // 固定資産の継続コストは、月割り先の費用カテゴリが必須。
     const categoryBad = useFixedMonthly && monthlyCategoryId === '';
     setCategoryError(categoryBad);
     if (found.length > 0 || monthsBad || categoryBad) return;
@@ -285,8 +285,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             ...repayFields,
           });
         } else {
-          // 生活コスト化: 支出フォームの debit=費用カテゴリ / credit=支払い元 をそのまま月額化に渡す。
-          // 選択中の管理区分を月額化コスト本体・生成支払い仕訳へ引き継ぐ（未指定なら repository が既定区分）。
+          // 支出化: 支出フォームの debit=費用カテゴリ / credit=支払い元 をそのまま継続コストに渡す。
+          // 選択中の管理区分を継続コスト本体・生成支払い仕訳へ引き継ぐ（未指定なら repository が既定区分）。
           await createMonthlyCost({
             name: toSave.description,
             ...scopeField,
@@ -302,8 +302,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           });
         }
       } else if (useFixedMonthly) {
-        // 固定資産購入（借方 固定資産 / 貸方 資金 or 負債）+ 月額化コストを一括保存。購入仕訳が実体で、
-        // 月額化は支払い仕訳を作らず formula 認識のみ（recognitionCreditAccountId=固定資産）。
+        // 固定資産購入（借方 固定資産 / 貸方 資金 or 負債）+ 継続コストを一括保存。購入仕訳が実体で、
+        // 継続コストは支払い仕訳を作らず formula 認識のみ（recognitionCreditAccountId=固定資産）。
         // 負債払いで返済入力があれば、購入仕訳の貸方負債を取り崩す返済予定 CF も同時に作る。
         const repeat = continueCost ? months : undefined;
         const repayCount = repayCountText === '' ? 0 : Number.parseInt(repayCountText, 10);
@@ -474,7 +474,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const flowDef = isManual ? null : MODE_FLOW[mode as FlowMode];
   const renderFlow = () => {
     if (!flowDef) return null;
-    // トグルで明示したときだけ目的別資金・負債を候補に足す（既選択は includeId で常に表示）。
+    // トグルで明示したときだけ取り置き資金・負債を候補に足す（既選択は includeId で常に表示）。
     const extras: AccountRole[] = [];
     if (showReserve) extras.push('reserve-asset');
     if (showLiability) {
@@ -598,7 +598,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       </label>
       {allocate ? (
         <>
-          {/* 生活コスト化（費用）か、耐久財・固定資産（BS資産・後で売却/故障処分可）かを選ぶ。
+          {/* 支出化（費用）か、耐久財・固定資産（BS資産・後で売却/故障処分可）かを選ぶ。
               固定資産科目を事前に作らなくても、ここから正規ルートへ入れる。 */}
           <SelectInput
             label={t('entry.assetKind')}
@@ -642,7 +642,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     </div>
   ) : null;
 
-  // 固定資産の購入を「生活コストとして月額化」する（購入仕訳とは別に formula 認識）。
+  // 固定資産の購入を「支出として継続コスト」する（購入仕訳とは別に formula 認識）。
   const fixedMonthlyField = canFixedMonthly ? (
     <div className="field">
       <label
@@ -792,8 +792,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     </div>
   ) : null;
 
-  // 支出/振替で、目的別資金・負債を候補に出すトグルと、その場で作る導線。
-  // 既定では daily-asset 中心。目的別資金が増えても通常入力を軽く保つ。
+  // 支出/振替で、取り置き資金・負債を候補に出すトグルと、その場で作る導線。
+  // 既定では daily-asset 中心。取り置き資金が増えても通常入力を軽く保つ。
   const flowExtras =
     mode === 'expense' || mode === 'transfer' ? (
       <div className="field stack" style={{ gap: 'var(--space-2)' }}>
@@ -984,7 +984,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       </Modal>
       {discardConfirm}
 
-      {/* 入力を中断せず、目的別資金（振替の行き先）を作って選択する。 */}
+      {/* 入力を中断せず、取り置き資金（振替の行き先）を作って選択する。 */}
       {reserveSheetOpen ? (
         <ReserveSheet
           onClose={() => setReserveSheetOpen(false)}

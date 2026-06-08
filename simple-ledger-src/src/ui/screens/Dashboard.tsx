@@ -72,7 +72,7 @@ export function Dashboard({
     const asOfDate = periodAsOf(period, today, lastDataDate);
     const within = (e: JournalEntry) => !range || (e.date >= range.from && e.date <= range.to);
     const expenseIds = new Set(accounts.filter((a) => a.type === 'expense').map((a) => a.id));
-    // 投資の評価損益（生活コストとは別の補助情報）。
+    // 投資の評価損益（支出とは別の補助情報）。
     let investmentLoss = 0;
     let investmentGain = 0;
     for (const e of entries) {
@@ -83,7 +83,7 @@ export function Dashboard({
       if (debit && expenseIds.has(debit.accountId)) investmentLoss += debit.amount;
       else if (credit) investmentGain += credit.amount; // 評価益は revenue 貸方
     }
-    // 支出（生活コスト）= 通常支出 + 月額化。支出の内訳画面・推移と同じ正本ヘルパを使う。
+    // 支出= 通常支出 + 継続コスト。支出の内訳画面・推移と同じ正本ヘルパを使う。
     const months = periodBuckets(period, { dataMonths: dataMonthsOf(entries.map((e) => e.date)) });
     const breakdown = livingCostBreakdownForRange(
       accounts,
@@ -104,7 +104,7 @@ export function Dashboard({
 
   // 推移（年別=12ヶ月 / 全体=年集約）。グラフで俯瞰する（縦長リストにしない）。
   // 推移シリーズは内訳ページと同じ正本（buildSectionTrends）から取り、数字をズラさない。
-  // ホームでは 収支（=収入−生活コスト）/ 生活コスト / 純資産 の 3 本を見せる。
+  // ホームでは 収支（=収入−支出）/ 支出 / 純資産 の 3 本を見せる。
   const trend = useMemo(() => buildSectionTrends(period, ledger), [period, ledger]);
 
   const currency = ledger?.settings.currency ?? 'JPY';
@@ -145,8 +145,8 @@ export function Dashboard({
         >
           <Money amount={pl.totalRevenue} currency={currency} />
         </StatButton>
-        {/* 「支出」= 生活コスト（通常支出 + 月額化）。購入額そのもの・返済・振替は支出に含めない
-            （購入は資産取得、償却分の費用＝月額化として計上）。タップで「支出の内訳」へ。 */}
+        {/* 「支出」= 支出（通常支出 + 継続コスト）。購入額そのもの・返済・振替は支出に含めない
+            （購入は資産取得、償却分の費用＝継続コストとして計上）。タップで「支出の内訳」へ。 */}
         <StatButton
           label={t('dashboard.expense')}
           onClick={() => onNavigate('expenseBreakdown')}
@@ -154,7 +154,7 @@ export function Dashboard({
         >
           <Money amount={normalExpense + monthlyCost} currency={currency} />
         </StatButton>
-        {/* 収支 = 収入 − 支出（生活コスト）の生活余剰。タップで「収支」ページ（月ごとの残り方）へ。 */}
+        {/* 収支 = 収入 − 支出の生活余剰。タップで「収支」ページ（月ごとの残り方）へ。 */}
         <StatButton
           label={t('dashboard.netIncome')}
           onClick={() => onNavigate('netIncome')}
@@ -192,7 +192,7 @@ export function Dashboard({
         >
           <Money amount={bs.netAssets} currency={currency} signed />
         </StatButton>
-        {/* 投資の評価損益は財政状態の補助情報としてここに置く（旧・生活コストセクションから移設）。 */}
+        {/* 投資の評価損益は財政状態の補助情報としてここに置く（旧・支出セクションから移設）。 */}
         {investmentValuation.loss > 0 || investmentValuation.gain > 0 ? (
           <div className="stat">
             <span className="stat__label">{t('dashboard.investmentValuation')}</span>
@@ -241,8 +241,8 @@ export function Dashboard({
         </div>
       ) : null}
 
-      {/* 生活コストはホーム独立セクションにしない（上段の「支出」= 通常支出 + 月額化 がその値）。
-          内訳の月額化は月額化コスト画面（支出カードのタップ先）、通常支出は損益計算書で見る。 */}
+      {/* 支出はホーム独立セクションにしない（上段の「支出」= 通常支出 + 継続コスト がその値）。
+          内訳の継続コストは継続コスト台帳（支出カードのタップ先）、通常支出は損益計算書で見る。 */}
 
       {/* 期間内の仕訳（下部・スクロールで見える）。詳細は仕訳画面へ。 */}
       <div
@@ -268,7 +268,7 @@ export function Dashboard({
       ) : (
         <ul className="card list" data-ui={UI.dashboard.journalPreview}>
           {periodEntries.map((entry) => {
-            // 生成仕訳（按分/月額化）は編集不可なので、タップは仕訳画面へ。
+            // 生成仕訳（按分/継続コスト）は編集不可なので、タップは仕訳画面へ。
             const generated = !!(entry.metadata?.allocationId || entry.metadata?.monthlyCostId);
             return (
               <EntryListItem

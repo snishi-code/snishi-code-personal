@@ -25,7 +25,7 @@ export function Accounts() {
   const entries = ledger?.journalEntries ?? [];
   const currency = ledger?.settings.currency ?? 'JPY';
 
-  // 使用中の科目（仕訳/予定CF/目的別資金/按分から参照）。区分変更・削除ができない。
+  // 使用中の科目（仕訳/予定CF/取り置き資金/按分から参照）。区分変更・削除ができない。
   const usedIds = useMemo(
     () =>
       referencedAccountIds({

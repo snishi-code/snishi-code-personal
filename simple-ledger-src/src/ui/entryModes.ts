@@ -16,7 +16,7 @@ export interface EntryRole {
   labelKey: MessageKey;
   /**
    * このフィールドで選べる科目の役割(role)。type ではなく role で絞ることで、
-   * 按分中資産・目的別資金・投資資産・残高調整科目を日常入力から外す。
+   * 按分中資産・取り置き資金・投資資産・残高調整科目を日常入力から外す。
    */
   allowedRoles: AccountRole[];
 }
@@ -49,7 +49,7 @@ export const MODE_ROLES: Record<FormMode, readonly [EntryRole, EntryRole]> = {
     },
   ],
   transfer: [
-    // 資金移動: 日常/目的別資金 ↔ 資金、資金→負債（返済）、負債→資金（借入実行）。
+    // 資金移動: 日常/取り置き資金 ↔ 資金、資金→負債（返済）、負債→資金（借入実行）。
     {
       side: 'credit',
       labelKey: 'entry.transfer.from',
@@ -79,8 +79,8 @@ export type FlowMode = 'income' | 'expense' | 'transfer';
  *
  * 支出の支払い方法は、現金・預金などの資金(daily-asset)とクレジットカード(payment-liability)を
  * 既定で出す（カードは日常の支払い手段なのでトグル無しで選べる）。それ以外の
- * 目的別資金(reserve-asset)・ローン等(other-liability)、および振替での負債は候補を重くしないため
- * 既定に出さず、EntrySheet のトグル（目的別資金を使う / ローン等の負債も使う）で allowedRoles に
+ * 取り置き資金(reserve-asset)・ローン等(other-liability)、および振替での負債は候補を重くしないため
+ * 既定に出さず、EntrySheet のトグル（取り置き資金を使う / ローン等の負債も使う）で allowedRoles に
  * 追加する。編集中の既選択は groupedAccountsByRole の includeId で常に表示維持される。
  */
 export interface FlowDef {

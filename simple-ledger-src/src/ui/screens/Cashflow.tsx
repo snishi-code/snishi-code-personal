@@ -1,9 +1,9 @@
 /*
  * 資金繰り（将来CF）。planned な予定・未来日付の仕訳から自由資金の推移・最低残高を投影し、
- * 目的別資金（取り置き枠）の管理を行う。入力はホームに一本化し、この画面は確認専用。
+ * 取り置き資金（取り置き枠）の管理を行う。入力はホームに一本化し、この画面は確認専用。
  * 「いつ費用認識するか(按分)」とは別概念で、「いつ現金が動くか」を扱う。
  *
- * 表示終了日（任意の日付）まで投影する。目的別資金は「資金目標」を統合した枠で、任意の
+ * 表示終了日（任意の日付）まで投影する。取り置き資金は「資金目標」を統合した枠で、任意の
  * 目標額・目標日から必要な毎月の積立額を出す（現在額は口座残高から自動）。
  */
 import { useMemo, useState } from 'react';
@@ -74,7 +74,7 @@ export function Cashflow() {
     const reserveBalance = reserves.reduce((s, r) => s + (byId.get(r.reserveAccountId) ?? 0), 0);
     // 未来日付（date > today）の仕訳で現金が動くもの = CF に取り込む（ホーム入力が自然に反映される）。
     // delta=総資金の純増減（資金↔資金/資金↔取り置きの振替は 0）、reserveDelta=取り置き残高の純増減
-    //（普通預金→目的別資金 なら +amount で自由資金が減る）、amount=一覧表示用の取引金額（借方合計）。
+    //（普通預金→取り置き資金 なら +amount で自由資金が減る）、amount=一覧表示用の取引金額（借方合計）。
     const end = untilDate;
     const future = entries
       .filter((e) => e.date > today && e.date <= end && e.lines.some((l) => isLiquid(l.accountId)))
@@ -274,7 +274,7 @@ export function Cashflow() {
         </ul>
       )}
 
-      {/* 分割・定期の予定（読み取り専用）。月額化コストの負債払い・借入の分割返済から生成される。 */}
+      {/* 分割・定期の予定（読み取り専用）。継続コストの負債払い・借入の分割返済から生成される。 */}
       <p className="section-label">{t('cashflow.scheduleSecondaryTitle')}</p>
       <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
         {t('cashflow.scheduleSecondaryHint')}
@@ -329,7 +329,7 @@ export function Cashflow() {
         </ul>
       )}
 
-      {/* 目的別資金・資金目標（補助情報・下部に畳む） */}
+      {/* 取り置き資金・資金目標（補助情報・下部に畳む） */}
       <button
         type="button"
         className="collapse-toggle"
@@ -345,7 +345,7 @@ export function Cashflow() {
         <div className="stack">
           <p className="field__hint">{t('cashflow.advancedHint')}</p>
 
-          {/* 目的別資金（任意で目標額・目標日。現在額は口座残高から自動・必要月額を表示） */}
+          {/* 取り置き資金（任意で目標額・目標日。現在額は口座残高から自動・必要月額を表示） */}
           <div
             className="section-label"
             style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
@@ -402,7 +402,7 @@ export function Cashflow() {
             </ul>
           )}
 
-          {/* 資金目標（旧概念・読み取り専用）。新規は目的別資金へ統合。残データの確認/削除のみ。 */}
+          {/* 資金目標（旧概念・読み取り専用）。新規は取り置き資金へ統合。残データの確認/削除のみ。 */}
           {goals.length > 0 ? (
             <>
               <p className="section-label">{t('fundingGoal.title')}</p>

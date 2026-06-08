@@ -1,7 +1,7 @@
 /*
  * 支出の内訳。ホーム上段「支出」のタップ先。
- * 支出 = 通常支出 + 月額化コスト（生活コスト）。月額化コストをタップすると月額化コスト台帳へ。
- * 生活コストはホーム独立セクションにはしない（ここで内訳を見せる）。期間はホームの選択に従う。
+ * 支出 = 通常支出 + 継続コスト。継続コストをタップすると継続コスト台帳へ。
+ * 支出はホーム独立セクションにはしない（ここで内訳を見せる）。期間はホームの選択に従う。
  */
 import { useMemo } from 'react';
 import { useLedger } from '../../state/store';
@@ -63,7 +63,7 @@ export function ExpenseBreakdown({
             <Money amount={breakdown.normalExpense} currency={currency} />
           </span>
         </div>
-        {/* 月額化コスト（生活コスト）。タップで月額化コスト台帳へ。 */}
+        {/* 継続コスト。タップで継続コスト台帳へ。 */}
         <button
           type="button"
           className="stat stat--btn"
@@ -86,7 +86,7 @@ export function ExpenseBreakdown({
         </div>
       </div>
 
-      {/* 生活コスト（支出）の推移。年別=12ヶ月 / 全体=年集約。全体は年ラベルでその年へ。 */}
+      {/* 支出の推移。年別=12ヶ月 / 全体=年集約。全体は年ラベルでその年へ。 */}
       {trends && trends.living.length > 1 ? (
         <div style={{ marginTop: 'var(--space-4)' }}>
           <TrendChart

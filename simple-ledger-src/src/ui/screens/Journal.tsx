@@ -101,9 +101,9 @@ export function Journal({
 
   const hasDateOrQuery = query !== '' || from !== '' || to !== '';
 
-  // 月額化認識（読み取り専用。仕訳ではなく MonthlyCostItem の formula から導出）。
+  // 継続コスト認識（読み取り専用。仕訳ではなく MonthlyCostItem の formula から導出）。
   // 期間フィルタに追従する: フィルタなし=今月 / from・to が同一月=その月 / それ以外の範囲は非表示。
-  // 科目フィルタが費用カテゴリならその科目の月額化だけ。タグフィルタ時は非表示（月額化にタグなし）。
+  // 科目フィルタが費用カテゴリならその科目の継続コストだけ。タグフィルタ時は非表示（継続コストにタグなし）。
   const { year, month } = currentYearMonth();
   const currentYm = `${year}-${String(month).padStart(2, '0')}`;
   const { recognitionYm, monthRecognitions } = useMemo(() => {
@@ -117,7 +117,7 @@ export function Journal({
       .filter((m) => !accountFilterId || m.expenseAccountId === accountFilterId)
       .map((m) => {
         // 固定資産由来（recognitionCreditAccountId あり）は「固定資産 → 費用カテゴリ」、
-        // それ以外（サブスク等）は「月額化: 名称」と表示する（いずれも仮想行・read-only）。
+        // それ以外（サブスク等）は「継続コスト: 名称」と表示する（いずれも仮想行・read-only）。
         const recCredit = m.recognitionCreditAccountId
           ? accById.get(m.recognitionCreditAccountId)?.name
           : undefined;
@@ -290,7 +290,7 @@ export function Journal({
           {filtered.map((entry) => {
             const isAllocation = !!entry.metadata?.allocationId;
             const isMonthlyCost = !!entry.metadata?.monthlyCostId;
-            // 生成仕訳（按分 / 月額化）は読み取り専用（編集・削除・取消を出さない）。
+            // 生成仕訳（按分 / 継続コスト）は読み取り専用（編集・削除・取消を出さない）。
             const generated = isAllocation || isMonthlyCost;
             const entryTagNames = tagNames(allTags, entry.tagIds);
             const title = (

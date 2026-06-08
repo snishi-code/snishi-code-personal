@@ -3,7 +3,7 @@
  *
  * ホームの上段カード・各内訳ページ・推移グラフが必ず同じ定義を使うため、フロー（収入/支出/収支）
  * とストック（資産/負債/純資産）の月次バケット集計をここに集約する（数字のズレ防止）。
- *  - フロー（収入/生活コスト/収支）は各バケットの `range` で集計（bar 表示）。
+ *  - フロー（収入/支出/収支）は各バケットの `range` で集計（bar 表示）。
  *  - ストック（資産/負債/純資産）は各バケット末 `asOf` 時点の残高（line 表示）。
  *  - month モードは推移を出さない（単月）→ null。
  *  - all モードは年集約バーで、各点をタップしてその年へドリルできる（drillable）。
@@ -17,9 +17,9 @@ import type { TrendPoint } from '../components/TrendChart';
 export interface SectionTrends {
   /** 収入（フロー）。 */
   revenue: TrendPoint[];
-  /** 生活コスト＝支出（フロー）。 */
+  /** 支出（フロー）。 */
   living: TrendPoint[];
-  /** 収支＝収入 − 生活コスト（フロー）。 */
+  /** 収支＝収入 − 支出（フロー）。 */
   net: TrendPoint[];
   /** 資産合計（ストック）。 */
   assets: TrendPoint[];

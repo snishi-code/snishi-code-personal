@@ -27,7 +27,7 @@ export function AccountSheet({ existing, onClose }: { existing?: Account; onClos
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  // 使用中（仕訳/予定CF/目的別資金/按分から参照）の科目は区分(type)を変更できない（role は変更可）。
+  // 使用中（仕訳/予定CF/取り置き資金/按分から参照）の科目は区分(type)を変更できない（role は変更可）。
   const inUse =
     !!existing &&
     isAccountReferenced(existing.id, {
