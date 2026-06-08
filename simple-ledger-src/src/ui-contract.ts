@@ -41,8 +41,6 @@ export const UI = {
     openPl: 'dashboard.stat.revenue',
     openBs: 'dashboard.stat.assets',
     // 生活コスト（収支/財政状態と同じ stat。月額化コストは月額化コスト画面へ）
-    statNormalExpense: 'dashboard.stat.normalExpense',
-    openMonthlyCost: 'dashboard.openMonthlyCost',
     // 当月の仕訳プレビュー
     journalPreview: 'dashboard.journal.preview',
     journalOpenAll: 'dashboard.journal.openAll',

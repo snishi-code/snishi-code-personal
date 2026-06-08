@@ -175,15 +175,18 @@ export function Dashboard({
         b.key.length === 4
           ? Array.from({ length: 12 }, (_, i) => `${b.year}-${String(i + 1).padStart(2, '0')}`)
           : [b.key];
+      // 収支は上段カードと同義（収入 − 生活コスト支出）。raw PL の netIncome ではなく
+      // 「収入 − 生活コスト」で推移を描く（ホームの「支出」定義と一致させる）。
+      const livingB = livingCostForRange(accounts, entries, items, b.range, months);
       net.push({
         key: b.key,
         label: b.label,
-        value: deriveProfitAndLoss(accounts, entries, b.range).netIncome,
+        value: deriveProfitAndLoss(accounts, entries, b.range).totalRevenue - livingB,
       });
       living.push({
         key: b.key,
         label: b.label,
-        value: livingCostForRange(accounts, entries, items, b.range, months),
+        value: livingB,
       });
       assets.push({
         key: b.key,
@@ -235,28 +238,27 @@ export function Dashboard({
         >
           <Money amount={pl.totalRevenue} currency={currency} />
         </StatButton>
+        {/* 「支出」= 生活コスト（通常支出 + 月額化）。購入額そのもの・返済・振替は支出に含めない
+            （購入は資産取得、償却分の費用＝月額化として計上）。会計上の損益計算書とは概念が異なり
+            数字が一致しないため、タップ先は raw PL ではなく月額化コスト画面（生活コストの管理先）。 */}
         <StatButton
           label={t('dashboard.expense')}
-          onClick={() => onOpenStatement('pl', 'expense')}
+          onClick={() => onNavigate('allocations')}
           dataUi={UI.dashboard.statExpense}
         >
-          {/* 「支出」= 生活コスト（通常支出 + 月額化）。固定資産の購入額そのものや返済・振替は支出に
-              含めない（購入は資産取得、償却分の費用＝月額化として計上）。タップ先の損益計算書は
-              会計上の別ビュー（仕訳ベース）で、数字は必ずしも一致しない。 */}
           <Money amount={normalExpense + monthlyCost} currency={currency} />
         </StatButton>
-        <StatButton
-          label={t('dashboard.netIncome')}
-          onClick={() => onOpenStatement('pl', 'net')}
-          dataUi={UI.dashboard.statNetIncome}
-        >
-          {/* 収支 = 収入 − 支出（生活コスト）。生活余剰。 */}
-          <Money
-            amount={pl.totalRevenue - (normalExpense + monthlyCost)}
-            currency={currency}
-            signed
-          />
-        </StatButton>
+        {/* 収支 = 収入 − 支出（生活コスト）の生活余剰。対応する単一画面が無いためドリルダウンしない。 */}
+        <div className="stat" data-ui={UI.dashboard.statNetIncome}>
+          <span className="stat__label">{t('dashboard.netIncome')}</span>
+          <span className="stat__value">
+            <Money
+              amount={pl.totalRevenue - (normalExpense + monthlyCost)}
+              currency={currency}
+              signed
+            />
+          </span>
+        </div>
       </div>
 
       {/* 財政状態（期間末時点。各項目から貸借対照表の該当セクションへ） */}
@@ -283,6 +285,19 @@ export function Dashboard({
         >
           <Money amount={bs.netAssets} currency={currency} signed />
         </StatButton>
+        {/* 投資の評価損益は財政状態の補助情報としてここに置く（旧・生活コストセクションから移設）。 */}
+        {investmentValuation.loss > 0 || investmentValuation.gain > 0 ? (
+          <div className="stat">
+            <span className="stat__label">{t('dashboard.investmentValuation')}</span>
+            <span className="stat__value">
+              <Money
+                amount={investmentValuation.gain - investmentValuation.loss}
+                currency={currency}
+                signed
+              />
+            </span>
+          </div>
+        ) : null}
       </div>
 
       {/* 推移（年別=12ヶ月 / 全体=年集約）。SVG グラフで俯瞰。全体は年ラベルをタップで年別へ。 */}
@@ -321,37 +336,8 @@ export function Dashboard({
         </div>
       ) : null}
 
-      {/* 生活コスト（収支/財政状態と同じ stat-grid。月額化コストは月額化コスト画面へ。CF とは別概念） */}
-      <p className="section-label">{t('dashboard.livingCostOf', { label })}</p>
-      <div className="stat-grid">
-        <StatButton
-          label={t('dashboard.normalExpense')}
-          onClick={() => onOpenStatement('pl', 'expense')}
-          dataUi={UI.dashboard.statNormalExpense}
-        >
-          <Money amount={normalExpense} currency={currency} />
-        </StatButton>
-        <StatButton
-          label={t('dashboard.monthlyCost')}
-          onClick={() => onNavigate('allocations')}
-          dataUi={UI.dashboard.openMonthlyCost}
-        >
-          <Money amount={monthlyCost} currency={currency} />
-        </StatButton>
-        {/* 「生活コスト合計」カードは置かない（上段の「支出」= 通常支出 + 月額化 と同値のため）。 */}
-        {investmentValuation.loss > 0 || investmentValuation.gain > 0 ? (
-          <div className="stat">
-            <span className="stat__label">{t('dashboard.investmentValuation')}</span>
-            <span className="stat__value">
-              <Money
-                amount={investmentValuation.gain - investmentValuation.loss}
-                currency={currency}
-                signed
-              />
-            </span>
-          </div>
-        ) : null}
-      </div>
+      {/* 生活コストはホーム独立セクションにしない（上段の「支出」= 通常支出 + 月額化 がその値）。
+          内訳の月額化は月額化コスト画面（支出カードのタップ先）、通常支出は損益計算書で見る。 */}
 
       {/* 期間内の仕訳（下部・スクロールで見える）。詳細は仕訳画面へ。 */}
       <div
