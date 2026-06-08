@@ -36,7 +36,7 @@
 | `cashflow.advanced.toggle` | CF 取り置き資金・資金目標の折りたたみ | 下部の補助情報を開閉 |
 | `journal.view` | Journal ルート | 仕訳画面の検出 |
 | `journal.entry.list` | Journal 一覧 | 仕訳一覧 |
-| `journal.monthlyRecognition` | 今月の継続コスト認識カード | 読み取り専用（仕訳ではない月割り表示） |
+| `journal.monthlyRecognition` | 今月の継続コスト計上カード | 読み取り専用（仕訳ではない月割り表示） |
 | `journal.search` | Journal 検索入力 | 検索 |
 | `journal.filter.clearAccount` | 科目絞り込み解除 | ドリルダウン解除 |
 | `journal.entry.save` | Entry シート保存 | 保存 |
@@ -55,7 +55,7 @@
 | `cashflow.goal.name` / `.amount` / `.date` | 資金目標フォーム | 名称/目標額/期限 |
 | `journal.entry.ccToggle` | 行き先の「継続コスト化」ボタン | 行き先を継続コスト対象（自由入力）に切替 |
 | `journal.entry.ccName` | 継続コスト対象の名前 | 台帳に登録する対象名（自由入力） |
-| `journal.entry.ccCategory` | 認識先カテゴリ（費用） | 継続コストの月次認識先 |
+| `journal.entry.ccCategory` | 分類先カテゴリ（費用） | 継続コストの月次分類先 |
 | `journal.entry.allocateMonths` | 継続する月数 | 継続する月数入力 |
 | `journal.entry.date` | Entry 日付 | 日付入力 |
 | `journal.entry.description` | Entry 摘要 | 摘要入力 |
@@ -69,7 +69,7 @@
 | `allocations.view` | 継続コスト ルート | 画面の検出（screen 名は歴史的に allocations） |
 | `allocations.list` | 継続コストの一覧 | 継続コスト項目一覧 |
 | `allocations.showCompleted` | 停止/終了表示トグル | 非 active の表示切替 |
-| `allocations.edit.impactWarning` | 編集シートの過去再計算注意 | 総額/開始月/認識月数/周期/終了月/費用カテゴリ変更時に表示 |
+| `allocations.edit.impactWarning` | 編集シートの過去再計算注意 | 総額/開始月/月数/周期/終了月/分類先カテゴリ変更時に表示 |
 | `adjustments.view` | 補正・勘定科目 ルート | 画面の検出（screen 名は歴史的に adjustments） |
 | `adjustments.list` | 登録済み補正の一覧 | 現実アンカーの一覧 |
 | `adjustments.row.edit` / `adjustments.row.delete` | 一覧各行の編集 / 削除 | 補正の後編集・削除 |

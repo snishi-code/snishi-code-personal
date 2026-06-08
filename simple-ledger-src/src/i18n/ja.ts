@@ -87,7 +87,7 @@ export const ja = {
   'journal.allocationTag': '継続コスト',
   'journal.monthlyCostTag': '継続コスト',
   'journal.monthlyCostRow': '継続コスト: {name}',
-  'journal.monthlyRecognitionTitle': '{year}年{month}月の継続コスト認識',
+  'journal.monthlyRecognitionTitle': '{year}年{month}月の継続コスト計上',
   'journal.monthlyRecognitionNote':
     '継続コストの当月分です（仕訳ではなく月割りの参考表示。支出に計上されます）。',
   'journal.generatedNotice':
@@ -102,14 +102,14 @@ export const ja = {
   'allocations.months': '継続する月数',
   'allocations.monthly': '月額目安',
   'allocations.remainingMonths': '残り {count} か月',
-  'allocations.unrecognized': '未認識残高',
-  'allocations.expenseCategory': '費用カテゴリ',
-  'allocations.payment': '支払元',
+  'allocations.unrecognized': '未消化残高',
+  'allocations.expenseCategory': '分類先カテゴリ',
+  'allocations.payment': '支払い元',
   'allocations.monthsUnit': '{count} か月',
   'allocations.statusActive': '継続中',
-  'allocations.statusCompleted': '認識完了',
+  'allocations.statusCompleted': '消化完了',
   'allocations.recognitionNote':
-    '「認識完了」は毎月の費用認識が終わった状態です。クレジットカード等（負債）で支払った場合、負債の返済は別です（資金繰りで返済予定を登録できます）。',
+    '「消化完了」は毎月の費用への分類が終わった状態です。クレジットカード等（負債）で支払った場合、負債の返済は別です（資金繰りで返済予定を登録できます）。',
 
   // 継続コスト（サブスク・年払い・耐久財・定期イベントを統一）
   'monthlyCost.title': '継続コスト',
@@ -126,7 +126,7 @@ export const ja = {
   'monthlyCost.repeat': '更新周期',
   'monthlyCost.repeatUnit': '{count} か月ごと',
   'monthlyCost.thisMonth': '今月の計上額',
-  'monthlyCost.expenseCategory': '費用カテゴリ',
+  'monthlyCost.expenseCategory': '分類先カテゴリ',
   'monthlyCost.payment': '支払い元',
   'monthlyCost.pause': '一時停止',
   'monthlyCost.resume': '再開',
@@ -145,7 +145,7 @@ export const ja = {
   'monthlyCost.paymentLocked': '支払い元・返済口座は変更できません（会計事実を保つため）。',
   // 過去から再計算される項目を変えたときの注意（不具合ではなく仕様）。
   'monthlyCost.pastRecalcWarning':
-    '総額・開始月・認識月数・更新周期・終了月・費用カテゴリを変えると、過去の支出・収支・BS・未認識残高もさかのぼって再計算されます。',
+    '総額・開始月・月数・更新周期・終了月・分類先カテゴリを変えると、過去の支出・収支・BS・未消化残高もさかのぼって再計算されます。',
   'monthlyCost.deleteConfirmTitle': '継続コストを削除しますか？',
   'monthlyCost.deleteConfirmBody':
     '「{name}」を削除します。関連する継続コストの支払い仕訳と未実績の返済予定も削除されます。',
@@ -184,7 +184,7 @@ export const ja = {
   'cashflow.intro':
     '将来の入出金予定から、自由資金の推移を見ます。予定は「実績化」すると仕訳になります。',
   'cashflow.liquidNote':
-    '総資金は現金・預金・取り置きなどの流動資金です（投資・固定資産・継続コストの未認識分は含めません）。',
+    '総資金は現金・預金・取り置きなどの流動資金です（投資・固定資産・継続コストの未消化分は含めません）。',
   'cashflow.until': '表示終了日',
   'cashflow.untilHint': '今日からこの日までの入出金予定を投影します。',
   'cashflow.totalFunds': '総資金',
@@ -518,9 +518,9 @@ export const ja = {
   'entry.ccTargetName': '継続コスト対象の名前',
   'entry.ccTargetNameHint':
     '継続コスト台帳に登録する項目名です（例: 自動車 / 洗濯機 / 家賃）。勘定科目は増えません。',
-  'entry.ccCategory': '認識先カテゴリ（費用）',
+  'entry.ccCategory': '分類先カテゴリ（費用）',
   'entry.ccNote':
-    '支払い元 → 継続コスト台帳（資産）に計上し、選んだ月数で費用カテゴリへ認識します。台帳項目として記録され、勘定科目は増えません。',
+    '支払い元 → 継続コスト台帳（資産）に計上し、選んだ月数で費用カテゴリへ分類します。台帳項目として記録され、勘定科目は増えません。',
   'entry.error.loanNotExpense':
     'ローン（その他負債）は通常の支出の支払い元にできません。継続コスト化するか、借入として振替で実行してください。',
   // 返済を資金繰りに入れるトグル ON 時の必須検証（口座・回数が無いと CF が作られないため fail closed）。
@@ -539,7 +539,7 @@ export const ja = {
   'entry.allocateMonths': '継続する月数',
   'entry.allocateMonthsHint': '2 か月以上。総額を月割りして毎月の費用に計上します。',
   'entry.allocateNote':
-    '購入時は「継続コストの未認識分」に計上し、毎月この費用カテゴリへ振り替えます。月次の認識仕訳は自動生成され、継続コスト台帳で管理します。',
+    '購入時は「継続コストの未消化分」に計上し、毎月この費用カテゴリへ振り替えます。月次の計上仕訳は自動生成され、継続コスト台帳で管理します。',
   'entry.error.months-invalid': '月数は 1 以上の整数で入力してください。',
   // 継続コスト
   'entry.monthlyizeToggle': 'この支出を継続コスト化する（支出として見る）',
@@ -569,11 +569,14 @@ export const ja = {
   // 取り置き資金・負債は既定で候補に出さない。必要時だけトグルで表示し、その場で作れる。
   'entry.reserveToggle': '取り置き資金を使う',
   'entry.reserveCreate': '取り置き資金を作成',
+  'entry.reservePickHint': '使う取り置き資金を選びます（普通預金から取り置いた枠）。',
   'entry.liabilityToggle': '負債（カード・ローン）を使う',
-  // 支出ではカードは既定表示のため、トグルは「ローン等」を足す意味にする。
-  'entry.liabilityToggleLoan': 'ローン等の負債も使う',
   'entry.liabilityCreate': '新しい負債を作る',
-  'entry.liabilityCreateCard': '新しいカードを作る',
+  // 支出の支払い元側のローン導線（単一導線）。押すと既存ローン選択＋新規ローン作成へ。
+  'entry.loanArrange': 'ローンを組む',
+  'entry.loanArrangeHint':
+    'ローンで支払う場合に開きます。既存のローンを選ぶか、新しいローンを作成します。',
+  'entry.loanArrangeCreate': '新しいローンを作成',
 
   'journal.reverse': '取消/返金',
   'journal.reverseAction': '取消/返金を記録',
@@ -663,7 +666,7 @@ export const ja = {
   'accounts.roleHint': '日常入力（収入/支出/振替）の候補は、この役割で絞り込まれます。',
   'accounts.role.daily-asset': '日常資産（現金・預金）',
   'accounts.role.reserve-asset': '取り置き資金',
-  'accounts.role.deferred-asset': '継続コストの未認識分',
+  'accounts.role.deferred-asset': '継続コストの未消化分',
   'accounts.role.investment-asset': '投資資産',
   'accounts.role.fixed-asset': '固定資産（車・家財など）',
   'accounts.role.continuing-cost-asset': '継続コスト台帳（内部集約）',
@@ -796,7 +799,7 @@ export const ja = {
   'error.instrument.lockedInUse': '使用中の支払い手段は親科目・管理区分を変更できません。',
   'error.allocation.expenseCategory': '費用カテゴリ（支出カテゴリの科目）を選んでください。',
   'error.allocation.paymentSource': '支払い元は日常資産または支払用負債を選んでください。',
-  'error.allocation.deferredInvalid': '継続コストの未認識分の科目が不正です。',
+  'error.allocation.deferredInvalid': '継続コストの未消化分の科目が不正です。',
   'error.adjust.targetNotFound': '対象科目が見つかりません。',
   'error.adjust.assetLiabilityOnly': '残高補正できるのは資産・負債の科目です。',
   'error.adjust.notFound': '対象の残高補正が見つかりません。',

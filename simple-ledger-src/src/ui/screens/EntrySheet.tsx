@@ -651,19 +651,11 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     );
   };
 
-  // 行き先を「継続コスト対象」に切り替えたとき（ccMode）の詳細: 認識先カテゴリ・認識月数・継続購入。
+  // 行き先を「継続コスト対象」に切り替えたとき（ccMode）の詳細。
+  // 入力順は 対象名（流れの行き先）→ 月数 → 分類先カテゴリ → 継続・買い替え（日付・金額に続く自然な順）。
   const ccDetailField =
     canAllocate && ccMode ? (
       <div className="field">
-        <AccountPicker
-          label={t('entry.ccCategory')}
-          required
-          value={ccCategoryId}
-          groups={groupedAccountsByRole(accounts, ['expense-category'], ccCategoryId)}
-          onChange={setCcCategoryId}
-          error={categoryError ? t('entry.error.category-required') : undefined}
-          dataUi={UI.journal.entry.ccCategory}
-        />
         <TextInput
           label={t('entry.monthlyizeMonths')}
           required
@@ -673,6 +665,15 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           onChange={(v) => setMonthsText(v.replace(/[^\d]/g, ''))}
           error={monthsError ? t('entry.error.months-invalid') : undefined}
           dataUi={UI.journal.entry.allocateMonths}
+        />
+        <AccountPicker
+          label={t('entry.ccCategory')}
+          required
+          value={ccCategoryId}
+          groups={groupedAccountsByRole(accounts, ['expense-category'], ccCategoryId)}
+          onChange={setCcCategoryId}
+          error={categoryError ? t('entry.error.category-required') : undefined}
+          dataUi={UI.journal.entry.ccCategory}
         />
         <label
           style={{ display: 'inline-flex', gap: 8, alignItems: 'center', minHeight: 'var(--tap)' }}
@@ -844,73 +845,81 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   ) : null;
 
   // 支出/振替で、取り置き資金・負債を候補に出すトグルと、その場で作る導線。
-  // 既定では daily-asset 中心。取り置き資金が増えても通常入力を軽く保つ。
+  // 既定では daily-asset 中心。取り置き資金やローンが増えても通常入力を軽く保つ。
+  const rowStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'var(--space-2)',
+    flexWrap: 'wrap' as const,
+  };
+  const checkboxLabelStyle = {
+    display: 'inline-flex',
+    gap: 8,
+    alignItems: 'center',
+    minHeight: 'var(--tap)',
+  };
   const flowExtras =
     mode === 'expense' || mode === 'transfer' ? (
-      <div className="field stack" style={{ gap: 'var(--space-2)' }}>
-        <div
-          style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}
-        >
-          <label
-            style={{
-              display: 'inline-flex',
-              gap: 8,
-              alignItems: 'center',
-              minHeight: 'var(--tap)',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={showReserve}
-              onChange={(e) => setShowReserve(e.target.checked)}
-              data-ui={UI.journal.entry.reserveToggle}
-            />
-            {t('entry.reserveToggle')}
-          </label>
-          {mode === 'transfer' ? (
-            <button
-              type="button"
-              className="btn btn--ghost"
-              style={{ minHeight: 36 }}
-              onClick={() => setReserveSheetOpen(true)}
-              data-ui={UI.journal.entry.reserveCreate}
-            >
-              <Icon name="plus" size={16} />
-              {t('entry.reserveCreate')}
-            </button>
-          ) : null}
+      <div className="field stack" style={{ gap: 'var(--space-3)' }}>
+        {/* 取り置き資金: 通常は畳む。開いた時だけ既存の取り置き資金が支払い元候補に並ぶ。 */}
+        <div className="stack" style={{ gap: 'var(--space-1)' }}>
+          <div style={rowStyle}>
+            <label style={checkboxLabelStyle}>
+              <input
+                type="checkbox"
+                checked={showReserve}
+                onChange={(e) => setShowReserve(e.target.checked)}
+                data-ui={UI.journal.entry.reserveToggle}
+              />
+              {t('entry.reserveToggle')}
+            </label>
+            {mode === 'transfer' ? (
+              <button
+                type="button"
+                className="btn btn--ghost"
+                style={{ minHeight: 36 }}
+                onClick={() => setReserveSheetOpen(true)}
+                data-ui={UI.journal.entry.reserveCreate}
+              >
+                <Icon name="plus" size={16} />
+                {t('entry.reserveCreate')}
+              </button>
+            ) : null}
+          </div>
+          {showReserve ? <p className="field__hint">{t('entry.reservePickHint')}</p> : null}
         </div>
-        <div
-          style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}
-        >
-          <label
-            style={{
-              display: 'inline-flex',
-              gap: 8,
-              alignItems: 'center',
-              minHeight: 'var(--tap)',
-            }}
-          >
+
+        {/* 負債（支払い元）: 支出は「ローンを組む」単一導線（開くと既存ローンが支払い元に並び、
+            新規ローンも作れる）。クレジットカードは支払い方法として既定で出るので混ぜない。
+            振替は従来どおり「負債（カード・ローン）を使う」。 */}
+        <div className="stack" style={{ gap: 'var(--space-1)' }}>
+          <label style={checkboxLabelStyle}>
             <input
               type="checkbox"
               checked={showLiability}
               onChange={(e) => setShowLiability(e.target.checked)}
               data-ui={UI.journal.entry.liabilityToggle}
             />
-            {/* 支出ではカードは既定表示。トグルは other-liability(ローン等)用に意味を変える。 */}
-            {mode === 'expense' ? t('entry.liabilityToggleLoan') : t('entry.liabilityToggle')}
+            {mode === 'expense' ? t('entry.loanArrange') : t('entry.liabilityToggle')}
           </label>
-          <button
-            type="button"
-            className="btn btn--ghost"
-            style={{ minHeight: 36 }}
-            onClick={() => setLiabilitySheetOpen(true)}
-            data-ui={UI.journal.entry.liabilityCreate}
-          >
-            <Icon name="plus" size={16} />
-            {/* 支出ではクレジットカード(payment-liability)を作る導線。振替はローン等も作る。 */}
-            {mode === 'expense' ? t('entry.liabilityCreateCard') : t('entry.liabilityCreate')}
-          </button>
+          {/* 支出はトグルを開いた時だけ新規ローン作成を出す。振替は常に作成導線を出す。 */}
+          {mode === 'transfer' || showLiability ? (
+            <div style={rowStyle}>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                style={{ minHeight: 36 }}
+                onClick={() => setLiabilitySheetOpen(true)}
+                data-ui={UI.journal.entry.liabilityCreate}
+              >
+                <Icon name="plus" size={16} />
+                {mode === 'expense' ? t('entry.loanArrangeCreate') : t('entry.liabilityCreate')}
+              </button>
+            </div>
+          ) : null}
+          {mode === 'expense' && showLiability ? (
+            <p className="field__hint">{t('entry.loanArrangeHint')}</p>
+          ) : null}
         </div>
       </div>
     ) : null;
@@ -1047,10 +1056,11 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         />
       ) : null}
 
-      {/* 入力を中断せず、新しい負債（支払い方法 / 借入の源泉）を作って選択する。 */}
+      {/* 入力を中断せず、新しい負債を作って選択する。支出は「ローンを組む」導線なので
+          既定をローン(other-liability)にする。クレジットカードは勘定科目管理で扱う。 */}
       {liabilitySheetOpen ? (
         <LiabilitySheet
-          defaultRole={mode === 'expense' ? 'payment-liability' : 'other-liability'}
+          defaultRole="other-liability"
           onClose={() => setLiabilitySheetOpen(false)}
           onSave={async (account) => {
             await saveAccount(account);
