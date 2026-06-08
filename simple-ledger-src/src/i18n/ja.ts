@@ -522,6 +522,9 @@ export const ja = {
     '支払い元 → 継続コスト対象（資産）に計上し、選んだ月数で費用カテゴリへ認識します。',
   'entry.error.loanNotExpense':
     'ローン（その他負債）は通常の支出の支払い元にできません。継続コスト化するか、借入として振替で実行してください。',
+  // 返済を資金繰りに入れるトグル ON 時の必須検証（口座・回数が無いと CF が作られないため fail closed）。
+  'entry.error.repayAccount': '返済元の口座を選んでください。',
+  'entry.error.repayCount': '返済回数は 1 以上で入力してください。',
   'entry.source.manual': '左側（貸方）',
   'entry.destination.manual': '右側（借方）',
   'entry.detailToggle': '詳細（メモ・タグ）',

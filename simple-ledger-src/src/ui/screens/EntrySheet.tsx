@@ -139,6 +139,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [repayAccountId, setRepayAccountId] = useState('');
   const [repayCountText, setRepayCountText] = useState('');
   const [repayStartDate, setRepayStartDate] = useState('');
+  const [repayAccountError, setRepayAccountError] = useState(false);
+  const [repayCountError, setRepayCountError] = useState(false);
   // 支払い元(credit)が負債（カード=payment-liability / ローン=other-liability）なら返済 CF を入力できる。
   const paymentRole = accounts.find((a) => a.id === form.creditAccountId)?.role;
   const isLiabilityPayment =
@@ -225,6 +227,18 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     return { ...form, description: auto };
   }
 
+  // 「返済を資金繰りに入れる」ON のとき、返済元口座・回数を必須にする（3 経路共通）。
+  // 空のまま保存すると CF 予定が静かに作られず、ユーザーの期待とズレるため fail-closed。
+  function validateRepay(blockActive: boolean): { accBad: boolean; countBad: boolean } {
+    const active = blockActive && repayToggle;
+    const count = repayCountText === '' ? 0 : Number.parseInt(repayCountText, 10);
+    const accBad = active && repayAccountId === '';
+    const countBad = active && (!Number.isInteger(count) || count < 1);
+    setRepayAccountError(accBad);
+    setRepayCountError(countBad);
+    return { accBad, countBad };
+  }
+
   async function onSave() {
     // 保存時は常に「現在有効な管理区分」を明示的に載せる（区分セレクタが出ない単一区分でも
     // 実在する区分 id で保存する）。DEFAULT_MANAGEMENT_SCOPE_ID は最終フォールバックに留める。
@@ -246,8 +260,9 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       setCategoryError(categoryBad);
       const monthsBad = !Number.isInteger(months) || months < 1;
       setMonthsError(monthsBad);
+      const { accBad, countBad } = validateRepay(isLiabilityPayment);
       setFlowError(undefined);
-      if (found.length > 0 || nameBad || categoryBad || monthsBad) return;
+      if (found.length > 0 || nameBad || categoryBad || monthsBad || accBad || countBad) return;
       setSubmitting(true);
       try {
         const repeat = continueCost ? months : undefined;
@@ -295,7 +310,9 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     // 固定資産の継続コストは、月割り先の費用カテゴリが必須。
     const categoryBad = useFixedMonthly && monthlyCategoryId === '';
     setCategoryError(categoryBad);
-    if (found.length > 0 || monthsBad || categoryBad) return;
+    // 返済トグルの必須検証: 固定資産月割り=負債払い / 借入振替=ローン実行。
+    const { accBad, countBad } = validateRepay(useFixedMonthly ? isLiabilityPayment : isLoanDraw);
+    if (found.length > 0 || monthsBad || categoryBad || accBad || countBad) return;
     // 通常の支出でローン（other-liability）を支払い元にはできない（継続コスト化 or 借入の振替に限定）。
     if (mode === 'expense' && !useFixedMonthly) {
       const srcRole = accounts.find((a) => a.id === toSave.creditAccountId)?.role;
@@ -755,6 +772,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               value={repayAccountId}
               groups={groupedAccountsByRole(accounts, ['daily-asset'], repayAccountId)}
               onChange={setRepayAccountId}
+              error={repayAccountError ? t('entry.error.repayAccount') : undefined}
               dataUi={UI.journal.entry.monthlyizeRepayAccount}
             />
             <TextInput
@@ -762,6 +780,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               inputMode="numeric"
               value={repayCountText}
               onChange={(v) => setRepayCountText(v.replace(/[^\d]/g, ''))}
+              error={repayCountError ? t('entry.error.repayCount') : undefined}
               dataUi={UI.journal.entry.monthlyizeRepayCount}
             />
             <TextInput
@@ -800,6 +819,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             value={repayAccountId}
             groups={groupedAccountsByRole(accounts, ['daily-asset'], repayAccountId)}
             onChange={setRepayAccountId}
+            error={repayAccountError ? t('entry.error.repayAccount') : undefined}
             dataUi={UI.journal.entry.loanRepayAccount}
           />
           <TextInput
@@ -807,6 +827,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             inputMode="numeric"
             value={repayCountText}
             onChange={(v) => setRepayCountText(v.replace(/[^\d]/g, ''))}
+            error={repayCountError ? t('entry.error.repayCount') : undefined}
             dataUi={UI.journal.entry.loanRepayCount}
           />
           <TextInput
