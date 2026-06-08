@@ -145,6 +145,8 @@ export const ja = {
   'monthlyCost.deleteConfirmTitle': '継続コストを削除しますか？',
   'monthlyCost.deleteConfirmBody':
     '「{name}」を削除します。関連する継続コストの支払い仕訳と未実績の返済予定も削除されます。',
+  'monthlyCost.recurringBadge': '継続購入',
+  'monthlyCost.oneTimeBadge': '償却のみ',
   'monthlyCost.kind.subscription': 'サブスク（月課金）',
   'monthlyCost.kind.prepaid-service': '年払い・前払いサービス',
   'monthlyCost.kind.durable-asset': '耐久財・買い替え',
@@ -482,9 +484,6 @@ export const ja = {
   'entry.error.months-invalid': '月数は 1 以上の整数で入力してください。',
   // 継続コスト
   'entry.monthlyizeToggle': 'この支出を継続コスト化する（支出として見る）',
-  'entry.assetKind': '種類',
-  'entry.assetKind.living': '費用として継続コスト化する',
-  'entry.assetKind.fixed': '耐久財・固定資産（あとで売却・故障で処分できる）',
   'entry.monthlyizeMonths': '何か月分として見るか',
   'entry.monthlyizeMonthsHint': 'サブスクは 1。年払いは 12、耐久財は使う年数×12 など。',
   'entry.monthlyizeContinue': '継続・買い替えする',

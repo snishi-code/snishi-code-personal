@@ -41,8 +41,8 @@ export function buildSectionTrends(
 ): SectionTrends | null {
   if (period.mode === 'month' || !ledger) return null;
   const accounts = ledger.accounts;
-  const entries = ledger.journalEntries;
-  const items = ledger.monthlyCostItems;
+  // 集計は導出専用 entries（実仕訳 + 継続コストの仮想認識）を使う（単一正本）。
+  const entries = ledger.derivedEntries;
   const buckets = trendBuckets(period, { dataYears: dataYearsOf(entries.map((e) => e.date)) });
   if (buckets.length === 0) return null;
 
@@ -54,14 +54,9 @@ export function buildSectionTrends(
   const netAssets: TrendPoint[] = [];
 
   for (const b of buckets) {
-    // 年集約バケット（key='YYYY'）は 12 ヶ月、月バケット（key='YYYY-MM'）は 1 ヶ月ぶんを数える。
-    const months =
-      b.key.length === 4
-        ? Array.from({ length: 12 }, (_, i) => `${b.year}-${String(i + 1).padStart(2, '0')}`)
-        : [b.key];
     const pl = deriveProfitAndLoss(accounts, entries, b.range);
     const bs = deriveBalanceSheet(accounts, entries, b.asOf);
-    const livingB = livingCostForRange(accounts, entries, items, b.range, months);
+    const livingB = livingCostForRange(accounts, entries, b.range);
     const base = { key: b.key, label: b.label };
     revenue.push({ ...base, value: pl.totalRevenue });
     living.push({ ...base, value: livingB });

@@ -10,6 +10,7 @@ import { useMemo, useState } from 'react';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet } from '../../domain/accounting';
 import { cashDeltaOfEntry, liquidAssetTotal, projectCashflow } from '../../domain/cashflow';
+import { continuousCostEntries } from '../../domain/continuousCost';
 import { goalRequiredMonthly, reserveRequiredMonthly } from '../../domain/fundingGoal';
 import { addMonthsToDate } from '../../domain/allocation';
 import { currentYearMonth, todayLocal } from '../../util/time';
@@ -49,7 +50,10 @@ export function Cashflow() {
 
   const { projection, balById, liabBalById, futureRows } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger?.journalEntries ?? [];
+    // 現在残高は導出専用 entries（実仕訳 + 継続コストの仮想funding/認識）で見る
+    // （現金払いの継続コストは funding で資金が減る）。
+    const entries = ledger?.derivedEntries ?? [];
+    const items = ledger?.monthlyCostItems ?? [];
     const reserves = ledger?.reserves ?? [];
     const schedules = ledger?.cashflowSchedules ?? [];
     const bs = deriveBalanceSheet(accounts, entries, today);
@@ -76,8 +80,17 @@ export function Cashflow() {
     // delta=総資金の純増減（資金↔資金/資金↔取り置きの振替は 0）、reserveDelta=取り置き残高の純増減
     //（普通預金→取り置き資金 なら +amount で自由資金が減る）、amount=一覧表示用の取引金額（借方合計）。
     const end = untilDate;
-    const future = entries
-      .filter((e) => e.date > today && e.date <= end && e.lines.some((l) => isLiquid(l.accountId)))
+    // 未来の継続更新（funding 仮想仕訳・date>today）を untilDate まで投影に取り込む
+    //（永続仕訳は作らず、辞書展開で必要範囲だけ）。現金払いの更新は自由資金を減らす。
+    const futureFunding = continuousCostEntries(items, accounts, end).filter(
+      (e) => e.metadata?.ccKind === 'funding' && e.date > today && e.date <= end,
+    );
+    const future = [
+      ...entries.filter(
+        (e) => e.date > today && e.date <= end && e.lines.some((l) => isLiquid(l.accountId)),
+      ),
+      ...futureFunding,
+    ]
       .map((e) => ({
         id: e.id,
         date: e.date,

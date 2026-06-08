@@ -62,8 +62,9 @@ import { buildScheduleEntry } from '../domain/cashflow';
 import { reserveBalanceShortfall } from '../domain/entry';
 import { buildAdjustmentEntry, counterpartName, counterpartRole } from '../domain/adjustment';
 import { accountBalance, filterByDateRange } from '../domain/accounting';
+import { entriesWithContinuousCost } from '../domain/continuousCost';
 import { isTagReferenced, tagAssignmentError } from '../domain/tags';
-import { nowIso } from '../util/time';
+import { nowIso, todayLocal } from '../util/time';
 
 async function tagMap(): Promise<Map<string, Tag>> {
   const tags = await getAll<Tag>(STORE.tags);
@@ -253,6 +254,18 @@ export async function loadLedger(): Promise<Ledger> {
   managementScopes.sort((a, b) => cmp(a.createdAt, b.createdAt));
   accountInstruments.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
   assetDisposals.sort((a, b) => cmp(b.createdAt, a.createdAt));
+  // 導出専用 entries = 実仕訳 + 継続コストの仮想仕訳。「今」まで展開する
+  // （未来の継続更新を現在の PL/BS に混ぜない。"全期間" PL が未来分を足す事故を防ぐ）。
+  // CF の未来投影は Cashflow 側が untilDate まで別途展開する。
+  const lastDataDate = journalEntries.reduce((m, e) => (e.date > m ? e.date : m), '');
+  const today = todayLocal();
+  const nowHorizon = lastDataDate > today ? lastDataDate : today;
+  const derivedEntries = entriesWithContinuousCost(
+    journalEntries,
+    monthlyCostItems,
+    accounts,
+    nowHorizon,
+  );
   return {
     meta,
     settings,
@@ -260,6 +273,7 @@ export async function loadLedger(): Promise<Ledger> {
     accountInstruments,
     accounts,
     journalEntries,
+    derivedEntries,
     allocations,
     cashflowSchedules,
     reserves,
@@ -1242,6 +1256,136 @@ export async function createFixedAssetPurchaseMonthly(
     (t) => {
       t.objectStore(STORE.accounts).put(fixedAccount);
       t.objectStore(STORE.journalEntries).put(entry);
+      t.objectStore(STORE.monthlyCostItems).put(item);
+      const sStore = t.objectStore(STORE.cashflowSchedules);
+      for (const s of schedules) sStore.put(s);
+    },
+  );
+  return item;
+}
+
+export interface ContinuousCostInput {
+  /** 継続コスト対象の名前（= 自動作成する資産科目名。例: YouTube / 洗濯機 / 家賃）。 */
+  name: string;
+  kind: MonthlyCostKind;
+  amount: number;
+  costMonths: number;
+  /** 継続購入（自動更新）なら何か月ごとに再発するか。未指定=償却のみ（1 サイクル）。 */
+  repeatEveryMonths?: number;
+  /** 初回サイクルの月 'YYYY-MM'。 */
+  startMonth: string;
+  managementScopeId?: string;
+  /** 認識先の費用カテゴリ（expense-category）。 */
+  expenseAccountId: string;
+  /** 支払い元（daily-asset | payment-liability）。funding 仮想仕訳の貸方。 */
+  paymentSourceAccountId: string;
+  /** 負債資金で分割返済を作る場合の返済口座（daily-asset）。 */
+  repaymentAccountId?: string;
+  repaymentCount?: number;
+  repaymentStartDate?: string;
+}
+
+/**
+ * 継続コストを「資産経由モデル」で登録する（v1 の正本フロー）。
+ * 品目ごとに専用資産科目（role=continuing-cost-asset）を自動作成し、台帳ルール(MonthlyCostItem)と
+ * （負債資金なら）返済 CF を保存する。**funding/recognition の実仕訳は作らない**——
+ * それらは `continuousCost.ts` が必要範囲だけ仮想展開する（辞書展開・永続仕訳を無限生成しない）。
+ */
+export async function createContinuousCost(input: ContinuousCostInput): Promise<MonthlyCostItem> {
+  if (input.name.trim() === '') throw new LedgerError('error.common.nameRequired');
+  if (!Number.isInteger(input.amount) || input.amount <= 0)
+    throw new LedgerError('error.common.amountInvalid');
+  if (!Number.isInteger(input.costMonths) || input.costMonths < 1)
+    throw new LedgerError('error.monthlyCost.monthsInvalid');
+  if (
+    input.repeatEveryMonths !== undefined &&
+    (!Number.isInteger(input.repeatEveryMonths) || input.repeatEveryMonths < input.costMonths)
+  )
+    throw new LedgerError('error.monthlyCost.repeatInvalid');
+  if (!/^\d{4}-\d{2}$/.test(input.startMonth))
+    throw new LedgerError('error.monthlyCost.startMonthInvalid');
+
+  const ctx = await loadSaveContext();
+  const managementScopeId = input.managementScopeId ?? DEFAULT_MANAGEMENT_SCOPE_ID;
+  if (!ctx.scopeIds.has(managementScopeId)) throw new LedgerError('error.scope.unknown');
+  const expense = ctx.byId.get(input.expenseAccountId);
+  if (!expense || expense.role !== 'expense-category')
+    throw new LedgerError('error.fixedAsset.expenseCategory');
+  const payment = ctx.byId.get(input.paymentSourceAccountId);
+  if (!payment || (payment.role !== 'daily-asset' && payment.role !== 'payment-liability'))
+    throw new LedgerError('error.monthlyCost.paymentSource');
+
+  const ts = nowIso();
+  // 1 品目 = 1 継続コスト対象の資産科目（個別名）。自動作成する。
+  const assetAccount: Account = {
+    id: newId(),
+    name: input.name.trim(),
+    type: 'asset',
+    role: 'continuing-cost-asset',
+    archived: false,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+
+  const item: MonthlyCostItem = {
+    id: newId(),
+    name: input.name.trim(),
+    managementScopeId,
+    kind: input.kind,
+    amount: input.amount,
+    costMonths: input.costMonths,
+    ...(input.repeatEveryMonths !== undefined
+      ? { repeatEveryMonths: input.repeatEveryMonths }
+      : {}),
+    startMonth: input.startMonth,
+    expenseAccountId: input.expenseAccountId,
+    paymentSourceAccountId: input.paymentSourceAccountId,
+    recognitionCreditAccountId: assetAccount.id,
+    ...(input.repaymentAccountId !== undefined
+      ? { repaymentAccountId: input.repaymentAccountId }
+      : {}),
+    status: 'active',
+    createdAt: ts,
+    updatedAt: ts,
+  };
+
+  // 負債資金 + 返済情報があれば、返済予定（返済口座 → 支払い元負債）を作る。
+  const schedules: CashflowSchedule[] = [];
+  if (
+    payment.role === 'payment-liability' &&
+    input.repaymentAccountId !== undefined &&
+    input.repaymentCount !== undefined &&
+    input.repaymentCount >= 1 &&
+    input.repaymentStartDate
+  ) {
+    const repay = ctx.byId.get(input.repaymentAccountId);
+    if (!repay || repay.role !== 'daily-asset')
+      throw new LedgerError('error.monthlyCost.repaymentAccount');
+    const parts = monthlyAmounts(input.amount, input.repaymentCount);
+    for (let i = 0; i < input.repaymentCount; i++) {
+      schedules.push({
+        id: newId(),
+        title: `${item.name} 返済 ${i + 1}/${input.repaymentCount}`,
+        dueDate: addMonthsToDate(input.repaymentStartDate, i),
+        amount: parts[i] ?? 0,
+        direction: 'outflow',
+        accountId: input.repaymentAccountId,
+        counterAccountId: input.paymentSourceAccountId,
+        source: 'installment',
+        status: 'planned',
+        managementScopeId,
+        monthlyCostId: item.id,
+        createdAt: ts,
+        updatedAt: ts,
+      });
+    }
+  }
+  assertSchedulesSavable(schedules, ctx);
+
+  await writeWithRevision(
+    [STORE.accounts, STORE.monthlyCostItems, STORE.cashflowSchedules],
+    (t) => {
+      t.objectStore(STORE.accounts).put(assetAccount);
       t.objectStore(STORE.monthlyCostItems).put(item);
       const sStore = t.objectStore(STORE.cashflowSchedules);
       for (const s of schedules) sStore.put(s);

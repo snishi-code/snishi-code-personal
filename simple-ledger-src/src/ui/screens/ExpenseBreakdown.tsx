@@ -6,13 +6,7 @@
 import { useMemo } from 'react';
 import { useLedger } from '../../state/store';
 import { livingCostBreakdownForRange } from '../../domain/livingCost';
-import {
-  dataMonthsOf,
-  periodBuckets,
-  periodLabel,
-  periodRange,
-  type ReportPeriod,
-} from '../../domain/reportPeriod';
+import { periodLabel, periodRange, type ReportPeriod } from '../../domain/reportPeriod';
 import { buildSectionTrends } from './breakdownData';
 import { Money } from '../money';
 import { Icon } from '../Icon';
@@ -36,13 +30,9 @@ export function ExpenseBreakdown({
 
   const breakdown = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger?.journalEntries ?? [];
-    const items = ledger?.monthlyCostItems ?? [];
-    const range = periodRange(period);
-    const months = periodBuckets(period, {
-      dataMonths: dataMonthsOf(entries.map((e) => e.date)),
-    }).map((b) => b.ym);
-    return livingCostBreakdownForRange(accounts, entries, items, range, months);
+    // 集計は導出専用 entries（実仕訳 + 継続コストの仮想認識）を使う。
+    const entries = ledger?.derivedEntries ?? [];
+    return livingCostBreakdownForRange(accounts, entries, periodRange(period));
   }, [ledger, period]);
 
   const trends = useMemo(() => buildSectionTrends(period, ledger), [period, ledger]);

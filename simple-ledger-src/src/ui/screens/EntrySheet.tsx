@@ -82,8 +82,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     saveEntry,
     saveEntryWithSchedules,
     saveEntryWithFixedAssetMonthly,
-    createMonthlyCost,
-    createFixedAssetPurchaseMonthly,
+    createContinuousCost,
     createReserve,
     saveAccount,
   } = useLedger();
@@ -119,8 +118,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const canAllocate =
     init.kind === 'create' && mode === 'expense' && destRole === 'expense-category';
   const [allocate, setAllocate] = useState(false);
-  // 継続コスト化する支出の種類: 'living'=支出化（借方 費用）/ 'fixed'=耐久財・固定資産（借方 固定資産・後で処分可）。
-  const [assetKind, setAssetKind] = useState<'living' | 'fixed'>('living');
   // 固定資産購入（expense × 固定資産 × create）は「支出として継続コスト」できる（別トグル）。
   const canFixedMonthly =
     init.kind === 'create' && mode === 'expense' && destRole === 'fixed-asset';
@@ -173,7 +170,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     form,
     amountText,
     allocate,
-    assetKind,
     fixedMonthly,
     monthlyCategoryId,
     monthsText,
@@ -269,38 +265,21 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           toSave.managementScopeId !== undefined
             ? { managementScopeId: toSave.managementScopeId }
             : {};
-        if (assetKind === 'fixed') {
-          // 耐久財・固定資産: 使い道(debit)=認識先カテゴリ / 支払い元(credit) を渡す。固定資産科目は自動作成。
-          await createFixedAssetPurchaseMonthly({
-            name: toSave.description,
-            ...scopeField,
-            kind: inferMonthlyCostKind(months, repeat),
-            amount: toSave.amount,
-            costMonths: months,
-            ...(repeat !== undefined ? { repeatEveryMonths: repeat } : {}),
-            startMonth: monthOf(toSave.date),
-            date: toSave.date,
-            expenseAccountId: toSave.debitAccountId,
-            paymentAccountId: toSave.creditAccountId,
-            ...repayFields,
-          });
-        } else {
-          // 支出化: 支出フォームの debit=費用カテゴリ / credit=支払い元 をそのまま継続コストに渡す。
-          // 選択中の管理区分を継続コスト本体・生成支払い仕訳へ引き継ぐ（未指定なら repository が既定区分）。
-          await createMonthlyCost({
-            name: toSave.description,
-            ...scopeField,
-            kind: inferMonthlyCostKind(months, repeat),
-            amount: toSave.amount,
-            costMonths: months,
-            ...(repeat !== undefined ? { repeatEveryMonths: repeat } : {}),
-            startMonth: monthOf(toSave.date),
-            date: toSave.date,
-            expenseAccountId: toSave.debitAccountId,
-            paymentAccountId: toSave.creditAccountId,
-            ...repayFields,
-          });
-        }
+        // 資産経由モデル: 品目名(description)で継続コスト対象資産を自動作成し、funding/recognition は
+        // 仮想展開する。debit=認識先カテゴリ / credit=支払い元（funding の貸方）。
+        // サブスク・年払い・耐久財（洗濯機等）をすべて同じルートで扱う（assetKind 分岐は廃止）。
+        await createContinuousCost({
+          name: toSave.description,
+          ...scopeField,
+          kind: inferMonthlyCostKind(months, repeat),
+          amount: toSave.amount,
+          costMonths: months,
+          ...(repeat !== undefined ? { repeatEveryMonths: repeat } : {}),
+          startMonth: monthOf(toSave.date),
+          expenseAccountId: toSave.debitAccountId,
+          paymentSourceAccountId: toSave.creditAccountId,
+          ...repayFields,
+        });
       } else if (useFixedMonthly) {
         // 固定資産購入（借方 固定資産 / 貸方 資金 or 負債）+ 継続コストを一括保存。購入仕訳が実体で、
         // 継続コストは支払い仕訳を作らず formula 認識のみ（recognitionCreditAccountId=固定資産）。
@@ -598,18 +577,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       </label>
       {allocate ? (
         <>
-          {/* 支出化（費用）か、耐久財・固定資産（BS資産・後で売却/故障処分可）かを選ぶ。
-              固定資産科目を事前に作らなくても、ここから正規ルートへ入れる。 */}
-          <SelectInput
-            label={t('entry.assetKind')}
-            value={assetKind}
-            onChange={(v) => setAssetKind(v as 'living' | 'fixed')}
-            options={[
-              { value: 'living', label: t('entry.assetKind.living') },
-              { value: 'fixed', label: t('entry.assetKind.fixed') },
-            ]}
-            dataUi={UI.journal.entry.allocateAssetKind}
-          />
+          {/* 資産経由モデル: 品目名（項目）で継続コスト対象を作り、何か月でどの費用カテゴリへ
+              認識するかを選ぶ。サブスク・年払い・耐久財をすべて同じルートで扱う。 */}
           <TextInput
             label={t('entry.monthlyizeMonths')}
             required

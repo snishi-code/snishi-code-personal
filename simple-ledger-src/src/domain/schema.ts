@@ -189,6 +189,7 @@ export const monthlyCostItemSchema = z.object({
   startMonth: monthSchema,
   endMonth: monthSchema.optional(),
   expenseAccountId: z.string().min(1),
+  paymentSourceAccountId: z.string().min(1).optional(),
   paymentAccountId: z.string().min(1).optional(),
   repaymentAccountId: z.string().min(1).optional(),
   sourceAllocationId: z.string().min(1).optional(),

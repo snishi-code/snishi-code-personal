@@ -7,14 +7,7 @@ import { useMemo, type ReactNode } from 'react';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../../domain/accounting';
 import { livingCostBreakdownForRange } from '../../domain/livingCost';
-import {
-  dataMonthsOf,
-  periodAsOf,
-  periodBuckets,
-  periodLabel,
-  periodRange,
-  type ReportPeriod,
-} from '../../domain/reportPeriod';
+import { periodAsOf, periodLabel, periodRange, type ReportPeriod } from '../../domain/reportPeriod';
 import { todayLocal } from '../../util/time';
 import { buildSectionTrends } from './breakdownData';
 import { Money } from '../money';
@@ -65,10 +58,13 @@ export function Dashboard({
 
   const { pl, bs, asOf, monthlyCost, normalExpense, investmentValuation } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger?.journalEntries ?? [];
-    const monthlyCostItems = ledger?.monthlyCostItems ?? [];
+    // 集計は導出専用 entries（実仕訳 + 継続コストの仮想認識）を使う。
+    const entries = ledger?.derivedEntries ?? [];
     // BS は期間末の基準日（ストック）。全体は最終データ日（無ければ今日）。
-    const lastDataDate = entries.reduce((m, e) => (e.date > m ? e.date : m), '');
+    const lastDataDate = (ledger?.journalEntries ?? []).reduce(
+      (m, e) => (e.date > m ? e.date : m),
+      '',
+    );
     const asOfDate = periodAsOf(period, today, lastDataDate);
     const within = (e: JournalEntry) => !range || (e.date >= range.from && e.date <= range.to);
     const expenseIds = new Set(accounts.filter((a) => a.type === 'expense').map((a) => a.id));
@@ -83,15 +79,8 @@ export function Dashboard({
       if (debit && expenseIds.has(debit.accountId)) investmentLoss += debit.amount;
       else if (credit) investmentGain += credit.amount; // 評価益は revenue 貸方
     }
-    // 支出= 通常支出 + 継続コスト。支出の内訳画面・推移と同じ正本ヘルパを使う。
-    const months = periodBuckets(period, { dataMonths: dataMonthsOf(entries.map((e) => e.date)) });
-    const breakdown = livingCostBreakdownForRange(
-      accounts,
-      entries,
-      monthlyCostItems,
-      range,
-      months.map((b) => b.ym),
-    );
+    // 支出 = 通常支出 + 継続コスト。支出の内訳画面・推移と同じ正本ヘルパを使う。
+    const breakdown = livingCostBreakdownForRange(accounts, entries, range);
     return {
       pl: deriveProfitAndLoss(accounts, entries, range),
       bs: deriveBalanceSheet(accounts, entries, asOfDate),

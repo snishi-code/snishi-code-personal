@@ -2,6 +2,12 @@
 
 この文書は、固定資産購入を月額化した `MonthlyCostItem` を、売却・故障・廃棄で途中終了する処理の仕様。
 
+> **v13 注記（継続コストの資産経由モデル）**: 新規の継続コスト（サブスク/年払い/耐久財/家賃 等）は
+> `role=continuing-cost-asset` の品目別資産へ資産化し、仮想認識で費消する新モデル（`createContinuousCost`）へ
+> 一本化した。本書の処分フローは **旧 `fixed-asset` 由来の `MonthlyCostItem`**（`saveEntryWithFixedAssetMonthly`）
+> だけを対象として内部互換で温存する。**continuing-cost-asset の途中売却/処分は v1 非対応**（未認識残高は既に
+> 対象資産に出ているため。`disposeFixedAsset` は `fixed-asset` role 限定で新 item を拒否）。次フェーズで扱う。
+
 **実装状況: v1 実装済み（schema v12）。** 本文の設計どおり実装されている。実装の要点:
 
 - 独立エンティティ `AssetDisposal`（ストア `assetDisposals`）に処分記録を残す（`monthlyCostId` / `fixedAccountId` / `disposalDate` / `proceedsAmount` / `destinationAccountId?` / `recognizedAmount` / `remainingAmount` / `generatedEntryIds`）。

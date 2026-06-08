@@ -101,7 +101,6 @@ export const UI = {
       debitTags: 'journal.entry.debitTags',
       creditTags: 'journal.entry.creditTags',
       allocateToggle: 'journal.entry.allocateToggle',
-      allocateAssetKind: 'journal.entry.allocateAssetKind',
       allocateMonths: 'journal.entry.allocateMonths',
       monthlyizeContinue: 'journal.entry.monthlyizeContinue',
       monthlyizeRepayToggle: 'journal.entry.monthlyizeRepayToggle',

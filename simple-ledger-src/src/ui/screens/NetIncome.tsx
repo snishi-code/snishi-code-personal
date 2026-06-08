@@ -7,13 +7,7 @@ import { useMemo } from 'react';
 import { useLedger } from '../../state/store';
 import { deriveProfitAndLoss } from '../../domain/accounting';
 import { livingCostForRange } from '../../domain/livingCost';
-import {
-  dataMonthsOf,
-  periodBuckets,
-  periodLabel,
-  periodRange,
-  type ReportPeriod,
-} from '../../domain/reportPeriod';
+import { periodLabel, periodRange, type ReportPeriod } from '../../domain/reportPeriod';
 import { buildSectionTrends } from './breakdownData';
 import { Money } from '../money';
 import { TrendChart } from '../components/TrendChart';
@@ -32,15 +26,12 @@ export function NetIncome({
 
   const { revenue, living } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger?.journalEntries ?? [];
-    const items = ledger?.monthlyCostItems ?? [];
+    // 集計は導出専用 entries（実仕訳 + 継続コストの仮想認識）を使う。
+    const entries = ledger?.derivedEntries ?? [];
     const range = periodRange(period);
-    const months = periodBuckets(period, {
-      dataMonths: dataMonthsOf(entries.map((e) => e.date)),
-    }).map((b) => b.ym);
     return {
       revenue: deriveProfitAndLoss(accounts, entries, range).totalRevenue,
-      living: livingCostForRange(accounts, entries, items, range, months),
+      living: livingCostForRange(accounts, entries, range),
     };
   }, [ledger, period]);
 

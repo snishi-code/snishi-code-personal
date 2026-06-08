@@ -20,8 +20,13 @@ export const APP_ID = 'snishi-code.simple-ledger' as const;
  *             タグは「仕訳全体のみ」に再設計（明細タグ JournalLine.tagIds / 予定CFの明細タグ /
  *             tag.scope の line・both を廃止）。JournalLine に任意の instrumentId を追加。
  *  v11 → v12: 固定資産の売却・故障処分（assetDisposals）を追加（空配列補完＝恒等移行）。
- *             JournalEntry.metadata に任意の assetDisposalId を追加（許容項目が増えるため版を上げる）。 */
-export const SCHEMA_VERSION = 12 as const;
+ *             JournalEntry.metadata に任意の assetDisposalId を追加（許容項目が増えるため版を上げる）。
+ *  v12 → v13: 継続コストを資産経由モデルへ統一。AccountRole に continuing-cost-asset を追加、
+ *             MonthlyCostItem に任意 paymentSourceAccountId を追加、EntryMetadata に
+ *             continuousCostId/ccKind/virtual を追加（許容値・任意項目が増えるため版を上げる）。
+ *             破壊的方針（未実運用）: 旧モデルの月額化/固定資産月額化の生成仕訳・MonthlyCostItem は
+ *             混在を避けるため migration でクリアする。 */
+export const SCHEMA_VERSION = 13 as const;
 
 /** 既定の管理区分（『個人用』）。seed と migration で同じ id を使い、既存データを寄せる。 */
 export const DEFAULT_MANAGEMENT_SCOPE_ID = 'scope-personal' as const;

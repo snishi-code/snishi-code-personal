@@ -114,6 +114,12 @@ export function Allocations() {
                     {m.name}{' '}
                     <span className={`tag ${m.status === 'active' ? 'tag--teal' : 'tag--neutral'}`}>
                       {t(`monthlyCost.status.${m.status}` as MessageKey)}
+                    </span>{' '}
+                    {/* 継続購入（自動更新）と 償却のみ（再購入なし）を小さなラベルで区別する。 */}
+                    <span className="tag tag--neutral" style={{ fontSize: '0.75em' }}>
+                      {m.repeatEveryMonths !== undefined
+                        ? t('monthlyCost.recurringBadge')
+                        : t('monthlyCost.oneTimeBadge')}
                     </span>
                   </span>
                   <span className="row-actions">
@@ -196,7 +202,7 @@ export function Allocations() {
                 </div>
                 <div className="kv">
                   <span className="muted">{t('monthlyCost.payment')}</span>
-                  <span>{name(m.paymentAccountId)}</span>
+                  <span>{name(m.paymentSourceAccountId ?? m.paymentAccountId)}</span>
                 </div>
               </div>
             );

@@ -1,65 +1,60 @@
 /*
- * 生活コスト（= ホームの「支出」）の計算。ホームの上段カード・支出の内訳画面・推移グラフが
- * すべて同じ定義を使うための単一の正本。
+ * 支出（= ホームの「支出」）の集計。資産経由モデルの単一正本。
  *
- * 生活コスト = 通常支出 + 月額化コスト。
- *  - 通常支出 = 期間内の費用 − 既存按分の認識 − 調整用費用(system-adjustment) − 月額化の実支払い
- *    （月額化は formula で別途足すため、実支払い仕訳を二重計上しない）。
- *  - 月額化コスト = MonthlyCostItem の formula を区間内の各月で合算。
- * 固定資産の購入額そのもの・返済・振替は費用科目ではない/別概念なので含まれない。
+ * 入力は **導出専用 entries（`Ledger.derivedEntries` = 実仕訳 + 継続コストの仮想仕訳）**。
+ * 継続コストは仮想認識 `借方 費用カテゴリ / 貸方 対象資産`(metadata.ccKind==='recognition') として
+ * すでに PL の費用に含まれるため、**formula を別途足さない**（旧モデルの二重計上ハックは廃止）。
+ *
+ *  - 通常支出 = 期間内の費用 − 投資評価損等(system-adjustment) − 継続コストの仮想認識。
+ *  - 継続コスト = 期間内の仮想認識の合計（= 各対象資産から費用へ費消した額）。
+ *  - 支出合計 = 通常支出 + 継続コスト（= 費用合計 − system-adjustment）。
+ * 固定資産の購入額そのもの・返済・振替・資産化(funding)は費用ではないので含まれない。
  */
 import { deriveProfitAndLoss } from './accounting';
-import { totalMonthlyCostForMonth } from './monthlyCost';
 import type { DateRange } from './reportPeriod';
-import type { Account, JournalEntry, MonthlyCostItem } from './types';
+import type { Account, JournalEntry } from './types';
 
 export interface LivingCostBreakdown {
-  /** 通常支出（費用 − 認識 − 調整 − 月額化の実支払い）。 */
+  /** 通常支出（費用 − system-adjustment − 継続コスト認識）。 */
   normalExpense: number;
-  /** 月額化コスト（formula の区間合計）。 */
+  /** 継続コスト（仮想認識の区間合計）。UI 契約上キー名は monthlyCost のまま。 */
   monthlyCost: number;
-  /** 支出合計 = 通常支出 + 月額化コスト。 */
+  /** 支出合計 = 通常支出 + 継続コスト。 */
   total: number;
 }
 
 /**
- * 期間（range が undefined のときは全期間）の生活コスト内訳を求める。
- * months は月額化 formula を合算する対象月（'YYYY-MM'）の一覧。
+ * 期間（range が undefined のときは全期間）の支出内訳を求める。
+ * entries は **derivedEntries**（実仕訳 + 継続コスト仮想仕訳）を渡すこと。
  */
 export function livingCostBreakdownForRange(
   accounts: Account[],
   entries: JournalEntry[],
-  items: MonthlyCostItem[],
   range: DateRange | undefined,
-  months: string[],
 ): LivingCostBreakdown {
   const roleById = new Map(accounts.map((a) => [a.id, a.role]));
-  const expenseIds = new Set(accounts.filter((a) => a.type === 'expense').map((a) => a.id));
   const within = (e: JournalEntry) => !range || (e.date >= range.from && e.date <= range.to);
-  let recognition = 0;
   let systemAdj = 0;
-  let monthlyCostPaid = 0;
+  let continuing = 0;
   for (const e of entries) {
     if (!within(e)) continue;
     const debit = e.lines.find((l) => l.side === 'debit');
-    if (e.metadata?.allocationRole === 'recognition') recognition += debit?.amount ?? 0;
+    if (e.metadata?.ccKind === 'recognition') {
+      continuing += debit?.amount ?? 0;
+      continue;
+    }
     if (debit && roleById.get(debit.accountId) === 'system-adjustment') systemAdj += debit.amount;
-    if (e.metadata?.monthlyCostId && debit && expenseIds.has(debit.accountId))
-      monthlyCostPaid += debit.amount;
   }
   const pl = deriveProfitAndLoss(accounts, entries, range);
-  const normalExpense = pl.totalExpense - recognition - systemAdj - monthlyCostPaid;
-  const monthlyCost = months.reduce((s, ym) => s + totalMonthlyCostForMonth(items, ym), 0);
-  return { normalExpense, monthlyCost, total: normalExpense + monthlyCost };
+  const normalExpense = pl.totalExpense - systemAdj - continuing;
+  return { normalExpense, monthlyCost: continuing, total: normalExpense + continuing };
 }
 
-/** 生活コスト合計（= 支出）。推移グラフ用。 */
+/** 支出合計（= 通常支出 + 継続コスト）。推移グラフ用。entries は derivedEntries。 */
 export function livingCostForRange(
   accounts: Account[],
   entries: JournalEntry[],
-  items: MonthlyCostItem[],
   range: DateRange | undefined,
-  months: string[],
 ): number {
-  return livingCostBreakdownForRange(accounts, entries, items, range, months).total;
+  return livingCostBreakdownForRange(accounts, entries, range).total;
 }

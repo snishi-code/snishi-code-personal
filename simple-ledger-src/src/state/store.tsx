@@ -24,6 +24,7 @@ import * as repo from '../data/repository';
 import { isDefaultSeedAccounts, isDefaultSettings } from '../data/seed';
 import type {
   AccountInstrumentInput,
+  ContinuousCostInput,
   DisposeFixedAssetInput,
   FixedAssetMonthlyInput,
   FixedAssetPurchaseMonthlyInput,
@@ -88,6 +89,7 @@ interface LedgerContextValue {
   removeEntry: (id: string, description: string) => Promise<void>;
   createAllocation: (input: Omit<AllocationInput, 'deferredAccountId'>) => Promise<void>;
   createMonthlyCost: (input: MonthlyCostInput) => Promise<void>;
+  createContinuousCost: (input: ContinuousCostInput) => Promise<void>;
   saveMonthlyCost: (item: MonthlyCostItem) => Promise<void>;
   removeMonthlyCost: (id: string) => Promise<void>;
   createFixedAssetPurchaseMonthly: (input: FixedAssetPurchaseMonthlyInput) => Promise<void>;
@@ -283,6 +285,20 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await repo.deleteMonthlyCost(id);
         await refresh();
         toast.show(t('toast.deleted'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const createContinuousCost = useCallback<LedgerContextValue['createContinuousCost']>(
+    async (input) => {
+      try {
+        await repo.createContinuousCost(input);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
       } catch (e) {
         toast.show(errorText(e), 'error');
         throw e;
@@ -688,6 +704,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       removeEntry,
       createAllocation,
       createMonthlyCost,
+      createContinuousCost,
       saveMonthlyCost,
       removeMonthlyCost,
       createFixedAssetPurchaseMonthly,
@@ -730,6 +747,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       removeEntry,
       createAllocation,
       createMonthlyCost,
+      createContinuousCost,
       saveMonthlyCost,
       removeMonthlyCost,
       createFixedAssetPurchaseMonthly,

@@ -143,9 +143,10 @@ export function Breakdown({
   }, [ledger, period, today]);
 
   // 表示行・合計・（純資産のみ）今期の損益を、種別に応じて PL/BS から導出する。
+  // 集計は導出専用 entries（実仕訳 + 継続コストの仮想仕訳）を使う。
   const { rows, total, retained } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger?.journalEntries ?? [];
+    const entries = ledger?.derivedEntries ?? [];
     if (section === 'revenue') {
       const pl = deriveProfitAndLoss(accounts, entries, range);
       return { rows: pl.revenues, total: pl.totalRevenue, retained: undefined };

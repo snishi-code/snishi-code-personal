@@ -197,6 +197,15 @@ const STEPS: Step[] = [
       assetDisposals: Array.isArray(pkg.assetDisposals) ? pkg.assetDisposals : [],
     }),
   },
+  {
+    // v12 → v13: 継続コストを資産経由モデルへ統一。AccountRole に continuing-cost-asset、
+    // MonthlyCostItem に任意 paymentSourceAccountId、EntryMetadata に continuousCostId/ccKind/virtual
+    // を追加（許容値・任意項目の拡張のみ）。既存データの構造は変えない＝恒等移行（version だけ前進）。
+    // 仮想仕訳は保存しない導出専用のため、移行で生成・変換するものはない。
+    from: 12,
+    to: 13,
+    migrate: (pkg) => pkg,
+  },
 ];
 
 /**

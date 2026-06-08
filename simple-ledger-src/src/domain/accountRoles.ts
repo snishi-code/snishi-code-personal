@@ -18,6 +18,7 @@ export type AccountRole =
   | 'deferred-asset'
   | 'investment-asset'
   | 'fixed-asset'
+  | 'continuing-cost-asset'
   | 'payment-liability'
   | 'other-liability'
   | 'equity'
@@ -31,6 +32,7 @@ export const ACCOUNT_ROLES: readonly AccountRole[] = [
   'deferred-asset',
   'investment-asset',
   'fixed-asset',
+  'continuing-cost-asset',
   'payment-liability',
   'other-liability',
   'equity',
@@ -47,6 +49,9 @@ export const ROLE_TYPES: Record<AccountRole, AccountType[]> = {
   'investment-asset': ['asset'],
   // 固定資産（車・家財など）。現金ではない asset。CF 総資金には含めない。
   'fixed-asset': ['asset'],
+  // 継続コスト対象（YouTube/洗濯機/家賃 等の品目別資産）。支払いを資産化し、認識で費消する。
+  // 通常入力候補に出さない・CF 総資金に含めない。
+  'continuing-cost-asset': ['asset'],
   'payment-liability': ['liability'],
   'other-liability': ['liability'],
   equity: ['equity'],
