@@ -142,7 +142,7 @@ formula で月割り認識する（`saveEntryWithFixedAssetMonthly`）。
 
 - **BS** は基準日で導出（`deriveBalanceSheet(..., asOf)`）。未来月の認識を現在残高に含めない。
   基準日は共有の `ReportPeriod` から `periodAsOf` で決める（月→月末 / 年→年末 / 全体→最終データ日 or
-  今日）。Dashboard / Statements は同じ期間 state を参照する。
+  今日）。Dashboard / 各内訳ページ（資産/負債/純資産）は同じ期間 state を参照する。
   → 120,000 円/12 か月なら、当月 BS では `按分中資産` に未認識残高（例 110,000）が残る。
 - **Journal** の既定表示は今日まで（未来の認識仕訳を隠す）。「将来予定も表示」で確認できる。
 - 完了ラベルは **「認識完了」**。クレカ等（負債）支払いでは費用認識完了 ≠ 返済完了。

@@ -1,5 +1,5 @@
 /*
- * E2E: 主要フロー（起動 → 支出入力 → 集計反映 → 取消/返金 → ドリルダウン → 財務諸表）。
+ * E2E: 主要フロー（起動 → 支出入力 → 集計反映 → 取消/返金 → 各項目の内訳ページ → ドリルダウン）。
  * 外部送信ゼロも検証する（同一オリジン以外へのリクエストが無いこと）。
  *
  * 借方/貸方は日常入力に出さない。お金の流れ（源泉 → 行き先）をチップ(radio)で選ぶ。
@@ -29,7 +29,7 @@ async function openJournal(page: Page) {
   await page.locator(ui('dashboard.journal.openAll')).click();
 }
 
-/** 財務諸表/勘定科目/タグ/残高補正は設定の「管理」セクションから開く。 */
+/** 勘定科目/タグ/残高補正は設定の「管理」セクションから開く。 */
 async function openManagement(page: Page, screen: string) {
   await page.locator(ui('nav.menu.button')).click();
   await page.locator(ui('nav.settings')).click();
@@ -488,31 +488,54 @@ test('残高補正: 実残高を入力すると補正仕訳ができる', async 
   await expect(page.locator(ui('journal.entry.list'))).toContainText('残高補正');
 });
 
-test('損益計算書の科目から仕訳一覧へドリルダウンできる', async ({ page }) => {
+test('資産の内訳の科目から仕訳一覧へドリルダウンできる', async ({ page }) => {
   await page.goto('./');
   await addExpense(page, 'コーヒー', '500');
 
-  // 財務諸表はホームの損益サマリーから開く（管理メニューには無い）。
-  await page.locator(ui('dashboard.stat.revenue')).click();
-  await page.locator(ui('statements.row')).filter({ hasText: '変動費' }).first().click();
+  // 旧・財務諸表は廃止。各項目の内訳ページから科目をタップしてドリルダウンする。
+  await page.locator(ui('dashboard.stat.assets')).click();
+  await expect(page.locator(ui('assetsBreakdown.view'))).toBeVisible();
+  await page.locator(ui('assetsBreakdown.row')).filter({ hasText: '現金' }).first().click();
 
   await expect(page.locator(ui('journal.view'))).toBeVisible();
-  await expect(page.getByText('「変動費」で絞り込み中')).toBeVisible();
+  await expect(page.getByText('「現金」で絞り込み中')).toBeVisible();
   await expect(page.locator(ui('journal.entry.list'))).toContainText('コーヒー');
 });
 
-test('ホームの損益/資産サマリーから財務諸表(PL/BS)を開ける', async ({ page }) => {
+test('ホーム各項目は同じ財務諸表ではなく、それぞれの内訳ページへ分かれて遷移する', async ({
+  page,
+}) => {
   await page.goto('./');
-  // 損益サマリー → 損益計算書
+
+  // 収入 → 収入の内訳
   await page.locator(ui('dashboard.stat.revenue')).click();
-  await expect(page.locator(ui('statements.profitAndLoss'))).toBeVisible();
-  // ホームへ戻り、資産負債サマリー → 貸借対照表
+  await expect(page.locator(ui('incomeBreakdown.view'))).toBeVisible();
+
+  // 収支 → 収支ページ（科目別ドリルではなく残り方を見る）
+  await page.locator(ui('nav.home')).click();
+  await page.locator(ui('dashboard.stat.netIncome')).click();
+  await expect(page.locator(ui('netIncome.view'))).toBeVisible();
+  await expect(page.locator(ui('netIncome.result'))).toBeVisible();
+
+  // 資産 → 資産の内訳
   await page.locator(ui('nav.home')).click();
   await page.locator(ui('dashboard.stat.assets')).click();
-  await expect(page.locator(ui('statements.balanceSheet'))).toBeVisible();
-  // タブ切替も従来どおり動く
-  await page.locator(ui('statements.tab.pl')).click();
-  await expect(page.locator(ui('statements.profitAndLoss'))).toBeVisible();
+  await expect(page.locator(ui('assetsBreakdown.view'))).toBeVisible();
+
+  // 負債 → 負債の内訳（資産の内訳とは別ページ）。資金繰りへの導線を持つ。
+  await page.locator(ui('nav.home')).click();
+  await page.locator(ui('dashboard.stat.liabilities')).click();
+  await expect(page.locator(ui('liabilitiesBreakdown.view'))).toBeVisible();
+  await expect(page.locator(ui('assetsBreakdown.view'))).toHaveCount(0);
+  await page.locator(ui('liabilitiesBreakdown.cashflowLink')).click();
+  await expect(page.locator(ui('cashflow.view'))).toBeVisible();
+
+  // 純資産 → 純資産ページ（資産/負債とは別ページ）
+  await page.locator(ui('nav.home')).click();
+  await page.locator(ui('dashboard.stat.netAssets')).click();
+  await expect(page.locator(ui('netAssets.view'))).toBeVisible();
+  await expect(page.locator(ui('assetsBreakdown.view'))).toHaveCount(0);
+  await expect(page.locator(ui('liabilitiesBreakdown.view'))).toHaveCount(0);
 });
 
 test('ホーム上部の入力ボタン直下に誤解を招く空カードを出さない', async ({ page }) => {

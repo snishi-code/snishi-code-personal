@@ -13,17 +13,21 @@ import {
   periodRange,
   type ReportPeriod,
 } from '../../domain/reportPeriod';
+import { buildSectionTrends } from './breakdownData';
 import { Money } from '../money';
 import { Icon } from '../Icon';
+import { TrendChart } from '../components/TrendChart';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import type { Screen } from '../navigation';
 
 export function ExpenseBreakdown({
   period,
+  onPeriodChange,
   onNavigate,
 }: {
   period: ReportPeriod;
+  onPeriodChange: (p: ReportPeriod) => void;
   onNavigate: (screen: Screen) => void;
 }) {
   const { ledger } = useLedger();
@@ -40,6 +44,8 @@ export function ExpenseBreakdown({
     }).map((b) => b.ym);
     return livingCostBreakdownForRange(accounts, entries, items, range, months);
   }, [ledger, period]);
+
+  const trends = useMemo(() => buildSectionTrends(period, ledger), [period, ledger]);
 
   return (
     <section aria-labelledby="expense-breakdown-title" data-ui={UI.expenseBreakdown.view}>
@@ -79,6 +85,25 @@ export function ExpenseBreakdown({
           </span>
         </div>
       </div>
+
+      {/* 生活コスト（支出）の推移。年別=12ヶ月 / 全体=年集約。全体は年ラベルでその年へ。 */}
+      {trends && trends.living.length > 1 ? (
+        <div style={{ marginTop: 'var(--space-4)' }}>
+          <TrendChart
+            title={t('expenseBreakdown.trend')}
+            data={trends.living}
+            currency={currency}
+            variant="bar"
+            {...(trends.drillable
+              ? {
+                  onSelect: (key: string) =>
+                    onPeriodChange({ mode: 'year', year: Number.parseInt(key, 10) }),
+                  selectHint: t('dashboard.trendDrillYear'),
+                }
+              : {})}
+          />
+        </div>
+      ) : null}
     </section>
   );
 }

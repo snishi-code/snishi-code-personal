@@ -30,20 +30,23 @@ export const UI = {
     income: 'dashboard.entry.income',
     expense: 'dashboard.entry.expense',
     transfer: 'dashboard.entry.transfer',
-    // 損益/資産負債サマリーの項目別ボタン（タップで財務諸表の該当セクションへ）
-    statRevenue: 'dashboard.stat.revenue',
-    statExpense: 'dashboard.stat.expense',
-    statNetIncome: 'dashboard.stat.netIncome',
-    statAssets: 'dashboard.stat.assets',
-    statLiabilities: 'dashboard.stat.liabilities',
-    statNetAssets: 'dashboard.stat.netAssets',
-    // 後方互換（旧 e2e 用に維持）: 収益=PL入口 / 資産=BS入口
-    openPl: 'dashboard.stat.revenue',
-    openBs: 'dashboard.stat.assets',
-    // 「支出」タップ先は「支出の内訳」画面（生活コストはホーム独立 stat にしない）。
+    // 収支/財政状態の項目別ボタン（タップで各項目の「内訳 + 推移」ページへ）。
+    // 旧・財務諸表（PL/BS トグル）を項目ごとの遷移先に分解した（同じページに集約しない）。
+    statRevenue: 'dashboard.stat.revenue', // → 収入の内訳
+    statExpense: 'dashboard.stat.expense', // → 支出の内訳
+    statNetIncome: 'dashboard.stat.netIncome', // → 収支
+    statAssets: 'dashboard.stat.assets', // → 資産の内訳
+    statLiabilities: 'dashboard.stat.liabilities', // → 負債の内訳
+    statNetAssets: 'dashboard.stat.netAssets', // → 純資産
     // 当月の仕訳プレビュー
     journalPreview: 'dashboard.journal.preview',
     journalOpenAll: 'dashboard.journal.openAll',
+  },
+  // 収入の内訳（ホーム「収入」のタップ先・フロー）。科目行は仕訳へドリル。
+  incomeBreakdown: {
+    view: 'incomeBreakdown.view',
+    row: 'incomeBreakdown.row',
+    total: 'incomeBreakdown.total',
   },
   // 支出の内訳（通常支出 + 月額化＝生活コスト）。月額化からは月額化コスト台帳へ。
   expenseBreakdown: {
@@ -51,6 +54,32 @@ export const UI = {
     normalExpense: 'expenseBreakdown.normalExpense',
     monthlyCost: 'expenseBreakdown.monthlyCost',
     total: 'expenseBreakdown.total',
+  },
+  // 収支（ホーム「収支」のタップ先・フロー）。科目別ドリルはせず、月ごとの残り方を推移で見せる。
+  netIncome: {
+    view: 'netIncome.view',
+    revenue: 'netIncome.revenue',
+    expense: 'netIncome.expense',
+    result: 'netIncome.result',
+  },
+  // 資産の内訳（ホーム「資産」のタップ先・ストック）。科目行は仕訳へドリル。
+  assetsBreakdown: {
+    view: 'assetsBreakdown.view',
+    row: 'assetsBreakdown.row',
+    total: 'assetsBreakdown.total',
+  },
+  // 負債の内訳（ホーム「負債」のタップ先・ストック）。資金繰り/返済計画への導線を持つ。
+  liabilitiesBreakdown: {
+    view: 'liabilitiesBreakdown.view',
+    row: 'liabilitiesBreakdown.row',
+    total: 'liabilitiesBreakdown.total',
+    cashflowLink: 'liabilitiesBreakdown.cashflowLink',
+  },
+  // 純資産（ホーム「純資産」のタップ先・ストック）。元手 + 今期の損益 + 推移。
+  netAssets: {
+    view: 'netAssets.view',
+    row: 'netAssets.row',
+    total: 'netAssets.total',
   },
   journal: {
     view: 'journal.view',
@@ -109,16 +138,6 @@ export const UI = {
       amount: 'journal.entry.amount',
       memo: 'journal.entry.memo',
     },
-  },
-  statements: {
-    view: 'statements.view',
-    profitAndLoss: 'statements.profitAndLoss',
-    balanceSheet: 'statements.balanceSheet',
-    tabPl: 'statements.tab.pl',
-    tabBs: 'statements.tab.bs',
-    asOf: 'statements.asOf',
-    // 科目行（クリックで Journal へドリルダウン）
-    row: 'statements.row',
   },
   accounts: {
     view: 'accounts.view',

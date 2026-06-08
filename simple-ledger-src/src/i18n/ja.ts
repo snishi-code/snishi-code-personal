@@ -78,6 +78,7 @@ export const ja = {
   'expenseBreakdown.normalExpense': '通常支出',
   'expenseBreakdown.monthlyCost': '月額化コスト（生活コスト）',
   'expenseBreakdown.total': '支出合計',
+  'expenseBreakdown.trend': '生活コストの推移',
   'dashboard.trendNet': '収支の推移',
   'dashboard.trendLiving': '生活コストの推移',
   'dashboard.trendAssets': '純資産の推移',
@@ -522,12 +523,7 @@ export const ja = {
   'journal.clearAccountFilter': '科目の絞り込みを解除',
   'journal.showFuture': '将来予定も表示',
 
-  'statements.title': '財務諸表',
-  'statements.pl': '収支（収入・支出）',
-  'statements.bs': '残高（資産・負債）',
-  'statements.plShort': '収支',
-  'statements.bsShort': '残高',
-  'statements.period': '対象期間',
+  // 期間フィルタの選択肢ラベル（タグ画面などで再利用）。
   'statements.allPeriods': '全期間',
   'statements.thisMonth': '今月',
   'statements.thisYear': '今年',
@@ -544,30 +540,45 @@ export const ja = {
   'period.pickerMonth': '対象期間（月）',
   'period.noTrendData': '推移を表示するデータがありません。',
   'period.trendYearHint': '年ラベルをタップすると、その年の月別表示に切り替わります。',
-  'statements.totalRevenue': '収入合計',
-  'statements.totalExpense': '支出合計',
-  'statements.netIncome': '差引収支',
-  'statements.netProfit': '当期純利益',
-  'statements.netLoss': '当期純損失',
-  'statements.total': '合計',
-  'statements.assets': '資産',
-  'statements.liabilities': '負債',
-  'statements.equity': '純資産（資本）',
-  'statements.retainedEarnings': '当期純損益',
-  'statements.totalAssets': '資産合計',
-  'statements.totalLiabilities': '負債合計',
-  'statements.netAssets': '純資産合計',
-  'statements.account': '科目',
-  'statements.amount': '金額',
-  'statements.noData': 'データがありません。',
-  'statements.unbalanced': '貸借が一致していません。仕訳を確認してください。',
-  'statements.balanced': '貸借一致',
-  'statements.drilldownHint': '科目をタップすると、その仕訳を一覧で確認できます。',
-  'statements.viewEntries': '「{name}」の仕訳を表示',
-  'statements.asOf': '基準日',
-  'statements.asOfDate': '{date} 時点の残高',
-  'statements.asOfHint':
-    'この日付時点の残高を表示します（既定は今日）。未来月の按分認識は含めません。',
+  // 内訳ページ共通（収入 / 資産 / 負債 / 純資産）。旧・財務諸表を項目ごとに分解した。
+  'breakdown.noData': 'データがありません。',
+  'breakdown.drilldownHint': '科目をタップすると、その仕訳を一覧で確認できます。',
+  'breakdown.viewEntries': '「{name}」の仕訳を表示',
+  'breakdown.asOfDate': '{date} 時点の残高',
+
+  // 収入の内訳（ホーム「収入」のタップ先）。
+  'income.title': '収入の内訳',
+  'income.intro': '収入の入り方と、月ごとの推移です。',
+  'income.total': '収入合計',
+  'income.trend': '収入の推移',
+
+  // 収支（ホーム「収支」のタップ先）。手元に残る額の推移を主役にする。
+  'netIncome.title': '収支（手元に残る額）',
+  'netIncome.intro': '収入から支出（生活コスト）を引いた、毎月の残り方です。',
+  'netIncome.revenue': '収入',
+  'netIncome.expense': '支出（生活コスト）',
+  'netIncome.result': '収支',
+  'netIncome.trend': '収支の推移',
+
+  // 資産の内訳（ホーム「資産」のタップ先）。
+  'assets.title': '資産の内訳',
+  'assets.intro': '持っているお金・資産の内訳と、月ごとの推移です。',
+  'assets.total': '資産合計',
+  'assets.trend': '資産の推移',
+
+  // 負債の内訳（ホーム「負債」のタップ先）。
+  'liabilities.title': '負債の内訳',
+  'liabilities.intro': 'カードやローンなど、これから払うお金の内訳です。',
+  'liabilities.total': '負債合計',
+  'liabilities.trend': '負債の推移',
+  'liabilities.cashflowLink': '返済計画・資金繰りを見る',
+
+  // 純資産（ホーム「純資産」のタップ先）。正味の財産 = 資産 − 負債。
+  'netAssets.title': '純資産（正味の財産）',
+  'netAssets.intro': '資産から負債を引いた、正味の財産の推移です。',
+  'netAssets.retained': '今期の損益',
+  'netAssets.total': '純資産合計',
+  'netAssets.trend': '純資産の推移',
 
   'accounts.title': '勘定科目',
   'accounts.add': '科目を追加',
@@ -672,7 +683,7 @@ export const ja = {
 
   'help.title': 'ヘルプ',
   'help.body':
-    'これは複式簿記の家計簿です。「仕訳」で日々の収支を記録すると、ホーム・財務諸表に自動で反映されます。データは端末内にのみ保存され、外部送信はありません。バックアップや端末間共有は設定の「JSON で書き出し／読み込み」を使ってください。',
+    'これは複式簿記の家計簿です。日々の収入・支出・振替を記録すると、ホームと各項目（収入/支出/収支/資産/負債/純資産）の内訳・推移に自動で反映されます。データは端末内にのみ保存され、外部送信はありません。バックアップや端末間共有は設定の「JSON で書き出し／読み込み」を使ってください。',
 
   'a11y.openMenu': 'メニューを開く',
   'a11y.closeMenu': 'メニューを閉じる',
