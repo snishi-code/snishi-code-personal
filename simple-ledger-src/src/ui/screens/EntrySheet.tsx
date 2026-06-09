@@ -1011,13 +1011,13 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           </>
         ) : (
           <>
-            {/* 人間が入力する順: 日付 → 金額 → お金の流れ(左辺[+ローン/取り置き] → 右辺) → 項目 → 継続コスト詳細 */}
+            {/* 人間が入力する順: 日付 → 項目 → 金額 → お金の流れ(左辺[+ローン/取り置き] → 右辺) → 継続コスト詳細 */}
             {dateField}
-            {amountField}
-            {renderFlow()}
-            {/* 項目は流れの後に置く（金額より前に出さない）。振替は自動命名、継続コスト化中は対象名と
+            {/* 項目は日付の下・金額の上に置く。振替は自動命名のため詳細へ、継続コスト化中は対象名と
                 重複するため出さない（名称は流れの行き先＝継続コスト対象の名前で入力する）。 */}
             {mode === 'transfer' || (canAllocate && ccMode) ? null : itemField}
+            {amountField}
+            {renderFlow()}
             {ccDetailField}
             {fixedMonthlyField}
             {repaymentField}
