@@ -119,11 +119,11 @@ export const UI = {
       // 固定資産購入の月額化
       fixedMonthlyToggle: 'journal.entry.fixedMonthlyToggle',
       fixedMonthlyCategory: 'journal.entry.fixedMonthlyCategory',
-      // 目的別資金（reserve-asset）を支出/振替の候補に出す・その場で作る
-      reserveToggle: 'journal.entry.reserveToggle',
+      // 取り置き資産（reserve-asset・聖域化）: 振替の移動先(右辺)を「取り置き資産名入力」へ切替（cc型）
       reserveCreate: 'journal.entry.reserveCreate',
-      // 負債（payment/other-liability）を候補に出す・その場で作る
-      liabilityToggle: 'journal.entry.liabilityToggle',
+      reserveName: 'journal.entry.reserveName',
+      // 支出の支払い元(左辺)を「ローンを組む」へ切替（既存ローン選択＋新規作成を同導線）
+      loanArrange: 'journal.entry.loanArrange',
       liabilityCreate: 'journal.entry.liabilityCreate',
       liabilityCreateName: 'journal.entry.liabilityCreate.name',
       liabilityCreateRole: 'journal.entry.liabilityCreate.role',
@@ -149,6 +149,8 @@ export const UI = {
     list: 'accounts.list',
     type: 'accounts.type',
     role: 'accounts.role',
+    // 補正・勘定科目 内に埋め込んだとき、各 BS 科目行から残高補正を開くボタン。
+    adjust: 'accounts.adjust',
   },
   allocations: {
     view: 'allocations.view',
@@ -205,6 +207,8 @@ export const UI = {
     kind: 'adjust.kind',
     actual: 'adjust.actual',
     save: 'adjust.save',
+    // 各勘定科目行の「補正」から開く、科目選択済みの補正入力ダイアログ。
+    createDialog: 'adjustments.createDialog',
     // 登録済みの補正（現実アンカー）の一覧・編集・削除。
     list: 'adjustments.list',
     row: 'adjustments.row',

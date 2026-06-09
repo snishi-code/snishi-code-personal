@@ -384,6 +384,9 @@ export const ja = {
   'adjust.delta': '差額',
   'adjust.deltaHint': '差額 = 実残高 − 理論残高（プラスで増加、マイナスで減少）。',
   'adjust.save': '補正する',
+  // 各勘定科目行から残高補正を開く導線（補正・勘定科目の統合）。
+  'adjust.rowAction': '補正',
+  'adjust.createTitle': '「{name}」の残高を補正',
   'adjust.noChange': '差額がないため、補正仕訳は作成しませんでした。',
   'adjust.error.account': '対象科目を選んでください。',
   'adjust.error.actual': '実残高を入力してください。',
@@ -566,17 +569,19 @@ export const ja = {
   'entry.error.category-required': '費用カテゴリを選んでください。',
   'entry.monthlyizeNote':
     '実際の支払いは仕訳に残し、支出は月あたりで見ます（月割りで導出・二重計上しません）。負債払いで返済を入力すると、返済予定（資金繰り）も作ります。',
-  // 取り置き資金・負債は既定で候補に出さない。必要時だけトグルで表示し、その場で作れる。
-  'entry.reserveToggle': '取り置き資金を使う',
-  'entry.reserveCreate': '取り置き資金を作成',
-  'entry.reservePickHint': '使う取り置き資金を選びます（普通預金から取り置いた枠）。',
-  'entry.liabilityToggle': '負債（カード・ローン）を使う',
-  'entry.liabilityCreate': '新しい負債を作る',
-  // 支出の支払い元側のローン導線（単一導線）。押すと既存ローン選択＋新規ローン作成へ。
+  // 取り置き資金は両辺で常時選択できる（チェックボックス廃止）。新規作成は振替の移動先（右辺）の
+  // 「取り置き資産を作る」で名称入力へ切替（継続コスト化と同じ片側切替挙動）。
+  'entry.reserveCreate': '取り置き資産を作る',
+  'entry.reserveTargetName': '取り置き資産の名前',
+  'entry.reserveTargetNameHint':
+    '移動先に作る取り置き枠の名前です（例: 旅行積立 / 車の頭金）。勘定科目は増えません。',
+  'entry.reserveBack': '取り置き資産をやめる',
+  // 支出の支払い元（左辺）のローン導線。「ローンを組む」で既存ローン選択＋新規ローン作成へ切り替える。
   'entry.loanArrange': 'ローンを組む',
-  'entry.loanArrangeHint':
-    'ローンで支払う場合に開きます。既存のローンを選ぶか、新しいローンを作成します。',
+  'entry.loanArrangePick': '組むローンを選ぶ',
+  'entry.loanArrangeEmpty': 'ローンがありません。「新しいローンを作成」で追加できます。',
   'entry.loanArrangeCreate': '新しいローンを作成',
+  'entry.loanArrangeBack': 'ローンをやめる',
 
   'journal.reverse': '取消/返金',
   'journal.reverseAction': '取消/返金を記録',

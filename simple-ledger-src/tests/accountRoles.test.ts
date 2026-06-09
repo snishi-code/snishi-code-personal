@@ -37,20 +37,22 @@ describe('role と type の整合', () => {
     expect(defaultRoleForType('expense')).toBe('expense-category');
     expect(defaultRoleForType('equity')).toBe('equity');
   });
-  it('rolesForType はその type の role だけを返す（内部集約ロールは除く）', () => {
-    // continuing-cost-asset は内部集約（継続コスト台帳）なのでユーザー選択肢に出さない。
+  it('rolesForType はその type の role だけを返す（内部ロールは除く）', () => {
+    // continuing-cost-asset（継続コスト台帳）と reserve-asset（取り置き・聖域化）は内部ロールなので
+    // ユーザー選択肢に出さない。
     expect(rolesForType('asset')).toEqual([
       'daily-asset',
-      'reserve-asset',
       'deferred-asset',
       'investment-asset',
       'fixed-asset',
     ]);
     expect(rolesForType('asset')).not.toContain('continuing-cost-asset');
+    expect(rolesForType('asset')).not.toContain('reserve-asset');
     expect(rolesForType('liability')).toEqual(['payment-liability', 'other-liability']);
   });
-  it('isInternalRole は continuing-cost-asset（内部集約）を真にする', () => {
+  it('isInternalRole は continuing-cost-asset / reserve-asset（内部・聖域化）を真にする', () => {
     expect(isInternalRole('continuing-cost-asset')).toBe(true);
+    expect(isInternalRole('reserve-asset')).toBe(true);
     expect(isInternalRole('daily-asset')).toBe(false);
     expect(isInternalRole('fixed-asset')).toBe(false);
   });

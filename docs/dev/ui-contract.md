@@ -56,6 +56,10 @@
 | `journal.entry.ccToggle` | 行き先の「継続コスト化」ボタン | 行き先を継続コスト対象（自由入力）に切替 |
 | `journal.entry.ccName` | 継続コスト対象の名前 | 台帳に登録する対象名（自由入力） |
 | `journal.entry.ccCategory` | 分類先カテゴリ（費用） | 継続コストの月次分類先 |
+| `journal.entry.reserveCreate` | 移動先の「取り置き資産を作る」ボタン | 振替の右辺を取り置き資産名入力へ切替（cc型・チェックボックス廃止） |
+| `journal.entry.reserveName` | 取り置き資産の名前 | 作成する取り置き枠の名（勘定科目は増やさない） |
+| `journal.entry.loanArrange` | 支払い元の「ローンを組む」ボタン | 支出の左辺を既存ローン選択＋新規作成へ切替（cc型・チェックボックス廃止） |
+| `journal.entry.liabilityCreate` | 新しいローンを作成（ローンを組む導線内） | 同じ導線内で other-liability を作成 |
 | `journal.entry.allocateMonths` | 継続する月数 | 継続する月数入力 |
 | `journal.entry.date` | Entry 日付 | 日付入力 |
 | `journal.entry.description` | Entry 摘要 | 摘要入力 |
@@ -82,12 +86,15 @@
 | `accounts.view` | Accounts ルート | 勘定科目の検出 |
 | `accounts.create` | 科目追加ボタン | 追加起動 |
 | `accounts.save` | 科目シート保存 | 保存 |
-| `accounts.list` | 科目一覧 | 一覧 |
+| `accounts.list` | 科目一覧 | 一覧（「補正・勘定科目」内に embedded で統合） |
 | `accounts.type` | 科目シートの区分セレクト | type 選択 |
 | `accounts.role` | 科目シートの役割セレクト | role 選択 |
+| `accounts.adjust` | 各 BS 科目行の「補正」ボタン | 科目選択済みの補正ダイアログを開く（embedded 時） |
+| `adjustments.createDialog` | 補正入力ダイアログ | 科目選択済みの残高補正（独立フォーム廃止） |
 | `settings.view` | Settings ルート | 設定の検出 |
 | `settings.manage.list` | 設定「管理」リスト | 補助画面への遷移リスト |
-| `settings.manage.<screen>` | 管理リストの各行 | 例 `settings.manage.accounts`（accounts/tags/adjustments。各内訳ページはホームの各項目から） |
+| `settings.manage.<screen>` | 管理リストの各行 | `settings.manage.tags` / `settings.manage.wallets`（勘定科目・補正は「補正・勘定科目」へ統合しメニュー昇格） |
+| `nav.adjustments` | メニュー「補正・勘定科目」 | 勘定科目 + 初期残高 + 残高補正の統合画面（メニュー昇格） |
 | `settings.exportJson` | export ボタン | JSON 書き出し |
 | `settings.importJson` | import ボタン | JSON 読み込み起動 |
 | `settings.importFile` | 隠しファイル入力 | ファイル選択 |

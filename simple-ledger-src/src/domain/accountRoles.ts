@@ -66,11 +66,16 @@ export function roleAllowsType(role: AccountRole, type: AccountType): boolean {
 }
 
 /**
- * 内部集約・自動生成のロール。ユーザーが手で作る/編集する勘定科目ではない。
- * 勘定科目管理一覧・ロール選択肢から除外する（BS / 資産内訳には残高として現れてよい）。
- * 現状は継続コストの集約台帳口座（continuing-cost-asset）のみ。
+ * 内部・自動生成・聖域化のロール。ユーザーが勘定科目管理画面で手作成/編集する対象ではない。
+ * 勘定科目管理一覧・ロール選択肢から除外する（BS / 資産内訳・CF には残高として現れてよい）。
+ *  - continuing-cost-asset: 継続コストの集約台帳口座（v14）。
+ *  - reserve-asset: 取り置き資金（目的別に作るが勘定科目一覧を増やさない＝聖域化）。作成・管理は
+ *    取り置き資金 UI / 振替の「取り置き資産を作る」導線で行う。
  */
-export const INTERNAL_ACCOUNT_ROLES: readonly AccountRole[] = ['continuing-cost-asset'];
+export const INTERNAL_ACCOUNT_ROLES: readonly AccountRole[] = [
+  'continuing-cost-asset',
+  'reserve-asset',
+];
 
 export function isInternalRole(role: AccountRole): boolean {
   return INTERNAL_ACCOUNT_ROLES.includes(role);

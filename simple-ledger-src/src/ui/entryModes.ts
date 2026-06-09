@@ -103,8 +103,10 @@ export const MODE_FLOW: Record<FlowMode, FlowDef> = {
     source: {
       side: 'credit',
       labelKey: 'entry.source.expense',
-      // 現金・預金など(daily-asset)に加え、クレジットカード(payment-liability)も既定で選べる。
-      allowedRoles: ['daily-asset', 'payment-liability'],
+      // 現金・預金など(daily-asset)、クレジットカード(payment-liability)に加え、取り置き資金
+      // (reserve-asset)も既定で選べる（チェックボックス無しで自然に支払い元に出す）。
+      // ローン(other-liability)は「ローンを組む」切替時のみ EntrySheet が足す。
+      allowedRoles: ['daily-asset', 'payment-liability', 'reserve-asset'],
     },
     destination: {
       side: 'debit',
@@ -117,12 +119,13 @@ export const MODE_FLOW: Record<FlowMode, FlowDef> = {
     source: {
       side: 'credit',
       labelKey: 'entry.transfer.from',
-      allowedRoles: ['daily-asset'],
+      // 取り置き資金は移動元・移動先の両辺で常時選択できる（チェックボックス廃止）。
+      allowedRoles: ['daily-asset', 'reserve-asset'],
     },
     destination: {
       side: 'debit',
       labelKey: 'entry.transfer.to',
-      allowedRoles: ['daily-asset'],
+      allowedRoles: ['daily-asset', 'reserve-asset'],
     },
     flowLabelKey: 'entry.flow.transfer',
   },
