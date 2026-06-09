@@ -7,8 +7,12 @@
 
 export const DB_NAME = 'simple-ledger';
 // v2: allocations / v3: cashflowSchedules, reserves / v4: tags / v5: monthlyCostItems
-// v6: fundingGoals（schema v16 で撤去・store は新規作成しない）/ v7: managementScopes, accountInstruments / v8: assetDisposals
-export const DB_VERSION = 8;
+// v6: fundingGoals / v7: managementScopes, accountInstruments / v8: assetDisposals
+// v9: 旧 fundingGoals store を物理削除（schema v16 で B 側レガシー撤去）。
+export const DB_VERSION = 9;
+
+/** schema v16 で撤去した旧 object store。DB upgrade で物理削除する（STORE には載せない）。 */
+const LEGACY_STORE_FUNDING_GOALS = 'fundingGoals';
 
 export const STORE = {
   kv: 'kv', // meta / settings の単一レコード置き場（out-of-line key）
@@ -83,6 +87,11 @@ export function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(STORE.snapshots)) {
         db.createObjectStore(STORE.snapshots, { keyPath: 'id' });
+      }
+      // DB v9（schema v16）: 旧 fundingGoals store を物理削除（B 側レガシー撤去・完全消去）。
+      // 既存ローカル DB に残る store を upgrade 時に落とす（無ければ何もしない）。
+      if (db.objectStoreNames.contains(LEGACY_STORE_FUNDING_GOALS)) {
+        db.deleteObjectStore(LEGACY_STORE_FUNDING_GOALS);
       }
     };
     req.onsuccess = () => {
