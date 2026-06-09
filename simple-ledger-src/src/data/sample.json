@@ -96,8 +96,8 @@
       "updatedAt": "2026-01-01T00:00:00.000Z"
     },
     {
-      "id": "acc-travel",
-      "name": "旅行資金",
+      "id": "reserve-ledger",
+      "name": "取り置き資金",
       "type": "asset",
       "role": "reserve-asset",
       "archived": false,
@@ -463,7 +463,7 @@
       "kind": "normal",
       "managementScopeId": "scope-personal",
       "lines": [
-        { "accountId": "acc-travel", "side": "debit", "amount": 30000 },
+        { "accountId": "reserve-ledger", "side": "debit", "amount": 30000 },
         {
           "accountId": "acc-bank",
           "side": "credit",
@@ -471,7 +471,7 @@
           "instrumentId": "inst-rakuten-bank"
         }
       ],
-      "metadata": { "inputMode": "transfer" },
+      "metadata": { "inputMode": "transfer", "reserveId": "res-travel" },
       "tagIds": ["tag-travel"],
       "createdAt": "2026-01-28T00:00:00.000Z",
       "updatedAt": "2026-01-28T00:00:00.000Z"
@@ -718,7 +718,7 @@
     {
       "id": "res-travel",
       "name": "旅行資金",
-      "reserveAccountId": "acc-travel",
+      "reserveAccountId": "reserve-ledger",
       "targetAmount": 200000,
       "targetDate": "2026-12-31",
       "note": "夏の旅行用",

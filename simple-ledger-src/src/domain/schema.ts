@@ -3,7 +3,12 @@
  * 型は src/domain/types.ts と一致させる（z.infer で照合可能）。
  */
 import { z } from 'zod';
-import { APP_ID, SCHEMA_VERSION } from './constants';
+import {
+  APP_ID,
+  CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+  RESERVE_LEDGER_ACCOUNT_ID,
+  SCHEMA_VERSION,
+} from './constants';
 import { addMonths, monthlyAmounts } from './allocation';
 import {
   ACCOUNT_ROLES,
@@ -314,6 +319,18 @@ export const ledgerExportPackageSchema = z
         issue(`勘定科目 ID が重複しています(${a.id})`, ['accounts', i, 'id']);
       accountType.set(a.id, a.type);
       accountRole.set(a.id, a.role);
+      // 集約モデルの不変条件（聖域化）: 内部集約ロールは唯一の集約口座 id のみ許す。
+      // これがないと import で目的別の reserve-asset / continuing-cost-asset 科目を再導入できてしまう。
+      if (a.role === 'reserve-asset' && a.id !== RESERVE_LEDGER_ACCOUNT_ID)
+        issue(
+          `取り置き資金(reserve-asset)は集約口座(${RESERVE_LEDGER_ACCOUNT_ID})のみ許可されます（目的別の科目は作れません）`,
+          ['accounts', i, 'id'],
+        );
+      if (a.role === 'continuing-cost-asset' && a.id !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID)
+        issue(
+          `継続コスト台帳(continuing-cost-asset)は集約口座(${CONTINUOUS_COST_LEDGER_ACCOUNT_ID})のみ許可されます`,
+          ['accounts', i, 'id'],
+        );
     });
     const hasAccount = (id: string) => accountType.has(id);
 
@@ -656,6 +673,11 @@ export const ledgerExportPackageSchema = z
       else if (accountRole.get(r.reserveAccountId) !== 'reserve-asset')
         issue(
           `目的別資金「${r.name}」の科目は目的別資金(reserve-asset)である必要があります`,
+          at('reserveAccountId'),
+        );
+      else if (r.reserveAccountId !== RESERVE_LEDGER_ACCOUNT_ID)
+        issue(
+          `目的別資金「${r.name}」は集約口座(${RESERVE_LEDGER_ACCOUNT_ID})に寄せる必要があります（目的別の科目は作れません）`,
           at('reserveAccountId'),
         );
       // 親口座（取り置き元）は任意。あれば日常資産(daily-asset)であること。

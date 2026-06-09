@@ -553,9 +553,13 @@ async function assertEntryTagsValid(entry: JournalEntry): Promise<void> {
 /** 目的別資金(reserve-asset)を貸方で減らす仕訳は、その資金の残高不足を保存前に拒否する。 */
 async function assertReserveSufficient(entry: JournalEntry, accounts: Account[]): Promise<void> {
   if (!accounts.some((a) => a.role === 'reserve-asset')) return;
-  const all = await getAll<JournalEntry>(STORE.journalEntries);
+  const [all, reserves] = await Promise.all([
+    getAll<JournalEntry>(STORE.journalEntries),
+    getAll<ReserveItem>(STORE.reserves),
+  ]);
   const others = all.filter((e) => e.id !== entry.id); // 編集時は自分自身を二重計上しない
-  const short = reserveBalanceShortfall(entry, accounts, others);
+  // 集約口座は目的(reserveId)単位で不足判定するため reserves を渡す。
+  const short = reserveBalanceShortfall(entry, accounts, others, reserves);
   if (short) throw new LedgerError('error.reserve.shortfall', { name: short.name });
 }
 

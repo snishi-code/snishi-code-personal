@@ -4,7 +4,7 @@ import {
   journalEntrySchema,
   ledgerExportPackageSchema,
 } from '../src/domain/schema';
-import { APP_ID, SCHEMA_VERSION } from '../src/domain/constants';
+import { APP_ID, RESERVE_LEDGER_ACCOUNT_ID, SCHEMA_VERSION } from '../src/domain/constants';
 import { buildAllocation } from '../src/domain/allocation';
 
 const validEntry = {
@@ -557,9 +557,10 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
     createdAt: 'x',
     updatedAt: 'x',
   };
+  // 集約モデル: 取り置きは目的別科目でなく単一の集約口座に寄せる（id は集約口座固定）。
   const reserveAcc = {
-    id: 'reserveAcc',
-    name: '結婚資金口座',
+    id: RESERVE_LEDGER_ACCOUNT_ID,
+    name: '取り置き資金',
     type: 'asset',
     role: 'reserve-asset',
     archived: false,
@@ -602,7 +603,7 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
         {
           id: 'r1',
           name: '結婚資金',
-          reserveAccountId: 'reserveAcc',
+          reserveAccountId: RESERVE_LEDGER_ACCOUNT_ID,
           createdAt: 'x',
           updatedAt: 'x',
         },
@@ -667,6 +668,29 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
   it('目的別資金の科目の role が reserve-asset でないと invalid（bank は daily-asset）', () => {
     const bad = cfPkg({
       reserves: [{ id: 'r1', name: 'x', reserveAccountId: 'bank', createdAt: 'x', updatedAt: 'x' }],
+    });
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+  it('集約モデルの不変条件: 目的別の reserve-asset 科目（集約口座以外）は invalid（import で再導入させない）', () => {
+    // 集約口座でない reserve-asset 科目を足し、それを reserveAccountId に使う = 旧モデル。
+    const bad = cfPkg({
+      accounts: [
+        bank,
+        card,
+        reserveAcc,
+        {
+          id: 'per-purpose',
+          name: '旅行積立',
+          type: 'asset',
+          role: 'reserve-asset',
+          archived: false,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+      reserves: [
+        { id: 'r1', name: '旅行', reserveAccountId: 'per-purpose', createdAt: 'x', updatedAt: 'x' },
+      ],
     });
     expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
   });

@@ -7,8 +7,8 @@ import {
   transferFlowValid,
   validateSimpleEntry,
 } from '../src/domain/entry';
-import type { Account, JournalEntry } from '../src/domain/types';
-import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
+import type { Account, JournalEntry, ReserveItem } from '../src/domain/types';
+import { DEFAULT_MANAGEMENT_SCOPE_ID, RESERVE_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 
 describe('reserveBalanceShortfall（目的別資金の残高不足）', () => {
   const accounts: Account[] = [
@@ -96,6 +96,101 @@ describe('reserveBalanceShortfall（目的別資金の残高不足）', () => {
       updatedAt: 'x',
     };
     expect(reserveBalanceShortfall(incomeToReserve, accounts, [funding])).toBeNull();
+  });
+});
+
+describe('reserveBalanceShortfall（集約モデル: 目的(reserveId)単位で判定）', () => {
+  const accounts: Account[] = [
+    {
+      id: RESERVE_LEDGER_ACCOUNT_ID,
+      name: '取り置き資金',
+      type: 'asset',
+      role: 'reserve-asset',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    },
+    {
+      id: 'cash',
+      name: '現金',
+      type: 'asset',
+      role: 'daily-asset',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    },
+    {
+      id: 'exp',
+      name: '変動費',
+      type: 'expense',
+      role: 'expense-category',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    },
+  ];
+  const reserves: ReserveItem[] = [
+    {
+      id: 'trip',
+      name: '旅行',
+      reserveAccountId: RESERVE_LEDGER_ACCOUNT_ID,
+      createdAt: 'x',
+      updatedAt: 'x',
+    },
+    {
+      id: 'old',
+      name: '老後',
+      reserveAccountId: RESERVE_LEDGER_ACCOUNT_ID,
+      createdAt: 'x',
+      updatedAt: 'x',
+    },
+  ];
+  // 集約口座へ: 老後に 50,000 取り置き（旅行は 0）。
+  const fundOld: JournalEntry = {
+    id: 'f-old',
+    date: '2026-01-10',
+    description: '老後へ取り置き',
+    kind: 'normal',
+    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
+    metadata: { reserveId: 'old' },
+    lines: [
+      { accountId: RESERVE_LEDGER_ACCOUNT_ID, side: 'debit', amount: 50000 },
+      { accountId: 'cash', side: 'credit', amount: 50000 },
+    ],
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  const spendFromTrip: JournalEntry = {
+    id: 'spend',
+    date: '2026-02-01',
+    description: '旅行から支払い',
+    kind: 'normal',
+    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
+    metadata: { reserveId: 'trip' },
+    lines: [
+      { accountId: 'exp', side: 'debit', amount: 30000 },
+      { accountId: RESERVE_LEDGER_ACCOUNT_ID, side: 'credit', amount: 30000 },
+    ],
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+
+  it('旅行が 0 円なら、集約口座に老後の残高があっても旅行からの支出は不足になる', () => {
+    const short = reserveBalanceShortfall(spendFromTrip, accounts, [fundOld], reserves);
+    expect(short).not.toBeNull();
+    expect(short?.name).toBe('旅行'); // 目的名で返す
+  });
+  it('その目的に残高があれば不足しない（老後から 40,000）', () => {
+    const spendFromOld: JournalEntry = {
+      ...spendFromTrip,
+      id: 'spend2',
+      metadata: { reserveId: 'old' },
+      lines: [
+        { accountId: 'exp', side: 'debit', amount: 40000 },
+        { accountId: RESERVE_LEDGER_ACCOUNT_ID, side: 'credit', amount: 40000 },
+      ],
+    };
+    expect(reserveBalanceShortfall(spendFromOld, accounts, [fundOld], reserves)).toBeNull();
   });
 });
 

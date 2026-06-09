@@ -8,8 +8,9 @@
 import { newId } from './ids';
 import { accountBalance, filterByDateRange } from './accounting';
 import type { AccountRole } from './accountRoles';
-import { DEFAULT_MANAGEMENT_SCOPE_ID } from './constants';
-import type { Account, EntryMetadata, JournalEntry, JournalEntryKind } from './types';
+import { DEFAULT_MANAGEMENT_SCOPE_ID, RESERVE_LEDGER_ACCOUNT_ID } from './constants';
+import type { Account, EntryMetadata, JournalEntry, JournalEntryKind, ReserveItem } from './types';
+import { reserveBalances } from './reserve';
 import { nowIso } from '../util/time';
 
 const TRANSFER_FUND_ROLES: AccountRole[] = ['daily-asset', 'reserve-asset'];
@@ -44,6 +45,7 @@ export function reserveBalanceShortfall(
   entry: JournalEntry,
   accounts: Account[],
   otherEntries: JournalEntry[],
+  reserves: ReserveItem[] = [],
 ): { accountId: string; name: string } | null {
   const byId = new Map(accounts.map((a) => [a.id, a]));
   const reduced = new Set(
@@ -54,6 +56,16 @@ export function reserveBalanceShortfall(
   if (reduced.size === 0) return null;
   const asOf = filterByDateRange([...otherEntries, entry], undefined, entry.date);
   for (const accId of reduced) {
+    // 集約モデル: 取り置き集約口座は口座残高（全目的の合計）でなく、その仕訳の目的(reserveId)
+    // 単位の残高で不足判定する（旅行が 0 でも老後の残高で払えてしまう不具合を防ぐ）。
+    if (accId === RESERVE_LEDGER_ACCOUNT_ID && entry.metadata?.reserveId) {
+      const rid = entry.metadata.reserveId;
+      if ((reserveBalances(asOf).get(rid) ?? 0) < 0) {
+        const name = reserves.find((r) => r.id === rid)?.name ?? byId.get(accId)?.name ?? accId;
+        return { accountId: accId, name };
+      }
+      continue;
+    }
     if (accountBalance(accId, 'asset', asOf) < 0) {
       return { accountId: accId, name: byId.get(accId)?.name ?? accId };
     }
