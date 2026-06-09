@@ -719,8 +719,6 @@
       "id": "res-travel",
       "name": "旅行資金",
       "reserveAccountId": "reserve-ledger",
-      "targetAmount": 200000,
-      "targetDate": "2026-12-31",
       "note": "夏の旅行用",
       "createdAt": "2026-01-01T00:00:00.000Z",
       "updatedAt": "2026-01-28T00:00:00.000Z"

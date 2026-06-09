@@ -103,8 +103,6 @@ interface LedgerContextValue {
   /** 目的別資金（枠 + reserve-asset 科目）を作成し、作成された ReserveItem を返す。 */
   createReserve: (input: {
     name: string;
-    targetAmount?: number;
-    targetDate?: string;
     note?: string;
     parentAccountId?: string;
   }) => Promise<ReserveItem>;

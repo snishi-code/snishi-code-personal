@@ -235,14 +235,18 @@ export function Settings({ onNavigate }: { onNavigate: (screen: Screen) => void 
       <div className="card card--pad">
         <TextInput label={t('settings.ledgerName')} value={ledgerName} onChange={setLedgerName} />
         <TextInput label={t('settings.currency')} value={currency} onChange={setCurrency} />
-        <TextInput
-          label={t('settings.expectedReturn')}
-          inputMode="numeric"
-          value={returnPct}
-          hint={t('settings.expectedReturnHint')}
-          onChange={(v) => setReturnPct(v.replace(/[^\d.]/g, ''))}
-          dataUi={UI.settings.expectedReturn}
-        />
+        {/* 期待年利は旧・資金目標(legacy FundingGoal)の必要積立額計算用。取り置き資産（短期の封筒分け）
+            には適用しないため、legacy データがあるときだけ出す（B=長期目標/投資は将来タスク）。 */}
+        {(ledger?.fundingGoals?.length ?? 0) > 0 ? (
+          <TextInput
+            label={t('settings.expectedReturn')}
+            inputMode="numeric"
+            value={returnPct}
+            hint={t('settings.expectedReturnHint')}
+            onChange={(v) => setReturnPct(v.replace(/[^\d.]/g, ''))}
+            dataUi={UI.settings.expectedReturn}
+          />
+        ) : null}
         <button type="button" className="btn" onClick={saveLedgerSettings}>
           {t('common.save')}
         </button>

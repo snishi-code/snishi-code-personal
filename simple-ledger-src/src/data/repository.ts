@@ -797,14 +797,13 @@ function findOrCreateReserveLedgerAccount(
 }
 
 /**
- * 取り置き枠(ReserveItem)を登録する。**目的ごとの勘定科目は作らない**——残高は単一の集約口座
- * （reserve-ledger）に寄せ、目的別残高は取り置き仕訳の `metadata.reserveId` 集計で導出する。
- * 実際の「取り置く」振替（資金口座 → 集約口座・reserveId 付き）は呼び出し側（EntrySheet）で保存する。
+ * 取り置き枠(ReserveItem)を登録する。取り置きは「短期の封筒分け」（A）: 目標額・目標期限・利回りは持たない。
+ * **目的ごとの勘定科目は作らない**——残高は単一の集約口座（reserve-ledger）に寄せ、目的別残高は取り置き仕訳の
+ * `metadata.reserveId` 集計で導出する。実際の「取り置く」振替は呼び出し側（EntrySheet）で保存する。
+ * 注: `ReserveItem.targetAmount/targetDate` は import 後方互換のため schema には optional で残すが、新規作成では持たせない。
  */
 export async function createReserve(input: {
   name: string;
-  targetAmount?: number;
-  targetDate?: string;
   note?: string;
   /** どの資金口座から取り置いたか（daily-asset）。未指定なら預金等の代表 daily-asset を既定にする。 */
   parentAccountId?: string;
@@ -823,8 +822,6 @@ export async function createReserve(input: {
     name: input.name,
     reserveAccountId: ledger.id,
     ...(validParent !== undefined ? { parentAccountId: validParent } : {}),
-    ...(input.targetAmount !== undefined ? { targetAmount: input.targetAmount } : {}),
-    ...(input.targetDate !== undefined ? { targetDate: input.targetDate } : {}),
     ...(input.note && input.note.trim() !== '' ? { note: input.note.trim() } : {}),
     createdAt: ts,
     updatedAt: ts,

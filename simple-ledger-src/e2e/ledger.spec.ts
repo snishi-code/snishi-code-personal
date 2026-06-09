@@ -416,7 +416,7 @@ test('資金繰り: 取り置き資金を作成できる（CF は確認専用・
   // CF 画面に予定の独立追加ボタンは無い（入力はホームに一本化）。
   await expect(page.locator(ui('cashflow.schedule.create'))).toHaveCount(0);
 
-  // 取り置き資金は下部の「取り置き資金・資金目標」を開いてから追加する
+  // 取り置き資金は下部の「取り置き資金」セクションを開いてから追加する
   await page.locator(ui('cashflow.advanced.toggle')).click();
   await page.locator(ui('cashflow.reserve.create')).click();
   await page.locator(ui('cashflow.reserve.name')).fill('結婚資金');

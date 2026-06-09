@@ -217,10 +217,10 @@ export const ja = {
   'cashflow.scheduleSecondaryTitle': '分割・定期の返済予定',
   'cashflow.scheduleSecondaryHint':
     '継続コストの負債払いや、借入（振替）の分割返済から自動で作られる予定です（読み取り専用）。',
-  'cashflow.advancedTitle': '取り置き資金・資金目標',
+  'cashflow.advancedTitle': '取り置き資金',
   'cashflow.advancedHint':
-    '自由資金から控除する取り置きと、長期の積立計画です（CF の主役ではなく補助情報）。',
-  'cashflow.advancedToggle': '取り置き資金・資金目標を開く',
+    '近い支払い予定に備えて、預金から自由資金を取り分けます（CF の主役ではなく補助情報）。',
+  'cashflow.advancedToggle': '取り置き資金を開く',
   'cashflow.form.title': '入出金予定',
   'cashflow.form.name': '項目',
   'cashflow.form.namePlaceholder': '例: カード引き落とし / 給料',
@@ -274,15 +274,13 @@ export const ja = {
   'reserves.deleteConfirmBody':
     '「{name}」の枠を削除します。取り置いた資金や仕訳は残ります（科目は残ります）。',
 
-  // 資金目標（長期の積立計画）
-  'fundingGoal.title': '資金目標',
-  'fundingGoal.intro':
-    '将来の大きな支出（車・老後・入院費など）に向けて、目標額・期限から必要な毎月の積立額を見ます。',
+  // 資金目標（旧概念・長期の積立計画。現在は新規作成しない。確認・削除のみ。）
+  'fundingGoal.title': '資金目標（旧）',
+  'fundingGoal.intro': '以前の「資金目標」です。確認と削除のみできます（新規は作成しません）。',
   'fundingGoal.add': '目標を追加',
-  'fundingGoal.empty':
-    '資金目標はありません。新しい目標は「取り置き資金」に目標額・目標期限を付けて作成します。',
+  'fundingGoal.empty': '資金目標はありません。',
   'fundingGoal.legacyHint':
-    '以前の「資金目標」です。新規は取り置き資金に統合しました（取り置き資金に目標額・目標期限を付けてください）。ここでは確認と削除のみできます。',
+    '以前の「資金目標」です。長期の目標・投資前提の資金は今後あらためて扱います。ここでは確認と削除のみできます。',
   'fundingGoal.target': '目標',
   'fundingGoal.current': '現在',
   'fundingGoal.requiredMonthly': '必要な毎月の積立額',
