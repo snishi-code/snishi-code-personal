@@ -532,12 +532,12 @@ test('継続コスト入力の語彙・導線: 分類先カテゴリ／ローン
   await page.goto('./');
   await page.locator(ui('dashboard.entry.expense')).click();
 
-  // 入力順: 金額はお金の流れより上、項目はお金の流れより下（金額の前に項目を出さない）。
+  // 入力順: 項目は日付の下・金額の上、金額はお金の流れより上（日付 → 項目 → 金額 → お金の流れ）。
   const amountBox = await page.locator(ui('journal.entry.amount')).boundingBox();
   const flowBox = await page.locator(ui('journal.entry.flow')).boundingBox();
   const itemBox = await page.locator(ui('journal.entry.item')).boundingBox();
+  expect(itemBox && amountBox && itemBox.y < amountBox.y).toBe(true);
   expect(amountBox && flowBox && amountBox.y < flowBox.y).toBe(true);
-  expect(flowBox && itemBox && flowBox.y < itemBox.y).toBe(true);
 
   // ローン導線（左辺）はチェックボックスでなくボタンで、お金の流れの中に置く。
   await expect(
