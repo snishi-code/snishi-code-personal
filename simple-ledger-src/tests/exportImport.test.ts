@@ -5,7 +5,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   createAllocation,
-  createFundingGoal,
   createMonthlyCost,
   loadLedger,
   upsertEntry,
@@ -162,25 +161,6 @@ describe('月額化コストの export/import', () => {
   });
 });
 
-describe('資金目標の export/import', () => {
-  it('資金目標を含む台帳を round-trip できる', async () => {
-    await loadLedger();
-    await createFundingGoal({
-      name: '車',
-      targetAmount: 3000000,
-      targetDate: '2031-06-30',
-      currentAmount: 100000,
-    });
-    const seeded = await loadLedger();
-    const text = exportToJsonText(seeded);
-    const outcome = await importFromJsonText(text);
-    expect(outcome.kind).toBe('ok');
-    const reloaded = await loadLedger();
-    expect(reloaded.fundingGoals).toHaveLength(1);
-    expect(reloaded.fundingGoals[0]).toMatchObject({ name: '車', targetAmount: 3000000 });
-  });
-});
-
 describe('restoreFromSnapshot（fail-closed）', () => {
   it('有効なスナップショットを復元できる', async () => {
     const ledger = await seedWithEntry();
@@ -290,9 +270,11 @@ describe('テスト用フィクスチャ（loadSampleFixture）', () => {
     expect(after.monthlyCostItems.length).toBeGreaterThanOrEqual(1);
     expect(after.reserves.length).toBeGreaterThanOrEqual(1);
     expect(after.tags.length).toBeGreaterThanOrEqual(1);
-    expect(after.accounts.some((a) => a.name === '旅行資金' && a.role === 'reserve-asset')).toBe(
-      true,
-    );
+    // 集約モデル: reserve-asset 科目は単一の集約口座『取り置き資金』。目的名（旅行資金）は ReserveItem 側。
+    expect(
+      after.accounts.some((a) => a.name === '取り置き資金' && a.role === 'reserve-asset'),
+    ).toBe(true);
+    expect(after.reserves.some((r) => r.name === '旅行資金')).toBe(true);
     // 再読込しても永続化されている。
     const reloaded = await loadLedger();
     expect(reloaded.journalEntries.length).toBe(after.journalEntries.length);

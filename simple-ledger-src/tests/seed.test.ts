@@ -55,7 +55,7 @@ describe('fixture 投入の安全判定（初期 seed そのまま判定）', ()
   it('既定設定そのままなら isDefaultSettings は true、変更で false', () => {
     expect(isDefaultSettings(defaultSettings())).toBe(true);
     expect(isDefaultSettings({ ...defaultSettings(), ledgerName: 'わが家の家計' })).toBe(false);
-    expect(isDefaultSettings({ ...defaultSettings(), expectedAnnualReturnBps: 300 })).toBe(false);
+    expect(isDefaultSettings({ ...defaultSettings(), currency: 'USD' })).toBe(false);
   });
 });
 

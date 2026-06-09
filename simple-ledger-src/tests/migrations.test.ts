@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { migrateToCurrent } from '../src/domain/migrations';
-import { SCHEMA_VERSION } from '../src/domain/constants';
+import {
+  CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+  RESERVE_LEDGER_ACCOUNT_ID,
+  SCHEMA_VERSION,
+} from '../src/domain/constants';
 import type { LedgerExportPackage } from '../src/domain/types';
 
 function pkg(version: number): LedgerExportPackage {
@@ -21,7 +25,6 @@ function pkg(version: number): LedgerExportPackage {
     reserves: [],
     tags: [],
     monthlyCostItems: [],
-    fundingGoals: [],
     assetDisposals: [],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
   };
@@ -149,7 +152,7 @@ describe('migrateToCurrent', () => {
     ];
     const r = migrateToCurrent(v6 as unknown as LedgerExportPackage);
     expect(r.ok).toBe(true);
-    expect(r.data?.schemaVersion).toBe(13);
+    expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
     // 旧モデルの登録簿は空に。
     expect(r.data?.monthlyCostItems).toEqual([]);
     expect(r.data?.allocations).toEqual([]);
@@ -159,12 +162,37 @@ describe('migrateToCurrent', () => {
     expect(ids).toContain('plain');
     expect(ids).not.toContain('gen');
   });
-  it('v7 → v8 で fundingGoals を空配列で補う', () => {
-    const v7 = { ...pkg(7) } as Record<string, unknown>;
-    delete v7.fundingGoals;
-    const r = migrateToCurrent(v7 as unknown as LedgerExportPackage);
+  it('v15 → v16 で B 側レガシー（資金目標・取り置きの目標額/期限・期待年利）を落とす', () => {
+    const v15 = pkg(15) as unknown as Record<string, unknown>;
+    v15.fundingGoals = [{ id: 'g1', name: '老後', targetAmount: 5000000 }];
+    v15.reserves = [
+      {
+        id: 'r1',
+        name: '旅行',
+        reserveAccountId: 'reserve-ledger',
+        targetAmount: 200000,
+        targetDate: '2026-12-31',
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+    ];
+    v15.settings = {
+      ledgerName: '家計簿',
+      currency: 'JPY',
+      locale: 'ja',
+      expectedAnnualReturnBps: 500,
+    };
+    const r = migrateToCurrent(v15 as unknown as LedgerExportPackage);
     expect(r.ok).toBe(true);
-    expect(r.data?.fundingGoals).toEqual([]);
+    expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
+    // 資金目標・期待年利・取り置きの目標は消える。
+    expect((r.data as unknown as Record<string, unknown>).fundingGoals).toBeUndefined();
+    const res = r.data?.reserves[0] as unknown as Record<string, unknown>;
+    expect(res.targetAmount).toBeUndefined();
+    expect(res.targetDate).toBeUndefined();
+    expect(
+      (r.data?.settings as unknown as Record<string, unknown>).expectedAnnualReturnBps,
+    ).toBeUndefined();
   });
   it('v8 → v9 は恒等移行（version だけ前進し内容は不変）', () => {
     const v8 = pkg(8);
@@ -187,5 +215,158 @@ describe('migrateToCurrent', () => {
     expect(r.ok).toBe(true);
     expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
     expect(r.data?.assetDisposals).toEqual([]);
+  });
+  it('v13 → v14 で品目別 continuing-cost-asset 科目を集約台帳口座へ寄せる', () => {
+    const v13 = pkg(13) as unknown as Record<string, unknown>;
+    v13.accounts = [
+      {
+        id: 'pay',
+        name: '現金',
+        type: 'asset',
+        role: 'daily-asset',
+        archived: false,
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+      {
+        id: 'exp',
+        name: '変動費',
+        type: 'expense',
+        role: 'expense-category',
+        archived: false,
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+      // 旧モデルの品目別資産科目（2 件）。
+      {
+        id: 'cc-washer',
+        name: '洗濯機',
+        type: 'asset',
+        role: 'continuing-cost-asset',
+        archived: false,
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+      {
+        id: 'cc-youtube',
+        name: 'YouTube',
+        type: 'asset',
+        role: 'continuing-cost-asset',
+        archived: false,
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+    ];
+    v13.monthlyCostItems = [
+      {
+        id: 'm1',
+        name: '洗濯機',
+        managementScopeId: 'scope-personal',
+        kind: 'durable-asset',
+        amount: 240000,
+        costMonths: 84,
+        startMonth: '2026-01',
+        expenseAccountId: 'exp',
+        paymentSourceAccountId: 'pay',
+        recognitionCreditAccountId: 'cc-washer',
+        status: 'active',
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+      {
+        id: 'm2',
+        name: 'YouTube',
+        managementScopeId: 'scope-personal',
+        kind: 'subscription',
+        amount: 12000,
+        costMonths: 12,
+        startMonth: '2026-01',
+        expenseAccountId: 'exp',
+        paymentSourceAccountId: 'pay',
+        recognitionCreditAccountId: 'cc-youtube',
+        status: 'active',
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+    ];
+    const r = migrateToCurrent(v13 as unknown as LedgerExportPackage);
+    expect(r.ok).toBe(true);
+    expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
+    // 旧品目別科目は消え、集約口座が 1 件だけ。
+    const ccAccounts = (r.data?.accounts ?? []).filter((a) => a.role === 'continuing-cost-asset');
+    expect(ccAccounts).toHaveLength(1);
+    expect(ccAccounts[0]?.id).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+    expect((r.data?.accounts ?? []).some((a) => a.id === 'cc-washer')).toBe(false);
+    expect((r.data?.accounts ?? []).some((a) => a.id === 'cc-youtube')).toBe(false);
+    // 品目名は失われず、recognitionCreditAccountId は集約口座へ付け替わる。
+    const items = r.data?.monthlyCostItems ?? [];
+    expect(items.map((m) => m.name).sort()).toEqual(['YouTube', '洗濯機']);
+    expect(
+      items.every((m) => m.recognitionCreditAccountId === CONTINUOUS_COST_LEDGER_ACCOUNT_ID),
+    ).toBe(true);
+  });
+
+  it('v14 → v15 で目的別 reserve-asset 科目を集約口座へ寄せ、取り置き振替に reserveId を付ける', () => {
+    const v14 = pkg(14) as unknown as Record<string, unknown>;
+    const acc = (id: string, name: string, role: string, type = 'asset') => ({
+      id,
+      name,
+      type,
+      role,
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    v14.accounts = [
+      acc('bank', '預金', 'daily-asset'),
+      acc('res-trip', '旅行積立', 'reserve-asset'),
+      acc('res-car', '車の頭金', 'reserve-asset'),
+    ];
+    v14.reserves = [
+      {
+        id: 'r-trip',
+        name: '旅行積立',
+        reserveAccountId: 'res-trip',
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+      {
+        id: 'r-car',
+        name: '車の頭金',
+        reserveAccountId: 'res-car',
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+    ];
+    // 取り置き振替（預金 → 旧目的別口座）。
+    v14.journalEntries = [
+      {
+        id: 'mv-trip',
+        date: '2026-01-05',
+        description: '預金 → 旅行積立',
+        kind: 'normal',
+        lines: [
+          { accountId: 'res-trip', side: 'debit', amount: 20000 },
+          { accountId: 'bank', side: 'credit', amount: 20000 },
+        ],
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+    ];
+    const r = migrateToCurrent(v14 as unknown as LedgerExportPackage);
+    expect(r.ok).toBe(true);
+    expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
+    // 旧目的別口座は消え、集約口座が 1 件だけ。
+    const resAccts = (r.data?.accounts ?? []).filter((a) => a.role === 'reserve-asset');
+    expect(resAccts).toHaveLength(1);
+    expect(resAccts[0]?.id).toBe(RESERVE_LEDGER_ACCOUNT_ID);
+    // ReserveItem は集約口座へ付け替え、目的名は残る。
+    const reserves = r.data?.reserves ?? [];
+    expect(reserves.map((x) => x.name).sort()).toEqual(['旅行積立', '車の頭金']);
+    expect(reserves.every((x) => x.reserveAccountId === RESERVE_LEDGER_ACCOUNT_ID)).toBe(true);
+    // 取り置き振替は集約口座参照へ差し替え + reserveId タグ付け。
+    const mv = (r.data?.journalEntries ?? []).find((e) => e.id === 'mv-trip')!;
+    expect(mv.metadata?.reserveId).toBe('r-trip');
+    expect(mv.lines.find((l) => l.side === 'debit')?.accountId).toBe(RESERVE_LEDGER_ACCOUNT_ID);
   });
 });

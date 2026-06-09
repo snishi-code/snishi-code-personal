@@ -3,18 +3,18 @@
  * 取り置き資金（取り置き枠）の管理を行う。入力はホームに一本化し、この画面は確認専用。
  * 「いつ費用認識するか(按分)」とは別概念で、「いつ現金が動くか」を扱う。
  *
- * 表示終了日（任意の日付）まで投影する。取り置き資金は「資金目標」を統合した枠で、任意の
- * 目標額・目標日から必要な毎月の積立額を出す（現在額は口座残高から自動）。
+ * 表示終了日（任意の日付）まで投影する。取り置き資金は短期の封筒分け（名前＋残高のみ）で、
+ * 目標額・利回りなどの長期目標機能は持たない。現在額は集約口座の reserveId 別残高から自動。
  */
 import { useMemo, useState } from 'react';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet } from '../../domain/accounting';
 import { cashDeltaOfEntry, liquidAssetTotal, projectCashflow } from '../../domain/cashflow';
 import { continuousCostEntries } from '../../domain/continuousCost';
-import { goalRequiredMonthly, reserveRequiredMonthly } from '../../domain/fundingGoal';
+import { reserveBalances } from '../../domain/reserve';
 import { addMonthsToDate } from '../../domain/allocation';
-import { currentYearMonth, todayLocal } from '../../util/time';
-import type { CashflowSchedule, FundingGoal, ReserveItem } from '../../domain/types';
+import { todayLocal } from '../../util/time';
+import type { CashflowSchedule, ReserveItem } from '../../domain/types';
 import { TextInput } from '../Field';
 import { ReserveSheet } from '../ReserveSheet';
 import { ConfirmDialog } from '../ConfirmDialog';
@@ -31,30 +31,22 @@ function shortDateLabel(date: string): string {
 }
 
 export function Cashflow() {
-  const { ledger, postSchedule, removeSchedule, createReserve, removeReserve, removeFundingGoal } =
-    useLedger();
+  const { ledger, postSchedule, removeSchedule, createReserve, removeReserve } = useLedger();
   const today = todayLocal();
   const [untilDate, setUntilDate] = useState(() => addMonthsToDate(todayLocal(), 6));
   const [reserveOpen, setReserveOpen] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [pendingSchedule, setPendingSchedule] = useState<CashflowSchedule | null>(null);
   const [pendingReserve, setPendingReserve] = useState<ReserveItem | null>(null);
-  const [pendingGoal, setPendingGoal] = useState<FundingGoal | null>(null);
-
-  const { year, month } = currentYearMonth();
-  const currentYm = `${year}-${String(month).padStart(2, '0')}`;
-  const returnBps = ledger?.settings.expectedAnnualReturnBps ?? 0;
-  const goals = ledger?.fundingGoals ?? [];
 
   const currency = ledger?.settings.currency ?? 'JPY';
 
-  const { projection, balById, liabBalById, futureRows } = useMemo(() => {
+  const { projection, liabBalById, futureRows } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     // 現在残高は導出専用 entries（実仕訳 + 継続コストの仮想funding/認識）で見る
     // （現金払いの継続コストは funding で資金が減る）。
     const entries = ledger?.derivedEntries ?? [];
     const items = ledger?.monthlyCostItems ?? [];
-    const reserves = ledger?.reserves ?? [];
     const schedules = ledger?.cashflowSchedules ?? [];
     const bs = deriveBalanceSheet(accounts, entries, today);
     const byId = new Map(bs.assets.map((a) => [a.account.id, a.balance] as const));
@@ -75,7 +67,8 @@ export function Cashflow() {
       bs.assets.map((a) => a.account.id).filter((id) => !liquidIds.has(id)),
     );
     const totalAssets = liquidAssetTotal(bs.assets, nonLiquidAssetIds);
-    const reserveBalance = reserves.reduce((s, r) => s + (byId.get(r.reserveAccountId) ?? 0), 0);
+    // 取り置き総額 = reserve-asset 科目（聖域化で単一の集約口座）の残高合計。
+    const reserveBalance = [...reserveIds].reduce((s, id) => s + (byId.get(id) ?? 0), 0);
     // 未来日付（date > today）の仕訳で現金が動くもの = CF に取り込む（ホーム入力が自然に反映される）。
     // delta=総資金の純増減（資金↔資金/資金↔取り置きの振替は 0）、reserveDelta=取り置き残高の純増減
     //（普通預金→取り置き資金 なら +amount で自由資金が減る）、amount=一覧表示用の取引金額（借方合計）。
@@ -101,7 +94,6 @@ export function Cashflow() {
       }))
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     return {
-      balById: byId,
       liabBalById: liabById,
       futureRows: future,
       projection: projectCashflow({
@@ -122,6 +114,8 @@ export function Cashflow() {
   const accountName = (id: string): string =>
     (ledger?.accounts ?? []).find((a) => a.id === id)?.name ?? '—';
   const reserves = ledger?.reserves ?? [];
+  // 目的別残高（reserveId 集計）。集約口座の口座残高は全目的の合計なので、個別表示はこちらを使う。
+  const resBalById = useMemo(() => reserveBalances(ledger?.journalEntries ?? []), [ledger]);
   const freeTrend: TrendPoint[] = projection.points.map((p, i) => ({
     key: `${p.date}-${i}`,
     label: shortDateLabel(i === 0 ? today : p.date),
@@ -342,7 +336,7 @@ export function Cashflow() {
         </ul>
       )}
 
-      {/* 取り置き資金・資金目標（補助情報・下部に畳む） */}
+      {/* 取り置き資金（短期の封筒分け・補助情報・下部に畳む） */}
       <button
         type="button"
         className="collapse-toggle"
@@ -358,7 +352,7 @@ export function Cashflow() {
         <div className="stack">
           <p className="field__hint">{t('cashflow.advancedHint')}</p>
 
-          {/* 取り置き資金（任意で目標額・目標日。現在額は口座残高から自動・必要月額を表示） */}
+          {/* 取り置き資金（短期の封筒分け）: 名前 + 現在残高 + 削除のみ。目標額/期限/必要積立額は持たない。 */}
           <div
             className="section-label"
             style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
@@ -380,26 +374,15 @@ export function Cashflow() {
           ) : (
             <ul className="card list" data-ui={UI.cashflow.reserveList}>
               {reserves.map((r) => {
-                const balance = balById.get(r.reserveAccountId) ?? 0;
-                const required = reserveRequiredMonthly(r, balance, currentYm, returnBps);
+                // 目的別残高は集約口座の口座残高でなく、reserveId 集計で導出する（聖域化・集約モデル）。
+                const balance = resBalById.get(r.id) ?? 0;
                 return (
                   <li key={r.id} className="list__item">
                     <div className="list__main">
                       <div className="list__title">{r.name}</div>
                       <div className="list__sub">
                         {t('reserves.balance')}: <Money amount={balance} currency={currency} />
-                        {r.targetAmount !== undefined
-                          ? `（${t('reserves.targetOf', { target: r.targetAmount.toLocaleString('ja-JP') })}${
-                              r.targetDate ? `・${r.targetDate}` : ''
-                            }）`
-                          : ''}
                       </div>
-                      {r.targetAmount !== undefined && r.targetDate !== undefined ? (
-                        <div className="list__sub">
-                          {t('reserves.requiredMonthly')}:{' '}
-                          <Money amount={required} currency={currency} />
-                        </div>
-                      ) : null}
                     </div>
                     <button
                       type="button"
@@ -414,67 +397,7 @@ export function Cashflow() {
               })}
             </ul>
           )}
-
-          {/* 資金目標（旧概念・読み取り専用）。新規は取り置き資金へ統合。残データの確認/削除のみ。 */}
-          {goals.length > 0 ? (
-            <>
-              <p className="section-label">{t('fundingGoal.title')}</p>
-              <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
-                {t('fundingGoal.legacyHint')}
-              </p>
-              <ul className="card list" data-ui={UI.cashflow.goalList}>
-                {goals.map((g) => (
-                  <li key={g.id} className="list__item">
-                    <div className="list__main">
-                      <div className="list__title">{g.name}</div>
-                      <div className="list__sub">
-                        {g.targetDate}・{t('fundingGoal.target')}{' '}
-                        <Money amount={g.targetAmount} currency={currency} />
-                        {g.currentAmount > 0 ? (
-                          <>
-                            {' '}
-                            / {t('fundingGoal.current')}{' '}
-                            <Money amount={g.currentAmount} currency={currency} />
-                          </>
-                        ) : null}
-                      </div>
-                      <div className="list__sub">
-                        {t('fundingGoal.requiredMonthly')}:{' '}
-                        <Money
-                          amount={goalRequiredMonthly(g, currentYm, returnBps)}
-                          currency={currency}
-                        />
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => setPendingGoal(g)}
-                      aria-label={`${t('common.delete')}: ${g.name}`}
-                    >
-                      <Icon name="trash" size={18} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : null}
         </div>
-      ) : null}
-
-      {pendingGoal ? (
-        <ConfirmDialog
-          title={t('fundingGoal.deleteConfirmTitle')}
-          body={t('fundingGoal.deleteConfirmBody', { name: pendingGoal.name })}
-          confirmLabel={t('common.delete')}
-          danger
-          onCancel={() => setPendingGoal(null)}
-          onConfirm={async () => {
-            const g = pendingGoal;
-            setPendingGoal(null);
-            await removeFundingGoal(g.id).catch(() => undefined);
-          }}
-        />
       ) : null}
 
       {reserveOpen ? (

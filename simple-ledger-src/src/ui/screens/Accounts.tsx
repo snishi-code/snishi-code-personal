@@ -6,6 +6,7 @@ import { useLedger } from '../../state/store';
 import { accountBalance } from '../../domain/accounting';
 import { referencedAccountIds } from '../../domain/accountRefs';
 import { ACCOUNT_TYPES, type Account } from '../../domain/types';
+import { isInternalRole } from '../../domain/accountRoles';
 import { accountRoleLabel, accountTypeLabel } from '../accountOptions';
 import { AccountSheet } from './AccountSheet';
 import { ConfirmDialog } from '../ConfirmDialog';
@@ -15,7 +16,18 @@ import { nowIso } from '../../util/time';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 
-export function Accounts() {
+/**
+ * 勘定科目管理。単独画面のほか、「補正・勘定科目」(Adjustments) 内に埋め込んで使う（embedded）。
+ * embedded 時は画面見出し(h1)でなく section-label を出し、各 BS 科目行に「補正」ボタンを足す
+ * （onAdjust）。残高補正を独立フォームでなく各科目から開く導線にするため。
+ */
+export function Accounts({
+  embedded = false,
+  onAdjust,
+}: {
+  embedded?: boolean;
+  onAdjust?: (account: Account) => void;
+} = {}) {
   const { ledger, saveAccount, removeAccount } = useLedger();
   const [editing, setEditing] = useState<Account | null>(null);
   const [creating, setCreating] = useState(false);
@@ -34,17 +46,17 @@ export function Accounts() {
         reserves: ledger?.reserves ?? [],
         allocations: ledger?.allocations ?? [],
         monthlyCostItems: ledger?.monthlyCostItems ?? [],
-        fundingGoals: ledger?.fundingGoals ?? [],
       }),
     [ledger],
   );
 
   const byType = useMemo(() => {
     const list = ledger?.accounts ?? [];
+    // 内部集約・自動生成の役割（継続コスト台帳など）はユーザー編集対象でないため管理一覧に出さない。
     return ACCOUNT_TYPES.map((type) => ({
       type,
       accounts: list
-        .filter((a) => a.type === type && (showArchived || !a.archived))
+        .filter((a) => a.type === type && !isInternalRole(a.role) && (showArchived || !a.archived))
         .sort((a, b) => a.name.localeCompare(b.name, 'ja')),
     })).filter((g) => g.accounts.length > 0);
   }, [ledger, showArchived]);
@@ -58,9 +70,15 @@ export function Accounts() {
   return (
     <section aria-labelledby="accounts-title" data-ui={UI.accounts.view}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <h1 className="screen-title" id="accounts-title" style={{ marginBottom: 0 }}>
-          {t('accounts.title')}
-        </h1>
+        {embedded ? (
+          <p className="section-label" id="accounts-title" style={{ marginBottom: 0 }}>
+            {t('accounts.title')}
+          </p>
+        ) : (
+          <h1 className="screen-title" id="accounts-title" style={{ marginBottom: 0 }}>
+            {t('accounts.title')}
+          </h1>
+        )}
         <button
           type="button"
           className="btn btn--primary"
@@ -112,6 +130,19 @@ export function Accounts() {
                       </div>
                     </div>
                     <div className="row-actions">
+                      {onAdjust && (account.type === 'asset' || account.type === 'liability') ? (
+                        <button
+                          type="button"
+                          className="btn btn--ghost"
+                          style={{ minHeight: 36 }}
+                          onClick={() => onAdjust(account)}
+                          aria-label={`${t('adjust.save')}: ${account.name}`}
+                          data-ui={UI.accounts.adjust}
+                        >
+                          <Icon name="adjust" size={16} />
+                          {t('adjust.rowAction')}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="icon-btn"

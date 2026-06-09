@@ -14,12 +14,9 @@ import { useDirtyGuard } from '../useDirtyGuard';
 import { SelectInput, TextArea, TextInput } from '../Field';
 import { AccountPicker } from '../AccountPicker';
 import { TagPicker } from '../TagPicker';
-import { ReserveSheet } from '../ReserveSheet';
 import { LiabilitySheet } from '../LiabilitySheet';
 import { groupedAccountsByRole } from '../accountOptions';
-import type { AccountRole } from '../../domain/accountRoles';
 import { tagsForEntry } from '../tagOptions';
-import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../../domain/constants';
 import {
   FORM_MODE_TITLE,
   MODE_FLOW,
@@ -29,7 +26,6 @@ import {
 } from '../entryModes';
 import { monthOf } from '../../domain/allocation';
 import { inferMonthlyCostKind } from '../../domain/monthlyCost';
-import { buildRepaymentSchedules } from '../../domain/cashflow';
 import { useLedger } from '../../state/store';
 import {
   reversalInput,
@@ -39,7 +35,8 @@ import {
   type EntryValidationError,
   type SimpleEntryInput,
 } from '../../domain/entry';
-import type { EntryMetadata, InputMode, JournalEntry } from '../../domain/types';
+import type { Account, EntryMetadata, InputMode, JournalEntry } from '../../domain/types';
+import { RESERVE_LEDGER_ACCOUNT_ID } from '../../domain/constants';
 import { Icon } from '../Icon';
 import { t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
@@ -80,14 +77,37 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const {
     ledger,
     saveEntry,
-    saveEntryWithSchedules,
     saveEntryWithFixedAssetMonthly,
     createContinuousCost,
     createReserve,
     saveAccount,
   } = useLedger();
   const accounts = ledger?.accounts ?? [];
+  const reserves = ledger?.reserves ?? [];
   const tags = ledger?.tags ?? [];
+  // 取り置き資金の目的別「擬似候補」。集約口座を直接出さず、目的ごとの選択肢を flow ピッカーに足す。
+  // value は `reserve:<reserveId>`。保存時に集約口座 + metadata.reserveId へ解決する。
+  const reserveOptionGroup = (): { type: 'asset'; label: string; accounts: Account[] } | null => {
+    if (reserves.length === 0) return null;
+    return {
+      type: 'asset',
+      label: t('reserves.title'),
+      accounts: reserves.map((r) => ({
+        id: `reserve:${r.id}`,
+        name: r.name,
+        type: 'asset' as const,
+        role: 'reserve-asset' as const,
+        archived: false,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      })),
+    };
+  };
+  // `reserve:<id>` 選択を集約口座 + reserveId へ解決する。
+  const resolveReserveSide = (id: string): { accountId: string; reserveId?: string } =>
+    id.startsWith('reserve:')
+      ? { accountId: RESERVE_LEDGER_ACCOUNT_ID, reserveId: id.slice('reserve:'.length) }
+      : { accountId: id };
   const scopes = ledger?.managementScopes ?? [];
   const instruments = ledger?.accountInstruments ?? [];
 
@@ -145,30 +165,20 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const paymentRole = accounts.find((a) => a.id === form.creditAccountId)?.role;
   const isLiabilityPayment =
     paymentRole === 'payment-liability' || paymentRole === 'other-liability';
-  // 振替で源泉(credit)が負債 = 借入・ローン実行。任意で分割返済予定を一緒に登録できる。
-  const isLoanDraw =
-    init.kind === 'create' &&
-    mode === 'transfer' &&
-    (paymentRole === 'payment-liability' || paymentRole === 'other-liability');
   // 詳細（メモ・タグ）は折りたたみ。編集時は既存値が見えるよう開いておく。
   const [showDetails, setShowDetails] = useState(init.kind === 'edit');
 
-  // 支出/振替で取り置き資金・負債は既定で候補に出さない。必要時だけトグルで表示し、その場で作る。
-  // 編集時に既選択が reserve/liability なら初期表示（includeId で常に見えるが状態も合わせる）。
-  const roleOf = (id: string) => accounts.find((a) => a.id === id)?.role;
-  const [showReserve, setShowReserve] = useState(() =>
-    [form.creditAccountId, form.debitAccountId].map(roleOf).includes('reserve-asset'),
-  );
-  const [showLiability, setShowLiability] = useState(() => {
-    const roles = [form.creditAccountId, form.debitAccountId].map(roleOf);
-    // 支出ではクレジットカード(payment-liability)は既定表示なのでトグル不要。
-    // トグルは other-liability(ローン等)用。振替では payment-liability も既定外なので選択時に開く。
-    return (
-      roles.includes('other-liability') ||
-      (mode !== 'expense' && roles.includes('payment-liability'))
-    );
-  });
-  const [reserveSheetOpen, setReserveSheetOpen] = useState(false);
+  // 取り置き資金・ローンはチェックボックスで候補を増やす方式を廃止し、継続コスト化(ccMode)と同じ
+  // 「フロー片側のピッカーをボタンで切り替える」挙動に寄せる。
+  //  - 振替の移動先(右辺): 「取り置き資産を作る」で名称入力へ切替（reserveMode）→ createReserve。
+  //  - 支出の支払い元(左辺): 「ローンを組む」で既存ローン選択 + 新規ローン作成へ切替（loanMode）。
+  // 既存の取り置き資金は両辺で常時選択できる（MODE_FLOW の allowedRoles に reserve-asset を既定で含める）。
+  const canCreateReserve = init.kind === 'create' && mode === 'transfer';
+  const [reserveMode, setReserveMode] = useState(false);
+  const [reserveName, setReserveName] = useState('');
+  const [reserveNameError, setReserveNameError] = useState(false);
+  const canArrangeLoan = init.kind === 'create' && mode === 'expense';
+  const [loanMode, setLoanMode] = useState(false);
   const [liabilitySheetOpen, setLiabilitySheetOpen] = useState(false);
 
   // 編集状態の検出: 入力フィールドのスナップショットを初期値と比較する。
@@ -178,6 +188,9 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     ccMode,
     ccTargetName,
     ccCategoryId,
+    reserveMode,
+    reserveName,
+    loanMode,
     fixedMonthly,
     monthlyCategoryId,
     monthsText,
@@ -219,11 +232,15 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     return mode; // create
   }
 
-  // 振替で項目未入力なら「移動元 → 移動先」を自動生成する。
+  // 振替で項目未入力なら「移動元 → 移動先」を自動生成する（取り置きは目的名で表示）。
+  function nameOfSide(id: string): string {
+    if (id.startsWith('reserve:'))
+      return reserves.find((r) => r.id === id.slice('reserve:'.length))?.name ?? '—';
+    return accounts.find((a) => a.id === id)?.name ?? '—';
+  }
   function effectiveForm(): SimpleEntryInput {
     if (mode !== 'transfer' || form.description.trim() !== '') return form;
-    const nameOf = (id: string) => accounts.find((a) => a.id === id)?.name ?? '—';
-    const auto = `${nameOf(form.creditAccountId)} → ${nameOf(form.debitAccountId)}`;
+    const auto = `${nameOfSide(form.creditAccountId)} → ${nameOfSide(form.debitAccountId)}`;
     return { ...form, description: auto };
   }
 
@@ -243,7 +260,16 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     // 保存時は常に「現在有効な管理区分」を明示的に載せる（区分セレクタが出ない単一区分でも
     // 実在する区分 id で保存する）。DEFAULT_MANAGEMENT_SCOPE_ID は最終フォールバックに留める。
     const base = effectiveForm();
-    const toSave = { ...base, managementScopeId: base.managementScopeId ?? scopes[0]?.id };
+    // 取り置き(reserve:)選択を集約口座 + reserveId へ解決する（目的別残高は reserveId 集計で出す）。
+    const srcResolved = resolveReserveSide(base.creditAccountId);
+    const dstResolved = resolveReserveSide(base.debitAccountId);
+    const selectedReserveId = srcResolved.reserveId ?? dstResolved.reserveId;
+    const toSave = {
+      ...base,
+      creditAccountId: srcResolved.accountId,
+      debitAccountId: dstResolved.accountId,
+      managementScopeId: base.managementScopeId ?? scopes[0]?.id,
+    };
 
     // 継続コスト（資産経由）: 行き先は「継続コスト対象（資産）」を自由入力し、認識先カテゴリは別フィールド。
     // 通常の simple entry は保存せず、createContinuousCost にルールを渡す（funding/recognition は仮想展開）。
@@ -301,6 +327,50 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       return;
     }
 
+    // 取り置き資産の新規作成（振替の移動先を「取り置き資産名入力」に切替えたとき）。
+    // 目的名ごとの勘定科目は増やさない（reserve-asset は内部ロール＝聖域化）。createReserve が
+    // 取り置き資金枠を作り、その枠の口座を移動先にして通常の振替仕訳を保存する。
+    const reserveActive = canCreateReserve && reserveMode;
+    if (reserveActive) {
+      const found: EntryValidationError[] = [];
+      if (toSave.date.trim() === '') found.push('date-required');
+      if (!Number.isInteger(toSave.amount) || toSave.amount < 1) found.push('amount-invalid');
+      if (toSave.creditAccountId === '') found.push('credit-required');
+      setErrors(found);
+      const nameBad = reserveName.trim() === '';
+      setReserveNameError(nameBad);
+      setFlowError(undefined);
+      if (found.length > 0 || nameBad) return;
+      setSubmitting(true);
+      try {
+        // 取り置き元（親口座）= 移動元の資金口座。残高は集約口座へ寄せ、目的は reserveId で識別。
+        const reserve = await createReserve({
+          name: reserveName.trim(),
+          parentAccountId: toSave.creditAccountId,
+        });
+        const srcName = accounts.find((a) => a.id === toSave.creditAccountId)?.name ?? '—';
+        // 自動命名は reserveMode 中の effectiveForm では行き先が空（'—'）になるため、ユーザーが
+        // 項目を打っていなければ「移動元 → 取り置き対象名」で作る。
+        const description =
+          form.description.trim() !== '' ? form.description : `${srcName} → ${reserveName.trim()}`;
+        const metadata: EntryMetadata = {
+          ...toSave.metadata,
+          inputMode: 'transfer',
+          reserveId: reserve.id,
+        };
+        await saveEntry({
+          ...toSave,
+          description,
+          debitAccountId: reserve.reserveAccountId,
+          metadata,
+        });
+        onClose();
+      } catch {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     const found = validateSimpleEntry(toSave);
     setErrors(found);
     const useFixedMonthly = canFixedMonthly && fixedMonthly;
@@ -310,8 +380,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     // 固定資産の継続コストは、月割り先の費用カテゴリが必須。
     const categoryBad = useFixedMonthly && monthlyCategoryId === '';
     setCategoryError(categoryBad);
-    // 返済トグルの必須検証: 固定資産月割り=負債払い / 借入振替=ローン実行。
-    const { accBad, countBad } = validateRepay(useFixedMonthly ? isLiabilityPayment : isLoanDraw);
+    // 返済トグルの必須検証: 固定資産月割りを負債で払うときだけ。
+    const { accBad, countBad } = validateRepay(useFixedMonthly && isLiabilityPayment);
     if (found.length > 0 || monthsBad || categoryBad || accBad || countBad) return;
     // 通常の支出でローン（other-liability）を支払い元にはできない（継続コスト化 or 借入の振替に限定）。
     if (mode === 'expense' && !useFixedMonthly) {
@@ -364,25 +434,12 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           },
         );
       } else {
-        const metadata: EntryMetadata = { ...toSave.metadata, inputMode: resolveInputMode() };
-        const entryInput = { ...toSave, metadata };
-        const repayCount = repayCountText === '' ? 0 : Number.parseInt(repayCountText, 10);
-        const useLoanRepay = isLoanDraw && repayToggle && repayAccountId !== '' && repayCount >= 1;
-        if (useLoanRepay) {
-          // 借入実行（借方 資金 / 貸方 負債）+ 分割返済予定（返済元 → 負債 の outflow）を一括保存。
-          const schedules = buildRepaymentSchedules({
-            title: toSave.description,
-            total: toSave.amount,
-            count: repayCount,
-            firstDueDate: repayStartDate || toSave.date,
-            fromAccountId: repayAccountId,
-            liabilityAccountId: toSave.creditAccountId,
-            managementScopeId: toSave.managementScopeId ?? DEFAULT_MANAGEMENT_SCOPE_ID,
-          });
-          await saveEntryWithSchedules(entryInput, schedules);
-        } else {
-          await saveEntry(entryInput, existing);
-        }
+        const metadata: EntryMetadata = {
+          ...toSave.metadata,
+          inputMode: resolveInputMode(),
+          ...(selectedReserveId ? { reserveId: selectedReserveId } : {}),
+        };
+        await saveEntry({ ...toSave, metadata }, existing);
       }
       onClose();
     } catch {
@@ -503,45 +560,91 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   };
 
   // お金の流れ（源泉 → 行き先）。簿記用語を出さず、左=貸方 / 右=借方。
+  // 取り置き資金は両辺で常時選択でき（MODE_FLOW の allowedRoles 既定）、チェックボックスは使わない。
+  // 支出の「ローンを組む」(左辺) / 振替の「取り置き資産を作る」(右辺) は継続コスト化と同じ片側切替挙動。
   const flowDef = isManual ? null : MODE_FLOW[mode as FlowMode];
   const renderFlow = () => {
     if (!flowDef) return null;
-    // トグルで明示したときだけ取り置き資金・負債を候補に足す（既選択は includeId で常に表示）。
-    const extras: AccountRole[] = [];
-    if (showReserve) extras.push('reserve-asset');
-    if (showLiability) {
-      // 支出は payment-liability が既定なのでトグルは other-liability(ローン等)を足す。振替は両方。
-      if (mode === 'expense') extras.push('other-liability');
-      else extras.push('payment-liability', 'other-liability');
-    }
-    // 支出は支払い方法(source)のみ拡張。振替は源泉/行き先の両方を拡張。
-    const srcExtra = mode === 'expense' || mode === 'transfer' ? extras : [];
-    const dstExtra = mode === 'transfer' ? extras : [];
-    const srcGroups = groupedAccountsByRole(
-      accounts,
-      [...flowDef.source.allowedRoles, ...srcExtra],
-      form.creditAccountId,
-    );
-    const dstGroups = groupedAccountsByRole(
-      accounts,
-      [...flowDef.destination.allowedRoles, ...dstExtra],
-      form.debitAccountId,
-    );
+    // 取り置き資金（目的別の擬似候補）を出す辺: 振替は両辺、支出は支払い元（左辺）。
+    const resGroup = reserveOptionGroup();
+    const srcReserve = resGroup && (mode === 'transfer' || mode === 'expense') ? [resGroup] : [];
+    const dstReserve = resGroup && mode === 'transfer' ? [resGroup] : [];
+    const srcGroups = [
+      ...groupedAccountsByRole(accounts, [...flowDef.source.allowedRoles], form.creditAccountId),
+      ...srcReserve,
+    ];
+    const dstGroups = [
+      ...groupedAccountsByRole(
+        accounts,
+        [...flowDef.destination.allowedRoles],
+        form.debitAccountId,
+      ),
+      ...dstReserve,
+    ];
+    // 「ローンを組む」切替時の支払い元候補（既存ローン = other-liability）。
+    const loanGroups = groupedAccountsByRole(accounts, ['other-liability'], form.creditAccountId);
     return (
       <div className="field" data-ui={UI.journal.entry.flow}>
         <span className="field__hint">{t(flowDef.flowLabelKey)}</span>
         <div className="flow">
           <div className="flow__side">
-            <AccountPicker
-              flat
-              label={t(flowDef.source.labelKey)}
-              required
-              value={form.creditAccountId}
-              groups={srcGroups}
-              onChange={(id) => setSide('credit', id)}
-              error={errorText(errors, 'credit-required') ?? sameAccount}
-              dataUi={UI.journal.entry.flowSource}
-            />
+            {canArrangeLoan && loanMode ? (
+              <>
+                {/* 左辺を「ローン選択/作成」へ切替。既存ローンを選ぶか、新しいローンを作成する。 */}
+                <AccountPicker
+                  flat
+                  label={t('entry.loanArrangePick')}
+                  required
+                  value={form.creditAccountId}
+                  groups={loanGroups}
+                  onChange={(id) => setSide('credit', id)}
+                  emptyText={t('entry.loanArrangeEmpty')}
+                  error={errorText(errors, 'credit-required') ?? sameAccount}
+                  dataUi={UI.journal.entry.flowSource}
+                />
+                <button
+                  type="button"
+                  className="collapse-toggle"
+                  onClick={() => setLiabilitySheetOpen(true)}
+                  data-ui={UI.journal.entry.liabilityCreate}
+                >
+                  <Icon name="plus" size={16} />
+                  {t('entry.loanArrangeCreate')}
+                </button>
+                <button
+                  type="button"
+                  className="collapse-toggle"
+                  onClick={() => setLoanMode(false)}
+                >
+                  {t('entry.loanArrangeBack')}
+                </button>
+              </>
+            ) : (
+              <>
+                <AccountPicker
+                  flat
+                  label={t(flowDef.source.labelKey)}
+                  required
+                  value={form.creditAccountId}
+                  groups={srcGroups}
+                  onChange={(id) => setSide('credit', id)}
+                  error={errorText(errors, 'credit-required') ?? sameAccount}
+                  dataUi={UI.journal.entry.flowSource}
+                />
+                {canArrangeLoan ? (
+                  // 支払い元（左辺）を「ローンを組む」へ切り替える単一導線。
+                  <button
+                    type="button"
+                    className="collapse-toggle"
+                    onClick={() => setLoanMode(true)}
+                    data-ui={UI.journal.entry.loanArrange}
+                  >
+                    <Icon name="plus" size={16} />
+                    {t('entry.loanArrange')}
+                  </button>
+                ) : null}
+              </>
+            )}
           </div>
           <div className="flow__arrow" aria-hidden="true">
             →
@@ -562,6 +665,27 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                 />
                 <button type="button" className="collapse-toggle" onClick={() => setCcMode(false)}>
                   {t('entry.ccBackToCategory')}
+                </button>
+              </>
+            ) : canCreateReserve && reserveMode ? (
+              <>
+                {/* 移動先を「取り置き資産名入力」へ切替。保存で createReserve（勘定科目は増やさない）。 */}
+                <TextInput
+                  label={t('entry.reserveTargetName')}
+                  required
+                  value={reserveName}
+                  placeholder={t('entry.reserveTargetName')}
+                  hint={t('entry.reserveTargetNameHint')}
+                  onChange={setReserveName}
+                  error={reserveNameError ? t('entry.error.description-required') : undefined}
+                  dataUi={UI.journal.entry.reserveName}
+                />
+                <button
+                  type="button"
+                  className="collapse-toggle"
+                  onClick={() => setReserveMode(false)}
+                >
+                  {t('entry.reserveBack')}
                 </button>
               </>
             ) : (
@@ -589,6 +713,21 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                   >
                     <Icon name="plus" size={16} />
                     {t('entry.ccToggle')}
+                  </button>
+                ) : null}
+                {canCreateReserve ? (
+                  // 移動先を「取り置き資産を作る」へ切り替える。タップで名称入力欄になる。
+                  <button
+                    type="button"
+                    className="collapse-toggle"
+                    onClick={() => {
+                      setReserveMode(true);
+                      if (reserveName.trim() === '') setReserveName(form.description);
+                    }}
+                    data-ui={UI.journal.entry.reserveCreate}
+                  >
+                    <Icon name="plus" size={16} />
+                    {t('entry.reserveCreate')}
                   </button>
                 ) : null}
               </>
@@ -651,19 +790,11 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     );
   };
 
-  // 行き先を「継続コスト対象」に切り替えたとき（ccMode）の詳細: 認識先カテゴリ・認識月数・継続購入。
+  // 行き先を「継続コスト対象」に切り替えたとき（ccMode）の詳細。
+  // 入力順は 対象名（流れの行き先）→ 月数 → 分類先カテゴリ → 継続・買い替え（日付・金額に続く自然な順）。
   const ccDetailField =
     canAllocate && ccMode ? (
       <div className="field">
-        <AccountPicker
-          label={t('entry.ccCategory')}
-          required
-          value={ccCategoryId}
-          groups={groupedAccountsByRole(accounts, ['expense-category'], ccCategoryId)}
-          onChange={setCcCategoryId}
-          error={categoryError ? t('entry.error.category-required') : undefined}
-          dataUi={UI.journal.entry.ccCategory}
-        />
         <TextInput
           label={t('entry.monthlyizeMonths')}
           required
@@ -673,6 +804,15 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           onChange={(v) => setMonthsText(v.replace(/[^\d]/g, ''))}
           error={monthsError ? t('entry.error.months-invalid') : undefined}
           dataUi={UI.journal.entry.allocateMonths}
+        />
+        <AccountPicker
+          label={t('entry.ccCategory')}
+          required
+          value={ccCategoryId}
+          groups={groupedAccountsByRole(accounts, ['expense-category'], ccCategoryId)}
+          onChange={setCcCategoryId}
+          error={categoryError ? t('entry.error.category-required') : undefined}
+          dataUi={UI.journal.entry.ccCategory}
         />
         <label
           style={{ display: 'inline-flex', gap: 8, alignItems: 'center', minHeight: 'var(--tap)' }}
@@ -796,125 +936,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       </div>
     ) : null;
 
-  // 借入・ローン実行（振替で源泉が負債）のとき、任意で分割返済予定を一緒に登録できる。
-  const loanRepaymentField = isLoanDraw ? (
-    <div className="field" data-ui={UI.journal.entry.loanRepayToggle}>
-      <label
-        style={{ display: 'inline-flex', gap: 8, alignItems: 'center', minHeight: 'var(--tap)' }}
-      >
-        <input
-          type="checkbox"
-          checked={repayToggle}
-          onChange={(e) => setRepayToggle(e.target.checked)}
-        />
-        {t('entry.loanRepayToggle')}
-      </label>
-      {repayToggle ? (
-        <div className="card card--pad" style={{ marginTop: 'var(--space-2)' }}>
-          <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
-            {t('entry.loanRepayNote')}
-          </p>
-          <AccountPicker
-            label={t('entry.loanRepayAccount')}
-            value={repayAccountId}
-            groups={groupedAccountsByRole(accounts, ['daily-asset'], repayAccountId)}
-            onChange={setRepayAccountId}
-            error={repayAccountError ? t('entry.error.repayAccount') : undefined}
-            dataUi={UI.journal.entry.loanRepayAccount}
-          />
-          <TextInput
-            label={t('entry.loanRepayCount')}
-            inputMode="numeric"
-            value={repayCountText}
-            onChange={(v) => setRepayCountText(v.replace(/[^\d]/g, ''))}
-            error={repayCountError ? t('entry.error.repayCount') : undefined}
-            dataUi={UI.journal.entry.loanRepayCount}
-          />
-          <TextInput
-            label={t('entry.loanRepayStart')}
-            type="date"
-            value={repayStartDate}
-            hint={t('entry.loanRepayStartHint')}
-            onChange={setRepayStartDate}
-            dataUi={UI.journal.entry.loanRepayStart}
-          />
-        </div>
-      ) : null}
-    </div>
-  ) : null;
-
-  // 支出/振替で、取り置き資金・負債を候補に出すトグルと、その場で作る導線。
-  // 既定では daily-asset 中心。取り置き資金が増えても通常入力を軽く保つ。
-  const flowExtras =
-    mode === 'expense' || mode === 'transfer' ? (
-      <div className="field stack" style={{ gap: 'var(--space-2)' }}>
-        <div
-          style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}
-        >
-          <label
-            style={{
-              display: 'inline-flex',
-              gap: 8,
-              alignItems: 'center',
-              minHeight: 'var(--tap)',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={showReserve}
-              onChange={(e) => setShowReserve(e.target.checked)}
-              data-ui={UI.journal.entry.reserveToggle}
-            />
-            {t('entry.reserveToggle')}
-          </label>
-          {mode === 'transfer' ? (
-            <button
-              type="button"
-              className="btn btn--ghost"
-              style={{ minHeight: 36 }}
-              onClick={() => setReserveSheetOpen(true)}
-              data-ui={UI.journal.entry.reserveCreate}
-            >
-              <Icon name="plus" size={16} />
-              {t('entry.reserveCreate')}
-            </button>
-          ) : null}
-        </div>
-        <div
-          style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}
-        >
-          <label
-            style={{
-              display: 'inline-flex',
-              gap: 8,
-              alignItems: 'center',
-              minHeight: 'var(--tap)',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={showLiability}
-              onChange={(e) => setShowLiability(e.target.checked)}
-              data-ui={UI.journal.entry.liabilityToggle}
-            />
-            {/* 支出ではカードは既定表示。トグルは other-liability(ローン等)用に意味を変える。 */}
-            {mode === 'expense' ? t('entry.liabilityToggleLoan') : t('entry.liabilityToggle')}
-          </label>
-          <button
-            type="button"
-            className="btn btn--ghost"
-            style={{ minHeight: 36 }}
-            onClick={() => setLiabilitySheetOpen(true)}
-            data-ui={UI.journal.entry.liabilityCreate}
-          >
-            <Icon name="plus" size={16} />
-            {/* 支出ではクレジットカード(payment-liability)を作る導線。振替はローン等も作る。 */}
-            {mode === 'expense' ? t('entry.liabilityCreateCard') : t('entry.liabilityCreate')}
-          </button>
-        </div>
-      </div>
-    ) : null;
-
   const manualSwitch =
     init.kind === 'create' && mode !== 'manual' && !ccMode ? (
       <button
@@ -990,17 +1011,16 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           </>
         ) : (
           <>
-            {/* 人間が入力する順: 日付 → 項目 → 金額 → お金の流れ(A → B) → 詳細 */}
+            {/* 人間が入力する順: 日付 → 金額 → お金の流れ(左辺[+ローン/取り置き] → 右辺) → 項目 → 継続コスト詳細 */}
             {dateField}
-            {/* 振替は「項目」を必須にしない（未入力なら自動で「移動元 → 移動先」を付ける）。 */}
-            {mode === 'transfer' ? null : itemField}
             {amountField}
             {renderFlow()}
-            {flowExtras}
+            {/* 項目は流れの後に置く（金額より前に出さない）。振替は自動命名、継続コスト化中は対象名と
+                重複するため出さない（名称は流れの行き先＝継続コスト対象の名前で入力する）。 */}
+            {mode === 'transfer' || (canAllocate && ccMode) ? null : itemField}
             {ccDetailField}
             {fixedMonthlyField}
             {repaymentField}
-            {loanRepaymentField}
 
             {allocationActive ? null : (
               <>
@@ -1035,27 +1055,16 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       </Modal>
       {discardConfirm}
 
-      {/* 入力を中断せず、取り置き資金（振替の行き先）を作って選択する。 */}
-      {reserveSheetOpen ? (
-        <ReserveSheet
-          onClose={() => setReserveSheetOpen(false)}
-          onSave={async (input) => {
-            const reserve = await createReserve(input);
-            setSide('debit', reserve.reserveAccountId);
-            setShowReserve(true);
-          }}
-        />
-      ) : null}
-
-      {/* 入力を中断せず、新しい負債（支払い方法 / 借入の源泉）を作って選択する。 */}
+      {/* 「ローンを組む」導線内から新しいローンを作って支払い元に選択する（同じ導線内）。
+          既定をローン(other-liability)にする。クレジットカードは勘定科目管理で扱う。 */}
       {liabilitySheetOpen ? (
         <LiabilitySheet
-          defaultRole={mode === 'expense' ? 'payment-liability' : 'other-liability'}
+          defaultRole="other-liability"
           onClose={() => setLiabilitySheetOpen(false)}
           onSave={async (account) => {
             await saveAccount(account);
             setSide('credit', account.id);
-            setShowLiability(true);
+            setLoanMode(true);
           }}
         />
       ) : null}

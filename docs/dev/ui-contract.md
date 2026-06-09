@@ -33,10 +33,10 @@
 | `period.fullYear.row` / `period.month.row` | 月ピッカーの行 | 年全体 / 各月（同上） |
 | `period.trend` / `period.trend.chart` / `period.trend.point` | 推移（自前 SVG・`TrendChart`） | 収支/支出=bar・純資産=line。年別=12ヶ月・全体=年集約。`point` は全体→年のドリルダウン |
 | `cashflow.future.list` | CF 未来の入出金・振替予定 | ホーム未来日付入力が反映される一覧 |
-| `cashflow.advanced.toggle` | CF 取り置き資金・資金目標の折りたたみ | 下部の補助情報を開閉 |
+| `cashflow.advanced.toggle` | CF 取り置き資金の折りたたみ | 下部の補助情報を開閉 |
 | `journal.view` | Journal ルート | 仕訳画面の検出 |
 | `journal.entry.list` | Journal 一覧 | 仕訳一覧 |
-| `journal.monthlyRecognition` | 今月の継続コスト認識カード | 読み取り専用（仕訳ではない月割り表示） |
+| `journal.monthlyRecognition` | 今月の継続コスト計上カード | 読み取り専用（仕訳ではない月割り表示） |
 | `journal.search` | Journal 検索入力 | 検索 |
 | `journal.filter.clearAccount` | 科目絞り込み解除 | ドリルダウン解除 |
 | `journal.entry.save` | Entry シート保存 | 保存 |
@@ -49,13 +49,14 @@
 | `journal.entry.monthlyizeContinue` | 継続・買い替えトグル | ON で repeatEveryMonths=costMonths |
 | `journal.entry.monthlyizeRepayToggle` | 分割/後日引落を資金繰りに入れる | 負債払いのみ表示 |
 | `journal.entry.monthlyizeRepayAccount` / `...RepayCount` / `...RepayStart` | 引落口座/回数/初回引落日 | 返済 CF の生成（購入日と別） |
-| `settings.expectedReturn` | 期待年利(%) | 資金目標の必要月額の参考計算 |
 | `cashflow.schedule.flow.source` / `.destination` | 予定入力のお金の流れ | 源泉 → 行き先（入金/出金は自動判定） |
-| `cashflow.goal.create` / `.list` / `.save` | 資金目標の追加/一覧/保存 | 長期の積立計画 |
-| `cashflow.goal.name` / `.amount` / `.date` | 資金目標フォーム | 名称/目標額/期限 |
 | `journal.entry.ccToggle` | 行き先の「継続コスト化」ボタン | 行き先を継続コスト対象（自由入力）に切替 |
 | `journal.entry.ccName` | 継続コスト対象の名前 | 台帳に登録する対象名（自由入力） |
-| `journal.entry.ccCategory` | 認識先カテゴリ（費用） | 継続コストの月次認識先 |
+| `journal.entry.ccCategory` | 分類先カテゴリ（費用） | 継続コストの月次分類先 |
+| `journal.entry.reserveCreate` | 移動先の「取り置き資産を作る」ボタン | 振替の右辺を取り置き資産名入力へ切替（cc型・チェックボックス廃止） |
+| `journal.entry.reserveName` | 取り置き資産の名前 | 作成する取り置き枠の名（勘定科目は増やさない） |
+| `journal.entry.loanArrange` | 支払い元の「ローンを組む」ボタン | 支出の左辺を既存ローン選択＋新規作成へ切替（cc型・チェックボックス廃止） |
+| `journal.entry.liabilityCreate` | 新しいローンを作成（ローンを組む導線内） | 同じ導線内で other-liability を作成 |
 | `journal.entry.allocateMonths` | 継続する月数 | 継続する月数入力 |
 | `journal.entry.date` | Entry 日付 | 日付入力 |
 | `journal.entry.description` | Entry 摘要 | 摘要入力 |
@@ -69,7 +70,7 @@
 | `allocations.view` | 継続コスト ルート | 画面の検出（screen 名は歴史的に allocations） |
 | `allocations.list` | 継続コストの一覧 | 継続コスト項目一覧 |
 | `allocations.showCompleted` | 停止/終了表示トグル | 非 active の表示切替 |
-| `allocations.edit.impactWarning` | 編集シートの過去再計算注意 | 総額/開始月/認識月数/周期/終了月/費用カテゴリ変更時に表示 |
+| `allocations.edit.impactWarning` | 編集シートの過去再計算注意 | 総額/開始月/月数/周期/終了月/分類先カテゴリ変更時に表示 |
 | `adjustments.view` | 補正・勘定科目 ルート | 画面の検出（screen 名は歴史的に adjustments） |
 | `adjustments.list` | 登録済み補正の一覧 | 現実アンカーの一覧 |
 | `adjustments.row.edit` / `adjustments.row.delete` | 一覧各行の編集 / 削除 | 補正の後編集・削除 |
@@ -82,12 +83,15 @@
 | `accounts.view` | Accounts ルート | 勘定科目の検出 |
 | `accounts.create` | 科目追加ボタン | 追加起動 |
 | `accounts.save` | 科目シート保存 | 保存 |
-| `accounts.list` | 科目一覧 | 一覧 |
+| `accounts.list` | 科目一覧 | 一覧（「補正・勘定科目」内に embedded で統合） |
 | `accounts.type` | 科目シートの区分セレクト | type 選択 |
 | `accounts.role` | 科目シートの役割セレクト | role 選択 |
+| `accounts.adjust` | 各 BS 科目行の「補正」ボタン | 科目選択済みの補正ダイアログを開く（embedded 時） |
+| `adjustments.createDialog` | 補正入力ダイアログ | 科目選択済みの残高補正（独立フォーム廃止） |
 | `settings.view` | Settings ルート | 設定の検出 |
 | `settings.manage.list` | 設定「管理」リスト | 補助画面への遷移リスト |
-| `settings.manage.<screen>` | 管理リストの各行 | 例 `settings.manage.accounts`（accounts/tags/adjustments。各内訳ページはホームの各項目から） |
+| `settings.manage.<screen>` | 管理リストの各行 | `settings.manage.tags` / `settings.manage.wallets`（勘定科目・補正は「補正・勘定科目」へ統合しメニュー昇格） |
+| `nav.adjustments` | メニュー「補正・勘定科目」 | 勘定科目 + 初期残高 + 残高補正の統合画面（メニュー昇格） |
 | `settings.exportJson` | export ボタン | JSON 書き出し |
 | `settings.importJson` | import ボタン | JSON 読み込み起動 |
 | `settings.importFile` | 隠しファイル入力 | ファイル選択 |

@@ -103,7 +103,9 @@ export const MODE_FLOW: Record<FlowMode, FlowDef> = {
     source: {
       side: 'credit',
       labelKey: 'entry.source.expense',
-      // 現金・預金など(daily-asset)に加え、クレジットカード(payment-liability)も既定で選べる。
+      // 現金・預金など(daily-asset)、クレジットカード(payment-liability)。ローン(other-liability)は
+      // 「ローンを組む」切替時のみ。取り置き資金は集約口座でなく目的別の擬似候補を EntrySheet が足す
+      // （reserve-asset は内部ロール＝集約口座を直接出さない）。
       allowedRoles: ['daily-asset', 'payment-liability'],
     },
     destination: {
@@ -117,6 +119,7 @@ export const MODE_FLOW: Record<FlowMode, FlowDef> = {
     source: {
       side: 'credit',
       labelKey: 'entry.transfer.from',
+      // 取り置き資金は目的別の擬似候補を EntrySheet が両辺に足す（集約口座は直接出さない）。
       allowedRoles: ['daily-asset'],
     },
     destination: {

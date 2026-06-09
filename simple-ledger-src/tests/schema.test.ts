@@ -3,8 +3,9 @@ import {
   isCurrentSchema,
   journalEntrySchema,
   ledgerExportPackageSchema,
+  reserveItemSchema,
 } from '../src/domain/schema';
-import { APP_ID, SCHEMA_VERSION } from '../src/domain/constants';
+import { APP_ID, RESERVE_LEDGER_ACCOUNT_ID, SCHEMA_VERSION } from '../src/domain/constants';
 import { buildAllocation } from '../src/domain/allocation';
 
 const validEntry = {
@@ -100,13 +101,50 @@ describe('ledgerExportPackageSchema', () => {
     reserves: [],
     tags: [],
     monthlyCostItems: [],
-    fundingGoals: [],
     assetDisposals: [],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
   };
 
   it('正しいパッケージを受け入れる', () => {
     expect(ledgerExportPackageSchema.safeParse(validPkg).success).toBe(true);
+  });
+  it('B 側レガシーの余計なキー（fundingGoals・expectedAnnualReturnBps）は strip される（v16 契約・出力に残さない）', () => {
+    const withLegacy = {
+      ...validPkg,
+      fundingGoals: [{ id: 'g', name: '老後', targetAmount: 5000000 }],
+      settings: {
+        ledgerName: '家計簿',
+        currency: 'JPY',
+        locale: 'ja',
+        expectedAnnualReturnBps: 500,
+      },
+    };
+    const parsed = ledgerExportPackageSchema.safeParse(withLegacy);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      // 出力に B 側キーは残らない（unknown key は strip）。
+      expect((parsed.data as unknown as Record<string, unknown>).fundingGoals).toBeUndefined();
+      expect(
+        (parsed.data.settings as unknown as Record<string, unknown>).expectedAnnualReturnBps,
+      ).toBeUndefined();
+    }
+  });
+  it('取り置きの旧目標フィールド（targetAmount/targetDate）は reserveItemSchema で strip される', () => {
+    const parsed = reserveItemSchema.safeParse({
+      id: 'r',
+      name: '旅行',
+      reserveAccountId: RESERVE_LEDGER_ACCOUNT_ID,
+      targetAmount: 100,
+      targetDate: '2026-12-31',
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      const res = parsed.data as unknown as Record<string, unknown>;
+      expect(res.targetAmount).toBeUndefined();
+      expect(res.targetDate).toBeUndefined();
+    }
   });
   it('appId が違うと拒否する', () => {
     expect(ledgerExportPackageSchema.safeParse({ ...validPkg, appId: 'other' }).success).toBe(
@@ -557,9 +595,10 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
     createdAt: 'x',
     updatedAt: 'x',
   };
+  // 集約モデル: 取り置きは目的別科目でなく単一の集約口座に寄せる（id は集約口座固定）。
   const reserveAcc = {
-    id: 'reserveAcc',
-    name: '結婚資金口座',
+    id: RESERVE_LEDGER_ACCOUNT_ID,
+    name: '取り置き資金',
     type: 'asset',
     role: 'reserve-asset',
     archived: false,
@@ -602,7 +641,7 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
         {
           id: 'r1',
           name: '結婚資金',
-          reserveAccountId: 'reserveAcc',
+          reserveAccountId: RESERVE_LEDGER_ACCOUNT_ID,
           createdAt: 'x',
           updatedAt: 'x',
         },
@@ -667,6 +706,59 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
   it('目的別資金の科目の role が reserve-asset でないと invalid（bank は daily-asset）', () => {
     const bad = cfPkg({
       reserves: [{ id: 'r1', name: 'x', reserveAccountId: 'bank', createdAt: 'x', updatedAt: 'x' }],
+    });
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+  it('集約モデルの不変条件: 目的別の reserve-asset 科目（集約口座以外）は invalid（import で再導入させない）', () => {
+    // 集約口座でない reserve-asset 科目を足し、それを reserveAccountId に使う = 旧モデル。
+    const bad = cfPkg({
+      accounts: [
+        bank,
+        card,
+        reserveAcc,
+        {
+          id: 'per-purpose',
+          name: '旅行積立',
+          type: 'asset',
+          role: 'reserve-asset',
+          archived: false,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+      reserves: [
+        { id: 'r1', name: '旅行', reserveAccountId: 'per-purpose', createdAt: 'x', updatedAt: 'x' },
+      ],
+    });
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
+  it('集約モデルの不変条件: metadata.reserveId が存在しない取り置きを参照すると invalid', () => {
+    const bad = cfPkg({
+      reserves: [
+        {
+          id: 'r1',
+          name: '旅行',
+          reserveAccountId: RESERVE_LEDGER_ACCOUNT_ID,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+      journalEntries: [
+        {
+          id: 'e-bad',
+          date: '2026-02-01',
+          description: '取り置き',
+          kind: 'normal',
+          managementScopeId: 'scope-personal',
+          metadata: { inputMode: 'transfer', reserveId: 'nope' },
+          lines: [
+            { accountId: RESERVE_LEDGER_ACCOUNT_ID, side: 'debit', amount: 10000 },
+            { accountId: 'bank', side: 'credit', amount: 10000 },
+          ],
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
     });
     expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
   });

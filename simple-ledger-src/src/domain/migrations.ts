@@ -10,18 +10,26 @@
  * migrations に { from: 1, to: 2, migrate } を登録する。
  */
 import {
+  CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+  CONTINUOUS_COST_LEDGER_ACCOUNT_NAME,
   DEFAULT_MANAGEMENT_SCOPE_ID,
   DEFAULT_MANAGEMENT_SCOPE_NAME,
+  RESERVE_LEDGER_ACCOUNT_ID,
+  RESERVE_LEDGER_ACCOUNT_NAME,
   SCHEMA_VERSION,
 } from './constants';
 import { inferRole } from './accountRoles';
 import { monthlyCostItemsFromAllocations } from './monthlyCostMigration';
+import { nowIso } from '../util/time';
 import type {
   Account,
   CashflowSchedule,
+  JournalEntry,
   JournalLine,
   LedgerExportPackage,
   ManagementScope,
+  MonthlyCostItem,
+  ReserveItem,
 } from './types';
 
 export interface MigrationResult {
@@ -38,6 +46,198 @@ type Step = {
   to: number;
   migrate: (pkg: LedgerExportPackage) => LedgerExportPackage;
 };
+
+/**
+ * v13→v14（勘定科目の聖域化）の共通ロジック。import 経路と既存DB起動経路の両方から使う。
+ * 品目別の continuing-cost-asset 科目を単一の集約台帳口座（CONTINUOUS_COST_LEDGER_ACCOUNT_ID）へ寄せる:
+ *  - 旧品目別科目を指す MonthlyCostItem.recognitionCreditAccountId を集約口座へ付け替える（name は item 上に残る）。
+ *  - 参照されなくなった旧品目別科目は削除。万一 実仕訳/予定CF/取り置き資金から参照されていれば
+ *    削除せず archived にフォールバック（fail-safe・通常は起きない＝funding/recognition は仮想・非永続）。
+ *  - 付け替え後に集約口座を参照する item が 1 件でもあり、集約口座が未作成なら作成する。
+ *  - fixed-asset 由来（recognitionCreditAccountId が fixed-asset）は対象外（旧互換の別経路）。
+ */
+export interface ContinuingCostConsolidation {
+  /** ensure すべき集約台帳口座（既存または新規）。継続コスト item が無ければ null。 */
+  ledgerAccount: Account | null;
+  /** ledgerAccount を新規 put する必要があるか（既存再利用なら false）。 */
+  ledgerCreated: boolean;
+  /** 集約口座へ付け替えた MonthlyCostItem（recognitionCreditAccountId のみ変更）。 */
+  repointedItems: MonthlyCostItem[];
+  /** 削除してよい旧品目別 continuing-cost-asset 科目の id。 */
+  dropAccountIds: string[];
+  /** 参照中のため削除せず archived にした旧科目（fail-safe）。 */
+  archivedAccounts: Account[];
+}
+
+function newContinuousCostLedgerAccount(ts: string): Account {
+  return {
+    id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+    name: CONTINUOUS_COST_LEDGER_ACCOUNT_NAME,
+    type: 'asset',
+    role: 'continuing-cost-asset',
+    archived: false,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+}
+
+export function consolidateContinuingCostAccounts(
+  accounts: Account[],
+  monthlyCostItems: MonthlyCostItem[],
+  journalEntries: JournalEntry[],
+  cashflowSchedules: CashflowSchedule[],
+  reserves: ReserveItem[],
+  ts: string,
+): ContinuingCostConsolidation {
+  const ledgerId = CONTINUOUS_COST_LEDGER_ACCOUNT_ID;
+  const oldPerItem = accounts.filter(
+    (a) => a.role === 'continuing-cost-asset' && a.id !== ledgerId,
+  );
+  const oldIds = new Set(oldPerItem.map((a) => a.id));
+
+  const repointedItems = monthlyCostItems
+    .filter(
+      (m) => m.recognitionCreditAccountId !== undefined && oldIds.has(m.recognitionCreditAccountId),
+    )
+    .map((m) => ({ ...m, recognitionCreditAccountId: ledgerId }));
+
+  // 付け替え後に集約口座を参照する item があるか（＝集約口座が要るか）。
+  const repointedById = new Map(repointedItems.map((m) => [m.id, m]));
+  const needLedger = monthlyCostItems.some(
+    (m) => (repointedById.get(m.id) ?? m).recognitionCreditAccountId === ledgerId,
+  );
+
+  const existingLedger = accounts.find((a) => a.id === ledgerId) ?? null;
+  const ledgerAccount = existingLedger ?? (needLedger ? newContinuousCostLedgerAccount(ts) : null);
+  const ledgerCreated = existingLedger === null && ledgerAccount !== null;
+
+  // 旧品目別科目が monthlyCostItems 以外（実仕訳/予定CF/取り置き資金）から参照されていないか。
+  const referencedOutside = new Set<string>();
+  for (const e of journalEntries) for (const l of e.lines) referencedOutside.add(l.accountId);
+  for (const s of cashflowSchedules) {
+    referencedOutside.add(s.accountId);
+    if (s.counterAccountId !== undefined) referencedOutside.add(s.counterAccountId);
+  }
+  for (const r of reserves) referencedOutside.add(r.reserveAccountId);
+
+  const dropAccountIds: string[] = [];
+  const archivedAccounts: Account[] = [];
+  for (const a of oldPerItem) {
+    if (referencedOutside.has(a.id)) archivedAccounts.push({ ...a, archived: true, updatedAt: ts });
+    else dropAccountIds.push(a.id);
+  }
+
+  return { ledgerAccount, ledgerCreated, repointedItems, dropAccountIds, archivedAccounts };
+}
+
+/** consolidation を LedgerExportPackage に適用する（import 経路）。 */
+function applyContinuingCostConsolidation(pkg: LedgerExportPackage): LedgerExportPackage {
+  const items = pkg.monthlyCostItems ?? [];
+  const c = consolidateContinuingCostAccounts(
+    pkg.accounts,
+    items,
+    pkg.journalEntries,
+    pkg.cashflowSchedules ?? [],
+    pkg.reserves ?? [],
+    nowIso(),
+  );
+  const repointById = new Map(c.repointedItems.map((m) => [m.id, m]));
+  const archivedById = new Map(c.archivedAccounts.map((a) => [a.id, a]));
+  const dropSet = new Set(c.dropAccountIds);
+  let accounts = pkg.accounts
+    .filter((a) => !dropSet.has(a.id))
+    .map((a) => archivedById.get(a.id) ?? a);
+  if (c.ledgerCreated && c.ledgerAccount) accounts = [...accounts, c.ledgerAccount];
+  const monthlyCostItems = items.map((m) => repointById.get(m.id) ?? m);
+  return { ...pkg, accounts, monthlyCostItems };
+}
+
+/**
+ * v14→v15（取り置き資金の聖域化・集約）の共通ロジック。import 経路と既存DB起動経路の両方から使う。
+ * 目的別の reserve-asset 科目を単一の集約口座（RESERVE_LEDGER_ACCOUNT_ID）へ寄せる:
+ *  - 旧目的別科目を指す ReserveItem.reserveAccountId を集約口座へ付け替える（name は ReserveItem に残る）。
+ *  - 旧目的別科目に触れる仕訳（取り置きの振替）を、その口座の ReserveItem の id で `metadata.reserveId`
+ *    タグ付けし、口座参照を集約口座へ差し替える（目的別残高がタグ集計で導出できるように）。
+ *  - 参照されなくなった旧目的別科目を削除する。
+ */
+export interface ReserveConsolidation {
+  ledgerAccount: Account | null;
+  ledgerCreated: boolean;
+  repointedReserves: ReserveItem[];
+  retaggedEntries: JournalEntry[];
+  dropAccountIds: string[];
+}
+
+function newReserveLedgerAccount(ts: string): Account {
+  return {
+    id: RESERVE_LEDGER_ACCOUNT_ID,
+    name: RESERVE_LEDGER_ACCOUNT_NAME,
+    type: 'asset',
+    role: 'reserve-asset',
+    archived: false,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+}
+
+export function consolidateReserveAccounts(
+  accounts: Account[],
+  reserves: ReserveItem[],
+  journalEntries: JournalEntry[],
+  ts: string,
+): ReserveConsolidation {
+  const ledgerId = RESERVE_LEDGER_ACCOUNT_ID;
+  const oldAccts = accounts.filter((a) => a.role === 'reserve-asset' && a.id !== ledgerId);
+  const oldIds = new Set(oldAccts.map((a) => a.id));
+  // 旧目的別口座 id → その口座を持つ ReserveItem の id（1:1 前提）。
+  const acctToReserve = new Map<string, string>();
+  for (const r of reserves) {
+    if (oldIds.has(r.reserveAccountId)) acctToReserve.set(r.reserveAccountId, r.id);
+  }
+
+  const repointedReserves = reserves.map((r) =>
+    oldIds.has(r.reserveAccountId) ? { ...r, reserveAccountId: ledgerId } : r,
+  );
+  const needLedger =
+    repointedReserves.some((r) => r.reserveAccountId === ledgerId) || oldAccts.length > 0;
+  const existingLedger = accounts.find((a) => a.id === ledgerId) ?? null;
+  const ledgerAccount = existingLedger ?? (needLedger ? newReserveLedgerAccount(ts) : null);
+  const ledgerCreated = existingLedger === null && ledgerAccount !== null;
+
+  // 旧目的別口座に触れる仕訳を、口座参照を集約口座へ差し替え + reserveId タグ付け。
+  const retaggedEntries: JournalEntry[] = [];
+  for (const e of journalEntries) {
+    const touched = e.lines.find((l) => oldIds.has(l.accountId));
+    if (!touched) continue;
+    const rid = e.metadata?.reserveId ?? acctToReserve.get(touched.accountId);
+    const lines = e.lines.map((l) => (oldIds.has(l.accountId) ? { ...l, accountId: ledgerId } : l));
+    retaggedEntries.push({
+      ...e,
+      lines,
+      metadata: rid ? { ...e.metadata, reserveId: rid } : e.metadata,
+    });
+  }
+  // 旧目的別口座は付け替え後に参照されない（仕訳は集約口座へ・ReserveItem も付け替え）→ 削除。
+  const dropAccountIds = oldAccts.map((a) => a.id);
+
+  return { ledgerAccount, ledgerCreated, repointedReserves, retaggedEntries, dropAccountIds };
+}
+
+/** consolidation を LedgerExportPackage に適用する（import 経路）。 */
+function applyReserveConsolidation(pkg: LedgerExportPackage): LedgerExportPackage {
+  const c = consolidateReserveAccounts(
+    pkg.accounts,
+    pkg.reserves ?? [],
+    pkg.journalEntries,
+    nowIso(),
+  );
+  const retaggedById = new Map(c.retaggedEntries.map((e) => [e.id, e]));
+  const dropSet = new Set(c.dropAccountIds);
+  let accounts = pkg.accounts.filter((a) => !dropSet.has(a.id));
+  if (c.ledgerCreated && c.ledgerAccount) accounts = [...accounts, c.ledgerAccount];
+  const journalEntries = pkg.journalEntries.map((e) => retaggedById.get(e.id) ?? e);
+  return { ...pkg, accounts, reserves: c.repointedReserves, journalEntries };
+}
 
 // version を上げるたびにここへ追加していく。
 const STEPS: Step[] = [
@@ -103,14 +303,11 @@ const STEPS: Step[] = [
     },
   },
   {
-    // v7 → v8: 資金目標(fundingGoals)を追加。既存 JSON には無いので空配列を補う。
-    // ReserveItem は targetDate を持たないため自動移行はせず、既存データは保持する。
+    // v7 → v8: 旧版で資金目標(fundingGoals)を追加していた版上げ。v16 で資金目標を撤去したため、
+    // ここは恒等移行に変更（v15→v16 で残存 fundingGoals 等を落とす）。
     from: 7,
     to: 8,
-    migrate: (pkg) => ({
-      ...pkg,
-      fundingGoals: Array.isArray(pkg.fundingGoals) ? pkg.fundingGoals : [],
-    }),
+    migrate: (pkg) => pkg,
   },
   {
     // v8 → v9: 予定CF direction に transfer を追加（許容値拡張）。既存データは
@@ -221,6 +418,39 @@ const STEPS: Step[] = [
         allocations: [],
         assetDisposals: [],
       };
+    },
+  },
+  {
+    // v13 → v14: 勘定科目の聖域化。品目別の continuing-cost-asset 科目を単一の集約台帳口座へ寄せ、
+    // 旧品目別科目を指す MonthlyCostItem を集約口座へ付け替え、参照されなくなった旧科目を削除する。
+    from: 13,
+    to: 14,
+    migrate: applyContinuingCostConsolidation,
+  },
+  {
+    // v14 → v15: 取り置き資金の聖域化・集約。目的別の reserve-asset 科目を単一の集約口座へ寄せ、
+    // ReserveItem.reserveAccountId を付け替え、取り置き振替に reserveId を付与、旧科目を削除する。
+    from: 14,
+    to: 15,
+    migrate: applyReserveConsolidation,
+  },
+  {
+    // v15 → v16: B 側レガシーの撤去。旧「資金目標(fundingGoals)」・取り置きの目標額/期限・
+    // 設定の期待年利を完全削除する（A=短期の封筒分けのみ）。
+    from: 15,
+    to: 16,
+    migrate: (pkg) => {
+      const p = pkg as unknown as Record<string, unknown>;
+      delete p.fundingGoals;
+      const reserves = (pkg.reserves ?? []).map((r) => {
+        const copy = { ...r } as Record<string, unknown>;
+        delete copy.targetAmount;
+        delete copy.targetDate;
+        return copy as unknown as ReserveItem;
+      });
+      const settings = { ...pkg.settings } as Record<string, unknown>;
+      delete settings.expectedAnnualReturnBps;
+      return { ...pkg, reserves, settings: settings as unknown as LedgerExportPackage['settings'] };
     },
   },
 ];

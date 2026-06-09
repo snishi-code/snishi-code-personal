@@ -9,9 +9,11 @@
  *  - equity（純資産・ストック）: 元手 + 今期の損益（= retained earnings）+ 純資産の推移（line）。
  * 科目行をタップすると、その仕訳一覧（Journal）へドリルダウンする（フロー=期間 / ストック=基準日）。
  */
-import { useMemo } from 'react';
+import { Fragment, useMemo } from 'react';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../../domain/accounting';
+import { reserveBalances } from '../../domain/reserve';
+import { RESERVE_LEDGER_ACCOUNT_ID } from '../../domain/constants';
 import { periodAsOf, periodLabel, periodRange, type ReportPeriod } from '../../domain/reportPeriod';
 import { todayLocal } from '../../util/time';
 import { buildSectionTrends, type SectionTrends } from './breakdownData';
@@ -162,6 +164,10 @@ export function Breakdown({
   const trends = useMemo(() => buildSectionTrends(period, ledger), [period, ledger]);
   const trendData = trends ? trends[cfg.series] : null;
 
+  // 取り置き資金（集約口座）の目的別内訳。資産内訳で「取り置き資金」の下に入れ子表示する。
+  const reserves = ledger?.reserves ?? [];
+  const reserveSub = useMemo(() => reserveBalances(ledger?.journalEntries ?? []), [ledger]);
+
   // 科目行 → 仕訳一覧。フローは期間、ストックは基準日(asOf)を引き継ぐ。
   const drill = (accountId: string) =>
     cfg.kind === 'flow'
@@ -190,7 +196,25 @@ export function Breakdown({
           <div className="stmt-row muted">{t('breakdown.noData')}</div>
         ) : (
           rows.map((b) => (
-            <Row key={b.account.id} b={b} currency={currency} rowUi={cfg.row} onDrill={drill} />
+            <Fragment key={b.account.id}>
+              <Row b={b} currency={currency} rowUi={cfg.row} onDrill={drill} />
+              {/* 取り置き資金は預金の下部構造として、目的別の内訳を入れ子で見せる。 */}
+              {section === 'asset' && b.account.id === RESERVE_LEDGER_ACCOUNT_ID
+                ? reserves.map((r) => (
+                    <div
+                      key={r.id}
+                      className="stmt-row stmt-row--sub"
+                      style={{ paddingLeft: 'var(--space-5)' }}
+                      data-ui={UI.assetsBreakdown.reserveSub}
+                    >
+                      <span className="muted">{t('breakdown.reserveOf', { name: r.name })}</span>
+                      <span className="stmt-row__num">
+                        <Money amount={reserveSub.get(r.id) ?? 0} currency={currency} />
+                      </span>
+                    </div>
+                  ))
+                : null}
+            </Fragment>
           ))
         )}
         {/* 純資産のみ: 今期の損益（当期純損益）を内訳の一項目として見せる（ドリルしない）。 */}

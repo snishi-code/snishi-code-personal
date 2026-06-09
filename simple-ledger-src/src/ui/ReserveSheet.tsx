@@ -1,9 +1,10 @@
 /*
  * 取り置き資金（取り置き枠）の追加シート。
  *
- * 資金目標を統合した枠なので、任意で「目標額・目標日」を持てる（現在額は口座残高から
- * 自動計算するため入力欄は持たない）。CF の補助セクションと、ホームの振替入力（行き先で
- * 「取り置き資金を作成」）の双方から使う共有コンポーネント。
+ * 取り置きは「短期の封筒分け」: 預金から近い支払い予定に備えて取り分ける流動性資金。
+ * 目標額・目標期限・利回りは持たない（長期の目標/投資前提の資金は将来タスク）。
+ * 作成に必要なのは name のみ（任意でメモ）。CF の補助セクションと、ホームの振替入力
+ * （右辺「取り置き資産を作る」）の双方から使う共有コンポーネント。
  */
 import { useRef, useState } from 'react';
 import { Modal } from './Modal';
@@ -14,8 +15,6 @@ import { UI } from '../ui-contract';
 
 export interface ReserveSheetInput {
   name: string;
-  targetAmount?: number;
-  targetDate?: string;
   note?: string;
 }
 
@@ -27,8 +26,6 @@ export function ReserveSheet({
   onSave: (input: ReserveSheetInput) => Promise<unknown> | void;
 }) {
   const [name, setName] = useState('');
-  const [targetText, setTargetText] = useState('');
-  const [targetDate, setTargetDate] = useState('');
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
@@ -39,13 +36,9 @@ export function ReserveSheet({
       return;
     }
     setSubmitting(true);
-    const target =
-      targetText === '' ? undefined : Number.parseInt(targetText.replace(/[^\d]/g, ''), 10);
     try {
       await onSave({
         name: name.trim(),
-        ...(target && target > 0 ? { targetAmount: target } : {}),
-        ...(/^\d{4}-\d{2}-\d{2}$/.test(targetDate) ? { targetDate } : {}),
         ...(note.trim() !== '' ? { note: note.trim() } : {}),
       });
       onClose(); // 成功時のみ閉じる
@@ -54,7 +47,7 @@ export function ReserveSheet({
     }
   }
 
-  const snapshot = JSON.stringify({ name, targetText, targetDate, note });
+  const snapshot = JSON.stringify({ name, note });
   const initialSnapshotRef = useRef<string | null>(null);
   if (initialSnapshotRef.current === null) initialSnapshotRef.current = snapshot;
   const dirty = snapshot !== initialSnapshotRef.current;
@@ -95,21 +88,7 @@ export function ReserveSheet({
           error={error}
           dataUi={UI.cashflow.reserveName}
         />
-        <TextInput
-          label={t('reserves.target')}
-          inputMode="numeric"
-          value={targetText}
-          onChange={(v) => setTargetText(v.replace(/[^\d]/g, ''))}
-          dataUi={UI.cashflow.reserveTarget}
-        />
-        <TextInput
-          label={t('reserves.targetDate')}
-          type="date"
-          value={targetDate}
-          hint={t('reserves.targetDateHint')}
-          onChange={setTargetDate}
-          dataUi={UI.cashflow.reserveDate}
-        />
+        <p className="field__hint">{t('reserves.intro')}</p>
         <TextArea label={t('reserves.note')} value={note} onChange={setNote} />
       </Modal>
       {discardConfirm}

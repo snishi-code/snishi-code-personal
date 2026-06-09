@@ -9,7 +9,14 @@
 import { STORE, deleteRecord, getAll, getKv, putRecord, runWrite, type StoreName } from './db';
 import { defaultAccounts, defaultManagementScopes, defaultSettings, newMeta } from './seed';
 import { newId } from '../domain/ids';
-import { DEFAULT_MANAGEMENT_SCOPE_ID, SCHEMA_VERSION } from '../domain/constants';
+import {
+  CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+  CONTINUOUS_COST_LEDGER_ACCOUNT_NAME,
+  DEFAULT_MANAGEMENT_SCOPE_ID,
+  RESERVE_LEDGER_ACCOUNT_ID,
+  RESERVE_LEDGER_ACCOUNT_NAME,
+  SCHEMA_VERSION,
+} from '../domain/constants';
 import {
   DEFERRED_ACCOUNT_NAME,
   inferRole,
@@ -32,7 +39,6 @@ import type {
   AllocationItem,
   AssetDisposal,
   CashflowSchedule,
-  FundingGoal,
   JournalEntry,
   JournalLine,
   Ledger,
@@ -46,6 +52,10 @@ import type {
   Tag,
 } from '../domain/types';
 import { monthlyCostItemsFromAllocations } from '../domain/monthlyCostMigration';
+import {
+  consolidateContinuingCostAccounts,
+  consolidateReserveAccounts,
+} from '../domain/migrations';
 import {
   addMonths,
   addMonthsToDate,
@@ -189,6 +199,27 @@ export async function ensureInitialized(): Promise<void> {
         .filter((tg) => tg.scope !== 'entry')
         .map((tg) => ({ ...tg, scope: 'entry' as const }));
 
+      // v13→v14（勘定科目の聖域化）: 品目別 continuing-cost-asset 科目を集約台帳口座へ寄せる。
+      // pre-v13 では cc 科目も monthlyCostItems も無い（v13 で導入・クリア）ため実質 no-op。
+      const isPreV14 = meta.schemaVersion < 14;
+      const v14 = isPreV14
+        ? consolidateContinuingCostAccounts(
+            accounts,
+            monthlyCostItems,
+            journalEntries,
+            cashflowSchedules,
+            reserves,
+            nowIso(),
+          )
+        : null;
+
+      // v14→v15（取り置き資金の聖域化・集約）: 目的別 reserve-asset 科目を集約口座へ寄せ、取り置き
+      // 振替に reserveId を付与する。pre-v15 のときだけ実行。
+      const isPreV15 = meta.schemaVersion < 15;
+      const v15 = isPreV15
+        ? consolidateReserveAccounts(accounts, reserves, journalEntries, nowIso())
+        : null;
+
       const bumped: LedgerMeta = { ...meta, schemaVersion: SCHEMA_VERSION };
       await runWrite(
         [
@@ -201,6 +232,7 @@ export async function ensureInitialized(): Promise<void> {
           STORE.managementScopes,
           STORE.allocations,
           STORE.assetDisposals,
+          STORE.reserves,
         ],
         (t) => {
           t.objectStore(STORE.kv).put(bumped, KV_META);
@@ -228,6 +260,21 @@ export async function ensureInitialized(): Promise<void> {
           // v13: 生成仕訳・返済CF を削除（put 後に delete＝delete 優先）。
           for (const id of v13DropEntryIds) jeStore.delete(id);
           for (const id of v13DropScheduleIds) schStore.delete(id);
+          // v14: 品目別 continuing-cost-asset 科目を集約台帳口座へ寄せる。
+          if (v14) {
+            if (v14.ledgerCreated && v14.ledgerAccount) store.put(v14.ledgerAccount);
+            for (const a of v14.archivedAccounts) store.put(a);
+            for (const m of v14.repointedItems) mcStore.put(m);
+            for (const id of v14.dropAccountIds) store.delete(id);
+          }
+          // v15: 目的別 reserve-asset 科目を集約口座へ寄せ、取り置き振替に reserveId を付与。
+          if (v15) {
+            if (v15.ledgerCreated && v15.ledgerAccount) store.put(v15.ledgerAccount);
+            const rStore = t.objectStore(STORE.reserves);
+            for (const r of v15.repointedReserves) rStore.put(r);
+            for (const e of v15.retaggedEntries) jeStore.put(e);
+            for (const id of v15.dropAccountIds) store.delete(id);
+          }
         },
       );
     }
@@ -261,7 +308,6 @@ export async function loadLedger(): Promise<Ledger> {
     reserves,
     tags,
     monthlyCostItems,
-    fundingGoals,
     assetDisposals,
   ] = await Promise.all([
     getMeta(),
@@ -275,7 +321,6 @@ export async function loadLedger(): Promise<Ledger> {
     getAll<ReserveItem>(STORE.reserves),
     getAll<Tag>(STORE.tags),
     getAll<MonthlyCostItem>(STORE.monthlyCostItems),
-    getAll<FundingGoal>(STORE.fundingGoals),
     getAll<AssetDisposal>(STORE.assetDisposals),
   ]);
   if (!meta || !settings) throw new Error('台帳の初期化に失敗しました');
@@ -289,7 +334,6 @@ export async function loadLedger(): Promise<Ledger> {
   reserves.sort((a, b) => cmp(a.createdAt, b.createdAt));
   tags.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
   monthlyCostItems.sort((a, b) => cmp(b.createdAt, a.createdAt));
-  fundingGoals.sort((a, b) => cmp(a.targetDate, b.targetDate));
   managementScopes.sort((a, b) => cmp(a.createdAt, b.createdAt));
   accountInstruments.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
   assetDisposals.sort((a, b) => cmp(b.createdAt, a.createdAt));
@@ -318,7 +362,6 @@ export async function loadLedger(): Promise<Ledger> {
     reserves,
     tags,
     monthlyCostItems,
-    fundingGoals,
     assetDisposals,
   };
 }
@@ -426,16 +469,14 @@ function assertSchedulesSavable(schedules: CashflowSchedule[], ctx: SaveContext)
 /* ── 勘定科目 ── */
 
 async function loadReferencingCollections(): Promise<AccountRefCollections> {
-  const [entries, schedules, reserves, allocations, monthlyCostItems, fundingGoals] =
-    await Promise.all([
-      getAll<JournalEntry>(STORE.journalEntries),
-      getAll<CashflowSchedule>(STORE.cashflowSchedules),
-      getAll<ReserveItem>(STORE.reserves),
-      getAll<AllocationItem>(STORE.allocations),
-      getAll<MonthlyCostItem>(STORE.monthlyCostItems),
-      getAll<FundingGoal>(STORE.fundingGoals),
-    ]);
-  return { entries, schedules, reserves, allocations, monthlyCostItems, fundingGoals };
+  const [entries, schedules, reserves, allocations, monthlyCostItems] = await Promise.all([
+    getAll<JournalEntry>(STORE.journalEntries),
+    getAll<CashflowSchedule>(STORE.cashflowSchedules),
+    getAll<ReserveItem>(STORE.reserves),
+    getAll<AllocationItem>(STORE.allocations),
+    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
+  ]);
+  return { entries, schedules, reserves, allocations, monthlyCostItems };
 }
 
 export async function upsertAccount(account: Account): Promise<void> {
@@ -505,9 +546,13 @@ async function assertEntryTagsValid(entry: JournalEntry): Promise<void> {
 /** 目的別資金(reserve-asset)を貸方で減らす仕訳は、その資金の残高不足を保存前に拒否する。 */
 async function assertReserveSufficient(entry: JournalEntry, accounts: Account[]): Promise<void> {
   if (!accounts.some((a) => a.role === 'reserve-asset')) return;
-  const all = await getAll<JournalEntry>(STORE.journalEntries);
+  const [all, reserves] = await Promise.all([
+    getAll<JournalEntry>(STORE.journalEntries),
+    getAll<ReserveItem>(STORE.reserves),
+  ]);
   const others = all.filter((e) => e.id !== entry.id); // 編集時は自分自身を二重計上しない
-  const short = reserveBalanceShortfall(entry, accounts, others);
+  // 集約口座は目的(reserveId)単位で不足判定するため reserves を渡す。
+  const short = reserveBalanceShortfall(entry, accounts, others, reserves);
   if (short) throw new LedgerError('error.reserve.shortfall', { name: short.name });
 }
 
@@ -720,48 +765,62 @@ export async function deleteReserve(id: string): Promise<void> {
  * 目的別資金を作成する。既存 asset を紐づけるか、無ければ同名の asset 科目を作る。
  * 取り置き自体は通常の振替（普通預金 → 目的別資金）で行う（このメソッドは枠の登録のみ）。
  */
-export async function createReserve(input: {
-  name: string;
-  targetAmount?: number;
-  targetDate?: string;
-  note?: string;
-  existingAccountId?: string;
-}): Promise<ReserveItem> {
-  const ts = nowIso();
-  let newAccount: Account | null = null;
-  let accountId = input.existingAccountId;
-  if (accountId) {
-    // 既存科目を紐づける場合、目的別資金として正しい科目だけ許可する（日常資産等を誤接続しない）。
-    const accounts = await getAll<Account>(STORE.accounts);
-    const acc = accounts.find((a) => a.id === accountId);
-    if (!acc || acc.type !== 'asset' || acc.role !== 'reserve-asset') {
-      throw new LedgerError('error.reserve.existingAccountInvalid');
-    }
-  }
-  if (!accountId) {
-    newAccount = {
-      id: newId(),
-      name: input.name,
+/**
+ * 取り置き残高を寄せる単一の集約口座（『取り置き資金』）を find-or-create する。
+ * 目的ごとに勘定科目を作らず、全取り置きをこの 1 口座に通す（聖域化・勘定科目を増やさない）。
+ */
+function findOrCreateReserveLedgerAccount(
+  accounts: Account[],
+  ts: string,
+): { account: Account; created: boolean } {
+  const existing = accounts.find((a) => a.id === RESERVE_LEDGER_ACCOUNT_ID);
+  if (existing) return { account: existing, created: false };
+  return {
+    account: {
+      id: RESERVE_LEDGER_ACCOUNT_ID,
+      name: RESERVE_LEDGER_ACCOUNT_NAME,
       type: 'asset',
       role: 'reserve-asset',
       archived: false,
       createdAt: ts,
       updatedAt: ts,
-    };
-    accountId = newAccount.id;
-  }
+    },
+    created: true,
+  };
+}
+
+/**
+ * 取り置き枠(ReserveItem)を登録する。取り置きは「短期の封筒分け」（A）: 目標額・目標期限・利回りは持たない。
+ * **目的ごとの勘定科目は作らない**——残高は単一の集約口座（reserve-ledger）に寄せ、目的別残高は取り置き仕訳の
+ * `metadata.reserveId` 集計で導出する。実際の「取り置く」振替は呼び出し側（EntrySheet）で保存する。
+ */
+export async function createReserve(input: {
+  name: string;
+  note?: string;
+  /** どの資金口座から取り置いたか（daily-asset）。未指定なら預金等の代表 daily-asset を既定にする。 */
+  parentAccountId?: string;
+}): Promise<ReserveItem> {
+  const ts = nowIso();
+  const accounts = await getAll<Account>(STORE.accounts);
+  const { account: ledger, created } = findOrCreateReserveLedgerAccount(accounts, ts);
+  // 親口座は daily-asset のみ許可。未指定/不正なら代表 daily-asset（預金優先）を既定にする。
+  const dailyAssets = accounts.filter((a) => a.role === 'daily-asset' && !a.archived);
+  const validParent =
+    input.parentAccountId && dailyAssets.some((a) => a.id === input.parentAccountId)
+      ? input.parentAccountId
+      : (dailyAssets.find((a) => a.name.includes('預金')) ?? dailyAssets[0])?.id;
   const reserve: ReserveItem = {
     id: newId(),
     name: input.name,
-    reserveAccountId: accountId,
-    ...(input.targetAmount !== undefined ? { targetAmount: input.targetAmount } : {}),
-    ...(input.targetDate !== undefined ? { targetDate: input.targetDate } : {}),
+    reserveAccountId: ledger.id,
+    ...(validParent !== undefined ? { parentAccountId: validParent } : {}),
     ...(input.note && input.note.trim() !== '' ? { note: input.note.trim() } : {}),
     createdAt: ts,
     updatedAt: ts,
   };
   await writeWithRevision([STORE.accounts, STORE.reserves], (t) => {
-    if (newAccount) t.objectStore(STORE.accounts).put(newAccount);
+    // 集約口座は新規作成時だけ put（目的数ぶん勘定科目を増やさない）。
+    if (created) t.objectStore(STORE.accounts).put(ledger);
     t.objectStore(STORE.reserves).put(reserve);
   });
   return reserve;
@@ -1527,10 +1586,36 @@ export interface ContinuousCostInput {
 }
 
 /**
+ * 継続コスト用の集約台帳口座（role=continuing-cost-asset・『継続コスト台帳』）を find-or-create する。
+ * 全継続コストの未消化残高を 1 口座に寄せる（品目ごとに資産科目を増やさない＝勘定科目の聖域化）。
+ * 既存があれば再利用し、無ければ well-known id で新規生成して返す（呼び出し側が新規時だけ put する）。
+ */
+function findOrCreateContinuousCostLedgerAccount(
+  ctx: SaveContext,
+  ts: string,
+): { account: Account; created: boolean } {
+  const existing = ctx.byId.get(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+  if (existing) return { account: existing, created: false };
+  return {
+    account: {
+      id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      name: CONTINUOUS_COST_LEDGER_ACCOUNT_NAME,
+      type: 'asset',
+      role: 'continuing-cost-asset',
+      archived: false,
+      createdAt: ts,
+      updatedAt: ts,
+    },
+    created: true,
+  };
+}
+
+/**
  * 継続コストを「資産経由モデル」で登録する（v1 の正本フロー）。
- * 品目ごとに専用資産科目（role=continuing-cost-asset）を自動作成し、台帳ルール(MonthlyCostItem)と
- * （負債資金なら）返済 CF を保存する。**funding/recognition の実仕訳は作らない**——
+ * 未消化残高は品目別の資産科目ではなく単一の集約台帳口座（『継続コスト台帳』）に寄せ、台帳ルール
+ * (MonthlyCostItem)と（負債資金なら）返済 CF を保存する。**funding/recognition の実仕訳は作らない**——
  * それらは `continuousCost.ts` が必要範囲だけ仮想展開する（辞書展開・永続仕訳を無限生成しない）。
+ * 品目名は MonthlyCostItem.name に保持し、勘定科目として自動作成しない。
  */
 export async function createContinuousCost(input: ContinuousCostInput): Promise<MonthlyCostItem> {
   if (input.name.trim() === '') throw new LedgerError('error.common.nameRequired');
@@ -1564,16 +1649,9 @@ export async function createContinuousCost(input: ContinuousCostInput): Promise<
   if (!paymentOk) throw new LedgerError('error.monthlyCost.paymentSource');
 
   const ts = nowIso();
-  // 1 品目 = 1 継続コスト対象の資産科目（個別名）。自動作成する。
-  const assetAccount: Account = {
-    id: newId(),
-    name: input.name.trim(),
-    type: 'asset',
-    role: 'continuing-cost-asset',
-    archived: false,
-    createdAt: ts,
-    updatedAt: ts,
-  };
+  // 未消化残高は品目別ではなく単一の集約台帳口座へ寄せる（勘定科目を品目数ぶん増やさない）。
+  const { account: ledgerAccount, created: ledgerCreated } =
+    findOrCreateContinuousCostLedgerAccount(ctx, ts);
 
   const item: MonthlyCostItem = {
     id: newId(),
@@ -1588,7 +1666,7 @@ export async function createContinuousCost(input: ContinuousCostInput): Promise<
     startMonth: input.startMonth,
     expenseAccountId: input.expenseAccountId,
     paymentSourceAccountId: input.paymentSourceAccountId,
-    recognitionCreditAccountId: assetAccount.id,
+    recognitionCreditAccountId: ledgerAccount.id,
     ...(input.repaymentAccountId !== undefined
       ? { repaymentAccountId: input.repaymentAccountId }
       : {}),
@@ -1634,7 +1712,8 @@ export async function createContinuousCost(input: ContinuousCostInput): Promise<
   await writeWithRevision(
     [STORE.accounts, STORE.monthlyCostItems, STORE.cashflowSchedules],
     (t) => {
-      t.objectStore(STORE.accounts).put(assetAccount);
+      // 集約台帳口座は新規作成された時だけ put（既存なら品目数ぶん増やさない）。
+      if (ledgerCreated) t.objectStore(STORE.accounts).put(ledgerAccount);
       t.objectStore(STORE.monthlyCostItems).put(item);
       const sStore = t.objectStore(STORE.cashflowSchedules);
       for (const s of schedules) sStore.put(s);
@@ -1998,63 +2077,6 @@ export async function disposeFixedAsset(input: DisposeFixedAssetInput): Promise<
   return disposal;
 }
 
-/* ── 資金目標 ── */
-
-export interface FundingGoalInput {
-  name: string;
-  targetAmount: number;
-  targetDate: string;
-  currentAmount?: number;
-  sourceAccountId?: string;
-  note?: string;
-}
-
-export async function createFundingGoal(input: FundingGoalInput): Promise<FundingGoal> {
-  if (input.name.trim() === '') throw new LedgerError('error.common.nameRequired');
-  if (!Number.isInteger(input.targetAmount) || input.targetAmount <= 0)
-    throw new LedgerError('error.fundingGoal.targetAmountInvalid');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.targetDate))
-    throw new LedgerError('error.fundingGoal.targetDateRequired');
-  const current = input.currentAmount ?? 0;
-  if (!Number.isInteger(current) || current < 0)
-    throw new LedgerError('error.fundingGoal.currentInvalid');
-  if (input.sourceAccountId !== undefined) {
-    const accounts = await getAll<Account>(STORE.accounts);
-    const acc = accounts.find((a) => a.id === input.sourceAccountId);
-    if (!acc || (acc.role !== 'daily-asset' && acc.role !== 'reserve-asset'))
-      throw new LedgerError('error.fundingGoal.sourceInvalid');
-  }
-  const ts = nowIso();
-  const goal: FundingGoal = {
-    id: newId(),
-    name: input.name.trim(),
-    targetAmount: input.targetAmount,
-    targetDate: input.targetDate,
-    currentAmount: current,
-    ...(input.sourceAccountId !== undefined ? { sourceAccountId: input.sourceAccountId } : {}),
-    ...(input.note && input.note.trim() !== '' ? { note: input.note.trim() } : {}),
-    status: 'active',
-    createdAt: ts,
-    updatedAt: ts,
-  };
-  await writeWithRevision([STORE.fundingGoals], (t) => {
-    t.objectStore(STORE.fundingGoals).put(goal);
-  });
-  return goal;
-}
-
-export async function upsertFundingGoal(goal: FundingGoal): Promise<void> {
-  await writeWithRevision([STORE.fundingGoals], (t) => {
-    t.objectStore(STORE.fundingGoals).put(goal);
-  });
-}
-
-export async function deleteFundingGoal(id: string): Promise<void> {
-  await writeWithRevision([STORE.fundingGoals], (t) => {
-    t.objectStore(STORE.fundingGoals).delete(id);
-  });
-}
-
 /* ── 管理区分 ── */
 
 export async function createManagementScope(name: string): Promise<ManagementScope> {
@@ -2208,7 +2230,6 @@ export interface ReplacePayload {
   reserves: ReserveItem[];
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
-  fundingGoals: FundingGoal[];
   assetDisposals: AssetDisposal[];
 }
 
@@ -2229,7 +2250,6 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       STORE.reserves,
       STORE.tags,
       STORE.monthlyCostItems,
-      STORE.fundingGoals,
       STORE.assetDisposals,
     ],
     (t) => {
@@ -2242,7 +2262,6 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       const reserves = t.objectStore(STORE.reserves);
       const tags = t.objectStore(STORE.tags);
       const monthlyCosts = t.objectStore(STORE.monthlyCostItems);
-      const fundingGoals = t.objectStore(STORE.fundingGoals);
       const disposals = t.objectStore(STORE.assetDisposals);
       scopes.clear();
       instruments.clear();
@@ -2253,7 +2272,6 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       reserves.clear();
       tags.clear();
       monthlyCosts.clear();
-      fundingGoals.clear();
       disposals.clear();
       for (const s of payload.managementScopes) scopes.put(s);
       for (const inst of payload.accountInstruments) instruments.put(inst);
@@ -2264,7 +2282,6 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       for (const r of payload.reserves) reserves.put(r);
       for (const tag of payload.tags) tags.put(tag);
       for (const mc of payload.monthlyCostItems) monthlyCosts.put(mc);
-      for (const g of payload.fundingGoals) fundingGoals.put(g);
       for (const d of payload.assetDisposals) disposals.put(d);
       t.objectStore(STORE.kv).put(payload.meta, KV_META);
       t.objectStore(STORE.kv).put(payload.settings, KV_SETTINGS);
@@ -2295,7 +2312,6 @@ export async function resetAll(): Promise<void> {
       STORE.reserves,
       STORE.tags,
       STORE.monthlyCostItems,
-      STORE.fundingGoals,
       STORE.assetDisposals,
       STORE.snapshots,
     ],
@@ -2310,7 +2326,6 @@ export async function resetAll(): Promise<void> {
       t.objectStore(STORE.reserves).clear();
       t.objectStore(STORE.tags).clear();
       t.objectStore(STORE.monthlyCostItems).clear();
-      t.objectStore(STORE.fundingGoals).clear();
       t.objectStore(STORE.assetDisposals).clear();
       t.objectStore(STORE.snapshots).clear();
       t.objectStore(STORE.kv).put(meta, KV_META);

@@ -87,7 +87,7 @@ export const ja = {
   'journal.allocationTag': '継続コスト',
   'journal.monthlyCostTag': '継続コスト',
   'journal.monthlyCostRow': '継続コスト: {name}',
-  'journal.monthlyRecognitionTitle': '{year}年{month}月の継続コスト認識',
+  'journal.monthlyRecognitionTitle': '{year}年{month}月の継続コスト計上',
   'journal.monthlyRecognitionNote':
     '継続コストの当月分です（仕訳ではなく月割りの参考表示。支出に計上されます）。',
   'journal.generatedNotice':
@@ -102,14 +102,14 @@ export const ja = {
   'allocations.months': '継続する月数',
   'allocations.monthly': '月額目安',
   'allocations.remainingMonths': '残り {count} か月',
-  'allocations.unrecognized': '未認識残高',
-  'allocations.expenseCategory': '費用カテゴリ',
-  'allocations.payment': '支払元',
+  'allocations.unrecognized': '未消化残高',
+  'allocations.expenseCategory': '分類先カテゴリ',
+  'allocations.payment': '支払い元',
   'allocations.monthsUnit': '{count} か月',
   'allocations.statusActive': '継続中',
-  'allocations.statusCompleted': '認識完了',
+  'allocations.statusCompleted': '消化完了',
   'allocations.recognitionNote':
-    '「認識完了」は毎月の費用認識が終わった状態です。クレジットカード等（負債）で支払った場合、負債の返済は別です（資金繰りで返済予定を登録できます）。',
+    '「消化完了」は毎月の費用への分類が終わった状態です。クレジットカード等（負債）で支払った場合、負債の返済は別です（資金繰りで返済予定を登録できます）。',
 
   // 継続コスト（サブスク・年払い・耐久財・定期イベントを統一）
   'monthlyCost.title': '継続コスト',
@@ -126,7 +126,7 @@ export const ja = {
   'monthlyCost.repeat': '更新周期',
   'monthlyCost.repeatUnit': '{count} か月ごと',
   'monthlyCost.thisMonth': '今月の計上額',
-  'monthlyCost.expenseCategory': '費用カテゴリ',
+  'monthlyCost.expenseCategory': '分類先カテゴリ',
   'monthlyCost.payment': '支払い元',
   'monthlyCost.pause': '一時停止',
   'monthlyCost.resume': '再開',
@@ -145,7 +145,7 @@ export const ja = {
   'monthlyCost.paymentLocked': '支払い元・返済口座は変更できません（会計事実を保つため）。',
   // 過去から再計算される項目を変えたときの注意（不具合ではなく仕様）。
   'monthlyCost.pastRecalcWarning':
-    '総額・開始月・認識月数・更新周期・終了月・費用カテゴリを変えると、過去の支出・収支・BS・未認識残高もさかのぼって再計算されます。',
+    '総額・開始月・月数・更新周期・終了月・分類先カテゴリを変えると、過去の支出・収支・BS・未消化残高もさかのぼって再計算されます。',
   'monthlyCost.deleteConfirmTitle': '継続コストを削除しますか？',
   'monthlyCost.deleteConfirmBody':
     '「{name}」を削除します。関連する継続コストの支払い仕訳と未実績の返済予定も削除されます。',
@@ -163,18 +163,18 @@ export const ja = {
   'disposal.action': '売却/故障',
   'disposal.title': '固定資産を処分する',
   'disposal.intro':
-    '売却または故障・廃棄で、この固定資産の継続コストを終了します。未認識の残りを売却損益として精算し、固定資産の残高を消し込みます。',
+    '売却または故障・廃棄で、この固定資産の継続コストを終了します。未消化の残りを売却損益として精算し、固定資産の残高を消し込みます。',
   'disposal.date': '処分日',
   'disposal.proceeds': '売却額（故障・廃棄は 0）',
   'disposal.destination': '入金先',
-  'disposal.recognized': '認識済み額',
+  'disposal.recognized': '計上済み額',
   'disposal.remaining': '残存額',
   'disposal.gain': '売却益',
   'disposal.loss': '売却損',
   'disposal.none': 'なし',
   'disposal.endsAt': '終了する月',
   'disposal.preview': '生成される仕訳の概要',
-  'disposal.previewAdjust': '認識済み分の消し込み（支出には含めない）',
+  'disposal.previewAdjust': '計上済み分の消し込み（支出には含めない）',
   'disposal.previewProceeds': '売却額の入金',
   'disposal.previewLoss': '売却損（その他支出・支出に含む）',
   'disposal.previewGain': '売却益（その他収入）',
@@ -184,7 +184,7 @@ export const ja = {
   'cashflow.intro':
     '将来の入出金予定から、自由資金の推移を見ます。予定は「実績化」すると仕訳になります。',
   'cashflow.liquidNote':
-    '総資金は現金・預金・取り置きなどの流動資金です（投資・固定資産・継続コストの未認識分は含めません）。',
+    '総資金は現金・預金・取り置きなどの流動資金です（投資・固定資産・継続コストの未消化分は含めません）。',
   'cashflow.until': '表示終了日',
   'cashflow.untilHint': '今日からこの日までの入出金予定を投影します。',
   'cashflow.totalFunds': '総資金',
@@ -217,10 +217,10 @@ export const ja = {
   'cashflow.scheduleSecondaryTitle': '分割・定期の返済予定',
   'cashflow.scheduleSecondaryHint':
     '継続コストの負債払いや、借入（振替）の分割返済から自動で作られる予定です（読み取り専用）。',
-  'cashflow.advancedTitle': '取り置き資金・資金目標',
+  'cashflow.advancedTitle': '取り置き資金',
   'cashflow.advancedHint':
-    '自由資金から控除する取り置きと、長期の積立計画です（CF の主役ではなく補助情報）。',
-  'cashflow.advancedToggle': '取り置き資金・資金目標を開く',
+    '近い支払い予定に備えて、預金から自由資金を取り分けます（CF の主役ではなく補助情報）。',
+  'cashflow.advancedToggle': '取り置き資金を開く',
   'cashflow.form.title': '入出金予定',
   'cashflow.form.name': '項目',
   'cashflow.form.namePlaceholder': '例: カード引き落とし / 給料',
@@ -253,14 +253,9 @@ export const ja = {
   'reserves.add': '取り置き資金を追加',
   'reserves.empty': '取り置き資金はありません。',
   'reserves.name': '名称',
-  'reserves.namePlaceholder': '例: プロポーズ資金',
-  'reserves.target': '目標額（任意）',
-  'reserves.targetDate': '目標期限（任意）',
-  'reserves.targetDateHint': '目標額と併せて入れると、必要な毎月の積立額の目安を出します。',
+  'reserves.namePlaceholder': '例: 飲み会用 / 秋旅行',
   'reserves.note': 'メモ',
   'reserves.balance': '現在残高',
-  'reserves.targetOf': '目標 {target}',
-  'reserves.requiredMonthly': '必要な毎月の積立額',
   'reserves.delete': '削除',
   'reserves.form.title': '取り置き資金',
   'reserves.error.name': '名称を入力してください。',
@@ -278,32 +273,6 @@ export const ja = {
   'reserves.deleteConfirmTitle': '取り置き資金の枠を削除しますか？',
   'reserves.deleteConfirmBody':
     '「{name}」の枠を削除します。取り置いた資金や仕訳は残ります（科目は残ります）。',
-
-  // 資金目標（長期の積立計画）
-  'fundingGoal.title': '資金目標',
-  'fundingGoal.intro':
-    '将来の大きな支出（車・老後・入院費など）に向けて、目標額・期限から必要な毎月の積立額を見ます。',
-  'fundingGoal.add': '目標を追加',
-  'fundingGoal.empty':
-    '資金目標はありません。新しい目標は「取り置き資金」に目標額・目標期限を付けて作成します。',
-  'fundingGoal.legacyHint':
-    '以前の「資金目標」です。新規は取り置き資金に統合しました（取り置き資金に目標額・目標期限を付けてください）。ここでは確認と削除のみできます。',
-  'fundingGoal.target': '目標',
-  'fundingGoal.current': '現在',
-  'fundingGoal.requiredMonthly': '必要な毎月の積立額',
-  'fundingGoal.form.title': '資金目標を追加',
-  'fundingGoal.name': '名称',
-  'fundingGoal.namePlaceholder': '例: 5年後に車 / 老後資金',
-  'fundingGoal.targetAmount': '目標額',
-  'fundingGoal.targetDate': '目標期限',
-  'fundingGoal.currentAmount': '現在確保できている額',
-  'fundingGoal.currentHint': '空欄なら 0。すでに貯めてある分があれば入れます。',
-  'fundingGoal.source': '積立元の口座（任意）',
-  'fundingGoal.note': 'メモ',
-  'fundingGoal.error.name': '名称を入力してください。',
-  'fundingGoal.error.target': '目標額（1 以上）と目標期限を入力してください。',
-  'fundingGoal.deleteConfirmTitle': '資金目標を削除しますか？',
-  'fundingGoal.deleteConfirmBody': '「{name}」を削除します。仕訳や口座は変更しません。',
 
   'cashflow.form.entryTags': 'タグ（全体）',
   'cashflow.form.accountTags': '口座側タグ',
@@ -384,6 +353,9 @@ export const ja = {
   'adjust.delta': '差額',
   'adjust.deltaHint': '差額 = 実残高 − 理論残高（プラスで増加、マイナスで減少）。',
   'adjust.save': '補正する',
+  // 各勘定科目行から残高補正を開く導線（補正・勘定科目の統合）。
+  'adjust.rowAction': '補正',
+  'adjust.createTitle': '「{name}」の残高を補正',
   'adjust.noChange': '差額がないため、補正仕訳は作成しませんでした。',
   'adjust.error.account': '対象科目を選んでください。',
   'adjust.error.actual': '実残高を入力してください。',
@@ -516,10 +488,11 @@ export const ja = {
   'entry.ccToggle': '継続コスト化',
   'entry.ccBackToCategory': '通常のカテゴリに戻す',
   'entry.ccTargetName': '継続コスト対象の名前',
-  'entry.ccTargetNameHint': '台帳に登録する名前を入れます（例: 自動車 / 洗濯機 / 家賃）。',
-  'entry.ccCategory': '認識先カテゴリ（費用）',
+  'entry.ccTargetNameHint':
+    '継続コスト台帳に登録する項目名です（例: 自動車 / 洗濯機 / 家賃）。勘定科目は増えません。',
+  'entry.ccCategory': '分類先カテゴリ（費用）',
   'entry.ccNote':
-    '支払い元 → 継続コスト対象（資産）に計上し、選んだ月数で費用カテゴリへ認識します。',
+    '支払い元 → 継続コスト台帳（資産）に計上し、選んだ月数で費用カテゴリへ分類します。台帳項目として記録され、勘定科目は増えません。',
   'entry.error.loanNotExpense':
     'ローン（その他負債）は通常の支出の支払い元にできません。継続コスト化するか、借入として振替で実行してください。',
   // 返済を資金繰りに入れるトグル ON 時の必須検証（口座・回数が無いと CF が作られないため fail closed）。
@@ -538,7 +511,7 @@ export const ja = {
   'entry.allocateMonths': '継続する月数',
   'entry.allocateMonthsHint': '2 か月以上。総額を月割りして毎月の費用に計上します。',
   'entry.allocateNote':
-    '購入時は「継続コストの未認識分」に計上し、毎月この費用カテゴリへ振り替えます。月次の認識仕訳は自動生成され、継続コスト台帳で管理します。',
+    '購入時は「継続コストの未消化分」に計上し、毎月この費用カテゴリへ振り替えます。月次の計上仕訳は自動生成され、継続コスト台帳で管理します。',
   'entry.error.months-invalid': '月数は 1 以上の整数で入力してください。',
   // 継続コスト
   'entry.monthlyizeToggle': 'この支出を継続コスト化する（支出として見る）',
@@ -565,14 +538,19 @@ export const ja = {
   'entry.error.category-required': '費用カテゴリを選んでください。',
   'entry.monthlyizeNote':
     '実際の支払いは仕訳に残し、支出は月あたりで見ます（月割りで導出・二重計上しません）。負債払いで返済を入力すると、返済予定（資金繰り）も作ります。',
-  // 取り置き資金・負債は既定で候補に出さない。必要時だけトグルで表示し、その場で作れる。
-  'entry.reserveToggle': '取り置き資金を使う',
-  'entry.reserveCreate': '取り置き資金を作成',
-  'entry.liabilityToggle': '負債（カード・ローン）を使う',
-  // 支出ではカードは既定表示のため、トグルは「ローン等」を足す意味にする。
-  'entry.liabilityToggleLoan': 'ローン等の負債も使う',
-  'entry.liabilityCreate': '新しい負債を作る',
-  'entry.liabilityCreateCard': '新しいカードを作る',
+  // 取り置き資金は両辺で常時選択できる（チェックボックス廃止）。新規作成は振替の移動先（右辺）の
+  // 「取り置き資産を作る」で名称入力へ切替（継続コスト化と同じ片側切替挙動）。
+  'entry.reserveCreate': '取り置き資産を作る',
+  'entry.reserveTargetName': '取り置き資産の名前',
+  'entry.reserveTargetNameHint':
+    '移動先に作る取り置き枠の名前です（例: 旅行積立 / 車の頭金）。勘定科目は増えません。',
+  'entry.reserveBack': '取り置き資産をやめる',
+  // 支出の支払い元（左辺）のローン導線。「ローンを組む」で既存ローン選択＋新規ローン作成へ切り替える。
+  'entry.loanArrange': 'ローンを組む',
+  'entry.loanArrangePick': '組むローンを選ぶ',
+  'entry.loanArrangeEmpty': 'ローンがありません。「新しいローンを作成」で追加できます。',
+  'entry.loanArrangeCreate': '新しいローンを作成',
+  'entry.loanArrangeBack': 'ローンをやめる',
 
   'journal.reverse': '取消/返金',
   'journal.reverseAction': '取消/返金を記録',
@@ -603,6 +581,7 @@ export const ja = {
   'breakdown.drilldownHint': '科目をタップすると、その仕訳を一覧で確認できます。',
   'breakdown.viewEntries': '「{name}」の仕訳を表示',
   'breakdown.asOfDate': '{date} 時点の残高',
+  'breakdown.reserveOf': 'うち {name}',
 
   // 収入の内訳（ホーム「収入」のタップ先）。
   'income.title': '収入の内訳',
@@ -662,9 +641,10 @@ export const ja = {
   'accounts.roleHint': '日常入力（収入/支出/振替）の候補は、この役割で絞り込まれます。',
   'accounts.role.daily-asset': '日常資産（現金・預金）',
   'accounts.role.reserve-asset': '取り置き資金',
-  'accounts.role.deferred-asset': '継続コストの未認識分',
+  'accounts.role.deferred-asset': '継続コストの未消化分',
   'accounts.role.investment-asset': '投資資産',
   'accounts.role.fixed-asset': '固定資産（車・家財など）',
+  'accounts.role.continuing-cost-asset': '継続コスト台帳（内部集約）',
   'accounts.role.payment-liability': '支払用負債（クレジットカード等）',
   'accounts.role.other-liability': 'その他の負債（ローン等）',
   'accounts.role.equity': '純資産（元入金等）',
@@ -691,9 +671,6 @@ export const ja = {
   'settings.about': 'アプリ情報',
   'settings.ledgerName': '台帳名',
   'settings.currency': '通貨コード',
-  'settings.expectedReturn': '期待年利（%）',
-  'settings.expectedReturnHint':
-    '資金目標の必要積立額の参考計算に使います。投資助言ではありません。0 でも使えます。',
   'settings.version': 'バージョン',
   'settings.schemaVersion': 'スキーマ版',
   'settings.revision': 'リビジョン',
@@ -794,7 +771,7 @@ export const ja = {
   'error.instrument.lockedInUse': '使用中の支払い手段は親科目・管理区分を変更できません。',
   'error.allocation.expenseCategory': '費用カテゴリ（支出カテゴリの科目）を選んでください。',
   'error.allocation.paymentSource': '支払い元は日常資産または支払用負債を選んでください。',
-  'error.allocation.deferredInvalid': '継続コストの未認識分の科目が不正です。',
+  'error.allocation.deferredInvalid': '継続コストの未消化分の科目が不正です。',
   'error.adjust.targetNotFound': '対象科目が見つかりません。',
   'error.adjust.assetLiabilityOnly': '残高補正できるのは資産・負債の科目です。',
   'error.adjust.notFound': '対象の残高補正が見つかりません。',
@@ -833,10 +810,6 @@ export const ja = {
   'error.disposal.gainCategoryMissing': '売却益の計上先（その他収入）が見つかりません。',
   'error.fixedAsset.expenseCategory': '継続コストの計上先の費用カテゴリを選んでください。',
   'error.fixedAsset.invalidAccount': '固定資産の科目が不正です。',
-  'error.fundingGoal.targetAmountInvalid': '目標額は 1 以上の整数で入力してください。',
-  'error.fundingGoal.targetDateRequired': '目標期限を入力してください。',
-  'error.fundingGoal.currentInvalid': '現在額は 0 以上の整数で入力してください。',
-  'error.fundingGoal.sourceInvalid': '積立元は日常資産または取り置き資金を選んでください。',
 } as const;
 
 export type MessageKey = keyof typeof ja;

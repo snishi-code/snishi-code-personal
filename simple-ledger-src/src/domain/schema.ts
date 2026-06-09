@@ -3,7 +3,12 @@
  * 型は src/domain/types.ts と一致させる（z.infer で照合可能）。
  */
 import { z } from 'zod';
-import { APP_ID, SCHEMA_VERSION } from './constants';
+import {
+  APP_ID,
+  CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+  RESERVE_LEDGER_ACCOUNT_ID,
+  SCHEMA_VERSION,
+} from './constants';
 import { addMonths, monthlyAmounts } from './allocation';
 import {
   ACCOUNT_ROLES,
@@ -129,6 +134,7 @@ export const entryMetadataSchema = z.object({
   adjustment: adjustmentMetaSchema.optional(),
   monthlyCostId: z.string().min(1).optional(),
   assetDisposalId: z.string().min(1).optional(),
+  reserveId: z.string().min(1).optional(),
 });
 
 const monthSchema = z.string().regex(/^\d{4}-\d{2}$/, '月は YYYY-MM 形式である必要があります');
@@ -171,8 +177,7 @@ export const reserveItemSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1).max(120),
   reserveAccountId: z.string().min(1),
-  targetAmount: amountSchema.optional(),
-  targetDate: isoDate.optional(),
+  parentAccountId: z.string().min(1).optional(),
   note: z.string().max(500).optional(),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
@@ -211,19 +216,6 @@ export const assetDisposalSchema = z.object({
   recognizedAmount: z.number().int().nonnegative(),
   remainingAmount: z.number().int().nonnegative(),
   generatedEntryIds: z.array(z.string().min(1)),
-  createdAt: isoDateTime,
-  updatedAt: isoDateTime,
-});
-
-export const fundingGoalSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1).max(120),
-  targetAmount: amountSchema,
-  targetDate: isoDate,
-  currentAmount: z.number().int().nonnegative(),
-  sourceAccountId: z.string().min(1).optional(),
-  status: z.enum(['active', 'achieved', 'archived']),
-  note: z.string().max(500).optional(),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
 });
@@ -270,8 +262,6 @@ export const settingsSchema = z.object({
   ledgerName: z.string().min(1).max(120),
   currency: z.string().min(1).max(8),
   locale: z.literal('ja'),
-  // 期待年利(bps)。古い JSON には無いので任意。0〜100%（10000bps）に制限。
-  expectedAnnualReturnBps: z.number().int().min(0).max(10000).optional(),
 });
 
 /**
@@ -296,7 +286,6 @@ export const ledgerExportPackageSchema = z
     reserves: z.array(reserveItemSchema),
     tags: z.array(tagSchema),
     monthlyCostItems: z.array(monthlyCostItemSchema),
-    fundingGoals: z.array(fundingGoalSchema),
     assetDisposals: z.array(assetDisposalSchema),
     settings: settingsSchema,
   })
@@ -312,6 +301,18 @@ export const ledgerExportPackageSchema = z
         issue(`勘定科目 ID が重複しています(${a.id})`, ['accounts', i, 'id']);
       accountType.set(a.id, a.type);
       accountRole.set(a.id, a.role);
+      // 集約モデルの不変条件（聖域化）: 内部集約ロールは唯一の集約口座 id のみ許す。
+      // これがないと import で目的別の reserve-asset / continuing-cost-asset 科目を再導入できてしまう。
+      if (a.role === 'reserve-asset' && a.id !== RESERVE_LEDGER_ACCOUNT_ID)
+        issue(
+          `取り置き資金(reserve-asset)は集約口座(${RESERVE_LEDGER_ACCOUNT_ID})のみ許可されます（目的別の科目は作れません）`,
+          ['accounts', i, 'id'],
+        );
+      if (a.role === 'continuing-cost-asset' && a.id !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID)
+        issue(
+          `継続コスト台帳(continuing-cost-asset)は集約口座(${CONTINUOUS_COST_LEDGER_ACCOUNT_ID})のみ許可されます`,
+          ['accounts', i, 'id'],
+        );
     });
     const hasAccount = (id: string) => accountType.has(id);
 
@@ -522,15 +523,15 @@ export const ledgerExportPackageSchema = z
           at('deferredAccountId'),
         );
 
-      // 認識仕訳の本数 = months、ID 重複なし。
+      // 計上仕訳の本数 = months、ID 重複なし。
       if (al.recognitionEntryIds.length !== al.months) {
         issue(
-          `按分「${al.name}」の認識仕訳数(${al.recognitionEntryIds.length})が按分月数(${al.months})と一致しません`,
+          `按分「${al.name}」の計上仕訳数(${al.recognitionEntryIds.length})が按分月数(${al.months})と一致しません`,
           at('recognitionEntryIds'),
         );
       }
       if (new Set(al.recognitionEntryIds).size !== al.recognitionEntryIds.length) {
-        issue(`按分「${al.name}」の認識仕訳 ID が重複しています`, at('recognitionEntryIds'));
+        issue(`按分「${al.name}」の計上仕訳 ID が重複しています`, at('recognitionEntryIds'));
       }
 
       // 原始仕訳: メタ一致 + 借方 deferred / 貸方 payment / 金額 totalAmount。
@@ -557,20 +558,20 @@ export const ledgerExportPackageSchema = z
         }
       }
 
-      // 月次認識仕訳: メタ・借方 expense / 貸方 deferred・金額列・日付列・合計が定義どおり。
+      // 月次計上仕訳: メタ・借方 expense / 貸方 deferred・金額列・日付列・合計が定義どおり。
       const amounts = monthlyAmounts(al.totalAmount, al.months);
       let sum = 0;
       let allRecognitionOk = al.recognitionEntryIds.length === al.months;
       al.recognitionEntryIds.forEach((rid, i) => {
         const re = entryById.get(rid);
         if (!re) {
-          issue(`按分「${al.name}」の認識仕訳(${rid})が存在しません`, at('recognitionEntryIds', i));
+          issue(`按分「${al.name}」の計上仕訳(${rid})が存在しません`, at('recognitionEntryIds', i));
           allRecognitionOk = false;
           return;
         }
         if (re.metadata?.allocationId !== al.id || re.metadata?.allocationRole !== 'recognition')
           issue(
-            `按分「${al.name}」の認識仕訳のメタ情報が一致しません`,
+            `按分「${al.name}」の計上仕訳のメタ情報が一致しません`,
             at('recognitionEntryIds', i),
           );
         const d = re.lines.find((l) => l.side === 'debit');
@@ -583,7 +584,7 @@ export const ledgerExportPackageSchema = z
           re.date !== expectedDate
         ) {
           issue(
-            `按分「${al.name}」の認識仕訳の科目/金額/日付が定義と一致しません`,
+            `按分「${al.name}」の計上仕訳の科目/金額/日付が定義と一致しません`,
             at('recognitionEntryIds', i),
           );
           allRecognitionOk = false;
@@ -592,7 +593,7 @@ export const ledgerExportPackageSchema = z
       });
       if (allRecognitionOk && sum !== al.totalAmount) {
         issue(
-          `按分「${al.name}」の認識仕訳の合計(${sum})が総額(${al.totalAmount})と一致しません`,
+          `按分「${al.name}」の計上仕訳の合計(${sum})が総額(${al.totalAmount})と一致しません`,
           at('recognitionEntryIds'),
         );
       }
@@ -655,6 +656,40 @@ export const ledgerExportPackageSchema = z
         issue(
           `目的別資金「${r.name}」の科目は目的別資金(reserve-asset)である必要があります`,
           at('reserveAccountId'),
+        );
+      else if (r.reserveAccountId !== RESERVE_LEDGER_ACCOUNT_ID)
+        issue(
+          `目的別資金「${r.name}」は集約口座(${RESERVE_LEDGER_ACCOUNT_ID})に寄せる必要があります（目的別の科目は作れません）`,
+          at('reserveAccountId'),
+        );
+      // 親口座（取り置き元）は任意。あれば日常資産(daily-asset)であること。
+      if (r.parentAccountId !== undefined) {
+        if (!accountType.has(r.parentAccountId))
+          issue(`目的別資金「${r.name}」の取り置き元口座が存在しません`, at('parentAccountId'));
+        else if (accountRole.get(r.parentAccountId) !== 'daily-asset')
+          issue(
+            `目的別資金「${r.name}」の取り置き元口座は日常資産である必要があります`,
+            at('parentAccountId'),
+          );
+      }
+    });
+
+    // 集約モデルの不変条件: 取り置きの仕訳タグ(metadata.reserveId)は既存の ReserveItem を参照し、
+    // かつ集約口座(reserve-ledger)に触れていること（目的別残高がタグ集計で正しく導出できる）。
+    pkg.journalEntries.forEach((e, ei) => {
+      const rid = e.metadata?.reserveId;
+      if (rid === undefined) return;
+      if (!reserveIds.has(rid))
+        issue(`仕訳の reserveId(${rid}) が存在しない取り置きを参照しています`, [
+          'journalEntries',
+          ei,
+          'metadata',
+          'reserveId',
+        ]);
+      if (!e.lines.some((l) => l.accountId === RESERVE_LEDGER_ACCOUNT_ID))
+        issue(
+          `reserveId 付きの仕訳は集約口座(${RESERVE_LEDGER_ACCOUNT_ID})に触れる必要があります`,
+          ['journalEntries', ei, 'metadata', 'reserveId'],
         );
     });
 
@@ -801,27 +836,6 @@ export const ledgerExportPackageSchema = z
             at('generatedEntryIds', gi),
           );
       });
-    });
-
-    // 資金目標(fundingGoals)の参照整合性。
-    const fundingGoalIds = new Set<string>();
-    pkg.fundingGoals.forEach((g, gi) => {
-      const at = (...p: (string | number)[]) => ['fundingGoals', gi, ...p];
-      if (fundingGoalIds.has(g.id)) issue(`資金目標の ID が重複しています(${g.id})`, at('id'));
-      fundingGoalIds.add(g.id);
-      if (g.currentAmount > g.targetAmount) {
-        // 既に到達は許容（必要月額 0）。ここでは構造のみ確認。
-      }
-      if (g.sourceAccountId !== undefined) {
-        const role = accountRole.get(g.sourceAccountId);
-        if (!accountType.has(g.sourceAccountId))
-          issue(`資金目標「${g.name}」の積立元口座が存在しません`, at('sourceAccountId'));
-        else if (role !== 'daily-asset' && role !== 'reserve-asset')
-          issue(
-            `資金目標「${g.name}」の積立元口座は日常資産または目的別資金である必要があります`,
-            at('sourceAccountId'),
-          );
-      }
     });
 
     // タグ(tags): id 一意 + active な同名重複なし。タグは「仕訳全体のみ」（明細タグは廃止）。
