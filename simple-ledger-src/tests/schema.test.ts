@@ -694,6 +694,36 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
     });
     expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
   });
+  it('集約モデルの不変条件: metadata.reserveId が存在しない取り置きを参照すると invalid', () => {
+    const bad = cfPkg({
+      reserves: [
+        {
+          id: 'r1',
+          name: '旅行',
+          reserveAccountId: RESERVE_LEDGER_ACCOUNT_ID,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+      journalEntries: [
+        {
+          id: 'e-bad',
+          date: '2026-02-01',
+          description: '取り置き',
+          kind: 'normal',
+          managementScopeId: 'scope-personal',
+          metadata: { inputMode: 'transfer', reserveId: 'nope' },
+          lines: [
+            { accountId: RESERVE_LEDGER_ACCOUNT_ID, side: 'debit', amount: 10000 },
+            { accountId: 'bank', side: 'credit', amount: 10000 },
+          ],
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+    });
+    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  });
   it('allocationRole 単独（allocationId なし）の仕訳は invalid', () => {
     const bad = cfPkg({
       journalEntries: [

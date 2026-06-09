@@ -271,8 +271,6 @@ export const UI = {
     reserveList: 'cashflow.reserve.list',
     reserveSave: 'cashflow.reserve.save',
     reserveName: 'cashflow.reserve.name',
-    reserveTarget: 'cashflow.reserve.target',
-    reserveDate: 'cashflow.reserve.date',
     // 資金目標
     addGoal: 'cashflow.goal.create',
     goalList: 'cashflow.goal.list',

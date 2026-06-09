@@ -11,7 +11,7 @@ import { useLedger } from '../../state/store';
 import { deriveBalanceSheet } from '../../domain/accounting';
 import { cashDeltaOfEntry, liquidAssetTotal, projectCashflow } from '../../domain/cashflow';
 import { continuousCostEntries } from '../../domain/continuousCost';
-import { goalRequiredMonthly, reserveRequiredMonthly } from '../../domain/fundingGoal';
+import { goalRequiredMonthly } from '../../domain/fundingGoal';
 import { reserveBalances } from '../../domain/reserve';
 import { addMonthsToDate } from '../../domain/allocation';
 import { currentYearMonth, todayLocal } from '../../util/time';
@@ -360,7 +360,7 @@ export function Cashflow() {
         <div className="stack">
           <p className="field__hint">{t('cashflow.advancedHint')}</p>
 
-          {/* 取り置き資金（任意で目標額・目標日。現在額は口座残高から自動・必要月額を表示） */}
+          {/* 取り置き資金（短期の封筒分け）: 名前 + 現在残高 + 削除のみ。目標額/期限/必要積立額は持たない。 */}
           <div
             className="section-label"
             style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
@@ -384,25 +384,13 @@ export function Cashflow() {
               {reserves.map((r) => {
                 // 目的別残高は集約口座の口座残高でなく、reserveId 集計で導出する（聖域化・集約モデル）。
                 const balance = resBalById.get(r.id) ?? 0;
-                const required = reserveRequiredMonthly(r, balance, currentYm, returnBps);
                 return (
                   <li key={r.id} className="list__item">
                     <div className="list__main">
                       <div className="list__title">{r.name}</div>
                       <div className="list__sub">
                         {t('reserves.balance')}: <Money amount={balance} currency={currency} />
-                        {r.targetAmount !== undefined
-                          ? `（${t('reserves.targetOf', { target: r.targetAmount.toLocaleString('ja-JP') })}${
-                              r.targetDate ? `・${r.targetDate}` : ''
-                            }）`
-                          : ''}
                       </div>
-                      {r.targetAmount !== undefined && r.targetDate !== undefined ? (
-                        <div className="list__sub">
-                          {t('reserves.requiredMonthly')}:{' '}
-                          <Money amount={required} currency={currency} />
-                        </div>
-                      ) : null}
                     </div>
                     <button
                       type="button"

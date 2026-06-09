@@ -692,6 +692,25 @@ export const ledgerExportPackageSchema = z
       }
     });
 
+    // 集約モデルの不変条件: 取り置きの仕訳タグ(metadata.reserveId)は既存の ReserveItem を参照し、
+    // かつ集約口座(reserve-ledger)に触れていること（目的別残高がタグ集計で正しく導出できる）。
+    pkg.journalEntries.forEach((e, ei) => {
+      const rid = e.metadata?.reserveId;
+      if (rid === undefined) return;
+      if (!reserveIds.has(rid))
+        issue(`仕訳の reserveId(${rid}) が存在しない取り置きを参照しています`, [
+          'journalEntries',
+          ei,
+          'metadata',
+          'reserveId',
+        ]);
+      if (!e.lines.some((l) => l.accountId === RESERVE_LEDGER_ACCOUNT_ID))
+        issue(
+          `reserveId 付きの仕訳は集約口座(${RESERVE_LEDGER_ACCOUNT_ID})に触れる必要があります`,
+          ['journalEntries', ei, 'metadata', 'reserveId'],
+        );
+    });
+
     // 月額化コスト(monthlyCostItems)の参照整合性。
     const monthlyCostIds = new Set<string>();
     pkg.monthlyCostItems.forEach((mc, mi) => {
