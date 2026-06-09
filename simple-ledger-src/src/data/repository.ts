@@ -39,7 +39,6 @@ import type {
   AllocationItem,
   AssetDisposal,
   CashflowSchedule,
-  FundingGoal,
   JournalEntry,
   JournalLine,
   Ledger,
@@ -309,7 +308,6 @@ export async function loadLedger(): Promise<Ledger> {
     reserves,
     tags,
     monthlyCostItems,
-    fundingGoals,
     assetDisposals,
   ] = await Promise.all([
     getMeta(),
@@ -323,7 +321,6 @@ export async function loadLedger(): Promise<Ledger> {
     getAll<ReserveItem>(STORE.reserves),
     getAll<Tag>(STORE.tags),
     getAll<MonthlyCostItem>(STORE.monthlyCostItems),
-    getAll<FundingGoal>(STORE.fundingGoals),
     getAll<AssetDisposal>(STORE.assetDisposals),
   ]);
   if (!meta || !settings) throw new Error('台帳の初期化に失敗しました');
@@ -337,7 +334,6 @@ export async function loadLedger(): Promise<Ledger> {
   reserves.sort((a, b) => cmp(a.createdAt, b.createdAt));
   tags.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
   monthlyCostItems.sort((a, b) => cmp(b.createdAt, a.createdAt));
-  fundingGoals.sort((a, b) => cmp(a.targetDate, b.targetDate));
   managementScopes.sort((a, b) => cmp(a.createdAt, b.createdAt));
   accountInstruments.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
   assetDisposals.sort((a, b) => cmp(b.createdAt, a.createdAt));
@@ -366,7 +362,6 @@ export async function loadLedger(): Promise<Ledger> {
     reserves,
     tags,
     monthlyCostItems,
-    fundingGoals,
     assetDisposals,
   };
 }
@@ -474,16 +469,14 @@ function assertSchedulesSavable(schedules: CashflowSchedule[], ctx: SaveContext)
 /* ── 勘定科目 ── */
 
 async function loadReferencingCollections(): Promise<AccountRefCollections> {
-  const [entries, schedules, reserves, allocations, monthlyCostItems, fundingGoals] =
-    await Promise.all([
-      getAll<JournalEntry>(STORE.journalEntries),
-      getAll<CashflowSchedule>(STORE.cashflowSchedules),
-      getAll<ReserveItem>(STORE.reserves),
-      getAll<AllocationItem>(STORE.allocations),
-      getAll<MonthlyCostItem>(STORE.monthlyCostItems),
-      getAll<FundingGoal>(STORE.fundingGoals),
-    ]);
-  return { entries, schedules, reserves, allocations, monthlyCostItems, fundingGoals };
+  const [entries, schedules, reserves, allocations, monthlyCostItems] = await Promise.all([
+    getAll<JournalEntry>(STORE.journalEntries),
+    getAll<CashflowSchedule>(STORE.cashflowSchedules),
+    getAll<ReserveItem>(STORE.reserves),
+    getAll<AllocationItem>(STORE.allocations),
+    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
+  ]);
+  return { entries, schedules, reserves, allocations, monthlyCostItems };
 }
 
 export async function upsertAccount(account: Account): Promise<void> {
@@ -800,7 +793,6 @@ function findOrCreateReserveLedgerAccount(
  * 取り置き枠(ReserveItem)を登録する。取り置きは「短期の封筒分け」（A）: 目標額・目標期限・利回りは持たない。
  * **目的ごとの勘定科目は作らない**——残高は単一の集約口座（reserve-ledger）に寄せ、目的別残高は取り置き仕訳の
  * `metadata.reserveId` 集計で導出する。実際の「取り置く」振替は呼び出し側（EntrySheet）で保存する。
- * 注: `ReserveItem.targetAmount/targetDate` は import 後方互換のため schema には optional で残すが、新規作成では持たせない。
  */
 export async function createReserve(input: {
   name: string;
@@ -2085,63 +2077,6 @@ export async function disposeFixedAsset(input: DisposeFixedAssetInput): Promise<
   return disposal;
 }
 
-/* ── 資金目標 ── */
-
-export interface FundingGoalInput {
-  name: string;
-  targetAmount: number;
-  targetDate: string;
-  currentAmount?: number;
-  sourceAccountId?: string;
-  note?: string;
-}
-
-export async function createFundingGoal(input: FundingGoalInput): Promise<FundingGoal> {
-  if (input.name.trim() === '') throw new LedgerError('error.common.nameRequired');
-  if (!Number.isInteger(input.targetAmount) || input.targetAmount <= 0)
-    throw new LedgerError('error.fundingGoal.targetAmountInvalid');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.targetDate))
-    throw new LedgerError('error.fundingGoal.targetDateRequired');
-  const current = input.currentAmount ?? 0;
-  if (!Number.isInteger(current) || current < 0)
-    throw new LedgerError('error.fundingGoal.currentInvalid');
-  if (input.sourceAccountId !== undefined) {
-    const accounts = await getAll<Account>(STORE.accounts);
-    const acc = accounts.find((a) => a.id === input.sourceAccountId);
-    if (!acc || (acc.role !== 'daily-asset' && acc.role !== 'reserve-asset'))
-      throw new LedgerError('error.fundingGoal.sourceInvalid');
-  }
-  const ts = nowIso();
-  const goal: FundingGoal = {
-    id: newId(),
-    name: input.name.trim(),
-    targetAmount: input.targetAmount,
-    targetDate: input.targetDate,
-    currentAmount: current,
-    ...(input.sourceAccountId !== undefined ? { sourceAccountId: input.sourceAccountId } : {}),
-    ...(input.note && input.note.trim() !== '' ? { note: input.note.trim() } : {}),
-    status: 'active',
-    createdAt: ts,
-    updatedAt: ts,
-  };
-  await writeWithRevision([STORE.fundingGoals], (t) => {
-    t.objectStore(STORE.fundingGoals).put(goal);
-  });
-  return goal;
-}
-
-export async function upsertFundingGoal(goal: FundingGoal): Promise<void> {
-  await writeWithRevision([STORE.fundingGoals], (t) => {
-    t.objectStore(STORE.fundingGoals).put(goal);
-  });
-}
-
-export async function deleteFundingGoal(id: string): Promise<void> {
-  await writeWithRevision([STORE.fundingGoals], (t) => {
-    t.objectStore(STORE.fundingGoals).delete(id);
-  });
-}
-
 /* ── 管理区分 ── */
 
 export async function createManagementScope(name: string): Promise<ManagementScope> {
@@ -2295,7 +2230,6 @@ export interface ReplacePayload {
   reserves: ReserveItem[];
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
-  fundingGoals: FundingGoal[];
   assetDisposals: AssetDisposal[];
 }
 
@@ -2316,7 +2250,6 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       STORE.reserves,
       STORE.tags,
       STORE.monthlyCostItems,
-      STORE.fundingGoals,
       STORE.assetDisposals,
     ],
     (t) => {
@@ -2329,7 +2262,6 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       const reserves = t.objectStore(STORE.reserves);
       const tags = t.objectStore(STORE.tags);
       const monthlyCosts = t.objectStore(STORE.monthlyCostItems);
-      const fundingGoals = t.objectStore(STORE.fundingGoals);
       const disposals = t.objectStore(STORE.assetDisposals);
       scopes.clear();
       instruments.clear();
@@ -2340,7 +2272,6 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       reserves.clear();
       tags.clear();
       monthlyCosts.clear();
-      fundingGoals.clear();
       disposals.clear();
       for (const s of payload.managementScopes) scopes.put(s);
       for (const inst of payload.accountInstruments) instruments.put(inst);
@@ -2351,7 +2282,6 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       for (const r of payload.reserves) reserves.put(r);
       for (const tag of payload.tags) tags.put(tag);
       for (const mc of payload.monthlyCostItems) monthlyCosts.put(mc);
-      for (const g of payload.fundingGoals) fundingGoals.put(g);
       for (const d of payload.assetDisposals) disposals.put(d);
       t.objectStore(STORE.kv).put(payload.meta, KV_META);
       t.objectStore(STORE.kv).put(payload.settings, KV_SETTINGS);
@@ -2382,7 +2312,6 @@ export async function resetAll(): Promise<void> {
       STORE.reserves,
       STORE.tags,
       STORE.monthlyCostItems,
-      STORE.fundingGoals,
       STORE.assetDisposals,
       STORE.snapshots,
     ],
@@ -2397,7 +2326,6 @@ export async function resetAll(): Promise<void> {
       t.objectStore(STORE.reserves).clear();
       t.objectStore(STORE.tags).clear();
       t.objectStore(STORE.monthlyCostItems).clear();
-      t.objectStore(STORE.fundingGoals).clear();
       t.objectStore(STORE.assetDisposals).clear();
       t.objectStore(STORE.snapshots).clear();
       t.objectStore(STORE.kv).put(meta, KV_META);

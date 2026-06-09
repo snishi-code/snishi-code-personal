@@ -9,13 +9,11 @@ import {
   deleteOpening,
   createContinuousCost,
   createAllocation,
-  createFundingGoal,
   createManagementScope,
   createMonthlyCost,
   createReserve,
   deleteAccount,
   deleteEntry,
-  deleteFundingGoal,
   createFixedAssetPurchaseMonthly,
   deleteManagementScope,
   deleteMonthlyCost,
@@ -274,8 +272,6 @@ describe('resetAll', () => {
       paymentAccountId: cash.id,
     });
     expect((await loadLedger()).monthlyCostItems).toHaveLength(1);
-    await createFundingGoal({ name: '車', targetAmount: 1000, targetDate: '2030-01-01' });
-    expect((await loadLedger()).fundingGoals).toHaveLength(1);
 
     await resetAll();
     const after = await loadLedger();
@@ -284,7 +280,6 @@ describe('resetAll', () => {
     expect(after.meta.revision).toBe(0); // 新しい meta で作り直されている
     expect(await listSnapshots()).toHaveLength(0); // snapshots も消える
     expect(after.monthlyCostItems).toHaveLength(0); // 月額化コストも消える
-    expect(after.fundingGoals).toHaveLength(0); // 資金目標も消える
   });
 });
 
@@ -356,13 +351,13 @@ describe('予定キャッシュフロー / 目的別資金', () => {
     expect(acc.role).toBe('reserve-asset');
   });
 
-  it('取り置きは短期の封筒分け（A）: 目標額・目標日を持たない', async () => {
+  it('取り置きは短期の封筒分け（A）: 目標額・目標日のフィールドを持たない', async () => {
     await loadLedger();
     const r = await createReserve({ name: '飲み会用' });
     const after = await loadLedger();
-    const saved = after.reserves.find((x) => x.id === r.id)!;
-    expect(saved.targetAmount).toBeUndefined();
-    expect(saved.targetDate).toBeUndefined();
+    const saved = after.reserves.find((x) => x.id === r.id)! as unknown as Record<string, unknown>;
+    expect('targetAmount' in saved).toBe(false);
+    expect('targetDate' in saved).toBe(false);
   });
 });
 
@@ -714,40 +709,6 @@ describe('月額化コスト createMonthlyCost', () => {
         date: '2026-06-15',
         expenseAccountId: cash.id, // asset を費用に → 拒否
         paymentAccountId: cash.id,
-      }),
-    ).rejects.toThrow();
-  });
-});
-
-describe('資金目標 createFundingGoal', () => {
-  it('目標を作成できる', async () => {
-    await loadLedger();
-    const g = await createFundingGoal({
-      name: '車',
-      targetAmount: 3000000,
-      targetDate: '2031-06-30',
-      currentAmount: 500000,
-    });
-    const after = await loadLedger();
-    expect(after.fundingGoals).toHaveLength(1);
-    expect(after.fundingGoals[0]).toMatchObject({
-      name: '車',
-      targetAmount: 3000000,
-      status: 'active',
-    });
-    await deleteFundingGoal(g.id);
-    expect((await loadLedger()).fundingGoals).toHaveLength(0);
-  });
-
-  it('積立元が日常資産/目的別資金でないと拒否', async () => {
-    const ledger = await loadLedger();
-    const card = ledger.accounts.find((a) => a.role === 'payment-liability')!;
-    await expect(
-      createFundingGoal({
-        name: 'x',
-        targetAmount: 1000,
-        targetDate: '2030-01-01',
-        sourceAccountId: card.id, // 負債は不可
       }),
     ).rejects.toThrow();
   });

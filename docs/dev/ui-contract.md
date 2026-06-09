@@ -33,7 +33,7 @@
 | `period.fullYear.row` / `period.month.row` | 月ピッカーの行 | 年全体 / 各月（同上） |
 | `period.trend` / `period.trend.chart` / `period.trend.point` | 推移（自前 SVG・`TrendChart`） | 収支/支出=bar・純資産=line。年別=12ヶ月・全体=年集約。`point` は全体→年のドリルダウン |
 | `cashflow.future.list` | CF 未来の入出金・振替予定 | ホーム未来日付入力が反映される一覧 |
-| `cashflow.advanced.toggle` | CF 取り置き資金・資金目標の折りたたみ | 下部の補助情報を開閉 |
+| `cashflow.advanced.toggle` | CF 取り置き資金の折りたたみ | 下部の補助情報を開閉 |
 | `journal.view` | Journal ルート | 仕訳画面の検出 |
 | `journal.entry.list` | Journal 一覧 | 仕訳一覧 |
 | `journal.monthlyRecognition` | 今月の継続コスト計上カード | 読み取り専用（仕訳ではない月割り表示） |
@@ -49,10 +49,7 @@
 | `journal.entry.monthlyizeContinue` | 継続・買い替えトグル | ON で repeatEveryMonths=costMonths |
 | `journal.entry.monthlyizeRepayToggle` | 分割/後日引落を資金繰りに入れる | 負債払いのみ表示 |
 | `journal.entry.monthlyizeRepayAccount` / `...RepayCount` / `...RepayStart` | 引落口座/回数/初回引落日 | 返済 CF の生成（購入日と別） |
-| `settings.expectedReturn` | 期待年利(%) | 資金目標の必要月額の参考計算 |
 | `cashflow.schedule.flow.source` / `.destination` | 予定入力のお金の流れ | 源泉 → 行き先（入金/出金は自動判定） |
-| `cashflow.goal.create` / `.list` / `.save` | 資金目標の追加/一覧/保存 | 長期の積立計画 |
-| `cashflow.goal.name` / `.amount` / `.date` | 資金目標フォーム | 名称/目標額/期限 |
 | `journal.entry.ccToggle` | 行き先の「継続コスト化」ボタン | 行き先を継続コスト対象（自由入力）に切替 |
 | `journal.entry.ccName` | 継続コスト対象の名前 | 台帳に登録する対象名（自由入力） |
 | `journal.entry.ccCategory` | 分類先カテゴリ（費用） | 継続コストの月次分類先 |

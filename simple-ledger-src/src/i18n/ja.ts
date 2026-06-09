@@ -274,30 +274,6 @@ export const ja = {
   'reserves.deleteConfirmBody':
     '「{name}」の枠を削除します。取り置いた資金や仕訳は残ります（科目は残ります）。',
 
-  // 資金目標（旧概念・長期の積立計画。現在は新規作成しない。確認・削除のみ。）
-  'fundingGoal.title': '資金目標（旧）',
-  'fundingGoal.intro': '以前の「資金目標」です。確認と削除のみできます（新規は作成しません）。',
-  'fundingGoal.add': '目標を追加',
-  'fundingGoal.empty': '資金目標はありません。',
-  'fundingGoal.legacyHint':
-    '以前の「資金目標」です。長期の目標・投資前提の資金は今後あらためて扱います。ここでは確認と削除のみできます。',
-  'fundingGoal.target': '目標',
-  'fundingGoal.current': '現在',
-  'fundingGoal.requiredMonthly': '必要な毎月の積立額',
-  'fundingGoal.form.title': '資金目標を追加',
-  'fundingGoal.name': '名称',
-  'fundingGoal.namePlaceholder': '例: 5年後に車 / 老後資金',
-  'fundingGoal.targetAmount': '目標額',
-  'fundingGoal.targetDate': '目標期限',
-  'fundingGoal.currentAmount': '現在確保できている額',
-  'fundingGoal.currentHint': '空欄なら 0。すでに貯めてある分があれば入れます。',
-  'fundingGoal.source': '積立元の口座（任意）',
-  'fundingGoal.note': 'メモ',
-  'fundingGoal.error.name': '名称を入力してください。',
-  'fundingGoal.error.target': '目標額（1 以上）と目標期限を入力してください。',
-  'fundingGoal.deleteConfirmTitle': '資金目標を削除しますか？',
-  'fundingGoal.deleteConfirmBody': '「{name}」を削除します。仕訳や口座は変更しません。',
-
   'cashflow.form.entryTags': 'タグ（全体）',
   'cashflow.form.accountTags': '口座側タグ',
   'cashflow.form.counterTags': '相手科目側タグ',
@@ -695,9 +671,6 @@ export const ja = {
   'settings.about': 'アプリ情報',
   'settings.ledgerName': '台帳名',
   'settings.currency': '通貨コード',
-  'settings.expectedReturn': '期待年利（%）',
-  'settings.expectedReturnHint':
-    '資金目標の必要積立額の参考計算に使います。投資助言ではありません。0 でも使えます。',
   'settings.version': 'バージョン',
   'settings.schemaVersion': 'スキーマ版',
   'settings.revision': 'リビジョン',
@@ -837,10 +810,6 @@ export const ja = {
   'error.disposal.gainCategoryMissing': '売却益の計上先（その他収入）が見つかりません。',
   'error.fixedAsset.expenseCategory': '継続コストの計上先の費用カテゴリを選んでください。',
   'error.fixedAsset.invalidAccount': '固定資産の科目が不正です。',
-  'error.fundingGoal.targetAmountInvalid': '目標額は 1 以上の整数で入力してください。',
-  'error.fundingGoal.targetDateRequired': '目標期限を入力してください。',
-  'error.fundingGoal.currentInvalid': '現在額は 0 以上の整数で入力してください。',
-  'error.fundingGoal.sourceInvalid': '積立元は日常資産または取り置き資金を選んでください。',
 } as const;
 
 export type MessageKey = keyof typeof ja;

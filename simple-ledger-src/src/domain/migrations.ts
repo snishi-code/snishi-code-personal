@@ -303,14 +303,11 @@ const STEPS: Step[] = [
     },
   },
   {
-    // v7 → v8: 資金目標(fundingGoals)を追加。既存 JSON には無いので空配列を補う。
-    // ReserveItem は targetDate を持たないため自動移行はせず、既存データは保持する。
+    // v7 → v8: 旧版で資金目標(fundingGoals)を追加していた版上げ。v16 で資金目標を撤去したため、
+    // ここは恒等移行に変更（v15→v16 で残存 fundingGoals 等を落とす）。
     from: 7,
     to: 8,
-    migrate: (pkg) => ({
-      ...pkg,
-      fundingGoals: Array.isArray(pkg.fundingGoals) ? pkg.fundingGoals : [],
-    }),
+    migrate: (pkg) => pkg,
   },
   {
     // v8 → v9: 予定CF direction に transfer を追加（許容値拡張）。既存データは
@@ -436,6 +433,25 @@ const STEPS: Step[] = [
     from: 14,
     to: 15,
     migrate: applyReserveConsolidation,
+  },
+  {
+    // v15 → v16: B 側レガシーの撤去。旧「資金目標(fundingGoals)」・取り置きの目標額/期限・
+    // 設定の期待年利を完全削除する（A=短期の封筒分けのみ）。
+    from: 15,
+    to: 16,
+    migrate: (pkg) => {
+      const p = pkg as unknown as Record<string, unknown>;
+      delete p.fundingGoals;
+      const reserves = (pkg.reserves ?? []).map((r) => {
+        const copy = { ...r } as Record<string, unknown>;
+        delete copy.targetAmount;
+        delete copy.targetDate;
+        return copy as unknown as ReserveItem;
+      });
+      const settings = { ...pkg.settings } as Record<string, unknown>;
+      delete settings.expectedAnnualReturnBps;
+      return { ...pkg, reserves, settings: settings as unknown as LedgerExportPackage['settings'] };
+    },
   },
 ];
 

@@ -25,7 +25,6 @@ function pkg(version: number): LedgerExportPackage {
     reserves: [],
     tags: [],
     monthlyCostItems: [],
-    fundingGoals: [],
     assetDisposals: [],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
   };
@@ -163,12 +162,37 @@ describe('migrateToCurrent', () => {
     expect(ids).toContain('plain');
     expect(ids).not.toContain('gen');
   });
-  it('v7 → v8 で fundingGoals を空配列で補う', () => {
-    const v7 = { ...pkg(7) } as Record<string, unknown>;
-    delete v7.fundingGoals;
-    const r = migrateToCurrent(v7 as unknown as LedgerExportPackage);
+  it('v15 → v16 で B 側レガシー（資金目標・取り置きの目標額/期限・期待年利）を落とす', () => {
+    const v15 = pkg(15) as unknown as Record<string, unknown>;
+    v15.fundingGoals = [{ id: 'g1', name: '老後', targetAmount: 5000000 }];
+    v15.reserves = [
+      {
+        id: 'r1',
+        name: '旅行',
+        reserveAccountId: 'reserve-ledger',
+        targetAmount: 200000,
+        targetDate: '2026-12-31',
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+    ];
+    v15.settings = {
+      ledgerName: '家計簿',
+      currency: 'JPY',
+      locale: 'ja',
+      expectedAnnualReturnBps: 500,
+    };
+    const r = migrateToCurrent(v15 as unknown as LedgerExportPackage);
     expect(r.ok).toBe(true);
-    expect(r.data?.fundingGoals).toEqual([]);
+    expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
+    // 資金目標・期待年利・取り置きの目標は消える。
+    expect((r.data as unknown as Record<string, unknown>).fundingGoals).toBeUndefined();
+    const res = r.data?.reserves[0] as unknown as Record<string, unknown>;
+    expect(res.targetAmount).toBeUndefined();
+    expect(res.targetDate).toBeUndefined();
+    expect(
+      (r.data?.settings as unknown as Record<string, unknown>).expectedAnnualReturnBps,
+    ).toBeUndefined();
   });
   it('v8 → v9 は恒等移行（version だけ前進し内容は不変）', () => {
     const v8 = pkg(8);

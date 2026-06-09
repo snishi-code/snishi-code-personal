@@ -5,7 +5,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   createAllocation,
-  createFundingGoal,
   createMonthlyCost,
   loadLedger,
   upsertEntry,
@@ -159,25 +158,6 @@ describe('月額化コストの export/import', () => {
     const reloaded = await loadLedger();
     expect(reloaded.monthlyCostItems).toHaveLength(1);
     expect(reloaded.monthlyCostItems[0]).toMatchObject({ name: 'Netflix', amount: 1500 });
-  });
-});
-
-describe('資金目標の export/import', () => {
-  it('資金目標を含む台帳を round-trip できる', async () => {
-    await loadLedger();
-    await createFundingGoal({
-      name: '車',
-      targetAmount: 3000000,
-      targetDate: '2031-06-30',
-      currentAmount: 100000,
-    });
-    const seeded = await loadLedger();
-    const text = exportToJsonText(seeded);
-    const outcome = await importFromJsonText(text);
-    expect(outcome.kind).toBe('ok');
-    const reloaded = await loadLedger();
-    expect(reloaded.fundingGoals).toHaveLength(1);
-    expect(reloaded.fundingGoals[0]).toMatchObject({ name: '車', targetAmount: 3000000 });
   });
 });
 

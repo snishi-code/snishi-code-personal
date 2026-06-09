@@ -8,7 +8,7 @@ export const APP_ID = 'snishi-code.simple-ledger' as const;
  *  v4 → v5: 残高補正（metadata.adjustment）の永続化に伴う版上げ（構造変更なし＝恒等移行）。
  *  v5 → v6: 勘定科目に role（UI 用の役割）を追加。既存科目は type 等から推定して補完。
  *  v6 → v7: 月額化コスト（monthlyCostItems）を追加。既存按分から移行生成する。
- *  v7 → v8: 資金目標（fundingGoals）を追加（空配列補完）。
+ *  v7 → v8: （旧）資金目標（fundingGoals）を追加していた版上げ。schema v16 で資金目標は撤去したため現在は恒等移行。
  *  v8 → v9: 予定CFの direction に transfer（口座間移動）を追加。許容値が増える＝
  *           新しい JSON を旧 v8 アプリが読むと validation error になり得るため版を上げる
  *           （既存データの構造変更はなし＝恒等移行）。
@@ -34,8 +34,11 @@ export const APP_ID = 'snishi-code.simple-ledger' as const;
  *  v14 → v15: 取り置き資金の聖域化・集約。目的ごとの reserve-asset 科目をやめ、単一の集約口座
  *             （RESERVE_LEDGER_ACCOUNT_ID『取り置き資金』）に寄せる。取り置き仕訳に `metadata.reserveId`
  *             を付与し目的別残高はその集計で導出。既存の目的別科目を集約へ付け替え、関連振替仕訳を
- *             reserveId でタグ付けし、参照されなくなった旧科目を削除する（目的名は ReserveItem.name に残る）。 */
-export const SCHEMA_VERSION = 15 as const;
+ *             reserveId でタグ付けし、参照されなくなった旧科目を削除する（目的名は ReserveItem.name に残る）。
+ *  v15 → v16: B 側レガシーの撤去（実運用前・後方互換不要）。取り置きは A=短期の封筒分けのみとし、
+ *             旧「資金目標(fundingGoals)」・取り置きの `targetAmount/targetDate`・`Settings.expectedAnnualReturnBps`
+ *             を完全削除する。 */
+export const SCHEMA_VERSION = 16 as const;
 
 /** 既定の管理区分（『個人用』）。seed と migration で同じ id を使い、既存データを寄せる。 */
 export const DEFAULT_MANAGEMENT_SCOPE_ID = 'scope-personal' as const;

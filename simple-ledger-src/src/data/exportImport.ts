@@ -35,7 +35,6 @@ export function buildExportPackage(ledger: Ledger): LedgerExportPackage {
     reserves: ledger.reserves,
     tags: ledger.tags,
     monthlyCostItems: ledger.monthlyCostItems,
-    fundingGoals: ledger.fundingGoals,
     assetDisposals: ledger.assetDisposals,
     settings: ledger.settings,
   };
@@ -175,7 +174,6 @@ export async function importFromJsonText(
     reserves: pkg.reserves,
     tags: pkg.tags,
     monthlyCostItems: pkg.monthlyCostItems,
-    fundingGoals: pkg.fundingGoals,
     assetDisposals: pkg.assetDisposals,
   });
 
@@ -246,7 +244,6 @@ export async function restoreFromSnapshot(snapshotData: LedgerExportPackage): Pr
     reserves: pkg.reserves,
     tags: pkg.tags,
     monthlyCostItems: pkg.monthlyCostItems,
-    fundingGoals: pkg.fundingGoals,
     assetDisposals: pkg.assetDisposals,
   });
   return loadLedger();
@@ -288,7 +285,6 @@ export async function loadSampleFixture(): Promise<Ledger> {
     reserves: pkg.reserves,
     tags: pkg.tags,
     monthlyCostItems: pkg.monthlyCostItems,
-    fundingGoals: pkg.fundingGoals,
     assetDisposals: pkg.assetDisposals,
   });
   return loadLedger();

@@ -9,7 +9,6 @@ import type {
   AccountInstrument,
   AdjustmentKind,
   CashflowSchedule,
-  FundingGoal,
   Ledger,
   ManagementScope,
   MonthlyCostItem,
@@ -28,7 +27,6 @@ import type {
   DisposeFixedAssetInput,
   FixedAssetMonthlyInput,
   FixedAssetPurchaseMonthlyInput,
-  FundingGoalInput,
   MonthlyCostInput,
 } from '../data/repository';
 import {
@@ -63,7 +61,6 @@ function isPristineSeedLedger(l: Ledger): boolean {
     l.cashflowSchedules.length === 0 &&
     l.reserves.length === 0 &&
     l.monthlyCostItems.length === 0 &&
-    l.fundingGoals.length === 0 &&
     l.tags.length === 0 &&
     isDefaultSettings(l.settings) &&
     isDefaultSeedAccounts(l.accounts)
@@ -94,9 +91,6 @@ interface LedgerContextValue {
   removeMonthlyCost: (id: string) => Promise<void>;
   createFixedAssetPurchaseMonthly: (input: FixedAssetPurchaseMonthlyInput) => Promise<void>;
   disposeFixedAsset: (input: DisposeFixedAssetInput) => Promise<void>;
-  createFundingGoal: (input: FundingGoalInput) => Promise<void>;
-  saveFundingGoal: (goal: FundingGoal) => Promise<void>;
-  removeFundingGoal: (id: string) => Promise<void>;
   saveSchedules: (schedules: CashflowSchedule[]) => Promise<void>;
   postSchedule: (id: string) => Promise<void>;
   removeSchedule: (id: string) => Promise<void>;
@@ -344,48 +338,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await repo.disposeFixedAsset(input);
         await refresh();
         toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const createFundingGoal = useCallback<LedgerContextValue['createFundingGoal']>(
-    async (input) => {
-      try {
-        await repo.createFundingGoal(input);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const saveFundingGoal = useCallback<LedgerContextValue['saveFundingGoal']>(
-    async (goal) => {
-      try {
-        await repo.upsertFundingGoal(goal);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const removeFundingGoal = useCallback<LedgerContextValue['removeFundingGoal']>(
-    async (id) => {
-      try {
-        await repo.deleteFundingGoal(id);
-        await refresh();
-        toast.show(t('toast.deleted'), 'success');
       } catch (e) {
         toast.show(errorText(e), 'error');
         throw e;
@@ -796,9 +748,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       removeMonthlyCost,
       createFixedAssetPurchaseMonthly,
       disposeFixedAsset,
-      createFundingGoal,
-      saveFundingGoal,
-      removeFundingGoal,
       saveSchedules,
       postSchedule,
       removeSchedule,
@@ -844,9 +793,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       removeMonthlyCost,
       createFixedAssetPurchaseMonthly,
       disposeFixedAsset,
-      createFundingGoal,
-      saveFundingGoal,
-      removeFundingGoal,
       saveSchedules,
       postSchedule,
       removeSchedule,

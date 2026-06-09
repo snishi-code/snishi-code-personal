@@ -46,7 +46,6 @@ export function Accounts({
         reserves: ledger?.reserves ?? [],
         allocations: ledger?.allocations ?? [],
         monthlyCostItems: ledger?.monthlyCostItems ?? [],
-        fundingGoals: ledger?.fundingGoals ?? [],
       }),
     [ledger],
   );

@@ -16,7 +16,6 @@ const empty: AccountRefCollections = {
   reserves: [],
   allocations: [],
   monthlyCostItems: [],
-  fundingGoals: [],
 };
 
 const monthlyCost: MonthlyCostItem = {
@@ -130,7 +129,6 @@ describe('referencedAccountIds', () => {
       reserves: [reserve],
       allocations: [allocation],
       monthlyCostItems: [monthlyCost],
-      fundingGoals: [],
     });
     for (const id of [
       'cash',
