@@ -106,7 +106,7 @@ interface LedgerContextValue {
     targetAmount?: number;
     targetDate?: string;
     note?: string;
-    existingAccountId?: string;
+    parentAccountId?: string;
   }) => Promise<ReserveItem>;
   removeReserve: (id: string) => Promise<void>;
   saveTag: (tag: Tag) => Promise<void>;

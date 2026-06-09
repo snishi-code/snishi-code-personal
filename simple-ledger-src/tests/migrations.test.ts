@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { migrateToCurrent } from '../src/domain/migrations';
-import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID, SCHEMA_VERSION } from '../src/domain/constants';
+import {
+  CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+  RESERVE_LEDGER_ACCOUNT_ID,
+  SCHEMA_VERSION,
+} from '../src/domain/constants';
 import type { LedgerExportPackage } from '../src/domain/types';
 
 function pkg(version: number): LedgerExportPackage {
@@ -276,5 +280,69 @@ describe('migrateToCurrent', () => {
     expect(
       items.every((m) => m.recognitionCreditAccountId === CONTINUOUS_COST_LEDGER_ACCOUNT_ID),
     ).toBe(true);
+  });
+
+  it('v14 → v15 で目的別 reserve-asset 科目を集約口座へ寄せ、取り置き振替に reserveId を付ける', () => {
+    const v14 = pkg(14) as unknown as Record<string, unknown>;
+    const acc = (id: string, name: string, role: string, type = 'asset') => ({
+      id,
+      name,
+      type,
+      role,
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    v14.accounts = [
+      acc('bank', '預金', 'daily-asset'),
+      acc('res-trip', '旅行積立', 'reserve-asset'),
+      acc('res-car', '車の頭金', 'reserve-asset'),
+    ];
+    v14.reserves = [
+      {
+        id: 'r-trip',
+        name: '旅行積立',
+        reserveAccountId: 'res-trip',
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+      {
+        id: 'r-car',
+        name: '車の頭金',
+        reserveAccountId: 'res-car',
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+    ];
+    // 取り置き振替（預金 → 旧目的別口座）。
+    v14.journalEntries = [
+      {
+        id: 'mv-trip',
+        date: '2026-01-05',
+        description: '預金 → 旅行積立',
+        kind: 'normal',
+        lines: [
+          { accountId: 'res-trip', side: 'debit', amount: 20000 },
+          { accountId: 'bank', side: 'credit', amount: 20000 },
+        ],
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+    ];
+    const r = migrateToCurrent(v14 as unknown as LedgerExportPackage);
+    expect(r.ok).toBe(true);
+    expect(r.data?.schemaVersion).toBe(SCHEMA_VERSION);
+    // 旧目的別口座は消え、集約口座が 1 件だけ。
+    const resAccts = (r.data?.accounts ?? []).filter((a) => a.role === 'reserve-asset');
+    expect(resAccts).toHaveLength(1);
+    expect(resAccts[0]?.id).toBe(RESERVE_LEDGER_ACCOUNT_ID);
+    // ReserveItem は集約口座へ付け替え、目的名は残る。
+    const reserves = r.data?.reserves ?? [];
+    expect(reserves.map((x) => x.name).sort()).toEqual(['旅行積立', '車の頭金']);
+    expect(reserves.every((x) => x.reserveAccountId === RESERVE_LEDGER_ACCOUNT_ID)).toBe(true);
+    // 取り置き振替は集約口座参照へ差し替え + reserveId タグ付け。
+    const mv = (r.data?.journalEntries ?? []).find((e) => e.id === 'mv-trip')!;
+    expect(mv.metadata?.reserveId).toBe('r-trip');
+    expect(mv.lines.find((l) => l.side === 'debit')?.accountId).toBe(RESERVE_LEDGER_ACCOUNT_ID);
   });
 });

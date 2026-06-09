@@ -35,7 +35,8 @@ import {
   type EntryValidationError,
   type SimpleEntryInput,
 } from '../../domain/entry';
-import type { EntryMetadata, InputMode, JournalEntry } from '../../domain/types';
+import type { Account, EntryMetadata, InputMode, JournalEntry } from '../../domain/types';
+import { RESERVE_LEDGER_ACCOUNT_ID } from '../../domain/constants';
 import { Icon } from '../Icon';
 import { t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
@@ -82,7 +83,31 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     saveAccount,
   } = useLedger();
   const accounts = ledger?.accounts ?? [];
+  const reserves = ledger?.reserves ?? [];
   const tags = ledger?.tags ?? [];
+  // 取り置き資金の目的別「擬似候補」。集約口座を直接出さず、目的ごとの選択肢を flow ピッカーに足す。
+  // value は `reserve:<reserveId>`。保存時に集約口座 + metadata.reserveId へ解決する。
+  const reserveOptionGroup = (): { type: 'asset'; label: string; accounts: Account[] } | null => {
+    if (reserves.length === 0) return null;
+    return {
+      type: 'asset',
+      label: t('reserves.title'),
+      accounts: reserves.map((r) => ({
+        id: `reserve:${r.id}`,
+        name: r.name,
+        type: 'asset' as const,
+        role: 'reserve-asset' as const,
+        archived: false,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      })),
+    };
+  };
+  // `reserve:<id>` 選択を集約口座 + reserveId へ解決する。
+  const resolveReserveSide = (id: string): { accountId: string; reserveId?: string } =>
+    id.startsWith('reserve:')
+      ? { accountId: RESERVE_LEDGER_ACCOUNT_ID, reserveId: id.slice('reserve:'.length) }
+      : { accountId: id };
   const scopes = ledger?.managementScopes ?? [];
   const instruments = ledger?.accountInstruments ?? [];
 
@@ -207,11 +232,15 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     return mode; // create
   }
 
-  // 振替で項目未入力なら「移動元 → 移動先」を自動生成する。
+  // 振替で項目未入力なら「移動元 → 移動先」を自動生成する（取り置きは目的名で表示）。
+  function nameOfSide(id: string): string {
+    if (id.startsWith('reserve:'))
+      return reserves.find((r) => r.id === id.slice('reserve:'.length))?.name ?? '—';
+    return accounts.find((a) => a.id === id)?.name ?? '—';
+  }
   function effectiveForm(): SimpleEntryInput {
     if (mode !== 'transfer' || form.description.trim() !== '') return form;
-    const nameOf = (id: string) => accounts.find((a) => a.id === id)?.name ?? '—';
-    const auto = `${nameOf(form.creditAccountId)} → ${nameOf(form.debitAccountId)}`;
+    const auto = `${nameOfSide(form.creditAccountId)} → ${nameOfSide(form.debitAccountId)}`;
     return { ...form, description: auto };
   }
 
@@ -231,7 +260,16 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     // 保存時は常に「現在有効な管理区分」を明示的に載せる（区分セレクタが出ない単一区分でも
     // 実在する区分 id で保存する）。DEFAULT_MANAGEMENT_SCOPE_ID は最終フォールバックに留める。
     const base = effectiveForm();
-    const toSave = { ...base, managementScopeId: base.managementScopeId ?? scopes[0]?.id };
+    // 取り置き(reserve:)選択を集約口座 + reserveId へ解決する（目的別残高は reserveId 集計で出す）。
+    const srcResolved = resolveReserveSide(base.creditAccountId);
+    const dstResolved = resolveReserveSide(base.debitAccountId);
+    const selectedReserveId = srcResolved.reserveId ?? dstResolved.reserveId;
+    const toSave = {
+      ...base,
+      creditAccountId: srcResolved.accountId,
+      debitAccountId: dstResolved.accountId,
+      managementScopeId: base.managementScopeId ?? scopes[0]?.id,
+    };
 
     // 継続コスト（資産経由）: 行き先は「継続コスト対象（資産）」を自由入力し、認識先カテゴリは別フィールド。
     // 通常の simple entry は保存せず、createContinuousCost にルールを渡す（funding/recognition は仮想展開）。
@@ -305,13 +343,21 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       if (found.length > 0 || nameBad) return;
       setSubmitting(true);
       try {
-        const reserve = await createReserve({ name: reserveName.trim() });
+        // 取り置き元（親口座）= 移動元の資金口座。残高は集約口座へ寄せ、目的は reserveId で識別。
+        const reserve = await createReserve({
+          name: reserveName.trim(),
+          parentAccountId: toSave.creditAccountId,
+        });
         const srcName = accounts.find((a) => a.id === toSave.creditAccountId)?.name ?? '—';
+        // 自動命名は reserveMode 中の effectiveForm では行き先が空（'—'）になるため、ユーザーが
+        // 項目を打っていなければ「移動元 → 取り置き対象名」で作る。
         const description =
-          toSave.description.trim() !== ''
-            ? toSave.description
-            : `${srcName} → ${reserveName.trim()}`;
-        const metadata: EntryMetadata = { ...toSave.metadata, inputMode: 'transfer' };
+          form.description.trim() !== '' ? form.description : `${srcName} → ${reserveName.trim()}`;
+        const metadata: EntryMetadata = {
+          ...toSave.metadata,
+          inputMode: 'transfer',
+          reserveId: reserve.id,
+        };
         await saveEntry({
           ...toSave,
           description,
@@ -388,7 +434,11 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           },
         );
       } else {
-        const metadata: EntryMetadata = { ...toSave.metadata, inputMode: resolveInputMode() };
+        const metadata: EntryMetadata = {
+          ...toSave.metadata,
+          inputMode: resolveInputMode(),
+          ...(selectedReserveId ? { reserveId: selectedReserveId } : {}),
+        };
         await saveEntry({ ...toSave, metadata }, existing);
       }
       onClose();
@@ -515,16 +565,22 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const flowDef = isManual ? null : MODE_FLOW[mode as FlowMode];
   const renderFlow = () => {
     if (!flowDef) return null;
-    const srcGroups = groupedAccountsByRole(
-      accounts,
-      [...flowDef.source.allowedRoles],
-      form.creditAccountId,
-    );
-    const dstGroups = groupedAccountsByRole(
-      accounts,
-      [...flowDef.destination.allowedRoles],
-      form.debitAccountId,
-    );
+    // 取り置き資金（目的別の擬似候補）を出す辺: 振替は両辺、支出は支払い元（左辺）。
+    const resGroup = reserveOptionGroup();
+    const srcReserve = resGroup && (mode === 'transfer' || mode === 'expense') ? [resGroup] : [];
+    const dstReserve = resGroup && mode === 'transfer' ? [resGroup] : [];
+    const srcGroups = [
+      ...groupedAccountsByRole(accounts, [...flowDef.source.allowedRoles], form.creditAccountId),
+      ...srcReserve,
+    ];
+    const dstGroups = [
+      ...groupedAccountsByRole(
+        accounts,
+        [...flowDef.destination.allowedRoles],
+        form.debitAccountId,
+      ),
+      ...dstReserve,
+    ];
     // 「ローンを組む」切替時の支払い元候補（既存ローン = other-liability）。
     const loanGroups = groupedAccountsByRole(accounts, ['other-liability'], form.creditAccountId);
     return (

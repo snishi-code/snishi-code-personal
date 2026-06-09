@@ -612,6 +612,7 @@ export const ja = {
   'breakdown.drilldownHint': '科目をタップすると、その仕訳を一覧で確認できます。',
   'breakdown.viewEntries': '「{name}」の仕訳を表示',
   'breakdown.asOfDate': '{date} 時点の残高',
+  'breakdown.reserveOf': 'うち {name}',
 
   // 収入の内訳（ホーム「収入」のタップ先）。
   'income.title': '収入の内訳',

@@ -151,6 +151,12 @@ export interface EntryMetadata {
   /** 固定資産の売却・故障処分で生成された仕訳のとき、紐づく AssetDisposal の ID（通常編集/削除は不可）。 */
   assetDisposalId?: string;
   /**
+   * 取り置き資金（聖域化・集約モデル）の目的を表す ReserveItem の ID。
+   * 取り置きは目的ごとの勘定科目を作らず、単一の集約口座（reserve-ledger）に寄せ、目的別残高は
+   * この `reserveId` 付き仕訳の集計で導出する（`reserveBalances`）。
+   */
+  reserveId?: string;
+  /**
    * 継続コスト（資産経由モデル）の仮想仕訳の印。これらは **保存されない導出専用**で、
    * `Ledger.derivedEntries` にのみ現れる。実仕訳(`journalEntries`)・保存系・export には入れない。
    */
@@ -352,15 +358,21 @@ export interface FundingGoal {
 }
 
 /**
- * 目的別資金（取り置き）。自由資金から除外して見るための asset 科目の目印。
- * 任意で「目標額・目標日」を持つ（資金目標を統合した枠）。現在額は reserveAccountId の残高から
- * 自動計算する（手入力しない）。
+ * 目的別資金（取り置き）。**聖域化・集約モデル**: 目的ごとの勘定科目は作らず、単一の集約口座
+ * （reserve-ledger『取り置き資金』）に寄せる。目的は ReserveItem が持ち、目的別残高は仕訳の
+ * `metadata.reserveId` 集計で導出する（`reserveBalances`）。任意で「目標額・目標日」を持ち、
+ * 設定の利回りから必要積立額を出す（旅行=目標なし / 老後=目標ありを表示で出し分け）。
  */
 export interface ReserveItem {
   id: string;
   name: string;
-  /** 取り置き先の asset 科目。 */
+  /** 取り置き残高を寄せる集約口座（全取り置き共通の reserve-ledger）。 */
   reserveAccountId: string;
+  /**
+   * どの資金口座から取り置いたか（daily-asset。既定=預金）。資産内訳で親口座の下部構造として
+   * 見せる手がかり。将来は投資資産などにも拡張する余地（現状は表示の所属ヒントに留める）。
+   */
+  parentAccountId?: string;
   /** 目標額（任意）。 */
   targetAmount?: number;
   /** 目標期限 'YYYY-MM-DD'（任意）。targetAmount と併せて必要な毎月の積立額を出す。 */

@@ -13,6 +13,8 @@ import {
   CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
   CONTINUOUS_COST_LEDGER_ACCOUNT_NAME,
   DEFAULT_MANAGEMENT_SCOPE_ID,
+  RESERVE_LEDGER_ACCOUNT_ID,
+  RESERVE_LEDGER_ACCOUNT_NAME,
   SCHEMA_VERSION,
 } from '../domain/constants';
 import {
@@ -51,7 +53,10 @@ import type {
   Tag,
 } from '../domain/types';
 import { monthlyCostItemsFromAllocations } from '../domain/monthlyCostMigration';
-import { consolidateContinuingCostAccounts } from '../domain/migrations';
+import {
+  consolidateContinuingCostAccounts,
+  consolidateReserveAccounts,
+} from '../domain/migrations';
 import {
   addMonths,
   addMonthsToDate,
@@ -209,6 +214,13 @@ export async function ensureInitialized(): Promise<void> {
           )
         : null;
 
+      // v14→v15（取り置き資金の聖域化・集約）: 目的別 reserve-asset 科目を集約口座へ寄せ、取り置き
+      // 振替に reserveId を付与する。pre-v15 のときだけ実行。
+      const isPreV15 = meta.schemaVersion < 15;
+      const v15 = isPreV15
+        ? consolidateReserveAccounts(accounts, reserves, journalEntries, nowIso())
+        : null;
+
       const bumped: LedgerMeta = { ...meta, schemaVersion: SCHEMA_VERSION };
       await runWrite(
         [
@@ -221,6 +233,7 @@ export async function ensureInitialized(): Promise<void> {
           STORE.managementScopes,
           STORE.allocations,
           STORE.assetDisposals,
+          STORE.reserves,
         ],
         (t) => {
           t.objectStore(STORE.kv).put(bumped, KV_META);
@@ -254,6 +267,14 @@ export async function ensureInitialized(): Promise<void> {
             for (const a of v14.archivedAccounts) store.put(a);
             for (const m of v14.repointedItems) mcStore.put(m);
             for (const id of v14.dropAccountIds) store.delete(id);
+          }
+          // v15: 目的別 reserve-asset 科目を集約口座へ寄せ、取り置き振替に reserveId を付与。
+          if (v15) {
+            if (v15.ledgerCreated && v15.ledgerAccount) store.put(v15.ledgerAccount);
+            const rStore = t.objectStore(STORE.reserves);
+            for (const r of v15.repointedReserves) rStore.put(r);
+            for (const e of v15.retaggedEntries) jeStore.put(e);
+            for (const id of v15.dropAccountIds) store.delete(id);
           }
         },
       );
@@ -747,40 +768,57 @@ export async function deleteReserve(id: string): Promise<void> {
  * 目的別資金を作成する。既存 asset を紐づけるか、無ければ同名の asset 科目を作る。
  * 取り置き自体は通常の振替（普通預金 → 目的別資金）で行う（このメソッドは枠の登録のみ）。
  */
-export async function createReserve(input: {
-  name: string;
-  targetAmount?: number;
-  targetDate?: string;
-  note?: string;
-  existingAccountId?: string;
-}): Promise<ReserveItem> {
-  const ts = nowIso();
-  let newAccount: Account | null = null;
-  let accountId = input.existingAccountId;
-  if (accountId) {
-    // 既存科目を紐づける場合、目的別資金として正しい科目だけ許可する（日常資産等を誤接続しない）。
-    const accounts = await getAll<Account>(STORE.accounts);
-    const acc = accounts.find((a) => a.id === accountId);
-    if (!acc || acc.type !== 'asset' || acc.role !== 'reserve-asset') {
-      throw new LedgerError('error.reserve.existingAccountInvalid');
-    }
-  }
-  if (!accountId) {
-    newAccount = {
-      id: newId(),
-      name: input.name,
+/**
+ * 取り置き残高を寄せる単一の集約口座（『取り置き資金』）を find-or-create する。
+ * 目的ごとに勘定科目を作らず、全取り置きをこの 1 口座に通す（聖域化・勘定科目を増やさない）。
+ */
+function findOrCreateReserveLedgerAccount(
+  accounts: Account[],
+  ts: string,
+): { account: Account; created: boolean } {
+  const existing = accounts.find((a) => a.id === RESERVE_LEDGER_ACCOUNT_ID);
+  if (existing) return { account: existing, created: false };
+  return {
+    account: {
+      id: RESERVE_LEDGER_ACCOUNT_ID,
+      name: RESERVE_LEDGER_ACCOUNT_NAME,
       type: 'asset',
       role: 'reserve-asset',
       archived: false,
       createdAt: ts,
       updatedAt: ts,
-    };
-    accountId = newAccount.id;
-  }
+    },
+    created: true,
+  };
+}
+
+/**
+ * 取り置き枠(ReserveItem)を登録する。**目的ごとの勘定科目は作らない**——残高は単一の集約口座
+ * （reserve-ledger）に寄せ、目的別残高は取り置き仕訳の `metadata.reserveId` 集計で導出する。
+ * 実際の「取り置く」振替（資金口座 → 集約口座・reserveId 付き）は呼び出し側（EntrySheet）で保存する。
+ */
+export async function createReserve(input: {
+  name: string;
+  targetAmount?: number;
+  targetDate?: string;
+  note?: string;
+  /** どの資金口座から取り置いたか（daily-asset）。未指定なら預金等の代表 daily-asset を既定にする。 */
+  parentAccountId?: string;
+}): Promise<ReserveItem> {
+  const ts = nowIso();
+  const accounts = await getAll<Account>(STORE.accounts);
+  const { account: ledger, created } = findOrCreateReserveLedgerAccount(accounts, ts);
+  // 親口座は daily-asset のみ許可。未指定/不正なら代表 daily-asset（預金優先）を既定にする。
+  const dailyAssets = accounts.filter((a) => a.role === 'daily-asset' && !a.archived);
+  const validParent =
+    input.parentAccountId && dailyAssets.some((a) => a.id === input.parentAccountId)
+      ? input.parentAccountId
+      : (dailyAssets.find((a) => a.name.includes('預金')) ?? dailyAssets[0])?.id;
   const reserve: ReserveItem = {
     id: newId(),
     name: input.name,
-    reserveAccountId: accountId,
+    reserveAccountId: ledger.id,
+    ...(validParent !== undefined ? { parentAccountId: validParent } : {}),
     ...(input.targetAmount !== undefined ? { targetAmount: input.targetAmount } : {}),
     ...(input.targetDate !== undefined ? { targetDate: input.targetDate } : {}),
     ...(input.note && input.note.trim() !== '' ? { note: input.note.trim() } : {}),
@@ -788,7 +826,8 @@ export async function createReserve(input: {
     updatedAt: ts,
   };
   await writeWithRevision([STORE.accounts, STORE.reserves], (t) => {
-    if (newAccount) t.objectStore(STORE.accounts).put(newAccount);
+    // 集約口座は新規作成時だけ put（目的数ぶん勘定科目を増やさない）。
+    if (created) t.objectStore(STORE.accounts).put(ledger);
     t.objectStore(STORE.reserves).put(reserve);
   });
   return reserve;

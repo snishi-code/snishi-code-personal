@@ -129,6 +129,7 @@ export const entryMetadataSchema = z.object({
   adjustment: adjustmentMetaSchema.optional(),
   monthlyCostId: z.string().min(1).optional(),
   assetDisposalId: z.string().min(1).optional(),
+  reserveId: z.string().min(1).optional(),
 });
 
 const monthSchema = z.string().regex(/^\d{4}-\d{2}$/, '月は YYYY-MM 形式である必要があります');
@@ -171,6 +172,7 @@ export const reserveItemSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1).max(120),
   reserveAccountId: z.string().min(1),
+  parentAccountId: z.string().min(1).optional(),
   targetAmount: amountSchema.optional(),
   targetDate: isoDate.optional(),
   note: z.string().max(500).optional(),
@@ -656,6 +658,16 @@ export const ledgerExportPackageSchema = z
           `目的別資金「${r.name}」の科目は目的別資金(reserve-asset)である必要があります`,
           at('reserveAccountId'),
         );
+      // 親口座（取り置き元）は任意。あれば日常資産(daily-asset)であること。
+      if (r.parentAccountId !== undefined) {
+        if (!accountType.has(r.parentAccountId))
+          issue(`目的別資金「${r.name}」の取り置き元口座が存在しません`, at('parentAccountId'));
+        else if (accountRole.get(r.parentAccountId) !== 'daily-asset')
+          issue(
+            `目的別資金「${r.name}」の取り置き元口座は日常資産である必要があります`,
+            at('parentAccountId'),
+          );
+      }
     });
 
     // 月額化コスト(monthlyCostItems)の参照整合性。

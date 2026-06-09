@@ -30,8 +30,12 @@ export const APP_ID = 'snishi-code.simple-ledger' as const;
  *             continuing-cost-asset 科目として自動作成するのをやめ、未消化残高を単一の集約台帳口座
  *             （CONTINUOUS_COST_LEDGER_ACCOUNT_ID『継続コスト台帳』）に寄せる。既存の品目別科目は
  *             MonthlyCostItem.recognitionCreditAccountId を集約口座へ付け替え、参照されなくなった
- *             旧科目を削除する（品目名は MonthlyCostItem.name に残るため失われない）。 */
-export const SCHEMA_VERSION = 14 as const;
+ *             旧科目を削除する（品目名は MonthlyCostItem.name に残るため失われない）。
+ *  v14 → v15: 取り置き資金の聖域化・集約。目的ごとの reserve-asset 科目をやめ、単一の集約口座
+ *             （RESERVE_LEDGER_ACCOUNT_ID『取り置き資金』）に寄せる。取り置き仕訳に `metadata.reserveId`
+ *             を付与し目的別残高はその集計で導出。既存の目的別科目を集約へ付け替え、関連振替仕訳を
+ *             reserveId でタグ付けし、参照されなくなった旧科目を削除する（目的名は ReserveItem.name に残る）。 */
+export const SCHEMA_VERSION = 15 as const;
 
 /** 既定の管理区分（『個人用』）。seed と migration で同じ id を使い、既存データを寄せる。 */
 export const DEFAULT_MANAGEMENT_SCOPE_ID = 'scope-personal' as const;
@@ -45,3 +49,11 @@ export const DEFAULT_MANAGEMENT_SCOPE_NAME = '個人用' as const;
  */
 export const CONTINUOUS_COST_LEDGER_ACCOUNT_ID = 'continuing-cost-ledger' as const;
 export const CONTINUOUS_COST_LEDGER_ACCOUNT_NAME = '継続コスト台帳' as const;
+
+/**
+ * 取り置き資金（目的別）の残高を寄せる単一の集約口座（role=reserve-asset・内部・聖域化）。
+ * 目的ごとに勘定科目を作らず、全取り置きをこの 1 口座に通し、目的別残高は仕訳の `metadata.reserveId`
+ * 集計で導出する。勘定科目管理 UI には出さず、資産内訳では資金グループの下部に入れ子表示する。
+ */
+export const RESERVE_LEDGER_ACCOUNT_ID = 'reserve-ledger' as const;
+export const RESERVE_LEDGER_ACCOUNT_NAME = '取り置き資金' as const;

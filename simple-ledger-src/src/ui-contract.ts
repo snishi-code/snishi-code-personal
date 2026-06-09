@@ -67,6 +67,8 @@ export const UI = {
     view: 'assetsBreakdown.view',
     row: 'assetsBreakdown.row',
     total: 'assetsBreakdown.total',
+    // 取り置き資金（集約口座）の目的別内訳行（資金の下部構造として入れ子表示）。
+    reserveSub: 'assetsBreakdown.reserveSub',
   },
   // 負債の内訳（ホーム「負債」のタップ先・ストック）。資金繰り/返済計画への導線を持つ。
   liabilitiesBreakdown: {

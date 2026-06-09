@@ -14,6 +14,8 @@ import {
   CONTINUOUS_COST_LEDGER_ACCOUNT_NAME,
   DEFAULT_MANAGEMENT_SCOPE_ID,
   DEFAULT_MANAGEMENT_SCOPE_NAME,
+  RESERVE_LEDGER_ACCOUNT_ID,
+  RESERVE_LEDGER_ACCOUNT_NAME,
   SCHEMA_VERSION,
 } from './constants';
 import { inferRole } from './accountRoles';
@@ -148,6 +150,93 @@ function applyContinuingCostConsolidation(pkg: LedgerExportPackage): LedgerExpor
   if (c.ledgerCreated && c.ledgerAccount) accounts = [...accounts, c.ledgerAccount];
   const monthlyCostItems = items.map((m) => repointById.get(m.id) ?? m);
   return { ...pkg, accounts, monthlyCostItems };
+}
+
+/**
+ * v14→v15（取り置き資金の聖域化・集約）の共通ロジック。import 経路と既存DB起動経路の両方から使う。
+ * 目的別の reserve-asset 科目を単一の集約口座（RESERVE_LEDGER_ACCOUNT_ID）へ寄せる:
+ *  - 旧目的別科目を指す ReserveItem.reserveAccountId を集約口座へ付け替える（name は ReserveItem に残る）。
+ *  - 旧目的別科目に触れる仕訳（取り置きの振替）を、その口座の ReserveItem の id で `metadata.reserveId`
+ *    タグ付けし、口座参照を集約口座へ差し替える（目的別残高がタグ集計で導出できるように）。
+ *  - 参照されなくなった旧目的別科目を削除する。
+ */
+export interface ReserveConsolidation {
+  ledgerAccount: Account | null;
+  ledgerCreated: boolean;
+  repointedReserves: ReserveItem[];
+  retaggedEntries: JournalEntry[];
+  dropAccountIds: string[];
+}
+
+function newReserveLedgerAccount(ts: string): Account {
+  return {
+    id: RESERVE_LEDGER_ACCOUNT_ID,
+    name: RESERVE_LEDGER_ACCOUNT_NAME,
+    type: 'asset',
+    role: 'reserve-asset',
+    archived: false,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+}
+
+export function consolidateReserveAccounts(
+  accounts: Account[],
+  reserves: ReserveItem[],
+  journalEntries: JournalEntry[],
+  ts: string,
+): ReserveConsolidation {
+  const ledgerId = RESERVE_LEDGER_ACCOUNT_ID;
+  const oldAccts = accounts.filter((a) => a.role === 'reserve-asset' && a.id !== ledgerId);
+  const oldIds = new Set(oldAccts.map((a) => a.id));
+  // 旧目的別口座 id → その口座を持つ ReserveItem の id（1:1 前提）。
+  const acctToReserve = new Map<string, string>();
+  for (const r of reserves) {
+    if (oldIds.has(r.reserveAccountId)) acctToReserve.set(r.reserveAccountId, r.id);
+  }
+
+  const repointedReserves = reserves.map((r) =>
+    oldIds.has(r.reserveAccountId) ? { ...r, reserveAccountId: ledgerId } : r,
+  );
+  const needLedger =
+    repointedReserves.some((r) => r.reserveAccountId === ledgerId) || oldAccts.length > 0;
+  const existingLedger = accounts.find((a) => a.id === ledgerId) ?? null;
+  const ledgerAccount = existingLedger ?? (needLedger ? newReserveLedgerAccount(ts) : null);
+  const ledgerCreated = existingLedger === null && ledgerAccount !== null;
+
+  // 旧目的別口座に触れる仕訳を、口座参照を集約口座へ差し替え + reserveId タグ付け。
+  const retaggedEntries: JournalEntry[] = [];
+  for (const e of journalEntries) {
+    const touched = e.lines.find((l) => oldIds.has(l.accountId));
+    if (!touched) continue;
+    const rid = e.metadata?.reserveId ?? acctToReserve.get(touched.accountId);
+    const lines = e.lines.map((l) => (oldIds.has(l.accountId) ? { ...l, accountId: ledgerId } : l));
+    retaggedEntries.push({
+      ...e,
+      lines,
+      metadata: rid ? { ...e.metadata, reserveId: rid } : e.metadata,
+    });
+  }
+  // 旧目的別口座は付け替え後に参照されない（仕訳は集約口座へ・ReserveItem も付け替え）→ 削除。
+  const dropAccountIds = oldAccts.map((a) => a.id);
+
+  return { ledgerAccount, ledgerCreated, repointedReserves, retaggedEntries, dropAccountIds };
+}
+
+/** consolidation を LedgerExportPackage に適用する（import 経路）。 */
+function applyReserveConsolidation(pkg: LedgerExportPackage): LedgerExportPackage {
+  const c = consolidateReserveAccounts(
+    pkg.accounts,
+    pkg.reserves ?? [],
+    pkg.journalEntries,
+    nowIso(),
+  );
+  const retaggedById = new Map(c.retaggedEntries.map((e) => [e.id, e]));
+  const dropSet = new Set(c.dropAccountIds);
+  let accounts = pkg.accounts.filter((a) => !dropSet.has(a.id));
+  if (c.ledgerCreated && c.ledgerAccount) accounts = [...accounts, c.ledgerAccount];
+  const journalEntries = pkg.journalEntries.map((e) => retaggedById.get(e.id) ?? e);
+  return { ...pkg, accounts, reserves: c.repointedReserves, journalEntries };
 }
 
 // version を上げるたびにここへ追加していく。
@@ -340,6 +429,13 @@ const STEPS: Step[] = [
     from: 13,
     to: 14,
     migrate: applyContinuingCostConsolidation,
+  },
+  {
+    // v14 → v15: 取り置き資金の聖域化・集約。目的別の reserve-asset 科目を単一の集約口座へ寄せ、
+    // ReserveItem.reserveAccountId を付け替え、取り置き振替に reserveId を付与、旧科目を削除する。
+    from: 14,
+    to: 15,
+    migrate: applyReserveConsolidation,
   },
 ];
 

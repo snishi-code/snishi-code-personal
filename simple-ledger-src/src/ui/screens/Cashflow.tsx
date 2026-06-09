@@ -12,6 +12,7 @@ import { deriveBalanceSheet } from '../../domain/accounting';
 import { cashDeltaOfEntry, liquidAssetTotal, projectCashflow } from '../../domain/cashflow';
 import { continuousCostEntries } from '../../domain/continuousCost';
 import { goalRequiredMonthly, reserveRequiredMonthly } from '../../domain/fundingGoal';
+import { reserveBalances } from '../../domain/reserve';
 import { addMonthsToDate } from '../../domain/allocation';
 import { currentYearMonth, todayLocal } from '../../util/time';
 import type { CashflowSchedule, FundingGoal, ReserveItem } from '../../domain/types';
@@ -48,13 +49,12 @@ export function Cashflow() {
 
   const currency = ledger?.settings.currency ?? 'JPY';
 
-  const { projection, balById, liabBalById, futureRows } = useMemo(() => {
+  const { projection, liabBalById, futureRows } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     // 現在残高は導出専用 entries（実仕訳 + 継続コストの仮想funding/認識）で見る
     // （現金払いの継続コストは funding で資金が減る）。
     const entries = ledger?.derivedEntries ?? [];
     const items = ledger?.monthlyCostItems ?? [];
-    const reserves = ledger?.reserves ?? [];
     const schedules = ledger?.cashflowSchedules ?? [];
     const bs = deriveBalanceSheet(accounts, entries, today);
     const byId = new Map(bs.assets.map((a) => [a.account.id, a.balance] as const));
@@ -75,7 +75,8 @@ export function Cashflow() {
       bs.assets.map((a) => a.account.id).filter((id) => !liquidIds.has(id)),
     );
     const totalAssets = liquidAssetTotal(bs.assets, nonLiquidAssetIds);
-    const reserveBalance = reserves.reduce((s, r) => s + (byId.get(r.reserveAccountId) ?? 0), 0);
+    // 取り置き総額 = reserve-asset 科目（聖域化で単一の集約口座）の残高合計。
+    const reserveBalance = [...reserveIds].reduce((s, id) => s + (byId.get(id) ?? 0), 0);
     // 未来日付（date > today）の仕訳で現金が動くもの = CF に取り込む（ホーム入力が自然に反映される）。
     // delta=総資金の純増減（資金↔資金/資金↔取り置きの振替は 0）、reserveDelta=取り置き残高の純増減
     //（普通預金→取り置き資金 なら +amount で自由資金が減る）、amount=一覧表示用の取引金額（借方合計）。
@@ -101,7 +102,6 @@ export function Cashflow() {
       }))
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     return {
-      balById: byId,
       liabBalById: liabById,
       futureRows: future,
       projection: projectCashflow({
@@ -122,6 +122,8 @@ export function Cashflow() {
   const accountName = (id: string): string =>
     (ledger?.accounts ?? []).find((a) => a.id === id)?.name ?? '—';
   const reserves = ledger?.reserves ?? [];
+  // 目的別残高（reserveId 集計）。集約口座の口座残高は全目的の合計なので、個別表示はこちらを使う。
+  const resBalById = useMemo(() => reserveBalances(ledger?.journalEntries ?? []), [ledger]);
   const freeTrend: TrendPoint[] = projection.points.map((p, i) => ({
     key: `${p.date}-${i}`,
     label: shortDateLabel(i === 0 ? today : p.date),
@@ -380,7 +382,8 @@ export function Cashflow() {
           ) : (
             <ul className="card list" data-ui={UI.cashflow.reserveList}>
               {reserves.map((r) => {
-                const balance = balById.get(r.reserveAccountId) ?? 0;
+                // 目的別残高は集約口座の口座残高でなく、reserveId 集計で導出する（聖域化・集約モデル）。
+                const balance = resBalById.get(r.id) ?? 0;
                 const required = reserveRequiredMonthly(r, balance, currentYm, returnBps);
                 return (
                   <li key={r.id} className="list__item">

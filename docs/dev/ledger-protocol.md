@@ -46,7 +46,11 @@
   仮想仕訳は保存しない導出専用＝export には含めない）、
   v13→v14 勘定科目の聖域化: 品目別 `continuing-cost-asset` 科目を単一の集約台帳口座
   （`continuing-cost-ledger`『継続コスト台帳』）へ寄せ、`MonthlyCostItem.recognitionCreditAccountId` を
-  付け替え・参照されなくなった旧科目を削除（品目名は `MonthlyCostItem.name` に残る）。
+  付け替え・参照されなくなった旧科目を削除（品目名は `MonthlyCostItem.name` に残る）、
+  v14→v15 取り置き資金の聖域化・集約: 目的別 `reserve-asset` 科目を単一の集約口座
+  （`reserve-ledger`『取り置き資金』）へ寄せ、`ReserveItem.reserveAccountId` を付け替え、取り置き振替に
+  `metadata.reserveId` を付与（目的別残高はタグ集計で導出）、旧科目を削除（目的名は `ReserveItem.name` に残る）。
+  `ReserveItem.parentAccountId?`（取り置き元の daily-asset・既定=預金）と `EntryMetadata.reserveId?` を追加。
 - `Settings.expectedAnnualReturnBps?`: 期待年利（bps 整数。例 5%=500、未指定 0）。資金目標の
   必要積立額の参考計算にのみ使う（投資助言ではない）。
 - `Account.role`: `type` と整合する UI 用役割（`daily-asset` / `reserve-asset` /
