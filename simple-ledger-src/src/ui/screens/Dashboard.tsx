@@ -99,179 +99,191 @@ export function Dashboard({
   const currency = ledger?.settings.currency ?? 'JPY';
 
   return (
-    <section aria-labelledby="dashboard-title" data-ui={UI.dashboard.view}>
-      <h1 className="sr-only" id="dashboard-title">
-        {t('dashboard.title')}
-      </h1>
+    <>
+      <section className="dashboard" aria-labelledby="dashboard-title" data-ui={UI.dashboard.view}>
+        <h1 className="sr-only" id="dashboard-title">
+          {t('dashboard.title')}
+        </h1>
 
-      {/* 日常入力の主導線（収入/支出/振替） */}
-      <div className="entry-types">
-        {ENTRY_TYPES.map((ty) => (
-          <button
-            key={ty.mode}
-            type="button"
-            className="entry-type-btn"
-            onClick={() => onAddEntry(ty.mode)}
-            data-ui={ty.ui}
+        {/* サマリー・推移・仕訳プレビューは上に詰める。日常入力は下部固定バー（return 末尾）。 */}
+
+        {/* 期間の切替はヘッダー中央の期間ボタンから（正本）。ここでは結果だけを見せる。 */}
+
+        {/* 期間の収支（各項目から、その項目の「内訳 + 推移」ページへ） */}
+        <p className="section-label">{t('dashboard.flowOf', { label })}</p>
+        <div className="stat-grid">
+          <StatButton
+            label={t('dashboard.revenue')}
+            onClick={() => onNavigate('incomeBreakdown')}
+            dataUi={UI.dashboard.statRevenue}
           >
-            <span className="entry-type-btn__icon">
-              <Icon name={ty.icon} size={20} />
-            </span>
-            {t(ty.labelKey)}
-          </button>
-        ))}
-      </div>
-
-      {/* 期間の切替はヘッダー中央の期間ボタンから（正本）。ここでは結果だけを見せる。 */}
-
-      {/* 期間の収支（各項目から、その項目の「内訳 + 推移」ページへ） */}
-      <p className="section-label">{t('dashboard.flowOf', { label })}</p>
-      <div className="stat-grid">
-        <StatButton
-          label={t('dashboard.revenue')}
-          onClick={() => onNavigate('incomeBreakdown')}
-          dataUi={UI.dashboard.statRevenue}
-        >
-          <Money amount={pl.totalRevenue} currency={currency} />
-        </StatButton>
-        {/* 「支出」= 支出（通常支出 + 継続コスト）。購入額そのもの・返済・振替は支出に含めない
+            <Money amount={pl.totalRevenue} currency={currency} />
+          </StatButton>
+          {/* 「支出」= 支出（通常支出 + 継続コスト）。購入額そのもの・返済・振替は支出に含めない
             （購入は資産取得、償却分の費用＝継続コストとして計上）。タップで「支出の内訳」へ。 */}
-        <StatButton
-          label={t('dashboard.expense')}
-          onClick={() => onNavigate('expenseBreakdown')}
-          dataUi={UI.dashboard.statExpense}
-        >
-          <Money amount={normalExpense + monthlyCost} currency={currency} />
-        </StatButton>
-        {/* 収支 = 収入 − 支出の生活余剰。タップで「収支」ページ（月ごとの残り方）へ。 */}
-        <StatButton
-          label={t('dashboard.netIncome')}
-          onClick={() => onNavigate('netIncome')}
-          dataUi={UI.dashboard.statNetIncome}
-        >
-          <Money
-            amount={pl.totalRevenue - (normalExpense + monthlyCost)}
-            currency={currency}
-            signed
-          />
-        </StatButton>
-      </div>
+          <StatButton
+            label={t('dashboard.expense')}
+            onClick={() => onNavigate('expenseBreakdown')}
+            dataUi={UI.dashboard.statExpense}
+          >
+            <Money amount={normalExpense + monthlyCost} currency={currency} />
+          </StatButton>
+          {/* 収支 = 収入 − 支出の生活余剰。タップで「収支」ページ（月ごとの残り方）へ。 */}
+          <StatButton
+            label={t('dashboard.netIncome')}
+            onClick={() => onNavigate('netIncome')}
+            dataUi={UI.dashboard.statNetIncome}
+          >
+            <Money
+              amount={pl.totalRevenue - (normalExpense + monthlyCost)}
+              currency={currency}
+              signed
+            />
+          </StatButton>
+        </div>
 
-      {/* 財政状態（期間末時点。各項目から、その項目の「内訳 + 推移」ページへ） */}
-      <p className="section-label">{t('dashboard.positionAsOf', { date: asOf })}</p>
-      <div className="stat-grid">
-        <StatButton
-          label={t('dashboard.assets')}
-          onClick={() => onNavigate('assetsBreakdown')}
-          dataUi={UI.dashboard.statAssets}
-        >
-          <Money amount={bs.totalAssets} currency={currency} />
-        </StatButton>
-        <StatButton
-          label={t('dashboard.liabilities')}
-          onClick={() => onNavigate('liabilitiesBreakdown')}
-          dataUi={UI.dashboard.statLiabilities}
-        >
-          <Money amount={bs.totalLiabilities} currency={currency} />
-        </StatButton>
-        <StatButton
-          label={t('dashboard.netAssets')}
-          onClick={() => onNavigate('netAssets')}
-          dataUi={UI.dashboard.statNetAssets}
-        >
-          <Money amount={bs.netAssets} currency={currency} signed />
-        </StatButton>
-        {/* 投資の評価損益は財政状態の補助情報としてここに置く（旧・支出セクションから移設）。 */}
-        {investmentValuation.loss > 0 || investmentValuation.gain > 0 ? (
-          <div className="stat">
-            <span className="stat__label">{t('dashboard.investmentValuation')}</span>
-            <span className="stat__value">
-              <Money
-                amount={investmentValuation.gain - investmentValuation.loss}
-                currency={currency}
-                signed
-              />
-            </span>
+        {/* 財政状態（期間末時点。各項目から、その項目の「内訳 + 推移」ページへ） */}
+        <p className="section-label">{t('dashboard.positionAsOf', { date: asOf })}</p>
+        <div className="stat-grid">
+          <StatButton
+            label={t('dashboard.assets')}
+            onClick={() => onNavigate('assetsBreakdown')}
+            dataUi={UI.dashboard.statAssets}
+          >
+            <Money amount={bs.totalAssets} currency={currency} />
+          </StatButton>
+          <StatButton
+            label={t('dashboard.liabilities')}
+            onClick={() => onNavigate('liabilitiesBreakdown')}
+            dataUi={UI.dashboard.statLiabilities}
+          >
+            <Money amount={bs.totalLiabilities} currency={currency} />
+          </StatButton>
+          <StatButton
+            label={t('dashboard.netAssets')}
+            onClick={() => onNavigate('netAssets')}
+            dataUi={UI.dashboard.statNetAssets}
+          >
+            <Money amount={bs.netAssets} currency={currency} signed />
+          </StatButton>
+          {/* 投資の評価損益は財政状態の補助情報としてここに置く（旧・支出セクションから移設）。 */}
+          {investmentValuation.loss > 0 || investmentValuation.gain > 0 ? (
+            <div className="stat">
+              <span className="stat__label">{t('dashboard.investmentValuation')}</span>
+              <span className="stat__value">
+                <Money
+                  amount={investmentValuation.gain - investmentValuation.loss}
+                  currency={currency}
+                  signed
+                />
+              </span>
+            </div>
+          ) : null}
+        </div>
+
+        {/* 推移（年別=12ヶ月 / 全体=年集約）。SVG グラフで俯瞰。全体は年ラベルをタップで年別へ。 */}
+        {trend ? (
+          <div data-ui={UI.period.trend}>
+            <TrendChart
+              title={t('dashboard.trendNet')}
+              data={trend.net}
+              currency={currency}
+              variant="bar"
+              dataUi={UI.period.trendChart}
+              pointDataUi={UI.period.trendPoint}
+              {...(trend.drillable
+                ? {
+                    onSelect: (key: string) =>
+                      onPeriodChange({ mode: 'year', year: Number.parseInt(key, 10) }),
+                    selectHint: t('dashboard.trendDrillYear'),
+                  }
+                : {})}
+            />
+            <TrendChart
+              title={t('dashboard.trendLiving')}
+              data={trend.living}
+              currency={currency}
+              variant="bar"
+            />
+            <TrendChart
+              title={t('dashboard.trendAssets')}
+              data={trend.netAssets}
+              currency={currency}
+              variant="line"
+            />
+            {trend.drillable ? <p className="field__hint">{t('period.trendYearHint')}</p> : null}
           </div>
         ) : null}
-      </div>
 
-      {/* 推移（年別=12ヶ月 / 全体=年集約）。SVG グラフで俯瞰。全体は年ラベルをタップで年別へ。 */}
-      {trend ? (
-        <div data-ui={UI.period.trend}>
-          <TrendChart
-            title={t('dashboard.trendNet')}
-            data={trend.net}
-            currency={currency}
-            variant="bar"
-            dataUi={UI.period.trendChart}
-            pointDataUi={UI.period.trendPoint}
-            {...(trend.drillable
-              ? {
-                  onSelect: (key: string) =>
-                    onPeriodChange({ mode: 'year', year: Number.parseInt(key, 10) }),
-                  selectHint: t('dashboard.trendDrillYear'),
-                }
-              : {})}
-          />
-          <TrendChart
-            title={t('dashboard.trendLiving')}
-            data={trend.living}
-            currency={currency}
-            variant="bar"
-          />
-          <TrendChart
-            title={t('dashboard.trendAssets')}
-            data={trend.netAssets}
-            currency={currency}
-            variant="line"
-          />
-          {trend.drillable ? <p className="field__hint">{t('period.trendYearHint')}</p> : null}
-        </div>
-      ) : null}
-
-      {/* 支出はホーム独立セクションにしない（上段の「支出」= 通常支出 + 継続コスト がその値）。
+        {/* 支出はホーム独立セクションにしない（上段の「支出」= 通常支出 + 継続コスト がその値）。
           内訳の継続コストは継続コスト台帳（支出カードのタップ先）、通常支出は損益計算書で見る。 */}
 
-      {/* 期間内の仕訳（下部・スクロールで見える）。詳細は仕訳画面へ。 */}
+        {/* 期間内の仕訳（下部・スクロールで見える）。詳細は仕訳画面へ。 */}
+        <div
+          className="section-label"
+          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+        >
+          <span>{t('dashboard.entriesOf', { label })}</span>
+          {periodEntries.length > 0 ? (
+            <button
+              type="button"
+              className="btn btn--ghost"
+              style={{ minHeight: 32 }}
+              onClick={() => onOpenJournal(range ?? {})}
+              data-ui={UI.dashboard.journalOpenAll}
+            >
+              {t('dashboard.viewAll')}
+              <Icon name="chevronRight" size={16} />
+            </button>
+          ) : null}
+        </div>
+        {periodEntries.length === 0 ? (
+          <div className="card card--pad muted">{t('dashboard.noMonthEntries')}</div>
+        ) : (
+          <ul className="card list" data-ui={UI.dashboard.journalPreview}>
+            {periodEntries.map((entry) => {
+              // 生成仕訳（按分/継続コスト）は編集不可なので、タップは仕訳画面へ。
+              const generated = !!(entry.metadata?.allocationId || entry.metadata?.monthlyCostId);
+              return (
+                <EntryListItem
+                  key={entry.id}
+                  entry={entry}
+                  accounts={ledger?.accounts ?? []}
+                  currency={currency}
+                  onClick={() => (generated ? onOpenJournal(range ?? {}) : onEditEntry(entry))}
+                />
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      {/* 日常入力の主導線（収入/支出/振替）はホーム下部に固定。親指で届きやすい位置に置く。
+          仕訳プレビュー等は section の padding-bottom（.dashboard）で隠れないようにする。 */}
       <div
-        className="section-label"
-        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+        className="entry-bar"
+        role="group"
+        aria-label={t('dashboard.entryActions')}
+        data-ui={UI.dashboard.entryBar}
       >
-        <span>{t('dashboard.entriesOf', { label })}</span>
-        {periodEntries.length > 0 ? (
-          <button
-            type="button"
-            className="btn btn--ghost"
-            style={{ minHeight: 32 }}
-            onClick={() => onOpenJournal(range ?? {})}
-            data-ui={UI.dashboard.journalOpenAll}
-          >
-            {t('dashboard.viewAll')}
-            <Icon name="chevronRight" size={16} />
-          </button>
-        ) : null}
+        <div className="entry-bar__inner">
+          {ENTRY_TYPES.map((ty) => (
+            <button
+              key={ty.mode}
+              type="button"
+              className="entry-type-btn"
+              onClick={() => onAddEntry(ty.mode)}
+              data-ui={ty.ui}
+            >
+              <span className="entry-type-btn__icon">
+                <Icon name={ty.icon} size={20} />
+              </span>
+              {t(ty.labelKey)}
+            </button>
+          ))}
+        </div>
       </div>
-      {periodEntries.length === 0 ? (
-        <div className="card card--pad muted">{t('dashboard.noMonthEntries')}</div>
-      ) : (
-        <ul className="card list" data-ui={UI.dashboard.journalPreview}>
-          {periodEntries.map((entry) => {
-            // 生成仕訳（按分/継続コスト）は編集不可なので、タップは仕訳画面へ。
-            const generated = !!(entry.metadata?.allocationId || entry.metadata?.monthlyCostId);
-            return (
-              <EntryListItem
-                key={entry.id}
-                entry={entry}
-                accounts={ledger?.accounts ?? []}
-                currency={currency}
-                onClick={() => (generated ? onOpenJournal(range ?? {}) : onEditEntry(entry))}
-              />
-            );
-          })}
-        </ul>
-      )}
-    </section>
+    </>
   );
 }
 

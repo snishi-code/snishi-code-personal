@@ -23,6 +23,12 @@ export interface LivingCostBreakdown {
   total: number;
 }
 
+/** 費用カテゴリ1件の支出額（通常支出 + そのカテゴリに認識された継続コスト分を含む）。 */
+export interface ExpenseCategoryAmount {
+  account: Account;
+  amount: number;
+}
+
 /**
  * 期間（range が undefined のときは全期間）の支出内訳を求める。
  * entries は **derivedEntries**（実仕訳 + 継続コスト仮想仕訳）を渡すこと。
@@ -57,4 +63,28 @@ export function livingCostForRange(
   range: DateRange | undefined,
 ): number {
   return livingCostBreakdownForRange(accounts, entries, range).total;
+}
+
+/**
+ * 「何へ支出しているか」を費用カテゴリ別に分解する（支出の内訳ページの主表示）。
+ *
+ * 各カテゴリの金額は PL の費用科目残高そのもの。継続コストは仮想認識
+ * （借方 費用カテゴリ）として entries（derivedEntries）に含まれるため、月割り分も
+ * 自動的に選ばれた費用カテゴリへ合算される（別途 formula を足さない）。
+ * 投資評価損等（system-adjustment）は支出ではないので除外する。
+ *
+ * この合計は livingCostBreakdownForRange().total（= ホーム「支出」の金額）と一致する。
+ * 残高 0 のカテゴリは表示から外し、金額の大きい順に並べる。
+ */
+export function expenseCategoryBreakdownForRange(
+  accounts: Account[],
+  entries: JournalEntry[],
+  range: DateRange | undefined,
+): ExpenseCategoryAmount[] {
+  const pl = deriveProfitAndLoss(accounts, entries, range);
+  return pl.expenses
+    .filter((b) => b.account.role !== 'system-adjustment')
+    .filter((b) => b.balance !== 0)
+    .map((b) => ({ account: b.account, amount: b.balance }))
+    .sort((a, b) => b.amount - a.amount);
 }

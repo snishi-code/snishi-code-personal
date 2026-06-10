@@ -46,6 +46,7 @@ export const ja = {
   'header.yearMonth': '{year}年{month}月',
 
   'dashboard.title': 'ホーム',
+  'dashboard.entryActions': '日常入力（収入・支出・振替）',
   'dashboard.thisMonth': '{year}年{month}月',
   'dashboard.revenue': '収入',
   'dashboard.expense': '支出',
@@ -74,7 +75,10 @@ export const ja = {
   // 支出の内訳（ホーム「支出」のタップ先）
   'expenseBreakdown.title': '支出の内訳',
   'expenseBreakdown.intro':
-    '支出は「通常支出」と「継続コスト」に分かれます。継続コストをタップすると台帳を開けます。',
+    '何へ支出したかを費用カテゴリ別に見られます。継続コストの月割り分も各カテゴリに含まれます。',
+  'expenseBreakdown.byCategory': '費用カテゴリ別',
+  'expenseBreakdown.categoryTotal': '支出合計',
+  'expenseBreakdown.noCategory': 'この期間の支出はまだありません。',
   'expenseBreakdown.normalExpense': '通常支出',
   'expenseBreakdown.monthlyCost': '継続コスト',
   'expenseBreakdown.total': '支出合計',

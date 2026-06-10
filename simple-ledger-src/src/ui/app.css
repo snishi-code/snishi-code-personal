@@ -834,9 +834,16 @@ button.list__item:hover {
   flex: 1;
 }
 
-/* 小さめの確認ダイアログ */
+/* dialog variant（メニュー / 確認 / 入力フォーム）は常に中央配置。
+   モバイルでも下からせり上がる下部シートにせず、画面端から少し余白を取った中央カードにする。 */
+.sheet-overlay:has(> .dialog) {
+  align-items: center;
+  padding: var(--space-3);
+}
 .dialog {
   max-width: 420px;
+  /* 下部シート用の上だけ角丸を上書きし、四隅とも角丸にする。 */
+  border-radius: var(--radius);
 }
 
 /* ── Toast ── */
@@ -918,26 +925,42 @@ button.list__item:hover {
   text-align: center;
 }
 
-/* ── Entry type buttons（収入/支出/振替） ── */
-.entry-types {
+/* ── Entry type buttons（収入/支出/振替）= ホーム下部の固定入力バー ── */
+/* 主要操作（毎回押す）なので画面下部に固定し、親指で届きやすくする。 */
+.entry-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30; /* モーダル(.sheet-overlay=40)より下。コンテンツより上。 */
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.08);
+  padding: var(--space-2) var(--space-3) calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+}
+.entry-bar__inner {
+  max-width: var(--maxw);
+  margin: 0 auto;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: var(--space-2);
-  margin-bottom: var(--space-4);
+}
+/* ホーム本体は固定バーに隠れないよう下部に余白を確保する。 */
+.dashboard {
+  padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
 }
 .entry-type-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 72px;
-  padding: var(--space-3);
+  gap: 4px;
+  min-height: 56px;
+  padding: var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
-  box-shadow: var(--shadow);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--text);
 }
@@ -946,8 +969,8 @@ button.list__item:hover {
   background: var(--primary-light);
 }
 .entry-type-btn__icon {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--radius-pill);
   display: flex;
   align-items: center;

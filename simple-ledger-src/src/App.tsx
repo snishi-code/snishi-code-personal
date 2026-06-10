@@ -129,7 +129,9 @@ export function App() {
         {screen === 'expenseBreakdown' ? (
           <ExpenseBreakdown period={period} onPeriodChange={setPeriod} onNavigate={setScreen} />
         ) : null}
-        {screen === 'netIncome' ? <NetIncome period={period} onPeriodChange={setPeriod} /> : null}
+        {screen === 'netIncome' ? (
+          <NetIncome period={period} onPeriodChange={setPeriod} onNavigate={setScreen} />
+        ) : null}
         {screen === 'assetsBreakdown' ? (
           <Breakdown
             section="asset"
