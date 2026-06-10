@@ -7,6 +7,7 @@ import { accountBalance } from '../../domain/accounting';
 import { referencedAccountIds } from '../../domain/accountRefs';
 import { ACCOUNT_TYPES, type Account } from '../../domain/types';
 import { isInternalRole } from '../../domain/accountRoles';
+import { isProtectedSeedAccount } from '../../data/seed';
 import { accountRoleLabel, accountTypeLabel } from '../accountOptions';
 import { AccountSheet } from './AccountSheet';
 import { ConfirmDialog } from '../ConfirmDialog';
@@ -109,69 +110,80 @@ export function Accounts({
             <div key={group.type}>
               <p className="section-label">{accountTypeLabel(group.type)}</p>
               <ul className="card list">
-                {group.accounts.map((account) => (
-                  <li key={account.id} className="list__item">
-                    <div className="list__main">
-                      <div className="list__title">
-                        {account.name}{' '}
-                        {usedIds.has(account.id) ? (
-                          <span className="tag tag--teal">{t('accounts.inUse')}</span>
-                        ) : null}{' '}
-                        {account.archived ? (
-                          <span className="tag tag--neutral">{t('accounts.archived')}</span>
+                {group.accounts.map((account) => {
+                  const protectedBasic = isProtectedSeedAccount(account);
+                  return (
+                    <li key={account.id} className="list__item">
+                      <div className="list__main">
+                        <div className="list__title">
+                          {account.name}{' '}
+                          {protectedBasic ? (
+                            <span className="tag tag--neutral">{t('accounts.basic')}</span>
+                          ) : null}{' '}
+                          {usedIds.has(account.id) ? (
+                            <span className="tag tag--teal">{t('accounts.inUse')}</span>
+                          ) : null}{' '}
+                          {account.archived ? (
+                            <span className="tag tag--neutral">{t('accounts.archived')}</span>
+                          ) : null}
+                        </div>
+                        <div className="list__sub">
+                          {accountRoleLabel(account.role)}・{t('accounts.balance')}:{' '}
+                          <Money
+                            amount={accountBalance(account.id, account.type, entries)}
+                            currency={currency}
+                          />
+                        </div>
+                      </div>
+                      <div className="row-actions">
+                        {onAdjust && (account.type === 'asset' || account.type === 'liability') ? (
+                          <button
+                            type="button"
+                            className="btn btn--ghost"
+                            style={{ minHeight: 36 }}
+                            onClick={() => onAdjust(account)}
+                            aria-label={`${t('adjust.rowAction')}: ${account.name}`}
+                            data-ui={UI.accounts.adjust}
+                          >
+                            <Icon name="adjust" size={16} />
+                            {t('adjust.rowAction')}
+                          </button>
                         ) : null}
-                      </div>
-                      <div className="list__sub">
-                        {accountRoleLabel(account.role)}・{t('accounts.balance')}:{' '}
-                        <Money
-                          amount={accountBalance(account.id, account.type, entries)}
-                          currency={currency}
-                        />
-                      </div>
-                    </div>
-                    <div className="row-actions">
-                      {onAdjust && (account.type === 'asset' || account.type === 'liability') ? (
                         <button
                           type="button"
-                          className="btn btn--ghost"
-                          style={{ minHeight: 36 }}
-                          onClick={() => onAdjust(account)}
-                          aria-label={`${t('adjust.save')}: ${account.name}`}
-                          data-ui={UI.accounts.adjust}
+                          className="icon-btn"
+                          onClick={() => setEditing(account)}
+                          aria-label={`${t('common.edit')}: ${account.name}`}
                         >
-                          <Icon name="adjust" size={16} />
-                          {t('adjust.rowAction')}
+                          <Icon name="edit" size={18} />
                         </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        onClick={() => setEditing(account)}
-                        aria-label={`${t('common.edit')}: ${account.name}`}
-                      >
-                        <Icon name="edit" size={18} />
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        onClick={() => toggleArchive(account)}
-                        aria-label={`${
-                          account.archived ? t('accounts.unarchive') : t('accounts.archive')
-                        }: ${account.name}`}
-                      >
-                        <Icon name={account.archived ? 'restore' : 'archive'} size={18} />
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        onClick={() => setPendingDelete(account)}
-                        aria-label={`${t('common.delete')}: ${account.name}`}
-                      >
-                        <Icon name="trash" size={18} />
-                      </button>
-                    </div>
-                  </li>
-                ))}
+                        {/* 基本科目（seed の土台科目）はアーカイブ・削除させない（聖域化）。 */}
+                        {protectedBasic ? null : (
+                          <>
+                            <button
+                              type="button"
+                              className="icon-btn"
+                              onClick={() => toggleArchive(account)}
+                              aria-label={`${
+                                account.archived ? t('accounts.unarchive') : t('accounts.archive')
+                              }: ${account.name}`}
+                            >
+                              <Icon name={account.archived ? 'restore' : 'archive'} size={18} />
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-btn"
+                              onClick={() => setPendingDelete(account)}
+                              aria-label={`${t('common.delete')}: ${account.name}`}
+                            >
+                              <Icon name="trash" size={18} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           ))}

@@ -7,7 +7,13 @@
  *  - 削除/全消去/復元は fail-closed（呼び出し側で確認 UI を出す）。
  */
 import { STORE, deleteRecord, getAll, getKv, putRecord, runWrite, type StoreName } from './db';
-import { defaultAccounts, defaultManagementScopes, defaultSettings, newMeta } from './seed';
+import {
+  defaultAccounts,
+  defaultManagementScopes,
+  defaultSettings,
+  isProtectedSeedAccount,
+  newMeta,
+} from './seed';
 import { newId } from '../domain/ids';
 import {
   CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
@@ -491,6 +497,16 @@ export async function upsertAccount(account: Account): Promise<void> {
     loadReferencingCollections(),
   ]);
   const prev = accounts.find((a) => a.id === account.id);
+  // seed 由来の基本科目（現金・預金・投資・クレジットカード・開始残高 等）は会計の土台。
+  // 名称・区分・役割・アーカイブを変えさせない（聖域化・fail-closed）。メモ等の付随更新だけ許可する。
+  if (prev && isProtectedSeedAccount(prev)) {
+    const broken =
+      account.name !== prev.name ||
+      account.type !== prev.type ||
+      account.role !== prev.role ||
+      !!account.archived !== !!prev.archived;
+    if (broken) throw new LedgerError('error.account.protected');
+  }
   if (prev && prev.type !== account.type) {
     if (isAccountReferenced(account.id, refs)) {
       throw new LedgerError('error.account.typeLocked');
@@ -501,9 +517,19 @@ export async function upsertAccount(account: Account): Promise<void> {
   });
 }
 
-/** 使用中（仕訳/予定CF/目的別資金から参照中）の科目は削除できない（アーカイブを使う）。fail-closed。 */
+/**
+ * 使用中（仕訳/予定CF/目的別資金から参照中）の科目は削除できない（アーカイブを使う）。fail-closed。
+ * seed 由来の基本科目は削除できない（聖域化）。
+ */
 export async function deleteAccount(id: string): Promise<void> {
-  const refs = await loadReferencingCollections();
+  const [accounts, refs] = await Promise.all([
+    getAll<Account>(STORE.accounts),
+    loadReferencingCollections(),
+  ]);
+  const target = accounts.find((a) => a.id === id);
+  if (target && isProtectedSeedAccount(target)) {
+    throw new LedgerError('error.account.protected');
+  }
   if (isAccountReferenced(id, refs)) {
     throw new LedgerError('error.account.deleteInUse');
   }

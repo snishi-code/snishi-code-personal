@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  creatableRolesForType,
+  defaultCreatableRoleForType,
   defaultRoleForType,
   inferRole,
   isInternalRole,
+  isUserCreatableRole,
   roleAllowsType,
   rolesForType,
 } from '../src/domain/accountRoles';
@@ -60,6 +63,43 @@ describe('role と type の整合', () => {
     expect(roleAllowsType('fixed-asset', 'asset')).toBe(true);
     expect(roleAllowsType('fixed-asset', 'expense')).toBe(false);
     expect(roleAllowsType('fixed-asset', 'liability')).toBe(false);
+  });
+});
+
+describe('科目を追加で作れる役割の制限（聖域化）', () => {
+  it('creatableRolesForType は通常科目だけ（取り置き/固定資産/その他負債/開始残高/按分/調整を出さない）', () => {
+    // 資産は日常資産と投資のみ（固定資産・取り置き・按分中・継続コスト台帳は出さない）。
+    expect(creatableRolesForType('asset')).toEqual(['daily-asset', 'investment-asset']);
+    // 負債は支払用（カード）のみ（その他負債=ローンは「ローンを組む」導線で作る）。
+    expect(creatableRolesForType('liability')).toEqual(['payment-liability']);
+    expect(creatableRolesForType('revenue')).toEqual(['income-category']);
+    expect(creatableRolesForType('expense')).toEqual(['expense-category']);
+    // 純資産（開始残高など）は作らせない。
+    expect(creatableRolesForType('equity')).toEqual([]);
+  });
+
+  it('isUserCreatableRole は特殊・内部ロールを偽にする', () => {
+    for (const r of ['daily-asset', 'investment-asset', 'payment-liability'] as const) {
+      expect(isUserCreatableRole(r)).toBe(true);
+    }
+    for (const r of [
+      'reserve-asset',
+      'fixed-asset',
+      'deferred-asset',
+      'continuing-cost-asset',
+      'other-liability',
+      'equity',
+      'system-adjustment',
+    ] as const) {
+      expect(isUserCreatableRole(r)).toBe(false);
+    }
+  });
+
+  it('defaultCreatableRoleForType は各 type の通常既定（負債はカード）', () => {
+    expect(defaultCreatableRoleForType('asset')).toBe('daily-asset');
+    expect(defaultCreatableRoleForType('liability')).toBe('payment-liability');
+    expect(defaultCreatableRoleForType('revenue')).toBe('income-category');
+    expect(defaultCreatableRoleForType('expense')).toBe('expense-category');
   });
 });
 

@@ -96,7 +96,8 @@ export const ja = {
     '継続コストの当月分です（仕訳ではなく月割りの参考表示。支出に計上されます）。',
   'journal.generatedNotice':
     '生成された仕訳（継続コスト）は各画面で管理します（直接の編集・削除はできません）。',
-  'journal.adjustmentNotice': '残高補正の仕訳は、残高補正画面で編集・削除します。',
+  'journal.adjustmentNotice':
+    '残高補正の仕訳です。補正・勘定科目の「残高を合わせる」で作成します（差額が出たら合わせ直してください）。',
 
   'allocations.title': '継続コスト台帳',
   'allocations.empty':
@@ -345,7 +346,6 @@ export const ja = {
   'entry.instrument': '支払い手段（任意）',
   'entry.instrumentNone': '指定なし',
 
-  'adjust.title': '残高補正',
   'adjust.intro': '実際の残高との差額を、任意の日に補正します（「締め」はありません）。',
   'adjust.account': '対象科目（資産・負債）',
   'adjust.date': '日付',
@@ -356,56 +356,23 @@ export const ja = {
   'adjust.expected': 'アプリ上の理論残高',
   'adjust.delta': '差額',
   'adjust.deltaHint': '差額 = 実残高 − 理論残高（プラスで増加、マイナスで減少）。',
-  'adjust.save': '補正する',
-  // 各勘定科目行から残高補正を開く導線（補正・勘定科目の統合）。
-  'adjust.rowAction': '補正',
-  'adjust.createTitle': '「{name}」の残高を補正',
+  'adjust.save': '残高を合わせる',
+  // 各勘定科目行から残高を合わせる導線（補正・勘定科目の統合）。初期残高/補正をユーザーに選ばせない。
+  'adjust.rowAction': '残高を合わせる',
+  'adjust.createTitle': '「{name}」の残高を合わせる',
   'adjust.noChange': '差額がないため、補正仕訳は作成しませんでした。',
-  'adjust.error.account': '対象科目を選んでください。',
   'adjust.error.actual': '実残高を入力してください。',
-  'adjust.noAccounts': '資産・負債の科目がありません。',
   'adjust.investmentNote': '投資評価損益は支出には含めません。',
-  // 登録済みの補正（現実アンカー）を一覧・編集・削除する。
-  'adjust.listTitle': '登録済みの残高補正',
-  'adjust.listIntro':
-    '残高補正は、ある日付の実残高に台帳をピン留めする「現実アンカー」です。後から編集・削除できます。',
-  'adjust.listEmpty': 'まだ残高補正はありません。',
-  'adjust.editTitle': '残高補正を編集',
-  'adjust.editIntro':
-    '理論残高は、この補正自身を除いて計算し直します（補正の二重掛けを避けるため）。',
-  'adjust.update': '更新する',
+  // 補正は仕訳としてそのまま見えるため、この画面では履歴一覧を持たない（差額が出たら合わせ直す）。
   'adjust.removedZero': '差額がなくなったため、補正を削除しました。',
   'adjust.deleted': '残高補正を削除しました。',
-  'adjust.deleteConfirmTitle': '残高補正を削除しますか？',
-  'adjust.deleteConfirmBody':
-    'この補正仕訳を削除します。対象日以降の理論残高は、補正前の状態に戻ります。',
-  'adjust.rowKind.unknown-balance': '残高調整',
-  'adjust.rowKind.investment-valuation': '投資評価',
 
-  // 補正・勘定科目（画面まとめ名）と初期残高（kind='opening'）。
+  // 補正・勘定科目（画面まとめ名）。
   'manage.title': '補正・勘定科目',
-  'opening.title': '初期残高',
-  'opening.intro':
-    '開始時点の資産・負債の残高を登録します。初回設定にも使えます。あとから編集・削除できます。',
-  'opening.mode': '対象',
-  'opening.modeNew': '新しい科目を作る',
-  'opening.modeExisting': '既存の科目',
-  'opening.account': '対象科目（資産・負債）',
-  'opening.name': '科目名',
-  'opening.role': '種類',
-  'opening.amount': '初期残高',
-  'opening.date': '基準日',
-  'opening.save': '初期残高を登録',
-  'opening.listTitle': '登録済みの初期残高',
-  'opening.listEmpty': 'まだ初期残高はありません。',
-  'opening.editTitle': '初期残高を編集',
-  'opening.update': '更新する',
+  'manage.intro':
+    '勘定科目を管理し、各科目の残高を実際の残高に合わせられます。初期残高という専用入力はありません（残高 0 の科目も「残高を合わせる」で設定できます）。',
+  // 既存データ（kind='opening'）削除時のトースト（store からのみ参照）。
   'opening.deleted': '初期残高を削除しました。',
-  'opening.deleteConfirmTitle': '初期残高を削除しますか？',
-  'opening.deleteConfirmBody': 'この初期残高を削除します。対象科目の開始残高はなくなります。',
-  'opening.error.name': '科目名を入力してください。',
-  'opening.error.amount': '初期残高は 1 以上の整数で入力してください。',
-  'opening.error.account': '対象科目を選んでください。',
 
   'journal.adjustmentTag': '補正',
   'dashboard.investmentValuation': '投資評価損益',
@@ -629,6 +596,10 @@ export const ja = {
   'accounts.note': 'メモ',
   'accounts.balance': '残高',
   'accounts.archived': 'アーカイブ済み',
+  // seed 由来の基本科目（会計の土台）。削除・アーカイブ・区分/役割の変更ができない。
+  'accounts.basic': '基本科目',
+  'accounts.basicHint':
+    '基本科目のため、名称・区分・役割は変更できません（メモのみ編集できます）。',
   'accounts.archive': 'アーカイブ',
   'accounts.unarchive': 'アーカイブ解除',
   'accounts.showArchived': 'アーカイブ済みも表示',
@@ -733,6 +704,8 @@ export const ja = {
   'error.account.roleTypeMismatch': '役割が区分と一致しません。',
   'error.account.typeLocked': '使用中の科目は区分を変更できません。',
   'error.account.deleteInUse': 'この科目は使用中のため削除できません。アーカイブしてください。',
+  'error.account.protected':
+    '基本科目は削除・アーカイブ・区分や役割の変更ができません（会計の土台のため）。',
   'error.entry.generated':
     '継続コストから生成された仕訳は編集・削除できません。継続コスト台帳で管理してください。',
   'error.entry.monthlyCost':

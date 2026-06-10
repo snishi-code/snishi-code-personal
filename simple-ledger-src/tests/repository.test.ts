@@ -48,7 +48,23 @@ import { buildExportPackage, exportToJsonText, importFromJsonText } from '../src
 import { getKv, putKv, putRecord, STORE } from '../src/data/db';
 import { SCHEMA_VERSION } from '../src/domain/constants';
 import { newId } from '../src/domain/ids';
-import type { CashflowSchedule, LedgerMeta, Tag } from '../src/domain/types';
+import type { Account, CashflowSchedule, LedgerMeta, Tag } from '../src/domain/types';
+
+/** seed の基本科目は保護されるため、汎用ルールの検証にはユーザー追加の（保護対象外の）口座を使う。 */
+async function addUserAsset(name = 'サブ口座'): Promise<Account> {
+  const ts = '2026-01-01T00:00:00.000Z';
+  const acc: Account = {
+    id: newId(),
+    name,
+    type: 'asset',
+    role: 'daily-asset',
+    archived: false,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+  await upsertAccount(acc);
+  return acc;
+}
 
 async function addEntryRef(foodId: string, cashId: string) {
   await upsertEntry(
@@ -172,23 +188,78 @@ describe('科目区分(type)の変更ルール', () => {
   });
 
   it('role が type と矛盾する保存は拒否する', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!; // asset
+    await loadLedger();
+    const sub = await addUserAsset(); // ユーザー追加の asset（保護対象外）
     // asset に expense-category を付ける → 不整合で拒否
     await expect(
-      upsertAccount({ ...cash, role: 'expense-category', updatedAt: 'y' }),
+      upsertAccount({ ...sub, role: 'expense-category', updatedAt: 'y' }),
     ).rejects.toThrow();
   });
 
-  it('使用中でも role 変更は許可する（会計残高は変わらない）', async () => {
+  it('使用中でも role 変更は許可する（会計残高は変わらない・基本科目以外）', async () => {
+    const ledger = await loadLedger();
+    const food = ledger.accounts.find((a) => a.name === '変動費')!;
+    // 現金は基本科目で role 変更が保護されるため、ユーザー追加の口座を使用中にして検証する。
+    const sub = await addUserAsset();
+    await addEntryRef(food.id, sub.id);
+    await upsertAccount({ ...sub, role: 'investment-asset', updatedAt: 'y' });
+    const after = await loadLedger();
+    expect(after.accounts.find((a) => a.id === sub.id)?.role).toBe('investment-asset');
+  });
+});
+
+describe('基本科目の保護（聖域化）', () => {
+  it('基本科目（現金・預金・投資・クレジットカード・開始残高）は削除できない', async () => {
+    const ledger = await loadLedger();
+    for (const name of ['現金', '預金', 'チャージ残高', '投資', 'クレジットカード', '開始残高']) {
+      const a = ledger.accounts.find((x) => x.name === name)!;
+      await expect(deleteAccount(a.id)).rejects.toThrow();
+    }
+    // 保護理由が明示される（参照中などではなく聖域化）。
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    await expect(deleteAccount(cash.id)).rejects.toMatchObject({ code: 'error.account.protected' });
+  });
+
+  it('基本科目はアーカイブできない', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    await addEntryRef(food.id, cash.id);
-    // 現金(daily-asset) を investment-asset へ（type は asset のまま）
-    await upsertAccount({ ...cash, role: 'investment-asset', updatedAt: 'y' });
+    await expect(upsertAccount({ ...cash, archived: true, updatedAt: 'y' })).rejects.toMatchObject({
+      code: 'error.account.protected',
+    });
+  });
+
+  it('基本科目の区分(type)・役割(role)・名称は変更できない', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    await expect(
+      upsertAccount({ ...cash, role: 'investment-asset', updatedAt: 'y' }),
+    ).rejects.toMatchObject({ code: 'error.account.protected' });
+    await expect(
+      upsertAccount({ ...cash, type: 'expense', role: 'expense-category', updatedAt: 'y' }),
+    ).rejects.toMatchObject({ code: 'error.account.protected' });
+    await expect(upsertAccount({ ...cash, name: '財布', updatedAt: 'y' })).rejects.toMatchObject({
+      code: 'error.account.protected',
+    });
+  });
+
+  it('基本科目でも name/type/role/archived を変えない更新（メモ付与）は許可する', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    await upsertAccount({ ...cash, note: '財布のお金', updatedAt: 'y' });
     const after = await loadLedger();
-    expect(after.accounts.find((a) => a.id === cash.id)?.role).toBe('investment-asset');
+    expect(after.accounts.find((a) => a.id === cash.id)?.note).toBe('財布のお金');
+  });
+
+  it('ユーザー追加の通常科目（銀行口座など）は従来どおりアーカイブ・削除できる', async () => {
+    await loadLedger();
+    const sub = await addUserAsset('三井住友銀行');
+    await upsertAccount({ ...sub, archived: true, updatedAt: 'y' });
+    const mid = await loadLedger();
+    expect(mid.accounts.find((a) => a.id === sub.id)?.archived).toBe(true);
+    // 未使用なら削除もできる。
+    await deleteAccount(sub.id);
+    const after = await loadLedger();
+    expect(after.accounts.some((a) => a.id === sub.id)).toBe(false);
   });
 });
 
@@ -380,17 +451,20 @@ describe('予定CF・目的別資金が参照する科目の保護', () => {
   }
 
   it('予定CF が参照する科目は削除できない', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    await upsertSchedule(plannedSchedule(cash.id));
-    await expect(deleteAccount(cash.id)).rejects.toThrow();
+    await loadLedger();
+    // 基本科目は無条件で保護されるため、参照ルールはユーザー追加の口座で検証する。
+    const sub = await addUserAsset();
+    await upsertSchedule(plannedSchedule(sub.id));
+    await expect(deleteAccount(sub.id)).rejects.toThrow();
   });
 
   it('予定CF が参照する科目は区分変更できない', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    await upsertSchedule(plannedSchedule(cash.id));
-    await expect(upsertAccount({ ...cash, type: 'expense', updatedAt: 'y' })).rejects.toThrow();
+    await loadLedger();
+    const sub = await addUserAsset();
+    await upsertSchedule(plannedSchedule(sub.id));
+    await expect(
+      upsertAccount({ ...sub, type: 'expense', role: 'expense-category', updatedAt: 'y' }),
+    ).rejects.toThrow();
   });
 
   it('目的別資金が参照する科目は削除できない', async () => {

@@ -214,43 +214,6 @@ test('継続コストを後から編集すると一覧とホームの支出に�
   await expect(page.locator(ui('dashboard.view'))).toContainText('10,000');
 });
 
-test('固定資産由来の継続コストを売却/故障で処分でき、終了する', async ({ page }) => {
-  await page.goto('./');
-  // 1) 固定資産科目「社用車」を作る。
-  await openAccountsManage(page);
-  await page.locator(ui('accounts.create')).click();
-  await page.getByRole('dialog').getByLabel('科目名').fill('社用車');
-  await page.locator(ui('accounts.type')).selectOption('asset');
-  await page.locator(ui('accounts.role')).selectOption('fixed-asset');
-  await page.locator(ui('accounts.save')).click();
-
-  // 2) 支出で固定資産購入を「固定資産として継続コスト」する（120 か月）。
-  await page.locator(ui('nav.home')).click();
-  await page.locator(ui('dashboard.entry.expense')).click();
-  await page.locator(ui('journal.entry.item')).fill('社用車の購入');
-  await pick(page, 'journal.entry.flow.destination', '社用車');
-  await pick(page, 'journal.entry.flow.source', '現金');
-  await page.locator(ui('journal.entry.amount')).fill('1200000');
-  await page.locator(ui('journal.entry.fixedMonthlyToggle')).check();
-  await page.locator(ui('journal.entry.allocateMonths')).fill('120');
-  await pick(page, 'journal.entry.fixedMonthlyCategory', '変動費');
-  await page.locator(ui('journal.entry.save')).click();
-
-  // 3) 継続コスト画面で「売却/故障」→ 0 円故障で処分。
-  await page.locator(ui('nav.menu.button')).click();
-  await page.locator(ui('nav.allocations')).click();
-  await expect(page.locator(ui('allocations.list'))).toContainText('社用車の購入');
-  await page.locator(ui('allocations.dispose')).first().click();
-  await page.locator(ui('allocations.dispose.proceeds')).fill('0');
-  await page.locator(ui('allocations.dispose.confirm')).click();
-
-  // 4) 既定（有効のみ）一覧からは消える（空表示）。終了分を表示すると「終了」として現れる。
-  await expect(page.locator(ui('allocations.view'))).toContainText('継続コストはありません');
-  await page.locator(ui('allocations.showCompleted')).check();
-  await expect(page.locator(ui('allocations.list'))).toContainText('社用車の購入');
-  await expect(page.locator(ui('allocations.list'))).toContainText('終了');
-});
-
 test('洗濯機（カード/84か月・償却のみ）を継続コスト対象に資産化し、返済CFを作る', async ({
   page,
 }) => {
@@ -338,21 +301,15 @@ test('YouTube年払い（継続購入）: クレカ→YouTube資産化、当月�
 
 test('自動車ローンで自動車を買う: ローン→自動車→固定費 の三層 + 返済CF', async ({ page }) => {
   await page.goto('./');
-  // 1) 自動車ローン（other-liability）を作る。
-  await openAccountsManage(page);
-  await page.locator(ui('accounts.create')).click();
-  await page.getByRole('dialog').getByLabel('科目名').fill('自動車ローン');
-  await page.locator(ui('accounts.type')).selectOption('liability');
-  await page.locator(ui('accounts.role')).selectOption('other-liability');
-  await page.locator(ui('accounts.save')).click();
-
-  // 2) 支出入力: 自動車ローン → 自動車（継続コスト対象） / 認識先 固定費 / 60か月 / 返済 預金 60回。
-  await page.locator(ui('nav.home')).click();
+  // 1) 支出入力: 自動車ローン（other-liability）は「ローンを組む」導線でその場で作る（勘定科目画面では作らない）。
   await page.locator(ui('dashboard.entry.expense')).click();
   await page.locator(ui('journal.entry.item')).fill('自動車');
-  // 「ローンを組む」で支払い元(左辺)をローン選択へ切替え、既存の自動車ローンを選ぶ。
+  // 「ローンを組む」→「新しいローンを作成」で自動車ローンを作成し、支払い元(左辺)に選ぶ。
   await page.locator(ui('journal.entry.loanArrange')).click();
-  await pick(page, 'journal.entry.flow.source', '自動車ローン');
+  await page.locator(ui('journal.entry.liabilityCreate')).click();
+  await page.locator(ui('journal.entry.liabilityCreate.name')).fill('自動車ローン');
+  await page.locator(ui('journal.entry.liabilityCreate.save')).click();
+  await expect(page.locator(ui('journal.entry.flow.source'))).toContainText('自動車ローン');
   await page.locator(ui('journal.entry.amount')).fill('2500000');
   // 行き先を「継続コスト化」→ 対象名「自動車」、認識先カテゴリ「固定費」、60か月。
   await page.locator(ui('journal.entry.ccToggle')).click();
@@ -667,73 +624,27 @@ test('管理区分・支払い手段: 細目を追加できる', async ({ page }
   await expect(page.locator(ui('wallets.instrument.list'))).toContainText('楽天カード');
 });
 
-test('残高補正: 実残高を入力すると補正仕訳ができる', async ({ page }) => {
+test('残高を合わせる: 残高 0 の科目に実残高を入れると補正仕訳ができる（初期残高/履歴UIは無い）', async ({
+  page,
+}) => {
   await page.goto('./');
   await openAccountsManage(page);
   await expect(page.locator(ui('adjustments.view'))).toBeVisible();
 
-  // 各勘定科目行の「補正」から、その科目を選択済みの補正入力を開く（独立フォーム廃止）。
-  await page.getByLabel('補正する: 現金').click();
+  // 聖域化: 初期残高フォームも残高補正履歴一覧もこの画面に無い。
+  await expect(page.locator(ui('opening.name'))).toHaveCount(0);
+  await expect(page.locator(ui('opening.list'))).toHaveCount(0);
+  await expect(page.locator(ui('adjustments.list'))).toHaveCount(0);
+
+  // 各勘定科目行の「残高を合わせる」から、その科目を選択済みの補正入力を開く（初期残高/補正を選ばせない）。
+  // 現金は残高 0 だが、同じ流れで実残高 8,000 を「0 からの残高補正」として設定できる。
+  await page.getByLabel('残高を合わせる: 現金').click();
   await page.locator(ui('adjustments.createDialog')).locator(ui('adjust.actual')).fill('8000');
   await page.locator(ui('adjust.save')).click();
 
-  // Journal に補正仕訳が出る
+  // 作成した残高補正は仕訳画面でそのまま見える（この画面に履歴を二重表示しない）。
   await openJournal(page);
   await expect(page.locator(ui('journal.entry.list'))).toContainText('残高補正');
-});
-
-test('残高補正: 一覧から編集・削除できる（現実アンカー）', async ({ page }) => {
-  await page.goto('./');
-  await openAccountsManage(page);
-
-  // 現金の実残高 8000 で補正（理論残高 0 → +8000）。各科目行の「補正」から開く。
-  await page.getByLabel('補正する: 現金').click();
-  await page.locator(ui('adjustments.createDialog')).locator(ui('adjust.actual')).fill('8000');
-  await page.locator(ui('adjust.save')).click();
-
-  // 登録済み一覧に出る。
-  const list = page.locator(ui('adjustments.list'));
-  await expect(list).toBeVisible();
-  await expect(list).toContainText('現金');
-  await expect(list).toContainText('8,000');
-
-  // 行から編集 → 実残高 5000 に変更（理論残高は補正自身を除いて 0 → 差額 5,000）。
-  await page.locator(ui('adjustments.row.edit')).first().click();
-  await page.locator(ui('adjustments.edit.actual')).fill('5000');
-  await page.locator(ui('adjustments.edit.save')).click();
-  await expect(list).toContainText('5,000');
-
-  // 行から削除（確認ダイアログ必須）→ 一覧が空になる。
-  await page.locator(ui('adjustments.row.delete')).first().click();
-  await page.locator(ui('dialog.confirm')).click();
-  await expect(page.locator(ui('adjustments.list'))).toHaveCount(0);
-});
-
-test('初期残高: 補正・勘定科目から新規科目の開始残高を登録・編集・削除できる', async ({ page }) => {
-  await page.goto('./');
-  await openAccountsManage(page);
-  await expect(page.locator(ui('adjustments.view'))).toBeVisible();
-
-  // 新しい資産科目「タンス預金」に初期残高 50,000 を登録（既定 = 新しい科目 / 日常資産）。
-  await page.locator(ui('opening.name')).fill('タンス預金');
-  await page.locator(ui('opening.amount')).fill('50000');
-  await page.locator(ui('opening.save')).click();
-
-  const list = page.locator(ui('opening.list'));
-  await expect(list).toBeVisible();
-  await expect(list).toContainText('タンス預金');
-  await expect(list).toContainText('50,000');
-
-  // 編集 → 60,000。
-  await page.locator(ui('opening.row.edit')).first().click();
-  await page.locator(ui('opening.edit.amount')).fill('60000');
-  await page.locator(ui('opening.edit.save')).click();
-  await expect(list).toContainText('60,000');
-
-  // 削除 → 一覧が空になる。
-  await page.locator(ui('opening.row.delete')).first().click();
-  await page.locator(ui('dialog.confirm')).click();
-  await expect(page.locator(ui('opening.list'))).toHaveCount(0);
 });
 
 test('資産の内訳の科目から仕訳一覧へドリルダウンできる', async ({ page }) => {

@@ -103,6 +103,36 @@ export function rolesForType(type: AccountType): AccountRole[] {
 }
 
 /**
+ * 勘定科目管理画面の「科目を追加」でユーザーが直接作ってよい役割（聖域化）。
+ * 通常の日常資産・投資・支払用負債（カード）・収支カテゴリに限る。
+ * 取り置き資金 / 固定資産 / 継続コスト台帳 / その他負債（ローン）/ 開始残高（純資産）/
+ * 按分中資産 / 調整用は、振替右辺・支出フロー（継続コスト化 / ローンを組む）・自動生成で作る。
+ * これらを勘定科目画面から直接作らせると会計構造が分かりづらく科目が増殖するため、選択肢に出さない。
+ * 既存データ（import / 旧モデル）の表示・編集は別途維持する（作成フォームだけ絞る）。
+ */
+export const USER_CREATABLE_ROLES: readonly AccountRole[] = [
+  'daily-asset',
+  'investment-asset',
+  'payment-liability',
+  'income-category',
+  'expense-category',
+];
+
+export function isUserCreatableRole(role: AccountRole): boolean {
+  return USER_CREATABLE_ROLES.includes(role);
+}
+
+/** その type で「科目を追加」から新規作成してよい role の一覧（聖域化フィルタ）。 */
+export function creatableRolesForType(type: AccountType): AccountRole[] {
+  return USER_CREATABLE_ROLES.filter((r) => roleAllowsType(r, type));
+}
+
+/** type に対する「新規作成時の既定 role」。作成可能ロールが無い type（equity）は defaultRoleForType に委ねる。 */
+export function defaultCreatableRoleForType(type: AccountType): AccountRole {
+  return creatableRolesForType(type)[0] ?? defaultRoleForType(type);
+}
+
+/**
  * 支払い手段の細目（AccountInstrument）を持てる親科目の役割。
  * 日常の支払い元になり得る「流動資産（現金・預金・チャージ残高）」と
  * 「支払い負債（クレジットカード）」に限る。固定資産・投資・目的別資金・按分中資産・

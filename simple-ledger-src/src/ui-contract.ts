@@ -207,6 +207,8 @@ export const UI = {
     instrumentKind: 'wallets.instrument.kind',
     instrumentSave: 'wallets.instrument.save',
   },
+  // 補正・勘定科目（聖域化）: 勘定科目管理 + 各 BS 科目行の「残高を合わせる」入力のみ。
+  // 初期残高フォーム・残高補正履歴一覧はこの画面に持たない（補正は仕訳としてそのまま見える）。
   adjustments: {
     view: 'adjustments.view',
     account: 'adjust.account',
@@ -214,37 +216,8 @@ export const UI = {
     kind: 'adjust.kind',
     actual: 'adjust.actual',
     save: 'adjust.save',
-    // 各勘定科目行の「補正」から開く、科目選択済みの補正入力ダイアログ。
+    // 各勘定科目行の「残高を合わせる」から開く、科目選択済みの補正入力ダイアログ。
     createDialog: 'adjustments.createDialog',
-    // 登録済みの補正（現実アンカー）の一覧・編集・削除。
-    list: 'adjustments.list',
-    row: 'adjustments.row',
-    rowEdit: 'adjustments.row.edit',
-    rowDelete: 'adjustments.row.delete',
-    editDialog: 'adjustments.editDialog',
-    editAccount: 'adjustments.edit.account',
-    editDate: 'adjustments.edit.date',
-    editKind: 'adjustments.edit.kind',
-    editActual: 'adjustments.edit.actual',
-    editSave: 'adjustments.edit.save',
-    deleteConfirm: 'adjustments.deleteConfirm',
-    // 初期残高（kind='opening'）の登録・一覧・編集・削除（同じ「補正・勘定科目」画面）。
-    openingMode: 'opening.mode',
-    openingAccount: 'opening.account',
-    openingName: 'opening.name',
-    openingRole: 'opening.role',
-    openingAmount: 'opening.amount',
-    openingDate: 'opening.date',
-    openingSave: 'opening.save',
-    openingList: 'opening.list',
-    openingRow: 'opening.row',
-    openingRowEdit: 'opening.row.edit',
-    openingRowDelete: 'opening.row.delete',
-    openingEditDialog: 'opening.editDialog',
-    openingEditAmount: 'opening.edit.amount',
-    openingEditDate: 'opening.edit.date',
-    openingEditSave: 'opening.edit.save',
-    openingDeleteConfirm: 'opening.deleteConfirm',
   },
   cashflow: {
     view: 'cashflow.view',
