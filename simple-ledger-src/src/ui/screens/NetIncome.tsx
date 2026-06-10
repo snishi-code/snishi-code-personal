@@ -2,6 +2,7 @@
  * 収支ページ。ホーム上段「収支」のタップ先。
  * 収支 = 収入 − 支出の「手元に残る額」。科目別ドリルダウンではなく、
  * 「毎月どれだけ残ったか（余剰／赤字）」の推移を主役にする。期間はホームの選択に従う。
+ * 収入／支出カードはホームの同名ボタンと同じ内訳ページ（収入の内訳／支出の内訳）へ遷移する。
  */
 import { useMemo } from 'react';
 import { useLedger } from '../../state/store';
@@ -10,16 +11,20 @@ import { livingCostForRange } from '../../domain/livingCost';
 import { periodLabel, periodRange, type ReportPeriod } from '../../domain/reportPeriod';
 import { buildSectionTrends } from './breakdownData';
 import { Money } from '../money';
+import { Icon } from '../Icon';
 import { TrendChart } from '../components/TrendChart';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
+import type { Screen } from '../navigation';
 
 export function NetIncome({
   period,
   onPeriodChange,
+  onNavigate,
 }: {
   period: ReportPeriod;
   onPeriodChange: (p: ReportPeriod) => void;
+  onNavigate: (screen: Screen) => void;
 }) {
   const { ledger } = useLedger();
   const currency = ledger?.settings.currency ?? 'JPY';
@@ -47,18 +52,36 @@ export function NetIncome({
       </p>
       <p className="section-label">{periodLabel(period)}</p>
       <div className="stat-grid">
-        <div className="stat" data-ui={UI.netIncome.revenue}>
-          <span className="stat__label">{t('netIncome.revenue')}</span>
+        {/* 収入カードはホームの「収入」と同じ「収入の内訳」へ。 */}
+        <button
+          type="button"
+          className="stat stat--btn"
+          onClick={() => onNavigate('incomeBreakdown')}
+          aria-label={t('dashboard.statDetail', { label: t('netIncome.revenue') })}
+          data-ui={UI.netIncome.revenue}
+        >
+          <span className="stat__label">
+            {t('netIncome.revenue')} <Icon name="chevronRight" size={12} />
+          </span>
           <span className="stat__value">
             <Money amount={revenue} currency={currency} />
           </span>
-        </div>
-        <div className="stat" data-ui={UI.netIncome.expense}>
-          <span className="stat__label">{t('netIncome.expense')}</span>
+        </button>
+        {/* 支出カードはホームの「支出」と同じ「支出の内訳」へ。 */}
+        <button
+          type="button"
+          className="stat stat--btn"
+          onClick={() => onNavigate('expenseBreakdown')}
+          aria-label={t('dashboard.statDetail', { label: t('netIncome.expense') })}
+          data-ui={UI.netIncome.expense}
+        >
+          <span className="stat__label">
+            {t('netIncome.expense')} <Icon name="chevronRight" size={12} />
+          </span>
           <span className="stat__value">
             <Money amount={living} currency={currency} />
           </span>
-        </div>
+        </button>
         <div className="stat" data-ui={UI.netIncome.result}>
           <span className="stat__label">{t('netIncome.result')}</span>
           <span className="stat__value">

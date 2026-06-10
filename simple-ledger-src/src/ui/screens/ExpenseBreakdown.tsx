@@ -1,11 +1,15 @@
 /*
  * 支出の内訳。ホーム上段「支出」のタップ先。
- * 支出 = 通常支出 + 継続コスト。継続コストをタップすると継続コスト台帳へ。
- * 支出はホーム独立セクションにはしない（ここで内訳を見せる）。期間はホームの選択に従う。
+ * 主役は「何へ支出したか」= 費用カテゴリ別の内訳（継続コストの月割り分も各カテゴリに合算）。
+ * 通常支出 / 継続コスト / 支出合計は補助カードとして残し、継続コストから継続コスト台帳へ行ける。
+ * 支出 = 通常支出 + 継続コスト。期間はホームの選択に従う。
  */
 import { useMemo } from 'react';
 import { useLedger } from '../../state/store';
-import { livingCostBreakdownForRange } from '../../domain/livingCost';
+import {
+  expenseCategoryBreakdownForRange,
+  livingCostBreakdownForRange,
+} from '../../domain/livingCost';
 import { periodLabel, periodRange, type ReportPeriod } from '../../domain/reportPeriod';
 import { buildSectionTrends } from './breakdownData';
 import { Money } from '../money';
@@ -28,11 +32,16 @@ export function ExpenseBreakdown({
   const currency = ledger?.settings.currency ?? 'JPY';
   const label = periodLabel(period);
 
-  const breakdown = useMemo(() => {
+  const { breakdown, categories } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     // 集計は導出専用 entries（実仕訳 + 継続コストの仮想認識）を使う。
     const entries = ledger?.derivedEntries ?? [];
-    return livingCostBreakdownForRange(accounts, entries, periodRange(period));
+    const range = periodRange(period);
+    return {
+      breakdown: livingCostBreakdownForRange(accounts, entries, range),
+      // 費用カテゴリ別内訳（合計は breakdown.total と一致＝ホーム「支出」の金額）。
+      categories: expenseCategoryBreakdownForRange(accounts, entries, range),
+    };
   }, [ledger, period]);
 
   const trends = useMemo(() => buildSectionTrends(period, ledger), [period, ledger]);
@@ -45,15 +54,42 @@ export function ExpenseBreakdown({
       <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
         {t('expenseBreakdown.intro')}
       </p>
-      <p className="section-label">{label}</p>
-      <div className="stat-grid">
+
+      {/* 主表示: 費用カテゴリ別の内訳（何へ支出したか）。継続コストの月割り分も各カテゴリに含まれる。 */}
+      <p className="section-label">{t('expenseBreakdown.byCategory')}</p>
+      <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
+        {label}
+      </p>
+      <div className="card" data-ui={UI.expenseBreakdown.categoryList}>
+        {categories.length === 0 ? (
+          <div className="stmt-row muted">{t('expenseBreakdown.noCategory')}</div>
+        ) : (
+          categories.map((c) => (
+            <div key={c.account.id} className="stmt-row" data-ui={UI.expenseBreakdown.categoryRow}>
+              <span>{c.account.name}</span>
+              <span className="stmt-row__num">
+                <Money amount={c.amount} currency={currency} />
+              </span>
+            </div>
+          ))
+        )}
+        <div className="stmt-row stmt-row--total">
+          <span>{t('expenseBreakdown.categoryTotal')}</span>
+          <span className="stmt-row__num">
+            <Money amount={breakdown.total} currency={currency} />
+          </span>
+        </div>
+      </div>
+
+      {/* 補助: 通常支出 / 継続コスト / 支出合計。継続コストをタップで継続コスト台帳へ。 */}
+      <div className="stat-grid" style={{ marginTop: 'var(--space-4)' }}>
         <div className="stat" data-ui={UI.expenseBreakdown.normalExpense}>
           <span className="stat__label">{t('expenseBreakdown.normalExpense')}</span>
           <span className="stat__value">
             <Money amount={breakdown.normalExpense} currency={currency} />
           </span>
         </div>
-        {/* 継続コスト。タップで継続コスト台帳へ。 */}
+        {/* 継続コスト。タップで継続コスト台帳へ（補助導線）。 */}
         <button
           type="button"
           className="stat stat--btn"

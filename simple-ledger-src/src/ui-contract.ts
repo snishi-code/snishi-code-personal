@@ -26,7 +26,8 @@ export const UI = {
   },
   dashboard: {
     view: 'dashboard.view',
-    // 日常入力 3 種（ホーム上部の主導線）
+    // 日常入力 3 種（ホーム下部の固定バー＝主導線）
+    entryBar: 'dashboard.entryBar',
     income: 'dashboard.entry.income',
     expense: 'dashboard.entry.expense',
     transfer: 'dashboard.entry.transfer',
@@ -48,9 +49,13 @@ export const UI = {
     row: 'incomeBreakdown.row',
     total: 'incomeBreakdown.total',
   },
-  // 支出の内訳（通常支出 + 月額化＝生活コスト）。月額化からは月額化コスト台帳へ。
+  // 支出の内訳（主役＝費用カテゴリ別内訳）。通常支出/継続コスト/支出合計は補助カード。
+  // 継続コストカードからは継続コスト台帳へ。
   expenseBreakdown: {
     view: 'expenseBreakdown.view',
+    // 費用カテゴリ別の内訳リスト（「何へ支出したか」）。
+    categoryList: 'expenseBreakdown.categoryList',
+    categoryRow: 'expenseBreakdown.categoryRow',
     normalExpense: 'expenseBreakdown.normalExpense',
     monthlyCost: 'expenseBreakdown.monthlyCost',
     total: 'expenseBreakdown.total',
