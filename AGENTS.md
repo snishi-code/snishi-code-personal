@@ -1,50 +1,42 @@
-# AGENTS.md — snishi-code-personal（個人カテゴリ）
+<!--
+Canonical source: Workspace/_workspace-management/agent-files/AGENTS.md
+This file is a copied distribution file. Do not edit it directly in this repo.
+Update the canonical workspace file first, then sync copies to each repo.
+-->
 
-<!-- ===== サイト憲法（全リポ共通）ここから =====
-  正本は apex リポ（snishi-code.com）。3リポに同一コピー。
-  変更は apex で直し medical / personal へ反映する
-  （別 origin のため物理コピーが必要。site-links.js と同じ運用）。 -->
+# AGENTS.md — 全 AI 共通の不変条件
 
-## サイト憲法（全リポ共通・正本=apex）
+この repo は Workspace 配下の関連 4 repo(apex / personal / medical / foundation)の一つ。
+AI 運用ルールの正本は `Workspace/_workspace-management/agent-files/` にあり、本ファイルはその配布コピーである。
 
-### origin 分離
-アプリは別サブドメイン（= 別 origin）に分離。各リポは自分のカテゴリだけを管理する。
+## サイト憲法(全 repo 共通の不変条件)
 
-| origin | repo | 内容 |
-|---|---|---|
-| `snishi-code.com`（apex） | `snishi-code.com` | カテゴリ入口（静的のみ） |
-| `medical(-dev).snishi-code.com` | `snishi-code-medical` | 医療アプリ（回診ほか） |
-| `personal(-dev).snishi-code.com` | `snishi-code-personal` | 個人アプリ |
+- **外部送信ゼロ (no-exfil)**: ユーザー入力データは端末内のみ。`fetch` / `XMLHttpRequest` / `WebSocket` / `EventSource` / `navigator.sendBeacon` での外部送信は実装しない。GA / Sentry 等のトラッキングも入れない。全カテゴリで例外なし(「送信可」の例外文を作らない。例外文の存在自体が漏洩源になる)。
+- **local-first**: データは IndexedDB 等の端末内ストレージ主体。クラウド同期は JSON 書き出し + ユーザー自身の外部手段に限る。
+- **fail-closed**: データの保存・削除・移動など、壊れたら実害になる操作は失敗時に中断して明示通知する。成功扱いで先へ進めない(fail-open 禁止)。catch で握りつぶして続行しない。可視状態を durable 状態より先に進めない(多段操作は atomic か補償付き)。
+- **中央ディスパッチャ**: 状態(app state / settings)を変更したら、必ず中央の再描画・更新経路を通す。ミューテーション箇所で個別 view の更新関数を列挙しない(特定 view の更新漏れバグの元)。
+- **wire format の正本一元化**: QR 等のデータ交換フォーマットは正本モジュールを唯一の authority とし、別実装・重複定義を作らない。互換性を壊す変更をしない。
+- **repo / origin 分離**: apex / personal / medical は別 repo・別 origin。横断 URL は正本ファイル経由で管理し、ハードコードしない。v2(foundation)は旧版と storage / Service Worker scope / appId を完全分離し、既存公開版を置き換えない。
+- **build output と source**: 配信成果物(build output)は手で編集しない。source を修正してビルドで再生成する。逆に、タスクで指示されない限り build output の再生成も行わない。
+- **アクセシビリティ / アイコン**: タップ領域は最小 44×44px。十字形・宗教シンボルのアイコンは使わない。UI 文言は i18n 経由とし、ハードコードしない。
 
-main=本番 / dev=テスト。env はホスト名規約で判定（`-dev.` / `*.pages.dev` / `localhost` を test、他を prod）。特定ドメインを直書きしない。
+## 作業管理
 
-### 外部送信ゼロ（絶対・例外なし）
-ユーザー入力データは端末内のみ。`fetch` / `XMLHttpRequest` / `WebSocket` / `EventSource` / `navigator.sendBeacon` での外部送信は実装しない。GA / Sentry 等のトラッキングも入れない。**personal を含む全カテゴリで例外なし**（「送信可」の例外文を作らない＝例外文の存在自体が AGENTS.md / メモリ経由の漏洩源になる）。
-- **機械ガードで担保**: `tools/no-exfil-guard.sh` が pre-commit（`git config core.hooksPath .githooks`）と GitHub Action（`.github/workflows/no-exfil.yml`）の両方で走る。正規の同一オリジン通信（service worker のキャッシュ等）のみ該当行に `// network-ok: <理由>` を付けて承認する。
-- **オフライン動作前提**。外部 CDN 読み込み禁止（ライブラリはバンドルに含め、ライセンス表記をファイル先頭に残す）。
+- 作業管理の正本は `Workspace/_workspace-management/`。
+- Notion / Handoff / `_agent-handoff/` は使わない(廃止済み)。作業正本をこれらに戻さない。
+- 実装指示の正本はユーザーとの会話本文。
 
-### サイト横断リンク
-apex ↔ medical ↔ personal の絶対 URL は `site-links.js` の1箇所で管理（**正本=apex**、各リポにコピー）。HTML は href を直書きせず `data-link="personal"` 等の属性で参照する。
+## 役割分担
 
-### カラー / デザイン（共通）
-- カラー変数は各リポ `shared.css` の `:root` が正本（`--blue` / `--green`（実値 teal） / `--neutral` + `-light` / `-border`）。ハードコード禁止。背景 `--bg: #f8fafc`、サーフェスは白。
-- カテゴリ色: **apex=neutral `#475569` / 医療=blue `#2563eb` / 個人=teal `#14b8a6`**。**入口（apex）では青・緑を使わない**（neutral）。ビビッド系（黄・赤）・癖の強い紫は共通色に採用しない。
-- カテゴリ代表アイコン: 医療=心電図波形、個人=芽（sprout）。サイトロゴ=`</>`。**十字・宗教的シンボルは避ける**。
-- UIアイコンは Lucide。概念→グリフの正本は `shared/icons.js`（apex）で各アプリへコピー。**意味で参照**（`icon("share")` 等）し、新概念は既存トークン再利用／無ければ追加。固有ブランドロゴは別途ベクター（Lucide に無いものは手描き起こしに頼らない）。
+- Codex: 設計・監査・指示書支援
+- Claude: 主実装担当
+- 人間: 最終判断者
 
-### ドキュメント原則
-**正本が別にあるものは AGENTS.md にコピーせずポインタにする**（例: 色値=`shared.css :root`、アプリ固有のリファレンスは `docs/dev/`）。AGENTS.md は「毎回必要な不変条件」だけに保つ。
+## 公開 repo に書いてはいけないもの
 
-<!-- ===== サイト憲法 ここまで ===== -->
+- 個人のローカル絶対パス、ローカルユーザー名、ホームディレクトリ
+- パス表記は必ず `Workspace/...` の形に抽象化する。
 
----
+## 配布ファイルの扱い
 
-## このリポジトリ固有（personal = 個人カテゴリ）
-
-- 個人向けのシンプルなウェブアプリを開発・配信する。
-- **家計簿アプリ（simple-ledger）**: ソースは **`simple-ledger-src/`**（Vite+React+TS strict・**IndexedDB 主体**・JSON 交換形式・**外部送信ゼロ**・PWA）。詳細は `docs/dev/ledger-*.md` / `docs/dev/{ui-contract,design-system}.md` / `docs/adr/0001-local-first-ledger.md` をポインタ参照（AGENTS.md には複製しない）。アプリ内同期・送信は実装しない（共有は JSON 書き出し → アプリ外手段）。
-- **配信は「リポジトリのファイルをそのまま静的配信（ビルドなし）」**。よって simple-ledger は**ビルド成果物を配信パス `simple-ledger/` に出力してコミットする**（`cd simple-ledger-src && npm run build` が `../simple-ledger/` を再生成）。`simple-ledger/` 配下の生成物は直接編集せず、必ずソースを直して再ビルド→コミットする。**ソースだけ更新してビルドを忘れると本番が真っ白になる**。
-- **teal 系で統一**。`badge-green` / `cat-card-green` / `app-icon-green` 等のクラスを使う（クラス名は歴史的経緯で `green` だが、実値は teal）。
-- 個別アプリのアイコンは**カテゴリ色 + 固有の形**（カテゴリ色だけの汎用アイコンは禁止）。
-- **同期は「アプリ内で外部送信」ではなく、JSON 書き出し + Obsidian sync 等のアプリ外手段で実現する**。これにより個人アプリも「外部送信ゼロ」を維持できる（憲法どおり）。送信ありの機能が本当に必要になったら、サイトの約束を濁さないよう別途設計を相談すること。
-- **エージェント運用**: Codex は設計・監査・指示書作成支援を主担当とし、コード / ビルド成果物 / コミットの編集はユーザーが明示的に許可した狭い範囲に限る。Claude は主実装担当として、タスクごとに作成された専用 worktree / `claude/*` ブランチだけを編集する。Claude の実装開始は人間が承認する。**Claude はユーザーが会話に貼り付けた指示本文を正とする**（実ユーズメモや方針相談を勝手に指示書化しない）。**タスク別の指示書は会話に直接貼り付ける**。作業管理の参考資料は `/Users/onishi/workspace/_workspace-management/`（Obsidian の作業管理正本）だが、これは Claude が自動で従う指示正本ではなく参照のみ。**Notion / Handoff は使わない**（Notion connector は切断済み、`_agent-handoff/` は廃止）。詳細は `docs/dev/agent-coordination.md` を参照（AGENTS.md には複製しない）。
+- 本ファイル、`CLAUDE.md`、`.claude/agents/` 配下は正本からの配布コピー。repo 側で直接編集しない。修正は正本を更新してから sync する。

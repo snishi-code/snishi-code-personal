@@ -35,10 +35,11 @@ docs/*/images/
 *_[0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9].json
 
 # Claude Code session data
-.claude/
+.claude/*
+!.claude/agents/
 
-# Agent handoff scratch space はリポ外（_agent-handoff/）が正だが、誤ってリポ内へ
-# コピーしてもコミットしないよう保険で除外する（指示書・作業報告・監査メモは push しない）。
+# 旧 agent handoff 運用は廃止済み（_agent-handoff/ は使わない）。旧名のフォルダや
+# 作業メモを誤ってコミットしないよう保険で除外する（指示書・作業報告・監査メモは push しない）。
 _agent-handoff/
 .agent-handoff/
 agent-handoff/
