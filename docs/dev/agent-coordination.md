@@ -4,7 +4,7 @@ Codex / Claude / 人間の責務を分け、複数エージェントが同じブ
 混線しないようにするための不変条件。サイト憲法（外部送信ゼロ / ローカルファースト / dev・main 保護 /
 ドキュメント原則）を上書きしない。
 
-> 作業管理の参考資料は `/Users/onishi/workspace/_workspace-management/`（Obsidian で読む作業管理正本）。
+> 作業管理の参考資料は `Workspace/_workspace-management/`（Obsidian で読む作業管理正本）。
 > Notion / Handoff は使わない（Notion connector は切断済み、Handoff フォルダは廃止）。
 > Claude への実装指示の正本は、ユーザーが会話に貼り付けた本文。`_workspace-management/` は
 > Claude にとって参照のみで、Claude が自動で従う指示正本ではない（編集は管理役 Codex がユーザー許可時に行う）。
@@ -43,7 +43,7 @@ Codex / Claude / 人間の責務を分け、複数エージェントが同じブ
 
 渡さないもの:
 
-- `/Users/onishi/workspace` 全体
+- `Workspace/` 全体
 - `snishi-code-medical` / `snishi-code.com`
 - 他タスクの worktree
 - 正規リポの `dev` / `main` checkout
