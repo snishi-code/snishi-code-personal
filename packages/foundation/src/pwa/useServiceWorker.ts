@@ -1,4 +1,3 @@
-// 移植元: snishi-code-personal/simple-ledger-src/src/pwa/useServiceWorker.ts (※updateReady/skipWaiting 方式は不採用)
 import { useEffect } from 'react';
 import { getEnv } from './env';
 
@@ -9,9 +8,8 @@ import { getEnv } from './env';
  * 未設定は env.ts が 'test' に倒す = 登録しない側 (凍結 SW が test origin に残ると
  * 更新手段がないため、誤登録の影響が通常 PWA より重い)。
  * https fallback は廃止: data-env='test' の .pages.dev でも SW が登録されてしまい、
- * docs/deployment.md の「prod のみ登録」と矛盾するため (Codex 監査 M2)。
+ * prod のみ登録する運用と矛盾するため。
  *
- * ledger 現行 (simple-ledger-src/src/pwa/useServiceWorker.ts) と異なり、
  * update() / skipWaiting / 「更新あり」リロード促しは実装しない:
  * install 後のアプリは origin から配信される内容に影響されない設計
  * (理由と変更禁止事項は sw.template.js 冒頭の不変性ブロックが正本)。

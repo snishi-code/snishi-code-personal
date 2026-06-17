@@ -3,7 +3,7 @@
 # snishi-code.com 全リポ共通の「外部送信ゼロ」機械ガード。
 #
 # 正本は apex リポ (snishi-code.com)。本ファイルはそのコピーに
-# snishi-foundation 向けの拡張を加えた派生版(拡張内容は下記 [EXT])。
+# React + TypeScript アプリ向けの拡張を加えた派生版(拡張内容は下記 [EXT])。
 # apex 正本への upstream 提案は docs/questions.md 参照(人間判断)。
 #
 # 方針: ユーザーデータの外部送信は **絶対禁止・例外なし(サイト全体)**。

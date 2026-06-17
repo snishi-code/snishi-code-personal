@@ -1,7 +1,7 @@
 # simple-ledger — UI / UX
 
 medical 側のコードは参照せず、snishi-code 系の抽象 UI 規約に従う。実装は
-`simple-ledger-src/src/ui/`、文言は `src/i18n/ja.ts`。
+`apps/simple-ledger/src/ui/`、文言は `apps/simple-ledger/src/i18n/ja.ts`。
 
 ## 全体方針
 

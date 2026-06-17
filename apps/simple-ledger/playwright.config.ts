@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 // E2E は本番ビルドを vite preview で配信して検証する（凍結 SW / manifest を含む実体に近い状態）。
-// 形式は移植元 simple-ledger-src/playwright.config.ts 準拠（chromium のみ）。
+// Cloudflare Pages と同じ production build を chromium で検証する。
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,

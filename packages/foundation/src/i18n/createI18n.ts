@@ -1,4 +1,4 @@
-// 移植元: snishi-code-personal/simple-ledger-src/src/i18n/index.ts (辞書固定 t() をファクトリへ汎用化)
+// snishi-code 各アプリで使う、辞書固定の key-value i18n。
 
 export interface I18n<T extends Record<string, string>> {
   t: (key: keyof T & string, params?: Record<string, string | number>) => string;
