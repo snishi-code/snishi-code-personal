@@ -17,7 +17,7 @@ export default tseslint.config(
       // Migration leftovers may exist only in local workspaces; they are not published app sources.
       'simple-ledger/**',
       'simple-ledger-src/**',
-      'site-links.js',
+      'site/site-links.js',
       // vendor 同梱ライブラリ(ライセンスヘッダ付き原文維持)は lint 対象外
       'packages/foundation/src/qr/vendor/**',
     ],
