@@ -6,7 +6,7 @@
  * type / role は実装内部の分類であり、通常 UI ではユーザーに直接選ばせない——
  * 箱ごとの作成導線が role を固定する（rolesForType を UI に出さない）。
  *
- * 対応表（_workspace-management/simple-ledger-v2.md「ユーザー向け大分類」）:
+ * 対応表（ユーザー向け大分類）:
  *  - 現預金・決済資産  = daily-asset
  *  - 投資             = investment-asset
  *  - 継続コスト資産    = fixed-asset / deferred-asset（追加は継続コスト化の導線のみ・終了は売却）

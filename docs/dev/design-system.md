@@ -1,6 +1,8 @@
 # simple-ledger — Design system（tokens）
 
-CSS variables による design tokens。正本は `simple-ledger-src/src/ui/tokens.css`。
+CSS variables による design tokens。共通正本は `packages/foundation/src/ui/tokens.css`、
+アプリ固有の上書きは `apps/simple-ledger/src/ui/app-theme.css` と
+`apps/simple-ledger/src/ui/app.css`。
 色値はコンポーネントに直書きしない（`var(--*)` 参照のみ）。
 
 > サイト全体の色の正本は各リポ `shared.css` の `:root`（`--bg` / `--surface` /
@@ -47,7 +49,8 @@ CSS variables による design tokens。正本は `simple-ledger-src/src/ui/toke
 
 ## React component 方針
 
-- 文字列は i18n（`src/i18n`）、安定セレクタは UI contract（`src/ui-contract.ts`）。
+- 文字列は i18n（`apps/simple-ledger/src/i18n`）、安定セレクタは UI contract
+  （`apps/simple-ledger/src/ui-contract.ts`）。
 - 汎用部品: `Icon`（Lucide パスのインライン）、`Field`（ラベル+control を id で結合）、
   `AccountPicker`（科目チップ=単一選択 radio。選択は枠+チェックで示し色のみに依存しない）、
   `Modal` / `ConfirmDialog`、`toast`、`money`（金額表示）。

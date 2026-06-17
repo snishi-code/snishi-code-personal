@@ -14,6 +14,7 @@ export default tseslint.config(
       '**/test-results/**',
       '**/*.d.ts',
       'docs/**',
+      // Migration leftovers may exist only in local workspaces; they are not published app sources.
       'simple-ledger/**',
       'simple-ledger-src/**',
       'site-links.js',

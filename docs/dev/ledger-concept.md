@@ -1,7 +1,7 @@
 # simple-ledger — 会計コンセプト
 
 個人カテゴリの家計簿アプリ `simple-ledger` の会計モデル。実装は
-`simple-ledger-src/src/domain/`。
+`apps/simple-ledger/src/domain/`。
 
 ## なぜ Spreadsheet ではなく PWA か
 
@@ -53,7 +53,8 @@
   `type` は `asset` / `liability` / `equity` / `revenue` / `expense`（会計分類）。
   `role` は UI 用の役割で、日常入力（収入/支出/振替）の候補制御に使う（`type` だけだと
   按分中資産・取り置き資金・投資資産・残高調整科目をすべて asset/expense/revenue として
-  混ぜてしまうため）。正本は [`src/domain/accountRoles.ts`](../../simple-ledger-src/src/domain/accountRoles.ts)。
+  混ぜてしまうため）。正本は
+  [`apps/simple-ledger/src/domain/accountRoles.ts`](../../apps/simple-ledger/src/domain/accountRoles.ts)。
   `role` は `type` と整合する（`roleAllowsType`）。
   - `daily-asset`（現金・預金）/ `reserve-asset`（取り置き資金）/ `deferred-asset`（按分中資産）/
     `investment-asset`（投資）/ `fixed-asset`（固定資産＝車・家財など。現金でない・CF総資金外）… いずれも `type=asset`
