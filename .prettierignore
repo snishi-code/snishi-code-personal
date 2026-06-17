@@ -2,6 +2,8 @@ node_modules/
 dist/
 dist-site/
 docs/
+
+# Migration leftovers may exist only in local workspaces; they are not published app sources.
 simple-ledger/
 simple-ledger-src/
 package-lock.json
