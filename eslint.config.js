@@ -14,7 +14,7 @@ export default tseslint.config(
       '**/test-results/**',
       '**/*.d.ts',
       'docs/**',
-      // Migration leftovers may exist only in local workspaces; they are not published app sources.
+      // 旧ローカル作業フォルダ（公開アプリのソースではない）は lint 対象外
       'simple-ledger/**',
       'simple-ledger-src/**',
       'site/site-links.js',
