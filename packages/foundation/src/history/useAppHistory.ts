@@ -1,4 +1,4 @@
-// 移植元: snishi-code-medical/hospital-rounds/src/features/app-history.js (createAppHistory の React アダプタ)
+// createAppHistory の React アダプタ。
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createAppHistory, type AppHistory } from './appHistory';
 

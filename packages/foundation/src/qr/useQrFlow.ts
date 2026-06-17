@@ -1,6 +1,5 @@
-// 移植元: snishi-code-medical/hospital-rounds/src/features/qr-flow.js
-// (createQrFlow のライフサイクルを DOM 配線なしの React hook に。描画は render.ts、
-//  カメラは scan.ts、文言生成はアプリ側に分離し、ここはフロー制御だけを持つ)
+// QR フローのライフサイクルを DOM 配線なしの React hook として提供する。描画は render.ts、
+// カメラは scan.ts、文言生成はアプリ側に分離し、ここはフロー制御だけを持つ。
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { encodePages, decodePage, newBatchId } from './protocol.js';
 import { packPayload, unpackPayload } from './crypto.js';
@@ -15,22 +14,22 @@ export interface QrFlowConfig<TDecoded> {
   shouldEncrypt(): boolean;
   compress?: boolean;
   maxBytes?: number;
-  // 鍵は foundation に埋め込まず常に注入する。現行アプリとの QR 互換は、アプリ側が
-  // v1 と同一の鍵を渡すことで成立する (foundation に鍵を置くと全アプリが同一鍵を
+  // 鍵は foundation に埋め込まず常に注入する。QR 互換は、アプリ側が
+  // 同一の鍵を渡すことで成立する (foundation に鍵を置くと全アプリが同一鍵を
   // 共有してしまい、アプリ毎の鍵分離・差し替えができなくなるため)。
   keyBytes: Uint8Array;
   onApply(decoded: TDecoded, ctrl: { close(): void }): void | Promise<void>;
 }
 
-// v1 ingestPage の状態遷移をそのままコード化 (文言はアプリ側で status から生成)
+// 受信の状態遷移を表す (文言はアプリ側で status から生成)。
 export type ReceiveStatus = 'unknownFormat' | 'wrongKind' | 'duplicate' | 'progress' | 'complete';
 
 export interface ReceiveResult {
   done: boolean;
-  // consumed=false (形式不一致・kind 違い) は「入力欄を消してはいけない」の合図 (v1 準拠)
+  // consumed=false (形式不一致・kind 違い) は「入力欄を消してはいけない」の合図。
   consumed: boolean;
   status: ReceiveStatus;
-  // 受信途中に別 batchId が来て古い断片を破棄した (v1 の newBatch リセット)
+  // 受信途中に別 batchId が来て古い断片を破棄した (newBatch リセット)。
   newBatch: boolean;
   got: number;
   total: number;
@@ -102,8 +101,8 @@ export function useQrFlow<TDecoded>(cfg: QrFlowConfig<TDecoded>): QrFlow {
           keyBytes: c.keyBytes,
         });
       } catch (e) {
-        // 暗号化が要るのに失敗した時は安全側に倒し QR を出さない (v1 と同じ fail-closed)。
-        // v1 は console.error で握ったが、hook は呼び出し側へ伝播して通知判断を委ねる
+        // 暗号化が要るのに失敗した時は安全側に倒し QR を出さない (fail-closed)。
+        // エラーは握らず呼び出し側へ伝播して通知判断を委ねる。
         applyPages([]);
         throw e;
       }
@@ -127,7 +126,7 @@ export function useQrFlow<TDecoded>(cfg: QrFlowConfig<TDecoded>): QrFlow {
   }, []);
 
   const refresh = useCallback(async (): Promise<void> => {
-    if (!isActiveRef.current) return; // v1 同様、表示中だけ再生成
+    if (!isActiveRef.current) return; // 表示中だけ再生成する
     await regenerate();
   }, [regenerate]);
 
@@ -139,12 +138,12 @@ export function useQrFlow<TDecoded>(cfg: QrFlowConfig<TDecoded>): QrFlow {
     setPageIndex((i) => Math.max(0, i - 1));
   }, []);
 
-  // 1 ページ分の生 QR テキストを取り込む (v1 ingestPage + applyPayload 準拠):
+  // 1 ページ分の生 QR テキストを取り込む:
   //   - 形式不正 / kind 違いは consumed:false で拒否 (入力を残す)
   //   - batchId 変化 = 新しい送信。古い断片と混ぜず状態をリセットして新バッチ開始
   //   - 重複ページは進捗を進めず無害
   //   - 順不同受信を許容 (Map に pageNum で保持)
-  //   - 全ページ揃った時点で受信状態を破棄し (v1 resetRecv と同位置)、
+  //   - 全ページ揃った時点で受信状態を破棄し、
   //     unpack → decodePayload → onApply。復号失敗・パース失敗は throw して
   //     onApply に到達させない (fail-closed。通知はアプリ側が catch して出す)
   const receivePage = useCallback(
@@ -185,8 +184,8 @@ export function useQrFlow<TDecoded>(cfg: QrFlowConfig<TDecoded>): QrFlow {
         buf.batchId = decoded.batchId;
         buf.total = decoded.totalPages;
       }
-      // v1 に無いガード: 範囲外 pageNum を数えると got==total なのに歯抜け、という
-      // 組み立て不能状態に陥るため、ヘッダ矛盾 (N > M 等) として拒否する (fail-closed)
+      // 範囲外 pageNum を数えると got==total なのに歯抜け、という
+      // 組み立て不能状態に陥るため、ヘッダ矛盾 (N > M 等) として拒否する (fail-closed)。
       if (decoded.pageNum < 1 || decoded.pageNum > buf.total) {
         syncRecv();
         return {
@@ -227,7 +226,7 @@ export function useQrFlow<TDecoded>(cfg: QrFlowConfig<TDecoded>): QrFlow {
       const fullParts: string[] = [];
       for (let i = 1; i <= total; i++) fullParts.push(buf.pages.get(i) ?? '');
       const payload = fullParts.join('');
-      // v1 と同位置で受信状態を破棄 (以降の失敗は新たな読み直しから再開する)
+      // ここで受信状態を破棄する (以降の失敗は新たな読み直しから再開する)。
       buf.batchId = null;
       buf.total = 0;
       buf.pages.clear();

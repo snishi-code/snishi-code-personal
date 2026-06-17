@@ -1,4 +1,3 @@
-// 移植元: snishi-code-medical/hospital-rounds/src/features/qr-scan.js (overlay UI を除く stream 部)
 import jsQR from 'jsqr';
 
 // ライブ tick は同一 QR を連続検出するため、デデュプ窓で同一テキストの多重発火を抑える
@@ -17,9 +16,9 @@ export interface ScanSession {
 }
 
 export interface ScanOptions {
-  // 同一テキストの再発火を抑える窓 (ms)。既定は v1 と同じ 2000
+  // 同一テキストの再発火を抑える窓 (ms)。既定は 2000
   dedupMs?: number;
-  // カメラ向き。既定は v1 と同じ背面カメラ優先
+  // カメラ向き。既定は背面カメラ優先
   facingMode?: ConstrainDOMString;
 }
 
@@ -78,7 +77,7 @@ export function scanQrStream(
               try {
                 result = onResult(text);
               } catch (e) {
-                // ハンドラ例外でスキャンループ自体は止めない (v1 と同じ)
+                // ハンドラ例外でスキャンループ自体は止めない
                 console.error('scan handler error', e);
                 result = undefined;
               }

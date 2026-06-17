@@ -1,9 +1,7 @@
-// 移植元: snishi-code-medical/hospital-rounds/src/features/crypto-payload.js (鍵注入化)
-
 /**
  * QR transport payload 層 (圧縮 / 暗号化を prefix で明示)
  *
- * transport wire format (v1 と 1 bit も変えない — v1 端末と相互運用するため):
+ * transport wire format (1 bit も変えない — 既存端末と相互運用するため):
  *   平文:   "<payload-text>"                                  ... prefix なし = plain (後方互換)
  *   C1:     "C1:<base64url(deflate-raw(plain))>"              ... 圧縮のみ (非暗号、v8.11+)
  *   E1:     "E1:<base64url(iv ‖ AES-GCM(plain))>"             ... v7.1.x (圧縮なし・受信互換)
@@ -14,8 +12,8 @@
  * 圧縮: DEFLATE raw via CompressionStream。未対応環境は feature detect で
  * fallback (encrypt は E1、compress は平文)。
  *
- * 鍵は埋め込まない (v1 からの設計変更): keyBytes (Uint8Array 32) を引数で受け、
- * 鍵の所有はアプリ側に置く (HR-v2 は v1 と同一鍵を注入して v1 端末と相互運用)。
+ * 鍵は埋め込まない: keyBytes (Uint8Array 32) を引数で受け、鍵の所有はアプリ側に
+ * 置く (アプリが既存端末と同一鍵を注入すれば相互運用できる)。
  * foundation に鍵を置くと全アプリが同一鍵を共有してしまい、アプリ毎の鍵分離・
  * 差し替えができなくなるため、transport 層は鍵を知らない設計にする。
  *

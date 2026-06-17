@@ -1,5 +1,3 @@
-// 移植元: simple-ledger src/data/exportImport.ts の export 部分の汎用化
-
 /** 交換用パッケージを整形 JSON にする(手動 diff・監査しやすさのため整形)。 */
 export function buildExportText(pkg: unknown): string {
   return JSON.stringify(pkg, null, 2);

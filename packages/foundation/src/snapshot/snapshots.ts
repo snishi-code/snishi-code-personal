@@ -1,4 +1,4 @@
-// 移植元: hospital-rounds src/features/snapshots.js の汎用化(患者/病棟の知識をアプリ注入に変更)
+// スナップショット(復元ポイント)ストア。scope などアプリ固有の知識は注入で受け取る。
 import { createDatabase } from '../storage/idb';
 import type { PointerStore } from '../storage/pointers';
 
@@ -83,7 +83,7 @@ type NewSnapshot<TData> = {
 };
 type StoredSnapshot<TData> = NewSnapshot<TData> & { id: number };
 
-// ローカル日付キー(YYYYMMDD)。「同日」判定は端末ローカル時刻基準(HR と同じ)。
+// ローカル日付キー(YYYYMMDD)。「同日」判定は端末ローカル時刻基準。
 function localDayKey(t: number): number {
   const d = new Date(t);
   return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
@@ -219,7 +219,7 @@ export function createSnapshotStore<TData>(cfg: SnapshotStoreConfig<TData>): Sna
 
     // dedup: nav は直近と同 signature ならスキップ / 破壊的 reason は同日初回のみ。
     // それ以外の reason(restore_undo 等)は dedup なしで常に撮る。
-    // スナップショットは保険であり主操作を塞がない(失敗は warn で縮退、HR と同じ)。
+    // スナップショットは保険であり主操作を塞がない(失敗は warn で縮退する)。
     async capture(reason, scopeId, data, label = '') {
       if (!scopeId) return;
       try {

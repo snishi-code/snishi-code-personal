@@ -1,4 +1,4 @@
-// 移植元: snishi-code ホスト名規約 (head の env 判定スクリプトが data-env を設定する前提)
+// head の env 判定スクリプトが data-env を設定する前提のホスト名規約。
 
 export type AppEnv = 'prod' | 'test';
 
