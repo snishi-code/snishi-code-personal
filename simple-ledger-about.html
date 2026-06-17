@@ -1,111 +1,141 @@
 <!doctype html>
 <html lang="ja">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>家計簿 — snishi-code</title>
-  <link rel="stylesheet" href="/shared.css" />
-</head>
-<body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>家計簿 — snishi-code</title>
+    <link rel="stylesheet" href="/shared.css" />
+  </head>
+  <body>
+    <header>
+      <div class="header-inner">
+        <div class="header-left">
+          <a class="logo-mark" data-link="apex" aria-label="ホームへ">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="16 18 22 12 16 6" />
+              <polyline points="8 6 2 12 8 18" />
+            </svg>
+          </a>
+          <a class="site-name" data-link="apex">snishi-code</a>
+        </div>
+        <nav>
+          <a class="nav-link" data-link="apex">ホーム</a>
+          <a class="nav-link" data-link="medical">医療</a>
+          <a class="nav-link active" data-link="personal">個人</a>
+        </nav>
+      </div>
+    </header>
 
-<header>
-  <div class="header-inner">
-    <div class="header-left">
-      <a class="logo-mark" data-link="apex" aria-label="ホームへ">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="16 18 22 12 16 6"/>
-          <polyline points="8 6 2 12 8 18"/>
-        </svg>
+    <main>
+      <section class="hero">
+        <div class="badge badge-green">個人用ツール</div>
+        <h1>家計簿</h1>
+        <p>
+          日々のお金の流れをもとに、今の生活を続けるためにどれだけお金が必要かを見直すための家計簿です。
+          支出、資産、負債、資金繰りを整理し、安心してお金を使える状態を目指します。
+        </p>
+      </section>
+
+      <p class="section-label">基本の使い方</p>
+      <div class="notice" style="margin-bottom: 32px">
+        <div class="notice-title">ホーム画面の3ボタンから記録する</div>
+        <ul>
+          <li>ホーム画面の 収入 / 支出 / 振替 から、日々の記録を追加できます。</li>
+          <li>お金の流れを「源泉 → 行き先」として選び、金額を入力します。</li>
+          <li>サブスク、年払い、耐久財などは「継続コスト化する」と台帳に登録できます。</li>
+          <li>資産のバランス、収支のバランス、将来の資金繰りを確認できます。</li>
+        </ul>
+      </div>
+
+      <p class="section-label">使いこなすと便利なこと</p>
+      <div class="notice" style="margin-bottom: 32px">
+        <div class="notice-title">生活会計を少ない手間で見直せます</div>
+        <ul>
+          <li>物の売却や処分を記録し、資産の残り方を整理できます。</li>
+          <li>カード払いやローンなどの負債と返済予定を確認できます。</li>
+          <li>資金目標や利率を設定し、将来に向けた必要額を見積もれます。</li>
+          <li>JSON export/import でバックアップや端末移行ができます。</li>
+        </ul>
+      </div>
+
+      <p class="section-label">アプリを起動</p>
+      <a
+        class="app-card"
+        href="/simple-ledger/"
+        style="max-width: 420px; border-color: var(--green-border); margin-bottom: 56px"
+      >
+        <div class="app-icon app-icon-green">
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="white"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path
+              d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-3a2 2 0 1 1 0-4h4"
+            />
+            <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" />
+          </svg>
+        </div>
+        <div>
+          <div class="app-name">家計簿アプリを開く</div>
+          <div class="app-desc">
+            大切なデータは、定期的にJSONを書き出してバックアップしてください。
+          </div>
+        </div>
+        <div class="app-footer">
+          <span class="tag tag-green">PWA・端末内保存</span>
+          <span class="arrow">→</span>
+        </div>
       </a>
-      <a class="site-name" data-link="apex">snishi-code</a>
-    </div>
-    <nav>
-      <a class="nav-link" data-link="apex">ホーム</a>
-      <a class="nav-link" data-link="medical">医療</a>
-      <a class="nav-link active" data-link="personal">個人</a>
-    </nav>
-  </div>
-</header>
 
-<main>
-  <section class="hero">
-    <div class="badge badge-green">個人用ツール</div>
-    <h1>家計簿</h1>
-    <p>
-      日々のお金の流れをもとに、今の生活を続けるためにどれだけお金が必要かを見直すための家計簿です。
-      支出、資産、負債、資金繰りを整理し、安心してお金を使える状態を目指します。
-    </p>
-  </section>
+      <p class="section-label">データとセキュリティ</p>
+      <div class="notice" style="margin-bottom: 32px">
+        <div class="notice-title">入力データは端末内に保存されます</div>
+        <ul>
+          <li>このアプリは外部サーバーへデータを送信しません。</li>
+          <li>JSON export/import は、バックアップと端末間移行のための機能です。</li>
+          <li>端末の紛失、故障、ブラウザデータ削除に備えて、定期的にバックアップしてください。</li>
+          <li>共有や同期が必要な場合は、アプリ外の手段でJSONファイルを管理してください。</li>
+        </ul>
+      </div>
 
-  <p class="section-label">基本の使い方</p>
-  <div class="notice" style="margin-bottom:32px">
-    <div class="notice-title">ホーム画面の3ボタンから記録する</div>
-    <ul>
-      <li>ホーム画面の 収入 / 支出 / 振替 から、日々の記録を追加できます。</li>
-      <li>お金の流れを「源泉 → 行き先」として選び、金額を入力します。</li>
-      <li>サブスク、年払い、耐久財などは「継続コスト化する」と台帳に登録できます。</li>
-      <li>資産のバランス、収支のバランス、将来の資金繰りを確認できます。</li>
-    </ul>
-  </div>
+      <p class="section-label">ご利用にあたって</p>
+      <div class="notice">
+        <div class="notice-title">免責・ライセンス</div>
+        <ul>
+          <li>
+            このツールは個人向けの記録補助ツールです。税務・会計上の正式な判断は専門家に確認してください。
+          </li>
+          <li>
+            Apache License 2.0
+            のもとで公開しています。著作権表示を保持していただければ、再配布・改変・商用利用が可能です。
+          </li>
+          <li>ご利用は自己責任でお願いします。</li>
+        </ul>
+      </div>
+    </main>
 
-  <p class="section-label">使いこなすと便利なこと</p>
-  <div class="notice" style="margin-bottom:32px">
-    <div class="notice-title">生活会計を少ない手間で見直せます</div>
-    <ul>
-      <li>物の売却や処分を記録し、資産の残り方を整理できます。</li>
-      <li>カード払いやローンなどの負債と返済予定を確認できます。</li>
-      <li>資金目標や利率を設定し、将来に向けた必要額を見積もれます。</li>
-      <li>JSON export/import でバックアップや端末移行ができます。</li>
-    </ul>
-  </div>
+    <footer>
+      <div class="footer-inner">
+        <span>© 2026 snishi-code · Apache License 2.0</span>
+        <a data-link="github" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </footer>
 
-  <p class="section-label">アプリを起動</p>
-  <a class="app-card" href="/simple-ledger/" style="max-width:420px; border-color:var(--green-border); margin-bottom:56px">
-    <div class="app-icon app-icon-green">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-3a2 2 0 1 1 0-4h4"/>
-        <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>
-      </svg>
-    </div>
-    <div>
-      <div class="app-name">家計簿アプリを開く</div>
-      <div class="app-desc">大切なデータは、定期的にJSONを書き出してバックアップしてください。</div>
-    </div>
-    <div class="app-footer">
-      <span class="tag tag-green">PWA・端末内保存</span>
-      <span class="arrow">→</span>
-    </div>
-  </a>
-
-  <p class="section-label">データとセキュリティ</p>
-  <div class="notice" style="margin-bottom:32px">
-    <div class="notice-title">入力データは端末内に保存されます</div>
-    <ul>
-      <li>このアプリは外部サーバーへデータを送信しません。</li>
-      <li>JSON export/import は、バックアップと端末間移行のための機能です。</li>
-      <li>端末の紛失、故障、ブラウザデータ削除に備えて、定期的にバックアップしてください。</li>
-      <li>共有や同期が必要な場合は、アプリ外の手段でJSONファイルを管理してください。</li>
-    </ul>
-  </div>
-
-  <p class="section-label">ご利用にあたって</p>
-  <div class="notice">
-    <div class="notice-title">免責・ライセンス</div>
-    <ul>
-      <li>このツールは個人向けの記録補助ツールです。税務・会計上の正式な判断は専門家に確認してください。</li>
-      <li>Apache License 2.0 のもとで公開しています。著作権表示を保持していただければ、再配布・改変・商用利用が可能です。</li>
-      <li>ご利用は自己責任でお願いします。</li>
-    </ul>
-  </div>
-</main>
-
-<footer>
-  <div class="footer-inner">
-    <span>© 2026 snishi-code · Apache License 2.0</span>
-    <a data-link="github" target="_blank" rel="noopener">GitHub</a>
-  </div>
-</footer>
-
-<script src="/site-links.js"></script>
-</body>
+    <script src="/site-links.js"></script>
+  </body>
 </html>

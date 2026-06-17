@@ -1,0 +1,8 @@
+node_modules/
+dist/
+dist-site/
+docs/
+simple-ledger/
+simple-ledger-src/
+package-lock.json
+packages/foundation/src/qr/vendor/

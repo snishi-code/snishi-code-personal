@@ -1,0 +1,29 @@
+/*
+ * アプリテーマ: personal カテゴリ色 teal (#14b8a6 系) で --primary 系を上書きする。
+ * カテゴリ色はトークン注入が憲法（foundation の既定値 neutral をここで置き換える）。
+ *
+ * --primary(teal-500) はアクセント。白文字を載せる塗りボタンには WCAG AA を満たす
+ * teal-700 を使う（白 on teal-500 は 2.48:1 で不足）。
+ */
+:root {
+  --primary: #14b8a6; /* teal-500 — アクセント */
+  --primary-fill: #0f766e; /* teal-700 — 白文字ボタン背景（白で 4.9:1） */
+  --primary-fill-strong: #115e59; /* teal-800 — ボタン hover */
+  --primary-strong: #0f766e; /* teal-700 — 文字色/強調 */
+  --primary-light: #f0fdfa; /* teal-50 */
+  --primary-border: #5eead4; /* teal-300 */
+  --on-primary: #ffffff;
+  --focus: #14b8a6;
+  --focus-ring: 0 0 0 3px rgba(20, 184, 166, 0.35);
+
+  /* 金額の増減表示（teal を正の色として統一） */
+  --pos: #0f766e; /* teal-700（白地で 4.9:1） */
+  --neg: #dc2626;
+
+  /* 財務諸表の区分色（意味づけ。既存トークンを参照） */
+  --fs-asset: var(--primary);
+  --fs-liability: var(--warning);
+  --fs-equity: var(--muted);
+  --fs-revenue: var(--primary);
+  --fs-expense: var(--danger);
+}

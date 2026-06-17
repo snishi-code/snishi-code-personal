@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- CSP: 外部送信ゼロ方針(憲法)。connect-src 'self' で外部通信を遮断。
+         正本テンプレート: snishi-code.com/scaffold/pwa/head.template.html -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; media-src 'self' blob:; worker-src 'self'; manifest-src 'self'; frame-src 'self'; child-src 'self'; form-action 'self'; base-uri 'self'; object-src 'none'"
+    />
+
+    <title>家計簿 v2</title>
+
+    <script>
+      // 本番/テスト判定(特定ドメインを直書きしない)。構成が変わってもここは不変。
+      (function () {
+        var host = location.hostname;
+        var isTest =
+          /(^|[.-])dev\./.test(host) ||
+          /\.pages\.dev$/.test(host) ||
+          host === 'localhost' ||
+          host === '127.0.0.1' ||
+          /\.local$/.test(host);
+        document.documentElement.dataset.env = isTest ? 'test' : 'prod';
+      })();
+    </script>
+
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="家計簿 v2" id="appAppleTitle" />
+    <meta name="theme-color" content="#14b8a6" />
+    <link rel="manifest" href="./manifest.json" id="appManifest" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+    <script>
+      // test 環境ではインストール名も test 用にする。
+      (function () {
+        if (document.documentElement.dataset.env !== 'test') return;
+        var m = document.getElementById('appManifest');
+        if (m) m.setAttribute('href', './manifest-test.json');
+        var appleTitle = document.getElementById('appAppleTitle');
+        if (appleTitle) appleTitle.setAttribute('content', '家計簿 v2 test');
+        document.title = '家計簿 v2 test';
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

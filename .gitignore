@@ -5,9 +5,16 @@
 
 # Build output (Cloudflare Pages が生成するのでコミット不要)
 dist/
+dist-site/
+*.tsbuildinfo
 
 # npm
 node_modules/
+
+# Playwright / test output
+test-results/
+playwright-report/
+.playwright/
 
 # 環境変数 (現状不使用だが念のため)
 .env
