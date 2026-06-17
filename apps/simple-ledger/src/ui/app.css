@@ -1,0 +1,492 @@
+/*
+ * simple-ledger-v2 アプリ固有スタイル。
+ * foundation の tokens.css / foundation.css / components.css を import した後に読む。
+ * ここには foundation に含まれない app 固有部品のみを定義する。
+ * 色値は tokens.css / app-theme.css の変数のみを参照し、ハードコードしない。
+ */
+
+/* ── Summary card (tappable: ホームの損益/資産負債サマリー) ── */
+.summary-card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  margin-bottom: var(--space-3);
+  cursor: pointer;
+}
+.summary-card:hover {
+  background: var(--bg);
+}
+.summary-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+  color: var(--muted);
+}
+
+/* ── List row button (設定の「管理」遷移リスト) ── */
+.list__row-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: var(--space-3) var(--space-4);
+  min-height: var(--tap);
+  cursor: pointer;
+  color: var(--text);
+  font-family: var(--font);
+}
+.list__row-btn:hover {
+  background: var(--bg);
+}
+.list__row-btn__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+/* ── Stat grid ── */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+}
+.stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+}
+.stat__label {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.stat__value {
+  font-size: clamp(15px, 4.4vw, 20px);
+  font-weight: 700;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+/* タップ可能な stat（ホームの項目別遷移）。stat の見た目を保ちボタン化する。 */
+.stat--btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  font-family: var(--font);
+}
+.stat--btn:hover {
+  background: var(--bg);
+}
+.stat--btn .stat__label {
+  justify-content: flex-start;
+}
+.amount--pos {
+  color: var(--pos);
+}
+.amount--neg {
+  color: var(--neg);
+}
+
+/* ── Statement rows ── */
+.stmt-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.stmt-row:last-child {
+  border-bottom: none;
+}
+.stmt-row--total {
+  font-weight: 700;
+  background: var(--bg);
+}
+.stmt-row__num {
+  white-space: nowrap;
+}
+
+/* ── お金の流れ（源泉 → 行き先）の入力 ── */
+.flow {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--space-2);
+}
+.flow__side {
+  min-width: 0;
+}
+.flow__arrow {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--muted);
+  text-align: center;
+  align-self: center;
+  pointer-events: none;
+}
+.flow .picker {
+  margin: 0;
+}
+@media (max-width: 480px) {
+  .flow {
+    grid-template-columns: 1fr;
+  }
+  .flow__arrow {
+    transform: rotate(90deg);
+  }
+}
+
+/* ── 財務諸表の左右対照レイアウト ── */
+.fs-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  align-items: start;
+}
+@media (max-width: 560px) {
+  .fs-cols {
+    grid-template-columns: 1fr;
+  }
+}
+.fs-col__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 700;
+  font-size: 14px;
+  padding: var(--space-2) var(--space-3);
+  border-left: 4px solid var(--fs-accent, var(--border));
+  margin-bottom: var(--space-2);
+}
+.fs-col--asset {
+  --fs-accent: var(--fs-asset);
+}
+.fs-col--liability {
+  --fs-accent: var(--fs-liability);
+}
+.fs-col--equity {
+  --fs-accent: var(--fs-equity);
+}
+.fs-col--revenue {
+  --fs-accent: var(--fs-revenue);
+}
+.fs-col--expense {
+  --fs-accent: var(--fs-expense);
+}
+
+/* ── 期間選択コントロール ── */
+.period-switcher .stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* ── ヘッダー中央: 現在の期間コンテキスト表示 ── */
+.period-context {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+}
+.period-context__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--tap);
+  padding: 0 var(--space-2);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: var(--font);
+}
+.period-context__chip:hover {
+  background: var(--bg);
+}
+.period-context__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.period-context__sep {
+  color: var(--muted);
+}
+
+/* ── トレンドチャート（自前 SVG） ── */
+.trend-svg {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.trend-svg__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.trend-svg__zero {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.trend-svg__tick {
+  fill: var(--muted);
+  font-size: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.trend-svg__bar {
+  fill: var(--primary);
+}
+.trend-svg__bar--neg {
+  fill: var(--neg);
+}
+.trend-svg__line {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.trend-svg__dot {
+  fill: var(--primary);
+}
+.trend-x {
+  display: flex;
+  gap: 2px;
+  margin-top: var(--space-1);
+}
+.trend-x__btn,
+.trend-x__label {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trend-x__btn {
+  min-height: 32px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--primary);
+  cursor: pointer;
+  font-family: var(--font);
+}
+.trend-x__btn:hover {
+  background: var(--bg);
+}
+.trend-svg__latest {
+  margin: 0 0 var(--space-3);
+  font-size: 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Account picker（チップ） ── */
+.picker {
+  border: none;
+  padding: 0;
+  margin-bottom: var(--space-4);
+  min-width: 0;
+}
+.picker__group {
+  margin-top: var(--space-2);
+}
+.picker__group-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin: var(--space-2) 0 var(--space-1);
+}
+.picker__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--tap);
+  padding: 0 var(--space-3);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--font);
+}
+.chip:hover {
+  background: var(--bg);
+}
+.chip__check {
+  display: none;
+  color: var(--primary-strong);
+}
+.chip:has(input:checked) {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary-strong);
+}
+.chip:has(input:checked) .chip__check {
+  display: inline-flex;
+}
+.chip:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ── Collapsible（詳細入力） ── */
+.collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--tap);
+  background: transparent;
+  border: none;
+  color: var(--primary-strong);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--font);
+}
+
+/* ── Filter chip（一覧の絞り込み表示） ── */
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 12px;
+  border: 1px solid var(--primary-border);
+  background: var(--primary-light);
+  color: var(--primary-strong);
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  font-weight: 600;
+}
+.filter-chip button {
+  min-width: 28px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: inherit;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font-family: var(--font);
+}
+
+/* クリック可能な財務諸表の行 */
+button.stmt-row {
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  min-height: var(--tap);
+  font-family: var(--font);
+}
+button.stmt-row:hover {
+  background: var(--bg);
+}
+
+/* ── Entry type buttons（収入/支出/振替）= ホーム下部の固定入力バー ── */
+.entry-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.08);
+  padding: var(--space-2) var(--space-3) calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+}
+.entry-bar__inner {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+}
+.dashboard {
+  padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+}
+.entry-type-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 56px;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font);
+}
+.entry-type-btn:hover {
+  border-color: var(--primary-border);
+  background: var(--primary-light);
+}
+.entry-type-btn__icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary-light);
+  color: var(--primary-strong);
+}
+
+/* ── Badge / tag (app 固有色クラス) ── */
+.tag--teal {
+  color: var(--primary-strong);
+  background: var(--primary-light);
+}
+
+/* ── misc ── */
+.row-actions {
+  display: flex;
+  gap: var(--space-1);
+}

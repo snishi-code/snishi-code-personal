@@ -1,84 +1,111 @@
 <!doctype html>
 <html lang="ja">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>個人用ツール — snishi-code</title>
-  <link rel="stylesheet" href="/shared.css" />
-</head>
-<body>
-
-<header>
-  <div class="header-inner">
-    <div class="header-left">
-      <a class="logo-mark" data-link="apex" aria-label="ホームへ">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="16 18 22 12 16 6"/>
-          <polyline points="8 6 2 12 8 18"/>
-        </svg>
-      </a>
-      <a class="site-name" data-link="apex">snishi-code</a>
-    </div>
-    <nav>
-      <a class="nav-link" data-link="apex">ホーム</a>
-      <a class="nav-link" data-link="medical">医療</a>
-      <a class="nav-link active" data-link="personal">個人</a>
-    </nav>
-  </div>
-</header>
-
-<main>
-  <section class="hero">
-    <div class="badge badge-green">個人用ツール</div>
-    <h1>日々の生活を<br>整えるツール</h1>
-    <p>
-      家計・スケジュール・記録など、プライベートで使うためのシンプルなウェブアプリです。
-      データはすべて端末内に保存され、外部には一切送信されません。
-    </p>
-  </section>
-
-  <p class="section-label">ツール一覧</p>
-  <div class="app-grid">
-
-    <!-- 個人用ツールが追加されたらここにカードを追加 -->
-    <a class="app-card" href="/simple-ledger-about.html">
-      <div class="app-icon app-icon-green">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-3a2 2 0 1 1 0-4h4"/>
-          <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>
-        </svg>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>個人用ツール — snishi-code</title>
+    <link rel="stylesheet" href="/shared.css" />
+  </head>
+  <body>
+    <header>
+      <div class="header-inner">
+        <div class="header-left">
+          <a class="logo-mark" data-link="apex" aria-label="ホームへ">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="16 18 22 12 16 6" />
+              <polyline points="8 6 2 12 8 18" />
+            </svg>
+          </a>
+          <a class="site-name" data-link="apex">snishi-code</a>
+        </div>
+        <nav>
+          <a class="nav-link" data-link="apex">ホーム</a>
+          <a class="nav-link" data-link="medical">医療</a>
+          <a class="nav-link active" data-link="personal">個人</a>
+        </nav>
       </div>
-      <div>
-        <div class="app-name">家計簿</div>
-        <div class="app-desc">複式簿記で記録するローカルファースト家計簿。データは端末内のみ・オフライン動作。</div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="badge badge-green">個人用ツール</div>
+        <h1>日々の生活を<br />整えるツール</h1>
+        <p>
+          家計・スケジュール・記録など、プライベートで使うためのシンプルなウェブアプリです。
+          データはすべて端末内に保存され、外部には一切送信されません。
+        </p>
+      </section>
+
+      <p class="section-label">ツール一覧</p>
+      <div class="app-grid">
+        <!-- 個人用ツールが追加されたらここにカードを追加 -->
+        <a class="app-card" href="/simple-ledger-about.html">
+          <div class="app-icon app-icon-green">
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path
+                d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-3a2 2 0 1 1 0-4h4"
+              />
+              <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" />
+            </svg>
+          </div>
+          <div>
+            <div class="app-name">家計簿</div>
+            <div class="app-desc">
+              複式簿記で記録するローカルファースト家計簿。データは端末内のみ・オフライン動作。
+            </div>
+          </div>
+          <div class="app-footer">
+            <span class="tag tag-green">PWA・端末内保存</span>
+            <span class="arrow">→</span>
+          </div>
+        </a>
       </div>
-      <div class="app-footer">
-        <span class="tag tag-green">PWA・端末内保存</span>
-        <span class="arrow">→</span>
+
+      <p class="section-label">ご利用にあたって</p>
+      <div class="notice">
+        <div class="notice-title">注意事項</div>
+        <ul>
+          <li>
+            入力したデータはお使いの端末にのみ保存されます。外部サーバーへの送信は一切行いません。
+          </li>
+          <li>フリーソフトウェアとして提供しています。ご利用は自己責任でお願いします。</li>
+          <li>
+            各ツールはオフラインで動作します。スマホ・タブレットでは「ホーム画面に追加」して使用してください（動作環境の詳細は
+            snishi-code.com を参照）。
+          </li>
+          <li>
+            Apache License 2.0 のもとで公開しています（再配布・改変・商用利用の詳細は
+            snishi-code.com を参照）。
+          </li>
+        </ul>
       </div>
-    </a>
+    </main>
 
-  </div>
+    <footer>
+      <div class="footer-inner">
+        <span>© 2026 snishi-code · Apache License 2.0</span>
+        <a data-link="github" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </footer>
 
-  <p class="section-label">ご利用にあたって</p>
-  <div class="notice">
-    <div class="notice-title">注意事項</div>
-    <ul>
-      <li>入力したデータはお使いの端末にのみ保存されます。外部サーバーへの送信は一切行いません。</li>
-      <li>フリーソフトウェアとして提供しています。ご利用は自己責任でお願いします。</li>
-      <li>各ツールはオフラインで動作します。スマホ・タブレットでは「ホーム画面に追加」して使用してください（動作環境の詳細は snishi-code.com を参照）。</li>
-      <li>Apache License 2.0 のもとで公開しています（再配布・改変・商用利用の詳細は snishi-code.com を参照）。</li>
-    </ul>
-  </div>
-</main>
-
-<footer>
-  <div class="footer-inner">
-    <span>© 2026 snishi-code · Apache License 2.0</span>
-    <a data-link="github" target="_blank" rel="noopener">GitHub</a>
-  </div>
-</footer>
-
-<script src="/site-links.js"></script>
-</body>
+    <script src="/site-links.js"></script>
+  </body>
 </html>

@@ -1,0 +1,512 @@
+/*
+ * UI キットのコンポーネントクラス。値は simple-ledger app.css をベースに統一。
+ * 色は tokens.css の変数のみを参照する(--primary 系はアプリが上書きする前提)。
+ * アプリのグローバルリセットに依存しないよう、キット部品自身で font / cursor を整える。
+ */
+
+/* スクリーンリーダー専用(視覚的に隠すが aria 上は残す) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* キット部品の最小リセット */
+.btn,
+.icon-btn,
+.segmented__btn,
+.menu-item,
+.picker-row,
+button.list__item {
+  font-family: var(--font);
+  color: inherit;
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Header(sticky。dialog は top-layer なので重なりの心配は無い) ── */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-header);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.app-header__inner {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  min-height: var(--header-h);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+}
+.app-header__center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+}
+
+/* ── Buttons ── */
+.btn {
+  min-height: var(--tap);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 14px;
+  font-weight: 600;
+}
+.btn:hover {
+  background: var(--bg);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn--primary {
+  background: var(--primary-fill);
+  color: var(--on-primary);
+  border-color: var(--primary-fill);
+}
+.btn--primary:hover {
+  background: var(--primary-fill-strong);
+}
+.btn--danger {
+  background: var(--danger);
+  color: var(--on-solid);
+  border-color: var(--danger);
+}
+.btn--danger:hover {
+  filter: brightness(0.95);
+}
+.btn--ghost {
+  background: transparent;
+  border-color: transparent;
+}
+.btn--ghost:hover {
+  background: var(--bg);
+}
+.btn--block {
+  width: 100%;
+}
+
+/* タップ可能なアイコンボタン(44px 以上) */
+.icon-btn {
+  min-width: var(--tap);
+  min-height: var(--tap);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+.icon-btn:hover {
+  background: var(--bg);
+}
+.icon-btn--primary {
+  background: var(--primary-fill);
+  color: var(--on-primary);
+}
+.icon-btn--primary:hover {
+  background: var(--primary-fill-strong);
+}
+
+/* ── List ── */
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.list > li {
+  list-style: none;
+}
+.list__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  width: 100%;
+  text-align: left;
+  min-height: var(--tap);
+}
+.list__item:last-child,
+.list > li:last-child .list__item {
+  border-bottom: none;
+}
+button.list__item:hover {
+  background: var(--bg);
+}
+.list__main {
+  flex: 1;
+  min-width: 0;
+}
+.list__title {
+  font-weight: 600;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.list__sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+.list__trailing {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── Tag ── */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+}
+.tag--primary {
+  color: var(--primary-strong);
+  background: var(--primary-light);
+}
+.tag--neutral {
+  color: var(--muted);
+  background: var(--bg);
+}
+.tag--warning {
+  color: var(--warning);
+  background: var(--warning-light);
+}
+.tag--danger {
+  color: var(--danger);
+  background: var(--danger-light);
+}
+
+/* ── Empty state ── */
+.empty {
+  text-align: center;
+  padding: var(--space-6) var(--space-4);
+  color: var(--muted);
+}
+.empty__cta {
+  margin-top: var(--space-4);
+}
+
+/* ── Forms ── */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+}
+.field__label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.field__req {
+  color: var(--danger);
+  font-size: 11px;
+  margin-left: 4px;
+}
+.field__hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+.field__error {
+  font-size: 12px;
+  color: var(--danger);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* エラーではないが見落とさせない注意喚起 */
+.field__warning {
+  font-size: 12px;
+  color: var(--warning);
+  background: var(--warning-light);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.input,
+.select,
+.textarea {
+  min-height: var(--tap);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-family: var(--font);
+  font-size: 16px; /* iOS のズーム防止に 16px 以上 */
+  color: var(--text);
+}
+.textarea {
+  min-height: 88px;
+  resize: vertical;
+  padding-top: var(--space-2);
+}
+.input[aria-invalid='true'],
+.select[aria-invalid='true'],
+.textarea[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+.input:focus-visible,
+.select:focus-visible,
+.textarea:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring);
+}
+
+/* ── Segmented control ── */
+.segmented {
+  display: inline-flex;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 3px;
+  gap: 3px;
+}
+.segmented__btn {
+  min-height: 38px;
+  padding: 0 var(--space-4);
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.segmented__btn[aria-selected='true'],
+.segmented__btn[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
+/* ── Menu(Modal dialog variant の body に置く一覧) ── */
+.menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--tap);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  text-align: left;
+  width: 100%;
+  font-size: 15px;
+  font-weight: 600;
+}
+.menu-item:hover {
+  background: var(--bg);
+}
+.menu-item[aria-current='page'] {
+  background: var(--primary-light);
+  color: var(--primary-strong);
+}
+
+/* ── Sheet / Modal(native <dialog>) ──
+ * top-layer に乗るため z-index は持たない。位置は margin で決める
+ * (dialog:modal の UA スタイルが position:fixed + inset:0 を与える)。 */
+dialog.sheet {
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-family: var(--font);
+  background: var(--surface);
+  width: 100%;
+  max-width: var(--maxw);
+  max-height: 92dvh;
+  overflow: auto;
+  border-radius: var(--radius) var(--radius) 0 0;
+  box-shadow: var(--shadow-pop);
+  /* モバイルは下からのシート(下端へ寄せる) */
+  margin: auto auto 0;
+}
+dialog.sheet::backdrop {
+  background: var(--overlay);
+}
+@media (min-width: 600px) {
+  dialog.sheet {
+    margin: auto;
+    border-radius: var(--radius);
+    max-width: 480px;
+  }
+}
+/* dialog variant(メニュー / 確認 / 入力フォーム)は常に中央。
+   モバイルでも下部シートにせず、画面端から余白を取った中央カードにする。 */
+dialog.sheet.dialog {
+  margin: auto;
+  border-radius: var(--radius);
+  width: calc(100% - var(--space-3) * 2);
+  max-width: 420px;
+}
+.sheet__header {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.sheet__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+.sheet__body {
+  padding: var(--space-4);
+}
+.sheet__footer {
+  position: sticky;
+  bottom: 0;
+  background: var(--surface);
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--border);
+}
+.sheet__footer .btn {
+  flex: 1;
+}
+
+/* ── 軽量ポップアップ(native <dialog>。期間ピッカー等) ── */
+dialog.popup {
+  border: 1px solid var(--border);
+  padding: var(--space-2);
+  color: inherit;
+  font-family: var(--font);
+  margin: auto;
+  width: calc(100% - var(--space-4) * 2);
+  max-width: 320px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+dialog.popup::backdrop {
+  background: var(--overlay);
+}
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 var(--space-2);
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  font-size: 15px;
+}
+.picker-row:hover {
+  background: var(--bg);
+}
+.picker-row[aria-current='true'] {
+  background: var(--bg);
+  font-weight: 700;
+}
+.picker-row__check {
+  width: 18px;
+  flex: none;
+  display: inline-flex;
+  color: var(--primary);
+}
+
+/* ── Environment badge ── */
+.env-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-pill);
+  background: var(--warning-light);
+  color: var(--warning);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* ── Toast ── */
+.toast-region {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--space-5) + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: max-content;
+  max-width: 92vw;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  background: var(--text);
+  color: var(--on-solid);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.toast--error {
+  background: var(--danger);
+}
+.toast--success {
+  background: var(--success);
+}
+/* info はベース（--text 背景）のままで変更なし。variant 視覚化は文言とアイコンで示す */

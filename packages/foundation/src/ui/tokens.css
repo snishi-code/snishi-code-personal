@@ -1,0 +1,78 @@
+/*
+ * Design tokens(正本)。コンポーネントは CSS 変数のみを参照し、色値をハードコードしない。
+ *
+ * 値の出典:
+ *  - 基本色 / --radius / --shadow / --font: apex shared.css(:root) と
+ *    simple-ledger tokens.css で同値のものをそのまま採用。
+ *  - 状態色 / spacing / tap / layout: simple-ledger tokens.css。
+ *  - カテゴリ色スロット(--primary 系)の既定値: apex の neutral(slate #475569 系)。
+ */
+:root {
+  /* ── 基本(apex shared.css / ledger tokens.css と一致) ── */
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --muted: #64748b;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 16px rgba(0, 0, 0, 0.06);
+  --shadow-pop: 0 8px 28px rgba(0, 0, 0, 0.16);
+  /* モーダル/ポップアップの背面(slate-900 40%) */
+  --overlay: rgba(15, 23, 42, 0.4);
+
+  /* ── カテゴリ色スロット ──
+   * 既定値は neutral(slate)。カテゴリ色はアプリ側の設定なので、
+   * アプリが必ず :root で上書きする(医療=blue 系 / 個人=teal 系)。
+   * --primary-fill は白文字(--on-primary)で WCAG AA を満たす濃色を入れること。 */
+  --primary: #475569; /* slate-600 — アクセント */
+  --primary-fill: #334155; /* slate-700 — 白文字ボタン背景 */
+  --primary-fill-strong: #1e293b; /* slate-800 — ボタン hover */
+  --primary-strong: #334155; /* slate-700 — 文字強調(白地で十分なコントラスト) */
+  --primary-light: #f1f5f9; /* slate-100 */
+  --primary-border: #cbd5e1; /* slate-300 */
+  --on-primary: #ffffff;
+  --focus: #475569;
+  --focus-ring: 0 0 0 3px rgba(71, 85, 105, 0.35);
+
+  /* ── 状態色(色だけに依存しない: 文言と併用する) ── */
+  --danger: #dc2626; /* red-600 */
+  --danger-light: #fef2f2;
+  --danger-border: #fecaca;
+  --warning: #b45309; /* amber-700(白地でのコントラスト確保) */
+  --warning-light: #fffbeb;
+  --warning-border: #fde68a;
+  --success: #0f766e; /* teal-700(白文字/白地ともに AA) */
+  --success-light: #f0fdfa;
+  --success-border: #5eead4; /* teal-300 */
+  /* 濃色の塗り(toast / danger ボタン等)に載せる文字色 */
+  --on-solid: #ffffff;
+
+  /* ── 形状 ── */
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-pill: 999px;
+
+  /* ── スペーシング ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* ── タップ領域(44px 以上)/レイアウト ── */
+  --tap: 44px;
+  --header-h: 56px;
+  --maxw: 720px;
+
+  /* ── z-index スケール ──
+   * native <dialog> は top-layer に乗るため --z-overlay / --z-popup は参考値。
+   * アプリの独自オーバーレイ（非 dialog）に使う。手動で dialog に z を当てない。 */
+  --z-header: 20;
+  --z-overlay: 40;
+  --z-popup: 50;
+  --z-toast: 60;
+
+  --font:
+    ui-sans-serif, system-ui, -apple-system, 'Hiragino Kaku Gothic ProN', 'Noto Sans JP',
+    'Yu Gothic', Meiryo, sans-serif;
+}

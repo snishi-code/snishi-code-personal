@@ -17,17 +17,17 @@
  * URL を変えるときは全リポのこのファイルを揃えて直すこと。
  * ========================================================================== */
 window.SITE_LINKS = {
-  apex:        "https://snishi-code.com",
-  medical:     "https://medical.snishi-code.com",
-  medicalDev:  "https://medical-dev.snishi-code.com",
-  personal:    "https://personal.snishi-code.com",
-  personalDev: "https://personal-dev.snishi-code.com",
-  github:      "https://github.com/snishi-code",
+  apex: 'https://snishi-code.com',
+  medical: 'https://medical.snishi-code.com',
+  medicalDev: 'https://medical-dev.snishi-code.com',
+  personal: 'https://personal.snishi-code.com',
+  personalDev: 'https://personal-dev.snishi-code.com',
+  github: 'https://github.com/snishi-code',
 };
 
-document.addEventListener("DOMContentLoaded", () => {
-  document.querySelectorAll("[data-link]").forEach((el) => {
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('[data-link]').forEach((el) => {
     const url = window.SITE_LINKS[el.dataset.link];
-    if (url) el.setAttribute("href", url);
+    if (url) el.setAttribute('href', url);
   });
 });
