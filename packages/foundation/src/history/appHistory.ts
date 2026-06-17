@@ -1,4 +1,4 @@
-// 移植元: snishi-code-medical/hospital-rounds/src/features/app-history.js (患者/フォーマット知識を hook 注入に汎用化)
+// 患者/フォーマット知識を持たず、hook (cfg) 注入で汎用化した履歴制御モジュール。
 
 export interface AppHistoryConfig {
   initialView: string;
@@ -50,7 +50,7 @@ export function createAppHistory(cfg: AppHistoryConfig): AppHistory {
       return;
     }
     // ② 終了確認表示中の Back は消費して確認を維持 (連打で guard を素通りさせて
-    //    確認なしに離脱させない = HR 修正#2)。
+    //    確認なしに離脱させない)。
     if (cfg.isExitConfirmOpen()) {
       history.pushState({ view: cfg.initialView }, '', '');
       return;
@@ -61,7 +61,7 @@ export function createAppHistory(cfg: AppHistoryConfig): AppHistory {
       return;
     }
     // ④ 編集モードは view 遷移せず編集だけ抜ける (編集が active な間は Back 1 回 = 編集破棄。
-    //    遷移と同時に破棄すると未保存ドラフトが黙って消える = HR 修正#3)。
+    //    遷移と同時に破棄すると未保存ドラフトが黙って消える)。
     if (cfg.isEditing()) {
       cfg.exitEdit();
       reconsume();
@@ -69,7 +69,7 @@ export function createAppHistory(cfg: AppHistoryConfig): AppHistory {
     }
     const st = (e.state ?? {}) as HistoryState;
     // ⑤ guard 到達 = initialView で Back。guard 上に留まると次の Back で確認なしに
-    //    履歴外へ抜けるため、initialView を積み直してから終了確認を出す (= HR 修正#2)。
+    //    履歴外へ抜けるため、initialView を積み直してから終了確認を出す。
     if (st.__exitGuard) {
       history.pushState({ view: cfg.initialView }, '', '');
       current = cfg.initialView;

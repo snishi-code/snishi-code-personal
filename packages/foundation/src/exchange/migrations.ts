@@ -1,5 +1,3 @@
-// 移植元: simple-ledger src/domain/migrations.ts のチェーン実行部分の汎用化
-
 export interface MigrationStep {
   from: number;
   to: number;

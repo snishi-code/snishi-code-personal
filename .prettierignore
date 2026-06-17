@@ -3,7 +3,7 @@ dist/
 dist-site/
 docs/
 
-# Migration leftovers may exist only in local workspaces; they are not published app sources.
+# 旧ローカル作業フォルダ（公開アプリのソースではない）は整形対象外
 simple-ledger/
 simple-ledger-src/
 package-lock.json

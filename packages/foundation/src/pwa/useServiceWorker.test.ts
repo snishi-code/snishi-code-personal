@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// useServiceWorker の env 判定テスト (Codex 監査 M2)。
+// useServiceWorker の env 判定テスト。
 // getEnv() === 'prod' のときのみ register が呼ばれること、
 // test / 未設定では呼ばれないことを確認する。
 import { renderHook } from '@testing-library/react';
@@ -23,7 +23,7 @@ afterEach(() => {
   delete document.documentElement.dataset.env;
 });
 
-describe('useServiceWorker (M2: getEnv() === prod のみ登録)', () => {
+describe('useServiceWorker（getEnv() === prod のみ登録）', () => {
   it("data-env='prod' のとき register が呼ばれる", () => {
     document.documentElement.dataset.env = 'prod';
     renderHook(() => useServiceWorker('./sw.js'));

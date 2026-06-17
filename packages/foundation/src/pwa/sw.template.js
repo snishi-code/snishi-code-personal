@@ -1,5 +1,5 @@
 /*
- * 移植元: snishi-code-medical/hospital-rounds/public/sw.js (凍結更新ポリシーをセマンティクス完全維持で移植)
+ * 凍結更新ポリシーを採る Service Worker テンプレート。
  *
  * 使い方 (アプリ側の置換手順):
  *   1. このファイルを各アプリの public/sw.js へコピーする

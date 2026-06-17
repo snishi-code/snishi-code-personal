@@ -1,4 +1,3 @@
-// 移植元: snishi-code-medical/hospital-rounds/src/features/qr-flow.js (drawQrToCanvas)
 import { qrcodegen } from './vendor/qrcodegen.js';
 
 export interface DrawQrOptions {
@@ -23,7 +22,7 @@ export function drawQrToCanvas(
   if (typeof opts.scale === 'number' && opts.scale > 0) {
     scale = Math.floor(opts.scale);
   } else {
-    // v1 と同じ自動スケール: 親幅 × dpr からモジュールが整数ピクセルになる scale を選ぶ
+    // 自動スケール: 親幅 × dpr からモジュールが整数ピクセルになる scale を選ぶ
     // (非整数 scale はモジュール欠け・にじみでスキャン失敗の原因になる)
     const parentW = canvas.parentElement?.clientWidth || 800;
     const cssW = Math.max(240, Math.min(parentW, 980));

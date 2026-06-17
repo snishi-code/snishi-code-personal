@@ -1,5 +1,3 @@
-// 移植元: simple-ledger src/data/exportImport.ts の型定義の汎用化
-
 /** JSON 交換ファイルの封筒。アプリ固有のペイロードはこの封筒の外側に並べて追加する。 */
 export interface ExchangeEnvelope {
   appId: string;

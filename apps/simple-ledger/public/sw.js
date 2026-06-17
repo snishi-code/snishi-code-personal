@@ -1,5 +1,5 @@
 /*
- * 移植元: packages/foundation/src/pwa/sw.template.js (凍結更新ポリシーをセマンティクス完全維持で移植)
+ * Service Worker: app-shell を install 時点で凍結する更新ポリシー。
  *
  * キャッシュ prefix: simple-ledger-v2- (CACHE_NAME_PREFIX と一致。src/data/constants.ts)
  * キャッシュ名: simple-ledger-v2-1 (CACHE_NAME_PREFIX + '1')
