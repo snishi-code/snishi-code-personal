@@ -72,7 +72,7 @@ export function TextInput({
 }: BaseProps & {
   value: string;
   onChange: (v: string) => void;
-  type?: 'text' | 'date' | 'number';
+  type?: 'text' | 'date' | 'number' | 'time';
   placeholder?: string;
   inputMode?: 'numeric';
 }) {

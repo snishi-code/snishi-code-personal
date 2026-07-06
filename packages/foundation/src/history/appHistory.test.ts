@@ -134,6 +134,103 @@ describe('createAppHistory', () => {
     expect(cfg.renderView).toHaveBeenCalledWith('home');
   });
 
+  it('consumeUnhandledBack 未指定なら guard で終了確認が出る (既定挙動を変えない)', () => {
+    // 既定構成 (cfg に consumeUnhandledBack 無し) では ⑤ をスキップし、従来どおり guard → 終了確認。
+    fire({ __exitGuard: true });
+    expect(cfg.showExitConfirm).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('createAppHistory consumeUnhandledBack (opt-in)', () => {
+  const fire = (state: unknown) => window.dispatchEvent(new PopStateEvent('popstate', { state }));
+  let overlays: number;
+  let editing: boolean;
+  let consume: boolean;
+  let cfg: AppHistoryConfig & {
+    renderView: ReturnType<typeof vi.fn>;
+    closeTopOverlay: ReturnType<typeof vi.fn>;
+    exitEdit: ReturnType<typeof vi.fn>;
+    showExitConfirm: ReturnType<typeof vi.fn>;
+  };
+  let app: AppHistory;
+  let backSpy: MockInstance<() => void>;
+
+  beforeEach(() => {
+    overlays = 0;
+    editing = false;
+    consume = true;
+    backSpy = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+    cfg = {
+      initialView: 'home',
+      renderView: vi.fn<(view: string) => void>(),
+      closeTopOverlay: vi.fn(() => {
+        if (overlays > 0) {
+          overlays--;
+          return true;
+        }
+        return false;
+      }),
+      isEditing: () => editing,
+      exitEdit: vi.fn(() => {
+        editing = false;
+      }),
+      showExitConfirm: vi.fn<() => void>(),
+      isExitConfirmOpen: () => false,
+      consumeUnhandledBack: () => consume,
+    };
+    app = createAppHistory(cfg);
+    app.init();
+  });
+
+  afterEach(() => {
+    app.dispose();
+    backSpy.mockRestore();
+  });
+
+  it('⑤ overlay/編集が無い Back は消費され、view 遷移も終了確認もしない (現在 view を維持)', () => {
+    app.pushView('detail');
+    fire({ view: 'home' });
+    // 消費: view 遷移せず detail を維持。終了確認も出ない。
+    expect(cfg.renderView).not.toHaveBeenCalled();
+    expect(cfg.showExitConfirm).not.toHaveBeenCalled();
+    expect(app.currentView()).toBe('detail');
+    expect(history.state).toEqual({ view: 'detail' }); // 現在 view を積み直す
+  });
+
+  it('⑤ guard 到達の Back も消費し、終了確認を出さない (アプリ終了させない)', () => {
+    fire({ __exitGuard: true });
+    expect(cfg.showExitConfirm).not.toHaveBeenCalled();
+    expect(cfg.renderView).not.toHaveBeenCalled();
+    expect(app.currentView()).toBe('home');
+    expect(backSpy).not.toHaveBeenCalled(); // 履歴外へ抜けない
+  });
+
+  it('③ overlay が開いていれば overlay を閉じ、view は維持する (consume より優先)', () => {
+    app.pushView('detail');
+    overlays = 1;
+    fire({ view: 'home' });
+    expect(cfg.closeTopOverlay).toHaveBeenCalledTimes(1);
+    expect(cfg.renderView).not.toHaveBeenCalled();
+    expect(app.currentView()).toBe('detail');
+  });
+
+  it('④ 編集中なら編集を抜け、view は維持する (consume より優先)', () => {
+    app.pushView('detail');
+    editing = true;
+    fire({ view: 'home' });
+    expect(cfg.exitEdit).toHaveBeenCalledTimes(1);
+    expect(cfg.renderView).not.toHaveBeenCalled();
+    expect(app.currentView()).toBe('detail');
+  });
+
+  it('consume が false を返すフレームでは従来どおり view 遷移する', () => {
+    app.pushView('detail');
+    consume = false;
+    fire({ view: 'home' });
+    expect(cfg.renderView).toHaveBeenCalledWith('home');
+    expect(app.currentView()).toBe('home');
+  });
+
   it('dispose 後は popstate を処理しない', () => {
     app.dispose();
     fire({ view: 'memo' });

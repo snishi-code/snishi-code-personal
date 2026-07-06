@@ -20,6 +20,9 @@ export interface ScanOptions {
   dedupMs?: number;
   // カメラ向き。既定は背面カメラ優先
   facingMode?: ConstrainDOMString;
+  // カメラ起動失敗 (権限拒否 / 非対応 / ハード不在) を呼び出し側へ通知する。
+  // 未指定なら従来どおり console.error + 停止のみ (後方互換)。
+  onError?: (error: unknown) => void;
 }
 
 // カメラ + jsQR の連続スキャン。getUserMedia の呼び出しはこの関数に閉じる
@@ -109,6 +112,7 @@ export function scanQrStream(
       tick();
     } catch (e) {
       console.error('camera start failed', e);
+      opts.onError?.(e);
       stop();
     }
   })();
