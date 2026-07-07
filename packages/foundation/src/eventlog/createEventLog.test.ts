@@ -1,3 +1,4 @@
+// @vitest-environment node
 // createEventLog: roundtrip / retention / 例外吸収を fake-indexeddb で検証する。
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEventLog } from './createEventLog';

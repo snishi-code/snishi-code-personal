@@ -1,27 +1,30 @@
 // @vitest-environment node
-// sw.template.js の静的歩哨テスト: 凍結更新ポリシーが崩されていないことをソース文字列で監視する。
+// sw.template.js の静的歩哨テスト (2026-07-07 改訂: 凍結 → 標準ライフサイクル)。
+//   守るべき不変条件は「使用中乗っ取りの禁止」のみに絞った:
+//     - skipWaiting / clients.claim を呼ばない = 起動中のページの版が実行中に切り替わらない。
+//   更新チェックと次回起動時反映 (navigation network-first) は標準ライフサイクルとして許容する
+//   (registration.update / updatefound の禁止は撤廃)。
+// 本ファイルは foundation 同期の除外対象 (正本 medical 側はアプリ実出荷 public/sw.js も
+// 検査するため medical 専用パスを含む。personal 側はテンプレートのみ検査するこの版を維持する)。
 // node 環境で動かすのは import.meta.url が file: URL になり readFileSync でパス解決できるため。
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const src = readFileSync(new URL('./sw.template.js', import.meta.url), 'utf8');
-// 「実行されるコード」のみを見る: 禁止 API 名は不変性の説明コメントには現れてよい。
+// 「実行されるコード」のみを見る: 禁止 API 名は説明コメントには現れてよい。
 const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 
-describe('sw.template.js (凍結 SW ポリシーの歩哨)', () => {
-  it('更新系 API をコードに含まない (skipWaiting / clients.claim / registration.update)', () => {
+describe('sw.template.js (SW ポリシーの歩哨)', () => {
+  it('使用中乗っ取り系 API をコードに含まない (skipWaiting / clients.claim)', () => {
     expect(code).not.toMatch(/skipWaiting/);
     expect(code).not.toMatch(/clients\s*\.\s*claim/);
-    expect(code).not.toMatch(/registration\s*\.\s*update/);
-    expect(code).not.toMatch(/updatefound/);
   });
 
-  it('不変性 (変更厳禁) コメントブロックを保持している', () => {
+  it('使用中乗っ取り禁止 (変更厳禁) コメントブロックを保持している', () => {
     expect(src).toContain('変更厳禁');
     // 禁止 API の列挙と狙いの説明が残っていること (コメントとして)。
     expect(src).toContain('skipWaiting');
     expect(src).toContain('clients.claim');
-    expect(src).toContain('registration.update');
   });
 
   it('fetch 呼び出し行はすべて network-ok 注釈付き', () => {
@@ -53,8 +56,9 @@ describe('sw.template.js (凍結 SW ポリシーの歩哨)', () => {
     expect(code).not.toMatch(/\.filter\s*\(\s*\([^)]*\)\s*=>\s*\w+\s*!==\s*CACHE\s*\)/);
   });
 
-  it('cache-first + SPA shell fallback の構造を保持している', () => {
+  it('オフライン時のキャッシュ fallback 構造を保持している', () => {
     expect(code).toContain('caches.match(e.request)');
-    expect(code).toMatch(/\.catch\(\(\) => caches\.match\(/);
+    // fetch 失敗時にキャッシュへ倒れる catch が存在する (改行整形の揺れを許容)。
+    expect(code).toMatch(/\.catch\(\(\) =>\s*caches\s*\.\s*match\(/);
   });
 });
