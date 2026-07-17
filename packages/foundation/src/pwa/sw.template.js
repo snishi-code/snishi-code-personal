@@ -74,7 +74,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   // 同一オリジン以外は SW を素通し (外部リソースの取得・キャッシュはしない)。
-  if (!e.request.url.startsWith(self.location.origin)) return;
+  if (new URL(e.request.url).origin !== self.location.origin) return;
 
   // アプリ起動/リロード: まずネットワークから最新 shell を取得してキャッシュを更新し、
   // 失敗時 (オフライン) はキャッシュ済み shell へ fallback する。
