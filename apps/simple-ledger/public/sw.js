@@ -1,19 +1,18 @@
 /*
- * Service Worker: app-shell を install 時点で凍結する更新ポリシー。
+ * Service Worker: 標準ライフサイクル + 使用中乗っ取り防止 (2026-07-17 テンプレート追従)。
+ * navigation は network-first なので、デプロイ済みの更新は次回起動時に反映される。
  *
- * キャッシュ prefix: simple-ledger-v2- (CACHE_NAME_PREFIX と一致。src/data/constants.ts)
- * キャッシュ名: simple-ledger-v2-1 (CACHE_NAME_PREFIX + '1')
- * CACHE_NAME_PREFIX = 'simple-ledger-v2-' (src/data/constants.ts)
- * ※ sw.js は単体配信ファイルなので import はしない。CACHE_PREFIX の値は constants.ts の
- *    CACHE_NAME_PREFIX と一致させること。
+ * キャッシュ prefix: simple-ledger-v2- (旧世代掃除用の名前空間。src/data/constants.ts の
+ *   CACHE_NAME_PREFIX と値を合わせること。sw.js は単体配信ファイルなので import はしない)
+ * キャッシュ名: simple-ledger-v2-2 (PREFIX + 世代番号。キャッシュを捨てたい時に版数を上げる。
+ *   -1 は凍結ポリシー期の世代。標準ライフサイクル移行で世代を上げ、下の activate が掃除する)
+ * 正本テンプレート: packages/foundation/src/pwa/sw.template.js
  */
-// CacheStorage は origin 単位。同一 origin に他アプリ/旧版が同居しても消さない(仕様§7)。
-// 削除するのは自アプリ prefix の旧世代のみ。
-// CACHE_PREFIX は src/data/constants.ts の CACHE_NAME_PREFIX と値を合わせている。
-const CACHE_PREFIX = 'simple-ledger-v2-';
-const CACHE = 'simple-ledger-v2-1';
 
-const PRECACHE_PATHS = [];
+const CACHE_PREFIX = 'simple-ledger-v2-';
+const CACHE = 'simple-ledger-v2-2';
+
+const PRECACHE_PATHS = ['./icons/icon-192.png', './icons/icon-512.png', './icons/icon.svg'];
 
 // SW のスコープ (= sw.js が置かれているディレクトリ)。相対 URL は scope を起点に解決し、
 // prod/test どちらの base でも同じファイルが動くようにする (特定ドメインを直書きしない)。
@@ -21,7 +20,7 @@ const SCOPE = self.registration
   ? self.registration.scope
   : self.location.href.replace(/[^/]*$/, '');
 
-// app shell。アプリ本体 (index.html) は SW インストール時点の内容で凍結される。
+// app shell。オフライン起動用に precache し、以後は navigation のたびに network-first で更新する。
 const SHELL = [new URL('./', SCOPE).href, new URL('./index.html', SCOPE).href];
 
 async function precacheAll() {
@@ -32,50 +31,69 @@ async function precacheAll() {
   await Promise.allSettled(PRECACHE_PATHS.map((p) => cache.add(new URL(p, SCOPE).href)));
 }
 
-// 自動更新の無効化 = 意図的な「不変性 (immutability)」設計。【セキュリティ要件・変更厳禁】
-//   一度インストールされた PWA は、その後 origin から配信される内容に一切影響されない:
-//     - skipWaiting() を呼ばない    → 新しい SW は 'waiting' に留まり発火しない
-//     - clients.claim() を呼ばない  → 既存インストールは古い SW を使い続ける
-//     - index.html は cache-first    → アプリ本体コードは install 時点で凍結される
-//     - 登録側 (pwa/useServiceWorker.ts) も registration.update() / updatefound を配線していない
-//   狙い: 配信元が信用できるのは「install の瞬間」だけ、と割り切る。install 後に
-//     (a) コードの瑕疵が後から「勝手に直って」端末の挙動が変わる、
-//     (b) デプロイ環境やアカウントが乗っ取られ悪性コードが既存インストールへ波及する、
-//     のどちらも起こさない。可搬性(patchability)より完全性(integrity)を優先する設計。
-//   トレードオフ: 正規の修正も既存端末には届かない。更新は「アンインストール →
-//     再インストール」のみ (= ユーザーが明示的に再信頼する操作を要求する)。
-//   ⚠️ skipWaiting / clients.claim / registration.update / 自動更新プロンプトを
-//      足すと、この保証が壊れる。追加しないこと。
+// 更新ポリシー (2026-07-07 改訂: 凍結 → 標準ライフサイクル)。
+//   運用前提を「完全オフライン」から「自サイトへは普通に接続」へ転換した:
+//     - navigation (アプリ起動/リロード) は network-first。オンラインならデプロイ済みの
+//       更新が次回起動時にそのまま反映され、オフラインならキャッシュ済み shell で起動する。
+//     - 配信元の乗っ取り対策はデプロイ側のトークン/アカウント管理が担う。
+//       アプリコードにその責務は置かない。
+//   ⚠️ 使用中乗っ取りの防止だけは引き続きこのコードの責務。【変更厳禁】
+//     - skipWaiting() を呼ばない    → 新しい SW は起動中のページを実行中に乗っ取らない
+//     - clients.claim() を呼ばない  → 既存ページの制御を実行中に奪わない
+//   = 「使用中にアプリの版が切り替わらない」が守るべき唯一の不変条件。更新が反映される
+//     境界は常にユーザー自身の起動/リロード操作にする。
 self.addEventListener('install', (e) => {
   e.waitUntil(precacheAll());
 });
 
 self.addEventListener('activate', (e) => {
-  // 旧キャッシュ名の掃除のみ (凍結ポリシー下で新 SW が発火するのは新規インストール時だけ)。
-  // CacheStorage は origin 単位。同一 origin に他アプリ/旧版が同居しても消さない(仕様§7)。
-  // 削除するのは自アプリ prefix の旧世代のみ。
+  // 旧世代キャッシュの掃除。CacheStorage は origin 単位。同一 origin に他アプリ/旧版が
+  // 同居しても消さない(仕様§7)。削除するのは自アプリ prefix の旧世代のみ。
   e.waitUntil(
     caches
       .keys()
       .then((keys) =>
         Promise.all(
-          keys.filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE).map((k) => caches.delete(k)),
+          keys
+            .filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE)
+            .map((k) => caches.delete(k)),
         ),
       ),
   );
 });
 
-// cache-first。miss 時のみ同一オリジン GET を取得してキャッシュへ補充し、
-// 全失敗時 (オフラインで未キャッシュ) は SPA shell を返す。
+// navigation = network-first (更新反映 + オフライン fallback)。
+// その他の同一オリジン GET (ハッシュ付きアセット等) = cache-first + miss 時補充。
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   // 同一オリジン以外は SW を素通し (外部リソースの取得・キャッシュはしない)。
-  if (!e.request.url.startsWith(self.location.origin)) return;
+  if (new URL(e.request.url).origin !== self.location.origin) return;
+
+  // アプリ起動/リロード: まずネットワークから最新 shell を取得してキャッシュを更新し、
+  // 失敗時 (オフライン) はキャッシュ済み shell へ fallback する。
+  if (e.request.mode === 'navigate' || SHELL.includes(e.request.url)) {
+    e.respondWith(
+      fetch(e.request) // network-ok: 同一オリジンの app shell 取得のみ(上の origin チェック済み)。ユーザーデータ送信なし
+        .then((res) => {
+          if (res && res.ok && res.status === 200) {
+            const clone = res.clone();
+            caches.open(CACHE).then((c) => c.put(e.request, clone));
+          }
+          return res;
+        })
+        .catch(() =>
+          caches
+            .match(e.request)
+            .then((cached) => cached || caches.match(new URL('./', SCOPE).href)),
+        ),
+    );
+    return;
+  }
 
   e.respondWith(
     caches.match(e.request).then((cached) => {
       if (cached) return cached;
-      return fetch(e.request) // network-ok: 同一オリジンの app shell キャッシュ取得のみ(上の origin チェック済み)。ユーザーデータ送信なし
+      return fetch(e.request) // network-ok: 同一オリジンのアセットキャッシュ補充のみ(上の origin チェック済み)。ユーザーデータ送信なし
         .then((res) => {
           if (res && res.ok && res.status === 200) {
             const clone = res.clone();
