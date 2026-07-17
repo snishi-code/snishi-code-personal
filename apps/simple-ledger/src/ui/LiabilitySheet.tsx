@@ -2,8 +2,8 @@
  * 新しい負債（科目）の作成シート。foundation の Modal/Field/useDirtyGuard を使用。
  */
 import { useState } from 'react';
-import { Modal } from '@snishi/foundation/ui/Modal';
-import { useDirtyGuard } from '@snishi/foundation/ui/useDirtyGuard';
+import { Modal } from './overlays';
+import { useDirtyGuard } from './overlays';
 import { TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { newId } from '../domain/ids';

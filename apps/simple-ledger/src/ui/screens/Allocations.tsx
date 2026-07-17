@@ -2,10 +2,10 @@
  * 継続コスト。サブスク・年払い・耐久財・定期イベントを統一して「月あたりコスト」で見る。
  */
 import { useMemo, useState } from 'react';
-import { Modal } from '@snishi/foundation/ui/Modal';
+import { Modal } from '../overlays';
 import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
-import { ConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
+import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import { monthlyCostForMonth, representativeMonthlyAmount } from '../../domain/monthlyCost';
 import { disposalOutcome } from '../../domain/assetDisposal';

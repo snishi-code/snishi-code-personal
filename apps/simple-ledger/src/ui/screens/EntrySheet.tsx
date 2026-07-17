@@ -6,8 +6,8 @@
  * source=貸方(credit) / destination=借方(debit) に対応する（MODE_FLOW）。
  */
 import { useState } from 'react';
-import { Modal } from '@snishi/foundation/ui/Modal';
-import { useDirtyGuard } from '@snishi/foundation/ui/useDirtyGuard';
+import { Modal } from '../overlays';
+import { useDirtyGuard } from '../overlays';
 import { SelectInput, TextArea, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { AccountPicker } from '../AccountPicker';

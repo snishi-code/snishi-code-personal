@@ -24,6 +24,8 @@ async function expectNoHorizontalScroll(page: Page, label: string) {
 for (const vp of VIEWPORTS) {
   test(`主要画面のレイアウト確認 (${vp.name})`, async ({ page }) => {
     await page.setViewportSize({ width: vp.width, height: vp.height });
+    // 初回オンボーディングを既読化してから起動する（撮影・クリックを遮らないように）。
+    await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
     await page.goto('./');
     await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
 

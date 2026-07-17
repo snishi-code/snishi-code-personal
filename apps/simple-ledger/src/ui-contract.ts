@@ -256,6 +256,7 @@ export const UI = {
     importJson: 'settings.importJson',
     importFile: 'settings.importFile',
     resetAll: 'settings.resetAll',
+    onboardingOpen: 'settings.onboardingOpen',
   },
   nav: {
     home: 'nav.home',
@@ -265,6 +266,17 @@ export const UI = {
   dialog: {
     confirm: 'dialog.confirm',
     cancel: 'dialog.cancel',
+  },
+  // 端末/ブラウザ Back の終了確認（appHistory が管理・オーバーレイ登録簿には載せない）
+  app: {
+    exitConfirm: 'app.exitConfirm',
+  },
+  // 初期残高の一括登録シート（初回起動時に自動表示・設定から再表示可能）
+  onboarding: {
+    view: 'onboarding.view',
+    amount: 'onboarding.amount',
+    save: 'onboarding.save',
+    skip: 'onboarding.skip',
   },
   toast: 'toast',
 } as const;

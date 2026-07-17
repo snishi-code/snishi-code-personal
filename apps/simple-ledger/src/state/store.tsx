@@ -38,6 +38,7 @@ import {
   type ImportOutcome,
 } from '../data/exportImport';
 import { useToast } from '@snishi/foundation/ui/toast';
+import { clearOnboardingDone } from '../data/localFlags';
 import { errorText, t } from '../i18n';
 
 /** `?fixture=sample` が指定されているか（手動テスト用。本番通常起動では false）。 */
@@ -52,9 +53,10 @@ function sampleFixtureRequested(): boolean {
 
 /**
  * 完全に初期 seed 状態か（ユーザーデータ皆無 + 既定科目・既定設定そのまま）。
- * フィクスチャ投入の安全判定に使う。科目だけ整理した／設定を変えた台帳は上書きしない。
+ * フィクスチャ投入と初回オンボーディング自動表示の安全判定に使う。
+ * 科目だけ整理した／設定を変えた台帳は「初期状態」と見なさない。
  */
-function isPristineSeedLedger(l: Ledger): boolean {
+export function isPristineSeedLedger(l: Ledger): boolean {
   return (
     l.journalEntries.length === 0 &&
     l.allocations.length === 0 &&
@@ -124,6 +126,8 @@ interface LedgerContextValue {
   }) => Promise<void>;
   deleteAdjustment: (id: string) => Promise<void>;
   createOpening: (input: repo.OpeningInput) => Promise<void>;
+  /** 初期残高の一括登録（オンボーディング用。成功 toast は 1 回に集約）。 */
+  createOpenings: (inputs: repo.OpeningInput[]) => Promise<void>;
   updateOpening: (input: { id: string; amount: number; date: string }) => Promise<void>;
   deleteOpening: (id: string) => Promise<void>;
   saveAccount: (account: Account, opts?: repo.AccountSaveOptions) => Promise<void>;
@@ -593,6 +597,25 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [refresh, toast],
   );
 
+  const createOpenings = useCallback<LedgerContextValue['createOpenings']>(
+    async (inputs) => {
+      try {
+        // opening は互いに独立な仕訳なので逐次作成する（途中失敗は error toast + throw。
+        // 作成済み分は有効な opening としてそのまま残り、仕訳一覧から編集/削除できる）。
+        for (const input of inputs) {
+          await repo.createOpening(input);
+        }
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        await refresh();
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
   const updateOpening = useCallback<LedgerContextValue['updateOpening']>(
     async (input) => {
       try {
@@ -726,6 +749,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const resetAll = useCallback<LedgerContextValue['resetAll']>(async () => {
     try {
       await repo.resetAll();
+      // 初期状態へ戻すので、オンボーディング既読フラグも消す（次回起動で再表示）。
+      clearOnboardingDone();
       await refresh();
       toast.show(t('toast.reset'), 'success');
     } catch (e) {
@@ -769,6 +794,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       updateAdjustment,
       deleteAdjustment,
       createOpening,
+      createOpenings,
       updateOpening,
       deleteOpening,
       saveAccount,
@@ -815,6 +841,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       updateAdjustment,
       deleteAdjustment,
       createOpening,
+      createOpenings,
       updateOpening,
       deleteOpening,
       saveAccount,

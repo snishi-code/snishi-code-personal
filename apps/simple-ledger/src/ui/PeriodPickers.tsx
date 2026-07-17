@@ -2,7 +2,7 @@
  * 期間の軽量ピッカー（ヘッダーの現在コンテキスト表示をタップして開く）。
  * foundation の Popup（native <dialog>）を使用。
  */
-import { Popup } from '@snishi/foundation/ui/Popup';
+import { Popup } from './overlays';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { t } from '../i18n';
 import { UI } from '../ui-contract';

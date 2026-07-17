@@ -825,6 +825,29 @@ export const ja = {
   'error.disposal.gainCategoryMissing': '売却益の計上先（その他収入）が見つかりません。',
   'error.fixedAsset.expenseCategory': '継続コストの計上先の費用カテゴリを選んでください。',
   'error.fixedAsset.invalidAccount': '固定資産の科目が不正です。',
+
+  // 戻る操作（dirty guard・終了確認）
+  'guard.discardTitle': '変更を破棄しますか？',
+  'guard.discardBody': '入力した内容は保存されません。',
+  'guard.discardConfirm': '破棄する',
+  'guard.discardCancel': '編集を続ける',
+  'exit.confirmTitle': 'アプリを終了しますか？',
+  'exit.confirmBody': 'データは端末内に保存されています。次回も続きから使えます。',
+  'exit.confirmLabel': '終了する',
+
+  // 初期残高の一括登録（初回起動時に自動表示・設定から再表示可能）
+  'onboarding.title': 'はじめに：いまの残高を登録',
+  'onboarding.intro':
+    '手元の現金や口座の残高を入れると、今日から収支と資産を追えます。金額は空欄のままでもかまいません（あとから登録できます）。',
+  'onboarding.assetSection': '資産（いまある残高）',
+  'onboarding.liabilitySection': '負債（カード未払・借入）',
+  'onboarding.dateLabel': '基準日',
+  'onboarding.dateHint': 'この日付時点の残高（初期残高）として登録します。',
+  'onboarding.amountPlaceholder': '未入力はスキップ',
+  'onboarding.save': '登録する',
+  'onboarding.skip': 'あとで設定',
+  'onboarding.laterHint': 'このシートは「設定 > 初期残高の一括登録」からいつでも開けます。',
+  'settings.onboardingOpen': '初期残高の一括登録',
 } as const;
 
 export type MessageKey = keyof typeof ja;

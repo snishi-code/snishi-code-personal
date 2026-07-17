@@ -9,9 +9,9 @@
  * `（アーカイブ）` 付きへ退避してから保存する。
  */
 import { useState } from 'react';
-import { Modal } from '@snishi/foundation/ui/Modal';
-import { useDirtyGuard } from '@snishi/foundation/ui/useDirtyGuard';
-import { ConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
+import { Modal } from '../overlays';
+import { useDirtyGuard } from '../overlays';
+import { ConfirmDialog } from '../overlays';
 import { TextArea, TextInput } from '@snishi/foundation/ui/Field';
 import { useLedger } from '../../state/store';
 import type { Account } from '../../domain/types';

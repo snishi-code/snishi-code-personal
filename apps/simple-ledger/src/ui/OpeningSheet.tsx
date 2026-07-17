@@ -4,7 +4,7 @@
  * 通常の仕訳編集で opening を壊さない（opening は開始時点の残高設定、補正とは会計的に別物）。
  */
 import { useState } from 'react';
-import { Modal } from '@snishi/foundation/ui/Modal';
+import { Modal } from './overlays';
 import { TextInput } from '@snishi/foundation/ui/Field';
 import { useLedger } from '../state/store';
 import type { Account, JournalEntry } from '../domain/types';

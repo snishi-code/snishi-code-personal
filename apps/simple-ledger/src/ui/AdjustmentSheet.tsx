@@ -4,7 +4,7 @@
  * 補正は「ある日付の実残高に台帳をピン留めする現実アンカー」で、初期残高(opening)とは別物。
  */
 import { useMemo, useState } from 'react';
-import { Modal } from '@snishi/foundation/ui/Modal';
+import { Modal } from './overlays';
 import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../state/store';

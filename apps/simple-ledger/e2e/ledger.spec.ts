@@ -8,6 +8,9 @@ import { test, expect, type Page } from '@playwright/test';
 const ui = (name: string) => `[data-ui="${name}"]`;
 
 async function boot(page: Page) {
+  // 初回オンボーディング（初期残高の一括登録）を既読化してから起動する
+  // （自動表示のモーダルが操作を遮らないように。オンボーディング自体は専用テストで確認）。
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
   await page.goto('./');
   await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
 }
@@ -25,6 +28,21 @@ test('起動 → ダッシュボードと日常入力バーが表示される', 
   await expect(page.locator(ui('dashboard.entry.expense'))).toBeVisible();
   await expect(page.locator(ui('dashboard.entry.income'))).toBeVisible();
   await expect(page.locator(ui('dashboard.entry.transfer'))).toBeVisible();
+});
+
+test('初回起動はオンボーディング（初期残高の一括登録）が自動表示され、スキップで消える', async ({
+  page,
+}) => {
+  // boot() と違い既読フラグを入れずに起動する（真の初回状態）。
+  await page.goto('./');
+  await expect(page.locator(ui('onboarding.view'))).toBeVisible({ timeout: 15_000 });
+  await page.locator(ui('onboarding.skip')).click();
+  await expect(page.locator(ui('onboarding.view'))).toBeHidden();
+  // スキップ後は通常どおり操作でき、再読込しても再表示されない。
+  await expect(page.locator(ui('dashboard.entryBar'))).toBeVisible();
+  await page.reload();
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(ui('onboarding.view'))).toBeHidden();
 });
 
 test('支出の仕訳作成 → ホームの当月仕訳プレビューへ反映され、再読込後も残る', async ({ page }) => {
