@@ -12,7 +12,7 @@ import { useState } from 'react';
 import { Modal } from '../overlays';
 import { useDirtyGuard } from '../overlays';
 import { ConfirmDialog } from '../overlays';
-import { SelectInput, TextArea, TextInput } from '@snishi/foundation/ui/Field';
+import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { useLedger } from '../../state/store';
 import type { Account } from '../../domain/types';
 import { findAccountNameConflicts, planArchiveRenames } from '../../domain/accountNames';
@@ -40,7 +40,8 @@ export function AccountSheet({
   const createRole = box?.createRole;
 
   const [name, setName] = useState(existing?.name ?? '');
-  const [note, setNote] = useState(existing?.note ?? '');
+  // メモ入力欄は撤去済みだが、既存の note は保存時にそのまま引き継ぐ（消さない）。
+  const [note] = useState(existing?.note ?? '');
   const [openingAmountText, setOpeningAmountText] = useState('');
   const [openingDate, setOpeningDate] = useState(todayLocal());
   const [repaymentAccountId, setRepaymentAccountId] = useState(existing?.repaymentAccountId ?? '');
@@ -206,7 +207,7 @@ export function AccountSheet({
           }}
           error={error}
         />
-        <TextArea label={t('accounts.note')} value={note} onChange={setNote} />
+        {/* メモ欄は UI から撤去（2026-07-23 作者指示）。既存メモは note state 経由で保持される。 */}
         {showRepayment ? (
           <>
             <SelectInput

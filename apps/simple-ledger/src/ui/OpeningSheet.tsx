@@ -1,12 +1,16 @@
 /*
- * 初期残高（kind='opening'）の専用編集シート。仕訳一覧の opening 行から開く。
- * 登録は科目追加シート（AccountSheet）の初期残高欄で行い、この画面では金額・基準日だけを編集する。
+ * 初期残高（kind='opening'）の専用シート。
+ *  - OpeningRegisterSheet: 履歴の無い既存科目へ初期残高を登録する（勘定科目画面の「補正」導線が
+ *    履歴ゼロのとき自動でこちらへ分岐。補正だと差分が収入/費用扱いになるため）。
+ *    経路は createOpening 一本（新規科目つき opening・オンボーディングと同じ共通機能）。
+ *  - OpeningEditSheet: 仕訳一覧の opening 行から金額・基準日を編集する。
  * 通常の仕訳編集で opening を壊さない（opening は開始時点の残高設定、補正とは会計的に別物）。
  */
 import { useState } from 'react';
 import { Modal } from './overlays';
 import { TextInput } from '@snishi/foundation/ui/Field';
 import { useLedger } from '../state/store';
+import { todayLocal } from '../util/time';
 import type { Account, JournalEntry } from '../domain/types';
 import { t } from '../i18n';
 import { UI } from '../ui-contract';
@@ -21,6 +25,81 @@ export function openingTarget(
     if (a && a.role !== 'equity') return { account: a, amount: l.amount };
   }
   return null;
+}
+
+/** 履歴の無い既存科目（資産・負債）へ初期残高を登録する。 */
+export function OpeningRegisterSheet({
+  account,
+  onClose,
+}: {
+  account: Account;
+  onClose: () => void;
+}) {
+  const { createOpening } = useLedger();
+  const [amountText, setAmountText] = useState('');
+  const [date, setDate] = useState(todayLocal());
+  const [submitting, setSubmitting] = useState(false);
+
+  const amount = amountText === '' ? null : Number.parseInt(amountText.replace(/[^\d]/g, ''), 10);
+
+  async function submit() {
+    if (amount === null || amount < 1 || submitting) return;
+    setSubmitting(true);
+    try {
+      await createOpening({ accountId: account.id, amount, date });
+      onClose();
+    } catch {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={t('opening.registerTitle', { name: account.name })}
+      onClose={onClose}
+      dismissMode="if-clean"
+      dataUi={UI.adjustments.openingRegisterDialog}
+      footer={
+        <>
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={submit}
+            disabled={submitting || amount === null || amount < 1}
+            data-ui={UI.adjustments.openingRegisterSave}
+          >
+            {t('opening.registerSave')}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <p className="field__hint">{t('opening.registerIntro')}</p>
+        <div className="kv">
+          <span className="muted">{t('opening.account')}</span>
+          <span>{account.name}</span>
+        </div>
+        <TextInput
+          label={t('opening.amount')}
+          required
+          inputMode="numeric"
+          value={amountText}
+          onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
+          dataUi={UI.adjustments.openingRegisterAmount}
+        />
+        <TextInput
+          label={t('opening.date')}
+          type="date"
+          value={date}
+          onChange={setDate}
+          dataUi={UI.adjustments.openingRegisterDate}
+        />
+      </div>
+    </Modal>
+  );
 }
 
 export function OpeningEditSheet({

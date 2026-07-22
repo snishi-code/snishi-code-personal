@@ -835,6 +835,12 @@ export const ja = {
   'exit.confirmBody': 'データは端末内に保存されています。次回も続きから使えます。',
   'exit.confirmLabel': '終了する',
 
+  // 履歴の無い既存科目への初期残高登録（勘定科目画面の補正導線から自動分岐）
+  'opening.registerTitle': '初期残高を登録（{name}）',
+  'opening.registerIntro':
+    'この科目にはまだ記録がありません。いまの実残高は補正（差額が収入/支出扱い）ではなく、初期残高（開始残高）として登録します。',
+  'opening.registerSave': '初期残高を登録',
+
   // 返済設定（負債の勘定科目）と資金繰りの返済予定
   'accounts.repaymentAccount': '返済口座',
   'accounts.repaymentDay': '毎月の返済日',

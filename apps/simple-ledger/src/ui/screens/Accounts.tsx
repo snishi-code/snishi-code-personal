@@ -10,12 +10,13 @@
 import { useMemo, useState } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
-import { accountBalance } from '../../domain/accounting';
+import { accountBalance, accountHasEntries } from '../../domain/accounting';
 import { referencedAccountIds } from '../../domain/accountRefs';
 import type { Account } from '../../domain/types';
 import { groupAccountsByBox, type AccountBox } from '../accountBoxes';
 import { AccountSheet } from './AccountSheet';
 import { AdjustmentCreateSheet } from '../AdjustmentSheet';
+import { OpeningRegisterSheet } from '../OpeningSheet';
 import { Money } from '../money';
 import { nowIso } from '../../util/time';
 import { t } from '../../i18n';
@@ -174,10 +175,19 @@ export function Accounts() {
       {creatingIn ? <AccountSheet box={creatingIn} onClose={() => setCreatingIn(null)} /> : null}
       {editing ? <AccountSheet existing={editing} onClose={() => setEditing(null)} /> : null}
       {adjustingAccount ? (
-        <AdjustmentCreateSheet
-          account={adjustingAccount}
-          onClose={() => setAdjustingAccount(null)}
-        />
+        // 履歴が全く無い科目への実残高入力は補正（差分が収入/費用扱い）ではなく
+        // 初期残高（開始残高）として登録する。履歴があれば従来どおり補正。
+        accountHasEntries(ledger?.journalEntries ?? [], adjustingAccount.id) ? (
+          <AdjustmentCreateSheet
+            account={adjustingAccount}
+            onClose={() => setAdjustingAccount(null)}
+          />
+        ) : (
+          <OpeningRegisterSheet
+            account={adjustingAccount}
+            onClose={() => setAdjustingAccount(null)}
+          />
+        )
       ) : null}
     </section>
   );

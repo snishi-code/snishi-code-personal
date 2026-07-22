@@ -215,6 +215,11 @@ export const UI = {
     actual: 'adjust.actual',
     save: 'adjust.save',
     createDialog: 'adjustments.createDialog',
+    // 履歴の無い科目の「補正」導線は初期残高登録へ自動分岐する
+    openingRegisterDialog: 'adjustments.openingRegister.dialog',
+    openingRegisterAmount: 'adjustments.openingRegister.amount',
+    openingRegisterDate: 'adjustments.openingRegister.date',
+    openingRegisterSave: 'adjustments.openingRegister.save',
     rowEdit: 'adjustments.row.edit',
     rowDelete: 'adjustments.row.delete',
     editDialog: 'adjustments.editDialog',
