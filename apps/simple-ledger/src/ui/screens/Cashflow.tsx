@@ -3,21 +3,28 @@
  * 取り置き資金（取り置き枠）の管理を行う。
  */
 import { useMemo, useState } from 'react';
-import { TextInput } from '@snishi/foundation/ui/Field';
+import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
-import { ConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
+import { ConfirmDialog, Modal } from '../overlays';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet } from '../../domain/accounting';
-import { cashDeltaOfEntry, liquidAssetTotal, projectCashflow } from '../../domain/cashflow';
+import {
+  cashDeltaOfEntry,
+  liquidAssetTotal,
+  nextRepaymentDate,
+  projectCashflow,
+} from '../../domain/cashflow';
 import { continuousCostEntries } from '../../domain/continuousCost';
 import { reserveBalances } from '../../domain/reserve';
 import { addMonthsToDate } from '../../domain/allocation';
-import { todayLocal } from '../../util/time';
-import type { CashflowSchedule, ReserveItem } from '../../domain/types';
+import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../../domain/constants';
+import { newId } from '../../domain/ids';
+import { nowIso, todayLocal } from '../../util/time';
+import type { Account, CashflowSchedule, ReserveItem } from '../../domain/types';
 import { ReserveSheet } from '../ReserveSheet';
 import { Money } from '../money';
 import { TrendChart, type TrendPoint } from '../components/TrendChart';
-import { t } from '../../i18n';
+import { errorText, t } from '../../i18n';
 import { UI } from '../../ui-contract';
 
 function shortDateLabel(date: string): string {
@@ -34,6 +41,7 @@ export function Cashflow() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [pendingSchedule, setPendingSchedule] = useState<CashflowSchedule | null>(null);
   const [pendingReserve, setPendingReserve] = useState<ReserveItem | null>(null);
+  const [repayFor, setRepayFor] = useState<{ account: Account; balance: number } | null>(null);
 
   const currency = ledger?.settings.currency ?? 'JPY';
 
@@ -118,6 +126,7 @@ export function Cashflow() {
         const nextDue = related.map((s) => s.dueDate).sort()[0];
         return {
           id: a.id,
+          account: a,
           name: a.name,
           count: related.length,
           remaining,
@@ -216,6 +225,15 @@ export function Cashflow() {
                 <div className="list__sub">
                   {t('cashflow.debtBalance')}: <Money amount={l.balance} currency={currency} />
                 </div>
+                {l.account.repaymentAccountId !== undefined &&
+                l.account.repaymentDay !== undefined ? (
+                  <div className="list__sub">
+                    {t('cashflow.repaySettingsLine', {
+                      account: accountName(l.account.repaymentAccountId),
+                      day: l.account.repaymentDay,
+                    })}
+                  </div>
+                ) : null}
                 {l.count > 0 ? (
                   <div className="list__sub">
                     {t('cashflow.nextDue')}: {l.nextDue ?? '—'}・
@@ -226,6 +244,16 @@ export function Cashflow() {
                   <div className="list__sub amount--neg">{t('cashflow.debtNoPlanHint')}</div>
                 )}
               </div>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                style={{ minHeight: 36 }}
+                onClick={() => setRepayFor({ account: l.account, balance: l.balance })}
+                data-ui={UI.cashflow.repayAdd}
+              >
+                <Icon name="add" size={16} />
+                {t('cashflow.repayAdd')}
+              </button>
             </li>
           ))}
         </ul>
@@ -380,6 +408,14 @@ export function Cashflow() {
         />
       ) : null}
 
+      {repayFor ? (
+        <RepaymentScheduleSheet
+          account={repayFor.account}
+          balance={repayFor.balance}
+          onClose={() => setRepayFor(null)}
+        />
+      ) : null}
+
       {pendingSchedule ? (
         <ConfirmDialog
           title={t('cashflow.deleteSchedule')}
@@ -410,5 +446,130 @@ export function Cashflow() {
         />
       ) : null}
     </section>
+  );
+}
+
+/**
+ * カード・ローンの返済予定を 1 件作るシート。
+ * 勘定科目の返済設定（返済口座・毎月の返済日）が既定値になる。金額の既定はいまの残高（全額）。
+ * 保存されるのは予定 CF（planned）で、支払日に「実績にする」で 借方 負債 / 貸方 返済口座 の仕訳になる。
+ */
+function RepaymentScheduleSheet({
+  account,
+  balance,
+  onClose,
+}: {
+  account: Account;
+  balance: number;
+  onClose: () => void;
+}) {
+  const { ledger, saveSchedules } = useLedger();
+  const accounts = ledger?.accounts ?? [];
+  const today = todayLocal();
+
+  const fromOptions = accounts
+    .filter((a) => a.role === 'daily-asset' && (!a.archived || a.id === account.repaymentAccountId))
+    .map((a) => ({ value: a.id, label: a.name }));
+  const [fromAccountId, setFromAccountId] = useState(
+    account.repaymentAccountId ?? fromOptions[0]?.value ?? '',
+  );
+  const [date, setDate] = useState(
+    account.repaymentDay !== undefined ? nextRepaymentDate(today, account.repaymentDay) : today,
+  );
+  const [amountText, setAmountText] = useState(balance > 0 ? String(balance) : '');
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit() {
+    if (submitting) return;
+    const amount = amountText === '' ? 0 : Number.parseInt(amountText, 10);
+    if (!Number.isInteger(amount) || amount < 1 || fromAccountId === '') return;
+    setSubmitting(true);
+    setError(undefined);
+    const ts = nowIso();
+    try {
+      await saveSchedules([
+        {
+          id: newId(),
+          title: t('cashflow.repayScheduleTitle', { name: account.name }),
+          dueDate: date,
+          amount,
+          direction: 'outflow',
+          accountId: fromAccountId,
+          counterAccountId: account.id,
+          source: account.role === 'payment-liability' ? 'credit-card' : 'manual',
+          status: 'planned',
+          managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
+          createdAt: ts,
+          updatedAt: ts,
+        },
+      ]);
+      onClose();
+    } catch (e) {
+      setError(errorText(e));
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={t('cashflow.repayTitle')}
+      onClose={onClose}
+      dismissMode="if-clean"
+      dataUi={UI.cashflow.repaySheet}
+      footer={
+        <>
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={submit}
+            disabled={submitting || amountText === '' || fromAccountId === ''}
+            data-ui={UI.cashflow.repaySave}
+          >
+            {t('common.save')}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <p className="field__hint">{t('cashflow.repayIntro', { name: account.name })}</p>
+        {account.repaymentAccountId === undefined || account.repaymentDay === undefined ? (
+          <p className="field__hint">{t('cashflow.repaySettingsHint')}</p>
+        ) : null}
+        {error ? (
+          <div className="field__error" role="alert">
+            <Icon name="alert" size={14} />
+            {error}
+          </div>
+        ) : null}
+        <SelectInput
+          label={t('cashflow.repayFrom')}
+          value={fromAccountId}
+          onChange={setFromAccountId}
+          options={fromOptions}
+          dataUi={UI.cashflow.repayFrom}
+        />
+        <TextInput
+          label={t('cashflow.repayDate')}
+          type="date"
+          required
+          value={date}
+          onChange={setDate}
+          dataUi={UI.cashflow.repayDate}
+        />
+        <TextInput
+          label={t('cashflow.repayAmount')}
+          required
+          inputMode="numeric"
+          value={amountText}
+          onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
+          hint={t('cashflow.repayAmountHint')}
+          dataUi={UI.cashflow.repayAmount}
+        />
+      </div>
+    </Modal>
   );
 }

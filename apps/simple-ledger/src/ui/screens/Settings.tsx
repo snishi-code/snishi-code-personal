@@ -10,7 +10,7 @@
  */
 import { startTransition, useEffect, useRef, useState } from 'react';
 import { useToast } from '@snishi/foundation/ui/toast';
-import { ConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
+import { ConfirmDialog } from '../overlays';
 import { TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
@@ -39,7 +39,14 @@ function importErrorMessage(outcome: Exclude<ImportOutcome, { kind: 'ok' | 'revi
   }
 }
 
-export function Settings({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
+export function Settings({
+  onNavigate,
+  onOpenOnboarding,
+}: {
+  onNavigate: (screen: Screen) => void;
+  /** 初期残高の一括登録シートを開く（初回オンボーディングの再表示導線）。 */
+  onOpenOnboarding: () => void;
+}) {
   const {
     ledger,
     exportJson,
@@ -186,6 +193,20 @@ export function Settings({ onNavigate }: { onNavigate: (screen: Screen) => void 
           />
           <p className="field__hint" style={{ marginTop: 6 }}>
             {t('settings.importDesc')}
+          </p>
+        </div>
+        <div>
+          <button
+            type="button"
+            className="btn btn--block"
+            onClick={onOpenOnboarding}
+            data-ui={UI.settings.onboardingOpen}
+          >
+            <Icon name="restore" size={18} />
+            {t('settings.onboardingOpen')}
+          </button>
+          <p className="field__hint" style={{ marginTop: 6 }}>
+            {t('onboarding.dateHint')}
           </p>
         </div>
       </div>

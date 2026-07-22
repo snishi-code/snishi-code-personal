@@ -37,6 +37,15 @@ export function accountBalance(
 }
 
 /** [from, to] の両端を含むフィルタ。未指定の端は無制限。 */
+/**
+ * 実仕訳にこの科目の行が 1 つでもあるか。
+ * 「補正」導線の分岐に使う: 履歴が全く無い科目への実残高入力は、補正（差分が収入/費用扱い）
+ * ではなく初期残高（開始残高）として登録する。残高がたまたま 0 の科目（履歴あり）は補正のまま。
+ */
+export function accountHasEntries(entries: JournalEntry[], accountId: string): boolean {
+  return entries.some((e) => e.lines.some((l) => l.accountId === accountId));
+}
+
 export function filterByDateRange(
   entries: JournalEntry[],
   from?: string,

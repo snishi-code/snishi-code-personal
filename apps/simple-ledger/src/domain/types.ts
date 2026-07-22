@@ -35,6 +35,14 @@ export interface Account {
   /** アーカイブ済みの科目は新規仕訳の選択肢から外すが、過去仕訳の集計には残る。 */
   archived: boolean;
   note?: string;
+  /**
+   * 返済設定（負債科目のみ: payment-liability / other-liability）。
+   * 毎月の返済元となる資金口座（role: daily-asset）。資金繰り画面の返済予定作成で既定値になる。
+   * 予定の自動生成はしない（予定 CF は明示登録・実績化のまま）。
+   */
+  repaymentAccountId?: string;
+  /** 毎月の返済日（1〜31）。31 など月に無い日はその月の月末として扱う。 */
+  repaymentDay?: number;
   createdAt: string;
   updatedAt: string;
 }

@@ -2,11 +2,11 @@
  * タグ画面。タグの作成/編集/アーカイブ/削除と、期間内の簡易集計。
  */
 import { useMemo, useState } from 'react';
-import { Modal } from '@snishi/foundation/ui/Modal';
-import { useDirtyGuard } from '@snishi/foundation/ui/useDirtyGuard';
+import { Modal } from '../overlays';
+import { useDirtyGuard } from '../overlays';
 import { TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
-import { ConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
+import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import { aggregateEntryTags } from '../../domain/tags';
 import { monthRange } from '../../domain/accounting';

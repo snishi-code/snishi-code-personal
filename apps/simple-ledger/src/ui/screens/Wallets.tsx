@@ -2,10 +2,10 @@
  * 管理区分（個人用/事業用/家族用）と支払い手段の細目の管理画面。
  */
 import { useState } from 'react';
-import { Modal } from '@snishi/foundation/ui/Modal';
+import { Modal } from '../overlays';
 import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
-import { ConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
+import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import type { AccountInstrument, AccountInstrumentKind } from '../../domain/types';
 import { isInstrumentParentRole } from '../../domain/accountRoles';

@@ -825,6 +825,71 @@ export const ja = {
   'error.disposal.gainCategoryMissing': '売却益の計上先（その他収入）が見つかりません。',
   'error.fixedAsset.expenseCategory': '継続コストの計上先の費用カテゴリを選んでください。',
   'error.fixedAsset.invalidAccount': '固定資産の科目が不正です。',
+
+  // 戻る操作（dirty guard・終了確認）
+  'guard.discardTitle': '変更を破棄しますか？',
+  'guard.discardBody': '入力した内容は保存されません。',
+  'guard.discardConfirm': '破棄する',
+  'guard.discardCancel': '編集を続ける',
+  'exit.confirmTitle': 'アプリを終了しますか？',
+  'exit.confirmBody': 'データは端末内に保存されています。次回も続きから使えます。',
+  'exit.confirmLabel': '終了する',
+
+  // 履歴の無い既存科目への初期残高登録（勘定科目画面の補正導線から自動分岐）
+  'opening.registerTitle': '初期残高を登録（{name}）',
+  'opening.registerIntro':
+    'この科目にはまだ記録がありません。いまの実残高は補正（差額が収入/支出扱い）ではなく、初期残高（開始残高）として登録します。',
+  'opening.registerSave': '初期残高を登録',
+
+  // 返済設定（負債の勘定科目）と資金繰りの返済予定
+  'accounts.repaymentAccount': '返済口座',
+  'accounts.repaymentDay': '毎月の返済日',
+  'accounts.repaymentUnset': '未設定',
+  'accounts.repaymentHint': '設定すると、資金繰り画面の返済予定づくりで既定値になります。',
+  'accounts.repaymentDayHint': '1〜31。31 など月に無い日は月末扱いになります。',
+  'error.account.repaymentOnlyLiability':
+    '返済口座・返済日はカード・未払 / ローンの科目にのみ設定できます。',
+  'error.account.repaymentDayInvalid': '返済日は 1〜31 で入力してください。',
+  'cashflow.repayAdd': '返済予定を追加',
+  'cashflow.repayTitle': '返済予定を追加',
+  'cashflow.repayIntro':
+    '返済口座から「{name}」への返済予定を作ります。支払日が来たら「実績にする」で仕訳になります。',
+  'cashflow.repayAmount': '返済額',
+  'cashflow.repayAmountHint': '既定はいまの残高（全額）です。請求額に合わせて変更できます。',
+  'cashflow.repayFrom': '返済口座',
+  'cashflow.repayDate': '支払日',
+  'cashflow.repaySettingsHint':
+    '勘定科目（カード・ローン）の編集で返済口座と毎月の返済日を設定すると、ここに既定値が入ります。',
+  'cashflow.repaySettingsLine': '返済口座: {account}・毎月{day}日',
+  'cashflow.repayScheduleTitle': '{name}の返済',
+
+  // 継続コストの移行登録（初期残高）
+  'monthlyCost.migrateAdd': '移行登録（初期残高）',
+  'monthlyCost.migrateTitle': '継続コストを移行登録',
+  'monthlyCost.migrateIntro':
+    'すでに持っている継続コスト（PC・年払い保険など）を、いま残っている価値と残り月数で登録します。残っている価値は開始残高（初期残高）として計上され、収入や支出にはなりません。',
+  'monthlyCost.migrateName': '対象の名前',
+  'monthlyCost.migrateAmount': '残っている価値',
+  'monthlyCost.migrateAmountHint': '取得額ではなく、まだ費用にしていない残りぶんの金額。',
+  'monthlyCost.migrateMonths': '残り月数',
+  'monthlyCost.migrateMonthsHint': '残っている価値を何か月かけて費用にしていくか。',
+  'monthlyCost.migrateStartMonth': '認識開始月',
+  'monthlyCost.migrateRenewHint':
+    '更新や次回の支払いが来たら、ホームの支出入力から「継続コスト化」で登録してください（この登録は今回ぶんのみ）。',
+
+  // 初期残高の一括登録（初回起動時に自動表示・設定から再表示可能）
+  'onboarding.title': 'はじめに：いまの残高を登録',
+  'onboarding.intro':
+    '手元の現金や口座の残高を入れると、今日から収支と資産を追えます。金額は空欄のままでもかまいません（あとから登録できます）。',
+  'onboarding.assetSection': '資産（いまある残高）',
+  'onboarding.liabilitySection': '負債（カード未払・借入）',
+  'onboarding.dateLabel': '基準日',
+  'onboarding.dateHint': 'この日付時点の残高（初期残高）として登録します。',
+  'onboarding.amountPlaceholder': '未入力はスキップ',
+  'onboarding.save': '登録する',
+  'onboarding.skip': 'あとで設定',
+  'onboarding.laterHint': 'このシートは「設定 > 初期残高の一括登録」からいつでも開けます。',
+  'settings.onboardingOpen': '初期残高の一括登録',
 } as const;
 
 export type MessageKey = keyof typeof ja;

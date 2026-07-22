@@ -153,6 +153,22 @@ export function horizonEnd(today: string, months: number): string {
 }
 
 /**
+ * 「毎月 day 日」の次回返済日（today より後の最初の該当日）。
+ * 31 など月に無い日はその月の月末へ丸める（勘定科目の repaymentDay と同じ約束）。
+ */
+export function nextRepaymentDate(today: string, day: number): string {
+  const clampToMonth = (ym: string): string => {
+    const [y, m] = ym.split('-');
+    const lastDay = new Date(Number.parseInt(y ?? '0', 10), Number.parseInt(m ?? '0', 10), 0)
+      .getDate();
+    return `${ym}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
+  };
+  const inThisMonth = clampToMonth(monthOf(today));
+  if (inThisMonth > today) return inThisMonth;
+  return clampToMonth(addMonths(monthOf(today), 1));
+}
+
+/**
  * 1 件の仕訳が「流動資産（現金など）」に与える純増減を求める。
  * 借方で流動資産が増えれば +、貸方で減れば −。流動でない明細（費用/収入/負債/按分中資産）は 0。
  * これにより、未来日付の通常仕訳（ホームの収入/支出/振替）をそのまま CF 投影に取り込める。

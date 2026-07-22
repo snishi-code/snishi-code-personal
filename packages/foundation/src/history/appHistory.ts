@@ -12,6 +12,13 @@ export interface AppHistoryConfig {
   /** 終了確認 UI を表示する */
   showExitConfirm: () => void;
   isExitConfirmOpen: () => boolean;
+  /**
+   * opt-in: overlay / 編集モードで拾われなかった Back を「消費」したいとき true を返す。
+   * true を返すと現在 view を積み直して Back を吸収し、view 遷移も exit guard (終了確認) もしない。
+   * 未指定 (既定) は false 相当で、従来どおり exit guard → 通常 view 遷移へ進む
+   * (全アプリの既存挙動を変えないための opt-in)。
+   */
+  consumeUnhandledBack?: () => boolean;
 }
 
 export interface AppHistory {
@@ -67,8 +74,15 @@ export function createAppHistory(cfg: AppHistoryConfig): AppHistory {
       reconsume();
       return;
     }
+    // ⑤ opt-in: overlay / 編集で拾われなかった Back を消費する (現在 view を積み直して吸収)。
+    //    rounds 等で「戻る」を画面遷移/アプリ終了に使わせない方針。view 遷移も終了確認もしない。
+    //    overlay / 編集の Back (③④) は上で先に処理済みなので、それらは従来どおり閉じられる。
+    if (cfg.consumeUnhandledBack?.() === true) {
+      reconsume();
+      return;
+    }
     const st = (e.state ?? {}) as HistoryState;
-    // ⑤ guard 到達 = initialView で Back。guard 上に留まると次の Back で確認なしに
+    // ⑥ guard 到達 = initialView で Back。guard 上に留まると次の Back で確認なしに
     //    履歴外へ抜けるため、initialView を積み直してから終了確認を出す。
     if (st.__exitGuard) {
       history.pushState({ view: cfg.initialView }, '', '');
@@ -77,7 +91,7 @@ export function createAppHistory(cfg: AppHistoryConfig): AppHistory {
       cfg.showExitConfirm();
       return;
     }
-    // ⑥ 通常 view 遷移。
+    // ⑦ 通常 view 遷移。
     const v = typeof st.view === 'string' && st.view ? st.view : cfg.initialView;
     current = v;
     cfg.renderView(v);

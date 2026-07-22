@@ -1,9 +1,9 @@
 /*
- * PWA E2E（凍結 SW ポリシー版）。本番ビルド（preview）に対して:
+ * PWA E2E（標準ライフサイクル + 使用中乗っ取り防止の SW）。本番ビルド（preview）に対して:
  *  - manifest が installable な内容で読める
- *  - SW が登録・activate される（凍結ポリシーのため clients.claim は呼ばれない →
+ *  - SW が登録・activate される（clients.claim は呼ばない設計 →
  *    初回ロードのページは非制御。リロード後のページから制御される）
- *  - オフラインでも app shell が起動する（cache-first の検証）
+ *  - オフラインでも app shell が起動する（navigation network-first の cache fallback）
  */
 import { test, expect, type Page } from '@playwright/test';
 
@@ -35,7 +35,7 @@ async function forceProdEnv(page: Page) {
 }
 
 async function waitForControlled(page: Page) {
-  // 凍結 SW: claim を呼ばないため、activate 済み SW の制御下に入るには再読込が必要。
+  // claim を呼ばない設計のため、activate 済み SW の制御下に入るには再読込が必要。
   await page.goto('./');
   await page.evaluate(async () => {
     await navigator.serviceWorker.ready;
@@ -61,7 +61,7 @@ test('manifest が installable な内容で読める', async ({ page }) => {
   expect(sizes).toContain('512x512');
 });
 
-test('SW が登録・activate される（凍結ポリシー: 初回ページは claim されない）', async ({
+test('SW が登録・activate される（使用中乗っ取り防止: 初回ページは claim されない）', async ({
   page,
 }) => {
   await forceProdEnv(page);
@@ -71,7 +71,7 @@ test('SW が登録・activate される（凍結ポリシー: 初回ページは
     return reg.active ? reg.scope : null;
   });
   expect(scope).toBeTruthy();
-  // 凍結 SW は clients.claim() を呼ばない → 初回ロードのこのページは非制御のまま
+  // SW は clients.claim() を呼ばない → 初回ロードのこのページは非制御のまま
   const firstLoadControlled = await page.evaluate(() => navigator.serviceWorker.controller !== null);
   expect(firstLoadControlled).toBe(false);
   // 再読込後のページは制御下に入る
@@ -83,7 +83,7 @@ test('SW が登録・activate される（凍結ポリシー: 初回ページは
 
 test('SW activate が他アプリの cache を削除しない (M1: prefix 限定削除)', async ({ page }) => {
   // 検証方針: SW activate の前に外部キャッシュを seed し、activate 完了後も生存することを確認する。
-  // 凍結 SW は skipWaiting/claim を呼ばないため activate 済みの SW を再発火させることはできない。
+  // SW は skipWaiting/claim を呼ばないため activate 済みの SW を再発火させることはできない。
   // そこで「SW が activate される前に seed → ready を待って生存確認」という手順を取る。
   // addInitScript で SW register より前に foreign cache を作成し、ready 後に has() で確認する。
   await page.addInitScript(() => {
@@ -114,7 +114,10 @@ test('data-env が prod 以外のとき SW は登録されない (M2: 明示 pro
   expect(hasRegistration).toBe(false);
 });
 
-test('オフラインでも app shell が起動する（凍結 SW の cache-first）', async ({ page, context }) => {
+test('オフラインでも app shell が起動する（network-first 失敗時の cache fallback）', async ({
+  page,
+  context,
+}) => {
   await forceProdEnv(page);
   await waitForControlled(page);
   await expect(page.locator(ui('dashboard.view'))).toBeVisible();

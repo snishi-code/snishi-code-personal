@@ -9,10 +9,10 @@
  * `（アーカイブ）` 付きへ退避してから保存する。
  */
 import { useState } from 'react';
-import { Modal } from '@snishi/foundation/ui/Modal';
-import { useDirtyGuard } from '@snishi/foundation/ui/useDirtyGuard';
-import { ConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
-import { TextArea, TextInput } from '@snishi/foundation/ui/Field';
+import { Modal } from '../overlays';
+import { useDirtyGuard } from '../overlays';
+import { ConfirmDialog } from '../overlays';
+import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { useLedger } from '../../state/store';
 import type { Account } from '../../domain/types';
 import { findAccountNameConflicts, planArchiveRenames } from '../../domain/accountNames';
@@ -40,9 +40,14 @@ export function AccountSheet({
   const createRole = box?.createRole;
 
   const [name, setName] = useState(existing?.name ?? '');
-  const [note, setNote] = useState(existing?.note ?? '');
+  // メモ入力欄は撤去済みだが、既存の note は保存時にそのまま引き継ぐ（消さない）。
+  const [note] = useState(existing?.note ?? '');
   const [openingAmountText, setOpeningAmountText] = useState('');
   const [openingDate, setOpeningDate] = useState(todayLocal());
+  const [repaymentAccountId, setRepaymentAccountId] = useState(existing?.repaymentAccountId ?? '');
+  const [repaymentDayText, setRepaymentDayText] = useState(
+    existing?.repaymentDay !== undefined ? String(existing.repaymentDay) : '',
+  );
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
   const [archiveRename, setArchiveRename] = useState<{ name: string; renamed: string } | null>(
@@ -51,6 +56,16 @@ export function AccountSheet({
 
   // 初期残高は新規作成 × 資産/負債の箱のみ（収入/支出/聖域には出さない）。
   const showOpening = !existing && !!box?.opening;
+  // 返済設定は負債（カード・未払 / ローン）の編集時のみ（新規は作成後に編集で設定する）。
+  const showRepayment =
+    !!existing && (existing.role === 'payment-liability' || existing.role === 'other-liability');
+  const repaymentOptions = [
+    { value: '', label: t('accounts.repaymentUnset') },
+    ...accounts
+      .filter((a) => a.role === 'daily-asset' && (!a.archived || a.id === repaymentAccountId))
+      .map((a) => ({ value: a.id, label: a.name })),
+  ];
+  const repaymentDay = repaymentDayText === '' ? null : Number.parseInt(repaymentDayText, 10);
   const openingAmount =
     openingAmountText === ''
       ? null
@@ -85,6 +100,8 @@ export function AccountSheet({
           role,
           archived: existing?.archived ?? false,
           ...(note.trim() !== '' ? { note: note.trim() } : {}),
+          ...(showRepayment && repaymentAccountId !== '' ? { repaymentAccountId } : {}),
+          ...(showRepayment && repaymentDay !== null ? { repaymentDay } : {}),
           createdAt: existing?.createdAt ?? ts,
           updatedAt: ts,
         };
@@ -112,6 +129,14 @@ export function AccountSheet({
       setError(t('opening.error.amount'));
       return;
     }
+    if (
+      showRepayment &&
+      repaymentDayText !== '' &&
+      (repaymentDay === null || !Number.isInteger(repaymentDay) || repaymentDay < 1 || repaymentDay > 31)
+    ) {
+      setError(t('error.account.repaymentDayInvalid'));
+      return;
+    }
     // 内訳名の重複を保存前に判定する（有効と衝突 → エラー、アーカイブと衝突 → 承認ダイアログ）。
     const conflicts = findAccountNameConflicts(accounts, trimmed, existing?.id);
     if (conflicts.active) {
@@ -126,7 +151,14 @@ export function AccountSheet({
     await doSave(false);
   }
 
-  const snapshot = JSON.stringify({ name, note, openingAmountText, openingDate });
+  const snapshot = JSON.stringify({
+    name,
+    note,
+    openingAmountText,
+    openingDate,
+    repaymentAccountId,
+    repaymentDayText,
+  });
   const [initialSnapshot] = useState(snapshot);
   const dirty = snapshot !== initialSnapshot;
   const { requestClose, discardConfirm } = useDirtyGuard(dirty, onClose);
@@ -175,7 +207,27 @@ export function AccountSheet({
           }}
           error={error}
         />
-        <TextArea label={t('accounts.note')} value={note} onChange={setNote} />
+        {/* メモ欄は UI から撤去（2026-07-23 作者指示）。既存メモは note state 経由で保持される。 */}
+        {showRepayment ? (
+          <>
+            <SelectInput
+              label={t('accounts.repaymentAccount')}
+              value={repaymentAccountId}
+              onChange={setRepaymentAccountId}
+              options={repaymentOptions}
+              hint={t('accounts.repaymentHint')}
+              dataUi={UI.accounts.repaymentAccount}
+            />
+            <TextInput
+              label={t('accounts.repaymentDay')}
+              inputMode="numeric"
+              value={repaymentDayText}
+              onChange={(v) => setRepaymentDayText(v.replace(/[^\d]/g, ''))}
+              hint={t('accounts.repaymentDayHint')}
+              dataUi={UI.accounts.repaymentDay}
+            />
+          </>
+        ) : null}
         {showOpening ? (
           <>
             <TextInput

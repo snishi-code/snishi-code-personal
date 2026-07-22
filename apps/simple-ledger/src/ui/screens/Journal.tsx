@@ -6,7 +6,7 @@
  */
 import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
-import { ConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
+import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import { AdjustmentEditSheet } from '../AdjustmentSheet';
 import { OpeningEditSheet } from '../OpeningSheet';

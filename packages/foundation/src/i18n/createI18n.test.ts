@@ -1,3 +1,4 @@
+// @vitest-environment node
 // createI18n: 補間と未知キーの fail-visible を検証する。
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createI18n } from './createI18n';

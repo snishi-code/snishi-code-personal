@@ -149,11 +149,21 @@ export const UI = {
     openingAmount: 'accounts.openingAmount',
     openingDate: 'accounts.openingDate',
     archiveRenameConfirm: 'accounts.archiveRenameConfirm',
+    // 返済設定（負債の編集シートのみ）
+    repaymentAccount: 'accounts.repaymentAccount',
+    repaymentDay: 'accounts.repaymentDay',
   },
   allocations: {
     view: 'allocations.view',
     list: 'allocations.list',
     showCompleted: 'allocations.showCompleted',
+    // 移行登録（初期残高）: 既存の継続コストを開始残高として登録するシート
+    migrateAdd: 'allocations.migrate.add',
+    migrateSheet: 'allocations.migrate.sheet',
+    migrateName: 'allocations.migrate.name',
+    migrateAmount: 'allocations.migrate.amount',
+    migrateMonths: 'allocations.migrate.months',
+    migrateSave: 'allocations.migrate.save',
     edit: 'allocations.edit',
     editDialog: 'allocations.editDialog',
     editName: 'allocations.edit.name',
@@ -205,6 +215,11 @@ export const UI = {
     actual: 'adjust.actual',
     save: 'adjust.save',
     createDialog: 'adjustments.createDialog',
+    // 履歴の無い科目の「補正」導線は初期残高登録へ自動分岐する
+    openingRegisterDialog: 'adjustments.openingRegister.dialog',
+    openingRegisterAmount: 'adjustments.openingRegister.amount',
+    openingRegisterDate: 'adjustments.openingRegister.date',
+    openingRegisterSave: 'adjustments.openingRegister.save',
     rowEdit: 'adjustments.row.edit',
     rowDelete: 'adjustments.row.delete',
     editDialog: 'adjustments.editDialog',
@@ -237,6 +252,13 @@ export const UI = {
     scheduleFlowDestination: 'cashflow.schedule.flow.destination',
     scheduleInstallments: 'cashflow.schedule.installments',
     liabilityList: 'cashflow.liability.list',
+    // カード・ローンの返済予定づくり（負債行から開く）
+    repayAdd: 'cashflow.repay.add',
+    repaySheet: 'cashflow.repay.sheet',
+    repayAmount: 'cashflow.repay.amount',
+    repayDate: 'cashflow.repay.date',
+    repayFrom: 'cashflow.repay.from',
+    repaySave: 'cashflow.repay.save',
     freeTrend: 'cashflow.freeTrend',
     futureList: 'cashflow.future.list',
     advancedToggle: 'cashflow.advanced.toggle',
@@ -256,6 +278,7 @@ export const UI = {
     importJson: 'settings.importJson',
     importFile: 'settings.importFile',
     resetAll: 'settings.resetAll',
+    onboardingOpen: 'settings.onboardingOpen',
   },
   nav: {
     home: 'nav.home',
@@ -265,6 +288,17 @@ export const UI = {
   dialog: {
     confirm: 'dialog.confirm',
     cancel: 'dialog.cancel',
+  },
+  // 端末/ブラウザ Back の終了確認（appHistory が管理・オーバーレイ登録簿には載せない）
+  app: {
+    exitConfirm: 'app.exitConfirm',
+  },
+  // 初期残高の一括登録シート（初回起動時に自動表示・設定から再表示可能）
+  onboarding: {
+    view: 'onboarding.view',
+    amount: 'onboarding.amount',
+    save: 'onboarding.save',
+    skip: 'onboarding.skip',
   },
   toast: 'toast',
 } as const;
