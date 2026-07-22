@@ -87,6 +87,8 @@ interface LedgerContextValue {
   createAllocation: (input: Omit<AllocationInput, 'deferredAccountId'>) => Promise<void>;
   createMonthlyCost: (input: MonthlyCostInput) => Promise<void>;
   createContinuousCost: (input: ContinuousCostInput) => Promise<void>;
+  /** 既存の継続コストを開始残高として移行登録する（funding 貸方 = 開始残高）。 */
+  createContinuousCostOpening: (input: repo.ContinuousCostOpeningInput) => Promise<void>;
   saveMonthlyCost: (item: MonthlyCostItem) => Promise<void>;
   removeMonthlyCost: (id: string) => Promise<void>;
   createFixedAssetPurchaseMonthly: (input: FixedAssetPurchaseMonthlyInput) => Promise<void>;
@@ -300,6 +302,22 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     async (input) => {
       try {
         await repo.createContinuousCost(input);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const createContinuousCostOpening = useCallback<
+    LedgerContextValue['createContinuousCostOpening']
+  >(
+    async (input) => {
+      try {
+        await repo.createContinuousCostFromOpening(input);
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
@@ -772,6 +790,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       createAllocation,
       createMonthlyCost,
       createContinuousCost,
+      createContinuousCostOpening,
       saveMonthlyCost,
       removeMonthlyCost,
       createFixedAssetPurchaseMonthly,
@@ -819,6 +838,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       createAllocation,
       createMonthlyCost,
       createContinuousCost,
+      createContinuousCostOpening,
       saveMonthlyCost,
       removeMonthlyCost,
       createFixedAssetPurchaseMonthly,

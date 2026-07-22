@@ -40,6 +40,7 @@ export function Allocations() {
   const [pendingDelete, setPendingDelete] = useState<MonthlyCostItem | null>(null);
   const [editing, setEditing] = useState<MonthlyCostItem | null>(null);
   const [disposing, setDisposing] = useState<MonthlyCostItem | null>(null);
+  const [migrating, setMigrating] = useState(false);
   const { year, month } = currentYearMonth();
   const currentYm = `${year}-${String(month).padStart(2, '0')}`;
   const currency = ledger?.settings.currency ?? 'JPY';
@@ -88,6 +89,17 @@ export function Allocations() {
       <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
         {t('monthlyCost.intro')}
       </p>
+
+      <button
+        type="button"
+        className="btn btn--ghost"
+        style={{ minHeight: 36, marginBottom: 'var(--space-3)' }}
+        onClick={() => setMigrating(true)}
+        data-ui={UI.allocations.migrateAdd}
+      >
+        <Icon name="add" size={16} />
+        {t('monthlyCost.migrateAdd')}
+      </button>
 
       <label
         style={{
@@ -241,6 +253,8 @@ export function Allocations() {
 
       {editing ? <MonthlyCostEditSheet item={editing} onClose={() => setEditing(null)} /> : null}
 
+      {migrating ? <ContinuousCostMigrateSheet onClose={() => setMigrating(false)} /> : null}
+
       {disposing ? (
         <MonthlyCostDisposeSheet
           item={disposing}
@@ -249,6 +263,124 @@ export function Allocations() {
         />
       ) : null}
     </section>
+  );
+}
+
+/**
+ * 移行登録（初期残高）シート。すでに持っている継続コスト対象を「残っている価値 + 残り月数」で
+ * 登録する。残っている価値は開始残高(equity)を貸方にした funding 仮想仕訳で計上され、
+ * 収入・支出・資金移動にはならない（通常の勘定科目の初期残高と同じ会計意味）。
+ */
+function ContinuousCostMigrateSheet({ onClose }: { onClose: () => void }) {
+  const { ledger, createContinuousCostOpening } = useLedger();
+  const accounts = ledger?.accounts ?? [];
+
+  const expenseOptions = accounts
+    .filter((a) => a.role === 'expense-category' && !a.archived)
+    .map((a) => ({ value: a.id, label: a.name }));
+
+  const [name, setName] = useState('');
+  const [amountText, setAmountText] = useState('');
+  const [monthsText, setMonthsText] = useState('');
+  const [startMonth, setStartMonth] = useState(() => {
+    const { year, month } = currentYearMonth();
+    return `${year}-${String(month).padStart(2, '0')}`;
+  });
+  const [expenseAccountId, setExpenseAccountId] = useState(expenseOptions[0]?.value ?? '');
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit() {
+    if (submitting) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await createContinuousCostOpening({
+        name: name.trim(),
+        amount: amountText === '' ? 0 : Number.parseInt(amountText, 10),
+        costMonths: monthsText === '' ? 0 : Number.parseInt(monthsText, 10),
+        startMonth: startMonth.trim(),
+        expenseAccountId,
+      });
+      onClose();
+    } catch (e) {
+      setError(errorText(e));
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={t('monthlyCost.migrateTitle')}
+      onClose={onClose}
+      dismissMode="if-clean"
+      dataUi={UI.allocations.migrateSheet}
+      footer={
+        <>
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={submit}
+            disabled={submitting || name.trim() === '' || amountText === '' || monthsText === ''}
+            data-ui={UI.allocations.migrateSave}
+          >
+            {t('common.save')}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <p className="field__hint">{t('monthlyCost.migrateIntro')}</p>
+        {error ? (
+          <div className="field__error" role="alert">
+            <Icon name="alert" size={14} />
+            {error}
+          </div>
+        ) : null}
+        <TextInput
+          label={t('monthlyCost.migrateName')}
+          required
+          value={name}
+          onChange={setName}
+          dataUi={UI.allocations.migrateName}
+        />
+        <TextInput
+          label={t('monthlyCost.migrateAmount')}
+          required
+          inputMode="numeric"
+          value={amountText}
+          onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
+          hint={t('monthlyCost.migrateAmountHint')}
+          dataUi={UI.allocations.migrateAmount}
+        />
+        <TextInput
+          label={t('monthlyCost.migrateMonths')}
+          required
+          inputMode="numeric"
+          value={monthsText}
+          onChange={(v) => setMonthsText(v.replace(/[^\d]/g, ''))}
+          hint={t('monthlyCost.migrateMonthsHint')}
+          dataUi={UI.allocations.migrateMonths}
+        />
+        <TextInput
+          label={t('monthlyCost.migrateStartMonth')}
+          required
+          value={startMonth}
+          placeholder="YYYY-MM"
+          onChange={setStartMonth}
+        />
+        <SelectInput
+          label={t('monthlyCost.expenseCategory')}
+          value={expenseAccountId}
+          onChange={setExpenseAccountId}
+          options={expenseOptions}
+        />
+        <p className="field__hint">{t('monthlyCost.migrateRenewHint')}</p>
+      </div>
+    </Modal>
   );
 }
 

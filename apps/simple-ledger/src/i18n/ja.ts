@@ -835,6 +835,42 @@ export const ja = {
   'exit.confirmBody': 'データは端末内に保存されています。次回も続きから使えます。',
   'exit.confirmLabel': '終了する',
 
+  // 返済設定（負債の勘定科目）と資金繰りの返済予定
+  'accounts.repaymentAccount': '返済口座',
+  'accounts.repaymentDay': '毎月の返済日',
+  'accounts.repaymentUnset': '未設定',
+  'accounts.repaymentHint': '設定すると、資金繰り画面の返済予定づくりで既定値になります。',
+  'accounts.repaymentDayHint': '1〜31。31 など月に無い日は月末扱いになります。',
+  'error.account.repaymentOnlyLiability':
+    '返済口座・返済日はカード・未払 / ローンの科目にのみ設定できます。',
+  'error.account.repaymentDayInvalid': '返済日は 1〜31 で入力してください。',
+  'cashflow.repayAdd': '返済予定を追加',
+  'cashflow.repayTitle': '返済予定を追加',
+  'cashflow.repayIntro':
+    '返済口座から「{name}」への返済予定を作ります。支払日が来たら「実績にする」で仕訳になります。',
+  'cashflow.repayAmount': '返済額',
+  'cashflow.repayAmountHint': '既定はいまの残高（全額）です。請求額に合わせて変更できます。',
+  'cashflow.repayFrom': '返済口座',
+  'cashflow.repayDate': '支払日',
+  'cashflow.repaySettingsHint':
+    '勘定科目（カード・ローン）の編集で返済口座と毎月の返済日を設定すると、ここに既定値が入ります。',
+  'cashflow.repaySettingsLine': '返済口座: {account}・毎月{day}日',
+  'cashflow.repayScheduleTitle': '{name}の返済',
+
+  // 継続コストの移行登録（初期残高）
+  'monthlyCost.migrateAdd': '移行登録（初期残高）',
+  'monthlyCost.migrateTitle': '継続コストを移行登録',
+  'monthlyCost.migrateIntro':
+    'すでに持っている継続コスト（PC・年払い保険など）を、いま残っている価値と残り月数で登録します。残っている価値は開始残高（初期残高）として計上され、収入や支出にはなりません。',
+  'monthlyCost.migrateName': '対象の名前',
+  'monthlyCost.migrateAmount': '残っている価値',
+  'monthlyCost.migrateAmountHint': '取得額ではなく、まだ費用にしていない残りぶんの金額。',
+  'monthlyCost.migrateMonths': '残り月数',
+  'monthlyCost.migrateMonthsHint': '残っている価値を何か月かけて費用にしていくか。',
+  'monthlyCost.migrateStartMonth': '認識開始月',
+  'monthlyCost.migrateRenewHint':
+    '更新や次回の支払いが来たら、ホームの支出入力から「継続コスト化」で登録してください（この登録は今回ぶんのみ）。',
+
   // 初期残高の一括登録（初回起動時に自動表示・設定から再表示可能）
   'onboarding.title': 'はじめに：いまの残高を登録',
   'onboarding.intro':

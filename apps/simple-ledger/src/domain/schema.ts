@@ -46,6 +46,9 @@ export const accountSchema = z
     role: accountRoleSchema,
     archived: z.boolean(),
     note: z.string().max(500).optional(),
+    // 返済設定（負債科目のみ。相互参照の整合はパッケージ superRefine で確認する）。
+    repaymentAccountId: z.string().min(1).optional(),
+    repaymentDay: z.number().int().min(1).max(31).optional(),
     createdAt: isoDateTime,
     updatedAt: isoDateTime,
   })
@@ -335,6 +338,29 @@ export const ledgerExportPackageSchema = z
         );
     });
     const hasAccount = (id: string) => accountType.has(id);
+
+    // 返済設定の相互参照（2 パス目: 全科目 map が揃ってから確認する）。
+    // 返済口座・返済日は負債（カード・未払 / ローン）にのみ許し、返済口座は存在する日常資産。
+    pkg.accounts.forEach((a, i) => {
+      const isLiability = a.role === 'payment-liability' || a.role === 'other-liability';
+      if (a.repaymentAccountId !== undefined) {
+        if (!isLiability)
+          issue(
+            `勘定科目「${a.name}」の返済口座は負債科目（カード・未払 / ローン）にのみ設定できます`,
+            ['accounts', i, 'repaymentAccountId'],
+          );
+        else if (accountRole.get(a.repaymentAccountId) !== 'daily-asset')
+          issue(
+            `勘定科目「${a.name}」の返済口座は存在する日常資産である必要があります`,
+            ['accounts', i, 'repaymentAccountId'],
+          );
+      }
+      if (a.repaymentDay !== undefined && !isLiability)
+        issue(
+          `勘定科目「${a.name}」の返済日は負債科目（カード・未払 / ローン）にのみ設定できます`,
+          ['accounts', i, 'repaymentDay'],
+        );
+    });
 
     // 管理区分 ID は一意。
     const scopeIds = new Set<string>();
@@ -744,7 +770,8 @@ export const ledgerExportPackageSchema = z
           );
       }
 
-      // 資産経由モデルの支払い元(資産化の貸方): 任意。あれば daily-asset または payment-liability。
+      // 資産経由モデルの支払い元(資産化の貸方): 任意。あれば daily-asset / payment-liability /
+      // other-liability / equity（移行の初期登録 = 開始残高を funding の貸方にする）。
       if (mc.paymentSourceAccountId !== undefined) {
         const srcRole = accountRole.get(mc.paymentSourceAccountId);
         if (!accountType.has(mc.paymentSourceAccountId))
@@ -755,10 +782,11 @@ export const ledgerExportPackageSchema = z
         else if (
           srcRole !== 'daily-asset' &&
           srcRole !== 'payment-liability' &&
-          srcRole !== 'other-liability'
+          srcRole !== 'other-liability' &&
+          srcRole !== 'equity'
         )
           issue(
-            `継続コスト「${mc.name}」の paymentSourceAccountId は日常資産・支払用負債・その他負債のいずれかである必要があります`,
+            `継続コスト「${mc.name}」の paymentSourceAccountId は日常資産・支払用負債・その他負債・開始残高(equity)のいずれかである必要があります`,
             at('paymentSourceAccountId'),
           );
       }
