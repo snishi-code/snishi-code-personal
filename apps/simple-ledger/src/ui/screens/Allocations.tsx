@@ -13,6 +13,7 @@ import {
   representativeMonthlyAmount,
 } from '../../domain/monthlyCost';
 import { lastExpenseCategoryId, rememberExpenseCategoryId } from '../../data/localFlags';
+import { sortAccounts } from '../../domain/accountOrder';
 import { disposalOutcome } from '../../domain/assetDisposal';
 import {
   continuousCostDisposalEndMonth,
@@ -279,7 +280,7 @@ function ContinuousCostMigrateSheet({ onClose }: { onClose: () => void }) {
   const { ledger, createContinuousCostOpening } = useLedger();
   const accounts = ledger?.accounts ?? [];
 
-  const expenseOptions = accounts
+  const expenseOptions = sortAccounts(accounts)
     .filter((a) => a.role === 'expense-category' && !a.archived)
     .map((a) => ({ value: a.id, label: a.name }));
 
@@ -573,7 +574,7 @@ function MonthlyCostEditSheet({ item, onClose }: { item: MonthlyCostItem; onClos
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  const expenseOptions = accounts
+  const expenseOptions = sortAccounts(accounts)
     .filter((a) => a.role === 'expense-category' && (!a.archived || a.id === item.expenseAccountId))
     .map((a) => ({ value: a.id, label: a.name }));
 
