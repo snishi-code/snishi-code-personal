@@ -133,6 +133,8 @@ interface LedgerContextValue {
   updateOpening: (input: { id: string; amount: number; date: string }) => Promise<void>;
   deleteOpening: (id: string) => Promise<void>;
   saveAccount: (account: Account, opts?: repo.AccountSaveOptions) => Promise<void>;
+  /** 科目の表示順を保存（並び替え。toast は出さない＝連続操作を妨げない）。 */
+  reorderAccounts: (ids: string[]) => Promise<void>;
   removeAccount: (id: string) => Promise<void>;
   saveSettings: (settings: Settings) => Promise<void>;
   exportJson: () => void;
@@ -676,6 +678,19 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [refresh, toast],
   );
 
+  const reorderAccounts = useCallback<LedgerContextValue['reorderAccounts']>(
+    async (ids) => {
+      try {
+        await repo.reorderAccounts(ids);
+        await refresh();
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
   const removeAccount = useCallback<LedgerContextValue['removeAccount']>(
     async (id) => {
       try {
@@ -817,6 +832,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       updateOpening,
       deleteOpening,
       saveAccount,
+      reorderAccounts,
       removeAccount,
       saveSettings,
       exportJson,
@@ -865,6 +881,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       updateOpening,
       deleteOpening,
       saveAccount,
+      reorderAccounts,
       removeAccount,
       saveSettings,
       exportJson,

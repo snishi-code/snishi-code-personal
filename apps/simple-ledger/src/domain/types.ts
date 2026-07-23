@@ -43,6 +43,8 @@ export interface Account {
   repaymentAccountId?: string;
   /** 毎月の返済日（1〜31）。31 など月に無い日はその月の月末として扱う。 */
   repaymentDay?: number;
+  /** 箱内での表示順（並び替え機能）。未設定は名前順で末尾。 */
+  sortIndex?: number;
   createdAt: string;
   updatedAt: string;
 }

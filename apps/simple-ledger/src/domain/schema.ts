@@ -49,6 +49,8 @@ export const accountSchema = z
     // 返済設定（負債科目のみ。相互参照の整合はパッケージ superRefine で確認する）。
     repaymentAccountId: z.string().min(1).optional(),
     repaymentDay: z.number().int().min(1).max(31).optional(),
+    // 箱内の表示順（並び替え機能）。
+    sortIndex: z.number().int().min(0).optional(),
     createdAt: isoDateTime,
     updatedAt: isoDateTime,
   })

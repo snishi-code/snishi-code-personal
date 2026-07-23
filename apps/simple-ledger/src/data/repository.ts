@@ -395,6 +395,27 @@ export async function upsertAccount(account: Account, opts?: AccountSaveOptions)
   });
 }
 
+/**
+ * 科目の表示順を保存する（並び替えモードの確定）。ids の配列順を sortIndex 0..n として
+ * 該当科目へ書き込む（1 トランザクション）。ids に無い科目の sortIndex は変更しない。
+ */
+export async function reorderAccounts(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const accounts = await getAll<Account>(STORE.accounts);
+  const byId = new Map(accounts.map((a) => [a.id, a] as const));
+  const ts = nowIso();
+  const updated: Account[] = [];
+  ids.forEach((id, i) => {
+    const account = byId.get(id);
+    if (!account) throw new LedgerError('error.adjust.targetNotFound');
+    updated.push({ ...account, sortIndex: i, updatedAt: ts });
+  });
+  await writeWithRevision([STORE.accounts], (t) => {
+    const store = t.objectStore(STORE.accounts);
+    for (const a of updated) store.put(a);
+  });
+}
+
 /** 使用中（仕訳/予定CF/目的別資金から参照中）の科目は削除できない（アーカイブを使う）。fail-closed。 */
 export async function deleteAccount(id: string): Promise<void> {
   const refs = await loadReferencingCollections();

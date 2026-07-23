@@ -55,3 +55,13 @@ export function monthlyCostForMonth(item: MonthlyCostItem, ym: string): number {
 export function totalMonthlyCostForMonth(items: MonthlyCostItem[], ym: string): number {
   return items.reduce((s, it) => s + monthlyCostForMonth(it, ym), 0);
 }
+
+/**
+ * 自動更新（repeatEveryMonths）の無い項目が、指定月までに費用認識を終えたか（残価 0）。
+ * 台帳 UI はこれを「終了」として扱い、有効一覧から自動で外す（自動アーカイブ）。
+ * 自動更新のある項目（毎月のサブスク・3か月ごとの定期イベント等）は false のまま残り続ける。
+ */
+export function isRecognitionFinished(item: MonthlyCostItem, ym: string): boolean {
+  if (item.repeatEveryMonths && item.repeatEveryMonths > 0) return false;
+  return monthsBetween(item.startMonth, ym) >= item.costMonths;
+}

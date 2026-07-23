@@ -835,6 +835,15 @@ export const ja = {
   'exit.confirmBody': 'データは端末内に保存されています。次回も続きから使えます。',
   'exit.confirmLabel': '終了する',
 
+  // 勘定科目の並び替え（箱内・上下ボタン式）
+  'accounts.reorder': '並び替え',
+  'accounts.reorderDone': '並び替えを終了',
+  'accounts.moveUp': '上へ',
+  'accounts.moveDown': '下へ',
+
+  // 継続コストの自動終了（自動更新なし・認識完了 = 残価 0）
+  'monthlyCost.finishedBadge': '終了（残価0）',
+
   // 履歴の無い既存科目への初期残高登録（勘定科目画面の補正導線から自動分岐）
   'opening.registerTitle': '初期残高を登録（{name}）',
   'opening.registerIntro':

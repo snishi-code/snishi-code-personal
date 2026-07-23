@@ -18,6 +18,7 @@
  * 聖域として一覧・追加・編集候補から隠す。
  */
 import type { AccountRole } from '../domain/accountRoles';
+import { compareAccountOrder } from '../domain/accountOrder';
 import type { Account, AccountType } from '../domain/types';
 import type { MessageKey } from '../i18n';
 
@@ -143,6 +144,6 @@ export function groupAccountsByBox(
     box,
     accounts: accounts
       .filter((a) => box.roles.includes(a.role) && (showArchived || !a.archived))
-      .sort((a, b) => a.name.localeCompare(b.name, 'ja')),
+      .sort(compareAccountOrder),
   }));
 }

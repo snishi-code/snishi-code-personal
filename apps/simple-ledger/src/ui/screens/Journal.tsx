@@ -117,12 +117,10 @@ export function Journal({
     const rows = (ledger?.monthlyCostItems ?? [])
       .filter((m) => !accountFilterId || m.expenseAccountId === accountFilterId)
       .map((m) => {
-        const recCredit = m.recognitionCreditAccountId
-          ? accById.get(m.recognitionCreditAccountId)?.name
-          : undefined;
+        // 行の主語は品目名（「継続コスト台帳 → 固定費」だけでは何の計上か分からない）。
         const expName = accById.get(m.expenseAccountId)?.name;
-        const label = recCredit
-          ? `${recCredit} → ${expName ?? '—'}`
+        const label = m.recognitionCreditAccountId
+          ? `${m.name} → ${expName ?? '—'}`
           : t('journal.monthlyCostRow', { name: m.name });
         return { id: m.id, label, amount: monthlyCostForMonth(m, ym!) };
       })

@@ -52,3 +52,15 @@ export function clearOnboardingDone(): void {
   memory.delete(ONBOARDING_DONE_KEY);
   lsRemove(ONBOARDING_DONE_KEY);
 }
+
+const LAST_EXPENSE_CATEGORY_KEY = `${LOCAL_PREFIX}lastExpenseCategoryId`;
+
+/** 継続コスト登録などで前回選んだ費用カテゴリ（次回の既定値。無ければ null）。 */
+export function lastExpenseCategoryId(): string | null {
+  return memory.get(LAST_EXPENSE_CATEGORY_KEY) ?? lsGet(LAST_EXPENSE_CATEGORY_KEY);
+}
+
+export function rememberExpenseCategoryId(id: string): void {
+  memory.set(LAST_EXPENSE_CATEGORY_KEY, id);
+  lsSet(LAST_EXPENSE_CATEGORY_KEY, id);
+}

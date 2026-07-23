@@ -152,6 +152,10 @@ export const UI = {
     // 返済設定（負債の編集シートのみ）
     repaymentAccount: 'accounts.repaymentAccount',
     repaymentDay: 'accounts.repaymentDay',
+    // 並び替えモード（箱内・上下ボタン式）
+    reorderToggle: 'accounts.reorder.toggle',
+    moveUp: 'accounts.reorder.up',
+    moveDown: 'accounts.reorder.down',
   },
   allocations: {
     view: 'allocations.view',
@@ -167,7 +171,6 @@ export const UI = {
     edit: 'allocations.edit',
     editDialog: 'allocations.editDialog',
     editName: 'allocations.edit.name',
-    editKind: 'allocations.edit.kind',
     editAmount: 'allocations.edit.amount',
     editCostMonths: 'allocations.edit.costMonths',
     editRepeat: 'allocations.edit.repeat',

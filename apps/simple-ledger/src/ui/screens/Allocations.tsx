@@ -7,7 +7,12 @@ import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
-import { monthlyCostForMonth, representativeMonthlyAmount } from '../../domain/monthlyCost';
+import {
+  isRecognitionFinished,
+  monthlyCostForMonth,
+  representativeMonthlyAmount,
+} from '../../domain/monthlyCost';
+import { lastExpenseCategoryId, rememberExpenseCategoryId } from '../../data/localFlags';
 import { disposalOutcome } from '../../domain/assetDisposal';
 import {
   continuousCostDisposalEndMonth,
@@ -20,19 +25,9 @@ import { Money } from '../money';
 import { errorText, t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
 import { UI } from '../../ui-contract';
-import type { MonthlyCostItem, MonthlyCostKind, MonthlyCostStatus } from '../../domain/types';
+import type { MonthlyCostItem, MonthlyCostStatus } from '../../domain/types';
 
-const KINDS: MonthlyCostKind[] = [
-  'subscription',
-  'prepaid-service',
-  'durable-asset',
-  'recurring-event',
-];
 const STATUSES: MonthlyCostStatus[] = ['active', 'paused', 'ended'];
-
-function kindLabel(kind: MonthlyCostKind): string {
-  return t(`monthlyCost.kind.${kind}` as MessageKey);
-}
 
 export function Allocations() {
   const { ledger, saveMonthlyCost, removeMonthlyCost } = useLedger();
@@ -51,9 +46,16 @@ export function Allocations() {
   );
   const name = (id?: string): string => (id ? (accountsMap.get(id)?.name ?? '—') : '—');
 
+  // 自動更新の無い項目は、認識を終えたら（残価 0）自動的に「終了」扱いにする（自動アーカイブ）。
+  // 自動更新のある項目（毎月サブスク・3か月ごとの定期イベント等）はユーザーが止めるまで残る。
+  const isFinished = (m: MonthlyCostItem): boolean =>
+    m.status === 'active' && isRecognitionFinished(m, currentYm);
   const items = useMemo(
-    () => (ledger?.monthlyCostItems ?? []).filter((m) => showInactive || m.status === 'active'),
-    [ledger, showInactive],
+    () =>
+      (ledger?.monthlyCostItems ?? []).filter(
+        (m) => showInactive || (m.status === 'active' && !isRecognitionFinished(m, currentYm)),
+      ),
+    [ledger, showInactive, currentYm],
   );
 
   async function togglePause(item: MonthlyCostItem) {
@@ -140,9 +142,15 @@ export function Allocations() {
                 >
                   <span>
                     {m.name}{' '}
-                    <span className={`tag ${m.status === 'active' ? 'tag--teal' : 'tag--neutral'}`}>
-                      {t(`monthlyCost.status.${m.status}` as MessageKey)}
-                    </span>{' '}
+                    {isFinished(m) ? (
+                      <span className="tag tag--neutral">{t('monthlyCost.finishedBadge')}</span>
+                    ) : (
+                      <span
+                        className={`tag ${m.status === 'active' ? 'tag--teal' : 'tag--neutral'}`}
+                      >
+                        {t(`monthlyCost.status.${m.status}` as MessageKey)}
+                      </span>
+                    )}{' '}
                     <span className="tag tag--neutral" style={{ fontSize: '0.75em' }}>
                       {m.repeatEveryMonths !== undefined
                         ? t('monthlyCost.recurringBadge')
@@ -189,10 +197,6 @@ export function Allocations() {
                       </button>
                     )}
                   </span>
-                </div>
-                <div className="kv">
-                  <span className="muted">{t('monthlyCost.kindLabel')}</span>
-                  <span>{kindLabel(m.kind)}</span>
                 </div>
                 <div className="kv">
                   <span className="muted">{t('monthlyCost.amount')}</span>
@@ -286,7 +290,12 @@ function ContinuousCostMigrateSheet({ onClose }: { onClose: () => void }) {
     const { year, month } = currentYearMonth();
     return `${year}-${String(month).padStart(2, '0')}`;
   });
-  const [expenseAccountId, setExpenseAccountId] = useState(expenseOptions[0]?.value ?? '');
+  // 分類先カテゴリの既定値は「前回選んだもの」（連続登録の切り替え手間を減らす）。
+  const [expenseAccountId, setExpenseAccountId] = useState(() => {
+    const last = lastExpenseCategoryId();
+    if (last && expenseOptions.some((o) => o.value === last)) return last;
+    return expenseOptions[0]?.value ?? '';
+  });
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
@@ -302,6 +311,7 @@ function ContinuousCostMigrateSheet({ onClose }: { onClose: () => void }) {
         startMonth: startMonth.trim(),
         expenseAccountId,
       });
+      rememberExpenseCategoryId(expenseAccountId);
       onClose();
     } catch (e) {
       setError(errorText(e));
@@ -551,7 +561,6 @@ function MonthlyCostEditSheet({ item, onClose }: { item: MonthlyCostItem; onClos
   const amountEditable = !linked && !hasPosted;
 
   const [name, setName] = useState(item.name);
-  const [kind, setKind] = useState<MonthlyCostKind>(item.kind);
   const [amountText, setAmountText] = useState(String(item.amount));
   const [costMonthsText, setCostMonthsText] = useState(String(item.costMonths));
   const [repeatText, setRepeatText] = useState(
@@ -582,7 +591,6 @@ function MonthlyCostEditSheet({ item, onClose }: { item: MonthlyCostItem; onClos
     const next: MonthlyCostItem = {
       ...item,
       name: name.trim(),
-      kind,
       amount: amountEditable && amountText !== '' ? Number.parseInt(amountText, 10) : item.amount,
       costMonths: costMonthsText === '' ? item.costMonths : Number.parseInt(costMonthsText, 10),
       startMonth: startMonth.trim(),
@@ -644,13 +652,6 @@ function MonthlyCostEditSheet({ item, onClose }: { item: MonthlyCostItem; onClos
           value={name}
           onChange={setName}
           dataUi={UI.allocations.editName}
-        />
-        <SelectInput
-          label={t('monthlyCost.kindLabel')}
-          value={kind}
-          onChange={(v) => setKind(v as MonthlyCostKind)}
-          options={KINDS.map((k) => ({ value: k, label: kindLabel(k) }))}
-          dataUi={UI.allocations.editKind}
         />
         <TextInput
           label={t('monthlyCost.amount')}
