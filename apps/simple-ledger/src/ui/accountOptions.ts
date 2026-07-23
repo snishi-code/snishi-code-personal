@@ -1,5 +1,6 @@
 import { ACCOUNT_TYPES, type Account, type AccountType } from '../domain/types';
 import type { AccountRole } from '../domain/accountRoles';
+import { compareAccountOrder } from '../domain/accountOrder';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
 
@@ -32,7 +33,9 @@ export function groupedAccounts(
     .map((type) => ({
       type,
       label: accountTypeLabel(type),
-      accounts: accounts.filter((a) => a.type === type && (!a.archived || a.id === includeId)),
+      accounts: accounts
+        .filter((a) => a.type === type && (!a.archived || a.id === includeId))
+        .sort(compareAccountOrder),
     }))
     .filter((g) => g.accounts.length > 0);
 }
@@ -52,9 +55,9 @@ export function groupedAccountsByRole(
     .map((type) => ({
       type,
       label: accountTypeLabel(type),
-      accounts: accounts.filter(
-        (a) => a.type === type && (a.id === includeId || (allow.has(a.role) && !a.archived)),
-      ),
+      accounts: accounts
+        .filter((a) => a.type === type && (a.id === includeId || (allow.has(a.role) && !a.archived)))
+        .sort(compareAccountOrder),
     }))
     .filter((g) => g.accounts.length > 0);
 }
