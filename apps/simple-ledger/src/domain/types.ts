@@ -175,6 +175,14 @@ export interface EntryMetadata {
   continuousCostId?: string;
   /** 仮想仕訳の種別。funding=資産化(支払元→対象資産) / recognition=認識(対象資産→費用カテゴリ)。 */
   ccKind?: 'funding' | 'recognition';
+  /**
+   * 定期ルールから自動起票された仕訳の由来（recurringMonth とペア）。
+   * 起票後は通常の仕訳として編集・削除できる。ルール削除時はこのメタデータを剥がして
+   * 通常仕訳へ戻す（事実は消さない）。
+   */
+  recurringRuleId?: string;
+  /** どの月ぶんの起票か 'YYYY-MM'。 */
+  recurringMonth?: string;
 }
 
 /**
@@ -310,6 +318,38 @@ export interface AssetDisposal {
 }
 
 /**
+ * 定期ルール（毎月の支出・収入・振替）。
+ * 「実仕訳の自動起票」方式: ルールは起票の道具で、正本は起票された実仕訳
+ * （金額が揺れる月は起票後にその月の仕訳を編集する）。展開は domain/recurring.ts。
+ * 継続コスト（費用の月割り認識 = 導出）とは別概念（こちらは実際の資金移動）。
+ */
+export interface RecurringRule {
+  id: string;
+  /** 摘要（起票される仕訳の description）。 */
+  name: string;
+  /** 毎月の既定額（正の整数）。 */
+  amount: number;
+  /** 毎月の日（1〜31。月に無い日は月末）。 */
+  dayOfMonth: number;
+  /** 行き先（費用カテゴリ / 資金 / 投資）。 */
+  debitAccountId: string;
+  /** 源泉（資金 / カード / 収入カテゴリ）。 */
+  creditAccountId: string;
+  /** 起票開始月 'YYYY-MM'。再開時は現在月へ更新される（停止中の月を遡って起票しない）。 */
+  startMonth: string;
+  /**
+   * 起票済みカーソル（この月まで処理済み）。キャッチアップが管理する。
+   * 起票済み仕訳をユーザーが削除しても再起票しない（スキップの尊重）。
+   */
+  postedThroughMonth?: string;
+  /** 停止中は起票しない。 */
+  paused?: boolean;
+  managementScopeId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
  * 予定キャッシュフロー（将来の現金の出入り）。
  * 「いつ費用認識するか(allocation)」とは別概念で、「いつ現金が動くか」を保持する。
  * 予定は通常仕訳一覧へ大量生成せず、ここに置く。実績化で 1 件の仕訳を作る。
@@ -433,6 +473,8 @@ export interface LedgerExportPackage {
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   assetDisposals: AssetDisposal[];
+  /** 定期ルール（2026-07 追加。旧バックアップには無い → import 時は空として扱う）。 */
+  recurringRules: RecurringRule[];
   settings: Settings;
 }
 
@@ -493,4 +535,5 @@ export interface Ledger {
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   assetDisposals: AssetDisposal[];
+  recurringRules: RecurringRule[];
 }

@@ -127,7 +127,17 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [submitting, setSubmitting] = useState(false);
 
   const destRole = accounts.find((a) => a.id === form.debitAccountId)?.role;
-  const canAllocate = init.kind === 'create' && mode === 'expense';
+  const paymentRole = accounts.find((a) => a.id === form.creditAccountId)?.role;
+  const isLiabilityPayment =
+    paymentRole === 'payment-liability' || paymentRole === 'other-liability';
+  // 継続コスト化は支出フローに加え、簿記編集（manual）でも貸方が資金/負債なら選べる
+  // （継続コストの支払い元にできる役割と同じ条件）。
+  const ccPaymentOk =
+    paymentRole === 'daily-asset' ||
+    paymentRole === 'payment-liability' ||
+    paymentRole === 'other-liability';
+  const canAllocate =
+    init.kind === 'create' && (mode === 'expense' || (mode === 'manual' && ccPaymentOk));
   const [ccMode, setCcMode] = useState(false);
   const [ccTargetName, setCcTargetName] = useState('');
   const [ccCategoryId, setCcCategoryId] = useState('');
@@ -148,9 +158,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [repayStartDate, setRepayStartDate] = useState('');
   const [repayAccountError, setRepayAccountError] = useState(false);
   const [repayCountError, setRepayCountError] = useState(false);
-  const paymentRole = accounts.find((a) => a.id === form.creditAccountId)?.role;
-  const isLiabilityPayment =
-    paymentRole === 'payment-liability' || paymentRole === 'other-liability';
   const [showDetails, setShowDetails] = useState(init.kind === 'edit');
 
   const canCreateReserve = init.kind === 'create' && mode === 'transfer';
@@ -937,12 +944,33 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         {isManual ? (
           <>
             {dateField}
-            {descriptionField}
+            {canAllocate && ccMode ? null : descriptionField}
             {amountField}
             {renderManualFlow()}
-            {memoField}
-            {scopeField}
-            {entryTagsField}
+            {/* 簿記編集でも、貸方が資金/負債なら継続コスト化できる（支出フローと同じパネル）。 */}
+            {canAllocate && !ccMode ? (
+              <button
+                type="button"
+                className="collapse-toggle"
+                onClick={() => {
+                  setCcMode(true);
+                  if (ccTargetName.trim() === '') setCcTargetName(form.description);
+                }}
+                data-ui={UI.journal.entry.ccToggle}
+              >
+                <Icon name="add" size={16} />
+                {t('entry.ccToggle')}
+              </button>
+            ) : null}
+            {ccDetailField}
+            {repaymentField}
+            {canAllocate && ccMode ? null : (
+              <>
+                {memoField}
+                {scopeField}
+                {entryTagsField}
+              </>
+            )}
           </>
         ) : (
           <>

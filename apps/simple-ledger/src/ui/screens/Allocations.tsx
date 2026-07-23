@@ -1,5 +1,8 @@
 /*
- * 継続コスト。サブスク・年払い・耐久財・定期イベントを統一して「月あたりコスト」で見る。
+ * 毎月のもの。
+ *  - 定期ルール（毎月の支出・収入・振替）: 実仕訳の自動起票（正本は起票された仕訳）。
+ *  - 継続コスト（費用の月割り）: 年払い・耐久財などを「月あたりコスト」で見る導出レイヤ。
+ * 実際にお金が動くものはルールで起票し、動いたお金の月割り解釈は継続コストが担う。
  */
 import { useMemo, useState } from 'react';
 import { Modal } from '../overlays';
@@ -22,21 +25,25 @@ import {
 } from '../../domain/continuousCost';
 import { addMonths, monthOf } from '../../domain/allocation';
 import { currentYearMonth, nowIso, todayLocal } from '../../util/time';
+import { recurringKindOf, type RecurringKind } from '../../domain/recurring';
 import { Money } from '../money';
 import { errorText, t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
 import { UI } from '../../ui-contract';
-import type { MonthlyCostItem, MonthlyCostStatus } from '../../domain/types';
+import type { MonthlyCostItem, MonthlyCostStatus, RecurringRule } from '../../domain/types';
 
 const STATUSES: MonthlyCostStatus[] = ['active', 'paused', 'ended'];
 
 export function Allocations() {
-  const { ledger, saveMonthlyCost, removeMonthlyCost } = useLedger();
+  const { ledger, saveMonthlyCost, removeMonthlyCost, saveRecurringRule, removeRecurringRule } =
+    useLedger();
   const [showInactive, setShowInactive] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<MonthlyCostItem | null>(null);
   const [editing, setEditing] = useState<MonthlyCostItem | null>(null);
   const [disposing, setDisposing] = useState<MonthlyCostItem | null>(null);
   const [migrating, setMigrating] = useState(false);
+  const [ruleSheet, setRuleSheet] = useState<{ existing?: RecurringRule } | null>(null);
+  const [pendingRuleDelete, setPendingRuleDelete] = useState<RecurringRule | null>(null);
   const { year, month } = currentYearMonth();
   const currentYm = `${year}-${String(month).padStart(2, '0')}`;
   const currency = ledger?.settings.currency ?? 'JPY';
@@ -83,12 +90,107 @@ export function Allocations() {
   const canDispose = (m: MonthlyCostItem): boolean =>
     m.status !== 'ended' && (isFixedAssetItem(m) || isContinuingItem(m));
 
+  const rules = ledger?.recurringRules ?? [];
+  const ruleKindLabel = (r: RecurringRule): string => {
+    const kind = recurringKindOf(
+      accountsMap.get(r.debitAccountId)?.role,
+      accountsMap.get(r.creditAccountId)?.role,
+    );
+    return kind ? t(`recurring.kind.${kind}` as MessageKey) : '—';
+  };
+  async function toggleRulePause(rule: RecurringRule) {
+    // 再開は今月から（停止中の月を遡って起票しない）。startMonth を現在月へ更新する。
+    const next: RecurringRule = rule.paused
+      ? { ...rule, paused: false, startMonth: currentYm, updatedAt: nowIso() }
+      : { ...rule, paused: true, updatedAt: nowIso() };
+    await saveRecurringRule(next).catch(() => undefined);
+  }
+
   return (
     <section aria-labelledby="allocations-title" data-ui={UI.allocations.view}>
       <h1 className="screen-title" id="allocations-title">
-        {t('monthlyCost.title')}
+        {t('monthly.title')}
       </h1>
 
+      {/* ── 定期ルール（毎月の支出・収入・振替） ── */}
+      <div
+        className="section-label"
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+      >
+        <span>{t('recurring.sectionTitle')}</span>
+        <button
+          type="button"
+          className="btn btn--ghost"
+          style={{ minHeight: 36 }}
+          onClick={() => setRuleSheet({})}
+          data-ui={UI.allocations.recurringAdd}
+        >
+          <Icon name="add" size={16} />
+          {t('recurring.add')}
+        </button>
+      </div>
+      <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
+        {t('recurring.sectionIntro')}
+      </p>
+      {rules.length === 0 ? (
+        <div className="card card--pad empty" style={{ marginBottom: 'var(--space-4)' }}>
+          {t('recurring.empty')}
+        </div>
+      ) : (
+        <ul className="card list" style={{ marginBottom: 'var(--space-4)' }} data-ui={UI.allocations.recurringList}>
+          {rules.map((r) => (
+            <li key={r.id} className="list__item">
+              <div className="list__main">
+                <div className="list__title">
+                  {r.name} <span className="tag tag--teal">{ruleKindLabel(r)}</span>{' '}
+                  {r.paused ? (
+                    <span className="tag tag--neutral">{t('recurring.paused')}</span>
+                  ) : null}
+                </div>
+                <div className="list__sub">
+                  {t('recurring.everyMonthDay', { day: r.dayOfMonth })}・{name(r.creditAccountId)}{' '}
+                  → {name(r.debitAccountId)}
+                </div>
+              </div>
+              <span className="list__amount">
+                <Money amount={r.amount} currency={currency} />
+              </span>
+              <div className="row-actions">
+                <button
+                  type="button"
+                  className="icon-btn"
+                  onClick={() => setRuleSheet({ existing: r })}
+                  aria-label={`${t('common.edit')}: ${r.name}`}
+                  data-ui={UI.allocations.recurringEdit}
+                >
+                  <Icon name="edit" size={18} />
+                </button>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  onClick={() => toggleRulePause(r)}
+                  aria-label={`${r.paused ? t('recurring.resume') : t('recurring.pause')}: ${r.name}`}
+                  data-ui={UI.allocations.recurringPause}
+                >
+                  <Icon name={r.paused ? 'restore' : 'archive'} size={18} />
+                </button>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  onClick={() => setPendingRuleDelete(r)}
+                  aria-label={`${t('common.delete')}: ${r.name}`}
+                  data-ui={UI.allocations.recurringDelete}
+                >
+                  <Icon name="delete" size={18} />
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* ── 継続コスト（費用の月割り） ── */}
+      <p className="section-label">{t('monthlyCost.sectionTitle')}</p>
       <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
         {t('monthlyCost.intro')}
       </p>
@@ -260,6 +362,28 @@ export function Allocations() {
 
       {migrating ? <ContinuousCostMigrateSheet onClose={() => setMigrating(false)} /> : null}
 
+      {ruleSheet ? (
+        <RecurringRuleSheet
+          {...(ruleSheet.existing !== undefined ? { existing: ruleSheet.existing } : {})}
+          onClose={() => setRuleSheet(null)}
+        />
+      ) : null}
+
+      {pendingRuleDelete ? (
+        <ConfirmDialog
+          title={t('recurring.deleteConfirmTitle')}
+          body={t('recurring.deleteConfirmBody', { name: pendingRuleDelete.name })}
+          confirmLabel={t('common.delete')}
+          danger
+          onCancel={() => setPendingRuleDelete(null)}
+          onConfirm={async () => {
+            const r = pendingRuleDelete;
+            setPendingRuleDelete(null);
+            await removeRecurringRule(r.id).catch(() => undefined);
+          }}
+        />
+      ) : null}
+
       {disposing ? (
         <MonthlyCostDisposeSheet
           item={disposing}
@@ -268,6 +392,227 @@ export function Allocations() {
         />
       ) : null}
     </section>
+  );
+}
+
+/** 定期ルールの種別ごとの科目役割（源泉=貸方 / 行き先=借方）。 */
+const RULE_ROLES: Record<
+  RecurringKind,
+  { from: readonly string[]; to: readonly string[]; fromKey: MessageKey; toKey: MessageKey }
+> = {
+  expense: {
+    from: ['daily-asset', 'payment-liability'],
+    to: ['expense-category'],
+    fromKey: 'recurring.from.expense',
+    toKey: 'recurring.to.expense',
+  },
+  income: {
+    from: ['income-category'],
+    to: ['daily-asset'],
+    fromKey: 'recurring.from.income',
+    toKey: 'recurring.to.income',
+  },
+  transfer: {
+    from: ['daily-asset'],
+    to: ['daily-asset', 'investment-asset'],
+    fromKey: 'recurring.from.transfer',
+    toKey: 'recurring.to.transfer',
+  },
+};
+
+const RULE_KINDS: RecurringKind[] = ['expense', 'income', 'transfer'];
+
+/**
+ * 定期ルールの追加・編集シート。毎月の支払日に実仕訳が自動起票される
+ * （登録直後に経過分も起票される。金額が違う月は起票された仕訳を編集）。
+ */
+function RecurringRuleSheet({
+  existing,
+  onClose,
+}: {
+  existing?: RecurringRule;
+  onClose: () => void;
+}) {
+  const { ledger, createRecurringRule, saveRecurringRule } = useLedger();
+  const accounts = sortAccounts(ledger?.accounts ?? []);
+  const roleOf = (id: string) => accounts.find((a) => a.id === id)?.role;
+
+  const [kind, setKind] = useState<RecurringKind>(() => {
+    if (!existing) return 'expense';
+    return recurringKindOf(roleOf(existing.debitAccountId), roleOf(existing.creditAccountId)) ?? 'expense';
+  });
+  const optionsFor = (roles: readonly string[], includeId?: string) =>
+    accounts
+      .filter((a) => (roles.includes(a.role) && !a.archived) || a.id === includeId)
+      .map((a) => ({ value: a.id, label: a.name }));
+  const fromOptions = optionsFor(RULE_ROLES[kind].from, existing?.creditAccountId);
+  const [creditAccountId, setCreditAccountId] = useState(
+    existing?.creditAccountId ?? fromOptions[0]?.value ?? '',
+  );
+  // 行き先は源泉と同一科目を除く（振替の 預金→預金 を防ぐ）。
+  const toOptions = optionsFor(RULE_ROLES[kind].to, existing?.debitAccountId).filter(
+    (o) => o.value !== creditAccountId,
+  );
+  const [debitAccountId, setDebitAccountId] = useState(
+    existing?.debitAccountId ?? toOptions[0]?.value ?? '',
+  );
+
+  const [name, setName] = useState(existing?.name ?? '');
+  const [amountText, setAmountText] = useState(existing !== undefined ? String(existing.amount) : '');
+  const [dayText, setDayText] = useState(existing !== undefined ? String(existing.dayOfMonth) : '');
+  const [startMonth, setStartMonth] = useState(() => {
+    if (existing) return existing.startMonth;
+    const { year, month } = currentYearMonth();
+    return `${year}-${String(month).padStart(2, '0')}`;
+  });
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [submitting, setSubmitting] = useState(false);
+
+  function switchKind(next: RecurringKind) {
+    setKind(next);
+    const from = optionsFor(RULE_ROLES[next].from);
+    const fromId = from[0]?.value ?? '';
+    setCreditAccountId(fromId);
+    const to = optionsFor(RULE_ROLES[next].to).filter((o) => o.value !== fromId);
+    setDebitAccountId(to[0]?.value ?? '');
+  }
+
+  async function submit() {
+    if (submitting) return;
+    const amount = amountText === '' ? 0 : Number.parseInt(amountText, 10);
+    const day = dayText === '' ? 0 : Number.parseInt(dayText, 10);
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      if (existing) {
+        await saveRecurringRule({
+          ...existing,
+          name: name.trim(),
+          amount,
+          dayOfMonth: day,
+          debitAccountId,
+          creditAccountId,
+          startMonth: startMonth.trim(),
+          updatedAt: nowIso(),
+        });
+      } else {
+        await createRecurringRule({
+          name: name.trim(),
+          amount,
+          dayOfMonth: day,
+          debitAccountId,
+          creditAccountId,
+          startMonth: startMonth.trim(),
+        });
+      }
+      onClose();
+    } catch (e) {
+      setError(errorText(e));
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={existing ? t('recurring.editTitle') : t('recurring.createTitle')}
+      onClose={onClose}
+      dismissMode="if-clean"
+      dataUi={UI.allocations.recurringSheet}
+      footer={
+        <>
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={submit}
+            disabled={
+              submitting ||
+              name.trim() === '' ||
+              amountText === '' ||
+              dayText === '' ||
+              creditAccountId === '' ||
+              debitAccountId === ''
+            }
+            data-ui={UI.allocations.recurringSave}
+          >
+            {t('common.save')}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <p className="field__hint">{t('recurring.sectionIntro')}</p>
+        {error ? (
+          <div className="field__error" role="alert">
+            <Icon name="alert" size={14} />
+            {error}
+          </div>
+        ) : null}
+        <SelectInput
+          label={t('recurring.kindLabel')}
+          value={kind}
+          onChange={(v) => switchKind(v as RecurringKind)}
+          options={RULE_KINDS.map((k) => ({
+            value: k,
+            label: t(`recurring.kind.${k}` as MessageKey),
+          }))}
+          dataUi={UI.allocations.recurringKind}
+        />
+        <TextInput
+          label={t('recurring.name')}
+          required
+          value={name}
+          onChange={setName}
+          hint={t('recurring.nameHint')}
+          dataUi={UI.allocations.recurringName}
+        />
+        <SelectInput
+          label={t(RULE_ROLES[kind].fromKey)}
+          value={creditAccountId}
+          onChange={(v) => {
+            setCreditAccountId(v);
+            if (v === debitAccountId) setDebitAccountId('');
+          }}
+          options={fromOptions}
+          dataUi={UI.allocations.recurringFrom}
+        />
+        <SelectInput
+          label={t(RULE_ROLES[kind].toKey)}
+          value={debitAccountId}
+          onChange={setDebitAccountId}
+          options={toOptions}
+          dataUi={UI.allocations.recurringTo}
+        />
+        <TextInput
+          label={t('recurring.amount')}
+          required
+          inputMode="numeric"
+          value={amountText}
+          onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
+          hint={t('recurring.amountHint')}
+          dataUi={UI.allocations.recurringAmount}
+        />
+        <TextInput
+          label={t('recurring.day')}
+          required
+          inputMode="numeric"
+          value={dayText}
+          onChange={(v) => setDayText(v.replace(/[^\d]/g, ''))}
+          hint={t('recurring.dayHint')}
+          dataUi={UI.allocations.recurringDay}
+        />
+        <TextInput
+          label={t('recurring.startMonth')}
+          required
+          value={startMonth}
+          placeholder="YYYY-MM"
+          onChange={setStartMonth}
+        />
+        {existing?.paused ? <p className="field__hint">{t('recurring.resumeNote')}</p> : null}
+      </div>
+    </Modal>
   );
 }
 
@@ -560,6 +905,11 @@ function MonthlyCostEditSheet({ item, onClose }: { item: MonthlyCostItem; onClos
     (s) => s.monthlyCostId === item.id && s.status === 'posted',
   );
   const amountEditable = !linked && !hasPosted;
+  // 移行登録（開始残高 funding）の項目は継続購入を設定できない（更新のたびに開始残高から
+  // 資金が湧いてしまう）。毎月払いは定期ルールで扱う。
+  const openingFunded =
+    item.paymentSourceAccountId !== undefined &&
+    accounts.find((a) => a.id === item.paymentSourceAccountId)?.role === 'equity';
 
   const [name, setName] = useState(item.name);
   const [amountText, setAmountText] = useState(String(item.amount));
@@ -679,14 +1029,18 @@ function MonthlyCostEditSheet({ item, onClose }: { item: MonthlyCostItem; onClos
           onChange={(v) => setCostMonthsText(v.replace(/[^\d]/g, ''))}
           dataUi={UI.allocations.editCostMonths}
         />
-        <TextInput
-          label={t('monthlyCost.repeatField')}
-          inputMode="numeric"
-          value={repeatText}
-          hint={t('monthlyCost.repeatFieldHint')}
-          onChange={(v) => setRepeatText(v.replace(/[^\d]/g, ''))}
-          dataUi={UI.allocations.editRepeat}
-        />
+        {openingFunded ? (
+          <p className="field__hint">{t('monthlyCost.repeatLockedOpening')}</p>
+        ) : (
+          <TextInput
+            label={t('monthlyCost.repeatField')}
+            inputMode="numeric"
+            value={repeatText}
+            hint={t('monthlyCost.repeatFieldHint')}
+            onChange={(v) => setRepeatText(v.replace(/[^\d]/g, ''))}
+            dataUi={UI.allocations.editRepeat}
+          />
+        )}
         <TextInput
           label={t('monthlyCost.startMonth')}
           required

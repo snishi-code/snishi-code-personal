@@ -30,7 +30,13 @@ import {
   cashflowScheduleSchema,
   journalEntrySchema,
   monthlyCostItemSchema,
+  recurringRuleSchema,
 } from '../domain/schema';
+import {
+  recurringCursorAfter,
+  recurringKindOf,
+  recurringPostingsDue,
+} from '../domain/recurring';
 import type {
   Account,
   AccountInstrument,
@@ -46,6 +52,7 @@ import type {
   ManagementScope,
   MonthlyCostItem,
   MonthlyCostKind,
+  RecurringRule,
   ReserveItem,
   Settings,
   Snapshot,
@@ -141,6 +148,7 @@ export async function loadLedger(): Promise<Ledger> {
     tags,
     monthlyCostItems,
     assetDisposals,
+    recurringRules,
   ] = await Promise.all([
     getMeta(),
     getSettings(),
@@ -154,6 +162,7 @@ export async function loadLedger(): Promise<Ledger> {
     getAll<Tag>(STORE.tags),
     getAll<MonthlyCostItem>(STORE.monthlyCostItems),
     getAll<AssetDisposal>(STORE.assetDisposals),
+    getAll<RecurringRule>(STORE.recurringRules),
   ]);
   if (!meta || !settings) throw new Error('台帳の初期化に失敗しました');
   // 一覧の安定した既定順: 仕訳は日付降順 → 作成降順。
@@ -169,6 +178,7 @@ export async function loadLedger(): Promise<Ledger> {
   managementScopes.sort((a, b) => cmp(a.createdAt, b.createdAt));
   accountInstruments.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
   assetDisposals.sort((a, b) => cmp(b.createdAt, a.createdAt));
+  recurringRules.sort((a, b) => cmp(a.createdAt, b.createdAt));
   // 導出専用 entries = 実仕訳 + 継続コストの仮想仕訳。「今」まで展開する
   // （未来の継続更新を現在の PL/BS に混ぜない。"全期間" PL が未来分を足す事故を防ぐ）。
   // CF の未来投影は Cashflow 側が untilDate まで別途展開する。
@@ -195,6 +205,7 @@ export async function loadLedger(): Promise<Ledger> {
     tags,
     monthlyCostItems,
     assetDisposals,
+    recurringRules,
   };
 }
 
@@ -679,6 +690,158 @@ export async function postSchedule(id: string): Promise<JournalEntry> {
     t.objectStore(STORE.cashflowSchedules).put(updated);
   });
   return entry;
+}
+
+/* ── 定期ルール（毎月の支出・収入・振替 = 実仕訳の自動起票） ── */
+
+export interface RecurringRuleInput {
+  name: string;
+  amount: number;
+  dayOfMonth: number;
+  debitAccountId: string;
+  creditAccountId: string;
+  /** 起票開始月。未指定は今日の月。 */
+  startMonth?: string;
+  managementScopeId?: string;
+}
+
+/** 保存境界の検証（作成・編集で共通・fail-closed）。 */
+function assertRecurringRuleSavable(rule: RecurringRule, ctx: SaveContext): void {
+  if (!recurringRuleSchema.safeParse(rule).success)
+    throw new LedgerError('error.recurring.invalidStructure');
+  if (rule.name.trim() === '') throw new LedgerError('error.common.nameRequired');
+  if (!ctx.scopeIds.has(rule.managementScopeId)) throw new LedgerError('error.scope.unknown');
+  const debit = ctx.byId.get(rule.debitAccountId);
+  const credit = ctx.byId.get(rule.creditAccountId);
+  if (!debit || !credit || rule.debitAccountId === rule.creditAccountId)
+    throw new LedgerError('error.recurring.flowInvalid');
+  if (recurringKindOf(debit.role, credit.role) === null)
+    throw new LedgerError('error.recurring.flowInvalid');
+}
+
+export async function createRecurringRule(input: RecurringRuleInput): Promise<RecurringRule> {
+  const ctx = await loadSaveContext();
+  const ts = nowIso();
+  const rule: RecurringRule = {
+    id: newId(),
+    name: input.name.trim(),
+    amount: input.amount,
+    dayOfMonth: input.dayOfMonth,
+    debitAccountId: input.debitAccountId,
+    creditAccountId: input.creditAccountId,
+    startMonth: input.startMonth ?? monthOf(todayLocal()),
+    managementScopeId: input.managementScopeId ?? DEFAULT_MANAGEMENT_SCOPE_ID,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+  assertRecurringRuleSavable(rule, ctx);
+  await writeWithRevision([STORE.recurringRules], (t) => {
+    t.objectStore(STORE.recurringRules).put(rule);
+  });
+  return rule;
+}
+
+/** 編集・停止/再開。id / createdAt / postedThroughMonth は既存を保持する（カーソルは起票側が管理）。 */
+export async function upsertRecurringRule(rule: RecurringRule): Promise<void> {
+  const [ctx, rules] = await Promise.all([
+    loadSaveContext(),
+    getAll<RecurringRule>(STORE.recurringRules),
+  ]);
+  const existing = rules.find((r) => r.id === rule.id);
+  if (!existing) throw new LedgerError('error.recurring.notFound');
+  const saved: RecurringRule = {
+    ...rule,
+    id: existing.id,
+    createdAt: existing.createdAt,
+    ...(existing.postedThroughMonth !== undefined
+      ? { postedThroughMonth: existing.postedThroughMonth }
+      : {}),
+    updatedAt: nowIso(),
+  };
+  if (existing.postedThroughMonth === undefined) delete saved.postedThroughMonth;
+  assertRecurringRuleSavable(saved, ctx);
+  await writeWithRevision([STORE.recurringRules], (t) => {
+    t.objectStore(STORE.recurringRules).put(saved);
+  });
+}
+
+/**
+ * 定期ルールを削除する。起票済みの仕訳は事実として残し、由来メタデータ
+ * （recurringRuleId / recurringMonth）を剥がして通常の仕訳へ戻す（同一トランザクション）。
+ */
+export async function deleteRecurringRule(id: string): Promise<void> {
+  const entries = await getAll<JournalEntry>(STORE.journalEntries);
+  const ts = nowIso();
+  const cleared = entries
+    .filter((e) => e.metadata?.recurringRuleId === id)
+    .map((e) => {
+      const metadata = { ...e.metadata };
+      delete metadata.recurringRuleId;
+      delete metadata.recurringMonth;
+      const next: JournalEntry = { ...e, updatedAt: ts };
+      if (Object.keys(metadata).length > 0) next.metadata = metadata;
+      else delete next.metadata;
+      return next;
+    });
+  await writeWithRevision([STORE.recurringRules, STORE.journalEntries], (t) => {
+    const eStore = t.objectStore(STORE.journalEntries);
+    for (const e of cleared) eStore.put(e);
+    t.objectStore(STORE.recurringRules).delete(id);
+  });
+}
+
+/**
+ * 経過月ぶんの定期仕訳をキャッチアップ起票する（アプリ起動時・ルール変更後に呼ぶ）。
+ *  - idempotent: ルールのカーソル（postedThroughMonth）で管理。起票済み仕訳をユーザーが
+ *    削除しても再起票しない（「今月はスキップ」の尊重）。
+ *  - 起票された仕訳は通常の実仕訳（metadata に由来のみ）。金額が違う月は起票後に編集する。
+ * 戻り値 = 起票した件数。
+ */
+export async function catchUpRecurringRules(today: string): Promise<number> {
+  const [ctx, rules] = await Promise.all([
+    loadSaveContext(),
+    getAll<RecurringRule>(STORE.recurringRules),
+  ]);
+  const newEntries: JournalEntry[] = [];
+  const updatedRules: RecurringRule[] = [];
+  const ts = nowIso();
+  for (const rule of rules) {
+    const postings = recurringPostingsDue(rule, today);
+    const debit = ctx.byId.get(rule.debitAccountId);
+    const credit = ctx.byId.get(rule.creditAccountId);
+    const kind = recurringKindOf(debit?.role, credit?.role);
+    // 参照が壊れているルール（科目が消えた等）は起票しない（fail-soft: 起動を止めない）。
+    if (kind === null) continue;
+    for (const p of postings) {
+      newEntries.push({
+        id: newId(),
+        date: p.date,
+        description: rule.name,
+        kind: 'normal',
+        managementScopeId: rule.managementScopeId,
+        lines: [
+          { accountId: rule.debitAccountId, side: 'debit', amount: rule.amount },
+          { accountId: rule.creditAccountId, side: 'credit', amount: rule.amount },
+        ],
+        metadata: { inputMode: kind, recurringRuleId: rule.id, recurringMonth: p.month },
+        createdAt: ts,
+        updatedAt: ts,
+      });
+    }
+    const cursor = recurringCursorAfter(rule, today);
+    if (cursor !== rule.postedThroughMonth) {
+      updatedRules.push({ ...rule, postedThroughMonth: cursor, updatedAt: ts });
+    }
+  }
+  if (newEntries.length === 0 && updatedRules.length === 0) return 0;
+  for (const e of newEntries) assertEntrySavable(e, ctx);
+  await writeWithRevision([STORE.journalEntries, STORE.recurringRules], (t) => {
+    const eStore = t.objectStore(STORE.journalEntries);
+    for (const e of newEntries) eStore.put(e);
+    const rStore = t.objectStore(STORE.recurringRules);
+    for (const r of updatedRules) rStore.put(r);
+  });
+  return newEntries.length;
 }
 
 /* ── 目的別資金 ── */
@@ -1842,6 +2005,15 @@ export async function upsertMonthlyCost(item: MonthlyCostItem): Promise<void> {
   if (!expense || expense.role !== 'expense-category')
     throw new LedgerError('error.monthlyCost.expenseCategory');
 
+  // 移行登録（開始残高 funding）の項目に「継続購入（自動更新）」は設定できない。
+  // 更新のたびに開始残高から資金が湧く（謎の収入化・実支払いと二重計上）ため fail-closed。
+  // 毎月払いのサブスクは定期ルール（毎月の支出）か、支出入力からの継続コスト化で扱う。
+  const paymentSource = saved.paymentSourceAccountId
+    ? ctx.byId.get(saved.paymentSourceAccountId)
+    : undefined;
+  if (paymentSource?.role === 'equity' && saved.repeatEveryMonths !== undefined)
+    throw new LedgerError('error.monthlyCost.repeatOnOpening');
+
   const relatedEntries = entries.filter((e) => e.metadata?.monthlyCostId === saved.id);
   const relatedSchedules = schedules.filter((s) => s.monthlyCostId === saved.id);
   const amountChanged = saved.amount !== existing.amount;
@@ -2436,6 +2608,7 @@ export interface ReplacePayload {
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   assetDisposals: AssetDisposal[];
+  recurringRules: RecurringRule[];
 }
 
 /**
@@ -2456,6 +2629,7 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       STORE.tags,
       STORE.monthlyCostItems,
       STORE.assetDisposals,
+      STORE.recurringRules,
     ],
     (t) => {
       const scopes = t.objectStore(STORE.managementScopes);
@@ -2468,6 +2642,7 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       const tags = t.objectStore(STORE.tags);
       const monthlyCosts = t.objectStore(STORE.monthlyCostItems);
       const disposals = t.objectStore(STORE.assetDisposals);
+      const rules = t.objectStore(STORE.recurringRules);
       scopes.clear();
       instruments.clear();
       accounts.clear();
@@ -2478,6 +2653,7 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       tags.clear();
       monthlyCosts.clear();
       disposals.clear();
+      rules.clear();
       for (const s of payload.managementScopes) scopes.put(s);
       for (const inst of payload.accountInstruments) instruments.put(inst);
       for (const a of payload.accounts) accounts.put(a);
@@ -2488,6 +2664,7 @@ export async function replaceLedger(payload: ReplacePayload): Promise<void> {
       for (const tag of payload.tags) tags.put(tag);
       for (const mc of payload.monthlyCostItems) monthlyCosts.put(mc);
       for (const d of payload.assetDisposals) disposals.put(d);
+      for (const rule of payload.recurringRules) rules.put(rule);
       t.objectStore(STORE.kv).put(payload.meta, KV_META);
       t.objectStore(STORE.kv).put(payload.settings, KV_SETTINGS);
     },
@@ -2518,6 +2695,7 @@ export async function resetAll(): Promise<void> {
       STORE.tags,
       STORE.monthlyCostItems,
       STORE.assetDisposals,
+      STORE.recurringRules,
       STORE.snapshots,
     ],
     (t) => {
@@ -2532,6 +2710,7 @@ export async function resetAll(): Promise<void> {
       t.objectStore(STORE.tags).clear();
       t.objectStore(STORE.monthlyCostItems).clear();
       t.objectStore(STORE.assetDisposals).clear();
+      t.objectStore(STORE.recurringRules).clear();
       t.objectStore(STORE.snapshots).clear();
       t.objectStore(STORE.kv).put(meta, KV_META);
       t.objectStore(STORE.kv).put(settings, KV_SETTINGS);

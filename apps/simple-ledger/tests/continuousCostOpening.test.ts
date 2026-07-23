@@ -90,6 +90,21 @@ describe('createContinuousCostFromOpening（移行登録=開始残高）', () =>
     expect(parsed.success).toBe(true);
   });
 
+  it('移行登録（開始残高 funding）の項目に継続購入は設定できない', async () => {
+    const expenseId = await expenseAccountId();
+    const item = await createContinuousCostFromOpening({
+      name: 'Netflix誤登録',
+      amount: 1490,
+      costMonths: 1,
+      startMonth: thisMonth(),
+      expenseAccountId: expenseId,
+    });
+    const { upsertMonthlyCost } = await import('../src/data/repository');
+    await expect(
+      upsertMonthlyCost({ ...item, repeatEveryMonths: 1, updatedAt: item.updatedAt }),
+    ).rejects.toThrow(LedgerError);
+  });
+
   it('検証: 金額・月数・開始月・費用カテゴリを fail-closed に弾く', async () => {
     const expenseId = await expenseAccountId();
     const base = {
