@@ -12,7 +12,7 @@ export const ja = {
   'nav.journal': '仕訳',
   'nav.statements': '財務諸表',
   'nav.accounts': '勘定科目',
-  'nav.allocations': '継続コスト',
+  'nav.allocations': '毎月のもの',
   'nav.cashflow': '資金繰り',
   'nav.tags': 'タグ',
   'nav.wallets': '管理区分・支払い手段',
@@ -878,6 +878,50 @@ export const ja = {
   'cashflow.repaySettingsLine': '返済口座: {account}・毎月{day}日',
   'cashflow.repayScheduleTitle': '{name}の返済',
 
+  // 毎月のもの（定期ルール = 実仕訳の自動起票）
+  'monthly.title': '毎月のもの',
+  'recurring.sectionTitle': '毎月の支出・収入・振替',
+  'recurring.sectionIntro':
+    '毎月の支払日に、実際の仕訳として自動で記帳されます（アプリを開いたときにまとめて起票）。金額が変わった月は、できた仕訳をその月だけ編集してください。',
+  'recurring.add': '定期ルールを追加',
+  'recurring.empty': '定期ルールはありません。積立・給与・毎月払いのサブスクなどを登録できます。',
+  'recurring.createTitle': '定期ルールを追加',
+  'recurring.editTitle': '定期ルールを編集',
+  'recurring.kindLabel': '種別',
+  'recurring.kind.expense': '支出（毎月の支払い）',
+  'recurring.kind.income': '収入（給与など）',
+  'recurring.kind.transfer': '振替（積立など）',
+  'recurring.name': '摘要',
+  'recurring.nameHint': '起票される仕訳の名前（例: NISA積立 / 給与 / Netflix）。',
+  'recurring.amount': '毎月の金額',
+  'recurring.amountHint': '月によって金額が違う場合は、起票された仕訳をその月だけ編集します。',
+  'recurring.day': '毎月の日',
+  'recurring.dayHint': '1〜31。31 など月に無い日は月末になります。',
+  'recurring.startMonth': '開始月',
+  'recurring.from.expense': '支払い元',
+  'recurring.to.expense': '費用カテゴリ',
+  'recurring.from.income': '収入カテゴリ',
+  'recurring.to.income': '受け取り口座',
+  'recurring.from.transfer': '移動元',
+  'recurring.to.transfer': '移動先（資金・投資）',
+  'recurring.everyMonthDay': '毎月{day}日',
+  'recurring.paused': '停止中',
+  'recurring.pause': '停止',
+  'recurring.resume': '再開',
+  'recurring.resumeNote': '再開すると今月ぶんから起票されます（停止中の月は起票されません）。',
+  'recurring.deleteConfirmTitle': '定期ルールを削除',
+  'recurring.deleteConfirmBody':
+    '「{name}」を削除します。起票済みの仕訳は通常の仕訳としてそのまま残ります。',
+  'error.recurring.invalidStructure': '定期ルールの形式が不正です。',
+  'error.recurring.flowInvalid':
+    '科目の組み合わせが不正です（支出・収入・振替のいずれかの形にしてください）。',
+  'error.recurring.notFound': '定期ルールが見つかりません。',
+  'error.monthlyCost.repeatOnOpening':
+    '移行登録（初期残高）の項目に継続購入（自動更新）は設定できません。毎月払いは「毎月の支出」の定期ルールで登録してください。',
+  'monthlyCost.sectionTitle': '継続コスト（費用の月割り）',
+  'monthlyCost.repeatLockedOpening':
+    '移行登録（初期残高）の項目のため継続購入は設定できません。毎月払いは定期ルールで。',
+
   // 継続コストの移行登録（初期残高）
   'monthlyCost.migrateAdd': '移行登録（初期残高）',
   'monthlyCost.migrateTitle': '継続コストを移行登録',
@@ -890,7 +934,7 @@ export const ja = {
   'monthlyCost.migrateMonthsHint': '残っている価値を何か月かけて費用にしていくか。',
   'monthlyCost.migrateStartMonth': '認識開始月',
   'monthlyCost.migrateRenewHint':
-    '更新や次回の支払いが来たら、ホームの支出入力から「継続コスト化」で登録してください（この登録は今回ぶんのみ）。',
+    'この登録は今回ぶんのみです。毎月払いのサブスクは「毎月の支出」の定期ルールで、年払いなどの更新が来たら支出入力から「継続コスト化」で登録してください。',
 
   // 初期残高の一括登録（初回起動時に自動表示・設定から再表示可能）
   'onboarding.title': 'はじめに：いまの残高を登録',

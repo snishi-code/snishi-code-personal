@@ -16,6 +16,7 @@ import {
   roleAllowsType,
   type AccountRole,
 } from './accountRoles';
+import { recurringKindOf } from './recurring';
 
 const isoDate = z
   .string()
@@ -149,6 +150,12 @@ export const entryMetadataSchema = z.object({
   monthlyCostId: z.string().min(1).optional(),
   assetDisposalId: z.string().min(1).optional(),
   reserveId: z.string().min(1).optional(),
+  // 定期ルールからの自動起票の由来（両方セットで持つ。整合はパッケージ superRefine）。
+  recurringRuleId: z.string().min(1).optional(),
+  recurringMonth: z
+    .string()
+    .regex(/^\d{4}-\d{2}$/)
+    .optional(),
 });
 
 const monthSchema = z.string().regex(/^\d{4}-\d{2}$/, '月は YYYY-MM 形式である必要があります');
@@ -183,6 +190,24 @@ export const cashflowScheduleSchema = z.object({
   linkedEntryId: z.string().min(1).optional(),
   entryTagIds: tagIdList.optional(),
   monthlyCostId: z.string().min(1).optional(),
+  createdAt: isoDateTime,
+  updatedAt: isoDateTime,
+});
+
+export const recurringRuleSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(120),
+  amount: amountSchema,
+  dayOfMonth: z.number().int().min(1).max(31),
+  debitAccountId: z.string().min(1),
+  creditAccountId: z.string().min(1),
+  startMonth: z.string().regex(/^\d{4}-\d{2}$/),
+  postedThroughMonth: z
+    .string()
+    .regex(/^\d{4}-\d{2}$/)
+    .optional(),
+  paused: z.boolean().optional(),
+  managementScopeId: z.string().min(1),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
 });
@@ -301,6 +326,8 @@ export const ledgerExportPackageSchema = z
     tags: z.array(tagSchema),
     monthlyCostItems: z.array(monthlyCostItemSchema),
     assetDisposals: z.array(assetDisposalSchema),
+    // 2026-07 追加。旧バックアップ（キー欠落）は空配列として受け入れる（追加 optional の後方互換）。
+    recurringRules: z.array(recurringRuleSchema).default([]),
     settings: settingsSchema,
   })
   .superRefine((pkg, ctx) => {
@@ -393,6 +420,7 @@ export const ledgerExportPackageSchema = z
 
     // 月額化コスト ID 集合（仕訳・予定CF の monthlyCostId 参照検証に使う）。
     const monthlyCostIdSet = new Set(pkg.monthlyCostItems.map((m) => m.id));
+    const recurringRuleIdSet = new Set(pkg.recurringRules.map((r) => r.id));
     // 固定資産処分 ID 集合（仕訳の assetDisposalId 参照検証に使う）。
     const assetDisposalIdSet = new Set(pkg.assetDisposals.map((d) => d.id));
 
@@ -493,6 +521,27 @@ export const ledgerExportPackageSchema = z
           issue('補正の相手科目が存在しません', ap('counterpartAccountId'));
         if (adj.delta !== adj.actualBalance - adj.expectedBalance)
           issue('補正の delta が actual − expected と一致しません', ap('delta'));
+      }
+
+      // 定期ルール由来の仕訳: ruleId と month は必ずペアで、ルールが存在すること
+      // （ルール削除時はメタデータを剥がして通常仕訳へ戻す運用なので、存在は強制できる）。
+      const rrId = e.metadata?.recurringRuleId;
+      const rrMonth = e.metadata?.recurringMonth;
+      if ((rrId !== undefined) !== (rrMonth !== undefined)) {
+        issue('recurringRuleId と recurringMonth は必ずペアで持つ必要があります', [
+          'journalEntries',
+          ei,
+          'metadata',
+          'recurringRuleId',
+        ]);
+      }
+      if (rrId !== undefined && !recurringRuleIdSet.has(rrId)) {
+        issue(`仕訳の recurringRuleId(${rrId})が存在しません`, [
+          'journalEntries',
+          ei,
+          'metadata',
+          'recurringRuleId',
+        ]);
       }
 
       // 月額化コスト由来の仕訳は、紐づく monthlyCostItem が存在すること。
@@ -684,6 +733,31 @@ export const ledgerExportPackageSchema = z
         );
       if (s.monthlyCostId !== undefined && !monthlyCostIdSet.has(s.monthlyCostId))
         issue(`予定 CF「${s.title}」の monthlyCostId が存在しません`, at('monthlyCostId'));
+    });
+
+    // 定期ルール(recurringRules)の参照整合性。
+    const seenRuleIds = new Set<string>();
+    pkg.recurringRules.forEach((r, ri) => {
+      const at = (...p: (string | number)[]) => ['recurringRules', ri, ...p];
+      if (seenRuleIds.has(r.id)) issue(`定期ルールの ID が重複しています(${r.id})`, at('id'));
+      seenRuleIds.add(r.id);
+      if (!hasScope(r.managementScopeId))
+        issue(`定期ルール「${r.name}」の管理区分が存在しません`, at('managementScopeId'));
+      if (!hasAccount(r.debitAccountId))
+        issue(`定期ルール「${r.name}」の行き先科目が存在しません`, at('debitAccountId'));
+      if (!hasAccount(r.creditAccountId))
+        issue(`定期ルール「${r.name}」の源泉科目が存在しません`, at('creditAccountId'));
+      if (r.debitAccountId === r.creditAccountId)
+        issue(`定期ルール「${r.name}」の源泉と行き先が同一です`, at('debitAccountId'));
+      const kind = recurringKindOf(
+        accountRole.get(r.debitAccountId) as AccountRole | undefined,
+        accountRole.get(r.creditAccountId) as AccountRole | undefined,
+      );
+      if (hasAccount(r.debitAccountId) && hasAccount(r.creditAccountId) && kind === null)
+        issue(
+          `定期ルール「${r.name}」の科目の組み合わせが不正です（支出/収入/振替のいずれかの形である必要があります）`,
+          at('debitAccountId'),
+        );
     });
 
     // 目的別資金(reserves)の参照整合性。
