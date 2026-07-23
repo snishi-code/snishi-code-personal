@@ -254,7 +254,12 @@ export function App() {
           />
         ) : null}
         {screen === 'expenseBreakdown' ? (
-          <ExpenseBreakdown period={period} onPeriodChange={setPeriod} onNavigate={go} />
+          <ExpenseBreakdown
+            period={period}
+            onPeriodChange={setPeriod}
+            onDrillDown={goJournalFiltered}
+            onNavigate={go}
+          />
         ) : null}
         {screen === 'netIncome' ? (
           <NetIncome period={period} onPeriodChange={setPeriod} onNavigate={go} />

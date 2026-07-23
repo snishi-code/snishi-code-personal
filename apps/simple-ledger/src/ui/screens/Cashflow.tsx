@@ -17,9 +17,8 @@ import {
 import { continuousCostEntries } from '../../domain/continuousCost';
 import { reserveBalances } from '../../domain/reserve';
 import { addMonthsToDate } from '../../domain/allocation';
-import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../../domain/constants';
-import { newId } from '../../domain/ids';
-import { nowIso, todayLocal } from '../../util/time';
+import { sortAccounts } from '../../domain/accountOrder';
+import { todayLocal } from '../../util/time';
 import type { Account, CashflowSchedule, ReserveItem } from '../../domain/types';
 import { ReserveSheet } from '../ReserveSheet';
 import { Money } from '../money';
@@ -116,26 +115,44 @@ export function Cashflow() {
   const liabilitySummary = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     const schedules = ledger?.cashflowSchedules ?? [];
-    return accounts
+    const entries = ledger?.journalEntries ?? [];
+    return sortAccounts(accounts)
       .filter((a) => a.role === 'payment-liability' || a.role === 'other-liability')
       .map((a) => {
-        const related = schedules.filter(
+        // 返済予定 = 未実績の予定 CF（分割返済など）+ 未来日付の返済実仕訳（借方がこの負債）。
+        const planned = schedules.filter(
           (s) => s.counterAccountId === a.id && s.status === 'planned',
         );
-        const remaining = related.reduce((sum, s) => sum + s.amount, 0);
-        const nextDue = related.map((s) => s.dueDate).sort()[0];
+        const futureRepayments = entries.filter(
+          (e) =>
+            e.date > today &&
+            e.lines.some((l) => l.side === 'debit' && l.accountId === a.id),
+        );
+        const remaining =
+          planned.reduce((sum, s) => sum + s.amount, 0) +
+          futureRepayments.reduce(
+            (sum, e) =>
+              sum +
+              e.lines
+                .filter((l) => l.side === 'debit' && l.accountId === a.id)
+                .reduce((s2, l) => s2 + l.amount, 0),
+            0,
+          );
+        const count = planned.length + futureRepayments.length;
+        const nextDue = [...planned.map((s) => s.dueDate), ...futureRepayments.map((e) => e.date)]
+          .sort()[0];
         return {
           id: a.id,
           account: a,
           name: a.name,
-          count: related.length,
+          count,
           remaining,
           nextDue,
           balance: liabBalById.get(a.id) ?? 0,
         };
       })
       .filter((x) => x.count > 0 || x.balance !== 0);
-  }, [ledger, liabBalById]);
+  }, [ledger, liabBalById, today]);
 
   return (
     <section aria-labelledby="cashflow-title" data-ui={UI.cashflow.view}>
@@ -450,9 +467,10 @@ export function Cashflow() {
 }
 
 /**
- * カード・ローンの返済予定を 1 件作るシート。
+ * カード・ローンの返済を 1 件登録するシート。
  * 勘定科目の返済設定（返済口座・毎月の返済日）が既定値になる。金額の既定はいまの残高（全額）。
- * 保存されるのは予定 CF（planned）で、支払日に「実績にする」で 借方 負債 / 貸方 返済口座 の仕訳になる。
+ * **支払日の振替仕訳（借方 負債 / 貸方 返済口座）をそのまま登録する**（予定 CF は経由しない。
+ * 未来日付の実仕訳は資金繰りの投影・仕訳一覧の「将来予定も表示」に反映される）。
  */
 function RepaymentScheduleSheet({
   account,
@@ -463,11 +481,11 @@ function RepaymentScheduleSheet({
   balance: number;
   onClose: () => void;
 }) {
-  const { ledger, saveSchedules } = useLedger();
+  const { ledger, saveEntry } = useLedger();
   const accounts = ledger?.accounts ?? [];
   const today = todayLocal();
 
-  const fromOptions = accounts
+  const fromOptions = sortAccounts(accounts)
     .filter((a) => a.role === 'daily-asset' && (!a.archived || a.id === account.repaymentAccountId))
     .map((a) => ({ value: a.id, label: a.name }));
   const [fromAccountId, setFromAccountId] = useState(
@@ -486,24 +504,15 @@ function RepaymentScheduleSheet({
     if (!Number.isInteger(amount) || amount < 1 || fromAccountId === '') return;
     setSubmitting(true);
     setError(undefined);
-    const ts = nowIso();
     try {
-      await saveSchedules([
-        {
-          id: newId(),
-          title: t('cashflow.repayScheduleTitle', { name: account.name }),
-          dueDate: date,
-          amount,
-          direction: 'outflow',
-          accountId: fromAccountId,
-          counterAccountId: account.id,
-          source: account.role === 'payment-liability' ? 'credit-card' : 'manual',
-          status: 'planned',
-          managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
-          createdAt: ts,
-          updatedAt: ts,
-        },
-      ]);
+      await saveEntry({
+        date,
+        description: t('cashflow.repayScheduleTitle', { name: account.name }),
+        debitAccountId: account.id,
+        creditAccountId: fromAccountId,
+        amount,
+        metadata: { inputMode: 'transfer' },
+      });
       onClose();
     } catch (e) {
       setError(errorText(e));

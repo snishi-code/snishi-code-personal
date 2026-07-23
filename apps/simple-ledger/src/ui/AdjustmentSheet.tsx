@@ -10,6 +10,7 @@ import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../state/store';
 import { accountBalance, filterByDateRange } from '../domain/accounting';
 import { ADJUSTABLE_ACCOUNT_ROLES } from '../domain/accountRoles';
+import { parseSignedAmountText, sanitizeSignedAmountText } from './amountText';
 import { groupedAccountsByRole } from './accountOptions';
 import { AccountPicker } from './AccountPicker';
 import { Money } from './money';
@@ -49,7 +50,7 @@ export function AdjustmentCreateSheet({
       ),
     [account.id, type, ledger, date],
   );
-  const actual = actualText === '' ? null : Number.parseInt(actualText.replace(/[^\d]/g, ''), 10);
+  const actual = parseSignedAmountText(actualText);
   const delta = actual === null ? 0 : actual - expected;
 
   async function submit() {
@@ -122,9 +123,9 @@ export function AdjustmentCreateSheet({
         <TextInput
           label={t('adjust.actual')}
           required
-          inputMode="numeric"
           value={actualText}
-          onChange={(v) => setActualText(v.replace(/[^\d]/g, ''))}
+          onChange={(v) => setActualText(sanitizeSignedAmountText(v))}
+          hint={t('common.signedAmountHint')}
           dataUi={UI.adjustments.actual}
         />
         <div className="kv">
@@ -173,7 +174,7 @@ export function AdjustmentEditSheet({
     return accountBalance(accountId, target.type, filterByDateRange(others, undefined, date));
   }, [accountId, target, adjustable, ledger, date, entry.id]);
 
-  const actual = actualText === '' ? null : Number.parseInt(actualText.replace(/[^\d]/g, ''), 10);
+  const actual = parseSignedAmountText(actualText);
   const delta = actual === null ? 0 : actual - expected;
   // 補正対象は内部集約口座（取り置き資金・継続コスト台帳）を除いた資産・負債のみ（聖域化）。
   const groups = groupedAccountsByRole(accounts, [...ADJUSTABLE_ACCOUNT_ROLES], accountId);
@@ -250,9 +251,9 @@ export function AdjustmentEditSheet({
         <TextInput
           label={t('adjust.actual')}
           required
-          inputMode="numeric"
           value={actualText}
-          onChange={(v) => setActualText(v.replace(/[^\d]/g, ''))}
+          onChange={(v) => setActualText(sanitizeSignedAmountText(v))}
+          hint={t('common.signedAmountHint')}
           dataUi={UI.adjustments.editActual}
         />
         <div className="kv">

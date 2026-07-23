@@ -16,29 +16,33 @@ import { TrendChart } from '../components/TrendChart';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import type { Screen } from '../navigation';
+import type { JournalFilter } from './Journal';
 
 export function ExpenseBreakdown({
   period,
   onPeriodChange,
+  onDrillDown,
   onNavigate,
 }: {
   period: ReportPeriod;
   onPeriodChange: (p: ReportPeriod) => void;
+  /** 費用カテゴリ行タップ → 仕訳一覧をそのカテゴリで絞り込んで開く。 */
+  onDrillDown: (filter: JournalFilter) => void;
   onNavigate: (screen: Screen) => void;
 }) {
   const { ledger } = useLedger();
   const currency = ledger?.settings.currency ?? 'JPY';
   const label = periodLabel(period);
+  const range = useMemo(() => periodRange(period), [period]);
 
   const { breakdown, categories } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     const entries = ledger?.derivedEntries ?? [];
-    const range = periodRange(period);
     return {
       breakdown: livingCostBreakdownForRange(accounts, entries, range),
       categories: expenseCategoryBreakdownForRange(accounts, entries, range),
     };
-  }, [ledger, period]);
+  }, [ledger, range]);
 
   const trends = useMemo(() => buildSectionTrends(period, ledger), [period, ledger]);
 
@@ -60,12 +64,22 @@ export function ExpenseBreakdown({
           <div className="stmt-row muted">{t('expenseBreakdown.noCategory')}</div>
         ) : (
           categories.map((c) => (
-            <div key={c.account.id} className="stmt-row" data-ui={UI.expenseBreakdown.categoryRow}>
-              <span>{c.account.name}</span>
+            <button
+              key={c.account.id}
+              type="button"
+              className="stmt-row stmt-row--btn"
+              style={{ width: '100%', background: 'transparent', border: 'none' }}
+              onClick={() => onDrillDown({ accountId: c.account.id, ...(range ?? {}) })}
+              aria-label={t('expenseBreakdown.drillDown', { name: c.account.name })}
+              data-ui={UI.expenseBreakdown.categoryRow}
+            >
+              <span>
+                {c.account.name} <Icon name="chevronRight" size={12} />
+              </span>
               <span className="stmt-row__num">
                 <Money amount={c.amount} currency={currency} />
               </span>
-            </div>
+            </button>
           ))
         )}
         <div className="stmt-row stmt-row--total">

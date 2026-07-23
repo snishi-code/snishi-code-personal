@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { Modal } from './overlays';
 import { TextInput } from '@snishi/foundation/ui/Field';
 import { useLedger } from '../state/store';
+import { parseSignedAmountText, sanitizeSignedAmountText } from './amountText';
 import { todayLocal } from '../util/time';
 import type { Account, JournalEntry } from '../domain/types';
 import { t } from '../i18n';
@@ -27,7 +28,7 @@ export function openingTarget(
   return null;
 }
 
-/** 履歴の無い既存科目（資産・負債）へ初期残高を登録する。 */
+/** 履歴の無い既存科目（資産・負債）へ初期残高を登録する（マイナス残高も可）。 */
 export function OpeningRegisterSheet({
   account,
   onClose,
@@ -40,10 +41,10 @@ export function OpeningRegisterSheet({
   const [date, setDate] = useState(todayLocal());
   const [submitting, setSubmitting] = useState(false);
 
-  const amount = amountText === '' ? null : Number.parseInt(amountText.replace(/[^\d]/g, ''), 10);
+  const amount = parseSignedAmountText(amountText);
 
   async function submit() {
-    if (amount === null || amount < 1 || submitting) return;
+    if (amount === null || amount === 0 || submitting) return;
     setSubmitting(true);
     try {
       await createOpening({ accountId: account.id, amount, date });
@@ -68,7 +69,7 @@ export function OpeningRegisterSheet({
             type="button"
             className="btn btn--primary"
             onClick={submit}
-            disabled={submitting || amount === null || amount < 1}
+            disabled={submitting || amount === null || amount === 0}
             data-ui={UI.adjustments.openingRegisterSave}
           >
             {t('opening.registerSave')}
@@ -85,9 +86,9 @@ export function OpeningRegisterSheet({
         <TextInput
           label={t('opening.amount')}
           required
-          inputMode="numeric"
           value={amountText}
-          onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
+          onChange={(v) => setAmountText(sanitizeSignedAmountText(v))}
+          hint={t('common.signedAmountHint')}
           dataUi={UI.adjustments.openingRegisterAmount}
         />
         <TextInput
@@ -114,13 +115,19 @@ export function OpeningEditSheet({
   const byId = new Map(accounts.map((a) => [a.id, a] as const));
   const tgt = openingTarget(entry, byId);
 
-  const [amountText, setAmountText] = useState(String(tgt?.amount ?? ''));
+  // 表示は符号付き: 自然向き（資産=科目が借方 / 負債=科目が貸方）なら正、反転（マイナス残高）なら負。
+  const targetLine = tgt ? entry.lines.find((l) => l.accountId === tgt.account.id) : undefined;
+  const naturalSide = tgt?.account.type === 'asset' ? 'debit' : 'credit';
+  const signedInitial =
+    tgt === null ? '' : String(targetLine?.side === naturalSide ? tgt.amount : -tgt.amount);
+
+  const [amountText, setAmountText] = useState(signedInitial);
   const [date, setDate] = useState(entry.date);
   const [submitting, setSubmitting] = useState(false);
-  const amount = amountText === '' ? null : Number.parseInt(amountText.replace(/[^\d]/g, ''), 10);
+  const amount = parseSignedAmountText(amountText);
 
   async function submit() {
-    if (amount === null || amount < 1) return;
+    if (amount === null || amount === 0) return;
     setSubmitting(true);
     try {
       await updateOpening({ id: entry.id, amount, date });
@@ -160,9 +167,9 @@ export function OpeningEditSheet({
         <TextInput
           label={t('opening.amount')}
           required
-          inputMode="numeric"
           value={amountText}
-          onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
+          onChange={(v) => setAmountText(sanitizeSignedAmountText(v))}
+          hint={t('common.signedAmountHint')}
           dataUi={UI.adjustments.openingEditAmount}
         />
         <TextInput

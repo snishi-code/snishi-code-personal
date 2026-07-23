@@ -972,10 +972,12 @@ export interface OpeningInput {
 /**
  * 開始時点の残高を `kind='opening'` の仕訳で登録する（初回設定にも使える・あとから編集/削除できる）。
  * 資産: `借方 科目 / 貸方 開始残高(equity)`。負債: `借方 開始残高 / 貸方 科目`。
+ * **マイナスの初期残高**（立替金が相手側に振れている等）は貸借を反転して登録する
+ * （明細金額は常に正・符号は向きで表す）。0 は不可。
  * 既存 BS 科目への付与と、新規 BS 科目の作成 + 付与の両方に対応する。ホームの日常入力経路では作らない。
  */
 export async function createOpening(input: OpeningInput): Promise<JournalEntry> {
-  if (!Number.isInteger(input.amount) || input.amount <= 0)
+  if (!Number.isInteger(input.amount) || input.amount === 0)
     throw new LedgerError('error.common.amountInvalid');
   const accounts = await getAll<Account>(STORE.accounts);
   const ts = nowIso();
@@ -1019,16 +1021,18 @@ export async function createOpening(input: OpeningInput): Promise<JournalEntry> 
   const equity = equityResult.account;
   const createdEquity = equityResult.created ? equity : null;
 
-  const lines: JournalLine[] =
-    target.type === 'asset'
-      ? [
-          { accountId: target.id, side: 'debit', amount: input.amount },
-          { accountId: equity.id, side: 'credit', amount: input.amount },
-        ]
-      : [
-          { accountId: equity.id, side: 'debit', amount: input.amount },
-          { accountId: target.id, side: 'credit', amount: input.amount },
-        ];
+  const magnitude = Math.abs(input.amount);
+  // 正: 資産=科目が借方 / 負債=科目が貸方（自然向き）。負は反転（マイナスの資産・負債）。
+  const accountOnDebit = input.amount > 0 ? target.type === 'asset' : target.type !== 'asset';
+  const lines: JournalLine[] = accountOnDebit
+    ? [
+        { accountId: target.id, side: 'debit', amount: magnitude },
+        { accountId: equity.id, side: 'credit', amount: magnitude },
+      ]
+    : [
+        { accountId: equity.id, side: 'debit', amount: magnitude },
+        { accountId: target.id, side: 'credit', amount: magnitude },
+      ];
   const entry: JournalEntry = {
     id: newId(),
     date: input.date,
@@ -1054,19 +1058,40 @@ export async function createOpening(input: OpeningInput): Promise<JournalEntry> 
 /** 初期残高の金額・日付を編集する（対象科目・向き・id は保持）。 */
 export async function updateOpening(input: {
   id: string;
+  /** 符号付き。正=自然向き（資産は借方/負債は貸方）・負=反転（マイナス残高）。0 は不可。 */
   amount: number;
   date: string;
 }): Promise<JournalEntry> {
-  if (!Number.isInteger(input.amount) || input.amount <= 0)
+  if (!Number.isInteger(input.amount) || input.amount === 0)
     throw new LedgerError('error.common.amountInvalid');
-  const entries = await getAll<JournalEntry>(STORE.journalEntries);
+  const [entries, accounts] = await Promise.all([
+    getAll<JournalEntry>(STORE.journalEntries),
+    getAll<Account>(STORE.accounts),
+  ]);
   const existing = entries.find((e) => e.id === input.id);
   if (!existing) throw new LedgerError('error.adjust.notFound');
   if (existing.kind !== 'opening') throw new LedgerError('error.opening.notOpening');
+  const byId = accountsById(accounts);
+  const targetLine = existing.lines.find((l) => byId.get(l.accountId)?.role !== 'equity');
+  const equityLine = existing.lines.find((l) => byId.get(l.accountId)?.role === 'equity');
+  const target = targetLine ? byId.get(targetLine.accountId) : undefined;
+  if (!targetLine || !equityLine || !target) throw new LedgerError('error.opening.notOpening');
+  const magnitude = Math.abs(input.amount);
+  // 符号で貸借の向きを組み直す（createOpening と同じ規則）。
+  const accountOnDebit = input.amount > 0 ? target.type === 'asset' : target.type !== 'asset';
+  const lines: JournalLine[] = accountOnDebit
+    ? [
+        { accountId: target.id, side: 'debit', amount: magnitude },
+        { accountId: equityLine.accountId, side: 'credit', amount: magnitude },
+      ]
+    : [
+        { accountId: equityLine.accountId, side: 'debit', amount: magnitude },
+        { accountId: target.id, side: 'credit', amount: magnitude },
+      ];
   const entry: JournalEntry = {
     ...existing,
     date: input.date,
-    lines: existing.lines.map((l) => ({ ...l, amount: input.amount })),
+    lines,
     updatedAt: nowIso(),
   };
   await writeWithRevision([STORE.journalEntries], (t) => {

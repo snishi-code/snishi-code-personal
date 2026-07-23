@@ -835,6 +835,12 @@ export const ja = {
   'exit.confirmBody': 'データは端末内に保存されています。次回も続きから使えます。',
   'exit.confirmLabel': '終了する',
 
+  // 符号付き金額入力（マイナス残高の初期残高・補正の実残高）
+  'common.signedAmountHint': 'マイナスは先頭に -（例: -3000）。立替金が相手側に振れている場合などに。',
+
+  // 支出内訳 → 仕訳一覧ドリルダウン
+  'expenseBreakdown.drillDown': '{name} の仕訳を見る',
+
   // 勘定科目の並び替え（箱内・上下ボタン式）
   'accounts.reorder': '並び替え',
   'accounts.reorderDone': '並び替えを終了',
@@ -862,7 +868,7 @@ export const ja = {
   'cashflow.repayAdd': '返済予定を追加',
   'cashflow.repayTitle': '返済予定を追加',
   'cashflow.repayIntro':
-    '返済口座から「{name}」への返済予定を作ります。支払日が来たら「実績にする」で仕訳になります。',
+    '返済口座から「{name}」への返済を、支払日の振替仕訳としてそのまま登録します（仕訳一覧・資金繰りに反映）。',
   'cashflow.repayAmount': '返済額',
   'cashflow.repayAmountHint': '既定はいまの残高（全額）です。請求額に合わせて変更できます。',
   'cashflow.repayFrom': '返済口座',

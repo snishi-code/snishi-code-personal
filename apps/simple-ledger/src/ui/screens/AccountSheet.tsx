@@ -16,6 +16,7 @@ import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { useLedger } from '../../state/store';
 import type { Account } from '../../domain/types';
 import { findAccountNameConflicts, planArchiveRenames } from '../../domain/accountNames';
+import { sortAccounts } from '../../domain/accountOrder';
 import { newId } from '../../domain/ids';
 import { nowIso, todayLocal } from '../../util/time';
 import { boxForRole, type AccountBox } from '../accountBoxes';
@@ -61,7 +62,7 @@ export function AccountSheet({
     !!existing && (existing.role === 'payment-liability' || existing.role === 'other-liability');
   const repaymentOptions = [
     { value: '', label: t('accounts.repaymentUnset') },
-    ...accounts
+    ...sortAccounts(accounts)
       .filter((a) => a.role === 'daily-asset' && (!a.archived || a.id === repaymentAccountId))
       .map((a) => ({ value: a.id, label: a.name })),
   ];

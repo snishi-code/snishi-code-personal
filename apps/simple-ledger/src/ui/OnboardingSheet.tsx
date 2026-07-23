@@ -8,6 +8,7 @@
 import { useState } from 'react';
 import { TextInput } from '@snishi/foundation/ui/Field';
 import { Modal, useDirtyGuard } from './overlays';
+import { sortAccounts } from '../domain/accountOrder';
 import { useLedger } from '../state/store';
 import { todayLocal } from '../util/time';
 import { t } from '../i18n';
@@ -22,7 +23,7 @@ const LIABILITY_ROLES: ReadonlySet<string> = new Set(['payment-liability', 'othe
 
 export function OnboardingSheet({ onClose }: { onClose: () => void }) {
   const { ledger, createOpenings } = useLedger();
-  const accounts = ledger?.accounts ?? [];
+  const accounts = sortAccounts(ledger?.accounts ?? []);
   const assetRows = accounts.filter((a) => !a.archived && ASSET_ROLES.has(a.role));
   const liabilityRows = accounts.filter((a) => !a.archived && LIABILITY_ROLES.has(a.role));
 
