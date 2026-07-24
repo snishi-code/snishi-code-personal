@@ -150,7 +150,7 @@ export const ja = {
     '総額・開始月・月数・更新周期・終了月・分類先カテゴリを変えると、過去の支出・収支・BS・未消化残高もさかのぼって再計算されます。',
   'monthlyCost.deleteConfirmTitle': '継続コストを削除しますか？',
   'monthlyCost.deleteConfirmBody':
-    '「{name}」を削除します。関連する継続コストの支払い仕訳と未実績の返済予定も削除されます。',
+    '「{name}」を削除します。関連する継続コストの支払い仕訳と未実績の返済予定も削除されます。登録済みの返済仕訳（未来日付の振替）は残ります（仕訳一覧から編集・削除できます）。',
   'monthlyCost.recurringBadge': '継続購入',
   'monthlyCost.oneTimeBadge': '償却のみ',
   'monthlyCost.kind.subscription': 'サブスク（月課金）',
@@ -187,7 +187,7 @@ export const ja = {
 
   'cashflow.title': '資金繰り',
   'cashflow.intro':
-    '将来の入出金予定から、自由資金の推移を見ます。予定は「実績化」すると仕訳になります。',
+    '未来日付の仕訳から、自由資金の推移を見ます。カード・ローンは行をタップすると返済計画を登録できます。',
   'cashflow.liquidNote':
     '総資金は現金・預金・取り置きなどの流動資金です（投資・固定資産・継続コストの未消化分は含めません）。',
   'cashflow.until': '表示終了日',
@@ -198,8 +198,6 @@ export const ja = {
   'cashflow.minFree': '期間内の最低自由資金',
   'cashflow.depleteWarning': 'この期間に自由資金がマイナスになる予定があります。',
   'cashflow.planned': '今後の支払い予定',
-  'cashflow.emptyPlanned':
-    '分割・定期の返済予定はありません。ホームの支出・振替（借入の分割返済）から自動で作られます。',
   'cashflow.liabilitiesTitle': '負債・分割払い',
   'cashflow.nextDue': '次回支払日',
   'cashflow.installmentsLeft': '残り {count} 回',
@@ -221,7 +219,7 @@ export const ja = {
   'cashflow.futureFromHome': 'ホームから未来日付で登録',
   'cashflow.scheduleSecondaryTitle': '分割・定期の返済予定',
   'cashflow.scheduleSecondaryHint':
-    '継続コストの負債払いや、借入（振替）の分割返済から自動で作られる予定です（読み取り専用）。',
+    '以前のバージョンで作られた返済予定です。新しくは作られません（返済は未来日付の振替仕訳として登録されます）。実績化または削除で整理できます。',
   'cashflow.advancedTitle': '取り置き資金',
   'cashflow.advancedHint':
     '近い支払い予定に備えて、預金から自由資金を取り分けます（CF の主役ではなく補助情報）。',
@@ -507,7 +505,8 @@ export const ja = {
   'entry.monthlyizeMonthsHint': 'サブスクは 1。年払いは 12、耐久財は使う年数×12 など。',
   'entry.monthlyizeContinue': '継続・買い替えする',
   'entry.monthlyizeRepayToggle': '分割・後日引落を資金繰りに入れる',
-  'entry.monthlyizeRepayNote': '支払い元が負債のため、返済予定（資金繰り）を作成できます。',
+  'entry.monthlyizeRepayNote':
+    '支払い元が負債のため、返済を未来日付の振替仕訳としてまとめて登録できます（仕訳一覧・資金繰りに反映）。',
   'entry.monthlyizeRepayAccount': '引落口座',
   'entry.monthlyizeRepayCount': '返済回数',
   'entry.monthlyizeRepayStart': '初回引落日',
@@ -877,6 +876,12 @@ export const ja = {
     '勘定科目（カード・ローン）の編集で返済口座と毎月の返済日を設定すると、ここに既定値が入ります。',
   'cashflow.repaySettingsLine': '返済口座: {account}・毎月{day}日',
   'cashflow.repayScheduleTitle': '{name}の返済',
+  'cashflow.repayCount': '返済回数',
+  'cashflow.repayCountHint':
+    '1 = カードの次回引落などの単発。毎月同額のローンは回数を入れると、毎月の振替仕訳をまとめて登録します（合計は返済額に一致）。',
+  'cashflow.repayPerMonth': '月あたり約 {amount} × {count} 回',
+  'error.repay.countInvalid': '返済回数は 1 以上の整数で入力してください。',
+  'error.repay.liabilityRequired': '返済先はカード・未払 / ローンの負債科目を選んでください。',
 
   // 毎月のもの（定期ルール = 実仕訳の自動起票）
   'monthly.title': '毎月のもの',

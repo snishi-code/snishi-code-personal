@@ -550,6 +550,113 @@ export async function saveEntryWithSchedules(
   });
 }
 
+export interface RepaymentPlanInput {
+  /** 返す負債（payment-liability | other-liability）。 */
+  liabilityAccountId: string;
+  /** 返済元（daily-asset）。 */
+  fromAccountId: string;
+  /** 初回返済日 'YYYY-MM-DD'。2 回目以降は毎月同日（月末クランプは addMonthsToDate に従う）。 */
+  firstDate: string;
+  /** 返済総額。count で月割り配分し、合計は必ずこれに一致する。 */
+  total: number;
+  /** 返済回数（>=1）。1 ならカードの次回引落など単発。 */
+  count: number;
+  /** 仕訳の摘要ベース。count>1 のとき「{title} i/count」になる。 */
+  title: string;
+  managementScopeId?: string;
+}
+
+/**
+ * 負債の返済計画を「未来日付の振替実仕訳 N 本」として一括登録する（1 トランザクション）。
+ * 予定→実績化の 2 段は経由しない。返済は金額・回数が最初から確定しているため、
+ * ルール（毎月のもの）ではなくただの未来仕訳で表す＝完済でぴったり終わる。
+ * 各仕訳は 借方 負債 / 貸方 返済元。仕訳一覧・資金繰りの投影にそのまま乗る。
+ */
+export async function createRepaymentEntries(input: RepaymentPlanInput): Promise<JournalEntry[]> {
+  if (input.title.trim() === '') throw new LedgerError('error.common.nameRequired');
+  const ctx = await loadSaveContext();
+  const managementScopeId = input.managementScopeId ?? DEFAULT_MANAGEMENT_SCOPE_ID;
+  if (!ctx.scopeIds.has(managementScopeId)) throw new LedgerError('error.scope.unknown');
+  const entries = buildRepaymentEntries(ctx, {
+    liabilityAccountId: input.liabilityAccountId,
+    fromAccountId: input.fromAccountId,
+    firstDate: input.firstDate,
+    total: input.total,
+    count: input.count,
+    title: input.title.trim(),
+    managementScopeId,
+    ts: nowIso(),
+  });
+  await writeWithRevision([STORE.journalEntries], (t) => {
+    const store = t.objectStore(STORE.journalEntries);
+    for (const e of entries) store.put(e);
+  });
+  return entries;
+}
+
+/**
+ * 負債払いの分割返済を「未来日付の振替実仕訳 N 本」として組み立てる（予定 CF は作らない）。
+ * createRepaymentEntries と同じ形: 借方 負債 / 貸方 返済元(daily-asset)。金額は monthlyAmounts で
+ * 配分し合計は必ず total に一致、日付は初回引落日(firstDate)から毎月同日。呼び出し側の
+ * 1 トランザクションに同梱して保存する（購入だけ成功して返済が残らない中途半端を作らない）。
+ * 返済は実予定（確定した資金移動の計画）なので metadata に monthlyCostId は付けない＝
+ * 継続コスト item を削除しても仕訳として残す・ユーザーが自由に編集/削除できる。
+ */
+function buildRepaymentEntries(
+  ctx: SaveContext,
+  params: {
+    /** 返す負債（payment-liability | other-liability）。 */
+    liabilityAccountId: string;
+    /** 返済元（daily-asset）。 */
+    fromAccountId: string;
+    /** 初回引落日 'YYYY-MM-DD'。2 回目以降は毎月同日（月末クランプは addMonthsToDate に従う）。 */
+    firstDate: string;
+    /** 返済総額。count で月割り配分し、合計は必ずこれに一致する。 */
+    total: number;
+    /** 返済回数（>=1 整数）。 */
+    count: number;
+    /** 摘要ベース。count>1 のとき「{title} i/count」になる。 */
+    title: string;
+    managementScopeId: string;
+    ts: string;
+  },
+): JournalEntry[] {
+  if (!Number.isInteger(params.total) || params.total < 1)
+    throw new LedgerError('error.common.amountInvalid');
+  if (!Number.isInteger(params.count) || params.count < 1)
+    throw new LedgerError('error.repay.countInvalid');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(params.firstDate))
+    throw new LedgerError('error.monthlyCost.dateRequired');
+  const liability = ctx.byId.get(params.liabilityAccountId);
+  if (
+    !liability ||
+    (liability.role !== 'payment-liability' && liability.role !== 'other-liability')
+  )
+    throw new LedgerError('error.repay.liabilityRequired');
+  const from = ctx.byId.get(params.fromAccountId);
+  if (!from || from.role !== 'daily-asset')
+    throw new LedgerError('error.monthlyCost.repaymentAccount');
+
+  const parts = monthlyAmounts(params.total, params.count);
+  const entries: JournalEntry[] = parts.map((amount, i) => ({
+    id: newId(),
+    date: addMonthsToDate(params.firstDate, i),
+    description:
+      params.count === 1 ? params.title : `${params.title} ${i + 1}/${params.count}`,
+    kind: 'normal',
+    managementScopeId: params.managementScopeId,
+    lines: [
+      { accountId: params.liabilityAccountId, side: 'debit', amount },
+      { accountId: params.fromAccountId, side: 'credit', amount },
+    ],
+    metadata: { inputMode: 'transfer' },
+    createdAt: params.ts,
+    updatedAt: params.ts,
+  }));
+  for (const e of entries) assertEntrySavable(e, ctx);
+  return entries;
+}
+
 /* ── 設定 ── */
 
 export async function updateSettings(settings: Settings): Promise<void> {
@@ -1298,11 +1405,11 @@ export interface MonthlyCostInput {
   expenseAccountId: string;
   /** 支払い元（daily-asset または payment-liability）。必須。 */
   paymentAccountId: string;
-  /** liability 払いのとき: 返済 CF を作る口座（daily-asset）。 */
+  /** liability 払いのとき: 返済仕訳の返済元口座（daily-asset）。 */
   repaymentAccountId?: string;
   /** 返済回数（>=1）。 */
   repaymentCount?: number;
-  /** 初回引落日 ISO（返済 CF だけに使う。購入仕訳の日付には使わない）。 */
+  /** 初回引落日 ISO（返済仕訳だけに使う。購入仕訳の日付には使わない）。 */
   repaymentStartDate?: string;
 }
 
@@ -1315,8 +1422,8 @@ export interface MonthlyCostInput {
  *    負債払いなら登録日に負債が立ち、返済 CF で取り崩す。
  *  - **生活コスト認識**: 仕訳の正本ではなく `MonthlyCostItem` の formula から導出する分析レイヤ。
  *    ダッシュボードは支払い仕訳を二重計上しないよう除外し、`monthlyCostForMonth` を足す。
- *  - 負債(payment-liability)払い + 返済情報があれば、返済予定 CF を **初回引落日(repaymentStartDate)**
- *    から回数分作る（購入日とは別）。
+ *  - 負債(payment-liability)払い + 返済情報があれば、返済を **未来日付の振替実仕訳** として
+ *    初回引落日(repaymentStartDate)から回数分作る（購入日とは別。予定 CF は作らない）。
  * 1 トランザクションで保存し revision を進める。
  */
 export async function createMonthlyCost(input: MonthlyCostInput): Promise<MonthlyCostItem> {
@@ -1384,8 +1491,10 @@ export async function createMonthlyCost(input: MonthlyCostInput): Promise<Monthl
     updatedAt: ts,
   };
 
-  // 負債払い + 返済情報があれば、返済予定 CF を初回引落日から回数分作る（購入日とは別）。
-  const schedules: CashflowSchedule[] = [];
+  // 負債払い + 返済情報があれば、返済を未来日付の振替実仕訳として初回引落日から回数分作る
+  // （購入日とは別・予定 CF は作らない）。返済は実予定なので monthlyCostId は付けない＝
+  // item 削除でも残す・編集/削除自由。
+  let repaymentEntries: JournalEntry[] = [];
   if (
     payment.role === 'payment-liability' &&
     input.repaymentAccountId !== undefined &&
@@ -1393,42 +1502,27 @@ export async function createMonthlyCost(input: MonthlyCostInput): Promise<Monthl
     input.repaymentCount >= 1 &&
     input.repaymentStartDate
   ) {
-    const repay = ctx.byId.get(input.repaymentAccountId);
-    if (!repay || repay.role !== 'daily-asset')
-      throw new LedgerError('error.monthlyCost.repaymentAccount');
-    const parts = monthlyAmounts(input.amount, input.repaymentCount);
-    for (let i = 0; i < input.repaymentCount; i++) {
-      schedules.push({
-        id: newId(),
-        title: `${item.name} 返済 ${i + 1}/${input.repaymentCount}`,
-        dueDate: addMonthsToDate(input.repaymentStartDate, i),
-        amount: parts[i] ?? 0,
-        direction: 'outflow',
-        accountId: input.repaymentAccountId,
-        counterAccountId: input.paymentAccountId,
-        source: 'installment',
-        status: 'planned',
-        managementScopeId,
-        monthlyCostId: item.id,
-        createdAt: ts,
-        updatedAt: ts,
-      });
-    }
+    repaymentEntries = buildRepaymentEntries(ctx, {
+      liabilityAccountId: input.paymentAccountId,
+      fromAccountId: input.repaymentAccountId,
+      firstDate: input.repaymentStartDate,
+      total: input.amount,
+      count: input.repaymentCount,
+      title: `${item.name} 返済`,
+      managementScopeId,
+      ts,
+    });
   }
 
-  // 生成した支払い仕訳・返済予定も保存境界の検証を通す（fail-closed）。
+  // 生成した支払い仕訳も保存境界の検証を通す（fail-closed。返済仕訳は build 内で検証済み）。
   assertEntrySavable(paymentEntry, ctx);
-  assertSchedulesSavable(schedules, ctx);
 
-  await writeWithRevision(
-    [STORE.monthlyCostItems, STORE.cashflowSchedules, STORE.journalEntries],
-    (t) => {
-      t.objectStore(STORE.monthlyCostItems).put(item);
-      t.objectStore(STORE.journalEntries).put(paymentEntry);
-      const sStore = t.objectStore(STORE.cashflowSchedules);
-      for (const s of schedules) sStore.put(s);
-    },
-  );
+  await writeWithRevision([STORE.monthlyCostItems, STORE.journalEntries], (t) => {
+    t.objectStore(STORE.monthlyCostItems).put(item);
+    const eStore = t.objectStore(STORE.journalEntries);
+    eStore.put(paymentEntry);
+    for (const e of repaymentEntries) eStore.put(e);
+  });
   return item;
 }
 
@@ -1444,7 +1538,7 @@ export interface FixedAssetMonthlyInput {
   /** 仮想認識で貸方に見せる固定資産（fixed-asset）。 */
   recognitionCreditAccountId: string;
   /**
-   * 負債払い（購入仕訳の貸方が payment-liability）のとき: 返済 CF を作る口座（daily-asset）。
+   * 負債払い（購入仕訳の貸方が payment-liability）のとき: 返済仕訳の返済元口座（daily-asset）。
    * 返済先の負債は購入仕訳の貸方科目を使う。回数・初回引落日と併せて指定する。
    */
   repaymentAccountId?: string;
@@ -1456,8 +1550,9 @@ export interface FixedAssetMonthlyInput {
  * 固定資産の購入仕訳（借方 固定資産 / 貸方 資金 or 負債）+ その月額化コストを 1 transaction で保存する。
  * 月額化は **支払い仕訳を作らない**（購入仕訳が実体）。MonthlyCostItem.formula で生活コストに月割り反映し、
  * Journal では sourceEntryId / recognitionCreditAccountId を使って「固定資産 → 費用」の仮想行を見せる。
- * 負債（payment-liability）払いで返済情報があれば、購入仕訳の貸方負債を取り崩す返済予定 CF を
- * 初回引落日から回数分、同じ transaction で作る（資金繰り判断に必要なため取りこぼさない）。
+ * 負債（payment-liability）払いで返済情報があれば、購入仕訳の貸方負債を取り崩す返済実仕訳
+ * （未来日付の振替）を初回引落日から回数分、同じ transaction で作る（資金繰り判断に必要なため
+ * 取りこぼさない。予定 CF は作らない）。
  */
 export async function saveEntryWithFixedAssetMonthly(
   entry: JournalEntry,
@@ -1518,9 +1613,10 @@ export async function saveEntryWithFixedAssetMonthly(
     updatedAt: ts,
   };
 
-  // 負債（payment-liability）払い + 返済情報があれば、購入仕訳の貸方負債を取り崩す返済予定を作る。
+  // 負債（payment-liability）払い + 返済情報があれば、購入仕訳の貸方負債を取り崩す返済実仕訳を作る。
+  // 返済は実予定なので monthlyCostId は付けない＝item 削除でも残す・編集/削除自由。
   const liabilityAccountId = entry.lines.find((l) => l.side === 'credit')?.accountId;
-  const schedules: CashflowSchedule[] = [];
+  let repaymentEntries: JournalEntry[] = [];
   if (
     liabilityAccountId !== undefined &&
     ctx.byId.get(liabilityAccountId)?.role === 'payment-liability' &&
@@ -1529,41 +1625,24 @@ export async function saveEntryWithFixedAssetMonthly(
     input.repaymentCount >= 1 &&
     input.repaymentStartDate
   ) {
-    const repay = ctx.byId.get(input.repaymentAccountId);
-    if (!repay || repay.role !== 'daily-asset')
-      throw new LedgerError('error.monthlyCost.repaymentAccount');
-    const parts = monthlyAmounts(input.amount, input.repaymentCount);
-    for (let i = 0; i < input.repaymentCount; i++) {
-      schedules.push({
-        id: newId(),
-        title: `${item.name} 返済 ${i + 1}/${input.repaymentCount}`,
-        dueDate: addMonthsToDate(input.repaymentStartDate, i),
-        amount: parts[i] ?? 0,
-        direction: 'outflow',
-        accountId: input.repaymentAccountId,
-        counterAccountId: liabilityAccountId,
-        source: 'installment',
-        status: 'planned',
-        managementScopeId,
-        monthlyCostId: item.id,
-        createdAt: ts,
-        updatedAt: ts,
-      });
-    }
+    repaymentEntries = buildRepaymentEntries(ctx, {
+      liabilityAccountId,
+      fromAccountId: input.repaymentAccountId,
+      firstDate: input.repaymentStartDate,
+      total: input.amount,
+      count: input.repaymentCount,
+      title: `${item.name} 返済`,
+      managementScopeId,
+      ts,
+    });
   }
 
-  // 生成した返済予定も保存境界の検証を通す（fail-closed）。
-  assertSchedulesSavable(schedules, ctx);
-
-  await writeWithRevision(
-    [STORE.journalEntries, STORE.monthlyCostItems, STORE.cashflowSchedules],
-    (t) => {
-      t.objectStore(STORE.journalEntries).put(entry);
-      t.objectStore(STORE.monthlyCostItems).put(item);
-      const sStore = t.objectStore(STORE.cashflowSchedules);
-      for (const s of schedules) sStore.put(s);
-    },
-  );
+  await writeWithRevision([STORE.journalEntries, STORE.monthlyCostItems], (t) => {
+    const eStore = t.objectStore(STORE.journalEntries);
+    eStore.put(entry);
+    for (const e of repaymentEntries) eStore.put(e);
+    t.objectStore(STORE.monthlyCostItems).put(item);
+  });
   return item;
 }
 
@@ -1590,8 +1669,9 @@ export interface FixedAssetPurchaseMonthlyInput {
 /**
  * 「耐久財・固定資産」として購入を月額化する（固定資産科目を自動作成する版）。
  * 使い道に費用カテゴリを選んだ通常の支出フローから、固定資産科目を事前に作らずに正規ルートへ入れる。
- * 固定資産科目（name）を新規作成し、購入仕訳（借方 固定資産 / 貸方 支払い元）+ 月額化 + 返済 CF を
- * 1 トランザクションで保存する。以降は売却/故障で処分できる（disposeFixedAsset）。
+ * 固定資産科目（name）を新規作成し、購入仕訳（借方 固定資産 / 貸方 支払い元）+ 月額化 + 返済実仕訳
+ * （未来日付の振替。予定 CF は作らない）を 1 トランザクションで保存する。
+ * 以降は売却/故障で処分できる（disposeFixedAsset）。
  */
 export async function createFixedAssetPurchaseMonthly(
   input: FixedAssetPurchaseMonthlyInput,
@@ -1673,8 +1753,9 @@ export async function createFixedAssetPurchaseMonthly(
     updatedAt: ts,
   };
 
-  // 負債払い + 返済情報があれば、購入仕訳の貸方負債を取り崩す返済予定を作る。
-  const schedules: CashflowSchedule[] = [];
+  // 負債払い + 返済情報があれば、購入仕訳の貸方負債を取り崩す返済実仕訳を作る。
+  // 返済は実予定なので monthlyCostId は付けない＝item 削除でも残す・編集/削除自由。
+  let repaymentEntries: JournalEntry[] = [];
   if (
     payment.role === 'payment-liability' &&
     input.repaymentAccountId !== undefined &&
@@ -1682,40 +1763,25 @@ export async function createFixedAssetPurchaseMonthly(
     input.repaymentCount >= 1 &&
     input.repaymentStartDate
   ) {
-    const repay = ctx.byId.get(input.repaymentAccountId);
-    if (!repay || repay.role !== 'daily-asset')
-      throw new LedgerError('error.monthlyCost.repaymentAccount');
-    const parts = monthlyAmounts(input.amount, input.repaymentCount);
-    for (let i = 0; i < input.repaymentCount; i++) {
-      schedules.push({
-        id: newId(),
-        title: `${item.name} 返済 ${i + 1}/${input.repaymentCount}`,
-        dueDate: addMonthsToDate(input.repaymentStartDate, i),
-        amount: parts[i] ?? 0,
-        direction: 'outflow',
-        accountId: input.repaymentAccountId,
-        counterAccountId: input.paymentAccountId,
-        source: 'installment',
-        status: 'planned',
-        managementScopeId,
-        monthlyCostId: item.id,
-        createdAt: ts,
-        updatedAt: ts,
-      });
-    }
+    repaymentEntries = buildRepaymentEntries(ctx, {
+      liabilityAccountId: input.paymentAccountId,
+      fromAccountId: input.repaymentAccountId,
+      firstDate: input.repaymentStartDate,
+      total: input.amount,
+      count: input.repaymentCount,
+      title: `${item.name} 返済`,
+      managementScopeId,
+      ts,
+    });
   }
-  assertSchedulesSavable(schedules, ctx);
 
-  await writeWithRevision(
-    [STORE.accounts, STORE.journalEntries, STORE.monthlyCostItems, STORE.cashflowSchedules],
-    (t) => {
-      t.objectStore(STORE.accounts).put(fixedAccount);
-      t.objectStore(STORE.journalEntries).put(entry);
-      t.objectStore(STORE.monthlyCostItems).put(item);
-      const sStore = t.objectStore(STORE.cashflowSchedules);
-      for (const s of schedules) sStore.put(s);
-    },
-  );
+  await writeWithRevision([STORE.accounts, STORE.journalEntries, STORE.monthlyCostItems], (t) => {
+    t.objectStore(STORE.accounts).put(fixedAccount);
+    const eStore = t.objectStore(STORE.journalEntries);
+    eStore.put(entry);
+    for (const e of repaymentEntries) eStore.put(e);
+    t.objectStore(STORE.monthlyCostItems).put(item);
+  });
   return item;
 }
 
@@ -1768,7 +1834,8 @@ function findOrCreateContinuousCostLedgerAccount(
 /**
  * 継続コストを「資産経由モデル」で登録する（v1 の正本フロー）。
  * 未消化残高は品目別の資産科目ではなく単一の集約台帳口座（『継続コスト台帳』）に寄せ、台帳ルール
- * (MonthlyCostItem)と（負債資金なら）返済 CF を保存する。**funding/recognition の実仕訳は作らない**——
+ * (MonthlyCostItem)と（負債資金なら）返済実仕訳（未来日付の振替。予定 CF は作らない）を保存する。
+ * **funding/recognition の実仕訳は作らない**——
  * それらは `continuousCost.ts` が必要範囲だけ仮想展開する（辞書展開・永続仕訳を無限生成しない）。
  * 品目名は MonthlyCostItem.name に保持し、勘定科目として自動作成しない。
  */
@@ -1831,8 +1898,9 @@ export async function createContinuousCost(input: ContinuousCostInput): Promise<
   };
 
   // 負債資金（カード=payment-liability / ローン=other-liability）+ 返済情報があれば、
-  // 返済予定（返済口座 → 支払い元負債）を作る。`預金 → 自動車ローン` の分割返済など。
-  const schedules: CashflowSchedule[] = [];
+  // 返済実仕訳（借方 支払い元負債 / 貸方 返済口座）を作る。`預金 → 自動車ローン` の分割返済など。
+  // 返済は実予定なので monthlyCostId は付けない＝item 削除でも残す・編集/削除自由。
+  let repaymentEntries: JournalEntry[] = [];
   if (
     (payment.role === 'payment-liability' || payment.role === 'other-liability') &&
     input.repaymentAccountId !== undefined &&
@@ -1840,40 +1908,25 @@ export async function createContinuousCost(input: ContinuousCostInput): Promise<
     input.repaymentCount >= 1 &&
     input.repaymentStartDate
   ) {
-    const repay = ctx.byId.get(input.repaymentAccountId);
-    if (!repay || repay.role !== 'daily-asset')
-      throw new LedgerError('error.monthlyCost.repaymentAccount');
-    const parts = monthlyAmounts(input.amount, input.repaymentCount);
-    for (let i = 0; i < input.repaymentCount; i++) {
-      schedules.push({
-        id: newId(),
-        title: `${item.name} 返済 ${i + 1}/${input.repaymentCount}`,
-        dueDate: addMonthsToDate(input.repaymentStartDate, i),
-        amount: parts[i] ?? 0,
-        direction: 'outflow',
-        accountId: input.repaymentAccountId,
-        counterAccountId: input.paymentSourceAccountId,
-        source: 'installment',
-        status: 'planned',
-        managementScopeId,
-        monthlyCostId: item.id,
-        createdAt: ts,
-        updatedAt: ts,
-      });
-    }
+    repaymentEntries = buildRepaymentEntries(ctx, {
+      liabilityAccountId: input.paymentSourceAccountId,
+      fromAccountId: input.repaymentAccountId,
+      firstDate: input.repaymentStartDate,
+      total: input.amount,
+      count: input.repaymentCount,
+      title: `${item.name} 返済`,
+      managementScopeId,
+      ts,
+    });
   }
-  assertSchedulesSavable(schedules, ctx);
 
-  await writeWithRevision(
-    [STORE.accounts, STORE.monthlyCostItems, STORE.cashflowSchedules],
-    (t) => {
-      // 集約台帳口座は新規作成された時だけ put（既存なら品目数ぶん増やさない）。
-      if (ledgerCreated) t.objectStore(STORE.accounts).put(ledgerAccount);
-      t.objectStore(STORE.monthlyCostItems).put(item);
-      const sStore = t.objectStore(STORE.cashflowSchedules);
-      for (const s of schedules) sStore.put(s);
-    },
-  );
+  await writeWithRevision([STORE.accounts, STORE.monthlyCostItems, STORE.journalEntries], (t) => {
+    // 集約台帳口座は新規作成された時だけ put（既存なら品目数ぶん増やさない）。
+    if (ledgerCreated) t.objectStore(STORE.accounts).put(ledgerAccount);
+    t.objectStore(STORE.monthlyCostItems).put(item);
+    const eStore = t.objectStore(STORE.journalEntries);
+    for (const e of repaymentEntries) eStore.put(e);
+  });
   return item;
 }
 

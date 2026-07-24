@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import './setup';
 import { deriveProfitAndLoss } from '../src/domain/accounting';
 import { monthlyCostForMonth } from '../src/domain/monthlyCost';
-import { buildRepaymentSchedules } from '../src/domain/cashflow';
+import { monthlyAmounts } from '../src/domain/allocation';
 import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
 import type { Account, JournalEntry, MonthlyCostItem } from '../src/domain/types';
 
@@ -76,19 +76,17 @@ describe('生活コストの二重計上防止（PL 費用の構成）', () => {
     expect(monthlyCostForMonth(car, '2031-06')).toBe(0);
   });
 
-  it('ローン返済は CashflowSchedule（CF）であり PL 費用ではない（約33,333/月）', () => {
-    const repay = buildRepaymentSchedules({
-      title: '自動車ローン',
-      total: 2_000_000,
-      count: 60,
-      firstDueDate: '2031-08-10',
-      fromAccountId: 'cash',
-      liabilityAccountId: 'loan',
-      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
-    });
-    expect(repay).toHaveLength(60);
-    // 返済は仕訳ではなく予定。PL には現れない（上の totalExpense=1000 が示す）。
-    expect(repay[0]?.amount).toBeGreaterThanOrEqual(33333);
-    expect(repay[0]?.amount).toBeLessThanOrEqual(33334);
+  it('ローン返済は 借方 負債 / 貸方 資金 の振替仕訳であり PL 費用ではない（約33,333/月）', () => {
+    // 返済は未来日付の実仕訳（借方 負債 / 貸方 返済元資金）として登録される。monthlyAmounts の
+    // 月割り配分は合計が元本に一致する。
+    const parts = monthlyAmounts(2_000_000, 60);
+    expect(parts).toHaveLength(60);
+    expect(parts.reduce((s, x) => s + x, 0)).toBe(2_000_000);
+    expect(parts[0]).toBeGreaterThanOrEqual(33333);
+    expect(parts[0]).toBeLessThanOrEqual(33334);
+    // 対象月に返済仕訳（借方 loan / 貸方 cash）が入っても PL 費用は増えない。
+    const withRepay = [...entries, entry('repay1', '2031-07-20', 'loan', 'cash', parts[0] ?? 0)];
+    const pl = deriveProfitAndLoss(accounts, withRepay, month);
+    expect(pl.totalExpense).toBe(1000);
   });
 });

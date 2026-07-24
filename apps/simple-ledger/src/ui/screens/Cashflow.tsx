@@ -237,39 +237,39 @@ export function Cashflow() {
         <ul className="card list" data-ui={UI.cashflow.liabilityList}>
           {liabilitySummary.map((l) => (
             <li key={l.id} className="list__item">
-              <div className="list__main">
-                <div className="list__title">{l.name}</div>
-                <div className="list__sub">
-                  {t('cashflow.debtBalance')}: <Money amount={l.balance} currency={currency} />
-                </div>
-                {l.account.repaymentAccountId !== undefined &&
-                l.account.repaymentDay !== undefined ? (
-                  <div className="list__sub">
-                    {t('cashflow.repaySettingsLine', {
-                      account: accountName(l.account.repaymentAccountId),
-                      day: l.account.repaymentDay,
-                    })}
-                  </div>
-                ) : null}
-                {l.count > 0 ? (
-                  <div className="list__sub">
-                    {t('cashflow.nextDue')}: {l.nextDue ?? '—'}・
-                    {t('cashflow.installmentsLeft', { count: l.count })}・
-                    {t('cashflow.debtBalance')} <Money amount={l.remaining} currency={currency} />
-                  </div>
-                ) : (
-                  <div className="list__sub amount--neg">{t('cashflow.debtNoPlanHint')}</div>
-                )}
-              </div>
+              {/* 行タップ = 返済シート（残高を見ながら返済計画を入力する）。 */}
               <button
                 type="button"
-                className="btn btn--ghost"
-                style={{ minHeight: 36 }}
+                className="list__row-btn"
                 onClick={() => setRepayFor({ account: l.account, balance: l.balance })}
-                data-ui={UI.cashflow.repayAdd}
+                aria-label={`${t('cashflow.repayAdd')}: ${l.name}`}
+                data-ui={UI.cashflow.liabilityRow}
               >
-                <Icon name="add" size={16} />
-                {t('cashflow.repayAdd')}
+                <div className="list__main">
+                  <div className="list__title">{l.name}</div>
+                  <div className="list__sub">
+                    {t('cashflow.debtBalance')}: <Money amount={l.balance} currency={currency} />
+                  </div>
+                  {l.account.repaymentAccountId !== undefined &&
+                  l.account.repaymentDay !== undefined ? (
+                    <div className="list__sub">
+                      {t('cashflow.repaySettingsLine', {
+                        account: accountName(l.account.repaymentAccountId),
+                        day: l.account.repaymentDay,
+                      })}
+                    </div>
+                  ) : null}
+                  {l.count > 0 ? (
+                    <div className="list__sub">
+                      {t('cashflow.nextDue')}: {l.nextDue ?? '—'}・
+                      {t('cashflow.installmentsLeft', { count: l.count })}・
+                      {t('cashflow.debtBalance')} <Money amount={l.remaining} currency={currency} />
+                    </div>
+                  ) : (
+                    <div className="list__sub amount--neg">{t('cashflow.debtNoPlanHint')}</div>
+                  )}
+                </div>
+                <Icon name="chevronRight" size={18} />
               </button>
             </li>
           ))}
@@ -303,58 +303,60 @@ export function Cashflow() {
         </ul>
       )}
 
-      <p className="section-label">{t('cashflow.scheduleSecondaryTitle')}</p>
-      <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
-        {t('cashflow.scheduleSecondaryHint')}
-      </p>
-      {projection.schedules.length === 0 ? (
-        <div className="card card--pad empty">{t('cashflow.emptyPlanned')}</div>
-      ) : (
-        <ul className="card list" data-ui={UI.cashflow.list}>
-          {projection.schedules.map((s) => (
-            <li key={s.id} className="list__item">
-              <div className="list__main">
-                <div className="list__title">{s.title}</div>
-                <div className="list__sub">
-                  {s.dueDate}・{accountName(s.accountId)}
-                  {s.counterAccountId ? ` ↔ ${accountName(s.counterAccountId)}` : ''}
+      {/* 旧バージョンで作られた予定 CF（分割返済など）のレガシー表示。新規には作られない
+          （返済は未来日付の実仕訳として登録される）ため、残っている時だけセクションごと表示する。 */}
+      {projection.schedules.length === 0 ? null : (
+        <>
+          <p className="section-label">{t('cashflow.scheduleSecondaryTitle')}</p>
+          <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
+            {t('cashflow.scheduleSecondaryHint')}
+          </p>
+          <ul className="card list" data-ui={UI.cashflow.list}>
+            {projection.schedules.map((s) => (
+              <li key={s.id} className="list__item">
+                <div className="list__main">
+                  <div className="list__title">{s.title}</div>
+                  <div className="list__sub">
+                    {s.dueDate}・{accountName(s.accountId)}
+                    {s.counterAccountId ? ` ↔ ${accountName(s.counterAccountId)}` : ''}
+                  </div>
                 </div>
-              </div>
-              <span
-                className={`list__amount ${
-                  s.direction === 'inflow'
-                    ? 'amount--pos'
-                    : s.direction === 'transfer'
-                      ? 'muted'
-                      : 'amount--neg'
-                }`}
-              >
-                {s.direction === 'inflow' ? '+' : s.direction === 'transfer' ? '→ ' : '−'}
-                <Money amount={s.amount} currency={currency} />
-              </span>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                style={{ minHeight: 36 }}
-                disabled={!s.counterAccountId}
-                title={s.counterAccountId ? undefined : t('cashflow.postNeedsCounter')}
-                onClick={() => postSchedule(s.id).catch(() => undefined)}
-                data-ui={UI.cashflow.schedulePost}
-              >
-                <Icon name="check" size={16} />
-                {t('cashflow.post')}
-              </button>
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={() => setPendingSchedule(s)}
-                aria-label={`${t('cashflow.deleteSchedule')}: ${s.title}`}
-              >
-                <Icon name="delete" size={18} />
-              </button>
-            </li>
-          ))}
-        </ul>
+                <span
+                  className={`list__amount ${
+                    s.direction === 'inflow'
+                      ? 'amount--pos'
+                      : s.direction === 'transfer'
+                        ? 'muted'
+                        : 'amount--neg'
+                  }`}
+                >
+                  {s.direction === 'inflow' ? '+' : s.direction === 'transfer' ? '→ ' : '−'}
+                  <Money amount={s.amount} currency={currency} />
+                </span>
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  style={{ minHeight: 36 }}
+                  disabled={!s.counterAccountId}
+                  title={s.counterAccountId ? undefined : t('cashflow.postNeedsCounter')}
+                  onClick={() => postSchedule(s.id).catch(() => undefined)}
+                  data-ui={UI.cashflow.schedulePost}
+                >
+                  <Icon name="check" size={16} />
+                  {t('cashflow.post')}
+                </button>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  onClick={() => setPendingSchedule(s)}
+                  aria-label={`${t('cashflow.deleteSchedule')}: ${s.title}`}
+                >
+                  <Icon name="delete" size={18} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
 
       <button
@@ -467,10 +469,11 @@ export function Cashflow() {
 }
 
 /**
- * カード・ローンの返済を 1 件登録するシート。
+ * カード・ローンの返済計画を登録するシート（負債の行タップで開く）。
  * 勘定科目の返済設定（返済口座・毎月の返済日）が既定値になる。金額の既定はいまの残高（全額）。
- * **支払日の振替仕訳（借方 負債 / 貸方 返済口座）をそのまま登録する**（予定 CF は経由しない。
- * 未来日付の実仕訳は資金繰りの投影・仕訳一覧の「将来予定も表示」に反映される）。
+ *  - 回数 1（既定）: カードの次回引落など、支払日の振替仕訳（借方 負債 / 貸方 返済口座）を 1 本。
+ *  - 回数 N: 毎月同額のローン。総額を N 回に配分した未来の振替仕訳を一括登録（合計は総額に一致）。
+ * どちらも予定 CF は経由しない。未来日付の実仕訳として仕訳一覧・資金繰りの投影に乗る。
  */
 function RepaymentScheduleSheet({
   account,
@@ -481,7 +484,7 @@ function RepaymentScheduleSheet({
   balance: number;
   onClose: () => void;
 }) {
-  const { ledger, saveEntry } = useLedger();
+  const { ledger, createRepaymentEntries } = useLedger();
   const accounts = ledger?.accounts ?? [];
   const today = todayLocal();
 
@@ -495,23 +498,27 @@ function RepaymentScheduleSheet({
     account.repaymentDay !== undefined ? nextRepaymentDate(today, account.repaymentDay) : today,
   );
   const [amountText, setAmountText] = useState(balance > 0 ? String(balance) : '');
+  const [countText, setCountText] = useState('1');
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
+  const amount = amountText === '' ? 0 : Number.parseInt(amountText, 10);
+  const count = countText === '' ? 0 : Number.parseInt(countText, 10);
+  const perMonth = count >= 2 && amount >= count ? Math.round(amount / count) : null;
+
   async function submit() {
     if (submitting) return;
-    const amount = amountText === '' ? 0 : Number.parseInt(amountText, 10);
-    if (!Number.isInteger(amount) || amount < 1 || fromAccountId === '') return;
+    if (!Number.isInteger(amount) || amount < 1 || count < 1 || fromAccountId === '') return;
     setSubmitting(true);
     setError(undefined);
     try {
-      await saveEntry({
-        date,
-        description: t('cashflow.repayScheduleTitle', { name: account.name }),
-        debitAccountId: account.id,
-        creditAccountId: fromAccountId,
-        amount,
-        metadata: { inputMode: 'transfer' },
+      await createRepaymentEntries({
+        liabilityAccountId: account.id,
+        fromAccountId,
+        firstDate: date,
+        total: amount,
+        count,
+        title: t('cashflow.repayScheduleTitle', { name: account.name }),
       });
       onClose();
     } catch (e) {
@@ -535,7 +542,7 @@ function RepaymentScheduleSheet({
             type="button"
             className="btn btn--primary"
             onClick={submit}
-            disabled={submitting || amountText === '' || fromAccountId === ''}
+            disabled={submitting || amountText === '' || countText === '' || fromAccountId === ''}
             data-ui={UI.cashflow.repaySave}
           >
             {t('common.save')}
@@ -578,6 +585,23 @@ function RepaymentScheduleSheet({
           hint={t('cashflow.repayAmountHint')}
           dataUi={UI.cashflow.repayAmount}
         />
+        <TextInput
+          label={t('cashflow.repayCount')}
+          required
+          inputMode="numeric"
+          value={countText}
+          onChange={(v) => setCountText(v.replace(/[^\d]/g, ''))}
+          hint={t('cashflow.repayCountHint')}
+          dataUi={UI.cashflow.repayCount}
+        />
+        {perMonth !== null ? (
+          <p className="field__hint" data-ui={UI.cashflow.repayPerMonth}>
+            {t('cashflow.repayPerMonth', {
+              amount: `¥${perMonth.toLocaleString('ja-JP')}`,
+              count: String(count),
+            })}
+          </p>
+        ) : null}
       </div>
     </Modal>
   );

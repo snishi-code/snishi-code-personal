@@ -80,7 +80,6 @@ interface LedgerContextValue {
     input: SimpleEntryInput,
     existing?: { id: string; createdAt: string },
   ) => Promise<void>;
-  saveEntryWithSchedules: (input: SimpleEntryInput, schedules: CashflowSchedule[]) => Promise<void>;
   saveEntryWithFixedAssetMonthly: (
     input: SimpleEntryInput,
     monthly: FixedAssetMonthlyInput,
@@ -93,6 +92,7 @@ interface LedgerContextValue {
   createContinuousCostOpening: (input: repo.ContinuousCostOpeningInput) => Promise<void>;
   /** 自動更新される契約（年払いサブスク等）の途中持ち込み（移行分+更新分の2項目）。 */
   createSubscriptionMigration: (input: repo.SubscriptionMigrationInput) => Promise<void>;
+  createRepaymentEntries: (input: repo.RepaymentPlanInput) => Promise<void>;
   saveMonthlyCost: (item: MonthlyCostItem) => Promise<void>;
   removeMonthlyCost: (id: string) => Promise<void>;
   createFixedAssetPurchaseMonthly: (input: FixedAssetPurchaseMonthlyInput) => Promise<void>;
@@ -203,21 +203,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       try {
         const entry = buildSimpleEntry(input, existing);
         await repo.upsertEntry(entry);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const saveEntryWithSchedules = useCallback<LedgerContextValue['saveEntryWithSchedules']>(
-    async (input, schedules) => {
-      try {
-        const entry = buildSimpleEntry(input);
-        await repo.saveEntryWithSchedules(entry, schedules);
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
@@ -351,6 +336,20 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     async (input) => {
       try {
         await repo.createSubscriptionMigration(input);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const createRepaymentEntries = useCallback<LedgerContextValue['createRepaymentEntries']>(
+    async (input) => {
+      try {
+        await repo.createRepaymentEntries(input);
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
@@ -890,7 +889,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       ...(error !== undefined ? { error } : {}),
       refresh,
       saveEntry,
-      saveEntryWithSchedules,
       saveEntryWithFixedAssetMonthly,
       removeEntry,
       createAllocation,
@@ -898,6 +896,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       createContinuousCost,
       createContinuousCostOpening,
       createSubscriptionMigration,
+      createRepaymentEntries,
       saveMonthlyCost,
       removeMonthlyCost,
       createFixedAssetPurchaseMonthly,
@@ -943,7 +942,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       error,
       refresh,
       saveEntry,
-      saveEntryWithSchedules,
       saveEntryWithFixedAssetMonthly,
       removeEntry,
       createAllocation,
@@ -951,6 +949,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       createContinuousCost,
       createContinuousCostOpening,
       createSubscriptionMigration,
+      createRepaymentEntries,
       saveMonthlyCost,
       removeMonthlyCost,
       createFixedAssetPurchaseMonthly,
