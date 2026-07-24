@@ -281,10 +281,13 @@ export const UI = {
     liabilityList: 'cashflow.liability.list',
     // カード・ローンの返済予定づくり（負債行から開く）
     repayAdd: 'cashflow.repay.add',
+    liabilityRow: 'cashflow.liability.row',
     repaySheet: 'cashflow.repay.sheet',
     repayAmount: 'cashflow.repay.amount',
     repayDate: 'cashflow.repay.date',
     repayFrom: 'cashflow.repay.from',
+    repayCount: 'cashflow.repay.count',
+    repayPerMonth: 'cashflow.repay.perMonth',
     repaySave: 'cashflow.repay.save',
     freeTrend: 'cashflow.freeTrend',
     futureList: 'cashflow.future.list',
