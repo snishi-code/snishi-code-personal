@@ -168,7 +168,7 @@ export const ja = {
     '売却または故障・廃棄で、この継続コスト資産を終了します。未消化の残りを売却損益として精算し、資産の残高を消し込みます。',
   'disposal.ccTitle': '継続コストを終了（売却・解約）',
   'disposal.ccIntro':
-    '売却・解約・返金なし終了で、この継続コストを終了します。未消化の残りは売却損として精算し、継続コスト台帳の残高を消し込みます。解約・返金なしの終了は、売却額 0 円のまま実行してください。',
+    '売却・解約・故障で、この継続コストを終了します。損益は一括計上せず、実際に使った月数で月あたりコストを再計算して台帳の残高を消し込みます。解約・返金なしの終了は、売却額 0 円のまま実行してください。',
   'disposal.date': '処分日',
   'disposal.proceeds': '売却額（故障・廃棄は 0）',
   'disposal.destination': '入金先',
@@ -880,6 +880,48 @@ export const ja = {
 
   // 毎月のもの（定期ルール = 実仕訳の自動起票）
   'monthly.title': '毎月のもの',
+  'monthly.add': '追加',
+  'monthly.intro':
+    '毎月続くもの（サブスク・給与・積立・年払い・持ち物の償却）をここで管理します。お金が実際に動くものは仕訳として自動記帳され、持ち物・前払いは月あたりコストとして月割りされます。',
+  'monthly.empty': 'まだ登録がありません。「追加」からサブスク・給与・積立・持ち物などを登録できます。',
+  'monthly.pickIntro': '何を登録しますか？',
+  'monthly.pick.expense': '毎月の支払い（サブスクなど）',
+  'monthly.pick.expenseHint': '毎月同じ日に支出の仕訳を自動記帳します。',
+  'monthly.pick.income': '毎月の収入（給与など）',
+  'monthly.pick.incomeHint': '毎月同じ日に収入の仕訳を自動記帳。金額が違う月はその月の仕訳を編集。',
+  'monthly.pick.transfer': '毎月の振替（積立など）',
+  'monthly.pick.transferHint': '預金→投資などの資金移動を毎月自動記帳します。',
+  'monthly.pick.subMigration': '年払いなどの契約を持ち込む',
+  'monthly.pick.subMigrationHint':
+    '契約途中の年払いサブスクなど。残りのぶんと次回からの更新を一度に登録します。',
+  'monthly.pick.asset': '持ち物・前払いを持ち込む（償却）',
+  'monthly.pick.assetHint':
+    'PC・家電など。残っている価値を見込み月数で月割りします（実績で自動再計算）。',
+  'monthlyCost.overEstimateBadge': '見込み超過・再計算中',
+
+  // 契約の持ち込み（自動更新あり・年払いサブスク等）
+  'subMigration.title': '契約の持ち込み（自動更新あり）',
+  'subMigration.intro':
+    '契約途中の年払いサブスクなどを持ち込みます。残りのぶんは初期残高として計上し（収入・支出になりません）、次回更新からは更新額が自動で継続されます。',
+  'subMigration.remainingAmount': '残っている価値',
+  'subMigration.remainingAmountHint':
+    '残り月数ぶんの前払い分（例: 月1,000円換算で残り8か月なら 8000）。',
+  'subMigration.remainingMonths': '残り月数',
+  'subMigration.remainingMonthsHint': '次の更新日までの月数。',
+  'subMigration.renewalAmount': '更新ごとの支払額',
+  'subMigration.renewalEvery': '更新周期（か月）',
+  'subMigration.renewalEveryHint': '年払いは 12。',
+  'subMigration.paymentSource': '更新の支払い元',
+  'subMigration.paymentSourceHint':
+    'カード払いなら更新のたびにカード残高が増え、返済フローで精算します。',
+  'subMigration.cancelHint':
+    '解約するときは、この項目の売却（0円）1回で終了します。実際に使った月数で月割りが過去に遡って再計算されます。',
+
+  // 処分（実績動的償却）
+  'disposal.usedMonths': '実使用月数',
+  'disposal.monthlyAfter': '再計算後の月あたり',
+  'disposal.retroNote':
+    '損益は一括計上せず、実際に使った月数で過去に遡って月あたりコストを再計算します（売却額は総コストから差し引かれます）。',
   'recurring.sectionTitle': '毎月の支出・収入・振替',
   'recurring.sectionIntro':
     '毎月の支払日に、実際の仕訳として自動で記帳されます（アプリを開いたときにまとめて起票）。金額が変わった月は、できた仕訳をその月だけ編集してください。',

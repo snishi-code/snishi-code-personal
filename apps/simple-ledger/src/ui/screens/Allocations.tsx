@@ -11,7 +11,7 @@ import { Icon } from '@snishi/foundation/ui/Icon';
 import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import {
-  isRecognitionFinished,
+  isOverEstimate,
   monthlyCostForMonth,
   representativeMonthlyAmount,
 } from '../../domain/monthlyCost';
@@ -42,7 +42,12 @@ export function Allocations() {
   const [editing, setEditing] = useState<MonthlyCostItem | null>(null);
   const [disposing, setDisposing] = useState<MonthlyCostItem | null>(null);
   const [migrating, setMigrating] = useState(false);
-  const [ruleSheet, setRuleSheet] = useState<{ existing?: RecurringRule } | null>(null);
+  const [chooserOpen, setChooserOpen] = useState(false);
+  const [subMigrating, setSubMigrating] = useState(false);
+  const [ruleSheet, setRuleSheet] = useState<{
+    existing?: RecurringRule;
+    initialKind?: RecurringKind;
+  } | null>(null);
   const [pendingRuleDelete, setPendingRuleDelete] = useState<RecurringRule | null>(null);
   const { year, month } = currentYearMonth();
   const currentYm = `${year}-${String(month).padStart(2, '0')}`;
@@ -54,16 +59,11 @@ export function Allocations() {
   );
   const name = (id?: string): string => (id ? (accountsMap.get(id)?.name ?? '—') : '—');
 
-  // 自動更新の無い項目は、認識を終えたら（残価 0）自動的に「終了」扱いにする（自動アーカイブ）。
-  // 自動更新のある項目（毎月サブスク・3か月ごとの定期イベント等）はユーザーが止めるまで残る。
-  const isFinished = (m: MonthlyCostItem): boolean =>
-    m.status === 'active' && isRecognitionFinished(m, currentYm);
+  // 実績動的償却: 見込みを超えても自動終了しない（月額を実績で再計算しながら生き続ける）。
+  // 終了は売却 / 0円売却（解約・故障）の明示操作のみ。停止・終了分は showInactive で表示。
   const items = useMemo(
-    () =>
-      (ledger?.monthlyCostItems ?? []).filter(
-        (m) => showInactive || (m.status === 'active' && !isRecognitionFinished(m, currentYm)),
-      ),
-    [ledger, showInactive, currentYm],
+    () => (ledger?.monthlyCostItems ?? []).filter((m) => showInactive || m.status === 'active'),
+    [ledger, showInactive],
   );
 
   async function togglePause(item: MonthlyCostItem) {
@@ -108,35 +108,33 @@ export function Allocations() {
 
   return (
     <section aria-labelledby="allocations-title" data-ui={UI.allocations.view}>
-      <h1 className="screen-title" id="allocations-title">
-        {t('monthly.title')}
-      </h1>
-
-      {/* ── 定期ルール（毎月の支出・収入・振替） ── */}
       <div
-        className="section-label"
         style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
       >
-        <span>{t('recurring.sectionTitle')}</span>
+        <h1 className="screen-title" id="allocations-title" style={{ marginBottom: 0 }}>
+          {t('monthly.title')}
+        </h1>
         <button
           type="button"
-          className="btn btn--ghost"
+          className="btn btn--primary"
           style={{ minHeight: 36 }}
-          onClick={() => setRuleSheet({})}
-          data-ui={UI.allocations.recurringAdd}
+          onClick={() => setChooserOpen(true)}
+          data-ui={UI.allocations.unifiedAdd}
         >
           <Icon name="add" size={16} />
-          {t('recurring.add')}
+          {t('monthly.add')}
         </button>
       </div>
-      <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
-        {t('recurring.sectionIntro')}
+      <p className="field__hint" style={{ margin: 'var(--space-2) 0 var(--space-3)' }}>
+        {t('monthly.intro')}
       </p>
-      {rules.length === 0 ? (
+
+      {rules.length === 0 && items.length === 0 ? (
         <div className="card card--pad empty" style={{ marginBottom: 'var(--space-4)' }}>
-          {t('recurring.empty')}
+          <Icon name="calendar" size={28} />
+          <p style={{ marginTop: 'var(--space-3)' }}>{t('monthly.empty')}</p>
         </div>
-      ) : (
+      ) : rules.length === 0 ? null : (
         <ul className="card list" style={{ marginBottom: 'var(--space-4)' }} data-ui={UI.allocations.recurringList}>
           {rules.map((r) => (
             <li key={r.id} className="list__item">
@@ -189,23 +187,6 @@ export function Allocations() {
         </ul>
       )}
 
-      {/* ── 継続コスト（費用の月割り） ── */}
-      <p className="section-label">{t('monthlyCost.sectionTitle')}</p>
-      <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
-        {t('monthlyCost.intro')}
-      </p>
-
-      <button
-        type="button"
-        className="btn btn--ghost"
-        style={{ minHeight: 36, marginBottom: 'var(--space-3)' }}
-        onClick={() => setMigrating(true)}
-        data-ui={UI.allocations.migrateAdd}
-      >
-        <Icon name="add" size={16} />
-        {t('monthlyCost.migrateAdd')}
-      </button>
-
       <label
         style={{
           display: 'inline-flex',
@@ -223,12 +204,7 @@ export function Allocations() {
         {t('monthlyCost.showInactive')}
       </label>
 
-      {items.length === 0 ? (
-        <div className="card card--pad empty">
-          <Icon name="calendar" size={28} />
-          <p style={{ marginTop: 'var(--space-3)' }}>{t('monthlyCost.empty')}</p>
-        </div>
-      ) : (
+      {items.length === 0 ? null : (
         <div className="stack" data-ui={UI.allocations.list}>
           {items.map((m) => {
             const thisMonth = monthlyCostForMonth(m, currentYm);
@@ -245,15 +221,14 @@ export function Allocations() {
                 >
                   <span>
                     {m.name}{' '}
-                    {isFinished(m) ? (
-                      <span className="tag tag--neutral">{t('monthlyCost.finishedBadge')}</span>
-                    ) : (
-                      <span
-                        className={`tag ${m.status === 'active' ? 'tag--teal' : 'tag--neutral'}`}
-                      >
-                        {t(`monthlyCost.status.${m.status}` as MessageKey)}
+                    <span className={`tag ${m.status === 'active' ? 'tag--teal' : 'tag--neutral'}`}>
+                      {t(`monthlyCost.status.${m.status}` as MessageKey)}
+                    </span>{' '}
+                    {isOverEstimate(m, currentYm) ? (
+                      <span className="tag tag--warning" data-ui={UI.allocations.overEstimateBadge}>
+                        {t('monthlyCost.overEstimateBadge')}
                       </span>
-                    )}{' '}
+                    ) : null}{' '}
                     <span className="tag tag--neutral" style={{ fontSize: '0.75em' }}>
                       {m.repeatEveryMonths !== undefined
                         ? t('monthlyCost.recurringBadge')
@@ -310,7 +285,7 @@ export function Allocations() {
                 <div className="kv">
                   <span className="muted">{t('monthlyCost.monthly')}</span>
                   <span>
-                    <Money amount={representativeMonthlyAmount(m)} currency={currency} />
+                    <Money amount={representativeMonthlyAmount(m, currentYm)} currency={currency} />
                   </span>
                 </div>
                 <div className="kv">
@@ -362,9 +337,24 @@ export function Allocations() {
 
       {migrating ? <ContinuousCostMigrateSheet onClose={() => setMigrating(false)} /> : null}
 
+      {subMigrating ? <SubscriptionMigrationSheet onClose={() => setSubMigrating(false)} /> : null}
+
+      {chooserOpen ? (
+        <AddChooserSheet
+          onClose={() => setChooserOpen(false)}
+          onPick={(pick) => {
+            setChooserOpen(false);
+            if (pick === 'sub-migration') setSubMigrating(true);
+            else if (pick === 'asset') setMigrating(true);
+            else setRuleSheet({ initialKind: pick });
+          }}
+        />
+      ) : null}
+
       {ruleSheet ? (
         <RecurringRuleSheet
           {...(ruleSheet.existing !== undefined ? { existing: ruleSheet.existing } : {})}
+          {...(ruleSheet.initialKind !== undefined ? { initialKind: ruleSheet.initialKind } : {})}
           onClose={() => setRuleSheet(null)}
         />
       ) : null}
@@ -392,6 +382,223 @@ export function Allocations() {
         />
       ) : null}
     </section>
+  );
+}
+
+/** 統一追加フローの選択肢。定期ルール3種 + 契約持ち込み + 持ち物（償却）。 */
+type AddPick = RecurringKind | 'sub-migration' | 'asset';
+
+const ADD_CHOICES: { pick: AddPick; labelKey: MessageKey; hintKey: MessageKey }[] = [
+  { pick: 'expense', labelKey: 'monthly.pick.expense', hintKey: 'monthly.pick.expenseHint' },
+  { pick: 'income', labelKey: 'monthly.pick.income', hintKey: 'monthly.pick.incomeHint' },
+  { pick: 'transfer', labelKey: 'monthly.pick.transfer', hintKey: 'monthly.pick.transferHint' },
+  {
+    pick: 'sub-migration',
+    labelKey: 'monthly.pick.subMigration',
+    hintKey: 'monthly.pick.subMigrationHint',
+  },
+  { pick: 'asset', labelKey: 'monthly.pick.asset', hintKey: 'monthly.pick.assetHint' },
+];
+
+/** 「追加」の種別選択シート（登録の一本化。ここから各シートへ分岐する）。 */
+function AddChooserSheet({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (pick: AddPick) => void;
+}) {
+  return (
+    <Modal
+      title={t('monthly.add')}
+      onClose={onClose}
+      variant="dialog"
+      dataUi={UI.allocations.addChooser}
+    >
+      <div className="stack">
+        <p className="field__hint">{t('monthly.pickIntro')}</p>
+        {ADD_CHOICES.map((c) => (
+          <button
+            key={c.pick}
+            type="button"
+            className="list__row-btn"
+            onClick={() => onPick(c.pick)}
+            data-ui={`${UI.allocations.addChooser}.${c.pick}`}
+          >
+            <span className="list__row-btn__label" style={{ display: 'block' }}>
+              <span style={{ display: 'block', fontWeight: 600 }}>{t(c.labelKey)}</span>
+              <span className="field__hint">{t(c.hintKey)}</span>
+            </span>
+            <Icon name="chevronRight" size={16} />
+          </button>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * 自動更新される契約（年払いサブスク等）の途中持ち込みシート。
+ * 残り（開始残高扱い・残り月数で認識し切って終了）+ 更新分（更新周期で自動継続・支払い元 funding）
+ * の 2 項目を一度に作る。解約は有効な項目の 0 円売却 1 操作。
+ */
+function SubscriptionMigrationSheet({ onClose }: { onClose: () => void }) {
+  const { ledger, createSubscriptionMigration } = useLedger();
+  const accounts = sortAccounts(ledger?.accounts ?? []);
+
+  const expenseOptions = accounts
+    .filter((a) => a.role === 'expense-category' && !a.archived)
+    .map((a) => ({ value: a.id, label: a.name }));
+  const paymentOptions = accounts
+    .filter(
+      (a) =>
+        (a.role === 'daily-asset' ||
+          a.role === 'payment-liability' ||
+          a.role === 'other-liability') &&
+        !a.archived,
+    )
+    .map((a) => ({ value: a.id, label: a.name }));
+
+  const [name, setName] = useState('');
+  const [remainingAmountText, setRemainingAmountText] = useState('');
+  const [remainingMonthsText, setRemainingMonthsText] = useState('');
+  const [renewalAmountText, setRenewalAmountText] = useState('');
+  const [renewalEveryText, setRenewalEveryText] = useState('12');
+  const [paymentSourceAccountId, setPaymentSourceAccountId] = useState(
+    paymentOptions[0]?.value ?? '',
+  );
+  const storedCategory = lastExpenseCategoryId();
+  const [expenseAccountId, setExpenseAccountId] = useState(
+    (storedCategory !== null && expenseOptions.some((o) => o.value === storedCategory)
+      ? storedCategory
+      : null) ??
+      expenseOptions[0]?.value ??
+      '',
+  );
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [submitting, setSubmitting] = useState(false);
+
+  const parse = (v: string) => (v === '' ? 0 : Number.parseInt(v, 10));
+
+  async function submit() {
+    if (submitting) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await createSubscriptionMigration({
+        name: name.trim(),
+        remainingAmount: parse(remainingAmountText),
+        remainingMonths: parse(remainingMonthsText),
+        renewalAmount: parse(renewalAmountText),
+        renewalEveryMonths: parse(renewalEveryText),
+        paymentSourceAccountId,
+        expenseAccountId,
+      });
+      rememberExpenseCategoryId(expenseAccountId);
+      onClose();
+    } catch (e) {
+      setError(errorText(e));
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={t('subMigration.title')}
+      onClose={onClose}
+      dismissMode="if-clean"
+      dataUi={UI.allocations.subMigrationSheet}
+      footer={
+        <>
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={submit}
+            disabled={
+              submitting ||
+              name.trim() === '' ||
+              remainingAmountText === '' ||
+              remainingMonthsText === '' ||
+              renewalAmountText === '' ||
+              renewalEveryText === '' ||
+              paymentSourceAccountId === '' ||
+              expenseAccountId === ''
+            }
+            data-ui={UI.allocations.subMigrationSave}
+          >
+            {t('common.save')}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <p className="field__hint">{t('subMigration.intro')}</p>
+        {error ? (
+          <div className="field__error" role="alert">
+            <Icon name="alert" size={14} />
+            {error}
+          </div>
+        ) : null}
+        <TextInput
+          label={t('monthlyCost.migrateName')}
+          required
+          value={name}
+          onChange={setName}
+          dataUi={UI.allocations.subMigrationName}
+        />
+        <TextInput
+          label={t('subMigration.remainingAmount')}
+          required
+          inputMode="numeric"
+          value={remainingAmountText}
+          onChange={(v) => setRemainingAmountText(v.replace(/[^\d]/g, ''))}
+          hint={t('subMigration.remainingAmountHint')}
+          dataUi={UI.allocations.subMigrationRemaining}
+        />
+        <TextInput
+          label={t('subMigration.remainingMonths')}
+          required
+          inputMode="numeric"
+          value={remainingMonthsText}
+          onChange={(v) => setRemainingMonthsText(v.replace(/[^\d]/g, ''))}
+          hint={t('subMigration.remainingMonthsHint')}
+          dataUi={UI.allocations.subMigrationMonths}
+        />
+        <TextInput
+          label={t('subMigration.renewalAmount')}
+          required
+          inputMode="numeric"
+          value={renewalAmountText}
+          onChange={(v) => setRenewalAmountText(v.replace(/[^\d]/g, ''))}
+          dataUi={UI.allocations.subMigrationRenewal}
+        />
+        <TextInput
+          label={t('subMigration.renewalEvery')}
+          required
+          inputMode="numeric"
+          value={renewalEveryText}
+          onChange={(v) => setRenewalEveryText(v.replace(/[^\d]/g, ''))}
+          hint={t('subMigration.renewalEveryHint')}
+        />
+        <SelectInput
+          label={t('subMigration.paymentSource')}
+          value={paymentSourceAccountId}
+          onChange={setPaymentSourceAccountId}
+          options={paymentOptions}
+          hint={t('subMigration.paymentSourceHint')}
+        />
+        <SelectInput
+          label={t('monthlyCost.expenseCategory')}
+          value={expenseAccountId}
+          onChange={setExpenseAccountId}
+          options={expenseOptions}
+        />
+        <p className="field__hint">{t('subMigration.cancelHint')}</p>
+      </div>
+    </Modal>
   );
 }
 
@@ -428,9 +635,12 @@ const RULE_KINDS: RecurringKind[] = ['expense', 'income', 'transfer'];
  */
 function RecurringRuleSheet({
   existing,
+  initialKind,
   onClose,
 }: {
   existing?: RecurringRule;
+  /** 統一追加フローからの種別プリセット。 */
+  initialKind?: RecurringKind;
   onClose: () => void;
 }) {
   const { ledger, createRecurringRule, saveRecurringRule } = useLedger();
@@ -438,7 +648,7 @@ function RecurringRuleSheet({
   const roleOf = (id: string) => accounts.find((a) => a.id === id)?.role;
 
   const [kind, setKind] = useState<RecurringKind>(() => {
-    if (!existing) return 'expense';
+    if (!existing) return initialKind ?? 'expense';
     return recurringKindOf(roleOf(existing.debitAccountId), roleOf(existing.creditAccountId)) ?? 'expense';
   });
   const optionsFor = (roles: readonly string[], includeId?: string) =>
@@ -771,9 +981,11 @@ function MonthlyCostDisposeSheet({
     () => new Map((ledger?.accounts ?? []).map((a) => [a.id, a] as const)),
     [ledger],
   );
-  const outcome = continuous
+  // 継続コスト（実績動的償却）: 実使用月数への遡及再配分プレビュー。固定資産は従来の損益方式。
+  const ccOutcome = continuous
     ? continuousCostDisposalOutcome(item, accountsById, disposalMonth, proceeds)
-    : disposalOutcome(item, disposalMonth, proceeds);
+    : null;
+  const fixedOutcome = continuous ? null : disposalOutcome(item, disposalMonth, proceeds);
   const endMonth = continuous
     ? continuousCostDisposalEndMonth(item, disposalMonth)
     : addMonths(disposalMonth, -1);
@@ -853,38 +1065,65 @@ function MonthlyCostDisposeSheet({
           />
         ) : null}
 
-        <div className="kv">
-          <span className="muted">{t('disposal.recognized')}</span>
-          <span>
-            <Money amount={outcome.recognizedAmount} currency={currency} />
-          </span>
-        </div>
-        <div className="kv">
-          <span className="muted">{t('disposal.remaining')}</span>
-          <span>
-            <Money amount={outcome.remainingAmount} currency={currency} />
-          </span>
-        </div>
-        <div className="kv">
-          <span className="muted">{t('disposal.gain')}</span>
-          <span>
-            {outcome.gain > 0 ? (
-              <Money amount={outcome.gain} currency={currency} />
-            ) : (
-              t('disposal.none')
-            )}
-          </span>
-        </div>
-        <div className="kv">
-          <span className="muted">{t('disposal.loss')}</span>
-          <span>
-            {outcome.loss > 0 ? (
-              <Money amount={outcome.loss} currency={currency} />
-            ) : (
-              t('disposal.none')
-            )}
-          </span>
-        </div>
+        {ccOutcome ? (
+          <>
+            {/* 実績動的償却: 損益の一括計上ではなく、実使用月数へ遡って月額が再計算される。 */}
+            <div className="kv">
+              <span className="muted">{t('disposal.usedMonths')}</span>
+              <span>{t('monthlyCost.monthsUnit', { count: ccOutcome.usedMonths })}</span>
+            </div>
+            <div className="kv">
+              <span className="muted">{t('disposal.monthlyAfter')}</span>
+              <span>
+                <Money amount={ccOutcome.monthlyAfter} currency={currency} />
+              </span>
+            </div>
+            {ccOutcome.gain > 0 ? (
+              <div className="kv">
+                <span className="muted">{t('disposal.gain')}</span>
+                <span>
+                  <Money amount={ccOutcome.gain} currency={currency} />
+                </span>
+              </div>
+            ) : null}
+            <p className="field__hint">{t('disposal.retroNote')}</p>
+          </>
+        ) : fixedOutcome ? (
+          <>
+            <div className="kv">
+              <span className="muted">{t('disposal.recognized')}</span>
+              <span>
+                <Money amount={fixedOutcome.recognizedAmount} currency={currency} />
+              </span>
+            </div>
+            <div className="kv">
+              <span className="muted">{t('disposal.remaining')}</span>
+              <span>
+                <Money amount={fixedOutcome.remainingAmount} currency={currency} />
+              </span>
+            </div>
+            <div className="kv">
+              <span className="muted">{t('disposal.gain')}</span>
+              <span>
+                {fixedOutcome.gain > 0 ? (
+                  <Money amount={fixedOutcome.gain} currency={currency} />
+                ) : (
+                  t('disposal.none')
+                )}
+              </span>
+            </div>
+            <div className="kv">
+              <span className="muted">{t('disposal.loss')}</span>
+              <span>
+                {fixedOutcome.loss > 0 ? (
+                  <Money amount={fixedOutcome.loss} currency={currency} />
+                ) : (
+                  t('disposal.none')
+                )}
+              </span>
+            </div>
+          </>
+        ) : null}
         <div className="kv">
           <span className="muted">{t('disposal.endsAt')}</span>
           <span>{endMonth}</span>

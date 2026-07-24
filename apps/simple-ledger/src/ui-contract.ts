@@ -161,6 +161,16 @@ export const UI = {
     view: 'allocations.view',
     list: 'allocations.list',
     showCompleted: 'allocations.showCompleted',
+    // 統一追加フロー（毎月のもの）と実績動的償却
+    unifiedAdd: 'allocations.add',
+    addChooser: 'allocations.add.chooser',
+    overEstimateBadge: 'allocations.overEstimate',
+    subMigrationSheet: 'allocations.subMigration.sheet',
+    subMigrationName: 'allocations.subMigration.name',
+    subMigrationRemaining: 'allocations.subMigration.remaining',
+    subMigrationMonths: 'allocations.subMigration.months',
+    subMigrationRenewal: 'allocations.subMigration.renewal',
+    subMigrationSave: 'allocations.subMigration.save',
     // 定期ルール（毎月の支出・収入・振替 = 実仕訳の自動起票）
     recurringList: 'allocations.recurring.list',
     recurringAdd: 'allocations.recurring.add',
