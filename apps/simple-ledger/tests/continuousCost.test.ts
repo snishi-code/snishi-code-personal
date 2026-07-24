@@ -106,10 +106,30 @@ describe('continuousCost 仮想展開', () => {
       expenseAccountId: 'fixedcost',
       recognitionCreditAccountId: 'washer',
     });
-    const es = continuousCostEntriesForItem(washer, byId, '2100-12-31');
+    // 見込みの最終月（2037-12）を「いま」として展開 → 見込みどおり 84 か月で認識し切る。
+    const es = continuousCostEntriesForItem(washer, byId, '2100-12-31', '2037-12');
     expect(es.filter((e) => e.metadata?.ccKind === 'funding')).toHaveLength(1);
     expect(es.filter((e) => e.metadata?.ccKind === 'recognition')).toHaveLength(84);
     // 全認識後は残高 0。
+    expect(accountBalance('washer', 'asset', es)).toBe(0);
+  });
+
+  it('実績動的償却: 見込みを超えて使用中は経過月数へ延伸され、残高 0 のまま月額が下がる', () => {
+    const washer = item({
+      id: 'w',
+      name: '洗濯機',
+      amount: 240000,
+      costMonths: 84,
+      startMonth: '2031-01',
+      expenseAccountId: 'fixedcost',
+      recognitionCreditAccountId: 'washer',
+    });
+    // 90 か月目（2038-06）を「いま」として展開 → 認識 90 件へ延伸・合計は総額のまま。
+    const es = continuousCostEntriesForItem(washer, byId, '2100-12-31', '2038-06');
+    const recogs = es.filter((e) => e.metadata?.ccKind === 'recognition');
+    expect(recogs).toHaveLength(90);
+    const total = recogs.reduce((s, e) => s + (e.lines[0]?.amount ?? 0), 0);
+    expect(total).toBe(240000);
     expect(accountBalance('washer', 'asset', es)).toBe(0);
   });
 

@@ -185,11 +185,13 @@ export async function loadLedger(): Promise<Ledger> {
   const lastDataDate = journalEntries.reduce((m, e) => (e.date > m ? e.date : m), '');
   const today = todayLocal();
   const nowHorizon = lastDataDate > today ? lastDataDate : today;
+  // 動的償却の「いま」は実時刻の月（未来日付の仕訳があっても延伸の基準は今日）。
   const derivedEntries = entriesWithContinuousCost(
     journalEntries,
     monthlyCostItems,
     accounts,
     nowHorizon,
+    monthOf(today),
   );
   return {
     meta,
@@ -1942,6 +1944,119 @@ export async function createContinuousCostFromOpening(
   return item;
 }
 
+export interface SubscriptionMigrationInput {
+  /** 契約の名前（例: クラウドストレージ）。 */
+  name: string;
+  /** 今サイクルの残っている価値（残り月数ぶんの前払い分）。 */
+  remainingAmount: number;
+  /** 今サイクルの残り月数（1 以上）。 */
+  remainingMonths: number;
+  /** 更新ごとの支払額。 */
+  renewalAmount: number;
+  /** 更新周期（か月。年払いは 12）。 */
+  renewalEveryMonths: number;
+  /** 更新の支払い元（daily-asset | payment-liability | other-liability）。 */
+  paymentSourceAccountId: string;
+  expenseAccountId: string;
+  /** 認識開始月（既定は今日の月）。 */
+  startMonth?: string;
+  managementScopeId?: string;
+}
+
+/**
+ * 自動更新される契約（年払いサブスク等）を**サイクル途中から**持ち込む。2 つの item を 1 tx で作る:
+ *  1. 移行分: 残っている価値を 開始残高(equity) funding で計上し、残り月数で認識して終了
+ *     （endMonth 固定。収入・支出・資金移動にならない＝通常の移行登録と同じ会計意味）。
+ *  2. 更新分: 残り月数の翌月から、更新額を更新周期で自動継続（funding 貸方=支払い元。
+ *     カード払いなら仮想的にカード残高が増え、返済フローで実精算する）。
+ * 解約は有効な item の売却（0円売却）1 操作＝実使用月数へ遡及再配分され、以後の更新も止まる。
+ */
+export async function createSubscriptionMigration(
+  input: SubscriptionMigrationInput,
+): Promise<{ migration: MonthlyCostItem; renewal: MonthlyCostItem }> {
+  if (input.name.trim() === '') throw new LedgerError('error.common.nameRequired');
+  if (!Number.isInteger(input.remainingAmount) || input.remainingAmount <= 0)
+    throw new LedgerError('error.common.amountInvalid');
+  if (!Number.isInteger(input.renewalAmount) || input.renewalAmount <= 0)
+    throw new LedgerError('error.common.amountInvalid');
+  if (!Number.isInteger(input.remainingMonths) || input.remainingMonths < 1)
+    throw new LedgerError('error.monthlyCost.monthsInvalid');
+  if (!Number.isInteger(input.renewalEveryMonths) || input.renewalEveryMonths < 1)
+    throw new LedgerError('error.monthlyCost.repeatInvalid');
+
+  const ctx = await loadSaveContext();
+  const managementScopeId = input.managementScopeId ?? DEFAULT_MANAGEMENT_SCOPE_ID;
+  if (!ctx.scopeIds.has(managementScopeId)) throw new LedgerError('error.scope.unknown');
+  const expense = ctx.byId.get(input.expenseAccountId);
+  if (!expense || expense.role !== 'expense-category')
+    throw new LedgerError('error.fixedAsset.expenseCategory');
+  const payment = ctx.byId.get(input.paymentSourceAccountId);
+  const paymentOk =
+    payment &&
+    (payment.role === 'daily-asset' ||
+      payment.role === 'payment-liability' ||
+      payment.role === 'other-liability');
+  if (!paymentOk) throw new LedgerError('error.monthlyCost.paymentSource');
+
+  const startMonth = input.startMonth ?? monthOf(todayLocal());
+  if (!/^\d{4}-\d{2}$/.test(startMonth))
+    throw new LedgerError('error.monthlyCost.startMonthInvalid');
+
+  const ts = nowIso();
+  const { account: ledgerAccount, created: ledgerCreated } =
+    findOrCreateContinuousCostLedgerAccount(ctx, ts);
+  const { account: equity, created: equityCreated } = findOrCreateOpeningEquityAccount(
+    ctx.byId.values(),
+    ts,
+  );
+
+  // 1. 移行分: 残り月数で認識し切って終了する（endMonth 固定＝動的延伸しない）。
+  const migration: MonthlyCostItem = {
+    id: newId(),
+    name: `${input.name.trim()}（移行分）`,
+    managementScopeId,
+    kind: inferMonthlyCostKind(input.remainingMonths, undefined),
+    amount: input.remainingAmount,
+    costMonths: input.remainingMonths,
+    startMonth,
+    endMonth: addMonths(startMonth, input.remainingMonths - 1),
+    expenseAccountId: input.expenseAccountId,
+    paymentSourceAccountId: equity.id,
+    recognitionCreditAccountId: ledgerAccount.id,
+    status: 'active',
+    createdAt: ts,
+    updatedAt: ts,
+  };
+
+  // 2. 更新分: 残り月数の翌月＝次回更新月から、更新周期で自動継続する。
+  const renewal: MonthlyCostItem = {
+    id: newId(),
+    name: input.name.trim(),
+    managementScopeId,
+    kind: inferMonthlyCostKind(input.renewalEveryMonths, input.renewalEveryMonths),
+    amount: input.renewalAmount,
+    costMonths: input.renewalEveryMonths,
+    repeatEveryMonths: input.renewalEveryMonths,
+    startMonth: addMonths(startMonth, input.remainingMonths),
+    expenseAccountId: input.expenseAccountId,
+    paymentSourceAccountId: input.paymentSourceAccountId,
+    recognitionCreditAccountId: ledgerAccount.id,
+    status: 'active',
+    createdAt: ts,
+    updatedAt: ts,
+  };
+
+  await writeWithRevision([STORE.accounts, STORE.monthlyCostItems], (t) => {
+    const aStore = t.objectStore(STORE.accounts);
+    if (ledgerCreated) aStore.put(ledgerAccount);
+    if (equityCreated) aStore.put(equity);
+    const mStore = t.objectStore(STORE.monthlyCostItems);
+    mStore.put(migration);
+    mStore.put(renewal);
+  });
+  return { migration, renewal };
+}
+
 /**
  * 月額化コストの更新（後編集・一時停止・終了）。保存境界で fail-closed に検証し、必要なら
  * 関連（実支払い仕訳・未実績の返済 CF）を同じトランザクションで整合させる。
@@ -1985,6 +2100,9 @@ export async function upsertMonthlyCost(item: MonthlyCostItem): Promise<void> {
     ...(existing.sourceEntryId !== undefined ? { sourceEntryId: existing.sourceEntryId } : {}),
     ...(existing.sourceAllocationId !== undefined
       ? { sourceAllocationId: existing.sourceAllocationId }
+      : {}),
+    ...(existing.disposalProceedsAmount !== undefined
+      ? { disposalProceedsAmount: existing.disposalProceedsAmount }
       : {}),
     createdAt: existing.createdAt,
     updatedAt: nowIso(),
@@ -2362,13 +2480,14 @@ export async function disposeContinuousCost(input: DisposeFixedAssetInput): Prom
 
   const disposalMonth = monthOf(input.disposalDate);
   const accountsById = new Map(accounts.map((a) => [a.id, a] as const));
-  const { recognizedAmount, remainingAmount, gain, loss } = continuousCostDisposalOutcome(
+  // 実績動的償却: 損益の一括計上はしない。最終サイクルを「実使用月数・売却額控除」で
+  // 遡及再配分する（月額に吸収）。実仕訳は売却額の資産移動と、サイクル額を超えた益だけ。
+  const { fundedAmount, inflow, gain } = continuousCostDisposalOutcome(
     item,
     accountsById,
     disposalMonth,
     input.proceedsAmount,
   );
-  const inflowToAsset = Math.min(input.proceedsAmount, remainingAmount);
 
   const ts = nowIso();
   const disposalId = newId();
@@ -2390,22 +2509,11 @@ export async function disposeContinuousCost(input: DisposeFixedAssetInput): Prom
     updatedAt: ts,
   });
 
-  // A: 売却入金（入金先 / 継続コスト台帳）。
-  if (inflowToAsset > 0 && destination)
-    generated.push(mkEntry(destination.id, ledgerAccount.id, inflowToAsset));
+  // A: 売却入金（入金先 / 継続コスト台帳）。認識側が売却額ぶんを費用配分から控除するため、
+  // 台帳に残るその残高をここで入金先へ移す（＝台帳のこの項目ぶんが 0 で閉じる）。
+  if (inflow > 0 && destination) generated.push(mkEntry(destination.id, ledgerAccount.id, inflow));
 
-  // B: 売却損（その他支出 / 継続コスト台帳）。解約・返金なし終了の未消化分はここに出る。
-  if (loss > 0) {
-    const lossAccount =
-      accounts.find(
-        (a) =>
-          a.role === 'expense-category' && a.name === DISPOSAL_LOSS_ACCOUNT_NAME && !a.archived,
-      ) ?? accounts.find((a) => a.role === 'expense-category' && !a.archived);
-    if (!lossAccount) throw new LedgerError('error.disposal.lossCategoryMissing');
-    generated.push(mkEntry(lossAccount.id, ledgerAccount.id, loss));
-  }
-
-  // C: 売却益（入金先 / その他収入）。
+  // B: 売却益（入金先 / その他収入）。売却額が最終サイクル額を超えた分だけ。
   if (gain > 0 && destination) {
     const gainAccount =
       accounts.find(
@@ -2427,18 +2535,21 @@ export async function disposeContinuousCost(input: DisposeFixedAssetInput): Prom
     disposalDate: input.disposalDate,
     proceedsAmount: input.proceedsAmount,
     ...(input.proceedsAmount > 0 && destination ? { destinationAccountId: destination.id } : {}),
-    recognizedAmount,
-    remainingAmount,
+    // 実績動的償却: 費用配分は 資産化総額 − 売却額（最終サイクル分）に収束し、未消化は残らない。
+    recognizedAmount: fundedAmount - inflow,
+    remainingAmount: 0,
     generatedEntryIds: generated.map((e) => e.id),
     createdAt: ts,
     updatedAt: ts,
   };
 
-  // 終了月から先の funding / recognition を止める（過去は保持）。
+  // 終了月（処分月まで使用として数える）から先の funding / recognition を止める。
+  // 過去は実使用月数で遡及再配分される（disposalProceedsAmount は認識側の控除に使う）。
   const updatedItem: MonthlyCostItem = {
     ...item,
     status: 'ended',
     endMonth: continuousCostDisposalEndMonth(item, disposalMonth),
+    ...(inflow > 0 ? { disposalProceedsAmount: inflow } : {}),
     updatedAt: ts,
   };
 
