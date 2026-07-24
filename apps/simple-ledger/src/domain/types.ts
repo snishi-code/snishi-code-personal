@@ -278,6 +278,11 @@ export interface MonthlyCostItem {
   paymentAccountId?: string;
   /** liability 払いのとき、返済 CF を作るための支払い口座（role: daily-asset）。 */
   repaymentAccountId?: string;
+  /**
+   * 処分（売却・解約）時の売却額（最終サイクル額まで）。実績動的償却では損益を一括計上せず、
+   * 最終サイクルの配分総額からこの額を控除する（超過分だけ売却益の実仕訳）。処分時に設定。
+   */
+  disposalProceedsAmount?: number;
   /** 既存 AllocationItem 由来なら紐づける。 */
   sourceAllocationId?: string;
   /** この月額化のもとになった実仕訳（固定資産購入など）。Journal 仮想行の由来表示に使う。 */

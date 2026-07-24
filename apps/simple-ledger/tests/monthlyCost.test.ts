@@ -44,16 +44,19 @@ describe('monthlyCostForMonth', () => {
     expect(monthlyCostForMonth(yr, '2026-12')).toBe(1000);
     expect(monthlyCostForMonth(yr, '2027-01')).toBe(1000); // 次の周期も連続
   });
-  it('耐久財（210000/84, 1 回限り）は 84 か月だけ、その後 0', () => {
+  it('耐久財（210000/84, 1 回限り）は見込み内 2500/月、超過後は経過月数で再配分（動的償却）', () => {
     const dur = item({
       kind: 'durable-asset',
       amount: 210000,
       costMonths: 84,
       startMonth: '2026-01',
     });
-    expect(monthlyCostForMonth(dur, '2026-01')).toBe(2500);
-    expect(monthlyCostForMonth(dur, '2032-12')).toBe(2500); // 84 か月目(2032-12)
-    expect(monthlyCostForMonth(dur, '2033-01')).toBe(0); // 85 か月目
+    expect(monthlyCostForMonth(dur, '2026-01', '2032-12')).toBe(2500);
+    expect(monthlyCostForMonth(dur, '2032-12', '2032-12')).toBe(2500); // 84 か月目(2032-12)
+    // 85 か月目も使用中なら 0 ではなく、210000/85 へ全期間が再配分される。
+    const stretched = monthlyCostForMonth(dur, '2033-01', '2033-01');
+    expect(stretched).toBeGreaterThan(0);
+    expect(stretched).toBeLessThan(2500);
   });
   it('repeat > costMonths は周期内の隙間が 0', () => {
     // 24 か月ごとに 2 か月だけ計上（例: 何かの一時費用）

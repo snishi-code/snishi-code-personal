@@ -128,7 +128,7 @@ export function Journal({
         const label = m.recognitionCreditAccountId
           ? `${m.name} → ${expName ?? '—'}`
           : t('journal.monthlyCostRow', { name: m.name });
-        return { id: m.id, label, amount: monthlyCostForMonth(m, ym!) };
+        return { id: m.id, label, amount: monthlyCostForMonth(m, ym!, currentYm) };
       })
       .filter((r) => r.amount > 0);
     return { recognitionYm: ym, monthRecognitions: rows };

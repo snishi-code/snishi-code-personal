@@ -13,6 +13,7 @@ import {
   createManagementScope,
   createMonthlyCost,
   createReserve,
+  createSubscriptionMigration,
   deleteAccount,
   deleteEntry,
   createFixedAssetPurchaseMonthly,
@@ -2236,60 +2237,64 @@ describe('継続コストの売却・解約（disposeContinuousCost）', () => {
     return { item, cash, fixed };
   }
 
-  it('返金なし解約は 0 円売却として未消化分が売却損になり、台帳残高が消える', async () => {
+  it('返金なし解約は損益を一括計上せず、実使用月数へ遡及再配分され台帳残高が消える', async () => {
     const { item } = await makeYearlySub('クラウドA');
-    // 2026-07 に解約 → endMonth=2026-06。認識済み 6 か月 = 6000、未消化 6000。
+    // 2026-07 に解約 → endMonth=2026-07（処分月まで使用）。12000 を 7 か月へ遡及再配分。
     const disposal = await disposeContinuousCost({
       monthlyCostId: item.id,
       disposalDate: '2026-07-15',
       proceedsAmount: 0,
     });
-    expect(disposal.remainingAmount).toBe(6000);
+    // 実績動的償却: 未消化は残らない（全額が実使用期間の費用へ吸収される）。
+    expect(disposal.remainingAmount).toBe(0);
+    expect(disposal.recognizedAmount).toBe(12000);
     expect(disposal.fixedAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
     const after = await loadLedger();
     const updated = after.monthlyCostItems.find((m) => m.id === item.id)!;
     expect(updated.status).toBe('ended');
-    expect(updated.endMonth).toBe('2026-06');
-    // 生成仕訳は売却損 1 本（借方 その他支出 / 貸方 継続コスト台帳）。
+    expect(updated.endMonth).toBe('2026-07');
+    // 損益の実仕訳は生成されない（0 件）。
     const generated = after.journalEntries.filter(
       (e) => e.metadata?.assetDisposalId === disposal.id,
     );
-    expect(generated).toHaveLength(1);
-    const lossEntry = generated[0]!;
-    expect(lossEntry.lines.find((l) => l.side === 'credit')?.accountId).toBe(
-      CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
-    );
-    expect(lossEntry.lines[0]?.amount).toBe(6000);
-    // 台帳口座のこの項目ぶんの残高が 0（derivedEntries で確認: funding 12000 − 認識 6000 − 実精算 6000）。
-    const bal = accountBalance(
-      CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
-      'asset',
-      after.derivedEntries,
-    );
+    expect(generated).toHaveLength(0);
+    // 台帳口座のこの項目ぶんの残高は 0（funding 12000 − 遡及認識 12000）。
+    const bal = accountBalance(CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 'asset', after.derivedEntries);
     expect(bal).toBe(0);
-    // 生成仕訳は通常編集・削除できない（fail-closed）。
-    const e = await caught(deleteEntry(lossEntry.id));
-    expect(e.code).toBe('error.entry.assetDisposal');
+    // 認識合計 = 総額（7 か月へ再配分。1714〜1715 円/月）。
+    const recogs = after.derivedEntries.filter(
+      (e) => e.metadata?.continuousCostId === item.id && e.metadata.ccKind === 'recognition',
+    );
+    expect(recogs).toHaveLength(7);
+    expect(recogs.reduce((s, e) => s + (e.lines[0]?.amount ?? 0), 0)).toBe(12000);
   });
 
-  it('売却額ありは入金先へ計上し、残存超過分は売却益になる', async () => {
+  it('売却額ありは配分総額から控除され、入金の資産移動だけが実仕訳になる', async () => {
     const { item, cash } = await makeYearlySub('クラウドB');
-    // 2026-07 売却、残存 6000 に対して 8000 で売却 → 益 2000。
+    // 2026-07 売却 8000 → 費用配分 = 12000 − 8000 = 4000 を 7 か月へ。入金 8000 は台帳→現金。
     const disposal = await disposeContinuousCost({
       monthlyCostId: item.id,
       disposalDate: '2026-07-15',
       proceedsAmount: 8000,
       destinationAccountId: cash.id,
     });
-    expect(disposal.remainingAmount).toBe(6000);
+    expect(disposal.remainingAmount).toBe(0);
+    expect(disposal.recognizedAmount).toBe(4000);
     const after = await loadLedger();
     const generated = after.journalEntries.filter(
       (e) => e.metadata?.assetDisposalId === disposal.id,
     );
-    // 入金（6000・貸方 台帳）と売却益（2000・貸方 その他収入）。
-    expect(generated).toHaveLength(2);
+    // 入金の資産移動 1 本のみ（借方 現金 / 貸方 台帳・8000）。売却益はサイクル額超過時だけ。
+    expect(generated).toHaveLength(1);
+    expect(generated[0]!.lines).toEqual([
+      { accountId: cash.id, side: 'debit', amount: 8000 },
+      { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'credit', amount: 8000 },
+    ]);
     const bal = accountBalance(CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 'asset', after.derivedEntries);
     expect(bal).toBe(0);
+    // 生成仕訳は通常編集・削除できない（fail-closed）。
+    const e0 = await caught(deleteEntry(generated[0]!.id));
+    expect(e0.code).toBe('error.entry.assetDisposal');
     // 売却額ありで入金先なしは拒否（別項目で確認）。
     const { item: item2 } = await makeYearlySub('クラウドC');
     const e = await caught(
@@ -2369,6 +2374,125 @@ describe('継続コストの売却・解約（disposeContinuousCost）', () => {
     expect(outcome.kind).toBe('ok');
     const after = await loadLedger();
     expect(after.assetDisposals.some((d) => d.id === disposal.id)).toBe(true);
+  });
+});
+
+/* ── 年払いサブスクの途中持ち込み（移行分 + 更新分の 2 段登録） ── */
+describe('createSubscriptionMigration', () => {
+  async function caught(p: Promise<unknown>): Promise<LedgerError> {
+    try {
+      await p;
+    } catch (e) {
+      return e as LedgerError;
+    }
+    throw new Error('expected rejection');
+  }
+
+  it('移行分（開始残高・残り月数で終了固定）と更新分（自動継続）を 1 tx で作る', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const fixed = ledger.accounts.find((a) => a.name === '固定費')!;
+    // 3/15 更新の年払いを 7 月に持ち込み: 残り 8 か月 8,000 円 + 更新 12 か月ごと 12,000 円。
+    const { migration, renewal } = await createSubscriptionMigration({
+      name: 'クラウド写真',
+      remainingAmount: 8000,
+      remainingMonths: 8,
+      renewalAmount: 12000,
+      renewalEveryMonths: 12,
+      paymentSourceAccountId: cash.id,
+      expenseAccountId: fixed.id,
+      startMonth: '2026-07',
+    });
+    const after = await loadLedger();
+    const mig = after.monthlyCostItems.find((m) => m.id === migration.id)!;
+    const ren = after.monthlyCostItems.find((m) => m.id === renewal.id)!;
+    // 移行分: 名前サフィックス・equity funding・endMonth 固定（2026-07 + 7 = 2027-02）。
+    expect(mig.name).toBe('クラウド写真（移行分）');
+    expect(mig.endMonth).toBe('2027-02');
+    expect(mig.repeatEveryMonths).toBeUndefined();
+    const migSource = after.accounts.find((a) => a.id === mig.paymentSourceAccountId)!;
+    expect(migSource.type).toBe('equity');
+    // 更新分: 次回更新月（2027-03）から更新周期で自動継続・支払い元は指定どおり。
+    expect(ren.name).toBe('クラウド写真');
+    expect(ren.startMonth).toBe('2027-03');
+    expect(ren.repeatEveryMonths).toBe(12);
+    expect(ren.paymentSourceAccountId).toBe(cash.id);
+    // 月あたり: 移行分は 8,000/8 = 1,000（残り月数の間だけ）、更新分は 12,000/12 = 1,000（以後）。
+    expect(monthlyCostForMonth(mig, '2026-07')).toBe(1000);
+    expect(monthlyCostForMonth(mig, '2027-02')).toBe(1000);
+    expect(monthlyCostForMonth(mig, '2027-03')).toBe(0);
+    expect(monthlyCostForMonth(ren, '2027-02')).toBe(0);
+    expect(monthlyCostForMonth(ren, '2027-03')).toBe(1000);
+    // 会計的な検証: 移行分 funding は 開始残高 貸方 8000（収入・支出にならない）。
+    const fundings = after.derivedEntries.filter(
+      (e) => e.metadata?.continuousCostId === mig.id && e.metadata.ccKind === 'funding',
+    );
+    expect(fundings).toHaveLength(1);
+    expect(fundings[0]!.lines.find((l) => l.side === 'credit')?.accountId).toBe(migSource.id);
+    expect(fundings[0]!.lines[0]?.amount).toBe(8000);
+  });
+
+  it('入力検証: 空名・0 金額・残り月数 0・更新周期 0 は拒否', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const fixed = ledger.accounts.find((a) => a.name === '固定費')!;
+    const base = {
+      name: '契約X',
+      remainingAmount: 8000,
+      remainingMonths: 8,
+      renewalAmount: 12000,
+      renewalEveryMonths: 12,
+      paymentSourceAccountId: cash.id,
+      expenseAccountId: fixed.id,
+      startMonth: '2026-07',
+    };
+    expect((await caught(createSubscriptionMigration({ ...base, name: ' ' }))).code).toBe(
+      'error.common.nameRequired',
+    );
+    expect(
+      (await caught(createSubscriptionMigration({ ...base, remainingAmount: 0 }))).code,
+    ).toBe('error.common.amountInvalid');
+    expect(
+      (await caught(createSubscriptionMigration({ ...base, remainingMonths: 0 }))).code,
+    ).toBe('error.monthlyCost.monthsInvalid');
+    expect(
+      (await caught(createSubscriptionMigration({ ...base, renewalEveryMonths: 0 }))).code,
+    ).toBe('error.monthlyCost.repeatInvalid');
+    // 支払い元に費用カテゴリは不可。
+    expect(
+      (await caught(createSubscriptionMigration({ ...base, paymentSourceAccountId: fixed.id })))
+        .code,
+    ).toBe('error.monthlyCost.paymentSource');
+  });
+
+  it('解約は更新分の 0 円売却 1 操作で、最終サイクルが実使用月数へ切り詰められる', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const fixed = ledger.accounts.find((a) => a.name === '固定費')!;
+    const { renewal } = await createSubscriptionMigration({
+      name: 'クラウド動画',
+      remainingAmount: 8000,
+      remainingMonths: 8,
+      renewalAmount: 12000,
+      renewalEveryMonths: 12,
+      paymentSourceAccountId: cash.id,
+      expenseAccountId: fixed.id,
+      startMonth: '2025-07',
+    });
+    // 更新分は 2026-03 開始。2026-07 に解約（0 円売却）→ 5 か月使用で切り詰め。
+    const disposal = await disposeContinuousCost({
+      monthlyCostId: renewal.id,
+      disposalDate: '2026-07-15',
+      proceedsAmount: 0,
+    });
+    expect(disposal.remainingAmount).toBe(0);
+    const after = await loadLedger();
+    const ended = after.monthlyCostItems.find((m) => m.id === renewal.id)!;
+    expect(ended.status).toBe('ended');
+    expect(ended.endMonth).toBe('2026-07');
+    // 12,000 が 5 か月（2026-03〜07）へ遡及再配分される（過去に遡って増額）。
+    expect(monthlyCostForMonth(ended, '2026-03')).toBe(2400);
+    expect(monthlyCostForMonth(ended, '2026-08')).toBe(0);
   });
 });
 
