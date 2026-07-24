@@ -10,11 +10,26 @@
  * 継続コスト（費用の月割り認識 = 導出レイヤ）とは別概念で、こちらは実際の資金移動を扱う。
  */
 import { addMonths, monthOf, monthsBetween } from './allocation';
-import type { AccountRole } from './accountRoles';
+import { ACCOUNT_ROLES, isInternalRole, type AccountRole } from './accountRoles';
 import type { RecurringRule } from './types';
 
 /** 表示用の種別（保存しない。勘定の役割から導出する）。 */
 export type RecurringKind = 'expense' | 'income' | 'transfer';
+
+/**
+ * 定期ルールが毎月自動起票してよい科目の役割（「簿記編集」モードで任意ペアを許すときの正本）。
+ * 内部集約（継続コスト台帳・目的別資金集約）と残高調整科目は除外する＝これらは導出エンジンや
+ * 補正が所有しており、実仕訳を毎月ぶつけると残高の意味が壊れるため（fail-closed）。
+ * 保存境界(repository)・import 検証(schema)・入力シートの科目候補が同じ正本を参照する。
+ */
+export const RECURRING_POSTABLE_ROLES: readonly AccountRole[] = ACCOUNT_ROLES.filter(
+  (r) => !isInternalRole(r) && r !== 'system-adjustment',
+);
+
+/** この役割の科目を定期ルールの借方/貸方に使ってよいか。 */
+export function isRecurringPostableRole(role: AccountRole | undefined): boolean {
+  return role !== undefined && RECURRING_POSTABLE_ROLES.includes(role);
+}
 
 /**
  * 借方/貸方の役割から種別を導出する。許可されない組み合わせは null。

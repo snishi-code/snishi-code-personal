@@ -25,7 +25,11 @@ import {
 } from '../../domain/continuousCost';
 import { addMonths, monthOf } from '../../domain/allocation';
 import { currentYearMonth, nowIso, todayLocal } from '../../util/time';
-import { recurringKindOf, type RecurringKind } from '../../domain/recurring';
+import {
+  RECURRING_POSTABLE_ROLES,
+  recurringKindOf,
+  type RecurringKind,
+} from '../../domain/recurring';
 import { Money } from '../money';
 import { errorText, t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
@@ -96,7 +100,8 @@ export function Allocations() {
       accountsMap.get(r.debitAccountId)?.role,
       accountsMap.get(r.creditAccountId)?.role,
     );
-    return kind ? t(`recurring.kind.${kind}` as MessageKey) : '—';
+    // 定型に当てはまらない組み合わせは簿記編集ルール。
+    return t(`recurring.kind.${kind ?? 'manual'}` as MessageKey);
   };
   async function toggleRulePause(rule: RecurringRule) {
     // 再開は今月から（停止中の月を遡って起票しない）。startMonth を現在月へ更新する。
@@ -603,8 +608,11 @@ function SubscriptionMigrationSheet({ onClose }: { onClose: () => void }) {
 }
 
 /** 定期ルールの種別ごとの科目役割（源泉=貸方 / 行き先=借方）。 */
+/** シート内だけの種別。定型3種 + 簿記編集（任意の科目ペアを直接指定）。 */
+type SheetKind = RecurringKind | 'manual';
+
 const RULE_ROLES: Record<
-  RecurringKind,
+  SheetKind,
   { from: readonly string[]; to: readonly string[]; fromKey: MessageKey; toKey: MessageKey }
 > = {
   expense: {
@@ -625,9 +633,16 @@ const RULE_ROLES: Record<
     fromKey: 'recurring.from.transfer',
     toKey: 'recurring.to.transfer',
   },
+  // 簿記編集: ホームの簿記編集と同じく任意の科目ペアを直接指定する（内部集約・調整科目は除外）。
+  manual: {
+    from: [...RECURRING_POSTABLE_ROLES],
+    to: [...RECURRING_POSTABLE_ROLES],
+    fromKey: 'recurring.from.manual',
+    toKey: 'recurring.to.manual',
+  },
 };
 
-const RULE_KINDS: RecurringKind[] = ['expense', 'income', 'transfer'];
+const RULE_KINDS: SheetKind[] = ['expense', 'income', 'transfer', 'manual'];
 
 /**
  * 定期ルールの追加・編集シート。毎月の支払日に実仕訳が自動起票される
@@ -647,9 +662,10 @@ function RecurringRuleSheet({
   const accounts = sortAccounts(ledger?.accounts ?? []);
   const roleOf = (id: string) => accounts.find((a) => a.id === id)?.role;
 
-  const [kind, setKind] = useState<RecurringKind>(() => {
+  const [kind, setKind] = useState<SheetKind>(() => {
     if (!existing) return initialKind ?? 'expense';
-    return recurringKindOf(roleOf(existing.debitAccountId), roleOf(existing.creditAccountId)) ?? 'expense';
+    // 定型に当てはまらない既存ルール（簿記編集で作ったもの）は簿記編集モードで開く。
+    return recurringKindOf(roleOf(existing.debitAccountId), roleOf(existing.creditAccountId)) ?? 'manual';
   });
   const optionsFor = (roles: readonly string[], includeId?: string) =>
     accounts
@@ -678,7 +694,7 @@ function RecurringRuleSheet({
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  function switchKind(next: RecurringKind) {
+  function switchKind(next: SheetKind) {
     setKind(next);
     const from = optionsFor(RULE_ROLES[next].from);
     const fromId = from[0]?.value ?? '';
@@ -763,13 +779,16 @@ function RecurringRuleSheet({
         <SelectInput
           label={t('recurring.kindLabel')}
           value={kind}
-          onChange={(v) => switchKind(v as RecurringKind)}
+          onChange={(v) => switchKind(v as SheetKind)}
           options={RULE_KINDS.map((k) => ({
             value: k,
             label: t(`recurring.kind.${k}` as MessageKey),
           }))}
           dataUi={UI.allocations.recurringKind}
         />
+        {kind === 'manual' ? (
+          <p className="field__hint">{t('recurring.manualHint')}</p>
+        ) : null}
         <TextInput
           label={t('recurring.name')}
           required
