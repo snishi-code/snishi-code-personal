@@ -933,6 +933,7 @@ export const ja = {
   'recurring.kind.expense': '支出（毎月の支払い）',
   'recurring.kind.income': '収入（給与など）',
   'recurring.kind.transfer': '振替（積立など）',
+  'recurring.kind.manual': '簿記編集（科目を直接指定）',
   'recurring.name': '摘要',
   'recurring.nameHint': '起票される仕訳の名前（例: NISA積立 / 給与 / Netflix）。',
   'recurring.amount': '毎月の金額',
@@ -946,6 +947,10 @@ export const ja = {
   'recurring.to.income': '受け取り口座',
   'recurring.from.transfer': '移動元',
   'recurring.to.transfer': '移動先（資金・投資）',
+  'recurring.from.manual': '貸方（支払い元・減る側）',
+  'recurring.to.manual': '借方（増える・使う側）',
+  'recurring.manualHint':
+    '任意の科目を直接指定できます（例: 健康保険は「銀行 → 収入」で収入減、積立は「カード → 投資」）。',
   'recurring.everyMonthDay': '毎月{day}日',
   'recurring.paused': '停止中',
   'recurring.pause': '停止',
@@ -956,7 +961,7 @@ export const ja = {
     '「{name}」を削除します。起票済みの仕訳は通常の仕訳としてそのまま残ります。',
   'error.recurring.invalidStructure': '定期ルールの形式が不正です。',
   'error.recurring.flowInvalid':
-    '科目の組み合わせが不正です（支出・収入・振替のいずれかの形にしてください）。',
+    '科目の組み合わせが不正です（源泉と行き先を別の科目にしてください。内部集約・調整科目は使えません）。',
   'error.recurring.notFound': '定期ルールが見つかりません。',
   'error.monthlyCost.repeatOnOpening':
     '移行登録（初期残高）の項目に継続購入（自動更新）は設定できません。毎月払いは「毎月の支出」の定期ルールで登録してください。',

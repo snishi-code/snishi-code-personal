@@ -16,7 +16,7 @@ import {
   roleAllowsType,
   type AccountRole,
 } from './accountRoles';
-import { recurringKindOf } from './recurring';
+import { isRecurringPostableRole } from './recurring';
 
 const isoDate = z
   .string()
@@ -750,13 +750,17 @@ export const ledgerExportPackageSchema = z
         issue(`定期ルール「${r.name}」の源泉科目が存在しません`, at('creditAccountId'));
       if (r.debitAccountId === r.creditAccountId)
         issue(`定期ルール「${r.name}」の源泉と行き先が同一です`, at('debitAccountId'));
-      const kind = recurringKindOf(
+      // 支出/収入/振替の定型に加え簿記編集（任意の科目ペア）を許容する。内部集約・調整科目
+      // だけは自動起票の対象外（RECURRING_POSTABLE_ROLES が正本）。
+      const debitPostable = isRecurringPostableRole(
         accountRole.get(r.debitAccountId) as AccountRole | undefined,
+      );
+      const creditPostable = isRecurringPostableRole(
         accountRole.get(r.creditAccountId) as AccountRole | undefined,
       );
-      if (hasAccount(r.debitAccountId) && hasAccount(r.creditAccountId) && kind === null)
+      if (hasAccount(r.debitAccountId) && hasAccount(r.creditAccountId) && (!debitPostable || !creditPostable))
         issue(
-          `定期ルール「${r.name}」の科目の組み合わせが不正です（支出/収入/振替のいずれかの形である必要があります）`,
+          `定期ルール「${r.name}」の科目は定期ルールに使えません（内部集約・調整科目は自動起票できません）`,
           at('debitAccountId'),
         );
     });

@@ -33,6 +33,7 @@ import {
   recurringRuleSchema,
 } from '../domain/schema';
 import {
+  isRecurringPostableRole,
   recurringCursorAfter,
   recurringKindOf,
   recurringPostingsDue,
@@ -45,6 +46,7 @@ import type {
   AllocationItem,
   AssetDisposal,
   CashflowSchedule,
+  InputMode,
   JournalEntry,
   JournalLine,
   Ledger,
@@ -717,7 +719,9 @@ function assertRecurringRuleSavable(rule: RecurringRule, ctx: SaveContext): void
   const credit = ctx.byId.get(rule.creditAccountId);
   if (!debit || !credit || rule.debitAccountId === rule.creditAccountId)
     throw new LedgerError('error.recurring.flowInvalid');
-  if (recurringKindOf(debit.role, credit.role) === null)
+  // 支出/収入/振替の定型に加え、簿記編集（任意の科目ペア）を許容する。ただし内部集約・
+  // 調整科目は自動起票の対象外（RECURRING_POSTABLE_ROLES が正本・fail-closed）。
+  if (!isRecurringPostableRole(debit.role) || !isRecurringPostableRole(credit.role))
     throw new LedgerError('error.recurring.flowInvalid');
 }
 
@@ -811,9 +815,11 @@ export async function catchUpRecurringRules(today: string): Promise<number> {
     const postings = recurringPostingsDue(rule, today);
     const debit = ctx.byId.get(rule.debitAccountId);
     const credit = ctx.byId.get(rule.creditAccountId);
-    const kind = recurringKindOf(debit?.role, credit?.role);
-    // 参照が壊れているルール（科目が消えた等）は起票しない（fail-soft: 起動を止めない）。
-    if (kind === null) continue;
+    // 参照が壊れている/自動起票の対象外の科目のルールは起票しない（fail-soft: 起動を止めない）。
+    if (!debit || !credit) continue;
+    if (!isRecurringPostableRole(debit.role) || !isRecurringPostableRole(credit.role)) continue;
+    // 定型（支出/収入/振替）は導出した種別を、非定型（簿記編集）は 'manual' を記録する。
+    const inputMode: InputMode = recurringKindOf(debit.role, credit.role) ?? 'manual';
     for (const p of postings) {
       newEntries.push({
         id: newId(),
@@ -825,7 +831,7 @@ export async function catchUpRecurringRules(today: string): Promise<number> {
           { accountId: rule.debitAccountId, side: 'debit', amount: rule.amount },
           { accountId: rule.creditAccountId, side: 'credit', amount: rule.amount },
         ],
-        metadata: { inputMode: kind, recurringRuleId: rule.id, recurringMonth: p.month },
+        metadata: { inputMode, recurringRuleId: rule.id, recurringMonth: p.month },
         createdAt: ts,
         updatedAt: ts,
       });
