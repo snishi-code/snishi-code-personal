@@ -11,12 +11,14 @@ import './setup';
 import {
   catchUpRecurringRules,
   createRecurringRule,
+  createReserve,
   deleteEntry,
   deleteRecurringRule,
   loadLedger,
   upsertRecurringRule,
 } from '../src/data/repository';
 import { clampDayToMonth, recurringPostingsDue } from '../src/domain/recurring';
+import { RESERVE_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import { buildExportPackage } from '../src/data/exportImport';
 import { ledgerExportPackageSchema } from '../src/domain/schema';
 import { LedgerError } from '../src/domain/errors';
@@ -143,16 +145,75 @@ describe('定期ルールのキャッチアップ起票', () => {
     expect(parsed.success).toBe(true);
   });
 
-  it('不正な組み合わせ（費用→収入など）は fail-closed に弾く', async () => {
-    const expense = await accountByName('固定費');
-    const income = await accountByName('給与');
+  it('簿記編集: 健康保険を「銀行 → 収入」で収入減として毎月起票できる', async () => {
+    const bank = await accountByName('預金');
+    const income = await accountByName('給与'); // income-category
+    // 借方 収入カテゴリ / 貸方 資金 = 収入のマイナス（定型3種に当てはまらない）。
+    await createRecurringRule({
+      name: '健康保険',
+      amount: 4000,
+      dayOfMonth: 5,
+      debitAccountId: income.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-07',
+    });
+    expect(await catchUpRecurringRules('2026-07-23')).toBe(1);
+    const ledger = await loadLedger();
+    const posted = ledger.journalEntries.find((e) => e.metadata?.recurringRuleId)!;
+    expect(posted.metadata?.inputMode).toBe('manual');
+    expect(posted.lines).toEqual(
+      expect.arrayContaining([
+        { accountId: income.id, side: 'debit', amount: 4000 },
+        { accountId: bank.id, side: 'credit', amount: 4000 },
+      ]),
+    );
+  });
+
+  it('簿記編集: クレカ積立を「カード → 投資」で毎月起票できる', async () => {
+    const card = await accountByName('クレジットカード'); // payment-liability
+    const invest = await accountByName('投資'); // investment-asset
+    await createRecurringRule({
+      name: 'クレカ積立',
+      amount: 10000,
+      dayOfMonth: 1,
+      debitAccountId: invest.id,
+      creditAccountId: card.id,
+      startMonth: '2026-07',
+    });
+    expect(await catchUpRecurringRules('2026-07-23')).toBe(1);
+    const ledger = await loadLedger();
+    const posted = ledger.journalEntries.find((e) => e.metadata?.recurringRuleId)!;
+    expect(posted.metadata?.inputMode).toBe('manual');
+    expect(posted.lines).toEqual(
+      expect.arrayContaining([
+        { accountId: invest.id, side: 'debit', amount: 10000 },
+        { accountId: card.id, side: 'credit', amount: 10000 },
+      ]),
+    );
+  });
+
+  it('同一科目・内部集約科目は fail-closed に弾く（自動起票の対象外）', async () => {
+    const bank = await accountByName('預金');
+    // 源泉=行き先 は不可。
     await expect(
       createRecurringRule({
-        name: 'x',
+        name: 'same',
         amount: 100,
         dayOfMonth: 1,
-        debitAccountId: income.id,
-        creditAccountId: expense.id,
+        debitAccountId: bank.id,
+        creditAccountId: bank.id,
+        startMonth: '2026-07',
+      }),
+    ).rejects.toThrow(LedgerError);
+    // 目的別資金の集約口座（reserve-asset）は毎月起票の対象外。
+    await createReserve({ name: '旅行積立' });
+    await expect(
+      createRecurringRule({
+        name: 'reserve',
+        amount: 100,
+        dayOfMonth: 1,
+        debitAccountId: RESERVE_LEDGER_ACCOUNT_ID,
+        creditAccountId: bank.id,
         startMonth: '2026-07',
       }),
     ).rejects.toThrow(LedgerError);
