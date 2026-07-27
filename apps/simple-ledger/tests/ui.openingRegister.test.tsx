@@ -5,12 +5,12 @@
  * あわせて、内訳編集シートからメモ欄が撤去されていることを確認する。
  */
 import { describe, it, expect, afterEach, beforeAll } from 'vitest';
-import { render, cleanup, fireEvent, waitFor, screen } from '@testing-library/react';
+import { render, cleanup, fireEvent, waitFor, screen, within } from '@testing-library/react';
 import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { Accounts } from '../src/ui/screens/Accounts';
 import { LedgerProvider } from '../src/state/store';
-import { loadLedger } from '../src/data/repository';
+import { createOpening, createRepaymentEntries, loadLedger } from '../src/data/repository';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import './setup';
 
@@ -42,6 +42,27 @@ async function renderAccounts() {
 }
 
 describe('補正導線の初期残高分岐', () => {
+  it('勘定科目の残高は未来日付の返済仕訳を含めない', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((account) => account.name === '現金')!;
+    const liability = ledger.accounts.find((account) => account.role === 'payment-liability')!;
+    await createOpening({ accountId: cash.id, amount: 100000, date: '2000-01-01' });
+    await createRepaymentEntries({
+      liabilityAccountId: liability.id,
+      fromAccountId: cash.id,
+      firstDate: '2090-01-27',
+      total: 60000,
+      count: 3,
+      title: '未来返済',
+    });
+
+    await renderAccounts();
+    const cashRow = (await screen.findByText('現金')).closest('li');
+    expect(cashRow).not.toBeNull();
+    expect(within(cashRow!).getByText(/100,000/)).toBeInTheDocument();
+    expect(within(cashRow!).queryByText(/40,000/)).not.toBeInTheDocument();
+  });
+
   it('履歴ゼロの科目は初期残高登録になり、opening 仕訳が作られる（収入にならない）', async () => {
     await renderAccounts();
 

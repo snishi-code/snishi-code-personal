@@ -6,7 +6,7 @@
  *
  * 実績動的償却（2026-07 作者決定）:
  *  - 見込み（costMonths）はあくまで暫定値。実績が確定するにつれて月額は真の値に収束する。
- *  - 更新なし・使用中の項目が見込みを超えたら、経過月数で全期間を再配分する
+ *  - 更新なし・使用中で costMonths > 1 の項目が見込みを超えたら、経過月数で全期間を再配分する
  *    （過去に遡って月額が下がる。30 万円を 5 年見込み → 実際 7 年使えば月 3,571 円に収束）。
  *  - 終了（売却・故障=0円売却・解約）したら、実使用月数で再配分し売却額を控除する
  *    （早く壊れれば過去に遡って月額が上がる。売却損益の一括計上はしない＝実績月額へ吸収）。
@@ -43,7 +43,8 @@ function hasRepeat(item: MonthlyCostItem): boolean {
  *    更新ありは最終サイクルだけが切り詰められる（min(実使用, costMonths)）。
  *  - 一時停止（paused）: 遡及しない。見込みレートのまま endMonth で認識が止まる
  *    （再開でそのまま続きから。停止は「終了」ではないので過去を書き換えない）。
- *  - 更新なし・使用中: max(見込み costMonths, todayYm までの経過月数) ＝ 見込み超過で延伸。
+ *  - 更新なし・使用中: costMonths <= 1 は固定。それ以外は
+ *    max(見込み costMonths, todayYm までの経過月数) ＝ 見込み超過で延伸。
  *  - 更新あり・使用中: costMonths 固定。
  */
 export function cycleSpreadMonths(
@@ -57,6 +58,8 @@ export function cycleSpreadMonths(
     return hasRepeat(item) ? Math.min(used, item.costMonths) : used;
   }
   if (item.endMonth !== undefined || hasRepeat(item)) return item.costMonths;
+  // 単発の支出を耐久財の「使用継続」と誤認し、経過月数へ延伸しない。
+  if (item.costMonths <= 1) return item.costMonths;
   const elapsed = monthsBetween(cycleYm, todayYm) + 1;
   return Math.max(item.costMonths, Math.max(elapsed, 1));
 }
@@ -126,6 +129,7 @@ export function totalMonthlyCostForMonth(
  * 超過中は月額が実績で再計算され続ける（自動終了はしない。終了は売却/0円売却の明示操作）。
  */
 export function isOverEstimate(item: MonthlyCostItem, todayYm: string): boolean {
+  if (item.costMonths <= 1) return false;
   if (hasRepeat(item)) return false;
   if (item.endMonth !== undefined || item.status !== 'active') return false;
   return monthsBetween(item.startMonth, todayYm) + 1 > item.costMonths;

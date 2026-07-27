@@ -46,6 +46,14 @@ describe('isOverEstimate（見込み超過）', () => {
     expect(isOverEstimate(item({ status: 'ended', endMonth: '2027-06' }), '2031-01')).toBe(false);
     expect(isOverEstimate(item({ status: 'paused', endMonth: '2027-06' }), '2031-01')).toBe(false);
   });
+
+  it('更新なしの単発（costMonths=1）は年月が経過しても延伸・超過しない', () => {
+    const oneTime = item({ amount: 200, costMonths: 1 });
+    expect(cycleSpreadMonths(oneTime, '2026-01', '2027-01')).toBe(1);
+    expect(monthlyCostForMonth(oneTime, '2026-01', '2027-01')).toBe(200);
+    expect(monthlyCostForMonth(oneTime, '2026-02', '2027-01')).toBe(0);
+    expect(isOverEstimate(oneTime, '2027-01')).toBe(false);
+  });
 });
 
 describe('実績動的償却の再配分', () => {

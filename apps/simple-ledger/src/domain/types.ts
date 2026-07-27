@@ -168,12 +168,12 @@ export interface EntryMetadata {
   reserveId?: string;
   /**
    * 継続コスト（資産経由モデル）の仮想仕訳の印。これらは **保存されない導出専用**で、
-   * `Ledger.derivedEntries` にのみ現れる。実仕訳(`journalEntries`)・保存系・export には入れない。
+   * `reportEntriesForAsOf` の結果にのみ現れる。実仕訳(`journalEntries`)・保存系・export には入れない。
    */
   virtual?: true;
   /** 仮想仕訳が属する MonthlyCostItem(継続コスト)の ID。 */
   continuousCostId?: string;
-  /** 仮想仕訳の種別。funding=資産化(支払元→対象資産) / recognition=認識(対象資産→費用カテゴリ)。 */
+  /** 仮想仕訳の種別。funding=資産化(支払元→対象資産) / recognition=認識(対象資産→認識先)。 */
   ccKind?: 'funding' | 'recognition';
   /**
    * 定期ルールから自動起票された仕訳の由来（recurringMonth とペア）。
@@ -237,7 +237,7 @@ export interface AllocationItem {
 
 /**
  * 月額化コスト。サブスク・年払い/前払い・耐久財・定期イベントを統一して扱う。
- * 登録時に「実際の支払い仕訳」（借方 費用カテゴリ / 貸方 支払い元、metadata.monthlyCostId 付き）を
+ * 登録時に「実際の支払い仕訳」（借方 認識先 / 貸方 支払い元、metadata.monthlyCostId 付き）を
  * 作る。一方で「生活コストとしての月割り認識」は仕訳ではなく、この項目の formula
  * （amount / costMonths を端数調整）から導出する分析レイヤで、ダッシュボードの生活コストに足す
  * （実支払い仕訳は二重計上しないよう除外する）。
@@ -267,7 +267,7 @@ export interface MonthlyCostItem {
   startMonth: string;
   /** 終了月 'YYYY-MM'。継続中なら未指定。 */
   endMonth?: string;
-  /** 月額化先の費用カテゴリ（role: expense-category）。 */
+  /** 月ごとの認識先。会計 type により費用・収入減・BS 内振替として導出する。 */
   expenseAccountId: string;
   /**
    * 資産経由モデルの funding（資産化）仮想仕訳の貸方＝支払い元（role: daily-asset | payment-liability）。
@@ -478,7 +478,7 @@ export interface LedgerExportPackage {
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   assetDisposals: AssetDisposal[];
-  /** 定期ルール（2026-07 追加。旧バックアップには無い → import 時は空として扱う）。 */
+  /** 定期ルール。交換 JSON では必須（旧形式はリポジトリ外で一度だけ変換する）。 */
   recurringRules: RecurringRule[];
   settings: Settings;
 }
@@ -529,11 +529,6 @@ export interface Ledger {
   accounts: Account[];
   /** 実仕訳（保存される正本）。保存系・export・残高チェックはこれだけを見る。 */
   journalEntries: JournalEntry[];
-  /**
-   * 導出専用の仕訳列 = 実仕訳 + 継続コストの仮想仕訳（funding/recognition）。
-   * PL/BS/支出/推移/Journal 表示など**集計はこれを使う**（単一正本）。保存されない。
-   */
-  derivedEntries: JournalEntry[];
   allocations: AllocationItem[];
   cashflowSchedules: CashflowSchedule[];
   reserves: ReserveItem[];

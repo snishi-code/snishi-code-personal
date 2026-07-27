@@ -17,6 +17,7 @@ import {
 } from '../../domain/monthlyCost';
 import { lastExpenseCategoryId, rememberExpenseCategoryId } from '../../data/localFlags';
 import { sortAccounts } from '../../domain/accountOrder';
+import { recognitionAccountOptions } from '../accountOptions';
 import { disposalOutcome } from '../../domain/assetDisposal';
 import {
   continuousCostDisposalEndMonth,
@@ -61,7 +62,12 @@ export function Allocations() {
     () => new Map((ledger?.accounts ?? []).map((a) => [a.id, a] as const)),
     [ledger],
   );
+  const disposedItemIds = useMemo(
+    () => new Set((ledger?.assetDisposals ?? []).map((disposal) => disposal.monthlyCostId)),
+    [ledger],
+  );
   const name = (id?: string): string => (id ? (accountsMap.get(id)?.name ?? '—') : '—');
+  const isDisposed = (item: MonthlyCostItem): boolean => disposedItemIds.has(item.id);
 
   // 実績動的償却: 見込みを超えても自動終了しない（月額を実績で再計算しながら生き続ける）。
   // 終了は売却 / 0円売却（解約・故障）の明示操作のみ。停止・終了分は showInactive で表示。
@@ -71,6 +77,7 @@ export function Allocations() {
   );
 
   async function togglePause(item: MonthlyCostItem) {
+    if (isDisposed(item)) return;
     if (item.status === 'active') {
       await saveMonthlyCost({
         ...item,
@@ -92,7 +99,7 @@ export function Allocations() {
   // 資産経由モデルの継続コスト対象。サブスク解約・返金なし終了も「0円で売却」で同じ導線から終了する。
   const isContinuingItem = (m: MonthlyCostItem): boolean => isContinuingCostItem(m, accountsMap);
   const canDispose = (m: MonthlyCostItem): boolean =>
-    m.status !== 'ended' && (isFixedAssetItem(m) || isContinuingItem(m));
+    !isDisposed(m) && m.status !== 'ended' && (isFixedAssetItem(m) || isContinuingItem(m));
 
   const rules = ledger?.recurringRules ?? [];
   const ruleKindLabel = (r: RecurringRule): string => {
@@ -261,15 +268,18 @@ export function Allocations() {
                     >
                       <Icon name="edit" size={18} />
                     </button>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => togglePause(m)}
-                      aria-label={`${m.status === 'active' ? t('monthlyCost.pause') : t('monthlyCost.resume')}: ${m.name}`}
-                    >
-                      <Icon name={m.status === 'active' ? 'archive' : 'restore'} size={18} />
-                    </button>
-                    {isFixedAssetItem(m) ? null : (
+                    {!isDisposed(m) ? (
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        onClick={() => togglePause(m)}
+                        aria-label={`${m.status === 'active' ? t('monthlyCost.pause') : t('monthlyCost.resume')}: ${m.name}`}
+                        data-ui={UI.allocations.pauseToggle}
+                      >
+                        <Icon name={m.status === 'active' ? 'archive' : 'restore'} size={18} />
+                      </button>
+                    ) : null}
+                    {isDisposed(m) || isFixedAssetItem(m) ? null : (
                       <button
                         type="button"
                         className="icon-btn"
@@ -338,7 +348,13 @@ export function Allocations() {
         />
       ) : null}
 
-      {editing ? <MonthlyCostEditSheet item={editing} onClose={() => setEditing(null)} /> : null}
+      {editing ? (
+        <MonthlyCostEditSheet
+          item={editing}
+          disposed={isDisposed(editing)}
+          onClose={() => setEditing(null)}
+        />
+      ) : null}
 
       {migrating ? <ContinuousCostMigrateSheet onClose={() => setMigrating(false)} /> : null}
 
@@ -451,9 +467,7 @@ function SubscriptionMigrationSheet({ onClose }: { onClose: () => void }) {
   const { ledger, createSubscriptionMigration } = useLedger();
   const accounts = sortAccounts(ledger?.accounts ?? []);
 
-  const expenseOptions = accounts
-    .filter((a) => a.role === 'expense-category' && !a.archived)
-    .map((a) => ({ value: a.id, label: a.name }));
+  const recognitionOptions = recognitionAccountOptions(accounts);
   const paymentOptions = accounts
     .filter(
       (a) =>
@@ -474,10 +488,10 @@ function SubscriptionMigrationSheet({ onClose }: { onClose: () => void }) {
   );
   const storedCategory = lastExpenseCategoryId();
   const [expenseAccountId, setExpenseAccountId] = useState(
-    (storedCategory !== null && expenseOptions.some((o) => o.value === storedCategory)
+    (storedCategory !== null && recognitionOptions.some((o) => o.value === storedCategory)
       ? storedCategory
       : null) ??
-      expenseOptions[0]?.value ??
+      recognitionOptions[0]?.value ??
       '',
   );
   const [error, setError] = useState<string | undefined>(undefined);
@@ -599,7 +613,7 @@ function SubscriptionMigrationSheet({ onClose }: { onClose: () => void }) {
           label={t('monthlyCost.expenseCategory')}
           value={expenseAccountId}
           onChange={setExpenseAccountId}
-          options={expenseOptions}
+          options={recognitionOptions}
         />
         <p className="field__hint">{t('subMigration.cancelHint')}</p>
       </div>
@@ -854,9 +868,7 @@ function ContinuousCostMigrateSheet({ onClose }: { onClose: () => void }) {
   const { ledger, createContinuousCostOpening } = useLedger();
   const accounts = ledger?.accounts ?? [];
 
-  const expenseOptions = sortAccounts(accounts)
-    .filter((a) => a.role === 'expense-category' && !a.archived)
-    .map((a) => ({ value: a.id, label: a.name }));
+  const recognitionOptions = recognitionAccountOptions(accounts);
 
   const [name, setName] = useState('');
   const [amountText, setAmountText] = useState('');
@@ -865,11 +877,11 @@ function ContinuousCostMigrateSheet({ onClose }: { onClose: () => void }) {
     const { year, month } = currentYearMonth();
     return `${year}-${String(month).padStart(2, '0')}`;
   });
-  // 分類先カテゴリの既定値は「前回選んだもの」（連続登録の切り替え手間を減らす）。
+  // 認識先の既定値は「前回選んだもの」（連続登録の切り替え手間を減らす）。
   const [expenseAccountId, setExpenseAccountId] = useState(() => {
     const last = lastExpenseCategoryId();
-    if (last && expenseOptions.some((o) => o.value === last)) return last;
-    return expenseOptions[0]?.value ?? '';
+    if (last && recognitionOptions.some((o) => o.value === last)) return last;
+    return recognitionOptions[0]?.value ?? '';
   });
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
@@ -961,7 +973,7 @@ function ContinuousCostMigrateSheet({ onClose }: { onClose: () => void }) {
           label={t('monthlyCost.expenseCategory')}
           value={expenseAccountId}
           onChange={setExpenseAccountId}
-          options={expenseOptions}
+          options={recognitionOptions}
         />
         <p className="field__hint">{t('monthlyCost.migrateRenewHint')}</p>
       </div>
@@ -1152,9 +1164,18 @@ function MonthlyCostDisposeSheet({
   );
 }
 
-function MonthlyCostEditSheet({ item, onClose }: { item: MonthlyCostItem; onClose: () => void }) {
+function MonthlyCostEditSheet({
+  item,
+  disposed,
+  onClose,
+}: {
+  item: MonthlyCostItem;
+  disposed: boolean;
+  onClose: () => void;
+}) {
   const { ledger, saveMonthlyCost } = useLedger();
   const accounts = ledger?.accounts ?? [];
+  const currency = ledger?.settings.currency ?? 'JPY';
   const accountName = (id?: string) =>
     id ? (accounts.find((a) => a.id === id)?.name ?? '—') : '—';
 
@@ -1162,7 +1183,7 @@ function MonthlyCostEditSheet({ item, onClose }: { item: MonthlyCostItem; onClos
   const hasPosted = (ledger?.cashflowSchedules ?? []).some(
     (s) => s.monthlyCostId === item.id && s.status === 'posted',
   );
-  const amountEditable = !linked && !hasPosted;
+  const amountEditable = !disposed && !linked && !hasPosted;
   // 移行登録（開始残高 funding）の項目は継続購入を設定できない（更新のたびに開始残高から
   // 資金が湧いてしまう）。毎月払いは定期ルールで扱う。
   const openingFunded =
@@ -1182,35 +1203,40 @@ function MonthlyCostEditSheet({ item, onClose }: { item: MonthlyCostItem; onClos
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  const expenseOptions = sortAccounts(accounts)
-    .filter((a) => a.role === 'expense-category' && (!a.archived || a.id === item.expenseAccountId))
-    .map((a) => ({ value: a.id, label: a.name }));
+  const recognitionOptions = recognitionAccountOptions(accounts, item.expenseAccountId);
 
   const pastFieldsChanged =
-    (amountEditable && amountText !== String(item.amount)) ||
-    costMonthsText !== String(item.costMonths) ||
-    repeatText !== (item.repeatEveryMonths !== undefined ? String(item.repeatEveryMonths) : '') ||
-    startMonth.trim() !== item.startMonth ||
-    endMonth.trim() !== (item.endMonth ?? '') ||
-    expenseAccountId !== item.expenseAccountId;
+    !disposed &&
+    ((amountEditable && amountText !== String(item.amount)) ||
+      costMonthsText !== String(item.costMonths) ||
+      repeatText !== (item.repeatEveryMonths !== undefined ? String(item.repeatEveryMonths) : '') ||
+      startMonth.trim() !== item.startMonth ||
+      endMonth.trim() !== (item.endMonth ?? '') ||
+      expenseAccountId !== item.expenseAccountId);
 
   async function submit() {
     setSubmitting(true);
     setError(undefined);
-    const next: MonthlyCostItem = {
-      ...item,
-      name: name.trim(),
-      amount: amountEditable && amountText !== '' ? Number.parseInt(amountText, 10) : item.amount,
-      costMonths: costMonthsText === '' ? item.costMonths : Number.parseInt(costMonthsText, 10),
-      startMonth: startMonth.trim(),
-      expenseAccountId,
-      status,
-      updatedAt: nowIso(),
-    };
-    if (repeatText.trim() === '') delete next.repeatEveryMonths;
-    else next.repeatEveryMonths = Number.parseInt(repeatText, 10);
-    if (endMonth.trim() === '') delete next.endMonth;
-    else next.endMonth = endMonth.trim();
+    const next: MonthlyCostItem = disposed
+      ? { ...item, name: name.trim(), updatedAt: nowIso() }
+      : {
+          ...item,
+          name: name.trim(),
+          amount:
+            amountEditable && amountText !== '' ? Number.parseInt(amountText, 10) : item.amount,
+          costMonths:
+            costMonthsText === '' ? item.costMonths : Number.parseInt(costMonthsText, 10),
+          startMonth: startMonth.trim(),
+          expenseAccountId,
+          status,
+          updatedAt: nowIso(),
+        };
+    if (!disposed) {
+      if (repeatText.trim() === '') delete next.repeatEveryMonths;
+      else next.repeatEveryMonths = Number.parseInt(repeatText, 10);
+      if (endMonth.trim() === '') delete next.endMonth;
+      else next.endMonth = endMonth.trim();
+    }
     try {
       await saveMonthlyCost(next);
       onClose();
@@ -1249,6 +1275,11 @@ function MonthlyCostEditSheet({ item, onClose }: { item: MonthlyCostItem; onClos
             {error}
           </div>
         ) : null}
+        {disposed ? (
+          <div className="field__hint" role="status">
+            {t('error.monthlyCost.disposedLocked')}
+          </div>
+        ) : null}
         {pastFieldsChanged ? (
           <div className="field__warning" role="status" data-ui={UI.allocations.editImpactWarning}>
             <Icon name="alert" size={14} />
@@ -1262,76 +1293,117 @@ function MonthlyCostEditSheet({ item, onClose }: { item: MonthlyCostItem; onClos
           onChange={setName}
           dataUi={UI.allocations.editName}
         />
-        <TextInput
-          label={t('monthlyCost.amount')}
-          required
-          inputMode="numeric"
-          value={amountText}
-          onChange={(v) => {
-            if (amountEditable) setAmountText(v.replace(/[^\d]/g, ''));
-          }}
-          hint={
-            amountEditable
-              ? undefined
-              : linked
-                ? t('monthlyCost.amountLockedFixed')
-                : t('monthlyCost.amountLockedPosted')
-          }
-          dataUi={UI.allocations.editAmount}
-        />
-        <TextInput
-          label={t('monthlyCost.costMonths')}
-          required
-          inputMode="numeric"
-          value={costMonthsText}
-          onChange={(v) => setCostMonthsText(v.replace(/[^\d]/g, ''))}
-          dataUi={UI.allocations.editCostMonths}
-        />
-        {openingFunded ? (
-          <p className="field__hint">{t('monthlyCost.repeatLockedOpening')}</p>
+        {disposed ? (
+          <>
+            <div className="kv" data-ui={UI.allocations.editAmount}>
+              <span className="muted">{t('monthlyCost.amount')}</span>
+              <span>
+                <Money amount={item.amount} currency={currency} />
+              </span>
+            </div>
+            <div className="kv" data-ui={UI.allocations.editCostMonths}>
+              <span className="muted">{t('monthlyCost.costMonths')}</span>
+              <span>{t('monthlyCost.monthsUnit', { count: item.costMonths })}</span>
+            </div>
+            <div className="kv" data-ui={UI.allocations.editRepeat}>
+              <span className="muted">{t('monthlyCost.repeatField')}</span>
+              <span>
+                {item.repeatEveryMonths === undefined
+                  ? '—'
+                  : t('monthlyCost.repeatUnit', { count: item.repeatEveryMonths })}
+              </span>
+            </div>
+            <div className="kv" data-ui={UI.allocations.editStartMonth}>
+              <span className="muted">{t('monthlyCost.startMonth')}</span>
+              <span>{item.startMonth}</span>
+            </div>
+            <div className="kv" data-ui={UI.allocations.editEndMonth}>
+              <span className="muted">{t('monthlyCost.endMonth')}</span>
+              <span>{item.endMonth ?? '—'}</span>
+            </div>
+            <div className="kv" data-ui={UI.allocations.editExpense}>
+              <span className="muted">{t('monthlyCost.expenseCategory')}</span>
+              <span>{accountName(item.expenseAccountId)}</span>
+            </div>
+            <div className="kv" data-ui={UI.allocations.editStatus}>
+              <span className="muted">{t('monthlyCost.statusLabel')}</span>
+              <span>{t(`monthlyCost.status.${item.status}` as MessageKey)}</span>
+            </div>
+          </>
         ) : (
-          <TextInput
-            label={t('monthlyCost.repeatField')}
-            inputMode="numeric"
-            value={repeatText}
-            hint={t('monthlyCost.repeatFieldHint')}
-            onChange={(v) => setRepeatText(v.replace(/[^\d]/g, ''))}
-            dataUi={UI.allocations.editRepeat}
-          />
+          <>
+            <TextInput
+              label={t('monthlyCost.amount')}
+              required
+              inputMode="numeric"
+              value={amountText}
+              onChange={(v) => {
+                if (amountEditable) setAmountText(v.replace(/[^\d]/g, ''));
+              }}
+              hint={
+                amountEditable
+                  ? undefined
+                  : linked
+                    ? t('monthlyCost.amountLockedFixed')
+                    : t('monthlyCost.amountLockedPosted')
+              }
+              dataUi={UI.allocations.editAmount}
+            />
+            <TextInput
+              label={t('monthlyCost.costMonths')}
+              required
+              inputMode="numeric"
+              value={costMonthsText}
+              onChange={(v) => setCostMonthsText(v.replace(/[^\d]/g, ''))}
+              dataUi={UI.allocations.editCostMonths}
+            />
+            {openingFunded ? (
+              <p className="field__hint">{t('monthlyCost.repeatLockedOpening')}</p>
+            ) : (
+              <TextInput
+                label={t('monthlyCost.repeatField')}
+                inputMode="numeric"
+                value={repeatText}
+                hint={t('monthlyCost.repeatFieldHint')}
+                onChange={(v) => setRepeatText(v.replace(/[^\d]/g, ''))}
+                dataUi={UI.allocations.editRepeat}
+              />
+            )}
+            <TextInput
+              label={t('monthlyCost.startMonth')}
+              required
+              value={startMonth}
+              placeholder="YYYY-MM"
+              onChange={setStartMonth}
+              dataUi={UI.allocations.editStartMonth}
+            />
+            <TextInput
+              label={t('monthlyCost.endMonth')}
+              value={endMonth}
+              placeholder="YYYY-MM"
+              hint={t('monthlyCost.endMonthHint')}
+              onChange={setEndMonth}
+              dataUi={UI.allocations.editEndMonth}
+            />
+            <SelectInput
+              label={t('monthlyCost.expenseCategory')}
+              value={expenseAccountId}
+              onChange={setExpenseAccountId}
+              options={recognitionOptions}
+              dataUi={UI.allocations.editExpense}
+            />
+            <SelectInput
+              label={t('monthlyCost.statusLabel')}
+              value={status}
+              onChange={(v) => setStatus(v as MonthlyCostStatus)}
+              options={STATUSES.map((s) => ({
+                value: s,
+                label: t(`monthlyCost.status.${s}` as MessageKey),
+              }))}
+              dataUi={UI.allocations.editStatus}
+            />
+          </>
         )}
-        <TextInput
-          label={t('monthlyCost.startMonth')}
-          required
-          value={startMonth}
-          placeholder="YYYY-MM"
-          onChange={setStartMonth}
-          dataUi={UI.allocations.editStartMonth}
-        />
-        <TextInput
-          label={t('monthlyCost.endMonth')}
-          value={endMonth}
-          placeholder="YYYY-MM"
-          hint={t('monthlyCost.endMonthHint')}
-          onChange={setEndMonth}
-          dataUi={UI.allocations.editEndMonth}
-        />
-        <SelectInput
-          label={t('monthlyCost.expenseCategory')}
-          value={expenseAccountId}
-          onChange={setExpenseAccountId}
-          options={expenseOptions}
-          dataUi={UI.allocations.editExpense}
-        />
-        <SelectInput
-          label={t('monthlyCost.statusLabel')}
-          value={status}
-          onChange={(v) => setStatus(v as MonthlyCostStatus)}
-          options={STATUSES.map((s) => ({
-            value: s,
-            label: t(`monthlyCost.status.${s}` as MessageKey),
-          }))}
-          dataUi={UI.allocations.editStatus}
-        />
         <div className="kv">
           <span className="muted">{t('monthlyCost.payment')}</span>
           <span>{accountName(item.paymentSourceAccountId ?? item.paymentAccountId)}</span>

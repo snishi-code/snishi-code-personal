@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import './setup';
 import {
+  entryMetadataSchema,
   isCurrentSchema,
   journalEntrySchema,
   ledgerExportPackageSchema,
+  monthlyCostItemSchema,
+  recurringRuleSchema,
   reserveItemSchema,
 } from '../src/domain/schema';
 import { APP_ID, RESERVE_LEDGER_ACCOUNT_ID, SCHEMA_VERSION } from '../src/domain/constants';
@@ -61,6 +64,43 @@ describe('journalEntrySchema', () => {
   it('不正な日付形式は拒否する', () => {
     expect(journalEntrySchema.safeParse({ ...validEntry, date: '2026/06/01' }).success).toBe(false);
   });
+  it('存在しない日付を拒否し、閏日の実在日を受け入れる', () => {
+    expect(journalEntrySchema.safeParse({ ...validEntry, date: '2024-02-29' }).success).toBe(true);
+    for (const date of [
+      '2026-02-29',
+      '2026-02-31',
+      '2026-04-31',
+      '2026-13-01',
+      '2026-00-01',
+    ]) {
+      expect(journalEntrySchema.safeParse({ ...validEntry, date }).success).toBe(false);
+    }
+  });
+});
+
+describe('年月の暦検証', () => {
+  const rule = {
+    id: 'r1',
+    name: '家賃',
+    amount: 100000,
+    dayOfMonth: 27,
+    debitAccountId: 'expense',
+    creditAccountId: 'bank',
+    startMonth: '2026-12',
+    managementScopeId: 'scope-personal',
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+
+  it('定期由来メタデータとルールの不正月を拒否する', () => {
+    expect(entryMetadataSchema.safeParse({ recurringMonth: '2026-12' }).success).toBe(true);
+    expect(entryMetadataSchema.safeParse({ recurringMonth: '2026-99' }).success).toBe(false);
+    expect(recurringRuleSchema.safeParse(rule).success).toBe(true);
+    expect(recurringRuleSchema.safeParse({ ...rule, startMonth: '2026-99' }).success).toBe(false);
+    expect(
+      recurringRuleSchema.safeParse({ ...rule, postedThroughMonth: '2026-00' }).success,
+    ).toBe(false);
+  });
 });
 
 describe('ledgerExportPackageSchema', () => {
@@ -102,6 +142,7 @@ describe('ledgerExportPackageSchema', () => {
     tags: [],
     monthlyCostItems: [],
     assetDisposals: [],
+    recurringRules: [],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
   };
 
@@ -295,6 +336,7 @@ describe('entry metadata / allocationPlan', () => {
       monthlyCostItems: [],
       fundingGoals: [],
       assetDisposals: [],
+      recurringRules: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
     const parsed = ledgerExportPackageSchema.safeParse(pkg);
@@ -370,6 +412,7 @@ describe('allocationPlan の参照整合性（package 検証）', () => {
       monthlyCostItems: [],
       fundingGoals: [],
       assetDisposals: [],
+      recurringRules: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
   }
@@ -465,6 +508,7 @@ describe('按分(allocations) の深い整合性検証（package）', () => {
       monthlyCostItems: [],
       fundingGoals: [],
       assetDisposals: [],
+      recurringRules: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
       ...overrides,
     };
@@ -646,6 +690,7 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
       monthlyCostItems: [],
       fundingGoals: [],
       assetDisposals: [],
+      recurringRules: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
       ...over,
     };
@@ -836,6 +881,7 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
       monthlyCostItems: [],
       fundingGoals: [],
       assetDisposals: [],
+      recurringRules: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
       ...over,
     };
@@ -877,7 +923,7 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
   });
 });
 
-describe('月額化コスト(monthlyCostItems) の参照・role 検証（package）', () => {
+describe('月額化コスト(monthlyCostItems) の参照・不変条件検証', () => {
   const cash = {
     id: 'cash',
     name: '現金',
@@ -917,6 +963,7 @@ describe('月額化コスト(monthlyCostItems) の参照・role 検証（package
       monthlyCostItems: items,
       fundingGoals: [],
       assetDisposals: [],
+      recurringRules: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
   }
@@ -936,10 +983,16 @@ describe('月額化コスト(monthlyCostItems) の参照・role 検証（package
   };
 
   it('正しい月額化コストは valid', () => {
+    expect(monthlyCostItemSchema.safeParse(base).success).toBe(true);
     expect(ledgerExportPackageSchema.safeParse(mcPkg([base])).success).toBe(true);
   });
-  it('expenseAccountId が支出カテゴリでないと invalid', () => {
-    const bad = mcPkg([{ ...base, expenseAccountId: 'cash' }]);
+  it('expenseAccountId は会計 type を問わず、存在する科目なら valid', () => {
+    const otherType = { ...base, expenseAccountId: 'cash' };
+    expect(monthlyCostItemSchema.safeParse(otherType).success).toBe(true);
+    expect(ledgerExportPackageSchema.safeParse(mcPkg([otherType])).success).toBe(true);
+  });
+  it('存在しない expenseAccountId は package で invalid', () => {
+    const bad = mcPkg([{ ...base, expenseAccountId: 'missing' }]);
     expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
   });
   it('paymentAccountId が日常資産/支払用負債でないと invalid', () => {
@@ -950,9 +1003,66 @@ describe('月額化コスト(monthlyCostItems) の参照・role 検証（package
     const bad = mcPkg([{ ...base, sourceAllocationId: 'nope' }]);
     expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
   });
-  it('repeatEveryMonths < costMonths は invalid', () => {
-    const bad = mcPkg([{ ...base, costMonths: 12, repeatEveryMonths: 6 }]);
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  it.each([
+    ['repeatEveryMonths < costMonths', { costMonths: 12, repeatEveryMonths: 6 }],
+    ['endMonth < startMonth の前月', { endMonth: '2026-04' }],
+    ['paused なのに endMonth がない', { status: 'paused' }],
+    ['ended なのに endMonth がない', { status: 'ended' }],
+  ])('%s は item schema / package ともに invalid', (_label, patch) => {
+    const invalid = { ...base, ...patch };
+    expect(monthlyCostItemSchema.safeParse(invalid).success).toBe(false);
+    expect(ledgerExportPackageSchema.safeParse(mcPkg([invalid])).success).toBe(false);
+  });
+  it.each([
+    ['active・endMonth なし', {}],
+    ['active・固定 endMonth あり', { endMonth: '2026-12' }],
+    ['paused・endMonth あり', { status: 'paused', endMonth: '2026-12' }],
+    ['ended・endMonth あり', { status: 'ended', endMonth: '2026-12' }],
+    // 前月 = 使用0ヶ月のエンコード（購入と同じ月に処分すると保存境界が正当に書く）。
+    ['ended・endMonth = startMonth の前月', { status: 'ended', endMonth: '2026-05' }],
+  ])('%s は item schema / package ともに valid', (_label, patch) => {
+    const valid = { ...base, ...patch };
+    expect(monthlyCostItemSchema.safeParse(valid).success).toBe(true);
+    expect(ledgerExportPackageSchema.safeParse(mcPkg([valid])).success).toBe(true);
+  });
+  it('認識先(expenseAccountId)に内部集約・残高調整の科目は package で invalid', () => {
+    const ccLedger = {
+      id: 'cc-ledger',
+      name: '継続コスト台帳',
+      type: 'asset',
+      role: 'continuing-cost-asset',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const pkg = mcPkg([{ ...base, expenseAccountId: 'cc-ledger' }]);
+    (pkg.accounts as Record<string, unknown>[]).push(ccLedger);
+    expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(false);
+  });
+  it('開始残高(equity) funding の項目に repeatEveryMonths があると package で invalid', () => {
+    const equity = {
+      id: 'opening',
+      name: '開始残高',
+      type: 'equity',
+      role: 'equity',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const item = {
+      ...base,
+      costMonths: 12,
+      repeatEveryMonths: 12,
+      paymentSourceAccountId: 'opening',
+    };
+    const pkg = mcPkg([item]);
+    (pkg.accounts as Record<string, unknown>[]).push(equity);
+    expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(false);
+    // repeat を外せば valid（移行登録そのものは正当）。
+    const okItem = { ...base, costMonths: 12, paymentSourceAccountId: 'opening' };
+    const okPkg = mcPkg([okItem]);
+    (okPkg.accounts as Record<string, unknown>[]).push(equity);
+    expect(ledgerExportPackageSchema.safeParse(okPkg).success).toBe(true);
   });
   it('仕訳の monthlyCostId が存在しないと invalid', () => {
     const pkg = mcPkg([base]) as Record<string, unknown>;

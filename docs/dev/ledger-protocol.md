@@ -93,7 +93,7 @@ scope entry|both）、`JournalLine.tagIds`（明細タグ、scope line|both）�
 > `支払い元 → 継続コスト台帳`（資産化）/ `継続コスト台帳 → 費用カテゴリ`（認識）を
 > **`src/domain/continuousCost.ts` が仮想展開**する（実仕訳を保存しない）。**v14 で勘定科目を聖域化**し、
 > 品目ごとに資産科目を作らず未消化残高を 1 口座へ集約する（品目名は `MonthlyCostItem.name` に保持）。
-> `paymentSourceAccountId`=資産化の貸方。PL/BS/支出は `Ledger.derivedEntries`（実仕訳 + 仮想仕訳）で集計し、
+> `paymentSourceAccountId`=資産化の貸方。PL/BS/支出は `reportEntriesForAsOf`（実仕訳 + 仮想仕訳）で集計し、
 > 集約台帳口座残高に未消化分が残る。詳細は [ledger-concept.md](ledger-concept.md#継続コスト)。
 > 以下の「支払い仕訳を残す」旧モデル（`createMonthlyCost`）と固定資産月額化（`saveEntryWithFixedAssetMonthly`）は
 > 内部互換で残すが、新規入力は資産経由モデルに一本化した。

@@ -7,6 +7,7 @@ import {
   inferScheduleFlow,
   liquidAssetTotal,
   projectCashflow,
+  uniqueEntriesById,
 } from '../src/domain/cashflow';
 import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
 import type { Account, AccountBalance, CashflowSchedule, JournalEntry } from '../src/domain/types';
@@ -238,6 +239,28 @@ describe('cashDeltaOfEntry（未来仕訳の現金デルタ）', () => {
       ],
     });
     expect(cashDeltaOfEntry(noncash, isLiquid)).toBe(0);
+  });
+});
+
+describe('uniqueEntriesById', () => {
+  it('同じ仮想仕訳が複数経路から渡されても未来行は 1 件だけになる', () => {
+    const a = entry({
+      id: 'cc-fund-item-2026-08',
+      lines: [
+        { accountId: 'asset', side: 'debit', amount: 12000 },
+        { accountId: 'cash', side: 'credit', amount: 12000 },
+      ],
+    });
+    const b = entry({
+      id: 'repayment-1',
+      lines: [
+        { accountId: 'loan', side: 'debit', amount: 10000 },
+        { accountId: 'cash', side: 'credit', amount: 10000 },
+      ],
+    });
+    const unique = uniqueEntriesById([a, { ...a }, b]);
+    expect(unique).toHaveLength(2);
+    expect(new Set(unique.map((candidate) => candidate.id)).size).toBe(2);
   });
 });
 

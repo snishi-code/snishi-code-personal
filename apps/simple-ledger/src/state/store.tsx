@@ -695,11 +695,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const createOpenings = useCallback<LedgerContextValue['createOpenings']>(
     async (inputs) => {
       try {
-        // opening は互いに独立な仕訳なので逐次作成する（途中失敗は error toast + throw。
-        // 作成済み分は有効な opening としてそのまま残り、仕訳一覧から編集/削除できる）。
-        for (const input of inputs) {
-          await repo.createOpening(input);
-        }
+        await repo.createOpenings(inputs);
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {

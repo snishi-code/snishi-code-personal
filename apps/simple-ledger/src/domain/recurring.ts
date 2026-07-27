@@ -11,7 +11,7 @@
  */
 import { addMonths, monthOf, monthsBetween } from './allocation';
 import { ACCOUNT_ROLES, isInternalRole, type AccountRole } from './accountRoles';
-import type { RecurringRule } from './types';
+import type { Account, InputMode, JournalEntry, RecurringRule } from './types';
 
 /** 表示用の種別（保存しない。勘定の役割から導出する）。 */
 export type RecurringKind = 'expense' | 'income' | 'transfer';
@@ -93,6 +93,48 @@ export function recurringPostingsDue(rule: RecurringRule, today: string): Recurr
     out.push({ month, date });
   }
   return out;
+}
+
+/**
+ * 選択した基準日までの、未起票分を表示専用の仮想仕訳として投影する。
+ * 永続化とカーソル更新は行わず、postedThroughMonth より後だけを出すため実仕訳と二重計上しない。
+ */
+export function recurringProjectionEntries(
+  rules: RecurringRule[],
+  accounts: Account[],
+  asOf: string,
+): JournalEntry[] {
+  const byId = new Map(accounts.map((account) => [account.id, account] as const));
+  const projected: JournalEntry[] = [];
+  for (const rule of rules) {
+    const debit = byId.get(rule.debitAccountId);
+    const credit = byId.get(rule.creditAccountId);
+    if (!debit || !credit) continue;
+    if (!isRecurringPostableRole(debit.role) || !isRecurringPostableRole(credit.role)) continue;
+    const inputMode: InputMode = recurringKindOf(debit.role, credit.role) ?? 'manual';
+    for (const posting of recurringPostingsDue(rule, asOf)) {
+      projected.push({
+        id: `rec-proj-${rule.id}-${posting.month}`,
+        date: posting.date,
+        description: rule.name,
+        kind: 'normal',
+        managementScopeId: rule.managementScopeId,
+        lines: [
+          { accountId: rule.debitAccountId, side: 'debit', amount: rule.amount },
+          { accountId: rule.creditAccountId, side: 'credit', amount: rule.amount },
+        ],
+        metadata: {
+          virtual: true,
+          inputMode,
+          recurringRuleId: rule.id,
+          recurringMonth: posting.month,
+        },
+        createdAt: rule.createdAt,
+        updatedAt: rule.updatedAt,
+      });
+    }
+  }
+  return projected;
 }
 
 /** キャッチアップ後にルールへ書き戻すカーソル（起票日が到来した最後の月）。 */

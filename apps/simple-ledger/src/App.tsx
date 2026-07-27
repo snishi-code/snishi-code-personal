@@ -115,6 +115,11 @@ export function App() {
     [
       ...ledger.journalEntries.map((e) => e.date),
       ...ledger.cashflowSchedules.map((s) => s.dueDate),
+      ...ledger.recurringRules.map((rule) => `${rule.startMonth}-01`),
+      ...ledger.monthlyCostItems.flatMap((item) => [
+        `${item.startMonth}-01`,
+        ...(item.endMonth ? [`${item.endMonth}-01`] : []),
+      ]),
     ],
     Number.parseInt(today.slice(0, 4), 10),
     period.mode !== 'all' ? period.year : undefined,

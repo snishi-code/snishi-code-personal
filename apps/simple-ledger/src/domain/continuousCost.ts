@@ -4,14 +4,14 @@
  * 継続コスト台帳（MonthlyCostItem）を「ルール辞書」とみなし、100 年ぶんの実仕訳を作らず、
  * 必要範囲（upTo）だけ仮想仕訳を導出する。1 サイクルにつき:
  *  - funding（資産化）: `借方 対象資産 / 貸方 支払い元`（cycle 先頭月の 1 日・サイクル額の全額）
- *  - recognition（認識）: `借方 費用カテゴリ / 貸方 対象資産`（各認識月の月初）
+ *  - recognition（認識）: `借方 認識先 / 貸方 対象資産`（各認識月の月初）
  *
  * 認識のスケジュールは monthlyCost.ts の実績動的償却規則（単一正本）に従う:
  *  - 更新なし・使用中: 見込みを超えたら経過月数で全期間を再配分（過去に遡って月額が下がる）
  *  - 終了済み: 実使用月数で再配分し売却額を控除（売却損益の一括計上はしない）
  *  - 更新あり: 各サイクル固定。最終サイクルだけ解約時に切り詰め
  * 過去の再配分が仕訳の書き換えなしで成立するのは、仮想仕訳が**保存されない導出**だから。
- * `Ledger.derivedEntries` だけに現れ、実仕訳・保存系・export には混ぜない。
+ * `reportEntriesForAsOf` の結果だけに現れ、実仕訳・保存系・export には混ぜない。
  */
 import { addMonths, monthlyAmounts, monthsBetween } from './allocation';
 import { cycleSpreadMonths, cycleSpreadTotal } from './monthlyCost';
@@ -75,7 +75,7 @@ export function continuousCostEntriesForItem(
       updatedAt: item.updatedAt,
     });
 
-    // recognition: 借方 費用カテゴリ / 貸方 対象資産。認識月数・配分総額は実績動的償却の
+    // recognition: 借方 認識先 / 貸方 対象資産。認識月数・配分総額は実績動的償却の
     // 共通規則（monthlyCost.ts）で決まる。認識日は月初（当月分が現在の集計に反映される）。
     const spreadMonths = cycleSpreadMonths(item, cycleYm, todayYm);
     const amounts = monthlyAmounts(cycleSpreadTotal(item, cycleYm), spreadMonths);
@@ -87,7 +87,7 @@ export function continuousCostEntriesForItem(
       const amount = amounts[k] ?? 0;
       if (amount === 0) continue; // 売却額控除で 0 になった月は行を出さない
       out.push({
-        id: `cc-recog-${item.id}-${recogYm}`,
+        id: `cc-recog-${item.id}-c${c}-${k}`,
         date: recogDate,
         description: item.name,
         kind: 'normal',

@@ -4,7 +4,7 @@
  *  - カーソル: 起票済み仕訳を削除しても再起票しない（スキップの尊重）。
  *  - 停止/再開: 停止中は起票しない。再開（startMonth 更新）で過去を遡らない。
  *  - 削除: ルールを消しても起票済み仕訳は通常仕訳として残る（メタデータを剥がす）。
- *  - export → schema round-trip / 旧バックアップ（recurringRules キー欠落）の受け入れ。
+ *  - export → schema round-trip / 必須キー欠落の拒否。
  */
 import { describe, expect, it } from 'vitest';
 import './setup';
@@ -17,7 +17,14 @@ import {
   loadLedger,
   upsertRecurringRule,
 } from '../src/data/repository';
-import { clampDayToMonth, recurringPostingsDue } from '../src/domain/recurring';
+import {
+  clampDayToMonth,
+  recurringPostingsDue,
+  recurringProjectionEntries,
+} from '../src/domain/recurring';
+import { deriveBalanceSheet, deriveProfitAndLoss } from '../src/domain/accounting';
+import { reportEntriesForAsOf } from '../src/domain/reportEntries';
+import { reportBasis } from '../src/domain/reportPeriod';
 import { RESERVE_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import { buildExportPackage } from '../src/data/exportImport';
 import { ledgerExportPackageSchema } from '../src/domain/schema';
@@ -57,6 +64,41 @@ describe('定期ルールのキャッチアップ起票', () => {
     );
 
     expect(await catchUpRecurringRules('2026-07-23')).toBe(0);
+  });
+
+  it('並行キャッチアップでも同じ月は 1 仕訳に収束する', async () => {
+    const bank = await accountByName('預金');
+    const invest = await accountByName('投資');
+    const rule = await createRecurringRule({
+      name: '並行積立',
+      amount: 80000,
+      dayOfMonth: 1,
+      debitAccountId: invest.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-05',
+    });
+
+    await Promise.all([
+      catchUpRecurringRules('2026-07-23'),
+      catchUpRecurringRules('2026-07-23'),
+    ]);
+
+    const posted = (await loadLedger()).journalEntries.filter(
+      (entry) => entry.metadata?.recurringRuleId === rule.id,
+    );
+    expect(posted).toHaveLength(3);
+    expect(posted.map((entry) => entry.id).sort()).toEqual([
+      `rec-${rule.id}-2026-05`,
+      `rec-${rule.id}-2026-06`,
+      `rec-${rule.id}-2026-07`,
+    ]);
+    expect(
+      posted.reduce(
+        (sum, entry) =>
+          sum + (entry.lines.find((line) => line.side === 'debit')?.amount ?? 0),
+        0,
+      ),
+    ).toBe(240000);
   });
 
   it('起票日が未到来の当月は起票せず、到来後の実行で起票される', async () => {
@@ -145,6 +187,29 @@ describe('定期ルールのキャッチアップ起票', () => {
     expect(parsed.success).toBe(true);
   });
 
+  it('同じ定期ルール・月の仕訳が重複した package は拒否する', async () => {
+    const bank = await accountByName('預金');
+    const invest = await accountByName('投資');
+    const rule = await createRecurringRule({
+      name: '積立',
+      amount: 1000,
+      dayOfMonth: 1,
+      debitAccountId: invest.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-07',
+    });
+    await catchUpRecurringRules('2026-07-23');
+    const pkg = buildExportPackage(await loadLedger());
+    const posted = pkg.journalEntries.find(
+      (entry) => entry.metadata?.recurringRuleId === rule.id,
+    )!;
+    const parsed = ledgerExportPackageSchema.safeParse({
+      ...pkg,
+      journalEntries: [...pkg.journalEntries, { ...posted, id: 'duplicate-recurring-entry' }],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
   it('簿記編集: 健康保険を「銀行 → 収入」で収入減として毎月起票できる', async () => {
     const bank = await accountByName('預金');
     const income = await accountByName('給与'); // income-category
@@ -219,7 +284,7 @@ describe('定期ルールのキャッチアップ起票', () => {
     ).rejects.toThrow(LedgerError);
   });
 
-  it('export round-trip と旧バックアップ（キー欠落）の受け入れ', async () => {
+  it('export round-trip と必須キー欠落の拒否', async () => {
     const bank = await accountByName('預金');
     const invest = await accountByName('投資');
     await createRecurringRule({
@@ -232,16 +297,67 @@ describe('定期ルールのキャッチアップ起票', () => {
     });
     const pkg = buildExportPackage(await loadLedger());
     expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(true);
-    // 旧バックアップ相当: recurringRules キーが無い → default [] で受け入れる。
+    // 後方互換はコードに持たないため、recurringRules キー欠落は fail-closed に拒否する。
     const legacy: Record<string, unknown> = { ...pkg };
     delete legacy.recurringRules;
     const parsed = ledgerExportPackageSchema.safeParse(legacy);
-    expect(parsed.success).toBe(true);
-    if (parsed.success) expect(parsed.data.recurringRules).toEqual([]);
+    expect(parsed.success).toBe(false);
+  });
+
+  it('未来基準日まではカーソル後の月だけを仮想投影し、実仕訳を保存しない', async () => {
+    const bank = await accountByName('預金');
+    const fixed = await accountByName('固定費');
+    const rule = await createRecurringRule({
+      name: '未来家賃',
+      amount: 80000,
+      dayOfMonth: 1,
+      debitAccountId: fixed.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-07',
+    });
+    await catchUpRecurringRules('2026-07-23');
+    const before = await loadLedger();
+
+    const entries = reportEntriesForAsOf(before, '2026-10-31', '2026-07-23');
+    const forRule = entries
+      .filter((entry) => entry.metadata?.recurringRuleId === rule.id)
+      .sort((a, b) => a.date.localeCompare(b.date));
+    expect(forRule.map((entry) => entry.metadata?.recurringMonth)).toEqual([
+      '2026-07',
+      '2026-08',
+      '2026-09',
+      '2026-10',
+    ]);
+    expect(forRule.map((entry) => entry.metadata?.virtual ?? false)).toEqual([
+      false,
+      true,
+      true,
+      true,
+    ]);
+    expect(new Set(forRule.map((entry) => entry.metadata?.recurringMonth)).size).toBe(
+      forRule.length,
+    );
+
+    const octoberBasis = reportBasis({ mode: 'month', year: 2026, month: 10 }, '2026-07-23');
+    expect(deriveProfitAndLoss(before.accounts, forRule, octoberBasis.flowRange).totalExpense).toBe(
+      80000,
+    );
+    expect(deriveBalanceSheet(before.accounts, forRule, octoberBasis.asOf).assets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          account: expect.objectContaining({ id: bank.id }),
+          balance: -320000,
+        }),
+      ]),
+    );
+
+    const after = await loadLedger();
+    expect(after.journalEntries).toEqual(before.journalEntries);
+    expect(after.recurringRules).toEqual(before.recurringRules);
   });
 });
 
-describe('clampDayToMonth / recurringPostingsDue', () => {
+describe('clampDayToMonth / recurringPostingsDue / recurringProjectionEntries', () => {
   it('31 日は月末へクランプされる', () => {
     expect(clampDayToMonth('2026-02', 31)).toBe('2026-02-28');
     expect(clampDayToMonth('2024-02', 31)).toBe('2024-02-29');
@@ -263,5 +379,51 @@ describe('clampDayToMonth / recurringPostingsDue', () => {
       updatedAt: 't',
     };
     expect(recurringPostingsDue(rule, '2026-07-23')).toEqual([]);
+  });
+
+  it('未来投影は決定的IDで、停止中ルールを含めない', () => {
+    const accounts: Account[] = [
+      {
+        id: 'cash',
+        name: '現金',
+        type: 'asset',
+        role: 'daily-asset',
+        archived: false,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+      {
+        id: 'expense',
+        name: '固定費',
+        type: 'expense',
+        role: 'expense-category',
+        archived: false,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+    ];
+    const base = {
+      id: 'rule',
+      name: '家賃',
+      amount: 80000,
+      dayOfMonth: 27,
+      debitAccountId: 'expense',
+      creditAccountId: 'cash',
+      startMonth: '2026-07',
+      postedThroughMonth: '2026-07',
+      managementScopeId: 'scope',
+      createdAt: 't',
+      updatedAt: 't',
+    };
+    const projected = recurringProjectionEntries([base], accounts, '2026-10-31');
+    expect(projected.map((entry) => entry.id)).toEqual([
+      'rec-proj-rule-2026-08',
+      'rec-proj-rule-2026-09',
+      'rec-proj-rule-2026-10',
+    ]);
+    expect(recurringProjectionEntries([base], accounts, '2026-10-31')).toEqual(projected);
+    expect(recurringProjectionEntries([{ ...base, paused: true }], accounts, '2026-10-31')).toEqual(
+      [],
+    );
   });
 });

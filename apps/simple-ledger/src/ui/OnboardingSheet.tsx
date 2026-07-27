@@ -2,7 +2,7 @@
  * 初期残高の一括登録シート。
  *  - 初回起動時（完全に初期 seed 状態 + 未既読）に App が自動表示する。
  *  - 「設定 > 初期残高の一括登録」からいつでも再表示できる（状態機械を持たない再利用シート）。
- *  - 登録は既存の opening 経路（createOpenings → repo.createOpening）のみを使い、
+ *  - 登録は opening の一括保存経路（createOpenings → repo.createOpenings）のみを使い、
  *    新しい永続化概念を増やさない。金額未入力の科目は何も作らない。
  */
 import { useState } from 'react';
@@ -26,18 +26,26 @@ export function OnboardingSheet({ onClose }: { onClose: () => void }) {
   const accounts = sortAccounts(ledger?.accounts ?? []);
   const assetRows = accounts.filter((a) => !a.archived && ASSET_ROLES.has(a.role));
   const liabilityRows = accounts.filter((a) => !a.archived && LIABILITY_ROLES.has(a.role));
+  const registeredAccountIds = new Set(
+    (ledger?.journalEntries ?? [])
+      .filter((entry) => entry.kind === 'opening')
+      .flatMap((entry) => entry.lines.map((line) => line.accountId)),
+  );
 
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [date, setDate] = useState(todayLocal());
   const [submitting, setSubmitting] = useState(false);
 
-  const filled = Object.entries(amounts).filter(([, v]) => v !== '' && Number.parseInt(v, 10) > 0);
+  const filled = Object.entries(amounts).filter(
+    ([accountId, v]) =>
+      !registeredAccountIds.has(accountId) && v !== '' && Number.parseInt(v, 10) > 0,
+  );
   // 何か入力してあれば閉じる前に確認する（'0' だけの入力も含めて保護する）。
   const dirty = Object.values(amounts).some((v) => v !== '');
   const { requestClose, discardConfirm } = useDirtyGuard(dirty, onClose);
 
   async function submit() {
-    if (!filled.length || submitting) return;
+    if (!filled.length || date === '' || submitting) return;
     setSubmitting(true);
     try {
       const inputs: OpeningInput[] = filled.map(([accountId, v]) => ({
@@ -56,17 +64,24 @@ export function OnboardingSheet({ onClose }: { onClose: () => void }) {
     setAmounts((prev) => ({ ...prev, [id]: v.replace(/[^\d]/g, '') }));
 
   const renderRows = (rows: Account[]) =>
-    rows.map((a) => (
-      <TextInput
-        key={a.id}
-        label={a.name}
-        inputMode="numeric"
-        value={amounts[a.id] ?? ''}
-        onChange={(v) => setAmount(a.id, v)}
-        placeholder={t('onboarding.amountPlaceholder')}
-        dataUi={UI.onboarding.amount}
-      />
-    ));
+    rows.map((a) =>
+      registeredAccountIds.has(a.id) ? (
+        <div key={a.id} className="kv" data-ui={UI.onboarding.registered}>
+          <span>{a.name}</span>
+          <span className="tag tag--neutral">{t('onboarding.registered')}</span>
+        </div>
+      ) : (
+        <TextInput
+          key={a.id}
+          label={a.name}
+          inputMode="numeric"
+          value={amounts[a.id] ?? ''}
+          onChange={(v) => setAmount(a.id, v)}
+          placeholder={t('onboarding.amountPlaceholder')}
+          dataUi={UI.onboarding.amount}
+        />
+      ),
+    );
 
   return (
     <>
@@ -92,7 +107,7 @@ export function OnboardingSheet({ onClose }: { onClose: () => void }) {
               type="button"
               className="btn btn--primary"
               onClick={submit}
-              disabled={filled.length === 0 || submitting}
+              disabled={filled.length === 0 || date === '' || submitting}
               data-ui={UI.onboarding.save}
             >
               {t('onboarding.save')}
@@ -107,6 +122,7 @@ export function OnboardingSheet({ onClose }: { onClose: () => void }) {
             type="date"
             value={date}
             onChange={setDate}
+            required
           />
           <p className="field__hint">{t('onboarding.dateHint')}</p>
 

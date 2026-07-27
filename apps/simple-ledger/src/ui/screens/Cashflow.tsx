@@ -13,9 +13,11 @@ import {
   liquidAssetTotal,
   nextRepaymentDate,
   projectCashflow,
+  uniqueEntriesById,
 } from '../../domain/cashflow';
-import { continuousCostEntries } from '../../domain/continuousCost';
-import { reserveBalances } from '../../domain/reserve';
+import { reserveBalances, unassignedReserveBalance } from '../../domain/reserve';
+import { reportBasis } from '../../domain/reportPeriod';
+import { reportEntriesForAsOf } from '../../domain/reportEntries';
 import { addMonthsToDate } from '../../domain/allocation';
 import { sortAccounts } from '../../domain/accountOrder';
 import { todayLocal } from '../../util/time';
@@ -35,6 +37,11 @@ function shortDateLabel(date: string): string {
 export function Cashflow() {
   const { ledger, postSchedule, removeSchedule, createReserve, removeReserve } = useLedger();
   const today = todayLocal();
+  const basis = useMemo(() => reportBasis({ mode: 'all' }, today), [today]);
+  const reportEntries = useMemo(
+    () => (ledger ? reportEntriesForAsOf(ledger, basis.asOf, today) : []),
+    [basis.asOf, ledger, today],
+  );
   const [untilDate, setUntilDate] = useState(() => addMonthsToDate(todayLocal(), 6));
   const [reserveOpen, setReserveOpen] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -46,8 +53,7 @@ export function Cashflow() {
 
   const { projection, liabBalById, futureRows } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger?.derivedEntries ?? [];
-    const items = ledger?.monthlyCostItems ?? [];
+    const entries = reportEntries;
     const schedules = ledger?.cashflowSchedules ?? [];
     const bs = deriveBalanceSheet(accounts, entries, today);
     const byId = new Map(bs.assets.map((a) => [a.account.id, a.balance] as const));
@@ -66,15 +72,12 @@ export function Cashflow() {
     const totalAssets = liquidAssetTotal(bs.assets, nonLiquidAssetIds);
     const reserveBalance = [...reserveIds].reduce((s, id) => s + (byId.get(id) ?? 0), 0);
     const end = untilDate;
-    const futureFunding = continuousCostEntries(items, accounts, end).filter(
-      (e) => e.metadata?.ccKind === 'funding' && e.date > today && e.date <= end,
-    );
-    const future = [
-      ...entries.filter(
+    const futureEntries = ledger ? reportEntriesForAsOf(ledger, end, today) : [];
+    const future = uniqueEntriesById(
+      futureEntries.filter(
         (e) => e.date > today && e.date <= end && e.lines.some((l) => isLiquid(l.accountId)),
       ),
-      ...futureFunding,
-    ]
+    )
       .map((e) => ({
         id: e.id,
         date: e.date,
@@ -100,12 +103,20 @@ export function Cashflow() {
         })),
       }),
     };
-  }, [ledger, untilDate, today]);
+  }, [ledger, reportEntries, untilDate, today]);
 
   const accountName = (id: string): string =>
     (ledger?.accounts ?? []).find((a) => a.id === id)?.name ?? '—';
   const reserves = ledger?.reserves ?? [];
-  const resBalById = useMemo(() => reserveBalances(ledger?.journalEntries ?? []), [ledger]);
+  const resBalById = useMemo(
+    () => reserveBalances(reportEntries, basis.asOf),
+    [basis.asOf, reportEntries],
+  );
+  const reserveUnassigned = unassignedReserveBalance(
+    projection.reserveBalance,
+    reserves,
+    resBalById,
+  );
   const freeTrend: TrendPoint[] = projection.points.map((p, i) => ({
     key: `${p.date}-${i}`,
     label: shortDateLabel(i === 0 ? today : p.date),
@@ -390,7 +401,7 @@ export function Cashflow() {
               {t('reserves.add')}
             </button>
           </div>
-          {reserves.length === 0 ? (
+          {reserves.length === 0 && reserveUnassigned === 0 ? (
             <div className="card card--pad empty">{t('reserves.empty')}</div>
           ) : (
             <ul className="card list" data-ui={UI.cashflow.reserveList}>
@@ -415,6 +426,20 @@ export function Cashflow() {
                   </li>
                 );
               })}
+              {reserveUnassigned !== 0 ? (
+                <li
+                  className="list__item"
+                  data-ui={UI.cashflow.reserveUnassigned}
+                >
+                  <div className="list__main">
+                    <div className="list__title">{t('reserves.unassigned')}</div>
+                    <div className="list__sub">
+                      {t('reserves.balance')}:{' '}
+                      <Money amount={reserveUnassigned} currency={currency} />
+                    </div>
+                  </div>
+                </li>
+              ) : null}
             </ul>
           )}
         </div>
