@@ -7,7 +7,6 @@ import { buildSectionTrends } from '../src/ui/screens/breakdownData';
 import './setup';
 
 const ts = '2026-07-01T00:00:00.000Z';
-const scopeId = 'scope-personal';
 const accounts: Account[] = [
   {
     id: 'cash',
@@ -51,7 +50,6 @@ function entry(
     date,
     description: id,
     kind,
-    managementScopeId: scopeId,
     lines: [
       { accountId: debitAccountId, side: 'debit', amount },
       { accountId: creditAccountId, side: 'credit', amount },
@@ -72,10 +70,6 @@ function ledgerOf(journalEntries: JournalEntry[]): Ledger {
       updatedAt: ts,
     },
     settings: { ledgerName: 'test', currency: 'JPY', locale: 'ja' },
-    managementScopes: [
-      { id: scopeId, name: '個人用', createdAt: ts, updatedAt: ts },
-    ],
-    accountInstruments: [],
     accounts,
     journalEntries,
     allocations: [],

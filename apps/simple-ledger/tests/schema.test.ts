@@ -16,7 +16,6 @@ const validEntry = {
   date: '2026-06-01',
   description: 'ランチ',
   kind: 'normal',
-  managementScopeId: 'scope-personal',
   lines: [
     { accountId: 'a', side: 'debit', amount: 1000 },
     { accountId: 'b', side: 'credit', amount: 1000 },
@@ -86,7 +85,6 @@ describe('年月の暦検証', () => {
     debitAccountId: 'expense',
     creditAccountId: 'bank',
     startMonth: '2026-12',
-    managementScopeId: 'scope-personal',
     createdAt: 'x',
     updatedAt: 'x',
   };
@@ -110,10 +108,6 @@ describe('ledgerExportPackageSchema', () => {
     exportedAt: '2026-06-01T00:00:00.000Z',
     deviceId: 'dev1',
     revision: 0,
-    managementScopes: [
-      { id: 'scope-personal', name: '個人用', archived: false, createdAt: 'x', updatedAt: 'x' },
-    ],
-    accountInstruments: [],
     accounts: [
       {
         id: 'a',
@@ -214,54 +208,6 @@ describe('ledgerExportPackageSchema', () => {
     };
     expect(ledgerExportPackageSchema.safeParse(dup).success).toBe(false);
   });
-  it('支払い手段の親科目が資金口座/クレジットカード以外（投資資産）は拒否する', () => {
-    const bad = {
-      ...validPkg,
-      accounts: [
-        ...validPkg.accounts,
-        {
-          id: 'inv',
-          name: '投資',
-          type: 'asset',
-          role: 'investment-asset',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-      accountInstruments: [
-        {
-          id: 'i1',
-          managementScopeId: 'scope-personal',
-          accountId: 'inv',
-          name: '証券口座',
-          kind: 'other',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-    };
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
-  });
-  it('支払い手段の親科目が資金口座（daily-asset）なら受け入れる', () => {
-    const ok = {
-      ...validPkg,
-      accountInstruments: [
-        {
-          id: 'i1',
-          managementScopeId: 'scope-personal',
-          accountId: 'a',
-          name: '楽天銀行',
-          kind: 'bank',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-    };
-    expect(ledgerExportPackageSchema.safeParse(ok).success).toBe(true);
-  });
 });
 
 describe('entry metadata / allocationPlan', () => {
@@ -294,10 +240,6 @@ describe('entry metadata / allocationPlan', () => {
       exportedAt: '2026-06-01T00:00:00.000Z',
       deviceId: 'd',
       revision: 0,
-      managementScopes: [
-        { id: 'scope-personal', name: '個人用', archived: false, createdAt: 'x', updatedAt: 'x' },
-      ],
-      accountInstruments: [],
       accounts: [
         {
           id: 'a',
@@ -372,10 +314,6 @@ describe('allocationPlan の参照整合性（package 検証）', () => {
       exportedAt: '2026-06-01T00:00:00.000Z',
       deviceId: 'd',
       revision: 0,
-      managementScopes: [
-        { id: 'scope-personal', name: '個人用', archived: false, createdAt: 'x', updatedAt: 'x' },
-      ],
-      accountInstruments: [],
       accounts: [
         {
           id: 'a',
@@ -459,10 +397,6 @@ describe('按分(allocations) の深い整合性検証（package）', () => {
       exportedAt: '2026-06-01T00:00:00.000Z',
       deviceId: 'd',
       revision: 0,
-      managementScopes: [
-        { id: 'scope-personal', name: '個人用', archived: false, createdAt: 'x', updatedAt: 'x' },
-      ],
-      accountInstruments: [],
       accounts: [
         {
           id: 'exp',
@@ -646,10 +580,6 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
       exportedAt: '2026-06-01T00:00:00.000Z',
       deviceId: 'd',
       revision: 0,
-      managementScopes: [
-        { id: 'scope-personal', name: '個人用', archived: false, createdAt: 'x', updatedAt: 'x' },
-      ],
-      accountInstruments: [],
       accounts: [bank, card, reserveAcc],
       journalEntries: [],
       allocations: [],
@@ -664,7 +594,6 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
           counterAccountId: 'card',
           source: 'credit-card',
           status: 'planned',
-          managementScopeId: 'scope-personal',
           createdAt: 'x',
           updatedAt: 'x',
         },
@@ -782,7 +711,6 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
           date: '2026-02-01',
           description: '取り置き',
           kind: 'normal',
-          managementScopeId: 'scope-personal',
           metadata: { inputMode: 'transfer', reserveId: 'nope' },
           lines: [
             { accountId: RESERVE_LEDGER_ACCOUNT_ID, side: 'debit', amount: 10000 },
@@ -803,7 +731,6 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
           date: '2026-06-01',
           description: '混入',
           kind: 'normal',
-          managementScopeId: 'scope-personal',
           lines: [
             { accountId: 'bank', side: 'debit', amount: 100 },
             { accountId: 'card', side: 'credit', amount: 100 },
@@ -836,10 +763,6 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
       exportedAt: '2026-06-01T00:00:00.000Z',
       deviceId: 'd',
       revision: 0,
-      managementScopes: [
-        { id: 'scope-personal', name: '個人用', archived: false, createdAt: 'x', updatedAt: 'x' },
-      ],
-      accountInstruments: [],
       accounts: [acc('food', 'expense'), acc('cash', 'asset')],
       journalEntries: [
         {
@@ -847,7 +770,6 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
           date: '2026-06-01',
           description: 'x',
           kind: 'normal',
-          managementScopeId: 'scope-personal',
           tagIds: ['trip'],
           lines: [
             { accountId: 'food', side: 'debit', amount: 1000 },
@@ -890,7 +812,6 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
           date: '2026-06-01',
           description: 'x',
           kind: 'normal',
-          managementScopeId: 'scope-personal',
           tagIds: ['nope'],
           lines: [
             { accountId: 'food', side: 'debit', amount: 1000 },
@@ -942,10 +863,6 @@ describe('月額化コスト(monthlyCostItems) の参照・不変条件検証', 
       exportedAt: '2026-06-01T00:00:00.000Z',
       deviceId: 'd',
       revision: 0,
-      managementScopes: [
-        { id: 'scope-personal', name: '個人用', archived: false, createdAt: 'x', updatedAt: 'x' },
-      ],
-      accountInstruments: [],
       accounts: [cash, food],
       journalEntries: [],
       allocations: [],
@@ -962,7 +879,6 @@ describe('月額化コスト(monthlyCostItems) の参照・不変条件検証', 
   const base = {
     id: 'm1',
     name: 'Netflix',
-    managementScopeId: 'scope-personal',
     kind: 'subscription',
     amount: 1500,
     costMonths: 1,
@@ -1066,7 +982,6 @@ describe('月額化コスト(monthlyCostItems) の参照・不変条件検証', 
         date: '2026-06-01',
         description: '購入',
         kind: 'normal',
-        managementScopeId: 'scope-personal',
         lines: [
           { accountId: 'food', side: 'debit', amount: 100 },
           { accountId: 'cash', side: 'credit', amount: 100 },
@@ -1091,7 +1006,6 @@ describe('月額化コスト(monthlyCostItems) の参照・不変条件検証', 
         counterAccountId: 'cash',
         source: 'installment',
         status: 'planned',
-        managementScopeId: 'scope-personal',
         monthlyCostId: 'nope',
         createdAt: 'x',
         updatedAt: 'x',
@@ -1115,7 +1029,6 @@ describe('固定資産処分の重複検証', () => {
     const item = {
       id: 'm1',
       name: '車の月額化',
-      managementScopeId: 'scope-personal',
       kind: 'durable-asset',
       amount: 120000,
       costMonths: 12,
@@ -1132,7 +1045,6 @@ describe('固定資産処分の重複検証', () => {
       id,
       monthlyCostId: 'm1',
       fixedAccountId: 'fa',
-      managementScopeId: 'scope-personal',
       disposalDate: '2026-07-15',
       proceedsAmount: 0,
       recognizedAmount: 60000,
@@ -1148,10 +1060,6 @@ describe('固定資産処分の重複検証', () => {
       exportedAt: '2026-06-01T00:00:00.000Z',
       deviceId: 'd',
       revision: 0,
-      managementScopes: [
-        { id: 'scope-personal', name: '個人用', archived: false, createdAt: 'x', updatedAt: 'x' },
-      ],
-      accountInstruments: [],
       accounts: [
         {
           id: 'food',

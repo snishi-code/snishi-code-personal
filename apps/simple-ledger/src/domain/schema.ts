@@ -9,12 +9,7 @@ import {
   RESERVE_LEDGER_ACCOUNT_ID,
 } from './constants';
 import { addMonths, monthlyAmounts } from './allocation';
-import {
-  ACCOUNT_ROLES,
-  isInstrumentParentRole,
-  roleAllowsType,
-  type AccountRole,
-} from './accountRoles';
+import { ACCOUNT_ROLES, roleAllowsType, type AccountRole } from './accountRoles';
 import { isValidIsoDate, isValidIsoMonth } from './calendar';
 import { isRecurringPostableRole } from './recurring';
 
@@ -87,8 +82,6 @@ export const journalLineSchema = z.object({
   accountId: z.string().min(1),
   side: sideSchema,
   amount: amountSchema,
-  /** 支払い手段の細目（任意）。参照整合は export パッケージ側で検証する。 */
-  instrumentId: z.string().min(1).optional(),
 });
 
 // タグは「仕訳全体のみ」。明細・両方 scope は廃止。
@@ -99,27 +92,6 @@ export const tagSchema = z.object({
   name: z.string().min(1).max(60),
   scope: tagScopeSchema,
   color: z.string().min(1).max(40).optional(),
-  archived: z.boolean(),
-  createdAt: isoDateTime,
-  updatedAt: isoDateTime,
-});
-
-export const managementScopeSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1).max(60),
-  archived: z.boolean().optional(),
-  createdAt: isoDateTime,
-  updatedAt: isoDateTime,
-});
-
-export const accountInstrumentKindSchema = z.enum(['bank', 'card', 'prepaid', 'cash', 'other']);
-
-export const accountInstrumentSchema = z.object({
-  id: z.string().min(1),
-  managementScopeId: z.string().min(1),
-  accountId: z.string().min(1),
-  name: z.string().min(1).max(80),
-  kind: accountInstrumentKindSchema,
   archived: z.boolean(),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
@@ -187,7 +159,6 @@ export const cashflowScheduleSchema = z.object({
   counterAccountId: z.string().min(1).optional(),
   source: z.enum(['manual', 'credit-card', 'installment', 'reserve']),
   status: z.enum(['planned', 'posted', 'cancelled']),
-  managementScopeId: z.string().min(1),
   linkedEntryId: z.string().min(1).optional(),
   entryTagIds: tagIdList.optional(),
   monthlyCostId: z.string().min(1).optional(),
@@ -205,7 +176,6 @@ export const recurringRuleSchema = z.object({
   startMonth: monthSchema,
   postedThroughMonth: monthSchema.optional(),
   paused: z.boolean().optional(),
-  managementScopeId: z.string().min(1),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
 });
@@ -224,7 +194,6 @@ export const monthlyCostItemSchema = z
   .object({
     id: z.string().min(1),
     name: z.string().min(1).max(120),
-    managementScopeId: z.string().min(1),
     kind: z.enum(['subscription', 'prepaid-service', 'durable-asset', 'recurring-event']),
     amount: amountSchema,
     costMonths: z.number().int().min(1),
@@ -281,7 +250,6 @@ export const assetDisposalSchema = z.object({
   id: z.string().min(1),
   monthlyCostId: z.string().min(1),
   fixedAccountId: z.string().min(1),
-  managementScopeId: z.string().min(1),
   disposalDate: isoDate,
   proceedsAmount: z.number().int().nonnegative(),
   destinationAccountId: z.string().min(1).optional(),
@@ -300,7 +268,6 @@ export const journalEntrySchema = z
     lines: z.array(journalLineSchema).min(2),
     memo: z.string().max(1000).optional(),
     kind: z.enum(['normal', 'opening']),
-    managementScopeId: z.string().min(1),
     metadata: entryMetadataSchema.optional(),
     tagIds: tagIdList.optional(),
     createdAt: isoDateTime,
@@ -349,8 +316,6 @@ export const ledgerExportPackageSchema = z
     deviceId: z.string().min(1),
     // foundation 封筒の revision（楽観的衝突検出）。v2 では必須（無いファイルは取り込まない）。
     revision: z.number().int().nonnegative(),
-    managementScopes: z.array(managementScopeSchema),
-    accountInstruments: z.array(accountInstrumentSchema),
     accounts: z.array(accountSchema),
     journalEntries: z.array(journalEntrySchema),
     allocations: z.array(allocationItemSchema),
@@ -423,33 +388,6 @@ export const ledgerExportPackageSchema = z
         );
     });
 
-    // 管理区分 ID は一意。
-    const scopeIds = new Set<string>();
-    pkg.managementScopes.forEach((s, i) => {
-      if (scopeIds.has(s.id))
-        issue(`管理区分 ID が重複しています(${s.id})`, ['managementScopes', i, 'id']);
-      scopeIds.add(s.id);
-    });
-    const hasScope = (id: string) => scopeIds.has(id);
-
-    // 支払い手段の細目: ID 一意 + 管理区分・親科目の参照整合。account を引く map も作る。
-    const instrumentById = new Map<string, (typeof pkg.accountInstruments)[number]>();
-    pkg.accountInstruments.forEach((inst, i) => {
-      const at = (...p: (string | number)[]) => ['accountInstruments', i, ...p];
-      if (instrumentById.has(inst.id))
-        issue(`支払い手段 ID が重複しています(${inst.id})`, at('id'));
-      instrumentById.set(inst.id, inst);
-      if (!hasScope(inst.managementScopeId))
-        issue(`支払い手段「${inst.name}」の管理区分が存在しません`, at('managementScopeId'));
-      if (!hasAccount(inst.accountId))
-        issue(`支払い手段「${inst.name}」の親科目が存在しません`, at('accountId'));
-      else if (!isInstrumentParentRole(accountRole.get(inst.accountId) as AccountRole))
-        issue(
-          `支払い手段「${inst.name}」の親科目は資金口座またはクレジットカードに限られます`,
-          at('accountId'),
-        );
-    });
-
     // 月額化コスト ID 集合（仕訳・予定CF の monthlyCostId 参照検証に使う）。
     const monthlyCostIdSet = new Set(pkg.monthlyCostItems.map((m) => m.id));
     const recurringRuleIdSet = new Set(pkg.recurringRules.map((r) => r.id));
@@ -467,14 +405,6 @@ export const ledgerExportPackageSchema = z
 
     // 参照整合性: すべての仕訳明細の accountId が accounts に存在すること。
     pkg.journalEntries.forEach((e, ei) => {
-      // 管理区分の参照整合。
-      if (!hasScope(e.managementScopeId))
-        issue(`仕訳「${e.description}」の管理区分が存在しません`, [
-          'journalEntries',
-          ei,
-          'managementScopeId',
-        ]);
-
       e.lines.forEach((l, li) => {
         if (!hasAccount(l.accountId)) {
           issue(`仕訳「${e.description}」が存在しない勘定科目(${l.accountId})を参照しています`, [
@@ -484,19 +414,6 @@ export const ledgerExportPackageSchema = z
             li,
             'accountId',
           ]);
-        }
-        // 支払い手段の細目: 存在 + 親科目一致 + 管理区分一致。
-        if (l.instrumentId !== undefined) {
-          const inst = instrumentById.get(l.instrumentId);
-          const lp = (field: string) => ['journalEntries', ei, 'lines', li, field];
-          if (!inst)
-            issue(`仕訳「${e.description}」の支払い手段が存在しません`, lp('instrumentId'));
-          else {
-            if (inst.accountId !== l.accountId)
-              issue(`支払い手段「${inst.name}」が明細の科目と一致しません`, lp('instrumentId'));
-            if (inst.managementScopeId !== e.managementScopeId)
-              issue(`支払い手段「${inst.name}」が仕訳の管理区分と一致しません`, lp('instrumentId'));
-          }
         }
       });
 
@@ -760,8 +677,6 @@ export const ledgerExportPackageSchema = z
       const at = (...p: (string | number)[]) => ['cashflowSchedules', si, ...p];
       if (scheduleIds.has(s.id)) issue(`予定 CF の ID が重複しています(${s.id})`, at('id'));
       scheduleIds.add(s.id);
-      if (!hasScope(s.managementScopeId))
-        issue(`予定 CF「${s.title}」の管理区分が存在しません`, at('managementScopeId'));
       const accType = accountType.get(s.accountId);
       if (accType === undefined)
         issue(`予定 CF「${s.title}」の口座が存在しません`, at('accountId'));
@@ -787,8 +702,6 @@ export const ledgerExportPackageSchema = z
       const at = (...p: (string | number)[]) => ['recurringRules', ri, ...p];
       if (seenRuleIds.has(r.id)) issue(`定期ルールの ID が重複しています(${r.id})`, at('id'));
       seenRuleIds.add(r.id);
-      if (!hasScope(r.managementScopeId))
-        issue(`定期ルール「${r.name}」の管理区分が存在しません`, at('managementScopeId'));
       if (!hasAccount(r.debitAccountId))
         issue(`定期ルール「${r.name}」の行き先科目が存在しません`, at('debitAccountId'));
       if (!hasAccount(r.creditAccountId))
@@ -872,8 +785,6 @@ export const ledgerExportPackageSchema = z
       if (monthlyCostIds.has(mc.id))
         issue(`月額化コストの ID が重複しています(${mc.id})`, at('id'));
       monthlyCostIds.add(mc.id);
-      if (!hasScope(mc.managementScopeId))
-        issue(`月額化「${mc.name}」の管理区分が存在しません`, at('managementScopeId'));
 
       // 認識先: 全会計 type を許可し、参照先の存在だけを検証する。
       if (!accountType.has(mc.expenseAccountId))
@@ -982,8 +893,6 @@ export const ledgerExportPackageSchema = z
       if (disposedMonthlyCostIds.has(d.monthlyCostId))
         issue(`同じ項目が複数回処分されています(${d.monthlyCostId})`, at('monthlyCostId'));
       disposedMonthlyCostIds.add(d.monthlyCostId);
-      if (!hasScope(d.managementScopeId))
-        issue(`固定資産処分の管理区分が存在しません`, at('managementScopeId'));
       if (!monthlyCostIdSet.has(d.monthlyCostId))
         issue(`固定資産処分の monthlyCostId が存在しません`, at('monthlyCostId'));
       // 処分対象は継続コスト資産（fixed-asset、または継続コスト台帳口座=continuing-cost-asset。

@@ -50,7 +50,6 @@ describe('reserveBalances の基準日', () => {
       date,
       description: id,
       kind: 'normal',
-      managementScopeId: 'scope-personal',
       lines: [
         { accountId: 'reserve-ledger', side: 'debit', amount },
         { accountId: 'cash', side: 'credit', amount },
@@ -76,7 +75,6 @@ describe('取消（reversalInput）と取り置き', () => {
       date: '2026-07-01',
       description: '旅行の取り置き',
       kind: 'normal',
-      managementScopeId: 'scope-personal',
       lines: [
         { accountId: 'reserve-ledger', side: 'debit', amount: 50000 },
         { accountId: 'bank', side: 'credit', amount: 50000 },

@@ -30,7 +30,6 @@ function opening(id: string, date: string): JournalEntry {
     date,
     description: id,
     kind: 'opening',
-    managementScopeId: 'scope-personal',
     lines: [
       { accountId: 'cash', side: 'debit', amount: 100 },
       { accountId: 'equity', side: 'credit', amount: 100 },

@@ -9,7 +9,6 @@ import {
   monthRange,
 } from '../src/domain/accounting';
 import { defaultRoleForType } from '../src/domain/accountRoles';
-import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
 import type { Account, JournalEntry } from '../src/domain/types';
 
 function acc(id: string, name: string, type: Account['type']): Account {
@@ -37,7 +36,6 @@ function entry(
     date,
     description: id,
     kind,
-    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     lines: [
       { accountId: debit, side: 'debit', amount },
       { accountId: credit, side: 'credit', amount },

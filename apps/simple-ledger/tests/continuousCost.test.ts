@@ -13,7 +13,6 @@ import {
   isContinuingCostItem,
 } from '../src/domain/continuousCost';
 import { accountBalance, deriveBalanceSheet } from '../src/domain/accounting';
-import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
 import type { Account, MonthlyCostItem } from '../src/domain/types';
 
 function acc(id: string, role: Account['role'], type: Account['type']): Account {
@@ -34,7 +33,6 @@ function item(over: Partial<MonthlyCostItem>): MonthlyCostItem {
   return {
     id: 'yt',
     name: 'YouTube',
-    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     kind: 'prepaid-service',
     amount: 12000,
     costMonths: 12,
@@ -188,7 +186,6 @@ describe('continuousCost 仮想展開', () => {
         date: '2031-01-05',
         description: 'x',
         kind: 'normal' as const,
-        managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
         lines: [
           { accountId: 'fun', side: 'debit' as const, amount: 500 },
           { accountId: 'card', side: 'credit' as const, amount: 500 },

@@ -9,7 +9,7 @@ import {
   validateSimpleEntry,
 } from '../src/domain/entry';
 import type { Account, JournalEntry, ReserveItem } from '../src/domain/types';
-import { DEFAULT_MANAGEMENT_SCOPE_ID, RESERVE_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
+import { RESERVE_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 
 describe('reserveBalanceShortfall（目的別資金の残高不足）', () => {
   const accounts: Account[] = [
@@ -47,7 +47,6 @@ describe('reserveBalanceShortfall（目的別資金の残高不足）', () => {
     date: '2026-01-10',
     description: '積立',
     kind: 'normal',
-    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     lines: [
       { accountId: 'res', side: 'debit', amount: 100000 },
       { accountId: 'cash', side: 'credit', amount: 100000 },
@@ -60,7 +59,6 @@ describe('reserveBalanceShortfall（目的別資金の残高不足）', () => {
     date,
     description: '自動車購入',
     kind: 'normal',
-    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     lines: [
       { accountId: 'fixed', side: 'debit', amount },
       { accountId: 'res', side: 'credit', amount },
@@ -88,7 +86,6 @@ describe('reserveBalanceShortfall（目的別資金の残高不足）', () => {
       date: '2026-02-01',
       description: '入金',
       kind: 'normal',
-      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
       lines: [
         { accountId: 'res', side: 'debit', amount: 5000 },
         { accountId: 'cash', side: 'credit', amount: 5000 },
@@ -152,7 +149,6 @@ describe('reserveBalanceShortfall（集約モデル: 目的(reserveId)単位で�
     date: '2026-01-10',
     description: '老後へ取り置き',
     kind: 'normal',
-    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     metadata: { reserveId: 'old' },
     lines: [
       { accountId: RESERVE_LEDGER_ACCOUNT_ID, side: 'debit', amount: 50000 },
@@ -166,7 +162,6 @@ describe('reserveBalanceShortfall（集約モデル: 目的(reserveId)単位で�
     date: '2026-02-01',
     description: '旅行から支払い',
     kind: 'normal',
-    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     metadata: { reserveId: 'trip' },
     lines: [
       { accountId: 'exp', side: 'debit', amount: 30000 },
@@ -334,7 +329,6 @@ describe('reversalInput', () => {
     date: '2026-06-01',
     description: 'クレジットで食費',
     kind: 'normal',
-    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     lines: [
       { accountId: 'food', side: 'debit', amount: 1000 },
       { accountId: 'card', side: 'credit', amount: 1000 },
@@ -376,27 +370,22 @@ describe('reversalInput', () => {
   });
 });
 
-describe('reversalInput は仕訳全体タグ・管理区分・支払い手段を引き継ぐ', () => {
-  it('全体タグ・管理区分を引き継ぎ、支払い手段は借方/貸方の入れ替えに合わせる', () => {
+describe('reversalInput は仕訳全体タグを引き継ぐ', () => {
+  it('全体タグを引き継ぐ', () => {
     const source: JournalEntry = {
       id: 's',
       date: '2026-06-01',
       description: '旅行',
       kind: 'normal',
-      managementScopeId: 'scope-x',
       tagIds: ['trip'],
       lines: [
-        { accountId: 'food', side: 'debit', amount: 1000, instrumentId: 'inst-food' },
-        { accountId: 'cash', side: 'credit', amount: 1000, instrumentId: 'inst-pay' },
+        { accountId: 'food', side: 'debit', amount: 1000 },
+        { accountId: 'cash', side: 'credit', amount: 1000 },
       ],
       createdAt: 'x',
       updatedAt: 'x',
     };
     const input = reversalInput(source);
     expect(input.tagIds).toEqual(['trip']);
-    expect(input.managementScopeId).toBe('scope-x');
-    // 元の貸方(inst-pay)が新しい借方、元の借方(inst-food)が新しい貸方
-    expect(input.debitInstrumentId).toBe('inst-pay');
-    expect(input.creditInstrumentId).toBe('inst-food');
   });
 });

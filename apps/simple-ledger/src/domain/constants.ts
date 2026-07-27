@@ -6,10 +6,6 @@
  */
 export { APP_ID, SCHEMA_VERSION } from '../data/constants';
 
-/** 既定の管理区分（『個人用』）。seed と migration で同じ id を使い、既存データを寄せる。 */
-export const DEFAULT_MANAGEMENT_SCOPE_ID = 'scope-personal' as const;
-export const DEFAULT_MANAGEMENT_SCOPE_NAME = '個人用' as const;
-
 /**
  * 継続コストの未消化残高を寄せる単一の集約台帳口座（role=continuing-cost-asset・内部集約）。
  * 品目ごとに資産科目を作らず、全継続コストの funding/recognition をこの 1 口座に通す。

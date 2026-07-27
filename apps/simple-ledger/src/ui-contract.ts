@@ -223,19 +223,6 @@ export const UI = {
     entrySummary: 'tags.summary.entry',
     lineSummary: 'tags.summary.line',
   },
-  wallets: {
-    view: 'wallets.view',
-    scopeList: 'wallets.scope.list',
-    scopeCreate: 'wallets.scope.create',
-    scopeName: 'wallets.scope.name',
-    scopeSave: 'wallets.scope.save',
-    instrumentList: 'wallets.instrument.list',
-    instrumentCreate: 'wallets.instrument.create',
-    instrumentName: 'wallets.instrument.name',
-    instrumentAccount: 'wallets.instrument.account',
-    instrumentKind: 'wallets.instrument.kind',
-    instrumentSave: 'wallets.instrument.save',
-  },
   // 残高補正・初期残高のシート（勘定科目の内訳行・仕訳一覧から開く）。
   adjustments: {
     account: 'adjust.account',

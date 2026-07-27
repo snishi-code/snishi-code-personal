@@ -8,7 +8,7 @@
 import { useState } from 'react';
 import { Modal } from '../overlays';
 import { useDirtyGuard } from '../overlays';
-import { SelectInput, TextArea, TextInput } from '@snishi/foundation/ui/Field';
+import { TextArea, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { AccountPicker } from '../AccountPicker';
 import { TagPicker } from '../TagPicker';
@@ -102,8 +102,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     id.startsWith('reserve:')
       ? { accountId: RESERVE_LEDGER_ACCOUNT_ID, reserveId: id.slice('reserve:'.length) }
       : { accountId: id };
-  const scopes = ledger?.managementScopes ?? [];
-  const instruments = ledger?.accountInstruments ?? [];
 
   const [mode, setMode] = useState<FormMode>(
     init.kind === 'create'
@@ -247,7 +245,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       ...base,
       creditAccountId: srcResolved.accountId,
       debitAccountId: dstResolved.accountId,
-      managementScopeId: base.managementScopeId ?? scopes[0]?.id,
     };
 
     const ccActive = canAllocate && ccMode;
@@ -279,13 +276,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               repaymentStartDate: repayStartDate || toSave.date,
             }
           : {};
-        const scopeField =
-          toSave.managementScopeId !== undefined
-            ? { managementScopeId: toSave.managementScopeId }
-            : {};
         await createContinuousCost({
           name: ccTargetName.trim(),
-          ...scopeField,
           kind: inferMonthlyCostKind(months, repeat),
           amount: toSave.amount,
           costMonths: months,
@@ -477,44 +469,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       dataUi={UI.journal.entry.memo}
     />
   );
-
-  const currentScopeId = form.managementScopeId ?? scopes[0]?.id;
-  const scopeField =
-    scopes.length > 1 ? (
-      <SelectInput
-        label={t('entry.managementScope')}
-        value={currentScopeId ?? ''}
-        onChange={(id) => setForm((f) => ({ ...f, managementScopeId: id }))}
-        options={scopes.map((s) => ({ value: s.id, label: s.name }))}
-      />
-    ) : null;
-
-  const renderInstrument = (side: 'debit' | 'credit') => {
-    const accId = side === 'debit' ? form.debitAccountId : form.creditAccountId;
-    if (!accId) return null;
-    const opts = instruments.filter(
-      (i) => i.accountId === accId && i.managementScopeId === currentScopeId && !i.archived,
-    );
-    if (opts.length === 0) return null;
-    const accName = accounts.find((a) => a.id === accId)?.name ?? '';
-    const value = (side === 'debit' ? form.debitInstrumentId : form.creditInstrumentId) ?? '';
-    return (
-      <SelectInput
-        label={`${t('entry.instrument')}: ${accName}`}
-        value={value}
-        onChange={(id) =>
-          setForm((f) => ({
-            ...f,
-            [side === 'debit' ? 'debitInstrumentId' : 'creditInstrumentId']: id || undefined,
-          }))
-        }
-        options={[
-          { value: '', label: t('entry.instrumentNone') },
-          ...opts.map((i) => ({ value: i.id, label: i.name })),
-        ]}
-      />
-    );
-  };
 
   const flowDef = isManual ? null : MODE_FLOW[mode as FlowMode];
   const renderFlow = () => {
@@ -713,7 +667,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               error={errorText(errors, 'credit-required') ?? sameAccount}
               dataUi={UI.journal.entry.flowSource}
             />
-            {renderInstrument('credit')}
           </div>
           <div className="flow__arrow" aria-hidden="true">
             →
@@ -729,7 +682,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               error={errorText(errors, 'debit-required')}
               dataUi={UI.journal.entry.flowDestination}
             />
-            {renderInstrument('debit')}
           </div>
         </div>
       </div>
@@ -967,7 +919,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             {canAllocate && ccMode ? null : (
               <>
                 {memoField}
-                {scopeField}
                 {entryTagsField}
               </>
             )}
@@ -998,11 +949,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                   <div className="stack">
                     {mode === 'transfer' ? itemField : null}
                     {memoField}
-                    {scopeField}
                     {entryTagsField}
-                    {roles.map((role) => (
-                      <div key={role.side}>{renderInstrument(role.side)}</div>
-                    ))}
                   </div>
                 ) : null}
               </>

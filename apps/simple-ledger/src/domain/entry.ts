@@ -8,7 +8,7 @@
 import { newId } from './ids';
 import { accountBalance, filterByDateRange } from './accounting';
 import type { AccountRole } from './accountRoles';
-import { DEFAULT_MANAGEMENT_SCOPE_ID, RESERVE_LEDGER_ACCOUNT_ID } from './constants';
+import { RESERVE_LEDGER_ACCOUNT_ID } from './constants';
 import type { Account, EntryMetadata, JournalEntry, JournalEntryKind, ReserveItem } from './types';
 import { reserveBalances } from './reserve';
 import { nowIso } from '../util/time';
@@ -82,13 +82,8 @@ export interface SimpleEntryInput {
   memo?: string;
   kind?: JournalEntryKind;
   metadata?: EntryMetadata;
-  /** どの管理区分の仕訳か。未指定なら既定（個人用）。 */
-  managementScopeId?: string;
   /** 仕訳全体タグ（イベント/目的ラベル）。 */
   tagIds?: string[];
-  /** 借方/貸方の支払い手段の細目（任意）。 */
-  debitInstrumentId?: string;
-  creditInstrumentId?: string;
 }
 
 export type EntryValidationError =
@@ -135,19 +130,16 @@ export function buildSimpleEntry(
 ): JournalEntry {
   const ts = nowIso();
   const metadata = cleanMetadata(input.metadata);
-  const debitInst = input.debitInstrumentId ? { instrumentId: input.debitInstrumentId } : {};
-  const creditInst = input.creditInstrumentId ? { instrumentId: input.creditInstrumentId } : {};
   return {
     id: existing?.id ?? newId(),
     date: input.date,
     description: input.description.trim(),
     lines: [
-      { accountId: input.debitAccountId, side: 'debit', amount: input.amount, ...debitInst },
-      { accountId: input.creditAccountId, side: 'credit', amount: input.amount, ...creditInst },
+      { accountId: input.debitAccountId, side: 'debit', amount: input.amount },
+      { accountId: input.creditAccountId, side: 'credit', amount: input.amount },
     ],
     ...(input.memo && input.memo.trim() !== '' ? { memo: input.memo.trim() } : {}),
     kind: input.kind ?? 'normal',
-    managementScopeId: input.managementScopeId ?? DEFAULT_MANAGEMENT_SCOPE_ID,
     ...(metadata ? { metadata } : {}),
     ...(input.tagIds?.length ? { tagIds: input.tagIds } : {}),
     createdAt: existing?.createdAt ?? ts,
@@ -167,11 +159,8 @@ export function toSimpleInput(entry: JournalEntry): SimpleEntryInput {
     amount: debit?.amount ?? credit?.amount ?? 0,
     ...(entry.memo !== undefined ? { memo: entry.memo } : {}),
     kind: entry.kind,
-    managementScopeId: entry.managementScopeId,
     ...(entry.metadata ? { metadata: entry.metadata } : {}),
     ...(entry.tagIds ? { tagIds: entry.tagIds } : {}),
-    ...(debit?.instrumentId ? { debitInstrumentId: debit.instrumentId } : {}),
-    ...(credit?.instrumentId ? { creditInstrumentId: credit.instrumentId } : {}),
   };
 }
 
@@ -192,12 +181,8 @@ export function reversalInput(source: JournalEntry): SimpleEntryInput {
     creditAccountId: debit?.accountId ?? '',
     amount: debit?.amount ?? credit?.amount ?? 0,
     kind: 'normal',
-    // 管理区分は引き継ぐ。仕訳全体タグも引き継ぐ（タグ別集計に取消を反映させるため）。
-    // 支払い手段は side 入れ替えに合わせて付け替える。
-    managementScopeId: source.managementScopeId,
+    // 仕訳全体タグは引き継ぐ（タグ別集計に取消を反映させるため）。
     ...(source.tagIds?.length ? { tagIds: source.tagIds } : {}),
-    ...(credit?.instrumentId ? { debitInstrumentId: credit.instrumentId } : {}),
-    ...(debit?.instrumentId ? { creditInstrumentId: debit.instrumentId } : {}),
     // 取り置き(reserveId)も引き継ぐ。落とすと集約口座だけ減って目的別残高が
     // 据え置かれ、「未割り当て」が負になる（side 入れ替えで自動的に減算方向になる）。
     metadata: {

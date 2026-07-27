@@ -67,7 +67,6 @@ describe('追補監査の画面回帰', () => {
       date: '2026-01-01',
       description: '残高補正',
       kind: 'normal',
-      managementScopeId: 'scope-personal',
       lines: [
         { accountId: cash.id, side: 'debit', amount: 100 },
         { accountId: expense.id, side: 'credit', amount: 100 },
@@ -90,7 +89,6 @@ describe('追補監査の画面回帰', () => {
       date: '2026-01-01',
       description: '初期残高',
       kind: 'opening',
-      managementScopeId: 'scope-personal',
       lines: [
         { accountId: cash.id, side: 'debit', amount: 100 },
         { accountId: equity.id, side: 'credit', amount: 100 },

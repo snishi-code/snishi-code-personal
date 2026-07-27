@@ -14,8 +14,6 @@ import { DB_NAME, DB_VERSION } from './constants';
 
 export const STORE = {
   kv: 'kv', // meta / settings の単一レコード置き場（out-of-line key）
-  managementScopes: 'managementScopes',
-  accountInstruments: 'accountInstruments',
   accounts: 'accounts',
   journalEntries: 'journalEntries',
   allocations: 'allocations',
@@ -30,18 +28,20 @@ export const STORE = {
 
 export type StoreName = (typeof STORE)[keyof typeof STORE];
 
-/** foundation の DatabaseHandle。v1=初期ストア一括作成・v2=recurringRules 追加（contains ガードで冪等）。 */
+/**
+ * foundation の DatabaseHandle。v1=初期ストア一括作成・v2=recurringRules 追加・
+ * v3=管理区分/支払い手段ストアの削除（contains ガードで冪等）。
+ */
 export const db = createDatabase({
   name: DB_NAME,
   version: DB_VERSION,
   upgrade: (idb) => {
+    // v3: 現行 STORE に無いレガシーストア（廃止した管理区分・支払い手段のもの）を削除する。
+    const wanted = new Set<string>(Object.values(STORE));
+    for (const name of Array.from(idb.objectStoreNames)) {
+      if (!wanted.has(name)) idb.deleteObjectStore(name);
+    }
     if (!idb.objectStoreNames.contains(STORE.kv)) idb.createObjectStore(STORE.kv);
-    if (!idb.objectStoreNames.contains(STORE.managementScopes)) {
-      idb.createObjectStore(STORE.managementScopes, { keyPath: 'id' });
-    }
-    if (!idb.objectStoreNames.contains(STORE.accountInstruments)) {
-      idb.createObjectStore(STORE.accountInstruments, { keyPath: 'id' });
-    }
     if (!idb.objectStoreNames.contains(STORE.accounts)) {
       idb.createObjectStore(STORE.accounts, { keyPath: 'id' });
     }

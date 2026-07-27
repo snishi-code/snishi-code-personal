@@ -8,7 +8,6 @@ import './setup';
 import { deriveProfitAndLoss } from '../src/domain/accounting';
 import { monthlyCostForMonth } from '../src/domain/monthlyCost';
 import { monthlyAmounts } from '../src/domain/allocation';
-import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
 import type { Account, JournalEntry, MonthlyCostItem } from '../src/domain/types';
 
 function acc(id: string, role: Account['role'], type: Account['type']): Account {
@@ -26,7 +25,6 @@ function entry(
     date,
     description: id,
     kind: 'normal',
-    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     lines: [
       { accountId: debit, side: 'debit', amount },
       { accountId: credit, side: 'credit', amount },
@@ -61,7 +59,6 @@ describe('生活コストの二重計上防止（PL 費用の構成）', () => {
     const car: MonthlyCostItem = {
       id: 'm',
       name: '自動車',
-      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
       kind: 'durable-asset',
       amount: 3_000_000,
       costMonths: 120,
