@@ -10,6 +10,7 @@ import {
   expenseCategoryBreakdownForRange,
   livingCostBreakdownForRange,
 } from '../src/domain/livingCost';
+import { deriveBalanceSheet, deriveProfitAndLoss } from '../src/domain/accounting';
 import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
 import type { Account, EntryMetadata, JournalEntry } from '../src/domain/types';
 
@@ -81,5 +82,60 @@ describe('expenseCategoryBreakdownForRange（費用カテゴリ別内訳）', ()
   it('金額の大きい順に並ぶ', () => {
     const cats = expenseCategoryBreakdownForRange(accounts, entries, month);
     expect(cats.map((c) => c.account.id)).toEqual(['fixed', 'food']);
+  });
+});
+
+describe('継続コスト認識の生活コスト分類', () => {
+  const accounts: Account[] = [
+    acc('source', 'daily-asset', 'asset'),
+    acc('expense', 'expense-category', 'expense'),
+    acc('revenue', 'income-category', 'revenue'),
+    acc('asset', 'daily-asset', 'asset'),
+    acc('liability', 'other-liability', 'liability'),
+    acc('equity', 'equity', 'equity'),
+  ];
+  const recognition = (id: string, debit: string, amount: number) =>
+    entry(id, '2031-07-01', debit, 'source', amount, { ccKind: 'recognition' });
+
+  it('借方の会計 type が expense の認識だけを継続コストへ含める', () => {
+    const result = livingCostBreakdownForRange(
+      accounts,
+      [
+        recognition('expense-recognition', 'expense', 100),
+        recognition('revenue-recognition', 'revenue', 200),
+        recognition('asset-recognition', 'asset', 300),
+        recognition('liability-recognition', 'liability', 400),
+        recognition('equity-recognition', 'equity', 500),
+      ],
+      { from: '2031-07-01', to: '2031-07-31' },
+    );
+
+    expect(result).toEqual({ normalExpense: 0, monthlyCost: 100, total: 100 });
+  });
+
+  it('revenue への認識は収入減として PL に反映する', () => {
+    const entries = [recognition('revenue-recognition', 'revenue', 200)];
+    const range = { from: '2031-07-01', to: '2031-07-31' };
+
+    expect(deriveProfitAndLoss(accounts, entries, range)).toMatchObject({
+      totalRevenue: -200,
+      totalExpense: 0,
+    });
+    expect(livingCostBreakdownForRange(accounts, entries, range).total).toBe(0);
+  });
+
+  it.each([
+    ['asset', 300],
+    ['liability', 400],
+  ] as const)('%s への認識は BS 内の振替となり純資産を変えない', (debit, amount) => {
+    const entries = [recognition(`${debit}-recognition`, debit, amount)];
+    const range = { from: '2031-07-01', to: '2031-07-31' };
+
+    expect(deriveProfitAndLoss(accounts, entries, range)).toMatchObject({
+      totalRevenue: 0,
+      totalExpense: 0,
+    });
+    expect(deriveBalanceSheet(accounts, entries, range.to).netAssets).toBe(0);
+    expect(livingCostBreakdownForRange(accounts, entries, range).total).toBe(0);
   });
 });

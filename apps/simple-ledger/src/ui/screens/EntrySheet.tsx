@@ -13,7 +13,7 @@ import { Icon } from '@snishi/foundation/ui/Icon';
 import { AccountPicker } from '../AccountPicker';
 import { TagPicker } from '../TagPicker';
 import { LiabilitySheet } from '../LiabilitySheet';
-import { groupedAccountsByRole } from '../accountOptions';
+import { groupedAccountsByRole, groupedRecognitionAccounts } from '../accountOptions';
 import { tagsForEntry } from '../tagOptions';
 import {
   FORM_MODE_TITLE,
@@ -753,7 +753,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           label={t('entry.ccCategory')}
           required
           value={ccCategoryId}
-          groups={groupedAccountsByRole(accounts, ['expense-category'], ccCategoryId)}
+          groups={groupedRecognitionAccounts(accounts, ccCategoryId)}
           onChange={setCcCategoryId}
           error={categoryError ? t('entry.error.category-required') : undefined}
           dataUi={UI.journal.entry.ccCategory}
@@ -805,7 +805,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             label={t('entry.fixedMonthlyCategory')}
             required
             value={monthlyCategoryId}
-            groups={groupedAccountsByRole(accounts, ['expense-category'], monthlyCategoryId)}
+            groups={groupedRecognitionAccounts(accounts, monthlyCategoryId)}
             onChange={setMonthlyCategoryId}
             error={categoryError ? t('entry.error.category-required') : undefined}
             dataUi={UI.journal.entry.fixedMonthlyCategory}

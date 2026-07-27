@@ -44,7 +44,7 @@ export function OpeningRegisterSheet({
   const amount = parseSignedAmountText(amountText);
 
   async function submit() {
-    if (amount === null || amount === 0 || submitting) return;
+    if (amount === null || amount === 0 || date.trim() === '' || submitting) return;
     setSubmitting(true);
     try {
       await createOpening({ accountId: account.id, amount, date });
@@ -69,7 +69,7 @@ export function OpeningRegisterSheet({
             type="button"
             className="btn btn--primary"
             onClick={submit}
-            disabled={submitting || amount === null || amount === 0}
+            disabled={submitting || amount === null || amount === 0 || date.trim() === ''}
             data-ui={UI.adjustments.openingRegisterSave}
           >
             {t('opening.registerSave')}
@@ -93,6 +93,7 @@ export function OpeningRegisterSheet({
         />
         <TextInput
           label={t('opening.date')}
+          required
           type="date"
           value={date}
           onChange={setDate}
@@ -127,7 +128,7 @@ export function OpeningEditSheet({
   const amount = parseSignedAmountText(amountText);
 
   async function submit() {
-    if (amount === null || amount === 0) return;
+    if (amount === null || amount === 0 || date.trim() === '' || submitting) return;
     setSubmitting(true);
     try {
       await updateOpening({ id: entry.id, amount, date });
@@ -151,7 +152,7 @@ export function OpeningEditSheet({
             type="button"
             className="btn btn--primary"
             onClick={submit}
-            disabled={submitting}
+            disabled={submitting || amount === null || amount === 0 || date.trim() === ''}
             data-ui={UI.adjustments.openingEditSave}
           >
             {t('opening.update')}
@@ -174,6 +175,7 @@ export function OpeningEditSheet({
         />
         <TextInput
           label={t('opening.date')}
+          required
           type="date"
           value={date}
           onChange={setDate}

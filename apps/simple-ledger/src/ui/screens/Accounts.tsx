@@ -10,15 +10,17 @@
 import { useMemo, useState } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
-import { accountBalance, accountHasEntries } from '../../domain/accounting';
+import { accountBalance, accountHasEntries, filterByDateRange } from '../../domain/accounting';
 import { referencedAccountIds } from '../../domain/accountRefs';
+import { reportEntriesForAsOf } from '../../domain/reportEntries';
+import { reportBasis } from '../../domain/reportPeriod';
 import type { Account } from '../../domain/types';
 import { groupAccountsByBox, type AccountBox } from '../accountBoxes';
 import { AccountSheet } from './AccountSheet';
 import { AdjustmentCreateSheet } from '../AdjustmentSheet';
 import { OpeningRegisterSheet } from '../OpeningSheet';
 import { Money } from '../money';
-import { nowIso } from '../../util/time';
+import { nowIso, todayLocal } from '../../util/time';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 
@@ -30,7 +32,19 @@ export function Accounts() {
   const [reordering, setReordering] = useState(false);
   const [adjustingAccount, setAdjustingAccount] = useState<Account | null>(null);
 
-  const entries = ledger?.journalEntries ?? [];
+  const today = todayLocal();
+  const basis = reportBasis({ mode: 'all' }, today);
+  const entries = useMemo(
+    () =>
+      ledger
+        ? filterByDateRange(
+            reportEntriesForAsOf(ledger, basis.asOf, today),
+            undefined,
+            basis.asOf,
+          )
+        : [],
+    [ledger, basis.asOf, today],
+  );
   const currency = ledger?.settings.currency ?? 'JPY';
 
   const usedIds = useMemo(
@@ -244,7 +258,7 @@ export function Accounts() {
       {adjustingAccount ? (
         // 履歴が全く無い科目への実残高入力は補正（差分が収入/費用扱い）ではなく
         // 初期残高（開始残高）として登録する。履歴があれば従来どおり補正。
-        accountHasEntries(ledger?.journalEntries ?? [], adjustingAccount.id) ? (
+        accountHasEntries(entries, adjustingAccount.id) ? (
           <AdjustmentCreateSheet
             account={adjustingAccount}
             onClose={() => setAdjustingAccount(null)}

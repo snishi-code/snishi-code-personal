@@ -5,14 +5,15 @@
  *  - 金額を入れて登録すると opening 仕訳が作られ、シートが閉じる。
  */
 import { describe, it, expect, afterEach, beforeAll } from 'vitest';
-import { render, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { App } from '../src/App';
 import { LedgerProvider } from '../src/state/store';
 import { clearOnboardingDone, isOnboardingDone, markOnboardingDone } from '../src/data/localFlags';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
-import { loadLedger } from '../src/data/repository';
+import { createOpening, loadLedger } from '../src/data/repository';
+import { OnboardingSheet } from '../src/ui/OnboardingSheet';
 import './setup';
 
 beforeAll(() => {
@@ -89,6 +90,33 @@ describe('初期残高の一括登録（オンボーディング）', () => {
     expect(openings.length).toBe(1);
     const amounts = openings[0]!.lines.map((l) => l.amount);
     expect(amounts).toEqual([12345, 12345]);
+  });
+
+  it('登録済み科目は再表示時に登録済みと明示され、再入力できない', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((account) => account.name === '現金')!;
+    await createOpening({ accountId: cash.id, amount: 12345, date: '2026-07-27' });
+
+    render(
+      <ToastProvider>
+        <LedgerProvider>
+          <OnboardingSheet onClose={() => undefined} />
+        </LedgerProvider>
+      </ToastProvider>,
+    );
+    await waitFor(() => {
+      expect(q('onboarding.view')).toBeInTheDocument();
+    });
+
+    expect(await screen.findByText('登録済み')).toBeInTheDocument();
+    expect(screen.queryByLabelText('現金')).not.toBeInTheDocument();
+    const after = await loadLedger();
+    expect(
+      after.journalEntries.filter(
+        (entry) =>
+          entry.kind === 'opening' && entry.lines.some((line) => line.accountId === cash.id),
+      ),
+    ).toHaveLength(1);
   });
 
   it('登録済みの台帳（pristine でない）では自動表示されない', async () => {

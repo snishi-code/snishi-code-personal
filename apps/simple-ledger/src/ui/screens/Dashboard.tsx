@@ -7,7 +7,8 @@ import type { IconName } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../../domain/accounting';
 import { livingCostBreakdownForRange } from '../../domain/livingCost';
-import { periodAsOf, periodLabel, periodRange, type ReportPeriod } from '../../domain/reportPeriod';
+import { reportBasis, periodLabel, type ReportPeriod } from '../../domain/reportPeriod';
+import { reportEntriesForAsOf } from '../../domain/reportEntries';
 import { todayLocal } from '../../util/time';
 import { buildSectionTrends } from './breakdownData';
 import { Money } from '../money';
@@ -48,20 +49,20 @@ export function Dashboard({
 }) {
   const { ledger } = useLedger();
   const today = todayLocal();
-  const range = periodRange(period);
-  const inRange = (e: JournalEntry) => !range || (e.date >= range.from && e.date <= range.to);
+  const basis = useMemo(() => reportBasis(period, today), [period, today]);
+  const range = basis.flowRange;
+  // Journal へは全期間のときクランプ済み range を渡さない（「未来も表示」トグルを殺さないため）。
+  const journalFilter = period.mode === 'all' ? {} : range;
+  const inRange = (e: JournalEntry) =>
+    (!range.from || e.date >= range.from) && e.date <= range.to;
   const periodEntries = (ledger?.journalEntries ?? []).filter(inRange).slice(0, 5);
   const label = periodLabel(period);
 
   const { pl, bs, asOf, monthlyCost, normalExpense, investmentValuation } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger?.derivedEntries ?? [];
-    const lastDataDate = (ledger?.journalEntries ?? []).reduce(
-      (m, e) => (e.date > m ? e.date : m),
-      '',
-    );
-    const asOfDate = periodAsOf(period, today, lastDataDate);
-    const within = (e: JournalEntry) => !range || (e.date >= range.from && e.date <= range.to);
+    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf, today) : [];
+    const within = (e: JournalEntry) =>
+      (!range.from || e.date >= range.from) && e.date <= range.to;
     const expenseIds = new Set(accounts.filter((a) => a.type === 'expense').map((a) => a.id));
     let investmentLoss = 0;
     let investmentGain = 0;
@@ -76,15 +77,15 @@ export function Dashboard({
     const breakdown = livingCostBreakdownForRange(accounts, entries, range);
     return {
       pl: deriveProfitAndLoss(accounts, entries, range),
-      bs: deriveBalanceSheet(accounts, entries, asOfDate),
-      asOf: asOfDate,
+      bs: deriveBalanceSheet(accounts, entries, basis.asOf),
+      asOf: basis.asOf,
       monthlyCost: breakdown.monthlyCost,
       normalExpense: breakdown.normalExpense,
       investmentValuation: { loss: investmentLoss, gain: investmentGain },
     };
-  }, [ledger, period, range, today]);
+  }, [basis.asOf, ledger, range, today]);
 
-  const trend = useMemo(() => buildSectionTrends(period, ledger), [period, ledger]);
+  const trend = useMemo(() => buildSectionTrends(period, ledger, today), [period, ledger, today]);
 
   const currency = ledger?.settings.currency ?? 'JPY';
 
@@ -204,7 +205,7 @@ export function Dashboard({
               type="button"
               className="btn btn--ghost"
               style={{ minHeight: 32 }}
-              onClick={() => onOpenJournal(range ?? {})}
+              onClick={() => onOpenJournal(journalFilter)}
               data-ui={UI.dashboard.journalOpenAll}
             >
               {t('dashboard.viewAll')}
@@ -224,7 +225,7 @@ export function Dashboard({
                   entry={entry}
                   accounts={ledger?.accounts ?? []}
                   currency={currency}
-                  onClick={() => (generated ? onOpenJournal(range ?? {}) : onEditEntry(entry))}
+                  onClick={() => (generated ? onOpenJournal(journalFilter) : onEditEntry(entry))}
                 />
               );
             })}

@@ -70,6 +70,7 @@ export const UI = {
     row: 'assetsBreakdown.row',
     total: 'assetsBreakdown.total',
     reserveSub: 'assetsBreakdown.reserveSub',
+    reserveUnassigned: 'assetsBreakdown.reserveUnassigned',
   },
   // 負債の内訳
   liabilitiesBreakdown: {
@@ -204,6 +205,7 @@ export const UI = {
     editStatus: 'allocations.edit.status',
     editSave: 'allocations.edit.save',
     editImpactWarning: 'allocations.edit.impactWarning',
+    pauseToggle: 'allocations.pauseToggle',
     dispose: 'allocations.dispose',
     disposeDialog: 'allocations.disposeDialog',
     disposeDate: 'allocations.dispose.date',
@@ -298,6 +300,7 @@ export const UI = {
     summary: 'cashflow.summary',
     addReserve: 'cashflow.reserve.create',
     reserveList: 'cashflow.reserve.list',
+    reserveUnassigned: 'cashflow.reserve.unassigned',
     reserveSave: 'cashflow.reserve.save',
     reserveName: 'cashflow.reserve.name',
   },
@@ -327,6 +330,7 @@ export const UI = {
   onboarding: {
     view: 'onboarding.view',
     amount: 'onboarding.amount',
+    registered: 'onboarding.registered',
     save: 'onboarding.save',
     skip: 'onboarding.skip',
   },

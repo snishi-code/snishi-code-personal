@@ -107,6 +107,11 @@ export interface CashflowProjection {
   schedules: CashflowSchedule[];
 }
 
+/** 同じ仮想仕訳が複数の投影経路から渡されても、未来 CF では 1 回だけ扱う。 */
+export function uniqueEntriesById(entries: JournalEntry[]): JournalEntry[] {
+  return [...new Map(entries.map((entry) => [entry.id, entry])).values()];
+}
+
 /** 月数ぶん先の期間上限（'YYYY-MM-31' の文字列比較で十分）。 */
 export function horizonEnd(today: string, months: number): string {
   return `${addMonths(monthOf(today), months)}-31`;

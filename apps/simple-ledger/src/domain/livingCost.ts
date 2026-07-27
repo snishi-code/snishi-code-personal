@@ -1,7 +1,7 @@
 /*
  * 支出（= ホームの「支出」）の集計。資産経由モデルの単一正本。
  *
- * 入力は **導出専用 entries（`Ledger.derivedEntries` = 実仕訳 + 継続コストの仮想仕訳）**。
+ * 入力は **導出専用 entries（`reportEntriesForAsOf` = 実仕訳 + 継続コスト等の仮想仕訳）**。
  * 継続コストは仮想認識 `借方 費用カテゴリ / 貸方 対象資産`(metadata.ccKind==='recognition') として
  * すでに PL の費用に含まれるため、**formula を別途足さない**（旧モデルの二重計上ハックは廃止）。
  *
@@ -11,7 +11,7 @@
  * 固定資産の購入額そのもの・返済・振替・資産化(funding)は費用ではないので含まれない。
  */
 import { deriveProfitAndLoss } from './accounting';
-import type { DateRange } from './reportPeriod';
+import type { ReportFlowRange } from './reportPeriod';
 import type { Account, JournalEntry } from './types';
 
 export interface LivingCostBreakdown {
@@ -31,36 +31,43 @@ export interface ExpenseCategoryAmount {
 
 /**
  * 期間（range が undefined のときは全期間）の支出内訳を求める。
- * entries は **derivedEntries**（実仕訳 + 継続コスト仮想仕訳）を渡すこと。
+ * entries は **導出仕訳**（`reportEntriesForAsOf` = 実仕訳 + 継続コスト仮想仕訳）を渡すこと。
  */
 export function livingCostBreakdownForRange(
   accounts: Account[],
   entries: JournalEntry[],
-  range: DateRange | undefined,
+  range: ReportFlowRange | undefined,
 ): LivingCostBreakdown {
-  const roleById = new Map(accounts.map((a) => [a.id, a.role]));
-  const within = (e: JournalEntry) => !range || (e.date >= range.from && e.date <= range.to);
+  const accountById = new Map(accounts.map((a) => [a.id, a] as const));
+  const within = (e: JournalEntry) =>
+    !range || ((!range.from || e.date >= range.from) && e.date <= range.to);
   let systemAdj = 0;
   let continuing = 0;
   for (const e of entries) {
     if (!within(e)) continue;
     const debit = e.lines.find((l) => l.side === 'debit');
     if (e.metadata?.ccKind === 'recognition') {
-      continuing += debit?.amount ?? 0;
+      // 継続コストの認識先は任意の勘定科目にできる。生活コストとして数えるのは
+      // 借方が費用のときだけで、収益減・資産/負債/純資産への振替は支出に含めない。
+      if (debit && accountById.get(debit.accountId)?.type === 'expense') {
+        continuing += debit.amount;
+      }
       continue;
     }
-    if (debit && roleById.get(debit.accountId) === 'system-adjustment') systemAdj += debit.amount;
+    if (debit && accountById.get(debit.accountId)?.role === 'system-adjustment') {
+      systemAdj += debit.amount;
+    }
   }
   const pl = deriveProfitAndLoss(accounts, entries, range);
   const normalExpense = pl.totalExpense - systemAdj - continuing;
   return { normalExpense, monthlyCost: continuing, total: normalExpense + continuing };
 }
 
-/** 支出合計（= 通常支出 + 継続コスト）。推移グラフ用。entries は derivedEntries。 */
+/** 支出合計（= 通常支出 + 継続コスト）。推移グラフ用。entries は導出仕訳。 */
 export function livingCostForRange(
   accounts: Account[],
   entries: JournalEntry[],
-  range: DateRange | undefined,
+  range: ReportFlowRange | undefined,
 ): number {
   return livingCostBreakdownForRange(accounts, entries, range).total;
 }
@@ -69,7 +76,7 @@ export function livingCostForRange(
  * 「何へ支出しているか」を費用カテゴリ別に分解する（支出の内訳ページの主表示）。
  *
  * 各カテゴリの金額は PL の費用科目残高そのもの。継続コストは仮想認識
- * （借方 費用カテゴリ）として entries（derivedEntries）に含まれるため、月割り分も
+ * （借方 費用カテゴリ）として entries（導出仕訳）に含まれるため、月割り分も
  * 自動的に選ばれた費用カテゴリへ合算される（別途 formula を足さない）。
  * 投資評価損等（system-adjustment）は支出ではないので除外する。
  *
@@ -79,7 +86,7 @@ export function livingCostForRange(
 export function expenseCategoryBreakdownForRange(
   accounts: Account[],
   entries: JournalEntry[],
-  range: DateRange | undefined,
+  range: ReportFlowRange | undefined,
 ): ExpenseCategoryAmount[] {
   const pl = deriveProfitAndLoss(accounts, entries, range);
   return pl.expenses
