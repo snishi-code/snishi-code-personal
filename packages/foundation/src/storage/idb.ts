@@ -1,4 +1,4 @@
-// 移植元: simple-ledger src/data/db.ts の汎用化(DB 名/version/upgrade をアプリ注入に変更)
+// IndexedDB の薄いラッパ。DB 名 / version / upgrade はアプリ注入で受け取る。
 
 export interface DbConfig {
   name: string;

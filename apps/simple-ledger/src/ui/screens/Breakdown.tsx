@@ -11,9 +11,10 @@ import { Fragment, useMemo } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../../domain/accounting';
-import { reserveBalances } from '../../domain/reserve';
+import { reserveBalances, unassignedReserveBalance } from '../../domain/reserve';
 import { RESERVE_LEDGER_ACCOUNT_ID } from '../../domain/constants';
-import { periodAsOf, periodLabel, periodRange, type ReportPeriod } from '../../domain/reportPeriod';
+import { periodLabel, reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
+import { reportEntriesForAsOf } from '../../domain/reportEntries';
 import { todayLocal } from '../../util/time';
 import { buildSectionTrends, type SectionTrends } from './breakdownData';
 import { Money } from '../money';
@@ -135,37 +136,52 @@ export function Breakdown({
   const { ledger } = useLedger();
   const currency = ledger?.settings.currency ?? 'JPY';
   const today = todayLocal();
-  const range = useMemo(() => periodRange(period), [period]);
-  const asOf = useMemo(() => {
-    const entries = ledger?.journalEntries ?? [];
-    const lastDataDate = entries.reduce((m, e) => (e.date > m ? e.date : m), '');
-    return periodAsOf(period, today, lastDataDate);
-  }, [ledger, period, today]);
+  const basis = useMemo(() => reportBasis(period, today), [period, today]);
+  const range = basis.flowRange;
+  const asOf = basis.asOf;
+  const reportEntries = useMemo(
+    () => (ledger ? reportEntriesForAsOf(ledger, asOf, today) : []),
+    [asOf, ledger, today],
+  );
 
   const { rows, total, retained } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger?.derivedEntries ?? [];
     if (section === 'revenue') {
-      const pl = deriveProfitAndLoss(accounts, entries, range);
+      const pl = deriveProfitAndLoss(accounts, reportEntries, range);
       return { rows: pl.revenues, total: pl.totalRevenue, retained: undefined };
     }
-    const bs = deriveBalanceSheet(accounts, entries, asOf || undefined);
+    const bs = deriveBalanceSheet(accounts, reportEntries, asOf);
     if (section === 'asset') return { rows: bs.assets, total: bs.totalAssets, retained: undefined };
     if (section === 'liability')
       return { rows: bs.liabilities, total: bs.totalLiabilities, retained: undefined };
     return { rows: bs.equity, total: bs.netAssets, retained: bs.retainedEarnings };
-  }, [ledger, section, range, asOf]);
+  }, [asOf, ledger, range, reportEntries, section]);
 
-  const trends = useMemo(() => buildSectionTrends(period, ledger), [period, ledger]);
+  const trends = useMemo(
+    () => buildSectionTrends(period, ledger, today),
+    [period, ledger, today],
+  );
   const trendData = trends ? trends[cfg.series] : null;
 
   const reserves = ledger?.reserves ?? [];
-  const reserveSub = useMemo(() => reserveBalances(ledger?.journalEntries ?? []), [ledger]);
+  const reserveSub = useMemo(
+    () => reserveBalances(reportEntries, asOf),
+    [asOf, reportEntries],
+  );
+  const reserveParentBalance =
+    section === 'asset'
+      ? (rows.find((row) => row.account.id === RESERVE_LEDGER_ACCOUNT_ID)?.balance ?? 0)
+      : 0;
+  const reserveUnassigned = unassignedReserveBalance(
+    reserveParentBalance,
+    reserves,
+    reserveSub,
+  );
 
   const drill = (accountId: string) =>
     cfg.kind === 'flow'
-      ? onDrillDown({ accountId, ...(range ?? {}) })
-      : onDrillDown({ accountId, ...(asOf ? { to: asOf } : {}) });
+      ? onDrillDown({ accountId, ...range })
+      : onDrillDown({ accountId, to: asOf });
 
   return (
     <section aria-labelledby="breakdown-title" data-ui={cfg.view}>
@@ -192,19 +208,39 @@ export function Breakdown({
             <Fragment key={b.account.id}>
               <Row b={b} currency={currency} rowUi={cfg.row} onDrill={drill} />
               {section === 'asset' && b.account.id === RESERVE_LEDGER_ACCOUNT_ID
-                ? reserves.map((r) => (
-                    <div
-                      key={r.id}
-                      className="stmt-row stmt-row--sub"
-                      style={{ paddingLeft: 'var(--space-5)' }}
-                      data-ui={UI.assetsBreakdown.reserveSub}
-                    >
-                      <span className="muted">{t('breakdown.reserveOf', { name: r.name })}</span>
-                      <span className="stmt-row__num">
-                        <Money amount={reserveSub.get(r.id) ?? 0} currency={currency} />
-                      </span>
-                    </div>
-                  ))
+                ? (
+                    <>
+                      {reserves.map((r) => (
+                        <div
+                          key={r.id}
+                          className="stmt-row stmt-row--sub"
+                          style={{ paddingLeft: 'var(--space-5)' }}
+                          data-ui={UI.assetsBreakdown.reserveSub}
+                        >
+                          <span className="muted">
+                            {t('breakdown.reserveOf', { name: r.name })}
+                          </span>
+                          <span className="stmt-row__num">
+                            <Money amount={reserveSub.get(r.id) ?? 0} currency={currency} />
+                          </span>
+                        </div>
+                      ))}
+                      {reserveUnassigned !== 0 ? (
+                        <div
+                          className="stmt-row stmt-row--sub"
+                          style={{ paddingLeft: 'var(--space-5)' }}
+                          data-ui={UI.assetsBreakdown.reserveUnassigned}
+                        >
+                          <span className="muted">
+                            {t('breakdown.reserveOf', { name: t('reserves.unassigned') })}
+                          </span>
+                          <span className="stmt-row__num">
+                            <Money amount={reserveUnassigned} currency={currency} />
+                          </span>
+                        </div>
+                      ) : null}
+                    </>
+                  )
                 : null}
             </Fragment>
           ))

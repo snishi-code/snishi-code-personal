@@ -10,7 +10,13 @@
  */
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../../domain/accounting';
 import { livingCostForRange } from '../../domain/livingCost';
-import { dataYearsOf, trendBuckets, type ReportPeriod } from '../../domain/reportPeriod';
+import {
+  dataYearsOf,
+  reportBasis,
+  trendBuckets,
+  type ReportPeriod,
+} from '../../domain/reportPeriod';
+import { reportEntriesForAsOf } from '../../domain/reportEntries';
 import type { Ledger } from '../../domain/types';
 import type { TrendPoint } from '../components/TrendChart';
 
@@ -38,12 +44,16 @@ export interface SectionTrends {
 export function buildSectionTrends(
   period: ReportPeriod,
   ledger: Ledger | null,
+  today: string,
 ): SectionTrends | null {
   if (period.mode === 'month' || !ledger) return null;
   const accounts = ledger.accounts;
-  // 集計は導出専用 entries（実仕訳 + 継続コストの仮想認識）を使う（単一正本）。
-  const entries = ledger.derivedEntries;
-  const buckets = trendBuckets(period, { dataYears: dataYearsOf(entries.map((e) => e.date)) });
+  const basis = reportBasis(period, today);
+  const basisEntries = reportEntriesForAsOf(ledger, basis.asOf, today);
+  const dataYears = dataYearsOf(
+    basisEntries.filter((entry) => entry.date <= basis.asOf).map((entry) => entry.date),
+  );
+  const buckets = trendBuckets(period, today, { dataYears });
   if (buckets.length === 0) return null;
 
   const revenue: TrendPoint[] = [];
@@ -54,6 +64,7 @@ export function buildSectionTrends(
   const netAssets: TrendPoint[] = [];
 
   for (const b of buckets) {
+    const entries = reportEntriesForAsOf(ledger, b.asOf, today);
     const pl = deriveProfitAndLoss(accounts, entries, b.range);
     const bs = deriveBalanceSheet(accounts, entries, b.asOf);
     const livingB = livingCostForRange(accounts, entries, b.range);

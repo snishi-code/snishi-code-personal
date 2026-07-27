@@ -1,37 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import './setup';
 import {
-  buildRepaymentSchedules,
   buildScheduleEntry,
   cashDeltaOfEntry,
   horizonEnd,
   inferScheduleFlow,
   liquidAssetTotal,
   projectCashflow,
+  uniqueEntriesById,
 } from '../src/domain/cashflow';
 import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
-
-describe('buildRepaymentSchedules（分割返済の予定生成）', () => {
-  it('200万円 / 60回 で 60 件、合計一致、各 daily→liability の outflow', () => {
-    const list = buildRepaymentSchedules({
-      title: '自動車ローン',
-      total: 2_000_000,
-      count: 60,
-      firstDueDate: '2031-07-10',
-      fromAccountId: 'cash',
-      liabilityAccountId: 'loan',
-      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
-    });
-    expect(list).toHaveLength(60);
-    expect(list.reduce((s, x) => s + x.amount, 0)).toBe(2_000_000);
-    expect(list.every((x) => x.direction === 'outflow')).toBe(true);
-    expect(list.every((x) => x.accountId === 'cash' && x.counterAccountId === 'loan')).toBe(true);
-    expect(list.every((x) => x.source === 'installment' && x.status === 'planned')).toBe(true);
-    expect(list[0]?.dueDate).toBe('2031-07-10');
-    expect(list[1]?.dueDate).toBe('2031-08-10');
-    expect(list[11]?.dueDate).toBe('2032-06-10');
-  });
-});
 import type { Account, AccountBalance, CashflowSchedule, JournalEntry } from '../src/domain/types';
 import type { AccountRole } from '../src/domain/accountRoles';
 
@@ -261,6 +239,28 @@ describe('cashDeltaOfEntry（未来仕訳の現金デルタ）', () => {
       ],
     });
     expect(cashDeltaOfEntry(noncash, isLiquid)).toBe(0);
+  });
+});
+
+describe('uniqueEntriesById', () => {
+  it('同じ仮想仕訳が複数経路から渡されても未来行は 1 件だけになる', () => {
+    const a = entry({
+      id: 'cc-fund-item-2026-08',
+      lines: [
+        { accountId: 'asset', side: 'debit', amount: 12000 },
+        { accountId: 'cash', side: 'credit', amount: 12000 },
+      ],
+    });
+    const b = entry({
+      id: 'repayment-1',
+      lines: [
+        { accountId: 'loan', side: 'debit', amount: 10000 },
+        { accountId: 'cash', side: 'credit', amount: 10000 },
+      ],
+    });
+    const unique = uniqueEntriesById([a, { ...a }, b]);
+    expect(unique).toHaveLength(2);
+    expect(new Set(unique.map((candidate) => candidate.id)).size).toBe(2);
   });
 });
 

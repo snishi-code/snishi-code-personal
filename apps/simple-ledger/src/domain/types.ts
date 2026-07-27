@@ -35,6 +35,16 @@ export interface Account {
   /** アーカイブ済みの科目は新規仕訳の選択肢から外すが、過去仕訳の集計には残る。 */
   archived: boolean;
   note?: string;
+  /**
+   * 返済設定（負債科目のみ: payment-liability / other-liability）。
+   * 毎月の返済元となる資金口座（role: daily-asset）。資金繰り画面の返済予定作成で既定値になる。
+   * 予定の自動生成はしない（予定 CF は明示登録・実績化のまま）。
+   */
+  repaymentAccountId?: string;
+  /** 毎月の返済日（1〜31）。31 など月に無い日はその月の月末として扱う。 */
+  repaymentDay?: number;
+  /** 箱内での表示順（並び替え機能）。未設定は名前順で末尾。 */
+  sortIndex?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -158,13 +168,21 @@ export interface EntryMetadata {
   reserveId?: string;
   /**
    * 継続コスト（資産経由モデル）の仮想仕訳の印。これらは **保存されない導出専用**で、
-   * `Ledger.derivedEntries` にのみ現れる。実仕訳(`journalEntries`)・保存系・export には入れない。
+   * `reportEntriesForAsOf` の結果にのみ現れる。実仕訳(`journalEntries`)・保存系・export には入れない。
    */
   virtual?: true;
   /** 仮想仕訳が属する MonthlyCostItem(継続コスト)の ID。 */
   continuousCostId?: string;
-  /** 仮想仕訳の種別。funding=資産化(支払元→対象資産) / recognition=認識(対象資産→費用カテゴリ)。 */
+  /** 仮想仕訳の種別。funding=資産化(支払元→対象資産) / recognition=認識(対象資産→認識先)。 */
   ccKind?: 'funding' | 'recognition';
+  /**
+   * 定期ルールから自動起票された仕訳の由来（recurringMonth とペア）。
+   * 起票後は通常の仕訳として編集・削除できる。ルール削除時はこのメタデータを剥がして
+   * 通常仕訳へ戻す（事実は消さない）。
+   */
+  recurringRuleId?: string;
+  /** どの月ぶんの起票か 'YYYY-MM'。 */
+  recurringMonth?: string;
 }
 
 /**
@@ -219,7 +237,7 @@ export interface AllocationItem {
 
 /**
  * 月額化コスト。サブスク・年払い/前払い・耐久財・定期イベントを統一して扱う。
- * 登録時に「実際の支払い仕訳」（借方 費用カテゴリ / 貸方 支払い元、metadata.monthlyCostId 付き）を
+ * 登録時に「実際の支払い仕訳」（借方 認識先 / 貸方 支払い元、metadata.monthlyCostId 付き）を
  * 作る。一方で「生活コストとしての月割り認識」は仕訳ではなく、この項目の formula
  * （amount / costMonths を端数調整）から導出する分析レイヤで、ダッシュボードの生活コストに足す
  * （実支払い仕訳は二重計上しないよう除外する）。
@@ -249,7 +267,7 @@ export interface MonthlyCostItem {
   startMonth: string;
   /** 終了月 'YYYY-MM'。継続中なら未指定。 */
   endMonth?: string;
-  /** 月額化先の費用カテゴリ（role: expense-category）。 */
+  /** 月ごとの認識先。会計 type により費用・収入減・BS 内振替として導出する。 */
   expenseAccountId: string;
   /**
    * 資産経由モデルの funding（資産化）仮想仕訳の貸方＝支払い元（role: daily-asset | payment-liability）。
@@ -260,6 +278,11 @@ export interface MonthlyCostItem {
   paymentAccountId?: string;
   /** liability 払いのとき、返済 CF を作るための支払い口座（role: daily-asset）。 */
   repaymentAccountId?: string;
+  /**
+   * 処分（売却・解約）時の売却額（最終サイクル額まで）。実績動的償却では損益を一括計上せず、
+   * 最終サイクルの配分総額からこの額を控除する（超過分だけ売却益の実仕訳）。処分時に設定。
+   */
+  disposalProceedsAmount?: number;
   /** 既存 AllocationItem 由来なら紐づける。 */
   sourceAllocationId?: string;
   /** この月額化のもとになった実仕訳（固定資産購入など）。Journal 仮想行の由来表示に使う。 */
@@ -295,6 +318,38 @@ export interface AssetDisposal {
   remainingAmount: number;
   /** この処分で生成した仕訳の ID 群（監査・追跡用）。 */
   generatedEntryIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 定期ルール（毎月の支出・収入・振替）。
+ * 「実仕訳の自動起票」方式: ルールは起票の道具で、正本は起票された実仕訳
+ * （金額が揺れる月は起票後にその月の仕訳を編集する）。展開は domain/recurring.ts。
+ * 継続コスト（費用の月割り認識 = 導出）とは別概念（こちらは実際の資金移動）。
+ */
+export interface RecurringRule {
+  id: string;
+  /** 摘要（起票される仕訳の description）。 */
+  name: string;
+  /** 毎月の既定額（正の整数）。 */
+  amount: number;
+  /** 毎月の日（1〜31。月に無い日は月末）。 */
+  dayOfMonth: number;
+  /** 行き先（費用カテゴリ / 資金 / 投資）。 */
+  debitAccountId: string;
+  /** 源泉（資金 / カード / 収入カテゴリ）。 */
+  creditAccountId: string;
+  /** 起票開始月 'YYYY-MM'。再開時は現在月へ更新される（停止中の月を遡って起票しない）。 */
+  startMonth: string;
+  /**
+   * 起票済みカーソル（この月まで処理済み）。キャッチアップが管理する。
+   * 起票済み仕訳をユーザーが削除しても再起票しない（スキップの尊重）。
+   */
+  postedThroughMonth?: string;
+  /** 停止中は起票しない。 */
+  paused?: boolean;
+  managementScopeId: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -423,6 +478,8 @@ export interface LedgerExportPackage {
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   assetDisposals: AssetDisposal[];
+  /** 定期ルール。交換 JSON では必須（旧形式はリポジトリ外で一度だけ変換する）。 */
+  recurringRules: RecurringRule[];
   settings: Settings;
 }
 
@@ -472,15 +529,11 @@ export interface Ledger {
   accounts: Account[];
   /** 実仕訳（保存される正本）。保存系・export・残高チェックはこれだけを見る。 */
   journalEntries: JournalEntry[];
-  /**
-   * 導出専用の仕訳列 = 実仕訳 + 継続コストの仮想仕訳（funding/recognition）。
-   * PL/BS/支出/推移/Journal 表示など**集計はこれを使う**（単一正本）。保存されない。
-   */
-  derivedEntries: JournalEntry[];
   allocations: AllocationItem[];
   cashflowSchedules: CashflowSchedule[];
   reserves: ReserveItem[];
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   assetDisposals: AssetDisposal[];
+  recurringRules: RecurringRule[];
 }

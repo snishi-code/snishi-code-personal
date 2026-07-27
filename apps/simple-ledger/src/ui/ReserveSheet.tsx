@@ -2,8 +2,8 @@
  * 取り置き資金（取り置き枠）の追加シート。foundation の Modal/Field/useDirtyGuard を使用。
  */
 import { useState } from 'react';
-import { Modal } from '@snishi/foundation/ui/Modal';
-import { useDirtyGuard } from '@snishi/foundation/ui/useDirtyGuard';
+import { Modal } from './overlays';
+import { useDirtyGuard } from './overlays';
 import { TextArea, TextInput } from '@snishi/foundation/ui/Field';
 import { t } from '../i18n';
 import { UI } from '../ui-contract';

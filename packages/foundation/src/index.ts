@@ -16,4 +16,9 @@
 //   i18n/createI18n    型安全 key→文言
 //   eventlog/*         createEventLog — PII ゼロ前提の端末内イベントログ
 //   pwa/*              凍結 SW テンプレート / 登録のみの useServiceWorker / getEnv
+//   build/viteTarget   createSnishiTargetViteConfig — PWA/Desktop の Vite build 分岐
+//                      (app の vite.config.ts から呼ぶ。Node 専用・実行時バンドルには含めない)
+//   sync/revision      nextGroupRevision / shouldApplyRevision — 端末間 LWW の HLC-lite プリミティブ
+//   format/timestamp   fmtTimestamp — YYYY-MM-DD HH:MM 表示
+//   testing/boundaryScan scanBoundary — 静的境界ガードのスキャナ (テスト専用・Node 専用)
 export const FOUNDATION_VERSION = '0.1.0';

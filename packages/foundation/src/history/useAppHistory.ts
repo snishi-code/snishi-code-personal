@@ -1,4 +1,4 @@
-// 移植元: snishi-code-medical/hospital-rounds/src/features/app-history.js (createAppHistory の React アダプタ)
+// createAppHistory の React アダプタ。
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createAppHistory, type AppHistory } from './appHistory';
 
@@ -9,6 +9,8 @@ export interface UseAppHistoryOptions {
   exitEdit?: () => void;
   showExitConfirm?: () => void;
   isExitConfirmOpen?: () => boolean;
+  /** opt-in: overlay/編集で拾われなかった Back を消費する (createAppHistory の ⑤ へ渡す)。 */
+  consumeUnhandledBack?: () => boolean;
 }
 
 export interface UseAppHistoryResult {
@@ -41,6 +43,7 @@ export function useAppHistory(opts: UseAppHistoryOptions): UseAppHistoryResult {
       exitEdit: () => optsRef.current.exitEdit?.(),
       showExitConfirm: () => optsRef.current.showExitConfirm?.(),
       isExitConfirmOpen: () => optsRef.current.isExitConfirmOpen?.() ?? false,
+      consumeUnhandledBack: () => optsRef.current.consumeUnhandledBack?.() ?? false,
     });
     h.init();
     historyRef.current = h;

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createSnapshotStore,
@@ -240,5 +241,73 @@ describe('snapshot/snapshots', () => {
     expect(res).toEqual({ ok: true, count: 1 });
     expect(tombstones.get(`snapshot_purge_pending:${dbName}`)).toBeNull();
     expect(await store.list('s1')).toEqual([]);
+  });
+
+  it('owner: ownerOf 注入時は capture と restore undo に ownerId が記録される', async () => {
+    let user = 'u1';
+    const { store, advance } = setup({ ownerOf: () => user });
+    await store.capture('clear', 's1', { items: ['a'] });
+    expect((await store.list('s1'))[0]?.ownerId).toBe('u1');
+
+    // 復元 undo も「その時の作業ユーザー」が owner になる (undo も現ユーザーの PII)。
+    advance(1000);
+    user = 'u2';
+    const id = (await store.list('s1'))[0]?.id;
+    await store.restore(id!, { items: ['current'] }, async () => {});
+    const undo = (await store.list('s1')).find((p) => p.reason === DEFAULT_RESTORE_UNDO_REASON);
+    expect(undo?.ownerId).toBe('u2');
+  });
+
+  it('purgeForOwner: 対象 owner のみ scope 横断で消え、他 owner と owner 無し旧レコードは残る', async () => {
+    let user: string | null = 'u1';
+    const { store, advance } = setup({ ownerOf: () => user });
+    await store.capture('clear', 's1', { items: ['a'] }); // u1 所有 (s1)
+    advance(1000);
+    await store.capture('nav', 's2', { items: ['b'] }); // u1 所有 (s2・scope 横断の確認)
+    advance(1000);
+    user = 'u2';
+    await store.capture('nav', 's1', { items: ['c'] }); // u2 所有 (同 scope の他ユーザー)
+    advance(1000);
+    user = null;
+    await store.capture('manual', 's1', { items: ['d'] }); // owner なし (ownerOf 導入前の旧レコード相当)
+
+    expect(await store.purgeForOwner('')).toEqual({ ok: true, count: 0 }); // 空 id は no-op
+    const res = await store.purgeForOwner('u1');
+    expect(res).toEqual({ ok: true, count: 2 });
+    const s1 = await store.list('s1');
+    expect(s1.map((p) => p.ownerId)).toEqual([undefined, 'u2']); // 新しい順: owner なし → u2
+    expect(await store.list('s2')).toEqual([]);
+  });
+
+  it('purgeForOwner: 削除失敗で owner tombstone が残り、init 再実行で回収される', async () => {
+    let user = 'u1';
+    const { store, tombstones, dbName, advance } = setup({ ownerOf: () => user });
+    const ownerKey = `snapshot_purge_pending_owner:${dbName}`;
+    await store.capture('clear', 's1', { items: ['a'] });
+    advance(1000);
+    user = 'u2';
+    await store.capture('nav', 's1', { items: ['b'] });
+
+    const spy = vi.spyOn(IDBObjectStore.prototype, 'delete').mockImplementation(() => {
+      throw new Error('delete blocked');
+    });
+    let res;
+    try {
+      res = await store.purgeForOwner('u1');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('delete');
+    // 失敗中は owner tombstone が残る (= 完了扱いにしない)
+    expect(tombstones.get(ownerKey)).toContain('u1');
+    expect(await store.list('s1')).toHaveLength(2);
+
+    // init の再試行で u1 分だけ回収され、tombstone も除去される (u2 は残る)
+    await store.init();
+    expect(tombstones.get(ownerKey)).toBeNull();
+    const rest = await store.list('s1');
+    expect(rest).toHaveLength(1);
+    expect(rest[0]?.ownerId).toBe('u2');
   });
 });

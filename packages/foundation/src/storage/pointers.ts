@@ -1,4 +1,4 @@
-// 移植元: hospital-rounds src/storage.js の localStorage ポインタ群の汎用化(prefix 名前空間化)
+// localStorage 上のポインタ群を prefix で名前空間化して扱う薄いストア。
 
 export interface PointerStore {
   get(key: string): string | null;

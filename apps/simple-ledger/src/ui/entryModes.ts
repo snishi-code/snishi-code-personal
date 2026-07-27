@@ -1,5 +1,5 @@
 /*
- * 入力モード → フィールド役割の対応（v1 から移植）。
+ * 入力モード → フィールド役割の対応。
  */
 import { ACCOUNT_ROLES, type AccountRole } from '../domain/accountRoles';
 import type { MessageKey } from '../i18n';

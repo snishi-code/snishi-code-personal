@@ -9,38 +9,49 @@ import {
   expenseCategoryBreakdownForRange,
   livingCostBreakdownForRange,
 } from '../../domain/livingCost';
-import { periodLabel, periodRange, type ReportPeriod } from '../../domain/reportPeriod';
+import { periodLabel, reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
+import { reportEntriesForAsOf } from '../../domain/reportEntries';
+import { todayLocal } from '../../util/time';
 import { buildSectionTrends } from './breakdownData';
 import { Money } from '../money';
 import { TrendChart } from '../components/TrendChart';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import type { Screen } from '../navigation';
+import type { JournalFilter } from './Journal';
 
 export function ExpenseBreakdown({
   period,
   onPeriodChange,
+  onDrillDown,
   onNavigate,
 }: {
   period: ReportPeriod;
   onPeriodChange: (p: ReportPeriod) => void;
+  /** 費用カテゴリ行タップ → 仕訳一覧をそのカテゴリで絞り込んで開く。 */
+  onDrillDown: (filter: JournalFilter) => void;
   onNavigate: (screen: Screen) => void;
 }) {
   const { ledger } = useLedger();
   const currency = ledger?.settings.currency ?? 'JPY';
   const label = periodLabel(period);
+  const today = todayLocal();
+  const basis = useMemo(() => reportBasis(period, today), [period, today]);
+  const range = basis.flowRange;
 
   const { breakdown, categories } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger?.derivedEntries ?? [];
-    const range = periodRange(period);
+    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf, today) : [];
     return {
       breakdown: livingCostBreakdownForRange(accounts, entries, range),
       categories: expenseCategoryBreakdownForRange(accounts, entries, range),
     };
-  }, [ledger, period]);
+  }, [basis.asOf, ledger, range, today]);
 
-  const trends = useMemo(() => buildSectionTrends(period, ledger), [period, ledger]);
+  const trends = useMemo(
+    () => buildSectionTrends(period, ledger, today),
+    [period, ledger, today],
+  );
 
   return (
     <section aria-labelledby="expense-breakdown-title" data-ui={UI.expenseBreakdown.view}>
@@ -60,12 +71,22 @@ export function ExpenseBreakdown({
           <div className="stmt-row muted">{t('expenseBreakdown.noCategory')}</div>
         ) : (
           categories.map((c) => (
-            <div key={c.account.id} className="stmt-row" data-ui={UI.expenseBreakdown.categoryRow}>
-              <span>{c.account.name}</span>
+            <button
+              key={c.account.id}
+              type="button"
+              className="stmt-row stmt-row--btn"
+              style={{ width: '100%', background: 'transparent', border: 'none' }}
+              onClick={() => onDrillDown({ accountId: c.account.id, ...range })}
+              aria-label={t('expenseBreakdown.drillDown', { name: c.account.name })}
+              data-ui={UI.expenseBreakdown.categoryRow}
+            >
+              <span>
+                {c.account.name} <Icon name="chevronRight" size={12} />
+              </span>
               <span className="stmt-row__num">
                 <Money amount={c.amount} currency={currency} />
               </span>
-            </div>
+            </button>
           ))
         )}
         <div className="stmt-row stmt-row--total">

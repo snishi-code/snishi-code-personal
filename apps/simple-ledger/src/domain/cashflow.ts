@@ -9,7 +9,7 @@
 import { newId } from './ids';
 import { nowIso } from '../util/time';
 import { LedgerError } from './errors';
-import { addMonths, addMonthsToDate, monthOf, monthlyAmounts } from './allocation';
+import { addMonths, monthOf } from './allocation';
 import type {
   Account,
   AccountBalance,
@@ -17,46 +17,6 @@ import type {
   CashflowSchedule,
   JournalEntry,
 } from './types';
-
-/**
- * 返済予定（分割）を生成する。返済元 daily-asset → 負債（counter）への outflow を回数分。
- * 金額は monthlyAmounts で配分し、合計が total に一致する。初回返済日から毎月 1 件。
- * 借入実行（負債→資金）の振替と一緒に登録するのが主用途。
- *
- * 現状は **元本のみ** の単純配分（利息は考慮しない）。将来的に利息概念を入れる余地を残す:
- *  - `total` を「総返済額（元本+利息）」とし、利息分を利息費用科目へ振り替える実績化に拡張する、
- *    もしくは params に `interestAccountId` / `principalTotal` を足して各回を
- *    `元本→負債 + 利息→費用` の複数行で表現する想定。今は呼び出し側が元本=total を渡す。
- */
-export function buildRepaymentSchedules(params: {
-  title: string;
-  total: number;
-  count: number;
-  firstDueDate: string;
-  /** 返済元（現金が出ていく daily-asset）。 */
-  fromAccountId: string;
-  /** 返済先の負債科目（counterAccountId）。 */
-  liabilityAccountId: string;
-  /** どの管理区分の予定か。 */
-  managementScopeId: string;
-}): CashflowSchedule[] {
-  const ts = nowIso();
-  const parts = monthlyAmounts(params.total, params.count);
-  return Array.from({ length: params.count }, (_, i) => ({
-    id: newId(),
-    title: `${params.title} 返済 ${i + 1}/${params.count}`,
-    dueDate: addMonthsToDate(params.firstDueDate, i),
-    amount: parts[i] ?? 0,
-    direction: 'outflow' as const,
-    accountId: params.fromAccountId,
-    counterAccountId: params.liabilityAccountId,
-    source: 'installment' as const,
-    status: 'planned' as const,
-    managementScopeId: params.managementScopeId,
-    createdAt: ts,
-    updatedAt: ts,
-  }));
-}
 
 /**
  * 予定 CF の「源泉 → 行き先」(A → B) から、保存する {現金が動く口座 accountId / 相手 counter /
@@ -147,9 +107,30 @@ export interface CashflowProjection {
   schedules: CashflowSchedule[];
 }
 
+/** 同じ仮想仕訳が複数の投影経路から渡されても、未来 CF では 1 回だけ扱う。 */
+export function uniqueEntriesById(entries: JournalEntry[]): JournalEntry[] {
+  return [...new Map(entries.map((entry) => [entry.id, entry])).values()];
+}
+
 /** 月数ぶん先の期間上限（'YYYY-MM-31' の文字列比較で十分）。 */
 export function horizonEnd(today: string, months: number): string {
   return `${addMonths(monthOf(today), months)}-31`;
+}
+
+/**
+ * 「毎月 day 日」の次回返済日（today より後の最初の該当日）。
+ * 31 など月に無い日はその月の月末へ丸める（勘定科目の repaymentDay と同じ約束）。
+ */
+export function nextRepaymentDate(today: string, day: number): string {
+  const clampToMonth = (ym: string): string => {
+    const [y, m] = ym.split('-');
+    const lastDay = new Date(Number.parseInt(y ?? '0', 10), Number.parseInt(m ?? '0', 10), 0)
+      .getDate();
+    return `${ym}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
+  };
+  const inThisMonth = clampToMonth(monthOf(today));
+  if (inThisMonth > today) return inThisMonth;
+  return clampToMonth(addMonths(monthOf(today), 1));
 }
 
 /**

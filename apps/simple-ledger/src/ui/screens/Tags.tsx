@@ -2,15 +2,16 @@
  * タグ画面。タグの作成/編集/アーカイブ/削除と、期間内の簡易集計。
  */
 import { useMemo, useState } from 'react';
-import { Modal } from '@snishi/foundation/ui/Modal';
-import { useDirtyGuard } from '@snishi/foundation/ui/useDirtyGuard';
+import { Modal } from '../overlays';
+import { useDirtyGuard } from '../overlays';
 import { TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
-import { ConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
+import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import { aggregateEntryTags } from '../../domain/tags';
-import { monthRange } from '../../domain/accounting';
-import { currentYearMonth, nowIso } from '../../util/time';
+import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
+import { reportEntriesForAsOf } from '../../domain/reportEntries';
+import { nowIso, todayLocal } from '../../util/time';
 import { newId } from '../../domain/ids';
 import type { Tag } from '../../domain/types';
 import { Money } from '../money';
@@ -31,20 +32,25 @@ export function Tags() {
   const tags = ledger?.tags ?? [];
   const visible = tags.filter((tg) => showArchived || !tg.archived);
 
-  const { year, month } = currentYearMonth();
-  const range = useMemo(() => {
-    if (period === 'all') return undefined;
-    if (period === 'year') return { from: `${year}-01-01`, to: `${year}-12-31` };
-    return monthRange(year, month);
-  }, [period, year, month]);
+  const today = todayLocal();
+  const year = Number.parseInt(today.slice(0, 4), 10);
+  const month = Number.parseInt(today.slice(5, 7), 10);
+  const basis = useMemo(() => {
+    const reportPeriod: ReportPeriod =
+      period === 'all'
+        ? { mode: 'all' }
+        : period === 'year'
+          ? { mode: 'year', year }
+          : { mode: 'month', year, month };
+    return reportBasis(reportPeriod, today);
+  }, [month, period, today, year]);
 
-  const entryTotals = useMemo(
-    () =>
-      aggregateEntryTags(ledger?.journalEntries ?? [], ledger?.tags ?? [], range).filter(
-        (x) => x.count > 0,
-      ),
-    [ledger, range],
-  );
+  const entryTotals = useMemo(() => {
+    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf, today) : [];
+    return aggregateEntryTags(entries, ledger?.tags ?? [], basis.flowRange).filter(
+      (x) => x.count > 0,
+    );
+  }, [basis, ledger, today]);
 
   async function toggleArchive(tag: Tag) {
     await saveTag({ ...tag, archived: !tag.archived, updatedAt: nowIso() }).catch(() => undefined);

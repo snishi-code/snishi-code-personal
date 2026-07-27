@@ -82,7 +82,7 @@ describe('Settings スモーク', () => {
   it('data-ui=settings があり、エクスポートボタンが表示される', async () => {
     render(
       <Providers>
-        <Settings onNavigate={() => undefined} />
+        <Settings onNavigate={() => undefined} onOpenOnboarding={() => undefined} />
       </Providers>,
     );
     await waitFor(() => {

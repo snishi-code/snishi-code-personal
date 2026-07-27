@@ -35,6 +35,8 @@ export const CONCEPT = {
   settings: 'gear', // 設定
   help: 'help', // ヘルプ
   tag: 'tag', // タグ
+  favorite: 'star', // お気に入り (アウトライン = 未選択)
+  favoriteFilled: 'starFilled', // お気に入り (塗り = 選択中)
   expand: 'chevronDown', // 展開 / シェブロン下
   // ledger 由来の追加概念
   alert: 'alert', // 警告 / エラー

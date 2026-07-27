@@ -12,7 +12,7 @@ export const ja = {
   'nav.journal': '仕訳',
   'nav.statements': '財務諸表',
   'nav.accounts': '勘定科目',
-  'nav.allocations': '継続コスト',
+  'nav.allocations': '毎月のもの',
   'nav.cashflow': '資金繰り',
   'nav.tags': 'タグ',
   'nav.wallets': '管理区分・支払い手段',
@@ -70,7 +70,7 @@ export const ja = {
   'dashboard.noMonthEntries': '仕訳はまだありません。',
   'dashboard.entriesOf': '仕訳',
   'dashboard.flowOf': '収支',
-  'dashboard.positionAsOf': '財務',
+  'dashboard.positionAsOf': '財政状態（{date} 時点）',
   // 支出の内訳（ホーム「支出」のタップ先）
   'expenseBreakdown.title': '支出の内訳',
   'expenseBreakdown.intro':
@@ -105,7 +105,6 @@ export const ja = {
   'allocations.monthly': '月額目安',
   'allocations.remainingMonths': '残り {count} か月',
   'allocations.unrecognized': '未消化残高',
-  'allocations.expenseCategory': '分類先カテゴリ',
   'allocations.payment': '支払い元',
   'allocations.monthsUnit': '{count} か月',
   'allocations.statusActive': '継続中',
@@ -128,7 +127,7 @@ export const ja = {
   'monthlyCost.repeat': '更新周期',
   'monthlyCost.repeatUnit': '{count} か月ごと',
   'monthlyCost.thisMonth': '今月の計上額',
-  'monthlyCost.expenseCategory': '分類先カテゴリ',
+  'monthlyCost.expenseCategory': '認識先',
   'monthlyCost.payment': '支払い元',
   'monthlyCost.pause': '一時停止',
   'monthlyCost.resume': '再開',
@@ -147,10 +146,10 @@ export const ja = {
   'monthlyCost.paymentLocked': '支払い元・返済口座は変更できません（会計事実を保つため）。',
   // 過去から再計算される項目を変えたときの注意（不具合ではなく仕様）。
   'monthlyCost.pastRecalcWarning':
-    '総額・開始月・月数・更新周期・終了月・分類先カテゴリを変えると、過去の支出・収支・BS・未消化残高もさかのぼって再計算されます。',
+    '総額・開始月・月数・更新周期・終了月・認識先を変えると、過去の支出・収支・BS・未消化残高もさかのぼって再計算されます。',
   'monthlyCost.deleteConfirmTitle': '継続コストを削除しますか？',
   'monthlyCost.deleteConfirmBody':
-    '「{name}」を削除します。関連する継続コストの支払い仕訳と未実績の返済予定も削除されます。',
+    '「{name}」を削除します。関連する継続コストの支払い仕訳と未実績の返済予定も削除されます。登録済みの返済仕訳（未来日付の振替）は残ります（仕訳一覧から編集・削除できます）。',
   'monthlyCost.recurringBadge': '継続購入',
   'monthlyCost.oneTimeBadge': '償却のみ',
   'monthlyCost.kind.subscription': 'サブスク（月課金）',
@@ -168,7 +167,7 @@ export const ja = {
     '売却または故障・廃棄で、この継続コスト資産を終了します。未消化の残りを売却損益として精算し、資産の残高を消し込みます。',
   'disposal.ccTitle': '継続コストを終了（売却・解約）',
   'disposal.ccIntro':
-    '売却・解約・返金なし終了で、この継続コストを終了します。未消化の残りは売却損として精算し、継続コスト台帳の残高を消し込みます。解約・返金なしの終了は、売却額 0 円のまま実行してください。',
+    '売却・解約・故障で、この継続コストを終了します。損益は一括計上せず、実際に使った月数で月あたりコストを再計算して台帳の残高を消し込みます。解約・返金なしの終了は、売却額 0 円のまま実行してください。',
   'disposal.date': '処分日',
   'disposal.proceeds': '売却額（故障・廃棄は 0）',
   'disposal.destination': '入金先',
@@ -187,7 +186,7 @@ export const ja = {
 
   'cashflow.title': '資金繰り',
   'cashflow.intro':
-    '将来の入出金予定から、自由資金の推移を見ます。予定は「実績化」すると仕訳になります。',
+    '未来日付の仕訳から、自由資金の推移を見ます。カード・ローンは行をタップすると返済計画を登録できます。',
   'cashflow.liquidNote':
     '総資金は現金・預金・取り置きなどの流動資金です（投資・固定資産・継続コストの未消化分は含めません）。',
   'cashflow.until': '表示終了日',
@@ -198,8 +197,6 @@ export const ja = {
   'cashflow.minFree': '期間内の最低自由資金',
   'cashflow.depleteWarning': 'この期間に自由資金がマイナスになる予定があります。',
   'cashflow.planned': '今後の支払い予定',
-  'cashflow.emptyPlanned':
-    '分割・定期の返済予定はありません。ホームの支出・振替（借入の分割返済）から自動で作られます。',
   'cashflow.liabilitiesTitle': '負債・分割払い',
   'cashflow.nextDue': '次回支払日',
   'cashflow.installmentsLeft': '残り {count} 回',
@@ -221,7 +218,7 @@ export const ja = {
   'cashflow.futureFromHome': 'ホームから未来日付で登録',
   'cashflow.scheduleSecondaryTitle': '分割・定期の返済予定',
   'cashflow.scheduleSecondaryHint':
-    '継続コストの負債払いや、借入（振替）の分割返済から自動で作られる予定です（読み取り専用）。',
+    '以前のバージョンで作られた返済予定です。新しくは作られません（返済は未来日付の振替仕訳として登録されます）。実績化または削除で整理できます。',
   'cashflow.advancedTitle': '取り置き資金',
   'cashflow.advancedHint':
     '近い支払い予定に備えて、預金から自由資金を取り分けます（CF の主役ではなく補助情報）。',
@@ -261,6 +258,7 @@ export const ja = {
   'reserves.namePlaceholder': '例: 飲み会用 / 秋旅行',
   'reserves.note': 'メモ',
   'reserves.balance': '現在残高',
+  'reserves.unassigned': '未割り当て',
   'reserves.delete': '削除',
   'reserves.form.title': '取り置き資金',
   'reserves.error.name': '名称を入力してください。',
@@ -478,9 +476,9 @@ export const ja = {
   'entry.ccTargetName': '継続コスト対象の名前',
   'entry.ccTargetNameHint':
     '継続コスト台帳に登録する項目名です（例: 自動車 / 洗濯機 / 家賃）。勘定科目は増えません。',
-  'entry.ccCategory': '分類先カテゴリ（費用）',
+  'entry.ccCategory': '認識先',
   'entry.ccNote':
-    '支払い元 → 継続コスト台帳（資産）に計上し、選んだ月数で費用カテゴリへ分類します。台帳項目として記録され、勘定科目は増えません。',
+    '支払い元 → 継続コスト台帳（資産）に計上し、選んだ月数で認識先へ振り替えます。台帳項目として記録され、勘定科目は増えません。',
   'entry.error.loanNotExpense':
     'ローン（その他負債）は通常の支出の支払い元にできません。継続コスト化するか、借入として振替で実行してください。',
   // 返済を資金繰りに入れるトグル ON 時の必須検証（口座・回数が無いと CF が作られないため fail closed）。
@@ -499,7 +497,7 @@ export const ja = {
   'entry.allocateMonths': '継続する月数',
   'entry.allocateMonthsHint': '2 か月以上。総額を月割りして毎月の費用に計上します。',
   'entry.allocateNote':
-    '購入時は「継続コストの未消化分」に計上し、毎月この費用カテゴリへ振り替えます。月次の計上仕訳は自動生成され、継続コスト台帳で管理します。',
+    '購入時は「継続コストの未消化分」に計上し、毎月この認識先へ振り替えます。月次の計上仕訳は自動生成され、継続コスト台帳で管理します。',
   'entry.error.months-invalid': '月数は 1 以上の整数で入力してください。',
   // 継続コスト
   'entry.monthlyizeToggle': 'この支出を継続コスト化する（支出として見る）',
@@ -507,7 +505,8 @@ export const ja = {
   'entry.monthlyizeMonthsHint': 'サブスクは 1。年払いは 12、耐久財は使う年数×12 など。',
   'entry.monthlyizeContinue': '継続・買い替えする',
   'entry.monthlyizeRepayToggle': '分割・後日引落を資金繰りに入れる',
-  'entry.monthlyizeRepayNote': '支払い元が負債のため、返済予定（資金繰り）を作成できます。',
+  'entry.monthlyizeRepayNote':
+    '支払い元が負債のため、返済を未来日付の振替仕訳としてまとめて登録できます（仕訳一覧・資金繰りに反映）。',
   'entry.monthlyizeRepayAccount': '引落口座',
   'entry.monthlyizeRepayCount': '返済回数',
   'entry.monthlyizeRepayStart': '初回引落日',
@@ -522,8 +521,8 @@ export const ja = {
   'entry.fixedMonthlyToggle': 'この購入を継続コスト化する（支出として見る）',
   'entry.fixedMonthlyNote':
     '購入額を何か月分の支出として見るかを決めます（購入そのものは費用にしません）。',
-  'entry.fixedMonthlyCategory': '継続コストの計上先カテゴリ',
-  'entry.error.category-required': '費用カテゴリを選んでください。',
+  'entry.fixedMonthlyCategory': '認識先',
+  'entry.error.category-required': '認識先を選んでください。',
   'entry.monthlyizeNote':
     '実際の支払いは仕訳に残し、支出は月あたりで見ます（月割りで導出・二重計上しません）。負債払いで返済を入力すると、返済予定（資金繰り）も作ります。',
   // 取り置き資金は両辺で常時選択できる（チェックボックス廃止）。新規作成は振替の移動先（右辺）の
@@ -750,6 +749,7 @@ export const ja = {
   'error.entry.scheduleLinked':
     '実績化済みの予定に紐づく仕訳は編集・削除できません。資金繰りの予定から操作してください。',
   'error.entry.adjustment': '残高補正の仕訳は、仕訳一覧の補正行から編集・削除してください。',
+  'error.entry.virtual': '導出専用の仮想仕訳は保存できません。',
   'error.entry.invalidStructure': '仕訳の形式が正しくないため保存できません。',
   'error.entry.unknownAccount': '仕訳が存在しない勘定科目を参照しています。',
   'error.entry.accountRoleMismatch': '仕訳の勘定科目の役割と区分が一致していません。',
@@ -798,13 +798,15 @@ export const ja = {
   'error.monthlyCost.repeatInvalid': '更新周期は月数以上である必要があります。',
   'error.monthlyCost.dateRequired': '購入日を入力してください。',
   'error.monthlyCost.startMonthInvalid': '開始月は YYYY-MM 形式で入力してください。',
-  'error.monthlyCost.expenseCategory': '費用カテゴリ（支出カテゴリの科目）を選んでください。',
+  'error.monthlyCost.expenseCategory': '認識先の勘定科目を選んでください。',
   'error.monthlyCost.paymentSource':
     '支払い元は資金（現金・預金）かカード・ローンを選んでください。',
   'error.monthlyCost.repaymentAccount': '返済口座は日常資産を選んでください。',
   'error.monthlyCost.notFound': '対象の継続コストが見つかりません。',
   'error.monthlyCost.invalidStructure': '継続コストの内容が不正です。',
   'error.monthlyCost.endBeforeStart': '終了月は開始月以降にしてください。',
+  'error.monthlyCost.endMonthRequired': '停止中・終了済みの項目には終了月が必要です。',
+  'error.monthlyCost.disposedLocked': '処分済みの継続コストは名称以外変更できません。',
   'error.monthlyCost.editAmountLinked': '固定資産由来の継続コストは総額を変更できません。',
   'error.monthlyCost.editAmountPosted':
     '返済が実績化済みのため総額を変更できません。終了して新規に作成してください。',
@@ -818,13 +820,194 @@ export const ja = {
   'error.disposal.notContinuousCost': 'この項目は継続コスト資産ではないため売却できません。',
   'error.disposal.alreadyEnded': 'この継続コストはすでに終了しています。',
   'error.disposal.duplicate': 'この固定資産はすでに処分済みです。',
+  'error.disposal.beforeStart': '処分日は開始月以降にしてください。',
+  'error.disposal.conflict':
+    '処分の途中で項目が更新されました。内容を確認してからやり直してください。',
   'error.disposal.destinationRequired': '売却額があるときは入金先を選んでください。',
   'error.disposal.destinationInvalid': '入金先は資金口座または取り置き資金を選んでください。',
   'error.disposal.insufficientAsset': '固定資産の残高が不足しているため処分できません。',
   'error.disposal.lossCategoryMissing': '売却損の計上先（その他支出）が見つかりません。',
   'error.disposal.gainCategoryMissing': '売却益の計上先（その他収入）が見つかりません。',
-  'error.fixedAsset.expenseCategory': '継続コストの計上先の費用カテゴリを選んでください。',
+  'error.fixedAsset.expenseCategory': '継続コストの認識先を選んでください。',
   'error.fixedAsset.invalidAccount': '固定資産の科目が不正です。',
+
+  // 戻る操作（dirty guard・終了確認）
+  'guard.discardTitle': '変更を破棄しますか？',
+  'guard.discardBody': '入力した内容は保存されません。',
+  'guard.discardConfirm': '破棄する',
+  'guard.discardCancel': '編集を続ける',
+  'exit.confirmTitle': 'アプリを終了しますか？',
+  'exit.confirmBody': 'データは端末内に保存されています。次回も続きから使えます。',
+  'exit.confirmLabel': '終了する',
+
+  // 符号付き金額入力（マイナス残高の初期残高・補正の実残高）
+  'common.signedAmountHint': 'マイナスは先頭に -（例: -3000）。立替金が相手側に振れている場合などに。',
+
+  // 支出内訳 → 仕訳一覧ドリルダウン
+  'expenseBreakdown.drillDown': '{name} の仕訳を見る',
+
+  // 勘定科目の並び替え（箱内・上下ボタン式）
+  'accounts.reorder': '並び替え',
+  'accounts.reorderDone': '並び替えを終了',
+  'accounts.moveUp': '上へ',
+  'accounts.moveDown': '下へ',
+
+  // 継続コストの自動終了（自動更新なし・認識完了 = 残価 0）
+  'monthlyCost.finishedBadge': '終了（残価0）',
+
+  // 履歴の無い既存科目への初期残高登録（勘定科目画面の補正導線から自動分岐）
+  'opening.registerTitle': '初期残高を登録（{name}）',
+  'opening.registerIntro':
+    'この科目にはまだ記録がありません。いまの実残高は補正（差額が収入/支出扱い）ではなく、初期残高（開始残高）として登録します。',
+  'opening.registerSave': '初期残高を登録',
+
+  // 返済設定（負債の勘定科目）と資金繰りの返済予定
+  'accounts.repaymentAccount': '返済口座',
+  'accounts.repaymentDay': '毎月の返済日',
+  'accounts.repaymentUnset': '未設定',
+  'accounts.repaymentHint': '設定すると、資金繰り画面の返済予定づくりで既定値になります。',
+  'accounts.repaymentDayHint': '1〜31。31 など月に無い日は月末扱いになります。',
+  'error.account.repaymentOnlyLiability':
+    '返済口座・返済日はカード・未払 / ローンの科目にのみ設定できます。',
+  'error.account.repaymentDayInvalid': '返済日は 1〜31 で入力してください。',
+  'cashflow.repayAdd': '返済予定を追加',
+  'cashflow.repayTitle': '返済予定を追加',
+  'cashflow.repayIntro':
+    '返済口座から「{name}」への返済を、支払日の振替仕訳としてそのまま登録します（仕訳一覧・資金繰りに反映）。',
+  'cashflow.repayAmount': '返済額',
+  'cashflow.repayAmountHint': '既定はいまの残高（全額）です。請求額に合わせて変更できます。',
+  'cashflow.repayFrom': '返済口座',
+  'cashflow.repayDate': '支払日',
+  'cashflow.repaySettingsHint':
+    '勘定科目（カード・ローン）の編集で返済口座と毎月の返済日を設定すると、ここに既定値が入ります。',
+  'cashflow.repaySettingsLine': '返済口座: {account}・毎月{day}日',
+  'cashflow.repayScheduleTitle': '{name}の返済',
+  'cashflow.repayCount': '返済回数',
+  'cashflow.repayCountHint':
+    '1 = カードの次回引落などの単発。毎月同額のローンは回数を入れると、毎月の振替仕訳をまとめて登録します（合計は返済額に一致）。',
+  'cashflow.repayPerMonth': '月あたり約 {amount} × {count} 回',
+  'error.repay.countInvalid': '返済回数は 1 以上の整数で入力してください。',
+  'error.repay.liabilityRequired': '返済先はカード・未払 / ローンの負債科目を選んでください。',
+
+  // 毎月のもの（定期ルール = 実仕訳の自動起票）
+  'monthly.title': '毎月のもの',
+  'monthly.add': '追加',
+  'monthly.intro':
+    '毎月続くもの（サブスク・給与・積立・年払い・持ち物の償却）をここで管理します。お金が実際に動くものは仕訳として自動記帳され、持ち物・前払いは月あたりコストとして月割りされます。',
+  'monthly.empty': 'まだ登録がありません。「追加」からサブスク・給与・積立・持ち物などを登録できます。',
+  'monthly.pickIntro': '何を登録しますか？',
+  'monthly.pick.expense': '毎月の支払い（サブスクなど）',
+  'monthly.pick.expenseHint': '毎月同じ日に支出の仕訳を自動記帳します。',
+  'monthly.pick.income': '毎月の収入（給与など）',
+  'monthly.pick.incomeHint': '毎月同じ日に収入の仕訳を自動記帳。金額が違う月はその月の仕訳を編集。',
+  'monthly.pick.transfer': '毎月の振替（積立など）',
+  'monthly.pick.transferHint': '預金→投資などの資金移動を毎月自動記帳します。',
+  'monthly.pick.subMigration': '年払いなどの契約を持ち込む',
+  'monthly.pick.subMigrationHint':
+    '契約途中の年払いサブスクなど。残りのぶんと次回からの更新を一度に登録します。',
+  'monthly.pick.asset': '持ち物・前払いを持ち込む（償却）',
+  'monthly.pick.assetHint':
+    'PC・家電など。残っている価値を見込み月数で月割りします（実績で自動再計算）。',
+  'monthlyCost.overEstimateBadge': '見込み超過・再計算中',
+
+  // 契約の持ち込み（自動更新あり・年払いサブスク等）
+  'subMigration.title': '契約の持ち込み（自動更新あり）',
+  'subMigration.intro':
+    '契約途中の年払いサブスクなどを持ち込みます。残りのぶんは初期残高として計上し（収入・支出になりません）、次回更新からは更新額が自動で継続されます。',
+  'subMigration.remainingAmount': '残っている価値',
+  'subMigration.remainingAmountHint':
+    '残り月数ぶんの前払い分（例: 月1,000円換算で残り8か月なら 8000）。',
+  'subMigration.remainingMonths': '残り月数',
+  'subMigration.remainingMonthsHint': '次の更新日までの月数。',
+  'subMigration.renewalAmount': '更新ごとの支払額',
+  'subMigration.renewalEvery': '更新周期（か月）',
+  'subMigration.renewalEveryHint': '年払いは 12。',
+  'subMigration.paymentSource': '更新の支払い元',
+  'subMigration.paymentSourceHint':
+    'カード払いなら更新のたびにカード残高が増え、返済フローで精算します。',
+  'subMigration.cancelHint':
+    '解約するときは、この項目の売却（0円）1回で終了します。実際に使った月数で月割りが過去に遡って再計算されます。',
+
+  // 処分（実績動的償却）
+  'disposal.usedMonths': '実使用月数',
+  'disposal.monthlyAfter': '再計算後の月あたり',
+  'disposal.retroNote':
+    '損益は一括計上せず、実際に使った月数で過去に遡って月あたりコストを再計算します（売却額は総コストから差し引かれます）。',
+  'recurring.sectionTitle': '毎月の支出・収入・振替',
+  'recurring.sectionIntro':
+    '毎月の支払日に、実際の仕訳として自動で記帳されます（アプリを開いたときにまとめて起票）。金額が変わった月は、できた仕訳をその月だけ編集してください。',
+  'recurring.add': '定期ルールを追加',
+  'recurring.empty': '定期ルールはありません。積立・給与・毎月払いのサブスクなどを登録できます。',
+  'recurring.createTitle': '定期ルールを追加',
+  'recurring.editTitle': '定期ルールを編集',
+  'recurring.kindLabel': '種別',
+  'recurring.kind.expense': '支出（毎月の支払い）',
+  'recurring.kind.income': '収入（給与など）',
+  'recurring.kind.transfer': '振替（積立など）',
+  'recurring.kind.manual': '簿記編集（科目を直接指定）',
+  'recurring.name': '摘要',
+  'recurring.nameHint': '起票される仕訳の名前（例: NISA積立 / 給与 / Netflix）。',
+  'recurring.amount': '毎月の金額',
+  'recurring.amountHint': '月によって金額が違う場合は、起票された仕訳をその月だけ編集します。',
+  'recurring.day': '毎月の日',
+  'recurring.dayHint': '1〜31。31 など月に無い日は月末になります。',
+  'recurring.startMonth': '開始月',
+  'recurring.from.expense': '支払い元',
+  'recurring.to.expense': '費用カテゴリ',
+  'recurring.from.income': '収入カテゴリ',
+  'recurring.to.income': '受け取り口座',
+  'recurring.from.transfer': '移動元',
+  'recurring.to.transfer': '移動先（資金・投資）',
+  'recurring.from.manual': '貸方（支払い元・減る側）',
+  'recurring.to.manual': '借方（増える・使う側）',
+  'recurring.manualHint':
+    '任意の科目を直接指定できます（例: 健康保険は「銀行 → 収入」で収入減、積立は「カード → 投資」）。',
+  'recurring.everyMonthDay': '毎月{day}日',
+  'recurring.paused': '停止中',
+  'recurring.pause': '停止',
+  'recurring.resume': '再開',
+  'recurring.resumeNote': '再開すると今月ぶんから起票されます（停止中の月は起票されません）。',
+  'recurring.deleteConfirmTitle': '定期ルールを削除',
+  'recurring.deleteConfirmBody':
+    '「{name}」を削除します。起票済みの仕訳は通常の仕訳としてそのまま残ります。',
+  'error.recurring.invalidStructure': '定期ルールの形式が不正です。',
+  'error.recurring.flowInvalid':
+    '科目の組み合わせが不正です（源泉と行き先を別の科目にしてください。内部集約・調整科目は使えません）。',
+  'error.recurring.notFound': '定期ルールが見つかりません。',
+  'error.monthlyCost.repeatOnOpening':
+    '移行登録（初期残高）の項目に継続購入（自動更新）は設定できません。毎月払いは「毎月の支出」の定期ルールで登録してください。',
+  'monthlyCost.sectionTitle': '継続コスト（費用の月割り）',
+  'monthlyCost.repeatLockedOpening':
+    '移行登録（初期残高）の項目のため継続購入は設定できません。毎月払いは定期ルールで。',
+
+  // 継続コストの移行登録（初期残高）
+  'monthlyCost.migrateAdd': '移行登録（初期残高）',
+  'monthlyCost.migrateTitle': '継続コストを移行登録',
+  'monthlyCost.migrateIntro':
+    'すでに持っている継続コスト（PC・年払い保険など）を、いま残っている価値と残り月数で登録します。残っている価値は開始残高（初期残高）として計上され、収入や支出にはなりません。',
+  'monthlyCost.migrateName': '対象の名前',
+  'monthlyCost.migrateAmount': '残っている価値',
+  'monthlyCost.migrateAmountHint': '取得額ではなく、まだ費用にしていない残りぶんの金額。',
+  'monthlyCost.migrateMonths': '残り月数',
+  'monthlyCost.migrateMonthsHint': '残っている価値を何か月かけて費用にしていくか。',
+  'monthlyCost.migrateStartMonth': '認識開始月',
+  'monthlyCost.migrateRenewHint':
+    'この登録は今回ぶんのみです。毎月払いのサブスクは「毎月の支出」の定期ルールで、年払いなどの更新が来たら支出入力から「継続コスト化」で登録してください。',
+
+  // 初期残高の一括登録（初回起動時に自動表示・設定から再表示可能）
+  'onboarding.title': 'はじめに：いまの残高を登録',
+  'onboarding.intro':
+    '手元の現金や口座の残高を入れると、今日から収支と資産を追えます。金額は空欄のままでもかまいません（あとから登録できます）。',
+  'onboarding.assetSection': '資産（いまある残高）',
+  'onboarding.liabilitySection': '負債（カード未払・借入）',
+  'onboarding.dateLabel': '基準日',
+  'onboarding.dateHint': 'この日付時点の残高（初期残高）として登録します。',
+  'onboarding.amountPlaceholder': '未入力はスキップ',
+  'onboarding.registered': '登録済み',
+  'onboarding.save': '登録する',
+  'onboarding.skip': 'あとで設定',
+  'onboarding.laterHint': 'このシートは「設定 > 初期残高の一括登録」からいつでも開けます。',
+  'settings.onboardingOpen': '初期残高の一括登録',
 } as const;
 
 export type MessageKey = keyof typeof ja;

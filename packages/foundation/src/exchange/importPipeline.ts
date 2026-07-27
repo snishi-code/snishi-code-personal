@@ -1,4 +1,3 @@
-// 移植元: simple-ledger src/data/exportImport.ts の 7 段階 fail-closed import の汎用化
 import { z } from 'zod';
 import type { ImportOutcome } from './types';
 

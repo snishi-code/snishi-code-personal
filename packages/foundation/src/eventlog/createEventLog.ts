@@ -1,5 +1,3 @@
-// 移植元: snishi-code-medical/hospital-rounds/src/features/eventlog.js (EVENT 種別定義と起動配線をアプリ側へ移し汎用化)
-
 const DB_VERSION = 1;
 const STORE = 'events';
 const EXPORT_SCHEMA = 1;

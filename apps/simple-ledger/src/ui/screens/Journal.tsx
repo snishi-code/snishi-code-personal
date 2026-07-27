@@ -6,7 +6,7 @@
  */
 import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
-import { ConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
+import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import { AdjustmentEditSheet } from '../AdjustmentSheet';
 import { OpeningEditSheet } from '../OpeningSheet';
@@ -96,12 +96,16 @@ export function Journal({
       if (from && e.date < from) return false;
       if (effectiveTo && e.date > effectiveTo) return false;
       if (q) {
-        const hay = `${e.description} ${e.memo ?? ''}`.toLowerCase();
+        // 検索対象 = 摘要・メモ + 借方/貸方の勘定科目名（「食費」で検索 → 食費が絡む仕訳が出る）。
+        const accountNames = e.lines
+          .map((l) => map.get(l.accountId)?.name ?? '')
+          .join(' ');
+        const hay = `${e.description} ${e.memo ?? ''} ${accountNames}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [ledger, query, from, effectiveTo, accountFilterId, tagFilter]);
+  }, [ledger, query, from, effectiveTo, accountFilterId, tagFilter, map]);
 
   const hasDateOrQuery = query !== '' || from !== '' || to !== '';
 
@@ -112,23 +116,23 @@ export function Journal({
     if (from === '' && to === '') ym = currentYm;
     else if (from !== '' && to !== '' && from.slice(0, 7) === to.slice(0, 7)) ym = from.slice(0, 7);
     if (tagFilter) ym = null;
+    // テキスト検索中は継続コストの月次サマリーを出さない（検索結果に毎回同じカードが混ざる問題）。
+    if (query.trim() !== '') ym = null;
     if (!ym) return { recognitionYm: null, monthRecognitions: [] };
     const accById = new Map((ledger?.accounts ?? []).map((a) => [a.id, a]));
     const rows = (ledger?.monthlyCostItems ?? [])
       .filter((m) => !accountFilterId || m.expenseAccountId === accountFilterId)
       .map((m) => {
-        const recCredit = m.recognitionCreditAccountId
-          ? accById.get(m.recognitionCreditAccountId)?.name
-          : undefined;
+        // 行の主語は品目名（「継続コスト台帳 → 固定費」だけでは何の計上か分からない）。
         const expName = accById.get(m.expenseAccountId)?.name;
-        const label = recCredit
-          ? `${recCredit} → ${expName ?? '—'}`
+        const label = m.recognitionCreditAccountId
+          ? `${m.name} → ${expName ?? '—'}`
           : t('journal.monthlyCostRow', { name: m.name });
-        return { id: m.id, label, amount: monthlyCostForMonth(m, ym!) };
+        return { id: m.id, label, amount: monthlyCostForMonth(m, ym!, currentYm) };
       })
       .filter((r) => r.amount > 0);
     return { recognitionYm: ym, monthRecognitions: rows };
-  }, [ledger, accountFilterId, tagFilter, from, to, currentYm]);
+  }, [ledger, accountFilterId, tagFilter, from, to, currentYm, query]);
   const recognitionMonthLabel = recognitionYm ?? currentYm;
   const monthRecognitionTotal = monthRecognitions.reduce((s, r) => s + r.amount, 0);
 

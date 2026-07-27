@@ -231,6 +231,13 @@ main {
 .app-icon-green {
   background: var(--green);
 }
+.app-icon-image {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: block;
+  flex-shrink: 0;
+}
 
 .app-name {
   font-size: 16px;

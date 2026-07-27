@@ -1,4 +1,4 @@
-// 移植元: hospital-rounds src/features/snapshots.js の汎用化(患者/病棟の知識をアプリ注入に変更)
+// スナップショット(復元ポイント)ストア。scope などアプリ固有の知識は注入で受け取る。
 import { createDatabase } from '../storage/idb';
 import type { PointerStore } from '../storage/pointers';
 
@@ -28,6 +28,12 @@ export interface SnapshotStoreConfig<TData> {
   signatureOf: (data: TData) => string;
   /** purge 失敗追跡の tombstone 置き場(アプリの prefix 付き PointerStore)。 */
   tombstones: PointerStore;
+  /**
+   * 撮影時の所有ユーザー(その時の作業ユーザー)ID。注入すると capture / restore undo の
+   * レコードへ ownerId が記録され、purgeForOwner のユーザー次元掃除が可能になる。
+   * 未注入・空値なら従来どおり owner なしで記録する(後方互換)。
+   */
+  ownerOf?: () => string | null | undefined;
   /** テスト注入用の現在時刻。 */
   now?: () => number;
 }
@@ -38,6 +44,8 @@ export interface RestorePoint {
   reason: string;
   scopeId: string;
   label: string;
+  /** 撮影時の所有ユーザー(cfg.ownerOf 注入時のみ)。旧レコードには無い。 */
+  ownerId?: string;
 }
 
 export type RestoreResult = { ok: true } | { ok: false; reason: 'notfound' | 'expired' | 'save' };
@@ -70,6 +78,12 @@ export interface SnapshotStore<TData> {
    * 積み、成功時のみ除去 → 途中失敗でも次回 init() で再実行され PII を取りこぼさない。
    */
   purgeForScopes(scopeIds: string[]): Promise<PurgeResult>;
+  /**
+   * 所有ユーザー(ownerId)のスナップショットを scope 横断で全削除する(ユーザー削除時の掃除)。
+   * ownerId の無い旧レコードは対象外(推測 purge で他ユーザー分を巻き添えにしない。TTL で消える)。
+   * tombstone の fail-closed 追跡は purgeForScopes と同型(owner 用の第2キー)。
+   */
+  purgeForOwner(ownerId: string): Promise<PurgeResult>;
   _resetForTests(): void;
 }
 
@@ -80,10 +94,11 @@ type NewSnapshot<TData> = {
   label: string;
   sig: string;
   data: TData;
+  ownerId?: string;
 };
 type StoredSnapshot<TData> = NewSnapshot<TData> & { id: number };
 
-// ローカル日付キー(YYYYMMDD)。「同日」判定は端末ローカル時刻基準(HR と同じ)。
+// ローカル日付キー(YYYYMMDD)。「同日」判定は端末ローカル時刻基準。
 function localDayKey(t: number): number {
   const d = new Date(t);
   return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
@@ -97,7 +112,9 @@ export function createSnapshotStore<TData>(cfg: SnapshotStoreConfig<TData>): Sna
   const isDestructive = (reason: string): boolean => cfg.destructiveReasons.includes(reason);
   const now = cfg.now ?? Date.now;
   // tombstone キーに dbName を含める(同じ PointerStore を複数 snapshot store で共有しても衝突しない)。
+  // scope 次元と owner 次元は別キー(scopeId と userId の値空間を 1 リストに混ぜない)。
   const tombstoneKey = `snapshot_purge_pending:${cfg.dbName}`;
+  const ownerTombstoneKey = `snapshot_purge_pending_owner:${cfg.dbName}`;
 
   const handle = createDatabase({
     name: cfg.dbName,
@@ -150,8 +167,8 @@ export function createSnapshotStore<TData>(cfg: SnapshotStoreConfig<TData>): Sna
   }
 
   // ── purge tombstone(tombstones)──
-  function readTombstone(): string[] {
-    const raw = cfg.tombstones.get(tombstoneKey);
+  function readTombstone(key: string): string[] {
+    const raw = cfg.tombstones.get(key);
     if (!raw) return [];
     try {
       const arr: unknown = JSON.parse(raw);
@@ -163,28 +180,27 @@ export function createSnapshotStore<TData>(cfg: SnapshotStoreConfig<TData>): Sna
     }
   }
 
-  function writeTombstone(ids: string[]): void {
+  function writeTombstone(key: string, ids: string[]): void {
     const uniq = [...new Set(ids)];
-    if (!uniq.length) cfg.tombstones.remove(tombstoneKey);
-    else cfg.tombstones.set(tombstoneKey, JSON.stringify(uniq));
+    if (!uniq.length) cfg.tombstones.remove(key);
+    else cfg.tombstones.set(key, JSON.stringify(uniq));
   }
 
-  function addTombstone(ids: string[]): void {
-    writeTombstone([...readTombstone(), ...ids]);
+  function addTombstone(key: string, ids: string[]): void {
+    writeTombstone(key, [...readTombstone(key), ...ids]);
   }
 
-  function removeTombstone(ids: string[]): void {
+  function removeTombstone(key: string, ids: string[]): void {
     const drop = new Set(ids);
-    writeTombstone(readTombstone().filter((id) => !drop.has(id)));
+    writeTombstone(key, readTombstone(key).filter((id) => !drop.has(id)));
   }
 
   // 実際の削除(scan + delete)。tombstone は触らない。「0 件成功」と「失敗」を ok で区別する。
-  async function purgeNow(scopeIds: string[]): Promise<PurgeResult> {
+  async function purgeWhere(match: (s: StoredSnapshot<TData>) => boolean): Promise<PurgeResult> {
     let toDelete: number[];
     try {
-      const targets = new Set(scopeIds);
       const all = await handle.getAll<StoredSnapshot<TData>>(STORE);
-      toDelete = all.filter((s) => targets.has(s.scopeId)).map((s) => s.id);
+      toDelete = all.filter(match).map((s) => s.id);
     } catch (e) {
       console.warn('snapshot purge scan failed:', e);
       return { ok: false, count: 0, reason: 'scan' };
@@ -199,6 +215,17 @@ export function createSnapshotStore<TData>(cfg: SnapshotStoreConfig<TData>): Sna
     return { ok: true, count: toDelete.length };
   }
 
+  function purgeNow(scopeIds: string[]): Promise<PurgeResult> {
+    const targets = new Set(scopeIds);
+    return purgeWhere((s) => targets.has(s.scopeId));
+  }
+
+  // owner の無い旧レコードは対象外(ownerId 未設定 = 誰の分か断定できないので推測で消さない)。
+  function purgeNowForOwners(ownerIds: string[]): Promise<PurgeResult> {
+    const targets = new Set(ownerIds);
+    return purgeWhere((s) => typeof s.ownerId === 'string' && targets.has(s.ownerId));
+  }
+
   return {
     async init() {
       try {
@@ -208,18 +235,24 @@ export function createSnapshotStore<TData>(cfg: SnapshotStoreConfig<TData>): Sna
       } catch (e) {
         console.warn('snapshot init prune failed:', e);
       }
-      // 前回 purge に失敗した scope(PII)を再試行する(best-effort で捨てない)。
-      const pending = readTombstone();
+      // 前回 purge に失敗した scope / owner(PII)を再試行する(best-effort で捨てない)。
+      const pending = readTombstone(tombstoneKey);
       if (pending.length) {
         const res = await purgeNow(pending);
-        if (res.ok) removeTombstone(pending);
+        if (res.ok) removeTombstone(tombstoneKey, pending);
         else console.warn('snapshot deferred purge retry failed:', res.reason);
+      }
+      const pendingOwners = readTombstone(ownerTombstoneKey);
+      if (pendingOwners.length) {
+        const res = await purgeNowForOwners(pendingOwners);
+        if (res.ok) removeTombstone(ownerTombstoneKey, pendingOwners);
+        else console.warn('snapshot deferred owner purge retry failed:', res.reason);
       }
     },
 
     // dedup: nav は直近と同 signature ならスキップ / 破壊的 reason は同日初回のみ。
     // それ以外の reason(restore_undo 等)は dedup なしで常に撮る。
-    // スナップショットは保険であり主操作を塞がない(失敗は warn で縮退、HR と同じ)。
+    // スナップショットは保険であり主操作を塞がない(失敗は warn で縮退する)。
     async capture(reason, scopeId, data, label = '') {
       if (!scopeId) return;
       try {
@@ -238,7 +271,8 @@ export function createSnapshotStore<TData>(cfg: SnapshotStoreConfig<TData>): Sna
           );
           if (sameDay) return; // 同日再操作で「昨日」を上書きしない(初回優先)
         }
-        await addRecord({ scopeId, t, reason, label, sig, data: cloned });
+        const ownerId = cfg.ownerOf?.() || undefined;
+        await addRecord({ scopeId, t, reason, label, sig, data: cloned, ...(ownerId ? { ownerId } : {}) });
         await pruneScope(scopeId);
       } catch (e) {
         console.warn('snapshot capture failed:', e);
@@ -252,7 +286,14 @@ export function createSnapshotStore<TData>(cfg: SnapshotStoreConfig<TData>): Sna
         return all
           .filter((s) => s.t >= cutoff && (scopeId === undefined || s.scopeId === scopeId))
           .sort((a, b) => b.t - a.t)
-          .map((s) => ({ id: s.id, t: s.t, reason: s.reason, scopeId: s.scopeId, label: s.label }));
+          .map((s) => ({
+            id: s.id,
+            t: s.t,
+            reason: s.reason,
+            scopeId: s.scopeId,
+            label: s.label,
+            ...(s.ownerId ? { ownerId: s.ownerId } : {}),
+          }));
       } catch (e) {
         console.warn('snapshot list failed:', e);
         return [];
@@ -272,8 +313,10 @@ export function createSnapshotStore<TData>(cfg: SnapshotStoreConfig<TData>): Sna
       if (snap.t < cutoffNow()) return { ok: false, reason: 'expired' };
 
       // 1) 現状を「復元の取り消し」用に撮る(同日 dedup を避けるため直接 add)。
+      // undo も現在の作業ユーザーのデータなので ownerId を同じく記録する(ユーザー削除 purge の対象)。
       try {
         const cur = structuredClone(currentData);
+        const ownerId = cfg.ownerOf?.() || undefined;
         await addRecord({
           scopeId: snap.scopeId,
           t: now(),
@@ -281,6 +324,7 @@ export function createSnapshotStore<TData>(cfg: SnapshotStoreConfig<TData>): Sna
           label: '',
           sig: cfg.signatureOf(cur),
           data: cur,
+          ...(ownerId ? { ownerId } : {}),
         });
       } catch (e) {
         console.warn('snapshot restore undo capture failed:', e);
@@ -309,9 +353,17 @@ export function createSnapshotStore<TData>(cfg: SnapshotStoreConfig<TData>): Sna
       const ids = scopeIds.filter(Boolean);
       if (!ids.length) return { ok: true, count: 0 };
       // 削除完了を確認できるまで tombstone で追跡する(fail-closed: best-effort で捨てない)。
-      addTombstone(ids);
+      addTombstone(tombstoneKey, ids);
       const res = await purgeNow(ids);
-      if (res.ok) removeTombstone(ids);
+      if (res.ok) removeTombstone(tombstoneKey, ids);
+      return res;
+    },
+
+    async purgeForOwner(ownerId) {
+      if (!ownerId) return { ok: true, count: 0 };
+      addTombstone(ownerTombstoneKey, [ownerId]);
+      const res = await purgeNowForOwners([ownerId]);
+      if (res.ok) removeTombstone(ownerTombstoneKey, [ownerId]);
       return res;
     },
 

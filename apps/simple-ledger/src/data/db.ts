@@ -24,12 +24,13 @@ export const STORE = {
   tags: 'tags',
   monthlyCostItems: 'monthlyCostItems',
   assetDisposals: 'assetDisposals',
+  recurringRules: 'recurringRules', // 定期ルール（v2 で追加）
   snapshots: 'snapshots',
 } as const;
 
 export type StoreName = (typeof STORE)[keyof typeof STORE];
 
-/** foundation の DatabaseHandle。version 1 で全ストアを一括作成する。 */
+/** foundation の DatabaseHandle。v1=初期ストア一括作成・v2=recurringRules 追加（contains ガードで冪等）。 */
 export const db = createDatabase({
   name: DB_NAME,
   version: DB_VERSION,
@@ -65,6 +66,9 @@ export const db = createDatabase({
     }
     if (!idb.objectStoreNames.contains(STORE.assetDisposals)) {
       idb.createObjectStore(STORE.assetDisposals, { keyPath: 'id' });
+    }
+    if (!idb.objectStoreNames.contains(STORE.recurringRules)) {
+      idb.createObjectStore(STORE.recurringRules, { keyPath: 'id' });
     }
     if (!idb.objectStoreNames.contains(STORE.snapshots)) {
       idb.createObjectStore(STORE.snapshots, { keyPath: 'id' });

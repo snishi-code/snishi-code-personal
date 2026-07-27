@@ -3,21 +3,29 @@
  * 取り置き資金（取り置き枠）の管理を行う。
  */
 import { useMemo, useState } from 'react';
-import { TextInput } from '@snishi/foundation/ui/Field';
+import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
-import { ConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
+import { ConfirmDialog, Modal } from '../overlays';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet } from '../../domain/accounting';
-import { cashDeltaOfEntry, liquidAssetTotal, projectCashflow } from '../../domain/cashflow';
-import { continuousCostEntries } from '../../domain/continuousCost';
-import { reserveBalances } from '../../domain/reserve';
+import {
+  cashDeltaOfEntry,
+  liquidAssetTotal,
+  nextRepaymentDate,
+  projectCashflow,
+  uniqueEntriesById,
+} from '../../domain/cashflow';
+import { reserveBalances, unassignedReserveBalance } from '../../domain/reserve';
+import { reportBasis } from '../../domain/reportPeriod';
+import { reportEntriesForAsOf } from '../../domain/reportEntries';
 import { addMonthsToDate } from '../../domain/allocation';
+import { sortAccounts } from '../../domain/accountOrder';
 import { todayLocal } from '../../util/time';
-import type { CashflowSchedule, ReserveItem } from '../../domain/types';
+import type { Account, CashflowSchedule, ReserveItem } from '../../domain/types';
 import { ReserveSheet } from '../ReserveSheet';
 import { Money } from '../money';
 import { TrendChart, type TrendPoint } from '../components/TrendChart';
-import { t } from '../../i18n';
+import { errorText, t } from '../../i18n';
 import { UI } from '../../ui-contract';
 
 function shortDateLabel(date: string): string {
@@ -29,18 +37,23 @@ function shortDateLabel(date: string): string {
 export function Cashflow() {
   const { ledger, postSchedule, removeSchedule, createReserve, removeReserve } = useLedger();
   const today = todayLocal();
+  const basis = useMemo(() => reportBasis({ mode: 'all' }, today), [today]);
+  const reportEntries = useMemo(
+    () => (ledger ? reportEntriesForAsOf(ledger, basis.asOf, today) : []),
+    [basis.asOf, ledger, today],
+  );
   const [untilDate, setUntilDate] = useState(() => addMonthsToDate(todayLocal(), 6));
   const [reserveOpen, setReserveOpen] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [pendingSchedule, setPendingSchedule] = useState<CashflowSchedule | null>(null);
   const [pendingReserve, setPendingReserve] = useState<ReserveItem | null>(null);
+  const [repayFor, setRepayFor] = useState<{ account: Account; balance: number } | null>(null);
 
   const currency = ledger?.settings.currency ?? 'JPY';
 
   const { projection, liabBalById, futureRows } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger?.derivedEntries ?? [];
-    const items = ledger?.monthlyCostItems ?? [];
+    const entries = reportEntries;
     const schedules = ledger?.cashflowSchedules ?? [];
     const bs = deriveBalanceSheet(accounts, entries, today);
     const byId = new Map(bs.assets.map((a) => [a.account.id, a.balance] as const));
@@ -59,15 +72,12 @@ export function Cashflow() {
     const totalAssets = liquidAssetTotal(bs.assets, nonLiquidAssetIds);
     const reserveBalance = [...reserveIds].reduce((s, id) => s + (byId.get(id) ?? 0), 0);
     const end = untilDate;
-    const futureFunding = continuousCostEntries(items, accounts, end).filter(
-      (e) => e.metadata?.ccKind === 'funding' && e.date > today && e.date <= end,
-    );
-    const future = [
-      ...entries.filter(
+    const futureEntries = ledger ? reportEntriesForAsOf(ledger, end, today) : [];
+    const future = uniqueEntriesById(
+      futureEntries.filter(
         (e) => e.date > today && e.date <= end && e.lines.some((l) => isLiquid(l.accountId)),
       ),
-      ...futureFunding,
-    ]
+    )
       .map((e) => ({
         id: e.id,
         date: e.date,
@@ -93,12 +103,20 @@ export function Cashflow() {
         })),
       }),
     };
-  }, [ledger, untilDate, today]);
+  }, [ledger, reportEntries, untilDate, today]);
 
   const accountName = (id: string): string =>
     (ledger?.accounts ?? []).find((a) => a.id === id)?.name ?? '—';
   const reserves = ledger?.reserves ?? [];
-  const resBalById = useMemo(() => reserveBalances(ledger?.journalEntries ?? []), [ledger]);
+  const resBalById = useMemo(
+    () => reserveBalances(reportEntries, basis.asOf),
+    [basis.asOf, reportEntries],
+  );
+  const reserveUnassigned = unassignedReserveBalance(
+    projection.reserveBalance,
+    reserves,
+    resBalById,
+  );
   const freeTrend: TrendPoint[] = projection.points.map((p, i) => ({
     key: `${p.date}-${i}`,
     label: shortDateLabel(i === 0 ? today : p.date),
@@ -108,25 +126,44 @@ export function Cashflow() {
   const liabilitySummary = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     const schedules = ledger?.cashflowSchedules ?? [];
-    return accounts
+    const entries = ledger?.journalEntries ?? [];
+    return sortAccounts(accounts)
       .filter((a) => a.role === 'payment-liability' || a.role === 'other-liability')
       .map((a) => {
-        const related = schedules.filter(
+        // 返済予定 = 未実績の予定 CF（分割返済など）+ 未来日付の返済実仕訳（借方がこの負債）。
+        const planned = schedules.filter(
           (s) => s.counterAccountId === a.id && s.status === 'planned',
         );
-        const remaining = related.reduce((sum, s) => sum + s.amount, 0);
-        const nextDue = related.map((s) => s.dueDate).sort()[0];
+        const futureRepayments = entries.filter(
+          (e) =>
+            e.date > today &&
+            e.lines.some((l) => l.side === 'debit' && l.accountId === a.id),
+        );
+        const remaining =
+          planned.reduce((sum, s) => sum + s.amount, 0) +
+          futureRepayments.reduce(
+            (sum, e) =>
+              sum +
+              e.lines
+                .filter((l) => l.side === 'debit' && l.accountId === a.id)
+                .reduce((s2, l) => s2 + l.amount, 0),
+            0,
+          );
+        const count = planned.length + futureRepayments.length;
+        const nextDue = [...planned.map((s) => s.dueDate), ...futureRepayments.map((e) => e.date)]
+          .sort()[0];
         return {
           id: a.id,
+          account: a,
           name: a.name,
-          count: related.length,
+          count,
           remaining,
           nextDue,
           balance: liabBalById.get(a.id) ?? 0,
         };
       })
       .filter((x) => x.count > 0 || x.balance !== 0);
-  }, [ledger, liabBalById]);
+  }, [ledger, liabBalById, today]);
 
   return (
     <section aria-labelledby="cashflow-title" data-ui={UI.cashflow.view}>
@@ -211,21 +248,40 @@ export function Cashflow() {
         <ul className="card list" data-ui={UI.cashflow.liabilityList}>
           {liabilitySummary.map((l) => (
             <li key={l.id} className="list__item">
-              <div className="list__main">
-                <div className="list__title">{l.name}</div>
-                <div className="list__sub">
-                  {t('cashflow.debtBalance')}: <Money amount={l.balance} currency={currency} />
-                </div>
-                {l.count > 0 ? (
+              {/* 行タップ = 返済シート（残高を見ながら返済計画を入力する）。 */}
+              <button
+                type="button"
+                className="list__row-btn"
+                onClick={() => setRepayFor({ account: l.account, balance: l.balance })}
+                aria-label={`${t('cashflow.repayAdd')}: ${l.name}`}
+                data-ui={UI.cashflow.liabilityRow}
+              >
+                <div className="list__main">
+                  <div className="list__title">{l.name}</div>
                   <div className="list__sub">
-                    {t('cashflow.nextDue')}: {l.nextDue ?? '—'}・
-                    {t('cashflow.installmentsLeft', { count: l.count })}・
-                    {t('cashflow.debtBalance')} <Money amount={l.remaining} currency={currency} />
+                    {t('cashflow.debtBalance')}: <Money amount={l.balance} currency={currency} />
                   </div>
-                ) : (
-                  <div className="list__sub amount--neg">{t('cashflow.debtNoPlanHint')}</div>
-                )}
-              </div>
+                  {l.account.repaymentAccountId !== undefined &&
+                  l.account.repaymentDay !== undefined ? (
+                    <div className="list__sub">
+                      {t('cashflow.repaySettingsLine', {
+                        account: accountName(l.account.repaymentAccountId),
+                        day: l.account.repaymentDay,
+                      })}
+                    </div>
+                  ) : null}
+                  {l.count > 0 ? (
+                    <div className="list__sub">
+                      {t('cashflow.nextDue')}: {l.nextDue ?? '—'}・
+                      {t('cashflow.installmentsLeft', { count: l.count })}・
+                      {t('cashflow.debtBalance')} <Money amount={l.remaining} currency={currency} />
+                    </div>
+                  ) : (
+                    <div className="list__sub amount--neg">{t('cashflow.debtNoPlanHint')}</div>
+                  )}
+                </div>
+                <Icon name="chevronRight" size={18} />
+              </button>
             </li>
           ))}
         </ul>
@@ -258,58 +314,60 @@ export function Cashflow() {
         </ul>
       )}
 
-      <p className="section-label">{t('cashflow.scheduleSecondaryTitle')}</p>
-      <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
-        {t('cashflow.scheduleSecondaryHint')}
-      </p>
-      {projection.schedules.length === 0 ? (
-        <div className="card card--pad empty">{t('cashflow.emptyPlanned')}</div>
-      ) : (
-        <ul className="card list" data-ui={UI.cashflow.list}>
-          {projection.schedules.map((s) => (
-            <li key={s.id} className="list__item">
-              <div className="list__main">
-                <div className="list__title">{s.title}</div>
-                <div className="list__sub">
-                  {s.dueDate}・{accountName(s.accountId)}
-                  {s.counterAccountId ? ` ↔ ${accountName(s.counterAccountId)}` : ''}
+      {/* 旧バージョンで作られた予定 CF（分割返済など）のレガシー表示。新規には作られない
+          （返済は未来日付の実仕訳として登録される）ため、残っている時だけセクションごと表示する。 */}
+      {projection.schedules.length === 0 ? null : (
+        <>
+          <p className="section-label">{t('cashflow.scheduleSecondaryTitle')}</p>
+          <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
+            {t('cashflow.scheduleSecondaryHint')}
+          </p>
+          <ul className="card list" data-ui={UI.cashflow.list}>
+            {projection.schedules.map((s) => (
+              <li key={s.id} className="list__item">
+                <div className="list__main">
+                  <div className="list__title">{s.title}</div>
+                  <div className="list__sub">
+                    {s.dueDate}・{accountName(s.accountId)}
+                    {s.counterAccountId ? ` ↔ ${accountName(s.counterAccountId)}` : ''}
+                  </div>
                 </div>
-              </div>
-              <span
-                className={`list__amount ${
-                  s.direction === 'inflow'
-                    ? 'amount--pos'
-                    : s.direction === 'transfer'
-                      ? 'muted'
-                      : 'amount--neg'
-                }`}
-              >
-                {s.direction === 'inflow' ? '+' : s.direction === 'transfer' ? '→ ' : '−'}
-                <Money amount={s.amount} currency={currency} />
-              </span>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                style={{ minHeight: 36 }}
-                disabled={!s.counterAccountId}
-                title={s.counterAccountId ? undefined : t('cashflow.postNeedsCounter')}
-                onClick={() => postSchedule(s.id).catch(() => undefined)}
-                data-ui={UI.cashflow.schedulePost}
-              >
-                <Icon name="check" size={16} />
-                {t('cashflow.post')}
-              </button>
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={() => setPendingSchedule(s)}
-                aria-label={`${t('cashflow.deleteSchedule')}: ${s.title}`}
-              >
-                <Icon name="delete" size={18} />
-              </button>
-            </li>
-          ))}
-        </ul>
+                <span
+                  className={`list__amount ${
+                    s.direction === 'inflow'
+                      ? 'amount--pos'
+                      : s.direction === 'transfer'
+                        ? 'muted'
+                        : 'amount--neg'
+                  }`}
+                >
+                  {s.direction === 'inflow' ? '+' : s.direction === 'transfer' ? '→ ' : '−'}
+                  <Money amount={s.amount} currency={currency} />
+                </span>
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  style={{ minHeight: 36 }}
+                  disabled={!s.counterAccountId}
+                  title={s.counterAccountId ? undefined : t('cashflow.postNeedsCounter')}
+                  onClick={() => postSchedule(s.id).catch(() => undefined)}
+                  data-ui={UI.cashflow.schedulePost}
+                >
+                  <Icon name="check" size={16} />
+                  {t('cashflow.post')}
+                </button>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  onClick={() => setPendingSchedule(s)}
+                  aria-label={`${t('cashflow.deleteSchedule')}: ${s.title}`}
+                >
+                  <Icon name="delete" size={18} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
 
       <button
@@ -343,7 +401,7 @@ export function Cashflow() {
               {t('reserves.add')}
             </button>
           </div>
-          {reserves.length === 0 ? (
+          {reserves.length === 0 && reserveUnassigned === 0 ? (
             <div className="card card--pad empty">{t('reserves.empty')}</div>
           ) : (
             <ul className="card list" data-ui={UI.cashflow.reserveList}>
@@ -368,6 +426,20 @@ export function Cashflow() {
                   </li>
                 );
               })}
+              {reserveUnassigned !== 0 ? (
+                <li
+                  className="list__item"
+                  data-ui={UI.cashflow.reserveUnassigned}
+                >
+                  <div className="list__main">
+                    <div className="list__title">{t('reserves.unassigned')}</div>
+                    <div className="list__sub">
+                      {t('reserves.balance')}:{' '}
+                      <Money amount={reserveUnassigned} currency={currency} />
+                    </div>
+                  </div>
+                </li>
+              ) : null}
             </ul>
           )}
         </div>
@@ -377,6 +449,14 @@ export function Cashflow() {
         <ReserveSheet
           onClose={() => setReserveOpen(false)}
           onSave={(input) => createReserve(input)}
+        />
+      ) : null}
+
+      {repayFor ? (
+        <RepaymentScheduleSheet
+          account={repayFor.account}
+          balance={repayFor.balance}
+          onClose={() => setRepayFor(null)}
         />
       ) : null}
 
@@ -410,5 +490,144 @@ export function Cashflow() {
         />
       ) : null}
     </section>
+  );
+}
+
+/**
+ * カード・ローンの返済計画を登録するシート（負債の行タップで開く）。
+ * 勘定科目の返済設定（返済口座・毎月の返済日）が既定値になる。金額の既定はいまの残高（全額）。
+ *  - 回数 1（既定）: カードの次回引落など、支払日の振替仕訳（借方 負債 / 貸方 返済口座）を 1 本。
+ *  - 回数 N: 毎月同額のローン。総額を N 回に配分した未来の振替仕訳を一括登録（合計は総額に一致）。
+ * どちらも予定 CF は経由しない。未来日付の実仕訳として仕訳一覧・資金繰りの投影に乗る。
+ */
+function RepaymentScheduleSheet({
+  account,
+  balance,
+  onClose,
+}: {
+  account: Account;
+  balance: number;
+  onClose: () => void;
+}) {
+  const { ledger, createRepaymentEntries } = useLedger();
+  const accounts = ledger?.accounts ?? [];
+  const today = todayLocal();
+
+  const fromOptions = sortAccounts(accounts)
+    .filter((a) => a.role === 'daily-asset' && (!a.archived || a.id === account.repaymentAccountId))
+    .map((a) => ({ value: a.id, label: a.name }));
+  const [fromAccountId, setFromAccountId] = useState(
+    account.repaymentAccountId ?? fromOptions[0]?.value ?? '',
+  );
+  const [date, setDate] = useState(
+    account.repaymentDay !== undefined ? nextRepaymentDate(today, account.repaymentDay) : today,
+  );
+  const [amountText, setAmountText] = useState(balance > 0 ? String(balance) : '');
+  const [countText, setCountText] = useState('1');
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [submitting, setSubmitting] = useState(false);
+
+  const amount = amountText === '' ? 0 : Number.parseInt(amountText, 10);
+  const count = countText === '' ? 0 : Number.parseInt(countText, 10);
+  const perMonth = count >= 2 && amount >= count ? Math.round(amount / count) : null;
+
+  async function submit() {
+    if (submitting) return;
+    if (!Number.isInteger(amount) || amount < 1 || count < 1 || fromAccountId === '') return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await createRepaymentEntries({
+        liabilityAccountId: account.id,
+        fromAccountId,
+        firstDate: date,
+        total: amount,
+        count,
+        title: t('cashflow.repayScheduleTitle', { name: account.name }),
+      });
+      onClose();
+    } catch (e) {
+      setError(errorText(e));
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={t('cashflow.repayTitle')}
+      onClose={onClose}
+      dismissMode="if-clean"
+      dataUi={UI.cashflow.repaySheet}
+      footer={
+        <>
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={submit}
+            disabled={submitting || amountText === '' || countText === '' || fromAccountId === ''}
+            data-ui={UI.cashflow.repaySave}
+          >
+            {t('common.save')}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <p className="field__hint">{t('cashflow.repayIntro', { name: account.name })}</p>
+        {account.repaymentAccountId === undefined || account.repaymentDay === undefined ? (
+          <p className="field__hint">{t('cashflow.repaySettingsHint')}</p>
+        ) : null}
+        {error ? (
+          <div className="field__error" role="alert">
+            <Icon name="alert" size={14} />
+            {error}
+          </div>
+        ) : null}
+        <SelectInput
+          label={t('cashflow.repayFrom')}
+          value={fromAccountId}
+          onChange={setFromAccountId}
+          options={fromOptions}
+          dataUi={UI.cashflow.repayFrom}
+        />
+        <TextInput
+          label={t('cashflow.repayDate')}
+          type="date"
+          required
+          value={date}
+          onChange={setDate}
+          dataUi={UI.cashflow.repayDate}
+        />
+        <TextInput
+          label={t('cashflow.repayAmount')}
+          required
+          inputMode="numeric"
+          value={amountText}
+          onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
+          hint={t('cashflow.repayAmountHint')}
+          dataUi={UI.cashflow.repayAmount}
+        />
+        <TextInput
+          label={t('cashflow.repayCount')}
+          required
+          inputMode="numeric"
+          value={countText}
+          onChange={(v) => setCountText(v.replace(/[^\d]/g, ''))}
+          hint={t('cashflow.repayCountHint')}
+          dataUi={UI.cashflow.repayCount}
+        />
+        {perMonth !== null ? (
+          <p className="field__hint" data-ui={UI.cashflow.repayPerMonth}>
+            {t('cashflow.repayPerMonth', {
+              amount: `¥${perMonth.toLocaleString('ja-JP')}`,
+              count: String(count),
+            })}
+          </p>
+        ) : null}
+      </div>
+    </Modal>
   );
 }

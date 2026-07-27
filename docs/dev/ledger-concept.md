@@ -160,14 +160,20 @@ formula で月割り認識する（`saveEntryWithFixedAssetMonthly`）。
 - 生成仕訳は **通常の編集・削除では壊せない**（`metadata.allocationId` を持つ仕訳は fail-closed）。継続コスト台帳で管理する。
 - 完了（全認識月が経過）は現在月から導出し、台帳の既定表示から外す。**物理削除はしない**。
 
-#### 現在表示は必ず「今日時点」で切る（未来は予定）
+#### フローとストックは同じレポート基準で切る
 
-未来月の認識仕訳を事前生成する方式のため、現在の集計表示は as-of で切る:
+Dashboard / 各内訳ページは共有の `ReportPeriod` と `reportBasis(period, today)` から、フロー期間と
+BS 基準日を同時に得る。PL だけ期間末、BS だけ今日、という片側の境界ずれを作らない。
 
-- **BS** は基準日で導出（`deriveBalanceSheet(..., asOf)`）。未来月の認識を現在残高に含めない。
-  基準日は共有の `ReportPeriod` から `periodAsOf` で決める（月→月末 / 年→年末 / 全体→最終データ日 or
-  今日）。Dashboard / 各内訳ページ（資産/負債/純資産）は同じ期間 state を参照する。
-  → 120,000 円/12 か月なら、当月 BS では `按分中資産` に未認識残高（例 110,000）が残る。
+- 過去の月・年: フローは期間初〜期間末、BS は期間末時点。
+- 選択中の月・年: フローは期間初〜今日、BS は今日時点。
+- 未来の月・年: 明示的に未来期間を選んだ見込み表示として、フローは期間初〜期間末、BS は期間末時点。
+- 全期間: フローは開始制約なし〜今日、BS は今日時点。未来の実仕訳・仮想仕訳は混ぜない。
+
+画面集計は `reportEntriesForAsOf(ledger, asOf)` で選択基準日まで必要な仮想仕訳を展開し、財政状態の
+見出しにも `YYYY-MM-DD 時点` を表示する。たとえば 120,000 円/12 か月なら、当月 BS では
+`按分中資産` に未認識残高（例 110,000）が残る。
+
 - **Journal** の既定表示は今日まで（未来の認識仕訳を隠す）。「将来予定も表示」で確認できる。
 - 完了ラベルは **「認識完了」**。クレカ等（負債）支払いでは費用認識完了 ≠ 返済完了。
 
@@ -180,7 +186,7 @@ formula で月割り認識する（`saveEntryWithFixedAssetMonthly`）。
 サブスク・年払い/前払い・耐久財の買い替え・家賃・保険などを **資産経由モデル** で統一して扱う
 （v13。正本ルール = `MonthlyCostItem`（台帳辞書）、仮想展開 = `src/domain/continuousCost.ts`）。
 **支払い時に費用へ直行させず、単一の集約台帳口座（role=`continuing-cost-asset`・『継続コスト台帳』）に
-いったん計上し、必要な期間だけ `継続コスト台帳 → 費用カテゴリ` を仮想展開して認識する**。台帳口座残高に
+いったん計上し、必要な期間だけ `継続コスト台帳 → 認識先` を仮想展開して認識する**。台帳口座残高に
 未消化分が残る。
 
 - **勘定科目の聖域化（v14）**: 品目ごとに資産科目を自動作成しない。継続コスト対象名（YouTube/洗濯機/家賃 等）は
@@ -191,25 +197,27 @@ formula で月割り認識する（`saveEntryWithFixedAssetMonthly`）。
   `repeatEveryMonths?`/startMonth/expenseAccountId=認識先/`paymentSourceAccountId`=支払い元/
   `recognitionCreditAccountId`=集約台帳口座）+（集約口座が未作成なら）集約口座 +（負債資金で分割なら）返済CF。
   **funding/recognition の実仕訳は保存しない**。集約口座は find-or-create で 1 つだけ作る。
-- **三層構造**: 入力は `支払い元/借入元 → 継続コスト対象（資産）` を選び、別フィールドで `認識先カテゴリ（費用）`
-  を選ぶ。仕訳は `支払い元 → 対象資産（funding）` と `対象資産 → 費用カテゴリ（recognition）` に分かれる。
+- **三層構造**: 入力は `支払い元/借入元 → 継続コスト対象（資産）` を選び、別フィールドで通常勘定科目から
+  `認識先` を選ぶ。仕訳は `支払い元 → 対象資産（funding）` と `対象資産 → 認識先（recognition）` に分かれる。
+  認識先の会計 type により、費用・収入減・BS 内振替として集計する。
   UI（支出入力）では行き先の「継続コスト化」ボタンで対象名を自由入力する（`EntrySheet`）。
 - **支払い元（funding の貸方）は資金・カード・ローンを許可**: `daily-asset` / `payment-liability`（カード）/
   `other-liability`（ローン）。**自動車をローンで買う = 資産取得の貸方が負債**（`自動車ローン → 自動車`）。
   通常の単なる費用払いに `other-liability` を使うのは UI で禁止（`entry.error.loanNotExpense`）。
 - **仮想展開**（`continuousCostEntriesForItem(item, accounts, upTo)`）: 1 サイクルにつき
   - **funding**: `借方 対象資産 / 貸方 支払い元`（cycle 先頭月の 1 日）
-  - **recognition ×costMonths**: `借方 費用カテゴリ / 貸方 対象資産`（各認識月の 1 日・`monthlyAmounts`
+  - **recognition ×costMonths**: `借方 認識先 / 貸方 対象資産`（各認識月の 1 日・`monthlyAmounts`
     で端数配分。合計 = `amount`）
   funding が recognition より先行するので各時点 BS で **対象資産 >= 0（= 未認識残高）**。例: 12,000 を
   払って 3 か月認識済みなら対象資産 = 9,000。
 - **辞書展開（永続仕訳を無限生成しない）**: `repeatEveryMonths` 指定は周期ごとに funding+recognition を
   仮想展開する。実データは作らず、`upTo`（暫定上限 `2100-12-31`）まで必要範囲だけ展開する。各サイクルは
   資産化→全額認識で閉じるので積み上がらない。
-- **導出専用 entries（`Ledger.derivedEntries` = 実仕訳 + 仮想仕訳）**: PL/BS/支出/推移/Journal/CF は
-  これを使う（単一正本）。`loadLedger` が `nowHorizon=max(今日, 最終データ日)` まで一度だけ展開する
-  （未来の更新を「今」の PL/BS に混ぜない）。仮想仕訳は `metadata.virtual` を持ち **保存系・export・
-  残高チェックには渡さない**（実仕訳 `journalEntries` と型で分離）。
+- **導出専用 entries（`reportEntriesForAsOf` = 実仕訳 + 仮想仕訳）**: PL/BS/支出/推移/CF は
+  これを使う（単一正本）。各画面が `reportBasis` の基準日ごとに必要範囲だけ展開する
+  （未来の更新を「今」の PL/BS に混ぜない）。過去・未来のレポートは保存値を増やさず、
+  `reportEntriesForAsOf` が選択した `asOf` まで同じ辞書から再展開する。仮想仕訳は `metadata.virtual` を持ち
+  **保存系・export・残高チェックには渡さない**（実仕訳 `journalEntries` と型で分離）。
 - **返済 CF は別物**: 負債（`payment-liability` カード / `other-liability` ローン）資金で返済情報があれば
   返済予定 `CashflowSchedule`(installment) を作る（`預金 → 負債`）。**返済は費用(PL)ではなく資金繰り(CF)**。
   継続コストの認識（費用）とは独立。未来の更新支払いは資金繰り画面が `untilDate` まで funding を仮想投影
@@ -217,10 +225,11 @@ formula で月割り認識する（`saveEntryWithFixedAssetMonthly`）。
 
 ### 支出の集計（二重計上しない）
 
-`derivedEntries` には継続コストの認識が `借方 費用カテゴリ` で既に入るため、**formula を別途足さない**
+導出仕訳（`reportEntriesForAsOf`）には継続コストの認識が `借方 認識先` で既に入るため、**formula を別途足さない**
 （`src/domain/livingCost.ts`）:
 
-- **継続コスト** = 期間内の仮想認識（`metadata.ccKind==='recognition'`）の合計。
+- **継続コスト** = 期間内で借方が費用科目の仮想認識（`metadata.ccKind==='recognition'`）の合計。
+- 借方が収益なら収入減、資産・負債なら BS 内振替として扱い、生活コストには加えない。
 - **通常支出** = 期間内の費用合計 − 投資評価損等(system-adjustment) − 継続コスト認識。
 - **支出合計** = 通常支出 + 継続コスト（= 費用合計 − system-adjustment）。
 
@@ -239,7 +248,7 @@ simple-ledger は**監査証跡を固定する帳簿ではなく、生活上の�
 
 - 例: 3 年前に 27 万円で買った洗濯機に、後から運搬費 3 万円も「洗濯機を持つコスト」として足したい
   → 元々 30 万円だったかのように過去から計算し直せる余地を持たせる。
-- 継続コスト（資産経由モデル）は `MonthlyCostItem` を辞書として `derivedEntries` に仮想展開するので、
+- 継続コスト（資産経由モデル）は `MonthlyCostItem` を辞書として導出仕訳に仮想展開するので、
   `amount` / `startMonth` / `costMonths` / `repeatEveryMonths` / `endMonth` / `expenseAccountId` を
   後編集すれば**過去サイクルから展開し直され、過去集計も変わる**。これは不具合ではなく仕様。
   - UI（継続コスト編集シート）はこれらの項目を変えると「過去から再計算されます」の注意を出す
@@ -298,7 +307,9 @@ simple-ledger は**監査証跡を固定する帳簿ではなく、生活上の�
 - **取り置き資金（`ReserveItem`・A=短期の封筒分けのみ）**: 取り置きは通常の振替（預金 → 取り置き資金）で行い、
   資金繰りでは残高を**自由資金から除外**して見る（総資産は不変）。例: 飲み会用 5 万を取り置くと自由資金が
   5 万減る。**目標額・期限・利回りは持たない**（聖域化・集約モデル＝目的別の勘定科目を作らず単一の集約口座
-  `reserve-ledger` + `metadata.reserveId` で目的別残高を導出。schema v16）。長期の目標/投資前提の資金は将来別途。
+  `reserve-ledger` + `metadata.reserveId` で目的別残高を導出。schema v16）。集約口座の親残高と目的別行の合計に
+  差があれば、保存データを書き換えず表示専用の「未割り当て」行（負値を含む）で差額を明示する。
+  長期の目標/投資前提の資金は将来別途。
 - 支出按分の月数と、負債返済の回数は**別概念**（同じ `months` に混ぜない）。
 
 ### 次フェーズ（未実装）

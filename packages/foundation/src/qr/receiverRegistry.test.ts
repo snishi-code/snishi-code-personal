@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, vi } from 'vitest';
 import { createReceiverRegistry, type ReceiveCtrl } from './receiverRegistry.js';
 

@@ -78,6 +78,5 @@ describe('inferRole', () => {
   });
 });
 
-// NOTE(UI 移植担当へ): v1 の groupedAccountsByRole（日常入力の候補絞り込み）のテストは
-// src/ui/accountOptions.ts に依存するため、UI 層の移植時に accountOptions.ts と併せて復元すること
-// （v1 tests/accountRoles.test.ts の「groupedAccountsByRole」describe ブロックが正本）。
+// NOTE: groupedAccountsByRole（日常入力の候補絞り込み）のテストは src/ui/accountOptions.ts に
+// 依存する。accountOptions.ts を追加するときに、そのテストも併せて用意すること。

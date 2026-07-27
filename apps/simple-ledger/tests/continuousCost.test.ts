@@ -96,6 +96,20 @@ describe('continuousCost 仮想展開', () => {
     expect(accountBalance('youtube', 'asset', es)).toBe(0);
   });
 
+  it('認識 ID は重なるサイクルでも一意かつ決定的', () => {
+    // 保存境界では repeat < costMonths を拒否するが、純粋関数は不正・将来データでも
+    // ID を衝突させない。c0 の7か月目と c1 の1か月目は同じ 2031-07 に重なる。
+    const overlapping = item({ costMonths: 12, repeatEveryMonths: 6 });
+    const first = continuousCostEntriesForItem(overlapping, byId, '2031-12-31');
+    const second = continuousCostEntriesForItem(overlapping, byId, '2031-12-31');
+    const ids = first.map((e) => e.id);
+
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(second.map((e) => e.id)).toEqual(ids);
+    expect(ids).toContain('cc-recog-yt-c0-6');
+    expect(ids).toContain('cc-recog-yt-c1-0');
+  });
+
   it('one-time（償却のみ・洗濯機84か月）: funding 1 件のみ・周期更新しない', () => {
     const washer = item({
       id: 'w',
@@ -106,10 +120,45 @@ describe('continuousCost 仮想展開', () => {
       expenseAccountId: 'fixedcost',
       recognitionCreditAccountId: 'washer',
     });
-    const es = continuousCostEntriesForItem(washer, byId, '2100-12-31');
+    // 見込みの最終月（2037-12）を「いま」として展開 → 見込みどおり 84 か月で認識し切る。
+    const es = continuousCostEntriesForItem(washer, byId, '2100-12-31', '2037-12');
     expect(es.filter((e) => e.metadata?.ccKind === 'funding')).toHaveLength(1);
     expect(es.filter((e) => e.metadata?.ccKind === 'recognition')).toHaveLength(84);
     // 全認識後は残高 0。
+    expect(accountBalance('washer', 'asset', es)).toBe(0);
+  });
+
+  it('単発（costMonths=1）は時間経過後も funding 1 件 + 認識 1 件のまま', () => {
+    const oneTime = item({
+      id: 'one',
+      amount: 200,
+      costMonths: 1,
+      startMonth: '2031-01',
+    });
+    const es = continuousCostEntriesForItem(oneTime, byId, '2032-01-31', '2032-01');
+    const recognition = es.filter((e) => e.metadata?.ccKind === 'recognition');
+
+    expect(es.filter((e) => e.metadata?.ccKind === 'funding')).toHaveLength(1);
+    expect(recognition).toHaveLength(1);
+    expect(recognition.reduce((sum, e) => sum + (e.lines[0]?.amount ?? 0), 0)).toBe(200);
+  });
+
+  it('実績動的償却: 見込みを超えて使用中は経過月数へ延伸され、残高 0 のまま月額が下がる', () => {
+    const washer = item({
+      id: 'w',
+      name: '洗濯機',
+      amount: 240000,
+      costMonths: 84,
+      startMonth: '2031-01',
+      expenseAccountId: 'fixedcost',
+      recognitionCreditAccountId: 'washer',
+    });
+    // 90 か月目（2038-06）を「いま」として展開 → 認識 90 件へ延伸・合計は総額のまま。
+    const es = continuousCostEntriesForItem(washer, byId, '2100-12-31', '2038-06');
+    const recogs = es.filter((e) => e.metadata?.ccKind === 'recognition');
+    expect(recogs).toHaveLength(90);
+    const total = recogs.reduce((s, e) => s + (e.lines[0]?.amount ?? 0), 0);
+    expect(total).toBe(240000);
     expect(accountBalance('washer', 'asset', es)).toBe(0);
   });
 

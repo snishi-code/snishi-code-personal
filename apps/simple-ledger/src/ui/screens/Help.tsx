@@ -1,4 +1,4 @@
-import { Modal } from '@snishi/foundation/ui/Modal';
+import { Modal } from '../overlays';
 import { t } from '../../i18n';
 
 export function Help({ onClose }: { onClose: () => void }) {

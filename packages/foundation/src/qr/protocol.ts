@@ -1,7 +1,5 @@
-// 移植元: snishi-code-medical/hospital-rounds/src/features/qr-protocol.js (transport 層のみ)
-
 /**
- * QR Wire Format Authority — transport 層 (v1 互換の正本)
+ * QR Wire Format Authority — transport 層 (互換の正本)
  *
  * すべての QR 種が従う共通ページ書式:
  *
@@ -15,9 +13,9 @@
  * ("C1:" / "E1:" / "E2:") 付き base64url。transport 層 (pack/unpack) はページ分割
  * (encodePages/decodePage) の前段に位置する。
  *
- * ── 設計 2 原則 (v1 qr-protocol.js 冒頭の要旨。ドメイン wire 変換
- *    (formatToWire / patientToWire / PANEL_BY_INDEX 等) はアプリ側に残すが、
- *    Wire Format Authority の正本性はこの doc comment に保持する) ──
+ * ── 設計 2 原則 (ドメイン wire 変換 (formatToWire / patientToWire /
+ *    PANEL_BY_INDEX 等) はアプリ側に残すが、Wire Format Authority の
+ *    正本性はこの doc comment に保持する) ──
  *
  * 原則①「可変領域は冒頭辞書 + index 参照」:
  *   ユーザーが順序や内容を変えうるもの (タグ名、フォーマット並び、項目並び等)
@@ -50,13 +48,13 @@ export function utf8ByteLength(text: string): number {
   return new TextEncoder().encode(String(text ?? '')).length;
 }
 
-// now 注入可 (決定論テスト用)。既定は v1 と同じ Date.now().toString(36)
+// now 注入可 (決定論テスト用)。既定は Date.now().toString(36)
 export function newBatchId(now?: number): string {
   return (now ?? Date.now()).toString(36);
 }
 
 // ============================
-// Escape helpers (v1 逐語移植)
+// Escape helpers
 // ============================
 
 export function escapeField(s: string): string {

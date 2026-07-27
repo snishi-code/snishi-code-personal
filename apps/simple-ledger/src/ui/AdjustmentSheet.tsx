@@ -4,12 +4,15 @@
  * 補正は「ある日付の実残高に台帳をピン留めする現実アンカー」で、初期残高(opening)とは別物。
  */
 import { useMemo, useState } from 'react';
-import { Modal } from '@snishi/foundation/ui/Modal';
+import { Modal } from './overlays';
 import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../state/store';
 import { accountBalance, filterByDateRange } from '../domain/accounting';
 import { ADJUSTABLE_ACCOUNT_ROLES } from '../domain/accountRoles';
+import { isValidIsoDate } from '../domain/calendar';
+import { reportEntriesForAsOf } from '../domain/reportEntries';
+import { parseSignedAmountText, sanitizeSignedAmountText } from './amountText';
 import { groupedAccountsByRole } from './accountOptions';
 import { AccountPicker } from './AccountPicker';
 import { Money } from './money';
@@ -40,19 +43,22 @@ export function AdjustmentCreateSheet({
   const [submitting, setSubmitting] = useState(false);
 
   const type = account.type as AccountType;
-  const expected = useMemo(
-    () =>
-      accountBalance(
-        account.id,
-        type,
-        filterByDateRange(ledger?.journalEntries ?? [], undefined, date),
-      ),
-    [account.id, type, ledger, date],
-  );
-  const actual = actualText === '' ? null : Number.parseInt(actualText.replace(/[^\d]/g, ''), 10);
+  const expected = useMemo(() => {
+    if (!ledger || !isValidIsoDate(date)) return 0;
+    return accountBalance(
+      account.id,
+      type,
+      filterByDateRange(reportEntriesForAsOf(ledger, date), undefined, date),
+    );
+  }, [account.id, type, ledger, date]);
+  const actual = parseSignedAmountText(actualText);
   const delta = actual === null ? 0 : actual - expected;
 
   async function submit() {
+    if (date.trim() === '') {
+      setError(t('entry.error.date-required'));
+      return;
+    }
     if (actual === null || !Number.isInteger(actual)) {
       setError(t('adjust.error.actual'));
       return;
@@ -82,7 +88,7 @@ export function AdjustmentCreateSheet({
             type="button"
             className="btn btn--primary"
             onClick={submit}
-            disabled={submitting}
+            disabled={submitting || date.trim() === ''}
             data-ui={UI.adjustments.save}
           >
             {t('adjust.save')}
@@ -114,6 +120,7 @@ export function AdjustmentCreateSheet({
         ) : null}
         <TextInput
           label={t('adjust.date')}
+          required
           type="date"
           value={date}
           onChange={setDate}
@@ -122,9 +129,9 @@ export function AdjustmentCreateSheet({
         <TextInput
           label={t('adjust.actual')}
           required
-          inputMode="numeric"
           value={actualText}
-          onChange={(v) => setActualText(v.replace(/[^\d]/g, ''))}
+          onChange={(v) => setActualText(sanitizeSignedAmountText(v))}
+          hint={t('common.signedAmountHint')}
           dataUi={UI.adjustments.actual}
         />
         <div className="kv">
@@ -168,17 +175,22 @@ export function AdjustmentEditSheet({
   const adjustable = target?.type === 'asset' || target?.type === 'liability';
 
   const expected = useMemo(() => {
-    if (!target || !adjustable) return 0;
+    if (!ledger || !target || !adjustable || !isValidIsoDate(date)) return 0;
     const others = (ledger?.journalEntries ?? []).filter((e) => e.id !== entry.id);
-    return accountBalance(accountId, target.type, filterByDateRange(others, undefined, date));
+    const entries = reportEntriesForAsOf({ ...ledger, journalEntries: others }, date);
+    return accountBalance(accountId, target.type, filterByDateRange(entries, undefined, date));
   }, [accountId, target, adjustable, ledger, date, entry.id]);
 
-  const actual = actualText === '' ? null : Number.parseInt(actualText.replace(/[^\d]/g, ''), 10);
+  const actual = parseSignedAmountText(actualText);
   const delta = actual === null ? 0 : actual - expected;
   // 補正対象は内部集約口座（取り置き資金・継続コスト台帳）を除いた資産・負債のみ（聖域化）。
   const groups = groupedAccountsByRole(accounts, [...ADJUSTABLE_ACCOUNT_ROLES], accountId);
 
   async function submit() {
+    if (date.trim() === '') {
+      setError(t('entry.error.date-required'));
+      return;
+    }
     if (!accountId || actual === null) return;
     setSubmitting(true);
     setError(undefined);
@@ -205,7 +217,7 @@ export function AdjustmentEditSheet({
             type="button"
             className="btn btn--primary"
             onClick={submit}
-            disabled={submitting}
+            disabled={submitting || date.trim() === ''}
             data-ui={UI.adjustments.editSave}
           >
             {t('adjust.update')}
@@ -242,6 +254,7 @@ export function AdjustmentEditSheet({
         ) : null}
         <TextInput
           label={t('adjust.date')}
+          required
           type="date"
           value={date}
           onChange={setDate}
@@ -250,9 +263,9 @@ export function AdjustmentEditSheet({
         <TextInput
           label={t('adjust.actual')}
           required
-          inputMode="numeric"
           value={actualText}
-          onChange={(v) => setActualText(v.replace(/[^\d]/g, ''))}
+          onChange={(v) => setActualText(sanitizeSignedAmountText(v))}
+          hint={t('common.signedAmountHint')}
           dataUi={UI.adjustments.editActual}
         />
         <div className="kv">

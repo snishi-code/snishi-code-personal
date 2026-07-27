@@ -11,7 +11,7 @@
 export const DB_NAME = 'simple-ledger-v2' as const;
 
 /** IndexedDB のバージョン。v2 は 12 ストア構成を version 1 で一括作成する。 */
-export const DB_VERSION = 1 as const;
+export const DB_VERSION = 2 as const;
 
 /** エクスポート/import 照合用のアプリ ID（封筒 appId）。v1 とは別 ID。 */
 export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
