@@ -63,7 +63,7 @@ export function livingCostBreakdownForRange(
   return { normalExpense, monthlyCost: continuing, total: normalExpense + continuing };
 }
 
-/** 支出合計（= 通常支出 + 継続コスト）。推移グラフ用。entries は derivedEntries。 */
+/** 支出合計（= 通常支出 + 継続コスト）。推移グラフ用。entries は導出仕訳。 */
 export function livingCostForRange(
   accounts: Account[],
   entries: JournalEntry[],
@@ -76,7 +76,7 @@ export function livingCostForRange(
  * 「何へ支出しているか」を費用カテゴリ別に分解する（支出の内訳ページの主表示）。
  *
  * 各カテゴリの金額は PL の費用科目残高そのもの。継続コストは仮想認識
- * （借方 費用カテゴリ）として entries（derivedEntries）に含まれるため、月割り分も
+ * （借方 費用カテゴリ）として entries（導出仕訳）に含まれるため、月割り分も
  * 自動的に選ばれた費用カテゴリへ合算される（別途 formula を足さない）。
  * 投資評価損等（system-adjustment）は支出ではないので除外する。
  *
