@@ -163,7 +163,6 @@ export interface ContinuousCostDisposalOutcome {
  */
 export function continuousCostDisposalOutcome(
   item: MonthlyCostItem,
-  _accountsById: Map<string, Account>,
   disposalMonth: string,
   proceedsAmount: number,
 ): ContinuousCostDisposalOutcome {

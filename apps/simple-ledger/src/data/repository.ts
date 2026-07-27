@@ -323,6 +323,8 @@ function assertMonthlyCostItemSavable(item: MonthlyCostItem): void {
 async function commitDisposalWrite(params: {
   stores: StoreName[];
   itemBefore: MonthlyCostItem;
+  /** 生成仕訳が参照する既存科目（同時削除されていたら abort。tx 内で新規作成する科目は含めない）。 */
+  requiredAccountIds: string[];
   write: (t: IDBTransaction) => void;
 }): Promise<void> {
   let missingRace = false;
@@ -332,13 +334,15 @@ async function commitDisposalWrite(params: {
     await writeWithRevision(params.stores, (t) => {
       const itemProbe = t.objectStore(STORE.monthlyCostItems).get(params.itemBefore.id);
       const disposalProbe = t.objectStore(STORE.assetDisposals).getAll();
+      const accountProbe = t.objectStore(STORE.accounts).getAll();
       let current: MonthlyCostItem | undefined;
       let currentResolved = false;
       let disposals: AssetDisposal[] = [];
       let disposalsResolved = false;
+      let accountIds: Set<string> | undefined;
 
       const applyAfterProbes = () => {
-        if (!currentResolved || !disposalsResolved) return;
+        if (!currentResolved || !disposalsResolved || !accountIds) return;
         if (!current) {
           missingRace = true;
           t.abort();
@@ -349,7 +353,11 @@ async function commitDisposalWrite(params: {
           t.abort();
           return;
         }
-        if (current.updatedAt !== params.itemBefore.updatedAt) {
+        const ids = accountIds;
+        if (
+          current.updatedAt !== params.itemBefore.updatedAt ||
+          params.requiredAccountIds.some((id) => !ids.has(id))
+        ) {
           conflictRace = true;
           t.abort();
           return;
@@ -365,6 +373,10 @@ async function commitDisposalWrite(params: {
       disposalProbe.onsuccess = () => {
         disposals = disposalProbe.result as AssetDisposal[];
         disposalsResolved = true;
+        applyAfterProbes();
+      };
+      accountProbe.onsuccess = () => {
+        accountIds = new Set((accountProbe.result as Account[]).map((a) => a.id));
         applyAfterProbes();
       };
     });
@@ -953,9 +965,32 @@ export async function upsertRecurringRule(rule: RecurringRule): Promise<void> {
   };
   if (existing.postedThroughMonth === undefined) delete saved.postedThroughMonth;
   assertRecurringRuleSavable(saved, ctx);
-  await writeWithRevision([STORE.recurringRules], (t) => {
-    t.objectStore(STORE.recurringRules).put(saved);
-  });
+  // 事前読みは別トランザクション。書き込みトランザクション内で現在値を再読し、
+  // (a) 削除済みルールを put で復活させない (b) 並行 catchUp が進めたカーソルを
+  // 古い値で巻き戻さない（巻き戻すと同じ月が二重起票される）。
+  let missingRace = false;
+  try {
+    await writeWithRevision([STORE.recurringRules], (t) => {
+      const store = t.objectStore(STORE.recurringRules);
+      const probe = store.get(saved.id);
+      probe.onsuccess = () => {
+        const current = probe.result as RecurringRule | undefined;
+        if (!current) {
+          missingRace = true;
+          t.abort();
+          return;
+        }
+        const next: RecurringRule = { ...saved };
+        if (current.postedThroughMonth !== undefined)
+          next.postedThroughMonth = current.postedThroughMonth;
+        else delete next.postedThroughMonth;
+        store.put(next);
+      };
+    });
+  } catch (error) {
+    if (missingRace) throw new LedgerError('error.recurring.notFound');
+    throw error;
+  }
 }
 
 /**
@@ -963,23 +998,25 @@ export async function upsertRecurringRule(rule: RecurringRule): Promise<void> {
  * （recurringRuleId / recurringMonth）を剥がして通常の仕訳へ戻す（同一トランザクション）。
  */
 export async function deleteRecurringRule(id: string): Promise<void> {
-  const entries = await getAll<JournalEntry>(STORE.journalEntries);
+  // 仕訳の読みも同一トランザクション内で行う（別読みだと、読みと書きの間に
+  // catchUp が起票した仕訳のメタデータが剥がれず、削除済みルールを参照して残る）。
   const ts = nowIso();
-  const cleared = entries
-    .filter((e) => e.metadata?.recurringRuleId === id)
-    .map((e) => {
-      const metadata = { ...e.metadata };
-      delete metadata.recurringRuleId;
-      delete metadata.recurringMonth;
-      const next: JournalEntry = { ...e, updatedAt: ts };
-      if (Object.keys(metadata).length > 0) next.metadata = metadata;
-      else delete next.metadata;
-      return next;
-    });
   await writeWithRevision([STORE.recurringRules, STORE.journalEntries], (t) => {
     const eStore = t.objectStore(STORE.journalEntries);
-    for (const e of cleared) eStore.put(e);
-    t.objectStore(STORE.recurringRules).delete(id);
+    const probe = eStore.getAll();
+    probe.onsuccess = () => {
+      for (const e of probe.result as JournalEntry[]) {
+        if (e.metadata?.recurringRuleId !== id) continue;
+        const metadata = { ...e.metadata };
+        delete metadata.recurringRuleId;
+        delete metadata.recurringMonth;
+        const next: JournalEntry = { ...e, updatedAt: ts };
+        if (Object.keys(metadata).length > 0) next.metadata = metadata;
+        else delete next.metadata;
+        eStore.put(next);
+      }
+      t.objectStore(STORE.recurringRules).delete(id);
+    };
   });
 }
 
@@ -995,8 +1032,12 @@ export async function catchUpRecurringRules(today: string): Promise<number> {
     loadSaveContext(),
     getAll<RecurringRule>(STORE.recurringRules),
   ]);
-  const newEntries: JournalEntry[] = [];
-  const updatedRules: RecurringRule[] = [];
+  interface RulePlan {
+    ruleId: string;
+    entries: JournalEntry[];
+    cursor: string | undefined;
+  }
+  const plans: RulePlan[] = [];
   const ts = nowIso();
   for (const rule of rules) {
     const postings = recurringPostingsDue(rule, today);
@@ -1007,43 +1048,82 @@ export async function catchUpRecurringRules(today: string): Promise<number> {
     if (!isRecurringPostableRole(debit.role) || !isRecurringPostableRole(credit.role)) continue;
     // 定型（支出/収入/振替）は導出した種別を、非定型（簿記編集）は 'manual' を記録する。
     const inputMode: InputMode = recurringKindOf(debit.role, credit.role) ?? 'manual';
-    for (const p of postings) {
-      newEntries.push({
-        id: `rec-${rule.id}-${p.month}`,
-        date: p.date,
-        description: rule.name,
-        kind: 'normal',
-        managementScopeId: rule.managementScopeId,
-        lines: [
-          { accountId: rule.debitAccountId, side: 'debit', amount: rule.amount },
-          { accountId: rule.creditAccountId, side: 'credit', amount: rule.amount },
-        ],
-        metadata: { inputMode, recurringRuleId: rule.id, recurringMonth: p.month },
-        createdAt: ts,
-        updatedAt: ts,
-      });
-    }
+    const entries = postings.map((p) => ({
+      id: `rec-${rule.id}-${p.month}`,
+      date: p.date,
+      description: rule.name,
+      kind: 'normal' as const,
+      managementScopeId: rule.managementScopeId,
+      lines: [
+        { accountId: rule.debitAccountId, side: 'debit' as const, amount: rule.amount },
+        { accountId: rule.creditAccountId, side: 'credit' as const, amount: rule.amount },
+      ],
+      metadata: { inputMode, recurringRuleId: rule.id, recurringMonth: p.month },
+      createdAt: ts,
+      updatedAt: ts,
+    }));
     const cursor = recurringCursorAfter(rule, today);
-    if (cursor !== rule.postedThroughMonth) {
-      updatedRules.push({ ...rule, postedThroughMonth: cursor, updatedAt: ts });
+    if (entries.length > 0 || cursor !== rule.postedThroughMonth) {
+      plans.push({ ruleId: rule.id, entries, cursor });
     }
   }
-  if (newEntries.length === 0 && updatedRules.length === 0) return 0;
-  for (const e of newEntries) assertEntrySavable(e, ctx);
+  if (plans.length === 0) return 0;
+  for (const p of plans) for (const e of p.entries) assertEntrySavable(e, ctx);
+  // 事前読みは別トランザクション。書き込みトランザクション内でルールごとに現在値を
+  // 再読し、(a) 削除済みルールぶんを起票しない（削除済みルール参照の仕訳を作らない）
+  // (b) 停止されたルールを起票しない (c) 並行 catchUp が進めたカーソルを巻き戻さず、
+  // 起票済み月（ユーザーが消した月を含む）を再起票しない。
+  let posted = 0;
   await writeWithRevision([STORE.journalEntries, STORE.recurringRules], (t) => {
     const eStore = t.objectStore(STORE.journalEntries);
-    for (const e of newEntries) eStore.put(e);
     const rStore = t.objectStore(STORE.recurringRules);
-    for (const r of updatedRules) rStore.put(r);
+    for (const plan of plans) {
+      const probe = rStore.get(plan.ruleId);
+      probe.onsuccess = () => {
+        const current = probe.result as RecurringRule | undefined;
+        if (!current || current.paused) return;
+        const postedThrough = current.postedThroughMonth ?? '';
+        for (const e of plan.entries) {
+          const month = e.metadata?.recurringMonth;
+          if (month !== undefined && month <= postedThrough) continue;
+          eStore.put(e);
+          posted += 1;
+        }
+        const cursor =
+          plan.cursor !== undefined && plan.cursor > postedThrough
+            ? plan.cursor
+            : current.postedThroughMonth;
+        if (cursor !== current.postedThroughMonth) {
+          rStore.put({ ...current, postedThroughMonth: cursor, updatedAt: ts });
+        }
+      };
+    }
   });
-  return newEntries.length;
+  return posted;
 }
 
 /* ── 目的別資金 ── */
 
 export async function deleteReserve(id: string): Promise<void> {
-  await writeWithRevision([STORE.reserves], (t) => {
-    t.objectStore(STORE.reserves).delete(id);
+  // 仕訳の metadata.reserveId を同一トランザクションで剥がしてから枠を消す
+  // （deleteRecurringRule と同型）。剥がさないと孤児 reserveId が残り、
+  // その export JSON は自分自身の import 検証（存在しない取り置き参照）で弾かれる。
+  const ts = nowIso();
+  await writeWithRevision([STORE.reserves, STORE.journalEntries], (t) => {
+    const eStore = t.objectStore(STORE.journalEntries);
+    const probe = eStore.getAll();
+    probe.onsuccess = () => {
+      for (const e of probe.result as JournalEntry[]) {
+        if (e.metadata?.reserveId !== id) continue;
+        const metadata = { ...e.metadata };
+        delete metadata.reserveId;
+        const next: JournalEntry = { ...e, updatedAt: ts };
+        if (Object.keys(metadata).length > 0) next.metadata = metadata;
+        else delete next.metadata;
+        eStore.put(next);
+      }
+      t.objectStore(STORE.reserves).delete(id);
+    };
   });
 }
 
@@ -2325,10 +2405,14 @@ export async function upsertMonthlyCost(item: MonthlyCostItem): Promise<void> {
   // UI 側で消し込めない optional を保持しないよう、locked 以外の undefined は素直に従う。
 
   // 専用エラー契約を保つため、期間不変条件は構造schemaより先に判定する。
-  // endMonth は「startMonth の前月」まで許す（使用0ヶ月の同月処分が書く正当なエンコード）。
+  // endMonth の「前月」は終了済み（使用0ヶ月の同月処分）だけの正当なエンコード。
   if (saved.repeatEveryMonths !== undefined && saved.repeatEveryMonths < saved.costMonths)
     throw new LedgerError('error.monthlyCost.repeatInvalid');
-  if (saved.endMonth !== undefined && saved.endMonth < addMonths(saved.startMonth, -1))
+  if (
+    saved.endMonth !== undefined &&
+    saved.endMonth < saved.startMonth &&
+    !(saved.status === 'ended' && saved.endMonth === addMonths(saved.startMonth, -1))
+  )
     throw new LedgerError('error.monthlyCost.endBeforeStart');
   if (saved.status !== 'active' && saved.endMonth === undefined)
     throw new LedgerError('error.monthlyCost.endMonthRequired');
@@ -2496,16 +2580,33 @@ export async function deleteMonthlyCost(id: string): Promise<void> {
   if (relatedSchedules.some((s) => s.status === 'posted')) {
     throw new LedgerError('error.monthlyCost.deletePosted');
   }
-  await writeWithRevision(
-    [STORE.monthlyCostItems, STORE.cashflowSchedules, STORE.journalEntries],
-    (t) => {
-      t.objectStore(STORE.monthlyCostItems).delete(id);
-      const sStore = t.objectStore(STORE.cashflowSchedules);
-      for (const s of relatedSchedules) sStore.delete(s.id);
-      const eStore = t.objectStore(STORE.journalEntries);
-      for (const e of relatedEntries) eStore.delete(e.id);
-    },
-  );
+  // 事前チェックは別トランザクションの読みに依存するため、最終トランザクションで
+  // 処分の有無だけ再判定する（処分直後に削除が走ると台帳だけ消えて AssetDisposal と
+  // 生成仕訳が孤立し、export が復元不能になる）。
+  let disposedRace = false;
+  try {
+    await writeWithRevision(
+      [STORE.monthlyCostItems, STORE.cashflowSchedules, STORE.journalEntries, STORE.assetDisposals],
+      (t) => {
+        const probe = t.objectStore(STORE.assetDisposals).getAll();
+        probe.onsuccess = () => {
+          if ((probe.result as AssetDisposal[]).some((d) => d.monthlyCostId === id)) {
+            disposedRace = true;
+            t.abort();
+            return;
+          }
+          t.objectStore(STORE.monthlyCostItems).delete(id);
+          const sStore = t.objectStore(STORE.cashflowSchedules);
+          for (const s of relatedSchedules) sStore.delete(s.id);
+          const eStore = t.objectStore(STORE.journalEntries);
+          for (const e of relatedEntries) eStore.delete(e.id);
+        };
+      },
+    );
+  } catch (error) {
+    if (disposedRace) throw new LedgerError('error.monthlyCost.deleteFixedAsset');
+    throw error;
+  }
 }
 
 /* ── 固定資産の売却・故障処分 ── */
@@ -2694,6 +2795,14 @@ export async function disposeFixedAsset(input: DisposeFixedAssetInput): Promise<
   await commitDisposalWrite({
     stores: [STORE.assetDisposals, STORE.journalEntries, STORE.monthlyCostItems, STORE.accounts],
     itemBefore: item,
+    // tx 内で新規作成する調整科目は除外して既存参照だけを検証する。
+    requiredAccountIds: [
+      ...new Set(
+        generated
+          .flatMap((e) => e.lines.map((l) => l.accountId))
+          .filter((accountId) => accountId !== newAdjAccount?.id),
+      ),
+    ],
     write: (t) => {
       if (newAdjAccount) t.objectStore(STORE.accounts).put(newAdjAccount);
       const eStore = t.objectStore(STORE.journalEntries);
@@ -2762,12 +2871,10 @@ export async function disposeContinuousCost(input: DisposeFixedAssetInput): Prom
   const disposalMonth = monthOf(input.disposalDate);
   // 開始月より前の処分は「開始前に処分」＝入力誤り。endMonth < startMonth の item を作らせない。
   if (disposalMonth < item.startMonth) throw new LedgerError('error.disposal.beforeStart');
-  const accountsById = new Map(accounts.map((a) => [a.id, a] as const));
   // 実績動的償却: 損益の一括計上はしない。最終サイクルを「実使用月数・売却額控除」で
   // 遡及再配分する（月額に吸収）。実仕訳は売却額の資産移動と、サイクル額を超えた益だけ。
   const { fundedAmount, inflow, gain } = continuousCostDisposalOutcome(
     item,
-    accountsById,
     disposalMonth,
     input.proceedsAmount,
   );
@@ -2838,8 +2945,9 @@ export async function disposeContinuousCost(input: DisposeFixedAssetInput): Prom
 
   assertMonthlyCostItemSavable(updatedItem);
   await commitDisposalWrite({
-    stores: [STORE.assetDisposals, STORE.journalEntries, STORE.monthlyCostItems],
+    stores: [STORE.assetDisposals, STORE.journalEntries, STORE.monthlyCostItems, STORE.accounts],
     itemBefore: item,
+    requiredAccountIds: [...new Set(generated.flatMap((e) => e.lines.map((l) => l.accountId)))],
     write: (t) => {
       const eStore = t.objectStore(STORE.journalEntries);
       for (const e of generated) eStore.put(e);

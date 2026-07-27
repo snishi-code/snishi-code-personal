@@ -17,7 +17,7 @@ import {
 } from '../../domain/monthlyCost';
 import { lastExpenseCategoryId, rememberExpenseCategoryId } from '../../data/localFlags';
 import { sortAccounts } from '../../domain/accountOrder';
-import { recognitionAccountOptions } from '../accountOptions';
+import { defaultRecognitionAccountId, recognitionAccountOptions } from '../accountOptions';
 import { disposalOutcome } from '../../domain/assetDisposal';
 import {
   continuousCostDisposalEndMonth,
@@ -490,9 +490,7 @@ function SubscriptionMigrationSheet({ onClose }: { onClose: () => void }) {
   const [expenseAccountId, setExpenseAccountId] = useState(
     (storedCategory !== null && recognitionOptions.some((o) => o.value === storedCategory)
       ? storedCategory
-      : null) ??
-      recognitionOptions[0]?.value ??
-      '',
+      : null) ?? defaultRecognitionAccountId(accounts),
   );
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
@@ -881,7 +879,7 @@ function ContinuousCostMigrateSheet({ onClose }: { onClose: () => void }) {
   const [expenseAccountId, setExpenseAccountId] = useState(() => {
     const last = lastExpenseCategoryId();
     if (last && recognitionOptions.some((o) => o.value === last)) return last;
-    return recognitionOptions[0]?.value ?? '';
+    return defaultRecognitionAccountId(accounts);
   });
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
@@ -1008,13 +1006,9 @@ function MonthlyCostDisposeSheet({
 
   const proceeds = proceedsText === '' ? 0 : Number.parseInt(proceedsText, 10);
   const disposalMonth = /^\d{4}-\d{2}-\d{2}$/.test(date) ? monthOf(date) : item.startMonth;
-  const accountsById = useMemo(
-    () => new Map((ledger?.accounts ?? []).map((a) => [a.id, a] as const)),
-    [ledger],
-  );
   // 継続コスト（実績動的償却）: 実使用月数への遡及再配分プレビュー。固定資産は従来の損益方式。
   const ccOutcome = continuous
-    ? continuousCostDisposalOutcome(item, accountsById, disposalMonth, proceeds)
+    ? continuousCostDisposalOutcome(item, disposalMonth, proceeds)
     : null;
   const fixedOutcome = continuous ? null : disposalOutcome(item, disposalMonth, proceeds);
   const endMonth = continuous

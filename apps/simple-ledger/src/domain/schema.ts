@@ -7,7 +7,6 @@ import {
   APP_ID,
   CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
   RESERVE_LEDGER_ACCOUNT_ID,
-  SCHEMA_VERSION,
 } from './constants';
 import { addMonths, monthlyAmounts } from './allocation';
 import {
@@ -255,14 +254,19 @@ export const monthlyCostItemSchema = z
         path: ['repeatEveryMonths'],
       });
     }
-    // endMonth は「startMonth の前月」まで許す。前月＝使用0ヶ月のエンコードで、
-    // 固定資産を購入と同じ月に処分すると保存境界が正当に書く（認識エンジンは 0 ヶ月扱い）。
-    if (item.endMonth !== undefined && item.endMonth < addMonths(item.startMonth, -1)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'endMonth は startMonth の前月以降である必要があります',
-        path: ['endMonth'],
-      });
+    // endMonth は原則 startMonth 以降。「前月」だけは終了済み（ended）に限り許す。
+    // 前月＝使用0ヶ月のエンコードで、固定資産を購入と同じ月に処分すると保存境界が
+    // 正当に書く（認識エンジンは 0 ヶ月扱い）。active/paused には認めない。
+    if (item.endMonth !== undefined && item.endMonth < item.startMonth) {
+      const zeroUseDisposal = item.status === 'ended' && item.endMonth === addMonths(item.startMonth, -1);
+      if (!zeroUseDisposal) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            'endMonth は startMonth 以降である必要があります（前月は終了済みの使用0ヶ月処分のみ）',
+          path: ['endMonth'],
+        });
+      }
     }
     if (item.status !== 'active' && item.endMonth === undefined) {
       ctx.addIssue({
@@ -969,10 +973,15 @@ export const ledgerExportPackageSchema = z
     // 固定資産処分(assetDisposals)の参照整合性。
     const journalEntryIds = new Set(pkg.journalEntries.map((e) => e.id));
     const disposalIds = new Set<string>();
+    const disposedMonthlyCostIds = new Set<string>();
     pkg.assetDisposals.forEach((d, di) => {
       const at = (...p: (string | number)[]) => ['assetDisposals', di, ...p];
       if (disposalIds.has(d.id)) issue(`固定資産処分の ID が重複しています(${d.id})`, at('id'));
       disposalIds.add(d.id);
+      // 同一項目への処分は1回だけ（保存境界の error.disposal.duplicate と同値）。
+      if (disposedMonthlyCostIds.has(d.monthlyCostId))
+        issue(`同じ項目が複数回処分されています(${d.monthlyCostId})`, at('monthlyCostId'));
+      disposedMonthlyCostIds.add(d.monthlyCostId);
       if (!hasScope(d.managementScopeId))
         issue(`固定資産処分の管理区分が存在しません`, at('managementScopeId'));
       if (!monthlyCostIdSet.has(d.monthlyCostId))
@@ -1042,8 +1051,3 @@ export const ledgerExportPackageSchema = z
   });
 
 export type LedgerExportPackageInput = z.infer<typeof ledgerExportPackageSchema>;
-
-/** 現行版のエクスポートか（migration 不要か）。 */
-export function isCurrentSchema(version: number): boolean {
-  return version === SCHEMA_VERSION;
-}

@@ -79,6 +79,19 @@ export function recognitionAccountOptions(
     .map((a) => ({ value: a.id, label: a.name }));
 }
 
+/**
+ * 認識先の既定値。候補は全会計区分にまたがるが、既定は必ず費用カテゴリから選ぶ
+ * （名前順の先頭が負債科目だと、触らず保存したとき通常の費用計上が負債への振替として
+ * 静かに保存されてしまうため）。費用カテゴリが無いときだけ候補の先頭に落とす。
+ */
+export function defaultRecognitionAccountId(accounts: Account[]): string {
+  const expense = accounts
+    .filter((a) => a.role === 'expense-category' && !a.archived)
+    .sort(compareAccountOrder)[0];
+  if (expense) return expense.id;
+  return recognitionAccountOptions(accounts)[0]?.value ?? '';
+}
+
 /** AccountPicker 用の認識先候補（区分別グループ）。 */
 export function groupedRecognitionAccounts(
   accounts: Account[],

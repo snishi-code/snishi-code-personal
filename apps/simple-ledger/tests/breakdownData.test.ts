@@ -78,7 +78,6 @@ function ledgerOf(journalEntries: JournalEntry[]): Ledger {
     accountInstruments: [],
     accounts,
     journalEntries,
-    derivedEntries: journalEntries,
     allocations: [],
     cashflowSchedules: [],
     reserves: [],

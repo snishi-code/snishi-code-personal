@@ -3630,3 +3630,31 @@ describe('M2 保存境界の回帰（不正日付・導出残高・MonthlyCostIt
     );
   });
 });
+
+describe('取り置きの枠削除（後片付け）', () => {
+  it('枠の削除は同一トランザクションで仕訳の reserveId を剥がし、export が復元可能なまま残る', async () => {
+    const { deleteReserve, createReserve } = await import('../src/data/repository');
+    const ledger = await loadLedger();
+    const capital = ledger.accounts.find((a) => a.name === '開始残高')!;
+    const r = await createReserve({ name: '旅行（削除テスト）' });
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2026-07-01',
+        description: '取り置き',
+        debitAccountId: RESERVE_LEDGER_ACCOUNT_ID,
+        creditAccountId: capital.id,
+        amount: 30000,
+        metadata: { inputMode: 'transfer', reserveId: r.id },
+      }),
+    );
+    await deleteReserve(r.id);
+    const after = await loadLedger();
+    expect(after.reserves.some((x) => x.id === r.id)).toBe(false);
+    const entry = after.journalEntries.find((e) => e.description === '取り置き')!;
+    expect(entry).toBeDefined();
+    expect(entry.metadata?.reserveId).toBeUndefined();
+    // 孤児 reserveId が残っていないので export → schema 検証が通る。
+    const pkg = buildExportPackage(after);
+    expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(true);
+  });
+});

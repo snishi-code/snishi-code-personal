@@ -275,7 +275,7 @@ export const ja = {
   'liability.error.name': '名称を入力してください。',
   'reserves.deleteConfirmTitle': '取り置き資金の枠を削除しますか？',
   'reserves.deleteConfirmBody':
-    '「{name}」の枠を削除します。取り置いた資金や仕訳は残ります（科目は残ります）。',
+    '「{name}」の枠を削除します。取り置いた資金は「未割り当て」に戻り、仕訳は残ります。',
 
   'cashflow.form.entryTags': 'タグ（全体）',
   'cashflow.form.accountTags': '口座側タグ',

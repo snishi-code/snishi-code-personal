@@ -67,3 +67,38 @@ describe('reserveBalances の基準日', () => {
     expect(balances.get('trip')).toBe(100);
   });
 });
+
+describe('取消（reversalInput）と取り置き', () => {
+  it('取消は reserveId を引き継ぎ、目的別残高が集約口座と同じだけ減る', async () => {
+    const { reversalInput } = await import('../src/domain/entry');
+    const source: JournalEntry = {
+      id: 'src',
+      date: '2026-07-01',
+      description: '旅行の取り置き',
+      kind: 'normal',
+      managementScopeId: 'scope-personal',
+      lines: [
+        { accountId: 'reserve-ledger', side: 'debit', amount: 50000 },
+        { accountId: 'bank', side: 'credit', amount: 50000 },
+      ],
+      metadata: { inputMode: 'transfer', reserveId: 'trip' },
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const input = reversalInput(source);
+    expect(input.metadata?.reserveId).toBe('trip');
+    // 取消仕訳を実体化して合算すると目的別残高が 0 に戻る（未割り当てが負にならない）。
+    const reversal: JournalEntry = {
+      ...source,
+      id: 'rev',
+      description: input.description,
+      lines: [
+        { accountId: input.debitAccountId, side: 'debit', amount: input.amount },
+        { accountId: input.creditAccountId, side: 'credit', amount: input.amount },
+      ],
+      metadata: input.metadata,
+    };
+    const balances = reserveBalances([source, reversal], '2026-07-27');
+    expect(balances.get('trip') ?? 0).toBe(0);
+  });
+});

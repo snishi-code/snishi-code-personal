@@ -198,6 +198,12 @@ export function reversalInput(source: JournalEntry): SimpleEntryInput {
     ...(source.tagIds?.length ? { tagIds: source.tagIds } : {}),
     ...(credit?.instrumentId ? { debitInstrumentId: credit.instrumentId } : {}),
     ...(debit?.instrumentId ? { creditInstrumentId: debit.instrumentId } : {}),
-    metadata: { inputMode: 'reversal', reversalOfEntryId: source.id },
+    // 取り置き(reserveId)も引き継ぐ。落とすと集約口座だけ減って目的別残高が
+    // 据え置かれ、「未割り当て」が負になる（side 入れ替えで自動的に減算方向になる）。
+    metadata: {
+      inputMode: 'reversal',
+      reversalOfEntryId: source.id,
+      ...(source.metadata?.reserveId ? { reserveId: source.metadata.reserveId } : {}),
+    },
   };
 }

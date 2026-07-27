@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import './setup';
 import {
   entryMetadataSchema,
-  isCurrentSchema,
   journalEntrySchema,
   ledgerExportPackageSchema,
   monthlyCostItemSchema,
@@ -262,13 +261,6 @@ describe('ledgerExportPackageSchema', () => {
       ],
     };
     expect(ledgerExportPackageSchema.safeParse(ok).success).toBe(true);
-  });
-});
-
-describe('isCurrentSchema', () => {
-  it('現行版のみ true', () => {
-    expect(isCurrentSchema(SCHEMA_VERSION)).toBe(true);
-    expect(isCurrentSchema(SCHEMA_VERSION + 1)).toBe(false);
   });
 });
 
@@ -1006,6 +998,8 @@ describe('月額化コスト(monthlyCostItems) の参照・不変条件検証', 
   it.each([
     ['repeatEveryMonths < costMonths', { costMonths: 12, repeatEveryMonths: 6 }],
     ['endMonth < startMonth の前月', { endMonth: '2026-04' }],
+    // 前月の例外は「終了済み（使用0ヶ月処分）」限定。active には認めない。
+    ['active で endMonth = startMonth の前月', { endMonth: '2026-05' }],
     ['paused なのに endMonth がない', { status: 'paused' }],
     ['ended なのに endMonth がない', { status: 'ended' }],
   ])('%s は item schema / package ともに invalid', (_label, patch) => {
@@ -1104,5 +1098,85 @@ describe('月額化コスト(monthlyCostItems) の参照・不変条件検証', 
       },
     ];
     expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(false);
+  });
+});
+
+describe('固定資産処分の重複検証', () => {
+  it('同一 monthlyCostId への処分が2件あると package で invalid', () => {
+    const fixedAccount = {
+      id: 'fa',
+      name: '車',
+      type: 'asset',
+      role: 'fixed-asset',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const item = {
+      id: 'm1',
+      name: '車の月額化',
+      managementScopeId: 'scope-personal',
+      kind: 'durable-asset',
+      amount: 120000,
+      costMonths: 12,
+      startMonth: '2026-01',
+      expenseAccountId: 'food',
+      recognitionCreditAccountId: 'fa',
+      sourceEntryId: 'e1',
+      status: 'ended',
+      endMonth: '2026-06',
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const disposal = (id: string) => ({
+      id,
+      monthlyCostId: 'm1',
+      fixedAccountId: 'fa',
+      managementScopeId: 'scope-personal',
+      disposalDate: '2026-07-15',
+      proceedsAmount: 0,
+      recognizedAmount: 60000,
+      remainingAmount: 60000,
+      generatedEntryIds: [],
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    const pkg = (disposals: Record<string, unknown>[]) => ({
+      appId: APP_ID,
+      schemaVersion: SCHEMA_VERSION,
+      ledgerId: 'ledger',
+      exportedAt: '2026-06-01T00:00:00.000Z',
+      deviceId: 'd',
+      revision: 0,
+      managementScopes: [
+        { id: 'scope-personal', name: '個人用', archived: false, createdAt: 'x', updatedAt: 'x' },
+      ],
+      accountInstruments: [],
+      accounts: [
+        {
+          id: 'food',
+          name: '食費',
+          type: 'expense',
+          role: 'expense-category',
+          archived: false,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+        fixedAccount,
+      ],
+      journalEntries: [],
+      allocations: [],
+      cashflowSchedules: [],
+      reserves: [],
+      tags: [],
+      monthlyCostItems: [item],
+      assetDisposals: disposals,
+      recurringRules: [],
+      settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
+    });
+    expect(ledgerExportPackageSchema.safeParse(pkg([disposal('d1')])).success).toBe(true);
+    expect(
+      ledgerExportPackageSchema.safeParse(pkg([disposal('d1'), disposal('d2')])).success,
+    ).toBe(false);
   });
 });
