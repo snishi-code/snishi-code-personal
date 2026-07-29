@@ -1,17 +1,23 @@
 /*
- * 定期ルール（毎月の支出・収入・振替）の純関数。
+ * 定期ルール（くり返し記帳）の純関数。
  *
  * 方式 = 会計ソフト標準の「実仕訳の自動起票」（GnuCash の Since-Last-Run と同型）:
  *  - ルールは起票の道具で、正本は起票された実仕訳（明細照合・個別月の編集ができる）。
  *  - アプリ起動時に経過月ぶんをキャッチアップ起票する（idempotent）。
  *  - 起票済み管理はルール側のカーソル（postedThroughMonth）で行う。ユーザーが起票済み
  *    仕訳を削除しても再起票しない（「今月はスキップ」を尊重する）。
- *  - 停止中は起票しない。再開時は startMonth を現在月へ更新し、停止中の月を遡って起票しない。
- * 継続コスト（費用の月割り認識 = 導出レイヤ）とは別概念で、こちらは実際の資金移動を扱う。
+ *  - 停止中は起票しない。再開時は startMonth を書き換えず（周期の位相を保つ）、
+ *    postedThroughMonth を前月に置いて停止中の月を遡って起票しない（repository 側）。
+ *  - everyMonths（必須。1 = 毎月）で間引く。位相は startMonth 基点。
+ *  - spreadExpenseAccountId を持つルールは**月割りするルール**（継続コスト化）:
+ *    起票は `借方 継続コスト台帳 / 貸方 源泉` + item 自動生成（repository 側）。
+ *    投影もここで購入行 + 費用行（cc-recogp）を両方出す＝未来断面で台帳が積み上がらない。
  */
 import { addMonths, monthOf, monthsBetween } from './allocation';
 import { ACCOUNT_ROLES, isInternalRole, type AccountRole } from './accountRoles';
-import type { Account, InputMode, JournalEntry, RecurringRule } from './types';
+import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from './constants';
+import { continuousCostEntriesForItem } from './continuousCost';
+import type { Account, InputMode, JournalEntry, MonthlyCostItem, RecurringRule } from './types';
 
 /** 表示用の種別（保存しない。勘定の役割から導出する）。 */
 export type RecurringKind = 'expense' | 'income' | 'transfer';
@@ -85,7 +91,9 @@ export function recurringPostingsDue(rule: RecurringRule, today: string): Recurr
   if (span < 0) return [];
   const out: RecurringPosting[] = [];
   const count = Math.min(span + 1, CATCH_UP_HARD_CAP_MONTHS);
+  const every = rule.everyMonths >= 1 ? rule.everyMonths : 1;
   for (let i = 0; i < count; i++) {
+    if (i % every !== 0) continue; // startMonth 基点の位相で間引く
     const month = addMonths(rule.startMonth, i);
     if (rule.postedThroughMonth !== undefined && month <= rule.postedThroughMonth) continue;
     const date = clampDayToMonth(month, rule.dayOfMonth);
@@ -95,9 +103,52 @@ export function recurringPostingsDue(rule: RecurringRule, today: string): Recurr
   return out;
 }
 
+/* ── 月割りするルール（spreadExpenseAccountId あり）が自動生成する item ── */
+
+/** ルール生成 item の決定的 ID。由来メタは持たない（ID が由来を符号化する）。 */
+export function ruleItemId(ruleId: string, month: string): string {
+  return `ccr-${ruleId}-${month}`;
+}
+
+/**
+ * ルール生成 item の終了日 = 周期がカバーする最終月の末日（厳密式）。
+ * 「起票日 + 周期 − 1日」は day=1 のときしか一致しない（13ヶ月配分になる）ので使わない。
+ */
+export function ruleItemEndDate(postingMonth: string, everyMonths: number): string {
+  return clampDayToMonth(addMonths(postingMonth, everyMonths - 1), 31);
+}
+
+/**
+ * 月割りするルールの 1 起票ぶんの item を組み立てる。startDate = 起票日（購入の仕訳の日付）。
+ * ルール生成 item の endDate は必ず埋まる（周期が分かっているので計算できる）。
+ */
+export function buildRuleItem(
+  rule: RecurringRule,
+  posting: RecurringPosting,
+  ts: { createdAt: string; updatedAt: string },
+): MonthlyCostItem | null {
+  if (rule.spreadExpenseAccountId === undefined) return null;
+  return {
+    id: ruleItemId(rule.id, posting.month),
+    name: rule.name,
+    amount: rule.amount,
+    startDate: posting.date,
+    endDate: ruleItemEndDate(posting.month, rule.everyMonths),
+    expenseAccountId: rule.spreadExpenseAccountId,
+    createdAt: ts.createdAt,
+    updatedAt: ts.updatedAt,
+  };
+}
+
 /**
  * 選択した基準日までの、未起票分を表示専用の仮想仕訳として投影する。
  * 永続化とカーソル更新は行わず、postedThroughMonth より後だけを出すため実仕訳と二重計上しない。
+ *
+ * 月割りするルール（spreadExpenseAccountId あり）は購入行に加えて**費用行も投影する**
+ * （`cc-recogp-{ruleId}-{postingMonth}-{YYYY-MM}`）。これを落とすと未来断面で
+ * 継続コスト台帳が購入行ぶんだけ積み上がり、純資産が実在しない額まで膨らむ。
+ * 二重展開はしない: 起票済み月は item 側（continuousCostEntries）が展開し、
+ * ここはカーソルより後の月だけを出す。
  */
 export function recurringProjectionEntries(
   rules: RecurringRule[],
@@ -107,11 +158,21 @@ export function recurringProjectionEntries(
   const byId = new Map(accounts.map((account) => [account.id, account] as const));
   const projected: JournalEntry[] = [];
   for (const rule of rules) {
+    const spread = rule.spreadExpenseAccountId !== undefined;
     const debit = byId.get(rule.debitAccountId);
     const credit = byId.get(rule.creditAccountId);
     if (!debit || !credit) continue;
-    if (!isRecurringPostableRole(debit.role) || !isRecurringPostableRole(credit.role)) continue;
-    const inputMode: InputMode = recurringKindOf(debit.role, credit.role) ?? 'manual';
+    if (!isRecurringPostableRole(credit.role)) continue;
+    // 月割りルールの借方は継続コスト台帳に固定（postable ではないので別枠で検証する）。
+    if (spread) {
+      if (rule.debitAccountId !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID) continue;
+    } else if (!isRecurringPostableRole(debit.role)) {
+      continue;
+    }
+    // recurringKindOf(continuing-cost-asset, …) は null を返すため、月割りルールは 'expense' 直指定。
+    const inputMode: InputMode = spread
+      ? 'expense'
+      : (recurringKindOf(debit.role, credit.role) ?? 'manual');
     for (const posting of recurringPostingsDue(rule, asOf)) {
       projected.push({
         id: `rec-proj-${rule.id}-${posting.month}`,
@@ -131,6 +192,28 @@ export function recurringProjectionEntries(
         createdAt: rule.createdAt,
         updatedAt: rule.updatedAt,
       });
+      if (spread) {
+        const ephemeral = buildRuleItem(rule, posting, {
+          createdAt: rule.createdAt,
+          updatedAt: rule.updatedAt,
+        });
+        if (ephemeral) {
+          // id を `{ruleId}-{postingMonth}` にすると費用行 ID が
+          // `cc-recogp-{ruleId}-{postingMonth}-{YYYY-MM}` になる（item 由来の cc-recog と衝突しない）。
+          // metadata に recurringRuleId を足す＝仕訳一覧のタップでルールへ飛べる（投影 item は実在しないため）。
+          projected.push(
+            ...continuousCostEntriesForItem(
+              { ...ephemeral, id: `${rule.id}-${posting.month}` },
+              asOf,
+              ephemeral.amount,
+              'cc-recogp',
+            ).map((e) => ({
+              ...e,
+              metadata: { ...e.metadata, recurringRuleId: rule.id, recurringMonth: posting.month },
+            })),
+          );
+        }
+      }
     }
   }
   return projected;

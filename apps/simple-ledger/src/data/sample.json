@@ -1,6 +1,6 @@
 {
   "appId": "snishi-code.simple-ledger-v2",
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "ledgerId": "sample-ledger",
   "exportedAt": "2026-04-01T00:00:00.000Z",
   "deviceId": "sample-device",
@@ -163,6 +163,15 @@
       "archived": false,
       "createdAt": "2026-01-01T00:00:00.000Z",
       "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "continuing-cost-ledger",
+      "name": "継続コスト台帳",
+      "type": "asset",
+      "role": "continuing-cost-asset",
+      "archived": false,
+      "createdAt": "2026-04-01T00:00:00.000Z",
+      "updatedAt": "2026-04-01T00:00:00.000Z"
     }
   ],
   "journalEntries": [
@@ -230,8 +239,7 @@
         }
       ],
       "metadata": {
-        "inputMode": "expense",
-        "monthlyCostId": "mc-rent"
+        "inputMode": "expense"
       },
       "createdAt": "2026-01-01T00:00:00.000Z",
       "updatedAt": "2026-01-01T00:00:00.000Z"
@@ -254,8 +262,7 @@
         }
       ],
       "metadata": {
-        "inputMode": "expense",
-        "monthlyCostId": "mc-utility"
+        "inputMode": "expense"
       },
       "createdAt": "2026-01-01T00:00:00.000Z",
       "updatedAt": "2026-01-01T00:00:00.000Z"
@@ -278,8 +285,7 @@
         }
       ],
       "metadata": {
-        "inputMode": "expense",
-        "monthlyCostId": "mc-gym"
+        "inputMode": "expense"
       },
       "createdAt": "2026-01-05T00:00:00.000Z",
       "updatedAt": "2026-01-05T00:00:00.000Z"
@@ -302,8 +308,7 @@
         }
       ],
       "metadata": {
-        "inputMode": "expense",
-        "monthlyCostId": "mc-sub"
+        "inputMode": "expense"
       },
       "createdAt": "2026-01-05T00:00:00.000Z",
       "updatedAt": "2026-01-05T00:00:00.000Z"
@@ -754,6 +759,54 @@
       },
       "createdAt": "2026-03-25T00:00:00.000Z",
       "updatedAt": "2026-03-25T00:00:00.000Z"
+    },
+    {
+      "id": "e-cc-annual",
+      "date": "2026-01-15",
+      "description": "年払いクラウド",
+      "kind": "normal",
+      "lines": [
+        {
+          "accountId": "continuing-cost-ledger",
+          "side": "debit",
+          "amount": 12000
+        },
+        {
+          "accountId": "acc-bank",
+          "side": "credit",
+          "amount": 12000
+        }
+      ],
+      "metadata": {
+        "inputMode": "expense",
+        "monthlyCostId": "mc-annual"
+      },
+      "createdAt": "2026-04-01T00:00:00.000Z",
+      "updatedAt": "2026-04-01T00:00:00.000Z"
+    },
+    {
+      "id": "e-cc-washer",
+      "date": "2024-06-01",
+      "description": "洗濯機",
+      "kind": "opening",
+      "lines": [
+        {
+          "accountId": "continuing-cost-ledger",
+          "side": "debit",
+          "amount": 240000
+        },
+        {
+          "accountId": "acc-open",
+          "side": "credit",
+          "amount": 240000
+        }
+      ],
+      "metadata": {
+        "inputMode": "manual",
+        "monthlyCostId": "mc-washer"
+      },
+      "createdAt": "2026-04-01T00:00:00.000Z",
+      "updatedAt": "2026-04-01T00:00:00.000Z"
     }
   ],
   "cashflowSchedules": [
@@ -814,58 +867,24 @@
   ],
   "monthlyCostItems": [
     {
-      "id": "mc-rent",
-      "name": "家賃",
-      "kind": "subscription",
-      "amount": 80000,
-      "costMonths": 1,
-      "startMonth": "2026-01",
+      "id": "mc-annual",
+      "name": "年払いクラウド",
+      "amount": 12000,
+      "startDate": "2026-01-15",
+      "endDate": "2026-12-31",
       "expenseAccountId": "acc-fixed",
-      "paymentAccountId": "acc-bank",
-      "status": "active",
-      "createdAt": "2026-01-01T00:00:00.000Z",
-      "updatedAt": "2026-01-01T00:00:00.000Z"
+      "createdAt": "2026-04-01T00:00:00.000Z",
+      "updatedAt": "2026-04-01T00:00:00.000Z"
     },
     {
-      "id": "mc-utility",
-      "name": "光熱・通信",
-      "kind": "subscription",
-      "amount": 15000,
-      "costMonths": 1,
-      "startMonth": "2026-01",
+      "id": "mc-washer",
+      "name": "洗濯機",
+      "amount": 240000,
+      "startDate": "2024-06-01",
       "expenseAccountId": "acc-fixed",
-      "paymentAccountId": "acc-bank",
-      "status": "active",
-      "createdAt": "2026-01-01T00:00:00.000Z",
-      "updatedAt": "2026-01-01T00:00:00.000Z"
-    },
-    {
-      "id": "mc-gym",
-      "name": "ジム",
-      "kind": "subscription",
-      "amount": 7000,
-      "costMonths": 1,
-      "startMonth": "2026-01",
-      "expenseAccountId": "acc-health",
-      "paymentAccountId": "acc-bank",
-      "status": "active",
-      "createdAt": "2026-01-05T00:00:00.000Z",
-      "updatedAt": "2026-01-05T00:00:00.000Z"
-    },
-    {
-      "id": "mc-sub",
-      "name": "動画サブスク",
-      "kind": "subscription",
-      "amount": 1500,
-      "costMonths": 1,
-      "startMonth": "2026-01",
-      "expenseAccountId": "acc-fun",
-      "paymentAccountId": "acc-card",
-      "status": "active",
-      "createdAt": "2026-01-05T00:00:00.000Z",
-      "updatedAt": "2026-01-05T00:00:00.000Z"
+      "createdAt": "2026-04-01T00:00:00.000Z",
+      "updatedAt": "2026-04-01T00:00:00.000Z"
     }
   ],
-  "assetDisposals": [],
   "recurringRules": []
 }

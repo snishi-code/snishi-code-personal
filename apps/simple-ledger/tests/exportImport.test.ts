@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import './setup';
 import {
-  createMonthlyCost,
+  createContinuousCost,
   loadLedger,
   upsertEntry,
   listSnapshots,
@@ -143,21 +143,18 @@ describe('revision 競合', () => {
   });
 });
 
-describe('月額化コストの export/import', () => {
-  it('月額化コストを含む台帳を round-trip できる', async () => {
+describe('継続コスト資産の export/import', () => {
+  it('継続コスト資産（購入の仕訳つき）を含む台帳を round-trip できる', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
     const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    await createMonthlyCost({
-      name: 'Netflix',
-      kind: 'subscription',
-      amount: 1500,
-      costMonths: 1,
-      repeatEveryMonths: 1,
-      startMonth: '2026-06',
-      date: '2026-06-15',
+    await createContinuousCost({
+      name: '年払いクラウド',
+      amount: 12000,
+      startDate: '2026-06-15',
+      endDate: '2027-05-31',
       expenseAccountId: food.id,
-      paymentAccountId: cash.id,
+      creditAccountId: cash.id,
     });
     const seeded = await loadLedger();
     expect(seeded.monthlyCostItems).toHaveLength(1);
@@ -166,7 +163,13 @@ describe('月額化コストの export/import', () => {
     expect(outcome.kind).toBe('ok');
     const reloaded = await loadLedger();
     expect(reloaded.monthlyCostItems).toHaveLength(1);
-    expect(reloaded.monthlyCostItems[0]).toMatchObject({ name: 'Netflix', amount: 1500 });
+    expect(reloaded.monthlyCostItems[0]).toMatchObject({ name: '年払いクラウド', amount: 12000 });
+    // 購入の仕訳（monthlyCostId）も round-trip される。
+    expect(
+      reloaded.journalEntries.some(
+        (e) => e.metadata?.monthlyCostId === reloaded.monthlyCostItems[0]!.id,
+      ),
+    ).toBe(true);
   });
 });
 

@@ -86,6 +86,7 @@ describe('年月の暦検証', () => {
     name: '家賃',
     amount: 100000,
     dayOfMonth: 27,
+    everyMonths: 1,
     debitAccountId: 'expense',
     creditAccountId: 'bank',
     startMonth: '2026-12',
@@ -675,7 +676,7 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
   });
 });
 
-describe('月額化コスト(monthlyCostItems) の参照・不変条件検証', () => {
+describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証（⑤⑥⑦⑧⑨）', () => {
   const cash = {
     id: 'cash',
     name: '現金',
@@ -694,7 +695,43 @@ describe('月額化コスト(monthlyCostItems) の参照・不変条件検証', 
     createdAt: 'x',
     updatedAt: 'x',
   };
-  function mcPkg(items: Record<string, unknown>[]) {
+  const ccLedger = {
+    id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+    name: '継続コスト台帳',
+    type: 'asset',
+    role: 'continuing-cost-asset',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  const base = {
+    id: 'm1',
+    name: '年払いクラウド',
+    amount: 12000,
+    startDate: '2026-06-15',
+    endDate: '2027-05-31',
+    expenseAccountId: 'food',
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  /** 購入の仕訳（借方 台帳 / 貸方 現金・item と金額/日付が完全一致）。 */
+  function purchaseOf(item: Record<string, unknown>, over: Record<string, unknown> = {}) {
+    return {
+      id: `p-${item.id as string}`,
+      date: item.startDate,
+      description: item.name,
+      kind: 'normal',
+      lines: [
+        { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: item.amount },
+        { accountId: 'cash', side: 'credit', amount: item.amount },
+      ],
+      metadata: { inputMode: 'expense', monthlyCostId: item.id },
+      createdAt: 'x',
+      updatedAt: 'x',
+      ...over,
+    };
+  }
+  function mcPkg(items: Record<string, unknown>[], entries?: Record<string, unknown>[]) {
     return {
       appId: APP_ID,
       schemaVersion: SCHEMA_VERSION,
@@ -702,131 +739,190 @@ describe('月額化コスト(monthlyCostItems) の参照・不変条件検証', 
       exportedAt: '2026-06-01T00:00:00.000Z',
       deviceId: 'd',
       revision: 0,
-      accounts: [cash, food],
-      journalEntries: [],
+      accounts: [cash, food, ccLedger],
+      journalEntries: entries ?? items.map((item) => purchaseOf(item)),
       cashflowSchedules: [],
       reserves: [],
       tags: [],
       monthlyCostItems: items,
-      assetDisposals: [],
       recurringRules: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
   }
-  const base = {
-    id: 'm1',
-    name: 'Netflix',
-    kind: 'subscription',
-    amount: 1500,
-    costMonths: 1,
-    startMonth: '2026-06',
-    expenseAccountId: 'food',
-    paymentAccountId: 'cash',
-    status: 'active',
-    createdAt: 'x',
-    updatedAt: 'x',
-  };
 
-  it('正しい月額化コストは valid', () => {
+  it('正しい item + 購入の仕訳は valid（終了日なしも valid）', () => {
     expect(monthlyCostItemSchema.safeParse(base).success).toBe(true);
     expect(ledgerExportPackageSchema.safeParse(mcPkg([base])).success).toBe(true);
+    const open = { ...base };
+    delete (open as Record<string, unknown>).endDate;
+    expect(monthlyCostItemSchema.safeParse(open).success).toBe(true);
+    expect(ledgerExportPackageSchema.safeParse(mcPkg([open])).success).toBe(true);
   });
-  it('expenseAccountId は会計 type を問わず、存在する科目なら valid', () => {
-    const otherType = { ...base, expenseAccountId: 'cash' };
-    expect(monthlyCostItemSchema.safeParse(otherType).success).toBe(true);
-    expect(ledgerExportPackageSchema.safeParse(mcPkg([otherType])).success).toBe(true);
+  it('endDate < startDate / 暦にない日付 / 1200ヶ月超は item schema で invalid', () => {
+    expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2026-06-14' }).success).toBe(false);
+    expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2027-02-30' }).success).toBe(false);
+    expect(monthlyCostItemSchema.safeParse({ ...base, startDate: '2026/06/15' }).success).toBe(
+      false,
+    );
+    expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2126-06-30' }).success).toBe(false);
+    // ちょうど 1200ヶ月（2026-06 〜 2126-05）は valid。
+    expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2126-05-31' }).success).toBe(true);
   });
-  it('存在しない expenseAccountId は package で invalid', () => {
-    const bad = mcPkg([{ ...base, expenseAccountId: 'missing' }]);
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  it('存在しない/内部集約の expenseAccountId は package で invalid', () => {
+    expect(
+      ledgerExportPackageSchema.safeParse(mcPkg([{ ...base, expenseAccountId: 'missing' }]))
+        .success,
+    ).toBe(false);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        mcPkg([{ ...base, expenseAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID }]),
+      ).success,
+    ).toBe(false);
   });
-  it('paymentAccountId が日常資産/支払用負債でないと invalid', () => {
-    const bad = mcPkg([{ ...base, paymentAccountId: 'food' }]);
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
+  it('⑥ 購入の仕訳がちょうど 1 件（0 件・2 件は invalid）', () => {
+    expect(ledgerExportPackageSchema.safeParse(mcPkg([base], [])).success).toBe(false);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        mcPkg([base], [purchaseOf(base), purchaseOf(base, { id: 'p-dup' })]),
+      ).success,
+    ).toBe(false);
   });
-  it.each([
-    ['repeatEveryMonths < costMonths', { costMonths: 12, repeatEveryMonths: 6 }],
-    ['endMonth < startMonth の前月', { endMonth: '2026-04' }],
-    // 前月の例外は「終了済み（使用0ヶ月処分）」限定。active には認めない。
-    ['active で endMonth = startMonth の前月', { endMonth: '2026-05' }],
-    ['paused なのに endMonth がない', { status: 'paused' }],
-    ['ended なのに endMonth がない', { status: 'ended' }],
-  ])('%s は item schema / package ともに invalid', (_label, patch) => {
-    const invalid = { ...base, ...patch };
-    expect(monthlyCostItemSchema.safeParse(invalid).success).toBe(false);
-    expect(ledgerExportPackageSchema.safeParse(mcPkg([invalid])).success).toBe(false);
+  it('⑦ 購入の仕訳は日付・金額が item と完全一致（日レベル）・借方 = 台帳・貸方 role 制限', () => {
+    // 同じ月でも日が違えば invalid（月レベル一致にしない＝初月の台帳マイナスを防ぐ）。
+    expect(
+      ledgerExportPackageSchema.safeParse(mcPkg([base], [purchaseOf(base, { date: '2026-06-01' })]))
+        .success,
+    ).toBe(false);
+    // 金額不一致。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        mcPkg(
+          [base],
+          [
+            purchaseOf(base, {
+              lines: [
+                { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: 9999 },
+                { accountId: 'cash', side: 'credit', amount: 9999 },
+              ],
+            }),
+          ],
+        ),
+      ).success,
+    ).toBe(false);
+    // 借方が台帳でない。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        mcPkg(
+          [base],
+          [
+            purchaseOf(base, {
+              lines: [
+                { accountId: 'food', side: 'debit', amount: 12000 },
+                { accountId: 'cash', side: 'credit', amount: 12000 },
+              ],
+            }),
+          ],
+        ),
+      ).success,
+    ).toBe(false);
+    // 貸方 role が費用カテゴリ（資金・負債・初期残高のどれでもない）。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        mcPkg(
+          [base],
+          [
+            purchaseOf(base, {
+              lines: [
+                { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: 12000 },
+                { accountId: 'food', side: 'credit', amount: 12000 },
+              ],
+            }),
+          ],
+        ),
+      ).success,
+    ).toBe(false);
   });
-  it.each([
-    ['active・endMonth なし', {}],
-    ['active・固定 endMonth あり', { endMonth: '2026-12' }],
-    ['paused・endMonth あり', { status: 'paused', endMonth: '2026-12' }],
-    ['ended・endMonth あり', { status: 'ended', endMonth: '2026-12' }],
-    // 前月 = 使用0ヶ月のエンコード（購入と同じ月に処分すると保存境界が正当に書く）。
-    ['ended・endMonth = startMonth の前月', { status: 'ended', endMonth: '2026-05' }],
-  ])('%s は item schema / package ともに valid', (_label, patch) => {
-    const valid = { ...base, ...patch };
-    expect(monthlyCostItemSchema.safeParse(valid).success).toBe(true);
-    expect(ledgerExportPackageSchema.safeParse(mcPkg([valid])).success).toBe(true);
-  });
-  it('認識先(expenseAccountId)に内部集約・残高調整の科目は package で invalid', () => {
-    const ccLedger = {
-      id: 'cc-ledger',
-      name: '継続コスト台帳',
-      type: 'asset',
-      role: 'continuing-cost-asset',
-      archived: false,
+  it('⑧ 台帳にふれる保存仕訳は monthlyCostId が必須（§13-14 の import 側）', () => {
+    const plain = {
+      id: 'e-ledger',
+      date: '2026-06-15',
+      description: '台帳へ直接',
+      kind: 'normal',
+      lines: [
+        { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: 100 },
+        { accountId: 'cash', side: 'credit', amount: 100 },
+      ],
       createdAt: 'x',
       updatedAt: 'x',
     };
-    const pkg = mcPkg([{ ...base, expenseAccountId: 'cc-ledger' }]);
-    (pkg.accounts as Record<string, unknown>[]).push(ccLedger);
-    expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(false);
+    expect(
+      ledgerExportPackageSchema.safeParse(mcPkg([base], [purchaseOf(base), plain])).success,
+    ).toBe(false);
   });
-  it('初期残高(equity) funding の項目に repeatEveryMonths があると package で invalid', () => {
-    const equity = {
-      id: 'opening',
-      name: '初期残高',
-      type: 'equity',
-      role: 'equity',
-      archived: false,
+  it('⑨ 回収の振替は貸方 = 台帳・回収額に上限なし（購入額超の valid を確認）', () => {
+    const recovery = (amount: number, over: Record<string, unknown> = {}) => ({
+      id: 'e-recovery',
+      date: '2026-12-31',
+      description: '売却',
+      kind: 'normal',
+      lines: [
+        { accountId: 'cash', side: 'debit', amount },
+        { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'credit', amount },
+      ],
+      metadata: { inputMode: 'transfer', monthlyCostId: 'm1', monthlyCostRecovery: true },
       createdAt: 'x',
       updatedAt: 'x',
-    };
-    const item = {
-      ...base,
-      costMonths: 12,
-      repeatEveryMonths: 12,
-      paymentSourceAccountId: 'opening',
-    };
-    const pkg = mcPkg([item]);
-    (pkg.accounts as Record<string, unknown>[]).push(equity);
-    expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(false);
-    // repeat を外せば valid（移行登録そのものは正当）。
-    const okItem = { ...base, costMonths: 12, paymentSourceAccountId: 'opening' };
-    const okPkg = mcPkg([okItem]);
-    (okPkg.accounts as Record<string, unknown>[]).push(equity);
-    expect(ledgerExportPackageSchema.safeParse(okPkg).success).toBe(true);
+      ...over,
+    });
+    expect(
+      ledgerExportPackageSchema.safeParse(mcPkg([base], [purchaseOf(base), recovery(3000)]))
+        .success,
+    ).toBe(true);
+    // 回収額 > 購入額 でも valid（過去にわたる費用減）。
+    expect(
+      ledgerExportPackageSchema.safeParse(mcPkg([base], [purchaseOf(base), recovery(99999)]))
+        .success,
+    ).toBe(true);
+    // 貸方が台帳でない回収の振替は invalid。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        mcPkg(
+          [base],
+          [
+            purchaseOf(base),
+            recovery(3000, {
+              lines: [
+                { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: 3000 },
+                { accountId: 'cash', side: 'credit', amount: 3000 },
+              ],
+            }),
+          ],
+        ),
+      ).success,
+    ).toBe(false);
   });
-  it('仕訳の monthlyCostId が存在しないと invalid', () => {
-    const pkg = mcPkg([base]) as Record<string, unknown>;
-    pkg.journalEntries = [
-      {
-        id: 'e1',
-        date: '2026-06-01',
-        description: '購入',
-        kind: 'normal',
-        lines: [
-          { accountId: 'food', side: 'debit', amount: 100 },
-          { accountId: 'cash', side: 'credit', amount: 100 },
-        ],
-        metadata: { inputMode: 'manual', monthlyCostId: 'nope' },
-        createdAt: 'x',
-        updatedAt: 'x',
-      },
-    ];
+  it('⑤ 同一ルール由来の item（ccr-{ruleId}-{month}）の月区間が重なると invalid（§13-12）', () => {
+    const cycle = (month: string, startDate: string, endDate: string) => ({
+      id: `ccr-rule1-${month}`,
+      name: '火災保険',
+      amount: 60000,
+      startDate,
+      endDate,
+      expenseAccountId: 'food',
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    const a = cycle('2026-04', '2026-04-25', '2027-03-31');
+    const b = cycle('2027-04', '2027-04-25', '2028-03-31');
+    expect(ledgerExportPackageSchema.safeParse(mcPkg([a, b])).success).toBe(true);
+    // a の終了日を伸ばして 2027-04 と重ねると invalid（当該月が 2 倍計上される）。
+    const overlapped = { ...a, endDate: '2027-04-30' };
+    const pkg = mcPkg([overlapped, b]);
     expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(false);
   });
-  it('予定CF の monthlyCostId が存在しないと invalid', () => {
+  it('仕訳・予定CF の monthlyCostId が存在しないと invalid', () => {
+    const dangling = purchaseOf(base, { metadata: { inputMode: 'expense', monthlyCostId: 'no' } });
+    expect(ledgerExportPackageSchema.safeParse(mcPkg([], [dangling])).success).toBe(false);
     const pkg = mcPkg([base]) as Record<string, unknown>;
     pkg.cashflowSchedules = [
       {
@@ -848,193 +944,79 @@ describe('月額化コスト(monthlyCostItems) の参照・不変条件検証', 
   });
 });
 
-describe('継続コスト処分の重複検証', () => {
-  it('同一 monthlyCostId への処分が2件あると package で invalid', () => {
-    const ledgerAccount = {
-      id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
-      name: '継続コスト台帳',
-      type: 'asset',
-      role: 'continuing-cost-asset',
-      archived: false,
-      createdAt: 'x',
-      updatedAt: 'x',
-    };
-    const item = {
-      id: 'm1',
-      name: '車の月額化',
-      kind: 'durable-asset',
-      amount: 120000,
-      costMonths: 12,
-      startMonth: '2026-01',
-      expenseAccountId: 'food',
-      recognitionCreditAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
-      status: 'ended',
-      endMonth: '2026-06',
-      createdAt: 'x',
-      updatedAt: 'x',
-    };
-    const disposal = (id: string) => ({
-      id,
-      monthlyCostId: 'm1',
-      fixedAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
-      disposalDate: '2026-07-15',
-      proceedsAmount: 0,
-      recognizedAmount: 120000,
-      remainingAmount: 0,
-      generatedEntryIds: [],
-      createdAt: 'x',
-      updatedAt: 'x',
-    });
-    const pkg = (disposals: Record<string, unknown>[]) => ({
+describe('勘定科目のアーカイブ不変条件（アーカイブ済み = 残高 0）', () => {
+  const food = {
+    id: 'food',
+    name: '食費',
+    type: 'expense',
+    role: 'expense-category',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  function pkgWith(accounts: Record<string, unknown>[], entries: Record<string, unknown>[]) {
+    return {
       appId: APP_ID,
       schemaVersion: SCHEMA_VERSION,
       ledgerId: 'ledger',
       exportedAt: '2026-06-01T00:00:00.000Z',
       deviceId: 'd',
       revision: 0,
-      accounts: [
-        {
-          id: 'food',
-          name: '食費',
-          type: 'expense',
-          role: 'expense-category',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-        ledgerAccount,
-      ],
-      journalEntries: [],
+      accounts,
+      journalEntries: entries,
       cashflowSchedules: [],
       reserves: [],
       tags: [],
-      monthlyCostItems: [item],
-      assetDisposals: disposals,
+      monthlyCostItems: [],
       recurringRules: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
-    });
-    const single = ledgerExportPackageSchema.safeParse(pkg([disposal('d1')]));
-    expect(single.success).toBe(true);
+    };
+  }
+  const wallet = (archived: boolean) => ({
+    id: 'wallet',
+    name: '旧財布',
+    type: 'asset',
+    role: 'daily-asset',
+    archived,
+    createdAt: 'x',
+    updatedAt: 'x',
+  });
+  const spend = {
+    id: 'e1',
+    date: '2026-06-01',
+    description: '支出',
+    kind: 'normal',
+    lines: [
+      { accountId: 'food', side: 'debit', amount: 1000 },
+      { accountId: 'wallet', side: 'credit', amount: 1000 },
+    ],
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  const topUp = {
+    id: 'e0',
+    date: '2026-05-01',
+    description: '入金',
+    kind: 'normal',
+    lines: [
+      { accountId: 'wallet', side: 'debit', amount: 1000 },
+      { accountId: 'food', side: 'credit', amount: 1000 },
+    ],
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+
+  it('残高が 0 でない資産をアーカイブ済みにした package は invalid', () => {
     expect(
-      ledgerExportPackageSchema.safeParse(pkg([disposal('d1'), disposal('d2')])).success,
-    ).toBe(false);
-    expect(
-      ledgerExportPackageSchema.safeParse({
-        ...pkg([disposal('d1')]),
-        monthlyCostItems: [{ ...item, status: 'active', endMonth: undefined }],
-      }).success,
-    ).toBe(false);
-    expect(
-      ledgerExportPackageSchema.safeParse(
-        pkg([{ ...disposal('d1'), fixedAccountId: 'food' }]),
-      ).success,
+      ledgerExportPackageSchema.safeParse(pkgWith([wallet(true), food], [topUp])).success,
     ).toBe(false);
   });
-
-  it('generatedEntryIds と仕訳 metadata は双方向に一致する必要がある', () => {
-    const ledgerAccount = {
-      id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
-      name: '継続コスト台帳',
-      type: 'asset',
-      role: 'continuing-cost-asset',
-      archived: false,
-      createdAt: 'x',
-      updatedAt: 'x',
-    };
-    const bank = {
-      id: 'bank',
-      name: '預金',
-      type: 'asset',
-      role: 'daily-asset',
-      archived: false,
-      createdAt: 'x',
-      updatedAt: 'x',
-    };
-    const item = {
-      id: 'm1',
-      name: '年払い',
-      kind: 'prepaid-service',
-      amount: 12000,
-      costMonths: 12,
-      startMonth: '2026-01',
-      endMonth: '2026-07',
-      expenseAccountId: 'food',
-      paymentSourceAccountId: bank.id,
-      recognitionCreditAccountId: ledgerAccount.id,
-      disposalProceedsAmount: 500,
-      status: 'ended',
-      createdAt: 'x',
-      updatedAt: 'x',
-    };
-    const disposal = {
-      id: 'd1',
-      monthlyCostId: item.id,
-      fixedAccountId: ledgerAccount.id,
-      disposalDate: '2026-07-15',
-      proceedsAmount: 500,
-      destinationAccountId: bank.id,
-      recognizedAmount: 11500,
-      remainingAmount: 0,
-      generatedEntryIds: ['generated'],
-      createdAt: 'x',
-      updatedAt: 'x',
-    };
-    const generated = {
-      id: 'generated',
-      date: '2026-07-15',
-      description: '売却',
-      kind: 'normal',
-      lines: [
-        { accountId: bank.id, side: 'debit', amount: 500 },
-        { accountId: ledgerAccount.id, side: 'credit', amount: 500 },
-      ],
-      metadata: { assetDisposalId: disposal.id },
-      createdAt: 'x',
-      updatedAt: 'x',
-    };
-    const base = {
-      appId: APP_ID,
-      schemaVersion: SCHEMA_VERSION,
-      ledgerId: 'ledger',
-      exportedAt: '2026-06-01T00:00:00.000Z',
-      deviceId: 'd',
-      revision: 0,
-      accounts: [
-        bank,
-        ledgerAccount,
-        {
-          id: 'food',
-          name: '食費',
-          type: 'expense',
-          role: 'expense-category',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-      journalEntries: [generated],
-      cashflowSchedules: [],
-      reserves: [],
-      tags: [],
-      monthlyCostItems: [item],
-      assetDisposals: [disposal],
-      recurringRules: [],
-      settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
-    };
-
-    // 既存仕訳 ID を指す generatedEntryIds は許可する。
-    expect(ledgerExportPackageSchema.safeParse(base).success).toBe(true);
+  it('最終残高 0 なら archived でも valid・未アーカイブは残高があっても valid', () => {
     expect(
-      ledgerExportPackageSchema.safeParse({
-        ...base,
-        assetDisposals: [{ ...disposal, generatedEntryIds: [] }],
-      }).success,
-    ).toBe(false);
+      ledgerExportPackageSchema.safeParse(pkgWith([wallet(true), food], [topUp, spend])).success,
+    ).toBe(true);
     expect(
-      ledgerExportPackageSchema.safeParse({
-        ...base,
-        journalEntries: [{ ...generated, metadata: undefined }],
-      }).success,
-    ).toBe(false);
+      ledgerExportPackageSchema.safeParse(pkgWith([wallet(false), food], [topUp])).success,
+    ).toBe(true);
   });
 });

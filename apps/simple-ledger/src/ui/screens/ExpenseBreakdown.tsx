@@ -42,7 +42,7 @@ export function ExpenseBreakdown({
 
   const { breakdown, categories } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf, today) : [];
+    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf) : [];
     return {
       breakdown: livingCostBreakdownForRange(accounts, entries, range),
       categories: expenseCategoryBreakdownForRange(accounts, entries, range),

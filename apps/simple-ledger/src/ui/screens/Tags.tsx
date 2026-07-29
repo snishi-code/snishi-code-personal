@@ -45,7 +45,7 @@ export function Tags() {
   }, [period, today, year]);
 
   const entryTotals = useMemo(() => {
-    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf, today) : [];
+    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf) : [];
     return aggregateEntryTags(entries, ledger?.tags ?? [], basis.flowRange).filter(
       (x) => x.count > 0,
     );

@@ -38,7 +38,7 @@ export function Accounts() {
     () =>
       ledger
         ? filterByDateRange(
-            reportEntriesForAsOf(ledger, basis.asOf, today),
+            reportEntriesForAsOf(ledger, basis.asOf),
             undefined,
             basis.asOf,
           )

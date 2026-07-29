@@ -61,7 +61,7 @@ export function Dashboard({
 
   const { pl, bs, asOf, monthlyCost, normalExpense } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf, today) : [];
+    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf) : [];
     const breakdown = livingCostBreakdownForRange(accounts, entries, range);
     return {
       pl: deriveProfitAndLoss(accounts, entries, range),
