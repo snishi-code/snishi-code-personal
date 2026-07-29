@@ -11,9 +11,10 @@
 export const DB_NAME = 'simple-ledger-v2' as const;
 
 /**
- * IndexedDB のバージョン。version 4 で旧 allocations ストアを削除した。
+ * IndexedDB のバージョン。version 5 で assetDisposals ストアを削除した
+ * （version 4 は旧 allocations ストアの削除）。
  */
-export const DB_VERSION = 4 as const;
+export const DB_VERSION = 5 as const;
 
 /** エクスポート/import 照合用のアプリ ID（封筒 appId）。v1 とは別 ID。 */
 export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
@@ -24,7 +25,7 @@ export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
  * migration step は追加しない（作者決定＝後方互換を持たない）。旧版 JSON /
  * スナップショットは unsupported-version として fail-closed に拒否される。
  */
-export const SCHEMA_VERSION = 3 as const;
+export const SCHEMA_VERSION = 4 as const;
 
 /** localStorage 等のキー接頭辞（ポインタ/フラグ用。v1 の 'simple-ledger' 系と分離）。 */
 export const LOCAL_PREFIX = 'slv2.' as const;

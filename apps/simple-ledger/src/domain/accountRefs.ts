@@ -13,16 +13,9 @@ export interface AccountRefCollections {
 }
 
 function monthlyCostRefs(m: MonthlyCostItem): (string | undefined)[] {
-  // 資産経由モデルの paymentSourceAccountId（支払い元）/
-  // recognitionCreditAccountId（継続コスト台帳）も参照に含める。これらを参照中の科目は削除/区分変更を fail-closed にする
-  // （消すと仮想展開が壊れる）。
-  return [
-    m.expenseAccountId,
-    m.paymentSourceAccountId,
-    m.paymentAccountId,
-    m.repaymentAccountId,
-    m.recognitionCreditAccountId,
-  ];
+  // 4項目モデルの参照は費用の行き先だけ。支払い元は購入の仕訳（保存される仕訳）が参照する。
+  // 継続コスト台帳は定数参照（保護は deleteAccount の role ガード）。
+  return [m.expenseAccountId];
 }
 
 export function isAccountReferenced(id: string, c: AccountRefCollections): boolean {

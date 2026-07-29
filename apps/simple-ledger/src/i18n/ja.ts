@@ -712,7 +712,7 @@ export const ja = {
   'error.common.amountInvalid': '金額は 1 以上の整数で入力してください。',
   'error.monthlyCost.monthsInvalid': '月数は 1 以上で入力してください。',
   'error.monthlyCost.repeatInvalid': '更新周期は月数以上である必要があります。',
-  'error.monthlyCost.dateRequired': '購入日を入力してください。',
+  'error.monthlyCost.dateRequired': '開始日（購入の仕訳の日付）を入力してください。',
   'error.monthlyCost.startMonthInvalid': '開始月は YYYY-MM 形式で入力してください。',
   'error.monthlyCost.expenseCategory': '認識先の勘定科目を選んでください。',
   'error.monthlyCost.paymentSource':
@@ -720,7 +720,7 @@ export const ja = {
   'error.monthlyCost.repaymentAccount': '返済口座は日常資産を選んでください。',
   'error.monthlyCost.notFound': '対象の継続コストが見つかりません。',
   'error.monthlyCost.invalidStructure': '継続コストの内容が不正です。',
-  'error.monthlyCost.endBeforeStart': '終了月は開始月以降にしてください。',
+  'error.monthlyCost.endBeforeStart': '終了日は開始日以降にしてください。',
   'error.monthlyCost.endMonthRequired': '停止中・終了済みの項目には終了月が必要です。',
   'error.monthlyCost.disposedLocked': '処分済みの継続コストは名称以外変更できません。',
   'error.monthlyCost.editAmountPosted':
@@ -728,6 +728,14 @@ export const ja = {
   'error.monthlyCost.deletePosted':
     '返済が実績化済みのため削除できません。継続コスト台帳で「終了」にしてください。',
   'error.monthlyCost.deleteDisposed': '処分済みの継続コストは削除できません。',
+  // 4項目モデル（指示書#5）で新設したエラーコード。
+  'error.monthlyCost.purchaseAfterEnd': '購入の仕訳の日付は終了日以前にしてください。',
+  'error.monthlyCost.deleteLiability':
+    '負債で購入した項目は削除できません。アーカイブ（終了日の設定）を使ってください。',
+  'error.monthlyCost.recoveryDestination': '振替先の科目を選んでください。',
+  'error.entry.ledgerAccount': '継続コスト台帳の科目は継続コスト資産の登録からだけ使えます。',
+  'error.account.archiveBalance':
+    '残高が残っている科目はアーカイブできません。先に振替で残高を 0 にしてください。',
   'error.disposal.dateRequired': '処分日を YYYY-MM-DD で入力してください。',
   'error.disposal.proceedsInvalid': '売却額は 0 以上の整数で入力してください。',
   'error.disposal.notContinuousCost': 'この項目は継続コスト資産ではないため売却できません。',
