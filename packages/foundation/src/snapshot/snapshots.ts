@@ -192,7 +192,10 @@ export function createSnapshotStore<TData>(cfg: SnapshotStoreConfig<TData>): Sna
 
   function removeTombstone(key: string, ids: string[]): void {
     const drop = new Set(ids);
-    writeTombstone(key, readTombstone(key).filter((id) => !drop.has(id)));
+    writeTombstone(
+      key,
+      readTombstone(key).filter((id) => !drop.has(id)),
+    );
   }
 
   // 実際の削除(scan + delete)。tombstone は触らない。「0 件成功」と「失敗」を ok で区別する。
@@ -272,7 +275,15 @@ export function createSnapshotStore<TData>(cfg: SnapshotStoreConfig<TData>): Sna
           if (sameDay) return; // 同日再操作で「昨日」を上書きしない(初回優先)
         }
         const ownerId = cfg.ownerOf?.() || undefined;
-        await addRecord({ scopeId, t, reason, label, sig, data: cloned, ...(ownerId ? { ownerId } : {}) });
+        await addRecord({
+          scopeId,
+          t,
+          reason,
+          label,
+          sig,
+          data: cloned,
+          ...(ownerId ? { ownerId } : {}),
+        });
         await pruneScope(scopeId);
       } catch (e) {
         console.warn('snapshot capture failed:', e);
