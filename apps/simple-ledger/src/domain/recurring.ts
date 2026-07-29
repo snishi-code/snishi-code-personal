@@ -118,7 +118,6 @@ export function recurringProjectionEntries(
         date: posting.date,
         description: rule.name,
         kind: 'normal',
-        managementScopeId: rule.managementScopeId,
         lines: [
           { accountId: rule.debitAccountId, side: 'debit', amount: rule.amount },
           { accountId: rule.creditAccountId, side: 'credit', amount: rule.amount },

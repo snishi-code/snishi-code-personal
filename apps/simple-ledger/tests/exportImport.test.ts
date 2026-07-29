@@ -81,7 +81,6 @@ describe('fail-closed', () => {
       date: '2026-06-02',
       description: 'broken',
       kind: 'normal',
-      managementScopeId: 'scope-personal',
       lines: [
         { accountId: 'a', side: 'debit', amount: 100 },
         { accountId: 'b', side: 'credit', amount: 90 },
@@ -203,7 +202,6 @@ describe('restoreFromSnapshot（fail-closed）', () => {
       date: '2026-06-02',
       description: 'broken',
       kind: 'normal',
-      managementScopeId: 'scope-personal',
       lines: [
         { accountId: 'a', side: 'debit', amount: 100 },
         { accountId: 'b', side: 'credit', amount: 90 },

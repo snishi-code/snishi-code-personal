@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import './setup';
 import {
-  createAccountInstrument,
   createAdjustment,
   updateAdjustment,
   deleteAdjustment,
@@ -12,7 +11,6 @@ import {
   createContinuousCost,
   createContinuousCostFromOpening,
   createAllocation,
-  createManagementScope,
   createMonthlyCost,
   createRepaymentEntries,
   createReserve,
@@ -20,7 +18,6 @@ import {
   deleteAccount,
   deleteEntry,
   createFixedAssetPurchaseMonthly,
-  deleteManagementScope,
   deleteMonthlyCost,
   deleteTag,
   disposeContinuousCost,
@@ -34,7 +31,6 @@ import {
   saveSnapshot,
   updateSettings,
   upsertAccount,
-  upsertAccountInstrument,
   upsertEntry,
   upsertMonthlyCost,
   upsertSchedule,
@@ -45,7 +41,6 @@ import { LedgerError } from '../src/domain/errors';
 import {
   CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
   CONTINUOUS_COST_LEDGER_ACCOUNT_NAME,
-  DEFAULT_MANAGEMENT_SCOPE_ID,
   RESERVE_LEDGER_ACCOUNT_ID,
 } from '../src/domain/constants';
 import { monthlyCostForMonth } from '../src/domain/monthlyCost';
@@ -322,7 +317,6 @@ describe('予定キャッシュフロー / 目的別資金', () => {
       counterAccountId: card.id,
       source: 'credit-card',
       status: 'planned',
-      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
       createdAt: 'x',
       updatedAt: 'x',
     };
@@ -353,7 +347,6 @@ describe('予定キャッシュフロー / 目的別資金', () => {
       counterAccountId: card.id,
       source: 'manual',
       status: 'planned',
-      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
       createdAt: 'x',
       updatedAt: 'x',
     };
@@ -397,7 +390,6 @@ describe('予定CF・目的別資金が参照する科目の保護', () => {
       ...(counterAccountId ? { counterAccountId } : {}),
       source: 'manual',
       status: 'planned',
-      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
       createdAt: 'x',
       updatedAt: 'x',
     };
@@ -715,7 +707,6 @@ describe('月額化コストの整合性（生成仕訳・削除）', () => {
       counterAccountId: card.id,
       source: 'installment',
       status: 'planned',
-      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
       monthlyCostId: item.id,
       createdAt: 'x',
       updatedAt: 'x',
@@ -882,7 +873,6 @@ describe('タグ実行時検証（保存前）', () => {
       counterAccountId: card.id,
       source: 'manual',
       status: 'planned',
-      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
       entryTagIds: ['no-such-tag'],
       createdAt: 'x',
       updatedAt: 'x',
@@ -1721,7 +1711,6 @@ describe('保存境界の fail-closed（構造・参照検証 + i18n エラー�
       accountId: 'no-such-account',
       source: 'manual',
       status: 'planned',
-      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
       createdAt: 'x',
       updatedAt: 'x',
     };
@@ -1742,7 +1731,6 @@ describe('保存境界の fail-closed（構造・参照検証 + i18n エラー�
       accountId: cash.id,
       source: 'manual',
       status: 'planned',
-      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
       createdAt: 'x',
       updatedAt: 'x',
     };
@@ -1832,145 +1820,6 @@ describe('保存境界の fail-closed（構造・参照検証 + i18n エラー�
     );
     expect(e).toBeInstanceOf(LedgerError);
     expect(e.code).toBe('error.allocation.expenseCategory');
-  });
-});
-
-describe('管理区分・支払い手段の保存境界', () => {
-  /** 例外を捕捉して LedgerError として返す（throw しなければ失敗）。 */
-  async function caught(p: Promise<unknown>): Promise<LedgerError> {
-    try {
-      await p;
-    } catch (e) {
-      return e as LedgerError;
-    }
-    throw new Error('例外が送出されませんでした');
-  }
-
-  it('既定の管理区分は削除できない（最後の 1 つでなくても拒否）', async () => {
-    await loadLedger();
-    // 2 つ目を足しても、既定区分そのものは削除不可。
-    await createManagementScope('事業用');
-    const e = await caught(deleteManagementScope(DEFAULT_MANAGEMENT_SCOPE_ID));
-    expect(e).toBeInstanceOf(LedgerError);
-    expect(e.code).toBe('error.scope.deleteDefault');
-  });
-
-  it('既定でない未使用の管理区分は削除できる', async () => {
-    await loadLedger();
-    const scope = await createManagementScope('事業用');
-    await deleteManagementScope(scope.id);
-    const ledger = await loadLedger();
-    expect(ledger.managementScopes.some((s) => s.id === scope.id)).toBe(false);
-  });
-
-  it('createAccountInstrument は資金口座（daily-asset）を親にできる', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!; // daily-asset
-    const inst = await createAccountInstrument({
-      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
-      accountId: cash.id,
-      name: '楽天銀行',
-      kind: 'bank',
-    });
-    expect(inst.accountId).toBe(cash.id);
-  });
-
-  it('createAccountInstrument はクレジットカード（payment-liability）を親にできる', async () => {
-    const ledger = await loadLedger();
-    const card = ledger.accounts.find((a) => a.name === 'クレジットカード')!; // payment-liability
-    const inst = await createAccountInstrument({
-      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
-      accountId: card.id,
-      name: '楽天カード',
-      kind: 'card',
-    });
-    expect(inst.accountId).toBe(card.id);
-  });
-
-  it('createAccountInstrument は資金口座/カード以外（投資資産）を親にできない', async () => {
-    const ledger = await loadLedger();
-    const inv = ledger.accounts.find((a) => a.name === '投資')!; // investment-asset
-    const e = await caught(
-      createAccountInstrument({
-        managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
-        accountId: inv.id,
-        name: '証券口座',
-        kind: 'other',
-      }),
-    );
-    expect(e).toBeInstanceOf(LedgerError);
-    expect(e.code).toBe('error.instrument.accountRole');
-  });
-
-  it('使用中の支払い手段は親科目を変更できない（名称変更は可）', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const bank = ledger.accounts.find((a) => a.name === '預金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    const inst = await createAccountInstrument({
-      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
-      accountId: cash.id,
-      name: 'Suica',
-      kind: 'prepaid',
-    });
-    // この細目を参照する仕訳を作る → 使用中になる。
-    await upsertEntry(
-      buildSimpleEntry({
-        date: '2026-06-01',
-        description: 'コンビニ',
-        debitAccountId: food.id,
-        creditAccountId: cash.id,
-        creditInstrumentId: inst.id,
-        amount: 500,
-      }),
-    );
-    // 親科目の変更は拒否。
-    const e = await caught(upsertAccountInstrument({ ...inst, accountId: bank.id }));
-    expect(e).toBeInstanceOf(LedgerError);
-    expect(e.code).toBe('error.instrument.lockedInUse');
-    // 名称（親科目・管理区分は据え置き）の変更は許可。
-    await upsertAccountInstrument({ ...inst, name: 'Suica（メイン）' });
-    const after = await loadLedger();
-    expect(after.accountInstruments.find((i) => i.id === inst.id)?.name).toBe('Suica（メイン）');
-  });
-
-  it('未使用の支払い手段は親科目を変更できる', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const bank = ledger.accounts.find((a) => a.name === '預金')!;
-    const inst = await createAccountInstrument({
-      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
-      accountId: cash.id,
-      name: '付け替え予定',
-      kind: 'other',
-    });
-    await upsertAccountInstrument({ ...inst, accountId: bank.id });
-    const after = await loadLedger();
-    expect(after.accountInstruments.find((i) => i.id === inst.id)?.accountId).toBe(bank.id);
-  });
-
-  it('通常の月額化コストは選択中の管理区分を本体と生成支払い仕訳に引き継ぐ', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    const biz = await createManagementScope('事業用'); // 既定でない区分
-    const item = await createMonthlyCost({
-      name: 'クラウドサブスク',
-      managementScopeId: biz.id,
-      kind: 'subscription',
-      amount: 1200,
-      costMonths: 1,
-      startMonth: '2026-06',
-      date: '2026-06-01',
-      expenseAccountId: food.id,
-      paymentAccountId: cash.id,
-    });
-    expect(item.managementScopeId).toBe(biz.id);
-    // 生成された支払い仕訳（metadata.monthlyCostId 紐づけ）も同じ区分であること。
-    const after = await loadLedger();
-    const payEntry = after.journalEntries.find((e) => e.metadata?.monthlyCostId === item.id);
-    expect(payEntry).toBeDefined();
-    expect(payEntry?.managementScopeId).toBe(biz.id);
   });
 });
 
@@ -2081,7 +1930,6 @@ describe('月額化コストの後編集（upsertMonthlyCost 保存境界）', (
       counterAccountId: card.id,
       source: 'installment',
       status: 'planned',
-      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
       monthlyCostId: item.id,
       createdAt: 'x',
       updatedAt: 'x',
@@ -3309,8 +3157,6 @@ describe('M2 保存境界の回帰（不正日付・導出残高・MonthlyCostIt
     return {
       meta: ledger.meta,
       settings: ledger.settings,
-      managementScopes: ledger.managementScopes,
-      accountInstruments: ledger.accountInstruments,
       accounts: ledger.accounts,
       journalEntries: ledger.journalEntries,
       allocations: ledger.allocations,
@@ -3628,5 +3474,33 @@ describe('M2 保存境界の回帰（不正日付・導出残高・MonthlyCostIt
       'error.monthlyCost.invalidStructure',
       'createSubscriptionMigration generated migration name',
     );
+  });
+});
+
+describe('取り置きの枠削除（後片付け）', () => {
+  it('枠の削除は同一トランザクションで仕訳の reserveId を剥がし、export が復元可能なまま残る', async () => {
+    const { deleteReserve, createReserve } = await import('../src/data/repository');
+    const ledger = await loadLedger();
+    const capital = ledger.accounts.find((a) => a.name === '開始残高')!;
+    const r = await createReserve({ name: '旅行（削除テスト）' });
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2026-07-01',
+        description: '取り置き',
+        debitAccountId: RESERVE_LEDGER_ACCOUNT_ID,
+        creditAccountId: capital.id,
+        amount: 30000,
+        metadata: { inputMode: 'transfer', reserveId: r.id },
+      }),
+    );
+    await deleteReserve(r.id);
+    const after = await loadLedger();
+    expect(after.reserves.some((x) => x.id === r.id)).toBe(false);
+    const entry = after.journalEntries.find((e) => e.description === '取り置き')!;
+    expect(entry).toBeDefined();
+    expect(entry.metadata?.reserveId).toBeUndefined();
+    // 孤児 reserveId が残っていないので export → schema 検証が通る。
+    const pkg = buildExportPackage(after);
+    expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(true);
   });
 });

@@ -8,9 +8,11 @@
  *  4. 検証・置換が成功するまで既存 DB を壊さない（置換は単一トランザクションで原子的）。
  *  5. revision 不一致は自動上書きせず、呼び出し側の確認（force）を求める。MVP は自動マージしない。
  *
- * v2 の封筒は APP_ID('snishi-code.simple-ledger-v2') + SCHEMA_VERSION=1。
- * migration チェーンは**空**（v2 は最新モデルを版 1 として開始・レガシー migration なし・仕様§16）。
- * 版 1 以外（v1 の 16 や未来版）は unsupported-version で fail-closed に拒否される。
+ * v2 の封筒は APP_ID('snishi-code.simple-ledger-v2') + SCHEMA_VERSION（現行 2。
+ * 版 2 = 管理区分・支払い手段の廃止・2026-07-28）。
+ * migration チェーンは**空**（後方互換をコードで持たない作者決定。旧版が読みたければ
+ * 単発変換で対応する）。現行版以外（版 1・v1 の 16・未来版）は unsupported-version で
+ * fail-closed に拒否される。
  * revision は foundation 封筒の `revision` フィールドに repository の meta.revision を載せて運ぶ。
  */
 import { createImportPipeline } from '@snishi/foundation/exchange/importPipeline';
@@ -23,8 +25,8 @@ import { loadLedger, makeSnapshotId, replaceLedger, saveSnapshot } from './repos
 import { nowIso } from '../util/time';
 
 /**
- * migration チェーン（空）。v2 に旧版は存在しないため step を持たない。
- * 互換性のない変更で SCHEMA_VERSION を上げるときに step を足す。
+ * migration チェーン（空）。後方互換をコードで持たない（作者決定）。
+ * 版上げしても step は足さず、旧版は unsupported-version で明確に拒否する。
  * 空チェーンでは「現行版以外＝missing-step / too-new」となり fail-closed。
  */
 const migrationChain = createMigrationChain<unknown>([]);
@@ -39,8 +41,6 @@ export function buildExportPackage(ledger: Ledger): LedgerExportPackage {
     deviceId: ledger.meta.deviceId,
     // foundation 封筒の revision（楽観的衝突検出）。export 時点の編集リビジョン。
     revision: ledger.meta.revision,
-    managementScopes: ledger.managementScopes,
-    accountInstruments: ledger.accountInstruments,
     accounts: ledger.accounts,
     journalEntries: ledger.journalEntries,
     allocations: ledger.allocations,
@@ -106,8 +106,6 @@ async function replaceWithPackage(pkg: LedgerExportPackage, current: Ledger): Pr
       updatedAt: nowIso(),
     },
     settings: pkg.settings,
-    managementScopes: pkg.managementScopes,
-    accountInstruments: pkg.accountInstruments,
     accounts: pkg.accounts,
     journalEntries: pkg.journalEntries,
     allocations: pkg.allocations,
@@ -216,8 +214,6 @@ export async function restoreFromSnapshot(snapshotData: LedgerExportPackage): Pr
       updatedAt: nowIso(),
     },
     settings: pkg.settings,
-    managementScopes: pkg.managementScopes,
-    accountInstruments: pkg.accountInstruments,
     accounts: pkg.accounts,
     journalEntries: pkg.journalEntries,
     allocations: pkg.allocations,

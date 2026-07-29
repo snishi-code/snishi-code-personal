@@ -9,7 +9,6 @@ import type {
   MonthlyCostItem,
   ReserveItem,
 } from '../src/domain/types';
-import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
 
 const empty: AccountRefCollections = {
   entries: [],
@@ -22,7 +21,6 @@ const empty: AccountRefCollections = {
 const monthlyCost: MonthlyCostItem = {
   id: 'mc1',
   name: 'x',
-  managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
   kind: 'durable-asset',
   amount: 1000,
   costMonths: 10,
@@ -42,7 +40,6 @@ const entry: JournalEntry = {
   date: '2026-06-01',
   description: 'x',
   kind: 'normal',
-  managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
   lines: [
     { accountId: 'cash', side: 'debit', amount: 100 },
     { accountId: 'food', side: 'credit', amount: 100 },
@@ -61,7 +58,6 @@ const schedule: CashflowSchedule = {
   counterAccountId: 'sched-counter',
   source: 'manual',
   status: 'planned',
-  managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
   createdAt: 'x',
   updatedAt: 'x',
 };

@@ -14,7 +14,6 @@ import {
   upsertAccount,
   upsertSchedule,
 } from '../src/data/repository';
-import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
 import { nextRepaymentDate } from '../src/domain/cashflow';
 import { ledgerExportPackageSchema } from '../src/domain/schema';
 import { buildExportPackage } from '../src/data/exportImport';
@@ -102,7 +101,6 @@ describe('返済予定の実績化', () => {
       counterAccountId: card.id,
       source: 'credit-card',
       status: 'planned',
-      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
       createdAt: ts,
       updatedAt: ts,
     };

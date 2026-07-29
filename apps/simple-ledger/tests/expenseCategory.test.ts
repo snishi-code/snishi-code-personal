@@ -11,7 +11,6 @@ import {
   livingCostBreakdownForRange,
 } from '../src/domain/livingCost';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../src/domain/accounting';
-import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
 import type { Account, EntryMetadata, JournalEntry } from '../src/domain/types';
 
 function acc(id: string, role: Account['role'], type: Account['type']): Account {
@@ -30,7 +29,6 @@ function entry(
     date,
     description: id,
     kind: 'normal',
-    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     lines: [
       { accountId: debit, side: 'debit', amount },
       { accountId: credit, side: 'credit', amount },

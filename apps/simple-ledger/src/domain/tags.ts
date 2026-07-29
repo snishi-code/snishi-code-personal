@@ -1,7 +1,6 @@
 /*
  * タグのドメインヘルパ。タグは PL/BS を変えない分析軸。
  * タグは常に「仕訳全体（entry）」に付く（旅行・帰省・学会 等のイベント/目的ラベル）。
- * カード名・銀行名・Pay 系名はタグにしない（支払い手段の細目 = AccountInstrument で扱う）。
  */
 import type { CashflowSchedule, JournalEntry, Tag } from './types';
 import type { MessageKey } from '../i18n';

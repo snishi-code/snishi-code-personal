@@ -374,7 +374,6 @@ describe('clampDayToMonth / recurringPostingsDue / recurringProjectionEntries', 
       creditAccountId: 'c',
       startMonth: '2026-01',
       paused: true,
-      managementScopeId: 's',
       createdAt: 't',
       updatedAt: 't',
     };
@@ -411,7 +410,6 @@ describe('clampDayToMonth / recurringPostingsDue / recurringProjectionEntries', 
       creditAccountId: 'cash',
       startMonth: '2026-07',
       postedThroughMonth: '2026-07',
-      managementScopeId: 'scope',
       createdAt: 't',
       updatedAt: 't',
     };
@@ -425,5 +423,48 @@ describe('clampDayToMonth / recurringPostingsDue / recurringProjectionEntries', 
     expect(recurringProjectionEntries([{ ...base, paused: true }], accounts, '2026-10-31')).toEqual(
       [],
     );
+  });
+});
+
+describe('編集・削除と起票カーソルの整合（check-then-act の封鎖）', () => {
+  it('古いルールオブジェクトで upsert してもカーソルは巻き戻らない（二重起票しない）', async () => {
+    const bank = await accountByName('預金');
+    const invest = await accountByName('投資');
+    const stale = await createRecurringRule({
+      name: 'カーソル保持',
+      amount: 10000,
+      dayOfMonth: 1,
+      debitAccountId: invest.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-05',
+    });
+    // catchUp がカーソルを進めたあと、進める前に読んだ古いオブジェクトで編集を保存する。
+    expect(await catchUpRecurringRules('2026-07-23')).toBe(3);
+    await upsertRecurringRule({ ...stale, amount: 12000 });
+    // カーソルが巻き戻っていなければ再起票は 0 件のまま。
+    expect(await catchUpRecurringRules('2026-07-23')).toBe(0);
+    const ledger = await loadLedger();
+    const rule = ledger.recurringRules.find((r) => r.id === stale.id)!;
+    expect(rule.amount).toBe(12000);
+    expect(rule.postedThroughMonth).toBe('2026-07');
+  });
+
+  it('削除済みルールを古いオブジェクトの upsert で復活させない', async () => {
+    const bank = await accountByName('預金');
+    const invest = await accountByName('投資');
+    const stale = await createRecurringRule({
+      name: '復活禁止',
+      amount: 5000,
+      dayOfMonth: 1,
+      debitAccountId: invest.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-06',
+    });
+    await deleteRecurringRule(stale.id);
+    await expect(upsertRecurringRule({ ...stale, amount: 6000 })).rejects.toMatchObject({
+      code: 'error.recurring.notFound',
+    });
+    const ledger = await loadLedger();
+    expect(ledger.recurringRules.some((r) => r.id === stale.id)).toBe(false);
   });
 });

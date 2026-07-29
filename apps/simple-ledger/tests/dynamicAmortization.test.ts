@@ -17,7 +17,6 @@ function item(over: Partial<MonthlyCostItem>): MonthlyCostItem {
   return {
     id: 'x',
     name: 'x',
-    managementScopeId: 's',
     kind: 'durable-asset',
     amount: 300000,
     costMonths: 60,

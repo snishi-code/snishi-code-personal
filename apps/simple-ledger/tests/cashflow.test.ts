@@ -9,7 +9,6 @@ import {
   projectCashflow,
   uniqueEntriesById,
 } from '../src/domain/cashflow';
-import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
 import type { Account, AccountBalance, CashflowSchedule, JournalEntry } from '../src/domain/types';
 import type { AccountRole } from '../src/domain/accountRoles';
 
@@ -109,7 +108,6 @@ function sched(over: Partial<CashflowSchedule>): CashflowSchedule {
     accountId: 'bank',
     source: 'manual',
     status: 'planned',
-    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     createdAt: 'x',
     updatedAt: 'x',
     ...over,
@@ -195,7 +193,6 @@ function entry(over: Partial<JournalEntry> & { lines: JournalEntry['lines'] }): 
     date: '2026-07-01',
     description: 'x',
     kind: 'normal',
-    managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
     metadata: { inputMode: 'manual' },
     createdAt: 'x',
     updatedAt: 'x',

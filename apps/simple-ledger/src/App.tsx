@@ -25,7 +25,6 @@ import { Allocations } from './ui/screens/Allocations';
 import { Cashflow } from './ui/screens/Cashflow';
 import { Tags } from './ui/screens/Tags';
 import { Accounts } from './ui/screens/Accounts';
-import { Wallets } from './ui/screens/Wallets';
 import { Settings } from './ui/screens/Settings';
 import { Help } from './ui/screens/Help';
 import { EntrySheet, type EntryInit } from './ui/screens/EntrySheet';
@@ -309,7 +308,6 @@ export function App() {
         {screen === 'cashflow' ? <Cashflow /> : null}
         {screen === 'tags' ? <Tags /> : null}
         {screen === 'accounts' ? <Accounts /> : null}
-        {screen === 'wallets' ? <Wallets /> : null}
         {screen === 'settings' ? (
           <Settings onNavigate={go} onOpenOnboarding={() => setOnboardingManualOpen(true)} />
         ) : null}

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import './setup';
 import { aggregateEntryTags, entryHasTag } from '../src/domain/tags';
-import { DEFAULT_MANAGEMENT_SCOPE_ID } from '../src/domain/constants';
 import type { JournalEntry, Tag } from '../src/domain/types';
 
 function tag(id: string): Tag {
@@ -15,7 +14,6 @@ const e1: JournalEntry = {
   date: '2026-06-10',
   description: '北海道',
   kind: 'normal',
-  managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
   tagIds: ['trip'],
   lines: [
     { accountId: 'food', side: 'debit', amount: 1000 },
@@ -29,7 +27,6 @@ const e2: JournalEntry = {
   date: '2026-06-20',
   description: '書籍',
   kind: 'normal',
-  managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
   tagIds: ['work'],
   lines: [
     { accountId: 'book', side: 'debit', amount: 3000 },
@@ -67,7 +64,6 @@ describe('reversal はタグ集計で負に扱う', () => {
       date: '2026-06-15',
       description: '取消: 北海道',
       kind: 'normal',
-      managementScopeId: DEFAULT_MANAGEMENT_SCOPE_ID,
       tagIds: ['trip'],
       metadata: { inputMode: 'reversal', reversalOfEntryId: 'e1' },
       lines: [

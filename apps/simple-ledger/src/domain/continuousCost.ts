@@ -65,7 +65,6 @@ export function continuousCostEntriesForItem(
       date: fundingDate,
       description: item.name,
       kind: 'normal',
-      managementScopeId: item.managementScopeId,
       lines: [
         { accountId: assetId, side: 'debit', amount: item.amount },
         { accountId: payId, side: 'credit', amount: item.amount },
@@ -91,7 +90,6 @@ export function continuousCostEntriesForItem(
         date: recogDate,
         description: item.name,
         kind: 'normal',
-        managementScopeId: item.managementScopeId,
         lines: [
           { accountId: item.expenseAccountId, side: 'debit', amount },
           { accountId: assetId, side: 'credit', amount },
@@ -163,7 +161,6 @@ export interface ContinuousCostDisposalOutcome {
  */
 export function continuousCostDisposalOutcome(
   item: MonthlyCostItem,
-  _accountsById: Map<string, Account>,
   disposalMonth: string,
   proceedsAmount: number,
 ): ContinuousCostDisposalOutcome {

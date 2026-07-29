@@ -39,7 +39,7 @@
   永続化＝恒等移行、v5→v6 勘定科目に `role`、v6→v7 月額化コスト `monthlyCostItems`、
   v7→v8 予定CF `direction` に `transfer`＝恒等移行（旧 v8 の資金目標は v16 で撤去）、
   v9→v10 `role` に `fixed-asset` + `MonthlyCostItem` に `sourceEntryId`/`recognitionCreditAccountId`、
-  v10→v11 管理区分/支払い手段、v11→v12 `assetDisposals`、
+  v10→v11 管理区分/支払い手段（v2 の版 2・2026-07-28 で概念ごと廃止）、v11→v12 `assetDisposals`、
   v12→v13 継続コストの資産経由モデル: `role` に `continuing-cost-asset` + `MonthlyCostItem` に任意
   `paymentSourceAccountId` + `EntryMetadata` に `virtual`/`continuousCostId`/`ccKind`（拡張のみ＝恒等移行）。
   仮想仕訳は保存しない導出専用＝export には含めない）、
@@ -52,6 +52,13 @@
   `ReserveItem.parentAccountId?`（取り置き元の daily-asset・既定=預金）と `EntryMetadata.reserveId?` を追加、
   v15→v16 B 側レガシー撤去: 旧「資金目標(fundingGoals)」・取り置きの `targetAmount/targetDate`・
   `Settings.expectedAnnualReturnBps` を完全削除（取り置きは A=短期の封筒分けのみ。長期目標/投資は将来別途）。
+- **simple-ledger-v2 の版**（appId `snishi-code.simple-ledger-v2`。上の v1〜v16 は旧 v1 アプリの歴史）:
+  - **v1**: v1 アプリの最終形（v16 相当）を版 1 として開始（レガシー migration なし）。
+  - **v1→v2**（2026-07-28）: **管理区分（ManagementScope）・支払い手段（AccountInstrument）を廃止**。
+    `managementScopes` / `accountInstruments` 配列、全レコードの `managementScopeId`、
+    `JournalLine.instrumentId` を削除。migration step は追加しない（後方互換をコードで持たない
+    作者決定）＝版 1 の JSON / スナップショットは unsupported-version で fail-closed に拒否される。
+    IndexedDB は DB_VERSION 3 の upgrade で旧 2 ストアを削除する。
 - `Account.role`: `type` と整合する UI 用役割（`daily-asset` / `reserve-asset` /
   `deferred-asset` / `investment-asset` / `fixed-asset`（固定資産。現金でない asset・CF総資金外） /
   `payment-liability` / `other-liability` / `equity` /

@@ -77,7 +77,6 @@ export function buildScheduleEntry(schedule: CashflowSchedule): JournalEntry {
     date: schedule.dueDate,
     description: schedule.title,
     kind: 'normal',
-    managementScopeId: schedule.managementScopeId,
     lines: [
       { accountId: debit, side: 'debit', amount: schedule.amount },
       { accountId: credit, side: 'credit', amount: schedule.amount },

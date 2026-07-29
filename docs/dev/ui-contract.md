@@ -90,7 +90,7 @@
 | `adjustments.createDialog` | 補正入力ダイアログ | 科目選択済みの残高補正（独立フォーム廃止） |
 | `settings.view` | Settings ルート | 設定の検出 |
 | `settings.manage.list` | 設定「管理」リスト | 補助画面への遷移リスト |
-| `settings.manage.<screen>` | 管理リストの各行 | `settings.manage.tags` / `settings.manage.wallets`（勘定科目・補正は「補正・勘定科目」へ統合しメニュー昇格） |
+| `settings.manage.<screen>` | 管理リストの各行 | `settings.manage.tags`（勘定科目・補正は「補正・勘定科目」へ統合しメニュー昇格。管理区分・支払い手段の wallets 画面は廃止・2026-07-28） |
 | `nav.adjustments` | メニュー「補正・勘定科目」 | 勘定科目 + 初期残高 + 残高補正の統合画面（メニュー昇格） |
 | `settings.exportJson` | export ボタン | JSON 書き出し |
 | `settings.importJson` | import ボタン | JSON 読み込み起動 |
