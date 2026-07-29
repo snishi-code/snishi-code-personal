@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { App } from '../src/App';
@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 describe('未来開始の定期ルールへの期間ナビゲーション', () => {
-  it('実仕訳がなくても開始年を年ピッカーから選べる', async () => {
+  it('ヘッダーの日付ピッカーから未来の断面を選べる', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((account) => account.role === 'daily-asset')!;
     const expense = ledger.accounts.find((account) => account.role === 'expense-category')!;
@@ -51,17 +51,23 @@ describe('未来開始の定期ルールへの期間ナビゲーション', () =
       expect(document.querySelector('[data-ui="dashboard.view"]')).toBeInTheDocument();
     });
 
-    fireEvent.click(document.querySelector(`[data-ui="${UI.period.yearTrigger}"]`)!);
-    fireEvent.click(await screen.findByRole('button', { name: `${futureYear}年` }));
+    const trigger = document.querySelector(
+      `[data-ui="${UI.period.dateTrigger}"]`,
+    ) as HTMLButtonElement;
+    expect(trigger).toHaveTextContent(todayLocal());
+
+    fireEvent.click(trigger);
+    const dateInput = document.querySelector(
+      `[data-ui="${UI.period.dateInput}"]`,
+    ) as HTMLInputElement;
+    fireEvent.change(dateInput, { target: { value: `${futureYear}-04-15` } });
+
     await waitFor(() => {
-      expect(document.querySelector(`[data-ui="${UI.period.yearTrigger}"]`)).toHaveTextContent(
-        String(futureYear),
+      expect(document.querySelector(`[data-ui="${UI.period.dateTrigger}"]`)).toHaveTextContent(
+        `${futureYear}-04-15`,
       );
     });
 
-    fireEvent.click(document.querySelector(`[data-ui="${UI.period.yearTrigger}"]`)!);
-    expect(
-      await screen.findByRole('button', { name: `${futureYear + 1}年` }),
-    ).toBeInTheDocument();
+    expect(document.querySelector('[data-ui="period.year.trigger"]')).not.toBeInTheDocument();
   });
 });

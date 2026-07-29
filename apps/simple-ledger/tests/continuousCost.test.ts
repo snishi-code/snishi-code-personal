@@ -25,7 +25,7 @@ const accounts: Account[] = [
   acc('washer', 'continuing-cost-asset', 'asset'),
   acc('fun', 'expense-category', 'expense'),
   acc('fixedcost', 'expense-category', 'expense'),
-  acc('car', 'fixed-asset', 'asset'),
+  acc('cash', 'daily-asset', 'asset'),
 ];
 const byId = new Map(accounts.map((a) => [a.id, a] as const));
 
@@ -50,7 +50,7 @@ function item(over: Partial<MonthlyCostItem>): MonthlyCostItem {
 describe('continuousCost 仮想展開', () => {
   it('対象判定: continuing-cost-asset を指すときだけ対象', () => {
     expect(isContinuingCostItem(item({}), byId)).toBe(true);
-    expect(isContinuingCostItem(item({ recognitionCreditAccountId: 'car' }), byId)).toBe(false);
+    expect(isContinuingCostItem(item({ recognitionCreditAccountId: 'cash' }), byId)).toBe(false);
     expect(isContinuingCostItem(item({ recognitionCreditAccountId: undefined }), byId)).toBe(false);
   });
 

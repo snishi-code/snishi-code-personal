@@ -1,18 +1,15 @@
 /*
  * 残高補正。任意の日に実残高との差分を 2 行仕訳で補正する（「締め」は作らない）。
- *  - unknown-balance: 通常の現金/預金差額 → 残高調整費 / 残高調整収入
- *  - investment-valuation: 投資残高差額 → 投資評価損 / 投資評価益（生活コストとは別）
+ * 現金・預金・投資・負債の差額を、残高調整費 / 残高調整収入との2行仕訳で合わせる。
  */
 import { newId } from './ids';
 import { nowIso } from '../util/time';
-import type { AdjustmentKind, AdjustmentMeta, JournalEntry } from './types';
+import type { AdjustmentMeta, JournalEntry } from './types';
 
 /** 補正の相手科目の既定名（初回利用時に作成/再利用）。 */
 export const ADJUSTMENT_ACCOUNTS = {
   balanceExpense: '残高調整費', // expense
   balanceRevenue: '残高調整収入', // revenue
-  investmentLoss: '投資評価損', // expense
-  investmentGain: '投資評価益', // revenue
 } as const;
 
 /** 損益方向: asset 増 or liability 減 = 益(revenue) / それ以外 = 損(expense)。 */
@@ -24,20 +21,14 @@ export function counterpartRole(
   return gain ? 'revenue' : 'expense';
 }
 
-/** kind + 役割 → 既定の相手科目名。 */
-export function counterpartName(kind: AdjustmentKind, role: 'expense' | 'revenue'): string {
-  if (kind === 'investment-valuation') {
-    return role === 'expense'
-      ? ADJUSTMENT_ACCOUNTS.investmentLoss
-      : ADJUSTMENT_ACCOUNTS.investmentGain;
-  }
+/** 役割 → 既定の相手科目名。 */
+export function counterpartName(role: 'expense' | 'revenue'): string {
   return role === 'expense'
     ? ADJUSTMENT_ACCOUNTS.balanceExpense
     : ADJUSTMENT_ACCOUNTS.balanceRevenue;
 }
 
 export interface AdjustmentInput {
-  kind: AdjustmentKind;
   accountId: string;
   accountType: 'asset' | 'liability';
   date: string;
@@ -55,7 +46,7 @@ export interface AdjustmentInput {
 
 /**
  * 補正仕訳を作る。delta=0 なら null（仕訳を作らない）。
- *  - asset 増: 借方 資産 / 貸方 収入(評価益)   asset 減: 借方 費(評価損) / 貸方 資産
+ *  - asset 増: 借方 資産 / 貸方 収入   asset 減: 借方 費用 / 貸方 資産
  *  - liability 増: 借方 費 / 貸方 負債          liability 減: 借方 負債 / 貸方 収入
  */
 export function buildAdjustmentEntry(input: AdjustmentInput): JournalEntry | null {
@@ -87,7 +78,6 @@ export function buildAdjustmentEntry(input: AdjustmentInput): JournalEntry | nul
   }
 
   const meta: AdjustmentMeta = {
-    kind: input.kind,
     accountId: acc,
     expectedBalance: input.expectedBalance,
     actualBalance: input.actualBalance,

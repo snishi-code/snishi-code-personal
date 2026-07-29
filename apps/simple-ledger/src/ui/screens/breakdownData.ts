@@ -5,7 +5,7 @@
  * とストック（資産/負債/純資産）の月次バケット集計をここに集約する（数字のズレ防止）。
  *  - フロー（収入/支出/収支）は各バケットの `range` で集計（bar 表示）。
  *  - ストック（資産/負債/純資産）は各バケット末 `asOf` 時点の残高（line 表示）。
- *  - month モードは推移を出さない（単月）→ null。
+ *  - date モードは推移を出さない（選択日までの単月）→ null。
  *  - all モードは年集約バーで、各点をタップしてその年へドリルできる（drillable）。
  */
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../../domain/accounting';
@@ -38,7 +38,7 @@ export interface SectionTrends {
 }
 
 /**
- * 期間に応じた推移シリーズ一式を返す。month モード・データ無しは null。
+ * 期間に応じた推移シリーズ一式を返す。date モード・データ無しは null。
  * 各画面は必要なシリーズだけを取り出して使う（定義は 1 か所）。
  */
 export function buildSectionTrends(
@@ -46,7 +46,7 @@ export function buildSectionTrends(
   ledger: Ledger | null,
   today: string,
 ): SectionTrends | null {
-  if (period.mode === 'month' || !ledger) return null;
+  if (period.mode === 'date' || !ledger) return null;
   const accounts = ledger.accounts;
   const basis = reportBasis(period, today);
   const basisEntries = reportEntriesForAsOf(ledger, basis.asOf, today);

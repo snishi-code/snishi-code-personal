@@ -2,19 +2,12 @@ import { describe, expect, it } from 'vitest';
 import './setup';
 import { isAccountReferenced, referencedAccountIds } from '../src/domain/accountRefs';
 import type { AccountRefCollections } from '../src/domain/accountRefs';
-import type {
-  AllocationItem,
-  CashflowSchedule,
-  JournalEntry,
-  MonthlyCostItem,
-  ReserveItem,
-} from '../src/domain/types';
+import type { CashflowSchedule, JournalEntry, MonthlyCostItem, ReserveItem } from '../src/domain/types';
 
 const empty: AccountRefCollections = {
   entries: [],
   schedules: [],
   reserves: [],
-  allocations: [],
   monthlyCostItems: [],
 };
 
@@ -70,23 +63,7 @@ const reserve: ReserveItem = {
   updatedAt: 'x',
 };
 
-const allocation: AllocationItem = {
-  id: 'a1',
-  name: 'x',
-  totalAmount: 300,
-  months: 3,
-  startMonth: '2026-06',
-  expenseAccountId: 'alloc-exp',
-  paymentAccountId: 'alloc-pay',
-  deferredAccountId: 'alloc-def',
-  sourceEntryId: 'se',
-  recognitionEntryIds: ['r1e', 'r2e', 'r3e'],
-  status: 'active',
-  createdAt: 'x',
-  updatedAt: 'x',
-};
-
-describe('isAccountReferenced（仕訳/予定CF/目的別資金/按分）', () => {
+describe('isAccountReferenced（仕訳/予定CF/目的別資金/継続コスト）', () => {
   it('仕訳明細の参照を検出する', () => {
     expect(isAccountReferenced('cash', { ...empty, entries: [entry] })).toBe(true);
     expect(isAccountReferenced('food', { ...empty, entries: [entry] })).toBe(true);
@@ -98,11 +75,6 @@ describe('isAccountReferenced（仕訳/予定CF/目的別資金/按分）', () =
   });
   it('目的別資金の参照を検出する', () => {
     expect(isAccountReferenced('res-acc', { ...empty, reserves: [reserve] })).toBe(true);
-  });
-  it('按分（expense/payment/deferred）の参照を検出する', () => {
-    expect(isAccountReferenced('alloc-exp', { ...empty, allocations: [allocation] })).toBe(true);
-    expect(isAccountReferenced('alloc-pay', { ...empty, allocations: [allocation] })).toBe(true);
-    expect(isAccountReferenced('alloc-def', { ...empty, allocations: [allocation] })).toBe(true);
   });
   it('継続コスト（expense/支払い元/返済/対象資産）の参照を検出する', () => {
     expect(isAccountReferenced('mc-exp', { ...empty, monthlyCostItems: [monthlyCost] })).toBe(true);
@@ -124,7 +96,6 @@ describe('referencedAccountIds', () => {
       entries: [entry],
       schedules: [schedule],
       reserves: [reserve],
-      allocations: [allocation],
       monthlyCostItems: [monthlyCost],
     });
     for (const id of [
@@ -133,9 +104,6 @@ describe('referencedAccountIds', () => {
       'sched-acc',
       'sched-counter',
       'res-acc',
-      'alloc-exp',
-      'alloc-pay',
-      'alloc-def',
       'mc-exp',
       'mc-pay',
       'mc-repay',

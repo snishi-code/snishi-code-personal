@@ -9,7 +9,6 @@ import {
 
 function base(over: Partial<AdjustmentInput>): AdjustmentInput {
   return {
-    kind: 'unknown-balance',
     accountId: 'acc',
     accountType: 'asset',
     date: '2026-06-01',
@@ -29,10 +28,8 @@ describe('counterpartRole / counterpartName', () => {
     expect(counterpartRole('liability', -2000)).toBe('revenue'); // 負債減 = 益
   });
   it('名称', () => {
-    expect(counterpartName('unknown-balance', 'expense')).toBe('残高調整費');
-    expect(counterpartName('unknown-balance', 'revenue')).toBe('残高調整収入');
-    expect(counterpartName('investment-valuation', 'expense')).toBe('投資評価損');
-    expect(counterpartName('investment-valuation', 'revenue')).toBe('投資評価益');
+    expect(counterpartName('expense')).toBe('残高調整費');
+    expect(counterpartName('revenue')).toBe('残高調整収入');
   });
 });
 

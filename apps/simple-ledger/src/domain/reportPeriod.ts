@@ -2,14 +2,13 @@
  * レポート期間モデル。ダッシュボード/財務諸表/仕訳/資金繰りが共有する「いつの数字か」。
  *
  *  - レポート表示は reportBasis からフロー期間とストック基準日を同時に得る。
- *  - 選択中の月・年だけ今日で止め、過去・未来の月・年は期間末、全期間は今日を基準日とする。
+ *  - date は選択日の断面、選択中の年だけ今日で止め、過去・未来の年は期間末、
+ *    全期間は今日を基準日とする。
  *  - フローも同じ基準日までに揃え、PL と BS の日付境界をずらさない。
  *  - periodRange は「将来予定も表示」を別に扱う仕訳一覧の互換 API。レポート集計には使わない。
  */
-import { monthRange } from './accounting';
-
 export type ReportPeriod =
-  | { mode: 'month'; year: number; month: number }
+  | { mode: 'date'; date: string }
   | { mode: 'year'; year: number }
   | { mode: 'all' };
 
@@ -40,14 +39,15 @@ function pad2(n: number): string {
 export function periodRange(p: ReportPeriod): DateRange | undefined {
   if (p.mode === 'all') return undefined;
   if (p.mode === 'year') return { from: `${p.year}-01-01`, to: `${p.year}-12-31` };
-  return monthRange(p.year, p.month);
+  return { from: `${p.date.slice(0, 7)}-01`, to: p.date };
 }
 
 /**
  * レポート表示の単一期間基準。
- *  - 過去の month/year: 期間初〜期間末、asOf=期間末
- *  - 選択中の month/year: 期間初〜今日、asOf=今日
- *  - 未来の month/year: 期間初〜期間末、asOf=期間末
+ *  - date: 選択月の月初〜選択日、asOf=選択日
+ *  - 過去の year: 年初〜年末、asOf=年末
+ *  - 選択中の year: 年初〜今日、asOf=今日
+ *  - 未来の year: 年初〜年末、asOf=年末
  *  - all: 開始制約なし〜今日、asOf=今日
  *
  * 未来期間を明示的に選んだ場合だけ、その期間末までの見込みを表示する。全期間表示へ
@@ -57,20 +57,19 @@ export function reportBasis(p: ReportPeriod, today: string): ReportBasis {
   if (p.mode === 'all') return { flowRange: { to: today }, asOf: today };
 
   const fullRange = periodRange(p);
-  if (!fullRange) throw new Error('month/year の期間範囲を導出できません。');
+  if (!fullRange) throw new Error('date/year の期間範囲を導出できません。');
+  if (p.mode === 'date') {
+    return {
+      flowRange: { from: fullRange.from, to: p.date },
+      asOf: p.date,
+    };
+  }
   const isCurrent = fullRange.from <= today && today <= fullRange.to;
   const asOf = isCurrent ? today : fullRange.to;
   return {
     flowRange: { from: fullRange.from, to: asOf },
     asOf,
   };
-}
-
-/** 表示用ラベル（日本語）。 */
-export function periodLabel(p: ReportPeriod): string {
-  if (p.mode === 'month') return `${p.year}年${p.month}月`;
-  if (p.mode === 'year') return `${p.year}年`;
-  return '全期間';
 }
 
 /** 'YYYY-MM-DD' の配列から、データのある年（数値）を昇順・重複排除で返す。 */
@@ -96,7 +95,7 @@ export interface TrendBucket {
 
 /**
  * トレンド（グラフ）用のバケット列。縦長リストを避け、俯瞰しやすい粒度にする。
- *  - month: 単月なので推移は出さない（空配列）。
+ *  - date: 選択日までの単月なので推移は出さない（空配列）。
  *  - year:  その年の 1〜12 月（12 本の月次バー）。
  *  - all:   最初〜最後のデータ年を**連続**で（年次バー。空白年も埋める）。データが無ければ空配列。
  */
@@ -105,26 +104,26 @@ export function trendBuckets(
   today: string,
   opts: { dataYears?: number[] } = {},
 ): TrendBucket[] {
-  if (p.mode === 'month') return [];
+  if (p.mode === 'date') return [];
   if (p.mode === 'year') {
     return Array.from({ length: 12 }, (_, i) => {
-      const basis = reportBasis({ mode: 'month', year: p.year, month: i + 1 }, today);
-      const from = basis.flowRange.from;
-      if (!from) throw new Error('月次トレンドの開始日を導出できません。');
+      const month = i + 1;
+      const from = `${p.year}-${pad2(month)}-01`;
+      const lastDay = new Date(p.year, month, 0).getDate();
+      const to = `${p.year}-${pad2(month)}-${pad2(lastDay)}`;
+      const asOf = from <= today && today <= to ? today : to;
       return {
-        key: `${p.year}-${pad2(i + 1)}`,
-        label: `${i + 1}月`,
-        range: { from, to: basis.flowRange.to },
-        asOf: basis.asOf,
+        key: `${p.year}-${pad2(month)}`,
+        label: `${month}月`,
+        range: { from, to: asOf },
+        asOf,
         year: p.year,
       };
     });
   }
   // all: データのある年を最小〜最大で連続に（年次バー）。
   const todayYear = Number.parseInt(today.slice(0, 4), 10);
-  const years = (opts.dataYears ?? []).filter(
-    (y) => Number.isFinite(y) && y > 0 && y <= todayYear,
-  );
+  const years = (opts.dataYears ?? []).filter((y) => Number.isFinite(y) && y > 0 && y <= todayYear);
   if (years.length === 0) return [];
   const lo = Math.min(...years);
   const hi = Math.max(...years);

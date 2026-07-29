@@ -89,40 +89,16 @@ export type JournalEntryKind = 'normal' | 'opening';
  */
 export type InputMode = 'income' | 'expense' | 'transfer' | 'manual' | 'reversal';
 
-/**
- * 期間按分の計画（将来実装用）。MVP では保存・export/import・検証が通るだけ。
- * UI からは生成しない（按分仕訳の自動生成ロジックは未実装）。
- */
-export interface AllocationPlan {
-  kind: 'period';
-  /** ISO 日付。 */
-  startDate: string;
-  endDate: string;
-  /** 按分方式。MVP は型のみ（'even-monthly' 等を想定）。 */
-  method: 'even-monthly';
-  /** 期間費用/収益として認識する科目。 */
-  recognitionAccountId: string;
-  /** 繰延（前払/前受）として保持する科目。 */
-  deferredAccountId: string;
-  /** この計画から生成された仕訳 ID（未生成なら空）。 */
-  generatedEntryIds: string[];
-}
-
-/** 仕訳の付帯情報。将来の取消/返金・期間按分に耐えるための拡張点。 */
+/** 仕訳の付帯情報。取消/返金や自動生成仕訳の由来を保持する。 */
 export interface EntryMetadata {
   inputMode?: InputMode;
   /** reversal のとき、元仕訳の ID。 */
   reversalOfEntryId?: string;
-  allocationPlan?: AllocationPlan;
-  /** 按分支出から生成された仕訳のとき、紐づく AllocationItem の ID。 */
-  allocationId?: string;
-  /** 按分仕訳の役割。source=原始仕訳 / recognition=月次認識仕訳。 */
-  allocationRole?: 'source' | 'recognition';
   /** 残高補正（実残高との差分調整）で作られた仕訳の付帯情報。 */
   adjustment?: AdjustmentMeta;
   /** 月額化コストの実支払い仕訳のとき、紐づく MonthlyCostItem の ID（通常編集/削除は不可）。 */
   monthlyCostId?: string;
-  /** 固定資産の売却・故障処分で生成された仕訳のとき、紐づく AssetDisposal の ID（通常編集/削除は不可）。 */
+  /** 継続コストの処分で生成された仕訳のとき、紐づく AssetDisposal の ID（通常編集/削除は不可）。 */
   assetDisposalId?: string;
   /**
    * 取り置き資金（聖域化・集約モデル）の目的を表す ReserveItem の ID。
@@ -151,13 +127,9 @@ export interface EntryMetadata {
 
 /**
  * 残高補正。任意の日に実残高との差分を補正する（「締め」は作らない）。
- *  - unknown-balance: 通常の現金/預金差額 → 残高調整費/収入
- *  - investment-valuation: 投資残高差額 → 投資評価損/益（生活コストとは別）
+ * 通常の現金・預金・投資・負債の差額を、残高調整費/収入との仕訳で合わせる。
  */
-export type AdjustmentKind = 'unknown-balance' | 'investment-valuation';
-
 export interface AdjustmentMeta {
-  kind: AdjustmentKind;
   /** 補正対象の科目（asset または liability）。 */
   accountId: string;
   /** アプリ上の理論残高。 */
@@ -166,37 +138,8 @@ export interface AdjustmentMeta {
   actualBalance: number;
   /** actual - expected。 */
   delta: number;
-  /** 相手科目（残高調整費/収入 or 投資評価損/益）。 */
+  /** 相手科目（残高調整費/収入）。 */
   counterpartAccountId: string;
-}
-
-/** 按分支出（長期の生活コストを月割りで費用認識する）。 */
-export type AllocationStatus = 'active' | 'completed' | 'disposed' | 'settled';
-
-export interface AllocationItem {
-  id: string;
-  /** 表示名（例: PC）。 */
-  name: string;
-  /** 総額（最小通貨単位の整数）。 */
-  totalAmount: number;
-  /** 按分月数（2 以上）。 */
-  months: number;
-  /** 認識開始月 'YYYY-MM'。 */
-  startMonth: string;
-  /** 月次認識の費用カテゴリ。 */
-  expenseAccountId: string;
-  /** 支払元（asset または liability）。 */
-  paymentAccountId: string;
-  /** 按分中資産（繰延）科目。 */
-  deferredAccountId: string;
-  /** 原始仕訳（按分中資産 / 支払元）の ID。 */
-  sourceEntryId: string;
-  /** 月次認識仕訳の ID（months 件）。 */
-  recognitionEntryIds: string[];
-  /** MVP は active を基本。disposed/settled は次フェーズ。 */
-  status: AllocationStatus;
-  createdAt: string;
-  updatedAt: string;
 }
 
 /**
@@ -205,7 +148,6 @@ export interface AllocationItem {
  * 作る。一方で「生活コストとしての月割り認識」は仕訳ではなく、この項目の formula
  * （amount / costMonths を端数調整）から導出する分析レイヤで、ダッシュボードの生活コストに足す
  * （実支払い仕訳は二重計上しないよう除外する）。
- * 既存の按分(allocations)から移行した項目は sourceAllocationId を持つ。
  */
 export type MonthlyCostKind =
   | 'subscription' // サブスク（月課金）
@@ -245,11 +187,7 @@ export interface MonthlyCostItem {
    * 最終サイクルの配分総額からこの額を控除する（超過分だけ売却益の実仕訳）。処分時に設定。
    */
   disposalProceedsAmount?: number;
-  /** 既存 AllocationItem 由来なら紐づける。 */
-  sourceAllocationId?: string;
-  /** この月額化のもとになった実仕訳（固定資産購入など）。Journal 仮想行の由来表示に使う。 */
-  sourceEntryId?: string;
-  /** 仮想認識で貸方側に見せる科目（固定資産など）。指定時、Journal 仮想行は「この科目 → 費用」で表示。 */
+  /** 仮想認識で貸方側に見せる継続コスト台帳科目。 */
   recognitionCreditAccountId?: string;
   status: MonthlyCostStatus;
   createdAt: string;
@@ -257,15 +195,14 @@ export interface MonthlyCostItem {
 }
 
 /**
- * 固定資産の売却・故障処分の記録（監査用の独立エンティティ）。
- * 固定資産由来の MonthlyCostItem を途中終了し、未認識残高の消し込みと売却損益の仕訳を生成したときに作る。
+ * 継続コストの売却・解約・故障処分の記録（監査用の独立エンティティ）。
  * 生成仕訳は `metadata.assetDisposalId` でこのレコードに紐づき、通常編集/削除は不可（fail-closed）。
  */
 export interface AssetDisposal {
   id: string;
-  /** 処分した固定資産由来の MonthlyCostItem。 */
+  /** 処分した MonthlyCostItem。 */
   monthlyCostId: string;
-  /** 処分対象の固定資産科目（= MonthlyCostItem.recognitionCreditAccountId）。 */
+  /** 処分対象の継続コスト台帳科目（= MonthlyCostItem.recognitionCreditAccountId）。 */
   fixedAccountId: string;
   /** 処分日 (YYYY-MM-DD)。 */
   disposalDate: string;
@@ -273,10 +210,10 @@ export interface AssetDisposal {
   proceedsAmount: number;
   /** 売却額の入金先（proceedsAmount > 0 のときのみ）。 */
   destinationAccountId?: string;
-  /** 処分月の前月までに月額化 formula で認識済みの合計。 */
+  /** 処分時点で費用配分へ収束させた合計。 */
   recognizedAmount: number;
-  /** amount - recognizedAmount（0 未満にしない）。 */
-  remainingAmount: number;
+  /** 処分後に残る価値。継続コスト処分では常に 0。 */
+  remainingAmount: 0;
   /** この処分で生成した仕訳の ID 群（監査・追跡用）。 */
   generatedEntryIds: string[];
   createdAt: string;
@@ -316,7 +253,7 @@ export interface RecurringRule {
 
 /**
  * 予定キャッシュフロー（将来の現金の出入り）。
- * 「いつ費用認識するか(allocation)」とは別概念で、「いつ現金が動くか」を保持する。
+ * 「いつ費用認識するか」とは別概念で、「いつ現金が動くか」を保持する。
  * 予定は通常仕訳一覧へ大量生成せず、ここに置く。実績化で 1 件の仕訳を作る。
  */
 export type CashflowDirection = 'inflow' | 'outflow' | 'transfer';
@@ -358,7 +295,7 @@ export interface ReserveItem {
   /** 取り置き残高を寄せる集約口座（全取り置き共通の reserve-ledger）。 */
   reserveAccountId: string;
   /**
-   * どの資金口座から取り置いたか（daily-asset。既定=預金）。資産内訳で親口座の下部構造として
+   * どの資金口座から取り置いたか（daily-asset。既定=表示順先頭）。資産内訳で親口座の下部構造として
    * 見せる手がかり。将来は投資資産などにも拡張する余地（現状は表示の所属ヒントに留める）。
    */
   parentAccountId?: string;
@@ -376,7 +313,7 @@ export interface JournalEntry {
   memo?: string;
   /** 'opening' は UI で「初期残高」として見せる。集計上は通常の仕訳と同じ。 */
   kind: JournalEntryKind;
-  /** 付帯情報（入力方法・逆仕訳リンク・按分計画など）。任意。 */
+  /** 付帯情報（入力方法・逆仕訳リンク・自動生成の由来など）。任意。 */
   metadata?: EntryMetadata;
   /** 仕訳全体タグ（旅行・帰省・学会 等のイベント/目的ラベル）。 */
   tagIds?: string[];
@@ -426,7 +363,6 @@ export interface LedgerExportPackage {
   revision: number;
   accounts: Account[];
   journalEntries: JournalEntry[];
-  allocations: AllocationItem[];
   cashflowSchedules: CashflowSchedule[];
   reserves: ReserveItem[];
   tags: Tag[];
@@ -481,7 +417,6 @@ export interface Ledger {
   accounts: Account[];
   /** 実仕訳（保存される正本）。保存系・export・残高チェックはこれだけを見る。 */
   journalEntries: JournalEntry[];
-  allocations: AllocationItem[];
   cashflowSchedules: CashflowSchedule[];
   reserves: ReserveItem[];
   tags: Tag[];

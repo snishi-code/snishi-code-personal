@@ -60,7 +60,12 @@ function account(
 async function addCandidateFixtures() {
   await loadLedger();
   const fixtures = {
-    fixed: account('recognition-fixed', '認識先・固定資産', 'asset', 'fixed-asset'),
+    investment: account(
+      'recognition-investment',
+      '認識先・投資資産',
+      'asset',
+      'investment-asset',
+    ),
     liability: account(
       'recognition-liability',
       '認識先・その他負債',
@@ -102,10 +107,10 @@ async function expectBroadCandidates(container: HTMLElement, excludedNames: stri
   await waitFor(() => {
     for (const name of [
       '現金',
-      '認識先・固定資産',
+      '認識先・投資資産',
       'クレジットカード',
       '認識先・その他負債',
-      '開始残高',
+      '初期残高',
       '給与',
       '固定費',
     ]) {
@@ -122,9 +127,7 @@ describe('継続コストの認識先候補', () => {
     const roleType: Record<AccountRole, AccountType> = {
       'daily-asset': 'asset',
       'reserve-asset': 'asset',
-      'deferred-asset': 'asset',
       'investment-asset': 'asset',
-      'fixed-asset': 'asset',
       'continuing-cost-asset': 'asset',
       'payment-liability': 'liability',
       'other-liability': 'liability',
@@ -148,9 +151,7 @@ describe('継続コストの認識先候補', () => {
     expect(ids).toEqual(
       expect.arrayContaining([
         'role-daily-asset',
-        'role-deferred-asset',
         'role-investment-asset',
-        'role-fixed-asset',
         'role-payment-liability',
         'role-other-liability',
         'role-equity',
@@ -209,10 +210,10 @@ describe('継続コストの認識先候補', () => {
     await waitFor(() => {
       for (const name of [
         '現金',
-        '認識先・固定資産',
+        '認識先・投資資産',
         'クレジットカード',
         '認識先・その他負債',
-        '開始残高',
+        '初期残高',
         '給与',
         '固定費',
       ]) {
@@ -229,7 +230,7 @@ describe('継続コストの認識先候補', () => {
     }
   });
 
-  it('契約持ち込みと開始残高からの持ち込みで同じ認識先候補を使う', async () => {
+  it('契約持ち込みと初期残高からの持ち込みで同じ認識先候補を使う', async () => {
     await addCandidateFixtures();
     const excluded = [
       '認識先・アーカイブ済み',

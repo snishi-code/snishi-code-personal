@@ -9,11 +9,12 @@ import {
   expenseCategoryBreakdownForRange,
   livingCostBreakdownForRange,
 } from '../../domain/livingCost';
-import { periodLabel, reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
+import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
 import { reportEntriesForAsOf } from '../../domain/reportEntries';
 import { todayLocal } from '../../util/time';
 import { buildSectionTrends } from './breakdownData';
 import { Money } from '../money';
+import { periodLabel } from '../periodLabel';
 import { TrendChart } from '../components/TrendChart';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';

@@ -66,6 +66,13 @@ export function AccountSheet({
       .filter((a) => a.role === 'daily-asset' && (!a.archived || a.id === repaymentAccountId))
       .map((a) => ({ value: a.id, label: a.name })),
   ];
+  const repaymentDayOptions = [
+    { value: '', label: t('accounts.repaymentUnset') },
+    ...Array.from({ length: 31 }, (_, index) => {
+      const day = String(index + 1);
+      return { value: day, label: day };
+    }),
+  ];
   const repaymentDay = repaymentDayText === '' ? null : Number.parseInt(repaymentDayText, 10);
   const openingAmount =
     openingAmountText === ''
@@ -219,12 +226,11 @@ export function AccountSheet({
               hint={t('accounts.repaymentHint')}
               dataUi={UI.accounts.repaymentAccount}
             />
-            <TextInput
+            <SelectInput
               label={t('accounts.repaymentDay')}
-              inputMode="numeric"
               value={repaymentDayText}
-              onChange={(v) => setRepaymentDayText(v.replace(/[^\d]/g, ''))}
-              hint={t('accounts.repaymentDayHint')}
+              onChange={setRepaymentDayText}
+              options={repaymentDayOptions}
               dataUi={UI.accounts.repaymentDay}
             />
           </>

@@ -1,7 +1,7 @@
 /*
  * 継続コストの移行登録（初期残高）: createContinuousCostFromOpening。
- *  - funding 仮想仕訳の貸方が 開始残高(equity) になり、収入(PL)を通らない。
- *  - 残っている価値は継続コスト台帳(資産)へ、認識は費用カテゴリへ月次で流れる。
+ *  - funding 仮想仕訳の貸方が初期残高(equity)になり、収入(PL)を通らない。
+ *  - 残存価値は継続コスト台帳(資産)へ、認識は費用カテゴリへ月次で流れる。
  *  - export → schema 検証の round-trip が通る（equity 支払い元を拒否しない）。
  */
 import { describe, expect, it } from 'vitest';
@@ -35,8 +35,8 @@ async function expenseAccountId(): Promise<string> {
   return expense.id;
 }
 
-describe('createContinuousCostFromOpening（移行登録=開始残高）', () => {
-  it('funding の貸方が開始残高になり、資産・純資産へ計上され PL 収入を通らない', async () => {
+describe('createContinuousCostFromOpening（移行登録=初期残高）', () => {
+  it('funding の貸方が初期残高になり、資産・純資産へ計上され PL 収入を通らない', async () => {
     const expenseId = await expenseAccountId();
     const item = await createContinuousCostFromOpening({
       name: '移行PC',
@@ -53,7 +53,7 @@ describe('createContinuousCostFromOpening（移行登録=開始残高）', () =>
     expect(item.recognitionCreditAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
     expect(item.repeatEveryMonths).toBeUndefined();
 
-    // 仮想 funding: 借方 台帳 / 貸方 開始残高（実仕訳は作らない）。
+    // 仮想 funding: 借方 台帳 / 貸方 初期残高（実仕訳は作らない）。
     expect(ledger.journalEntries.length).toBe(0);
     const funding = derivedOf(ledger).find(
       (e) => e.metadata?.ccKind === 'funding' && e.metadata.continuousCostId === item.id,
@@ -64,7 +64,7 @@ describe('createContinuousCostFromOpening（移行登録=開始残高）', () =>
       { accountId: equity!.id, side: 'credit', amount: 12000 },
     ]);
 
-    // BS: 台帳残高 = 12000 − 当月認識 1000。純資産側は開始残高 12000。
+    // BS: 台帳残高 = 12000 − 当月認識 1000。純資産側は初期残高 12000。
     const today = todayLocal();
     const bs = deriveBalanceSheet(ledger.accounts, derivedOf(ledger), today);
     const ccLedger = bs.assets.find((a) => a.account.id === CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
@@ -72,7 +72,7 @@ describe('createContinuousCostFromOpening（移行登録=開始残高）', () =>
     const eqBal = bs.equity.find((a) => a.account.id === equity!.id);
     expect(eqBal?.balance).toBe(12000);
 
-    // PL: 収入 0・当月費用 1000（開始残高は収入にならない）。
+    // PL: 収入 0・当月費用 1000（初期残高は収入にならない）。
     const ym = thisMonth();
     const pl = deriveProfitAndLoss(ledger.accounts, derivedOf(ledger), {
       from: `${ym}-01`,
@@ -96,7 +96,7 @@ describe('createContinuousCostFromOpening（移行登録=開始残高）', () =>
     expect(parsed.success).toBe(true);
   });
 
-  it('移行登録（開始残高 funding）の項目に継続購入は設定できない', async () => {
+  it('移行登録（初期残高 funding）の項目に継続購入は設定できない', async () => {
     const expenseId = await expenseAccountId();
     const item = await createContinuousCostFromOpening({
       name: 'Netflix誤登録',
@@ -142,7 +142,7 @@ describe('createContinuousCostFromOpening（移行登録=開始残高）', () =>
 
     await expect(
       createContinuousCostFromOpening({ ...base, expenseAccountId: 'no-such-account' }),
-    ).rejects.toMatchObject({ code: 'error.fixedAsset.expenseCategory' });
+    ).rejects.toMatchObject({ code: 'error.monthlyCost.expenseCategory' });
     expect((await loadLedger()).monthlyCostItems).toHaveLength(1);
   });
 });

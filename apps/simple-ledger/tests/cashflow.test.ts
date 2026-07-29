@@ -381,7 +381,7 @@ describe('projectCashflow（取り置き移動が自由資金に反映される�
 });
 
 describe('liquidAssetTotal', () => {
-  it('除外指定した資産（按分中資産など）を総資金から外す', () => {
+  it('除外指定した内部資産を総資金から外す', () => {
     const assets = [bal('cash', 100000), bal('bank', 50000), bal('def', 30000)];
     expect(liquidAssetTotal(assets, new Set())).toBe(180000);
     expect(liquidAssetTotal(assets, new Set(['def']))).toBe(150000);

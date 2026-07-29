@@ -32,10 +32,10 @@ describe('reserveBalanceShortfall（目的別資金の残高不足）', () => {
       updatedAt: 'x',
     },
     {
-      id: 'fixed',
-      name: '固定資産',
+      id: 'investment',
+      name: '投資資産',
       type: 'asset',
-      role: 'fixed-asset',
+      role: 'investment-asset',
       archived: false,
       createdAt: 'x',
       updatedAt: 'x',
@@ -60,7 +60,7 @@ describe('reserveBalanceShortfall（目的別資金の残高不足）', () => {
     description: '自動車購入',
     kind: 'normal',
     lines: [
-      { accountId: 'fixed', side: 'debit', amount },
+      { accountId: 'investment', side: 'debit', amount },
       { accountId: 'res', side: 'credit', amount },
     ],
     createdAt: 'x',
@@ -204,12 +204,12 @@ describe('transferFlowValid（振替の役割組み合わせ）', () => {
     expect(transferFlowValid('other-liability', 'reserve-asset')).toBe(true);
     expect(transferFlowValid('payment-liability', 'daily-asset')).toBe(true);
   });
-  it('負債 → 負債 や 費用/収入/固定資産が絡む組み合わせは invalid', () => {
+  it('負債 → 負債 や 費用・収入・投資資産が絡む組み合わせは invalid', () => {
     expect(transferFlowValid('other-liability', 'payment-liability')).toBe(false);
     expect(transferFlowValid('expense-category', 'daily-asset')).toBe(false);
     expect(transferFlowValid('daily-asset', 'expense-category')).toBe(false);
     expect(transferFlowValid('income-category', 'daily-asset')).toBe(false);
-    expect(transferFlowValid('daily-asset', 'fixed-asset')).toBe(false);
+    expect(transferFlowValid('daily-asset', 'investment-asset')).toBe(false);
   });
 });
 

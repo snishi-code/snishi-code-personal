@@ -118,8 +118,7 @@ function cleanMetadata(meta: EntryMetadata | undefined): EntryMetadata | undefin
   if (!meta) return undefined;
   const has =
     meta.inputMode !== undefined ||
-    meta.reversalOfEntryId !== undefined ||
-    meta.allocationPlan !== undefined;
+    meta.reversalOfEntryId !== undefined;
   return has ? meta : undefined;
 }
 

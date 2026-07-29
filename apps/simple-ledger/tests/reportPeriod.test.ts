@@ -3,18 +3,18 @@ import './setup';
 import {
   availableYears,
   dataYearsOf,
-  periodLabel,
   periodRange,
   reportBasis,
   trendBuckets,
   type ReportPeriod,
 } from '../src/domain/reportPeriod';
+import { periodLabel } from '../src/ui/periodLabel';
 
 describe('periodRange（フロー期間）', () => {
-  it('month は当月の月初〜月末', () => {
-    expect(periodRange({ mode: 'month', year: 2026, month: 2 })).toEqual({
+  it('date は選択月の月初〜選択日', () => {
+    expect(periodRange({ mode: 'date', date: '2026-02-18' })).toEqual({
       from: '2026-02-01',
-      to: '2026-02-28',
+      to: '2026-02-18',
     });
   });
   it('year は 1/1〜12/31', () => {
@@ -33,19 +33,19 @@ describe('reportBasis（フロー期間と BS 基準日の単一正本）', () =
 
   it.each([
     [
-      '過去月',
-      { mode: 'month', year: 2026, month: 5 } as ReportPeriod,
-      { flowRange: { from: '2026-05-01', to: '2026-05-31' }, asOf: '2026-05-31' },
+      '過去日',
+      { mode: 'date', date: '2026-05-18' } as ReportPeriod,
+      { flowRange: { from: '2026-05-01', to: '2026-05-18' }, asOf: '2026-05-18' },
     ],
     [
-      '現在月',
-      { mode: 'month', year: 2026, month: 6 } as ReportPeriod,
+      '当日',
+      { mode: 'date', date: today } as ReportPeriod,
       { flowRange: { from: '2026-06-01', to: today }, asOf: today },
     ],
     [
-      '未来月',
-      { mode: 'month', year: 2026, month: 7 } as ReportPeriod,
-      { flowRange: { from: '2026-07-01', to: '2026-07-31' }, asOf: '2026-07-31' },
+      '未来日',
+      { mode: 'date', date: '2026-07-12' } as ReportPeriod,
+      { flowRange: { from: '2026-07-01', to: '2026-07-12' }, asOf: '2026-07-12' },
     ],
     [
       '過去年',
@@ -70,7 +70,7 @@ describe('reportBasis（フロー期間と BS 基準日の単一正本）', () =
 
 describe('periodLabel', () => {
   it('各モードの表示ラベル', () => {
-    expect(periodLabel({ mode: 'month', year: 2026, month: 6 })).toBe('2026年6月');
+    expect(periodLabel({ mode: 'date', date: '2026-06-07' })).toBe('2026年6月7日');
     expect(periodLabel({ mode: 'year', year: 2026 })).toBe('2026年');
     expect(periodLabel({ mode: 'all' })).toBe('全期間');
   });
@@ -103,8 +103,8 @@ describe('availableYears（年別セレクトの選択肢）', () => {
 describe('trendBuckets（グラフ用バケット）', () => {
   const today = '2026-06-07';
 
-  it('month は推移を出さない（空配列）', () => {
-    expect(trendBuckets({ mode: 'month', year: 2026, month: 6 }, today)).toEqual([]);
+  it('date は推移を出さない（空配列）', () => {
+    expect(trendBuckets({ mode: 'date', date: '2026-06-07' }, today)).toEqual([]);
   });
   it('year は 12 本の月次バー', () => {
     const b = trendBuckets({ mode: 'year', year: 2026 }, today);

@@ -18,7 +18,6 @@ import {
 import { lastExpenseCategoryId, rememberExpenseCategoryId } from '../../data/localFlags';
 import { sortAccounts } from '../../domain/accountOrder';
 import { defaultRecognitionAccountId, recognitionAccountOptions } from '../accountOptions';
-import { disposalOutcome } from '../../domain/assetDisposal';
 import {
   continuousCostDisposalEndMonth,
   continuousCostDisposalOutcome,
@@ -28,10 +27,12 @@ import { addMonths, monthOf } from '../../domain/allocation';
 import { currentYearMonth, nowIso, todayLocal } from '../../util/time';
 import {
   RECURRING_POSTABLE_ROLES,
+  clampDayToMonth,
   recurringKindOf,
   type RecurringKind,
 } from '../../domain/recurring';
 import { Money } from '../money';
+import { MonthField } from '../MonthField';
 import { errorText, t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
 import { UI } from '../../ui-contract';
@@ -92,14 +93,10 @@ export function Allocations() {
     }
   }
 
-  const isFixedAssetItem = (m: MonthlyCostItem): boolean =>
-    m.sourceEntryId !== undefined &&
-    m.recognitionCreditAccountId !== undefined &&
-    accountsMap.get(m.recognitionCreditAccountId)?.role === 'fixed-asset';
   // 資産経由モデルの継続コスト対象。サブスク解約・返金なし終了も「0円で売却」で同じ導線から終了する。
   const isContinuingItem = (m: MonthlyCostItem): boolean => isContinuingCostItem(m, accountsMap);
   const canDispose = (m: MonthlyCostItem): boolean =>
-    !isDisposed(m) && m.status !== 'ended' && (isFixedAssetItem(m) || isContinuingItem(m));
+    !isDisposed(m) && m.status !== 'ended' && isContinuingItem(m);
 
   const rules = ledger?.recurringRules ?? [];
   const ruleKindLabel = (r: RecurringRule): string => {
@@ -120,9 +117,7 @@ export function Allocations() {
 
   return (
     <section aria-labelledby="allocations-title" data-ui={UI.allocations.view}>
-      <div
-        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-      >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 className="screen-title" id="allocations-title" style={{ marginBottom: 0 }}>
           {t('monthly.title')}
         </h1>
@@ -147,7 +142,11 @@ export function Allocations() {
           <p style={{ marginTop: 'var(--space-3)' }}>{t('monthly.empty')}</p>
         </div>
       ) : rules.length === 0 ? null : (
-        <ul className="card list" style={{ marginBottom: 'var(--space-4)' }} data-ui={UI.allocations.recurringList}>
+        <ul
+          className="card list"
+          style={{ marginBottom: 'var(--space-4)' }}
+          data-ui={UI.allocations.recurringList}
+        >
           {rules.map((r) => (
             <li key={r.id} className="list__item">
               <div className="list__main">
@@ -158,8 +157,8 @@ export function Allocations() {
                   ) : null}
                 </div>
                 <div className="list__sub">
-                  {t('recurring.everyMonthDay', { day: r.dayOfMonth })}・{name(r.creditAccountId)}{' '}
-                  → {name(r.debitAccountId)}
+                  {t('recurring.everyMonthDay', { day: r.dayOfMonth })}・{name(r.creditAccountId)} →{' '}
+                  {name(r.debitAccountId)}
                 </div>
               </div>
               <span className="list__amount">
@@ -279,7 +278,7 @@ export function Allocations() {
                         <Icon name={m.status === 'active' ? 'archive' : 'restore'} size={18} />
                       </button>
                     ) : null}
-                    {isDisposed(m) || isFixedAssetItem(m) ? null : (
+                    {isDisposed(m) ? null : (
                       <button
                         type="button"
                         className="icon-btn"
@@ -396,11 +395,7 @@ export function Allocations() {
       ) : null}
 
       {disposing ? (
-        <MonthlyCostDisposeSheet
-          item={disposing}
-          continuous={isContinuingItem(disposing)}
-          onClose={() => setDisposing(null)}
-        />
+        <MonthlyCostDisposeSheet item={disposing} onClose={() => setDisposing(null)} />
       ) : null}
     </section>
   );
@@ -460,7 +455,7 @@ function AddChooserSheet({
 
 /**
  * 自動更新される契約（年払いサブスク等）の途中持ち込みシート。
- * 残り（開始残高扱い・残り月数で認識し切って終了）+ 更新分（更新周期で自動継続・支払い元 funding）
+ * 残り（初期残高扱い・残り月数で認識し切って終了）+ 更新分（更新周期で自動継続・支払い元 funding）
  * の 2 項目を一度に作る。解約は有効な項目の 0 円売却 1 操作。
  */
 function SubscriptionMigrationSheet({ onClose }: { onClose: () => void }) {
@@ -492,6 +487,12 @@ function SubscriptionMigrationSheet({ onClose }: { onClose: () => void }) {
       ? storedCategory
       : null) ?? defaultRecognitionAccountId(accounts),
   );
+  const [fieldErrors, setFieldErrors] = useState<{
+    remainingAmount?: string;
+    remainingMonths?: string;
+    renewalAmount?: string;
+    renewalEvery?: string;
+  }>({});
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
@@ -499,15 +500,38 @@ function SubscriptionMigrationSheet({ onClose }: { onClose: () => void }) {
 
   async function submit() {
     if (submitting) return;
+    const remainingAmount = parse(remainingAmountText);
+    const remainingMonths = parse(remainingMonthsText);
+    const renewalAmount = parse(renewalAmountText);
+    const renewalEveryMonths = parse(renewalEveryText);
+    const nextFieldErrors: typeof fieldErrors = {};
+    if (!Number.isInteger(remainingAmount) || remainingAmount < 1) {
+      nextFieldErrors.remainingAmount = t('error.subMigration.remainingAmountInvalid');
+    }
+    if (!Number.isInteger(remainingMonths) || remainingMonths < 1) {
+      nextFieldErrors.remainingMonths = t('error.subMigration.remainingMonthsInvalid');
+    }
+    if (!Number.isInteger(renewalAmount) || renewalAmount < 1) {
+      nextFieldErrors.renewalAmount = t('error.subMigration.renewalAmountInvalid');
+    }
+    if (!Number.isInteger(renewalEveryMonths) || renewalEveryMonths < 1) {
+      nextFieldErrors.renewalEvery = t('error.subMigration.renewalEveryInvalid');
+    }
+    if (Object.keys(nextFieldErrors).length > 0) {
+      setFieldErrors(nextFieldErrors);
+      setError(undefined);
+      return;
+    }
     setSubmitting(true);
+    setFieldErrors({});
     setError(undefined);
     try {
       await createSubscriptionMigration({
         name: name.trim(),
-        remainingAmount: parse(remainingAmountText),
-        remainingMonths: parse(remainingMonthsText),
-        renewalAmount: parse(renewalAmountText),
-        renewalEveryMonths: parse(renewalEveryText),
+        remainingAmount,
+        remainingMonths,
+        renewalAmount,
+        renewalEveryMonths,
         paymentSourceAccountId,
         expenseAccountId,
       });
@@ -571,8 +595,12 @@ function SubscriptionMigrationSheet({ onClose }: { onClose: () => void }) {
           required
           inputMode="numeric"
           value={remainingAmountText}
-          onChange={(v) => setRemainingAmountText(v.replace(/[^\d]/g, ''))}
+          onChange={(v) => {
+            setRemainingAmountText(v.replace(/[^\d]/g, ''));
+            setFieldErrors((current) => ({ ...current, remainingAmount: undefined }));
+          }}
           hint={t('subMigration.remainingAmountHint')}
+          error={fieldErrors.remainingAmount}
           dataUi={UI.allocations.subMigrationRemaining}
         />
         <TextInput
@@ -580,8 +608,12 @@ function SubscriptionMigrationSheet({ onClose }: { onClose: () => void }) {
           required
           inputMode="numeric"
           value={remainingMonthsText}
-          onChange={(v) => setRemainingMonthsText(v.replace(/[^\d]/g, ''))}
+          onChange={(v) => {
+            setRemainingMonthsText(v.replace(/[^\d]/g, ''));
+            setFieldErrors((current) => ({ ...current, remainingMonths: undefined }));
+          }}
           hint={t('subMigration.remainingMonthsHint')}
+          error={fieldErrors.remainingMonths}
           dataUi={UI.allocations.subMigrationMonths}
         />
         <TextInput
@@ -589,7 +621,11 @@ function SubscriptionMigrationSheet({ onClose }: { onClose: () => void }) {
           required
           inputMode="numeric"
           value={renewalAmountText}
-          onChange={(v) => setRenewalAmountText(v.replace(/[^\d]/g, ''))}
+          onChange={(v) => {
+            setRenewalAmountText(v.replace(/[^\d]/g, ''));
+            setFieldErrors((current) => ({ ...current, renewalAmount: undefined }));
+          }}
+          error={fieldErrors.renewalAmount}
           dataUi={UI.allocations.subMigrationRenewal}
         />
         <TextInput
@@ -597,8 +633,12 @@ function SubscriptionMigrationSheet({ onClose }: { onClose: () => void }) {
           required
           inputMode="numeric"
           value={renewalEveryText}
-          onChange={(v) => setRenewalEveryText(v.replace(/[^\d]/g, ''))}
+          onChange={(v) => {
+            setRenewalEveryText(v.replace(/[^\d]/g, ''));
+            setFieldErrors((current) => ({ ...current, renewalEvery: undefined }));
+          }}
           hint={t('subMigration.renewalEveryHint')}
+          error={fieldErrors.renewalEvery}
         />
         <SelectInput
           label={t('subMigration.paymentSource')}
@@ -677,7 +717,9 @@ function RecurringRuleSheet({
   const [kind, setKind] = useState<SheetKind>(() => {
     if (!existing) return initialKind ?? 'expense';
     // 定型に当てはまらない既存ルール（簿記編集で作ったもの）は簿記編集モードで開く。
-    return recurringKindOf(roleOf(existing.debitAccountId), roleOf(existing.creditAccountId)) ?? 'manual';
+    return (
+      recurringKindOf(roleOf(existing.debitAccountId), roleOf(existing.creditAccountId)) ?? 'manual'
+    );
   });
   const optionsFor = (roles: readonly string[], includeId?: string) =>
     accounts
@@ -696,13 +738,12 @@ function RecurringRuleSheet({
   );
 
   const [name, setName] = useState(existing?.name ?? '');
-  const [amountText, setAmountText] = useState(existing !== undefined ? String(existing.amount) : '');
-  const [dayText, setDayText] = useState(existing !== undefined ? String(existing.dayOfMonth) : '');
-  const [startMonth, setStartMonth] = useState(() => {
-    if (existing) return existing.startMonth;
-    const { year, month } = currentYearMonth();
-    return `${year}-${String(month).padStart(2, '0')}`;
-  });
+  const [amountText, setAmountText] = useState(
+    existing !== undefined ? String(existing.amount) : '',
+  );
+  const [firstPostingDate, setFirstPostingDate] = useState(() =>
+    existing ? clampDayToMonth(existing.startMonth, existing.dayOfMonth) : todayLocal(),
+  );
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
@@ -718,7 +759,21 @@ function RecurringRuleSheet({
   async function submit() {
     if (submitting) return;
     const amount = amountText === '' ? 0 : Number.parseInt(amountText, 10);
-    const day = dayText === '' ? 0 : Number.parseInt(dayText, 10);
+    if (!Number.isInteger(amount) || amount < 1) {
+      setError(t('error.common.amountInvalid'));
+      return;
+    }
+    const day = Number.parseInt(firstPostingDate.slice(8, 10), 10);
+    const startMonth = monthOf(firstPostingDate);
+    // 日付欄は「元の dayOfMonth をその月へクランプした結果」を表示している。表示どおりのまま
+    // なら日を触っていない＝元の値を保つ（2 月のルールを開いて保存しただけで 31 → 28 に
+    // 落ち、以後の起票日がずれるのを防ぐ）。日を変えたときだけ入力値を採用する。
+    const dayOfMonth =
+      existing !== undefined &&
+      clampDayToMonth(startMonth, existing.dayOfMonth).slice(8, 10) ===
+        firstPostingDate.slice(8, 10)
+        ? existing.dayOfMonth
+        : day;
     setSubmitting(true);
     setError(undefined);
     try {
@@ -727,10 +782,10 @@ function RecurringRuleSheet({
           ...existing,
           name: name.trim(),
           amount,
-          dayOfMonth: day,
+          dayOfMonth,
           debitAccountId,
           creditAccountId,
-          startMonth: startMonth.trim(),
+          startMonth,
           updatedAt: nowIso(),
         });
       } else {
@@ -740,7 +795,7 @@ function RecurringRuleSheet({
           dayOfMonth: day,
           debitAccountId,
           creditAccountId,
-          startMonth: startMonth.trim(),
+          startMonth,
         });
       }
       onClose();
@@ -769,7 +824,7 @@ function RecurringRuleSheet({
               submitting ||
               name.trim() === '' ||
               amountText === '' ||
-              dayText === '' ||
+              firstPostingDate === '' ||
               creditAccountId === '' ||
               debitAccountId === ''
             }
@@ -798,9 +853,7 @@ function RecurringRuleSheet({
           }))}
           dataUi={UI.allocations.recurringKind}
         />
-        {kind === 'manual' ? (
-          <p className="field__hint">{t('recurring.manualHint')}</p>
-        ) : null}
+        {kind === 'manual' ? <p className="field__hint">{t('recurring.manualHint')}</p> : null}
         <TextInput
           label={t('recurring.name')}
           required
@@ -836,20 +889,12 @@ function RecurringRuleSheet({
           dataUi={UI.allocations.recurringAmount}
         />
         <TextInput
-          label={t('recurring.day')}
+          label={t('recurring.firstPostingDate')}
+          type="date"
           required
-          inputMode="numeric"
-          value={dayText}
-          onChange={(v) => setDayText(v.replace(/[^\d]/g, ''))}
-          hint={t('recurring.dayHint')}
-          dataUi={UI.allocations.recurringDay}
-        />
-        <TextInput
-          label={t('recurring.startMonth')}
-          required
-          value={startMonth}
-          placeholder="YYYY-MM"
-          onChange={setStartMonth}
+          value={firstPostingDate}
+          onChange={setFirstPostingDate}
+          dataUi={UI.allocations.recurringFirstPostingDate}
         />
         {existing?.paused ? <p className="field__hint">{t('recurring.resumeNote')}</p> : null}
       </div>
@@ -858,8 +903,8 @@ function RecurringRuleSheet({
 }
 
 /**
- * 移行登録（初期残高）シート。すでに持っている継続コスト対象を「残っている価値 + 残り月数」で
- * 登録する。残っている価値は開始残高(equity)を貸方にした funding 仮想仕訳で計上され、
+ * 移行登録（初期残高）シート。すでに持っている継続コスト対象を「残存価値 + 残り月数」で
+ * 登録する。残存価値は初期残高(equity)を貸方にした funding 仮想仕訳で計上され、
  * 収入・支出・資金移動にはならない（通常の勘定科目の初期残高と同じ会計意味）。
  */
 function ContinuousCostMigrateSheet({ onClose }: { onClose: () => void }) {
@@ -886,13 +931,23 @@ function ContinuousCostMigrateSheet({ onClose }: { onClose: () => void }) {
 
   async function submit() {
     if (submitting) return;
+    const amount = amountText === '' ? 0 : Number.parseInt(amountText, 10);
+    const costMonths = monthsText === '' ? 0 : Number.parseInt(monthsText, 10);
+    if (!Number.isInteger(amount) || amount < 1) {
+      setError(t('error.common.amountInvalid'));
+      return;
+    }
+    if (!Number.isInteger(costMonths) || costMonths < 1) {
+      setError(t('error.monthlyCost.monthsInvalid'));
+      return;
+    }
     setSubmitting(true);
     setError(undefined);
     try {
       await createContinuousCostOpening({
         name: name.trim(),
-        amount: amountText === '' ? 0 : Number.parseInt(amountText, 10),
-        costMonths: monthsText === '' ? 0 : Number.parseInt(monthsText, 10),
+        amount,
+        costMonths,
         startMonth: startMonth.trim(),
         expenseAccountId,
       });
@@ -960,11 +1015,10 @@ function ContinuousCostMigrateSheet({ onClose }: { onClose: () => void }) {
           hint={t('monthlyCost.migrateMonthsHint')}
           dataUi={UI.allocations.migrateMonths}
         />
-        <TextInput
+        <MonthField
           label={t('monthlyCost.migrateStartMonth')}
           required
           value={startMonth}
-          placeholder="YYYY-MM"
           onChange={setStartMonth}
         />
         <SelectInput
@@ -981,15 +1035,12 @@ function ContinuousCostMigrateSheet({ onClose }: { onClose: () => void }) {
 
 function MonthlyCostDisposeSheet({
   item,
-  continuous,
   onClose,
 }: {
   item: MonthlyCostItem;
-  /** 資産経由モデルの継続コスト対象（サブスク等）。false なら固定資産由来。 */
-  continuous: boolean;
   onClose: () => void;
 }) {
-  const { ledger, disposeFixedAsset, disposeContinuousCost } = useLedger();
+  const { ledger, disposeContinuousCost } = useLedger();
   const accounts = ledger?.accounts ?? [];
   const currency = ledger?.settings.currency ?? 'JPY';
 
@@ -1006,14 +1057,9 @@ function MonthlyCostDisposeSheet({
 
   const proceeds = proceedsText === '' ? 0 : Number.parseInt(proceedsText, 10);
   const disposalMonth = /^\d{4}-\d{2}-\d{2}$/.test(date) ? monthOf(date) : item.startMonth;
-  // 継続コスト（実績動的償却）: 実使用月数への遡及再配分プレビュー。固定資産は従来の損益方式。
-  const ccOutcome = continuous
-    ? continuousCostDisposalOutcome(item, disposalMonth, proceeds)
-    : null;
-  const fixedOutcome = continuous ? null : disposalOutcome(item, disposalMonth, proceeds);
-  const endMonth = continuous
-    ? continuousCostDisposalEndMonth(item, disposalMonth)
-    : addMonths(disposalMonth, -1);
+  // 継続コスト（実績動的償却）: 実使用月数への遡及再配分プレビュー。
+  const outcome = continuousCostDisposalOutcome(item, disposalMonth, proceeds);
+  const endMonth = continuousCostDisposalEndMonth(item, disposalMonth);
 
   async function submit() {
     setSubmitting(true);
@@ -1025,8 +1071,7 @@ function MonthlyCostDisposeSheet({
         proceedsAmount: proceeds,
         ...(proceeds > 0 ? { destinationAccountId } : {}),
       };
-      if (continuous) await disposeContinuousCost(input);
-      else await disposeFixedAsset(input);
+      await disposeContinuousCost(input);
       onClose();
     } catch (e) {
       setError(errorText(e));
@@ -1036,7 +1081,7 @@ function MonthlyCostDisposeSheet({
 
   return (
     <Modal
-      title={continuous ? t('disposal.ccTitle') : t('disposal.title')}
+      title={t('disposal.ccTitle')}
       onClose={onClose}
       dismissMode="if-clean"
       footer={
@@ -1057,7 +1102,7 @@ function MonthlyCostDisposeSheet({
       }
     >
       <div className="stack" data-ui={UI.allocations.disposeDialog}>
-        <p className="field__hint">{continuous ? t('disposal.ccIntro') : t('disposal.intro')}</p>
+        <p className="field__hint">{t('disposal.ccIntro')}</p>
         {error ? (
           <div className="field__error" role="alert">
             <Icon name="alert" size={14} />
@@ -1090,65 +1135,26 @@ function MonthlyCostDisposeSheet({
           />
         ) : null}
 
-        {ccOutcome ? (
-          <>
-            {/* 実績動的償却: 損益の一括計上ではなく、実使用月数へ遡って月額が再計算される。 */}
-            <div className="kv">
-              <span className="muted">{t('disposal.usedMonths')}</span>
-              <span>{t('monthlyCost.monthsUnit', { count: ccOutcome.usedMonths })}</span>
-            </div>
-            <div className="kv">
-              <span className="muted">{t('disposal.monthlyAfter')}</span>
-              <span>
-                <Money amount={ccOutcome.monthlyAfter} currency={currency} />
-              </span>
-            </div>
-            {ccOutcome.gain > 0 ? (
-              <div className="kv">
-                <span className="muted">{t('disposal.gain')}</span>
-                <span>
-                  <Money amount={ccOutcome.gain} currency={currency} />
-                </span>
-              </div>
-            ) : null}
-            <p className="field__hint">{t('disposal.retroNote')}</p>
-          </>
-        ) : fixedOutcome ? (
-          <>
-            <div className="kv">
-              <span className="muted">{t('disposal.recognized')}</span>
-              <span>
-                <Money amount={fixedOutcome.recognizedAmount} currency={currency} />
-              </span>
-            </div>
-            <div className="kv">
-              <span className="muted">{t('disposal.remaining')}</span>
-              <span>
-                <Money amount={fixedOutcome.remainingAmount} currency={currency} />
-              </span>
-            </div>
-            <div className="kv">
-              <span className="muted">{t('disposal.gain')}</span>
-              <span>
-                {fixedOutcome.gain > 0 ? (
-                  <Money amount={fixedOutcome.gain} currency={currency} />
-                ) : (
-                  t('disposal.none')
-                )}
-              </span>
-            </div>
-            <div className="kv">
-              <span className="muted">{t('disposal.loss')}</span>
-              <span>
-                {fixedOutcome.loss > 0 ? (
-                  <Money amount={fixedOutcome.loss} currency={currency} />
-                ) : (
-                  t('disposal.none')
-                )}
-              </span>
-            </div>
-          </>
+        {/* 実績動的償却: 損益の一括計上ではなく、実使用月数へ遡って月額が再計算される。 */}
+        <div className="kv">
+          <span className="muted">{t('disposal.usedMonths')}</span>
+          <span>{t('monthlyCost.monthsUnit', { count: outcome.usedMonths })}</span>
+        </div>
+        <div className="kv">
+          <span className="muted">{t('disposal.monthlyAfter')}</span>
+          <span>
+            <Money amount={outcome.monthlyAfter} currency={currency} />
+          </span>
+        </div>
+        {outcome.gain > 0 ? (
+          <div className="kv">
+            <span className="muted">{t('disposal.gain')}</span>
+            <span>
+              <Money amount={outcome.gain} currency={currency} />
+            </span>
+          </div>
         ) : null}
+        <p className="field__hint">{t('disposal.retroNote')}</p>
         <div className="kv">
           <span className="muted">{t('disposal.endsAt')}</span>
           <span>{endMonth}</span>
@@ -1173,12 +1179,11 @@ function MonthlyCostEditSheet({
   const accountName = (id?: string) =>
     id ? (accounts.find((a) => a.id === id)?.name ?? '—') : '—';
 
-  const linked = item.sourceEntryId !== undefined || item.sourceAllocationId !== undefined;
   const hasPosted = (ledger?.cashflowSchedules ?? []).some(
     (s) => s.monthlyCostId === item.id && s.status === 'posted',
   );
-  const amountEditable = !disposed && !linked && !hasPosted;
-  // 移行登録（開始残高 funding）の項目は継続購入を設定できない（更新のたびに開始残高から
+  const amountEditable = !disposed && !hasPosted;
+  // 移行登録（初期残高 funding）の項目は継続購入を設定できない（更新のたびに初期残高から
   // 資金が湧いてしまう）。毎月払いは定期ルールで扱う。
   const openingFunded =
     item.paymentSourceAccountId !== undefined &&
@@ -1209,6 +1214,28 @@ function MonthlyCostEditSheet({
       expenseAccountId !== item.expenseAccountId);
 
   async function submit() {
+    if (!disposed) {
+      const nextAmount =
+        amountEditable && amountText !== '' ? Number.parseInt(amountText, 10) : item.amount;
+      const nextCostMonths =
+        costMonthsText === '' ? Number.NaN : Number.parseInt(costMonthsText, 10);
+      const nextRepeat = repeatText.trim() === '' ? undefined : Number.parseInt(repeatText, 10);
+      if (!Number.isInteger(nextAmount) || nextAmount < 1) {
+        setError(t('error.common.amountInvalid'));
+        return;
+      }
+      if (!Number.isInteger(nextCostMonths) || nextCostMonths < 1) {
+        setError(t('error.monthlyCost.monthsInvalid'));
+        return;
+      }
+      if (
+        nextRepeat !== undefined &&
+        (!Number.isInteger(nextRepeat) || nextRepeat < nextCostMonths)
+      ) {
+        setError(t('error.monthlyCost.repeatInvalid'));
+        return;
+      }
+    }
     setSubmitting(true);
     setError(undefined);
     const next: MonthlyCostItem = disposed
@@ -1218,8 +1245,7 @@ function MonthlyCostEditSheet({
           name: name.trim(),
           amount:
             amountEditable && amountText !== '' ? Number.parseInt(amountText, 10) : item.amount,
-          costMonths:
-            costMonthsText === '' ? item.costMonths : Number.parseInt(costMonthsText, 10),
+          costMonths: costMonthsText === '' ? item.costMonths : Number.parseInt(costMonthsText, 10),
           startMonth: startMonth.trim(),
           expenseAccountId,
           status,
@@ -1334,13 +1360,7 @@ function MonthlyCostEditSheet({
               onChange={(v) => {
                 if (amountEditable) setAmountText(v.replace(/[^\d]/g, ''));
               }}
-              hint={
-                amountEditable
-                  ? undefined
-                  : linked
-                    ? t('monthlyCost.amountLockedFixed')
-                    : t('monthlyCost.amountLockedPosted')
-              }
+              hint={amountEditable ? undefined : t('monthlyCost.amountLockedPosted')}
               dataUi={UI.allocations.editAmount}
             />
             <TextInput
@@ -1363,21 +1383,20 @@ function MonthlyCostEditSheet({
                 dataUi={UI.allocations.editRepeat}
               />
             )}
-            <TextInput
+            <MonthField
               label={t('monthlyCost.startMonth')}
               required
               value={startMonth}
-              placeholder="YYYY-MM"
               onChange={setStartMonth}
               dataUi={UI.allocations.editStartMonth}
             />
-            <TextInput
+            <MonthField
               label={t('monthlyCost.endMonth')}
               value={endMonth}
-              placeholder="YYYY-MM"
               hint={t('monthlyCost.endMonthHint')}
               onChange={setEndMonth}
               dataUi={UI.allocations.editEndMonth}
+              clearLabel={t('common.clear')}
             />
             <SelectInput
               label={t('monthlyCost.expenseCategory')}

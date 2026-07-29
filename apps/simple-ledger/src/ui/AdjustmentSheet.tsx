@@ -5,7 +5,7 @@
  */
 import { useMemo, useState } from 'react';
 import { Modal } from './overlays';
-import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
+import { TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../state/store';
 import { accountBalance, filterByDateRange } from '../domain/accounting';
@@ -17,14 +17,9 @@ import { groupedAccountsByRole } from './accountOptions';
 import { AccountPicker } from './AccountPicker';
 import { Money } from './money';
 import { todayLocal } from '../util/time';
-import type { Account, AccountType, AdjustmentKind, JournalEntry } from '../domain/types';
+import type { Account, AccountType, JournalEntry } from '../domain/types';
 import { t } from '../i18n';
 import { UI } from '../ui-contract';
-
-const KIND_OPTIONS: { value: AdjustmentKind; label: string }[] = [
-  { value: 'unknown-balance', label: t('adjust.kind.unknown-balance') },
-  { value: 'investment-valuation', label: t('adjust.kind.investment-valuation') },
-];
 
 export function AdjustmentCreateSheet({
   account,
@@ -37,7 +32,6 @@ export function AdjustmentCreateSheet({
   const currency = ledger?.settings.currency ?? 'JPY';
 
   const [date, setDate] = useState(todayLocal());
-  const [kind, setKind] = useState<AdjustmentKind>('unknown-balance');
   const [actualText, setActualText] = useState('');
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
@@ -66,7 +60,7 @@ export function AdjustmentCreateSheet({
     setSubmitting(true);
     setError(undefined);
     try {
-      await createAdjustment({ kind, accountId: account.id, date, actualBalance: actual });
+      await createAdjustment({ accountId: account.id, date, actualBalance: actual });
       onClose();
     } catch {
       setError(t('toast.error'));
@@ -108,16 +102,6 @@ export function AdjustmentCreateSheet({
           <span className="muted">{t('adjust.account')}</span>
           <span>{account.name}</span>
         </div>
-        <SelectInput
-          label={t('adjust.kind')}
-          value={kind}
-          onChange={(v) => setKind(v as AdjustmentKind)}
-          options={KIND_OPTIONS}
-          dataUi={UI.adjustments.kind}
-        />
-        {kind === 'investment-valuation' ? (
-          <p className="field__hint">{t('adjust.investmentNote')}</p>
-        ) : null}
         <TextInput
           label={t('adjust.date')}
           required
@@ -166,7 +150,6 @@ export function AdjustmentEditSheet({
 
   const [accountId, setAccountId] = useState(adj.accountId);
   const [date, setDate] = useState(entry.date);
-  const [kind, setKind] = useState<AdjustmentKind>(adj.kind);
   const [actualText, setActualText] = useState(String(adj.actualBalance));
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
@@ -195,7 +178,7 @@ export function AdjustmentEditSheet({
     setSubmitting(true);
     setError(undefined);
     try {
-      await updateAdjustment({ id: entry.id, kind, accountId, date, actualBalance: actual });
+      await updateAdjustment({ id: entry.id, accountId, date, actualBalance: actual });
       onClose();
     } catch {
       setError(t('toast.error'));
@@ -242,16 +225,6 @@ export function AdjustmentEditSheet({
           emptyText={t('adjust.noAccounts')}
           dataUi={UI.adjustments.editAccount}
         />
-        <SelectInput
-          label={t('adjust.kind')}
-          value={kind}
-          onChange={(v) => setKind(v as AdjustmentKind)}
-          options={KIND_OPTIONS}
-          dataUi={UI.adjustments.editKind}
-        />
-        {kind === 'investment-valuation' ? (
-          <p className="field__hint">{t('adjust.investmentNote')}</p>
-        ) : null}
         <TextInput
           label={t('adjust.date')}
           required

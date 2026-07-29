@@ -1,15 +1,27 @@
 /*
  * Zod スキーマ。import 時の境界検証はすべてここを通す。
  * 型は src/domain/types.ts と一致させる（z.infer で照合可能）。
+ *
+ * **`.strict()` を使わない**: 未知キーは zod 既定どおり黙って落とす。撤去済みフィールドの残骸を
+ * 持つ既存データ（過去バージョンで保存された IndexedDB レコード・手元の JSON）がそのまま通り、
+ * 保存のたびに残骸が落ちて自己修復する。「後方互換をコードで持たない」＝フィールドを消したら
+ * コードから消すだけ、を運用面で成立させているのがこの strip 挙動。
  */
 import { z } from 'zod';
 import {
   APP_ID,
   CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
   RESERVE_LEDGER_ACCOUNT_ID,
+  SCHEMA_VERSION,
 } from './constants';
-import { addMonths, monthlyAmounts } from './allocation';
-import { ACCOUNT_ROLES, roleAllowsType, type AccountRole } from './accountRoles';
+import { counterpartName, counterpartRole } from './adjustment';
+import { addMonths } from './allocation';
+import {
+  ACCOUNT_ROLES,
+  ADJUSTABLE_ACCOUNT_ROLES,
+  roleAllowsType,
+  type AccountRole,
+} from './accountRoles';
 import { isValidIsoDate, isValidIsoMonth } from './calendar';
 import { isRecurringPostableRole } from './recurring';
 
@@ -99,55 +111,27 @@ export const tagSchema = z.object({
 
 export const inputModeSchema = z.enum(['income', 'expense', 'transfer', 'manual', 'reversal']);
 
-export const allocationPlanSchema = z.object({
-  kind: z.literal('period'),
-  startDate: isoDate,
-  endDate: isoDate,
-  method: z.enum(['even-monthly']),
-  recognitionAccountId: z.string().min(1),
-  deferredAccountId: z.string().min(1),
-  generatedEntryIds: z.array(z.string().min(1)),
-});
+export const adjustmentMetaSchema = z
+  .object({
+    accountId: z.string().min(1),
+    expectedBalance: z.number().int().finite(),
+    actualBalance: z.number().int().finite(),
+    delta: z.number().int().finite(),
+    counterpartAccountId: z.string().min(1),
+  });
 
-export const adjustmentMetaSchema = z.object({
-  kind: z.enum(['unknown-balance', 'investment-valuation']),
-  accountId: z.string().min(1),
-  expectedBalance: z.number().int().finite(),
-  actualBalance: z.number().int().finite(),
-  delta: z.number().int().finite(),
-  counterpartAccountId: z.string().min(1),
-});
-
-export const entryMetadataSchema = z.object({
-  inputMode: inputModeSchema.optional(),
-  reversalOfEntryId: z.string().min(1).optional(),
-  allocationPlan: allocationPlanSchema.optional(),
-  allocationId: z.string().min(1).optional(),
-  allocationRole: z.enum(['source', 'recognition']).optional(),
-  adjustment: adjustmentMetaSchema.optional(),
-  monthlyCostId: z.string().min(1).optional(),
-  assetDisposalId: z.string().min(1).optional(),
-  reserveId: z.string().min(1).optional(),
-  // 定期ルールからの自動起票の由来（両方セットで持つ。整合はパッケージ superRefine）。
-  recurringRuleId: z.string().min(1).optional(),
-  recurringMonth: monthSchema.optional(),
-});
-
-export const allocationItemSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1).max(120),
-  totalAmount: amountSchema,
-  months: z.number().int().min(2),
-  startMonth: monthSchema,
-  expenseAccountId: z.string().min(1),
-  paymentAccountId: z.string().min(1),
-  deferredAccountId: z.string().min(1),
-  sourceEntryId: z.string().min(1),
-  recognitionEntryIds: z.array(z.string().min(1)),
-  status: z.enum(['active', 'completed', 'disposed', 'settled']),
-  createdAt: isoDateTime,
-  updatedAt: isoDateTime,
-});
+export const entryMetadataSchema = z
+  .object({
+    inputMode: inputModeSchema.optional(),
+    reversalOfEntryId: z.string().min(1).optional(),
+    adjustment: adjustmentMetaSchema.optional(),
+    monthlyCostId: z.string().min(1).optional(),
+    assetDisposalId: z.string().min(1).optional(),
+    reserveId: z.string().min(1).optional(),
+    // 定期ルールからの自動起票の由来（両方セットで持つ。整合はパッケージ superRefine）。
+    recurringRuleId: z.string().min(1).optional(),
+    recurringMonth: monthSchema.optional(),
+  });
 
 export const cashflowScheduleSchema = z.object({
   id: z.string().min(1),
@@ -205,8 +189,6 @@ export const monthlyCostItemSchema = z
     paymentAccountId: z.string().min(1).optional(),
     repaymentAccountId: z.string().min(1).optional(),
     disposalProceedsAmount: z.number().int().min(0).optional(),
-    sourceAllocationId: z.string().min(1).optional(),
-    sourceEntryId: z.string().min(1).optional(),
     recognitionCreditAccountId: z.string().min(1).optional(),
     status: z.enum(['active', 'paused', 'ended']),
     createdAt: isoDateTime,
@@ -223,9 +205,8 @@ export const monthlyCostItemSchema = z
         path: ['repeatEveryMonths'],
       });
     }
-    // endMonth は原則 startMonth 以降。「前月」だけは終了済み（ended）に限り許す。
-    // 前月＝使用0ヶ月のエンコードで、固定資産を購入と同じ月に処分すると保存境界が
-    // 正当に書く（認識エンジンは 0 ヶ月扱い）。active/paused には認めない。
+    // endMonth は原則 startMonth 以降。「前月」だけは終了済み（ended）に限り、
+    // 使用0ヶ月の処分を表す値として許す。active/paused には認めない。
     if (item.endMonth !== undefined && item.endMonth < item.startMonth) {
       const zeroUseDisposal = item.status === 'ended' && item.endMonth === addMonths(item.startMonth, -1);
       if (!zeroUseDisposal) {
@@ -254,7 +235,7 @@ export const assetDisposalSchema = z.object({
   proceedsAmount: z.number().int().nonnegative(),
   destinationAccountId: z.string().min(1).optional(),
   recognizedAmount: z.number().int().nonnegative(),
-  remainingAmount: z.number().int().nonnegative(),
+  remainingAmount: z.literal(0),
   generatedEntryIds: z.array(z.string().min(1)),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
@@ -310,7 +291,7 @@ export const settingsSchema = z.object({
 export const ledgerExportPackageSchema = z
   .object({
     appId: z.literal(APP_ID),
-    schemaVersion: z.number().int().positive(),
+    schemaVersion: z.literal(SCHEMA_VERSION),
     ledgerId: z.string().min(1),
     exportedAt: isoDateTime,
     deviceId: z.string().min(1),
@@ -318,7 +299,6 @@ export const ledgerExportPackageSchema = z
     revision: z.number().int().nonnegative(),
     accounts: z.array(accountSchema),
     journalEntries: z.array(journalEntrySchema),
-    allocations: z.array(allocationItemSchema),
     cashflowSchedules: z.array(cashflowScheduleSchema),
     reserves: z.array(reserveItemSchema),
     tags: z.array(tagSchema),
@@ -337,12 +317,14 @@ export const ledgerExportPackageSchema = z
     // （アーカイブ解除時に保存境界の nameConflict で弾かれる）。
     const accountType = new Map<string, string>();
     const accountRole = new Map<string, string>();
+    const accountById = new Map<string, (typeof pkg.accounts)[number]>();
     const activeAccountNames = new Set<string>();
     pkg.accounts.forEach((a, i) => {
       if (accountType.has(a.id))
         issue(`勘定科目 ID が重複しています(${a.id})`, ['accounts', i, 'id']);
       accountType.set(a.id, a.type);
       accountRole.set(a.id, a.role);
+      accountById.set(a.id, a);
       if (!a.archived) {
         // 空白違いの同名（例: 「預金」と「預金 」）を別名にしないよう trim 後で比較する。
         const trimmedName = a.name.trim();
@@ -390,9 +372,10 @@ export const ledgerExportPackageSchema = z
 
     // 月額化コスト ID 集合（仕訳・予定CF の monthlyCostId 参照検証に使う）。
     const monthlyCostIdSet = new Set(pkg.monthlyCostItems.map((m) => m.id));
+    const monthlyCostById = new Map(pkg.monthlyCostItems.map((item) => [item.id, item] as const));
     const recurringRuleIdSet = new Set(pkg.recurringRules.map((r) => r.id));
     const recurringPostingMonths = new Map<string, Set<string>>();
-    // 固定資産処分 ID 集合（仕訳の assetDisposalId 参照検証に使う）。
+    // 処分 ID 集合（仕訳の assetDisposalId 参照検証に使う）。
     const assetDisposalIdSet = new Set(pkg.assetDisposals.map((d) => d.id));
 
     // 仕訳 ID は一意 + map。
@@ -417,60 +400,80 @@ export const ledgerExportPackageSchema = z
         }
       });
 
-      // allocationId と allocationRole は必ず同時に存在する（role 単独で按分認識額へ
-      // 混ざるのを防ぐ。さらに後段の孤立チェックで AllocationItem 参照も必須にする）。
-      const hasAllocId = e.metadata?.allocationId !== undefined;
-      const hasAllocRole = e.metadata?.allocationRole !== undefined;
-      if (hasAllocId !== hasAllocRole) {
-        issue('allocationId と allocationRole は同時に指定する必要があります', [
-          'journalEntries',
-          ei,
-          'metadata',
-        ]);
-      }
-
-      // 按分計画(allocationPlan)の参照整合性（将来拡張の土台でも壊れた参照は取り込まない）。
-      const plan = e.metadata?.allocationPlan;
-      if (plan) {
-        (
-          [
-            ['recognitionAccountId', plan.recognitionAccountId],
-            ['deferredAccountId', plan.deferredAccountId],
-          ] as const
-        ).forEach(([field, id]) => {
-          if (!hasAccount(id)) {
-            issue(`按分計画の ${field} が存在しない勘定科目(${id})を参照しています`, [
-              'journalEntries',
-              ei,
-              'metadata',
-              'allocationPlan',
-              field,
-            ]);
-          }
-        });
-        plan.generatedEntryIds.forEach((gid, gi) => {
-          if (!entryById.has(gid)) {
-            issue(`按分計画の生成仕訳 ID(${gid})が存在しません`, [
-              'journalEntries',
-              ei,
-              'metadata',
-              'allocationPlan',
-              'generatedEntryIds',
-              gi,
-            ]);
-          }
-        });
-      }
-
-      // 残高補正(adjustment)の参照整合性 + delta の一貫性。
+      // 残高補正(adjustment)の参照・相手科目・2行仕訳の一貫性。
       const adj = e.metadata?.adjustment;
       if (adj) {
         const ap = (field: string) => ['journalEntries', ei, 'metadata', 'adjustment', field];
-        if (!hasAccount(adj.accountId)) issue('補正の対象科目が存在しません', ap('accountId'));
-        if (!hasAccount(adj.counterpartAccountId))
+        const targetType = accountType.get(adj.accountId);
+        const targetRole = accountRole.get(adj.accountId) as AccountRole | undefined;
+        const counter = accountById.get(adj.counterpartAccountId);
+        if (targetType === undefined) issue('補正の対象科目が存在しません', ap('accountId'));
+        else if (targetType !== 'asset' && targetType !== 'liability')
+          issue('補正の対象科目は資産または負債である必要があります', ap('accountId'));
+        else if (
+          targetRole === undefined ||
+          !ADJUSTABLE_ACCOUNT_ROLES.includes(targetRole)
+        )
+          issue('補正の対象科目に内部集約科目は使えません', ap('accountId'));
+        if (!counter) {
           issue('補正の相手科目が存在しません', ap('counterpartAccountId'));
+        }
         if (adj.delta !== adj.actualBalance - adj.expectedBalance)
           issue('補正の delta が actual − expected と一致しません', ap('delta'));
+        if (adj.delta === 0) issue('差額 0 の補正仕訳は保存できません', ap('delta'));
+        if (e.kind !== 'normal')
+          issue('補正仕訳の kind は normal である必要があります', [
+            'journalEntries',
+            ei,
+            'kind',
+          ]);
+
+        if (
+          (targetType === 'asset' || targetType === 'liability') &&
+          adj.delta !== 0 &&
+          counter
+        ) {
+          const expectedCounterType = counterpartRole(targetType, adj.delta);
+          if (
+            counter.type !== expectedCounterType ||
+            counter.role !== 'system-adjustment' ||
+            counter.name !== counterpartName(expectedCounterType)
+          ) {
+            issue(
+              '補正の相手科目は対応する残高調整費または残高調整収入である必要があります',
+              ap('counterpartAccountId'),
+            );
+          }
+
+          const targetSide =
+            targetType === 'asset'
+              ? adj.delta > 0
+                ? 'debit'
+                : 'credit'
+              : adj.delta > 0
+                ? 'credit'
+                : 'debit';
+          const counterpartSide = targetSide === 'debit' ? 'credit' : 'debit';
+          const amount = Math.abs(adj.delta);
+          const targetLine = e.lines.find((line) => line.accountId === adj.accountId);
+          const counterpartLine = e.lines.find(
+            (line) => line.accountId === adj.counterpartAccountId,
+          );
+          if (
+            !targetLine ||
+            targetLine.side !== targetSide ||
+            targetLine.amount !== amount ||
+            !counterpartLine ||
+            counterpartLine.side !== counterpartSide ||
+            counterpartLine.amount !== amount
+          ) {
+            issue('補正の仕訳明細が metadata の差額・科目と一致しません', [
+              'journalEntries',
+              ei,
+              'lines',
+            ]);
+          }
+        }
       }
 
       // 定期ルール由来の仕訳: ruleId と month は必ずペアで、ルールが存在すること
@@ -517,7 +520,7 @@ export const ledgerExportPackageSchema = z
           'monthlyCostId',
         ]);
       }
-      // 固定資産処分で生成された仕訳は、紐づく assetDisposal が存在すること。
+      // 処分で生成された仕訳は、紐づく assetDisposal が存在すること。
       const adId = e.metadata?.assetDisposalId;
       if (adId !== undefined && !assetDisposalIdSet.has(adId)) {
         issue(`仕訳の assetDisposalId(${adId})が存在しません`, [
@@ -525,148 +528,6 @@ export const ledgerExportPackageSchema = z
           ei,
           'metadata',
           'assetDisposalId',
-        ]);
-      }
-    });
-
-    // 按分支出(allocations)の深い整合性検証。壊れた JSON を取り込まない。
-    const allocationIds = new Set<string>();
-    const claimedEntryIds = new Set<string>();
-    pkg.allocations.forEach((al, ai) => {
-      const at = (...p: (string | number)[]) => ['allocations', ai, ...p];
-      if (allocationIds.has(al.id)) issue(`按分 ID が重複しています(${al.id})`, at('id'));
-      allocationIds.add(al.id);
-      claimedEntryIds.add(al.sourceEntryId);
-      al.recognitionEntryIds.forEach((rid) => claimedEntryIds.add(rid));
-
-      // 科目の存在と type（expense=費用 / payment=資産か負債 / deferred=資産）+ role 整合。
-      const expType = accountType.get(al.expenseAccountId);
-      if (expType === undefined)
-        issue(`按分「${al.name}」の expenseAccountId が存在しません`, at('expenseAccountId'));
-      else if (expType !== 'expense')
-        issue(
-          `按分「${al.name}」の expenseAccountId は費用科目である必要があります`,
-          at('expenseAccountId'),
-        );
-      else if (accountRole.get(al.expenseAccountId) !== 'expense-category')
-        issue(
-          `按分「${al.name}」の expenseAccountId は支出カテゴリ(expense-category)である必要があります`,
-          at('expenseAccountId'),
-        );
-
-      const payType = accountType.get(al.paymentAccountId);
-      const payRole = accountRole.get(al.paymentAccountId);
-      if (payType === undefined)
-        issue(`按分「${al.name}」の paymentAccountId が存在しません`, at('paymentAccountId'));
-      else if (payType !== 'asset' && payType !== 'liability')
-        issue(
-          `按分「${al.name}」の paymentAccountId は資産または負債である必要があります`,
-          at('paymentAccountId'),
-        );
-      else if (payRole !== 'daily-asset' && payRole !== 'payment-liability')
-        issue(
-          `按分「${al.name}」の paymentAccountId は日常資産または支払用負債である必要があります`,
-          at('paymentAccountId'),
-        );
-
-      const defType = accountType.get(al.deferredAccountId);
-      if (defType === undefined)
-        issue(`按分「${al.name}」の deferredAccountId が存在しません`, at('deferredAccountId'));
-      else if (defType !== 'asset')
-        issue(
-          `按分「${al.name}」の deferredAccountId は資産科目である必要があります`,
-          at('deferredAccountId'),
-        );
-      else if (accountRole.get(al.deferredAccountId) !== 'deferred-asset')
-        issue(
-          `按分「${al.name}」の deferredAccountId は按分中資産(deferred-asset)である必要があります`,
-          at('deferredAccountId'),
-        );
-
-      // 計上仕訳の本数 = months、ID 重複なし。
-      if (al.recognitionEntryIds.length !== al.months) {
-        issue(
-          `按分「${al.name}」の計上仕訳数(${al.recognitionEntryIds.length})が按分月数(${al.months})と一致しません`,
-          at('recognitionEntryIds'),
-        );
-      }
-      if (new Set(al.recognitionEntryIds).size !== al.recognitionEntryIds.length) {
-        issue(`按分「${al.name}」の計上仕訳 ID が重複しています`, at('recognitionEntryIds'));
-      }
-
-      // 原始仕訳: メタ一致 + 借方 deferred / 貸方 payment / 金額 totalAmount。
-      const src = entryById.get(al.sourceEntryId);
-      if (!src) {
-        issue(
-          `按分「${al.name}」の原始仕訳(${al.sourceEntryId})が存在しません`,
-          at('sourceEntryId'),
-        );
-      } else {
-        if (src.metadata?.allocationId !== al.id || src.metadata?.allocationRole !== 'source')
-          issue(`按分「${al.name}」の原始仕訳のメタ情報が一致しません`, at('sourceEntryId'));
-        const d = src.lines.find((l) => l.side === 'debit');
-        const c = src.lines.find((l) => l.side === 'credit');
-        if (
-          d?.accountId !== al.deferredAccountId ||
-          c?.accountId !== al.paymentAccountId ||
-          d?.amount !== al.totalAmount
-        ) {
-          issue(
-            `按分「${al.name}」の原始仕訳の借方/貸方/金額が定義と一致しません`,
-            at('sourceEntryId'),
-          );
-        }
-      }
-
-      // 月次計上仕訳: メタ・借方 expense / 貸方 deferred・金額列・日付列・合計が定義どおり。
-      const amounts = monthlyAmounts(al.totalAmount, al.months);
-      let sum = 0;
-      let allRecognitionOk = al.recognitionEntryIds.length === al.months;
-      al.recognitionEntryIds.forEach((rid, i) => {
-        const re = entryById.get(rid);
-        if (!re) {
-          issue(`按分「${al.name}」の計上仕訳(${rid})が存在しません`, at('recognitionEntryIds', i));
-          allRecognitionOk = false;
-          return;
-        }
-        if (re.metadata?.allocationId !== al.id || re.metadata?.allocationRole !== 'recognition')
-          issue(
-            `按分「${al.name}」の計上仕訳のメタ情報が一致しません`,
-            at('recognitionEntryIds', i),
-          );
-        const d = re.lines.find((l) => l.side === 'debit');
-        const c = re.lines.find((l) => l.side === 'credit');
-        const expectedDate = `${addMonths(al.startMonth, i)}-01`;
-        if (
-          d?.accountId !== al.expenseAccountId ||
-          c?.accountId !== al.deferredAccountId ||
-          d?.amount !== amounts[i] ||
-          re.date !== expectedDate
-        ) {
-          issue(
-            `按分「${al.name}」の計上仕訳の科目/金額/日付が定義と一致しません`,
-            at('recognitionEntryIds', i),
-          );
-          allRecognitionOk = false;
-        }
-        if (d) sum += d.amount;
-      });
-      if (allRecognitionOk && sum !== al.totalAmount) {
-        issue(
-          `按分「${al.name}」の計上仕訳の合計(${sum})が総額(${al.totalAmount})と一致しません`,
-          at('recognitionEntryIds'),
-        );
-      }
-    });
-
-    // 孤立した按分仕訳（どの AllocationItem からも参照されない allocationId 付き仕訳）。
-    pkg.journalEntries.forEach((e, ei) => {
-      if (e.metadata?.allocationId && !claimedEntryIds.has(e.id)) {
-        issue(`按分仕訳「${e.description}」がどの按分台帳からも参照されていません`, [
-          'journalEntries',
-          ei,
-          'metadata',
-          'allocationId',
         ]);
       }
     });
@@ -810,7 +671,7 @@ export const ledgerExportPackageSchema = z
       }
 
       // 資産経由モデルの支払い元(資産化の貸方): 任意。あれば daily-asset / payment-liability /
-      // other-liability / equity（移行の初期登録 = 開始残高を funding の貸方にする）。
+      // other-liability / equity（移行の初期登録 = 初期残高を funding の貸方にする）。
       if (mc.paymentSourceAccountId !== undefined) {
         const srcRole = accountRole.get(mc.paymentSourceAccountId);
         if (!accountType.has(mc.paymentSourceAccountId))
@@ -825,19 +686,19 @@ export const ledgerExportPackageSchema = z
           srcRole !== 'equity'
         )
           issue(
-            `継続コスト「${mc.name}」の paymentSourceAccountId は日常資産・支払用負債・その他負債・開始残高(equity)のいずれかである必要があります`,
+            `継続コスト「${mc.name}」の paymentSourceAccountId は日常資産・支払用負債・その他負債・初期残高(equity)のいずれかである必要があります`,
             at('paymentSourceAccountId'),
           );
-        // 移行登録（開始残高 funding）に更新周期は設定できない（保存境界 repeatOnOpening と同値）。
-        // 更新のたびに開始残高から資金が湧き、実支払いと二重計上になるため fail-closed。
+        // 移行登録（初期残高 funding）に更新周期は設定できない（保存境界 repeatOnOpening と同値）。
+        // 更新のたびに初期残高から資金が湧き、実支払いと二重計上になるため fail-closed。
         else if (srcRole === 'equity' && mc.repeatEveryMonths !== undefined)
           issue(
-            `継続コスト「${mc.name}」は開始残高からの移行登録のため repeatEveryMonths を設定できません`,
+            `継続コスト「${mc.name}」は初期残高からの移行登録のため repeatEveryMonths を設定できません`,
             at('repeatEveryMonths'),
           );
       }
 
-      // 認識の貸方科目: 任意。あれば継続コスト対象資産(continuing-cost-asset)か固定資産(fixed-asset)。
+      // 認識の貸方科目: 任意。あれば継続コスト台帳(continuing-cost-asset)。
       if (mc.recognitionCreditAccountId !== undefined) {
         const recRole = accountRole.get(mc.recognitionCreditAccountId);
         if (!accountType.has(mc.recognitionCreditAccountId))
@@ -845,9 +706,9 @@ export const ledgerExportPackageSchema = z
             `継続コスト「${mc.name}」の recognitionCreditAccountId が存在しません`,
             at('recognitionCreditAccountId'),
           );
-        else if (recRole !== 'continuing-cost-asset' && recRole !== 'fixed-asset')
+        else if (recRole !== 'continuing-cost-asset')
           issue(
-            `継続コスト「${mc.name}」の recognitionCreditAccountId は継続コスト対象資産または固定資産である必要があります`,
+            `継続コスト「${mc.name}」の recognitionCreditAccountId は継続コスト台帳である必要があります`,
             at('recognitionCreditAccountId'),
           );
       }
@@ -866,11 +727,7 @@ export const ledgerExportPackageSchema = z
           );
       }
 
-      // 既存按分との紐づけがあれば、その allocation が存在する。
-      if (mc.sourceAllocationId !== undefined && !allocationIds.has(mc.sourceAllocationId))
-        issue(`月額化「${mc.name}」の sourceAllocationId が存在しません`, at('sourceAllocationId'));
-
-      // 仮想認識の貸方科目（固定資産など）があれば、その科目が存在する。
+      // 仮想認識の貸方科目があれば、その科目が存在する。
       if (
         mc.recognitionCreditAccountId !== undefined &&
         !accountType.has(mc.recognitionCreditAccountId)
@@ -881,29 +738,37 @@ export const ledgerExportPackageSchema = z
         );
     });
 
-    // 固定資産処分(assetDisposals)の参照整合性。
-    const journalEntryIds = new Set(pkg.journalEntries.map((e) => e.id));
+    // 継続コスト処分(assetDisposals)の参照整合性。
     const disposalIds = new Set<string>();
     const disposedMonthlyCostIds = new Set<string>();
     pkg.assetDisposals.forEach((d, di) => {
       const at = (...p: (string | number)[]) => ['assetDisposals', di, ...p];
-      if (disposalIds.has(d.id)) issue(`固定資産処分の ID が重複しています(${d.id})`, at('id'));
+      if (disposalIds.has(d.id)) issue(`処分の ID が重複しています(${d.id})`, at('id'));
       disposalIds.add(d.id);
       // 同一項目への処分は1回だけ（保存境界の error.disposal.duplicate と同値）。
       if (disposedMonthlyCostIds.has(d.monthlyCostId))
         issue(`同じ項目が複数回処分されています(${d.monthlyCostId})`, at('monthlyCostId'));
       disposedMonthlyCostIds.add(d.monthlyCostId);
       if (!monthlyCostIdSet.has(d.monthlyCostId))
-        issue(`固定資産処分の monthlyCostId が存在しません`, at('monthlyCostId'));
-      // 処分対象は継続コスト資産（fixed-asset、または継続コスト台帳口座=continuing-cost-asset。
-      // 後者はサブスク解約等の「0円で売却」を含む継続コストの売却終了で使う）。
+        issue(`処分の monthlyCostId が存在しません`, at('monthlyCostId'));
+      const disposedItem = monthlyCostById.get(d.monthlyCostId);
+      if (disposedItem) {
+        if (disposedItem.status !== 'ended')
+          issue(`処分対象の継続コストは終了済みである必要があります`, at('monthlyCostId'));
+        if (disposedItem.recognitionCreditAccountId !== d.fixedAccountId)
+          issue(
+            `処分の fixedAccountId が対象継続コストの台帳科目と一致しません`,
+            at('fixedAccountId'),
+          );
+      }
+      // 処分対象は継続コスト台帳口座のみ。
       if (!accountType.has(d.fixedAccountId))
-        issue(`固定資産処分の fixedAccountId が存在しません`, at('fixedAccountId'));
+        issue(`処分の fixedAccountId が存在しません`, at('fixedAccountId'));
       else {
         const fixedRole = accountRole.get(d.fixedAccountId);
-        if (fixedRole !== 'fixed-asset' && fixedRole !== 'continuing-cost-asset')
+        if (fixedRole !== 'continuing-cost-asset')
           issue(
-            `処分の fixedAccountId は固定資産または継続コスト台帳の科目である必要があります`,
+            `処分の fixedAccountId は継続コスト台帳の科目である必要があります`,
             at('fixedAccountId'),
           );
       }
@@ -911,24 +776,45 @@ export const ledgerExportPackageSchema = z
       if (d.destinationAccountId !== undefined) {
         const role = accountRole.get(d.destinationAccountId);
         if (!accountType.has(d.destinationAccountId))
-          issue(`固定資産処分の destinationAccountId が存在しません`, at('destinationAccountId'));
+          issue(`処分の destinationAccountId が存在しません`, at('destinationAccountId'));
         else if (role !== 'daily-asset' && role !== 'reserve-asset')
           issue(
-            `固定資産処分の入金先は日常資産または目的別資金である必要があります`,
+            `処分の入金先は日常資産または取り置き資金である必要があります`,
             at('destinationAccountId'),
           );
       }
       // 売却額があれば入金先必須。
       if (d.proceedsAmount > 0 && d.destinationAccountId === undefined)
         issue(`売却額があるのに入金先がありません`, at('destinationAccountId'));
-      // 残存額は amount との整合（recognized + remaining の不変条件は repository が保証）。
-      // 生成仕訳 ID は実在すること。
+      // 生成仕訳 ID は重複せず実在し、metadata.assetDisposalId と双方向に一致すること。
+      const claimedEntryIds = new Set<string>();
       d.generatedEntryIds.forEach((eid, gi) => {
-        if (!journalEntryIds.has(eid))
+        if (claimedEntryIds.has(eid))
+          issue(`処分の generatedEntryIds が重複しています(${eid})`, at('generatedEntryIds', gi));
+        claimedEntryIds.add(eid);
+        const generated = entryById.get(eid);
+        if (!generated)
           issue(
-            `固定資産処分の generatedEntryIds が存在しません(${eid})`,
+            `処分の generatedEntryIds が存在しません(${eid})`,
             at('generatedEntryIds', gi),
           );
+        else if (generated.metadata?.assetDisposalId !== d.id)
+          issue(
+            `処分の生成仕訳(${eid})が同じ assetDisposalId を参照していません`,
+            at('generatedEntryIds', gi),
+          );
+      });
+      pkg.journalEntries.forEach((entry, ei) => {
+        if (
+          entry.metadata?.assetDisposalId === d.id &&
+          !claimedEntryIds.has(entry.id)
+        )
+          issue(`処分由来の仕訳(${entry.id})が generatedEntryIds に含まれていません`, [
+            'journalEntries',
+            ei,
+            'metadata',
+            'assetDisposalId',
+          ]);
       });
     });
 

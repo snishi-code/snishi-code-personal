@@ -48,8 +48,14 @@ export function Journal({
 }) {
   const { ledger, removeEntry, deleteOpening, deleteAdjustment } = useLedger();
   const [query, setQuery] = useState('');
-  const [from, setFrom] = useState(filter?.from ?? '');
-  const [to, setTo] = useState(filter?.to ?? '');
+  // 明示フィルターで開いた場合はその範囲を優先し、メニューから直接開いた場合は
+  // 初回描画から共有期間を反映する。period effect は明示フィルターを上書きしないよう初回を飛ばす。
+  const [from, setFrom] = useState(() =>
+    filter ? (filter.from ?? '') : (periodRange(period)?.from ?? ''),
+  );
+  const [to, setTo] = useState(() =>
+    filter ? (filter.to ?? '') : (periodRange(period)?.to ?? ''),
+  );
   const [showFuture, setShowFuture] = useState(false);
   const [tagFilter, setTagFilter] = useState('');
   const [pendingDelete, setPendingDelete] = useState<JournalEntry | null>(null);
@@ -84,7 +90,9 @@ export function Journal({
   const currency = ledger?.settings.currency ?? 'JPY';
   const filterAccount = accountFilterId ? map.get(accountFilterId) : undefined;
 
-  const effectiveTo = to !== '' ? to : showFuture ? '' : todayLocal();
+  // 「将来予定も表示」は日付欄より優先する（to はヘッダー日付から常に埋まるため、
+  // to を先に見るとトグルが永久に効かない）。OFF のときだけ to → 当日 の順に上限を決める。
+  const effectiveTo = showFuture ? '' : to !== '' ? to : todayLocal();
 
   const allTags = ledger?.tags ?? [];
 
@@ -291,12 +299,11 @@ export function Journal({
       ) : (
         <ul className="card list" data-ui={UI.journal.list}>
           {filtered.map((entry) => {
-            const isAllocation = !!entry.metadata?.allocationId;
             const isMonthlyCost = !!entry.metadata?.monthlyCostId;
             const isDisposal = !!entry.metadata?.assetDisposalId;
             const isAdjustment = !!entry.metadata?.adjustment;
             const isOpening = entry.kind === 'opening';
-            const generated = isAllocation || isMonthlyCost || isDisposal;
+            const generated = isMonthlyCost || isDisposal;
             // opening / adjustment は通常編集ではなく専用シートを開く（会計意味を保つ）。
             const onRowTap = generated
               ? undefined
@@ -314,9 +321,6 @@ export function Journal({
                   ) : null}
                   {entry.metadata?.inputMode === 'reversal' ? (
                     <span className="tag tag--warning">{t('journal.reversalTag')}</span>
-                  ) : null}
-                  {isAllocation ? (
-                    <span className="tag tag--teal">{t('journal.allocationTag')}</span>
                   ) : null}
                   {isMonthlyCost ? (
                     <span className="tag tag--teal">{t('journal.monthlyCostTag')}</span>

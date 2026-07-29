@@ -36,7 +36,7 @@ describe('Dashboard スモーク', () => {
     render(
       <Providers>
         <Dashboard
-          period={{ mode: 'month', year: 2025, month: 1 }}
+          period={{ mode: 'date', date: '2025-01-31' }}
           onPeriodChange={() => undefined}
           onAddEntry={() => undefined}
           onEditEntry={() => undefined}
@@ -65,7 +65,7 @@ describe('Journal スモーク', () => {
           onEditEntry={() => undefined}
           onReverse={() => undefined}
           filter={null}
-          period={{ mode: 'month', year: 2025, month: 1 }}
+          period={{ mode: 'date', date: '2025-01-31' }}
           onClearAccountFilter={() => undefined}
         />
       </Providers>,
@@ -74,6 +74,8 @@ describe('Journal スモーク', () => {
       expect(document.querySelector('[data-ui="journal.view"]')).toBeInTheDocument();
     });
     expect(document.querySelector('[data-ui="journal.search"]')).toBeInTheDocument();
+    expect(document.querySelector('#journal-from')).toHaveValue('2025-01-01');
+    expect(document.querySelector('#journal-to')).toHaveValue('2025-01-31');
   });
 });
 

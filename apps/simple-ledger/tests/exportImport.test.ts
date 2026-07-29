@@ -5,7 +5,6 @@
 import { describe, expect, it } from 'vitest';
 import './setup';
 import {
-  createAllocation,
   createMonthlyCost,
   loadLedger,
   upsertEntry,
@@ -227,43 +226,6 @@ describe('export package 形状', () => {
     expect(pkg).toHaveProperty('deviceId');
     expect(pkg).toHaveProperty('revision');
     expect(pkg).toHaveProperty('settings');
-  });
-});
-
-describe('按分支出の export/import', () => {
-  async function seedWithAllocation() {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    await createAllocation({
-      date: '2026-06-15',
-      description: 'PC',
-      totalAmount: 900,
-      months: 3,
-      expenseAccountId: food.id,
-      paymentAccountId: cash.id,
-    });
-    return loadLedger();
-  }
-
-  it('按分支出を含む台帳を round-trip できる（allocations と関連仕訳を保持）', async () => {
-    const ledger = await seedWithAllocation();
-    expect(ledger.allocations).toHaveLength(1);
-    const text = exportToJsonText(ledger);
-    const outcome = await importFromJsonText(text);
-    expect(outcome.kind).toBe('ok');
-    const reloaded = await loadLedger();
-    expect(reloaded.allocations).toHaveLength(1);
-    // 1 source + 3 recognition
-    expect(reloaded.journalEntries).toHaveLength(4);
-  });
-
-  it('壊れた按分参照（存在しない費用科目）は validation-error', async () => {
-    const ledger = await seedWithAllocation();
-    const pkg = buildExportPackage(ledger);
-    pkg.allocations[0]!.expenseAccountId = 'nope';
-    const outcome = await importFromJsonText(JSON.stringify(pkg));
-    expect(outcome.kind).toBe('validation-error');
   });
 });
 

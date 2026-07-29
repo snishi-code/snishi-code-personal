@@ -15,7 +15,7 @@ const accounts: Account[] = [
   },
   {
     id: 'equity',
-    name: '開始残高',
+    name: '初期残高',
     type: 'equity',
     role: 'equity',
     archived: false,
