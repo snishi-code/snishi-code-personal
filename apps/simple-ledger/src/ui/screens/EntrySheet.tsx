@@ -71,14 +71,7 @@ function errorText(
 }
 
 export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => void }) {
-  const {
-    ledger,
-    saveEntry,
-    saveEntryWithFixedAssetMonthly,
-    createContinuousCost,
-    createReserve,
-    saveAccount,
-  } = useLedger();
+  const { ledger, saveEntry, createContinuousCost, createReserve, saveAccount } = useLedger();
   const accounts = ledger?.accounts ?? [];
   const reserves = ledger?.reserves ?? [];
   const tags = ledger?.tags ?? [];
@@ -124,7 +117,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [flowError, setFlowError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  const destRole = accounts.find((a) => a.id === form.debitAccountId)?.role;
   const paymentRole = accounts.find((a) => a.id === form.creditAccountId)?.role;
   const isLiabilityPayment =
     paymentRole === 'payment-liability' || paymentRole === 'other-liability';
@@ -134,18 +126,14 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     paymentRole === 'daily-asset' ||
     paymentRole === 'payment-liability' ||
     paymentRole === 'other-liability';
-  const canAllocate =
+  const canCreateContinuousCost =
     init.kind === 'create' && (mode === 'expense' || (mode === 'manual' && ccPaymentOk));
   const [ccMode, setCcMode] = useState(false);
   const [ccTargetName, setCcTargetName] = useState('');
   const [ccCategoryId, setCcCategoryId] = useState('');
   const [ccNameError, setCcNameError] = useState(false);
-  const canFixedMonthly =
-    init.kind === 'create' && mode === 'expense' && !ccMode && destRole === 'fixed-asset';
-  const [fixedMonthly, setFixedMonthly] = useState(false);
-  const [monthlyCategoryId, setMonthlyCategoryId] = useState('');
   const [categoryError, setCategoryError] = useState(false);
-  const allocationActive = (canAllocate && ccMode) || (canFixedMonthly && fixedMonthly);
+  const continuousCostActive = canCreateContinuousCost && ccMode;
   const [monthsText, setMonthsText] = useState('');
   const [monthsError, setMonthsError] = useState(false);
   const months = monthsText === '' ? 0 : Number.parseInt(monthsText, 10);
@@ -175,8 +163,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     reserveMode,
     reserveName,
     loanMode,
-    fixedMonthly,
-    monthlyCategoryId,
     monthsText,
     continueCost,
     repayToggle,
@@ -247,7 +233,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       debitAccountId: dstResolved.accountId,
     };
 
-    const ccActive = canAllocate && ccMode;
+    const ccActive = canCreateContinuousCost && ccMode;
     if (ccActive) {
       const found: EntryValidationError[] = [];
       if (toSave.date.trim() === '') found.push('date-required');
@@ -334,14 +320,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
 
     const found = validateSimpleEntry(toSave);
     setErrors(found);
-    const useFixedMonthly = canFixedMonthly && fixedMonthly;
-    const monthsBad = useFixedMonthly && (!Number.isInteger(months) || months < 1);
-    setMonthsError(monthsBad);
-    const categoryBad = useFixedMonthly && monthlyCategoryId === '';
-    setCategoryError(categoryBad);
-    const { accBad, countBad } = validateRepay(useFixedMonthly && isLiabilityPayment);
-    if (found.length > 0 || monthsBad || categoryBad || accBad || countBad) return;
-    if (mode === 'expense' && !useFixedMonthly) {
+    if (found.length > 0) return;
+    if (mode === 'expense') {
       const srcRole = accounts.find((a) => a.id === toSave.creditAccountId)?.role;
       if (srcRole === 'other-liability') {
         setFlowError(t('entry.error.loanNotExpense'));
@@ -359,40 +339,12 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     }
     setSubmitting(true);
     try {
-      if (useFixedMonthly) {
-        const repeat = continueCost ? months : undefined;
-        const repayCount = repayCountText === '' ? 0 : Number.parseInt(repayCountText, 10);
-        const useRepay =
-          isLiabilityPayment && repayToggle && repayAccountId !== '' && repayCount >= 1;
-        const metadata: EntryMetadata = { ...toSave.metadata, inputMode: 'expense' };
-        await saveEntryWithFixedAssetMonthly(
-          { ...toSave, metadata },
-          {
-            name: toSave.description,
-            kind: inferMonthlyCostKind(months, repeat),
-            amount: toSave.amount,
-            costMonths: months,
-            ...(repeat !== undefined ? { repeatEveryMonths: repeat } : {}),
-            startMonth: monthOf(toSave.date),
-            expenseAccountId: monthlyCategoryId,
-            recognitionCreditAccountId: toSave.debitAccountId,
-            ...(useRepay
-              ? {
-                  repaymentAccountId: repayAccountId,
-                  repaymentCount: repayCount,
-                  repaymentStartDate: repayStartDate || form.date,
-                }
-              : {}),
-          },
-        );
-      } else {
-        const metadata: EntryMetadata = {
-          ...toSave.metadata,
-          inputMode: resolveInputMode(),
-          ...(selectedReserveId ? { reserveId: selectedReserveId } : {}),
-        };
-        await saveEntry({ ...toSave, metadata }, existing);
-      }
+      const metadata: EntryMetadata = {
+        ...toSave.metadata,
+        inputMode: resolveInputMode(),
+        ...(selectedReserveId ? { reserveId: selectedReserveId } : {}),
+      };
+      await saveEntry({ ...toSave, metadata }, existing);
       onClose();
     } catch {
       setSubmitting(false);
@@ -450,7 +402,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     />
   );
 
-  const entryTagsField = allocationActive ? null : (
+  const entryTagsField = continuousCostActive ? null : (
     <TagPicker
       label={t('entry.tags')}
       hint={t('entry.tagsHint')}
@@ -554,7 +506,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             →
           </div>
           <div className="flow__side">
-            {canAllocate && ccMode ? (
+            {canCreateContinuousCost && ccMode ? (
               <>
                 <TextInput
                   label={t('entry.ccTargetName')}
@@ -602,7 +554,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                   error={errorText(errors, 'debit-required')}
                   dataUi={UI.journal.entry.flowDestination}
                 />
-                {canAllocate ? (
+                {canCreateContinuousCost ? (
                   <button
                     type="button"
                     className="collapse-toggle"
@@ -689,7 +641,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   };
 
   const ccDetailField =
-    canAllocate && ccMode ? (
+    canCreateContinuousCost && ccMode ? (
       <div className="field">
         <TextInput
           label={t('entry.monthlyizeMonths')}
@@ -725,65 +677,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       </div>
     ) : null;
 
-  const fixedMonthlyField = canFixedMonthly ? (
-    <div className="field">
-      <label
-        style={{ display: 'inline-flex', gap: 8, alignItems: 'center', minHeight: 'var(--tap)' }}
-      >
-        <input
-          type="checkbox"
-          checked={fixedMonthly}
-          onChange={(e) => setFixedMonthly(e.target.checked)}
-          data-ui={UI.journal.entry.fixedMonthlyToggle}
-        />
-        {t('entry.fixedMonthlyToggle')}
-      </label>
-      {fixedMonthly ? (
-        <div className="card card--pad" style={{ marginTop: 'var(--space-2)' }}>
-          <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
-            {t('entry.fixedMonthlyNote')}
-          </p>
-          <TextInput
-            label={t('entry.monthlyizeMonths')}
-            required
-            inputMode="numeric"
-            value={monthsText}
-            hint={t('entry.monthlyizeMonthsHint')}
-            onChange={(v) => setMonthsText(v.replace(/[^\d]/g, ''))}
-            error={monthsError ? t('entry.error.months-invalid') : undefined}
-            dataUi={UI.journal.entry.allocateMonths}
-          />
-          <AccountPicker
-            label={t('entry.fixedMonthlyCategory')}
-            required
-            value={monthlyCategoryId}
-            groups={groupedRecognitionAccounts(accounts, monthlyCategoryId)}
-            onChange={setMonthlyCategoryId}
-            error={categoryError ? t('entry.error.category-required') : undefined}
-            dataUi={UI.journal.entry.fixedMonthlyCategory}
-          />
-          <label
-            style={{
-              display: 'inline-flex',
-              gap: 8,
-              alignItems: 'center',
-              minHeight: 'var(--tap)',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={continueCost}
-              onChange={(e) => setContinueCost(e.target.checked)}
-            />
-            {t('entry.monthlyizeContinue')}
-          </label>
-        </div>
-      ) : null}
-    </div>
-  ) : null;
-
   const repaymentField =
-    allocationActive && isLiabilityPayment ? (
+    continuousCostActive && isLiabilityPayment ? (
       <div className="field">
         <label
           style={{ display: 'inline-flex', gap: 8, alignItems: 'center', minHeight: 'var(--tap)' }}
@@ -896,11 +791,11 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         {isManual ? (
           <>
             {dateField}
-            {canAllocate && ccMode ? null : descriptionField}
+            {canCreateContinuousCost && ccMode ? null : descriptionField}
             {amountField}
             {renderManualFlow()}
             {/* 簿記編集でも、貸方が資金/負債なら継続コスト化できる（支出フローと同じパネル）。 */}
-            {canAllocate && !ccMode ? (
+            {canCreateContinuousCost && !ccMode ? (
               <button
                 type="button"
                 className="collapse-toggle"
@@ -916,7 +811,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             ) : null}
             {ccDetailField}
             {repaymentField}
-            {canAllocate && ccMode ? null : (
+            {canCreateContinuousCost && ccMode ? null : (
               <>
                 {memoField}
                 {entryTagsField}
@@ -926,14 +821,13 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         ) : (
           <>
             {dateField}
-            {mode === 'transfer' || (canAllocate && ccMode) ? null : itemField}
+            {mode === 'transfer' || (canCreateContinuousCost && ccMode) ? null : itemField}
             {amountField}
             {renderFlow()}
             {ccDetailField}
-            {fixedMonthlyField}
             {repaymentField}
 
-            {allocationActive ? null : (
+            {continuousCostActive ? null : (
               <>
                 <button
                   type="button"

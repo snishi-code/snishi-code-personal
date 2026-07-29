@@ -7,9 +7,8 @@
  * 箱ごとの作成導線が role を固定する（rolesForType を UI に出さない）。
  *
  * 対応表（ユーザー向け大分類）:
- *  - 現預金・決済資産  = daily-asset
+ *  - 現預金・決済資産  = daily-asset（取り置きは親口座の内訳として表示）
  *  - 投資             = investment-asset
- *  - 継続コスト資産    = fixed-asset / deferred-asset（追加は継続コスト化の導線のみ・終了は売却）
  *  - カード・未払      = payment-liability（短期債務）
  *  - ローン           = other-liability（長期債務）
  *  - 収入カテゴリ      = income-category
@@ -25,7 +24,6 @@ import type { MessageKey } from '../i18n';
 export type AccountBoxKey =
   | 'cash'
   | 'investment'
-  | 'continuingCost'
   | 'shortTermDebt'
   | 'longTermDebt'
   | 'income'
@@ -39,8 +37,7 @@ export interface AccountBox {
   /** 箱に対応する会計 type（残高の符号・初期残高の向きに使う）。 */
   type: AccountType;
   /**
-   * 「内訳を追加」で固定する role。undefined の箱は通常 UI から追加できない
-   * （継続コスト資産は継続コスト化の導線でだけ増える）。
+   * 「内訳を追加」で固定する role。
    */
   createRole?: AccountRole;
   /** 追加ボタンの文言。 */
@@ -69,14 +66,6 @@ export const ACCOUNT_BOXES: readonly AccountBox[] = [
     createRole: 'investment-asset',
     addLabelKey: 'box.addSubdivision',
     opening: true,
-  },
-  {
-    key: 'continuingCost',
-    labelKey: 'box.continuingCost',
-    roles: ['fixed-asset', 'deferred-asset'],
-    type: 'asset',
-    opening: false,
-    hintKey: 'box.continuingCostHint',
   },
   {
     key: 'shortTermDebt',

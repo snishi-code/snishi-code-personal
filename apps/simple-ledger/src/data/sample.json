@@ -1,6 +1,6 @@
 {
   "appId": "snishi-code.simple-ledger-v2",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "ledgerId": "sample-ledger",
   "exportedAt": "2026-04-01T00:00:00.000Z",
   "deviceId": "sample-device",
@@ -67,7 +67,7 @@
     },
     {
       "id": "acc-open",
-      "name": "開始残高",
+      "name": "初期残高",
       "type": "equity",
       "role": "equity",
       "archived": false,
@@ -169,7 +169,7 @@
     {
       "id": "ent-open-bank",
       "date": "2026-01-01",
-      "description": "開始残高（預金）",
+      "description": "初期残高（預金）",
       "kind": "opening",
       "lines": [
         {
@@ -192,7 +192,7 @@
     {
       "id": "ent-open-cash",
       "date": "2026-01-01",
-      "description": "開始残高（現金）",
+      "description": "初期残高（現金）",
       "kind": "opening",
       "lines": [
         {
@@ -756,7 +756,6 @@
       "updatedAt": "2026-03-25T00:00:00.000Z"
     }
   ],
-  "allocations": [],
   "cashflowSchedules": [
     {
       "id": "sch-card",

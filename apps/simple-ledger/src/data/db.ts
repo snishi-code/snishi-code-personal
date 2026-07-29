@@ -6,7 +6,7 @@
  * ドメインの意味づけは repository.ts に置く。
  *
  * v2 の DB は v1（'simple-ledger' / version 9）から識別子を完全分離し、v1 の最終形
- * （12 ストア構成）を **version 1 で一括作成**する（レガシー upgrade 経路を持たない）。
+ * （当時のストア構成）を **version 1 で一括作成**する（レガシー migration は持たない）。
  * 旧 fundingGoals ストアは作らない（v1 schema v16 で撤去済みのレガシー）。
  */
 import { createDatabase } from '@snishi/foundation/storage/idb';
@@ -16,7 +16,6 @@ export const STORE = {
   kv: 'kv', // meta / settings の単一レコード置き場（out-of-line key）
   accounts: 'accounts',
   journalEntries: 'journalEntries',
-  allocations: 'allocations',
   cashflowSchedules: 'cashflowSchedules',
   reserves: 'reserves',
   tags: 'tags',
@@ -29,14 +28,13 @@ export const STORE = {
 export type StoreName = (typeof STORE)[keyof typeof STORE];
 
 /**
- * foundation の DatabaseHandle。v1=初期ストア一括作成・v2=recurringRules 追加・
- * v3=管理区分/支払い手段ストアの削除（contains ガードで冪等）。
+ * foundation の DatabaseHandle。現行 STORE との差分で廃止ストアを削除するので冪等。
  */
 export const db = createDatabase({
   name: DB_NAME,
   version: DB_VERSION,
   upgrade: (idb) => {
-    // v3: 現行 STORE に無いレガシーストア（廃止した管理区分・支払い手段のもの）を削除する。
+    // 現行 STORE に無いレガシーストアを削除する。
     const wanted = new Set<string>(Object.values(STORE));
     for (const name of Array.from(idb.objectStoreNames)) {
       if (!wanted.has(name)) idb.deleteObjectStore(name);
@@ -48,9 +46,6 @@ export const db = createDatabase({
     if (!idb.objectStoreNames.contains(STORE.journalEntries)) {
       const s = idb.createObjectStore(STORE.journalEntries, { keyPath: 'id' });
       s.createIndex('date', 'date', { unique: false });
-    }
-    if (!idb.objectStoreNames.contains(STORE.allocations)) {
-      idb.createObjectStore(STORE.allocations, { keyPath: 'id' });
     }
     if (!idb.objectStoreNames.contains(STORE.cashflowSchedules)) {
       idb.createObjectStore(STORE.cashflowSchedules, { keyPath: 'id' });

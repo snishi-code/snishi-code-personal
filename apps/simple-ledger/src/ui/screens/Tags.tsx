@@ -34,16 +34,15 @@ export function Tags() {
 
   const today = todayLocal();
   const year = Number.parseInt(today.slice(0, 4), 10);
-  const month = Number.parseInt(today.slice(5, 7), 10);
   const basis = useMemo(() => {
     const reportPeriod: ReportPeriod =
       period === 'all'
         ? { mode: 'all' }
         : period === 'year'
           ? { mode: 'year', year }
-          : { mode: 'month', year, month };
+          : { mode: 'date', date: today };
     return reportBasis(reportPeriod, today);
-  }, [month, period, today, year]);
+  }, [period, today, year]);
 
   const entryTotals = useMemo(() => {
     const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf, today) : [];

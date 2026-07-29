@@ -45,7 +45,7 @@ export function inferScheduleFlow(
 }
 
 /**
- * 資金繰りの「総資金」= 流動資産のみ。按分中資産・固定資産・投資など、現金化を伴わない
+ * 資金繰りの「総資金」= 流動資産のみ。継続コスト資産・投資など、現金化を伴わない
  * asset は除外する（excludedAccountIds で指定）。目的別資金は流動なので含める（自由資金で控除）。
  */
 export function liquidAssetTotal(
@@ -134,13 +134,13 @@ export function nextRepaymentDate(today: string, day: number): string {
 
 /**
  * 1 件の仕訳が「流動資産（現金など）」に与える純増減を求める。
- * 借方で流動資産が増えれば +、貸方で減れば −。流動でない明細（費用/収入/負債/按分中資産）は 0。
+ * 借方で流動資産が増えれば +、貸方で減れば −。流動でない明細（費用/収入/負債/継続コスト資産）は 0。
  * これにより、未来日付の通常仕訳（ホームの収入/支出/振替）をそのまま CF 投影に取り込める。
  *  - 収入: 借方 現金 / 貸方 収入 → +amount（inflow）
  *  - 支出: 借方 費用 / 貸方 現金 → −amount（outflow）
  *  - 返済: 借方 負債 / 貸方 現金 → −amount（負債は流動資産でない）
  *  - 振替(日常→日常): 借方 現金A / 貸方 現金B → 0（自由資金は変わらない）
- *  - 認識/按分(現金が動かない) → 0
+ *  - 月次認識（現金が動かない）→ 0
  */
 export function cashDeltaOfEntry(
   entry: JournalEntry,

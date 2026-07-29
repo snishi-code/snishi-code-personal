@@ -156,28 +156,24 @@ describe('追補監査の画面回帰', () => {
       title: '未来返済',
     });
 
-    const view = render(dashboard({ mode: 'month', year: futureYear, month: 1 }));
+    const view = render(dashboard({ mode: 'date', date: `${futureYear}-01-31` }));
     const expectDashboardBalances = async (amount: string) => {
       await waitFor(() => {
         expect(document.querySelector('[data-ui="dashboard.stat.assets"]')).toHaveTextContent(
           amount,
         );
-        expect(
-          document.querySelector('[data-ui="dashboard.stat.liabilities"]'),
-        ).toHaveTextContent(amount);
+        expect(document.querySelector('[data-ui="dashboard.stat.liabilities"]')).toHaveTextContent(
+          amount,
+        );
       });
     };
     // 未来月・未来年は選択期間の末日までを投影するため、1月15日の未来返済を含む。
     await expectDashboardBalances('550,000');
-    expect(
-      screen.getByText(`財政状態（${futureYear}-01-31 時点）`),
-    ).toBeInTheDocument();
+    expect(screen.getByText(`財政状態（${futureYear}-01-31 時点）`)).toBeInTheDocument();
 
     view.rerender(dashboard({ mode: 'year', year: futureYear }));
     await expectDashboardBalances('550,000');
-    expect(
-      screen.getByText(`財政状態（${futureYear}-12-31 時点）`),
-    ).toBeInTheDocument();
+    expect(screen.getByText(`財政状態（${futureYear}-12-31 時点）`)).toBeInTheDocument();
 
     // 全期間は「未来を無制限に含む」のではなく today が基準。
     view.rerender(dashboard({ mode: 'all' }));

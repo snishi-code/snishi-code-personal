@@ -78,10 +78,7 @@ describe('定期ルールのキャッチアップ起票', () => {
       startMonth: '2026-05',
     });
 
-    await Promise.all([
-      catchUpRecurringRules('2026-07-23'),
-      catchUpRecurringRules('2026-07-23'),
-    ]);
+    await Promise.all([catchUpRecurringRules('2026-07-23'), catchUpRecurringRules('2026-07-23')]);
 
     const posted = (await loadLedger()).journalEntries.filter(
       (entry) => entry.metadata?.recurringRuleId === rule.id,
@@ -94,8 +91,7 @@ describe('定期ルールのキャッチアップ起票', () => {
     ]);
     expect(
       posted.reduce(
-        (sum, entry) =>
-          sum + (entry.lines.find((line) => line.side === 'debit')?.amount ?? 0),
+        (sum, entry) => sum + (entry.lines.find((line) => line.side === 'debit')?.amount ?? 0),
         0,
       ),
     ).toBe(240000);
@@ -200,9 +196,7 @@ describe('定期ルールのキャッチアップ起票', () => {
     });
     await catchUpRecurringRules('2026-07-23');
     const pkg = buildExportPackage(await loadLedger());
-    const posted = pkg.journalEntries.find(
-      (entry) => entry.metadata?.recurringRuleId === rule.id,
-    )!;
+    const posted = pkg.journalEntries.find((entry) => entry.metadata?.recurringRuleId === rule.id)!;
     const parsed = ledgerExportPackageSchema.safeParse({
       ...pkg,
       journalEntries: [...pkg.journalEntries, { ...posted, id: 'duplicate-recurring-entry' }],
@@ -338,7 +332,7 @@ describe('定期ルールのキャッチアップ起票', () => {
       forRule.length,
     );
 
-    const octoberBasis = reportBasis({ mode: 'month', year: 2026, month: 10 }, '2026-07-23');
+    const octoberBasis = reportBasis({ mode: 'date', date: '2026-10-31' }, '2026-07-23');
     expect(deriveProfitAndLoss(before.accounts, forRule, octoberBasis.flowRange).totalExpense).toBe(
       80000,
     );

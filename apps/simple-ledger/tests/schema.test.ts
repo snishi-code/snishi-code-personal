@@ -8,8 +8,12 @@ import {
   recurringRuleSchema,
   reserveItemSchema,
 } from '../src/domain/schema';
-import { APP_ID, RESERVE_LEDGER_ACCOUNT_ID, SCHEMA_VERSION } from '../src/domain/constants';
-import { buildAllocation } from '../src/domain/allocation';
+import {
+  APP_ID,
+  CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+  RESERVE_LEDGER_ACCOUNT_ID,
+  SCHEMA_VERSION,
+} from '../src/domain/constants';
 
 const validEntry = {
   id: 'e1',
@@ -129,7 +133,6 @@ describe('ledgerExportPackageSchema', () => {
       },
     ],
     journalEntries: [validEntry],
-    allocations: [],
     cashflowSchedules: [],
     reserves: [],
     tags: [],
@@ -142,9 +145,11 @@ describe('ledgerExportPackageSchema', () => {
   it('正しいパッケージを受け入れる', () => {
     expect(ledgerExportPackageSchema.safeParse(validPkg).success).toBe(true);
   });
-  it('B 側レガシーの余計なキー（fundingGoals・expectedAnnualReturnBps）は strip される（v16 契約・出力に残さない）', () => {
+  it('旧バージョン固有の余計なキーは strip される（撤去済みフィールドの残骸で取り込みが壊れない）', () => {
     const withLegacy = {
       ...validPkg,
+      // 撤去済みの概念（旧 allocations 等）と、B 側レガシーのキー。
+      allocations: [],
       fundingGoals: [{ id: 'g', name: '老後', targetAmount: 5000000 }],
       settings: {
         ledgerName: '家計簿',
@@ -156,8 +161,10 @@ describe('ledgerExportPackageSchema', () => {
     const parsed = ledgerExportPackageSchema.safeParse(withLegacy);
     expect(parsed.success).toBe(true);
     if (parsed.success) {
-      // 出力に B 側キーは残らない（unknown key は strip）。
-      expect((parsed.data as unknown as Record<string, unknown>).fundingGoals).toBeUndefined();
+      // 出力に余計なキーは残らない（unknown key は strip）。
+      const res = parsed.data as unknown as Record<string, unknown>;
+      expect(res.allocations).toBeUndefined();
+      expect(res.fundingGoals).toBeUndefined();
       expect(
         (parsed.data.settings as unknown as Record<string, unknown>).expectedAnnualReturnBps,
       ).toBeUndefined();
@@ -185,6 +192,14 @@ describe('ledgerExportPackageSchema', () => {
       false,
     );
   });
+  it('現行以外の schemaVersion は直接の schema 検証でも拒否する', () => {
+    expect(
+      ledgerExportPackageSchema.safeParse({
+        ...validPkg,
+        schemaVersion: SCHEMA_VERSION - 1,
+      }).success,
+    ).toBe(false);
+  });
   it('role と type が矛盾する科目は拒否する', () => {
     const bad = {
       ...validPkg,
@@ -210,25 +225,14 @@ describe('ledgerExportPackageSchema', () => {
   });
 });
 
-describe('entry metadata / allocationPlan', () => {
+describe('entry metadata', () => {
   it('metadata なしの仕訳も有効', () => {
     expect(journalEntrySchema.safeParse(validEntry).success).toBe(true);
   });
-  it('inputMode と allocationPlan を含む仕訳を受け入れる（将来按分の拡張点）', () => {
+  it('inputMode を含む仕訳を受け入れる', () => {
     const withMeta = {
       ...validEntry,
-      metadata: {
-        inputMode: 'expense',
-        allocationPlan: {
-          kind: 'period',
-          startDate: '2026-06-01',
-          endDate: '2026-12-31',
-          method: 'even-monthly',
-          recognitionAccountId: 'a',
-          deferredAccountId: 'b',
-          generatedEntryIds: [],
-        },
-      },
+      metadata: { inputMode: 'expense' },
     };
     expect(journalEntrySchema.safeParse(withMeta).success).toBe(true);
   });
@@ -263,12 +267,10 @@ describe('entry metadata / allocationPlan', () => {
       journalEntries: [
         { ...validEntry, metadata: { inputMode: 'reversal', reversalOfEntryId: 'z' } },
       ],
-      allocations: [],
       cashflowSchedules: [],
       reserves: [],
       tags: [],
       monthlyCostItems: [],
-      fundingGoals: [],
       assetDisposals: [],
       recurringRules: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
@@ -277,6 +279,105 @@ describe('entry metadata / allocationPlan', () => {
     expect(parsed.success).toBe(true);
     if (parsed.success) {
       expect(parsed.data.journalEntries[0]?.metadata?.inputMode).toBe('reversal');
+    }
+  });
+});
+
+describe('残高補正 metadata の package 整合性', () => {
+  const target = {
+    id: 'cash',
+    name: '現金',
+    type: 'asset',
+    role: 'daily-asset',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  const counter = {
+    id: 'balance-expense',
+    name: '残高調整費',
+    type: 'expense',
+    role: 'system-adjustment',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  const entry = {
+    id: 'adjustment',
+    date: '2026-06-30',
+    description: '残高補正',
+    kind: 'normal',
+    lines: [
+      { accountId: counter.id, side: 'debit', amount: 200 },
+      { accountId: target.id, side: 'credit', amount: 200 },
+    ],
+    metadata: {
+      inputMode: 'manual',
+      adjustment: {
+        accountId: target.id,
+        expectedBalance: 1000,
+        actualBalance: 800,
+        delta: -200,
+        counterpartAccountId: counter.id,
+      },
+    },
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  const pkg = (entryValue: Record<string, unknown>, counterValue = counter) => ({
+    appId: APP_ID,
+    schemaVersion: SCHEMA_VERSION,
+    ledgerId: 'ledger',
+    exportedAt: '2026-06-01T00:00:00.000Z',
+    deviceId: 'd',
+    revision: 0,
+    accounts: [target, counterValue],
+    journalEntries: [entryValue],
+    cashflowSchedules: [],
+    reserves: [],
+    tags: [],
+    monthlyCostItems: [],
+    assetDisposals: [],
+    recurringRules: [],
+    settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
+  });
+
+  it('相手が system-adjustment で明細と差額が一致する補正だけを受け入れる', () => {
+    expect(ledgerExportPackageSchema.safeParse(pkg(entry)).success).toBe(true);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg(entry, { ...counter, role: 'expense-category' }),
+      ).success,
+    ).toBe(false);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg({
+          ...entry,
+          lines: [
+            { accountId: target.id, side: 'debit', amount: 200 },
+            { accountId: counter.id, side: 'credit', amount: 200 },
+          ],
+        }),
+      ).success,
+    ).toBe(false);
+  });
+
+  it('廃止済みの補正種別フィールド(kind)の残骸は strip され、取り込みを壊さない', () => {
+    const parsed = ledgerExportPackageSchema.safeParse(
+      pkg({
+        ...entry,
+        metadata: {
+          ...entry.metadata,
+          adjustment: { ...entry.metadata.adjustment, kind: 'obsolete' },
+        },
+      }),
+    );
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      const adjustment = parsed.data.journalEntries[0]?.metadata?.adjustment as unknown as
+        | Record<string, unknown>
+        | undefined;
+      expect(adjustment?.kind).toBeUndefined();
     }
   });
 });
@@ -305,245 +406,7 @@ describe('journalEntrySchema 行数ルール（MVP: 1 借方・1 貸方）', () 
   });
 });
 
-describe('allocationPlan の参照整合性（package 検証）', () => {
-  function pkgWithPlan(plan: Record<string, unknown>) {
-    return {
-      appId: APP_ID,
-      schemaVersion: SCHEMA_VERSION,
-      ledgerId: 'ledger',
-      exportedAt: '2026-06-01T00:00:00.000Z',
-      deviceId: 'd',
-      revision: 0,
-      accounts: [
-        {
-          id: 'a',
-          name: '現金',
-          type: 'asset',
-          role: 'daily-asset',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-        {
-          id: 'b',
-          name: '食費',
-          type: 'expense',
-          role: 'expense-category',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-      journalEntries: [{ ...validEntry, metadata: { allocationPlan: plan } }],
-      allocations: [],
-      cashflowSchedules: [],
-      reserves: [],
-      tags: [],
-      monthlyCostItems: [],
-      fundingGoals: [],
-      assetDisposals: [],
-      recurringRules: [],
-      settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
-    };
-  }
-  const base = {
-    kind: 'period',
-    startDate: '2026-06-01',
-    endDate: '2026-12-31',
-    method: 'even-monthly',
-    recognitionAccountId: 'b',
-    deferredAccountId: 'a',
-    generatedEntryIds: [] as string[],
-  };
-
-  it('科目参照が揃っていれば有効', () => {
-    expect(ledgerExportPackageSchema.safeParse(pkgWithPlan(base)).success).toBe(true);
-  });
-  it('存在しない recognition/deferred 科目は拒否する', () => {
-    expect(
-      ledgerExportPackageSchema.safeParse(pkgWithPlan({ ...base, recognitionAccountId: 'zzz' }))
-        .success,
-    ).toBe(false);
-  });
-  it('存在しない generatedEntryIds は拒否する', () => {
-    expect(
-      ledgerExportPackageSchema.safeParse(pkgWithPlan({ ...base, generatedEntryIds: ['nope'] }))
-        .success,
-    ).toBe(false);
-  });
-  it('既存仕訳 ID を指す generatedEntryIds は許可する', () => {
-    expect(
-      ledgerExportPackageSchema.safeParse(pkgWithPlan({ ...base, generatedEntryIds: ['e1'] }))
-        .success,
-    ).toBe(true);
-  });
-});
-
-describe('按分(allocations) の深い整合性検証（package）', () => {
-  const built = buildAllocation({
-    date: '2026-06-15',
-    description: 'PC',
-    totalAmount: 1000,
-    months: 3,
-    expenseAccountId: 'exp',
-    paymentAccountId: 'pay',
-    deferredAccountId: 'def',
-  });
-  function allocPkg(overrides: Record<string, unknown> = {}) {
-    return {
-      appId: APP_ID,
-      schemaVersion: SCHEMA_VERSION,
-      ledgerId: 'ledger',
-      exportedAt: '2026-06-01T00:00:00.000Z',
-      deviceId: 'd',
-      revision: 0,
-      accounts: [
-        {
-          id: 'exp',
-          name: '食費',
-          type: 'expense',
-          role: 'expense-category',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-        {
-          id: 'pay',
-          name: '現金',
-          type: 'asset',
-          role: 'daily-asset',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-        {
-          id: 'def',
-          name: '按分中資産',
-          type: 'asset',
-          role: 'deferred-asset',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-      journalEntries: [built.sourceEntry, ...built.recognitionEntries],
-      allocations: [built.item],
-      cashflowSchedules: [],
-      reserves: [],
-      tags: [],
-      monthlyCostItems: [],
-      fundingGoals: [],
-      assetDisposals: [],
-      recurringRules: [],
-      settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
-      ...overrides,
-    };
-  }
-
-  it('buildAllocation 由来の正しいパッケージは valid', () => {
-    expect(ledgerExportPackageSchema.safeParse(allocPkg()).success).toBe(true);
-  });
-  it('認識仕訳数が月数と不一致なら invalid', () => {
-    const bad = allocPkg({ allocations: [{ ...built.item, months: 2 }] });
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
-  });
-  it('deferred が資産科目でないと invalid', () => {
-    const bad = allocPkg({
-      accounts: [
-        {
-          id: 'exp',
-          name: '食費',
-          type: 'expense',
-          role: 'expense-category',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-        {
-          id: 'pay',
-          name: '現金',
-          type: 'asset',
-          role: 'daily-asset',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-        {
-          id: 'def',
-          name: '誤区分',
-          type: 'expense',
-          role: 'expense-category',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-    });
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
-  });
-  it('deferred の role が deferred-asset でないと invalid（asset だが daily-asset）', () => {
-    const bad = allocPkg({
-      accounts: [
-        {
-          id: 'exp',
-          name: '食費',
-          type: 'expense',
-          role: 'expense-category',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-        {
-          id: 'pay',
-          name: '現金',
-          type: 'asset',
-          role: 'daily-asset',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-        {
-          id: 'def',
-          name: '按分中資産',
-          type: 'asset',
-          role: 'daily-asset', // type は asset だが role が deferred-asset でない
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-    });
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
-  });
-  it('孤立した按分仕訳（どの台帳からも参照されない）は invalid', () => {
-    const ghost = {
-      ...built.recognitionEntries[0],
-      id: 'ghost',
-      metadata: { allocationId: 'zzz', allocationRole: 'recognition' },
-    };
-    const bad = allocPkg({
-      journalEntries: [built.sourceEntry, ...built.recognitionEntries, ghost],
-    });
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
-  });
-  it('認識仕訳の金額を改ざんすると invalid（合計/月額不一致）', () => {
-    const tampered = built.recognitionEntries.map((e, i) =>
-      i === 0
-        ? {
-            ...e,
-            lines: [
-              { ...e.lines[0]!, amount: e.lines[0]!.amount + 100 },
-              { ...e.lines[1]!, amount: e.lines[1]!.amount + 100 },
-            ],
-          }
-        : e,
-    );
-    const bad = allocPkg({ journalEntries: [built.sourceEntry, ...tampered] });
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
-  });
-});
-
-describe('予定CF・目的別資金・allocation メタの検証（package）', () => {
+describe('予定CF・目的別資金の検証（package）', () => {
   const bank = {
     id: 'bank',
     name: '普通預金',
@@ -582,7 +445,6 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
       revision: 0,
       accounts: [bank, card, reserveAcc],
       journalEntries: [],
-      allocations: [],
       cashflowSchedules: [
         {
           id: 's1',
@@ -609,7 +471,6 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
       ],
       tags: [],
       monthlyCostItems: [],
-      fundingGoals: [],
       assetDisposals: [],
       recurringRules: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
@@ -723,26 +584,6 @@ describe('予定CF・目的別資金・allocation メタの検証（package）',
     });
     expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
   });
-  it('allocationRole 単独（allocationId なし）の仕訳は invalid', () => {
-    const bad = cfPkg({
-      journalEntries: [
-        {
-          id: 'x1',
-          date: '2026-06-01',
-          description: '混入',
-          kind: 'normal',
-          lines: [
-            { accountId: 'bank', side: 'debit', amount: 100 },
-            { accountId: 'card', side: 'credit', amount: 100 },
-          ],
-          metadata: { allocationRole: 'recognition' },
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-    });
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
-  });
 });
 
 describe('タグ(tags) の scope・参照検証（package）', () => {
@@ -779,7 +620,6 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
           updatedAt: 'x',
         },
       ],
-      allocations: [],
       cashflowSchedules: [],
       reserves: [],
       tags: [
@@ -793,7 +633,6 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
         },
       ],
       monthlyCostItems: [],
-      fundingGoals: [],
       assetDisposals: [],
       recurringRules: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
@@ -865,12 +704,10 @@ describe('月額化コスト(monthlyCostItems) の参照・不変条件検証', 
       revision: 0,
       accounts: [cash, food],
       journalEntries: [],
-      allocations: [],
       cashflowSchedules: [],
       reserves: [],
       tags: [],
       monthlyCostItems: items,
-      fundingGoals: [],
       assetDisposals: [],
       recurringRules: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
@@ -905,10 +742,6 @@ describe('月額化コスト(monthlyCostItems) の参照・不変条件検証', 
   });
   it('paymentAccountId が日常資産/支払用負債でないと invalid', () => {
     const bad = mcPkg([{ ...base, paymentAccountId: 'food' }]);
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
-  });
-  it('存在しない sourceAllocationId は invalid', () => {
-    const bad = mcPkg([{ ...base, sourceAllocationId: 'nope' }]);
     expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
   });
   it.each([
@@ -949,10 +782,10 @@ describe('月額化コスト(monthlyCostItems) の参照・不変条件検証', 
     (pkg.accounts as Record<string, unknown>[]).push(ccLedger);
     expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(false);
   });
-  it('開始残高(equity) funding の項目に repeatEveryMonths があると package で invalid', () => {
+  it('初期残高(equity) funding の項目に repeatEveryMonths があると package で invalid', () => {
     const equity = {
       id: 'opening',
-      name: '開始残高',
+      name: '初期残高',
       type: 'equity',
       role: 'equity',
       archived: false,
@@ -1015,13 +848,13 @@ describe('月額化コスト(monthlyCostItems) の参照・不変条件検証', 
   });
 });
 
-describe('固定資産処分の重複検証', () => {
+describe('継続コスト処分の重複検証', () => {
   it('同一 monthlyCostId への処分が2件あると package で invalid', () => {
-    const fixedAccount = {
-      id: 'fa',
-      name: '車',
+    const ledgerAccount = {
+      id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      name: '継続コスト台帳',
       type: 'asset',
-      role: 'fixed-asset',
+      role: 'continuing-cost-asset',
       archived: false,
       createdAt: 'x',
       updatedAt: 'x',
@@ -1034,8 +867,7 @@ describe('固定資産処分の重複検証', () => {
       costMonths: 12,
       startMonth: '2026-01',
       expenseAccountId: 'food',
-      recognitionCreditAccountId: 'fa',
-      sourceEntryId: 'e1',
+      recognitionCreditAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
       status: 'ended',
       endMonth: '2026-06',
       createdAt: 'x',
@@ -1044,11 +876,11 @@ describe('固定資産処分の重複検証', () => {
     const disposal = (id: string) => ({
       id,
       monthlyCostId: 'm1',
-      fixedAccountId: 'fa',
+      fixedAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
       disposalDate: '2026-07-15',
       proceedsAmount: 0,
-      recognizedAmount: 60000,
-      remainingAmount: 60000,
+      recognizedAmount: 120000,
+      remainingAmount: 0,
       generatedEntryIds: [],
       createdAt: 'x',
       updatedAt: 'x',
@@ -1070,10 +902,9 @@ describe('固定資産処分の重複検証', () => {
           createdAt: 'x',
           updatedAt: 'x',
         },
-        fixedAccount,
+        ledgerAccount,
       ],
       journalEntries: [],
-      allocations: [],
       cashflowSchedules: [],
       reserves: [],
       tags: [],
@@ -1082,9 +913,128 @@ describe('固定資産処分の重複検証', () => {
       recurringRules: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     });
-    expect(ledgerExportPackageSchema.safeParse(pkg([disposal('d1')])).success).toBe(true);
+    const single = ledgerExportPackageSchema.safeParse(pkg([disposal('d1')]));
+    expect(single.success).toBe(true);
     expect(
       ledgerExportPackageSchema.safeParse(pkg([disposal('d1'), disposal('d2')])).success,
+    ).toBe(false);
+    expect(
+      ledgerExportPackageSchema.safeParse({
+        ...pkg([disposal('d1')]),
+        monthlyCostItems: [{ ...item, status: 'active', endMonth: undefined }],
+      }).success,
+    ).toBe(false);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg([{ ...disposal('d1'), fixedAccountId: 'food' }]),
+      ).success,
+    ).toBe(false);
+  });
+
+  it('generatedEntryIds と仕訳 metadata は双方向に一致する必要がある', () => {
+    const ledgerAccount = {
+      id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      name: '継続コスト台帳',
+      type: 'asset',
+      role: 'continuing-cost-asset',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const bank = {
+      id: 'bank',
+      name: '預金',
+      type: 'asset',
+      role: 'daily-asset',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const item = {
+      id: 'm1',
+      name: '年払い',
+      kind: 'prepaid-service',
+      amount: 12000,
+      costMonths: 12,
+      startMonth: '2026-01',
+      endMonth: '2026-07',
+      expenseAccountId: 'food',
+      paymentSourceAccountId: bank.id,
+      recognitionCreditAccountId: ledgerAccount.id,
+      disposalProceedsAmount: 500,
+      status: 'ended',
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const disposal = {
+      id: 'd1',
+      monthlyCostId: item.id,
+      fixedAccountId: ledgerAccount.id,
+      disposalDate: '2026-07-15',
+      proceedsAmount: 500,
+      destinationAccountId: bank.id,
+      recognizedAmount: 11500,
+      remainingAmount: 0,
+      generatedEntryIds: ['generated'],
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const generated = {
+      id: 'generated',
+      date: '2026-07-15',
+      description: '売却',
+      kind: 'normal',
+      lines: [
+        { accountId: bank.id, side: 'debit', amount: 500 },
+        { accountId: ledgerAccount.id, side: 'credit', amount: 500 },
+      ],
+      metadata: { assetDisposalId: disposal.id },
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const base = {
+      appId: APP_ID,
+      schemaVersion: SCHEMA_VERSION,
+      ledgerId: 'ledger',
+      exportedAt: '2026-06-01T00:00:00.000Z',
+      deviceId: 'd',
+      revision: 0,
+      accounts: [
+        bank,
+        ledgerAccount,
+        {
+          id: 'food',
+          name: '食費',
+          type: 'expense',
+          role: 'expense-category',
+          archived: false,
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+      journalEntries: [generated],
+      cashflowSchedules: [],
+      reserves: [],
+      tags: [],
+      monthlyCostItems: [item],
+      assetDisposals: [disposal],
+      recurringRules: [],
+      settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
+    };
+
+    // 既存仕訳 ID を指す generatedEntryIds は許可する。
+    expect(ledgerExportPackageSchema.safeParse(base).success).toBe(true);
+    expect(
+      ledgerExportPackageSchema.safeParse({
+        ...base,
+        assetDisposals: [{ ...disposal, generatedEntryIds: [] }],
+      }).success,
+    ).toBe(false);
+    expect(
+      ledgerExportPackageSchema.safeParse({
+        ...base,
+        journalEntries: [{ ...generated, metadata: undefined }],
+      }).success,
     ).toBe(false);
   });
 });

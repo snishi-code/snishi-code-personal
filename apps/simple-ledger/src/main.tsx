@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { ErrorBoundary } from './ui/ErrorBoundary';
 import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { LedgerProvider } from './state/store';
 import { useServiceWorker } from '@snishi/foundation/pwa/useServiceWorker';
@@ -23,7 +24,10 @@ createRoot(rootEl).render(
     <ToastProvider>
       <LedgerProvider>
         <PwaRegistrar />
-        <App />
+        {/* 描画時例外でも「設定」（JSON 読み込み・復元）へ到達できるようにする。 */}
+        <ErrorBoundary>
+          <App />
+        </ErrorBoundary>
       </LedgerProvider>
     </ToastProvider>
   </StrictMode>,

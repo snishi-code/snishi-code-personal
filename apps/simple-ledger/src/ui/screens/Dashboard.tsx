@@ -7,11 +7,12 @@ import type { IconName } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../../domain/accounting';
 import { livingCostBreakdownForRange } from '../../domain/livingCost';
-import { reportBasis, periodLabel, type ReportPeriod } from '../../domain/reportPeriod';
+import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
 import { reportEntriesForAsOf } from '../../domain/reportEntries';
 import { todayLocal } from '../../util/time';
 import { buildSectionTrends } from './breakdownData';
 import { Money } from '../money';
+import { periodLabel } from '../periodLabel';
 import { EntryListItem } from '../EntryListItem';
 import { TrendChart } from '../components/TrendChart';
 import { t } from '../../i18n';
@@ -58,22 +59,9 @@ export function Dashboard({
   const periodEntries = (ledger?.journalEntries ?? []).filter(inRange).slice(0, 5);
   const label = periodLabel(period);
 
-  const { pl, bs, asOf, monthlyCost, normalExpense, investmentValuation } = useMemo(() => {
+  const { pl, bs, asOf, monthlyCost, normalExpense } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf, today) : [];
-    const within = (e: JournalEntry) =>
-      (!range.from || e.date >= range.from) && e.date <= range.to;
-    const expenseIds = new Set(accounts.filter((a) => a.type === 'expense').map((a) => a.id));
-    let investmentLoss = 0;
-    let investmentGain = 0;
-    for (const e of entries) {
-      if (!within(e)) continue;
-      if (e.metadata?.adjustment?.kind !== 'investment-valuation') continue;
-      const debit = e.lines.find((l) => l.side === 'debit');
-      const credit = e.lines.find((l) => l.side === 'credit');
-      if (debit && expenseIds.has(debit.accountId)) investmentLoss += debit.amount;
-      else if (credit) investmentGain += credit.amount;
-    }
     const breakdown = livingCostBreakdownForRange(accounts, entries, range);
     return {
       pl: deriveProfitAndLoss(accounts, entries, range),
@@ -81,7 +69,6 @@ export function Dashboard({
       asOf: basis.asOf,
       monthlyCost: breakdown.monthlyCost,
       normalExpense: breakdown.normalExpense,
-      investmentValuation: { loss: investmentLoss, gain: investmentGain },
     };
   }, [basis.asOf, ledger, range, today]);
 
@@ -148,18 +135,6 @@ export function Dashboard({
           >
             <Money amount={bs.netAssets} currency={currency} signed />
           </StatButton>
-          {investmentValuation.loss > 0 || investmentValuation.gain > 0 ? (
-            <div className="stat">
-              <span className="stat__label">{t('dashboard.investmentValuation')}</span>
-              <span className="stat__value">
-                <Money
-                  amount={investmentValuation.gain - investmentValuation.loss}
-                  currency={currency}
-                  signed
-                />
-              </span>
-            </div>
-          ) : null}
         </div>
 
         {trend ? (
@@ -218,7 +193,7 @@ export function Dashboard({
         ) : (
           <ul className="card list" data-ui={UI.dashboard.journalPreview}>
             {periodEntries.map((entry) => {
-              const generated = !!(entry.metadata?.allocationId || entry.metadata?.monthlyCostId);
+              const generated = !!entry.metadata?.monthlyCostId;
               return (
                 <EntryListItem
                   key={entry.id}

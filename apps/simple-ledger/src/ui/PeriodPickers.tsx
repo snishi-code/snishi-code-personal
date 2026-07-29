@@ -3,12 +3,11 @@
  * foundation の Popup（native <dialog>）を使用。
  */
 import { Popup } from './overlays';
+import { TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { t } from '../i18n';
 import { UI } from '../ui-contract';
 import type { ReportPeriod } from '../domain/reportPeriod';
-
-const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 
 function Row({
   selected,
@@ -52,8 +51,7 @@ export function PeriodYearPicker({
     onChange(p);
     onClose();
   };
-  const pickYear = (year: number): ReportPeriod =>
-    period.mode === 'month' ? { mode: 'month', year, month: period.month } : { mode: 'year', year };
+  const pickYear = (year: number): ReportPeriod => ({ mode: 'year', year });
 
   return (
     <Popup ariaLabel={t('period.pickerYear')} onClose={onClose} dataUi={UI.period.yearPicker}>
@@ -66,7 +64,7 @@ export function PeriodYearPicker({
       {years.map((y) => (
         <Row
           key={y}
-          selected={period.mode !== 'all' && period.year === y}
+          selected={period.mode === 'year' && period.year === y}
           label={t('period.yearUnit', { year: y })}
           onClick={() => select(pickYear(y))}
           dataUi={UI.period.yearRow}
@@ -76,40 +74,32 @@ export function PeriodYearPicker({
   );
 }
 
-export function PeriodMonthPicker({
-  period,
-  today,
+/** ヘッダー用の日付ピッカー。年・全期間への導線は意図的に持たない。 */
+export function PeriodDatePicker({
+  date,
   onChange,
   onClose,
 }: {
-  period: ReportPeriod;
-  today: string;
-  onChange: (p: ReportPeriod) => void;
+  date: string;
+  onChange: (date: string) => void;
   onClose: () => void;
 }) {
-  const year = period.mode === 'all' ? Number.parseInt(today.slice(0, 4), 10) : period.year;
-  const select = (p: ReportPeriod) => {
-    onChange(p);
+  const select = (nextDate: string) => {
+    if (nextDate === '') return;
+    onChange(nextDate);
     onClose();
   };
 
   return (
-    <Popup ariaLabel={t('period.pickerMonth')} onClose={onClose} dataUi={UI.period.monthPicker}>
-      <Row
-        selected={period.mode === 'year'}
-        label={t('period.fullYear')}
-        onClick={() => select({ mode: 'year', year })}
-        dataUi={UI.period.fullYearRow}
+    <Popup ariaLabel={t('period.pickerDate')} onClose={onClose} dataUi={UI.period.datePicker}>
+      <TextInput
+        label={t('period.date')}
+        type="date"
+        required
+        value={date}
+        onChange={select}
+        dataUi={UI.period.dateInput}
       />
-      {MONTHS.map((m) => (
-        <Row
-          key={m}
-          selected={period.mode === 'month' && period.month === m}
-          label={t('period.monthUnit', { month: m })}
-          onClick={() => select({ mode: 'month', year, month: m })}
-          dataUi={UI.period.monthRow}
-        />
-      ))}
     </Popup>
   );
 }

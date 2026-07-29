@@ -11,11 +11,9 @@
 export const DB_NAME = 'simple-ledger-v2' as const;
 
 /**
- * IndexedDB のバージョン。v2 は 12 ストア構成を version 1 で一括作成し、
- * version 2 で recurringRules を追加、version 3 で管理区分・支払い手段の
- * ストアを削除した（概念の廃止・2026-07-28）。
+ * IndexedDB のバージョン。version 4 で旧 allocations ストアを削除した。
  */
-export const DB_VERSION = 3 as const;
+export const DB_VERSION = 4 as const;
 
 /** エクスポート/import 照合用のアプリ ID（封筒 appId）。v1 とは別 ID。 */
 export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
@@ -23,11 +21,10 @@ export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
 /**
  * 現行スキーマ版。v2 は v1 の最終形（v16 相当の最新モデル）を **1** として開始した
  * （レガシー migration は持たない・仕様§16）。互換性のない変更ごとに +1 する。
- * **2**（2026-07-28）: 管理区分・支払い手段を廃止。
  * migration step は追加しない（作者決定＝後方互換を持たない）。旧版 JSON /
  * スナップショットは unsupported-version として fail-closed に拒否される。
  */
-export const SCHEMA_VERSION = 2 as const;
+export const SCHEMA_VERSION = 3 as const;
 
 /** localStorage 等のキー接頭辞（ポインタ/フラグ用。v1 の 'simple-ledger' 系と分離）。 */
 export const LOCAL_PREFIX = 'slv2.' as const;

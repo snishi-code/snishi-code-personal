@@ -8,17 +8,14 @@
 export const UI = {
   // 期間（データ抽出条件）。ヘッダー中央の「現在コンテキスト表示」+ 軽量ピッカー。ホーム/財務諸表/仕訳で共有
   period: {
-    // ヘッダーの現在コンテキスト表示（タップで対応ピッカーを開く）
-    yearTrigger: 'period.year.trigger',
-    monthTrigger: 'period.month.trigger',
-    // 軽量ピッカー本体
+    // ヘッダーの日付表示（タップで日付ピッカーを開く）
+    dateTrigger: 'period.date.trigger',
+    datePicker: 'period.date.picker',
+    dateInput: 'period.date.input',
+    // 年・全期間はロジックを維持するが、現在は UI から到達させない。
     yearPicker: 'period.year.picker',
-    monthPicker: 'period.month.picker',
-    // ピッカーの行（選択で即反映して閉じる）
     yearRow: 'period.year.row',
-    monthRow: 'period.month.row',
     allRow: 'period.all.row',
-    fullYearRow: 'period.fullYear.row',
     // トレンド（SVG グラフ）
     trend: 'period.trend',
     trendChart: 'period.trend.chart',
@@ -118,8 +115,6 @@ export const UI = {
       ccToggle: 'journal.entry.ccToggle',
       ccName: 'journal.entry.ccName',
       ccCategory: 'journal.entry.ccCategory',
-      fixedMonthlyToggle: 'journal.entry.fixedMonthlyToggle',
-      fixedMonthlyCategory: 'journal.entry.fixedMonthlyCategory',
       reserveCreate: 'journal.entry.reserveCreate',
       reserveName: 'journal.entry.reserveName',
       loanArrange: 'journal.entry.loanArrange',
@@ -179,14 +174,14 @@ export const UI = {
     recurringKind: 'allocations.recurring.kind',
     recurringName: 'allocations.recurring.name',
     recurringAmount: 'allocations.recurring.amount',
-    recurringDay: 'allocations.recurring.day',
+    recurringFirstPostingDate: 'allocations.recurring.firstPostingDate',
     recurringFrom: 'allocations.recurring.from',
     recurringTo: 'allocations.recurring.to',
     recurringSave: 'allocations.recurring.save',
     recurringEdit: 'allocations.recurring.edit',
     recurringPause: 'allocations.recurring.pause',
     recurringDelete: 'allocations.recurring.delete',
-    // 移行登録（初期残高）: 既存の継続コストを開始残高として登録するシート
+    // 移行登録（初期残高）: 既存の継続コストを初期残高として登録するシート
     migrateAdd: 'allocations.migrate.add',
     migrateSheet: 'allocations.migrate.sheet',
     migrateName: 'allocations.migrate.name',
@@ -227,7 +222,6 @@ export const UI = {
   adjustments: {
     account: 'adjust.account',
     date: 'adjust.date',
-    kind: 'adjust.kind',
     actual: 'adjust.actual',
     save: 'adjust.save',
     createDialog: 'adjustments.createDialog',
@@ -241,7 +235,6 @@ export const UI = {
     editDialog: 'adjustments.editDialog',
     editAccount: 'adjustments.edit.account',
     editDate: 'adjustments.edit.date',
-    editKind: 'adjustments.edit.kind',
     editActual: 'adjustments.edit.actual',
     editSave: 'adjustments.edit.save',
     deleteConfirm: 'adjustments.deleteConfirm',
@@ -312,6 +305,9 @@ export const UI = {
   // 端末/ブラウザ Back の終了確認（appHistory が管理・オーバーレイ登録簿には載せない）
   app: {
     exitConfirm: 'app.exitConfirm',
+    // 台帳が読めない / 描画時例外のときの復旧画面（設定へ入って JSON 読み込み・復元）。
+    recovery: 'app.recovery',
+    recoverySettings: 'app.recovery.settings',
   },
   // 初期残高の一括登録シート（初回起動時に自動表示・設定から再表示可能）
   onboarding: {

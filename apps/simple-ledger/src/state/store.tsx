@@ -6,7 +6,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from 'react';
 import type {
   Account,
-  AdjustmentKind,
   CashflowSchedule,
   Ledger,
   MonthlyCostItem,
@@ -17,14 +16,11 @@ import type {
   Tag,
 } from '../domain/types';
 import { buildSimpleEntry, type SimpleEntryInput } from '../domain/entry';
-import type { AllocationInput } from '../domain/allocation';
 import * as repo from '../data/repository';
 import { isDefaultSeedAccounts, isDefaultSettings } from '../data/seed';
 import type {
   ContinuousCostInput,
-  DisposeFixedAssetInput,
-  FixedAssetMonthlyInput,
-  FixedAssetPurchaseMonthlyInput,
+  DisposeContinuousCostInput,
   MonthlyCostInput,
 } from '../data/repository';
 import {
@@ -58,7 +54,6 @@ function sampleFixtureRequested(): boolean {
 export function isPristineSeedLedger(l: Ledger): boolean {
   return (
     l.journalEntries.length === 0 &&
-    l.allocations.length === 0 &&
     l.cashflowSchedules.length === 0 &&
     l.reserves.length === 0 &&
     l.monthlyCostItems.length === 0 &&
@@ -77,24 +72,17 @@ interface LedgerContextValue {
     input: SimpleEntryInput,
     existing?: { id: string; createdAt: string },
   ) => Promise<void>;
-  saveEntryWithFixedAssetMonthly: (
-    input: SimpleEntryInput,
-    monthly: FixedAssetMonthlyInput,
-  ) => Promise<void>;
   removeEntry: (id: string, description: string) => Promise<void>;
-  createAllocation: (input: Omit<AllocationInput, 'deferredAccountId'>) => Promise<void>;
   createMonthlyCost: (input: MonthlyCostInput) => Promise<void>;
   createContinuousCost: (input: ContinuousCostInput) => Promise<void>;
-  /** 既存の継続コストを開始残高として移行登録する（funding 貸方 = 開始残高）。 */
+  /** 既存の継続コストを初期残高として移行登録する（funding 貸方 = 初期残高）。 */
   createContinuousCostOpening: (input: repo.ContinuousCostOpeningInput) => Promise<void>;
   /** 自動更新される契約（年払いサブスク等）の途中持ち込み（移行分+更新分の2項目）。 */
   createSubscriptionMigration: (input: repo.SubscriptionMigrationInput) => Promise<void>;
   createRepaymentEntries: (input: repo.RepaymentPlanInput) => Promise<void>;
   saveMonthlyCost: (item: MonthlyCostItem) => Promise<void>;
   removeMonthlyCost: (id: string) => Promise<void>;
-  createFixedAssetPurchaseMonthly: (input: FixedAssetPurchaseMonthlyInput) => Promise<void>;
-  disposeFixedAsset: (input: DisposeFixedAssetInput) => Promise<void>;
-  disposeContinuousCost: (input: DisposeFixedAssetInput) => Promise<void>;
+  disposeContinuousCost: (input: DisposeContinuousCostInput) => Promise<void>;
   saveSchedules: (schedules: CashflowSchedule[]) => Promise<void>;
   postSchedule: (id: string) => Promise<void>;
   removeSchedule: (id: string) => Promise<void>;
@@ -111,7 +99,6 @@ interface LedgerContextValue {
   saveTag: (tag: Tag) => Promise<void>;
   removeTag: (id: string) => Promise<void>;
   createAdjustment: (input: {
-    kind: AdjustmentKind;
     accountId: string;
     date: string;
     actualBalance: number;
@@ -119,7 +106,6 @@ interface LedgerContextValue {
   }) => Promise<void>;
   updateAdjustment: (input: {
     id: string;
-    kind: AdjustmentKind;
     accountId: string;
     date: string;
     actualBalance: number;
@@ -155,6 +141,16 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     const next = await repo.loadLedger();
     setLedger(next);
+    setStatus('ready');
+  }, []);
+
+  /**
+   * 復旧経路（JSON 取り込み・スナップショット復元）の結果を反映する。status/error も戻すのが要点:
+   * 戻さないと「起動に失敗 → 復旧画面から取り込み → データは入ったのに画面はエラーのまま」になる。
+   */
+  const applyRecoveredLedger = useCallback((next: Ledger) => {
+    setLedger(next);
+    setError(undefined);
     setStatus('ready');
   }, []);
 
@@ -204,43 +200,12 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [refresh, toast],
   );
 
-  const saveEntryWithFixedAssetMonthly = useCallback<
-    LedgerContextValue['saveEntryWithFixedAssetMonthly']
-  >(
-    async (input, monthly) => {
-      try {
-        const entry = buildSimpleEntry(input);
-        await repo.saveEntryWithFixedAssetMonthly(entry, monthly);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
   const removeEntry = useCallback<LedgerContextValue['removeEntry']>(
     async (id) => {
       try {
         await repo.deleteEntry(id);
         await refresh();
         toast.show(t('toast.deleted'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const createAllocation = useCallback<LedgerContextValue['createAllocation']>(
-    async (input) => {
-      try {
-        await repo.createAllocation(input);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
       } catch (e) {
         toast.show(errorText(e), 'error');
         throw e;
@@ -341,36 +306,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     async (input) => {
       try {
         await repo.createRepaymentEntries(input);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const createFixedAssetPurchaseMonthly = useCallback<
-    LedgerContextValue['createFixedAssetPurchaseMonthly']
-  >(
-    async (input) => {
-      try {
-        await repo.createFixedAssetPurchaseMonthly(input);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const disposeFixedAsset = useCallback<LedgerContextValue['disposeFixedAsset']>(
-    async (input) => {
-      try {
-        await repo.disposeFixedAsset(input);
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
@@ -727,7 +662,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         } catch {
           // fail-soft
         }
-        setLedger(latest);
+        applyRecoveredLedger(latest);
         toast.show(
           t('import.success', {
             accounts: outcome.counts.accounts,
@@ -738,7 +673,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       }
       return outcome;
     },
-    [toast],
+    [applyRecoveredLedger, toast],
   );
 
   const listSnapshots = useCallback<LedgerContextValue['listSnapshots']>(() => {
@@ -756,14 +691,14 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         } catch {
           // fail-soft
         }
-        setLedger(next);
+        applyRecoveredLedger(next);
         toast.show(t('toast.restored'), 'success');
       } catch (e) {
         toast.show(t('toast.error'), 'error');
         throw e;
       }
     },
-    [toast],
+    [applyRecoveredLedger, toast],
   );
 
   const deleteSnapshot = useCallback<LedgerContextValue['deleteSnapshot']>(async (id) => {
@@ -790,9 +725,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       ...(error !== undefined ? { error } : {}),
       refresh,
       saveEntry,
-      saveEntryWithFixedAssetMonthly,
       removeEntry,
-      createAllocation,
       createMonthlyCost,
       createContinuousCost,
       createContinuousCostOpening,
@@ -800,8 +733,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       createRepaymentEntries,
       saveMonthlyCost,
       removeMonthlyCost,
-      createFixedAssetPurchaseMonthly,
-      disposeFixedAsset,
       disposeContinuousCost,
       saveSchedules,
       postSchedule,
@@ -837,9 +768,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       error,
       refresh,
       saveEntry,
-      saveEntryWithFixedAssetMonthly,
       removeEntry,
-      createAllocation,
       createMonthlyCost,
       createContinuousCost,
       createContinuousCostOpening,
@@ -847,8 +776,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       createRepaymentEntries,
       saveMonthlyCost,
       removeMonthlyCost,
-      createFixedAssetPurchaseMonthly,
-      disposeFixedAsset,
       disposeContinuousCost,
       saveSchedules,
       postSchedule,

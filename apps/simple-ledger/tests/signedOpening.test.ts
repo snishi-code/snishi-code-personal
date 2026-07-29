@@ -25,7 +25,7 @@ describe('マイナスの初期残高（opening）', () => {
 
     const ledger = await loadLedger();
     const equity = ledger.accounts.find((a) => a.role === 'equity')!;
-    // 反転: 借方 開始残高 / 貸方 現金（明細金額は正）。
+    // 反転: 借方 初期残高 / 貸方 現金（明細金額は正）。
     expect(entry.lines).toEqual([
       { accountId: equity.id, side: 'debit', amount: 3000 },
       { accountId: cash.id, side: 'credit', amount: 3000 },

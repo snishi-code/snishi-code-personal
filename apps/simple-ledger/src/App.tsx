@@ -14,6 +14,7 @@ import { Icon } from '@snishi/foundation/ui/Icon';
 import { EnvBadge } from '@snishi/foundation/pwa/EnvBadge';
 import { useAppHistory } from '@snishi/foundation/history/useAppHistory';
 import { Menu, closeTopOverlay, type MenuItem } from './ui/overlays';
+import { RecoveryScreen } from './ui/ErrorBoundary';
 import { isPristineSeedLedger, useLedger } from './state/store';
 import { isOnboardingDone, markOnboardingDone } from './data/localFlags';
 import { Dashboard } from './ui/screens/Dashboard';
@@ -29,11 +30,11 @@ import { Settings } from './ui/screens/Settings';
 import { Help } from './ui/screens/Help';
 import { EntrySheet, type EntryInit } from './ui/screens/EntrySheet';
 import { OnboardingSheet } from './ui/OnboardingSheet';
-import { PeriodYearPicker, PeriodMonthPicker } from './ui/PeriodPickers';
+import { PeriodDatePicker } from './ui/PeriodPickers';
 import { NAV_ITEMS } from './ui/navigation';
 import { t } from './i18n';
-import { currentYearMonth, todayLocal } from './util/time';
-import { availableYears, type ReportPeriod } from './domain/reportPeriod';
+import { todayLocal } from './util/time';
+import type { ReportPeriod } from './domain/reportPeriod';
 import { UI } from './ui-contract';
 import type { Screen } from './ui/navigation';
 import type { FormMode } from './ui/entryModes';
@@ -45,16 +46,16 @@ export function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [entryInit, setEntryInit] = useState<EntryInit | null>(null);
   const [journalFilter, setJournalFilter] = useState<JournalFilter | null>(null);
-  const [picker, setPicker] = useState<'year' | 'month' | null>(null);
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [exitConfirm, setExitConfirm] = useState(false);
   // オンボーディングは「初回状態からの派生 + ユーザー操作の上書き」で開閉する
   // （effect での setState を避ける。render 中の派生調整パターン）。
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [onboardingManualOpen, setOnboardingManualOpen] = useState(false);
-  const [period, setPeriod] = useState<ReportPeriod>(() => {
-    const { year, month } = currentYearMonth();
-    return { mode: 'month', year, month };
-  });
+  const [period, setPeriod] = useState<ReportPeriod>(() => ({
+    mode: 'date',
+    date: todayLocal(),
+  }));
 
   // 端末/ブラウザ Back の中央制御。overlay → (overlay 側 dirty guard) → 画面履歴 → 終了確認。
   const { view, navigate, beginExit } = useAppHistory({
@@ -64,7 +65,15 @@ export function App() {
     isExitConfirmOpen: () => exitConfirm,
   });
   const screen = view as Screen;
-  const go = (s: Screen) => navigate(s);
+  const go = (s: Screen) => {
+    setJournalFilter(null);
+    navigate(s);
+  };
+  // ヘッダーの日付を変えたら明示フィルターより日付を優先する（フィルターが居座らない）。
+  const changePeriod = (next: ReportPeriod) => {
+    setJournalFilter(null);
+    setPeriod(next);
+  };
 
   // 初回起動（完全に初期 seed 状態 + 未既読）だけ、初期残高の一括登録を自動表示する。
   const onboardingAutoOpen =
@@ -90,39 +99,22 @@ export function App() {
   }
 
   if (status === 'error' || !ledger) {
-    return (
-      <main className="app-main">
-        <div className="banner" role="alert">
-          <Icon name="alert" size={18} />
-          {error ?? t('toast.error')}
-        </div>
-      </main>
-    );
+    // banner だけで終わらせない: 設定（JSON 読み込み・スナップショット復元）へ入れる。
+    return <RecoveryScreen message={error} />;
   }
 
   const openCreate = (mode: FormMode) => setEntryInit({ kind: 'create', mode });
   const openEdit = (entry: JournalEntry) => setEntryInit({ kind: 'edit', entry });
   const openReversal = (source: JournalEntry) => setEntryInit({ kind: 'reversal', source });
 
+  // 明示フィルターは「その遷移だけ」のもの。go は必ず捨てるので、accountId を持たない
+  // 日付だけの絞り込み（解除チップが出ない）が居座らない。
   const goJournalFiltered = (filter: JournalFilter) => {
+    navigate('journal');
     setJournalFilter(filter);
-    go('journal');
   };
 
   const today = todayLocal();
-  const periodYears = availableYears(
-    [
-      ...ledger.journalEntries.map((e) => e.date),
-      ...ledger.cashflowSchedules.map((s) => s.dueDate),
-      ...ledger.recurringRules.map((rule) => `${rule.startMonth}-01`),
-      ...ledger.monthlyCostItems.flatMap((item) => [
-        `${item.startMonth}-01`,
-        ...(item.endMonth ? [`${item.endMonth}-01`] : []),
-      ]),
-    ],
-    Number.parseInt(today.slice(0, 4), 10),
-    period.mode !== 'all' ? period.year : undefined,
-  );
 
   // --- メニュー items ビルド ---
   const menuItems: MenuItem[] = [
@@ -143,44 +135,22 @@ export function App() {
   ];
 
   // --- ヘッダー中央の期間コンテキスト ---
-  const yearAriaLabel =
-    period.mode === 'all' ? t('period.allPeriod') : t('period.yearUnit', { year: period.year });
-  const monthAriaLabel =
-    period.mode === 'month' ? t('period.monthUnit', { month: period.month }) : t('period.fullYear');
-  const yearDisplay = period.mode === 'all' ? t('period.allPeriod') : String(period.year);
-  const monthDisplay = period.mode === 'month' ? String(period.month) : t('period.fullYearShort');
+  // year/all は俯瞰ロジックとして残すが、現時点のヘッダー UI は日付選択だけを公開する。
+  const selectedDate = period.mode === 'date' ? period.date : today;
 
   const periodCenter = (
     <div className="period-context">
       <button
         type="button"
         className="period-context__chip"
-        onClick={() => setPicker('year')}
+        onClick={() => setDatePickerOpen(true)}
         aria-haspopup="dialog"
-        aria-label={`${yearAriaLabel} — ${t('period.openYear')}`}
-        data-ui={UI.period.yearTrigger}
+        aria-label={`${selectedDate} — ${t('period.openDate')}`}
+        data-ui={UI.period.dateTrigger}
       >
-        <span className="period-context__text">{yearDisplay}</span>
+        <span className="period-context__text">{selectedDate}</span>
         <Icon name="expand" size={14} />
       </button>
-      {period.mode !== 'all' ? (
-        <>
-          <span className="period-context__sep" aria-hidden="true">
-            /
-          </span>
-          <button
-            type="button"
-            className="period-context__chip"
-            onClick={() => setPicker('month')}
-            aria-haspopup="dialog"
-            aria-label={`${monthAriaLabel} — ${t('period.openMonth')}`}
-            data-ui={UI.period.monthTrigger}
-          >
-            <span className="period-context__text">{monthDisplay}</span>
-            <Icon name="expand" size={14} />
-          </button>
-        </>
-      ) : null}
     </div>
   );
 
@@ -220,20 +190,11 @@ export function App() {
         }
       />
 
-      {picker === 'year' ? (
-        <PeriodYearPicker
-          period={period}
-          years={periodYears}
-          onChange={setPeriod}
-          onClose={() => setPicker(null)}
-        />
-      ) : null}
-      {picker === 'month' ? (
-        <PeriodMonthPicker
-          period={period}
-          today={today}
-          onChange={setPeriod}
-          onClose={() => setPicker(null)}
+      {datePickerOpen ? (
+        <PeriodDatePicker
+          date={selectedDate}
+          onChange={(date) => changePeriod({ mode: 'date', date })}
+          onClose={() => setDatePickerOpen(false)}
         />
       ) : null}
 
@@ -241,7 +202,7 @@ export function App() {
         {screen === 'dashboard' ? (
           <Dashboard
             period={period}
-            onPeriodChange={setPeriod}
+            onPeriodChange={changePeriod}
             onAddEntry={openCreate}
             onEditEntry={openEdit}
             onNavigate={go}
@@ -252,7 +213,7 @@ export function App() {
           <Breakdown
             section="revenue"
             period={period}
-            onPeriodChange={setPeriod}
+            onPeriodChange={changePeriod}
             onDrillDown={goJournalFiltered}
             onNavigate={go}
           />
@@ -260,19 +221,19 @@ export function App() {
         {screen === 'expenseBreakdown' ? (
           <ExpenseBreakdown
             period={period}
-            onPeriodChange={setPeriod}
+            onPeriodChange={changePeriod}
             onDrillDown={goJournalFiltered}
             onNavigate={go}
           />
         ) : null}
         {screen === 'netIncome' ? (
-          <NetIncome period={period} onPeriodChange={setPeriod} onNavigate={go} />
+          <NetIncome period={period} onPeriodChange={changePeriod} onNavigate={go} />
         ) : null}
         {screen === 'assetsBreakdown' ? (
           <Breakdown
             section="asset"
             period={period}
-            onPeriodChange={setPeriod}
+            onPeriodChange={changePeriod}
             onDrillDown={goJournalFiltered}
             onNavigate={go}
           />
@@ -281,7 +242,7 @@ export function App() {
           <Breakdown
             section="liability"
             period={period}
-            onPeriodChange={setPeriod}
+            onPeriodChange={changePeriod}
             onDrillDown={goJournalFiltered}
             onNavigate={go}
           />
@@ -290,7 +251,7 @@ export function App() {
           <Breakdown
             section="equity"
             period={period}
-            onPeriodChange={setPeriod}
+            onPeriodChange={changePeriod}
             onDrillDown={goJournalFiltered}
             onNavigate={go}
           />

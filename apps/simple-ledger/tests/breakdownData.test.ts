@@ -19,7 +19,7 @@ const accounts: Account[] = [
   },
   {
     id: 'opening',
-    name: '開始残高',
+    name: '初期残高',
     type: 'equity',
     role: 'equity',
     archived: false,
@@ -72,7 +72,6 @@ function ledgerOf(journalEntries: JournalEntry[]): Ledger {
     settings: { ledgerName: 'test', currency: 'JPY', locale: 'ja' },
     accounts,
     journalEntries,
-    allocations: [],
     cashflowSchedules: [],
     reserves: [],
     tags: [],
@@ -89,7 +88,7 @@ describe('buildSectionTrends（画面サマリーと同じ期間基準）', () =
   const ledger = ledgerOf([opening, futureExpense]);
 
   it('当月の資産サマリーと年推移の当月ストック点が一致する', () => {
-    const basis = reportBasis({ mode: 'month', year: 2026, month: 7 }, today);
+    const basis = reportBasis({ mode: 'date', date: today }, today);
     const entries = reportEntriesForAsOf(ledger, basis.asOf, today);
     const summary = deriveBalanceSheet(accounts, entries, basis.asOf);
     const trends = buildSectionTrends({ mode: 'year', year: 2026 }, ledger, today);
@@ -99,8 +98,8 @@ describe('buildSectionTrends（画面サマリーと同じ期間基準）', () =
     expect(july?.value).toBe(summary.totalAssets);
   });
 
-  it('当期フローだけを今日で止め、開始残高−支出と純資産を一致させる', () => {
-    const basis = reportBasis({ mode: 'month', year: 2026, month: 7 }, today);
+  it('当期フローだけを今日で止め、初期残高−支出と純資産を一致させる', () => {
+    const basis = reportBasis({ mode: 'date', date: today }, today);
     const entries = reportEntriesForAsOf(ledger, basis.asOf, today);
     const pl = deriveProfitAndLoss(accounts, entries, basis.flowRange);
     const bs = deriveBalanceSheet(accounts, entries, basis.asOf);
@@ -111,12 +110,7 @@ describe('buildSectionTrends（画面サマリーと同じ期間基準）', () =
   });
 
   it.each([
-    [
-      '過去月',
-      { mode: 'month', year: 2026, month: 5 } as const,
-      20_000,
-      70_000,
-    ],
+    ['過去月', { mode: 'date', date: '2026-05-31' } as const, 20_000, 70_000],
     ['過去年', { mode: 'year', year: 2025 } as const, 10_000, 90_000],
   ])('%sは期間末までの既存数値を変えない', (_label, period, expense, netAssets) => {
     const pastLedger = ledgerOf([

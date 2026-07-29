@@ -21,8 +21,6 @@ export const MODE_ROLES: Record<FormMode, readonly [EntryRole, EntryRole]> = {
   ],
   expense: [
     {
-      // 使い道に固定資産(fixed-asset)は出さない。PC・車などの取得は「継続コスト化」で
-      // 継続コスト資産として扱う（入力時に会計分類を選ばせない）。
       side: 'debit',
       labelKey: 'entry.expense.category',
       allowedRoles: ['expense-category'],
@@ -76,7 +74,6 @@ export const MODE_FLOW: Record<FlowMode, FlowDef> = {
       allowedRoles: ['daily-asset', 'payment-liability'],
     },
     destination: {
-      // fixed-asset は出さない（上の MODE_ROLES.expense と同じ理由）。
       side: 'debit',
       labelKey: 'entry.destination.expense',
       allowedRoles: ['expense-category'],

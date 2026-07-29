@@ -5,7 +5,7 @@
  * - ユーザーは箱の中の内訳だけを追加・名前変更・アーカイブできる（削除は出さない）。
  * - 資産・負債の内訳行には残高補正の導線を置く（補正は対象科目が決まってから行う操作のため）。
  * - 登録済みの初期残高・補正の履歴はこの画面に置かず、仕訳一覧に委ねる。
- * - 開始残高(equity)・調整用(system-adjustment)・内部集約 role は聖域として表示しない。
+ * - 初期残高(equity)・調整用(system-adjustment)・内部集約 role は聖域として表示しない。
  */
 import { useMemo, useState } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
@@ -53,7 +53,6 @@ export function Accounts() {
         entries: ledger?.journalEntries ?? [],
         schedules: ledger?.cashflowSchedules ?? [],
         reserves: ledger?.reserves ?? [],
-        allocations: ledger?.allocations ?? [],
         monthlyCostItems: ledger?.monthlyCostItems ?? [],
       }),
     [ledger],
@@ -123,8 +122,6 @@ export function Accounts() {
 
       <div className="stack" data-ui={UI.accounts.list}>
         {groups.map(({ box, accounts }) => {
-          // 追加導線のない箱（継続コスト資産）は、内訳が無ければ行ごと出さない。
-          if (!box.createRole && accounts.length === 0) return null;
           const canAdjust = box.type === 'asset' || box.type === 'liability';
           return (
             <div key={box.key}>
@@ -257,7 +254,7 @@ export function Accounts() {
       {editing ? <AccountSheet existing={editing} onClose={() => setEditing(null)} /> : null}
       {adjustingAccount ? (
         // 履歴が全く無い科目への実残高入力は補正（差分が収入/費用扱い）ではなく
-        // 初期残高（開始残高）として登録する。履歴があれば従来どおり補正。
+        // 初期残高として登録する。履歴があれば従来どおり補正。
         accountHasEntries(entries, adjustingAccount.id) ? (
           <AdjustmentCreateSheet
             account={adjustingAccount}
