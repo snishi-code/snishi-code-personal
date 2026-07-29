@@ -104,10 +104,9 @@ async function getSettings(): Promise<Settings | undefined> {
 export async function ensureInitialized(): Promise<void> {
   const meta = await getMeta();
   if (meta) {
-    // v2 は v16 相当の最新モデルを版 1 として開始し、版 2（2026-07-28）で管理区分・
-    // 支払い手段を廃止した。後方互換をコードで持たない（作者決定）ため、起動時の
-    // schemaVersion 追従（恒等移行等）はここには無い。旧版データが必要になったら
-    // 単発変換で対応する。編集追跡(revision)はここでは変えない（import の競合判定に影響させない）。
+    // 後方互換をコードで持たない（作者決定）ため、起動時の schemaVersion 追従
+    // （恒等移行等）はここには無い。旧版データが必要になったら単発変換で対応する。
+    // 編集追跡(revision)はここでは変えない（import の競合判定に影響させない）。
     return;
   }
   const accounts = defaultAccounts();
@@ -2276,7 +2275,7 @@ export async function createSubscriptionMigration(
  *    - 関連返済 CF が 1 件でも posted なら拒否（現金/負債が既に動いている）。
  *    - 全て未実績なら、関連返済 CF を新総額で再配分し、生成支払い仕訳の借方/貸方金額も同時更新する。
  *  - **認識先(expenseAccountId)の変更**は、生成支払い仕訳の借方科目も同時更新する。
- *  - 管理区分・支払い元・返済口座・由来・recognition 科目・id・createdAt は変更不可（既存値を保持）。
+ *  - 支払い元・返済口座・由来・recognition 科目・id・createdAt は変更不可（既存値を保持）。
  */
 export async function upsertMonthlyCost(item: MonthlyCostItem): Promise<void> {
   const [items, entries, schedules, disposals] = await Promise.all([

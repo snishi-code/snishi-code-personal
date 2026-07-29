@@ -30,13 +30,13 @@ export type StoreName = (typeof STORE)[keyof typeof STORE];
 
 /**
  * foundation の DatabaseHandle。v1=初期ストア一括作成・v2=recurringRules 追加・
- * v3=管理区分/支払い手段ストアの削除（contains ガードで冪等）。
+ * v3=廃止した旧ストアの削除（現行 STORE との差分で判定するので冪等）。
  */
 export const db = createDatabase({
   name: DB_NAME,
   version: DB_VERSION,
   upgrade: (idb) => {
-    // v3: 現行 STORE に無いレガシーストア（廃止した管理区分・支払い手段のもの）を削除する。
+    // 現行 STORE に無いレガシーストアを削除する。
     const wanted = new Set<string>(Object.values(STORE));
     for (const name of Array.from(idb.objectStoreNames)) {
       if (!wanted.has(name)) idb.deleteObjectStore(name);

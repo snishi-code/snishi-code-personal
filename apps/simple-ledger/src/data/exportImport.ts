@@ -8,8 +8,7 @@
  *  4. 検証・置換が成功するまで既存 DB を壊さない（置換は単一トランザクションで原子的）。
  *  5. revision 不一致は自動上書きせず、呼び出し側の確認（force）を求める。MVP は自動マージしない。
  *
- * v2 の封筒は APP_ID('snishi-code.simple-ledger-v2') + SCHEMA_VERSION（現行 2。
- * 版 2 = 管理区分・支払い手段の廃止・2026-07-28）。
+ * v2 の封筒は APP_ID('snishi-code.simple-ledger-v2') + SCHEMA_VERSION（現行 2）。
  * migration チェーンは**空**（後方互換をコードで持たない作者決定。旧版が読みたければ
  * 単発変換で対応する）。現行版以外（版 1・v1 の 16・未来版）は unsupported-version で
  * fail-closed に拒否される。
