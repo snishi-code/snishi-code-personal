@@ -1,0 +1,20 @@
+{
+  "id": "./template-memo-test",
+  "name": "テンプレメモ テスト — template-memo",
+  "short_name": "テンプレメモ test",
+  "description": "外部送信ゼロのローカルファーストなテンプレートメモ テスト環境。定型文テンプレートから巡回メモを素早く作り、QRで書き出します。データは端末内にのみ保存します。",
+  "lang": "ja",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f8fafc",
+  "theme_color": "#14b8a6",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

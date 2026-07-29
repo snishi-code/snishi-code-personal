@@ -1,0 +1,19 @@
+{
+  "name": "template-memo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "テンプレメモ(定型文テンプレートで巡回メモを作りQR出力・ローカルファースト)",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@snishi/foundation": "*",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  }
+}

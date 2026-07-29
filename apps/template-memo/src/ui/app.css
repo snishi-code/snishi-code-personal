@@ -1,0 +1,182 @@
+/*
+ * アプリ固有スタイル。基本は foundation の tokens.css / foundation.css / components.css に
+ * 乗り、ここには template-memo 固有のレイアウトとステータス表示だけを置く。
+ * クラス接頭辞は tm-。
+ */
+
+/* ============ 画面骨格 ============ */
+
+.tm-screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 72px);
+}
+
+.tm-main {
+  flex: 1;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 12px 16px 24px;
+  box-sizing: border-box;
+}
+
+/* 下部固定バー（主要アクション用・44px タップ領域確保） */
+.tm-bottom-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  padding: 10px 16px calc(env(safe-area-inset-bottom, 0px) + 10px);
+  background: var(--surface, #ffffff);
+  border-top: 1px solid var(--border, #e2e8f0);
+  z-index: 20;
+}
+
+/* ============ ステータス（5色） ============ */
+
+.tm-status-dot {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  flex: none;
+}
+
+.tm-status-dot[data-status='none'] {
+  background: var(--status-none-bg);
+  border-color: var(--status-none-border);
+}
+.tm-status-dot[data-status='yellow'] {
+  background: var(--status-yellow);
+}
+.tm-status-dot[data-status='green'] {
+  background: var(--status-green);
+}
+.tm-status-dot[data-status='gray'] {
+  background: var(--status-gray);
+}
+.tm-status-dot[data-status='blue'] {
+  background: var(--status-blue);
+}
+
+/* 一覧行の背景も薄くステータス色を敷く（視認性・旧回診の操作感） */
+.tm-subject-row[data-status='yellow'] {
+  background: var(--status-yellow-bg);
+}
+.tm-subject-row[data-status='green'] {
+  background: var(--status-green-bg);
+}
+.tm-subject-row[data-status='gray'] {
+  background: var(--status-gray-bg);
+}
+.tm-subject-row[data-status='blue'] {
+  background: var(--status-blue-bg);
+}
+
+/* ============ 一覧・カード ============ */
+
+.tm-subject-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 12px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  background: var(--surface, #ffffff);
+  box-sizing: border-box;
+  text-align: left;
+}
+
+.tm-subject-row + .tm-subject-row {
+  margin-top: 8px;
+}
+
+.tm-subject-meta {
+  color: var(--muted, #64748b);
+  font-size: 0.85em;
+}
+
+.tm-card {
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 12px;
+  background: var(--surface, #ffffff);
+  padding: 12px;
+  margin-top: 12px;
+}
+
+.tm-card-title {
+  font-weight: 600;
+  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tm-textarea {
+  width: 100%;
+  min-height: 72px;
+  box-sizing: border-box;
+  resize: vertical;
+  font: inherit;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #cbd5e1);
+  border-radius: 8px;
+}
+
+.tm-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* 定型文・呼び出し群のチップ（44px タップ領域） */
+.tm-chip {
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: 22px;
+  border: 1px solid var(--primary-border);
+  background: var(--primary-light);
+  color: var(--primary-strong);
+  font: inherit;
+}
+
+.tm-chip:active {
+  background: var(--primary-border);
+}
+
+/* ============ QR ============ */
+
+.tm-qr-canvas-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0;
+}
+
+.tm-qr-canvas-wrap canvas {
+  max-width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+}
+
+.tm-qr-source {
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  background: var(--surface-2, #f8fafc);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  padding: 8px;
+  max-height: 40dvh;
+  overflow: auto;
+}
