@@ -267,6 +267,17 @@ describe('composeItem', () => {
       '肺音：明らかなラ音なし',
     );
   });
+
+  it('select: text と同じ経路で選択値を合成する', () => {
+    const it_ = item({
+      id: 'i',
+      label: '方針',
+      kind: 'select',
+      options: ['経過観察', '精査'],
+    });
+    expect(composeItem(it_, '', '：')).toBe('');
+    expect(composeItem(it_, { value: '精査', source: 'manual' }, '：')).toBe('方針：精査');
+  });
 });
 
 // ============================
@@ -446,6 +457,23 @@ describe('normalizeItem', () => {
       kind: 'number',
       label: '',
     });
+  });
+
+  it('select は空選択肢を除外し、1 件も残らなければ row を捨てる', () => {
+    expect(
+      normalizeItem({
+        kind: 'select',
+        label: '方針',
+        options: [' 経過観察 ', '', '精査'],
+        normal: '持たせない',
+        unit: '持たせない',
+      }),
+    ).toMatchObject({
+      kind: 'select',
+      label: '方針',
+      options: ['経過観察', '精査'],
+    });
+    expect(normalizeItem({ kind: 'select', label: '方針', options: ['', 1] })).toBeNull();
   });
 
   it('id 欠落は itm_ prefix で採番して救う', () => {

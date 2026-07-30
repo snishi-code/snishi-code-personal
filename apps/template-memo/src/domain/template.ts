@@ -23,10 +23,10 @@ import type { FormValues, Patient } from './types';
 // 型
 // ============================
 
-type ItemKind = 'text' | 'number' | 'fraction';
+export type ItemKind = 'text' | 'number' | 'fraction' | 'select';
 
 /** 群の表示方式。always = カード常設（値保存）/ oncall = チップから呼び出し（本文へ挿入）。 */
-type GroupDisplay = 'always' | 'oncall';
+export type GroupDisplay = 'always' | 'oncall';
 
 /** 小項目。text は正常文ワンタップ（normal）対応。 */
 export interface TemplateItem {
@@ -37,6 +37,8 @@ export interface TemplateItem {
   unit?: string;
   /** text の正常文（ワンタップ入力・全部正常の対象）。 */
   normal?: string;
+  /** select の選択肢（1 個以上）。 */
+  options?: string[];
   /** 合成でラベルを出すか。未定義は true 扱い。false は値だけを出す。 */
   showLabel?: boolean;
 }
@@ -241,19 +243,30 @@ function str(v: unknown, fallback = ''): string {
 export function normalizeItem(raw: unknown): TemplateItem | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
-  const kind: ItemKind = r.kind === 'number' || r.kind === 'fraction' ? r.kind : 'text';
+  const kind: ItemKind =
+    r.kind === 'number' || r.kind === 'fraction' || r.kind === 'select' ? r.kind : 'text';
   const item: TemplateItem = {
     id: str(r.id) || newId('itm'),
     label: str(r.label),
     kind,
   };
-  const unit = str(r.unit);
-  if (unit !== '') item.unit = unit;
-  const normal = str(r.normal);
-  if (normal !== '') item.normal = normal;
+  if (kind === 'number' || kind === 'fraction') {
+    const unit = str(r.unit);
+    if (unit !== '') item.unit = unit;
+  } else if (kind === 'text') {
+    const normal = str(r.normal);
+    if (normal !== '') item.normal = normal;
+  } else {
+    const options = (Array.isArray(r.options) ? r.options : [])
+      .filter((option): option is string => typeof option === 'string')
+      .map((option) => option.trim())
+      .filter((option) => option !== '');
+    if (options.length === 0) return null;
+    item.options = options;
+  }
   if (r.showLabel === false) item.showLabel = false;
   // text はラベルも正常文も無いと入力欄の意味が立たないので捨てる。
-  // number/fraction はラベル無しが正当（例 血糖 108-222-100 の 2 つ目以降）。
+  // number/fraction/select はラベル無しが正当。
   if (item.kind === 'text' && item.label === '' && item.normal === undefined) return null;
   return item;
 }

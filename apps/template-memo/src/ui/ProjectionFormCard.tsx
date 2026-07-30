@@ -57,6 +57,35 @@ function ItemRow({
   const inputRef = useRef<HTMLInputElement>(null);
   const label = labelWithUnit(item.label, item.unit);
 
+  if (item.kind === 'select') {
+    const value = readTextValue(rawValue);
+    return (
+      <div className="projectionField">
+        {item.label !== '' ? <span className="projectionFieldLabel">{item.label}</span> : null}
+        <div className="tagSelection">
+          {(item.options ?? []).map((option) => {
+            const selected = value === option;
+            return (
+              <button
+                key={option}
+                type="button"
+                className={`tagChip${selected ? ' selected' : ''}`}
+                aria-pressed={selected}
+                data-ui={UI.projection.field}
+                onClick={() => {
+                  onWrite(manualTextEntry(selected ? '' : option));
+                  hapticTick();
+                }}
+              >
+                {option}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   if (item.kind === 'text') {
     const value = readTextValue(rawValue);
     const isPreset =

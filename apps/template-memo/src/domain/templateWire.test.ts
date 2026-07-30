@@ -52,6 +52,12 @@ function fixtureTemplate(): Template {
               { id: 'itm_bp', label: 'BP', kind: 'fraction', unit: 'mmHg' },
               { id: 'itm_hr', label: 'HR', kind: 'number' },
               { id: 'itm_lung', label: '肺音', kind: 'text', normal: '明らかなラ音なし' },
+              {
+                id: 'itm_course',
+                label: '方針',
+                kind: 'select',
+                options: ['経過観察', '精査'],
+              },
             ],
           },
           {
@@ -131,7 +137,7 @@ describe('template wire roundtrip', () => {
     expect(summarizeTemplate(fixtureTemplate())).toEqual({
       sections: 2,
       groups: 2,
-      items: 5,
+      items: 6,
     });
   });
 });
