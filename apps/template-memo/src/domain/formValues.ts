@@ -29,9 +29,17 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 
 type TextSource = 'empty' | 'preset' | 'manual';
 
-/** text 保存値から「現在の値文字列」を取り出す（object の .value。それ以外は未入力）。 */
+/** text 保存値から現在値を取り出す。source の無い数値形などは kind 変更の残骸として落とす。 */
 export function readTextValue(stored: unknown): string {
-  return isPlainObject(stored) ? String(stored.value ?? '') : '';
+  if (!isPlainObject(stored)) return '';
+  if (stored.source !== 'preset' && stored.source !== 'manual') return '';
+  return String(stored.value ?? '');
+}
+
+/** select は TextEntry 形に加え、現在の options に存在する値だけを採用する。 */
+export function readSelectValue(stored: unknown, options: readonly string[]): string {
+  const value = readTextValue(stored);
+  return options.includes(value) ? value : '';
 }
 
 /**
@@ -84,6 +92,7 @@ export function manualTextEntry(value: string): TextEntry | '' {
 /** number/fraction 保存値を { value, note } に正規化する（object 以外は未入力）。 */
 export function readNumericEntry(stored: unknown): { value: string; note: string } {
   if (!isPlainObject(stored)) return { value: '', note: '' };
+  if ('source' in stored) return { value: '', note: '' };
   return { value: String(stored.value ?? ''), note: String(stored.note ?? '') };
 }
 

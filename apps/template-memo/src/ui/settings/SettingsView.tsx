@@ -24,7 +24,8 @@ import {
   type WorkspaceImportCandidate,
   type WorkspaceImportData,
 } from '../../domain/importWorkspace';
-import type { Template } from '../../domain/template';
+import { buildDailyReportPreset, buildRoundPreset, type Template } from '../../domain/template';
+import { newId } from '../../data/constants';
 import { REASON } from '../../data/snapshots';
 import { useRevision, type AppRuntime } from '../appRuntime';
 import { AddTagWidget } from '../TagPicker';
@@ -34,6 +35,7 @@ import { OverlayBinding, useRegisterOverlay } from '../registries';
 import { downloadTextFile, pickTextFile } from '../files';
 import { TemplateQrSendDialog } from '../TemplateQrSendDialog';
 import { TemplateQrReceiveDialog } from '../TemplateQrReceiveDialog';
+import { TemplateEditView } from '../TemplateEditView';
 import { errorText, s } from '../../i18n';
 import { UI } from '../../ui-contract';
 
@@ -181,7 +183,13 @@ function TagManagerSection({ runtime }: { runtime: AppRuntime }) {
 // テンプレート (有効切替 / QR送受信 / 削除)。編集 UI は持たない (QR/プリセットで受け渡し)。
 // ============================
 
-function TemplateSection({ runtime }: { runtime: AppRuntime }) {
+function TemplateSection({
+  runtime,
+  onEdit,
+}: {
+  runtime: AppRuntime;
+  onEdit: (template: Template) => void;
+}) {
   const toast = useToast();
   useRevision(runtime);
   const { store } = runtime;
@@ -221,6 +229,42 @@ function TemplateSection({ runtime }: { runtime: AppRuntime }) {
     }
   }
 
+  async function addPreset(kind: 'round' | 'daily'): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const template =
+        kind === 'round' ? buildRoundPreset(Date.now()) : buildDailyReportPreset(Date.now());
+      await store.saveTemplate(template);
+      runtime.bump();
+    } catch (error) {
+      toast.show(errorText(error, s.toast.saveFailed), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function addEmpty(): void {
+    const sectionId = newId('sec');
+    onEdit({
+      id: newId('tpl'),
+      name: '',
+      includeProblems: false,
+      includeHandover: false,
+      memoSectionId: sectionId,
+      sections: [
+        {
+          id: sectionId,
+          title: '',
+          keepWhenEmpty: false,
+          freeText: true,
+          groups: [],
+        },
+      ],
+      updatedAt: Date.now(),
+    });
+  }
+
   return (
     <div className="card card--pad settingsSection">
       <div className="section-label">{s.settings.template.section}</div>
@@ -241,6 +285,9 @@ function TemplateSection({ runtime }: { runtime: AppRuntime }) {
                 </span>
               </button>
               <span className="formatListActions">
+                <IconButton label={s.common.edit} onClick={() => onEdit(tpl)}>
+                  <Icon name="edit" size={16} />
+                </IconButton>
                 <IconButton label={s.settings.template.qrSend} onClick={() => setSendTarget(tpl)}>
                   <Icon name="qr" size={16} />
                 </IconButton>
@@ -256,6 +303,15 @@ function TemplateSection({ runtime }: { runtime: AppRuntime }) {
       </div>
       <div className="settingsRowActions">
         <Button onClick={() => setReceiveOpen(true)}>{s.settings.template.qrReceive}</Button>
+        <Button disabled={busy} onClick={() => void addPreset('round')}>
+          {s.settings.template.addRound}
+        </Button>
+        <Button disabled={busy} onClick={() => void addPreset('daily')}>
+          {s.settings.template.addDaily}
+        </Button>
+        <Button disabled={busy} onClick={addEmpty}>
+          {s.settings.template.addEmpty}
+        </Button>
       </div>
 
       {sendTarget ? <OverlayBinding onClose={() => setSendTarget(null)} /> : null}
@@ -948,11 +1004,17 @@ export function SettingsView({
   onNavigateHome?: () => void;
 }) {
   useRevision(runtime);
+  const [editing, setEditing] = useState<Template | null>(null);
+  if (editing) {
+    return (
+      <TemplateEditView runtime={runtime} template={editing} onDone={() => setEditing(null)} />
+    );
+  }
   // 設定入口はヘッダー右上の 1 つだけ。画面タイトルの見出しは出さない (内容を見れば分かる)。
   return (
     <section aria-label={s.header.settings} className="settingsView" data-ui={UI.settings.view}>
       <TagManagerSection runtime={runtime} />
-      <TemplateSection runtime={runtime} />
+      <TemplateSection runtime={runtime} onEdit={setEditing} />
       <QrOutputSection runtime={runtime} />
       <PlaceSection runtime={runtime} />
       <DataSection runtime={runtime} />

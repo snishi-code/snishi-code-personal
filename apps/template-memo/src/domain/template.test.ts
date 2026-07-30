@@ -319,6 +319,13 @@ describe('composeGroup', () => {
     const g2 = { ...g, name: '' };
     expect(composeGroup(g2, { b: { value: '63' } }).text).toBe('HR 63');
   });
+
+  it('項目を並び替えても安定 id で対応する値を読む', () => {
+    const reordered = { ...g, items: [g.items[1]!, g.items[0]!] };
+    expect(composeGroup(reordered, { a: { value: '120/80' }, b: { value: '63' } }).text).toBe(
+      '（バイタル）\nHR 63, BP 120/80',
+    );
+  });
 });
 
 describe('composeSection', () => {

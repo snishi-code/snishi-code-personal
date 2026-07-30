@@ -58,6 +58,18 @@ export const UI = {
     sheet: 'projection.sheet',
     sheetSave: 'projection.sheet.save',
   },
+  templateEdit: {
+    view: 'templateEdit.view',
+    section: 'templateEdit.section',
+    group: 'templateEdit.group',
+    item: 'templateEdit.item',
+    field: 'templateEdit.field',
+    kind: 'templateEdit.kind',
+    option: 'templateEdit.option',
+    display: 'templateEdit.display',
+    memoSection: 'templateEdit.memoSection',
+    save: 'templateEdit.save',
+  },
   qr: {
     canvas: 'qr.canvas',
     pageMeta: 'qr.pageMeta',

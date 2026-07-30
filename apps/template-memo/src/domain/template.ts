@@ -16,7 +16,7 @@
  */
 
 import { newId } from '../data/constants';
-import { readGroupValues, readNumericEntry, readTextValue } from './formValues';
+import { readGroupValues, readNumericEntry, readSelectValue, readTextValue } from './formValues';
 import type { FormValues, Patient } from './types';
 
 // ============================
@@ -118,7 +118,10 @@ export function composeItem(item: TemplateItem, rawValue: unknown, labelSep: str
     const base = `${labelPart}${v}${item.unit ?? ''}`;
     return note.trim() === '' ? base : `${base} ${note.trim()}`;
   }
-  const value = readTextValue(rawValue).trim();
+  const value =
+    item.kind === 'select'
+      ? readSelectValue(rawValue, item.options ?? []).trim()
+      : readTextValue(rawValue).trim();
   if (value === '') return '';
   return `${labelPart}${value}`;
 }

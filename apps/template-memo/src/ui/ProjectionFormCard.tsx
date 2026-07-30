@@ -24,6 +24,7 @@ import {
   numericEntry,
   readGroupValues,
   readNumericEntry,
+  readSelectValue,
   readTextValue,
 } from '../domain/formValues';
 import type { Template, TemplateGroup, TemplateItem, TemplateSection } from '../domain/template';
@@ -64,7 +65,7 @@ function ItemRow({
   const label = labelWithUnit(item.label, item.unit);
 
   if (item.kind === 'select') {
-    const value = readTextValue(rawValue);
+    const value = readSelectValue(rawValue, item.options ?? []);
     return (
       <div className="projectionField">
         {item.label !== '' ? <span className="projectionFieldLabel">{item.label}</span> : null}
