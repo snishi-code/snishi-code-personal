@@ -1,0 +1,355 @@
+import { describe, expect, it } from 'vitest';
+import {
+  WORKSPACE_IMPORT_ENCRYPTED_MSG,
+  WORKSPACE_IMPORT_JSON_UNREADABLE_MSG,
+  WORKSPACE_IMPORT_USER_NOT_FOUND_MSG,
+  convertWorkspaceBackup,
+  listImportCandidates,
+  prepareWorkspaceImportAppend,
+  workspaceImportSchemaMismatchMsg,
+} from './importWorkspace';
+import { STATUS } from './types';
+
+const NOW = 1_800_000_000_000;
+
+/** medical 側 buildWorkspaceBackup の envelope / DB schema v7 に沿う合成 fixture。 */
+function makeWorkspaceBackup(): Record<string, unknown> {
+  return {
+    kind: 'HOSPITAL_WORKSPACE_BACKUP',
+    version: 1,
+    appId: 'hospital-workspace',
+    createdAt: '2026-07-30T00:00:00.000Z',
+    schemaVersion: 7,
+    source: { appVersion: 'test' },
+    stores: {
+      appSettings: [
+        { key: 'app', activeSurface: 'rounds', activeUserId: 'usr_a' },
+        {
+          key: 'placesConfig',
+          items: [
+            { placeId: 'place_1', name: '東エリア', showNextVisit: false },
+            { placeId: 'place_2', name: '東エリア', showNextVisit: true },
+            { placeId: 'place_3', name: '西エリア', showNextVisit: false },
+          ],
+          updatedAt: 10,
+        },
+        {
+          key: 'roundsConfig',
+          aiTemplate: { fixedFields: [] },
+          templateRevision: 3,
+          closingPreset: 'A: 著変なし',
+          textSnippets: [
+            { id: 'old_snip_1', label: '確認', body: '確認済み' },
+            { id: 'old_snip_2', label: '  連絡  ', body: '担当へ連絡 __' },
+          ],
+          updatedAt: 20,
+        },
+      ],
+      users: [
+        {
+          id: 'usr_a',
+          name: '利用者A',
+          role: 'member',
+          createdAt: 1,
+          passhash: null,
+        },
+        {
+          id: 'usr_b',
+          name: '利用者B',
+          role: 'member',
+          createdAt: 2,
+          passhash: null,
+        },
+      ],
+      patients: [
+        {
+          patientId: 'pt_1',
+          name: 'サンプル対象1',
+          room: 'A-01',
+          placeId: 'place_1',
+          problems: ['継続課題', '', 42],
+          sharedTags: ['移行しない'],
+          archivedAt: 777,
+          createdAt: 100,
+          updatedAt: 110,
+        },
+        {
+          patientId: 'pt_2',
+          name: 'サンプル対象2',
+          room: 'B-02',
+          placeId: 'place_2',
+          problems: [],
+          createdAt: 200,
+          updatedAt: 210,
+        },
+        {
+          patientId: 'pt_3',
+          name: 'サンプル対象3',
+          room: '',
+          placeId: 'missing_place',
+          problems: ['確認事項'],
+          createdAt: 300,
+        },
+      ],
+      roundsUserStates: [
+        {
+          key: 'usr_a::pt_1',
+          userId: 'usr_a',
+          patientId: 'pt_1',
+          status: 'green',
+          visitMemo: '移行しない今回メモ',
+          standingMemo: 'Aの継続メモ',
+          confirmedNote: 'Aの清書',
+          projectedValues: { 'fixed:x': '移行しない' },
+          tags: ['移行しない'],
+          updatedAt: 120,
+        },
+        {
+          key: 'usr_b::pt_1',
+          userId: 'usr_b',
+          patientId: 'pt_1',
+          status: 'blue',
+          visitMemo: 'Bの今回メモ',
+          standingMemo: 'Bの継続メモ',
+          confirmedNote: 'Bの清書',
+          projectedValues: {},
+          tags: [],
+          updatedAt: 130,
+        },
+        {
+          key: 'usr_a::pt_2',
+          userId: 'usr_a',
+          patientId: 'pt_2',
+          status: 'yellow',
+          visitMemo: '破棄',
+          standingMemo: '対象2の継続メモ',
+          projectedValues: { x: '破棄' },
+          tags: ['破棄'],
+          updatedAt: 220,
+        },
+      ],
+      noteDocuments: [],
+      noteSettings: [],
+      roundsUserSettings: [],
+    },
+    localStorage: { current_user_id: 'usr_a' },
+    counts: {},
+  };
+}
+
+function jsonOf(value: unknown): string {
+  return JSON.stringify(value);
+}
+
+describe('listImportCandidates', () => {
+  it('バックアップの有効なユーザーを列挙し、複数ユーザーを選択可能にする', () => {
+    expect(listImportCandidates(jsonOf(makeWorkspaceBackup()))).toEqual([
+      { id: 'usr_a', name: '利用者A' },
+      { id: 'usr_b', name: '利用者B' },
+    ]);
+  });
+
+  it('壊れた user row と重複 id を捨てる', () => {
+    const backup = makeWorkspaceBackup();
+    const stores = backup.stores as Record<string, unknown[]>;
+    (stores.users ??= []).push(
+      null,
+      { id: '', name: '壊れ' },
+      { id: 'usr_bad' },
+      { id: 'usr_a', name: '重複' },
+    );
+    expect(listImportCandidates(jsonOf(backup))).toEqual([
+      { id: 'usr_a', name: '利用者A' },
+      { id: 'usr_b', name: '利用者B' },
+    ]);
+  });
+});
+
+describe('convertWorkspaceBackup', () => {
+  it('place 同名を 1 Group にまとめ、選択ユーザーの継続メモ・清書だけを移行する', () => {
+    const converted = convertWorkspaceBackup(jsonOf(makeWorkspaceBackup()), 'usr_a', {
+      nowMs: NOW,
+    });
+
+    expect(converted.groups.map((group) => group.name)).toEqual(['東エリア', '西エリア']);
+    expect(converted.groups.map((group) => group.sortOrder)).toEqual([1, 2]);
+    const east = converted.groups[0];
+    expect(east).toBeDefined();
+
+    expect(converted.subjects).toHaveLength(3);
+    const first = converted.subjects.find((subject) => subject.name === 'サンプル対象1');
+    const second = converted.subjects.find((subject) => subject.name === 'サンプル対象2');
+    const third = converted.subjects.find((subject) => subject.name === 'サンプル対象3');
+    expect(first).toMatchObject({
+      name: 'サンプル対象1',
+      code: 'pt_1',
+      location: 'A-01',
+      groupId: east?.id,
+      sortOrder: 1,
+      status: STATUS.NONE,
+      problems: ['継続課題'],
+      handover: 'Aの継続メモ',
+      confirmedNote: 'Aの清書',
+      sectionText: {},
+      formValues: {},
+      tagIds: [],
+      archivedAt: 777,
+      createdAt: 100,
+      updatedAt: 120,
+    });
+    expect(second).toMatchObject({
+      groupId: east?.id,
+      sortOrder: 2,
+      handover: '対象2の継続メモ',
+      confirmedNote: '',
+    });
+    expect(third).toMatchObject({
+      groupId: null,
+      sortOrder: 1,
+      problems: ['確認事項'],
+      handover: '',
+    });
+    expect(converted.subjects.every((subject) => subject.id.startsWith('sub_'))).toBe(true);
+    expect(JSON.stringify(converted.subjects)).not.toContain('移行しない今回メモ');
+    expect(JSON.stringify(converted.subjects)).not.toContain('fixed:x');
+    expect(JSON.stringify(converted.subjects)).not.toContain('sharedTags');
+  });
+
+  it('ユーザー選択で per-user の継続メモ・清書が切り替わる', () => {
+    const converted = convertWorkspaceBackup(jsonOf(makeWorkspaceBackup()), 'usr_b', {
+      nowMs: NOW,
+    });
+    const first = converted.subjects.find((subject) => subject.name === 'サンプル対象1');
+    expect(first?.handover).toBe('Bの継続メモ');
+    expect(first?.confirmedNote).toBe('Bの清書');
+    // usr_b の状態が無い対象は master だけを移し、個人メモは空。
+    expect(converted.subjects.find((subject) => subject.name === 'サンプル対象2')?.handover).toBe(
+      '',
+    );
+  });
+
+  it('RoundsConfig.textSnippets は新規 id で移し、closingPreset は注記だけにする', () => {
+    const converted = convertWorkspaceBackup(jsonOf(makeWorkspaceBackup()), 'usr_a', {
+      nowMs: NOW,
+    });
+    expect(converted.snippets.map(({ label, body }) => ({ label, body }))).toEqual([
+      { label: '確認', body: '確認済み' },
+      { label: '連絡', body: '担当へ連絡 __' },
+    ]);
+    expect(converted.snippets.every((snippet) => snippet.id.startsWith('snp_'))).toBe(true);
+    expect(converted.snippets.map((snippet) => snippet.id)).not.toContain('old_snip_1');
+    expect(converted.notes).toEqual(['closingPresetSkipped']);
+  });
+
+  it('壊れた patient/state/place/snippet row を捨てて有効 row を救う', () => {
+    const backup = makeWorkspaceBackup();
+    const stores = backup.stores as Record<string, unknown[]>;
+    (stores.patients ??= []).push(
+      null,
+      { patientId: '', name: '壊れ' },
+      { patientId: 'pt_bad' },
+      { patientId: 'pt_blank', name: '   ' },
+      { patientId: 'pt_1', name: '重複' },
+    );
+    (stores.roundsUserStates ??= []).push(
+      { key: 'wrong', userId: 'usr_a', patientId: 'pt_3', standingMemo: '採用しない' },
+      null,
+    );
+    const appSettings = stores.appSettings as Record<string, unknown>[];
+    const places = appSettings.find((row) => row.key === 'placesConfig');
+    const config = appSettings.find((row) => row.key === 'roundsConfig');
+    (places?.items as unknown[]).push(null, { placeId: '', name: '壊れ' });
+    (config?.textSnippets as unknown[]).push(null, { label: '' }, { label: 123 });
+
+    const converted = convertWorkspaceBackup(jsonOf(backup), 'usr_a', { nowMs: NOW });
+    expect(converted.subjects).toHaveLength(3);
+    expect(converted.groups).toHaveLength(2);
+    expect(converted.snippets).toHaveLength(2);
+    expect(converted.subjects.find((subject) => subject.name === 'サンプル対象3')?.handover).toBe(
+      '',
+    );
+  });
+
+  it('未知のユーザー指定を拒否する', () => {
+    expect(() =>
+      convertWorkspaceBackup(jsonOf(makeWorkspaceBackup()), 'usr_missing', { nowMs: NOW }),
+    ).toThrow(WORKSPACE_IMPORT_USER_NOT_FOUND_MSG);
+  });
+});
+
+describe('workspace backup envelope guard', () => {
+  it('壊れた JSON を拒否する', () => {
+    expect(() => listImportCandidates('{bad')).toThrow(WORKSPACE_IMPORT_JSON_UNREADABLE_MSG);
+  });
+
+  it('暗号化封筒は平文で書き出し直す案内を出して拒否する', () => {
+    expect(() =>
+      listImportCandidates(
+        jsonOf({
+          kind: 'HOSPITAL_WORKSPACE_BACKUP_ENC',
+          version: 1,
+          appId: 'hospital-workspace',
+          data: 'E2:...',
+        }),
+      ),
+    ).toThrow(WORKSPACE_IMPORT_ENCRYPTED_MSG);
+  });
+
+  it('DB schema v7 以外は単発変換の対象外として拒否する', () => {
+    const backup = { ...makeWorkspaceBackup(), schemaVersion: 6 };
+    expect(() => listImportCandidates(jsonOf(backup))).toThrow(workspaceImportSchemaMismatchMsg(6));
+  });
+});
+
+describe('prepareWorkspaceImportAppend', () => {
+  it('既存データを含めず、グループと未分類対象の並び順だけを末尾へ補正する', () => {
+    const incoming = convertWorkspaceBackup(jsonOf(makeWorkspaceBackup()), 'usr_a', {
+      nowMs: NOW,
+    });
+    const current = {
+      groups: [{ id: 'grp_existing', name: '既存', sortOrder: 7 }],
+      subjects: [
+        {
+          ...(incoming.subjects[0] as (typeof incoming.subjects)[number]),
+          id: 'sub_existing',
+          groupId: null,
+          sortOrder: 4,
+        },
+      ],
+      snippets: [{ id: 'snp_existing', label: '既存', body: '既存本文' }],
+    };
+
+    const prepared = prepareWorkspaceImportAppend(incoming, current);
+    expect(prepared.groups.map((group) => group.sortOrder)).toEqual([8, 9]);
+    expect(prepared.subjects.find((subject) => subject.name === 'サンプル対象3')?.sortOrder).toBe(
+      5,
+    );
+    expect(prepared.subjects.find((subject) => subject.name === 'サンプル対象1')?.sortOrder).toBe(
+      1,
+    );
+    expect(prepared.snippets).toEqual(incoming.snippets);
+  });
+
+  it('ID衝突と取り込み外グループへの参照を拒否する', () => {
+    const incoming = convertWorkspaceBackup(jsonOf(makeWorkspaceBackup()), 'usr_a', {
+      nowMs: NOW,
+    });
+    expect(() =>
+      prepareWorkspaceImportAppend(incoming, {
+        groups: [incoming.groups[0] as (typeof incoming.groups)[number]],
+        subjects: [],
+        snippets: [],
+      }),
+    ).toThrow('import id collision');
+
+    const broken = {
+      ...incoming,
+      subjects: incoming.subjects.map((subject, index) =>
+        index === 0 ? { ...subject, groupId: 'grp_missing' } : subject,
+      ),
+    };
+    expect(() =>
+      prepareWorkspaceImportAppend(broken, { groups: [], subjects: [], snippets: [] }),
+    ).toThrow('import group reference is invalid');
+  });
+});
