@@ -48,28 +48,6 @@ export const s = {
       label: '継続メモ',
       placeholder: '次回以降も残したい個人メモ。',
     },
-    // 清書 (confirmedNote)。定型清書で作る転記用の完成本文。転記用QR の本文に優先採用される。
-    clean: {
-      label: '清書（転記用）',
-      placeholder: '「定型清書」で作成した清書がここに入ります。編集すると転記用QRに反映されます。',
-    },
-  },
-
-  // 定型文 (今回メモへの挿入部品)。
-  snippet: {
-    btn: '定型文',
-    dialogTitle: '定型文を挿入',
-    empty: '定型文がありません。設定画面で登録できます。',
-    inserted: (label: string) => `「${label}」を挿入しました`,
-  },
-
-  // 定型清書 (非AI): 今回メモ + テンプレートの定型文 (正常文) から清書をワンタップで作る。
-  presetClean: {
-    label: '定型清書（今回メモ＋定型文）',
-    hint: '今回メモの下にテンプレートの定型文（正常文）を付けて清書を作ります。',
-    done: '清書を作成しました',
-    empty: '今回メモも定型文も空です',
-    failed: '清書を作成できませんでした',
   },
 
   // 共通
@@ -102,7 +80,7 @@ export const s = {
       btn: 'ラウンド開始',
       tooltip: '新しいラウンドを開始（記録をクリア）',
       confirm:
-        '新しいラウンドを開始します。前回の記録をクリアしてよろしいですか？\n（ステータス（青以外）・今回メモ・フォーム値・清書をクリアします。問題リスト・継続メモ・タグは残ります）',
+        '新しいラウンドを開始します。前回の記録をクリアしてよろしいですか？\n（ステータス（青以外）・今回メモ・フォーム値をクリアします。問題リスト・継続メモ・タグは残ります）',
     },
     patientQr: {
       title: 'この対象の転記用QRを表示',
@@ -387,15 +365,6 @@ export const s = {
       deleteConfirmTitle: 'テンプレートを削除しますか？',
       deleteConfirmBody: (name: string) => `「${name}」を削除します。対象の入力値は消えません。`,
     },
-    // 設定: 定型文 (今回メモへの挿入部品)
-    snippet: {
-      section: '定型文',
-      label: '名前（一覧に出る短い名前）',
-      body: '本文（空欄は __ などの慣習で）',
-      add: '＋定型文を追加',
-      deleteConfirmTitle: '定型文を削除しますか？',
-      deleteConfirmBody: (label: string) => `「${label}」を削除します。`,
-    },
     // 設定: QR 出力 (改行モード)
     qrOutput: {
       section: 'QR出力',
@@ -420,13 +389,12 @@ export const s = {
       pick: 'バックアップJSONを選ぶ',
       previewTitle: '旧ワークスペースからの移行',
       user: '移行するユーザー',
-      counts: (subjects: number, groups: number, snippets: number) =>
-        `対象 ${subjects} 件 / グループ ${groups} 件 / 定型文 ${snippets} 件`,
+      counts: (subjects: number, groups: number) => `対象 ${subjects} 件 / グループ ${groups} 件`,
       appendOnly:
         '現在のデータは残したまま、上記のデータを追加します。今回メモ・状態・タグ・フォーム値は移行しません。',
       apply: '既存データへ追加',
-      imported: (subjects: number, groups: number, snippets: number) =>
-        `対象 ${subjects} 件・グループ ${groups} 件・定型文 ${snippets} 件を追加しました`,
+      imported: (subjects: number, groups: number) =>
+        `対象 ${subjects} 件・グループ ${groups} 件を追加しました`,
       failed: (reason: string) => `移行できませんでした: ${reason}`,
       noUsers: '移行できるユーザーが見つかりません',
       noteClosingPreset:

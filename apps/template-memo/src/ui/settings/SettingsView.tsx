@@ -1,5 +1,5 @@
 // 設定画面 (コピー元: hospital-workspace/rounds/ui/settings/SettingsView.tsx)。
-//   タグ管理 / テンプレート (有効切替・QR送受信・削除) / 定型文 / QR出力 (改行) /
+//   タグ管理 / テンプレート (有効切替・QR送受信・削除) / QR出力 (改行) /
 //   場所の管理 / バックアップ (JSON 書出・復元) / ワークスペース移行 / 巻き戻し / 全削除 /
 //   操作ガイド (準備中プレースホルダ)
 //
@@ -15,7 +15,7 @@ import { Modal } from '@snishi/foundation/ui/Modal';
 import { useToast } from '@snishi/foundation/ui/toast';
 import type { RestorePoint } from '@snishi/foundation/snapshot/snapshots';
 import { fmtTimestamp } from '@snishi/foundation/format/timestamp';
-import { TAG_COLORS, type Snippet, type TagColor } from '../../domain/types';
+import { TAG_COLORS, type TagColor } from '../../domain/types';
 import { normalizePatientArray } from '../../domain/normalize';
 import { buildBackupJson, parseBackupJson } from '../../domain/backup';
 import {
@@ -25,7 +25,6 @@ import {
   type WorkspaceImportData,
 } from '../../domain/importWorkspace';
 import type { Template } from '../../domain/template';
-import { newId } from '../../data/constants';
 import { REASON } from '../../data/snapshots';
 import { useRevision, type AppRuntime } from '../appRuntime';
 import { AddTagWidget } from '../TagPicker';
@@ -290,98 +289,6 @@ function TemplateSection({ runtime }: { runtime: AppRuntime }) {
             const target = deleteTarget;
             setDeleteTarget(null);
             if (target) void runDelete(target);
-          }}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-// ============================
-// 定型文 (今回メモへの挿入部品)。settings.snippets が正本・write-through。
-// ============================
-
-function SnippetSection({ runtime }: { runtime: AppRuntime }) {
-  const toast = useToast();
-  useRevision(runtime);
-  const { store } = runtime;
-  const snippets = store.getSettings().snippets;
-  const [deleteTarget, setDeleteTarget] = useState<Snippet | null>(null);
-
-  function persist(): void {
-    void store
-      .saveSettings()
-      .then(() => runtime.bump())
-      .catch((e) => {
-        console.error('snippet save failed:', e);
-        toast.show(errorText(e, s.toast.saveFailed), 'error');
-      });
-  }
-
-  function write(id: string, patch: Partial<Snippet>): void {
-    const settings = store.getSettings();
-    settings.snippets = settings.snippets.map((x) => (x.id === id ? { ...x, ...patch } : x));
-    persist();
-  }
-
-  function add(): void {
-    const settings = store.getSettings();
-    settings.snippets = [...settings.snippets, { id: newId('snp'), label: '', body: '' }];
-    persist();
-  }
-
-  function remove(id: string): void {
-    const settings = store.getSettings();
-    settings.snippets = settings.snippets.filter((x) => x.id !== id);
-    persist();
-  }
-
-  return (
-    <div className="card card--pad settingsSection">
-      <div className="section-label">{s.settings.snippet.section}</div>
-      {snippets.map((sn) => (
-        <div key={sn.id} className="settingsField snippetEditRow">
-          <div className="settingsRowActions">
-            <input
-              className="input"
-              type="text"
-              value={sn.label}
-              placeholder={s.settings.snippet.label}
-              aria-label={s.settings.snippet.label}
-              autoComplete="off"
-              onChange={(e) => write(sn.id, { label: e.target.value })}
-            />
-            <IconButton label={s.common.delete} onClick={() => setDeleteTarget(sn)}>
-              <Icon name="delete" size={16} />
-            </IconButton>
-          </div>
-          <textarea
-            className="textarea"
-            rows={2}
-            value={sn.body}
-            placeholder={s.settings.snippet.body}
-            aria-label={s.settings.snippet.body}
-            onChange={(e) => write(sn.id, { body: e.target.value })}
-          />
-        </div>
-      ))}
-      <div className="settingsRowActions">
-        <Button onClick={add}>{s.settings.snippet.add}</Button>
-      </div>
-
-      {deleteTarget ? <OverlayBinding onClose={() => setDeleteTarget(null)} /> : null}
-      {deleteTarget ? (
-        <ConfirmDialog
-          title={s.settings.snippet.deleteConfirmTitle}
-          body={s.settings.snippet.deleteConfirmBody(deleteTarget.label)}
-          confirmLabel={s.common.delete}
-          cancelLabel={s.common.cancel}
-          danger
-          onCancel={() => setDeleteTarget(null)}
-          onConfirm={() => {
-            const target = deleteTarget;
-            setDeleteTarget(null);
-            if (target) remove(target.id);
           }}
         />
       ) : null}
@@ -797,16 +704,10 @@ function WorkspaceImportDialog({
     if (!data || busy) return;
     setBusy(true);
     try {
-      const counts = {
-        subjects: data.patients.length,
-        groups: data.places.length,
-        snippets: data.snippets.length,
-      };
+      const counts = { subjects: data.patients.length, groups: data.places.length };
       await store.appendImported(data);
       runtime.bump();
-      toast.show(
-        s.settings.workspaceImport.imported(counts.subjects, counts.groups, counts.snippets),
-      );
+      toast.show(s.settings.workspaceImport.imported(counts.subjects, counts.groups));
       onClose();
     } catch (e) {
       console.error('workspace import failed:', e);
@@ -841,13 +742,7 @@ function WorkspaceImportDialog({
       {convertError ? <p className="dangerText">{convertError}</p> : null}
       {data ? (
         <>
-          <p>
-            {s.settings.workspaceImport.counts(
-              data.patients.length,
-              data.places.length,
-              data.snippets.length,
-            )}
-          </p>
+          <p>{s.settings.workspaceImport.counts(data.patients.length, data.places.length)}</p>
           <p className="muted">{s.settings.workspaceImport.appendOnly}</p>
           {data.notes.includes('closingPresetSkipped') ? (
             <p className="muted">{s.settings.workspaceImport.noteClosingPreset}</p>
@@ -1058,7 +953,6 @@ export function SettingsView({
     <section aria-label={s.header.settings} className="settingsView" data-ui={UI.settings.view}>
       <TagManagerSection runtime={runtime} />
       <TemplateSection runtime={runtime} />
-      <SnippetSection runtime={runtime} />
       <QrOutputSection runtime={runtime} />
       <PlaceSection runtime={runtime} />
       <DataSection runtime={runtime} />

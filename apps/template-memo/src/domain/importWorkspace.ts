@@ -9,7 +9,7 @@
  */
 
 import { newId } from '../data/constants';
-import { STATUS, type Patient, type PlaceDef, type Snippet } from './types';
+import { STATUS, type Patient, type PlaceDef } from './types';
 import { makeDefaultPatient } from './normalize';
 
 const WORKSPACE_BACKUP_KIND = 'HOSPITAL_WORKSPACE_BACKUP';
@@ -49,7 +49,6 @@ export interface WorkspaceImportCandidate {
 export interface WorkspaceImportPayload {
   patients: Patient[];
   places: PlaceDef[];
-  snippets: Snippet[];
 }
 
 type WorkspaceImportNote = 'closingPresetSkipped';
@@ -231,7 +230,6 @@ function convertPatients(
       finiteNumber(state?.updatedAt) ?? 0,
     );
     const archivedAt = finiteNumber(raw.archivedAt);
-    const confirmedNote = typeof state?.confirmedNote === 'string' ? state.confirmedNote : '';
     patients.push({
       ...makeDefaultPatient(),
       pid: newId('pat'),
@@ -243,7 +241,6 @@ function convertPatients(
       // 現行 source の「継続メモ」は RoundsPatientState.standingMemo。
       standingMemo: typeof state?.standingMemo === 'string' ? state.standingMemo : '',
       // visitMemo / projectedValues / tags は「今回分・個人分」のため移行しない。
-      ...(confirmedNote !== '' ? { confirmedNote } : {}),
       archivedAt: archivedAt !== null && archivedAt > 0 ? archivedAt : null,
       updatedAt,
     });
@@ -251,27 +248,13 @@ function convertPatients(
   return patients;
 }
 
-function convertSnippets(backup: WorkspaceBackup): {
-  snippets: Snippet[];
-  notes: WorkspaceImportNote[];
-} {
+function importNotes(backup: WorkspaceBackup): WorkspaceImportNote[] {
   const config = settingsRow(backup, ROUNDS_CONFIG_KEY);
-  const snippets: Snippet[] = [];
-  const rows = config && Array.isArray(config.textSnippets) ? config.textSnippets : [];
-  for (const raw of rows) {
-    if (!isRecord(raw)) continue;
-    if (typeof raw.label !== 'string' || raw.label.trim() === '') continue;
-    snippets.push({
-      id: newId('snp'),
-      label: raw.label.trim(),
-      body: typeof raw.body === 'string' ? raw.body : '',
-    });
-  }
   const notes: WorkspaceImportNote[] = [];
   if (config && typeof config.closingPreset === 'string' && config.closingPreset.trim() !== '') {
     notes.push('closingPresetSkipped');
   }
-  return { snippets, notes };
+  return notes;
 }
 
 /**
@@ -290,12 +273,10 @@ export function convertWorkspaceBackup(
   }
   const nowMs = finiteNumber(options.nowMs) ?? Date.now();
   const { places, placeIdByOldId } = convertPlaces(backup);
-  const { snippets, notes } = convertSnippets(backup);
   return {
     places,
     patients: convertPatients(backup, userId, placeIdByOldId, nowMs),
-    snippets,
-    notes,
+    notes: importNotes(backup),
   };
 }
 
@@ -310,7 +291,6 @@ export function prepareWorkspaceImportAppend(
   const idSets: Array<[string[], Set<string>]> = [
     [incoming.places.map((row) => row.placeId), new Set(current.places.map((row) => row.placeId))],
     [incoming.patients.map((row) => row.pid), new Set(current.patients.map((row) => row.pid))],
-    [incoming.snippets.map((row) => row.id), new Set(current.snippets.map((row) => row.id))],
   ];
   if (
     idSets.some(
@@ -330,6 +310,5 @@ export function prepareWorkspaceImportAppend(
   return {
     places: [...incoming.places],
     patients: [...incoming.patients],
-    snippets: [...incoming.snippets],
   };
 }

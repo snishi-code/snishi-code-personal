@@ -59,19 +59,6 @@ export interface TagDef {
 }
 
 // ============================
-// 定型文（今回メモへのワンタップ挿入部品）
-// ============================
-
-/** 定型文（今回メモへワンタップ挿入するテキスト部品。空欄は「__」等の慣習で）。 */
-export interface Snippet {
-  id: string;
-  /** 一覧に出す短い名前（例: 採血・胸部Xp）。 */
-  label: string;
-  /** 挿入される本文（改行可）。 */
-  body: string;
-}
-
-// ============================
 // フォーム値（テンプレート group/item への入力値）
 // ============================
 
@@ -107,7 +94,7 @@ export type FormValues = Record<string, Record<string, unknown>>;
  * 1 レコード = 1 件のフラット構造（place は参照属性）。アーカイブは archivedAt のソフトデリート。
  *
  * 「今回分」(ラウンド開始・クリアで消えるもの) = status(青以外) / visitMemo /
- * projectedValues / confirmedNote。
+ * projectedValues。
  * 「継続」(消えないもの) = name / room / placeId / problems / standingMemo / tags。
  */
 export interface Patient {
@@ -127,8 +114,6 @@ export interface Patient {
   visitMemo: string;
   /** 継続メモ（申し送り）。ラウンド開始でクリアしない。 */
   standingMemo: string;
-  /** 清書（合成結果を人間が確認・修正した最終本文。QR に出すのはこれ）。ラウンド開始でクリア。 */
-  confirmedNote?: string;
   /**
    * テンプレートのフォーム入力値（今回分）。名前はコピー元 UI に合わせて projectedValues の
    * まま、型は合成エンジンの FormValues（formValues[groupId][itemId]・provenance 付き）。
@@ -153,7 +138,6 @@ export interface AppSettings {
   activeTemplateId: string;
   /** 個人タグの定義（色は表示/分類のみ）。 */
   tags: TagDef[];
-  snippets: Snippet[];
   /** QR 出力の改行モード（既定 crlf）。 */
   newlineMode: NewlineMode;
   updatedAt: number;

@@ -234,7 +234,7 @@ describe('ラウンド開始クリア（HomeView.runClear と同じ固定ポリ�
     expect(livePatient(store, blue).status).toBe('blue');
   });
 
-  it('今回メモ/フォーム値/清書をクリアし、問題/継続メモ/タグは維持する（永続化まで）', async () => {
+  it('今回メモ/フォーム値をクリアし、問題/継続メモ/タグは維持する（永続化まで）', async () => {
     const { db, store } = await setup();
     const pid = await store.createPatientInActivePlace('対象A');
     const p = livePatient(store, pid);
@@ -244,7 +244,6 @@ describe('ラウンド開始クリア（HomeView.runClear と同じ固定ポリ�
     p.problems = ['HF', 'DM'];
     p.visitMemo = '今回の観察メモ';
     p.standingMemo = '週明けLabo';
-    p.confirmedNote = '前回の清書';
     p.projectedValues = { grp_v: { itm_bp: { value: '120/80' } } };
     await store.persistActiveOrThrow();
     const beforeUpdatedAt = p.updatedAt;
@@ -255,10 +254,9 @@ describe('ラウンド開始クリア（HomeView.runClear と同じ固定ポリ�
     // 再起動相当で読み直しても、クリア結果が正しく永続化されている。
     const store2 = await reopen(db);
     const after = livePatient(store2, pid);
-    // クリアされる: status(黄緑灰) / 今回メモ / 清書 / フォーム値。
+    // クリアされる: status(黄緑灰) / 今回メモ / フォーム値。
     expect(after.status).toBe('none');
     expect(after.visitMemo).toBe('');
-    expect(after.confirmedNote).toBeUndefined();
     expect(after.projectedValues).toEqual({});
     // 維持される: 名前 / 位置 / タグ / 問題 / 継続メモ。
     expect(after.name).toBe('対象A');
@@ -337,7 +335,6 @@ describe('Undo（snapshot: クリア前へ巻き戻す）', () => {
     const p = livePatient(store, pid);
     p.status = 'green';
     p.visitMemo = 'クリアで消えるメモ';
-    p.confirmedNote = 'クリアで消える清書';
     p.projectedValues = { grp_v: { itm_hr: { value: '63' } } };
     await store.persistActiveOrThrow();
 
@@ -378,7 +375,6 @@ describe('Undo（snapshot: クリア前へ巻き戻す）', () => {
     expect(livePatient(store, pid)).toMatchObject({
       status: 'green',
       visitMemo: 'クリアで消えるメモ',
-      confirmedNote: 'クリアで消える清書',
       projectedValues: { grp_v: { itm_hr: { value: '63' } } },
     });
     const store2 = await reopen(db);

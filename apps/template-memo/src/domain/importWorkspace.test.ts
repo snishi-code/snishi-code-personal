@@ -187,7 +187,6 @@ describe('convertWorkspaceBackup', () => {
       problems: ['継続課題'],
       visitMemo: '',
       standingMemo: 'Aの継続メモ',
-      confirmedNote: 'Aの清書',
       tags: [],
       projectedValues: {},
       archivedAt: 777,
@@ -197,7 +196,6 @@ describe('convertWorkspaceBackup', () => {
       placeId: east?.placeId,
       standingMemo: '対象2の継続メモ',
     });
-    expect(second?.confirmedNote).toBeUndefined();
     expect(third).toMatchObject({
       placeId: '',
       problems: ['確認事項'],
@@ -211,33 +209,27 @@ describe('convertWorkspaceBackup', () => {
     expect(JSON.stringify(converted.patients)).not.toContain('sharedTags');
   });
 
-  it('ユーザー選択で per-user の継続メモ・清書が切り替わる', () => {
+  it('ユーザー選択で per-user の継続メモが切り替わる', () => {
     const converted = convertWorkspaceBackup(jsonOf(makeWorkspaceBackup()), 'usr_b', {
       nowMs: NOW,
     });
     const first = converted.patients.find((patient) => patient.name === 'サンプル対象1');
     expect(first?.standingMemo).toBe('Bの継続メモ');
-    expect(first?.confirmedNote).toBe('Bの清書');
     // usr_b の状態が無い対象は master だけを移し、個人メモは空。
     expect(
       converted.patients.find((patient) => patient.name === 'サンプル対象2')?.standingMemo,
     ).toBe('');
   });
 
-  it('RoundsConfig.textSnippets は新規 id で移し、closingPreset は注記だけにする', () => {
+  it('RoundsConfig.textSnippets は移さず、closingPreset は注記だけにする', () => {
     const converted = convertWorkspaceBackup(jsonOf(makeWorkspaceBackup()), 'usr_a', {
       nowMs: NOW,
     });
-    expect(converted.snippets.map(({ label, body }) => ({ label, body }))).toEqual([
-      { label: '確認', body: '確認済み' },
-      { label: '連絡', body: '担当へ連絡 __' },
-    ]);
-    expect(converted.snippets.every((snippet) => snippet.id.startsWith('snp_'))).toBe(true);
-    expect(converted.snippets.map((snippet) => snippet.id)).not.toContain('old_snip_1');
+    expect(JSON.stringify(converted)).not.toContain('確認済み');
     expect(converted.notes).toEqual(['closingPresetSkipped']);
   });
 
-  it('壊れた patient/state/place/snippet row を捨てて有効 row を救う', () => {
+  it('壊れた patient/state/place row を捨てて有効 row を救う', () => {
     const backup = makeWorkspaceBackup();
     const stores = backup.stores as Record<string, unknown[]>;
     (stores.patients ??= []).push(
@@ -253,14 +245,11 @@ describe('convertWorkspaceBackup', () => {
     );
     const appSettings = stores.appSettings as Record<string, unknown>[];
     const places = appSettings.find((row) => row.key === 'placesConfig');
-    const config = appSettings.find((row) => row.key === 'roundsConfig');
     (places?.items as unknown[]).push(null, { placeId: '', name: '壊れ' });
-    (config?.textSnippets as unknown[]).push(null, { label: '' }, { label: 123 });
 
     const converted = convertWorkspaceBackup(jsonOf(backup), 'usr_a', { nowMs: NOW });
     expect(converted.patients).toHaveLength(3);
     expect(converted.places).toHaveLength(2);
-    expect(converted.snippets).toHaveLength(2);
     expect(
       converted.patients.find((patient) => patient.name === 'サンプル対象3')?.standingMemo,
     ).toBe('');
@@ -311,13 +300,11 @@ describe('prepareWorkspaceImportAppend', () => {
           placeId: '',
         },
       ],
-      snippets: [{ id: 'snp_existing', label: '既存', body: '既存本文' }],
     };
 
     const prepared = prepareWorkspaceImportAppend(incoming, current);
     expect(prepared.places).toEqual(incoming.places);
     expect(prepared.patients).toEqual(incoming.patients);
-    expect(prepared.snippets).toEqual(incoming.snippets);
   });
 
   it('ID衝突と取り込み外 place への参照を拒否する', () => {
@@ -328,7 +315,6 @@ describe('prepareWorkspaceImportAppend', () => {
       prepareWorkspaceImportAppend(incoming, {
         places: [incoming.places[0] as (typeof incoming.places)[number]],
         patients: [],
-        snippets: [],
       }),
     ).toThrow('import id collision');
 
@@ -338,8 +324,8 @@ describe('prepareWorkspaceImportAppend', () => {
         index === 0 ? { ...patient, placeId: 'plc_missing' } : patient,
       ),
     };
-    expect(() =>
-      prepareWorkspaceImportAppend(broken, { places: [], patients: [], snippets: [] }),
-    ).toThrow('import place reference is invalid');
+    expect(() => prepareWorkspaceImportAppend(broken, { places: [], patients: [] })).toThrow(
+      'import place reference is invalid',
+    );
   });
 });

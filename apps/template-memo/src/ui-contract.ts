@@ -30,10 +30,6 @@ export const UI = {
     // 画面内ボタン (患者固有 = 転記用QR)
     emrQr: 'detail.emrQr', // 患者詳細内「転記用QRを表示」ボタン
     qrDialog: 'detail.qr.dialog',
-    presetClean: 'detail.presetClean', // 「定型清書」ボタン (今回メモ + 締め文 → 清書)
-    snippetBtn: 'detail.snippet.btn', // 「定型文」ボタン (今回メモへの挿入シートを開く)
-    snippetDialog: 'detail.snippet.dialog', // 定型文選択シート
-    snippetItem: 'detail.snippet.item', // シート内の定型文 1 件 (タップで挿入)
   },
   problem: {
     card: 'problem.card',
@@ -45,11 +41,10 @@ export const UI = {
     moveUp: 'problem.moveUp',
     moveDown: 'problem.moveDown',
   },
-  // 今回メモ / 継続メモ / 清書 (患者ごとの独立 textarea)
+  // 今回メモ / 継続メモ (患者ごとの独立 textarea)
   memo: {
     visit: { card: 'memo.visit.card', input: 'memo.visit.input' },
     standing: { card: 'memo.standing.card', input: 'memo.standing.input' },
-    clean: { card: 'memo.clean.card', input: 'memo.clean.input' },
   },
   // テンプレート投影の入力欄 (患者ごとに projectedValues へ保存)
   projection: {

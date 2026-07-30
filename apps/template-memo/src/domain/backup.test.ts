@@ -37,7 +37,6 @@ function makePatient(over: Partial<Patient> = {}): Patient {
     problems: ['発熱\n経過観察中'],
     visitMemo: '今回メモ本文',
     standingMemo: '申し送りメモ',
-    confirmedNote: '清書テキスト',
     projectedValues: {
       grp_1: {
         itm_1: { value: '120/80' },
@@ -56,7 +55,6 @@ function makeSettings(activeTemplateId: string): AppSettings {
     key: 'app',
     activeTemplateId,
     tags: [{ name: '要注意', color: 'amber' }],
-    snippets: [{ id: 'snp_1', label: '採血', body: '採血: __' }],
     newlineMode: 'lf',
     updatedAt: NOW,
   };
@@ -206,7 +204,6 @@ describe('parseBackupJson の防御的正規化', () => {
     expect(parsed.settings.key).toBe('app');
     expect(parsed.settings.activeTemplateId).toBe(parsed.templates[0]!.id);
     expect(parsed.settings.tags).toEqual([]);
-    expect(parsed.settings.snippets).toEqual([]);
     expect(parsed.settings.newlineMode).toBe('crlf');
   });
 });

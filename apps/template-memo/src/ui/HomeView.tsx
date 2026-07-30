@@ -50,7 +50,7 @@ export function HomeView({
   const archive = store.isArchiveViewActive();
 
   // ラウンド開始 (= 記録クリア)。クリア対象はユーザー選択式にせず、コード固定ポリシー (design.md「クリア方針」)。
-  //   クリアする: status 黄/緑/灰 → none / 今回メモ (visitMemo) / 清書 (confirmedNote) /
+  //   クリアする: status 黄/緑/灰 → none / 今回メモ (visitMemo) /
   //               inputHash (visitMemo から都度算出するので visitMemo クリアで自動失効) /
   //               今回セッション用入力値 (projectedValues)。
   //   残す: status 青 (持ち越し/要注意) / 継続メモ (standingMemo) / タグ / プロブレムリスト。
