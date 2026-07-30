@@ -176,6 +176,18 @@ test('テンプレート編集で選択項目を作り、チップで単一選�
   const templateRow = page.locator('.formatListRow', { hasText: '回診メモ' }).first();
   await templateRow.getByRole('button', { name: '編集', exact: true }).click();
 
+  // text 項目は「種類」と「正常文」がデスクトップ幅で同じ行に並ぶ。
+  const firstKindRow = page.locator('.templateEditKindRow').first();
+  await expect(firstKindRow.locator('.field')).toHaveCount(2);
+  await expect
+    .poll(() =>
+      firstKindRow.locator('.field').evaluateAll((fields) => {
+        const tops = fields.map((field) => field.getBoundingClientRect().top);
+        return tops.every((top) => Math.abs(top - (tops[0] ?? top)) < 2);
+      }),
+    )
+    .toBe(true);
+
   // 場所 > フォーマット > 項目の入れ子が、主用途の 375px 幅でも横にはみ出さない。
   await page.setViewportSize({ width: 375, height: 812 });
   await expect

@@ -1736,6 +1736,19 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   background: var(--surface);
 }
 
+/* 項目の「種類」と kind 別設定（単位 / 正常文）を同じ行へ圧縮。
+   狭幅では flex-wrap し、各入力の 44px 操作領域と可読幅を維持する。 */
+.templateEditKindRow {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  margin: 0;
+}
+
+.templateEditKindRow > .field {
+  flex: 1 1 9rem;
+  min-width: 0;
+}
+
 /* select の選択肢編集 (見出し + 選択肢行 + 追加ボタンの縦積み。行内は settingsField の横並び) */
 .templateEditOptions {
   display: grid;

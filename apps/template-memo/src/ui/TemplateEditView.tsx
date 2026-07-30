@@ -309,51 +309,57 @@ export function TemplateEditView({
             }
           />
         </Field>
-        <Field label={s.tpl.itemKind}>
-          <select
-            className="select"
-            value={item.kind}
-            data-ui={UI.templateEdit.kind}
-            onChange={(event) =>
-              mutateItem(sectionId, groupId, item.id, (next) =>
-                morphItemKind(next, event.target.value as ItemKind),
-              )
-            }
-          >
-            <option value="text">{s.tpl.itemKindText}</option>
-            <option value="number">{s.tpl.itemKindNumber}</option>
-            <option value="fraction">{s.tpl.itemKindFraction}</option>
-            <option value="select">{s.tpl.itemKindSelect}</option>
-          </select>
-        </Field>
-        {item.kind === 'text' ? (
-          <Field label={s.tpl.itemNormal}>
-            <input
-              className="input"
-              value={item.normal ?? ''}
+        <div className="settingsField templateEditKindRow">
+          <Field label={s.tpl.itemKind}>
+            <select
+              className="select"
+              value={item.kind}
+              data-ui={UI.templateEdit.kind}
               onChange={(event) =>
-                mutateItem(
-                  sectionId,
-                  groupId,
-                  item.id,
-                  (next) => (next.normal = event.target.value),
+                mutateItem(sectionId, groupId, item.id, (next) =>
+                  morphItemKind(next, event.target.value as ItemKind),
                 )
               }
-            />
+            >
+              <option value="text">{s.tpl.itemKindText}</option>
+              <option value="number">{s.tpl.itemKindNumber}</option>
+              <option value="fraction">{s.tpl.itemKindFraction}</option>
+              <option value="select">{s.tpl.itemKindSelect}</option>
+            </select>
           </Field>
-        ) : item.kind === 'select' ? (
-          renderOptions(sectionId, groupId, item)
-        ) : (
-          <Field label={s.tpl.itemUnit}>
-            <input
-              className="input"
-              value={item.unit ?? ''}
-              onChange={(event) =>
-                mutateItem(sectionId, groupId, item.id, (next) => (next.unit = event.target.value))
-              }
-            />
-          </Field>
-        )}
+          {item.kind === 'text' ? (
+            <Field label={s.tpl.itemNormal}>
+              <input
+                className="input"
+                value={item.normal ?? ''}
+                onChange={(event) =>
+                  mutateItem(
+                    sectionId,
+                    groupId,
+                    item.id,
+                    (next) => (next.normal = event.target.value),
+                  )
+                }
+              />
+            </Field>
+          ) : item.kind === 'select' ? null : (
+            <Field label={s.tpl.itemUnit}>
+              <input
+                className="input"
+                value={item.unit ?? ''}
+                onChange={(event) =>
+                  mutateItem(
+                    sectionId,
+                    groupId,
+                    item.id,
+                    (next) => (next.unit = event.target.value),
+                  )
+                }
+              />
+            </Field>
+          )}
+        </div>
+        {item.kind === 'select' ? renderOptions(sectionId, groupId, item) : null}
         <CheckRow
           label={s.tpl.itemShowLabel}
           checked={item.showLabel !== false}
