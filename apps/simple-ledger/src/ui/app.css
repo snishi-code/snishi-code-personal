@@ -239,6 +239,11 @@
 .period-context__chip:hover {
   background: var(--bg);
 }
+/* 透明な日付 input にキーボード focus したとき、チップに現在位置を可視化する。 */
+.period-context__chip:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
 /* チップ全面を覆う透明な <input type="date">。1 タップで OS のカレンダーが開く。 */
 .period-context__input {
   position: absolute;

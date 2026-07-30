@@ -169,6 +169,24 @@ export interface FutureCashEvent {
 }
 
 /**
+ * 予定 CF 1 件が「自由に動かせるお金」に与える純増減（cashDeltaOfEntry の予定 CF 版）。
+ * 実績化仕訳（buildScheduleEntry）と同じ借方/貸方に組んでから free 判定する＝
+ * movable=false の科目への入出金・振替も実仕訳と同じ扱いになる（監査 P2-4:
+ * direction だけで判定すると、自由→非自由の振替 −額・非自由への入金 +額 を取りこぼす）。
+ */
+export function scheduleCashDelta(
+  schedule: Pick<CashflowSchedule, 'amount' | 'direction' | 'accountId' | 'counterAccountId'>,
+  isFree: (accountId: string) => boolean,
+): number {
+  const debit = schedule.direction === 'inflow' ? schedule.accountId : schedule.counterAccountId;
+  const credit = schedule.direction === 'inflow' ? schedule.counterAccountId : schedule.accountId;
+  let delta = 0;
+  if (debit !== undefined && isFree(debit)) delta += schedule.amount;
+  if (credit !== undefined && isFree(credit)) delta -= schedule.amount;
+  return delta;
+}
+
+/**
  * planned な予定 + 未来日付の通常仕訳を期日順に適用して将来残高を投影する。
  *
  * futureEvents は「未来日付仕訳（date > today）の現金デルタ」。startFree は today 時点の残高なので、
@@ -181,13 +199,15 @@ export function projectCashflow(params: {
   startFree: number;
   schedules: CashflowSchedule[];
   today: string;
+  /** 「自由に動かせるお金」に数える科目か（未来仕訳の cashDeltaOfEntry と同じ判定を渡す）。 */
+  isFree: (accountId: string) => boolean;
   /** 月数ぶん先を終端にする（後方互換）。`untilDate` 指定時は無視される。 */
   months?: number;
   /** 表示終了日 'YYYY-MM-DD'。指定時はこの日までを投影する（months より優先）。 */
   untilDate?: string;
   futureEvents?: FutureCashEvent[];
 }): CashflowProjection {
-  const { startFree, schedules, today, futureEvents = [] } = params;
+  const { startFree, schedules, today, isFree, futureEvents = [] } = params;
   const end = params.untilDate ?? horizonEnd(today, params.months ?? 6);
   const planned = schedules
     .filter((s) => s.status === 'planned' && s.dueDate >= today && s.dueDate <= end)
@@ -196,11 +216,7 @@ export function projectCashflow(params: {
 
   // 予定 CF と未来仕訳を 1 本のイベント列に統合し、期日順に積む。
   const events: FutureCashEvent[] = [
-    ...planned.map((s) => ({
-      date: s.dueDate,
-      // transfer（口座間移動）は自由に動かせるお金を変えない。
-      amount: s.direction === 'inflow' ? s.amount : s.direction === 'outflow' ? -s.amount : 0,
-    })),
+    ...planned.map((s) => ({ date: s.dueDate, amount: scheduleCashDelta(s, isFree) })),
     ...futureEvents.filter((e) => e.date > today && e.date <= end),
   ].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 

@@ -50,9 +50,17 @@ export function buildExportPackage(ledger: Ledger): LedgerExportPackage {
   };
 }
 
-/** export を整形 JSON 文字列にする。 */
+/**
+ * export を整形 JSON 文字列にする。書き出す前に必ず現行 schema を通す（fail-closed・監査 P1-4）。
+ * ここで失敗する状態はどこかの保存境界の欠陥なので、「現行版を名乗る復元不能 JSON」を
+ * 黙って作るより明示して止める（スナップショットは安全網なので対象外・復元時に検証する）。
+ */
 export function exportToJsonText(ledger: Ledger): string {
-  return buildExportText(buildExportPackage(ledger));
+  const validated = validatePackage(buildExportPackage(ledger));
+  if (!validated.ok) {
+    throw new Error(`エクスポートが現行スキーマの検証を通りません: ${validated.detail}`);
+  }
+  return buildExportText(validated.pkg);
 }
 
 /** ダウンロード用ファイル名（端末ローカル生成・外部送信なし）。 */

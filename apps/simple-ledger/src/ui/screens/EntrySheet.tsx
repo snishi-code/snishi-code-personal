@@ -33,6 +33,7 @@ import {
   type SimpleEntryInput,
 } from '../../domain/entry';
 import type { EntryMetadata, InputMode, JournalEntry } from '../../domain/types';
+import { isRecurringPostableRole } from '../../domain/recurring';
 import { t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
 import { todayLocal } from '../../util/time';
@@ -602,11 +603,12 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     const creditRole = roles.find((role) => role.side === 'credit');
     const debitRole = roles.find((role) => role.side === 'debit');
     if (!creditRole || !debitRole) return null;
-    const srcGroups = groupedAccountsByRole(
-      accounts,
-      [...creditRole.allowedRoles],
-      form.creditAccountId,
-    );
+    // 継続コスト化中の貸方 = 購入の仕訳の支払い元。保存境界と同じ RECURRING_POSTABLE_ROLES に
+    // 絞る（残高調整科目を選べて保存だけ失敗する袋小路を作らない・監査 P2-6）。
+    const srcRoles = continuousCostActive
+      ? creditRole.allowedRoles.filter((r) => isRecurringPostableRole(r))
+      : [...creditRole.allowedRoles];
+    const srcGroups = groupedAccountsByRole(accounts, srcRoles, form.creditAccountId);
     const dstGroups = groupedAccountsByRole(
       accounts,
       [...debitRole.allowedRoles],
@@ -671,7 +673,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               key={years}
               type="button"
               className="btn btn--ghost"
-              style={{ minHeight: 32 }}
+              style={{ minHeight: 'var(--tap)' }}
               onClick={() => setCcEndDate(quickSpanEndDate(form.date, years))}
             >
               {t('ccItem.quickSpan', { years })}

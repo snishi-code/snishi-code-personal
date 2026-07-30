@@ -2,12 +2,18 @@ import { describe, expect, it } from 'vitest';
 import './setup';
 import { isAccountReferenced, referencedAccountIds } from '../src/domain/accountRefs';
 import type { AccountRefCollections } from '../src/domain/accountRefs';
-import type { CashflowSchedule, JournalEntry, MonthlyCostItem } from '../src/domain/types';
+import type {
+  CashflowSchedule,
+  JournalEntry,
+  MonthlyCostItem,
+  RecurringRule,
+} from '../src/domain/types';
 
 const empty: AccountRefCollections = {
   entries: [],
   schedules: [],
   monthlyCostItems: [],
+  recurringRules: [],
 };
 
 const monthlyCost: MonthlyCostItem = {
@@ -48,6 +54,20 @@ const schedule: CashflowSchedule = {
   updatedAt: 'x',
 };
 
+const rule: RecurringRule = {
+  id: 'r1',
+  name: 'x',
+  amount: 100,
+  dayOfMonth: 1,
+  everyMonths: 1,
+  spreadExpenseAccountId: 'rule-spread',
+  debitAccountId: 'rule-debit',
+  creditAccountId: 'rule-credit',
+  startMonth: '2026-06',
+  createdAt: 'x',
+  updatedAt: 'x',
+};
+
 describe('isAccountReferenced（仕訳/予定CF/継続コスト）', () => {
   it('仕訳明細の参照を検出する', () => {
     expect(isAccountReferenced('cash', { ...empty, entries: [entry] })).toBe(true);
@@ -64,6 +84,12 @@ describe('isAccountReferenced（仕訳/予定CF/継続コスト）', () => {
       false,
     );
   });
+  it('定期ルールの借方・貸方・費用の行き先を参照として検出する（未起票でも保護する・監査 P1-7）', () => {
+    expect(isAccountReferenced('rule-debit', { ...empty, recurringRules: [rule] })).toBe(true);
+    expect(isAccountReferenced('rule-credit', { ...empty, recurringRules: [rule] })).toBe(true);
+    expect(isAccountReferenced('rule-spread', { ...empty, recurringRules: [rule] })).toBe(true);
+    expect(isAccountReferenced('nope', { ...empty, recurringRules: [rule] })).toBe(false);
+  });
 });
 
 describe('referencedAccountIds', () => {
@@ -72,6 +98,7 @@ describe('referencedAccountIds', () => {
       entries: [entry],
       schedules: [schedule],
       monthlyCostItems: [monthlyCost],
+      recurringRules: [rule],
     });
     for (const id of [
       'cash',
@@ -79,6 +106,9 @@ describe('referencedAccountIds', () => {
       'sched-acc',
       'sched-counter',
       'mc-exp',
+      'rule-debit',
+      'rule-credit',
+      'rule-spread',
     ]) {
       expect(ids.has(id)).toBe(true);
     }

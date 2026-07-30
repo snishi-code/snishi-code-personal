@@ -21,12 +21,19 @@ import { UI } from '../ui-contract';
 export function RecoveryScreen({ message }: { message?: string }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [wipeConfirm, setWipeConfirm] = useState(false);
+  const [wipeError, setWipeError] = useState(false);
   return (
     <main className="app-main" id="main" data-ui={UI.app.recovery}>
       <div className="banner" role="alert">
         <Icon name="alert" size={18} />
         {message ?? t('toast.error')}
       </div>
+      {wipeError ? (
+        <div className="banner" role="alert">
+          <Icon name="alert" size={18} />
+          {t('recovery.wipeFailed')}
+        </div>
+      ) : null}
       {settingsOpen ? (
         // 復旧中は他画面へ遷移させない（台帳が無い状態で開けないため）。
         <Settings onNavigate={() => undefined} onOpenOnboarding={() => undefined} />
@@ -59,8 +66,15 @@ export function RecoveryScreen({ message }: { message?: string }) {
           danger
           onCancel={() => setWipeConfirm(false)}
           onConfirm={async () => {
-            await wipeDatabase();
-            window.location.reload();
+            // 成功（onsuccess）のときだけ reload する。error / blocked（別タブが接続を保持）は
+            // この画面に留まり、原因と再試行の案内を出す（fail-closed・監査 P2-5）。
+            try {
+              await wipeDatabase();
+              window.location.reload();
+            } catch {
+              setWipeConfirm(false);
+              setWipeError(true);
+            }
           }}
         />
       ) : null}

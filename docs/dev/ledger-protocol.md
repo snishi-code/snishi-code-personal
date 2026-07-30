@@ -135,12 +135,16 @@ import では strip される）。
     （`RECURRING_POSTABLE_ROLES`。equity=初期残高・収入カテゴリも可）、金額 == `item.amount`、
     **`date === item.startDate`（日レベル）**。
   - **台帳に触れる保存仕訳は必ず `monthlyCostId` を持つ**（購入の仕訳 / 回収の振替の 2 種類だけ）。
-  - 回収の振替は貸方 = 台帳（回収額の上限は設けない＝割り振る総額が負になってよい）。
+  - 回収の振替は貸方 = 台帳・**借方 ≠ 台帳（自己振替禁止）**・借方 role は
+    `RECOVERY_DESTINATION_ROLES`（日常資産・負債）・**`date >= item.startDate`**
+    （回収額の上限は設けない＝割り振る総額が負になってよい）。
   - `endDate?` は `>= startDate`・配分月数 ≤ 1200 ヶ月。`expenseAccountId` は内部集約・残高調整
     以外（`isRecurringPostableRole`）。
   - **同一ルール由来（id `ccr-{ruleId}-…`）の item の月区間が重ならない**。
-- **勘定科目の不変条件: アーカイブ済み（資産・負債）= 全仕訳から計算した最終残高が 0**。
-- 定期ルール: `everyMonths >= 1`。月割りするルール（`spreadExpenseAccountId` あり）は
+- 勘定科目の不変条件「アーカイブ済み（資産・負債）= 残高 0」は**アーカイブ操作時点（今日・
+  導出仕訳込み）の保存境界だけが守り、import では再検証しない**（時点依存の条件のため。
+  最終残高で再検証すると、未来仕訳を含む保存済み台帳の round-trip が壊れる。監査 P1-3・2026-07-30）。
+- 定期ルール: `everyMonths` は 1〜1200（配分月数の上限と同じ）。月割りするルール（`spreadExpenseAccountId` あり）は
   **周期にかかわらず**借方 = 継続コスト台帳・源泉と費用の行き先は内部集約・残高調整以外の
   全 role（`RECURRING_POSTABLE_ROLES`）。定期ルール由来の仕訳は `recurringRuleId`/`recurringMonth`
   をペアで持ち、ルールが存在し、同ルール・同月の重複が無い。

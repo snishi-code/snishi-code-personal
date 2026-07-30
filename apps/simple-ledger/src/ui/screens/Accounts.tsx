@@ -53,6 +53,7 @@ export function Accounts() {
         entries: ledger?.journalEntries ?? [],
         schedules: ledger?.cashflowSchedules ?? [],
         monthlyCostItems: ledger?.monthlyCostItems ?? [],
+        recurringRules: ledger?.recurringRules ?? [],
       }),
     [ledger],
   );
@@ -70,10 +71,10 @@ export function Accounts() {
         return;
       }
       // 不変条件「アーカイブ済み = 今日時点の残高 0」。残高が残る資産・負債は振替を先に聞く。
-      // 判定は保存境界（archiveAccount）と同じ「保存される仕訳の今日時点残高」で行う。
+      // 判定は保存境界（archiveAccount）と同じ「導出仕訳（継続コストの費用行・定期ルールの
+      // 投影込み）の今日時点残高」で行う（画面に見えている残高と一致させる・監査 P1-2）。
       if (account.type === 'asset' || account.type === 'liability') {
-        const saved = filterByDateRange(ledger?.journalEntries ?? [], undefined, today);
-        const balance = accountBalance(account.id, account.type, saved);
+        const balance = accountBalance(account.id, account.type, entries);
         if (balance !== 0) {
           // 自然符号 → 借方残高へ正規化: 借方残高が残る側なら貸方（振替元）を対象に固定する。
           const debitBalance = account.type === 'asset' ? balance : -balance;

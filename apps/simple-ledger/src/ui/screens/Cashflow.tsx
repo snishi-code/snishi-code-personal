@@ -87,6 +87,8 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
         startFree,
         schedules,
         today,
+        // 予定 CF も未来仕訳（cashDeltaOfEntry）と同じ free 判定で増減を出す（監査 P2-4）。
+        isFree,
         untilDate: end,
         futureEvents: future.map((f) => ({ date: f.date, amount: f.delta })),
       }),

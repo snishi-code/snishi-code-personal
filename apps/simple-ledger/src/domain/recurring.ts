@@ -70,8 +70,8 @@ export function clampDayToMonth(ym: string, day: number): string {
   return `${ym}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
 }
 
-/** 暴走防止の上限（起票対象月数。100 年ぶんを超える範囲は扱わない）。 */
-const CATCH_UP_HARD_CAP_MONTHS = 1200;
+/** 暴走防止の上限（1 回の catch-up で走査する月数。超過分は次回の catch-up が続きを処理する）。 */
+export const CATCH_UP_HARD_CAP_MONTHS = 1200;
 
 export interface RecurringPosting {
   month: string; // 'YYYY-MM'
@@ -79,20 +79,36 @@ export interface RecurringPosting {
 }
 
 /**
+ * 1 回の catch-up が走査する月 index の範囲 [first, last]（startMonth からの月数）。
+ * カーソル（postedThroughMonth）の次の月から最大 CATCH_UP_HARD_CAP_MONTHS か月。
+ * recurringPostingsDue と recurringCursorAfter が同じ窓を共有する＝カーソルは走査した
+ * 最後の月より先へ進まない（上限を超えた月が「処理済み」になって永久に飛ばされない）。
+ */
+function catchUpWindow(rule: RecurringRule, today: string): { first: number; last: number } | null {
+  const span = monthsBetween(rule.startMonth, monthOf(today));
+  if (span < 0) return null;
+  const first =
+    rule.postedThroughMonth !== undefined && rule.postedThroughMonth >= rule.startMonth
+      ? monthsBetween(rule.startMonth, rule.postedThroughMonth) + 1
+      : 0;
+  if (first > span) return null;
+  return { first, last: Math.min(span, first + CATCH_UP_HARD_CAP_MONTHS - 1) };
+}
+
+/**
  * 今日までに起票すべき月を列挙する。
  *  - 対象 = startMonth 〜 今日の月のうち、起票日がすでに到来していて（date <= today）、
  *    カーソル（postedThroughMonth）より後の月。
  *  - 停止中は空。まだ起票日が来ていない当月は含めない（到来した次回起動で起票される）。
+ *  - 1 回に走査するのはカーソルの次から CATCH_UP_HARD_CAP_MONTHS か月まで（catchUpWindow）。
  */
 export function recurringPostingsDue(rule: RecurringRule, today: string): RecurringPosting[] {
   if (rule.paused) return [];
-  const currentYm = monthOf(today);
-  const span = monthsBetween(rule.startMonth, currentYm);
-  if (span < 0) return [];
+  const window = catchUpWindow(rule, today);
+  if (!window) return [];
   const out: RecurringPosting[] = [];
-  const count = Math.min(span + 1, CATCH_UP_HARD_CAP_MONTHS);
   const every = rule.everyMonths >= 1 ? rule.everyMonths : 1;
-  for (let i = 0; i < count; i++) {
+  for (let i = window.first; i <= window.last; i++) {
     if (i % every !== 0) continue; // startMonth 基点の位相で間引く
     const month = addMonths(rule.startMonth, i);
     if (rule.postedThroughMonth !== undefined && month <= rule.postedThroughMonth) continue;
@@ -116,6 +132,27 @@ export function ruleItemId(ruleId: string, month: string): string {
  */
 export function ruleItemEndDate(postingMonth: string, everyMonths: number): string {
   return clampDayToMonth(addMonths(postingMonth, everyMonths - 1), 31);
+}
+
+/**
+ * ルール由来 item（id = `ccr-{ruleId}-{month}`）が費用の割り振りでカバーする最終月。
+ * 周期の変更（例: 12 か月ごと → 毎月）後も、既存 item が覆う月へ新しい item を重ねない
+ * （重なると当該月の費用が二重計上され、import schema の不変条件⑤も破る）ための単一正本。
+ * 終了日なし（ユーザーが編集で外した）は開区間として '9999-12' 扱い＝以降は起票しない
+ * （どの月に重ねても schema ⑤が拒否するため）。ルール由来 item が無ければ undefined。
+ */
+export function ruleItemCoverageThrough(
+  ruleId: string,
+  items: readonly MonthlyCostItem[],
+): string | undefined {
+  const prefix = `ccr-${ruleId}-`;
+  let through: string | undefined;
+  for (const item of items) {
+    if (!item.id.startsWith(prefix)) continue;
+    const to = item.endDate !== undefined ? monthOf(item.endDate) : '9999-12';
+    if (through === undefined || to > through) through = to;
+  }
+  return through;
 }
 
 /**
@@ -154,6 +191,7 @@ export function recurringProjectionEntries(
   rules: RecurringRule[],
   accounts: Account[],
   asOf: string,
+  monthlyCostItems: readonly MonthlyCostItem[] = [],
 ): JournalEntry[] {
   const byId = new Map(accounts.map((account) => [account.id, account] as const));
   const projected: JournalEntry[] = [];
@@ -162,18 +200,27 @@ export function recurringProjectionEntries(
     const debit = byId.get(rule.debitAccountId);
     const credit = byId.get(rule.creditAccountId);
     if (!debit || !credit) continue;
+    // アーカイブ済み科目には起票しない（catch-up と同じ判定。監査 P1-7）。
+    if (credit.archived) continue;
     if (!isRecurringPostableRole(credit.role)) continue;
     // 月割りルールの借方は継続コスト台帳に固定（postable ではないので別枠で検証する）。
     if (spread) {
       if (rule.debitAccountId !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID) continue;
-    } else if (!isRecurringPostableRole(debit.role)) {
+      const spreadAccount = rule.spreadExpenseAccountId
+        ? byId.get(rule.spreadExpenseAccountId)
+        : undefined;
+      if (!spreadAccount || spreadAccount.archived) continue;
+    } else if (debit.archived || !isRecurringPostableRole(debit.role)) {
       continue;
     }
+    // 既存のルール由来 item が覆う月には投影しない（catch-up も同じ月を起票しない・監査 P1-10）。
+    const coveredThrough = spread ? ruleItemCoverageThrough(rule.id, monthlyCostItems) : undefined;
     // recurringKindOf(continuing-cost-asset, …) は null を返すため、月割りルールは 'expense' 直指定。
     const inputMode: InputMode = spread
       ? 'expense'
       : (recurringKindOf(debit.role, credit.role) ?? 'manual');
     for (const posting of recurringPostingsDue(rule, asOf)) {
+      if (coveredThrough !== undefined && posting.month <= coveredThrough) continue;
       projected.push({
         id: `rec-proj-${rule.id}-${posting.month}`,
         date: posting.date,
@@ -219,14 +266,18 @@ export function recurringProjectionEntries(
   return projected;
 }
 
-/** キャッチアップ後にルールへ書き戻すカーソル（起票日が到来した最後の月）。 */
+/** キャッチアップ後にルールへ書き戻すカーソル（起票日が到来した最後の月。走査した窓の中まで）。 */
 export function recurringCursorAfter(rule: RecurringRule, today: string): string | undefined {
   if (rule.paused) return rule.postedThroughMonth;
+  const window = catchUpWindow(rule, today);
+  if (!window) return rule.postedThroughMonth;
   const currentYm = monthOf(today);
-  if (monthsBetween(rule.startMonth, currentYm) < 0) return rule.postedThroughMonth;
   // 当月の起票日が未到来なら前月まで、到来済みなら当月まで。
   const currentDue = clampDayToMonth(currentYm, rule.dayOfMonth) <= today;
-  const through = currentDue ? currentYm : addMonths(currentYm, -1);
+  let through = currentDue ? currentYm : addMonths(currentYm, -1);
+  // 走査していない月をカーソルが飛び越えない（recurringPostingsDue と同じ窓・監査 P1-9）。
+  const scannedThrough = addMonths(rule.startMonth, window.last);
+  if (through > scannedThrough) through = scannedThrough;
   if (through < rule.startMonth) return rule.postedThroughMonth;
   if (rule.postedThroughMonth !== undefined && through <= rule.postedThroughMonth) {
     return rule.postedThroughMonth;

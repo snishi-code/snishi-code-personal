@@ -143,12 +143,16 @@ describe('buildScheduleEntry', () => {
 
 describe('projectCashflow', () => {
   const today = '2026-06-15';
+  // 自由に動かせるお金 = bank / cash。suica は movable=false 相当（原資に入れない）。
+  const freeIds = new Set(['bank', 'cash']);
+  const isFree = (id: string) => freeIds.has(id);
 
   it('未来の出金予定で自由に動かせるお金が減る', () => {
     const proj = projectCashflow({
       startFree: 200000,
       schedules: [sched({ dueDate: '2026-07-10', amount: 50000, direction: 'outflow' })],
       today,
+      isFree,
       months: 3,
     });
     expect(proj.startFree).toBe(200000);
@@ -156,7 +160,7 @@ describe('projectCashflow', () => {
     expect(proj.minFree).toBe(150000);
   });
 
-  it('transfer 予定は自由に動かせるお金を変えない', () => {
+  it('transfer 予定（自由 → 自由）は自由に動かせるお金を変えない', () => {
     const proj = projectCashflow({
       startFree: 100000,
       schedules: [
@@ -168,6 +172,55 @@ describe('projectCashflow', () => {
         }),
       ],
       today,
+      isFree,
+      months: 3,
+    });
+    expect(proj.points.at(-1)?.free).toBe(100000);
+    expect(proj.minFree).toBe(100000);
+  });
+
+  it('transfer 予定（自由 → movable=false）は自由に動かせるお金が減る（監査 P2-4）', () => {
+    const proj = projectCashflow({
+      startFree: 100000,
+      schedules: [
+        sched({
+          dueDate: '2026-06-20',
+          amount: 10000,
+          direction: 'transfer',
+          counterAccountId: 'suica',
+        }),
+      ],
+      today,
+      isFree,
+      months: 3,
+    });
+    expect(proj.points.at(-1)?.free).toBe(90000);
+    expect(proj.minFree).toBe(90000);
+  });
+
+  it('movable=false の口座への入金予定・そこからの出金予定は自由に動かせるお金を変えない（監査 P2-4）', () => {
+    const proj = projectCashflow({
+      startFree: 100000,
+      schedules: [
+        sched({
+          id: 'in',
+          accountId: 'suica',
+          counterAccountId: 'salary',
+          dueDate: '2026-06-20',
+          amount: 5000,
+          direction: 'inflow',
+        }),
+        sched({
+          id: 'out',
+          accountId: 'suica',
+          counterAccountId: 'food',
+          dueDate: '2026-06-25',
+          amount: 3000,
+          direction: 'outflow',
+        }),
+      ],
+      today,
+      isFree,
       months: 3,
     });
     expect(proj.points.at(-1)?.free).toBe(100000);
@@ -179,6 +232,7 @@ describe('projectCashflow', () => {
       startFree: 100000,
       schedules: [sched({ dueDate: '2027-01-10', amount: 1000 })],
       today,
+      isFree,
       months: 3,
     });
     expect(proj.schedules).toHaveLength(0);
@@ -193,6 +247,7 @@ describe('projectCashflow', () => {
         sched({ id: 'b', dueDate: '2026-06-25', amount: 30000, direction: 'inflow' }),
       ],
       today,
+      isFree,
       months: 3,
     });
     // 10000 → 2000 → 32000。最低額は 2000。
@@ -291,6 +346,7 @@ describe('projectCashflow + 未来仕訳(futureEvents)', () => {
       startFree: 100000,
       schedules: [],
       today: '2026-06-15',
+      isFree: (id) => id === 'bank',
       months: 3,
       futureEvents: [{ date: '2026-07-10', amount: -30000 }],
     });
@@ -302,6 +358,7 @@ describe('projectCashflow + 未来仕訳(futureEvents)', () => {
       startFree: 100000,
       schedules: [],
       today: '2026-06-15',
+      isFree: (id) => id === 'bank',
       months: 3,
       futureEvents: [
         { date: '2026-06-15', amount: -1000 }, // today は startFree に含み済み
@@ -322,6 +379,7 @@ describe('horizonEnd', () => {
 
 describe('projectCashflow（表示終了日 untilDate）', () => {
   const today = '2026-06-15';
+  const isFree = (id: string) => id === 'bank';
   it('untilDate までの予定だけを取り込む（境界含む）', () => {
     const proj = projectCashflow({
       startFree: 100000,
@@ -330,6 +388,7 @@ describe('projectCashflow（表示終了日 untilDate）', () => {
         sched({ id: 'b', dueDate: '2026-08-01', amount: 20000, direction: 'outflow' }),
       ],
       today,
+      isFree,
       untilDate: '2026-07-31',
     });
     // 7-31 は含み、8-01 は範囲外。
@@ -341,6 +400,7 @@ describe('projectCashflow（表示終了日 untilDate）', () => {
       startFree: 100000,
       schedules: [sched({ dueDate: '2027-01-10', amount: 5000, direction: 'outflow' })],
       today,
+      isFree,
       months: 3, // この月数だと 2027-01 は範囲外だが、untilDate で含める。
       untilDate: '2027-03-31',
     });
@@ -352,6 +412,7 @@ describe('projectCashflow（表示終了日 untilDate）', () => {
       startFree: 100000,
       schedules: [sched({ dueDate: '2026-09-10', amount: 1000, direction: 'outflow' })],
       today,
+      isFree,
     });
     // 既定 6 か月（2026-12-31 まで）に含まれる。
     expect(proj.schedules).toHaveLength(1);

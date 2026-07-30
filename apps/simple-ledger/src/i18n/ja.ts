@@ -441,6 +441,8 @@ export const ja = {
 
   // 復旧画面（ErrorBoundary）。DB の版不整合（VersionError）で開けない詰みからの最終手段。
   'recovery.wipe': 'DB を初期化して再起動',
+  'recovery.wipeFailed':
+    'DB を削除できませんでした。このアプリを開いている他のタブ・ウィンドウをすべて閉じてから、もう一度お試しください。',
 
   'toast.saved': '保存しました。',
   'toast.deleted': '削除しました。',
@@ -511,6 +513,15 @@ export const ja = {
   'error.account.archiveBalance':
     '残高が残っている科目はアーカイブできません。先に振替で残高を 0 にしてください。',
   'error.recurring.everyMonthsInvalid': '周期は 1 か月以上の整数で入力してください。',
+  // 監査 2026-07-30 対応で新設したエラーコード。
+  'error.monthlyCost.recoveryBeforeStart':
+    '回収の振替の日付は開始日（購入の仕訳の日付）以降にしてください。',
+  'error.monthlyCost.editLiability':
+    '負債（カード・ローン）で購入した項目は、支払い元と金額を変更できません（自動作成した返済の仕訳と合わなくなるため）。終了はアーカイブ（終了日の設定）を使ってください。',
+  'error.common.staleData':
+    '別のタブ（またはウィンドウ）でデータが変更されています。ページを再読み込みしてから、もう一度お試しください。',
+  'error.db.schemaVersionMismatch':
+    '保存データのスキーマ版({found})がこのアプリの版({expected})と一致しません。JSON バックアップの読み込み、または「DB を初期化して再起動」で復旧してください。',
 
   // 戻る操作（dirty guard・終了確認）
   'guard.discardTitle': '変更を破棄しますか？',
@@ -593,6 +604,8 @@ export const ja = {
   'recurring.amountHint': '月によって金額が違う場合は、起票された仕訳をその月だけ編集します。',
   'recurring.intervalMonths': '周期（か月）',
   'recurring.firstPostingDate': '初回の起票日',
+  'recurring.refBroken':
+    '参照している科目が削除またはアーカイブされています。このルールの起票は止まっています（編集で科目を選び直してください）。',
   'recurring.from.expense': '支払い元',
   'recurring.to.expense': '費用カテゴリ',
   'recurring.from.income': '収入カテゴリ',

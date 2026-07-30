@@ -919,12 +919,14 @@ describe('勘定科目のアーカイブ不変条件（アーカイブ済み = �
     updatedAt: 'x',
   };
 
-  it('残高が 0 でない資産をアーカイブ済みにした package は invalid', () => {
+  it('アーカイブ済み科目の残高は import で再検証しない（round-trip 保証・監査 P1-3）', () => {
+    // 「アーカイブ済み = 今日残高 0」は時点依存の不変条件なので、アーカイブ操作時点の
+    // 保存境界（upsertAccount / archiveAccount）だけが守る。未来仕訳を含む台帳では
+    // 最終残高が非 0 でも保存できるため、schema で最終残高 0 を要求すると
+    // 「保存に成功した状態を書き出すと取り込めない」round-trip 破壊になる。
     expect(
       ledgerExportPackageSchema.safeParse(pkgWith([wallet(true), food], [topUp])).success,
-    ).toBe(false);
-  });
-  it('最終残高 0 なら archived でも valid・未アーカイブは残高があっても valid', () => {
+    ).toBe(true);
     expect(
       ledgerExportPackageSchema.safeParse(pkgWith([wallet(true), food], [topUp, spend])).success,
     ).toBe(true);

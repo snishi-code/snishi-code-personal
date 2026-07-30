@@ -22,7 +22,8 @@ import {
   type AccountRole,
 } from './accountRoles';
 import { isValidIsoDate, isValidIsoMonth } from './calendar';
-import { isRecurringPostableRole } from './recurring';
+import { CATCH_UP_HARD_CAP_MONTHS, isRecurringPostableRole } from './recurring';
+import { RECOVERY_DESTINATION_ROLES } from './monthlyCost';
 
 const isoDate = z
   .string()
@@ -169,8 +170,9 @@ export const recurringRuleSchema = z
     name: z.string().min(1).max(120),
     amount: amountSchema,
     dayOfMonth: z.number().int().min(1).max(31),
-    // 何か月ごとに起票するか（必須。1 = 毎月）。
-    everyMonths: z.number().int().min(1),
+    // 何か月ごとに起票するか（必須。1 = 毎月）。上限は配分月数と同じ（監査 P2-3:
+    // これが無いと rule だけ保存できて生成 item が配分上限で保存できない）。
+    everyMonths: z.number().int().min(1).max(CATCH_UP_HARD_CAP_MONTHS),
     // 費用の行き先（あれば月割りするルール = 継続コスト化）。
     spreadExpenseAccountId: z.string().min(1).optional(),
     debitAccountId: z.string().min(1),
@@ -195,8 +197,8 @@ export const recurringRuleSchema = z
     }
   });
 
-/** 配分月数の上限（100 年。ルールの CATCH_UP_HARD_CAP_MONTHS と同値）。 */
-const SPREAD_MONTHS_CAP = 1200;
+/** 配分月数の上限（100 年）。rule の everyMonths・catch-up の走査窓と同じ正本を参照する。 */
+const SPREAD_MONTHS_CAP = CATCH_UP_HARD_CAP_MONTHS;
 
 export const monthlyCostItemSchema = z
   .object({
@@ -354,6 +356,7 @@ export const ledgerExportPackageSchema = z
 
     // 継続コスト ID 集合（仕訳・予定CF の monthlyCostId 参照検証に使う）。
     const monthlyCostIdSet = new Set(pkg.monthlyCostItems.map((m) => m.id));
+    const monthlyCostById = new Map(pkg.monthlyCostItems.map((m) => [m.id, m]));
     const recurringRuleIdSet = new Set(pkg.recurringRules.map((r) => r.id));
     const recurringPostingMonths = new Map<string, Set<string>>();
     // item ごとの購入の仕訳（monthlyCostId あり・monthlyCostRecovery なし）。不変条件⑥⑦に使う。
@@ -520,6 +523,9 @@ export const ledgerExportPackageSchema = z
       }
       // ⑨ 回収の振替は 貸方 = 台帳 かつ monthlyCostId 必須（回収額の上限は設けない＝
       //    割り振る総額が負になってよい。作者決定 2026-07-29）。
+      //    借方は台帳自身を禁止（自己振替は回収集計だけを動かし「台帳残高 = 残存価値」を壊す）、
+      //    振替先はアーカイブ UI と同じ role に限定、日付は購入（item.startDate）以降
+      //    （購入前の期間に台帳が負になる断面を作らない。監査 P1-1）。
       if (isRecovery) {
         if (mcId === undefined) {
           issue(`回収の振替「${e.description}」は monthlyCostId が必要です`, [
@@ -535,6 +541,30 @@ export const ledgerExportPackageSchema = z
             ei,
             'lines',
           ]);
+        }
+        if (debitLedger) {
+          issue(`回収の振替「${e.description}」の借方に継続コスト台帳は使えません`, [
+            'journalEntries',
+            ei,
+            'lines',
+          ]);
+        } else {
+          const debitRole = debitLine
+            ? (accountRole.get(debitLine.accountId) as AccountRole | undefined)
+            : undefined;
+          if (debitRole === undefined || !RECOVERY_DESTINATION_ROLES.includes(debitRole)) {
+            issue(
+              `回収の振替「${e.description}」の振替先は日常資産または負債である必要があります`,
+              ['journalEntries', ei, 'lines'],
+            );
+          }
+        }
+        const recoveryItem = mcId !== undefined ? monthlyCostById.get(mcId) : undefined;
+        if (recoveryItem && e.date < recoveryItem.startDate) {
+          issue(
+            `回収の振替「${e.description}」の日付(${e.date})が開始日(${recoveryItem.startDate})より前です`,
+            ['journalEntries', ei, 'date'],
+          );
         }
       }
       // ⑦（前半）購入の仕訳の形: 借方 = 継続コスト台帳・貸方（支払い元）は起票可能な全 role
@@ -715,31 +745,11 @@ export const ledgerExportPackageSchema = z
       }
     }
 
-    // 勘定科目の不変条件: アーカイブ済み（資産・負債）= 全仕訳から計算した最終残高が 0。
-    // 過去日の表示はその日の残高で出し続ける（accounting.ts 側の責務）が、
-    // 「いま残高があるのにアーカイブ済み」は取り込まない（fail-closed）。
-    {
-      const debitTotals = new Map<string, number>();
-      const creditTotals = new Map<string, number>();
-      for (const e of pkg.journalEntries) {
-        for (const l of e.lines) {
-          if (l.side === 'debit') debitTotals.set(l.accountId, (debitTotals.get(l.accountId) ?? 0) + l.amount);
-          else creditTotals.set(l.accountId, (creditTotals.get(l.accountId) ?? 0) + l.amount);
-        }
-      }
-      pkg.accounts.forEach((a, i) => {
-        if (!a.archived) return;
-        if (a.type !== 'asset' && a.type !== 'liability') return;
-        const debit = debitTotals.get(a.id) ?? 0;
-        const credit = creditTotals.get(a.id) ?? 0;
-        const balance = a.type === 'asset' ? debit - credit : credit - debit;
-        if (balance !== 0)
-          issue(
-            `アーカイブ済み科目「${a.name}」に残高(${balance})が残っています（アーカイブ済み = 残高 0）`,
-            ['accounts', i, 'archived'],
-          );
-      });
-    }
+    // 勘定科目の不変条件「アーカイブ済み = 残高 0」は **アーカイブ操作時点（今日）** の
+    // 保存境界だけが守る（upsertAccount / archiveAccount が導出仕訳込みの今日残高 0 を検証）。
+    // import ではあえて再検証しない: 残高は時点依存（未来仕訳・継続コストの導出行で今日 0 でも
+    // 最終残高は非 0 になり得る）ため、ここで「全仕訳の最終残高 0」を要求すると保存に成功した
+    // 状態の JSON が取り込めない round-trip 破壊になる（監査 P1-3 対応・2026-07-30）。
 
     // タグ(tags): id 一意 + active な同名重複なし。タグは「仕訳全体のみ」（明細タグは廃止）。
     const tagIds = new Set<string>();

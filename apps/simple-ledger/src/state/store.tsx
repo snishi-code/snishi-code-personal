@@ -164,7 +164,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         }
       } catch (e) {
         if (active) {
-          setError(e instanceof Error ? e.message : String(e));
+          // LedgerError（schemaVersion 不一致など）は i18n 文言で復旧画面に出す。
+          setError(errorText(e));
           setStatus('error');
         }
       }
@@ -589,7 +590,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       URL.revokeObjectURL(url);
       toast.show(t('toast.exported'), 'success');
     } catch (e) {
-      toast.show(t('toast.error'), 'error');
+      // export は書き出し前に schema 検証で throw し得る。原因（どの項目が不正か）を出す。
+      toast.show(errorText(e), 'error');
       throw e;
     }
   }, [ledger, toast]);

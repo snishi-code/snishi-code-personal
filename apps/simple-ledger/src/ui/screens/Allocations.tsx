@@ -78,9 +78,10 @@ export function Allocations({
   const name = (id?: string): string => (id ? (accountsMap.get(id)?.name ?? '—') : '—');
 
   // 回収の振替を差し引いた「割り振る総額」（負になってよい＝過去にわたる費用減）。
-  const recovered = useMemo(
-    () => recoveredAmountsByItem(ledger?.journalEntries ?? []),
-    [ledger],
+  // 集計は今日までの保存仕訳に限定する（未来日付の回収を今日の一覧へ先取りしない。
+  // reportEntriesForAsOf が実仕訳を asOf で切ってから展開するのと同じ扱い・監査 P2-2）。
+  const recovered = recoveredAmountsByItem(
+    (ledger?.journalEntries ?? []).filter((e) => e.date <= today),
   );
   const spreadTotalOf = (m: MonthlyCostItem): number => m.amount - (recovered.get(m.id) ?? 0);
   const purchaseEntryOf = (m: MonthlyCostItem): JournalEntry | undefined =>
@@ -95,6 +96,21 @@ export function Allocations({
     .sort(compareMonthlyCostItems);
 
   const rules = ledger?.recurringRules ?? [];
+  // 参照科目が削除/アーカイブ済みのルールは catch-up が起票を止める（fail-soft）。
+  // 黙ってスキップしない＝一覧の行で警告する（監査 P1-7）。削除は accountRefs が塞ぐため、
+  // 通常ここに出るのはアーカイブ由来だけ。
+  const ruleRefBroken = (r: RecurringRule): boolean => {
+    const ids = [
+      r.creditAccountId,
+      ...(r.spreadExpenseAccountId !== undefined
+        ? [r.spreadExpenseAccountId]
+        : [r.debitAccountId]),
+    ];
+    return ids.some((id) => {
+      const account = accountsMap.get(id);
+      return !account || account.archived;
+    });
+  };
   const ruleKindLabel = (r: RecurringRule): string => {
     const kind = sheetKindForRule(r, (id) => accountsMap.get(id)?.role);
     return t(`recurring.kind.${kind}` as MessageKey);
@@ -177,6 +193,11 @@ export function Allocations({
                       </>
                     ) : null}
                   </div>
+                  {ruleRefBroken(r) ? (
+                    <div className="field__error" role="alert">
+                      {t('recurring.refBroken')}
+                    </div>
+                  ) : null}
                 </div>
                 <span className="list__amount">
                   <Money amount={r.amount} currency={currency} />
@@ -933,7 +954,7 @@ function ContinuousCostItemSheet({
               key={years}
               type="button"
               className="btn btn--ghost"
-              style={{ minHeight: 32 }}
+              style={{ minHeight: 'var(--tap)' }}
               onClick={() => setEndDate(quickSpanEndDate(startDate, years))}
             >
               {t('ccItem.quickSpan', { years })}
@@ -977,11 +998,12 @@ function MonthlyCostArchiveDialog({
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  // 変更前の item の割り振りで「その日までに費用になっていない残り」。回収済みは差し引く。
-  const alreadyRecovered = item.amount - spreadTotal;
+  // 変更前の item の割り振りで「その日までに費用になっていない残り」。
+  // remainingValue が回収済みを織り込んだ単一正本（spreadTotal − 認識済み）なので、
+  // ここで回収額をもう一度引かない（一覧と同じ値になる・監査 P2-1）。
   const remaining = isValidIsoDate(endDate)
-    ? remainingValue(item, endDate, spreadTotal) - alreadyRecovered
-    : remainingValue(item, todayLocal(), spreadTotal) - alreadyRecovered;
+    ? remainingValue(item, endDate, spreadTotal)
+    : remainingValue(item, todayLocal(), spreadTotal);
 
   async function archiveWithoutTransfer() {
     if (submitting) return;
