@@ -52,6 +52,7 @@ export const UI = {
     section: 'projection.section',
     group: 'projection.group',
     field: 'projection.field', // 各入力要素・選択チップ
+    normalBtn: 'projection.normalBtn',
     oncall: 'projection.oncall',
     menu: 'projection.menu',
     menuDialog: 'projection.menu.dialog',

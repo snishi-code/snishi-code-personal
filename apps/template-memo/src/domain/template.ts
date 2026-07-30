@@ -35,7 +35,7 @@ export interface TemplateItem {
   kind: ItemKind;
   /** number/fraction の単位（例 mmHg, %）。値の直後に付く。 */
   unit?: string;
-  /** text の正常文（ワンタップ入力・全部正常の対象）。 */
+  /** text の正常文（長押しチェック入力の対象）。 */
   normal?: string;
   /** select の選択肢（1 個以上）。 */
   options?: string[];

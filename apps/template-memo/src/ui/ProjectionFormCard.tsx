@@ -4,14 +4,14 @@
 // 仕様:
 //   - 現在テンプレートの全場所を表示する（フォーマットが無い場所も見出しを残す）。
 //   - 展開 (always) 群: 行ごとの入力を patient.projectedValues (FormValues) へ write-through 保存。
-//     text 項目は行末に正常文ワンタップボタン (全部正常は群見出し右)。手入力は openEditor で守る。
+//     text 項目は項目名の右に正常文チェックを置く。手入力は openEditor で守る。
 //   - 呼び出し (oncall) / メニュー (menu) 群: シートの値を同じ projectedValues へ保存。
 //   - oncall/menu 群は値が入ると展開カードへ昇格し、全消去で入口へ戻る。
 //   - 場所 (section) ごとに見出し・展開カード・呼び出しチップ・メニューをまとめる。
 //   - 値の読み書きは必ず domain/formValues.ts のヘルパ経由。
 //   - 患者は pid で捕捉する (並び替えで別患者へ書かないため)。MemoCards と同じ write-through。
 
-import { useRef, useState } from 'react';
+import { useRef, useState, type RefObject } from 'react';
 import { Button } from '@snishi/foundation/ui/Button';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { Modal } from '@snishi/foundation/ui/Modal';
@@ -33,6 +33,7 @@ import { useRegisterOverlay } from './registries';
 import { hapticTick } from './feedback';
 import { s } from '../i18n';
 import { UI } from '../ui-contract';
+import { NormalCheckButton } from './NormalCheckButton';
 
 export function partitionSectionGroups(section: TemplateSection, values: FormValues) {
   const hasInput = (group: TemplateGroup) => groupHasInput(readGroupValues(values, group.id));
@@ -52,23 +53,36 @@ function labelWithUnit(label: string, unit?: string): string {
  * 項目 1 行 (text / number / fraction / select)。rawValue は保存形そのまま
  * (TextEntry/NumericEntry/legacy 文字列/undefined)。書き込みは onWrite (write-through)。
  */
-function ItemRow({
+export function ItemRow({
   item,
   rawValue,
+  hasLabelCol,
+  hasNormalCol,
+  freshTapRef,
   onWrite,
 }: {
   item: TemplateItem;
   rawValue: unknown;
+  hasLabelCol: boolean;
+  hasNormalCol: boolean;
+  freshTapRef: RefObject<boolean>;
   onWrite: (stored: TextEntry | NumericEntry | '') => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const label = labelWithUnit(item.label, item.unit);
+  const labelCell = hasLabelCol ? (
+    <span className="projectionFieldLabel">{item.kind === 'select' ? item.label : label}</span>
+  ) : null;
+  const normalSpacer = hasNormalCol ? (
+    <span className="projectionNormalSpacer" aria-hidden="true" />
+  ) : null;
 
   if (item.kind === 'select') {
     const value = readSelectValue(rawValue, item.options ?? []);
     return (
       <div className="projectionField">
-        {item.label !== '' ? <span className="projectionFieldLabel">{item.label}</span> : null}
+        {labelCell}
+        {normalSpacer}
         <div className="tagSelection">
           {(item.options ?? []).map((option) => {
             const selected = value === option;
@@ -95,24 +109,27 @@ function ItemRow({
 
   if (item.kind === 'text') {
     const value = readTextValue(rawValue);
-    const isPreset =
-      item.normal !== undefined && normalizeTextEntry(rawValue, item.normal).source === 'preset';
+    const source =
+      item.normal !== undefined ? normalizeTextEntry(rawValue, item.normal).source : 'empty';
+    const isPreset = source === 'preset';
     return (
       <div className="projectionField">
-        {item.label !== '' ? <span className="projectionFieldLabel">{item.label}</span> : null}
-        <input
-          ref={inputRef}
-          className="input"
-          type="text"
-          value={value}
-          aria-label={item.label || item.normal || s.detail.noteInput}
-          data-ui={UI.projection.field}
-          onChange={(e) => onWrite(manualTextEntry(e.target.value))}
-        />
+        {labelCell}
         {item.normal !== undefined ? (
-          <Button
-            aria-pressed={isPreset}
-            onClick={() => {
+          <NormalCheckButton
+            on={isPreset}
+            title={
+              source === 'empty'
+                ? s.detail.normalCheck.input(item.normal)
+                : isPreset
+                  ? s.detail.normalCheck.clear
+                  : s.detail.normalCheck.edit
+            }
+            ariaLabel={s.detail.normalCheck.aria}
+            ariaPressed={isPreset}
+            onTrigger={() => {
+              // detail 入場直後や対象切替直後のゴーストタップでは書き込まない。
+              if (!freshTapRef.current) return;
               const d = decidePresetToggle(rawValue, item.normal);
               if (d.action === 'openEditor') {
                 // 手入力を守る: 上書きせず編集へ委ねる。
@@ -122,11 +139,19 @@ function ItemRow({
               onWrite(d.action === 'write' ? d.value : '');
               hapticTick();
             }}
-          >
-            {isPreset ? <Icon name="check" size={16} /> : null}
-            {item.normal}
-          </Button>
-        ) : null}
+          />
+        ) : (
+          normalSpacer
+        )}
+        <input
+          ref={inputRef}
+          className="input"
+          type="text"
+          value={value}
+          aria-label={item.label || item.normal || s.detail.noteInput}
+          data-ui={UI.projection.field}
+          onChange={(e) => onWrite(manualTextEntry(e.target.value))}
+        />
       </div>
     );
   }
@@ -135,7 +160,8 @@ function ItemRow({
   const entry = readNumericEntry(rawValue);
   return (
     <div className="projectionField">
-      {item.label !== '' ? <span className="projectionFieldLabel">{label}</span> : null}
+      {labelCell}
+      {normalSpacer}
       <input
         className="input"
         type="text"
@@ -150,44 +176,47 @@ function ItemRow({
   );
 }
 
-/** 群 1 つ分の行列 (見出し + 全部正常 + 項目行)。値の読み書きは values/onWrite に委ねる。 */
+/** 群 1 つ分の行列 (見出し + 項目行)。値の読み書きは values/onWrite に委ねる。 */
 function GroupRows({
   group,
   values,
+  freshTapRef,
   onWrite,
 }: {
   group: TemplateGroup;
   values: Record<string, unknown>;
+  freshTapRef: RefObject<boolean>;
   onWrite: (itemId: string, stored: TextEntry | NumericEntry | '') => void;
 }) {
-  const hasNormalText = group.items.some((i) => i.kind === 'text' && i.normal !== undefined);
-
-  // 全部正常: 空の text item だけを正常文 (preset) で埋める。手入力・入力済みは触らない。
-  function allNormal(): void {
-    for (const item of group.items) {
-      if (item.kind !== 'text' || item.normal === undefined) continue;
-      if (readTextValue(values[item.id]) !== '') continue;
-      onWrite(item.id, { value: item.normal, source: 'preset' } satisfies TextEntry);
-    }
-    hapticTick();
-  }
+  const hasLabelCol = group.items.some((item) => item.label.trim() !== '');
+  const hasNormalCol = group.items.some(
+    (item) => item.kind === 'text' && item.normal !== undefined,
+  );
 
   return (
     <>
-      {group.name !== '' || hasNormalText ? (
+      {group.name !== '' ? (
         <div className="panelCardHead projectionGroupHead" data-ui={UI.projection.group}>
           <div className="panelLabel">{group.name}</div>
-          {hasNormalText ? <Button onClick={allNormal}>{s.detail.allNormal}</Button> : null}
         </div>
       ) : null}
-      {group.items.map((item) => (
-        <ItemRow
-          key={item.id}
-          item={item}
-          rawValue={values[item.id]}
-          onWrite={(stored) => onWrite(item.id, stored)}
-        />
-      ))}
+      <div
+        className={`projectionRows${hasLabelCol ? ' hasLabel' : ''}${
+          hasNormalCol ? ' hasNormal' : ''
+        }`}
+      >
+        {group.items.map((item) => (
+          <ItemRow
+            key={item.id}
+            item={item}
+            rawValue={values[item.id]}
+            hasLabelCol={hasLabelCol}
+            hasNormalCol={hasNormalCol}
+            freshTapRef={freshTapRef}
+            onWrite={(stored) => onWrite(item.id, stored)}
+          />
+        ))}
+      </div>
     </>
   );
 }
@@ -198,11 +227,13 @@ function GroupRows({
 function OncallGroupSheet({
   group,
   initialValues,
+  freshTapRef,
   onSave,
   onClose,
 }: {
   group: TemplateGroup;
   initialValues: Record<string, unknown>;
+  freshTapRef: RefObject<boolean>;
   onSave: (values: Record<string, unknown>) => void;
   onClose: () => void;
 }) {
@@ -230,6 +261,7 @@ function OncallGroupSheet({
       <GroupRows
         group={group}
         values={values}
+        freshTapRef={freshTapRef}
         onWrite={(itemId, stored) => setValues((prev) => ({ ...prev, [itemId]: stored }))}
       />
     </Modal>
@@ -275,9 +307,11 @@ function MenuGroupDialog({
 export function ProjectionFormCard({
   runtime,
   patient,
+  freshTapRef,
 }: {
   runtime: AppRuntime;
   patient: Patient;
+  freshTapRef: RefObject<boolean>;
 }) {
   const { store } = runtime;
   const [oncallOpen, setOncallOpen] = useState<TemplateGroup | null>(null);
@@ -342,6 +376,7 @@ export function ProjectionFormCard({
                 key={group.id}
                 group={group}
                 values={readGroupValues(patient.projectedValues, group.id)}
+                freshTapRef={freshTapRef}
                 onWrite={(itemId, stored) => writeValue(group.id, itemId, stored)}
               />
             ))}
@@ -352,7 +387,10 @@ export function ProjectionFormCard({
                     key={group.id}
                     type="button"
                     className="tagChip"
-                    onClick={() => setOncallOpen(group)}
+                    onClick={() => {
+                      if (!freshTapRef.current) return;
+                      setOncallOpen(group);
+                    }}
                   >
                     {group.name || s.detail.noteInput}
                   </button>
@@ -363,7 +401,10 @@ export function ProjectionFormCard({
               <Button
                 dataUi={UI.projection.menu}
                 aria-label={s.detail.menuOpen(section.title)}
-                onClick={() => setMenuOpen(section)}
+                onClick={() => {
+                  if (!freshTapRef.current) return;
+                  setMenuOpen(section);
+                }}
               >
                 <Icon name="menu" size={18} />
                 {s.detail.menuOpen(section.title)}
@@ -377,6 +418,7 @@ export function ProjectionFormCard({
         <OncallGroupSheet
           group={oncallOpen}
           initialValues={readGroupValues(patient.projectedValues, oncallOpen.id)}
+          freshTapRef={freshTapRef}
           onSave={(values) => saveGroup(oncallOpen.id, values)}
           onClose={() => setOncallOpen(null)}
         />

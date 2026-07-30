@@ -74,6 +74,13 @@ async function confirmDialog(page: Page): Promise<void> {
   await expect(dialog).toBeHidden();
 }
 
+/** 正常チェックを長押しして確定する。 */
+async function hold(page: Page, target: Locator, ms = 450): Promise<void> {
+  await target.dispatchEvent('pointerdown', { pointerType: 'touch' });
+  await page.waitForTimeout(ms);
+  await target.dispatchEvent('pointerup', { pointerType: 'touch' });
+}
+
 /** QR canvas が実際に描画されている (幅 > 0 の正方形 + 非ゼロ画素がある) ことを確認する。 */
 async function expectRenderedQr(canvas: Locator): Promise<void> {
   await expect(canvas).toBeVisible();
@@ -128,10 +135,13 @@ test('今回メモと固定フォームから完成文を合成し、QRダイア
   // 今回メモ (自由本文) 入力。
   await page.locator(ui(UI.memo.visit.input)).fill('食欲低下あり');
 
-  // 固定フォーム (ラウンド入力カード): バイタルの BP と、身体所見の「全部正常」ワンタップ。
+  // 固定フォーム (ラウンド入力カード): バイタルの BP と、肺音の正常チェックを入力。
   // (BP/肺音/正常文はプリセットテンプレート『回診メモ』のデータであり UI 文言ではない)
   await page.getByLabel('BP', { exact: true }).fill('120/80');
-  await page.getByRole('button', { name: '全部正常', exact: true }).click();
+  const lungRow = page.locator('.projectionField', {
+    has: page.getByLabel('肺音', { exact: true }),
+  });
+  await hold(page, lungRow.locator(ui(UI.projection.normalBtn)));
   await expect(page.getByLabel('肺音', { exact: true })).toHaveValue('明らかなラ音なし');
 
   // 転記用QRを開いた時点で空セクションが正常文で充填され、memoSection (O) に今回メモが入る。

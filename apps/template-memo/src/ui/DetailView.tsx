@@ -7,7 +7,7 @@
 //
 // メモは visitMemo / standingMemo の 2 欄に集約する (write-through 保存は MemoCards 側)。
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@snishi/foundation/ui/Button';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { BottomActionBar } from './BottomActionBar';
@@ -22,6 +22,29 @@ import { PatientEditPopup } from './PatientEditPopup';
 import { PatientLifecyclePanel } from './PatientLifecyclePanel';
 import { s } from '../i18n';
 import { UI } from '../ui-contract';
+
+/**
+ * 誤タップガード: 詳細画面へ入った直後と対象切替直後は、新しい pointerdown が来るまで
+ * 正常チェックや入力シートを発火させない。
+ */
+export function useFreshTapGuard(pid: string | null) {
+  const freshTapRef = useRef(false);
+  useEffect(() => {
+    freshTapRef.current = false;
+    const onDown = () => {
+      freshTapRef.current = true;
+    };
+    window.addEventListener('pointerdown', onDown);
+    return () => window.removeEventListener('pointerdown', onDown);
+  }, []);
+
+  // 詳細ビューは対象切替で再マウントされないため、前対象の pointerdown を持ち越さない。
+  useEffect(() => {
+    freshTapRef.current = false;
+  }, [pid]);
+
+  return freshTapRef;
+}
 
 export function DetailView({
   runtime,
@@ -40,6 +63,7 @@ export function DetailView({
   const { store } = runtime;
   const appState = store.getAppState();
   const patient = appState.patients[selectedNo - 1] ?? null;
+  const freshTapRef = useFreshTapGuard(patient?.pid ?? null);
 
   const [qrOpen, setQrOpen] = useState(false);
   const [metaOpen, setMetaOpen] = useState(false);
@@ -126,7 +150,7 @@ export function DetailView({
 
         {/* 入力フォーム (テンプレート投影の入力欄)。継続メモの後、今回メモの前に置く。
               プロブレム/継続メモ = ずっと参照する背景、入力フォーム/今回メモ = 今回入力する情報。 */}
-        <ProjectionFormCard runtime={runtime} patient={patient} />
+        <ProjectionFormCard runtime={runtime} patient={patient} freshTapRef={freshTapRef} />
 
         {/* 今回メモは継続メモと同じく常時表示。患者切替時の key remount は維持する。 */}
         <VisitMemoCard key={`visit:${patient.pid}`} runtime={runtime} patient={patient} />
