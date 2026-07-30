@@ -7,13 +7,20 @@
  */
 import { Component, useState, type ErrorInfo, type ReactNode } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
+import { ConfirmDialog } from './overlays';
 import { Settings } from './screens/Settings';
+import { wipeDatabase } from '../data/db';
 import { t } from '../i18n';
 import { UI } from '../ui-contract';
 
-/** エラー表示 + 「設定」へ入るだけの最小画面。文言は既存キーを使い回す。 */
+/**
+ * エラー表示 + 「設定」（JSON 読み込み・復元）と「DB を初期化して再起動」の最小画面。
+ * 後者は IndexedDB の版が新しくて開けない（VersionError）等、設定にすら入れない詰みからの
+ * 最終復旧手段（deleteDatabase → reload）。文言は既存キーを使い回す。
+ */
 export function RecoveryScreen({ message }: { message?: string }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [wipeConfirm, setWipeConfirm] = useState(false);
   return (
     <main className="app-main" id="main" data-ui={UI.app.recovery}>
       <div className="banner" role="alert">
@@ -34,6 +41,29 @@ export function RecoveryScreen({ message }: { message?: string }) {
           {t('nav.settings')}
         </button>
       )}
+      <button
+        type="button"
+        className="btn btn--block"
+        style={{ marginTop: 'var(--space-3)' }}
+        onClick={() => setWipeConfirm(true)}
+        data-ui={UI.app.recoveryWipe}
+      >
+        <Icon name="delete" size={18} />
+        {t('recovery.wipe')}
+      </button>
+      {wipeConfirm ? (
+        <ConfirmDialog
+          title={t('reset.confirmTitle')}
+          body={t('reset.confirmBody')}
+          confirmLabel={t('recovery.wipe')}
+          danger
+          onCancel={() => setWipeConfirm(false)}
+          onConfirm={async () => {
+            await wipeDatabase();
+            window.location.reload();
+          }}
+        />
+      ) : null}
     </main>
   );
 }

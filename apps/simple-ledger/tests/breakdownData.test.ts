@@ -76,7 +76,6 @@ function ledgerOf(journalEntries: JournalEntry[]): Ledger {
     reserves: [],
     tags: [],
     monthlyCostItems: [],
-    assetDisposals: [],
     recurringRules: [],
   };
 }

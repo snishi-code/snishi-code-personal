@@ -61,7 +61,7 @@ export function Dashboard({
 
   const { pl, bs, asOf, monthlyCost, normalExpense } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf, today) : [];
+    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf) : [];
     const breakdown = livingCostBreakdownForRange(accounts, entries, range);
     return {
       pl: deriveProfitAndLoss(accounts, entries, range),
@@ -70,7 +70,7 @@ export function Dashboard({
       monthlyCost: breakdown.monthlyCost,
       normalExpense: breakdown.normalExpense,
     };
-  }, [basis.asOf, ledger, range, today]);
+  }, [basis.asOf, ledger, range]);
 
   const trend = useMemo(() => buildSectionTrends(period, ledger, today), [period, ledger, today]);
 

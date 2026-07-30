@@ -14,16 +14,10 @@ const empty: AccountRefCollections = {
 const monthlyCost: MonthlyCostItem = {
   id: 'mc1',
   name: 'x',
-  kind: 'durable-asset',
   amount: 1000,
-  costMonths: 10,
-  startMonth: '2026-06',
+  startDate: '2026-06-01',
+  endDate: '2027-03-31',
   expenseAccountId: 'mc-exp',
-  paymentSourceAccountId: 'mc-src',
-  paymentAccountId: 'mc-pay',
-  repaymentAccountId: 'mc-repay',
-  recognitionCreditAccountId: 'mc-recog',
-  status: 'active',
   createdAt: 'x',
   updatedAt: 'x',
 };
@@ -76,16 +70,10 @@ describe('isAccountReferenced（仕訳/予定CF/目的別資金/継続コスト�
   it('目的別資金の参照を検出する', () => {
     expect(isAccountReferenced('res-acc', { ...empty, reserves: [reserve] })).toBe(true);
   });
-  it('継続コスト（expense/支払い元/返済/対象資産）の参照を検出する', () => {
+  it('継続コスト資産の参照は費用の行き先だけ（支払い元は購入の仕訳が仕訳側で参照する）', () => {
     expect(isAccountReferenced('mc-exp', { ...empty, monthlyCostItems: [monthlyCost] })).toBe(true);
-    expect(isAccountReferenced('mc-pay', { ...empty, monthlyCostItems: [monthlyCost] })).toBe(true);
-    expect(isAccountReferenced('mc-repay', { ...empty, monthlyCostItems: [monthlyCost] })).toBe(
-      true,
-    );
-    // 資産経由モデルの支払い元(funding 貸方)と対象資産も参照中＝削除/区分変更を fail-closed に。
-    expect(isAccountReferenced('mc-src', { ...empty, monthlyCostItems: [monthlyCost] })).toBe(true);
-    expect(isAccountReferenced('mc-recog', { ...empty, monthlyCostItems: [monthlyCost] })).toBe(
-      true,
+    expect(isAccountReferenced('mc-src', { ...empty, monthlyCostItems: [monthlyCost] })).toBe(
+      false,
     );
   });
 });
@@ -105,8 +93,6 @@ describe('referencedAccountIds', () => {
       'sched-counter',
       'res-acc',
       'mc-exp',
-      'mc-pay',
-      'mc-repay',
     ]) {
       expect(ids.has(id)).toBe(true);
     }

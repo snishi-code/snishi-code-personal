@@ -22,7 +22,7 @@ import { Breakdown } from './ui/screens/Breakdown';
 import { ExpenseBreakdown } from './ui/screens/ExpenseBreakdown';
 import { NetIncome } from './ui/screens/NetIncome';
 import { Journal, type JournalFilter } from './ui/screens/Journal';
-import { Allocations } from './ui/screens/Allocations';
+import { Allocations, type AllocationsTarget } from './ui/screens/Allocations';
 import { Cashflow } from './ui/screens/Cashflow';
 import { Tags } from './ui/screens/Tags';
 import { Accounts } from './ui/screens/Accounts';
@@ -46,6 +46,8 @@ export function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [entryInit, setEntryInit] = useState<EntryInit | null>(null);
   const [journalFilter, setJournalFilter] = useState<JournalFilter | null>(null);
+  // 仕訳一覧の計算で生まれた行タップ → 「毎月のもの」で開くシートの対象（1 回で消費）。
+  const [allocationsTarget, setAllocationsTarget] = useState<AllocationsTarget | null>(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [exitConfirm, setExitConfirm] = useState(false);
   // オンボーディングは「初回状態からの派生 + ユーザー操作の上書き」で開閉する
@@ -67,6 +69,7 @@ export function App() {
   const screen = view as Screen;
   const go = (s: Screen) => {
     setJournalFilter(null);
+    setAllocationsTarget(null);
     navigate(s);
   };
   // ヘッダーの日付を変えたら明示フィルターより日付を優先する（フィルターが居座らない）。
@@ -112,6 +115,12 @@ export function App() {
   const goJournalFiltered = (filter: JournalFilter) => {
     navigate('journal');
     setJournalFilter(filter);
+  };
+
+  // 仕訳一覧 → 毎月のもの（計算で生まれた行の由来を開く）。
+  const goAllocationsFor = (target: AllocationsTarget) => {
+    navigate('allocations');
+    setAllocationsTarget(target);
   };
 
   const today = todayLocal();
@@ -260,12 +269,15 @@ export function App() {
           <Journal
             onEditEntry={openEdit}
             onReverse={openReversal}
+            onOpenAllocations={goAllocationsFor}
             filter={journalFilter}
             period={period}
             onClearAccountFilter={() => setJournalFilter(null)}
           />
         ) : null}
-        {screen === 'allocations' ? <Allocations /> : null}
+        {screen === 'allocations' ? (
+          <Allocations onEditEntry={openEdit} target={allocationsTarget} />
+        ) : null}
         {screen === 'cashflow' ? <Cashflow /> : null}
         {screen === 'tags' ? <Tags /> : null}
         {screen === 'accounts' ? <Accounts /> : null}

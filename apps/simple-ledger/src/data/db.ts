@@ -20,7 +20,6 @@ export const STORE = {
   reserves: 'reserves',
   tags: 'tags',
   monthlyCostItems: 'monthlyCostItems',
-  assetDisposals: 'assetDisposals',
   recurringRules: 'recurringRules', // 定期ルール（v2 で追加）
   snapshots: 'snapshots',
 } as const;
@@ -59,9 +58,6 @@ export const db = createDatabase({
     if (!idb.objectStoreNames.contains(STORE.monthlyCostItems)) {
       idb.createObjectStore(STORE.monthlyCostItems, { keyPath: 'id' });
     }
-    if (!idb.objectStoreNames.contains(STORE.assetDisposals)) {
-      idb.createObjectStore(STORE.assetDisposals, { keyPath: 'id' });
-    }
     if (!idb.objectStoreNames.contains(STORE.recurringRules)) {
       idb.createObjectStore(STORE.recurringRules, { keyPath: 'id' });
     }
@@ -74,6 +70,25 @@ export const db = createDatabase({
 /** テスト用: 接続を閉じてキャッシュを破棄する（deleteDatabase が blocked にならないように）。 */
 export function _resetConnectionForTests(): void {
   db._resetForTests();
+}
+
+/**
+ * 復旧用: 接続を閉じて DB を丸ごと削除する（VersionError で新旧どちらのビルドも開けなくなった
+ * 端末の最終復旧手段。ErrorBoundary の復旧画面から呼ぶ）。blocked でも待ち続けず解決する
+ * （呼び出し側が直後に reload するため、削除は再起動後に完了する）。
+ */
+export async function wipeDatabase(): Promise<void> {
+  try {
+    db._resetForTests();
+  } catch {
+    // 接続が開けていない（VersionError 等）場合はそのまま削除へ。
+  }
+  await new Promise<void>((resolve) => {
+    const request = indexedDB.deleteDatabase(DB_NAME);
+    request.onsuccess = () => resolve();
+    request.onerror = () => resolve();
+    request.onblocked = () => resolve();
+  });
 }
 
 /* ── handle への薄い委譲（repository / テストが使う API は v1 と同形に保つ） ── */

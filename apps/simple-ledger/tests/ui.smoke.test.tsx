@@ -64,6 +64,7 @@ describe('Journal スモーク', () => {
         <Journal
           onEditEntry={() => undefined}
           onReverse={() => undefined}
+          onOpenAllocations={() => undefined}
           filter={null}
           period={{ mode: 'date', date: '2025-01-31' }}
           onClearAccountFilter={() => undefined}

@@ -1,8 +1,9 @@
 /*
  * 毎月のもの。
- *  - 定期ルール（毎月の支出・収入・振替）: 実仕訳の自動起票（正本は起票された仕訳）。
- *  - 継続コスト（費用の月割り）: 年払い・耐久財などを「月あたりコスト」で見る導出レイヤ。
- * 実際にお金が動くものはルールで起票し、動いたお金の月割り解釈は継続コストが担う。
+ *  - くり返し記帳（定期ルール）: 実仕訳の自動起票（正本は起票された仕訳）。
+ *    支出ルールで everyMonths >= 2 なら自動で月割り（継続コスト化）される（トグルは無い）。
+ *  - 継続コスト資産: 項目名・金額・開始日・終了日の4項目。終了日までの月割りは導出で、
+ *    終了日を過ぎたら一覧から消える（アーカイブ = 終了日の設定）。
  */
 import { useMemo, useState } from 'react';
 import { Modal } from '../overlays';
@@ -11,108 +12,114 @@ import { Icon } from '@snishi/foundation/ui/Icon';
 import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import {
-  isOverEstimate,
+  compareMonthlyCostItems,
+  isArchived,
+  isEndingSoon,
   monthlyCostForMonth,
+  remainingValue,
   representativeMonthlyAmount,
 } from '../../domain/monthlyCost';
+import { recoveredAmountsByItem } from '../../domain/continuousCost';
+import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../../domain/constants';
 import { lastExpenseCategoryId, rememberExpenseCategoryId } from '../../data/localFlags';
 import { sortAccounts } from '../../domain/accountOrder';
 import { defaultRecognitionAccountId, recognitionAccountOptions } from '../accountOptions';
-import {
-  continuousCostDisposalEndMonth,
-  continuousCostDisposalOutcome,
-  isContinuingCostItem,
-} from '../../domain/continuousCost';
-import { addMonths, monthOf } from '../../domain/allocation';
-import { currentYearMonth, nowIso, todayLocal } from '../../util/time';
+import { monthlyAmounts, monthOf } from '../../domain/allocation';
+import { isValidIsoDate } from '../../domain/calendar';
+import { nowIso, todayLocal } from '../../util/time';
 import {
   RECURRING_POSTABLE_ROLES,
   clampDayToMonth,
   recurringKindOf,
   type RecurringKind,
 } from '../../domain/recurring';
+import { quickSpanEndDate } from '../ccQuickSpan';
 import { Money } from '../money';
-import { MonthField } from '../MonthField';
+import { EntrySheet } from './EntrySheet';
 import { errorText, t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
 import { UI } from '../../ui-contract';
-import type { MonthlyCostItem, MonthlyCostStatus, RecurringRule } from '../../domain/types';
+import type { JournalEntry, MonthlyCostItem, RecurringRule } from '../../domain/types';
 
-const STATUSES: MonthlyCostStatus[] = ['active', 'paused', 'ended'];
+/** 仕訳一覧から「この行はどこから来たか」で遷移してくるときの対象。 */
+export interface AllocationsTarget {
+  itemId?: string;
+  ruleId?: string;
+}
 
-export function Allocations() {
-  const { ledger, saveMonthlyCost, removeMonthlyCost, saveRecurringRule, removeRecurringRule } =
-    useLedger();
-  const [showInactive, setShowInactive] = useState(false);
+export function Allocations({
+  onEditEntry,
+  target,
+}: {
+  /** 購入の仕訳を開く（開始日の変更は仕訳側で行う）。 */
+  onEditEntry: (entry: JournalEntry) => void;
+  /** 仕訳一覧の計算で生まれた行タップからの遷移対象（開くシート。同一オブジェクトは 1 回だけ消費）。 */
+  target?: AllocationsTarget | null;
+}) {
+  const { ledger, removeMonthlyCost, setRecurringRulePaused, removeRecurringRule } = useLedger();
+  const [showEnded, setShowEnded] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<MonthlyCostItem | null>(null);
-  const [editing, setEditing] = useState<MonthlyCostItem | null>(null);
-  const [disposing, setDisposing] = useState<MonthlyCostItem | null>(null);
-  const [migrating, setMigrating] = useState(false);
+  const [itemSheet, setItemSheet] = useState<{ existing?: MonthlyCostItem } | null>(null);
+  const [archiving, setArchiving] = useState<MonthlyCostItem | null>(null);
   const [chooserOpen, setChooserOpen] = useState(false);
-  const [subMigrating, setSubMigrating] = useState(false);
-  const [ruleSheet, setRuleSheet] = useState<{
-    existing?: RecurringRule;
-    initialKind?: RecurringKind;
-  } | null>(null);
+  const [ruleSheet, setRuleSheet] = useState<{ existing?: RecurringRule } | null>(null);
   const [pendingRuleDelete, setPendingRuleDelete] = useState<RecurringRule | null>(null);
-  const { year, month } = currentYearMonth();
-  const currentYm = `${year}-${String(month).padStart(2, '0')}`;
+  // 「毎月のもの」は集計ではなく登録簿なので、ヘッダー選択日ではなく実際の今日で判定する。
+  const today = todayLocal();
+  const currentYm = monthOf(today);
   const currency = ledger?.settings.currency ?? 'JPY';
 
   const accountsMap = useMemo(
     () => new Map((ledger?.accounts ?? []).map((a) => [a.id, a] as const)),
     [ledger],
   );
-  const disposedItemIds = useMemo(
-    () => new Set((ledger?.assetDisposals ?? []).map((disposal) => disposal.monthlyCostId)),
+  const name = (id?: string): string => (id ? (accountsMap.get(id)?.name ?? '—') : '—');
+
+  // 回収の振替を差し引いた「割り振る総額」（負になってよい＝過去にわたる費用減）。
+  const recovered = useMemo(
+    () => recoveredAmountsByItem(ledger?.journalEntries ?? []),
     [ledger],
   );
-  const name = (id?: string): string => (id ? (accountsMap.get(id)?.name ?? '—') : '—');
-  const isDisposed = (item: MonthlyCostItem): boolean => disposedItemIds.has(item.id);
+  const spreadTotalOf = (m: MonthlyCostItem): number => m.amount - (recovered.get(m.id) ?? 0);
+  const purchaseEntryOf = (m: MonthlyCostItem): JournalEntry | undefined =>
+    (ledger?.journalEntries ?? []).find(
+      (e) => e.metadata?.monthlyCostId === m.id && e.metadata.monthlyCostRecovery !== true,
+    );
 
-  // 実績動的償却: 見込みを超えても自動終了しない（月額を実績で再計算しながら生き続ける）。
-  // 終了は売却 / 0円売却（解約・故障）の明示操作のみ。停止・終了分は showInactive で表示。
-  const items = useMemo(
-    () => (ledger?.monthlyCostItems ?? []).filter((m) => showInactive || m.status === 'active'),
-    [ledger, showInactive],
-  );
-
-  async function togglePause(item: MonthlyCostItem) {
-    if (isDisposed(item)) return;
-    if (item.status === 'active') {
-      await saveMonthlyCost({
-        ...item,
-        status: 'paused',
-        endMonth: addMonths(currentYm, -1),
-        updatedAt: nowIso(),
-      }).catch(() => undefined);
-    } else {
-      const next: MonthlyCostItem = { ...item, status: 'active', updatedAt: nowIso() };
-      delete next.endMonth;
-      await saveMonthlyCost(next).catch(() => undefined);
-    }
-  }
-
-  // 資産経由モデルの継続コスト対象。サブスク解約・返金なし終了も「0円で売却」で同じ導線から終了する。
-  const isContinuingItem = (m: MonthlyCostItem): boolean => isContinuingCostItem(m, accountsMap);
-  const canDispose = (m: MonthlyCostItem): boolean =>
-    !isDisposed(m) && m.status !== 'ended' && isContinuingItem(m);
+  const allItems = ledger?.monthlyCostItems ?? [];
+  // loadLedger は終了が近い順で返すが、編集直後の state 由来でも順序が崩れないよう再ソートする。
+  const items = [...allItems]
+    .filter((m) => showEnded || !isArchived(m, today))
+    .sort(compareMonthlyCostItems);
 
   const rules = ledger?.recurringRules ?? [];
   const ruleKindLabel = (r: RecurringRule): string => {
-    const kind = recurringKindOf(
-      accountsMap.get(r.debitAccountId)?.role,
-      accountsMap.get(r.creditAccountId)?.role,
-    );
-    // 定型に当てはまらない組み合わせは簿記編集ルール。
-    return t(`recurring.kind.${kind ?? 'manual'}` as MessageKey);
+    // 月割りするルールは借方が台帳固定のため導出は null になる＝支出として表示する。
+    const kind =
+      r.spreadExpenseAccountId !== undefined
+        ? 'expense'
+        : (recurringKindOf(
+            accountsMap.get(r.debitAccountId)?.role,
+            accountsMap.get(r.creditAccountId)?.role,
+          ) ?? 'manual');
+    return t(`recurring.kind.${kind}` as MessageKey);
   };
-  async function toggleRulePause(rule: RecurringRule) {
-    // 再開は今月から（停止中の月を遡って起票しない）。startMonth を現在月へ更新する。
-    const next: RecurringRule = rule.paused
-      ? { ...rule, paused: false, startMonth: currentYm, updatedAt: nowIso() }
-      : { ...rule, paused: true, updatedAt: nowIso() };
-    await saveRecurringRule(next).catch(() => undefined);
+  const ruleIntervalLabel = (r: RecurringRule): string =>
+    r.everyMonths >= 2
+      ? t('recurring.everyNMonthsDay', { n: r.everyMonths, day: r.dayOfMonth })
+      : t('recurring.everyMonthDay', { day: r.dayOfMonth });
+
+  // 仕訳一覧の計算で生まれた行タップからの遷移: 対象のシートを開く。
+  // effect ではなく「render 中の派生調整」パターン（同一 target は 1 回だけ消費する）。
+  const [consumedTarget, setConsumedTarget] = useState<AllocationsTarget | null>(null);
+  if (target != null && target !== consumedTarget && ledger) {
+    setConsumedTarget(target);
+    const targetItem =
+      target.itemId !== undefined ? allItems.find((m) => m.id === target.itemId) : undefined;
+    const targetRule =
+      target.ruleId !== undefined ? rules.find((r) => r.id === target.ruleId) : undefined;
+    if (targetItem) setItemSheet({ existing: targetItem });
+    else if (targetRule) setRuleSheet({ existing: targetRule });
   }
 
   return (
@@ -132,153 +139,153 @@ export function Allocations() {
           {t('monthly.add')}
         </button>
       </div>
-      <p className="field__hint" style={{ margin: 'var(--space-2) 0 var(--space-3)' }}>
-        {t('monthly.intro')}
-      </p>
 
-      {rules.length === 0 && items.length === 0 ? (
-        <div className="card card--pad empty" style={{ marginBottom: 'var(--space-4)' }}>
+      {rules.length === 0 && allItems.length === 0 ? (
+        <div
+          className="card card--pad empty"
+          style={{ margin: 'var(--space-3) 0 var(--space-4)' }}
+        >
           <Icon name="calendar" size={28} />
           <p style={{ marginTop: 'var(--space-3)' }}>{t('monthly.empty')}</p>
         </div>
-      ) : rules.length === 0 ? null : (
-        <ul
-          className="card list"
-          style={{ marginBottom: 'var(--space-4)' }}
-          data-ui={UI.allocations.recurringList}
-        >
-          {rules.map((r) => (
-            <li key={r.id} className="list__item">
-              <div className="list__main">
-                <div className="list__title">
-                  {r.name} <span className="tag tag--teal">{ruleKindLabel(r)}</span>{' '}
-                  {r.paused ? (
-                    <span className="tag tag--neutral">{t('recurring.paused')}</span>
-                  ) : null}
+      ) : null}
+
+      {rules.length === 0 ? null : (
+        <>
+          <p className="section-label" style={{ marginTop: 'var(--space-3)' }}>
+            {t('recurring.sectionTitle')}
+          </p>
+          <ul
+            className="card list"
+            style={{ marginBottom: 'var(--space-4)' }}
+            data-ui={UI.allocations.recurringList}
+          >
+            {rules.map((r) => (
+              <li key={r.id} className="list__item">
+                <div className="list__main">
+                  <div className="list__title">
+                    {r.name} <span className="tag tag--teal">{ruleKindLabel(r)}</span>{' '}
+                    {r.paused ? (
+                      <span className="tag tag--neutral">{t('recurring.paused')}</span>
+                    ) : null}
+                  </div>
+                  <div className="list__sub">
+                    {ruleIntervalLabel(r)}・{name(r.creditAccountId)} →{' '}
+                    {name(r.spreadExpenseAccountId ?? r.debitAccountId)}
+                    {r.spreadExpenseAccountId !== undefined ? (
+                      <>
+                        ・{t('monthlyCost.monthly')}{' '}
+                        <Money
+                          amount={monthlyAmounts(r.amount, r.everyMonths)[0] ?? 0}
+                          currency={currency}
+                        />
+                      </>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="list__sub">
-                  {t('recurring.everyMonthDay', { day: r.dayOfMonth })}・{name(r.creditAccountId)} →{' '}
-                  {name(r.debitAccountId)}
+                <span className="list__amount">
+                  <Money amount={r.amount} currency={currency} />
+                </span>
+                <div className="row-actions">
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    onClick={() => setRuleSheet({ existing: r })}
+                    aria-label={`${t('common.edit')}: ${r.name}`}
+                    data-ui={UI.allocations.recurringEdit}
+                  >
+                    <Icon name="edit" size={18} />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    onClick={() =>
+                      setRecurringRulePaused(r.id, !r.paused).catch(() => undefined)
+                    }
+                    aria-label={`${r.paused ? t('recurring.resume') : t('recurring.pause')}: ${r.name}`}
+                    data-ui={UI.allocations.recurringPause}
+                  >
+                    <Icon name={r.paused ? 'restore' : 'archive'} size={18} />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    onClick={() => setPendingRuleDelete(r)}
+                    aria-label={`${t('common.delete')}: ${r.name}`}
+                    data-ui={UI.allocations.recurringDelete}
+                  >
+                    <Icon name="delete" size={18} />
+                  </button>
                 </div>
-              </div>
-              <span className="list__amount">
-                <Money amount={r.amount} currency={currency} />
-              </span>
-              <div className="row-actions">
-                <button
-                  type="button"
-                  className="icon-btn"
-                  onClick={() => setRuleSheet({ existing: r })}
-                  aria-label={`${t('common.edit')}: ${r.name}`}
-                  data-ui={UI.allocations.recurringEdit}
-                >
-                  <Icon name="edit" size={18} />
-                </button>
-                <button
-                  type="button"
-                  className="icon-btn"
-                  onClick={() => toggleRulePause(r)}
-                  aria-label={`${r.paused ? t('recurring.resume') : t('recurring.pause')}: ${r.name}`}
-                  data-ui={UI.allocations.recurringPause}
-                >
-                  <Icon name={r.paused ? 'restore' : 'archive'} size={18} />
-                </button>
-                <button
-                  type="button"
-                  className="icon-btn"
-                  onClick={() => setPendingRuleDelete(r)}
-                  aria-label={`${t('common.delete')}: ${r.name}`}
-                  data-ui={UI.allocations.recurringDelete}
-                >
-                  <Icon name="delete" size={18} />
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
 
-      <label
-        style={{
-          display: 'inline-flex',
-          gap: 8,
-          alignItems: 'center',
-          margin: '0 0 var(--space-4)',
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={showInactive}
-          onChange={(e) => setShowInactive(e.target.checked)}
-          data-ui={UI.allocations.showCompleted}
-        />
-        {t('monthlyCost.showInactive')}
-      </label>
+      {allItems.length === 0 ? null : (
+        <>
+          <p className="section-label" style={{ marginBottom: 'var(--space-2)' }}>
+            {t('monthlyCost.sectionTitle')}
+          </p>
+          <label
+            style={{
+              display: 'inline-flex',
+              gap: 8,
+              alignItems: 'center',
+              margin: '0 0 var(--space-3)',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={showEnded}
+              onChange={(e) => setShowEnded(e.target.checked)}
+              data-ui={UI.allocations.showCompleted}
+            />
+            {t('monthlyCost.showEnded')}
+          </label>
 
-      {items.length === 0 ? null : (
-        <div className="stack" data-ui={UI.allocations.list}>
-          {items.map((m) => {
-            const thisMonth = monthlyCostForMonth(m, currentYm);
-            return (
-              <div className="card card--pad" key={m.id}>
+          <div className="stack" data-ui={UI.allocations.list}>
+            {items.map((m) => {
+              const spreadTotal = spreadTotalOf(m);
+              const ending = isEndingSoon(m, today);
+              const monthly = representativeMonthlyAmount(m, spreadTotal);
+              return (
                 <div
-                  className="list__title"
-                  style={{
-                    marginBottom: 'var(--space-2)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                  }}
+                  className={`card card--pad${ending ? ' card--ending' : ''}`}
+                  key={m.id}
+                  data-ui={UI.allocations.item}
+                  data-ending={ending ? 'true' : undefined}
                 >
-                  <span>
-                    {m.name}{' '}
-                    <span className={`tag ${m.status === 'active' ? 'tag--teal' : 'tag--neutral'}`}>
-                      {t(`monthlyCost.status.${m.status}` as MessageKey)}
-                    </span>{' '}
-                    {isOverEstimate(m, currentYm) ? (
-                      <span className="tag tag--warning" data-ui={UI.allocations.overEstimateBadge}>
-                        {t('monthlyCost.overEstimateBadge')}
-                      </span>
-                    ) : null}{' '}
-                    <span className="tag tag--neutral" style={{ fontSize: '0.75em' }}>
-                      {m.repeatEveryMonths !== undefined
-                        ? t('monthlyCost.recurringBadge')
-                        : t('monthlyCost.oneTimeBadge')}
-                    </span>
-                  </span>
-                  <span className="row-actions">
-                    {canDispose(m) ? (
+                  <div
+                    className="list__title"
+                    style={{
+                      marginBottom: 'var(--space-2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <span>{m.name}</span>
+                    <span className="row-actions">
                       <button
                         type="button"
                         className="icon-btn"
-                        onClick={() => setDisposing(m)}
-                        aria-label={`${t('disposal.action')}: ${m.name}`}
-                        data-ui={UI.allocations.dispose}
+                        onClick={() => setArchiving(m)}
+                        aria-label={`${t('ccItem.archiveTitle')}: ${m.name}`}
+                        data-ui={UI.allocations.archive}
                       >
-                        <Icon name="transfer" size={18} />
+                        <Icon name="archive" size={18} />
                       </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => setEditing(m)}
-                      aria-label={`${t('monthlyCost.edit')}: ${m.name}`}
-                      data-ui={UI.allocations.edit}
-                    >
-                      <Icon name="edit" size={18} />
-                    </button>
-                    {!isDisposed(m) ? (
                       <button
                         type="button"
                         className="icon-btn"
-                        onClick={() => togglePause(m)}
-                        aria-label={`${m.status === 'active' ? t('monthlyCost.pause') : t('monthlyCost.resume')}: ${m.name}`}
-                        data-ui={UI.allocations.pauseToggle}
+                        onClick={() => setItemSheet({ existing: m })}
+                        aria-label={`${t('common.edit')}: ${m.name}`}
+                        data-ui={UI.allocations.edit}
                       >
-                        <Icon name={m.status === 'active' ? 'archive' : 'restore'} size={18} />
+                        <Icon name="edit" size={18} />
                       </button>
-                    ) : null}
-                    {isDisposed(m) ? null : (
                       <button
                         type="button"
                         className="icon-btn"
@@ -287,49 +294,50 @@ export function Allocations() {
                       >
                         <Icon name="delete" size={18} />
                       </button>
-                    )}
-                  </span>
-                </div>
-                <div className="kv">
-                  <span className="muted">{t('monthlyCost.amount')}</span>
-                  <span>
-                    <Money amount={m.amount} currency={currency} />
-                  </span>
-                </div>
-                <div className="kv">
-                  <span className="muted">{t('monthlyCost.monthly')}</span>
-                  <span>
-                    <Money amount={representativeMonthlyAmount(m, currentYm)} currency={currency} />
-                  </span>
-                </div>
-                <div className="kv">
-                  <span className="muted">{t('monthlyCost.costMonths')}</span>
-                  <span>{t('monthlyCost.monthsUnit', { count: m.costMonths })}</span>
-                </div>
-                {m.repeatEveryMonths !== undefined ? (
-                  <div className="kv">
-                    <span className="muted">{t('monthlyCost.repeat')}</span>
-                    <span>{t('monthlyCost.repeatUnit', { count: m.repeatEveryMonths })}</span>
+                    </span>
                   </div>
-                ) : null}
-                <div className="kv">
-                  <span className="muted">{t('monthlyCost.thisMonth')}</span>
-                  <span>
-                    <Money amount={thisMonth} currency={currency} />
-                  </span>
+                  <div className="kv">
+                    <span className="muted">{t('monthlyCost.amount')}</span>
+                    <span>
+                      <Money amount={m.amount} currency={currency} />
+                    </span>
+                  </div>
+                  <div className="kv">
+                    <span className="muted">{t('monthlyCost.monthly')}</span>
+                    <span>
+                      {m.endDate === undefined ? '—' : <Money amount={monthly} currency={currency} />}
+                    </span>
+                  </div>
+                  <div className="kv">
+                    <span className="muted">{t('ccItem.period')}</span>
+                    <span>
+                      {m.startDate} 〜 {m.endDate ?? '—'}
+                    </span>
+                  </div>
+                  <div className="kv">
+                    <span className="muted">{t('ccItem.remainingValue')}</span>
+                    <span>
+                      <Money amount={remainingValue(m, today, spreadTotal)} currency={currency} />
+                    </span>
+                  </div>
+                  <div className="kv">
+                    <span className="muted">{t('monthlyCost.thisMonth')}</span>
+                    <span>
+                      <Money
+                        amount={monthlyCostForMonth(m, currentYm, spreadTotal)}
+                        currency={currency}
+                      />
+                    </span>
+                  </div>
+                  <div className="kv">
+                    <span className="muted">{t('monthlyCost.expenseCategory')}</span>
+                    <span>{name(m.expenseAccountId)}</span>
+                  </div>
                 </div>
-                <div className="kv">
-                  <span className="muted">{t('monthlyCost.expenseCategory')}</span>
-                  <span>{name(m.expenseAccountId)}</span>
-                </div>
-                <div className="kv">
-                  <span className="muted">{t('monthlyCost.payment')}</span>
-                  <span>{name(m.paymentSourceAccountId ?? m.paymentAccountId)}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        </>
       )}
 
       {pendingDelete ? (
@@ -347,26 +355,32 @@ export function Allocations() {
         />
       ) : null}
 
-      {editing ? (
-        <MonthlyCostEditSheet
-          item={editing}
-          disposed={isDisposed(editing)}
-          onClose={() => setEditing(null)}
+      {itemSheet ? (
+        <ContinuousCostItemSheet
+          {...(itemSheet.existing !== undefined ? { existing: itemSheet.existing } : {})}
+          {...(itemSheet.existing !== undefined
+            ? { purchaseEntry: purchaseEntryOf(itemSheet.existing) }
+            : {})}
+          onOpenPurchase={onEditEntry}
+          onClose={() => setItemSheet(null)}
         />
       ) : null}
 
-      {migrating ? <ContinuousCostMigrateSheet onClose={() => setMigrating(false)} /> : null}
-
-      {subMigrating ? <SubscriptionMigrationSheet onClose={() => setSubMigrating(false)} /> : null}
+      {archiving ? (
+        <MonthlyCostArchiveDialog
+          item={archiving}
+          spreadTotal={spreadTotalOf(archiving)}
+          onClose={() => setArchiving(null)}
+        />
+      ) : null}
 
       {chooserOpen ? (
         <AddChooserSheet
           onClose={() => setChooserOpen(false)}
           onPick={(pick) => {
             setChooserOpen(false);
-            if (pick === 'sub-migration') setSubMigrating(true);
-            else if (pick === 'asset') setMigrating(true);
-            else setRuleSheet({ initialKind: pick });
+            if (pick === 'asset') setItemSheet({});
+            else setRuleSheet({});
           }}
         />
       ) : null}
@@ -374,7 +388,6 @@ export function Allocations() {
       {ruleSheet ? (
         <RecurringRuleSheet
           {...(ruleSheet.existing !== undefined ? { existing: ruleSheet.existing } : {})}
-          {...(ruleSheet.initialKind !== undefined ? { initialKind: ruleSheet.initialKind } : {})}
           onClose={() => setRuleSheet(null)}
         />
       ) : null}
@@ -393,30 +406,19 @@ export function Allocations() {
           }}
         />
       ) : null}
-
-      {disposing ? (
-        <MonthlyCostDisposeSheet item={disposing} onClose={() => setDisposing(null)} />
-      ) : null}
     </section>
   );
 }
 
-/** 統一追加フローの選択肢。定期ルール3種 + 契約持ち込み + 持ち物（償却）。 */
-type AddPick = RecurringKind | 'sub-migration' | 'asset';
+/** 統一追加フローの2択: くり返し記帳（ルール） / 継続コスト資産の持ち込み。 */
+type AddPick = 'rule' | 'asset';
 
-const ADD_CHOICES: { pick: AddPick; labelKey: MessageKey; hintKey: MessageKey }[] = [
-  { pick: 'expense', labelKey: 'monthly.pick.expense', hintKey: 'monthly.pick.expenseHint' },
-  { pick: 'income', labelKey: 'monthly.pick.income', hintKey: 'monthly.pick.incomeHint' },
-  { pick: 'transfer', labelKey: 'monthly.pick.transfer', hintKey: 'monthly.pick.transferHint' },
-  {
-    pick: 'sub-migration',
-    labelKey: 'monthly.pick.subMigration',
-    hintKey: 'monthly.pick.subMigrationHint',
-  },
-  { pick: 'asset', labelKey: 'monthly.pick.asset', hintKey: 'monthly.pick.assetHint' },
+const ADD_CHOICES: { pick: AddPick; labelKey: MessageKey }[] = [
+  { pick: 'rule', labelKey: 'monthly.pick.rule' },
+  { pick: 'asset', labelKey: 'monthly.pick.asset' },
 ];
 
-/** 「追加」の種別選択シート（登録の一本化。ここから各シートへ分岐する）。 */
+/** 「追加」の種別選択シート（種別の選択はそれぞれのシート内に一本化）。 */
 function AddChooserSheet({
   onClose,
   onPick,
@@ -432,7 +434,6 @@ function AddChooserSheet({
       dataUi={UI.allocations.addChooser}
     >
       <div className="stack">
-        <p className="field__hint">{t('monthly.pickIntro')}</p>
         {ADD_CHOICES.map((c) => (
           <button
             key={c.pick}
@@ -441,9 +442,8 @@ function AddChooserSheet({
             onClick={() => onPick(c.pick)}
             data-ui={`${UI.allocations.addChooser}.${c.pick}`}
           >
-            <span className="list__row-btn__label" style={{ display: 'block' }}>
-              <span style={{ display: 'block', fontWeight: 600 }}>{t(c.labelKey)}</span>
-              <span className="field__hint">{t(c.hintKey)}</span>
+            <span className="list__row-btn__label" style={{ fontWeight: 600 }}>
+              {t(c.labelKey)}
             </span>
             <Icon name="chevronRight" size={16} />
           </button>
@@ -453,213 +453,6 @@ function AddChooserSheet({
   );
 }
 
-/**
- * 自動更新される契約（年払いサブスク等）の途中持ち込みシート。
- * 残り（初期残高扱い・残り月数で認識し切って終了）+ 更新分（更新周期で自動継続・支払い元 funding）
- * の 2 項目を一度に作る。解約は有効な項目の 0 円売却 1 操作。
- */
-function SubscriptionMigrationSheet({ onClose }: { onClose: () => void }) {
-  const { ledger, createSubscriptionMigration } = useLedger();
-  const accounts = sortAccounts(ledger?.accounts ?? []);
-
-  const recognitionOptions = recognitionAccountOptions(accounts);
-  const paymentOptions = accounts
-    .filter(
-      (a) =>
-        (a.role === 'daily-asset' ||
-          a.role === 'payment-liability' ||
-          a.role === 'other-liability') &&
-        !a.archived,
-    )
-    .map((a) => ({ value: a.id, label: a.name }));
-
-  const [name, setName] = useState('');
-  const [remainingAmountText, setRemainingAmountText] = useState('');
-  const [remainingMonthsText, setRemainingMonthsText] = useState('');
-  const [renewalAmountText, setRenewalAmountText] = useState('');
-  const [renewalEveryText, setRenewalEveryText] = useState('12');
-  const [paymentSourceAccountId, setPaymentSourceAccountId] = useState(
-    paymentOptions[0]?.value ?? '',
-  );
-  const storedCategory = lastExpenseCategoryId();
-  const [expenseAccountId, setExpenseAccountId] = useState(
-    (storedCategory !== null && recognitionOptions.some((o) => o.value === storedCategory)
-      ? storedCategory
-      : null) ?? defaultRecognitionAccountId(accounts),
-  );
-  const [fieldErrors, setFieldErrors] = useState<{
-    remainingAmount?: string;
-    remainingMonths?: string;
-    renewalAmount?: string;
-    renewalEvery?: string;
-  }>({});
-  const [error, setError] = useState<string | undefined>(undefined);
-  const [submitting, setSubmitting] = useState(false);
-
-  const parse = (v: string) => (v === '' ? 0 : Number.parseInt(v, 10));
-
-  async function submit() {
-    if (submitting) return;
-    const remainingAmount = parse(remainingAmountText);
-    const remainingMonths = parse(remainingMonthsText);
-    const renewalAmount = parse(renewalAmountText);
-    const renewalEveryMonths = parse(renewalEveryText);
-    const nextFieldErrors: typeof fieldErrors = {};
-    if (!Number.isInteger(remainingAmount) || remainingAmount < 1) {
-      nextFieldErrors.remainingAmount = t('error.subMigration.remainingAmountInvalid');
-    }
-    if (!Number.isInteger(remainingMonths) || remainingMonths < 1) {
-      nextFieldErrors.remainingMonths = t('error.subMigration.remainingMonthsInvalid');
-    }
-    if (!Number.isInteger(renewalAmount) || renewalAmount < 1) {
-      nextFieldErrors.renewalAmount = t('error.subMigration.renewalAmountInvalid');
-    }
-    if (!Number.isInteger(renewalEveryMonths) || renewalEveryMonths < 1) {
-      nextFieldErrors.renewalEvery = t('error.subMigration.renewalEveryInvalid');
-    }
-    if (Object.keys(nextFieldErrors).length > 0) {
-      setFieldErrors(nextFieldErrors);
-      setError(undefined);
-      return;
-    }
-    setSubmitting(true);
-    setFieldErrors({});
-    setError(undefined);
-    try {
-      await createSubscriptionMigration({
-        name: name.trim(),
-        remainingAmount,
-        remainingMonths,
-        renewalAmount,
-        renewalEveryMonths,
-        paymentSourceAccountId,
-        expenseAccountId,
-      });
-      rememberExpenseCategoryId(expenseAccountId);
-      onClose();
-    } catch (e) {
-      setError(errorText(e));
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <Modal
-      title={t('subMigration.title')}
-      onClose={onClose}
-      dismissMode="if-clean"
-      dataUi={UI.allocations.subMigrationSheet}
-      footer={
-        <>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={submit}
-            disabled={
-              submitting ||
-              name.trim() === '' ||
-              remainingAmountText === '' ||
-              remainingMonthsText === '' ||
-              renewalAmountText === '' ||
-              renewalEveryText === '' ||
-              paymentSourceAccountId === '' ||
-              expenseAccountId === ''
-            }
-            data-ui={UI.allocations.subMigrationSave}
-          >
-            {t('common.save')}
-          </button>
-        </>
-      }
-    >
-      <div className="stack">
-        <p className="field__hint">{t('subMigration.intro')}</p>
-        {error ? (
-          <div className="field__error" role="alert">
-            <Icon name="alert" size={14} />
-            {error}
-          </div>
-        ) : null}
-        <TextInput
-          label={t('monthlyCost.migrateName')}
-          required
-          value={name}
-          onChange={setName}
-          dataUi={UI.allocations.subMigrationName}
-        />
-        <TextInput
-          label={t('subMigration.remainingAmount')}
-          required
-          inputMode="numeric"
-          value={remainingAmountText}
-          onChange={(v) => {
-            setRemainingAmountText(v.replace(/[^\d]/g, ''));
-            setFieldErrors((current) => ({ ...current, remainingAmount: undefined }));
-          }}
-          hint={t('subMigration.remainingAmountHint')}
-          error={fieldErrors.remainingAmount}
-          dataUi={UI.allocations.subMigrationRemaining}
-        />
-        <TextInput
-          label={t('subMigration.remainingMonths')}
-          required
-          inputMode="numeric"
-          value={remainingMonthsText}
-          onChange={(v) => {
-            setRemainingMonthsText(v.replace(/[^\d]/g, ''));
-            setFieldErrors((current) => ({ ...current, remainingMonths: undefined }));
-          }}
-          hint={t('subMigration.remainingMonthsHint')}
-          error={fieldErrors.remainingMonths}
-          dataUi={UI.allocations.subMigrationMonths}
-        />
-        <TextInput
-          label={t('subMigration.renewalAmount')}
-          required
-          inputMode="numeric"
-          value={renewalAmountText}
-          onChange={(v) => {
-            setRenewalAmountText(v.replace(/[^\d]/g, ''));
-            setFieldErrors((current) => ({ ...current, renewalAmount: undefined }));
-          }}
-          error={fieldErrors.renewalAmount}
-          dataUi={UI.allocations.subMigrationRenewal}
-        />
-        <TextInput
-          label={t('subMigration.renewalEvery')}
-          required
-          inputMode="numeric"
-          value={renewalEveryText}
-          onChange={(v) => {
-            setRenewalEveryText(v.replace(/[^\d]/g, ''));
-            setFieldErrors((current) => ({ ...current, renewalEvery: undefined }));
-          }}
-          hint={t('subMigration.renewalEveryHint')}
-          error={fieldErrors.renewalEvery}
-        />
-        <SelectInput
-          label={t('subMigration.paymentSource')}
-          value={paymentSourceAccountId}
-          onChange={setPaymentSourceAccountId}
-          options={paymentOptions}
-          hint={t('subMigration.paymentSourceHint')}
-        />
-        <SelectInput
-          label={t('monthlyCost.expenseCategory')}
-          value={expenseAccountId}
-          onChange={setExpenseAccountId}
-          options={recognitionOptions}
-        />
-        <p className="field__hint">{t('subMigration.cancelHint')}</p>
-      </div>
-    </Modal>
-  );
-}
-
-/** 定期ルールの種別ごとの科目役割（源泉=貸方 / 行き先=借方）。 */
 /** シート内だけの種別。定型3種 + 簿記編集（任意の科目ペアを直接指定）。 */
 type SheetKind = RecurringKind | 'manual';
 
@@ -697,26 +490,26 @@ const RULE_ROLES: Record<
 const RULE_KINDS: SheetKind[] = ['expense', 'income', 'transfer', 'manual'];
 
 /**
- * 定期ルールの追加・編集シート。毎月の支払日に実仕訳が自動起票される
- * （登録直後に経過分も起票される。金額が違う月は起票された仕訳を編集）。
+ * 定期ルールの追加・編集シート。周期（everyMonths）付き。
+ * 種別=支出 かつ 周期 >= 2 なら自動で月割りされる（費用の行き先が spreadExpenseAccountId になり、
+ * 借方は継続コスト台帳に固定される。ユーザーは台帳という科目を一度も見ない・トグルは置かない）。
  */
 function RecurringRuleSheet({
   existing,
-  initialKind,
   onClose,
 }: {
   existing?: RecurringRule;
-  /** 統一追加フローからの種別プリセット。 */
-  initialKind?: RecurringKind;
   onClose: () => void;
 }) {
   const { ledger, createRecurringRule, saveRecurringRule } = useLedger();
   const accounts = sortAccounts(ledger?.accounts ?? []);
   const roleOf = (id: string) => accounts.find((a) => a.id === id)?.role;
 
+  const existingSpread = existing?.spreadExpenseAccountId !== undefined;
   const [kind, setKind] = useState<SheetKind>(() => {
-    if (!existing) return initialKind ?? 'expense';
-    // 定型に当てはまらない既存ルール（簿記編集で作ったもの）は簿記編集モードで開く。
+    if (!existing) return 'expense';
+    // 月割りするルール（借方=台帳）は支出。定型に当てはまらない既存ルールは簿記編集で開く。
+    if (existingSpread) return 'expense';
     return (
       recurringKindOf(roleOf(existing.debitAccountId), roleOf(existing.creditAccountId)) ?? 'manual'
     );
@@ -729,17 +522,22 @@ function RecurringRuleSheet({
   const [creditAccountId, setCreditAccountId] = useState(
     existing?.creditAccountId ?? fromOptions[0]?.value ?? '',
   );
+  // 月割りするルールの「行き先」は費用の行き先（spreadExpenseAccountId）を見せる（台帳は見せない）。
+  const existingDebit = existing
+    ? (existing.spreadExpenseAccountId ?? existing.debitAccountId)
+    : undefined;
   // 行き先は源泉と同一科目を除く（振替の 預金→預金 を防ぐ）。
-  const toOptions = optionsFor(RULE_ROLES[kind].to, existing?.debitAccountId).filter(
+  const toOptions = optionsFor(RULE_ROLES[kind].to, existingDebit).filter(
     (o) => o.value !== creditAccountId,
   );
-  const [debitAccountId, setDebitAccountId] = useState(
-    existing?.debitAccountId ?? toOptions[0]?.value ?? '',
-  );
+  const [debitAccountId, setDebitAccountId] = useState(existingDebit ?? toOptions[0]?.value ?? '');
 
   const [name, setName] = useState(existing?.name ?? '');
   const [amountText, setAmountText] = useState(
     existing !== undefined ? String(existing.amount) : '',
+  );
+  const [everyText, setEveryText] = useState(
+    existing !== undefined ? String(existing.everyMonths) : '1',
   );
   const [firstPostingDate, setFirstPostingDate] = useState(() =>
     existing ? clampDayToMonth(existing.startMonth, existing.dayOfMonth) : todayLocal(),
@@ -763,6 +561,11 @@ function RecurringRuleSheet({
       setError(t('error.common.amountInvalid'));
       return;
     }
+    const everyMonths = everyText === '' ? 0 : Number.parseInt(everyText, 10);
+    if (!Number.isInteger(everyMonths) || everyMonths < 1) {
+      setError(t('error.recurring.everyMonthsInvalid'));
+      return;
+    }
     const day = Number.parseInt(firstPostingDate.slice(8, 10), 10);
     const startMonth = monthOf(firstPostingDate);
     // 日付欄は「元の dayOfMonth をその月へクランプした結果」を表示している。表示どおりのまま
@@ -774,25 +577,33 @@ function RecurringRuleSheet({
         firstPostingDate.slice(8, 10)
         ? existing.dayOfMonth
         : day;
+    // 種別=支出 かつ 周期 >= 2 → 自動で月割り（行き先が spreadExpenseAccountId になる）。
+    const spread = kind === 'expense' && everyMonths >= 2;
     setSubmitting(true);
     setError(undefined);
     try {
       if (existing) {
-        await saveRecurringRule({
+        const next: RecurringRule = {
           ...existing,
           name: name.trim(),
           amount,
           dayOfMonth,
+          everyMonths,
           debitAccountId,
           creditAccountId,
           startMonth,
           updatedAt: nowIso(),
-        });
+        };
+        if (spread) next.spreadExpenseAccountId = debitAccountId;
+        else delete next.spreadExpenseAccountId;
+        await saveRecurringRule(next);
       } else {
         await createRecurringRule({
           name: name.trim(),
           amount,
           dayOfMonth: day,
+          everyMonths,
+          ...(spread ? { spreadExpenseAccountId: debitAccountId } : {}),
           debitAccountId,
           creditAccountId,
           startMonth,
@@ -824,6 +635,7 @@ function RecurringRuleSheet({
               submitting ||
               name.trim() === '' ||
               amountText === '' ||
+              everyText === '' ||
               firstPostingDate === '' ||
               creditAccountId === '' ||
               debitAccountId === ''
@@ -889,6 +701,14 @@ function RecurringRuleSheet({
           dataUi={UI.allocations.recurringAmount}
         />
         <TextInput
+          label={t('recurring.intervalMonths')}
+          required
+          inputMode="numeric"
+          value={everyText}
+          onChange={(v) => setEveryText(v.replace(/[^\d]/g, ''))}
+          dataUi={UI.allocations.recurringEvery}
+        />
+        <TextInput
           label={t('recurring.firstPostingDate')}
           type="date"
           required
@@ -903,25 +723,36 @@ function RecurringRuleSheet({
 }
 
 /**
- * 移行登録（初期残高）シート。すでに持っている継続コスト対象を「残存価値 + 残り月数」で
- * 登録する。残存価値は初期残高(equity)を貸方にした funding 仮想仕訳で計上され、
- * 収入・支出・資金移動にはならない（通常の勘定科目の初期残高と同じ会計意味）。
+ * 継続コスト資産シート（登録＝編集の 1 コンポーネント）。
+ *  - 新規 = 持ち込み登録: 金額は購入額。過去日で普通に登録できる（制約なし）。貸方は初期残高。
+ *  - 編集 = 名前・金額・終了日・費用の行き先のみ。開始日は購入の仕訳の日付のミラーなので
+ *    読み取り専用（タップで購入の仕訳へ）。
+ *  - 終了日は空でよい（空なら費用の割り振りをしない）。
  */
-function ContinuousCostMigrateSheet({ onClose }: { onClose: () => void }) {
-  const { ledger, createContinuousCostOpening } = useLedger();
+function ContinuousCostItemSheet({
+  existing,
+  purchaseEntry,
+  onOpenPurchase,
+  onClose,
+}: {
+  existing?: MonthlyCostItem;
+  purchaseEntry?: JournalEntry | undefined;
+  onOpenPurchase: (entry: JournalEntry) => void;
+  onClose: () => void;
+}) {
+  const { ledger, createContinuousCost, saveMonthlyCost } = useLedger();
   const accounts = ledger?.accounts ?? [];
+  const recognitionOptions = recognitionAccountOptions(accounts, existing?.expenseAccountId);
 
-  const recognitionOptions = recognitionAccountOptions(accounts);
-
-  const [name, setName] = useState('');
-  const [amountText, setAmountText] = useState('');
-  const [monthsText, setMonthsText] = useState('');
-  const [startMonth, setStartMonth] = useState(() => {
-    const { year, month } = currentYearMonth();
-    return `${year}-${String(month).padStart(2, '0')}`;
-  });
-  // 認識先の既定値は「前回選んだもの」（連続登録の切り替え手間を減らす）。
+  const [name, setName] = useState(existing?.name ?? '');
+  const [amountText, setAmountText] = useState(
+    existing !== undefined ? String(existing.amount) : '',
+  );
+  const [startDate, setStartDate] = useState(existing?.startDate ?? todayLocal());
+  const [endDate, setEndDate] = useState(existing?.endDate ?? '');
+  // 費用の行き先の既定値は「前回選んだもの」（連続登録の切り替え手間を減らす）。
   const [expenseAccountId, setExpenseAccountId] = useState(() => {
+    if (existing) return existing.expenseAccountId;
     const last = lastExpenseCategoryId();
     if (last && recognitionOptions.some((o) => o.value === last)) return last;
     return defaultRecognitionAccountId(accounts);
@@ -929,28 +760,43 @@ function ContinuousCostMigrateSheet({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
+  // 過去から再計算される項目の変更予告（破壊的操作の予告なので削らない）。
+  const pastFieldsChanged =
+    existing !== undefined &&
+    (amountText !== String(existing.amount) ||
+      endDate !== (existing.endDate ?? '') ||
+      expenseAccountId !== existing.expenseAccountId);
+
   async function submit() {
     if (submitting) return;
     const amount = amountText === '' ? 0 : Number.parseInt(amountText, 10);
-    const costMonths = monthsText === '' ? 0 : Number.parseInt(monthsText, 10);
     if (!Number.isInteger(amount) || amount < 1) {
       setError(t('error.common.amountInvalid'));
-      return;
-    }
-    if (!Number.isInteger(costMonths) || costMonths < 1) {
-      setError(t('error.monthlyCost.monthsInvalid'));
       return;
     }
     setSubmitting(true);
     setError(undefined);
     try {
-      await createContinuousCostOpening({
-        name: name.trim(),
-        amount,
-        costMonths,
-        startMonth: startMonth.trim(),
-        expenseAccountId,
-      });
+      if (existing) {
+        const next: MonthlyCostItem = {
+          ...existing,
+          name: name.trim(),
+          amount,
+          expenseAccountId,
+          updatedAt: nowIso(),
+        };
+        if (endDate.trim() === '') delete next.endDate;
+        else next.endDate = endDate.trim();
+        await saveMonthlyCost(next);
+      } else {
+        await createContinuousCost({
+          name: name.trim(),
+          amount,
+          startDate,
+          ...(endDate.trim() !== '' ? { endDate: endDate.trim() } : {}),
+          expenseAccountId,
+        });
+      }
       rememberExpenseCategoryId(expenseAccountId);
       onClose();
     } catch (e) {
@@ -961,10 +807,10 @@ function ContinuousCostMigrateSheet({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal
-      title={t('monthlyCost.migrateTitle')}
+      title={existing ? t('monthlyCost.editTitle') : t('monthly.pick.asset')}
       onClose={onClose}
       dismissMode="if-clean"
-      dataUi={UI.allocations.migrateSheet}
+      dataUi={UI.allocations.editDialog}
       footer={
         <>
           <button type="button" className="btn btn--ghost" onClick={onClose}>
@@ -974,313 +820,7 @@ function ContinuousCostMigrateSheet({ onClose }: { onClose: () => void }) {
             type="button"
             className="btn btn--primary"
             onClick={submit}
-            disabled={submitting || name.trim() === '' || amountText === '' || monthsText === ''}
-            data-ui={UI.allocations.migrateSave}
-          >
-            {t('common.save')}
-          </button>
-        </>
-      }
-    >
-      <div className="stack">
-        <p className="field__hint">{t('monthlyCost.migrateIntro')}</p>
-        {error ? (
-          <div className="field__error" role="alert">
-            <Icon name="alert" size={14} />
-            {error}
-          </div>
-        ) : null}
-        <TextInput
-          label={t('monthlyCost.migrateName')}
-          required
-          value={name}
-          onChange={setName}
-          dataUi={UI.allocations.migrateName}
-        />
-        <TextInput
-          label={t('monthlyCost.migrateAmount')}
-          required
-          inputMode="numeric"
-          value={amountText}
-          onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
-          hint={t('monthlyCost.migrateAmountHint')}
-          dataUi={UI.allocations.migrateAmount}
-        />
-        <TextInput
-          label={t('monthlyCost.migrateMonths')}
-          required
-          inputMode="numeric"
-          value={monthsText}
-          onChange={(v) => setMonthsText(v.replace(/[^\d]/g, ''))}
-          hint={t('monthlyCost.migrateMonthsHint')}
-          dataUi={UI.allocations.migrateMonths}
-        />
-        <MonthField
-          label={t('monthlyCost.migrateStartMonth')}
-          required
-          value={startMonth}
-          onChange={setStartMonth}
-        />
-        <SelectInput
-          label={t('monthlyCost.expenseCategory')}
-          value={expenseAccountId}
-          onChange={setExpenseAccountId}
-          options={recognitionOptions}
-        />
-        <p className="field__hint">{t('monthlyCost.migrateRenewHint')}</p>
-      </div>
-    </Modal>
-  );
-}
-
-function MonthlyCostDisposeSheet({
-  item,
-  onClose,
-}: {
-  item: MonthlyCostItem;
-  onClose: () => void;
-}) {
-  const { ledger, disposeContinuousCost } = useLedger();
-  const accounts = ledger?.accounts ?? [];
-  const currency = ledger?.settings.currency ?? 'JPY';
-
-  const [date, setDate] = useState(todayLocal());
-  const [proceedsText, setProceedsText] = useState('0');
-  const destinationOptions = accounts
-    .filter((a) => (a.role === 'daily-asset' || a.role === 'reserve-asset') && !a.archived)
-    .map((a) => ({ value: a.id, label: a.name }));
-  const [destinationAccountId, setDestinationAccountId] = useState(
-    destinationOptions[0]?.value ?? '',
-  );
-  const [error, setError] = useState<string | undefined>(undefined);
-  const [submitting, setSubmitting] = useState(false);
-
-  const proceeds = proceedsText === '' ? 0 : Number.parseInt(proceedsText, 10);
-  const disposalMonth = /^\d{4}-\d{2}-\d{2}$/.test(date) ? monthOf(date) : item.startMonth;
-  // 継続コスト（実績動的償却）: 実使用月数への遡及再配分プレビュー。
-  const outcome = continuousCostDisposalOutcome(item, disposalMonth, proceeds);
-  const endMonth = continuousCostDisposalEndMonth(item, disposalMonth);
-
-  async function submit() {
-    setSubmitting(true);
-    setError(undefined);
-    try {
-      const input = {
-        monthlyCostId: item.id,
-        disposalDate: date,
-        proceedsAmount: proceeds,
-        ...(proceeds > 0 ? { destinationAccountId } : {}),
-      };
-      await disposeContinuousCost(input);
-      onClose();
-    } catch (e) {
-      setError(errorText(e));
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <Modal
-      title={t('disposal.ccTitle')}
-      onClose={onClose}
-      dismissMode="if-clean"
-      footer={
-        <>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={submit}
-            disabled={submitting}
-            data-ui={UI.allocations.disposeConfirm}
-          >
-            {t('disposal.confirm')}
-          </button>
-        </>
-      }
-    >
-      <div className="stack" data-ui={UI.allocations.disposeDialog}>
-        <p className="field__hint">{t('disposal.ccIntro')}</p>
-        {error ? (
-          <div className="field__error" role="alert">
-            <Icon name="alert" size={14} />
-            {error}
-          </div>
-        ) : null}
-        <div className="list__title">{item.name}</div>
-        <TextInput
-          label={t('disposal.date')}
-          type="date"
-          required
-          value={date}
-          onChange={setDate}
-          dataUi={UI.allocations.disposeDate}
-        />
-        <TextInput
-          label={t('disposal.proceeds')}
-          inputMode="numeric"
-          value={proceedsText}
-          onChange={(v) => setProceedsText(v.replace(/[^\d]/g, ''))}
-          dataUi={UI.allocations.disposeProceeds}
-        />
-        {proceeds > 0 ? (
-          <SelectInput
-            label={t('disposal.destination')}
-            value={destinationAccountId}
-            onChange={setDestinationAccountId}
-            options={destinationOptions}
-            dataUi={UI.allocations.disposeDestination}
-          />
-        ) : null}
-
-        {/* 実績動的償却: 損益の一括計上ではなく、実使用月数へ遡って月額が再計算される。 */}
-        <div className="kv">
-          <span className="muted">{t('disposal.usedMonths')}</span>
-          <span>{t('monthlyCost.monthsUnit', { count: outcome.usedMonths })}</span>
-        </div>
-        <div className="kv">
-          <span className="muted">{t('disposal.monthlyAfter')}</span>
-          <span>
-            <Money amount={outcome.monthlyAfter} currency={currency} />
-          </span>
-        </div>
-        {outcome.gain > 0 ? (
-          <div className="kv">
-            <span className="muted">{t('disposal.gain')}</span>
-            <span>
-              <Money amount={outcome.gain} currency={currency} />
-            </span>
-          </div>
-        ) : null}
-        <p className="field__hint">{t('disposal.retroNote')}</p>
-        <div className="kv">
-          <span className="muted">{t('disposal.endsAt')}</span>
-          <span>{endMonth}</span>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-function MonthlyCostEditSheet({
-  item,
-  disposed,
-  onClose,
-}: {
-  item: MonthlyCostItem;
-  disposed: boolean;
-  onClose: () => void;
-}) {
-  const { ledger, saveMonthlyCost } = useLedger();
-  const accounts = ledger?.accounts ?? [];
-  const currency = ledger?.settings.currency ?? 'JPY';
-  const accountName = (id?: string) =>
-    id ? (accounts.find((a) => a.id === id)?.name ?? '—') : '—';
-
-  const hasPosted = (ledger?.cashflowSchedules ?? []).some(
-    (s) => s.monthlyCostId === item.id && s.status === 'posted',
-  );
-  const amountEditable = !disposed && !hasPosted;
-  // 移行登録（初期残高 funding）の項目は継続購入を設定できない（更新のたびに初期残高から
-  // 資金が湧いてしまう）。毎月払いは定期ルールで扱う。
-  const openingFunded =
-    item.paymentSourceAccountId !== undefined &&
-    accounts.find((a) => a.id === item.paymentSourceAccountId)?.role === 'equity';
-
-  const [name, setName] = useState(item.name);
-  const [amountText, setAmountText] = useState(String(item.amount));
-  const [costMonthsText, setCostMonthsText] = useState(String(item.costMonths));
-  const [repeatText, setRepeatText] = useState(
-    item.repeatEveryMonths !== undefined ? String(item.repeatEveryMonths) : '',
-  );
-  const [startMonth, setStartMonth] = useState(item.startMonth);
-  const [endMonth, setEndMonth] = useState(item.endMonth ?? '');
-  const [expenseAccountId, setExpenseAccountId] = useState(item.expenseAccountId);
-  const [status, setStatus] = useState<MonthlyCostStatus>(item.status);
-  const [error, setError] = useState<string | undefined>(undefined);
-  const [submitting, setSubmitting] = useState(false);
-
-  const recognitionOptions = recognitionAccountOptions(accounts, item.expenseAccountId);
-
-  const pastFieldsChanged =
-    !disposed &&
-    ((amountEditable && amountText !== String(item.amount)) ||
-      costMonthsText !== String(item.costMonths) ||
-      repeatText !== (item.repeatEveryMonths !== undefined ? String(item.repeatEveryMonths) : '') ||
-      startMonth.trim() !== item.startMonth ||
-      endMonth.trim() !== (item.endMonth ?? '') ||
-      expenseAccountId !== item.expenseAccountId);
-
-  async function submit() {
-    if (!disposed) {
-      const nextAmount =
-        amountEditable && amountText !== '' ? Number.parseInt(amountText, 10) : item.amount;
-      const nextCostMonths =
-        costMonthsText === '' ? Number.NaN : Number.parseInt(costMonthsText, 10);
-      const nextRepeat = repeatText.trim() === '' ? undefined : Number.parseInt(repeatText, 10);
-      if (!Number.isInteger(nextAmount) || nextAmount < 1) {
-        setError(t('error.common.amountInvalid'));
-        return;
-      }
-      if (!Number.isInteger(nextCostMonths) || nextCostMonths < 1) {
-        setError(t('error.monthlyCost.monthsInvalid'));
-        return;
-      }
-      if (
-        nextRepeat !== undefined &&
-        (!Number.isInteger(nextRepeat) || nextRepeat < nextCostMonths)
-      ) {
-        setError(t('error.monthlyCost.repeatInvalid'));
-        return;
-      }
-    }
-    setSubmitting(true);
-    setError(undefined);
-    const next: MonthlyCostItem = disposed
-      ? { ...item, name: name.trim(), updatedAt: nowIso() }
-      : {
-          ...item,
-          name: name.trim(),
-          amount:
-            amountEditable && amountText !== '' ? Number.parseInt(amountText, 10) : item.amount,
-          costMonths: costMonthsText === '' ? item.costMonths : Number.parseInt(costMonthsText, 10),
-          startMonth: startMonth.trim(),
-          expenseAccountId,
-          status,
-          updatedAt: nowIso(),
-        };
-    if (!disposed) {
-      if (repeatText.trim() === '') delete next.repeatEveryMonths;
-      else next.repeatEveryMonths = Number.parseInt(repeatText, 10);
-      if (endMonth.trim() === '') delete next.endMonth;
-      else next.endMonth = endMonth.trim();
-    }
-    try {
-      await saveMonthlyCost(next);
-      onClose();
-    } catch (e) {
-      setError(errorText(e));
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <Modal
-      title={t('monthlyCost.editTitle')}
-      onClose={onClose}
-      dismissMode="if-clean"
-      footer={
-        <>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={submit}
-            disabled={submitting}
+            disabled={submitting || name.trim() === '' || amountText === '' || startDate === ''}
             data-ui={UI.allocations.editSave}
           >
             {t('common.save')}
@@ -1288,16 +828,11 @@ function MonthlyCostEditSheet({
         </>
       }
     >
-      <div className="stack" data-ui={UI.allocations.editDialog}>
+      <div className="stack">
         {error ? (
           <div className="field__error" role="alert">
             <Icon name="alert" size={14} />
             {error}
-          </div>
-        ) : null}
-        {disposed ? (
-          <div className="field__hint" role="status">
-            {t('error.monthlyCost.disposedLocked')}
           </div>
         ) : null}
         {pastFieldsChanged ? (
@@ -1313,116 +848,210 @@ function MonthlyCostEditSheet({
           onChange={setName}
           dataUi={UI.allocations.editName}
         />
-        {disposed ? (
+        <TextInput
+          label={t('monthlyCost.amount')}
+          required
+          inputMode="numeric"
+          value={amountText}
+          onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
+          dataUi={UI.allocations.editAmount}
+        />
+        {existing ? (
           <>
-            <div className="kv" data-ui={UI.allocations.editAmount}>
-              <span className="muted">{t('monthlyCost.amount')}</span>
-              <span>
-                <Money amount={item.amount} currency={currency} />
-              </span>
+            {/* 開始日 = 購入の仕訳の日付。変えるときは仕訳側（タップで開く）。 */}
+            <div className="kv" data-ui={UI.allocations.editStartDate}>
+              <span className="muted">{t('ccItem.startDate')}</span>
+              <span>{existing.startDate}</span>
             </div>
-            <div className="kv" data-ui={UI.allocations.editCostMonths}>
-              <span className="muted">{t('monthlyCost.costMonths')}</span>
-              <span>{t('monthlyCost.monthsUnit', { count: item.costMonths })}</span>
-            </div>
-            <div className="kv" data-ui={UI.allocations.editRepeat}>
-              <span className="muted">{t('monthlyCost.repeatField')}</span>
-              <span>
-                {item.repeatEveryMonths === undefined
-                  ? '—'
-                  : t('monthlyCost.repeatUnit', { count: item.repeatEveryMonths })}
-              </span>
-            </div>
-            <div className="kv" data-ui={UI.allocations.editStartMonth}>
-              <span className="muted">{t('monthlyCost.startMonth')}</span>
-              <span>{item.startMonth}</span>
-            </div>
-            <div className="kv" data-ui={UI.allocations.editEndMonth}>
-              <span className="muted">{t('monthlyCost.endMonth')}</span>
-              <span>{item.endMonth ?? '—'}</span>
-            </div>
-            <div className="kv" data-ui={UI.allocations.editExpense}>
-              <span className="muted">{t('monthlyCost.expenseCategory')}</span>
-              <span>{accountName(item.expenseAccountId)}</span>
-            </div>
-            <div className="kv" data-ui={UI.allocations.editStatus}>
-              <span className="muted">{t('monthlyCost.statusLabel')}</span>
-              <span>{t(`monthlyCost.status.${item.status}` as MessageKey)}</span>
-            </div>
+            {purchaseEntry ? (
+              <button
+                type="button"
+                className="collapse-toggle"
+                onClick={() => {
+                  onClose();
+                  onOpenPurchase(purchaseEntry);
+                }}
+                data-ui={UI.allocations.editOpenPurchase}
+              >
+                <Icon name="chevronRight" size={16} />
+                {t('ccItem.openPurchase')}
+              </button>
+            ) : null}
           </>
         ) : (
-          <>
-            <TextInput
-              label={t('monthlyCost.amount')}
-              required
-              inputMode="numeric"
-              value={amountText}
-              onChange={(v) => {
-                if (amountEditable) setAmountText(v.replace(/[^\d]/g, ''));
-              }}
-              hint={amountEditable ? undefined : t('monthlyCost.amountLockedPosted')}
-              dataUi={UI.allocations.editAmount}
-            />
-            <TextInput
-              label={t('monthlyCost.costMonths')}
-              required
-              inputMode="numeric"
-              value={costMonthsText}
-              onChange={(v) => setCostMonthsText(v.replace(/[^\d]/g, ''))}
-              dataUi={UI.allocations.editCostMonths}
-            />
-            {openingFunded ? (
-              <p className="field__hint">{t('monthlyCost.repeatLockedOpening')}</p>
-            ) : (
-              <TextInput
-                label={t('monthlyCost.repeatField')}
-                inputMode="numeric"
-                value={repeatText}
-                hint={t('monthlyCost.repeatFieldHint')}
-                onChange={(v) => setRepeatText(v.replace(/[^\d]/g, ''))}
-                dataUi={UI.allocations.editRepeat}
-              />
-            )}
-            <MonthField
-              label={t('monthlyCost.startMonth')}
-              required
-              value={startMonth}
-              onChange={setStartMonth}
-              dataUi={UI.allocations.editStartMonth}
-            />
-            <MonthField
-              label={t('monthlyCost.endMonth')}
-              value={endMonth}
-              hint={t('monthlyCost.endMonthHint')}
-              onChange={setEndMonth}
-              dataUi={UI.allocations.editEndMonth}
-              clearLabel={t('common.clear')}
-            />
-            <SelectInput
-              label={t('monthlyCost.expenseCategory')}
-              value={expenseAccountId}
-              onChange={setExpenseAccountId}
-              options={recognitionOptions}
-              dataUi={UI.allocations.editExpense}
-            />
-            <SelectInput
-              label={t('monthlyCost.statusLabel')}
-              value={status}
-              onChange={(v) => setStatus(v as MonthlyCostStatus)}
-              options={STATUSES.map((s) => ({
-                value: s,
-                label: t(`monthlyCost.status.${s}` as MessageKey),
-              }))}
-              dataUi={UI.allocations.editStatus}
-            />
-          </>
+          <TextInput
+            label={t('ccItem.startDate')}
+            type="date"
+            required
+            value={startDate}
+            onChange={setStartDate}
+            dataUi={UI.allocations.editStartDate}
+          />
         )}
-        <div className="kv">
-          <span className="muted">{t('monthlyCost.payment')}</span>
-          <span>{accountName(item.paymentSourceAccountId ?? item.paymentAccountId)}</span>
+        <TextInput
+          label={t('ccItem.endDate')}
+          type="date"
+          value={endDate}
+          onChange={setEndDate}
+          dataUi={UI.allocations.editEndDate}
+        />
+        <div className="row-actions" data-ui={UI.allocations.editQuickSpan}>
+          {[1, 3, 5].map((years) => (
+            <button
+              key={years}
+              type="button"
+              className="btn btn--ghost"
+              style={{ minHeight: 32 }}
+              onClick={() => setEndDate(quickSpanEndDate(startDate, years))}
+            >
+              {t('ccItem.quickSpan', { years })}
+            </button>
+          ))}
         </div>
-        <p className="field__hint">{t('monthlyCost.paymentLocked')}</p>
+        <SelectInput
+          label={t('monthlyCost.expenseCategory')}
+          value={expenseAccountId}
+          onChange={setExpenseAccountId}
+          options={recognitionOptions}
+          dataUi={UI.allocations.editExpense}
+        />
       </div>
     </Modal>
+  );
+}
+
+/**
+ * アーカイブ = 終了日の設定。残存価値が残るなら「振替先を選ぶ」でホームの振替と同じシートを
+ * 開き、回収の振替（借方 振替先 / 貸方 継続コスト台帳）を同一トランザクションで保存する。
+ * 振替せずアーカイブ = 残存価値は全額その月までの費用になる（捨てた・使い切った）。
+ * 終了済みの行にも同じボタンを出す（終了日を先へ動かせば一覧に戻る＝復元も同じ 1 操作）。
+ */
+function MonthlyCostArchiveDialog({
+  item,
+  spreadTotal,
+  onClose,
+}: {
+  item: MonthlyCostItem;
+  spreadTotal: number;
+  onClose: () => void;
+}) {
+  const { ledger, archiveMonthlyCost } = useLedger();
+  const currency = ledger?.settings.currency ?? 'JPY';
+  // 既定 = 今日。終了済みの行だけ現在の endDate（先へ動かせば一覧へ戻る = 復元も同じ 1 操作）。
+  const [endDate, setEndDate] = useState(() =>
+    isArchived(item, todayLocal()) && item.endDate !== undefined ? item.endDate : todayLocal(),
+  );
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [submitting, setSubmitting] = useState(false);
+
+  // 変更前の item の割り振りで「その日までに費用になっていない残り」。回収済みは差し引く。
+  const alreadyRecovered = item.amount - spreadTotal;
+  const remaining = isValidIsoDate(endDate)
+    ? remainingValue(item, endDate, spreadTotal) - alreadyRecovered
+    : remainingValue(item, todayLocal(), spreadTotal) - alreadyRecovered;
+
+  async function archiveWithoutTransfer() {
+    if (submitting) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await archiveMonthlyCost({ id: item.id, endDate });
+      onClose();
+    } catch (e) {
+      setError(errorText(e));
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <>
+      <Modal
+        title={t('ccItem.archiveTitle')}
+        onClose={onClose}
+        variant="dialog"
+        dataUi={UI.allocations.archiveDialog}
+        footer={
+          <>
+            <button type="button" className="btn btn--ghost" onClick={onClose}>
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={archiveWithoutTransfer}
+              disabled={submitting || endDate === ''}
+              data-ui={UI.allocations.archiveConfirm}
+            >
+              {t('ccItem.archiveTitle')}
+            </button>
+          </>
+        }
+      >
+        <div className="stack">
+          {error ? (
+            <div className="field__error" role="alert">
+              <Icon name="alert" size={14} />
+              {error}
+            </div>
+          ) : null}
+          <div className="list__title">{item.name}</div>
+          <TextInput
+            label={t('ccItem.endDate')}
+            type="date"
+            required
+            value={endDate}
+            onChange={setEndDate}
+            dataUi={UI.allocations.archiveDate}
+          />
+          <div className="kv">
+            <span className="muted">{t('ccItem.remainingValue')}</span>
+            <span>
+              <Money amount={remaining} currency={currency} />
+            </span>
+          </div>
+          {remaining > 0 ? (
+            <button
+              type="button"
+              className="btn btn--block"
+              onClick={() => setTransferOpen(true)}
+              disabled={endDate === ''}
+              data-ui={UI.allocations.archiveTransfer}
+            >
+              <Icon name="transfer" size={16} />
+              {t('ccItem.transferTarget')}
+            </button>
+          ) : null}
+        </div>
+      </Modal>
+
+      {transferOpen ? (
+        <EntrySheet
+          init={{
+            kind: 'transfer-fixed',
+            fixed: {
+              side: 'credit',
+              accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+              date: endDate,
+              lockDate: true,
+              amount: remaining,
+              description: item.name,
+              onSave: async (input) => {
+                await archiveMonthlyCost({
+                  id: item.id,
+                  endDate,
+                  recovery: {
+                    destinationAccountId: input.debitAccountId,
+                    amount: input.amount,
+                  },
+                });
+                onClose();
+              },
+            },
+          }}
+          onClose={() => setTransferOpen(false)}
+        />
+      ) : null}
+    </>
   );
 }

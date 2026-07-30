@@ -39,8 +39,8 @@ export function Cashflow() {
   const today = todayLocal();
   const basis = useMemo(() => reportBasis({ mode: 'all' }, today), [today]);
   const reportEntries = useMemo(
-    () => (ledger ? reportEntriesForAsOf(ledger, basis.asOf, today) : []),
-    [basis.asOf, ledger, today],
+    () => (ledger ? reportEntriesForAsOf(ledger, basis.asOf) : []),
+    [basis.asOf, ledger],
   );
   const [untilDate, setUntilDate] = useState(() => addMonthsToDate(todayLocal(), 6));
   const [reserveOpen, setReserveOpen] = useState(false);
@@ -72,7 +72,7 @@ export function Cashflow() {
     const totalAssets = liquidAssetTotal(bs.assets, nonLiquidAssetIds);
     const reserveBalance = [...reserveIds].reduce((s, id) => s + (byId.get(id) ?? 0), 0);
     const end = untilDate;
-    const futureEntries = ledger ? reportEntriesForAsOf(ledger, end, today) : [];
+    const futureEntries = ledger ? reportEntriesForAsOf(ledger, end) : [];
     const future = uniqueEntriesById(
       futureEntries.filter(
         (e) => e.date > today && e.date <= end && e.lines.some((l) => isLiquid(l.accountId)),
