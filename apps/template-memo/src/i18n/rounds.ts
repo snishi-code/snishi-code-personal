@@ -220,7 +220,6 @@ export const s = {
     sectionAdd: '場所を追加',
     sectionTitle: '場所の見出し（例 (S)・【今日やったこと】）',
     sectionNormal: '正常文（空欄を補う文。例 著変なし）',
-    sectionKeepWhenEmpty: '空でも見出しを出す',
     sectionFreeText: '自由本文欄を持つ',
     groups: 'フォーマット',
     groupAdd: 'フォーマットを追加',

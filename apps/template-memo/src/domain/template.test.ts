@@ -2,7 +2,7 @@
  * 合成エンジン（domain/template.ts）のテスト。
  *
  * 最重要は golden test: 作者の実運用例文（回診メモ）を 1 文字違わず再現することを固定する。
- * 合成仕様（空伝播・keepWhenEmpty・oncall 除外・正規化の fail-safe）もここで固定する。
+ * 合成仕様（空伝播・場所見出しの常時保持・正規化の fail-safe）もここで固定する。
  */
 
 import { describe, expect, it } from 'vitest';
@@ -48,7 +48,7 @@ function group(partial: Partial<TemplateGroup> & Pick<TemplateGroup, 'id'>): Tem
 }
 
 function section(partial: Partial<TemplateSection> & Pick<TemplateSection, 'id'>): TemplateSection {
-  return { title: '', keepWhenEmpty: false, freeText: true, groups: [], ...partial };
+  return { title: '', freeText: true, groups: [], ...partial };
 }
 
 function template(partial: Partial<Template>): Template {
@@ -97,14 +97,12 @@ function goldenTemplate(): Template {
       section({
         id: 'sec-s',
         title: '(S)',
-        keepWhenEmpty: true,
         freeText: true,
         normal: '変わりない',
       }),
       section({
         id: 'sec-o',
         title: '(O)',
-        keepWhenEmpty: true,
         freeText: true,
         groups: [
           group({
@@ -151,14 +149,12 @@ function goldenTemplate(): Template {
       section({
         id: 'sec-a',
         title: '(A)',
-        keepWhenEmpty: true,
         freeText: true,
         normal: '著変なし',
       }),
       section({
         id: 'sec-p',
         title: '(P)',
-        keepWhenEmpty: true,
         freeText: true,
         normal: '現行加療継続',
       }),
@@ -348,27 +344,22 @@ describe('composeSection', () => {
   ];
 
   it('値が全部空の group はタイトル行ごと消え、自由本文だけ残る', () => {
-    const sec = section({ id: 's', title: '(O)', keepWhenEmpty: true, groups: oGroups });
+    const sec = section({ id: 's', title: '(O)', groups: oGroups });
     expect(composeSection(sec, '所見メモ', { g1: { a: '' } })).toBe('(O)\n所見メモ');
   });
 
-  it('空 section は keepWhenEmpty=false なら丸ごと消える', () => {
-    const sec = section({ id: 's', title: '(O)', keepWhenEmpty: false, groups: oGroups });
-    expect(composeSection(sec, '', {})).toBe('');
-  });
-
-  it('空 section は keepWhenEmpty=true なら見出しのみ残る', () => {
-    const sec = section({ id: 's', title: '(S)', keepWhenEmpty: true });
+  it('空 section も見出しを常に残す', () => {
+    const sec = section({ id: 's', title: '(S)' });
     expect(composeSection(sec, '', {})).toBe('(S)');
   });
 
-  it('keepWhenEmpty=true でも title が空なら何も出さない', () => {
-    const sec = section({ id: 's', title: '', keepWhenEmpty: true });
+  it('title が空なら空 section は何も出さない', () => {
+    const sec = section({ id: 's', title: '' });
     expect(composeSection(sec, '', {})).toBe('');
   });
 
   it('oncall 群も値があれば所属セクションへ合成する', () => {
-    const sec = section({ id: 's', title: '(O)', keepWhenEmpty: true, groups: oGroups });
+    const sec = section({ id: 's', title: '(O)', groups: oGroups });
     const out = composeSection(sec, '', {
       g1: { a: { value: '63' } },
       g2: { b: { value: '108' } },
@@ -417,9 +408,9 @@ describe('composePresetClean', () => {
   const tpl = template({
     memoSectionId: 's1',
     sections: [
-      section({ id: 's1', title: '(S)', keepWhenEmpty: true, normal: '変わりない' }),
-      section({ id: 's2', title: '(A)', keepWhenEmpty: true, normal: '著変なし' }),
-      section({ id: 's3', title: '(P)', keepWhenEmpty: true }), // normal なし
+      section({ id: 's1', title: '(S)', normal: '変わりない' }),
+      section({ id: 's2', title: '(A)', normal: '著変なし' }),
+      section({ id: 's3', title: '(P)' }), // normal なし
     ],
   });
 
@@ -428,16 +419,14 @@ describe('composePresetClean', () => {
     expect(composePresetClean(sub, tpl)).toBe('(S)\n食欲低下あり\n\n(A)\n著変なし\n\n(P)');
   });
 
-  it('normal のないセクションは埋まらず keepWhenEmpty に従う', () => {
+  it('normal のないセクションも見出しだけ残る', () => {
     const sub = patient({});
     expect(composePresetClean(sub, tpl)).toBe('(S)\n変わりない\n\n(A)\n著変なし\n\n(P)');
   });
 
   it('freeText=false のセクションは normal があっても埋めない', () => {
     const tpl2 = template({
-      sections: [
-        section({ id: 's1', title: '(S)', keepWhenEmpty: true, freeText: false, normal: 'x' }),
-      ],
+      sections: [section({ id: 's1', title: '(S)', freeText: false, normal: 'x' })],
     });
     expect(composePresetClean(patient({}), tpl2)).toBe('(S)');
   });
@@ -537,7 +526,6 @@ describe('normalizeSection', () => {
   it('freeText は未指定なら true（自由本文が既定）', () => {
     const r = normalizeSection({ title: '' });
     expect(r?.freeText).toBe(true);
-    expect(r?.keepWhenEmpty).toBe(false);
   });
 
   it('壊れ group を落としても section 自体は生きる', () => {

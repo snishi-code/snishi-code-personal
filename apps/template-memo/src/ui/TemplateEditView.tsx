@@ -69,7 +69,6 @@ function newSection(): TemplateSection {
   return {
     id: newId('sec'),
     title: '',
-    keepWhenEmpty: false,
     freeText: true,
     groups: [],
   };
@@ -498,13 +497,6 @@ export function TemplateEditView({
             }
           />
         </Field>
-        <CheckRow
-          label={s.tpl.sectionKeepWhenEmpty}
-          checked={section.keepWhenEmpty}
-          onChange={(checked) =>
-            mutateSection(section.id, (next) => (next.keepWhenEmpty = checked))
-          }
-        />
         <CheckRow
           label={s.tpl.sectionFreeText}
           checked={section.freeText}

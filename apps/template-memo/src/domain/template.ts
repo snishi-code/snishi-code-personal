@@ -65,8 +65,6 @@ export interface TemplateSection {
   id: string;
   /** 見出し（例 "(S)" / "今日やったこと"）。空 = 見出し行なし。 */
   title: string;
-  /** 中身が空でも見出し行を出すか（例 "(S)" は空でも骨格を残したい場合 true）。 */
-  keepWhenEmpty: boolean;
   /** 自由本文欄を持つか。 */
   freeText: boolean;
   /** 自由本文の正常文（完成文の空欄をこれで補う。例 "著変なし"）。 */
@@ -148,7 +146,7 @@ export function composeGroup(
 /**
  * セクション 1 つの合成。全群 → 自由本文の順。
  * 自由本文は呼び出し側が渡す（memoSection には patient.visitMemo が入る）。
- * 空なら keepWhenEmpty に従い「見出しのみ」か「まるごと省略」。
+ * 空でも見出しは常に残す（不要な場所はテンプレートから場所自体を削除する）。
  */
 export function composeSection(
   section: TemplateSection,
@@ -164,7 +162,7 @@ export function composeSection(
   if (free !== '') pieces.push(free);
 
   if (pieces.length === 0) {
-    return section.keepWhenEmpty && section.title !== '' ? section.title : '';
+    return section.title !== '' ? section.title : '';
   }
   const body = pieces.join('\n\n');
   return section.title !== '' ? `${section.title}\n${body}` : body;
@@ -301,7 +299,6 @@ export function normalizeSection(raw: unknown): TemplateSection | null {
   const section: TemplateSection = {
     id: str(r.id) || newId('sec'),
     title: str(r.title),
-    keepWhenEmpty: r.keepWhenEmpty === true,
     freeText: r.freeText !== false,
     groups,
   };
@@ -354,7 +351,6 @@ export function buildRoundPreset(nowMs: number): Template {
       {
         id: newId('sec'),
         title: '(S)',
-        keepWhenEmpty: true,
         freeText: true,
         normal: '変わりない',
         groups: [],
@@ -362,7 +358,6 @@ export function buildRoundPreset(nowMs: number): Template {
       {
         id: memoSectionId,
         title: '(O)',
-        keepWhenEmpty: true,
         freeText: true,
         groups: [
           {
@@ -424,7 +419,6 @@ export function buildRoundPreset(nowMs: number): Template {
       {
         id: newId('sec'),
         title: '(A)',
-        keepWhenEmpty: true,
         freeText: true,
         normal: '著変なし',
         groups: [],
@@ -432,7 +426,6 @@ export function buildRoundPreset(nowMs: number): Template {
       {
         id: newId('sec'),
         title: '(P)',
-        keepWhenEmpty: true,
         freeText: true,
         normal: '現行加療継続',
         groups: [],
@@ -456,14 +449,12 @@ export function buildDailyReportPreset(nowMs: number): Template {
       {
         id: memoSectionId,
         title: '【今日やったこと】',
-        keepWhenEmpty: true,
         freeText: true,
         groups: [],
       },
       {
         id: newId('sec'),
         title: '【課題・気づき】',
-        keepWhenEmpty: true,
         freeText: true,
         normal: '特になし',
         groups: [],
@@ -471,7 +462,6 @@ export function buildDailyReportPreset(nowMs: number): Template {
       {
         id: newId('sec'),
         title: '【明日の予定】',
-        keepWhenEmpty: true,
         freeText: true,
         groups: [],
       },

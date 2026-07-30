@@ -117,8 +117,8 @@ export function DetailView({
       <ProblemListCard runtime={runtime} patient={patient} />
 
       {/* 患者作業状態 (継続メモ/入力フォーム/今回メモ)。テンプレート未選択でも
-          status/今回メモ/継続メモは使える (スマホ主用途を止めない)。入力フォーム
-          (ProjectionFormCard) は群が無ければ自ら非表示になるため、fieldset での一括ロックはしない。 */}
+          status/今回メモ/継続メモは使える (スマホ主用途を止めない)。入力フォームは
+          テンプレートの場所が無ければ自ら非表示になるため、fieldset での一括ロックはしない。 */}
       <fieldset className="editLock">
         {/* 継続メモ → 今回メモ: プロブレムの後・患者管理の前。上から「継続情報を見て、今回分を書く」
               流れにする (継続メモ = 患者ごとの背景 / 今回メモ = 今回の入力・転記用QR の本文候補)。 */}

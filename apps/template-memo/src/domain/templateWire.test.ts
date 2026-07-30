@@ -30,7 +30,6 @@ function fixtureTemplate(): Template {
       {
         id: 'sec_s',
         title: '(S)',
-        keepWhenEmpty: true,
         freeText: true,
         normal: '変わりない',
         groups: [],
@@ -38,7 +37,6 @@ function fixtureTemplate(): Template {
       {
         id: 'sec_o',
         title: '(O)',
-        keepWhenEmpty: true,
         freeText: true,
         groups: [
           {

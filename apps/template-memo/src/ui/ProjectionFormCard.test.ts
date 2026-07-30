@@ -5,7 +5,6 @@ import { partitionSectionGroups } from './ProjectionFormCard';
 const section: TemplateSection = {
   id: 'sec',
   title: '場所',
-  keepWhenEmpty: false,
   freeText: false,
   groups: [
     {

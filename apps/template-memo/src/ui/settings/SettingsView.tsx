@@ -257,7 +257,6 @@ function TemplateSection({
         {
           id: sectionId,
           title: '',
-          keepWhenEmpty: false,
           freeText: true,
           groups: [],
         },

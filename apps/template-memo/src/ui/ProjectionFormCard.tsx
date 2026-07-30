@@ -2,7 +2,7 @@
 // 固定フォーム (fixedFields) をテンプレート合成エンジンの群 (TemplateGroup) へ差し替えた。
 //
 // 仕様:
-//   - 表示は現在テンプレートに群がある時だけ (空なら描画しない)。
+//   - 現在テンプレートの全場所を表示する（フォーマットが無い場所も見出しを残す）。
 //   - 展開 (always) 群: 行ごとの入力を patient.projectedValues (FormValues) へ write-through 保存。
 //     text 項目は行末に正常文ワンタップボタン (全部正常は群見出し右)。手入力は openEditor で守る。
 //   - 呼び出し (oncall) / メニュー (menu) 群: シートの値を同じ projectedValues へ保存。
@@ -283,13 +283,13 @@ export function ProjectionFormCard({
   const [oncallOpen, setOncallOpen] = useState<TemplateGroup | null>(null);
   const [menuOpen, setMenuOpen] = useState<TemplateSection | null>(null);
   const template: Template | null = store.getActiveTemplate();
-  const sections = template?.sections.filter((section) => section.groups.length > 0) ?? [];
+  const sections = template?.sections ?? [];
   const pid = patient.pid;
   const live = () => store.getAppState().patients.find((x) => x.pid === pid) ?? null;
   // markUpdated は 1-based の患者番号を取る (store: patients[no - 1])。
   const liveNo = () => store.getAppState().patients.findIndex((x) => x.pid === pid) + 1;
 
-  if (sections.length === 0) return null; // 群が無ければ出さない
+  if (sections.length === 0) return null; // テンプレート未選択または場所が無ければ出さない
 
   function writeValue(
     groupId: string,
