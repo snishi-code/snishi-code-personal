@@ -14,37 +14,37 @@ import { accountBalance, accountHasEntries, filterByDateRange } from '../../doma
 import { referencedAccountIds } from '../../domain/accountRefs';
 import { reportEntriesForAsOf } from '../../domain/reportEntries';
 import { reportBasis } from '../../domain/reportPeriod';
+import { buildSimpleEntry } from '../../domain/entry';
 import type { Account } from '../../domain/types';
 import { groupAccountsByBox, type AccountBox } from '../accountBoxes';
 import { AccountSheet } from './AccountSheet';
 import { AdjustmentCreateSheet } from '../AdjustmentSheet';
 import { OpeningRegisterSheet } from '../OpeningSheet';
+import { EntrySheet } from './EntrySheet';
 import { Money } from '../money';
 import { nowIso, todayLocal } from '../../util/time';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 
 export function Accounts() {
-  const { ledger, saveAccount, reorderAccounts } = useLedger();
+  const { ledger, saveAccount, archiveAccount, reorderAccounts } = useLedger();
   const [editing, setEditing] = useState<Account | null>(null);
   const [creatingIn, setCreatingIn] = useState<AccountBox | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [reordering, setReordering] = useState(false);
   const [adjustingAccount, setAdjustingAccount] = useState<Account | null>(null);
+  // 残高が残る科目のアーカイブ: 振替（ホームと同じシート）で残高を 0 にしてから 1 tx で保存する。
+  const [archiveTransfer, setArchiveTransfer] = useState<{
+    account: Account;
+    debitBalance: number;
+  } | null>(null);
 
   const today = todayLocal();
-  const basis = reportBasis({ mode: 'all' }, today);
-  const entries = useMemo(
-    () =>
-      ledger
-        ? filterByDateRange(
-            reportEntriesForAsOf(ledger, basis.asOf, today),
-            undefined,
-            basis.asOf,
-          )
-        : [],
-    [ledger, basis.asOf, today],
-  );
+  const entries = useMemo(() => {
+    if (!ledger) return [];
+    const asOf = reportBasis({ mode: 'all' }, today).asOf;
+    return filterByDateRange(reportEntriesForAsOf(ledger, asOf), undefined, asOf);
+  }, [ledger, today]);
   const currency = ledger?.settings.currency ?? 'JPY';
 
   const usedIds = useMemo(
@@ -64,9 +64,28 @@ export function Accounts() {
   );
 
   async function toggleArchive(account: Account) {
-    await saveAccount({ ...account, archived: !account.archived, updatedAt: nowIso() }).catch(
-      () => undefined,
-    );
+    try {
+      if (account.archived) {
+        // アーカイブ解除は残高チェック不要（残高 0 の状態から戻すだけ）。
+        await saveAccount({ ...account, archived: false, updatedAt: nowIso() });
+        return;
+      }
+      // 不変条件「アーカイブ済み = 今日時点の残高 0」。残高が残る資産・負債は振替を先に聞く。
+      // 判定は保存境界（archiveAccount）と同じ「保存される仕訳の今日時点残高」で行う。
+      if (account.type === 'asset' || account.type === 'liability') {
+        const saved = filterByDateRange(ledger?.journalEntries ?? [], undefined, today);
+        const balance = accountBalance(account.id, account.type, saved);
+        if (balance !== 0) {
+          // 自然符号 → 借方残高へ正規化: 借方残高が残る側なら貸方（振替元）を対象に固定する。
+          const debitBalance = account.type === 'asset' ? balance : -balance;
+          setArchiveTransfer({ account, debitBalance });
+          return;
+        }
+      }
+      await archiveAccount(account.id);
+    } catch {
+      // エラーは store が toast 済み（握り潰さず、ここでは未処理拒否だけ防ぐ）。
+    }
   }
 
   // 箱内の非アーカイブ内訳を 1 つ上/下と入れ替え、その並びを sortIndex として保存する
@@ -235,6 +254,7 @@ export function Accounts() {
                               aria-label={`${
                                 account.archived ? t('accounts.unarchive') : t('accounts.archive')
                               }: ${account.name}`}
+                              data-ui={UI.accounts.archiveToggle}
                             >
                               <Icon name={account.archived ? 'restore' : 'archive'} size={18} />
                             </button>
@@ -249,6 +269,25 @@ export function Accounts() {
           );
         })}
       </div>
+
+      {archiveTransfer ? (
+        <EntrySheet
+          init={{
+            kind: 'transfer-fixed',
+            fixed: {
+              // 借方残高が残る（資産のプラス等）→ 対象を振替元（貸方）に固定。逆は振替先（借方）。
+              side: archiveTransfer.debitBalance > 0 ? 'credit' : 'debit',
+              accountId: archiveTransfer.account.id,
+              amount: Math.abs(archiveTransfer.debitBalance),
+              onSave: async (input) => {
+                // 振替仕訳の保存 + archived=true を 1 トランザクションで（キャンセルなら何もしない）。
+                await archiveAccount(archiveTransfer.account.id, buildSimpleEntry(input));
+              },
+            },
+          }}
+          onClose={() => setArchiveTransfer(null)}
+        />
+      ) : null}
 
       {creatingIn ? <AccountSheet box={creatingIn} onClose={() => setCreatingIn(null)} /> : null}
       {editing ? <AccountSheet existing={editing} onClose={() => setEditing(null)} /> : null}

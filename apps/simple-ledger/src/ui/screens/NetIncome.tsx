@@ -35,12 +35,12 @@ export function NetIncome({
 
   const { revenue, living } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf, today) : [];
+    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf) : [];
     return {
       revenue: deriveProfitAndLoss(accounts, entries, basis.flowRange).totalRevenue,
       living: livingCostForRange(accounts, entries, basis.flowRange),
     };
-  }, [basis, ledger, today]);
+  }, [basis, ledger]);
 
   const trends = useMemo(
     () => buildSectionTrends(period, ledger, today),

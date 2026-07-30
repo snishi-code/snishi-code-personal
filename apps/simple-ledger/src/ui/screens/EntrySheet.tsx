@@ -22,8 +22,7 @@ import {
   type FlowMode,
   type FormMode,
 } from '../entryModes';
-import { monthOf } from '../../domain/allocation';
-import { inferMonthlyCostKind } from '../../domain/monthlyCost';
+import { quickSpanEndDate } from '../ccQuickSpan';
 import { useLedger } from '../../state/store';
 import {
   reversalInput,
@@ -40,10 +39,29 @@ import type { MessageKey } from '../../i18n';
 import { todayLocal } from '../../util/time';
 import { UI } from '../../ui-contract';
 
+/**
+ * 振替モードの「固定側 pass-through」: 呼び出し側から片側の科目を固定で渡す
+ * （継続コスト資産・勘定科目のアーカイブ時の振替が、ホームの振替と同じシートを再利用する）。
+ * 固定側は候補リストを経由しない（MODE_ROLES.transfer の allowedRoles は広げない）。
+ * 保存は onSave に委譲する（アーカイブ処理と同一トランザクションにするため）。
+ */
+export interface TransferFixed {
+  side: 'credit' | 'debit';
+  accountId: string;
+  date?: string;
+  /** 日付を固定表示にする（継続コスト資産のアーカイブ = 終了日固定）。 */
+  lockDate?: boolean;
+  /** 金額の既定値（編集可・上限なし）。 */
+  amount?: number;
+  description?: string;
+  onSave: (input: SimpleEntryInput) => Promise<void>;
+}
+
 export type EntryInit =
   | { kind: 'create'; mode: FormMode }
   | { kind: 'edit'; entry: JournalEntry }
-  | { kind: 'reversal'; source: JournalEntry };
+  | { kind: 'reversal'; source: JournalEntry }
+  | { kind: 'transfer-fixed'; fixed: TransferFixed };
 
 function emptyInput(): SimpleEntryInput {
   return {
@@ -96,19 +114,32 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       ? { accountId: RESERVE_LEDGER_ACCOUNT_ID, reserveId: id.slice('reserve:'.length) }
       : { accountId: id };
 
+  const fixed = init.kind === 'transfer-fixed' ? init.fixed : null;
   const [mode, setMode] = useState<FormMode>(
     init.kind === 'create'
       ? init.mode
       : init.kind === 'edit'
         ? initialModeFor(init.entry)
-        : 'manual',
+        : init.kind === 'transfer-fixed'
+          ? 'transfer'
+          : 'manual',
   );
   const [form, setForm] = useState<SimpleEntryInput>(
     init.kind === 'edit'
       ? toSimpleInput(init.entry)
       : init.kind === 'reversal'
         ? reversalInput(init.source)
-        : emptyInput(),
+        : init.kind === 'transfer-fixed'
+          ? {
+              date: init.fixed.date ?? todayLocal(),
+              description: init.fixed.description ?? '',
+              debitAccountId: init.fixed.side === 'debit' ? init.fixed.accountId : '',
+              creditAccountId: init.fixed.side === 'credit' ? init.fixed.accountId : '',
+              amount: init.fixed.amount ?? 0,
+              memo: '',
+              kind: 'normal',
+            }
+          : emptyInput(),
   );
   const [amountText, setAmountText] = useState<string>(
     init.kind === 'create' ? '' : String(form.amount || ''),
@@ -134,10 +165,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [ccNameError, setCcNameError] = useState(false);
   const [categoryError, setCategoryError] = useState(false);
   const continuousCostActive = canCreateContinuousCost && ccMode;
-  const [monthsText, setMonthsText] = useState('');
-  const [monthsError, setMonthsError] = useState(false);
-  const months = monthsText === '' ? 0 : Number.parseInt(monthsText, 10);
-  const [continueCost, setContinueCost] = useState(false);
+  // 終了日は空でよい（空なら費用の割り振りをしない。後から「毎月のもの」で入れられる）。
+  const [ccEndDate, setCcEndDate] = useState('');
   const [repayToggle, setRepayToggle] = useState(false);
   const [repayAccountId, setRepayAccountId] = useState('');
   const [repayCountText, setRepayCountText] = useState('');
@@ -163,8 +192,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     reserveMode,
     reserveName,
     loanMode,
-    monthsText,
-    continueCost,
+    ccEndDate,
     repayToggle,
     repayAccountId,
     repayCountText,
@@ -233,6 +261,34 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       debitAccountId: dstResolved.accountId,
     };
 
+    // 固定側 pass-through の振替: 検証後、保存は呼び出し側（アーカイブ処理）へ委譲する。
+    // 固定側は候補リストを経由しない科目（台帳・アーカイブ対象）のため transferFlowValid は通さない。
+    if (fixed) {
+      const found: EntryValidationError[] = [];
+      if (toSave.date.trim() === '') found.push('date-required');
+      if (!Number.isInteger(toSave.amount) || toSave.amount < 1) found.push('amount-invalid');
+      if (toSave.debitAccountId === '') found.push('debit-required');
+      if (toSave.creditAccountId === '') found.push('credit-required');
+      if (toSave.debitAccountId !== '' && toSave.debitAccountId === toSave.creditAccountId) {
+        found.push('same-account');
+      }
+      setErrors(found);
+      setFlowError(undefined);
+      if (found.length > 0) return;
+      setSubmitting(true);
+      try {
+        await fixed.onSave({
+          ...toSave,
+          metadata: { ...toSave.metadata, inputMode: 'transfer' },
+        });
+        onClose();
+      } catch {
+        // エラーは store 側が toast 済み。シートは開いたままにする。
+        setSubmitting(false);
+      }
+      return;
+    }
+
     const ccActive = canCreateContinuousCost && ccMode;
     if (ccActive) {
       const found: EntryValidationError[] = [];
@@ -244,14 +300,11 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       setCcNameError(nameBad);
       const categoryBad = ccCategoryId === '';
       setCategoryError(categoryBad);
-      const monthsBad = !Number.isInteger(months) || months < 1;
-      setMonthsError(monthsBad);
       const { accBad, countBad } = validateRepay(isLiabilityPayment);
       setFlowError(undefined);
-      if (found.length > 0 || nameBad || categoryBad || monthsBad || accBad || countBad) return;
+      if (found.length > 0 || nameBad || categoryBad || accBad || countBad) return;
       setSubmitting(true);
       try {
-        const repeat = continueCost ? months : undefined;
         const repayCount = repayCountText === '' ? 0 : Number.parseInt(repayCountText, 10);
         const useRepay =
           isLiabilityPayment && repayToggle && repayAccountId !== '' && repayCount >= 1;
@@ -262,15 +315,15 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               repaymentStartDate: repayStartDate || toSave.date,
             }
           : {};
+        // 購入の仕訳（保存される仕訳）+ item を 1 トランザクションで登録する。
+        // 開始日 = 仕訳の日付・支払い元 = ユーザーが選んだ貸方。終了日は空でよい。
         await createContinuousCost({
           name: ccTargetName.trim(),
-          kind: inferMonthlyCostKind(months, repeat),
           amount: toSave.amount,
-          costMonths: months,
-          ...(repeat !== undefined ? { repeatEveryMonths: repeat } : {}),
-          startMonth: monthOf(toSave.date),
+          startDate: toSave.date,
+          ...(ccEndDate.trim() !== '' ? { endDate: ccEndDate.trim() } : {}),
           expenseAccountId: ccCategoryId,
-          paymentSourceAccountId: toSave.creditAccountId,
+          creditAccountId: toSave.creditAccountId,
           ...repayFields,
         });
         onClose();
@@ -353,18 +406,36 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
 
   const sameAccount = errorText(errors, 'same-account');
   const isManual = mode === 'manual';
-
-  const dateField = (
-    <TextInput
-      label={t('entry.date')}
-      type="date"
-      required
-      value={form.date}
-      onChange={(v) => setForm((f) => ({ ...f, date: v }))}
-      error={errorText(errors, 'date-required')}
-      dataUi={UI.journal.entry.date}
-    />
+  // 購入の仕訳（継続コスト資産と 1:1）の編集: 借方は継続コスト台帳に固定（読み取り専用）。
+  const lockedDebit =
+    init.kind === 'edit' &&
+    init.entry.metadata?.monthlyCostId !== undefined &&
+    init.entry.metadata.monthlyCostRecovery !== true;
+  const accountNameOf = (id: string): string => accounts.find((a) => a.id === id)?.name ?? '—';
+  const readOnlyAccount = (labelKey: MessageKey, id: string) => (
+    <div className="field">
+      <span className="field__label">{t(labelKey)}</span>
+      <div className="list__title">{accountNameOf(id)}</div>
+    </div>
   );
+
+  const dateField =
+    fixed?.lockDate === true ? (
+      <div className="kv" data-ui={UI.journal.entry.date}>
+        <span className="muted">{t('entry.date')}</span>
+        <span>{form.date}</span>
+      </div>
+    ) : (
+      <TextInput
+        label={t('entry.date')}
+        type="date"
+        required
+        value={form.date}
+        onChange={(v) => setForm((f) => ({ ...f, date: v }))}
+        error={errorText(errors, 'date-required')}
+        dataUi={UI.journal.entry.date}
+      />
+    );
 
   const descriptionField = (
     <TextInput
@@ -423,8 +494,57 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   );
 
   const flowDef = isManual ? null : MODE_FLOW[mode as FlowMode];
+  // 固定側 pass-through: 相手側の候補（振替先/振替元）。台帳・アーカイブ対象は候補に出さない。
+  const FIXED_COUNTERPART_ROLES = ['daily-asset', 'payment-liability', 'other-liability'] as const;
   const renderFlow = () => {
     if (!flowDef) return null;
+    if (fixed) {
+      const counterpartSide = fixed.side === 'credit' ? 'debit' : 'credit';
+      const counterpartGroups = groupedAccountsByRole(
+        accounts,
+        [...FIXED_COUNTERPART_ROLES],
+        counterpartSide === 'debit' ? form.debitAccountId : form.creditAccountId,
+      );
+      const counterpartPicker = (
+        <AccountPicker
+          flat
+          label={t(counterpartSide === 'debit' ? 'entry.transfer.to' : 'entry.transfer.from')}
+          required
+          value={counterpartSide === 'debit' ? form.debitAccountId : form.creditAccountId}
+          groups={counterpartGroups}
+          onChange={(id) => setSide(counterpartSide, id)}
+          error={
+            (errorText(errors, counterpartSide === 'debit' ? 'debit-required' : 'credit-required') ??
+              sameAccount)
+          }
+          dataUi={
+            counterpartSide === 'debit'
+              ? UI.journal.entry.flowDestination
+              : UI.journal.entry.flowSource
+          }
+        />
+      );
+      return (
+        <div className="field" data-ui={UI.journal.entry.flow}>
+          <span className="field__hint">{t(flowDef.flowLabelKey)}</span>
+          <div className="flow">
+            <div className="flow__side">
+              {fixed.side === 'credit'
+                ? readOnlyAccount('entry.transfer.from', fixed.accountId)
+                : counterpartPicker}
+            </div>
+            <div className="flow__arrow" aria-hidden="true">
+              →
+            </div>
+            <div className="flow__side">
+              {fixed.side === 'debit'
+                ? readOnlyAccount('entry.transfer.to', fixed.accountId)
+                : counterpartPicker}
+            </div>
+          </div>
+        </div>
+      );
+    }
     const resGroup = reserveOptionGroup();
     const srcReserve = resGroup && (mode === 'transfer' || mode === 'expense') ? [resGroup] : [];
     const dstReserve = resGroup && mode === 'transfer' ? [resGroup] : [];
@@ -542,6 +662,9 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                   {t('entry.reserveBack')}
                 </button>
               </>
+            ) : lockedDebit ? (
+              // 購入の仕訳の借方 = 継続コスト台帳（固定）。日付・金額・貸方だけ編集できる。
+              readOnlyAccount(flowDef.destination.labelKey, form.debitAccountId)
             ) : (
               <>
                 <AccountPicker
@@ -624,16 +747,20 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             →
           </div>
           <div className="flow__side">
-            <AccountPicker
-              flat
-              label={t('entry.destination.manual')}
-              required
-              value={form.debitAccountId}
-              groups={dstGroups}
-              onChange={(id) => setSide('debit', id)}
-              error={errorText(errors, 'debit-required')}
-              dataUi={UI.journal.entry.flowDestination}
-            />
+            {lockedDebit ? (
+              readOnlyAccount('entry.destination.manual', form.debitAccountId)
+            ) : (
+              <AccountPicker
+                flat
+                label={t('entry.destination.manual')}
+                required
+                value={form.debitAccountId}
+                groups={dstGroups}
+                onChange={(id) => setSide('debit', id)}
+                error={errorText(errors, 'debit-required')}
+                dataUi={UI.journal.entry.flowDestination}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -644,15 +771,25 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     canCreateContinuousCost && ccMode ? (
       <div className="field">
         <TextInput
-          label={t('entry.monthlyizeMonths')}
-          required
-          inputMode="numeric"
-          value={monthsText}
-          hint={t('entry.monthlyizeMonthsHint')}
-          onChange={(v) => setMonthsText(v.replace(/[^\d]/g, ''))}
-          error={monthsError ? t('entry.error.months-invalid') : undefined}
-          dataUi={UI.journal.entry.allocateMonths}
+          label={t('ccItem.endDate')}
+          type="date"
+          value={ccEndDate}
+          onChange={setCcEndDate}
+          dataUi={UI.journal.entry.ccEndDate}
         />
+        <div className="row-actions">
+          {[1, 3, 5].map((years) => (
+            <button
+              key={years}
+              type="button"
+              className="btn btn--ghost"
+              style={{ minHeight: 32 }}
+              onClick={() => setCcEndDate(quickSpanEndDate(form.date, years))}
+            >
+              {t('ccItem.quickSpan', { years })}
+            </button>
+          ))}
+        </div>
         <AccountPicker
           label={t('entry.ccCategory')}
           required
@@ -662,18 +799,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           error={categoryError ? t('entry.error.category-required') : undefined}
           dataUi={UI.journal.entry.ccCategory}
         />
-        <label
-          style={{ display: 'inline-flex', gap: 8, alignItems: 'center', minHeight: 'var(--tap)' }}
-        >
-          <input
-            type="checkbox"
-            checked={continueCost}
-            onChange={(e) => setContinueCost(e.target.checked)}
-            data-ui={UI.journal.entry.monthlyizeContinue}
-          />
-          {t('entry.monthlyizeContinue')}
-        </label>
-        <p className="field__hint">{t('entry.ccNote')}</p>
       </div>
     ) : null;
 
@@ -827,7 +952,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             {ccDetailField}
             {repaymentField}
 
-            {continuousCostActive ? null : (
+            {continuousCostActive || fixed ? null : (
               <>
                 <button
                   type="button"

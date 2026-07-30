@@ -490,3 +490,9 @@ button.stmt-row:hover {
   display: flex;
   gap: var(--space-1);
 }
+
+/* 終了まで1ヶ月以内の継続コスト資産（毎月のもの）。色だけ変える（バッジ・文言は足さない）。 */
+.card--ending {
+  background: var(--warning-light);
+  border-color: var(--warning-border);
+}

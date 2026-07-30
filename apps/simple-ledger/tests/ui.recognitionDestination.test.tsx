@@ -62,39 +62,39 @@ async function addCandidateFixtures() {
   const fixtures = {
     investment: account(
       'recognition-investment',
-      '認識先・投資資産',
+      '行き先・投資資産',
       'asset',
       'investment-asset',
     ),
     liability: account(
       'recognition-liability',
-      '認識先・その他負債',
+      '行き先・その他負債',
       'liability',
       'other-liability',
     ),
     archived: account(
       'recognition-archived',
-      '認識先・アーカイブ済み',
+      '行き先・アーカイブ済み',
       'asset',
       'daily-asset',
       true,
     ),
     currentArchived: account(
       'recognition-current-archived',
-      '認識先・編集中のアーカイブ',
+      '行き先・編集中のアーカイブ',
       'revenue',
       'income-category',
     ),
     internal: account(
       'recognition-internal',
-      '認識先・内部台帳',
+      '行き先・内部台帳',
       'asset',
       'continuing-cost-asset',
     ),
-    reserve: account('recognition-reserve', '認識先・取り置き', 'asset', 'reserve-asset'),
+    reserve: account('recognition-reserve', '行き先・取り置き', 'asset', 'reserve-asset'),
     adjustment: account(
       'recognition-adjustment',
-      '認識先・残高調整',
+      '行き先・残高調整',
       'expense',
       'system-adjustment',
     ),
@@ -107,9 +107,9 @@ async function expectBroadCandidates(container: HTMLElement, excludedNames: stri
   await waitFor(() => {
     for (const name of [
       '現金',
-      '認識先・投資資産',
+      '行き先・投資資産',
       'クレジットカード',
-      '認識先・その他負債',
+      '行き先・その他負債',
       '初期残高',
       '給与',
       '固定費',
@@ -122,7 +122,7 @@ async function expectBroadCandidates(container: HTMLElement, excludedNames: stri
   }
 }
 
-describe('継続コストの認識先候補', () => {
+describe('継続コスト資産の費用の行き先候補', () => {
   it('共通候補は通常科目を全会計区分から返し、内部・調整・アーカイブを除外する', () => {
     const roleType: Record<AccountRole, AccountType> = {
       'daily-asset': 'asset',
@@ -184,7 +184,7 @@ describe('継続コストの認識先候補', () => {
     ).toEqual(expect.arrayContaining(ids));
   });
 
-  it('支出入力の継続コスト化で資産・負債・純資産・収入・支出を認識先に選べる', async () => {
+  it('支出入力の「継続コスト資産として持つ」で資産・負債・純資産・収入・支出を行き先に選べる', async () => {
     await addCandidateFixtures();
     render(
       <Providers>
@@ -199,6 +199,14 @@ describe('継続コストの認識先候補', () => {
     });
     fireEvent.click(toggle);
 
+    // 終了日は任意の日付ピッカー（空のままでよい）。月数欄は存在しない。
+    const endDate = document.querySelector(
+      `[data-ui="${UI.journal.entry.ccEndDate}"]`,
+    ) as HTMLInputElement;
+    expect(endDate).toBeInTheDocument();
+    expect(endDate.type).toBe('date');
+    expect(endDate.value).toBe('');
+
     const picker = await waitFor(() => {
       const found = document.querySelector(
         `[data-ui="${UI.journal.entry.ccCategory}"]`,
@@ -206,13 +214,13 @@ describe('継続コストの認識先候補', () => {
       expect(found).toBeInTheDocument();
       return found!;
     });
-    expect(within(picker).getByText('認識先')).toBeInTheDocument();
+    expect(within(picker).getByText('費用の行き先')).toBeInTheDocument();
     await waitFor(() => {
       for (const name of [
         '現金',
-        '認識先・投資資産',
+        '行き先・投資資産',
         'クレジットカード',
-        '認識先・その他負債',
+        '行き先・その他負債',
         '初期残高',
         '給与',
         '固定費',
@@ -221,49 +229,20 @@ describe('継続コストの認識先候補', () => {
       }
     });
     for (const name of [
-      '認識先・アーカイブ済み',
-      '認識先・内部台帳',
-      '認識先・取り置き',
-      '認識先・残高調整',
+      '行き先・アーカイブ済み',
+      '行き先・内部台帳',
+      '行き先・取り置き',
+      '行き先・残高調整',
     ]) {
       expect(within(picker).queryByRole('radio', { name })).not.toBeInTheDocument();
     }
   });
 
-  it('契約持ち込みと初期残高からの持ち込みで同じ認識先候補を使う', async () => {
+  it('持ち込みシートでも同じ費用の行き先候補を使う', async () => {
     await addCandidateFixtures();
-    const excluded = [
-      '認識先・アーカイブ済み',
-      '認識先・内部台帳',
-      '認識先・取り置き',
-      '認識先・残高調整',
-    ];
-
-    const subscription = render(
-      <Providers>
-        <Allocations />
-      </Providers>,
-    );
-    fireEvent.click(
-      await waitFor(() => {
-        const found = document.querySelector(`[data-ui="${UI.allocations.unifiedAdd}"]`);
-        expect(found).toBeInTheDocument();
-        return found!;
-      }),
-    );
-    fireEvent.click(
-      document.querySelector(
-        `[data-ui="${UI.allocations.addChooser}.sub-migration"]`,
-      )!,
-    );
-    const subscriptionSelect = await screen.findByLabelText('認識先');
-    await expectBroadCandidates(subscriptionSelect, excluded);
-    subscription.unmount();
-    _resetOverlaysForTests();
-
     render(
       <Providers>
-        <Allocations />
+        <Allocations onEditEntry={() => undefined} />
       </Providers>,
     );
     fireEvent.click(
@@ -273,11 +252,14 @@ describe('継続コストの認識先候補', () => {
         return found!;
       }),
     );
-    fireEvent.click(
-      document.querySelector(`[data-ui="${UI.allocations.addChooser}.asset"]`)!,
-    );
-    const openingSelect = await screen.findByLabelText('認識先');
-    await expectBroadCandidates(openingSelect, excluded);
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.addChooser}.asset"]`)!);
+    const select = await screen.findByLabelText('費用の行き先');
+    await expectBroadCandidates(select, [
+      '行き先・アーカイブ済み',
+      '行き先・内部台帳',
+      '行き先・取り置き',
+      '行き先・残高調整',
+    ]);
   });
 
   it('既存項目の編集では現在値だけアーカイブ済みでも残し、他のアーカイブは除外する', async () => {
@@ -285,19 +267,18 @@ describe('継続コストの認識先候補', () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((candidate) => candidate.name === '現金')!;
     const item = await createContinuousCost({
-      name: '認識先編集テスト',
-      kind: 'prepaid-service',
+      name: '行き先編集テスト',
       amount: 12000,
-      costMonths: 12,
-      startMonth: '2026-01',
+      startDate: '2026-01-15',
+      endDate: '2026-12-31',
       expenseAccountId: fixtures.currentArchived.id,
-      paymentSourceAccountId: cash.id,
+      creditAccountId: cash.id,
     });
     await upsertAccount({ ...fixtures.currentArchived, archived: true });
 
     render(
       <Providers>
-        <Allocations />
+        <Allocations onEditEntry={() => undefined} />
       </Providers>,
     );
     fireEvent.click(
@@ -311,7 +292,7 @@ describe('継続コストの認識先候補', () => {
       expect(found).toBeInTheDocument();
       return found!;
     });
-    expect(select).toHaveAccessibleName('認識先');
+    expect(select).toHaveAccessibleName('費用の行き先');
     expect(select).toHaveValue(fixtures.currentArchived.id);
     expect(within(select).getByRole('option', { name: fixtures.currentArchived.name })).toBeInTheDocument();
     expect(

@@ -13,10 +13,9 @@ import {
   createContinuousCost,
   createOpenings,
   createRepaymentEntries,
-  disposeContinuousCost,
   loadLedger,
-  upsertMonthlyCost,
 } from '../src/data/repository';
+import { addMonthsToDate } from '../src/domain/allocation';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { todayLocal } from '../src/util/time';
 import type { ReportPeriod } from '../src/domain/reportPeriod';
@@ -201,12 +200,11 @@ describe('追補監査の画面回帰', () => {
     await createOpenings([{ accountId: cash.id, amount: 500000, date: '2000-01-01' }]);
     await createContinuousCost({
       name: '年払いサービス',
-      kind: 'prepaid-service',
       amount: 120000,
-      costMonths: 12,
-      startMonth: todayLocal().slice(0, 7),
+      startDate: todayLocal(),
+      endDate: addMonthsToDate(todayLocal(), 11),
       expenseAccountId: expense.id,
-      paymentSourceAccountId: cash.id,
+      creditAccountId: cash.id,
     });
 
     const view = render(
@@ -236,99 +234,60 @@ describe('追補監査の画面回帰', () => {
     expect(within(accountCashRow!).getByText(/380,000/)).toBeInTheDocument();
   });
 
-  it('継続コストの操作可否を処分記録で判定し、処分済みは名称だけ編集できる', async () => {
+  it('終了日を過ぎた項目は一覧から消え、「終了分も表示」で戻る（アーカイブは導出）', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((account) => account.name === '現金')!;
     const expense = ledger.accounts.find((account) => account.name === '固定費')!;
-    const endedWithoutDisposal = await createContinuousCost({
-      name: '未処分終了',
-      kind: 'prepaid-service',
+    const today = todayLocal();
+    // 終了日が過去 = アーカイブ済み（導出）。
+    const ended = await createContinuousCost({
+      name: '終了済み項目',
       amount: 12000,
-      costMonths: 12,
-      repeatEveryMonths: 12,
-      startMonth: '2026-01',
+      startDate: '2026-01-01',
+      endDate: addMonthsToDate(today, -1),
       expenseAccountId: expense.id,
-      paymentSourceAccountId: cash.id,
+      creditAccountId: cash.id,
     });
-    await upsertMonthlyCost({
-      ...endedWithoutDisposal,
-      status: 'ended',
-      endMonth: '2026-06',
-    });
-    const disposed = await createContinuousCost({
-      name: '処分済み',
-      kind: 'prepaid-service',
-      amount: 12000,
-      costMonths: 12,
-      repeatEveryMonths: 12,
-      startMonth: '2026-01',
+    // 終了日 = 今日はまだ消えない（< 今日 で判定）。
+    const endingToday = await createContinuousCost({
+      name: '今日終了の項目',
+      amount: 24000,
+      startDate: '2026-01-01',
+      endDate: today,
       expenseAccountId: expense.id,
-      paymentSourceAccountId: cash.id,
+      creditAccountId: cash.id,
     });
-    await disposeContinuousCost({
-      monthlyCostId: disposed.id,
-      disposalDate: '2026-07-15',
-      proceedsAmount: 0,
+    // 終了日なしは永久にアーカイブされない。
+    const openEnded = await createContinuousCost({
+      name: '終了日なしの項目',
+      amount: 48000,
+      startDate: '2026-01-01',
+      expenseAccountId: expense.id,
+      creditAccountId: cash.id,
     });
-    const disposedBeforeRename = (await loadLedger()).monthlyCostItems.find(
-      (item) => item.id === disposed.id,
-    )!;
 
     render(
       <Providers>
-        <Allocations />
+        <Allocations onEditEntry={() => undefined} />
       </Providers>,
     );
     await waitFor(() => {
       expect(document.querySelector('[data-ui="allocations.view"]')).toBeInTheDocument();
     });
-    expect(screen.queryByText(endedWithoutDisposal.name)).not.toBeInTheDocument();
-    expect(screen.queryByText(disposed.name)).not.toBeInTheDocument();
+    expect(screen.queryByText(ended.name)).not.toBeInTheDocument();
+    expect(await screen.findByText(endingToday.name)).toBeInTheDocument();
+    expect(screen.getByText(openEnded.name)).toBeInTheDocument();
+    // 終了日なしの月あたりは数字を出さない（—）。
+    const openEndedCard = screen.getByText(openEnded.name).closest('.card');
+    expect(openEndedCard).not.toBeNull();
+    expect(within(openEndedCard as HTMLElement).getByText('—')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('checkbox', { name: '停止・終了分も表示' }));
-    expect(await screen.findByText(endedWithoutDisposal.name)).toBeInTheDocument();
-    expect(await screen.findByText(disposed.name)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: '終了分も表示' }));
+    expect(await screen.findByText(ended.name)).toBeInTheDocument();
 
-    expect(
-      screen.getByRole('button', { name: `編集: ${endedWithoutDisposal.name}` }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: `再開: ${endedWithoutDisposal.name}` }),
-    ).toBeInTheDocument();
-
-    expect(screen.getByRole('button', { name: `編集: ${disposed.name}` })).toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: `再開: ${disposed.name}` }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: `削除: ${disposed.name}` }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: `売却・終了: ${disposed.name}` }),
-    ).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: `編集: ${disposed.name}` }));
-    await screen.findByText('処分済みの継続コストは名称以外変更できません。');
-    const editDialog = document.querySelector('[data-ui="allocations.editDialog"]');
-    expect(editDialog).not.toBeNull();
-    expect(within(editDialog!).getByLabelText(/名称/)).toBeEnabled();
-    expect(within(editDialog!).queryByLabelText(/総額/)).not.toBeInTheDocument();
-    expect(editDialog!.querySelectorAll('input')).toHaveLength(1);
-    expect(editDialog!.querySelectorAll('select')).toHaveLength(0);
-
-    fireEvent.change(within(editDialog!).getByLabelText(/名称/), {
-      target: { value: '処分済み・名称変更' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: '保存' }));
-
-    await waitFor(async () => {
-      const updated = (await loadLedger()).monthlyCostItems.find((item) => item.id === disposed.id);
-      expect(updated).toBeDefined();
-      expect(updated).toEqual({
-        ...disposedBeforeRename,
-        name: '処分済み・名称変更',
-        updatedAt: updated!.updatedAt,
-      });
-    });
+    // 終了済みの行にもアーカイブ（終了日の変更 = 復元も同じ 1 操作）・編集・削除が出る。
+    expect(screen.getByRole('button', { name: `アーカイブ: ${ended.name}` })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `編集: ${ended.name}` })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `削除: ${ended.name}` })).toBeInTheDocument();
   });
 });

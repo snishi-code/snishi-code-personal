@@ -141,8 +141,8 @@ export function Breakdown({
   const range = basis.flowRange;
   const asOf = basis.asOf;
   const reportEntries = useMemo(
-    () => (ledger ? reportEntriesForAsOf(ledger, asOf, today) : []),
-    [asOf, ledger, today],
+    () => (ledger ? reportEntriesForAsOf(ledger, asOf) : []),
+    [asOf, ledger],
   );
 
   const { rows, total, retained } = useMemo(() => {

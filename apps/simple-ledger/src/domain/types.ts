@@ -96,10 +96,18 @@ export interface EntryMetadata {
   reversalOfEntryId?: string;
   /** 残高補正（実残高との差分調整）で作られた仕訳の付帯情報。 */
   adjustment?: AdjustmentMeta;
-  /** 月額化コストの実支払い仕訳のとき、紐づく MonthlyCostItem の ID（通常編集/削除は不可）。 */
+  /**
+   * 継続コスト資産に紐づく保存仕訳の印。
+   *  - `monthlyCostRecovery` なし = **購入の仕訳**（借方 継続コスト台帳 / 貸方 支払い元）。
+   *    item と 1:1 で、金額・日付は item の amount / startDate と双方向ミラー。削除不可
+   *    （item 削除で cascade）。
+   *  - `monthlyCostRecovery: true` = **回収の振替**（借方 振替先 / 貸方 継続コスト台帳）。
+   *    アーカイブ時の売却・返金。普通の振替として編集・削除できる。
+   * 台帳を借方/貸方に持つ保存仕訳はこの 2 種類だけ（保存境界・schema の不変条件）。
+   */
   monthlyCostId?: string;
-  /** 継続コストの処分で生成された仕訳のとき、紐づく AssetDisposal の ID（通常編集/削除は不可）。 */
-  assetDisposalId?: string;
+  /** 回収の振替の印（monthlyCostId とペア。貸方 = 継続コスト台帳）。 */
+  monthlyCostRecovery?: true;
   /**
    * 取り置き資金（聖域化・集約モデル）の目的を表す ReserveItem の ID。
    * 取り置きは目的ごとの勘定科目を作らず、単一の集約口座（reserve-ledger）に寄せ、目的別残高は
@@ -143,79 +151,26 @@ export interface AdjustmentMeta {
 }
 
 /**
- * 月額化コスト。サブスク・年払い/前払い・耐久財・定期イベントを統一して扱う。
- * 登録時に「実際の支払い仕訳」（借方 認識先 / 貸方 支払い元、metadata.monthlyCostId 付き）を
- * 作る。一方で「生活コストとしての月割り認識」は仕訳ではなく、この項目の formula
- * （amount / costMonths を端数調整）から導出する分析レイヤで、ダッシュボードの生活コストに足す
- * （実支払い仕訳は二重計上しないよう除外する）。
+ * 継続コスト資産。項目名・金額・開始日・終了日を持つ償却対象（4項目モデル）。
+ *
+ *  - 開始日は**購入の仕訳の日付と完全一致**（双方向ミラー。日付を変えるのは仕訳側）。
+ *  - 終了日は**任意**。未設定なら費用の割り振りを一切しない（残存価値 = 全額が BS に乗るだけ）。
+ *    設定すると開始日〜終了日で月割りされ、過去にも未来にも計算で生まれる仕訳が展開される。
+ *  - 費用の行はデータに残らない導出（monthlyCost.ts / continuousCost.ts）。
+ *  - アーカイブは「終了日を過ぎた」の導出のみ（status フィールドは持たない）。
  */
-export type MonthlyCostKind =
-  | 'subscription' // サブスク（月課金）
-  | 'prepaid-service' // 年払い/前払いサービス
-  | 'durable-asset' // 耐久財・買い替え
-  | 'recurring-event'; // 定期イベント（車検等）
-
-export type MonthlyCostStatus = 'active' | 'paused' | 'ended';
-
 export interface MonthlyCostItem {
   id: string;
+  /** 項目名。 */
   name: string;
-  kind: MonthlyCostKind;
-  /** 1 回の契約・購入・更新で発生する総額（正の整数）。 */
+  /** 金額（正の整数）= 割り振る総額の正本。購入の仕訳の金額と双方向ミラー。 */
   amount: number;
-  /** その金額を何か月分の生活コストとして見るか（1 以上）。 */
-  costMonths: number;
-  /** 継続/更新する場合、何か月ごとに同じコストが再発するか。未指定なら 1 回限り（costMonths で終了）。 */
-  repeatEveryMonths?: number;
-  /** 初回の月 'YYYY-MM'。 */
-  startMonth: string;
-  /** 終了月 'YYYY-MM'。継続中なら未指定。 */
-  endMonth?: string;
-  /** 月ごとの認識先。会計 type により費用・収入減・BS 内振替として導出する。 */
+  /** 開始日 'YYYY-MM-DD'（= 購入の仕訳の日付と完全一致）。 */
+  startDate: string;
+  /** 終了日 'YYYY-MM-DD'。任意。未設定 = まだ費用にしない。 */
+  endDate?: string;
+  /** 費用の行き先（費用カテゴリ等。内部集約・残高調整は不可）。 */
   expenseAccountId: string;
-  /**
-   * 資産経由モデルの funding（資産化）仮想仕訳の貸方＝支払い元（role: daily-asset | payment-liability）。
-   * 継続コスト対象（recognitionCreditAccountId が continuing-cost-asset）で使う。
-   */
-  paymentSourceAccountId?: string;
-  /** 実際の支払い元（role: daily-asset または payment-liability）。旧モデル（実支払い仕訳あり）用。 */
-  paymentAccountId?: string;
-  /** liability 払いのとき、返済 CF を作るための支払い口座（role: daily-asset）。 */
-  repaymentAccountId?: string;
-  /**
-   * 処分（売却・解約）時の売却額（最終サイクル額まで）。実績動的償却では損益を一括計上せず、
-   * 最終サイクルの配分総額からこの額を控除する（超過分だけ売却益の実仕訳）。処分時に設定。
-   */
-  disposalProceedsAmount?: number;
-  /** 仮想認識で貸方側に見せる継続コスト台帳科目。 */
-  recognitionCreditAccountId?: string;
-  status: MonthlyCostStatus;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
- * 継続コストの売却・解約・故障処分の記録（監査用の独立エンティティ）。
- * 生成仕訳は `metadata.assetDisposalId` でこのレコードに紐づき、通常編集/削除は不可（fail-closed）。
- */
-export interface AssetDisposal {
-  id: string;
-  /** 処分した MonthlyCostItem。 */
-  monthlyCostId: string;
-  /** 処分対象の継続コスト台帳科目（= MonthlyCostItem.recognitionCreditAccountId）。 */
-  fixedAccountId: string;
-  /** 処分日 (YYYY-MM-DD)。 */
-  disposalDate: string;
-  /** 売却額（故障・廃棄は 0）。正の整数または 0。 */
-  proceedsAmount: number;
-  /** 売却額の入金先（proceedsAmount > 0 のときのみ）。 */
-  destinationAccountId?: string;
-  /** 処分時点で費用配分へ収束させた合計。 */
-  recognizedAmount: number;
-  /** 処分後に残る価値。継続コスト処分では常に 0。 */
-  remainingAmount: 0;
-  /** この処分で生成した仕訳の ID 群（監査・追跡用）。 */
-  generatedEntryIds: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -234,11 +189,20 @@ export interface RecurringRule {
   amount: number;
   /** 毎月の日（1〜31。月に無い日は月末）。 */
   dayOfMonth: number;
-  /** 行き先（費用カテゴリ / 資金 / 投資）。 */
+  /** 何か月ごとに起票するか（必須。1 = 毎月）。位相の基点は startMonth。 */
+  everyMonths: number;
+  /**
+   * 費用の行き先（任意）。**これがあれば月割りするルール**（継続コスト化）:
+   * 起票のたびに item（id = `ccr-{ruleId}-{month}`・endDate = 周期末）を同一 tx で自動生成し、
+   * 購入の仕訳の借方は継続コスト台帳に固定される。boolean フラグは持たない
+   * （「true なのに行き先が空」という不整合を構造的に不可能にする）。
+   */
+  spreadExpenseAccountId?: string;
+  /** 行き先（費用カテゴリ / 資金 / 投資。月割りルールでは継続コスト台帳に固定）。 */
   debitAccountId: string;
   /** 源泉（資金 / カード / 収入カテゴリ）。 */
   creditAccountId: string;
-  /** 起票開始月 'YYYY-MM'。再開時は現在月へ更新される（停止中の月を遡って起票しない）。 */
+  /** 位相の基点 'YYYY-MM'（再開時も書き換えない＝周期の位相を保つ）。 */
   startMonth: string;
   /**
    * 起票済みカーソル（この月まで処理済み）。キャッチアップが管理する。
@@ -367,7 +331,6 @@ export interface LedgerExportPackage {
   reserves: ReserveItem[];
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
-  assetDisposals: AssetDisposal[];
   /** 定期ルール。交換 JSON では必須（旧形式はリポジトリ外で一度だけ変換する）。 */
   recurringRules: RecurringRule[];
   settings: Settings;
@@ -421,6 +384,5 @@ export interface Ledger {
   reserves: ReserveItem[];
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
-  assetDisposals: AssetDisposal[];
   recurringRules: RecurringRule[];
 }

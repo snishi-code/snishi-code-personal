@@ -30,7 +30,7 @@ function View() {
 
 function ReadyView() {
   const { status } = useLedger();
-  return status === 'ready' ? <Allocations /> : null;
+  return status === 'ready' ? <Allocations onEditEntry={() => undefined} /> : null;
 }
 
 describe('定期ルールの初回起票日', () => {
@@ -41,7 +41,7 @@ describe('定期ルールの初回起票日', () => {
     });
 
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.unifiedAdd}"]`)!);
-    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.addChooser}.expense"]`)!);
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.addChooser}.rule"]`)!);
 
     const name = document.querySelector(
       `[data-ui="${UI.allocations.recurringName}"]`,
@@ -177,41 +177,86 @@ describe('定期ルールの初回起票日', () => {
   });
 });
 
-describe('契約持ち込みの数字欄エラー', () => {
-  it('残存価値と更新支払額を、それぞれの欄で具体的に示す', async () => {
+describe('月割りするルール（支出 + 周期 >= 2）', () => {
+  it('周期 12 の支出ルールは spreadExpenseAccountId を持ち、借方が台帳に固定される', async () => {
     render(<View />);
     await waitFor(() => {
       expect(document.querySelector(`[data-ui="${UI.allocations.view}"]`)).toBeInTheDocument();
     });
 
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.unifiedAdd}"]`)!);
-    fireEvent.click(
-      document.querySelector(`[data-ui="${UI.allocations.addChooser}.sub-migration"]`)!,
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.addChooser}.rule"]`)!);
+
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringName}"]`)!, {
+      target: { value: '年払い保険' },
+    });
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!, {
+      target: { value: '60000' },
+    });
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringEvery}"]`)!, {
+      target: { value: '12' },
+    });
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
+
+    await waitFor(
+      () => {
+        expect(
+          document.querySelector(`[data-ui="${UI.allocations.recurringSheet}"]`),
+        ).not.toBeInTheDocument();
+      },
+      { timeout: 3000 },
     );
 
-    fireEvent.change(
-      document.querySelector(`[data-ui="${UI.allocations.subMigrationName}"]`)!,
-      { target: { value: '契約持ち込み' } },
+    const ledger = await loadLedger();
+    const saved = ledger.recurringRules.find((rule) => rule.name === '年払い保険');
+    const ledgerAccount = ledger.accounts.find(
+      (account) => account.role === 'continuing-cost-asset',
+    )!;
+    const spread = ledger.accounts.find(
+      (account) => account.id === saved!.spreadExpenseAccountId,
     );
-    fireEvent.change(
-      document.querySelector(`[data-ui="${UI.allocations.subMigrationRemaining}"]`)!,
-      { target: { value: '0' } },
-    );
-    fireEvent.change(
-      document.querySelector(`[data-ui="${UI.allocations.subMigrationMonths}"]`)!,
-      { target: { value: '1' } },
-    );
-    fireEvent.change(
-      document.querySelector(`[data-ui="${UI.allocations.subMigrationRenewal}"]`)!,
-      { target: { value: '0' } },
-    );
-    fireEvent.click(
-      document.querySelector(`[data-ui="${UI.allocations.subMigrationSave}"]`)!,
+    expect(saved).toMatchObject({ everyMonths: 12, debitAccountId: ledgerAccount.id });
+    expect(spread?.role).toBe('expense-category');
+    // 起票済みぶんの item（継続コスト資産）が決定的 ID で生まれている。
+    const item = ledger.monthlyCostItems.find((m) => m.id.startsWith(`ccr-${saved!.id}-`));
+    expect(item).toMatchObject({
+      name: '年払い保険',
+      amount: 60000,
+      expenseAccountId: saved!.spreadExpenseAccountId,
+    });
+  });
+
+  it('周期 1 の支出ルールは月割りしない（普通の支出ルールのまま）', async () => {
+    render(<View />);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.allocations.view}"]`)).toBeInTheDocument();
+    });
+
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.unifiedAdd}"]`)!);
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.addChooser}.rule"]`)!);
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringName}"]`)!, {
+      target: { value: '毎月サブスク' },
+    });
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!, {
+      target: { value: '1000' },
+    });
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
+
+    await waitFor(
+      () => {
+        expect(
+          document.querySelector(`[data-ui="${UI.allocations.recurringSheet}"]`),
+        ).not.toBeInTheDocument();
+      },
+      { timeout: 3000 },
     );
 
-    expect(screen.getByText('残存価値は 1 以上の整数で入力してください。')).toBeInTheDocument();
-    expect(
-      screen.getByText('更新ごとの支払額は 1 以上の整数で入力してください。'),
-    ).toBeInTheDocument();
+    const ledger = await loadLedger();
+    const saved = ledger.recurringRules.find((rule) => rule.name === '毎月サブスク');
+    const debit = ledger.accounts.find((account) => account.id === saved!.debitAccountId);
+    expect(saved!.everyMonths).toBe(1);
+    expect(saved!.spreadExpenseAccountId).toBeUndefined();
+    expect(debit?.role).toBe('expense-category');
+    expect(ledger.monthlyCostItems).toHaveLength(0);
   });
 });

@@ -35,8 +35,7 @@
 | `cashflow.future.list` | CF 未来の入出金・振替予定 | ホーム未来日付入力が反映される一覧 |
 | `cashflow.advanced.toggle` | CF 取り置き資金の折りたたみ | 下部の補助情報を開閉 |
 | `journal.view` | Journal ルート | 仕訳画面の検出 |
-| `journal.entry.list` | Journal 一覧 | 仕訳一覧 |
-| `journal.monthlyRecognition` | 今月の継続コスト計上カード | 読み取り専用（仕訳ではない月割り表示） |
+| `journal.entry.list` | Journal 一覧 | 保存される仕訳 + 計算で生まれる仕訳（継続コスト資産の費用行・ルール投影）を日付順で混合表示。計算で生まれた行のタップは「毎月のもの」の元の項目/ルールへ遷移 |
 | `journal.search` | Journal 検索入力 | 検索 |
 | `journal.filter.clearAccount` | 科目絞り込み解除 | ドリルダウン解除 |
 | `journal.entry.save` | Entry シート保存 | 保存 |
@@ -45,19 +44,17 @@
 | `journal.entry.reverse` | Journal 行の取消/返金 | 逆仕訳の起動 |
 | `journal.entry.detailToggle` | 詳細（メモ・タグ）開閉 | 日常入力の詳細を折りたたみ表示 |
 | `journal.entry.manualSwitch` | 詳細入力（借方/貸方）へ切替 | manual モードへ切替 |
-| `journal.entry.allocateToggle` | 継続コスト化するトグル | 継続コストに切替（支出のみ） |
-| `journal.entry.monthlyizeContinue` | 継続・買い替えトグル | ON で repeatEveryMonths=costMonths |
 | `journal.entry.monthlyizeRepayToggle` | 分割/後日引落を資金繰りに入れる | 負債払いのみ表示 |
 | `journal.entry.monthlyizeRepayAccount` / `...RepayCount` / `...RepayStart` | 引落口座/回数/初回引落日 | 返済 CF の生成（購入日と別） |
 | `cashflow.schedule.flow.source` / `.destination` | 予定入力のお金の流れ | 源泉 → 行き先（入金/出金は自動判定） |
-| `journal.entry.ccToggle` | 行き先の「継続コスト化」ボタン | 行き先を継続コスト対象（自由入力）に切替 |
+| `journal.entry.ccToggle` | 行き先の「継続コスト資産として持つ」ボタン | 行き先を継続コスト資産（自由入力の項目名）に切替 |
 | `journal.entry.ccName` | 継続コスト対象の名前 | 台帳に登録する対象名（自由入力） |
-| `journal.entry.ccCategory` | 分類先カテゴリ（費用） | 継続コストの月次分類先 |
+| `journal.entry.ccCategory` | 費用の行き先 | 継続コスト資産の月割りの行き先 |
+| `journal.entry.ccEndDate` | 終了日（任意） | 空なら費用の割り振りをしない（後から「毎月のもの」で設定できる） |
 | `journal.entry.reserveCreate` | 移動先の「取り置き資産を作る」ボタン | 振替の右辺を取り置き資産名入力へ切替（cc型・チェックボックス廃止） |
 | `journal.entry.reserveName` | 取り置き資産の名前 | 作成する取り置き枠の名（勘定科目は増やさない） |
 | `journal.entry.loanArrange` | 支払い元の「ローンを組む」ボタン | 支出の左辺を既存ローン選択＋新規作成へ切替（cc型・チェックボックス廃止） |
 | `journal.entry.liabilityCreate` | 新しいローンを作成（ローンを組む導線内） | 同じ導線内で other-liability を作成 |
-| `journal.entry.allocateMonths` | 継続する月数 | 継続する月数入力 |
 | `journal.entry.date` | Entry 日付 | 日付入力 |
 | `journal.entry.description` | Entry 摘要 | 摘要入力 |
 | `journal.entry.item` | Entry 項目（摘要のユーザー向け名） | 日常入力の「項目」 |
@@ -67,10 +64,14 @@
 | `journal.entry.creditAccount` | Entry 貸方ピッカー（manual のみ） | 詳細入力（貸方） |
 | `journal.entry.amount` | Entry 金額 | 金額入力 |
 | `journal.entry.memo` | Entry メモ | メモ入力 |
-| `allocations.view` | 継続コスト ルート | 画面の検出（screen 名は歴史的に allocations） |
-| `allocations.list` | 継続コストの一覧 | 継続コスト項目一覧 |
-| `allocations.showCompleted` | 停止/終了表示トグル | 非 active の表示切替 |
-| `allocations.edit.impactWarning` | 編集シートの過去再計算注意 | 総額/開始月/月数/周期/終了月/分類先カテゴリ変更時に表示 |
+| `allocations.view` | 毎月のもの ルート | 画面の検出（screen 名は歴史的に allocations） |
+| `allocations.add` / `allocations.add.chooser` | 追加ボタン / 2択チューザー | `.rule` = くり返し記帳 / `.asset` = 継続コスト資産の持ち込み |
+| `allocations.recurring.every` | ルールシートの周期（か月） | 種別=支出 かつ 周期>=2 なら自動で月割り（トグル無し） |
+| `allocations.list` / `allocations.item` | 継続コスト資産の一覧 / 1 項目カード | 終了が近い順。`data-ending="true"` = 終了まで1ヶ月以内（背景色変更） |
+| `allocations.showCompleted` | 終了分も表示トグル | 終了日を過ぎた項目（アーカイブ済み）の表示切替 |
+| `allocations.editDialog` | 継続コスト資産シート（登録＝編集） | `edit.name` / `edit.amount` / `edit.startDate`（編集時は読み取り専用 + `edit.openPurchase` で購入の仕訳へ）/ `edit.endDate` + `edit.quickSpan` / `edit.expense` / `edit.save` |
+| `allocations.edit.impactWarning` | 編集シートの過去再計算注意 | 金額/終了日/費用の行き先 変更時に表示 |
+| `allocations.archive` | 行の「アーカイブ」 | 終了日の設定（`archiveDialog` / `archive.date` / `archive.confirm`）。残存価値 > 0 なら `archive.transfer` でホームの振替と同じシートを開く |
 | `adjustments.view` | 補正・勘定科目 ルート | 画面の検出（screen 名は歴史的に adjustments） |
 | `adjustments.list` | 登録済み補正の一覧 | 現実アンカーの一覧 |
 | `adjustments.row.edit` / `adjustments.row.delete` | 一覧各行の編集 / 削除 | 補正の後編集・削除 |
@@ -87,6 +88,7 @@
 | `accounts.type` | 科目シートの区分セレクト | type 選択 |
 | `accounts.role` | 科目シートの役割セレクト | role 選択 |
 | `accounts.adjust` | 各 BS 科目行の「補正」ボタン | 科目選択済みの補正ダイアログを開く（embedded 時） |
+| `accounts.archiveToggle` | 各科目行のアーカイブ/解除 | 今日時点の残高が残る資産・負債は振替シート（EntrySheet transfer 再利用）を経由して 1 tx でアーカイブ |
 | `adjustments.createDialog` | 補正入力ダイアログ | 科目選択済みの残高補正（独立フォーム廃止） |
 | `settings.view` | Settings ルート | 設定の検出 |
 | `settings.manage.list` | 設定「管理」リスト | 補助画面への遷移リスト |
@@ -101,6 +103,7 @@
 | `nav.menu` | ドロワー nav | メニュー本体 |
 | `nav.<screen>` | メニュー各項目（管理・補助のみ） | `allocations`（継続コスト）/ `cashflow`（資金繰り）/ `settings` |
 | `dialog.confirm` / `dialog.cancel` | ConfirmDialog | 確定 / キャンセル |
+| `app.recovery.wipe` | 復旧画面「DB を初期化して再起動」 | deleteDatabase → reload（VersionError 詰み対策の最終手段） |
 | `toast` | toast 領域 | 通知の検出 |
 
 ## 使用例

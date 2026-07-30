@@ -2,9 +2,10 @@
  * 期間の軽量ピッカー（ヘッダーの現在コンテキスト表示をタップして開く）。
  * foundation の Popup（native <dialog>）を使用。
  */
+import { useId } from 'react';
 import { Popup } from './overlays';
-import { TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
+import { CONTINUOUS_COST_HARD_CAP } from '../domain/continuousCost';
 import { t } from '../i18n';
 import { UI } from '../ui-contract';
 import type { ReportPeriod } from '../domain/reportPeriod';
@@ -74,7 +75,11 @@ export function PeriodYearPicker({
   );
 }
 
-/** ヘッダー用の日付ピッカー。年・全期間への導線は意図的に持たない。 */
+/**
+ * ヘッダー用の日付ピッカー。年・全期間への導線は意図的に持たない。
+ * max = 継続コスト資産エンジンの展開上限（2100-12-31）。エンジンが展開できる範囲の外を
+ * そもそも選べなくする（表示日のピッカーだけ。入力欄には付けない）。
+ */
 export function PeriodDatePicker({
   date,
   onChange,
@@ -84,6 +89,7 @@ export function PeriodDatePicker({
   onChange: (date: string) => void;
   onClose: () => void;
 }) {
+  const id = useId();
   const select = (nextDate: string) => {
     if (nextDate === '') return;
     onChange(nextDate);
@@ -92,14 +98,20 @@ export function PeriodDatePicker({
 
   return (
     <Popup ariaLabel={t('period.pickerDate')} onClose={onClose} dataUi={UI.period.datePicker}>
-      <TextInput
-        label={t('period.date')}
-        type="date"
-        required
-        value={date}
-        onChange={select}
-        dataUi={UI.period.dateInput}
-      />
+      <div className="field">
+        <label className="field__label" htmlFor={id}>
+          {t('period.date')}
+        </label>
+        <input
+          id={id}
+          className="input"
+          type="date"
+          value={date}
+          max={CONTINUOUS_COST_HARD_CAP}
+          onChange={(e) => select(e.target.value)}
+          data-ui={UI.period.dateInput}
+        />
+      </div>
     </Popup>
   );
 }

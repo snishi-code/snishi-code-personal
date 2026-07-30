@@ -5,10 +5,13 @@
 
 ## 保存方針
 
-- **実行時の正本 = IndexedDB**（`DB_NAME = "simple-ledger"`）。ストア:
-  `kv`（meta / settings）、`accounts`、`journalEntries`、`allocations`、
-  `cashflowSchedules`、`reserves`、`tags`、`monthlyCostItems`、`snapshots`。
+- **実行時の正本 = IndexedDB**（`DB_NAME = "simple-ledger-v2"`）。ストア:
+  `kv`（meta / settings）、`accounts`、`journalEntries`、`cashflowSchedules`、
+  `reserves`、`tags`、`monthlyCostItems`、`recurringRules`、`snapshots`。
 - **公式交換形式 = JSON**（端末間共有・バックアップ）。JSON をDB代わりに常用しない。
+- **計算で生まれる仕訳は保存しない**: 継続コスト資産の費用の行・ルールの未来投影は
+  `reportEntriesForAsOf` が表示のたびに展開する導出専用で、IndexedDB / export / スナップショットの
+  どこにも書かれない（`assertEntrySavable` が `metadata.virtual` 付き仕訳の保存を例外で拒否する）。
 
 ## JSON export パッケージ
 
@@ -16,184 +19,139 @@
 
 ```jsonc
 {
-  "appId": "snishi-code.simple-ledger",
-  "schemaVersion": 10,
+  "appId": "snishi-code.simple-ledger-v2",
+  "schemaVersion": 4,
   "ledgerId": "ledger",
-  "exportedAt": "2026-06-06T00:00:00.000Z",
+  "exportedAt": "2026-07-29T00:00:00.000Z",
   "deviceId": "<uuid>",
-  "baseRevision": 12,      // このエクスポートが基づくリビジョン
-  "currentRevision": 12,   // エクスポート時点のリビジョン
+  "revision": 12,          // foundation 封筒の revision（楽観的衝突検出）
   "accounts": [ /* Account[]（type + role 付き） */ ],
-  "journalEntries": [ /* JournalEntry[]（tagIds / lines[].tagIds 付き） */ ],
-  "allocations": [ /* AllocationItem[]（按分支出。月額化コストの基盤履歴） */ ],
+  "journalEntries": [ /* JournalEntry[]（保存される仕訳のみ） */ ],
   "cashflowSchedules": [ /* CashflowSchedule[]（予定キャッシュフロー） */ ],
-  "reserves": [ /* ReserveItem[]（目的別資金） */ ],
+  "reserves": [ /* ReserveItem[]（取り置き資金） */ ],
   "tags": [ /* Tag[]（分析タグ） */ ],
-  "monthlyCostItems": [ /* MonthlyCostItem[]（月額化コスト） */ ],
+  "monthlyCostItems": [ /* MonthlyCostItem[]（継続コスト資産） */ ],
+  "recurringRules": [ /* RecurringRule[]（定期ルール） */ ],
   "settings": { "ledgerName": "家計簿", "currency": "JPY", "locale": "ja" }
 }
 ```
 
-- `schemaVersion`: スキーマ版。現行は **`16`**（v1→v2 `allocations`、v2→v3
-  `cashflowSchedules`/`reserves`、v3→v4 `tags`、v4→v5 残高補正 `metadata.adjustment`
-  永続化＝恒等移行、v5→v6 勘定科目に `role`、v6→v7 月額化コスト `monthlyCostItems`、
-  v7→v8 予定CF `direction` に `transfer`＝恒等移行（旧 v8 の資金目標は v16 で撤去）、
-  v9→v10 `role` に `fixed-asset` + `MonthlyCostItem` に `sourceEntryId`/`recognitionCreditAccountId`、
-  v10→v11 廃止済み概念（v2 の版 2 で撤去）、v11→v12 `assetDisposals`、
-  v12→v13 継続コストの資産経由モデル: `role` に `continuing-cost-asset` + `MonthlyCostItem` に任意
-  `paymentSourceAccountId` + `EntryMetadata` に `virtual`/`continuousCostId`/`ccKind`（拡張のみ＝恒等移行）。
-  仮想仕訳は保存しない導出専用＝export には含めない）、
-  v13→v14 勘定科目の聖域化: 品目別 `continuing-cost-asset` 科目を単一の集約台帳口座
-  （`continuing-cost-ledger`『継続コスト台帳』）へ寄せ、`MonthlyCostItem.recognitionCreditAccountId` を
-  付け替え・参照されなくなった旧科目を削除（品目名は `MonthlyCostItem.name` に残る）、
-  v14→v15 取り置き資金の聖域化・集約: 目的別 `reserve-asset` 科目を単一の集約口座
-  （`reserve-ledger`『取り置き資金』）へ寄せ、`ReserveItem.reserveAccountId` を付け替え、取り置き振替に
-  `metadata.reserveId` を付与（目的別残高はタグ集計で導出）、旧科目を削除（目的名は `ReserveItem.name` に残る）。
-  `ReserveItem.parentAccountId?`（取り置き元の daily-asset・既定=預金）と `EntryMetadata.reserveId?` を追加、
-  v15→v16 B 側レガシー撤去: 旧「資金目標(fundingGoals)」・取り置きの `targetAmount/targetDate`・
-  `Settings.expectedAnnualReturnBps` を完全削除（取り置きは A=短期の封筒分けのみ。長期目標/投資は将来別途）。
-- **simple-ledger-v2 の版**（appId `snishi-code.simple-ledger-v2`。上の v1〜v16 は旧 v1 アプリの歴史）:
-  - **v1**: v1 アプリの最終形（v16 相当）を版 1 として開始（レガシー migration なし）。
-  - **v1→v2**（2026-07-28）: 使われていなかった 2 概念を型・schema・store・UI ごと撤去。
-    migration step は追加しない（後方互換をコードで持たない作者決定）＝版 1 の JSON /
-    スナップショットは unsupported-version で fail-closed に拒否される。
-    IndexedDB は DB_VERSION 3 の upgrade で旧ストアを削除する。
-- `Account.role`: `type` と整合する UI 用役割（`daily-asset` / `reserve-asset` /
-  `deferred-asset` / `investment-asset` / `fixed-asset`（固定資産。現金でない asset・CF総資金外） /
-  `payment-liability` / `other-liability` / `equity` /
-  `income-category` / `expense-category` / `system-adjustment`）。詳細は
-  [ledger-concept.md](ledger-concept.md#中核モデル)。import 検証で `role` と `type` の整合も確認する。
-- `revision`: 端末ローカルの編集追跡。保存（仕訳/科目/設定/按分/予定CF/目的別資金/タグ）のたびに +1。
+- `Account.role`: `type` と整合する UI 用役割（`daily-asset` / `reserve-asset`（内部集約）/
+  `investment-asset` / `continuing-cost-asset`（内部集約＝継続コスト台帳）/ `payment-liability` /
+  `other-liability` / `equity` / `income-category` / `expense-category` / `system-adjustment`）。
+  詳細は [ledger-concept.md](ledger-concept.md#中核モデル)。import 検証で `role` と `type` の
+  整合も確認する。
+- `revision`: 端末ローカルの編集追跡。保存のたびに +1。
 - 金額（`JournalLine.amount`）は **正の整数・最小通貨単位**（JPY なら円）。
+
+### schemaVersion の変遷（simple-ledger-v2。appId `snishi-code.simple-ledger-v2`）
+
+> 旧 v1 アプリ（v1〜v16）の歴史は版 1 に畳んだ。**後方互換をコードで持たない**（作者決定）＝
+> migration step を追加せず、旧版 JSON は unsupported-version で fail-closed に拒否し、
+> 実データは単発の変換スクリプトで前進させる（下記）。
+
+| 版 | 変更 |
+|---|---|
+| **v1** | v1 アプリの最終形（旧 v16 相当）を版 1 として開始（レガシー migration なし）。 |
+| **v1→v2**（2026-07-28） | 使われていなかった 2 概念を型・schema・store・UI ごと撤去。IndexedDB は DB_VERSION 3 の upgrade で旧ストアを削除。 |
+| **v2→v3**（2026-07-29・指示書#4） | 廃止概念の一掃（`fixed-asset` / `deferred-asset` role・按分 `allocations`・投資評価損益）・補正の通常化・並び順の正本化・ヘッダーの日付選択化・用語統一。旧 `allocations` ストアを削除（DB_VERSION 4）。 |
+| **v3→v4**（2026-07-30・指示書#5） | **継続コスト資産の4項目モデル一本化**。`MonthlyCostItem` を 8 フィールド化（`startDate`/`endDate?`。`kind`/`costMonths`/`repeatEveryMonths`/`startMonth`/`endMonth`/`paymentSourceAccountId`/`recognitionCreditAccountId`/`status` 等を撤去）。**購入の仕訳を保存される仕訳にする**（`metadata.monthlyCostId`）。回収の振替（`metadata.monthlyCostRecovery`）を追加。`AssetDisposal`（処分）・一時停止・実績動的償却を全廃（`assetDisposals` ストア削除。DB_VERSION 5）。`RecurringRule` に `everyMonths`（必須）と `spreadExpenseAccountId?`（月割りするルール）を追加。科目名「開始残高」→「初期残高」。実データの変換 = `_workspace-management/scripts/convert-ledger-v3-to-v4.mjs`（単発・アプリ内 migration なし）。 |
+
+### `MonthlyCostItem`（継続コスト資産）
+
+`id` / `name` / `amount`（購入額・正の整数）/ `startDate`('YYYY-MM-DD'・**購入の仕訳の日付と
+完全一致**) / `endDate?`（任意。未設定 = 費用の割り振りをしない）/ `expenseAccountId`（費用の
+行き先）/ `createdAt` / `updatedAt`。
+
+- **購入の仕訳**（保存される仕訳・item と 1:1）: `借方 継続コスト台帳(continuing-cost-ledger) /
+  貸方 支払い元`。印は `metadata.monthlyCostId` のみ。持ち込み登録（貸方 = 初期残高 equity）は
+  `kind:'opening'`。
+- **回収の振替**（アーカイブ時の売却・返金）: `借方 振替先 / 貸方 継続コスト台帳`・
+  `metadata: { monthlyCostId, monthlyCostRecovery: true }`。普通のユーザー入力の振替として
+  編集・削除可。
+- 費用の行は保存されない（`continuousCostEntriesForItem` が展開する）。
+- ルール生成 item の id は決定的（`ccr-{ruleId}-{YYYY-MM}`）。ルール起票の保存仕訳は
+  `rec-{ruleId}-{month}`。
+
+### `RecurringRule`（定期ルール）
+
+`id` / `name` / `amount` / `dayOfMonth` / `everyMonths`（必須。1 = 毎月）/
+`spreadExpenseAccountId?`（**あれば月割りするルール** = 起票が購入の仕訳 + item を対で作る）/
+`debitAccountId`（月割りルールでは継続コスト台帳に固定）/ `creditAccountId` / `startMonth`
+（位相の基点）/ `postedThroughMonth?`（起票カーソル）/ `paused?`。
 
 ### `Tag`（分析タグ）
 
-`id` / `name` / `scope`('entry'|'line'|'both') / `color?` / `archived`。勘定科目を増やさずに
-旅行・カード名・銀行名などで抽出する分析軸。**PL/BS は変えない**。`JournalEntry.tagIds`（全体タグ、
-scope entry|both）、`JournalLine.tagIds`（明細タグ、scope line|both）、`CashflowSchedule` の
-`entryTagIds`/`accountLineTagIds`/`counterLineTagIds`（実績化時に仕訳へコピー）。
+`id` / `name` / `scope`（`'entry'` のみ＝仕訳全体。明細タグは廃止）/ `color?` / `archived`。
 
-### `CashflowSchedule`（予定キャッシュフロー）/ `ReserveItem`（目的別資金）
+### `CashflowSchedule` / `ReserveItem`
 
-- `CashflowSchedule`: `id` / `title` / `dueDate` / `amount` / `direction`('inflow'|'outflow') /
-  `accountId`(asset) / `counterAccountId?` / `source`('manual'|'credit-card'|'installment'|'reserve') /
-  `status`('planned'|'posted'|'cancelled') / `linkedEntryId?`。「いつ現金が動くか」を保持し、
-  実績化で 1 件の 2 行仕訳（outflow: 借方 counter / 貸方 account）を作る。**予定は仕訳一覧へ
-  大量生成しない**。
-- `ReserveItem`: `id` / `name` / `reserveAccountId`(集約口座 reserve-ledger) / `parentAccountId?` / `note?`。
-  A=短期の封筒分けのみ（目標額・期限・利回りは持たない）。取り置きは通常の振替で行い、資金繰り画面で
-  自由資金から除外して見る（総資産は不変）。
-
-### `AllocationItem`（按分支出）
-
-`id` / `name` / `totalAmount` / `months` / `startMonth`('YYYY-MM') / `expenseAccountId` /
-`paymentAccountId` / `deferredAccountId` / `sourceEntryId` / `recognitionEntryIds[]` /
-`status`('active'|'completed'|'disposed'|'settled') / `createdAt` / `updatedAt`。
-関連仕訳は `metadata.allocationId` / `allocationRole`('source'|'recognition') を持つ。詳細は
-[ledger-concept.md](ledger-concept.md#按分支出長期の生活コスト)。
-
-### `MonthlyCostItem`（継続コスト台帳）
-
-> **v13 以降の正本は「資産経由モデル」**（`createContinuousCost`）。`MonthlyCostItem` を台帳ルールとし、
-> 単一の集約台帳口座（role `continuing-cost-asset`・`continuing-cost-ledger`『継続コスト台帳』）への
-> `支払い元 → 継続コスト台帳`（資産化）/ `継続コスト台帳 → 費用カテゴリ`（認識）を
-> **`src/domain/continuousCost.ts` が仮想展開**する（実仕訳を保存しない）。**v14 で勘定科目を聖域化**し、
-> 品目ごとに資産科目を作らず未消化残高を 1 口座へ集約する（品目名は `MonthlyCostItem.name` に保持）。
-> `paymentSourceAccountId`=資産化の貸方。PL/BS/支出は `reportEntriesForAsOf`（実仕訳 + 仮想仕訳）で集計し、
-> 集約台帳口座残高に未消化分が残る。詳細は [ledger-concept.md](ledger-concept.md#継続コスト)。
-> 以下の「支払い仕訳を残す」旧モデル（`createMonthlyCost`）と固定資産月額化（`saveEntryWithFixedAssetMonthly`）は
-> 内部互換で残すが、新規入力は資産経由モデルに一本化した。
-
-（旧モデル）サブスク・年払い・耐久財・定期イベントを統一して扱う。「実際の支払い事実」と「生活コストとしての
-月割り認識」を分ける:
-- **支払い仕訳**: 登録日(`date`)に `借方 費用カテゴリ / 貸方 支払い元`（daily-asset でも
-  payment-liability でも作る。`metadata.monthlyCostId` 付き・通常編集/削除不可）。負債払いなら
-  登録日に負債が立ち、返済 CF で取り崩す。
-- **生活コスト認識**: 仕訳ではなく `MonthlyCostItem` の formula から導出する分析レイヤ
-  （ダッシュボードは `monthlyCostId` 付き支払い仕訳を除外し、`monthlyCostForMonth` を足す＝二重計上しない）。
-- **負債払い + 返済情報**があれば、返済予定 CF を **初回引落日(`repaymentStartDate`)** から回数分作る
-  （購入日とは別）。
-`id` / `name` / `kind`('subscription'|'prepaid-service'|'durable-asset'|'recurring-event') /
-`amount` / `costMonths`(>=1) / `repeatEveryMonths?`(>=costMonths) / `startMonth`('YYYY-MM') /
-`endMonth?` / `expenseAccountId`(role expense-category) / `paymentSourceAccountId?`(資産経由モデルの
-資産化の貸方。daily-asset | payment-liability | other-liability ※ローン購入を許可) / `paymentAccountId?`(旧モデル) / `repaymentAccountId?`(daily-asset) /
-`recognitionCreditAccountId?`(資産経由は continuing-cost-asset、固定資産月額化は fixed-asset) /
-`sourceAllocationId?` / `status`('active'|'paused'|'ended')。
-- 月額は formula で導出: `monthlyAmounts(amount, costMonths)`（合計は必ず `amount` に一致）。
-  `repeatEveryMonths` ありは周期ごとに先頭 `costMonths` か月だけ計上（隙間は 0）。
-- 負債（payment-liability カード / other-liability ローン）払いは返済予定 `CashflowSchedule`(source='installment')
-  を別に作る（`預金 → 負債`）。**返済 CF と月額化コストは別物**（CF=いつ現金が動くか / 月額化=月あたりの生活コスト）。
-- 既存按分(allocations)から移行した項目は `sourceAllocationId` を持つ。ダッシュボードの
-  生活コストは「通常支出 − 既存按分の認識 − 調整用費用 + 月額化コスト(formula)」で**二重計上しない**。
-  詳細は [ledger-concept.md](ledger-concept.md#月額化コスト)。
+- `CashflowSchedule`: 予定キャッシュフロー。`direction`('inflow'|'outflow'|'transfer') /
+  `source`('manual'|'credit-card'|'installment'|'reserve') / `status`('planned'|'posted'|'cancelled')。
+- `ReserveItem`: `id` / `name` / `reserveAccountId`（集約口座 `reserve-ledger` のみ）/
+  `parentAccountId?`（取り置き元の daily-asset）/ `note?`。
 
 ### `JournalEntry.metadata`（任意）
-
-仕訳の付帯情報。後方互換のため省略可能。
 
 ```jsonc
 "metadata": {
   "inputMode": "income | expense | transfer | manual | reversal",
   "reversalOfEntryId": "<元仕訳 ID（reversal のとき）>",
-  // 期間按分（将来拡張・保存と検証のみ。生成ロジックは未実装）
-  "allocationPlan": {
-    "kind": "period",
-    "startDate": "2026-06-01",
-    "endDate": "2026-12-31",
-    "method": "even-monthly",
-    "recognitionAccountId": "<acc>",
-    "deferredAccountId": "<acc>",
-    "generatedEntryIds": []
-  },
-  // 残高補正（実残高との差分調整＝現実アンカー。「締め」は作らない）。
-  // 後編集・削除は残高補正画面（updateAdjustment / deleteAdjustment）のみ。Journal の通常編集・削除は
-  // fail-closed（error.entry.adjustment）。編集時の理論残高は補正自身を除いて再計算する。
+  // 残高補正（現実アンカー。「締め」は作らない）。編集・削除は補正画面のみ（Journal は読み取り専用）。
   "adjustment": {
-    "kind": "unknown-balance | investment-valuation",
     "accountId": "<asset|liability>",
     "expectedBalance": 10000,
     "actualBalance": 8000,
     "delta": -2000,            // actual − expected
-    "counterpartAccountId": "<残高調整費/収入 or 投資評価損/益>"
+    "counterpartAccountId": "<残高調整費/収入>"
   },
-  // 月額化コスト（負債払い）の購入仕訳に付く。紐づく MonthlyCostItem の ID。
-  "monthlyCostId": "<monthlyCostItems[].id>"
+  // 継続コスト資産に紐づく保存仕訳の印。recovery なし = 購入の仕訳 / あり = 回収の振替。
+  "monthlyCostId": "<monthlyCostItems[].id>",
+  "monthlyCostRecovery": true,
+  // 取り置きの振替。
+  "reserveId": "<reserves[].id>",
+  // 定期ルールからの自動起票の由来（必ずペアで持つ）。
+  "recurringRuleId": "<recurringRules[].id>",
+  "recurringMonth": "2026-07"
 }
 ```
+
+`virtual` / `continuousCostId` / `ccKind` は**計算で生まれる仕訳専用の印**で、
+`entryMetadataSchema` に存在しない（保存される仕訳に付けると保存境界が例外で拒否し、
+import では strip される）。
 
 ### 構造・参照整合性（import 検証）
 
 `journalEntrySchema` / `ledgerExportPackageSchema` は次も検証する（不一致は `validation-error`）:
 
-- **仕訳は「1 借方・1 貸方・同額」の 2 行のみ**（MVP は複合仕訳 UI 未対応のため fail-closed）。
-- すべての `journalEntries[].lines[].accountId` が `accounts[].id` に存在する。
-- `accounts[].id` は一意。`accounts[].role` は `type` と整合する（`roleAllowsType`）。
-- `metadata.allocationPlan` の `recognitionAccountId` / `deferredAccountId` が `accounts[].id` に存在し、
-  `generatedEntryIds` の各 ID が `journalEntries[].id` に存在する。
-- **`allocations[]`**: `id` は一意。`expenseAccountId` / `paymentAccountId` / `deferredAccountId` が
-  `accounts[].id` に、`sourceEntryId` / `recognitionEntryIds[]` が `journalEntries[].id` に存在する。
-  さらに科目 type（expense / payment=asset|liability / deferred=asset）、本数 = months、原始/認識
-  仕訳のメタ・借方貸方・金額列・日付列・合計まで一致を検証。`allocationId` と `allocationRole` は
-  必ず同時に存在し、`allocationId` 付き仕訳はいずれかの AllocationItem から参照される。
-- **`cashflowSchedules[]`**: `id` 一意。`accountId` は asset、`counterAccountId?` は存在する科目、
-  `status: 'posted'` は存在する `linkedEntryId` を持つ。
-- **`reserves[]`**: `id` 一意。`reserveAccountId` は asset。
-- **`monthlyCostItems[]`**: `id` 一意。`expenseAccountId` は role expense-category、
-  `paymentAccountId?` は daily-asset|payment-liability、`paymentSourceAccountId?` は
-  daily-asset|payment-liability|other-liability、`repaymentAccountId?` は daily-asset、
-  `repeatEveryMonths >= costMonths`、`sourceAllocationId?` は `allocations[].id` に存在する。
-- **`reserves[]`**: `reserveAccountId` は集約口座 `reserve-ledger` のみ（目的別科目は作らない）。`parentAccountId?` は
-  daily-asset。取り置き仕訳の `metadata.reserveId` は既存 `ReserveItem.id` を参照し集約口座に触れる。
-- **`tags[]`**: `id` 一意・active な同名重複なし。`tagIds` 参照は存在必須かつ scope 整合
-  （全体タグ欄=entry|both、明細タグ欄=line|both）。仕訳・予定CF のタグ欄も同様に検証。
-- **`metadata.adjustment`**: `accountId` / `counterpartAccountId` が `accounts[].id` に存在し、
-  `delta === actualBalance − expectedBalance`。
+- **仕訳は「1 借方・1 貸方・同額」の 2 行のみ**（複合仕訳 UI 未対応のため fail-closed）。
+- すべての `lines[].accountId` が `accounts[].id` に存在する。`accounts[].id` は一意・
+  `role` は `type` と整合・有効（非アーカイブ）な科目名は trim 後で重複不可。
+- 内部集約ロールは唯一の集約口座のみ（`reserve-asset` = `reserve-ledger`、
+  `continuing-cost-asset` = `continuing-cost-ledger`）。
+- **継続コスト資産の不変条件**:
+  - 各 item に**購入の仕訳がちょうど 1 件**（`metadata.monthlyCostId === item.id`・recovery なし）。
+    `monthlyCostId` を持つ仕訳の参照先 item が存在する。
+  - 購入の仕訳の形: 借方 = 継続コスト台帳、貸方 role ∈ {daily-asset, payment-liability,
+    other-liability, equity}、金額 == `item.amount`、**`date === item.startDate`（日レベル）**。
+  - **台帳に触れる保存仕訳は必ず `monthlyCostId` を持つ**（購入の仕訳 / 回収の振替の 2 種類だけ）。
+  - 回収の振替は貸方 = 台帳（回収額の上限は設けない＝割り振る総額が負になってよい）。
+  - `endDate?` は `>= startDate`・配分月数 ≤ 1200 ヶ月。`expenseAccountId` は内部集約・残高調整
+    以外（`isRecurringPostableRole`）。
+  - **同一ルール由来（id `ccr-{ruleId}-…`）の item の月区間が重ならない**。
+- **勘定科目の不変条件: アーカイブ済み（資産・負債）= 全仕訳から計算した最終残高が 0**。
+- 定期ルール: `everyMonths >= 1`。月割りするルール（`spreadExpenseAccountId` あり）は
+  `everyMonths >= 2`・借方 = 継続コスト台帳・源泉 role ∈ {daily-asset, payment-liability,
+  other-liability}。定期ルール由来の仕訳は `recurringRuleId`/`recurringMonth` をペアで持ち、
+  ルールが存在し、同ルール・同月の重複が無い。
+- 残高補正: `delta === actualBalance − expectedBalance`・対象/相手科目の存在と形・kind=normal。
+- 予定 CF / 取り置き / タグ: id 一意・参照整合（posted の予定 CF は存在する仕訳に紐づく等）。
 
 ### revision の原子性
 
-本体（仕訳/科目/設定）の変更と `meta.revision` の +1 は **同一 IndexedDB トランザクション** で行う
-（`repository.writeWithRevision`）。途中失敗で「本体だけ変わって revision が進まない」状態を作らない。
-revision は import の競合判定に使うため、本体と必ず歩調を合わせる。
+本体の変更と `meta.revision` の +1 は **同一 IndexedDB トランザクション** で行う
+（`repository.writeWithRevision`）。途中失敗で「本体だけ変わって revision が進まない」状態を
+作らない。
 
 ## import ポリシー（fail-closed）
 
@@ -202,49 +160,30 @@ revision は import の競合判定に使うため、本体と必ず歩調を合
 1. **JSON パース** … 失敗 → `parse-error`（既存データ不変）。
 2. **封筒検証** … `appId` / `schemaVersion` を確認。
    - `appId` 不一致 → `not-our-file`。
-3. **migration** … `schemaVersion ≠ 現行` なら `migrateToCurrent` で前進。
-   - 現行より新しい → `unsupported-version`（`too-new`）。
-   - 手順が無い旧版 / 変換失敗 → `unsupported-version`（`unknown-version` / `migration-failed`）。
-4. **完全検証（Zod）** … 借方=貸方の一致まで検査。失敗 → `validation-error`（既存データ不変）。
-5. **revision 競合チェック** … ローカルの `revision ≠ ファイルの baseRevision` かつ `force` 未指定
-   → `revision-conflict`。**自動上書きしない・自動マージしない**。UI が警告し、ユーザー確認
-   （force）を得てから再実行する。
-6. **import 前スナップショット** … 現状を `snapshots` に保存（理由「import前」）。
-7. **原子的置換** … `meta` / `settings` / `accounts` / `journalEntries` を 1 トランザクションで
-   置換。ここで初めて既存を更新する（= 成功確認前に既存を成功扱いで壊さない）。`snapshots` は残す。
+   - `schemaVersion ≠ 現行` → `unsupported-version`（**migration チェーンは持たない**。実データは
+     変換スクリプトで前進させてから import する）。
+3. **完全検証（Zod）** … 上記の不変条件・借方=貸方の一致まで検査。失敗 → `validation-error`
+  （既存データ不変）。
+4. **revision 競合チェック** … ローカルの `revision ≠ ファイルの revision` かつ `force` 未指定
+   → `revision-conflict`。**自動上書きしない・自動マージしない**。
+5. **import 前スナップショット** … 現状を `snapshots` に保存。
+6. **原子的置換** … 全ストアを 1 トランザクションで置換（成功確認前に既存を壊さない）。
 
 復元（`restoreFromSnapshot`）も同様に、復元前スナップショットを取ってから原子的に置換する。
+`schemaVersion` 不一致のスナップショットは復元不可で、起動時に自動削除される（版上げ直後に
+「使えるように見えて復元できない」スナップショットを並べない）。
 
-## migration ポリシー
+## migration ポリシー（後方互換をコードで持たない）
 
-- `schemaVersion` を必ず持つ。現行は `16`。
-- migration 関数の置き場は `src/domain/migrations.ts` の `STEPS`（`{ from, to, migrate }`）。
-  - **v1 → v2**: `allocations: []` を補う（v1 JSON は按分を持たない）。
-  - **v2 → v3**: `cashflowSchedules: []` / `reserves: []` を補う。
-  - **v3 → v4**: `tags: []` を補う。
-  - **v4 → v5**: 残高補正（`metadata.adjustment`）の永続化に伴う版上げ。構造は変えない＝
-    恒等移行（version だけ前進）。
-  - **v5 → v6**: 勘定科目に `role` を補う。`type` と参照集合（按分中資産＝`allocations[].deferredAccountId`、
-    目的別資金＝`reserves[].reserveAccountId`）・既定名から推定する（`accountRoles.inferRole`）。
-  - **v6 → v7**: 月額化コスト `monthlyCostItems` を既存按分から移行生成する
-    （`monthlyCostMigration.monthlyCostItemsFromAllocations`、`kind='durable-asset'`・
-    `sourceAllocationId` 付き）。既存 `allocations` と生成済み仕訳は消さない（履歴保持）。
-  - **v7 → v8**: 旧版で資金目標を追加していた版上げ。v16 で資金目標を撤去したため恒等移行に変更。
-  - **v8 → v9**: 予定CF `direction` に `transfer`（口座間移動）を追加＝恒等移行（許容値拡張のみ）。
-  - **v13→v16**: 継続コスト/取り置きの聖域化・集約（上記）と、v15→v16 で B 側レガシー
-    （資金目標・取り置きの目標額/期限・期待年利）を撤去（破壊的・実運用前）。
-  - **v9 → v10**: `AccountRole` に `fixed-asset`、`MonthlyCostItem` に `sourceEntryId` /
-    `recognitionCreditAccountId` を追加＝恒等移行（許容値・任意項目の拡張のみ）。
-- 未対応版は **fail-closed**（取り込まない）。
-- migration 失敗時は既存データを保持し、UI に失敗を通知する（握りつぶさない）。
-- version を上げるときは `SCHEMA_VERSION` を +1 し、`STEPS` に旧→新の手順を追加する。
-  新ストアを足すときだけ `DB_VERSION` を上げ、`onupgradeneeded` でストアを追加する（v2 で
-  `allocations`、v3 で `cashflowSchedules` / `reserves`、v4 で `tags`、DB v5 で `monthlyCostItems`）。
-  schema v5（`metadata.adjustment`）と v6（`account.role`）は既存ストア内の
-  項目追加のみのため `DB_VERSION` 据え置き、schema v7 で `DB_VERSION` を 5、v8 で 6 へ上げる。
-- 既存 IndexedDB は起動時（`ensureInitialized`）に現行版へ前進させる。`meta.schemaVersion` を上げ、
-  v6 では `role` の無い科目に `inferRole`、v7 では空なら `monthlyCostItems` を按分から補完する。
-  **編集リビジョン（`revision`）は変えない**（恒等的な追従なので import の競合判定に影響させない）。
+- `schemaVersion` を必ず持つ。現行は **`4`**（`SCHEMA_VERSION`・`src/data/constants.ts`）。
+- **アプリ内に migration チェーンを持たない**（作者決定・単発変換方式）。版を上げたら:
+  1. `SCHEMA_VERSION` を +1 する（旧版 JSON / スナップショットは fail-closed に拒否される）。
+  2. 実データは書き出した JSON を**単発の変換スクリプト**（`_workspace-management/scripts/`）で
+     新版へ変換し、新ビルドに import する。変換結果は必ず `ledgerExportPackageSchema` に通す。
+  3. ストア構成が変わるときだけ `DB_VERSION` を上げる。upgrade は「現行 STORE に無いレガシー
+     ストアを削除して不足を作る」冪等な形（`src/data/db.ts`）。
+- 未対応版は **fail-closed**（取り込まない）。復旧面はルート直下の ErrorBoundary
+  （JSON import / DB 全消去の 2 ボタン）が受ける。
 
 ## 外部送信ゼロとの関係
 

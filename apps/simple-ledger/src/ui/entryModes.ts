@@ -12,7 +12,12 @@ export interface EntryRole {
   allowedRoles: AccountRole[];
 }
 
-const ALL_ROLES: AccountRole[] = [...ACCOUNT_ROLES];
+/*
+ * 簿記編集（manual）の候補。継続コスト台帳（continuing-cost-asset）は候補から外す —
+ * 台帳に触れる保存仕訳は購入の仕訳・回収の振替の 2 種類だけで、どちらも専用導線が作る
+ * （保存境界も monthlyCostId なしの台帳仕訳を拒否する）。reserve-asset は現行どおり残す。
+ */
+const MANUAL_ROLES: AccountRole[] = ACCOUNT_ROLES.filter((r) => r !== 'continuing-cost-asset');
 
 export const MODE_ROLES: Record<FormMode, readonly [EntryRole, EntryRole]> = {
   income: [
@@ -44,8 +49,8 @@ export const MODE_ROLES: Record<FormMode, readonly [EntryRole, EntryRole]> = {
     },
   ],
   manual: [
-    { side: 'debit', labelKey: 'entry.debitAccount', allowedRoles: ALL_ROLES },
-    { side: 'credit', labelKey: 'entry.creditAccount', allowedRoles: ALL_ROLES },
+    { side: 'debit', labelKey: 'entry.debitAccount', allowedRoles: MANUAL_ROLES },
+    { side: 'credit', labelKey: 'entry.creditAccount', allowedRoles: MANUAL_ROLES },
   ],
 };
 

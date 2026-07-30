@@ -64,7 +64,7 @@ export function groupedAccountsByRole(
 }
 
 /**
- * 継続コストの認識先候補。
+ * 継続コスト資産の「費用の行き先」候補。
  * ユーザーが仕訳先にできる通常科目は会計区分を問わず許可し、内部集約科目と
  * 残高調整科目だけを除外する。編集中の現在値はアーカイブ済みでも残す。
  */
@@ -80,7 +80,7 @@ export function recognitionAccountOptions(
 }
 
 /**
- * 認識先の既定値。候補は全会計区分にまたがるが、既定は必ず費用カテゴリから選ぶ
+ * 費用の行き先の既定値。候補は全会計区分にまたがるが、既定は必ず費用カテゴリから選ぶ
  * （名前順の先頭が負債科目だと、触らず保存したとき通常の費用計上が負債への振替として
  * 静かに保存されてしまうため）。費用カテゴリが無いときだけ候補の先頭に落とす。
  */
@@ -92,7 +92,7 @@ export function defaultRecognitionAccountId(accounts: Account[]): string {
   return recognitionAccountOptions(accounts)[0]?.value ?? '';
 }
 
-/** AccountPicker 用の認識先候補（区分別グループ）。 */
+/** AccountPicker 用の費用の行き先候補（区分別グループ）。 */
 export function groupedRecognitionAccounts(
   accounts: Account[],
   includeId?: string,

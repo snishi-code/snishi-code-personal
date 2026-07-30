@@ -1,8 +1,9 @@
 /*
- * 仕訳一覧。検索（摘要・メモ）・期間絞り込み・勘定科目絞り込み（PL/BS からの遷移）。
- * 行タップで編集、各行に取消/返金（逆仕訳）と削除。削除は明示確認。
- * 初期残高(opening)・残高補正(adjustment)の履歴はこの画面に寄せ、行から専用の
- * 編集・削除シートを開く（通常仕訳の編集・削除で壊さない。会計意味を混ぜない）。
+ * 仕訳一覧。保存される仕訳と計算で生まれる仕訳（継続コスト資産の費用行・定期ルールの投影）を
+ * **区別せず全部**日付順で出す（reportEntriesForAsOf が単一の正本。export には混ぜない）。
+ * 展開範囲 = いま表示している範囲（to → 今日 or 保存仕訳の最も遠い日付。上限 2100-12-31）。
+ * 行タップ: 通常 = 編集 / 初期残高・補正 = 専用シート / 購入の仕訳 = 編集（借方は台帳固定）/
+ * 計算で生まれた行 = 「毎月のもの」の元の項目・ルールのシートへ遷移。
  */
 import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
@@ -13,11 +14,13 @@ import { OpeningEditSheet } from '../OpeningSheet';
 import { Money } from '../money';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
-import { currentYearMonth, todayLocal } from '../../util/time';
+import { todayLocal } from '../../util/time';
 import { entryHasTag } from '../../domain/tags';
-import { monthlyCostForMonth } from '../../domain/monthlyCost';
+import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
+import { reportEntriesForAsOf } from '../../domain/reportEntries';
 import { periodRange, type ReportPeriod } from '../../domain/reportPeriod';
 import { tagNames } from '../tagOptions';
+import type { AllocationsTarget } from './Allocations';
 import type { Account, JournalEntry } from '../../domain/types';
 
 export interface JournalFilter {
@@ -36,12 +39,15 @@ function flowText(map: Map<string, Account>, entry: JournalEntry): string {
 export function Journal({
   onEditEntry,
   onReverse,
+  onOpenAllocations,
   filter,
   period,
   onClearAccountFilter,
 }: {
   onEditEntry: (entry: JournalEntry) => void;
   onReverse: (entry: JournalEntry) => void;
+  /** 計算で生まれた行のタップ: 「毎月のもの」へ遷移し、元の項目/ルールのシートを開く。 */
+  onOpenAllocations: (target: AllocationsTarget) => void;
   filter: JournalFilter | null;
   period: ReportPeriod;
   onClearAccountFilter: () => void;
@@ -90,19 +96,37 @@ export function Journal({
   const currency = ledger?.settings.currency ?? 'JPY';
   const filterAccount = accountFilterId ? map.get(accountFilterId) : undefined;
 
-  // 「将来予定も表示」は日付欄より優先する（to はヘッダー日付から常に埋まるため、
-  // to を先に見るとトグルが永久に効かない）。OFF のときだけ to → 当日 の順に上限を決める。
-  const effectiveTo = showFuture ? '' : to !== '' ? to : todayLocal();
-
   const allTags = ledger?.tags ?? [];
+
+  // どこまで展開するか = いま表示している範囲そのもの。
+  //  - to があればそこまで / 無ければ今日まで / 「将来予定も表示」は保存仕訳の最も遠い日付まで
+  //    （返済の未来仕訳がそこまである。データで決まるので上限が青天井にならない）。
+  //  - いずれもエンジンの上限（2100-12-31）でクランプ。
+  const today = todayLocal();
+  const expandTo = useMemo(() => {
+    // loadLedger は日付降順で返すので先頭が最も遠い日付。
+    const farthest = ledger?.journalEntries[0]?.date ?? today;
+    const base = to !== '' ? to : showFuture ? (farthest > today ? farthest : today) : today;
+    return base < CONTINUOUS_COST_HARD_CAP ? base : CONTINUOUS_COST_HARD_CAP;
+  }, [ledger, to, showFuture, today]);
+
+  // 保存される仕訳 + 計算で生まれる仕訳（分けない）。混合後に必ずソートし直す。
+  const source = useMemo(() => {
+    if (!ledger) return [];
+    return reportEntriesForAsOf(ledger, expandTo).sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
+  }, [ledger, expandTo]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return (ledger?.journalEntries ?? []).filter((e) => {
+    return source.filter((e) => {
       if (accountFilterId && !e.lines.some((l) => l.accountId === accountFilterId)) return false;
       if (tagFilter && !entryHasTag(e, tagFilter)) return false;
       if (from && e.date < from) return false;
-      if (effectiveTo && e.date > effectiveTo) return false;
+      if (to && e.date > to) return false;
       if (q) {
         // 検索対象 = 摘要・メモ + 借方/貸方の勘定科目名（「食費」で検索 → 食費が絡む仕訳が出る）。
         const accountNames = e.lines
@@ -113,36 +137,9 @@ export function Journal({
       }
       return true;
     });
-  }, [ledger, query, from, effectiveTo, accountFilterId, tagFilter, map]);
+  }, [source, query, from, to, accountFilterId, tagFilter, map]);
 
   const hasDateOrQuery = query !== '' || from !== '' || to !== '';
-
-  const { year, month } = currentYearMonth();
-  const currentYm = `${year}-${String(month).padStart(2, '0')}`;
-  const { recognitionYm, monthRecognitions } = useMemo(() => {
-    let ym: string | null = null;
-    if (from === '' && to === '') ym = currentYm;
-    else if (from !== '' && to !== '' && from.slice(0, 7) === to.slice(0, 7)) ym = from.slice(0, 7);
-    if (tagFilter) ym = null;
-    // テキスト検索中は継続コストの月次サマリーを出さない（検索結果に毎回同じカードが混ざる問題）。
-    if (query.trim() !== '') ym = null;
-    if (!ym) return { recognitionYm: null, monthRecognitions: [] };
-    const accById = new Map((ledger?.accounts ?? []).map((a) => [a.id, a]));
-    const rows = (ledger?.monthlyCostItems ?? [])
-      .filter((m) => !accountFilterId || m.expenseAccountId === accountFilterId)
-      .map((m) => {
-        // 行の主語は品目名（「継続コスト台帳 → 固定費」だけでは何の計上か分からない）。
-        const expName = accById.get(m.expenseAccountId)?.name;
-        const label = m.recognitionCreditAccountId
-          ? `${m.name} → ${expName ?? '—'}`
-          : t('journal.monthlyCostRow', { name: m.name });
-        return { id: m.id, label, amount: monthlyCostForMonth(m, ym!, currentYm) };
-      })
-      .filter((r) => r.amount > 0);
-    return { recognitionYm: ym, monthRecognitions: rows };
-  }, [ledger, accountFilterId, tagFilter, from, to, currentYm, query]);
-  const recognitionMonthLabel = recognitionYm ?? currentYm;
-  const monthRecognitionTotal = monthRecognitions.reduce((s, r) => s + r.amount, 0);
 
   return (
     <section aria-labelledby="journal-title" data-ui={UI.journal.view}>
@@ -213,6 +210,7 @@ export function Journal({
           className="input"
           type="date"
           value={from}
+          max={CONTINUOUS_COST_HARD_CAP}
           aria-label={t('journal.from')}
           onChange={(e) => setFrom(e.target.value)}
         />
@@ -224,6 +222,7 @@ export function Journal({
           className="input"
           type="date"
           value={to}
+          max={CONTINUOUS_COST_HARD_CAP}
           aria-label={t('journal.to')}
           onChange={(e) => setTo(e.target.value)}
         />
@@ -265,48 +264,29 @@ export function Journal({
         </label>
       </div>
 
-      {monthRecognitions.length > 0 ? (
-        <div className="card" data-ui={UI.journal.monthlyRecognition}>
-          <div className="stmt-row stmt-row--total">
-            <span>
-              {t('journal.monthlyRecognitionTitle', {
-                year: Number(recognitionMonthLabel.slice(0, 4)),
-                month: Number(recognitionMonthLabel.slice(5, 7)),
-              })}
-            </span>
-            <span className="stmt-row__num">
-              <Money amount={monthRecognitionTotal} currency={currency} />
-            </span>
-          </div>
-          {monthRecognitions.map((r) => (
-            <div className="stmt-row" key={r.id} data-ui={UI.journal.monthlyRecognitionRow}>
-              <span>
-                {r.label} <span className="tag tag--teal">{t('journal.monthlyCostTag')}</span>
-              </span>
-              <span className="stmt-row__num">
-                <Money amount={r.amount} currency={currency} />
-              </span>
-            </div>
-          ))}
-          <div className="stmt-row muted" style={{ fontSize: 12 }}>
-            {t('journal.monthlyRecognitionNote')}
-          </div>
-        </div>
-      ) : null}
-
       {filtered.length === 0 ? (
         <div className="card card--pad empty">{t('journal.empty')}</div>
       ) : (
         <ul className="card list" data-ui={UI.journal.list}>
           {filtered.map((entry) => {
-            const isMonthlyCost = !!entry.metadata?.monthlyCostId;
-            const isDisposal = !!entry.metadata?.assetDisposalId;
-            const isAdjustment = !!entry.metadata?.adjustment;
-            const isOpening = entry.kind === 'opening';
-            const generated = isMonthlyCost || isDisposal;
-            // opening / adjustment は通常編集ではなく専用シートを開く（会計意味を保つ）。
-            const onRowTap = generated
-              ? undefined
+            const md = entry.metadata;
+            const isVirtual = md?.virtual === true;
+            const isRecovery = md?.monthlyCostRecovery === true;
+            // 購入の仕訳（継続コスト資産と 1:1）: 編集シートを開ける（借方は台帳固定・削除不可）。
+            const isPurchase = !isVirtual && md?.monthlyCostId !== undefined && !isRecovery;
+            const isMonthlyCost = md?.monthlyCostId !== undefined || md?.continuousCostId !== undefined;
+            const isAdjustment = !!md?.adjustment;
+            // 持ち込みの購入の仕訳は kind='opening' だが、専用シートではなく購入の仕訳として編集する。
+            const isOpening = entry.kind === 'opening' && !isPurchase;
+            // タップ: 計算で生まれた行は「毎月のもの」の元のルール/項目へ。opening / adjustment は
+            // 専用シート。それ以外（購入の仕訳・回収の振替を含む）は編集シート。
+            const onRowTap = isVirtual
+              ? () =>
+                  onOpenAllocations(
+                    md?.recurringRuleId !== undefined
+                      ? { ruleId: md.recurringRuleId }
+                      : { itemId: md?.continuousCostId ?? '' },
+                  )
               : isAdjustment
                 ? () => setEditingAdjustment(entry)
                 : isOpening
@@ -346,28 +326,22 @@ export function Journal({
             );
             return (
               <li key={entry.id} className="list__item">
-                {onRowTap === undefined ? (
-                  <div className="list__main" title={t('journal.generatedNotice')}>
-                    {title}
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    className="list__main"
-                    onClick={onRowTap}
-                    style={{ background: 'transparent', border: 'none', textAlign: 'left' }}
-                    aria-label={`${t('common.edit')}: ${entry.description}`}
-                  >
-                    {title}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="list__main"
+                  onClick={onRowTap}
+                  style={{ background: 'transparent', border: 'none', textAlign: 'left' }}
+                  aria-label={`${t('common.edit')}: ${entry.description}`}
+                >
+                  {title}
+                </button>
                 <span className="list__amount">
                   <Money
                     amount={entry.lines.find((l) => l.side === 'debit')?.amount ?? 0}
                     currency={currency}
                   />
                 </span>
-                {generated ? null : isAdjustment ? (
+                {isVirtual || isPurchase ? null : isAdjustment ? (
                   <button
                     type="button"
                     className="icon-btn"
@@ -389,15 +363,18 @@ export function Journal({
                   </button>
                 ) : (
                   <>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => onReverse(entry)}
-                      aria-label={`${t('journal.reverseAction')}: ${entry.description}`}
-                      data-ui={UI.journal.entry.reverse}
-                    >
-                      <Icon name="reverse" size={18} />
-                    </button>
+                    {/* 回収の振替の逆仕訳は台帳の不変条件（⑧）で保存できないため出さない。 */}
+                    {isRecovery ? null : (
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        onClick={() => onReverse(entry)}
+                        aria-label={`${t('journal.reverseAction')}: ${entry.description}`}
+                        data-ui={UI.journal.entry.reverse}
+                      >
+                        <Icon name="reverse" size={18} />
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="icon-btn"
