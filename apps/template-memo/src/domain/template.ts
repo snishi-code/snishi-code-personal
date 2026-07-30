@@ -11,8 +11,8 @@
  *
  * 旧回診との対応:
  *   display 'always' = 旧 expand（値を保存し合成時に出力）
- *   display 'oncall' = 旧 quick（チップから入力シートを開き、合成文をセクション本文へ挿入。
- *                      値は保存しない）
+ *   display 'oncall' = 旧 quick（チップから入力シートを開く）
+ *   display 'menu' = 旧 menu（ハンバーガーメニューから入力シートを開く）
  */
 
 import { newId } from '../data/constants';
@@ -25,8 +25,8 @@ import type { FormValues, Patient } from './types';
 
 export type ItemKind = 'text' | 'number' | 'fraction' | 'select';
 
-/** 群の表示方式。always = カード常設（値保存）/ oncall = チップから呼び出し（本文へ挿入）。 */
-export type GroupDisplay = 'always' | 'oncall';
+/** 群の配置。always = 展開 / oncall = 呼び出し / menu = メニュー。値はいずれも保存する。 */
+export type GroupDisplay = 'always' | 'oncall' | 'menu';
 
 /** 小項目。text は正常文ワンタップ（normal）対応。 */
 export interface TemplateItem {
@@ -143,9 +143,8 @@ export function composeGroup(
 }
 
 /**
- * セクション 1 つの合成。常設 (always) 群 → 自由本文の順。
+ * セクション 1 つの合成。全群 → 自由本文の順。
  * 自由本文は呼び出し側が渡す（memoSection には patient.visitMemo が入る）。
- * oncall 群は本文への挿入部品なのでここでは出力しない。
  * 空なら keepWhenEmpty に従い「見出しのみ」か「まるごと省略」。
  */
 export function composeSection(
@@ -155,7 +154,6 @@ export function composeSection(
 ): string {
   const pieces: string[] = [];
   for (const group of section.groups) {
-    if (group.display !== 'always') continue;
     const { text, hasValue } = composeGroup(group, readGroupValues(formValues, group.id));
     if (hasValue) pieces.push(text);
   }
@@ -282,7 +280,7 @@ export function normalizeGroup(raw: unknown): TemplateGroup | null {
   return {
     id: str(r.id) || newId('grp'),
     name: str(r.name),
-    display: r.display === 'oncall' ? 'oncall' : 'always',
+    display: r.display === 'oncall' || r.display === 'menu' ? r.display : 'always',
     joiner: typeof r.joiner === 'string' ? r.joiner : '\n',
     labelSep: typeof r.labelSep === 'string' ? r.labelSep : '：',
     titleWrap: str(r.titleWrap),

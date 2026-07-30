@@ -69,6 +69,22 @@ interface Fixture {
 
 function makeFixture(): Fixture {
   const template = buildRoundPreset(NOW);
+  template.sections[1]?.groups.push({
+    id: 'grp_menu',
+    name: '判定',
+    display: 'menu',
+    joiner: '\n',
+    labelSep: '：',
+    titleWrap: '',
+    items: [
+      {
+        id: 'itm_select',
+        label: '方針',
+        kind: 'select',
+        options: ['経過観察', '精査'],
+      },
+    ],
+  });
   const places = [makePlace('plc_a', '第1グループ')];
   const patients = [makePatient({ placeId: 'plc_a' })];
   return { settings: makeSettings(template.id), places, patients, templates: [template] };

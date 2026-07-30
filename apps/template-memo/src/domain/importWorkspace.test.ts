@@ -38,10 +38,6 @@ function makeWorkspaceBackup(): Record<string, unknown> {
           aiTemplate: { fixedFields: [] },
           templateRevision: 3,
           closingPreset: 'A: 著変なし',
-          textSnippets: [
-            { id: 'old_snip_1', label: '確認', body: '確認済み' },
-            { id: 'old_snip_2', label: '  連絡  ', body: '担当へ連絡 __' },
-          ],
           updatedAt: 20,
         },
       ],
@@ -221,11 +217,10 @@ describe('convertWorkspaceBackup', () => {
     ).toBe('');
   });
 
-  it('RoundsConfig.textSnippets は移さず、closingPreset は注記だけにする', () => {
+  it('RoundsConfig.closingPreset は注記だけにする', () => {
     const converted = convertWorkspaceBackup(jsonOf(makeWorkspaceBackup()), 'usr_a', {
       nowMs: NOW,
     });
-    expect(JSON.stringify(converted)).not.toContain('確認済み');
     expect(converted.notes).toEqual(['closingPresetSkipped']);
   });
 

@@ -1620,33 +1620,6 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   font-size: 15px;
 }
 
-/* ── 定型文 (今回メモへの挿入部品・2026-07-24) ── */
-.detailSnippetRow {
-  margin: 4px 0 8px;
-}
-.snippetList {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.snippetItemBtn {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  text-align: left;
-}
-.snippetItemLabel {
-  font-weight: 600;
-}
-.snippetItemPreview {
-  font-size: 0.85em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
-}
-
 /* ============================================================================
    template-memo 固有の追記 (コピー移植後も残す最小限)。
    - tm-*: 温存ファイル (TemplateQrSendDialog / TemplateQrReceiveDialog) が使う 3 クラス。

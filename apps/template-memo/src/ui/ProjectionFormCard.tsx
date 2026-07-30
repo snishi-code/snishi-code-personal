@@ -3,9 +3,11 @@
 //
 // 仕様:
 //   - 表示は現在テンプレートに群がある時だけ (空なら描画しない)。
-//   - 常設 (always) 群: 行ごとの入力を patient.projectedValues (FormValues) へ write-through 保存。
+//   - 展開 (always) 群: 行ごとの入力を patient.projectedValues (FormValues) へ write-through 保存。
 //     text 項目は行末に正常文ワンタップボタン (全部正常は群見出し右)。手入力は openEditor で守る。
-//   - 呼び出し (oncall) 群: チップからシートを開き、一時値で合成して今回メモへ挿入 (値は保存しない)。
+//   - 呼び出し (oncall) / メニュー (menu) 群: シートの値を同じ projectedValues へ保存。
+//   - oncall/menu 群は値が入ると展開カードへ昇格し、全消去で入口へ戻る。
+//   - 場所 (section) ごとに見出し・展開カード・呼び出しチップ・メニューをまとめる。
 //   - 値の読み書きは必ず domain/formValues.ts のヘルパ経由。
 //   - 患者は pid で捕捉する (並び替えで別患者へ書かないため)。MemoCards と同じ write-through。
 
@@ -13,9 +15,10 @@ import { useRef, useState } from 'react';
 import { Button } from '@snishi/foundation/ui/Button';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { Modal } from '@snishi/foundation/ui/Modal';
-import type { Patient, NumericEntry, TextEntry } from '../domain/types';
+import type { FormValues, Patient, NumericEntry, TextEntry } from '../domain/types';
 import {
   decidePresetToggle,
+  groupHasInput,
   manualTextEntry,
   normalizeTextEntry,
   numericEntry,
@@ -23,18 +26,21 @@ import {
   readNumericEntry,
   readTextValue,
 } from '../domain/formValues';
-import {
-  composeGroup,
-  type Template,
-  type TemplateGroup,
-  type TemplateItem,
-} from '../domain/template';
-import { appendSnippetToMemo } from '../domain/snippets';
+import type { Template, TemplateGroup, TemplateItem, TemplateSection } from '../domain/template';
 import type { AppRuntime } from './appRuntime';
 import { useRegisterOverlay } from './registries';
 import { hapticTick } from './feedback';
 import { s } from '../i18n';
 import { UI } from '../ui-contract';
+
+export function partitionSectionGroups(section: TemplateSection, values: FormValues) {
+  const hasInput = (group: TemplateGroup) => groupHasInput(readGroupValues(values, group.id));
+  return {
+    shown: section.groups.filter((group) => group.display === 'always' || hasInput(group)),
+    oncall: section.groups.filter((group) => group.display === 'oncall' && !hasInput(group)),
+    menu: section.groups.filter((group) => group.display === 'menu' && !hasInput(group)),
+  };
+}
 
 /** ラベルに単位を併記する (例: 体温（℃）)。単位が無ければラベルのみ。 */
 function labelWithUnit(label: string, unit?: string): string {
@@ -186,26 +192,25 @@ function GroupRows({
 }
 
 /**
- * 呼び出し (oncall) 群の入力シート。値は一時 state のみ (保存しない)。
- * 「本文へ挿入」で composeGroup した合成文を今回メモの末尾へ追記する。
+ * 呼び出し (oncall/menu) 群の入力シート。保存済み値を draft にし、projectedValues へ保存する。
  */
 function OncallGroupSheet({
   group,
-  onInsert,
+  initialValues,
+  onSave,
   onClose,
 }: {
   group: TemplateGroup;
-  /** 合成文 (hasValue のときだけ呼ばれる)。 */
-  onInsert: (text: string) => void;
+  initialValues: Record<string, unknown>;
+  onSave: (values: Record<string, unknown>) => void;
   onClose: () => void;
 }) {
   useRegisterOverlay(onClose);
-  const [values, setValues] = useState<Record<string, unknown>>({});
+  const [values, setValues] = useState<Record<string, unknown>>(() => ({ ...initialValues }));
 
-  function insert(): void {
-    const { text, hasValue } = composeGroup(group, values);
-    if (hasValue) onInsert(text);
-    onClose(); // 全項目空なら挿入なしで閉じるだけ (空文を本文へ入れない)
+  function save(): void {
+    if (groupHasInput(values) || groupHasInput(initialValues)) onSave(values);
+    onClose();
   }
 
   return (
@@ -213,9 +218,10 @@ function OncallGroupSheet({
       title={group.name || s.detail.noteInput}
       onClose={onClose}
       variant="dialog"
+      dataUi={UI.projection.sheet}
       closeLabel={s.common.close}
       footer={
-        <Button variant="primary" block onClick={insert}>
+        <Button variant="primary" block dataUi={UI.projection.sheetSave} onClick={save}>
           {s.detail.oncallInsert}
         </Button>
       }
@@ -229,6 +235,42 @@ function OncallGroupSheet({
   );
 }
 
+function MenuGroupDialog({
+  section,
+  groups,
+  onSelect,
+  onClose,
+}: {
+  section: TemplateSection;
+  groups: TemplateGroup[];
+  onSelect: (group: TemplateGroup) => void;
+  onClose: () => void;
+}) {
+  useRegisterOverlay(onClose);
+  return (
+    <Modal
+      title={s.detail.menuTitle(section.title)}
+      onClose={onClose}
+      variant="dialog"
+      dataUi={UI.projection.menuDialog}
+      closeLabel={s.common.close}
+    >
+      <div className="menu-list">
+        {groups.map((group) => (
+          <button
+            key={group.id}
+            type="button"
+            className="menu-item"
+            onClick={() => onSelect(group)}
+          >
+            {group.name || s.detail.noteInput}
+          </button>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
 export function ProjectionFormCard({
   runtime,
   patient,
@@ -238,16 +280,15 @@ export function ProjectionFormCard({
 }) {
   const { store } = runtime;
   const [oncallOpen, setOncallOpen] = useState<TemplateGroup | null>(null);
+  const [menuOpen, setMenuOpen] = useState<TemplateSection | null>(null);
   const template: Template | null = store.getActiveTemplate();
-  const groups = template ? template.sections.flatMap((sec) => sec.groups) : [];
-  const alwaysGroups = groups.filter((g) => g.display === 'always');
-  const oncallGroups = groups.filter((g) => g.display === 'oncall');
+  const sections = template?.sections.filter((section) => section.groups.length > 0) ?? [];
   const pid = patient.pid;
   const live = () => store.getAppState().patients.find((x) => x.pid === pid) ?? null;
   // markUpdated は 1-based の患者番号を取る (store: patients[no - 1])。
   const liveNo = () => store.getAppState().patients.findIndex((x) => x.pid === pid) + 1;
 
-  if (alwaysGroups.length === 0 && oncallGroups.length === 0) return null; // 群が無ければ出さない
+  if (sections.length === 0) return null; // 群が無ければ出さない
 
   function writeValue(
     groupId: string,
@@ -264,11 +305,14 @@ export function ProjectionFormCard({
     runtime.bump();
   }
 
-  function insertOncall(text: string): void {
+  function saveGroup(groupId: string, values: Record<string, unknown>): void {
     const p = live();
     if (!p) return;
-    p.visitMemo = appendSnippetToMemo(p.visitMemo, text);
-    store.markUpdated(liveNo(), { bumpLight: true });
+    const pv = p.projectedValues && typeof p.projectedValues === 'object' ? p.projectedValues : {};
+    if (groupHasInput(values)) pv[groupId] = { ...values };
+    else delete pv[groupId];
+    p.projectedValues = pv;
+    store.markUpdated(liveNo());
     store.scheduleSave();
     runtime.bump();
   }
@@ -283,37 +327,70 @@ export function ProjectionFormCard({
         <div className="panelLabel">{s.projection.title}</div>
       </div>
 
-      {/* 常設 (always) 群: patient.projectedValues へ write-through 保存 */}
-      {alwaysGroups.map((group) => (
-        <GroupRows
-          key={group.id}
-          group={group}
-          values={readGroupValues(patient.projectedValues, group.id)}
-          onWrite={(itemId, stored) => writeValue(group.id, itemId, stored)}
-        />
-      ))}
-
-      {/* 呼び出し (oncall) 群: チップ → シート → 今回メモへ挿入 (値は保存しない) */}
-      {oncallGroups.length > 0 ? (
-        <div className="tagSelection projectionOncallRow">
-          {oncallGroups.map((group) => (
-            <button
-              key={group.id}
-              type="button"
-              className="tagChip"
-              onClick={() => setOncallOpen(group)}
-            >
-              {group.name || s.detail.noteInput}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      {sections.map((section) => {
+        const {
+          shown: shownGroups,
+          oncall: oncallGroups,
+          menu: menuGroups,
+        } = partitionSectionGroups(section, patient.projectedValues);
+        return (
+          <section key={section.id} className="projectionSection" data-ui={UI.projection.section}>
+            <div className="section-label">{section.title}</div>
+            {shownGroups.map((group) => (
+              <GroupRows
+                key={group.id}
+                group={group}
+                values={readGroupValues(patient.projectedValues, group.id)}
+                onWrite={(itemId, stored) => writeValue(group.id, itemId, stored)}
+              />
+            ))}
+            {oncallGroups.length > 0 ? (
+              <div className="tagSelection projectionOncallRow" data-ui={UI.projection.oncall}>
+                {oncallGroups.map((group) => (
+                  <button
+                    key={group.id}
+                    type="button"
+                    className="tagChip"
+                    onClick={() => setOncallOpen(group)}
+                  >
+                    {group.name || s.detail.noteInput}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {menuGroups.length > 0 ? (
+              <Button
+                dataUi={UI.projection.menu}
+                aria-label={s.detail.menuOpen(section.title)}
+                onClick={() => setMenuOpen(section)}
+              >
+                <Icon name="menu" size={18} />
+                {s.detail.menuOpen(section.title)}
+              </Button>
+            ) : null}
+          </section>
+        );
+      })}
 
       {oncallOpen ? (
         <OncallGroupSheet
           group={oncallOpen}
-          onInsert={insertOncall}
+          initialValues={readGroupValues(patient.projectedValues, oncallOpen.id)}
+          onSave={(values) => saveGroup(oncallOpen.id, values)}
           onClose={() => setOncallOpen(null)}
+        />
+      ) : null}
+      {menuOpen ? (
+        <MenuGroupDialog
+          section={menuOpen}
+          groups={menuOpen.groups.filter((group) =>
+            partitionSectionGroups(menuOpen, patient.projectedValues).menu.includes(group),
+          )}
+          onSelect={(group) => {
+            setMenuOpen(null);
+            setOncallOpen(group);
+          }}
+          onClose={() => setMenuOpen(null)}
         />
       ) : null}
     </section>

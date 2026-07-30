@@ -72,6 +72,15 @@ function fixtureTemplate(): Template {
               { id: 'itm_xp', label: '胸部Xp', kind: 'text' },
             ],
           },
+          {
+            id: 'grp_menu',
+            name: '画像所見',
+            display: 'menu',
+            joiner: '\n',
+            labelSep: '：',
+            titleWrap: '',
+            items: [{ id: 'itm_ct', label: 'CT', kind: 'text' }],
+          },
         ],
       },
     ],
@@ -136,8 +145,8 @@ describe('template wire roundtrip', () => {
   it('件数サマリーは section/group/item を全階層で数える', () => {
     expect(summarizeTemplate(fixtureTemplate())).toEqual({
       sections: 2,
-      groups: 2,
-      items: 6,
+      groups: 3,
+      items: 7,
     });
   });
 });

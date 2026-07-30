@@ -49,8 +49,14 @@ export const UI = {
   // テンプレート投影の入力欄 (患者ごとに projectedValues へ保存)
   projection: {
     card: 'projection.card',
+    section: 'projection.section',
     group: 'projection.group',
-    field: 'projection.field', // 各入力/select 要素
+    field: 'projection.field', // 各入力要素・選択チップ
+    oncall: 'projection.oncall',
+    menu: 'projection.menu',
+    menuDialog: 'projection.menu.dialog',
+    sheet: 'projection.sheet',
+    sheetSave: 'projection.sheet.save',
   },
   qr: {
     canvas: 'qr.canvas',

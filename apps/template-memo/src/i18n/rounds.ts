@@ -132,7 +132,9 @@ export const s = {
     noteInput: '入力',
     fractionPlaceholder: '120/80',
     allNormal: '全部正常',
-    oncallInsert: '本文へ挿入',
+    oncallInsert: '保存',
+    menuOpen: (place: string) => `${place}のメニューを開く`,
+    menuTitle: (place: string) => `${place}のフォーマット`,
   },
 
   patient: {

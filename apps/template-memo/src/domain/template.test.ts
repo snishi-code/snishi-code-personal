@@ -360,13 +360,13 @@ describe('composeSection', () => {
     expect(composeSection(sec, '', {})).toBe('');
   });
 
-  it('oncall 群は値があってもセクション合成には出ない（本文挿入部品のため）', () => {
+  it('oncall 群も値があれば所属セクションへ合成する', () => {
     const sec = section({ id: 's', title: '(O)', keepWhenEmpty: true, groups: oGroups });
     const out = composeSection(sec, '', {
       g1: { a: { value: '63' } },
       g2: { b: { value: '108' } },
     });
-    expect(out).toBe('(O)\nHR 63');
+    expect(out).toBe('(O)\nHR 63\n\nGlu 108');
   });
 
   it('freeText=false なら自由本文が入っていても無視する', () => {
