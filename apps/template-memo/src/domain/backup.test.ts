@@ -16,40 +16,37 @@ import {
   parseBackupJson,
 } from './backup';
 import { buildRoundPreset, type Template } from './template';
-import type { AppSettings, Group, Subject } from './types';
+import type { AppSettings, Patient, PlaceDef } from './types';
 
 const NOW = 1_753_000_000_000;
 
 // ── フィクスチャ ──
 
-function makeGroup(id: string, name: string, sortOrder = 1): Group {
-  return { id, name, sortOrder };
+function makePlace(placeId: string, name: string): PlaceDef {
+  return { placeId, name };
 }
 
-function makeSubject(over: Partial<Subject> = {}): Subject {
+function makePatient(over: Partial<Patient> = {}): Patient {
   return {
-    id: 'sub_a',
+    pid: 'pat_a',
     name: '対象A',
-    code: 'A-001',
-    location: '101',
-    groupId: null,
-    sortOrder: 1,
+    room: '101',
+    placeId: '',
     status: 'yellow',
+    tags: ['要注意'],
     problems: ['発熱\n経過観察中'],
-    handover: '申し送りメモ',
-    sectionText: { sec_1: '本文テキスト' },
-    formValues: {
+    visitMemo: '今回メモ本文',
+    standingMemo: '申し送りメモ',
+    confirmedNote: '清書テキスト',
+    projectedValues: {
       grp_1: {
         itm_1: { value: '120/80' },
         itm_2: { value: '96', note: 'O2 2L' },
-        itm_3: 'legacy 文字列',
+        itm_3: { value: '明らかなラ音なし', source: 'preset' },
       },
     },
-    confirmedNote: '清書テキスト',
-    tagIds: ['tag_1'],
-    archivedAt: null,
-    createdAt: NOW,
     updatedAt: NOW,
+    archivedAt: null,
     ...over,
   };
 }
@@ -58,27 +55,25 @@ function makeSettings(activeTemplateId: string): AppSettings {
   return {
     key: 'app',
     activeTemplateId,
-    tags: [{ id: 'tag_1', name: '要注意', sortOrder: 1 }],
+    tags: [{ name: '要注意', color: 'amber' }],
     snippets: [{ id: 'snp_1', label: '採血', body: '採血: __' }],
     newlineMode: 'lf',
-    round: { startedAt: NOW - 1000, endedAt: null },
-    onboardingDone: true,
     updatedAt: NOW,
   };
 }
 
 interface Fixture {
   settings: AppSettings;
-  groups: Group[];
-  subjects: Subject[];
+  places: PlaceDef[];
+  patients: Patient[];
   templates: Template[];
 }
 
 function makeFixture(): Fixture {
   const template = buildRoundPreset(NOW);
-  const groups = [makeGroup('grp_a', '第1グループ')];
-  const subjects = [makeSubject({ groupId: 'grp_a' })];
-  return { settings: makeSettings(template.id), groups, subjects, templates: [template] };
+  const places = [makePlace('plc_a', '第1グループ')];
+  const patients = [makePatient({ placeId: 'plc_a' })];
+  return { settings: makeSettings(template.id), places, patients, templates: [template] };
 }
 
 /** 正常な封筒を組んでから一部を差し替えた JSON を作る（拒否系テスト用）。 */
@@ -99,12 +94,12 @@ describe('buildBackupJson → parseBackupJson roundtrip', () => {
     expect(env.exportedAt).toBe(new Date(NOW).toISOString());
   });
 
-  it('build→parse で settings/groups/subjects/templates が一致する', () => {
+  it('build→parse で settings/places/patients/templates が一致する', () => {
     const data = makeFixture();
     const parsed = parseBackupJson(buildBackupJson(data, NOW));
     expect(parsed.settings).toEqual(data.settings);
-    expect(parsed.groups).toEqual(data.groups);
-    expect(parsed.subjects).toEqual(data.subjects);
+    expect(parsed.places).toEqual(data.places);
+    expect(parsed.patients).toEqual(data.patients);
     expect(parsed.templates).toEqual(data.templates);
   });
 });
@@ -130,9 +125,11 @@ describe('parseBackupJson の fail-closed 拒否', () => {
     expect(() => parseBackupJson(json)).toThrow(BACKUP_WRONG_APP_MSG);
   });
 
-  it('schemaVersion 不一致を拒否する（migration しない）', () => {
-    const json = envelopeWith({ schemaVersion: SCHEMA_VERSION + 1 });
-    expect(() => parseBackupJson(json)).toThrow(backupSchemaMismatchMsg(SCHEMA_VERSION + 1));
+  it('schemaVersion 不一致を拒否する（migration しない・旧 v1 封筒も拒否）', () => {
+    const newer = envelopeWith({ schemaVersion: SCHEMA_VERSION + 1 });
+    expect(() => parseBackupJson(newer)).toThrow(backupSchemaMismatchMsg(SCHEMA_VERSION + 1));
+    const v1 = envelopeWith({ schemaVersion: 1 });
+    expect(() => parseBackupJson(v1)).toThrow(backupSchemaMismatchMsg(1));
   });
 
   it('templates が配列でなければ拒否する', () => {
@@ -145,64 +142,62 @@ describe('parseBackupJson の fail-closed 拒否', () => {
     expect(() => parseBackupJson(json)).toThrow(BACKUP_NO_TEMPLATES_MSG);
   });
 
-  it('subjects が配列でなければ拒否する（黙って空にしない）', () => {
-    const json = envelopeWith({ subjects: { broken: true } });
-    expect(() => parseBackupJson(json)).toThrow(backupFieldBrokenMsg('subjects'));
+  it('patients が配列でなければ拒否する（黙って空にしない）', () => {
+    const json = envelopeWith({ patients: { broken: true } });
+    expect(() => parseBackupJson(json)).toThrow(backupFieldBrokenMsg('patients'));
   });
 });
 
 // ── 壊れ row の drop と生存 ──
 
 describe('parseBackupJson の防御的正規化', () => {
-  it('壊れた subject row は捨て、正常 row は生き残る', () => {
-    const good = makeSubject();
+  it('壊れた patient row は捨て、正常 row は生き残る', () => {
+    const good = makePatient({ placeId: 'plc_a' });
     const json = envelopeWith({
-      subjects: [
+      patients: [
         good,
         null, // object ですらない
         'garbage', // 文字列
-        { id: 123, name: 'id が数値' }, // id 型不正
-        { id: 'sub_bad', name: 42 }, // name 型不正
+        { pid: 123, name: 'pid が数値' }, // pid 型不正
+        { pid: 'pat_bad', name: 42 }, // name 型不正
       ],
     });
     const parsed = parseBackupJson(json);
-    expect(parsed.subjects).toEqual([good]);
+    expect(parsed.patients).toEqual([good]);
   });
 
-  it('subject の欄単位の型不正は既定値へ倒して row を救う', () => {
+  it('patient の欄単位の型不正は既定値へ倒して row を救う', () => {
     const json = envelopeWith({
-      subjects: [
+      patients: [
         {
-          id: 'sub_dirty',
+          pid: 'pat_dirty',
           name: '欄が汚れた対象',
           status: 'purple', // 不正ステータス
           problems: 'not-array',
-          sectionText: 5,
-          formValues: [1, 2], // 配列は plain object でない
-          tagIds: { a: 1 },
+          tags: { a: 1 },
+          projectedValues: [1, 2], // 配列は plain object でない
           archivedAt: 'yesterday',
         },
       ],
     });
     const parsed = parseBackupJson(json);
-    expect(parsed.subjects).toHaveLength(1);
-    const s = parsed.subjects[0]!;
+    expect(parsed.patients).toHaveLength(1);
+    const s = parsed.patients[0]!;
     expect(s.status).toBe('none');
     expect(s.problems).toEqual([]);
-    expect(s.sectionText).toEqual({});
-    expect(s.formValues).toEqual({});
-    expect(s.tagIds).toEqual([]);
+    expect(s.tags).toEqual([]);
+    expect(s.projectedValues).toEqual({});
     expect(s.archivedAt).toBeNull();
   });
 
-  it('壊れた group row は捨て、正常 row は生き残る', () => {
-    const good = makeGroup('grp_a', '第1グループ');
+  it('壊れた place row は捨て、正常 row は生き残る', () => {
+    const good = makePlace('plc_a', '第1グループ');
     const json = envelopeWith({
-      groups: [good, { id: '', name: 'id 空' }, { name: 'id なし' }, 7],
-      subjects: [],
+      places: [good, { placeId: '', name: 'placeId 空' }, { name: 'placeId なし' }, 7],
+      patients: [],
     });
     const parsed = parseBackupJson(json);
-    expect(parsed.groups).toEqual([good]);
+    expect(parsed.places).toEqual([good]);
   });
 
   it('settings が壊れていても既定値で復元できる', () => {
@@ -213,8 +208,6 @@ describe('parseBackupJson の防御的正規化', () => {
     expect(parsed.settings.tags).toEqual([]);
     expect(parsed.settings.snippets).toEqual([]);
     expect(parsed.settings.newlineMode).toBe('crlf');
-    expect(parsed.settings.round).toBeNull();
-    expect(parsed.settings.onboardingDone).toBe(false);
   });
 });
 
@@ -228,10 +221,10 @@ describe('parseBackupJson の参照整合', () => {
     expect(parsed.settings.activeTemplateId).toBe(data.templates[0]!.id);
   });
 
-  it('Subject.groupId が groups に無ければ null（未分類）へ倒す', () => {
+  it('Patient.placeId が places に無ければ先頭 place へ倒す', () => {
     const data = makeFixture();
-    data.subjects = [makeSubject({ groupId: 'grp_missing' })];
+    data.patients = [makePatient({ placeId: 'plc_missing' })];
     const parsed = parseBackupJson(buildBackupJson(data, NOW));
-    expect(parsed.subjects[0]!.groupId).toBeNull();
+    expect(parsed.patients[0]!.placeId).toBe('plc_a');
   });
 });

@@ -1,30 +1,81 @@
+// E2E smoke: コピー移植後の実 UI (workspace 回診 surface と同じ操作フロー) を 4 本で叩く。
+//
+// セレクタ方針 (ui-contract.ts / foundation ui/contract.ts):
+//   - 第一選択は data-ui (文言変更で壊れない安定名)。名簿 (src/ui-contract.ts の UI) 経由で参照する。
+//     確認ダイアログの確定は foundation ConfirmDialog の dialog.confirm を使う。
+//   - ステータス選択は 5 色ボックスの固定順 (none/yellow/green/gray/blue) を index で叩く
+//     (STATUS の順序はコード契約・文言に依存しない)。
+//   - 文言で叩くのは ja.ts / rounds.ts 由来の設定ボタン・トーストなど最小限に留める。
+//
+// 前提: Playwright はテストごとに独立した BrowserContext を作るため IndexedDB は毎回まっさら。
+// 初回起動で store が seed するのは プリセットテンプレート2種 + place『グループ1』のみ (対象 0 件)。
+
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { UI } from '../src/ui-contract';
 
-const SUBJECT_NAME = 'E2E巡回対象';
+/** data-ui 安定名 → CSS セレクタ。 */
+function ui(name: string): string {
+  return `[data-ui="${name}"]`;
+}
 
-async function openFreshApp(page: Page) {
+/** foundation ConfirmDialog の確定ボタン (uiAttr('dialog.confirm'))。 */
+const CONFIRM_BTN = '[data-ui="dialog.confirm"]';
+
+/** ステータス 5 色ボックスの固定順 (StatusSwatchRow = Object.values(STATUS) の描画順)。 */
+const STATUS_INDEX = { none: 0, yellow: 1, green: 2, gray: 3, blue: 4 } as const;
+
+async function openApp(page: Page): Promise<void> {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'テンプレメモ' })).toBeVisible();
+  // boot (initStore) 完了 = ホームの対象追加ボタンが出る。
+  await expect(page.locator(ui(UI.home.addPatient))).toBeVisible();
 }
 
-async function addSubject(page: Page, name = SUBJECT_NAME) {
-  await page.getByRole('button', { name: '＋対象を追加' }).click();
-
-  const dialog = page.getByRole('dialog', { name: '＋対象を追加' });
-  await dialog.getByLabel('名前').fill(name);
-  await dialog.getByLabel('管理ID').fill('E2E-001');
-  await dialog.getByLabel('位置').fill('E2E区画');
-  await dialog.getByRole('button', { name: '追加', exact: true }).click();
-
-  await expect(page.getByRole('button', { name })).toBeVisible();
+/**
+ * 対象追加: ＋ボタン → 編集ポップアップが自動で開く → 位置/名前を入力 → 閉じる。
+ * ホーム行 (patient.card) に「位置 名前」で載るまで待つ。
+ */
+async function addPatient(page: Page, room: string, name: string): Promise<void> {
+  await page.locator(ui(UI.home.addPatient)).click();
+  const popup = page.locator(ui(UI.patient.editPopup));
+  await expect(popup).toBeVisible();
+  await popup.locator(ui(UI.patient.room)).fill(room);
+  await popup.locator(ui(UI.patient.name)).fill(name);
+  await popup.getByRole('button', { name: '閉じる' }).click();
+  await expect(popup).toBeHidden();
+  await expect(page.locator(ui(UI.patient.card))).toContainText(`${room} ${name}`);
 }
 
-async function openSettings(page: Page) {
+/** ホーム行タップで対象詳細を開く。 */
+async function openDetail(page: Page, label: string): Promise<void> {
+  await page.locator(ui(UI.patient.card), { hasText: label }).click();
+  await expect(page.locator(ui(UI.detail.meta))).toBeVisible();
+}
+
+/** ヘッダー右上の設定アイコンから設定画面へ。 */
+async function openSettings(page: Page): Promise<void> {
   await page.getByRole('button', { name: '設定', exact: true }).click();
-  await expect(page.getByText('設定', { exact: true }).first()).toBeVisible();
+  await expect(page.locator(ui(UI.settings.view))).toBeVisible();
 }
 
-async function expectRenderedQr(canvas: Locator) {
+/** ホームのステータスボタン → ポップアップで色ボックス (固定順 index) を選ぶ。 */
+async function pickStatus(page: Page, index: number): Promise<void> {
+  await page.locator(ui(UI.home.statusZone)).click();
+  const popup = page.locator(ui(UI.patient.statusPopup));
+  await expect(popup).toBeVisible();
+  await popup.locator(ui(UI.patient.statusOption)).nth(index).click();
+  await expect(popup).toBeHidden();
+}
+
+/** 開いている唯一の確認ダイアログを確定する (native <dialog> は同時に 1 つ)。 */
+async function confirmDialog(page: Page): Promise<void> {
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.locator(CONFIRM_BTN).click();
+  await expect(dialog).toBeHidden();
+}
+
+/** QR canvas が実際に描画されている (幅 > 0 の正方形 + 非ゼロ画素がある) ことを確認する。 */
+async function expectRenderedQr(canvas: Locator): Promise<void> {
   await expect(canvas).toBeVisible();
   await expect
     .poll(() =>
@@ -38,170 +89,158 @@ async function expectRenderedQr(canvas: Locator) {
     .toBe(true);
 }
 
-function workspaceBackupFixture() {
-  return {
-    kind: 'HOSPITAL_WORKSPACE_BACKUP',
-    version: 1,
-    appId: 'hospital-workspace',
-    createdAt: '2026-07-30T00:00:00.000Z',
-    schemaVersion: 7,
-    source: {},
-    stores: {
-      appSettings: [
-        {
-          key: 'placesConfig',
-          items: [{ placeId: 'place_1', name: '旧グループ', showNextVisit: false }],
-          updatedAt: 1,
-        },
-        {
-          key: 'roundsConfig',
-          closingPreset: 'A: 著変なし',
-          textSnippets: [{ id: 'old_snp', label: '旧定型文', body: '旧本文' }],
-        },
-      ],
-      users: [
-        { id: 'usr_a', name: '利用者A' },
-        { id: 'usr_b', name: '利用者B' },
-      ],
-      patients: [
-        {
-          patientId: 'pt_old',
-          name: '旧アプリ対象',
-          room: '旧位置',
-          placeId: 'place_1',
-          problems: ['旧問題'],
-          createdAt: 1,
-        },
-      ],
-      roundsUserStates: [
-        {
-          key: 'usr_a::pt_old',
-          userId: 'usr_a',
-          patientId: 'pt_old',
-          standingMemo: 'Aの継続メモ',
-          updatedAt: 2,
-        },
-        {
-          key: 'usr_b::pt_old',
-          userId: 'usr_b',
-          patientId: 'pt_old',
-          standingMemo: 'Bの継続メモ',
-          confirmedNote: 'Bの清書',
-          updatedAt: 3,
-        },
-      ],
-      noteDocuments: [],
-      noteSettings: [],
-      roundsUserSettings: [],
-    },
-    localStorage: {},
-    counts: {},
-  };
-}
-
 test.beforeEach(async ({ page }) => {
-  // Playwright creates an isolated BrowserContext per test, so IndexedDB is fresh here.
-  await openFreshApp(page);
+  await openApp(page);
 });
 
-test('初回プリセットを確認し、対象追加後にステータスを未→途中→済へ進められる', async ({ page }) => {
+// ── 1. 初回起動 → 対象追加 → 編集ポップアップ → ホーム行 → ステータス 未→途中→済 ──
+
+test('初回起動から対象を追加し、ステータスを未→途中→済へ進められる', async ({ page }) => {
+  // 初回 seed: place『グループ1』がヘッダー中央に出る (対象は 0 件)。
+  await expect(page.getByRole('button', { name: 'グループ1' })).toBeVisible();
+  await expect(page.locator(ui(UI.patient.card))).toHaveCount(0);
+
+  // ＋対象追加 → 編集ポップアップ → ホーム行に「位置 名前」で表示 (addPatient 内で検証)。
+  await addPatient(page, '101', '検証対象A');
+
+  // ステータスは 未 (白・−) から始まる。
+  const statusBtn = page.locator(ui(UI.home.statusZone));
+  await expect(statusBtn).toHaveClass(/status-none/);
+  await expect(statusBtn).toHaveText('−');
+
+  // 未 → 途中 (黄・▲)
+  await pickStatus(page, STATUS_INDEX.yellow);
+  await expect(statusBtn).toHaveClass(/status-yellow/);
+  await expect(statusBtn).toHaveText('▲');
+
+  // 途中 → 済 (緑・✓)
+  await pickStatus(page, STATUS_INDEX.green);
+  await expect(statusBtn).toHaveClass(/status-green/);
+  await expect(statusBtn).toHaveText('✓');
+});
+
+// ── 2. 詳細 → 今回メモ + 固定フォーム → 定型清書 (例文型の合成) → QRダイアログ ──
+
+test('今回メモと固定フォームから定型清書を合成し、QRダイアログを表示できる', async ({ page }) => {
+  await addPatient(page, '202', '検証対象B');
+  await openDetail(page, '202 検証対象B');
+
+  // 今回メモ (自由本文) 入力。
+  await page.locator(ui(UI.memo.visit.input)).fill('食欲低下あり');
+
+  // 固定フォーム (ラウンド入力カード): バイタルの BP と、身体所見の「全部正常」ワンタップ。
+  // (BP/肺音/正常文はプリセットテンプレート『回診メモ』のデータであり UI 文言ではない)
+  await page.getByLabel('BP', { exact: true }).fill('120/80');
+  await page.getByRole('button', { name: '全部正常', exact: true }).click();
+  await expect(page.getByLabel('肺音', { exact: true })).toHaveValue('明らかなラ音なし');
+
+  // 定型清書: 空セクションは正常文で充填され、memoSection (O) に今回メモが入る。
+  await page.locator(ui(UI.detail.presetClean)).click();
+  await expect(page.getByText('清書を作成しました', { exact: true })).toBeVisible();
+
+  // 回診メモプリセットの合成結果 (例文型) を厳密一致で確認する。
+  const expectedCleanNote = [
+    '(S)',
+    '変わりない',
+    '',
+    '(O)',
+    'BP 120/80mmHg',
+    '',
+    '肺音：明らかなラ音なし',
+    '腸音：正常',
+    '腹部：平坦軟、圧痛なし',
+    '下腿浮腫：なし',
+    '',
+    '食欲低下あり',
+    '',
+    '(A)',
+    '著変なし',
+    '',
+    '(P)',
+    '現行加療継続',
+  ].join('\n');
+  await expect(page.locator(ui(UI.memo.clean.input))).toHaveValue(expectedCleanNote);
+
+  // 転記用QRダイアログ: canvas が実描画される。
+  await page.locator(ui(UI.detail.emrQr)).click();
+  const qrDialog = page.locator(ui(UI.detail.qrDialog));
+  await expect(qrDialog).toBeVisible();
+  await expectRenderedQr(qrDialog.locator(ui(UI.qr.canvas)));
+});
+
+// ── 3. ラウンド開始 (確認ダイアログ) → 今回分クリア・問題/継続メモ維持 → 巻き戻しで復元 ──
+
+test('ラウンド開始で今回分をクリアし（問題・継続メモは維持）、巻き戻しで復元できる', async ({
+  page,
+}) => {
+  await addPatient(page, '303', '検証対象C');
+
+  // クリア対象/維持対象の両方を作る: ステータス黄 + 問題 + 継続メモ + 今回メモ。
+  await pickStatus(page, STATUS_INDEX.yellow);
+  await openDetail(page, '303 検証対象C');
+  await page.locator(ui(UI.problem.input)).first().fill('誤嚥性肺炎');
+  await page.locator(ui(UI.memo.standing.input)).fill('継続メモ本文');
+  await page.locator(ui(UI.memo.visit.input)).fill('今回メモ本文');
+  await page.locator(ui(UI.detail.home)).click();
+
+  // ラウンド開始 (= 記録クリア)。確認ダイアログを経由する。
+  await page.locator(ui(UI.home.start)).click();
+  await confirmDialog(page);
+
+  // クリア結果: ステータス 未 / 今回メモ空。問題リスト・継続メモは残る。
+  const statusBtn = page.locator(ui(UI.home.statusZone));
+  await expect(statusBtn).toHaveClass(/status-none/);
+  await openDetail(page, '303 検証対象C');
+  await expect(page.locator(ui(UI.memo.visit.input))).toHaveValue('');
+  await expect(page.locator(ui(UI.problem.input)).first()).toHaveValue('誤嚥性肺炎');
+  await expect(page.locator(ui(UI.memo.standing.input))).toHaveValue('継続メモ本文');
+  await page.locator(ui(UI.detail.home)).click();
+
+  // Undo: 設定の巻き戻しに「ラウンド開始」直前のスナップショットが 1 行だけ載る → 戻す。
   await openSettings(page);
-  await expect(page.getByText('回診メモ', { exact: true })).toBeVisible();
-  await expect(page.getByText('日報', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'QRで受け取る', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'QR送信', exact: true }).first().click();
-  const templateQrDialog = page.getByRole('dialog', { name: 'テンプレートをQRで送る' });
-  await expectRenderedQr(templateQrDialog.locator('canvas'));
-  await templateQrDialog.getByRole('button', { name: '閉じる', exact: true }).click();
+  const restoreRow = page.locator(ui(UI.settings.restoreRow));
+  await expect(restoreRow).toHaveCount(1);
+  await restoreRow.locator(ui(UI.settings.restoreAction)).click();
+  await confirmDialog(page);
 
-  await page.getByRole('button', { name: '戻る', exact: true }).click();
-  await addSubject(page);
-
-  await page.getByRole('button', { name: '未', exact: true }).click();
-  await expect(page.getByRole('button', { name: '途中', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '途中', exact: true }).click();
-  await expect(page.getByRole('button', { name: '済', exact: true })).toBeVisible();
+  // 復元結果: ステータス黄と今回メモが戻る。
+  await page.locator(ui(UI.settings.homeBottom)).click();
+  await expect(statusBtn).toHaveClass(/status-yellow/);
+  await openDetail(page, '303 検証対象C');
+  await expect(page.locator(ui(UI.memo.visit.input))).toHaveValue('今回メモ本文');
+  await expect(page.locator(ui(UI.memo.standing.input))).toHaveValue('継続メモ本文');
 });
 
-test('S本文から定型清書を作成し、1ページのQRとして表示できる', async ({ page }) => {
-  await addSubject(page);
-  await page.getByRole('button', { name: SUBJECT_NAME }).click();
+// ── 4. 設定 → バックアップ書き出し → 全削除 → 復元 ──
 
-  await page.getByLabel('(S)', { exact: true }).fill('食欲低下あり');
-  await page.getByRole('button', { name: '定型清書', exact: true }).click();
-
-  const confirmedNote = page.getByLabel('清書', { exact: true });
-  await expect(confirmedNote).toHaveValue(/\(S\)\n食欲低下あり/);
-  await expect(confirmedNote).toHaveValue(/\(A\)\n著変なし/);
-
-  await page.getByRole('button', { name: 'QR表示', exact: true }).click();
-  const qrDialog = page.getByRole('dialog', { name: 'QR表示' });
-  const canvas = qrDialog.locator('.tm-qr-canvas-wrap canvas');
-  await expectRenderedQr(canvas);
-  await expect(qrDialog.getByText('1 / 1 ページ', { exact: true })).toBeVisible();
-});
-
-test('JSONバックアップを書き出し、全削除後に同じデータを復元できる', async ({ page }) => {
-  await addSubject(page);
+test('バックアップを書き出し、全削除後に同じデータを復元できる', async ({ page }) => {
+  await addPatient(page, '404', '検証対象D');
   await openSettings(page);
 
+  // 書き出し (127.0.0.1 は test 環境判定のため test_ prefix が付く)。
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'JSONバックアップを書き出す' }).click();
   const download = await downloadPromise;
-  await expect(download.suggestedFilename()).toMatch(/^template-memo-backup-\d{8}\.json$/);
+  expect(download.suggestedFilename()).toMatch(/^test_template_memo_\d{4}_\d{4}_\d{4}\.json$/);
   const backupPath = await download.path();
 
+  // 全削除 → 初期状態 (対象 0 件・seed し直し)。
   await page.getByRole('button', { name: '全データを削除して初期状態に戻す' }).click();
-  const wipeDialog = page.getByRole('dialog', { name: '全データを削除しますか？' });
-  await wipeDialog.getByRole('button', { name: 'OK', exact: true }).click();
-  await expect(wipeDialog).toBeHidden();
+  await confirmDialog(page);
   await expect(page.getByText('初期状態に戻しました', { exact: true })).toBeVisible();
+  await page.locator(ui(UI.settings.homeBottom)).click();
+  await expect(page.locator(ui(UI.patient.card))).toHaveCount(0);
 
-  await page.getByRole('button', { name: '戻る', exact: true }).click();
-  await expect(page.getByRole('button', { name: SUBJECT_NAME })).toHaveCount(0);
+  // 復元 (ファイル選択 → 確認ダイアログ → 置換)。
   await openSettings(page);
-
   const fileChooserPromise = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: 'JSONバックアップから復元する' }).click();
   const fileChooser = await fileChooserPromise;
   await fileChooser.setFiles(backupPath);
-
-  const restoreDialog = page.getByRole('dialog', { name: 'バックアップから復元しますか？' });
-  await restoreDialog.getByRole('button', { name: 'OK', exact: true }).click();
-  await expect(restoreDialog).toBeHidden();
+  await confirmDialog(page);
   await expect(page.getByText('復元しました', { exact: true })).toBeVisible();
 
-  await page.getByRole('button', { name: '戻る', exact: true }).click();
-  await expect(page.getByRole('button', { name: SUBJECT_NAME })).toBeVisible();
-});
-
-test('旧ワークスペースはユーザーを選び、既存データを残して追記できる', async ({ page }) => {
-  await addSubject(page, '既存対象');
-  await openSettings(page);
-
-  const fileChooserPromise = page.waitForEvent('filechooser');
-  await page.getByRole('button', { name: 'ワークスペースから移行（旧アプリ）' }).click();
-  const fileChooser = await fileChooserPromise;
-  await fileChooser.setFiles({
-    name: 'hospital-workspace-backup.json',
-    mimeType: 'application/json',
-    buffer: Buffer.from(JSON.stringify(workspaceBackupFixture()), 'utf8'),
-  });
-
-  const preview = page.getByRole('dialog', { name: '旧ワークスペースからの移行' });
-  await expect(preview).toContainText('対象 1 件 / グループ 1 件 / 定型文 1 件');
-  await preview.getByLabel('利用者B', { exact: true }).check();
-  await preview.getByRole('button', { name: '既存データへ追加', exact: true }).click();
-
-  const confirm = page.getByRole('dialog', {
-    name: '旧ワークスペースのデータを追加しますか？',
-  });
-  await confirm.getByRole('button', { name: '既存データへ追加', exact: true }).click();
-  await expect(page.getByText('対象 1 件・グループ 1 件・定型文 1 件を追加しました')).toBeVisible();
-
-  await page.getByRole('button', { name: '戻る', exact: true }).click();
-  await expect(page.getByRole('button', { name: '既存対象' })).toBeVisible();
-  await page.getByRole('button', { name: '旧アプリ対象' }).click();
-  await expect(page.getByLabel('申し送り・継続メモ', { exact: true })).toHaveValue('Bの継続メモ');
-  await expect(page.getByLabel('清書', { exact: true })).toHaveValue('Bの清書');
+  // 復元結果: 対象がホームへ戻る。
+  await page.locator(ui(UI.settings.homeBottom)).click();
+  await expect(page.locator(ui(UI.patient.card))).toContainText('404 検証対象D');
 });

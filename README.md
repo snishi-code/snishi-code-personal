@@ -11,12 +11,16 @@
 - `apps/simple-ledger` — 個人利用向けのローカル家計簿 PWA。仕訳・継続コスト・資金繰りを
   端末内（IndexedDB / localStorage）のデータとして扱い、外部送信は行いません。
   バックアップや端末移行は JSON export/import で行います。
+- `apps/template-memo` — 決まった型で繰り返し書くメモのための PWA。テンプレート（大項目・群・
+  項目）に沿って対象ごとの記録を組み立て、清書として QR で取り出します。データは端末内のみで、
+  テンプレートの受け渡し（QR）とバックアップ（JSON export/import）はいずれも外部送信を伴いません。
 
 個人利用を想定したプロジェクトとして公開しています。
 
 ## リポジトリ構成
 
 - `apps/simple-ledger/` — 公開アプリ本体。独立した PWA として build されます。
+- `apps/template-memo/` — 公開アプリ本体。独立した PWA として build されます。
 - `packages/foundation/` — 外部送信ゼロ、PWA、QR、UI などの共通基盤。
 - `site/` — カテゴリトップと各アプリの紹介ページ（静的サイト素材）。
 - `docs/` — 設計ドキュメント。

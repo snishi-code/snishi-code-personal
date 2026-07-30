@@ -1,18 +1,12 @@
 /*
- * i18n 入口。MVP は ja のみ。t() は {var} 補間に対応する（実装は foundation の createI18n）。
+ * i18n 入口。MVP は ja のみ。文言カタログは ./rounds の s ただ一つ。
+ * コンポーネントは `import { s } from '../i18n'` で引く (コピー元の import 面を維持)。
  */
-import { createI18n } from '@snishi/foundation/i18n/createI18n';
-import { ja, type MessageKey } from './ja';
+import { s } from './rounds';
 
-export type { MessageKey };
-
-const i18n = createI18n(ja);
-
-export function t(key: MessageKey, vars?: Record<string, string | number>): string {
-  return i18n.t(key, vars);
-}
+export { s };
 
 /** 例外をユーザー表示文言にする（Error はメッセージそのまま・不明値は汎用文言）。 */
-export function errorText(e: unknown, fallback: MessageKey = 'toast.error'): string {
-  return e instanceof Error && e.message ? e.message : t(fallback);
+export function errorText(e: unknown, fallback: string = s.toast.error): string {
+  return e instanceof Error && e.message ? e.message : fallback;
 }

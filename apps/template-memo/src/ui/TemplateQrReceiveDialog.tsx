@@ -13,7 +13,6 @@ import { isScannerSupported, scanQrStream, type ScanSession } from '@snishi/foun
 import { Button } from '@snishi/foundation/ui/Button';
 import { Modal } from '@snishi/foundation/ui/Modal';
 import { newId } from '../data/constants';
-import { saveTemplate } from '../data/store';
 import type { Template } from '../domain/template';
 import {
   createTemplateWireCollector,
@@ -21,69 +20,28 @@ import {
   TemplateWireError,
   type TemplateWireReceiveResult,
 } from '../domain/templateWire';
-import { t, type MessageKey } from '../i18n';
-import { useStore } from './useStore';
-
-/**
- * ja.ts へのキー追加は SettingsView 統合と同時に行う。並行実装中も新規ファイルだけで
- * 型検査できるよう、このコンポーネント固有キーの境界をここに明示する。
- */
-type TemplateQrReceiveMessageKey =
-  | 'templateQr.receiveTitle'
-  | 'templateQr.receiveIntro'
-  | 'templateQr.cameraUnavailable'
-  | 'templateQr.cameraStart'
-  | 'templateQr.cameraStop'
-  | 'templateQr.cameraLabel'
-  | 'templateQr.cameraFailed'
-  | 'templateQr.pasteLabel'
-  | 'templateQr.pastePlaceholder'
-  | 'templateQr.readPage'
-  | 'templateQr.invalidPage'
-  | 'templateQr.wrongKind'
-  | 'templateQr.duplicate'
-  | 'templateQr.progress'
-  | 'templateQr.errorTransport'
-  | 'templateQr.errorJson'
-  | 'templateQr.errorVersion'
-  | 'templateQr.errorTemplate'
-  | 'templateQr.errorIncomplete'
-  | 'templateQr.errorDecode'
-  | 'templateQr.reset'
-  | 'templateQr.previewTitle'
-  | 'templateQr.counts'
-  | 'templateQr.included'
-  | 'templateQr.excluded'
-  | 'templateQr.conflictTitle'
-  | 'templateQr.conflictBody'
-  | 'templateQr.overwrite'
-  | 'templateQr.addCopy'
-  | 'templateQr.saveFailed';
-
-function qt(key: TemplateQrReceiveMessageKey, vars?: Record<string, string | number>): string {
-  return t(key as MessageKey, vars);
-}
+import { s } from '../i18n';
 
 function decodeErrorMessage(error: unknown): string {
-  if (!(error instanceof TemplateWireError)) return qt('templateQr.errorDecode');
+  if (!(error instanceof TemplateWireError)) return s.templateQr.errorDecode;
   switch (error.code) {
     case 'invalid-transport':
     case 'compression-required':
-      return qt('templateQr.errorTransport');
+      return s.templateQr.errorTransport;
     case 'invalid-json':
-      return qt('templateQr.errorJson');
+      return s.templateQr.errorJson;
     case 'wrong-version':
-      return qt('templateQr.errorVersion');
+      return s.templateQr.errorVersion;
     case 'invalid-template':
-      return qt('templateQr.errorTemplate');
+      return s.templateQr.errorTemplate;
     case 'incomplete-pages':
     case 'mixed-batch':
-      return qt('templateQr.errorIncomplete');
+      return s.templateQr.errorIncomplete;
     case 'invalid-page':
     case 'wrong-kind':
-      return qt('templateQr.invalidPage');
+      return s.templateQr.invalidPage;
     default:
-      return qt('templateQr.errorDecode');
+      return s.templateQr.errorDecode;
   }
 }
 
@@ -112,13 +70,21 @@ const previewGridStyle: CSSProperties = {
 type SaveMode = 'overwrite' | 'copy';
 
 export interface TemplateQrReceiveDialogProps {
+  /** 既存テンプレート一覧 (id 衝突判定・重複名回避に使う)。 */
+  templates: Template[];
+  /** 保存 (store.saveTemplate へ委譲)。 */
+  onSave: (template: Template) => Promise<void>;
   onClose: () => void;
   /** 保存成功時だけ呼ぶ。toast 等は統合側が担う。 */
   onSaved?: (template: Template) => void;
 }
 
-export function TemplateQrReceiveDialog({ onClose, onSaved }: TemplateQrReceiveDialogProps) {
-  const { templates } = useStore();
+export function TemplateQrReceiveDialog({
+  templates,
+  onSave,
+  onClose,
+  onSaved,
+}: TemplateQrReceiveDialogProps) {
   const collectorRef = useRef(createTemplateWireCollector());
   const videoRef = useRef<HTMLVideoElement>(null);
   const scanSessionRef = useRef<ScanSession | null>(null);
@@ -148,24 +114,24 @@ export function TemplateQrReceiveDialog({ onClose, onSaved }: TemplateQrReceiveD
       if (result.status === 'rejected') {
         setReceiveError(
           result.reason === 'wrong-kind'
-            ? qt('templateQr.wrongKind', { kind: result.gotKind ?? '?' })
-            : qt('templateQr.invalidPage'),
+            ? s.templateQr.wrongKind(result.gotKind ?? '?')
+            : s.templateQr.invalidPage,
         );
         return;
       }
 
       setReceiveError(null);
       if (result.status === 'duplicate') {
-        setReceiveStatus(qt('templateQr.duplicate', { got: result.got, total: result.total }));
+        setReceiveStatus(s.templateQr.duplicate(result.got, result.total));
         return;
       }
       if (result.status === 'progress') {
-        setReceiveStatus(qt('templateQr.progress', { got: result.got, total: result.total }));
+        setReceiveStatus(s.templateQr.progress(result.got, result.total));
         return;
       }
       if (!('template' in result)) return;
 
-      setReceiveStatus(qt('templateQr.progress', { got: result.got, total: result.total }));
+      setReceiveStatus(s.templateQr.progress(result.got, result.total));
       setPreview(result.template);
       setSaveMode('copy');
       setSaveError(null);
@@ -209,7 +175,7 @@ export function TemplateQrReceiveDialog({ onClose, onSaved }: TemplateQrReceiveD
         onError: () => {
           scanSessionRef.current = null;
           setCameraActive(false);
-          setCameraError(qt('templateQr.cameraFailed'));
+          setCameraError(s.templateQr.cameraFailed);
         },
       },
     );
@@ -247,26 +213,26 @@ export function TemplateQrReceiveDialog({ onClose, onSaved }: TemplateQrReceiveD
           updatedAt: Date.now(),
         };
       }
-      await saveTemplate(toSave);
+      await onSave(toSave);
       onSaved?.(toSave);
       onClose();
     } catch (error) {
       console.error('template qr save failed', error);
-      setSaveError(qt('templateQr.saveFailed'));
+      setSaveError(s.templateQr.saveFailed);
     } finally {
       setSaving(false);
     }
-  }, [onClose, onSaved, preview, saveMode, saving, templates]);
+  }, [onClose, onSave, onSaved, preview, saveMode, saving, templates]);
 
   return (
     <Modal
-      title={qt('templateQr.receiveTitle')}
+      title={s.templateQr.receiveTitle}
       onClose={saving ? () => undefined : onClose}
       variant="dialog"
-      closeLabel={t('common.close')}
+      closeLabel={s.common.close}
       dismissMode={saving ? 'never' : 'always'}
     >
-      <p className="muted">{qt('templateQr.receiveIntro')}</p>
+      <p className="muted">{s.templateQr.receiveIntro}</p>
 
       {preview === null ? (
         <>
@@ -276,7 +242,7 @@ export function TemplateQrReceiveDialog({ onClose, onSaved }: TemplateQrReceiveD
                 ref={videoRef}
                 muted
                 playsInline
-                aria-label={qt('templateQr.cameraLabel')}
+                aria-label={s.templateQr.cameraLabel}
                 style={cameraActive ? videoStyle : { ...videoStyle, display: 'none' }}
               />
               <Button
@@ -284,7 +250,7 @@ export function TemplateQrReceiveDialog({ onClose, onSaved }: TemplateQrReceiveD
                 variant={cameraActive ? 'secondary' : 'primary'}
                 onClick={cameraActive ? stopCamera : startCamera}
               >
-                {cameraActive ? qt('templateQr.cameraStop') : qt('templateQr.cameraStart')}
+                {cameraActive ? s.templateQr.cameraStop : s.templateQr.cameraStart}
               </Button>
               {cameraError !== null ? (
                 <p role="alert" style={errorStyle}>
@@ -293,17 +259,17 @@ export function TemplateQrReceiveDialog({ onClose, onSaved }: TemplateQrReceiveD
               ) : null}
             </section>
           ) : (
-            <p className="muted">{qt('templateQr.cameraUnavailable')}</p>
+            <p className="muted">{s.templateQr.cameraUnavailable}</p>
           )}
 
           <section className="tm-card">
             <label>
-              <span>{qt('templateQr.pasteLabel')}</span>
+              <span>{s.templateQr.pasteLabel}</span>
               <textarea
                 className="tm-textarea"
                 value={pastedPage}
                 onChange={(event) => setPastedPage(event.target.value)}
-                placeholder={qt('templateQr.pastePlaceholder')}
+                placeholder={s.templateQr.pastePlaceholder}
                 spellCheck={false}
               />
             </label>
@@ -312,7 +278,7 @@ export function TemplateQrReceiveDialog({ onClose, onSaved }: TemplateQrReceiveD
               onClick={() => void receivePage(pastedPage, 'paste')}
               disabled={pastedPage.trim() === ''}
             >
-              {qt('templateQr.readPage')}
+              {s.templateQr.readPage}
             </Button>
           </section>
 
@@ -326,7 +292,7 @@ export function TemplateQrReceiveDialog({ onClose, onSaved }: TemplateQrReceiveD
           </div>
           {receiveStatus !== null || receiveError !== null ? (
             <Button block variant="ghost" onClick={resetReceive}>
-              {qt('templateQr.reset')}
+              {s.templateQr.reset}
             </Button>
           ) : null}
         </>
@@ -334,32 +300,22 @@ export function TemplateQrReceiveDialog({ onClose, onSaved }: TemplateQrReceiveD
 
       {preview !== null && summary !== null ? (
         <>
-          <h3>{qt('templateQr.previewTitle')}</h3>
+          <h3>{s.templateQr.previewTitle}</h3>
           <dl style={previewGridStyle}>
-            <dt>{t('tpl.name')}</dt>
+            <dt>{s.tpl.name}</dt>
             <dd>{preview.name}</dd>
-            <dt>{t('tpl.sections')}</dt>
-            <dd>
-              {qt('templateQr.counts', {
-                sections: summary.sections,
-                groups: summary.groups,
-                items: summary.items,
-              })}
-            </dd>
-            <dt>{t('tpl.includeProblems')}</dt>
-            <dd>
-              {preview.includeProblems ? qt('templateQr.included') : qt('templateQr.excluded')}
-            </dd>
-            <dt>{t('tpl.includeHandover')}</dt>
-            <dd>
-              {preview.includeHandover ? qt('templateQr.included') : qt('templateQr.excluded')}
-            </dd>
+            <dt>{s.tpl.sections}</dt>
+            <dd>{s.templateQr.counts(summary.sections, summary.groups, summary.items)}</dd>
+            <dt>{s.tpl.includeProblems}</dt>
+            <dd>{preview.includeProblems ? s.templateQr.included : s.templateQr.excluded}</dd>
+            <dt>{s.tpl.includeHandover}</dt>
+            <dd>{preview.includeHandover ? s.templateQr.included : s.templateQr.excluded}</dd>
           </dl>
 
           {collision ? (
             <fieldset className="tm-card">
-              <legend>{qt('templateQr.conflictTitle')}</legend>
-              <p className="muted">{qt('templateQr.conflictBody')}</p>
+              <legend>{s.templateQr.conflictTitle}</legend>
+              <p className="muted">{s.templateQr.conflictBody}</p>
               <label style={radioRowStyle}>
                 <input
                   type="radio"
@@ -368,7 +324,7 @@ export function TemplateQrReceiveDialog({ onClose, onSaved }: TemplateQrReceiveD
                   checked={saveMode === 'overwrite'}
                   onChange={() => setSaveMode('overwrite')}
                 />
-                {qt('templateQr.overwrite')}
+                {s.templateQr.overwrite}
               </label>
               <label style={radioRowStyle}>
                 <input
@@ -378,7 +334,7 @@ export function TemplateQrReceiveDialog({ onClose, onSaved }: TemplateQrReceiveD
                   checked={saveMode === 'copy'}
                   onChange={() => setSaveMode('copy')}
                 />
-                {qt('templateQr.addCopy')}
+                {s.templateQr.addCopy}
               </label>
             </fieldset>
           ) : null}
@@ -390,10 +346,10 @@ export function TemplateQrReceiveDialog({ onClose, onSaved }: TemplateQrReceiveD
           ) : null}
           <div className="toolbar">
             <Button variant="ghost" onClick={resetReceive} disabled={saving}>
-              {qt('templateQr.reset')}
+              {s.templateQr.reset}
             </Button>
             <Button variant="primary" onClick={() => void applyTemplate()} disabled={saving}>
-              {saving ? t('common.loading') : t('common.save')}
+              {saving ? s.common.loading : s.common.save}
             </Button>
           </div>
         </>

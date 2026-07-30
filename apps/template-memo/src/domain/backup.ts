@@ -3,32 +3,32 @@
  *
  * 封筒は kind / appId / schemaVersion で照合し、合わない JSON は fail-closed に拒否する
  * （medical 側 hospital-workspace/shared/workspaceBackup.ts の流儀を踏襲。zod は使わず手書き検証）。
- * schemaVersion は現行一致のみ受け付ける（migration step は持たない = constants の単発変換方式）。
+ * schemaVersion は現行一致のみ受け付ける（migration step は持たない = constants の単発変換方式。
+ * v1 の封筒は fail-closed に拒否する）。
  *
  * 中身の検証は 2 段構え:
  *   - templates: normalizeTemplate（domain/template.ts が正本）で正規化し、壊れは捨てる。
  *     全滅したら復元先が成立しないので throw（active テンプレート不在の状態を作らない）。
- *   - subjects / groups / settings: 1 件ずつ防御的に正規化する。id/name の型不正 row だけを
+ *   - patients / places / settings: 1 件ずつ防御的に正規化する。id/name の型不正 row だけを
  *     捨てて生き残りを救い、row 内の配列/オブジェクト欄は型不正なら空に落とす。
  *
  * 参照整合はここで閉じる: settings.activeTemplateId が templates に無ければ先頭へ付け替え、
- * Subject.groupId が groups に無ければ未分類 (null) へ倒す。返り値はそのまま
+ * Patient.placeId が places に無ければ先頭 place へ倒す。返り値はそのまま
  * store.replaceAll へ渡せる検証済みデータ（ReplaceAllData）。
  */
 
 import { APP_ID, BACKUP_KIND, SCHEMA_VERSION } from '../data/constants';
 import type { ReplaceAllData } from '../data/store';
 import { normalizeTemplate, type Template } from './template';
+import { normalizeProjectedValues } from './normalize';
 import {
-  isSubjectStatus,
+  isPatientStatus,
   STATUS,
   type AppSettings,
-  type FormValues,
-  type Group,
-  type RoundState,
+  type Patient,
+  type PlaceDef,
   type Snippet,
-  type Subject,
-  type Tag,
+  type TagDef,
 } from './types';
 
 // ============================
@@ -36,15 +36,15 @@ import {
 // ============================
 
 /** バックアップ JSON の封筒。kind/appId/schemaVersion が照合キー。 */
-export interface BackupBundle {
+interface BackupBundle {
   kind: typeof BACKUP_KIND;
   appId: typeof APP_ID;
   schemaVersion: number;
   /** 書き出し時刻（ISO 文字列。表示・ファイル整理用のメタで、検証キーではない）。 */
   exportedAt: string;
   settings: AppSettings;
-  groups: Group[];
-  subjects: Subject[];
+  places: PlaceDef[];
+  patients: Patient[];
   templates: Template[];
 }
 
@@ -68,7 +68,7 @@ export const backupFieldBrokenMsg = (name: string) => `バックアップの ${n
 
 /** 全データを封筒に包んで JSON 文字列にする（人が中を確認できるよう整形出力）。 */
 export function buildBackupJson(
-  data: { settings: AppSettings; groups: Group[]; subjects: Subject[]; templates: Template[] },
+  data: { settings: AppSettings; places: PlaceDef[]; patients: Patient[]; templates: Template[] },
   nowMs = Date.now(),
 ): string {
   const bundle: BackupBundle = {
@@ -77,8 +77,8 @@ export function buildBackupJson(
     schemaVersion: SCHEMA_VERSION,
     exportedAt: new Date(nowMs).toISOString(),
     settings: data.settings,
-    groups: data.groups,
-    subjects: data.subjects,
+    places: data.places,
+    patients: data.patients,
     templates: data.templates,
   };
   return JSON.stringify(bundle, null, 2);
@@ -105,65 +105,54 @@ function stringArray(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
 }
 
-/** group 1 件の正規化。id/name の型不正 row は捨てる。 */
-function normalizeGroupRow(raw: unknown): Group | null {
+/** place 1 件の正規化。placeId/name の型不正 row は捨てる。 */
+function normalizePlaceRow(raw: unknown): PlaceDef | null {
   if (!isPlainObject(raw)) return null;
-  if (typeof raw.id !== 'string' || raw.id === '') return null;
+  if (typeof raw.placeId !== 'string' || raw.placeId === '') return null;
   if (typeof raw.name !== 'string') return null;
-  return { id: raw.id, name: raw.name, sortOrder: num(raw.sortOrder) };
+  return { placeId: raw.placeId, name: raw.name };
 }
 
 /**
- * subject 1 件の正規化。id/name の型不正 row は捨て、それ以外の欄は型不正でも
- * 既定値へ倒して row を救う（status は isSubjectStatus で検証し不正は「未」へ）。
- * groupId は存在する group だけを許し、迷子参照は未分類 (null) へ。
+ * patient 1 件の正規化。pid/name の型不正 row は捨て、それ以外の欄は型不正でも
+ * 既定値へ倒して row を救う（status は isPatientStatus で検証し不正は「未」へ）。
+ * placeId は存在する place だけを許し、迷子参照は先頭 place へ倒す。
  */
-function normalizeSubjectRow(raw: unknown, groupIds: ReadonlySet<string>): Subject | null {
+function normalizePatientRow(raw: unknown, places: readonly PlaceDef[]): Patient | null {
   if (!isPlainObject(raw)) return null;
-  if (typeof raw.id !== 'string' || raw.id === '') return null;
+  if (typeof raw.pid !== 'string' || raw.pid === '') return null;
   if (typeof raw.name !== 'string') return null;
 
-  const sectionText: Record<string, string> = {};
-  if (isPlainObject(raw.sectionText)) {
-    for (const [k, v] of Object.entries(raw.sectionText)) {
-      if (typeof v === 'string') sectionText[k] = v;
-    }
-  }
-  // formValues の外側 2 層（groupId → itemId → 値）だけを検証する。値そのものは
-  // TextEntry / NumericEntry / legacy 文字列が混在し得るため、読み出し側の
-  // domain/formValues.ts の正規化ヘルパに委ねる（ここで形を断定しない）。
-  const formValues: FormValues = {};
-  if (isPlainObject(raw.formValues)) {
-    for (const [k, v] of Object.entries(raw.formValues)) {
-      if (isPlainObject(v)) formValues[k] = { ...v };
-    }
-  }
+  const placeId =
+    typeof raw.placeId === 'string' && places.some((p) => p.placeId === raw.placeId)
+      ? raw.placeId
+      : (places[0]?.placeId ?? '');
+  const confirmedNote = str(raw.confirmedNote);
   return {
-    id: raw.id,
+    pid: raw.pid,
     name: raw.name,
-    code: str(raw.code),
-    location: str(raw.location),
-    groupId: typeof raw.groupId === 'string' && groupIds.has(raw.groupId) ? raw.groupId : null,
-    sortOrder: num(raw.sortOrder),
-    status: isSubjectStatus(raw.status) ? raw.status : STATUS.NONE,
+    room: str(raw.room),
+    placeId,
+    status: isPatientStatus(raw.status) ? raw.status : STATUS.NONE,
+    tags: stringArray(raw.tags),
     problems: stringArray(raw.problems),
-    handover: str(raw.handover),
-    sectionText,
-    formValues,
-    confirmedNote: str(raw.confirmedNote),
-    tagIds: stringArray(raw.tagIds),
-    archivedAt: typeof raw.archivedAt === 'number' ? raw.archivedAt : null,
-    createdAt: num(raw.createdAt),
+    visitMemo: str(raw.visitMemo),
+    standingMemo: str(raw.standingMemo),
+    ...(confirmedNote !== '' ? { confirmedNote } : {}),
+    // projectedValues の外側 2 層（groupId → itemId → 値）だけを検証する。値そのものは
+    // 読み出し側の domain/formValues.ts の正規化ヘルパに委ねる（ここで形を断定せず、
+    // 壊れ値は読み出し時に未入力へ倒れる）。
+    projectedValues: normalizeProjectedValues(raw.projectedValues),
     updatedAt: num(raw.updatedAt),
+    archivedAt: typeof raw.archivedAt === 'number' ? raw.archivedAt : null,
   };
 }
 
-/** tag 1 件の正規化（settings 内の配列）。id/name の型不正 row は捨てる。 */
-function normalizeTagRow(raw: unknown): Tag | null {
+/** tag 定義 1 件の正規化（settings 内の配列）。name の型不正 row は捨てる。 */
+function normalizeTagRow(raw: unknown): TagDef | null {
   if (!isPlainObject(raw)) return null;
-  if (typeof raw.id !== 'string' || raw.id === '') return null;
-  if (typeof raw.name !== 'string') return null;
-  return { id: raw.id, name: raw.name, sortOrder: num(raw.sortOrder) };
+  if (typeof raw.name !== 'string' || raw.name.trim() === '') return null;
+  return { name: raw.name, color: raw.color === 'amber' ? 'amber' : 'gray' };
 }
 
 /** snippet 1 件の正規化（settings 内の配列)。id の型不正 row は捨てる。 */
@@ -173,19 +162,9 @@ function normalizeSnippetRow(raw: unknown): Snippet | null {
   return { id: raw.id, label: str(raw.label), body: str(raw.body) };
 }
 
-/** round 状態の正規化。startedAt が数値でなければ「一度も開始していない」(null) へ。 */
-function normalizeRound(raw: unknown): RoundState | null {
-  if (!isPlainObject(raw)) return null;
-  if (typeof raw.startedAt !== 'number') return null;
-  return {
-    startedAt: raw.startedAt,
-    endedAt: typeof raw.endedAt === 'number' ? raw.endedAt : null,
-  };
-}
-
 /**
- * settings の正規化: 既定値（data/store の defaultSettings と同形）の上に、型が合う欄だけを
- * 上書きマージする。activeTemplateId は検証済み templates に実在するものだけを許し、
+ * settings の正規化: 既定値の上に、型が合う欄だけを上書きマージする。
+ * activeTemplateId は検証済み templates に実在するものだけを許し、
  * 無ければ先頭 template へ付け替える（active 不在の状態を作らない）。
  */
 function normalizeSettings(raw: unknown, templates: readonly Template[]): AppSettings {
@@ -201,13 +180,11 @@ function normalizeSettings(raw: unknown, templates: readonly Template[]): AppSet
     activeTemplateId,
     tags: (Array.isArray(r.tags) ? r.tags : [])
       .map(normalizeTagRow)
-      .filter((t): t is Tag => t !== null),
+      .filter((t): t is TagDef => t !== null),
     snippets: (Array.isArray(r.snippets) ? r.snippets : [])
       .map(normalizeSnippetRow)
       .filter((s): s is Snippet => s !== null),
     newlineMode: r.newlineMode === 'lf' ? 'lf' : 'crlf',
-    round: normalizeRound(r.round),
-    onboardingDone: r.onboardingDone === true,
     updatedAt: num(r.updatedAt),
   };
 }
@@ -238,15 +215,14 @@ export function parseBackupJson(text: string): ReplaceAllData {
     .filter((t): t is Template => t !== null);
   if (templates.length === 0) throw new Error(BACKUP_NO_TEMPLATES_MSG);
 
-  if (!Array.isArray(parsed.groups)) throw new Error(backupFieldBrokenMsg('groups'));
-  const groups = parsed.groups.map(normalizeGroupRow).filter((g): g is Group => g !== null);
+  if (!Array.isArray(parsed.places)) throw new Error(backupFieldBrokenMsg('places'));
+  const places = parsed.places.map(normalizePlaceRow).filter((g): g is PlaceDef => g !== null);
 
-  if (!Array.isArray(parsed.subjects)) throw new Error(backupFieldBrokenMsg('subjects'));
-  const groupIds: ReadonlySet<string> = new Set(groups.map((g) => g.id));
-  const subjects = parsed.subjects
-    .map((row) => normalizeSubjectRow(row, groupIds))
-    .filter((s): s is Subject => s !== null);
+  if (!Array.isArray(parsed.patients)) throw new Error(backupFieldBrokenMsg('patients'));
+  const patients = parsed.patients
+    .map((row) => normalizePatientRow(row, places))
+    .filter((s): s is Patient => s !== null);
 
   const settings = normalizeSettings(parsed.settings, templates);
-  return { settings, subjects, groups, templates };
+  return { settings, patients, places, templates };
 }

@@ -15,34 +15,16 @@ import { Modal } from '@snishi/foundation/ui/Modal';
 import { useWakeLock } from '@snishi/foundation/ui/useWakeLock';
 import type { Template } from '../domain/template';
 import { encodeTemplateWirePages, TemplateWireError } from '../domain/templateWire';
-import { t, type MessageKey } from '../i18n';
+import { s } from '../i18n';
 
 const AUTO_ADVANCE_MS = 900;
 
-/**
- * ja.ts へのキー追加は SettingsView 統合と同時に行う。並行実装中も新規ファイルだけで
- * 型検査できるよう、このコンポーネント固有キーの境界をここに明示する。
- */
-type TemplateQrSendMessageKey =
-  | 'templateQr.sendTitle'
-  | 'templateQr.sendHint'
-  | 'templateQr.errorCompression'
-  | 'templateQr.errorTemplate'
-  | 'templateQr.errorEncode'
-  | 'templateQr.errorDraw'
-  | 'templateQr.previousPage'
-  | 'templateQr.nextPage';
-
-function qt(key: TemplateQrSendMessageKey, vars?: Record<string, string | number>): string {
-  return t(key as MessageKey, vars);
-}
-
 function encodeErrorMessage(error: unknown): string {
   if (error instanceof TemplateWireError) {
-    if (error.code === 'compression-required') return qt('templateQr.errorCompression');
-    if (error.code === 'invalid-template') return qt('templateQr.errorTemplate');
+    if (error.code === 'compression-required') return s.templateQr.errorCompression;
+    if (error.code === 'invalid-template') return s.templateQr.errorTemplate;
   }
-  return qt('templateQr.errorEncode');
+  return s.templateQr.errorEncode;
 }
 
 const errorStyle: CSSProperties = { color: 'var(--danger)' };
@@ -117,7 +99,7 @@ export function TemplateQrSendDialog({ template, onClose }: TemplateQrSendDialog
         setDrawError(null);
       } catch (error) {
         console.error('template qr draw failed', error);
-        setDrawError(qt('templateQr.errorDraw'));
+        setDrawError(s.templateQr.errorDraw);
       }
     }, 0);
     return () => clearTimeout(timer);
@@ -125,17 +107,17 @@ export function TemplateQrSendDialog({ template, onClose }: TemplateQrSendDialog
 
   return (
     <Modal
-      title={qt('templateQr.sendTitle')}
+      title={s.templateQr.sendTitle}
       onClose={onClose}
       variant="dialog"
-      closeLabel={t('common.close')}
+      closeLabel={s.common.close}
     >
       <p>
         <strong>{template.name}</strong>
       </p>
-      <p className="muted">{qt('templateQr.sendHint')}</p>
+      <p className="muted">{s.templateQr.sendHint}</p>
 
-      {preparing ? <p>{t('common.loading')}</p> : null}
+      {preparing ? <p>{s.common.loading}</p> : null}
       {encodeError !== null ? (
         <p role="alert" style={errorStyle}>
           {encodeError}
@@ -157,13 +139,11 @@ export function TemplateQrSendDialog({ template, onClose }: TemplateQrSendDialog
           ) : null}
 
           <div className="toolbar" style={{ alignItems: 'center', marginBottom: 0 }}>
-            <span className="muted">
-              {t('qr.page', { n: pager.index + 1, total: pages.length })}
-            </span>
+            <span className="muted">{s.qr.page(pager.index + 1, pages.length)}</span>
             {pages.length > 1 ? (
               <>
                 <IconButton
-                  label={qt('templateQr.previousPage')}
+                  label={s.templateQr.previousPage}
                   onClick={pager.prev}
                   disabled={pager.index <= 0}
                   style={{ marginLeft: 'auto' }}
@@ -173,7 +153,7 @@ export function TemplateQrSendDialog({ template, onClose }: TemplateQrSendDialog
                   </span>
                 </IconButton>
                 <IconButton
-                  label={qt('templateQr.nextPage')}
+                  label={s.templateQr.nextPage}
                   onClick={pager.next}
                   disabled={pager.index >= pages.length - 1}
                 >
@@ -191,7 +171,7 @@ export function TemplateQrSendDialog({ template, onClose }: TemplateQrSendDialog
                 onChange={pager.toggle}
                 style={{ width: 20, height: 20 }}
               />
-              {t('qr.autoPage')}
+              {s.qr.autoPage}
             </label>
           ) : null}
         </>

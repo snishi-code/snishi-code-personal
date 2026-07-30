@@ -25,7 +25,7 @@ import {
   type TemplateItem,
   type TemplateSection,
 } from './template';
-import type { Subject } from './types';
+import type { Patient } from './types';
 
 // ============================
 // テスト用ビルダー（固定 id で組む。newId 依存を避け golden を安定させる）
@@ -57,30 +57,27 @@ function template(partial: Partial<Template>): Template {
     name: 'テスト',
     includeProblems: false,
     includeHandover: false,
+    memoSectionId: null,
     sections: [],
     updatedAt: 0,
     ...partial,
   };
 }
 
-function subject(partial: Partial<Subject>): Subject {
+function patient(partial: Partial<Patient>): Patient {
   return {
-    id: 'sub-test',
-    name: '',
-    code: '',
-    location: '',
-    groupId: null,
-    sortOrder: 1,
+    pid: 'pat-test',
     status: 'none',
+    name: '',
+    room: '',
+    placeId: '',
+    tags: [],
     problems: [],
-    handover: '',
-    sectionText: {},
-    formValues: {},
-    confirmedNote: '',
-    tagIds: [],
-    archivedAt: null,
-    createdAt: 0,
+    visitMemo: '',
+    standingMemo: '',
+    projectedValues: {},
     updatedAt: 0,
+    archivedAt: null,
     ...partial,
   };
 }
@@ -89,13 +86,21 @@ function subject(partial: Partial<Subject>): Subject {
 // golden test: 作者の実運用例文
 // ============================
 
-/** 回診メモ相当のテンプレート（golden 用。血糖も always にして 3 群とも出力する）。 */
+/** 回診メモ相当のテンプレート（golden 用。血糖も always にして 3 群とも出力する）。
+ *  memoSection = (O)。(S)(A)(P) は正常文を持ち、定型清書 (composePresetClean) で埋まる。 */
 function goldenTemplate(): Template {
   return template({
     includeProblems: true,
     includeHandover: true,
+    memoSectionId: 'sec-o',
     sections: [
-      section({ id: 'sec-s', title: '(S)', keepWhenEmpty: true, freeText: true }),
+      section({
+        id: 'sec-s',
+        title: '(S)',
+        keepWhenEmpty: true,
+        freeText: true,
+        normal: '変わりない',
+      }),
       section({
         id: 'sec-o',
         title: '(O)',
@@ -143,18 +148,31 @@ function goldenTemplate(): Template {
           }),
         ],
       }),
-      section({ id: 'sec-a', title: '(A)', keepWhenEmpty: true, freeText: true }),
-      section({ id: 'sec-p', title: '(P)', keepWhenEmpty: true, freeText: true }),
+      section({
+        id: 'sec-a',
+        title: '(A)',
+        keepWhenEmpty: true,
+        freeText: true,
+        normal: '著変なし',
+      }),
+      section({
+        id: 'sec-p',
+        title: '(P)',
+        keepWhenEmpty: true,
+        freeText: true,
+        normal: '現行加療継続',
+      }),
     ],
   });
 }
 
-function goldenSubject(): Subject {
-  return subject({
+function goldenPatient(): Patient {
+  return patient({
     problems: ['HF', 'DM', '誤嚥性肺炎\n　7/20- TAZ/PIPC 9g/2'],
-    handover: '週明けLabo\n家族IC希望あり',
-    sectionText: { 'sec-s': '変わりない', 'sec-a': '著変なし', 'sec-p': '現行加療継続' },
-    formValues: {
+    standingMemo: '週明けLabo\n家族IC希望あり',
+    // (S)(A)(P) の本文は正常文 (定型清書で充填)。memoSection (O) の今回メモは空。
+    visitMemo: '',
+    projectedValues: {
       'grp-vital': { 'itm-bp': { value: '120/98' }, 'itm-hr': { value: '63' } },
       'grp-glu': {
         'itm-glu1': { value: '108' },
@@ -171,31 +189,40 @@ function goldenSubject(): Subject {
   });
 }
 
-describe('composeDocument golden（作者の実運用例文）', () => {
+describe('composePresetClean golden（作者の実運用例文）', () => {
   it('回診メモ例文を 1 文字違わず再現する', () => {
     const expected =
       '#1 HF\n#2 DM\n#3 誤嚥性肺炎\n　7/20- TAZ/PIPC 9g/2\n\n週明けLabo\n家族IC希望あり\n\n(S)\n変わりない\n\n(O)\nBP 120/98mmHg, HR 63\n\nGlu 108-222-100\n\n肺音：明らかなラ音なし\n腸音：正常\n腹部：平坦軟、圧痛なし\n下腿浮腫：なし\n\n(A)\n著変なし\n\n(P)\n現行加療継続';
-    expect(composeDocument(goldenSubject(), goldenTemplate())).toBe(expected);
+    expect(composePresetClean(goldenPatient(), goldenTemplate())).toBe(expected);
   });
 
   it('includeProblems=false なら問題ブロックが落ち、他は変わらない', () => {
     const tpl = { ...goldenTemplate(), includeProblems: false };
-    const out = composeDocument(goldenSubject(), tpl);
+    const out = composePresetClean(goldenPatient(), tpl);
     expect(out.startsWith('週明けLabo\n家族IC希望あり\n\n(S)')).toBe(true);
     expect(out).not.toContain('#1');
   });
 
   it('includeHandover=false なら申し送りブロックが落ちる', () => {
     const tpl = { ...goldenTemplate(), includeHandover: false };
-    const out = composeDocument(goldenSubject(), tpl);
+    const out = composePresetClean(goldenPatient(), tpl);
     expect(out).not.toContain('週明けLabo');
     expect(out).toContain('#1 HF\n#2 DM');
   });
 
-  it('handover が空白のみならブロック自体を出さない（空行が増えない）', () => {
-    const sub = { ...goldenSubject(), handover: '  \n ' };
-    const out = composeDocument(sub, goldenTemplate());
+  it('standingMemo が空白のみならブロック自体を出さない（空行が増えない）', () => {
+    const sub = { ...goldenPatient(), standingMemo: '  \n ' };
+    const out = composePresetClean(sub, goldenTemplate());
     expect(out).toContain('　7/20- TAZ/PIPC 9g/2\n\n(S)');
+  });
+
+  it('composeDocument は今回メモを memoSection (O) の自由本文として注入する', () => {
+    const p = { ...goldenPatient(), visitMemo: '右下肺に湿性ラ音' };
+    const out = composeDocument(p, goldenTemplate());
+    // (O) は群の後に自由本文。 (S)(A)(P) は normal を充填しない (見出しのみ)。
+    expect(out).toContain('下腿浮腫：なし\n\n右下肺に湿性ラ音\n\n(A)');
+    expect(out).toContain('(S)\n\n(O)');
+    expect(out).toContain('(A)\n\n(P)');
   });
 });
 
@@ -214,11 +241,6 @@ describe('composeItem', () => {
   it('number: 値+単位の直後に注記が付く', () => {
     const it_ = item({ id: 'i', label: 'SpO2', kind: 'number', unit: '%' });
     expect(composeItem(it_, { value: '96', note: 'O2 2L' }, sep)).toBe('SpO2 96% O2 2L');
-  });
-
-  it('number: legacy 文字列も値として読む', () => {
-    const it_ = item({ id: 'i', label: 'HR', kind: 'number' });
-    expect(composeItem(it_, '63', sep)).toBe('HR 63');
   });
 
   it("fraction: '' や '/' だけはスキップ", () => {
@@ -277,12 +299,14 @@ describe('composeGroup', () => {
 
   it('titleWrap が空ならタイトル行なしで本文だけ', () => {
     const g2 = { ...g, titleWrap: '' };
-    expect(composeGroup(g2, { a: '120/80', b: '63' }).text).toBe('BP 120/80, HR 63');
+    expect(composeGroup(g2, { a: { value: '120/80' }, b: { value: '63' } }).text).toBe(
+      'BP 120/80, HR 63',
+    );
   });
 
   it('titleWrap があっても name が空ならタイトル行は出ない', () => {
     const g2 = { ...g, name: '' };
-    expect(composeGroup(g2, { b: '63' }).text).toBe('HR 63');
+    expect(composeGroup(g2, { b: { value: '63' } }).text).toBe('HR 63');
   });
 });
 
@@ -307,33 +331,38 @@ describe('composeSection', () => {
 
   it('値が全部空の group はタイトル行ごと消え、自由本文だけ残る', () => {
     const sec = section({ id: 's', title: '(O)', keepWhenEmpty: true, groups: oGroups });
-    expect(composeSection(sec, { s: '所見メモ' }, { g1: { a: '' } })).toBe('(O)\n所見メモ');
+    expect(composeSection(sec, '所見メモ', { g1: { a: '' } })).toBe('(O)\n所見メモ');
   });
 
   it('空 section は keepWhenEmpty=false なら丸ごと消える', () => {
     const sec = section({ id: 's', title: '(O)', keepWhenEmpty: false, groups: oGroups });
-    expect(composeSection(sec, {}, {})).toBe('');
+    expect(composeSection(sec, '', {})).toBe('');
   });
 
   it('空 section は keepWhenEmpty=true なら見出しのみ残る', () => {
     const sec = section({ id: 's', title: '(S)', keepWhenEmpty: true });
-    expect(composeSection(sec, {}, {})).toBe('(S)');
+    expect(composeSection(sec, '', {})).toBe('(S)');
   });
 
   it('keepWhenEmpty=true でも title が空なら何も出さない', () => {
     const sec = section({ id: 's', title: '', keepWhenEmpty: true });
-    expect(composeSection(sec, {}, {})).toBe('');
+    expect(composeSection(sec, '', {})).toBe('');
   });
 
   it('oncall 群は値があってもセクション合成には出ない（本文挿入部品のため）', () => {
     const sec = section({ id: 's', title: '(O)', keepWhenEmpty: true, groups: oGroups });
-    const out = composeSection(sec, {}, { g1: { a: '63' }, g2: { b: '108' } });
+    const out = composeSection(sec, '', {
+      g1: { a: { value: '63' } },
+      g2: { b: { value: '108' } },
+    });
     expect(out).toBe('(O)\nHR 63');
   });
 
-  it('freeText=false なら sectionText が入っていても無視する', () => {
+  it('freeText=false なら自由本文が入っていても無視する', () => {
     const sec = section({ id: 's', title: '(O)', freeText: false, groups: oGroups });
-    expect(composeSection(sec, { s: '無視されるはず' }, { g1: { a: '63' } })).toBe('(O)\nHR 63');
+    expect(composeSection(sec, '無視されるはず', { g1: { a: { value: '63' } } })).toBe(
+      '(O)\nHR 63',
+    );
   });
 });
 
@@ -368,6 +397,7 @@ describe('composeProblems', () => {
 
 describe('composePresetClean', () => {
   const tpl = template({
+    memoSectionId: 's1',
     sections: [
       section({ id: 's1', title: '(S)', keepWhenEmpty: true, normal: '変わりない' }),
       section({ id: 's2', title: '(A)', keepWhenEmpty: true, normal: '著変なし' }),
@@ -375,13 +405,13 @@ describe('composePresetClean', () => {
     ],
   });
 
-  it('空の freeText セクションだけ normal で埋まり、入力済みは上書きしない', () => {
-    const sub = subject({ sectionText: { s1: '食欲低下あり' } });
+  it('空の freeText セクションだけ normal で埋まり、今回メモ入力済みは上書きしない', () => {
+    const sub = patient({ visitMemo: '食欲低下あり' });
     expect(composePresetClean(sub, tpl)).toBe('(S)\n食欲低下あり\n\n(A)\n著変なし\n\n(P)');
   });
 
   it('normal のないセクションは埋まらず keepWhenEmpty に従う', () => {
-    const sub = subject({});
+    const sub = patient({});
     expect(composePresetClean(sub, tpl)).toBe('(S)\n変わりない\n\n(A)\n著変なし\n\n(P)');
   });
 
@@ -391,13 +421,14 @@ describe('composePresetClean', () => {
         section({ id: 's1', title: '(S)', keepWhenEmpty: true, freeText: false, normal: 'x' }),
       ],
     });
-    expect(composePresetClean(subject({}), tpl2)).toBe('(S)');
+    expect(composePresetClean(patient({}), tpl2)).toBe('(S)');
   });
 
-  it('subject は不変（sectionText を書き換えない）', () => {
-    const sub = subject({ sectionText: {} });
+  it('patient は不変（visitMemo / projectedValues を書き換えない）', () => {
+    const sub = patient({ visitMemo: '', projectedValues: {} });
     composePresetClean(sub, tpl);
-    expect(sub.sectionText).toEqual({});
+    expect(sub.visitMemo).toBe('');
+    expect(sub.projectedValues).toEqual({});
   });
 });
 

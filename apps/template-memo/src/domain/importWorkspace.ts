@@ -2,14 +2,15 @@
  * hospital-workspace の平文バックアップ → template-memo の単発・片道インポータ。
  *
  * これは同期・互換レイヤではない。移行元の現行 DB schema v7 だけを理解し、
- * template-memo へ追記できる中立型へ一度だけ変換する。暗号化バックアップは対象外
+ * template-memo へ追記できる形へ一度だけ変換する。暗号化バックアップは対象外
  * （旧アプリで平文を書き出し直してもらう）。患者ごとの「今回分」
- * (status / visitMemo / projectedValues / tags) は、テンプレート構造と意味が異なるため
- * 意図的に移行しない。
+ * (status / visitMemo / projectedValues / tags) は意味が異なるため意図的に移行しない。
+ * 旧「患者ID」(code 概念) はこのアプリに無いので落とす。
  */
 
 import { newId } from '../data/constants';
-import { STATUS, type Group, type Snippet, type Subject } from './types';
+import { STATUS, type Patient, type PlaceDef, type Snippet } from './types';
+import { makeDefaultPatient } from './normalize';
 
 const WORKSPACE_BACKUP_KIND = 'HOSPITAL_WORKSPACE_BACKUP';
 const WORKSPACE_BACKUP_ENCRYPTED_KIND = 'HOSPITAL_WORKSPACE_BACKUP_ENC';
@@ -26,18 +27,17 @@ const PLACES_CONFIG_KEY = 'placesConfig';
 const ROUNDS_CONFIG_KEY = 'roundsConfig';
 
 export const WORKSPACE_IMPORT_JSON_UNREADABLE_MSG = 'ワークスペースバックアップのJSONを読めません';
-export const WORKSPACE_IMPORT_MALFORMED_MSG = 'ワークスペースバックアップの形式が不正です';
+const WORKSPACE_IMPORT_MALFORMED_MSG = 'ワークスペースバックアップの形式が不正です';
 export const WORKSPACE_IMPORT_ENCRYPTED_MSG =
   '暗号化バックアップは移行できません。旧アプリで平文バックアップを書き出し直してください';
-export const WORKSPACE_IMPORT_WRONG_KIND_MSG =
+const WORKSPACE_IMPORT_WRONG_KIND_MSG =
   'これは hospital-workspace の平文バックアップではありません';
-export const WORKSPACE_IMPORT_WRONG_VERSION_MSG =
-  'ワークスペースバックアップのバージョンが違います';
-export const WORKSPACE_IMPORT_WRONG_APP_MSG = 'ワークスペースバックアップのアプリが違います';
+const WORKSPACE_IMPORT_WRONG_VERSION_MSG = 'ワークスペースバックアップのバージョンが違います';
+const WORKSPACE_IMPORT_WRONG_APP_MSG = 'ワークスペースバックアップのアプリが違います';
 export const WORKSPACE_IMPORT_USER_NOT_FOUND_MSG = '移行するユーザーがバックアップに見つかりません';
 export const workspaceImportSchemaMismatchMsg = (schemaVersion: unknown) =>
   `ワークスペースバックアップのスキーマが v${typeof schemaVersion === 'number' ? schemaVersion : '?'} です（この移行ツールは v${WORKSPACE_SCHEMA_VERSION} 専用です）`;
-export const workspaceImportStoreBrokenMsg = (name: string) =>
+const workspaceImportStoreBrokenMsg = (name: string) =>
   `ワークスペースバックアップの ${name} が壊れています`;
 
 export interface WorkspaceImportCandidate {
@@ -47,12 +47,12 @@ export interface WorkspaceImportCandidate {
 
 /** store へ全置換せず追記する永続化対象。 */
 export interface WorkspaceImportPayload {
-  subjects: Subject[];
-  groups: Group[];
+  patients: Patient[];
+  places: PlaceDef[];
   snippets: Snippet[];
 }
 
-export type WorkspaceImportNote = 'closingPresetSkipped';
+type WorkspaceImportNote = 'closingPresetSkipped';
 
 export interface WorkspaceImportData extends WorkspaceImportPayload {
   /** 移行しなかった設定など、確認画面に出せる非患者データの注記。 */
@@ -140,33 +140,33 @@ function settingsRow(backup: WorkspaceBackup, key: string): Record<string, unkno
 }
 
 /**
- * place 定義を同名でまとめ、新しい Group と placeId→groupId 対応表を作る。
+ * place 定義を同名でまとめ、新しい PlaceDef と 旧placeId→新placeId 対応表を作る。
  * 同名判定は前後空白を除いた完全一致。壊れた place row は捨てる。
  */
-function convertGroups(backup: WorkspaceBackup): {
-  groups: Group[];
-  groupIdByPlaceId: Map<string, string>;
+function convertPlaces(backup: WorkspaceBackup): {
+  places: PlaceDef[];
+  placeIdByOldId: Map<string, string>;
 } {
-  const groups: Group[] = [];
-  const groupIdByName = new Map<string, string>();
-  const groupIdByPlaceId = new Map<string, string>();
-  const places = settingsRow(backup, PLACES_CONFIG_KEY);
-  const rows = places && Array.isArray(places.items) ? places.items : [];
+  const places: PlaceDef[] = [];
+  const placeIdByName = new Map<string, string>();
+  const placeIdByOldId = new Map<string, string>();
+  const config = settingsRow(backup, PLACES_CONFIG_KEY);
+  const rows = config && Array.isArray(config.items) ? config.items : [];
 
   for (const raw of rows) {
     if (!isRecord(raw)) continue;
     if (typeof raw.placeId !== 'string' || raw.placeId === '') continue;
     if (typeof raw.name !== 'string' || raw.name.trim() === '') continue;
     const name = raw.name.trim();
-    let groupId = groupIdByName.get(name);
-    if (!groupId) {
-      groupId = newId('grp');
-      groupIdByName.set(name, groupId);
-      groups.push({ id: groupId, name, sortOrder: groups.length + 1 });
+    let placeId = placeIdByName.get(name);
+    if (!placeId) {
+      placeId = newId('plc');
+      placeIdByName.set(name, placeId);
+      places.push({ placeId, name });
     }
-    if (!groupIdByPlaceId.has(raw.placeId)) groupIdByPlaceId.set(raw.placeId, groupId);
+    if (!placeIdByOldId.has(raw.placeId)) placeIdByOldId.set(raw.placeId, placeId);
   }
-  return { groups, groupIdByPlaceId };
+  return { places, placeIdByOldId };
 }
 
 /**
@@ -199,16 +199,15 @@ function stringList(v: unknown): string[] {
     .filter((x) => x.trim() !== '');
 }
 
-function convertSubjects(
+function convertPatients(
   backup: WorkspaceBackup,
   userId: string,
-  groupIdByPlaceId: ReadonlyMap<string, string>,
+  placeIdByOldId: ReadonlyMap<string, string>,
   nowMs: number,
-): Subject[] {
+): Patient[] {
   const states = selectedStates(backup, userId);
-  const subjects: Subject[] = [];
+  const patients: Patient[] = [];
   const seenPatientIds = new Set<string>();
-  const nextOrder = new Map<string, number>();
 
   for (const raw of backup.stores[STORE_PATIENTS] ?? []) {
     if (!isRecord(raw)) continue;
@@ -222,11 +221,7 @@ function convertSubjects(
     if (typeof raw.name !== 'string' || raw.name.trim() === '') continue;
     seenPatientIds.add(raw.patientId);
 
-    const groupId =
-      typeof raw.placeId === 'string' ? (groupIdByPlaceId.get(raw.placeId) ?? null) : null;
-    const orderKey = groupId ?? '__ungrouped__';
-    const sortOrder = (nextOrder.get(orderKey) ?? 0) + 1;
-    nextOrder.set(orderKey, sortOrder);
+    const placeId = typeof raw.placeId === 'string' ? (placeIdByOldId.get(raw.placeId) ?? '') : '';
 
     const state = states.get(raw.patientId);
     const createdAt = finiteNumber(raw.createdAt) ?? nowMs;
@@ -236,29 +231,24 @@ function convertSubjects(
       finiteNumber(state?.updatedAt) ?? 0,
     );
     const archivedAt = finiteNumber(raw.archivedAt);
-    subjects.push({
-      id: newId('sub'),
+    const confirmedNote = typeof state?.confirmedNote === 'string' ? state.confirmedNote : '';
+    patients.push({
+      ...makeDefaultPatient(),
+      pid: newId('pat'),
       name: raw.name,
-      // 指示書どおり移行元の患者IDを管理IDへ持ち込む。
-      code: raw.patientId,
-      location: typeof raw.room === 'string' ? raw.room : '',
-      groupId,
-      sortOrder,
+      room: typeof raw.room === 'string' ? raw.room : '',
+      placeId,
       status: STATUS.NONE,
       problems: stringList(raw.problems),
       // 現行 source の「継続メモ」は RoundsPatientState.standingMemo。
-      handover: typeof state?.standingMemo === 'string' ? state.standingMemo : '',
-      // visitMemo / projectedValues は「今回分」かつテンプレ構造が異なるため移行しない。
-      sectionText: {},
-      formValues: {},
-      confirmedNote: typeof state?.confirmedNote === 'string' ? state.confirmedNote : '',
-      tagIds: [],
+      standingMemo: typeof state?.standingMemo === 'string' ? state.standingMemo : '',
+      // visitMemo / projectedValues / tags は「今回分・個人分」のため移行しない。
+      ...(confirmedNote !== '' ? { confirmedNote } : {}),
       archivedAt: archivedAt !== null && archivedAt > 0 ? archivedAt : null,
-      createdAt,
       updatedAt,
     });
   }
-  return subjects;
+  return patients;
 }
 
 function convertSnippets(backup: WorkspaceBackup): {
@@ -299,18 +289,18 @@ export function convertWorkspaceBackup(
     throw new Error(WORKSPACE_IMPORT_USER_NOT_FOUND_MSG);
   }
   const nowMs = finiteNumber(options.nowMs) ?? Date.now();
-  const { groups, groupIdByPlaceId } = convertGroups(backup);
+  const { places, placeIdByOldId } = convertPlaces(backup);
   const { snippets, notes } = convertSnippets(backup);
   return {
-    groups,
-    subjects: convertSubjects(backup, userId, groupIdByPlaceId, nowMs),
+    places,
+    patients: convertPatients(backup, userId, placeIdByOldId, nowMs),
     snippets,
     notes,
   };
 }
 
 /**
- * 既存データへ安全に追記できるよう、ID衝突・参照を検証して並び順を末尾へ補正する。
+ * 既存データへ安全に追記できるよう、ID衝突・参照を検証する。
  * 返すのは incoming 側だけで、既存データ自体は含めない・変更しない。
  */
 export function prepareWorkspaceImportAppend(
@@ -318,8 +308,8 @@ export function prepareWorkspaceImportAppend(
   current: WorkspaceImportPayload,
 ): WorkspaceImportPayload {
   const idSets: Array<[string[], Set<string>]> = [
-    [incoming.groups.map((row) => row.id), new Set(current.groups.map((row) => row.id))],
-    [incoming.subjects.map((row) => row.id), new Set(current.subjects.map((row) => row.id))],
+    [incoming.places.map((row) => row.placeId), new Set(current.places.map((row) => row.placeId))],
+    [incoming.patients.map((row) => row.pid), new Set(current.patients.map((row) => row.pid))],
     [incoming.snippets.map((row) => row.id), new Set(current.snippets.map((row) => row.id))],
   ];
   if (
@@ -330,28 +320,16 @@ export function prepareWorkspaceImportAppend(
     throw new Error('import id collision');
   }
 
-  const importedGroupIds = new Set(incoming.groups.map((group) => group.id));
+  const importedPlaceIds = new Set(incoming.places.map((place) => place.placeId));
   if (
-    incoming.subjects.some((subject) => subject.groupId && !importedGroupIds.has(subject.groupId))
+    incoming.patients.some((patient) => patient.placeId && !importedPlaceIds.has(patient.placeId))
   ) {
-    throw new Error('import group reference is invalid');
+    throw new Error('import place reference is invalid');
   }
 
-  const groupOffset = Math.max(0, ...current.groups.map((group) => group.sortOrder));
-  const subjectOffsets = new Map<string, number>();
-  for (const subject of current.subjects) {
-    const key = subject.groupId ?? '';
-    subjectOffsets.set(key, Math.max(subjectOffsets.get(key) ?? 0, subject.sortOrder));
-  }
   return {
-    groups: incoming.groups.map((group) => ({
-      ...group,
-      sortOrder: group.sortOrder + groupOffset,
-    })),
-    subjects: incoming.subjects.map((subject) => ({
-      ...subject,
-      sortOrder: subject.sortOrder + (subjectOffsets.get(subject.groupId ?? '') ?? 0),
-    })),
+    places: [...incoming.places],
+    patients: [...incoming.patients],
     snippets: [...incoming.snippets],
   };
 }

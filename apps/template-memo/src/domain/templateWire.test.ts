@@ -24,6 +24,7 @@ function fixtureTemplate(): Template {
     name: '受け渡しテスト',
     includeProblems: true,
     includeHandover: false,
+    memoSectionId: 'sec_o',
     updatedAt: 123,
     sections: [
       {
