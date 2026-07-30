@@ -4,7 +4,7 @@
  * v2 は v1 の最終モデル（v16 相当）を SCHEMA_VERSION=1 として開始し、レガシー migration は
  * 持たない（仕様§16）。v1 の識別子（snishi-code.simple-ledger）はどこにも使わない（仕様§7）。
  */
-export { APP_ID, SCHEMA_VERSION } from '../data/constants';
+export { APP_ID, MAX_LEDGER_REVISION, SCHEMA_VERSION } from '../data/constants';
 
 /**
  * 継続コストの残存価値を寄せる単一の集約台帳口座（role=continuing-cost-asset・内部集約）。

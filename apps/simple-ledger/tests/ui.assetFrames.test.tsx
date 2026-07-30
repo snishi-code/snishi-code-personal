@@ -94,6 +94,8 @@ describe('資産の内訳 4 枠', () => {
     const ledgerRow = ui(UI.assetsBreakdown.ledgerRow)!;
     expect(ledgerRow).toHaveTextContent('継続コスト台帳');
     expect(ledgerRow).toHaveTextContent('120,000');
+    expect(ui(`${UI.assetsBreakdown.frame}.ledger`)).toHaveTextContent('継続コスト台帳');
+    expect(ui(UI.assetsBreakdown.ledgerSubtotal)).toHaveTextContent('120,000');
     expect(document.querySelectorAll(`[data-ui="${UI.assetsBreakdown.ledgerRow}"]`)).toHaveLength(
       1,
     );
@@ -127,6 +129,71 @@ describe('資産の内訳 4 枠', () => {
     });
     expect(ui(UI.assetsBreakdown.fixedSubtotal)).not.toBeInTheDocument();
     expect(ui(UI.assetsBreakdown.ledgerRow)).not.toBeInTheDocument();
+    expect(ui(UI.assetsBreakdown.ledgerSubtotal)).not.toBeInTheDocument();
     expect(screen.queryByText('自由に動かせないお金')).not.toBeInTheDocument();
+  });
+});
+
+describe('負債の内訳 2 枠', () => {
+  it.each([
+    { name: 'カードのみ', card: true, loan: false, total: 30000 },
+    { name: 'ローンのみ', card: false, loan: true, total: 200000 },
+    { name: 'カードとローン', card: true, loan: true, total: 230000 },
+    { name: '負債なし', card: false, loan: false, total: 0 },
+  ])('$name', async ({ card: showCard, loan: showLoan, total }) => {
+    const ledger = await loadLedger();
+    const card = ledger.accounts.find((account) => account.role === 'payment-liability')!;
+    if (!showCard) {
+      await upsertAccount({ ...card, archived: true });
+    }
+    const loan = {
+      id: 'frame-loan',
+      name: '住宅ローン',
+      type: 'liability' as const,
+      role: 'other-liability' as const,
+      archived: false,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    if (showLoan) await upsertAccount(loan);
+
+    const openings = [
+      ...(showCard ? [{ accountId: card.id, amount: 30000, date: '2000-01-01' }] : []),
+      ...(showLoan ? [{ accountId: loan.id, amount: 200000, date: '2000-01-01' }] : []),
+    ];
+    if (openings.length > 0) await createOpenings(openings);
+
+    render(
+      <Providers>
+        <Breakdown
+          section="liability"
+          period={{ mode: 'all' }}
+          onPeriodChange={() => undefined}
+          onDrillDown={() => undefined}
+          onNavigate={() => undefined}
+        />
+      </Providers>,
+    );
+
+    await waitFor(() => {
+      expect(ui(UI.liabilitiesBreakdown.total)).toHaveTextContent(
+        new Intl.NumberFormat('ja-JP').format(total),
+      );
+    });
+    expect(Boolean(ui(UI.liabilitiesBreakdown.shortTermSubtotal))).toBe(showCard);
+    expect(Boolean(ui(UI.liabilitiesBreakdown.longTermSubtotal))).toBe(showLoan);
+    if (showCard) {
+      expect(ui(UI.liabilitiesBreakdown.shortTermSubtotal)).toHaveTextContent('30,000');
+    }
+    if (showLoan) {
+      expect(ui(UI.liabilitiesBreakdown.longTermSubtotal)).toHaveTextContent('200,000');
+    }
+    if (showCard && showLoan) {
+      const shortTerm = ui(UI.liabilitiesBreakdown.shortTermSubtotal)!;
+      const longTerm = ui(UI.liabilitiesBreakdown.longTermSubtotal)!;
+      expect(shortTerm.compareDocumentPosition(longTerm) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
+        0,
+      );
+    }
   });
 });

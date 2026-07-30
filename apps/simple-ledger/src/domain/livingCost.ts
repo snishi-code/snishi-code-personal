@@ -31,6 +31,22 @@ export interface ExpenseCategoryAmount {
 }
 
 /**
+ * 仕訳一覧で「通常支出」に分類する判定の単一正本。
+ *
+ * 借方に費用科目を持つ仕訳のうち、継続コストの導出認識だけを除外する。
+ * inputMode や adjustment の有無には依存しないため、簿記編集・残高補正も通常支出に含まれる。
+ */
+export function isNormalExpenseEntry(
+  entry: JournalEntry,
+  accountById: ReadonlyMap<string, Account>,
+): boolean {
+  if (entry.metadata?.ccKind === 'recognition') return false;
+  return entry.lines.some(
+    (line) => line.side === 'debit' && accountById.get(line.accountId)?.type === 'expense',
+  );
+}
+
+/**
  * 期間（range が undefined のときは全期間）の支出内訳を求める。
  * entries は **導出仕訳**（`reportEntriesForAsOf` = 実仕訳 + 継続コスト仮想仕訳）を渡すこと。
  */

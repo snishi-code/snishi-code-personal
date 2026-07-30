@@ -33,6 +33,7 @@ import {
   type SimpleEntryInput,
 } from '../../domain/entry';
 import type { EntryMetadata, InputMode, JournalEntry } from '../../domain/types';
+import type { AccountRole } from '../../domain/accountRoles';
 import { isRecurringPostableRole } from '../../domain/recurring';
 import { t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
@@ -54,6 +55,8 @@ export interface TransferFixed {
   /** 金額の既定値（編集可・上限なし）。 */
   amount?: number;
   description?: string;
+  /** 相手側の候補。未指定なら科目アーカイブ用の資産・負債だけに限定する。 */
+  counterpartRoles?: AccountRole[];
   onSave: (input: SimpleEntryInput) => Promise<void>;
 }
 
@@ -452,7 +455,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       const counterpartSide = fixed.side === 'credit' ? 'debit' : 'credit';
       const counterpartGroups = groupedAccountsByRole(
         accounts,
-        [...FIXED_COUNTERPART_ROLES],
+        fixed.counterpartRoles ?? [...FIXED_COUNTERPART_ROLES],
         counterpartSide === 'debit' ? form.debitAccountId : form.creditAccountId,
       );
       const counterpartPicker = (

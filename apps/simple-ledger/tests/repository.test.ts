@@ -211,13 +211,20 @@ describe('resetAll', () => {
         amount: 500,
       }),
     );
+    const snapshotSource = await loadLedger();
     // スナップショットも作っておき、全ストアが一括で消えることを確認する
-    await saveSnapshot({
-      id: makeSnapshotId(),
-      createdAt: '2026-06-01T00:00:00.000Z',
-      reason: 'test',
-      data: buildExportPackage(ledger),
-    });
+    await saveSnapshot(
+      {
+        id: makeSnapshotId(),
+        createdAt: '2026-06-01T00:00:00.000Z',
+        reason: 'test',
+        data: buildExportPackage(snapshotSource),
+      },
+      {
+        deviceId: snapshotSource.meta.deviceId,
+        revision: snapshotSource.meta.revision,
+      },
+    );
     expect((await listSnapshots()).length).toBeGreaterThan(0);
 
     // 継続コスト資産も作っておき、消えることを確認する。
@@ -238,6 +245,26 @@ describe('resetAll', () => {
     expect(after.meta.revision).toBe(0); // 新しい meta で作り直されている
     expect(await listSnapshots()).toHaveLength(0); // snapshots も消える
     expect(after.monthlyCostItems).toHaveLength(0); // 月額化コストも消える
+  });
+
+  it('全初期化後に旧世代のスナップショットを保存せず、削除状態を維持する', async () => {
+    const before = await loadLedger();
+    const snapshot = {
+      id: makeSnapshotId(),
+      createdAt: '2026-06-01T00:00:00.000Z',
+      reason: 'reset競合',
+      data: buildExportPackage(before),
+    };
+
+    await resetAll();
+
+    await expect(
+      saveSnapshot(snapshot, {
+        deviceId: before.meta.deviceId,
+        revision: before.meta.revision,
+      }),
+    ).rejects.toMatchObject({ code: 'error.common.staleData' });
+    expect(await listSnapshots()).toHaveLength(0);
   });
 });
 
@@ -1749,9 +1776,8 @@ describe('継続コスト資産のアーカイブ（archiveMonthlyCost = 終了�
     expect(after.monthlyCostItems.find((m) => m.id === item.id)?.endDate).toBe('2030-05-31');
   });
 
-  it('検証: 開始日より前の終了日・不正な振替先は fail-closed', async () => {
-    const { item } = await setup();
-    const food = (await loadLedger()).accounts.find((a) => a.name === '変動費')!;
+  it('検証: 開始日より前の終了日・存在しない振替先は fail-closed', async () => {
+    const { item, food } = await setup();
     await expect(
       archiveMonthlyCost({ id: item.id, endDate: '2024-05-31' }),
     ).rejects.toMatchObject({ code: 'error.monthlyCost.endBeforeStart' });
@@ -1759,9 +1785,19 @@ describe('継続コスト資産のアーカイブ（archiveMonthlyCost = 終了�
       archiveMonthlyCost({
         id: item.id,
         endDate: '2026-06-15',
-        recovery: { destinationAccountId: food.id, amount: 100 },
+        recovery: { destinationAccountId: 'no-such-account', amount: 100 },
       }),
     ).rejects.toMatchObject({ code: 'error.monthlyCost.recoveryDestination' });
+    // 費用カテゴリも簿記編集の振替先として許可する。
+    await archiveMonthlyCost({
+      id: item.id,
+      endDate: '2026-06-15',
+      recovery: { destinationAccountId: food.id, amount: 100 },
+    });
+    const recovery = (await loadLedger()).journalEntries.find(
+      (entry) => entry.metadata?.monthlyCostRecovery === true,
+    );
+    expect(recovery?.lines.find((line) => line.side === 'debit')?.accountId).toBe(food.id);
     await expect(
       archiveMonthlyCost({ id: 'no-such-item', endDate: '2026-06-15' }),
     ).rejects.toMatchObject({ code: 'error.monthlyCost.notFound' });
@@ -2325,18 +2361,28 @@ describe('スナップショットの剪定（版上げ時・復旧面）', () =
     const { pruneIncompatibleSnapshots } = await import('../src/data/repository');
     const ledger = await loadLedger();
     const current = buildExportPackage(ledger);
-    await saveSnapshot({
-      id: makeSnapshotId(),
-      createdAt: '2026-06-01T00:00:00.000Z',
-      reason: 'current',
-      data: current,
-    });
-    await saveSnapshot({
-      id: makeSnapshotId(),
-      createdAt: '2026-05-01T00:00:00.000Z',
-      reason: 'stale',
-      data: { ...current, schemaVersion: (SCHEMA_VERSION - 1) as typeof SCHEMA_VERSION },
-    });
+    const expectedVersion = {
+      deviceId: ledger.meta.deviceId,
+      revision: ledger.meta.revision,
+    };
+    await saveSnapshot(
+      {
+        id: makeSnapshotId(),
+        createdAt: '2026-06-01T00:00:00.000Z',
+        reason: 'current',
+        data: current,
+      },
+      expectedVersion,
+    );
+    await saveSnapshot(
+      {
+        id: makeSnapshotId(),
+        createdAt: '2026-05-01T00:00:00.000Z',
+        reason: 'stale',
+        data: { ...current, schemaVersion: (SCHEMA_VERSION - 1) as typeof SCHEMA_VERSION },
+      },
+      expectedVersion,
+    );
     const pruned = await pruneIncompatibleSnapshots();
     expect(pruned).toBe(1);
     const remaining = await listSnapshots();

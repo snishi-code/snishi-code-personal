@@ -85,7 +85,17 @@ describe('定期ルールのキャッチアップ起票', () => {
       startMonth: '2026-05',
     });
 
-    await Promise.all([catchUpRecurringRules('2026-07-23'), catchUpRecurringRules('2026-07-23')]);
+    const outcomes = await Promise.allSettled([
+      catchUpRecurringRules('2026-07-23'),
+      catchUpRecurringRules('2026-07-23'),
+    ]);
+    // 同一タブでは事前読込から直列化され、先行が3件、後続が最新カーソルを見て0件になる。
+    expect(outcomes.every((outcome) => outcome.status === 'fulfilled')).toBe(true);
+    expect(
+      outcomes
+        .flatMap((outcome) => (outcome.status === 'fulfilled' ? [outcome.value] : []))
+        .sort((a, b) => a - b),
+    ).toEqual([0, 3]);
 
     const posted = (await loadLedger()).journalEntries.filter(
       (entry) => entry.metadata?.recurringRuleId === rule.id,
@@ -475,10 +485,70 @@ describe('clampDayToMonth / recurringPostingsDue / recurringProjectionEntries', 
       'rec-proj-rule-2026-09',
       'rec-proj-rule-2026-10',
     ]);
+    expect(projected.every((entry) => entry.metadata?.continuousCostId === undefined)).toBe(true);
     expect(recurringProjectionEntries([base], accounts, '2026-10-31')).toEqual(projected);
     expect(recurringProjectionEntries([{ ...base, paused: true }], accounts, '2026-10-31')).toEqual(
       [],
     );
+  });
+
+  it('月割りルールの投影購入行は費用行と同じ継続コストIDを持つ', () => {
+    const accounts: Account[] = [
+      {
+        id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+        name: '継続コスト台帳',
+        type: 'asset',
+        role: 'continuing-cost-asset',
+        archived: false,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+      {
+        id: 'cash',
+        name: '現金',
+        type: 'asset',
+        role: 'daily-asset',
+        archived: false,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+      {
+        id: 'expense',
+        name: '固定費',
+        type: 'expense',
+        role: 'expense-category',
+        archived: false,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+    ];
+    const projected = recurringProjectionEntries(
+      [
+        {
+          id: 'spread-rule',
+          name: '家賃',
+          amount: 80000,
+          dayOfMonth: 27,
+          debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+          creditAccountId: 'cash',
+          spreadExpenseAccountId: 'expense',
+          everyMonths: 1,
+          startMonth: '2026-07',
+          postedThroughMonth: '2026-07',
+          createdAt: 't',
+          updatedAt: 't',
+        },
+      ],
+      accounts,
+      '2026-08-31',
+    );
+
+    const purchase = projected.find((entry) => entry.id === 'rec-proj-spread-rule-2026-08');
+    expect(purchase?.metadata?.continuousCostId).toBe('spread-rule-2026-08');
+    expect(
+      projected.find((entry) => entry.metadata?.ccKind === 'recognition')?.metadata
+        ?.continuousCostId,
+    ).toBe('spread-rule-2026-08');
   });
 });
 

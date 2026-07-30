@@ -11,6 +11,7 @@ import { z } from 'zod';
 import {
   APP_ID,
   CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+  MAX_LEDGER_REVISION,
   SCHEMA_VERSION,
 } from './constants';
 import { counterpartName, counterpartRole } from './adjustment';
@@ -23,7 +24,6 @@ import {
 } from './accountRoles';
 import { isValidIsoDate, isValidIsoMonth } from './calendar';
 import { CATCH_UP_HARD_CAP_MONTHS, isRecurringPostableRole } from './recurring';
-import { RECOVERY_DESTINATION_ROLES } from './monthlyCost';
 
 const isoDate = z
   .string()
@@ -287,7 +287,7 @@ export const ledgerExportPackageSchema = z
     exportedAt: isoDateTime,
     deviceId: z.string().min(1),
     // foundation 封筒の revision（楽観的衝突検出）。v2 では必須（無いファイルは取り込まない）。
-    revision: z.number().int().nonnegative(),
+    revision: z.number().int().nonnegative().max(MAX_LEDGER_REVISION),
     accounts: z.array(accountSchema),
     journalEntries: z.array(journalEntrySchema),
     cashflowSchedules: z.array(cashflowScheduleSchema),
@@ -524,7 +524,7 @@ export const ledgerExportPackageSchema = z
       // ⑨ 回収の振替は 貸方 = 台帳 かつ monthlyCostId 必須（回収額の上限は設けない＝
       //    割り振る総額が負になってよい。作者決定 2026-07-29）。
       //    借方は台帳自身を禁止（自己振替は回収集計だけを動かし「台帳残高 = 残存価値」を壊す）、
-      //    振替先はアーカイブ UI と同じ role に限定、日付は購入（item.startDate）以降
+      //    振替先は簿記編集と同じく内部集約・残高調整以外の全 role、日付は購入（item.startDate）以降
       //    （購入前の期間に台帳が負になる断面を作らない。監査 P1-1）。
       if (isRecovery) {
         if (mcId === undefined) {
@@ -552,9 +552,9 @@ export const ledgerExportPackageSchema = z
           const debitRole = debitLine
             ? (accountRole.get(debitLine.accountId) as AccountRole | undefined)
             : undefined;
-          if (debitRole === undefined || !RECOVERY_DESTINATION_ROLES.includes(debitRole)) {
+          if (!isRecurringPostableRole(debitRole)) {
             issue(
-              `回収の振替「${e.description}」の振替先は日常資産または負債である必要があります`,
+              `回収の振替「${e.description}」の振替先は内部集約・残高調整以外の科目である必要があります`,
               ['journalEntries', ei, 'lines'],
             );
           }

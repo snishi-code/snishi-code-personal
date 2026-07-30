@@ -9,6 +9,7 @@ import './setup';
 import { deriveProfitAndLoss } from '../src/domain/accounting';
 import {
   expenseCategoryBreakdownForRange,
+  isNormalExpenseEntry,
   livingCostBreakdownForRange,
 } from '../src/domain/livingCost';
 import { monthlyCostForMonth } from '../src/domain/monthlyCost';
@@ -106,6 +107,28 @@ describe('生活コストの二重計上防止（PL 費用の構成）', () => {
     expect(living.normalExpense).toBe(1024);
     expect(categories.find((row) => row.account.id === 'adjustExpense')?.amount).toBe(24);
     expect(categories.reduce((sum, row) => sum + row.amount, 0)).toBe(pl.totalExpense);
+  });
+
+  it('通常支出フィルタは費用借方の実仕訳・補正だけを残し、継続コスト認識・収入・振替を除く', () => {
+    const accountById = new Map(accounts.map((account) => [account.id, account] as const));
+    const normal = entry('normal', '2031-07-03', 'food', 'cash', 1000);
+    const adjustment = entry('adjustment', '2031-07-04', 'adjustExpense', 'cash', 24);
+    const recognition: JournalEntry = {
+      ...entry('recognition', '2031-07-05', 'food', 'continuing', 500),
+      metadata: {
+        virtual: true,
+        continuousCostId: 'cc-1',
+        ccKind: 'recognition',
+      },
+    };
+    const income = entry('income', '2031-07-06', 'cash', 'income', 3000);
+    const transfer = entry('transfer', '2031-07-07', 'res', 'cash', 2000);
+
+    expect(
+      [normal, adjustment, recognition, income, transfer]
+        .filter((candidate) => isNormalExpenseEntry(candidate, accountById))
+        .map((candidate) => candidate.id),
+    ).toEqual(['normal', 'adjustment']);
   });
 
   it('残高調整収入を通常収入へ含め、収入合計と内訳が PL と一致する', () => {

@@ -13,19 +13,17 @@ import {
   createRecurringRule,
   deleteAccount,
   loadLedger,
+  replaceLedger,
+  resetAll,
   upsertAccount,
   upsertEntry,
   upsertMonthlyCost,
   upsertRecurringRule,
   upsertTag,
 } from '../src/data/repository';
-import {
-  buildExportPackage,
-  exportToJsonText,
-  importFromJsonText,
-} from '../src/data/exportImport';
+import { buildExportPackage, exportToJsonText, importFromJsonText } from '../src/data/exportImport';
 import { getAll, getKv, putKv, putRecord, wipeDatabase, STORE } from '../src/data/db';
-import { DB_NAME } from '../src/data/constants';
+import { DB_NAME, MAX_LEDGER_REVISION } from '../src/data/constants';
 import { buildSimpleEntry } from '../src/domain/entry';
 import { ledgerExportPackageSchema, recurringRuleSchema } from '../src/domain/schema';
 import {
@@ -99,12 +97,12 @@ describe('P1-1: 回収の振替の形（借方 ≠ 台帳・振替先 role・日
     expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(false);
   });
 
-  it('振替先が許可 role 以外（費用カテゴリ）の回収は import で拒否する', async () => {
+  it('振替先が費用カテゴリの回収も import で受理する', async () => {
     const pkg = clonePkg(await seededRecoveryPkg());
     const expense = pkg.accounts.find((a) => a.name === '変動費')!;
     const recovery = pkg.journalEntries.find((e) => e.metadata?.monthlyCostRecovery === true)!;
     recovery.lines.find((l) => l.side === 'debit')!.accountId = expense.id;
-    expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(false);
+    expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(true);
   });
 
   it('開始日（購入の仕訳の日付）より前の回収は import で拒否する', async () => {
@@ -117,9 +115,7 @@ describe('P1-1: 回収の振替の形（借方 ≠ 台帳・振替先 role・日
   it('保存境界: 回収の日付を開始日より前へ編集できない', async () => {
     await seededRecoveryPkg();
     const ledger = await loadLedger();
-    const recovery = ledger.journalEntries.find(
-      (e) => e.metadata?.monthlyCostRecovery === true,
-    )!;
+    const recovery = ledger.journalEntries.find((e) => e.metadata?.monthlyCostRecovery === true)!;
     await expect(upsertEntry({ ...recovery, date: '2026-01-09' })).rejects.toMatchObject({
       code: 'error.monthlyCost.recoveryBeforeStart',
     });
@@ -510,6 +506,90 @@ describe('再監査対応: import は全置換後に revision を必ず進める
     const forced = await importFromJsonText(text, { force: true });
     expect(forced.kind).toBe('ok');
   });
+
+  it('事前snapshot後に別操作が保存されたら、全置換をCASで拒否して更新を残す', async () => {
+    const snapshot = await loadLedger();
+    await upsertTag({
+      id: 'tag-after-snapshot',
+      name: 'snapshot後の更新',
+      scope: 'entry',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+
+    await expect(
+      replaceLedger(
+        {
+          meta: snapshot.meta,
+          settings: snapshot.settings,
+          accounts: snapshot.accounts,
+          journalEntries: snapshot.journalEntries,
+          cashflowSchedules: snapshot.cashflowSchedules,
+          tags: snapshot.tags,
+          monthlyCostItems: snapshot.monthlyCostItems,
+          recurringRules: snapshot.recurringRules,
+        },
+        { deviceId: snapshot.meta.deviceId, revision: snapshot.meta.revision },
+      ),
+    ).rejects.toMatchObject({ code: 'error.common.staleData' });
+
+    expect((await loadLedger()).tags.some((tag) => tag.id === 'tag-after-snapshot')).toBe(true);
+  });
+
+  it('全初期化で revision が同値へ戻っても、deviceId の世代差で古い全置換を拒否する', async () => {
+    const beforeReset = await loadLedger();
+    await resetAll();
+    const afterReset = await loadLedger();
+    expect(afterReset.meta.deviceId).not.toBe(beforeReset.meta.deviceId);
+
+    await expect(
+      replaceLedger(
+        {
+          meta: beforeReset.meta,
+          settings: beforeReset.settings,
+          accounts: beforeReset.accounts,
+          journalEntries: beforeReset.journalEntries,
+          cashflowSchedules: beforeReset.cashflowSchedules,
+          tags: beforeReset.tags,
+          monthlyCostItems: beforeReset.monthlyCostItems,
+          recurringRules: beforeReset.recurringRules,
+        },
+        { deviceId: beforeReset.meta.deviceId, revision: beforeReset.meta.revision },
+      ),
+    ).rejects.toMatchObject({ code: 'error.common.staleData' });
+
+    expect((await loadLedger()).meta.deviceId).toBe(afterReset.meta.deviceId);
+  });
+
+  it('revision 上限では unsafe integer を保存せず fail-closed に止める', async () => {
+    const ledger = await loadLedger();
+    await putKv('meta', { ...ledger.meta, revision: MAX_LEDGER_REVISION });
+    _resetRepositoryStateForTests();
+    await loadLedger();
+
+    await expect(
+      upsertTag({
+        id: 'tag-overflow',
+        name: '上限',
+        scope: 'entry',
+        archived: false,
+        createdAt: 'x',
+        updatedAt: 'x',
+      }),
+    ).rejects.toMatchObject({ code: 'error.common.revisionExhausted' });
+    expect(await getAll(STORE.tags)).toHaveLength(0);
+  });
+
+  it('safe integer を超える封筒 revision は schema で拒否する', async () => {
+    const pkg = buildExportPackage(await loadLedger());
+    expect(
+      ledgerExportPackageSchema.safeParse({
+        ...pkg,
+        revision: MAX_LEDGER_REVISION + 1,
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe('再監査対応: 起動時 catch-up（loadLedger 前）でも CAS の基準を確定する', () => {
@@ -529,6 +609,66 @@ describe('再監査対応: 起動時 catch-up（loadLedger 前）でも CAS の�
         updatedAt: 'x',
       }),
     ).rejects.toMatchObject({ code: 'error.common.staleData' });
+  });
+});
+
+describe('再監査対応: 同一タブの変更操作を事前読込から直列化する', () => {
+  it('同時に開始した2保存を順に検証・保存し、後続を stale tracker へ乗せ替えない', async () => {
+    const before = await loadLedger();
+    const results = await Promise.allSettled([
+      upsertTag({
+        id: 'tag-serial-a',
+        name: '直列A',
+        scope: 'entry',
+        archived: false,
+        createdAt: 'x',
+        updatedAt: 'x',
+      }),
+      upsertTag({
+        id: 'tag-serial-b',
+        name: '直列B',
+        scope: 'entry',
+        archived: false,
+        createdAt: 'x',
+        updatedAt: 'x',
+      }),
+    ]);
+
+    expect(results.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
+    const after = await loadLedger();
+    expect(after.meta.revision).toBe(before.meta.revision + 2);
+    expect(after.tags.map((tag) => tag.id).sort()).toEqual(['tag-serial-a', 'tag-serial-b']);
+  });
+
+  it('同名タグの同時作成は先行結果を見て再検証し、後続だけを拒否する', async () => {
+    const before = await loadLedger();
+    const results = await Promise.allSettled([
+      upsertTag({
+        id: 'tag-same-name-a',
+        name: '同時作成',
+        scope: 'entry',
+        archived: false,
+        createdAt: 'x',
+        updatedAt: 'x',
+      }),
+      upsertTag({
+        id: 'tag-same-name-b',
+        name: '同時作成',
+        scope: 'entry',
+        archived: false,
+        createdAt: 'x',
+        updatedAt: 'x',
+      }),
+    ]);
+
+    expect(results[0]?.status).toBe('fulfilled');
+    expect(results[1]).toMatchObject({
+      status: 'rejected',
+      reason: { code: 'error.tag.duplicateName' },
+    });
+    const after = await loadLedger();
+    expect(after.meta.revision).toBe(before.meta.revision + 1);
+    expect(after.tags.filter((tag) => tag.name === '同時作成')).toHaveLength(1);
   });
 });
 

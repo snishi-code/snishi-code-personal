@@ -29,6 +29,12 @@ export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
  */
 export const SCHEMA_VERSION = 5 as const;
 
+/**
+ * revision は JSON / IndexedDB の双方で安全な整数だけを扱う。
+ * 上限到達時は黙って丸めず、保存境界で fail-closed に停止する。
+ */
+export const MAX_LEDGER_REVISION = Number.MAX_SAFE_INTEGER;
+
 /** localStorage 等のキー接頭辞（ポインタ/フラグ用。v1 の 'simple-ledger' 系と分離）。 */
 export const LOCAL_PREFIX = 'slv2.' as const;
 

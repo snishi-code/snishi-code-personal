@@ -136,7 +136,7 @@ import では strip される）。
     **`date === item.startDate`（日レベル）**。
   - **台帳に触れる保存仕訳は必ず `monthlyCostId` を持つ**（購入の仕訳 / 回収の振替の 2 種類だけ）。
   - 回収の振替は貸方 = 台帳・**借方 ≠ 台帳（自己振替禁止）**・借方 role は
-    `RECOVERY_DESTINATION_ROLES`（日常資産・負債）・**`date >= item.startDate`**
+    `RECURRING_POSTABLE_ROLES`（内部集約・残高調整以外の全 role）・**`date >= item.startDate`**
     （回収額の上限は設けない＝割り振る総額が負になってよい）。
   - `endDate?` は `>= startDate`・配分月数 ≤ 1200 ヶ月。`expenseAccountId` は内部集約・残高調整
     以外（`isRecurringPostableRole`）。
@@ -155,7 +155,20 @@ import では strip される）。
 
 本体の変更と `meta.revision` の +1 は **同一 IndexedDB トランザクション** で行う
 （`repository.writeWithRevision`）。途中失敗で「本体だけ変わって revision が進まない」状態を
-作らない。
+作らない。CAS は revision 単独ではなく **`deviceId + revision`** を台帳世代として照合する。
+全初期化で revision が 0 に戻っても deviceId が変わるため、初期化前のタブからの古い保存は
+通らない。revision は safe integer に限定し、上限では丸めず保存全体を中断する。
+
+同一タブの変更 API は、事前読込から保存完了までリポジトリ境界で直列化する。操作開始時の
+`deviceId + revision` を固定するため、二重操作の途中で別の保存や import が tracker を進めても、
+古い検証結果を新 revision へ乗せ替えない。
+
+export / import前スナップショットに使う台帳全体は、meta と全本体 store を **単一 readonly
+transaction** で読み、別タブの複数 store 書込みと交差した中間状態を作らない。
+スナップショット保存も、読取り時の `deviceId + revision` と現在の meta を `kv` +
+`snapshots` の同一 transaction で照合してから行う。全初期化と競合した場合は保存を中断し、
+初期化後へ旧世代のスナップショットを復活させない（スナップショット保存自体は revision を
+進めない）。
 
 ## import ポリシー（fail-closed）
 
@@ -172,6 +185,10 @@ import では strip される）。
    → `revision-conflict`。**自動上書きしない・自動マージしない**。
 5. **import 前スナップショット** … 現状を `snapshots` に保存。
 6. **原子的置換** … 全ストアを 1 トランザクションで置換（成功確認前に既存を壊さない）。
+
+step 4 で見た `deviceId + revision` は step 5 の保存 transaction でも再照合し、その後の
+置換 transaction まで固定する。確認後に別タブが保存・全初期化した場合は force なしで新状態を
+上書きせず、中断する。force 時も step 5 のスナップショット時点を置換 CAS の基準にする。
 
 復元（`restoreFromSnapshot`）も同様に、復元前スナップショットを取ってから原子的に置換する。
 `schemaVersion` 不一致のスナップショットは復元不可で、起動時に自動削除される（版上げ直後に

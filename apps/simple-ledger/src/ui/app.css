@@ -121,12 +121,13 @@
   font-weight: 700;
   background: var(--bg);
 }
-/* 資産内訳の枠（自由に動かせるお金 / 自由に動かせないお金 / 投資）の見出しと小計 */
+/* 資産・負債内訳の枠見出し。色は accountBoxes.ts が --account-accent を選ぶ。 */
 .stmt-row--frame {
   font-size: 12px;
   font-weight: 700;
   color: var(--muted);
   background: var(--bg);
+  border-left: 4px solid var(--account-accent, var(--border));
 }
 .stmt-row--subtotal {
   font-weight: 600;
@@ -166,42 +167,15 @@
   }
 }
 
-/* ── 財務諸表の左右対照レイアウト ── */
-.fs-cols {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-3);
-  align-items: start;
-}
-@media (max-width: 560px) {
-  .fs-cols {
-    grid-template-columns: 1fr;
-  }
-}
-.fs-col__head {
+/* ── 勘定科目の箱見出し ── */
+.account-box__head {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  font-weight: 700;
-  font-size: 14px;
-  padding: var(--space-2) var(--space-3);
-  border-left: 4px solid var(--fs-accent, var(--border));
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-left: var(--space-2);
+  border-left: 4px solid var(--account-accent, var(--border));
   margin-bottom: var(--space-2);
-}
-.fs-col--asset {
-  --fs-accent: var(--fs-asset);
-}
-.fs-col--liability {
-  --fs-accent: var(--fs-liability);
-}
-.fs-col--equity {
-  --fs-accent: var(--fs-equity);
-}
-.fs-col--revenue {
-  --fs-accent: var(--fs-revenue);
-}
-.fs-col--expense {
-  --fs-accent: var(--fs-expense);
 }
 
 /* ── 期間選択コントロール ── */
@@ -360,6 +334,8 @@
   font-size: 12px;
   color: var(--muted);
   margin: var(--space-2) 0 var(--space-1);
+  padding-left: var(--space-2);
+  border-left: 4px solid var(--account-accent, var(--border));
 }
 .picker__chips {
   display: flex;
@@ -430,8 +406,8 @@
   font-weight: 600;
 }
 .filter-chip button {
-  min-width: 28px;
-  min-height: 28px;
+  min-width: var(--tap);
+  min-height: var(--tap);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -518,6 +494,19 @@ button.stmt-row:hover {
 .tag--teal {
   color: var(--primary-strong);
   background: var(--primary-light);
+}
+.tag--asset-muted {
+  color: var(--account-asset-muted-text);
+  background: var(--account-asset-muted-bg);
+  border-color: var(--account-asset-muted-border);
+}
+.account-list__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: normal;
+  overflow: visible;
 }
 
 /* ── misc ── */

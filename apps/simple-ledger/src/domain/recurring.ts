@@ -235,6 +235,10 @@ export function recurringProjectionEntries(
           inputMode,
           recurringRuleId: rule.id,
           recurringMonth: posting.month,
+          // 月割りルールの投影購入行も、同じ投影から生まれる費用行と同じ
+          // ephemeral item ID を持たせる。仕訳一覧では両方を「継続コスト」と表示する。
+          // virtual 行だけの印であり、保存境界の continuousCostId 拒否は維持する。
+          ...(spread ? { continuousCostId: `${rule.id}-${posting.month}` } : {}),
         },
         createdAt: rule.createdAt,
         updatedAt: rule.updatedAt,

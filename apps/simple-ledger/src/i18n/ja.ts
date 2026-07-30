@@ -286,6 +286,8 @@ export const ja = {
   'journal.reversalTag': '取消/返金',
   'journal.filteredByAccount': '「{name}」で絞り込み中',
   'journal.clearAccountFilter': '科目の絞り込みを解除',
+  'journal.filteredByNormalExpense': '通常支出のみ',
+  'journal.clearNormalExpenseFilter': '通常支出の絞り込みを解除',
   'journal.showFuture': '将来予定も表示',
 
   // 期間フィルタの選択肢ラベル（タグ画面などで再利用）。
@@ -522,6 +524,8 @@ export const ja = {
     '負債（カード・ローン）で購入した項目は、支払い元・金額・日付を変更できません（自動作成した返済の仕訳と合わなくなるため）。終了はアーカイブ（終了日の設定）を使ってください。',
   'error.common.staleData':
     '別のタブ（またはウィンドウ）でデータが変更されています。ページを再読み込みしてから、もう一度お試しください。',
+  'error.common.revisionExhausted':
+    'データの更新番号が上限に達したため保存できません。JSON バックアップを書き出してから、DB を初期化して読み込み直してください。',
   'error.db.schemaVersionMismatch':
     '保存データのスキーマ版({found})がこのアプリの版({expected})と一致しません。JSON バックアップの読み込み、または「DB を初期化して再起動」で復旧してください。',
 
@@ -555,6 +559,7 @@ export const ja = {
 
   // 「自由に動かせる」チェック（現預金の内訳のみ・既定 ON。OFF = 資金繰りの原資に数えない）
   'accounts.movable': '自由に動かせる',
+  'accounts.notMovable': '自由に動かせない',
 
   // 返済設定（負債の勘定科目）と資金繰りの返済予定
   'accounts.repaymentAccount': '返済口座',
@@ -595,7 +600,6 @@ export const ja = {
     '支払日に実際の仕訳として自動で記帳されます（アプリを開いたときにまとめて起票）。金額が変わった月は、できた仕訳をその月だけ編集してください。',
   'recurring.createTitle': '定期ルールを追加',
   'recurring.editTitle': '定期ルールを編集',
-  'recurring.kindLabel': '種別',
   'recurring.kind.expense': '支出（定期の支払い）',
   'recurring.kind.income': '収入（給与など）',
   'recurring.kind.transfer': '振替（積立など）',
@@ -608,12 +612,6 @@ export const ja = {
   'recurring.firstPostingDate': '初回の起票日',
   'recurring.refBroken':
     '参照している科目が削除またはアーカイブされています。このルールの起票は止まっています（編集で科目を選び直してください）。',
-  'recurring.from.expense': '支払い元',
-  'recurring.to.expense': '費用カテゴリ',
-  'recurring.from.income': '収入カテゴリ',
-  'recurring.to.income': '受け取り口座',
-  'recurring.from.transfer': '移動元',
-  'recurring.to.transfer': '移動先（資金・投資）',
   'recurring.from.manual': '貸方（支払い元・減る側）',
   'recurring.to.manual': '借方（増える・使う側）',
   'recurring.manualHint':

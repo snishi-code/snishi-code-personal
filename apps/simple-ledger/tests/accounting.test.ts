@@ -117,6 +117,12 @@ describe('deriveBalanceSheet', () => {
     expect(bs.totalAssets).toBe(100_000); // open のみ
     expect(bs.balanced).toBe(true);
   });
+  it('入力配列の順序ではなく、科目の sortIndex 順で残高行を返す', () => {
+    const first = { ...cash, id: 'first', name: '先', sortIndex: 1 };
+    const second = { ...cash, id: 'second', name: '後', sortIndex: 2 };
+    const bs = deriveBalanceSheet([second, first], []);
+    expect(bs.assets.map((row) => row.account.id)).toEqual(['first', 'second']);
+  });
 });
 
 describe('monthRange', () => {

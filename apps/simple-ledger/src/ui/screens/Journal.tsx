@@ -19,12 +19,14 @@ import { entryHasTag } from '../../domain/tags';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
 import { reportEntriesForAsOf } from '../../domain/reportEntries';
 import { periodRange, type ReportPeriod } from '../../domain/reportPeriod';
+import { isNormalExpenseEntry } from '../../domain/livingCost';
 import { tagNames } from '../tagOptions';
 import type { AllocationsTarget } from './Allocations';
 import type { Account, JournalEntry } from '../../domain/types';
 
 export interface JournalFilter {
   accountId?: string;
+  expenseKind?: 'normal';
   from?: string;
   to?: string;
 }
@@ -42,7 +44,7 @@ export function Journal({
   onOpenAllocations,
   filter,
   period,
-  onClearAccountFilter,
+  onClearFilter,
 }: {
   onEditEntry: (entry: JournalEntry) => void;
   onReverse: (entry: JournalEntry) => void;
@@ -50,7 +52,7 @@ export function Journal({
   onOpenAllocations: (target: AllocationsTarget) => void;
   filter: JournalFilter | null;
   period: ReportPeriod;
-  onClearAccountFilter: () => void;
+  onClearFilter: () => void;
 }) {
   const { ledger, removeEntry, deleteOpening, deleteAdjustment } = useLedger();
   const [query, setQuery] = useState('');
@@ -92,6 +94,7 @@ export function Journal({
   }, [period]);
 
   const accountFilterId = filter?.accountId;
+  const normalExpenseOnly = filter?.expenseKind === 'normal';
   const map = useMemo(() => new Map((ledger?.accounts ?? []).map((a) => [a.id, a])), [ledger]);
   const currency = ledger?.settings.currency ?? 'JPY';
   const filterAccount = accountFilterId ? map.get(accountFilterId) : undefined;
@@ -124,6 +127,7 @@ export function Journal({
     const q = query.trim().toLowerCase();
     return source.filter((e) => {
       if (accountFilterId && !e.lines.some((l) => l.accountId === accountFilterId)) return false;
+      if (normalExpenseOnly && !isNormalExpenseEntry(e, map)) return false;
       if (tagFilter && !entryHasTag(e, tagFilter)) return false;
       if (from && e.date < from) return false;
       if (to && e.date > to) return false;
@@ -137,7 +141,7 @@ export function Journal({
       }
       return true;
     });
-  }, [source, query, from, to, accountFilterId, tagFilter, map]);
+  }, [source, query, from, to, accountFilterId, normalExpenseOnly, tagFilter, map]);
 
   const hasDateOrQuery = query !== '' || from !== '' || to !== '';
 
@@ -147,19 +151,34 @@ export function Journal({
         {t('journal.title')}
       </h1>
 
-      {filterAccount ? (
+      {filterAccount || normalExpenseOnly ? (
         <div className="toolbar">
-          <span className="filter-chip">
-            {t('journal.filteredByAccount', { name: filterAccount.name })}
-            <button
-              type="button"
-              onClick={onClearAccountFilter}
-              aria-label={t('journal.clearAccountFilter')}
-              data-ui={UI.journal.clearAccountFilter}
-            >
-              <Icon name="close" size={16} />
-            </button>
-          </span>
+          {filterAccount ? (
+            <span className="filter-chip">
+              {t('journal.filteredByAccount', { name: filterAccount.name })}
+              <button
+                type="button"
+                onClick={onClearFilter}
+                aria-label={t('journal.clearAccountFilter')}
+                data-ui={UI.journal.clearAccountFilter}
+              >
+                <Icon name="close" size={16} />
+              </button>
+            </span>
+          ) : null}
+          {normalExpenseOnly ? (
+            <span className="filter-chip">
+              {t('journal.filteredByNormalExpense')}
+              <button
+                type="button"
+                onClick={onClearFilter}
+                aria-label={t('journal.clearNormalExpenseFilter')}
+                data-ui={UI.journal.clearNormalExpenseFilter}
+              >
+                <Icon name="close" size={16} />
+              </button>
+            </span>
+          ) : null}
         </div>
       ) : null}
 

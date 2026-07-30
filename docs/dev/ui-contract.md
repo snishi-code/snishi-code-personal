@@ -21,12 +21,13 @@
 | `dashboard.stat.assets` / `.liabilities` / `.netAssets` | ホーム財政状態の項目別ボタン | **それぞれ別ページへ**: 資産→資産の内訳 / 負債→負債の内訳 / 純資産→純資産ページ（同じ財務諸表に集約しない） |
 | `incomeBreakdown.view` / `.row` / `.total` | 収入の内訳ルート / 科目行 / 合計 | ホーム「収入」のタップ先（フロー）。行タップで仕訳へドリル。収入の推移つき |
 | `expenseBreakdown.view` | 支出の内訳ルート | ホーム「支出」のタップ先。支出はホーム独立 stat にしない |
-| `expenseBreakdown.normalExpense` / `.monthlyCost` / `.total` | 支出の内訳の項目 | 通常支出 / 継続コスト（タップで継続コスト台帳へ）/ 支出合計。支出の推移つき |
+| `expenseBreakdown.normalExpense` / `.monthlyCost` / `.total` | 支出の内訳の項目 | 通常支出（タップで同期間 + 通常支出フィルタの Journal）/ 継続コスト（タップで継続コスト台帳）/ 支出合計。支出の推移つき |
 | `netIncome.view` / `.revenue` / `.expense` / `.result` | 収支ルート / 収入 / 支出 / 収支 | ホーム「収支」のタップ先。科目別ドリルはせず、月ごとの残り方（収支の推移）を見せる |
 | `assetsBreakdown.view` / `.row` / `.total` | 資産の内訳ルート / 科目行 / 合計 | ホーム「資産」のタップ先（ストック=期間末時点）。行タップで仕訳へドリル。資産の推移つき |
-| `assetsBreakdown.subtotal.free` / `.fixed` / `.investment` | 資産 4 枠の小計行 | 預金など（自由に動かせる現預金）/ 自由に動かせないやつ（movable OFF）/ 投資 |
+| `assetsBreakdown.frame.<free/fixed/investment/ledger>` / `assetsBreakdown.subtotal.<free/fixed/investment/ledger>` | 資産 4 枠の見出し / 小計行 | 預金など（自由に動かせる現預金）/ 自由に動かせないやつ（movable OFF）/ 投資 / 継続コスト台帳 |
 | `assetsBreakdown.ledgerRow` | 継続コスト台帳の 1 行 | 残存価値の合計。タップで「毎月のもの」へ（内訳は台帳画面） |
 | `liabilitiesBreakdown.view` / `.row` / `.total` / `.cashflowLink` | 負債の内訳ルート / 科目行 / 合計 / CF導線 | ホーム「負債」のタップ先（ストック）。`cashflowLink` で資金繰り・返済計画へ |
+| `liabilitiesBreakdown.frame.<shortTermDebt/longTermDebt>` / `liabilitiesBreakdown.subtotal.<shortTermDebt/longTermDebt>` | 負債 2 枠の見出し / 小計行 | カード・未払 / ローン。空の枠は表示しない |
 | `netAssets.view` / `.row` / `.total` | 純資産ルート / 元手の科目行 / 合計 | ホーム「純資産」のタップ先（ストック）。元手 + 今期の損益 + 純資産の推移 |
 | `dashboard.journal.preview` / `dashboard.journal.openAll` | ホーム下部「期間内の仕訳」 | プレビュー / すべて見る（期間フィルタ） |
 | `period.date.trigger` | ヘッダー中央の表示日チップ | 透明な date input を重ねた 1 タップ選択（ポップアップのピッカーは経由しない） |
@@ -39,6 +40,7 @@
 | `journal.entry.list` | Journal 一覧 | 保存される仕訳 + 計算で生まれる仕訳（継続コスト資産の費用行・ルール投影）を日付順で混合表示。計算で生まれた行のタップは「毎月のもの」の元の項目/ルールへ遷移 |
 | `journal.search` | Journal 検索入力 | 検索 |
 | `journal.filter.clearAccount` | 科目絞り込み解除 | ドリルダウン解除 |
+| `journal.filter.clearNormalExpense` | 通常支出絞り込み解除 | 支出内訳からの通常支出ドリルダウン解除 |
 | `journal.entry.save` | Entry シート保存 | 保存 |
 | `journal.entry.cancel` | Entry シートキャンセル | キャンセル |
 | `journal.entry.delete` | Journal 行の削除 | 削除 |
@@ -65,8 +67,8 @@
 | `journal.entry.memo` | Entry メモ | メモ入力 |
 | `allocations.view` | 毎月のもの ルート | 画面の検出（screen 名は歴史的に allocations） |
 | `allocations.add` / `allocations.add.chooser` | 追加ボタン / 2択チューザー | `.rule` = くり返し記帳 / `.asset` = 継続コスト資産の持ち込み |
-| `allocations.recurring.every` | ルールシートの周期（か月） | 種別=支出は周期にかかわらず常に月割り（トグル無し） |
-| `allocations.recurring.manualSpread` | 簿記編集の「継続コストとして扱う」チェック | ON で任意の科目ペアを月割りに（費用の行き先 = 借方に選んだ科目） |
+| `allocations.recurring.from` / `.to` / `.every` | ルールシートの貸方 / 借方 / 周期（か月） | 独自の種別は置かず、通常の全会計区分から「貸方→借方」を登録 |
+| `allocations.recurring.manualSpread` | 「継続コストとして扱う」チェック | 全ルールに表示・既定 OFF。ON のときだけ周期分を月割り（費用の行き先 = 借方） |
 | `allocations.list` / `allocations.item` | 継続コスト資産の一覧 / 1 項目カード | 終了が近い順。`data-ending="true"` = 終了まで1ヶ月以内（背景色変更） |
 | `allocations.showCompleted` | 終了分も表示トグル | 終了日を過ぎた項目（アーカイブ済み）の表示切替 |
 | `allocations.editDialog` | 継続コスト資産シート（登録＝編集） | `edit.name` / `edit.amount` / `edit.startDate`（編集時は読み取り専用 + `edit.openPurchase` で購入の仕訳へ）/ `edit.endDate` + `edit.quickSpan` / `edit.expense` / `edit.save` |
@@ -85,6 +87,8 @@
 | `accounts.create` | 科目追加ボタン | 追加起動 |
 | `accounts.save` | 科目シート保存 | 保存 |
 | `accounts.list` | 科目一覧 | 一覧（「補正・勘定科目」内に embedded で統合） |
+| `accounts.box.<cash/investment/shortTermDebt/longTermDebt/income/expense>` | 科目箱の見出し | 会計区分ごとの意味色 |
+| `accounts.notMovableBadge` | 現預金科目のバッジ | `movable=false`（自由に動かせない）を一覧で表示 |
 | `accounts.type` | 科目シートの区分セレクト | type 選択 |
 | `accounts.role` | 科目シートの役割セレクト | role 選択 |
 | `accounts.adjust` | 各 BS 科目行の「補正」ボタン | 科目選択済みの補正ダイアログを開く（embedded 時） |

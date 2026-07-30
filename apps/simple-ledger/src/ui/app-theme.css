@@ -20,10 +20,24 @@
   --pos: #0f766e; /* teal-700（白地で 4.9:1） */
   --neg: #dc2626;
 
-  /* 財務諸表の区分色（意味づけ。既存トークンを参照） */
-  --fs-asset: var(--primary);
-  --fs-liability: var(--warning);
-  --fs-equity: var(--muted);
-  --fs-revenue: var(--primary);
-  --fs-expense: var(--danger);
+  /* 会計区分の意味色。面では塗らず、見出しの細い罫線と小さなバッジに使う。 */
+  --fs-asset: #2563eb; /* blue-600 */
+  --fs-liability: #dc2626; /* red-600 */
+  --fs-equity: #64748b; /* slate-500 */
+  --fs-revenue: #15803d; /* green-700 */
+  --fs-expense: #d97706; /* amber-600 */
+
+  /* 科目の箱・資産/負債内訳枠。自由/不自由は同じ青系の濃淡にする。 */
+  --account-asset-free: var(--fs-asset);
+  --account-asset-fixed: #3b82f6; /* blue-500（背景との非テキストコントラスト 3:1 以上） */
+  --account-investment: #4f46e5; /* indigo-600 */
+  --account-continuing-cost: #0f766e; /* teal-700 */
+  --account-liability-short: var(--fs-liability);
+  --account-liability-long: #991b1b; /* red-800 */
+  --account-income: var(--fs-revenue);
+  --account-expense: var(--fs-expense);
+  --account-equity: var(--fs-equity);
+  --account-asset-muted-bg: #eff6ff; /* blue-50 */
+  --account-asset-muted-border: #93c5fd; /* blue-300 */
+  --account-asset-muted-text: #1e40af; /* blue-800 */
 }

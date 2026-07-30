@@ -29,9 +29,29 @@ export type AccountBoxKey =
   | 'income'
   | 'expense';
 
+/**
+ * 科目の箱・内訳枠で共有する色の正本。
+ * 色値そのものは app-theme.css に置き、UI はここで選ばれた CSS 変数だけを参照する。
+ */
+export const ACCOUNT_ACCENTS = {
+  assetFree: 'var(--account-asset-free)',
+  assetFixed: 'var(--account-asset-fixed)',
+  investment: 'var(--account-investment)',
+  continuingCost: 'var(--account-continuing-cost)',
+  shortTermDebt: 'var(--account-liability-short)',
+  longTermDebt: 'var(--account-liability-long)',
+  income: 'var(--account-income)',
+  expense: 'var(--account-expense)',
+  equity: 'var(--account-equity)',
+} as const;
+
+export type AccountAccent = (typeof ACCOUNT_ACCENTS)[keyof typeof ACCOUNT_ACCENTS];
+
 export interface AccountBox {
   key: AccountBoxKey;
   labelKey: MessageKey;
+  /** 箱見出し・ピッカー見出し・内訳枠で共有するアクセント。 */
+  accent: AccountAccent;
   /** この箱に属する role。 */
   roles: readonly AccountRole[];
   /** 箱に対応する会計 type（残高の符号・初期残高の向きに使う）。 */
@@ -52,6 +72,7 @@ export const ACCOUNT_BOXES: readonly AccountBox[] = [
   {
     key: 'cash',
     labelKey: 'box.cash',
+    accent: ACCOUNT_ACCENTS.assetFree,
     roles: ['daily-asset'],
     type: 'asset',
     createRole: 'daily-asset',
@@ -61,6 +82,7 @@ export const ACCOUNT_BOXES: readonly AccountBox[] = [
   {
     key: 'investment',
     labelKey: 'box.investment',
+    accent: ACCOUNT_ACCENTS.investment,
     roles: ['investment-asset'],
     type: 'asset',
     createRole: 'investment-asset',
@@ -70,6 +92,7 @@ export const ACCOUNT_BOXES: readonly AccountBox[] = [
   {
     key: 'shortTermDebt',
     labelKey: 'box.shortTermDebt',
+    accent: ACCOUNT_ACCENTS.shortTermDebt,
     roles: ['payment-liability'],
     type: 'liability',
     createRole: 'payment-liability',
@@ -79,6 +102,7 @@ export const ACCOUNT_BOXES: readonly AccountBox[] = [
   {
     key: 'longTermDebt',
     labelKey: 'box.longTermDebt',
+    accent: ACCOUNT_ACCENTS.longTermDebt,
     roles: ['other-liability'],
     type: 'liability',
     createRole: 'other-liability',
@@ -89,6 +113,7 @@ export const ACCOUNT_BOXES: readonly AccountBox[] = [
   {
     key: 'income',
     labelKey: 'box.income',
+    accent: ACCOUNT_ACCENTS.income,
     roles: ['income-category'],
     type: 'revenue',
     createRole: 'income-category',
@@ -98,6 +123,7 @@ export const ACCOUNT_BOXES: readonly AccountBox[] = [
   {
     key: 'expense',
     labelKey: 'box.expense',
+    accent: ACCOUNT_ACCENTS.expense,
     roles: ['expense-category'],
     type: 'expense',
     createRole: 'expense-category',
@@ -119,6 +145,21 @@ export function boxByKey(key: AccountBoxKey): AccountBox {
   const box = ACCOUNT_BOXES.find((b) => b.key === key);
   if (!box) throw new Error(`unknown account box: ${key}`);
   return box;
+}
+
+/**
+ * ピッカー等で内部科目も含めて色を付けるためのフォールバック。
+ * 日常資産の movable は行/内訳枠で表すため、科目種別グループの見出しは同じ青系に揃える。
+ */
+export function accountAccent(account: Account): AccountAccent {
+  const box = boxForRole(account.role);
+  if (box) return box.accent;
+  if (account.role === 'continuing-cost-asset') return ACCOUNT_ACCENTS.continuingCost;
+  if (account.type === 'asset') return ACCOUNT_ACCENTS.assetFree;
+  if (account.type === 'liability') return ACCOUNT_ACCENTS.shortTermDebt;
+  if (account.type === 'revenue') return ACCOUNT_ACCENTS.income;
+  if (account.type === 'expense') return ACCOUNT_ACCENTS.expense;
+  return ACCOUNT_ACCENTS.equity;
 }
 
 /**

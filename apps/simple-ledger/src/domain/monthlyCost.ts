@@ -17,19 +17,7 @@
  *    絶対に書き換えない（購入の仕訳とのミラーが壊れる）。
  */
 import { addMonths, addMonthsToDate, monthlyAmounts, monthOf, monthsBetween } from './allocation';
-import type { AccountRole } from './accountRoles';
 import type { MonthlyCostItem } from './types';
-
-/**
- * 回収の振替の借方（振替先）に使える役割。保存境界（repository）・import 検証（schema）・
- * アーカイブ UI（EntrySheet の固定振替）が同じ正本を参照する。台帳自身への自己振替は
- * 別途禁止（回収集計だけが動いて「台帳残高 = 残存価値」が壊れるため・監査 P1-1）。
- */
-export const RECOVERY_DESTINATION_ROLES: readonly AccountRole[] = [
-  'daily-asset',
-  'payment-liability',
-  'other-liability',
-];
 
 /** 月バケット。終了日が無ければ null（= 配分しない）。 */
 export function recognitionSpan(item: MonthlyCostItem): { from: string; n: number } | null {

@@ -278,7 +278,7 @@ export function App() {
             onOpenAllocations={goAllocationsFor}
             filter={journalFilter}
             period={period}
-            onClearAccountFilter={() => setJournalFilter(null)}
+            onClearFilter={() => setJournalFilter(null)}
           />
         ) : null}
         {screen === 'allocations' ? (

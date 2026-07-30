@@ -34,6 +34,7 @@
       "name": "チャージ残高",
       "type": "asset",
       "role": "daily-asset",
+      "movable": false,
       "archived": false,
       "createdAt": "2026-01-01T00:00:00.000Z",
       "updatedAt": "2026-01-01T00:00:00.000Z"
@@ -485,9 +486,7 @@
       "metadata": {
         "inputMode": "expense"
       },
-      "tagIds": [
-        "tag-work"
-      ],
+      "tagIds": ["tag-work"],
       "createdAt": "2026-01-30T00:00:00.000Z",
       "updatedAt": "2026-01-30T00:00:00.000Z"
     },
@@ -672,9 +671,7 @@
       "metadata": {
         "inputMode": "expense"
       },
-      "tagIds": [
-        "tag-travel"
-      ],
+      "tagIds": ["tag-travel"],
       "createdAt": "2026-03-18T00:00:00.000Z",
       "updatedAt": "2026-03-18T00:00:00.000Z"
     },

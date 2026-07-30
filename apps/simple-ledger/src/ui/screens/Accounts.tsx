@@ -7,7 +7,7 @@
  * - 登録済みの初期残高・補正の履歴はこの画面に置かず、仕訳一覧に委ねる。
  * - 初期残高(equity)・調整用(system-adjustment)・内部集約 role は聖域として表示しない。
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
 import { accountBalance, accountHasEntries, filterByDateRange } from '../../domain/accounting';
@@ -129,7 +129,7 @@ export function Accounts() {
         <button
           type="button"
           className={`btn btn--ghost${reordering ? ' btn--primary' : ''}`}
-          style={{ minHeight: 36 }}
+          style={{ minHeight: 'var(--tap)' }}
           aria-pressed={reordering}
           onClick={() => setReordering((v) => !v)}
           data-ui={UI.accounts.reorderToggle}
@@ -145,7 +145,9 @@ export function Accounts() {
           return (
             <div key={box.key}>
               <div
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                className="account-box__head"
+                style={{ '--account-accent': box.accent } as CSSProperties}
+                data-ui={`${UI.accounts.box}.${box.key}`}
               >
                 <p className="section-label" style={{ marginBottom: 0 }}>
                   {t(box.labelKey)}
@@ -178,11 +180,19 @@ export function Accounts() {
                     return (
                       <li key={account.id} className="list__item">
                         <div className="list__main">
-                          <div className="list__title">
-                            {account.name}{' '}
+                          <div className="list__title account-list__title">
+                            <span>{account.name}</span>
+                            {account.role === 'daily-asset' && account.movable === false ? (
+                              <span
+                                className="tag tag--asset-muted"
+                                data-ui={UI.accounts.notMovableBadge}
+                              >
+                                {t('accounts.notMovable')}
+                              </span>
+                            ) : null}
                             {usedIds.has(account.id) ? (
                               <span className="tag tag--teal">{t('accounts.inUse')}</span>
-                            ) : null}{' '}
+                            ) : null}
                             {account.archived ? (
                               <span className="tag tag--neutral">{t('accounts.archived')}</span>
                             ) : null}
@@ -230,7 +240,7 @@ export function Accounts() {
                               <button
                                 type="button"
                                 className="btn btn--ghost"
-                                style={{ minHeight: 36 }}
+                                style={{ minHeight: 'var(--tap)' }}
                                 onClick={() => setAdjustingAccount(account)}
                                 aria-label={`${t('adjust.rowAction')}: ${account.name}`}
                                 data-ui={UI.accounts.adjust}

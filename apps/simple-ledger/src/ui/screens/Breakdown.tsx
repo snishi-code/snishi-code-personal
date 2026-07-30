@@ -9,7 +9,7 @@
  *  - liability（負債・ストック）: 同上 + 資金繰り/返済計画への導線。
  *  - equity（純資産・ストック）: 元手 + 今期の損益 + 純資産の推移（line）。
  */
-import { Fragment, useMemo } from 'react';
+import { Fragment, useMemo, type CSSProperties } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../../domain/accounting';
@@ -26,6 +26,11 @@ import type { AccountBalance } from '../../domain/types';
 import type { MessageKey } from '../../i18n';
 import type { Screen } from '../navigation';
 import type { JournalFilter } from './Journal';
+import {
+  ACCOUNT_ACCENTS,
+  boxByKey,
+  type AccountAccent,
+} from '../accountBoxes';
 
 export type BreakdownSection = 'revenue' | 'asset' | 'liability' | 'equity';
 
@@ -40,6 +45,16 @@ interface SectionConfig {
   trendKey: MessageKey;
   trendVariant: 'bar' | 'line';
   series: keyof Omit<SectionTrends, 'drillable'>;
+}
+
+interface BreakdownFrame {
+  key: string;
+  labelKey: MessageKey;
+  rows: AccountBalance[];
+  subtotalUi: string;
+  accent: AccountAccent;
+  /** 継続コスト台帳だけは複数科目を見せず、残存価値合計の1行として毎月のものへ遷移する。 */
+  aggregateLedger?: boolean;
 }
 
 const CONFIG: Record<BreakdownSection, SectionConfig> = {
@@ -169,37 +184,62 @@ export function Breakdown({
       ? onDrillDown({ accountId, ...range })
       : onDrillDown({ accountId, to: asOf });
 
-  // 資産セクションの 4 枠。継続コスト台帳は 1 行（= 残存価値合計・タップで「毎月のもの」へ）。
-  const assetFrames =
+  // 資産は4枠、負債はカード/未払とローンの2枠。同じ描画構造と色の正本を共有する。
+  const frames: BreakdownFrame[] | null =
     section === 'asset'
-      ? ([
+      ? [
           {
             key: 'free',
-            labelKey: 'assets.frame.free' as MessageKey,
+            labelKey: 'assets.frame.free',
             rows: rows.filter(
               (b) => b.account.role === 'daily-asset' && b.account.movable !== false,
             ),
             subtotalUi: UI.assetsBreakdown.freeSubtotal,
+            accent: ACCOUNT_ACCENTS.assetFree,
           },
           {
             key: 'fixed',
-            labelKey: 'assets.frame.fixed' as MessageKey,
+            labelKey: 'assets.frame.fixed',
             rows: rows.filter(
               (b) => b.account.role === 'daily-asset' && b.account.movable === false,
             ),
             subtotalUi: UI.assetsBreakdown.fixedSubtotal,
+            accent: ACCOUNT_ACCENTS.assetFixed,
           },
           {
             key: 'investment',
-            labelKey: 'assets.frame.investment' as MessageKey,
+            labelKey: 'assets.frame.investment',
             rows: rows.filter((b) => b.account.role === 'investment-asset'),
             subtotalUi: UI.assetsBreakdown.investmentSubtotal,
+            accent: boxByKey('investment').accent,
           },
-        ] as const)
-      : null;
-  const ledgerRows =
-    section === 'asset' ? rows.filter((b) => b.account.role === 'continuing-cost-asset') : [];
-  const ledgerTotal = ledgerRows.reduce((s, b) => s + b.balance, 0);
+          {
+            key: 'ledger',
+            labelKey: 'assets.frame.ledger',
+            rows: rows.filter((b) => b.account.role === 'continuing-cost-asset'),
+            subtotalUi: UI.assetsBreakdown.ledgerSubtotal,
+            accent: ACCOUNT_ACCENTS.continuingCost,
+            aggregateLedger: true,
+          },
+        ]
+      : section === 'liability'
+        ? [
+            {
+              key: 'shortTermDebt',
+              labelKey: 'box.shortTermDebt',
+              rows: rows.filter((b) => b.account.role === 'payment-liability'),
+              subtotalUi: UI.liabilitiesBreakdown.shortTermSubtotal,
+              accent: boxByKey('shortTermDebt').accent,
+            },
+            {
+              key: 'longTermDebt',
+              labelKey: 'box.longTermDebt',
+              rows: rows.filter((b) => b.account.role === 'other-liability'),
+              subtotalUi: UI.liabilitiesBreakdown.longTermSubtotal,
+              accent: boxByKey('longTermDebt').accent,
+            },
+          ]
+        : null;
 
   return (
     <section aria-labelledby="breakdown-title" data-ui={cfg.view}>
@@ -221,21 +261,44 @@ export function Breakdown({
       <div className="card">
         {rows.length === 0 && retained === undefined ? (
           <div className="stmt-row muted">{t('breakdown.noData')}</div>
-        ) : assetFrames ? (
+        ) : frames ? (
           <>
-            {assetFrames.map((frame) =>
+            {frames.map((frame) =>
               frame.rows.length === 0 ? null : (
                 <Fragment key={frame.key}>
-                  <div className="stmt-row stmt-row--frame">{t(frame.labelKey)}</div>
-                  {frame.rows.map((b) => (
-                    <Row
-                      key={b.account.id}
-                      b={b}
-                      currency={currency}
-                      rowUi={cfg.row}
-                      onDrill={drill}
-                    />
-                  ))}
+                  <div
+                    className="stmt-row stmt-row--frame"
+                    style={{ '--account-accent': frame.accent } as CSSProperties}
+                    data-ui={`${section === 'asset' ? UI.assetsBreakdown.frame : UI.liabilitiesBreakdown.frame}.${frame.key}`}
+                  >
+                    {t(frame.labelKey)}
+                  </div>
+                  {frame.aggregateLedger ? (
+                    <button
+                      type="button"
+                      className="stmt-row"
+                      onClick={() => onNavigate('allocations')}
+                      data-ui={UI.assetsBreakdown.ledgerRow}
+                    >
+                      <span>{t('assets.frame.ledger')}</span>
+                      <span className="stmt-row__num">
+                        <Money
+                          amount={frame.rows.reduce((s, b) => s + b.balance, 0)}
+                          currency={currency}
+                        />
+                      </span>
+                    </button>
+                  ) : (
+                    frame.rows.map((b) => (
+                      <Row
+                        key={b.account.id}
+                        b={b}
+                        currency={currency}
+                        rowUi={cfg.row}
+                        onDrill={drill}
+                      />
+                    ))
+                  )}
                   <div className="stmt-row stmt-row--subtotal" data-ui={frame.subtotalUi}>
                     <span>{t('breakdown.subtotal')}</span>
                     <span className="stmt-row__num">
@@ -248,20 +311,6 @@ export function Breakdown({
                 </Fragment>
               ),
             )}
-            {ledgerRows.length > 0 ? (
-              // 継続コスト台帳は 1 行（残高 = 残存価値合計）。内訳は「毎月のもの」で見る。
-              <button
-                type="button"
-                className="stmt-row"
-                onClick={() => onNavigate('allocations')}
-                data-ui={UI.assetsBreakdown.ledgerRow}
-              >
-                <span>{t('assets.frame.ledger')}</span>
-                <span className="stmt-row__num">
-                  <Money amount={ledgerTotal} currency={currency} />
-                </span>
-              </button>
-            ) : null}
           </>
         ) : (
           rows.map((b) => (

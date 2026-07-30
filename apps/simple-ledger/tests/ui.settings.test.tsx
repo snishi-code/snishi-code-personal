@@ -5,12 +5,9 @@
  */
 import { describe, it, expect } from 'vitest';
 import './setup';
-
-// importErrorMessage はモジュール非公開なので、exportImport を通じて動作を確認する。
-// ここでは Settings の importErrorMessage 関数が storage-error を正しく扱うことを
-// 間接的に検証するため、ImportOutcome 型の各ケースをドキュメントする。
-
 import type { ImportOutcome } from '../src/data/exportImport';
+import { t } from '../src/i18n';
+import { importErrorMessage } from '../src/ui/screens/Settings';
 
 describe('Settings — importErrorMessage カバレッジ確認', () => {
   it('ImportOutcome の全 kind が型として定義されている', () => {
@@ -49,5 +46,18 @@ describe('Settings — importErrorMessage カバレッジ確認', () => {
     expect(outcome.detail).toBeTruthy();
     // v2 では reason enum フィールドがない
     expect('reason' in outcome).toBe(false);
+  });
+
+  it.each(['error.common.staleData', 'error.common.revisionExhausted'] as const)(
+    'storage-error の既知コード %s を利用者向け文言へ変換する',
+    (detail) => {
+      expect(importErrorMessage({ kind: 'storage-error', detail })).toBe(t(detail));
+    },
+  );
+
+  it('storage-error の未知 detail は診断情報としてそのまま表示する', () => {
+    expect(importErrorMessage({ kind: 'storage-error', detail: 'IndexedDB error' })).toBe(
+      'IndexedDB error',
+    );
   });
 });

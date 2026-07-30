@@ -68,6 +68,8 @@ export const UI = {
     freeSubtotal: 'assetsBreakdown.subtotal.free',
     fixedSubtotal: 'assetsBreakdown.subtotal.fixed',
     investmentSubtotal: 'assetsBreakdown.subtotal.investment',
+    ledgerSubtotal: 'assetsBreakdown.subtotal.ledger',
+    frame: 'assetsBreakdown.frame',
     // 継続コスト台帳の 1 行（残存価値合計・タップで「毎月のもの」へ）
     ledgerRow: 'assetsBreakdown.ledgerRow',
   },
@@ -76,6 +78,9 @@ export const UI = {
     view: 'liabilitiesBreakdown.view',
     row: 'liabilitiesBreakdown.row',
     total: 'liabilitiesBreakdown.total',
+    shortTermSubtotal: 'liabilitiesBreakdown.subtotal.shortTermDebt',
+    longTermSubtotal: 'liabilitiesBreakdown.subtotal.longTermDebt',
+    frame: 'liabilitiesBreakdown.frame',
     cashflowLink: 'liabilitiesBreakdown.cashflowLink',
   },
   // 純資産
@@ -89,6 +94,7 @@ export const UI = {
     list: 'journal.entry.list',
     search: 'journal.search',
     clearAccountFilter: 'journal.filter.clearAccount',
+    clearNormalExpenseFilter: 'journal.filter.clearNormalExpense',
     showFuture: 'journal.filter.showFuture',
     filterTag: 'journal.filter.tag',
     entry: {
@@ -133,6 +139,7 @@ export const UI = {
     save: 'accounts.save',
     list: 'accounts.list',
     box: 'accounts.box',
+    notMovableBadge: 'accounts.notMovableBadge',
     adjust: 'accounts.adjust',
     // アーカイブ/解除ボタン。残高が残る資産・負債は振替シート（EntrySheet transfer 再利用）を経由する
     archiveToggle: 'accounts.archiveToggle',
@@ -158,11 +165,10 @@ export const UI = {
     // 統一追加フロー（2択: .rule = くり返し記帳 / .asset = 継続コスト資産の持ち込み）
     unifiedAdd: 'allocations.add',
     addChooser: 'allocations.add.chooser',
-    // 定期ルール（くり返し記帳 = 実仕訳の自動起票。支出は常に月割り・簿記編集はチェックで月割り）
+    // 定期ルール（くり返し記帳 = 実仕訳の自動起票。チェック ON のとき月割り）
     recurringList: 'allocations.recurring.list',
     recurringAdd: 'allocations.recurring.add',
     recurringSheet: 'allocations.recurring.sheet',
-    recurringKind: 'allocations.recurring.kind',
     recurringManualSpread: 'allocations.recurring.manualSpread',
     recurringName: 'allocations.recurring.name',
     recurringAmount: 'allocations.recurring.amount',

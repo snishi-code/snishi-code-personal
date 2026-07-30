@@ -9,7 +9,7 @@
  * （当時のストア構成）を **version 1 で一括作成**する（レガシー migration は持たない）。
  * 旧 fundingGoals ストアは作らない（v1 schema v16 で撤去済みのレガシー）。
  */
-import { createDatabase } from '@snishi/foundation/storage/idb';
+import { createDatabase, txDone } from '@snishi/foundation/storage/idb';
 import { DB_NAME, DB_VERSION } from './constants';
 
 export const STORE = {
@@ -119,4 +119,18 @@ export async function runWrite(
   fn: (t: IDBTransaction) => void,
 ): Promise<void> {
   await db.runWrite(stores as string[], fn);
+}
+
+/**
+ * 複数ストアを同一時点の readonly transaction で読む。
+ * fn は最初の await より前に必要な request をすべて発行すること。
+ */
+export async function runRead<T>(
+  stores: StoreName[],
+  fn: (t: IDBTransaction) => Promise<T>,
+): Promise<T> {
+  const idb = await db.open();
+  const t = idb.transaction(stores as string[], 'readonly');
+  const [value] = await Promise.all([fn(t), txDone(t)]);
+  return value;
 }
