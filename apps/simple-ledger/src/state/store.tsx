@@ -30,6 +30,7 @@ import { useToast } from '@snishi/foundation/ui/toast';
 import { clearOnboardingDone } from '../data/localFlags';
 import { todayLocal } from '../util/time';
 import { errorText, t } from '../i18n';
+import { LedgerError } from '../domain/errors';
 
 /** `?fixture=sample` が指定されているか（手動テスト用。本番通常起動では false）。 */
 function sampleFixtureRequested(): boolean {
@@ -61,6 +62,8 @@ interface LedgerContextValue {
   status: 'loading' | 'ready' | 'error';
   ledger: Ledger | null;
   error?: string;
+  /** 起動失敗の LedgerError コード（復旧画面が版不一致の専用導線を出す判定に使う）。 */
+  errorCode?: string;
   refresh: () => Promise<void>;
   saveEntry: (
     input: SimpleEntryInput,
@@ -126,6 +129,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [errorCode, setErrorCode] = useState<string | undefined>(undefined);
 
   const refresh = useCallback(async () => {
     const next = await repo.loadLedger();
@@ -140,6 +144,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const applyRecoveredLedger = useCallback((next: Ledger) => {
     setLedger(next);
     setError(undefined);
+    setErrorCode(undefined);
     setStatus('ready');
   }, []);
 
@@ -166,6 +171,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         if (active) {
           // LedgerError（schemaVersion 不一致など）は i18n 文言で復旧画面に出す。
           setError(errorText(e));
+          setErrorCode(e instanceof LedgerError ? e.code : undefined);
           setStatus('error');
         }
       }
@@ -669,6 +675,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       status,
       ledger,
       ...(error !== undefined ? { error } : {}),
+      ...(errorCode !== undefined ? { errorCode } : {}),
       refresh,
       saveEntry,
       removeEntry,
@@ -709,6 +716,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       status,
       ledger,
       error,
+      errorCode,
       refresh,
       saveEntry,
       removeEntry,

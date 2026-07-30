@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import './setup';
 import {
+  _resetRepositoryStateForTests,
   archiveAccount,
   archiveMonthlyCost,
   catchUpRecurringRules,
@@ -18,7 +19,11 @@ import {
   upsertRecurringRule,
   upsertTag,
 } from '../src/data/repository';
-import { buildExportPackage } from '../src/data/exportImport';
+import {
+  buildExportPackage,
+  exportToJsonText,
+  importFromJsonText,
+} from '../src/data/exportImport';
 import { getAll, getKv, putKv, putRecord, wipeDatabase, STORE } from '../src/data/db';
 import { DB_NAME } from '../src/data/constants';
 import { buildSimpleEntry } from '../src/domain/entry';
@@ -264,11 +269,14 @@ describe('P1-6: 負債（カード・ローン）で買った購入の仕訳は�
     });
   });
 
-  it('日付・摘要の変更はできる（借入と返済の対応は崩れない）', async () => {
+  it('摘要の変更はできるが、日付の変更は拒否する（返済が購入より先に立たない・再監査対応）', async () => {
     const { purchase } = await liabilityPurchase();
     await expect(
-      upsertEntry({ ...purchase, date: '2026-06-12', description: 'カード購入（修正）' }),
+      upsertEntry({ ...purchase, description: 'カード購入（修正）' }),
     ).resolves.toBeUndefined();
+    await expect(upsertEntry({ ...purchase, date: '2026-06-12' })).rejects.toMatchObject({
+      code: 'error.monthlyCost.editLiability',
+    });
   });
 });
 
@@ -475,6 +483,52 @@ describe('P2-5: DB 全消去は onsuccess だけを成功扱いにする', () =>
     } finally {
       held.close();
     }
+  });
+});
+
+describe('再監査対応: import は全置換後に revision を必ず進める', () => {
+  it('置換後 revision = max(現行, 封筒) + 1。同じ封筒の再取込は conflict になり force で通る', async () => {
+    await loadLedger();
+    await upsertTag({
+      id: 'tag-rev',
+      name: '再監査',
+      scope: 'entry',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    const ledger = await loadLedger();
+    const before = ledger.meta.revision;
+    const text = exportToJsonText(ledger);
+    const outcome = await importFromJsonText(text);
+    expect(outcome.kind).toBe('ok');
+    // revision が進む = 別タブの CAS（import 前の revision を基準に持つ）が必ず失火する。
+    expect((await loadLedger()).meta.revision).toBe(before + 1);
+    // 進んだ結果、同じ封筒はもう古い（事実どおり conflict → force で明示上書き）。
+    const second = await importFromJsonText(text);
+    expect(second.kind).toBe('revision-conflict');
+    const forced = await importFromJsonText(text, { force: true });
+    expect(forced.kind).toBe('ok');
+  });
+});
+
+describe('再監査対応: 起動時 catch-up（loadLedger 前）でも CAS の基準を確定する', () => {
+  it('catch-up が基準 revision を設定し、以後の別タブ変更を検出できる', async () => {
+    await loadLedger();
+    _resetRepositoryStateForTests(); // タブ起動直後（トラッカ未設定）を再現
+    await catchUpRecurringRules(todayLocal()); // ルール 0 件・書込みなしでも基準を確定する
+    const meta = (await getKv<LedgerMeta>('meta'))!;
+    await putKv('meta', { ...meta, revision: meta.revision + 1 }); // 別タブの書込みを模す
+    await expect(
+      upsertTag({
+        id: 'tag-boot-cas',
+        name: '起動競合',
+        scope: 'entry',
+        archived: false,
+        createdAt: 'x',
+        updatedAt: 'x',
+      }),
+    ).rejects.toMatchObject({ code: 'error.common.staleData' });
   });
 });
 

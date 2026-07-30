@@ -18,7 +18,15 @@ import { UI } from '../ui-contract';
  * 後者は IndexedDB の版が新しくて開けない（VersionError）等、設定にすら入れない詰みからの
  * 最終復旧手段（deleteDatabase → reload）。文言は既存キーを使い回す。
  */
-export function RecoveryScreen({ message }: { message?: string }) {
+export function RecoveryScreen({
+  message,
+  schemaMismatch,
+}: {
+  message?: string;
+  /** 保存データが旧版（meta.schemaVersion 不一致）。直接 import は内部の loadLedger も
+   *  同じ版不一致で失敗して通らないため、設定への導線を出さず正式手順を明示する。 */
+  schemaMismatch?: boolean;
+}) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [wipeConfirm, setWipeConfirm] = useState(false);
   const [wipeError, setWipeError] = useState(false);
@@ -34,7 +42,10 @@ export function RecoveryScreen({ message }: { message?: string }) {
           {t('recovery.wipeFailed')}
         </div>
       ) : null}
-      {settingsOpen ? (
+      {schemaMismatch ? (
+        // 正式な移行手順（旧版 JSON → 単発変換 → 初期化 → 現行版 JSON を読み込み）。
+        <p className="field__hint">{t('recovery.schemaMismatchHint')}</p>
+      ) : settingsOpen ? (
         // 復旧中は他画面へ遷移させない（台帳が無い状態で開けないため）。
         <Settings onNavigate={() => undefined} onOpenOnboarding={() => undefined} />
       ) : (

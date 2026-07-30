@@ -135,6 +135,17 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const canCreateContinuousCost =
     init.kind === 'create' && (mode === 'expense' || mode === 'manual');
   const [ccMode, setCcMode] = useState(false);
+  // 継続コスト化を ON にする共通処理。ON 前に選んでいた貸方が支払い元に使えない役割
+  // （残高調整など）なら選択を外す（候補から消えても選択だけ残って保存時に失敗する袋小路を
+  // 作らない・再監査 P2 対応）。
+  const enableCcMode = () => {
+    setCcMode(true);
+    if (ccTargetName.trim() === '') setCcTargetName(form.description);
+    const creditAccountRole = accounts.find((a) => a.id === form.creditAccountId)?.role;
+    if (creditAccountRole !== undefined && !isRecurringPostableRole(creditAccountRole)) {
+      setForm((f) => ({ ...f, creditAccountId: '' }));
+    }
+  };
   const [ccTargetName, setCcTargetName] = useState('');
   const [ccCategoryId, setCcCategoryId] = useState('');
   const [ccNameError, setCcNameError] = useState(false);
@@ -581,10 +592,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                   <button
                     type="button"
                     className="collapse-toggle"
-                    onClick={() => {
-                      setCcMode(true);
-                      if (ccTargetName.trim() === '') setCcTargetName(form.description);
-                    }}
+                    onClick={enableCcMode}
                     data-ui={UI.journal.entry.ccToggle}
                   >
                     <Icon name="add" size={16} />
@@ -814,10 +822,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               <button
                 type="button"
                 className="collapse-toggle"
-                onClick={() => {
-                  setCcMode(true);
-                  if (ccTargetName.trim() === '') setCcTargetName(form.description);
-                }}
+                onClick={enableCcMode}
                 data-ui={UI.journal.entry.ccToggle}
               >
                 <Icon name="add" size={16} />

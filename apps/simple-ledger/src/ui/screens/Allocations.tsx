@@ -30,6 +30,7 @@ import { monthlyAmounts, monthOf } from '../../domain/allocation';
 import { isValidIsoDate } from '../../domain/calendar';
 import { nowIso, todayLocal } from '../../util/time';
 import {
+  CATCH_UP_HARD_CAP_MONTHS,
   RECURRING_POSTABLE_ROLES,
   clampDayToMonth,
   recurringKindOf,
@@ -597,7 +598,12 @@ function RecurringRuleSheet({
       return;
     }
     const everyMonths = everyText === '' ? 0 : Number.parseInt(everyText, 10);
-    if (!Number.isInteger(everyMonths) || everyMonths < 1) {
+    // 上限は保存境界・schema と同じ（配分月数の上限）。画面でも先に弾いて理由を示す。
+    if (
+      !Number.isInteger(everyMonths) ||
+      everyMonths < 1 ||
+      everyMonths > CATCH_UP_HARD_CAP_MONTHS
+    ) {
       setError(t('error.recurring.everyMonthsInvalid'));
       return;
     }

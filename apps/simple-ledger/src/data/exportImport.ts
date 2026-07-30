@@ -100,13 +100,20 @@ function validatePackage(
   return { ok: true, pkg: validated.data };
 }
 
-/** 検証済みパッケージで台帳全体を原子置換する（meta.revision は封筒の revision に合わせる）。 */
+/**
+ * 検証済みパッケージで台帳全体を原子置換する。
+ * revision は「現行と封筒の大きい方 + 1」へ**必ず進める**（再監査 P1-2 対応）:
+ * 封筒の revision をそのまま据えると、別タブが import 前の revision と同じ値を見て
+ * CAS を通過し、古い画面のデータを新しい台帳へ書き込めてしまう。復元（restoreFromSnapshot）が
+ * current.revision + 1 へ進めるのと同じ規則。以後の import は封筒 revision と一致しなくなるが、
+ * それは「置換後の台帳はその封筒より新しい」という事実どおり（revision-conflict → force で通す）。
+ */
 async function replaceWithPackage(pkg: LedgerExportPackage, current: Ledger): Promise<void> {
   await replaceLedger({
     meta: {
       ...current.meta,
       schemaVersion: SCHEMA_VERSION,
-      revision: pkg.revision,
+      revision: Math.max(current.meta.revision, pkg.revision) + 1,
       updatedAt: nowIso(),
     },
     settings: pkg.settings,

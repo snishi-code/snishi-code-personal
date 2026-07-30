@@ -442,7 +442,9 @@ export const ja = {
   // 復旧画面（ErrorBoundary）。DB の版不整合（VersionError）で開けない詰みからの最終手段。
   'recovery.wipe': 'DB を初期化して再起動',
   'recovery.wipeFailed':
-    'DB を削除できませんでした。このアプリを開いている他のタブ・ウィンドウをすべて閉じてから、もう一度お試しください。',
+    'DB を削除できませんでした。このアプリを開いている他のタブ・ウィンドウをすべて閉じてください（閉じた時点で削除が完了することがあります）。そのあとページを再読み込みして、もう一度お試しください。',
+  'recovery.schemaMismatchHint':
+    '旧版データのままでは JSON の読み込みもできません。手順: ①「DB を初期化して再起動」で初期化 → ②起動後に設定から、現行版へ変換済みの JSON を読み込んでください。',
 
   'toast.saved': '保存しました。',
   'toast.deleted': '削除しました。',
@@ -512,12 +514,12 @@ export const ja = {
   'error.entry.ledgerAccount': '継続コスト台帳の科目は継続コスト資産の登録からだけ使えます。',
   'error.account.archiveBalance':
     '残高が残っている科目はアーカイブできません。先に振替で残高を 0 にしてください。',
-  'error.recurring.everyMonthsInvalid': '周期は 1 か月以上の整数で入力してください。',
+  'error.recurring.everyMonthsInvalid': '周期は 1〜1200 か月の整数で入力してください。',
   // 監査 2026-07-30 対応で新設したエラーコード。
   'error.monthlyCost.recoveryBeforeStart':
     '回収の振替の日付は開始日（購入の仕訳の日付）以降にしてください。',
   'error.monthlyCost.editLiability':
-    '負債（カード・ローン）で購入した項目は、支払い元と金額を変更できません（自動作成した返済の仕訳と合わなくなるため）。終了はアーカイブ（終了日の設定）を使ってください。',
+    '負債（カード・ローン）で購入した項目は、支払い元・金額・日付を変更できません（自動作成した返済の仕訳と合わなくなるため）。終了はアーカイブ（終了日の設定）を使ってください。',
   'error.common.staleData':
     '別のタブ（またはウィンドウ）でデータが変更されています。ページを再読み込みしてから、もう一度お試しください。',
   'error.db.schemaVersionMismatch':

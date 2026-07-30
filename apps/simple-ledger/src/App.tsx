@@ -41,7 +41,7 @@ import type { FormMode } from './ui/entryModes';
 import type { JournalEntry } from './domain/types';
 
 export function App() {
-  const { status, ledger, error } = useLedger();
+  const { status, ledger, error, errorCode } = useLedger();
   const [menuOpen, setMenuOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [entryInit, setEntryInit] = useState<EntryInit | null>(null);
@@ -102,7 +102,14 @@ export function App() {
 
   if (status === 'error' || !ledger) {
     // banner だけで終わらせない: 設定（JSON 読み込み・スナップショット復元）へ入れる。
-    return <RecoveryScreen message={error} />;
+    // 版不一致だけは直接 import も内部で loadLedger に失敗して通らないため、専用の
+    // 手順（初期化 → 変換済み JSON 読み込み）を出す（再監査対応・正式な移行手順の固定）。
+    return (
+      <RecoveryScreen
+        message={error}
+        schemaMismatch={errorCode === 'error.db.schemaVersionMismatch'}
+      />
+    );
   }
 
   const openCreate = (mode: FormMode) => setEntryInit({ kind: 'create', mode });

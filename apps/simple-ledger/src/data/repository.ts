@@ -741,10 +741,11 @@ export async function upsertEntry(entry: JournalEntry): Promise<void> {
     return;
   }
 
-  // 負債（カード・ローン）で買った購入の仕訳は、支払い元と金額を変更できない（fail-closed・
-  // 監査 P1-6）: 自動作成した返済の実仕訳には意図的に monthlyCostId が無く追跡できないため、
-  // 貸方の付け替えや金額変更で借入だけが消えて返済が残る（負債残高がマイナスになる）。
-  // 日付・摘要・メモ・タグは変更できる。終了は項目のアーカイブで行う。
+  // 負債（カード・ローン）で買った購入の仕訳は、支払い元・金額・日付を変更できない
+  // （fail-closed・監査 P1-6 + 再監査対応）: 自動作成した返済の実仕訳には意図的に
+  // monthlyCostId が無く追跡できないため、貸方の付け替え・金額変更で借入だけが消えて返済が残り、
+  // 日付の後ろ倒しでは返済が購入より先に立って負債が途中でマイナスになる。
+  // 摘要・メモ・タグは変更できる。終了は項目のアーカイブで行う。
   const prevCreditLine = existing?.lines.find((l) => l.side === 'credit');
   const prevCreditRole = prevCreditLine
     ? ctx.byId.get(prevCreditLine.accountId)?.role
@@ -753,7 +754,8 @@ export async function upsertEntry(entry: JournalEntry): Promise<void> {
     const nextCredit = savable.lines.find((l) => l.side === 'credit');
     if (
       nextCredit?.accountId !== prevCreditLine?.accountId ||
-      nextCredit?.amount !== prevCreditLine?.amount
+      nextCredit?.amount !== prevCreditLine?.amount ||
+      savable.date !== existing?.date
     ) {
       throw new LedgerError('error.monthlyCost.editLiability');
     }
@@ -1238,7 +1240,12 @@ export async function deleteRecurringRule(id: string): Promise<void> {
 export async function catchUpRecurringRules(today: string): Promise<number> {
   // 旧版 DB へ起票（書込み）しない。正規の全体検証（loadLedger）より先に呼ばれるため、
   // ここでも版を fail-closed に確認する（監査 P1-4）。
-  assertSchemaVersionCurrent(await getMeta());
+  const meta = await getMeta();
+  assertSchemaVersionCurrent(meta);
+  // 起動時は loadLedger より先に走る唯一の書込み。CAS の基準 revision をここで確定する
+  // （再監査 P1-2 対応: これが無いとトラッカ未設定で照合を素通りし、事前読みと書込みの間の
+  // 別タブの変更を検出できない）。
+  if (meta) lastSeenRevision = meta.revision;
   const [ctx, rules, existingItems] = await Promise.all([
     loadSaveContext(),
     getAll<RecurringRule>(STORE.recurringRules),
