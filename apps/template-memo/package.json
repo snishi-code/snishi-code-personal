@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "テンプレメモ(定型文テンプレートで巡回メモを作りQR出力・ローカルファースト)",
+  "description": "テンプレメモ(テンプレートで巡回メモを作りQR出力・ローカルファースト)",
   "license": "Apache-2.0",
   "dependencies": {
     "@snishi/foundation": "*",

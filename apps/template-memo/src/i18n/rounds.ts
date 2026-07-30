@@ -132,7 +132,7 @@ export const s = {
     noteInput: '入力',
     fractionPlaceholder: '120/80',
     allNormal: '全部正常',
-    oncallInsert: '保存',
+    sheetSave: '保存',
     menuOpen: (place: string) => `${place}のメニューを開く`,
     menuTitle: (place: string) => `${place}のフォーマット`,
   },
@@ -211,12 +211,13 @@ export const s = {
   // テンプレート定義のフィールド名 (QR 受信プレビューの見出し)。
   tpl: {
     name: 'テンプレート名',
-    sections: 'セクション',
+    // 作者語彙は「場所」(セクションはコード識別子のみ)。
+    sections: '場所',
     includeProblems: '合成に問題リストを含める',
     includeHandover: '合成に申し送りを含める',
     memoSection: '今回メモを入れる場所',
     memoSectionNone: '入れない',
-    sectionAdd: 'セクションを追加',
+    sectionAdd: '場所を追加',
     sectionTitle: '場所の見出し（例 (S)・【今日やったこと】）',
     sectionNormal: '正常文（空欄を補う文。例 著変なし）',
     sectionKeepWhenEmpty: '空でも見出しを出す',

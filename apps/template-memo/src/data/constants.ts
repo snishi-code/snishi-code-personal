@@ -49,8 +49,12 @@ export const ALL_STORES = [
 /** settings store の単一レコードの固定キー。 */
 export const APP_SETTINGS_KEY = 'app';
 
-/** 巻き戻しスナップショット（foundation createSnapshotStore）の専用 DB 名。 */
+/**
+ * 巻き戻しスナップショット（foundation createSnapshotStore）の専用 DB 名。
+ * v3 で Patient 形が変わった（清書廃止ほか）ため DB 名ごと切り替え、旧形の巻き戻しを封じる。
+ */
 export const SNAPSHOT_DB_NAME = 'template-memo-snapshots-v3' as const;
+/** v2 以前のスナップショット DB 名（接続時に削除するためだけに残す）。 */
 export const LEGACY_SNAPSHOT_DB_NAME = 'template-memo-snapshots' as const;
 
 /**

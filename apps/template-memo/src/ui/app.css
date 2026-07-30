@@ -1615,6 +1615,12 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   border-top: 1px solid var(--border);
 }
 
+/* select の選択肢編集 (見出し + 選択肢行 + 追加ボタンの縦積み。行内は settingsField の横並び) */
+.templateEditOptions {
+  display: grid;
+  gap: var(--space-2);
+}
+
 .templateEditActions {
   position: sticky;
   bottom: 0;

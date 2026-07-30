@@ -54,7 +54,7 @@ export function createHrSnapshots(
   tombstones: PointerStore,
   now?: () => number,
 ): SnapshotStore<SnapshotData> {
-  // v2 以前の Patient 形を含む別 DB は復元に使わず、v3 初回起動時に破棄する。
+  // v2 以前の Patient 形を含む旧 DB は復元に使わない。接続のたびに削除を試みる (冪等)。
   if (typeof indexedDB !== 'undefined') {
     try {
       indexedDB.deleteDatabase(LEGACY_SNAPSHOT_DB_NAME);

@@ -162,7 +162,7 @@ describe('listImportCandidates', () => {
 });
 
 describe('convertWorkspaceBackup', () => {
-  it('place 同名を 1 つにまとめ、選択ユーザーの継続メモ・清書だけを移行する', () => {
+  it('place 同名を 1 つにまとめ、選択ユーザーの継続メモだけを移行する', () => {
     const converted = convertWorkspaceBackup(jsonOf(makeWorkspaceBackup()), 'usr_a', {
       nowMs: NOW,
     });
@@ -203,6 +203,9 @@ describe('convertWorkspaceBackup', () => {
     expect(JSON.stringify(converted.patients)).not.toContain('移行しない今回メモ');
     expect(JSON.stringify(converted.patients)).not.toContain('fixed:x');
     expect(JSON.stringify(converted.patients)).not.toContain('sharedTags');
+    // 清書 (confirmedNote) は本体廃止済み。旧バックアップにあっても持ち込まない。
+    expect(JSON.stringify(converted.patients)).not.toContain('confirmedNote');
+    expect(JSON.stringify(converted.patients)).not.toContain('Aの清書');
   });
 
   it('ユーザー選択で per-user の継続メモが切り替わる', () => {

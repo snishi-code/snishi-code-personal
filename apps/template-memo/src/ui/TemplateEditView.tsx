@@ -32,11 +32,20 @@ function moveInArray<T>(items: T[], index: number, direction: -1 | 1): void {
   if (item !== undefined) items.splice(next, 0, item);
 }
 
+// DOM の select 値は許可リストで検証してから型に載せる (fail-closed: 未知値は無変更)。
+const ITEM_KINDS: readonly ItemKind[] = ['text', 'number', 'fraction', 'select'];
+const GROUP_DISPLAYS: readonly GroupDisplay[] = ['always', 'oncall', 'menu'];
+
 export function morphItemKind(item: TemplateItem, kind: ItemKind): void {
+  if (!ITEM_KINDS.includes(kind)) return;
+  // number↔fraction は同じ数値系なので単位を引き継ぐ (旧回診 FormatEditDialog と同じ)。
+  const numeric = (k: ItemKind) => k === 'number' || k === 'fraction';
+  const keepUnit = numeric(item.kind) && numeric(kind) ? item.unit : undefined;
   item.kind = kind;
   delete item.unit;
   delete item.normal;
   delete item.options;
+  if (keepUnit !== undefined) item.unit = keepUnit;
   if (kind === 'select') item.options = [s.tpl.itemOptionDefault];
 }
 
@@ -101,11 +110,13 @@ function RowTools({
   count,
   onMove,
   onDelete,
+  disableDelete = false,
 }: {
   index: number;
   count: number;
   onMove: (direction: -1 | 1) => void;
   onDelete: () => void;
+  disableDelete?: boolean;
 }) {
   return (
     <span className="formatListActions">
@@ -115,7 +126,7 @@ function RowTools({
       <IconButton label={s.tpl.moveDown} disabled={index === count - 1} onClick={() => onMove(1)}>
         ↓
       </IconButton>
-      <IconButton label={s.common.delete} onClick={onDelete}>
+      <IconButton label={s.common.delete} disabled={disableDelete} onClick={onDelete}>
         <Icon name="delete" size={18} />
       </IconButton>
     </span>
@@ -217,10 +228,10 @@ export function TemplateEditView({
   function renderOptions(sectionId: string, groupId: string, item: TemplateItem) {
     const options = item.options ?? [];
     return (
-      <div className="settingsField">
+      <div className="templateEditOptions">
         <div className="field__label">{s.tpl.itemOptions}</div>
         {options.map((option, index) => (
-          <div className="settingsRowActions" key={`${item.id}:${index}`}>
+          <div className="settingsField" key={`${item.id}:${index}`}>
             <input
               className="input"
               value={option}
@@ -237,6 +248,8 @@ export function TemplateEditView({
             <RowTools
               index={index}
               count={options.length}
+              // 選択肢 0 個の select は normalizeItem が項目ごと落とすため、最後の 1 つは消させない。
+              disableDelete={options.length === 1}
               onMove={(direction) =>
                 mutateItem(sectionId, groupId, item.id, (next) =>
                   moveInArray((next.options ??= []), index, direction),
@@ -269,7 +282,7 @@ export function TemplateEditView({
     count: number,
   ) {
     return (
-      <div className="settingsField templateEditItem" key={item.id} data-ui={UI.templateEdit.item}>
+      <div className="templateEditItem" key={item.id} data-ui={UI.templateEdit.item}>
         <div className="formatListRow">
           <span className="pickerRowLabel">
             {s.tpl.items} {index + 1}
@@ -392,13 +405,11 @@ export function TemplateEditView({
             className="select"
             value={group.display}
             data-ui={UI.templateEdit.display}
-            onChange={(event) =>
-              mutateGroup(
-                sectionId,
-                group.id,
-                (next) => (next.display = event.target.value as GroupDisplay),
-              )
-            }
+            onChange={(event) => {
+              const display = event.target.value as GroupDisplay;
+              if (!GROUP_DISPLAYS.includes(display)) return;
+              mutateGroup(sectionId, group.id, (next) => (next.display = display));
+            }}
           >
             <option value="always">{s.tpl.groupDisplayAlways}</option>
             <option value="oncall">{s.tpl.groupDisplayOncall}</option>

@@ -30,9 +30,6 @@ function MemoCard({
   placeholder,
   cardUi,
   inputUi,
-  rows = 2,
-  readOnly = false,
-  readOnlyHint,
 }: {
   runtime: AppRuntime;
   patient: Patient;
@@ -41,10 +38,6 @@ function MemoCard({
   placeholder: string;
   cardUi: string;
   inputUi: string;
-  rows?: number;
-  /** 参照のみ表示する場合。 */
-  readOnly?: boolean;
-  readOnlyHint?: string;
 }) {
   const { store } = runtime;
   const pid = patient.pid;
@@ -56,7 +49,6 @@ function MemoCard({
   const raw = patient[field];
   const value = typeof raw === 'string' ? raw : '';
   function write(next: string): void {
-    if (readOnly) return;
     const p = live();
     if (!p) return;
     p[field] = next;
@@ -65,35 +57,24 @@ function MemoCard({
     store.scheduleSave();
   }
 
-  const textarea = (
-    <textarea
-      className="textarea memoInput"
-      rows={rows}
-      value={value}
-      placeholder={readOnly ? '' : placeholder}
-      aria-label={label}
-      data-ui={inputUi}
-      readOnly={readOnly}
-      onFocus={(e) => autosize(e.currentTarget)}
-      onChange={(e) => {
-        write(e.target.value);
-        autosize(e.currentTarget);
-      }}
-    />
-  );
-  const body = (
-    <>
-      {readOnly && readOnlyHint ? <p className="muted memoReadOnlyHint">{readOnlyHint}</p> : null}
-      {textarea}
-    </>
-  );
-
   return (
     <section className="card panelCard memoCard" aria-label={label} data-ui={cardUi}>
       <div className="panelCardHead">
         <div className="panelLabel">{label}</div>
       </div>
-      {body}
+      <textarea
+        className="textarea memoInput"
+        rows={2}
+        value={value}
+        placeholder={placeholder}
+        aria-label={label}
+        data-ui={inputUi}
+        onFocus={(e) => autosize(e.currentTarget)}
+        onChange={(e) => {
+          write(e.target.value);
+          autosize(e.currentTarget);
+        }}
+      />
     </section>
   );
 }

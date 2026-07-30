@@ -1,4 +1,4 @@
-// E2E smoke: コピー移植後の実 UI (workspace 回診 surface と同じ操作フロー) を 4 本で叩く。
+// E2E smoke: コピー移植後の実 UI (workspace 回診 surface と同じ操作フロー) を一通り叩く。
 //
 // セレクタ方針 (ui-contract.ts / foundation ui/contract.ts):
 //   - 第一選択は data-ui (文言変更で壊れない安定名)。名簿 (src/ui-contract.ts の UI) 経由で参照する。

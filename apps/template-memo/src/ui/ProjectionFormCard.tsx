@@ -49,7 +49,7 @@ function labelWithUnit(label: string, unit?: string): string {
 }
 
 /**
- * 項目 1 行 (text / number / fraction)。rawValue は保存形そのまま
+ * 項目 1 行 (text / number / fraction / select)。rawValue は保存形そのまま
  * (TextEntry/NumericEntry/legacy 文字列/undefined)。書き込みは onWrite (write-through)。
  */
 function ItemRow({
@@ -223,7 +223,7 @@ function OncallGroupSheet({
       closeLabel={s.common.close}
       footer={
         <Button variant="primary" block dataUi={UI.projection.sheetSave} onClick={save}>
-          {s.detail.oncallInsert}
+          {s.detail.sheetSave}
         </Button>
       }
     >
