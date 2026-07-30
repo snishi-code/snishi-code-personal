@@ -121,6 +121,17 @@
   font-weight: 700;
   background: var(--bg);
 }
+/* 資産内訳の枠（自由に動かせるお金 / 自由に動かせないお金 / 投資）の見出しと小計 */
+.stmt-row--frame {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--bg);
+}
+.stmt-row--subtotal {
+  font-weight: 600;
+  color: var(--muted);
+}
 .stmt-row__num {
   white-space: nowrap;
 }
@@ -210,6 +221,7 @@
   gap: var(--space-1);
 }
 .period-context__chip {
+  position: relative; /* 透明な日付 input を重ねる基準 */
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
@@ -226,6 +238,24 @@
 }
 .period-context__chip:hover {
   background: var(--bg);
+}
+/* チップ全面を覆う透明な <input type="date">。1 タップで OS のカレンダーが開く。 */
+.period-context__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.period-context__input::-webkit-calendar-picker-indicator {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
 }
 .period-context__text {
   min-width: 0;
@@ -491,8 +521,10 @@ button.stmt-row:hover {
   gap: var(--space-1);
 }
 
-/* 終了まで1ヶ月以内の継続コスト資産（毎月のもの）。色だけ変える（バッジ・文言は足さない）。 */
+/* 終了まで1ヶ月以内の継続コスト資産（毎月のもの）。色だけ変える（バッジ・文言は足さない）。
+   --warning-light(#fffbeb) は白背景とほぼ区別がつかないため、視認できるアンバー + 左ボーダー。 */
 .card--ending {
-  background: var(--warning-light);
+  background: #fdf3d8;
   border-color: var(--warning-border);
+  border-left: 3px solid var(--warning);
 }

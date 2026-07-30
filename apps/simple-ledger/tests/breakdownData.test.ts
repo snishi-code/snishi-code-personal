@@ -73,7 +73,6 @@ function ledgerOf(journalEntries: JournalEntry[]): Ledger {
     accounts,
     journalEntries,
     cashflowSchedules: [],
-    reserves: [],
     tags: [],
     monthlyCostItems: [],
     recurringRules: [],

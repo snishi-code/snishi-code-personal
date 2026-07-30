@@ -30,7 +30,7 @@ import { Settings } from './ui/screens/Settings';
 import { Help } from './ui/screens/Help';
 import { EntrySheet, type EntryInit } from './ui/screens/EntrySheet';
 import { OnboardingSheet } from './ui/OnboardingSheet';
-import { PeriodDatePicker } from './ui/PeriodPickers';
+import { CONTINUOUS_COST_HARD_CAP } from './domain/continuousCost';
 import { NAV_ITEMS } from './ui/navigation';
 import { t } from './i18n';
 import { todayLocal } from './util/time';
@@ -48,7 +48,6 @@ export function App() {
   const [journalFilter, setJournalFilter] = useState<JournalFilter | null>(null);
   // 仕訳一覧の計算で生まれた行タップ → 「毎月のもの」で開くシートの対象（1 回で消費）。
   const [allocationsTarget, setAllocationsTarget] = useState<AllocationsTarget | null>(null);
-  const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [exitConfirm, setExitConfirm] = useState(false);
   // オンボーディングは「初回状態からの派生 + ユーザー操作の上書き」で開閉する
   // （effect での setState を避ける。render 中の派生調整パターン）。
@@ -145,21 +144,29 @@ export function App() {
 
   // --- ヘッダー中央の期間コンテキスト ---
   // year/all は俯瞰ロジックとして残すが、現時点のヘッダー UI は日付選択だけを公開する。
+  // チップに透明な <input type="date"> を重ね、1 タップで OS のカレンダーを直接開く。
+  // max = 継続コスト資産エンジンの展開上限（エンジンが展開できる範囲の外を選べなくする）。
   const selectedDate = period.mode === 'date' ? period.date : today;
 
   const periodCenter = (
     <div className="period-context">
-      <button
-        type="button"
-        className="period-context__chip"
-        onClick={() => setDatePickerOpen(true)}
-        aria-haspopup="dialog"
-        aria-label={`${selectedDate} — ${t('period.openDate')}`}
-        data-ui={UI.period.dateTrigger}
-      >
-        <span className="period-context__text">{selectedDate}</span>
+      <span className="period-context__chip" data-ui={UI.period.dateTrigger}>
+        <span className="period-context__text" aria-hidden="true">
+          {selectedDate}
+        </span>
         <Icon name="expand" size={14} />
-      </button>
+        <input
+          type="date"
+          className="period-context__input"
+          value={selectedDate}
+          max={CONTINUOUS_COST_HARD_CAP}
+          aria-label={`${selectedDate} — ${t('period.openDate')}`}
+          onChange={(e) => {
+            if (e.target.value !== '') changePeriod({ mode: 'date', date: e.target.value });
+          }}
+          data-ui={UI.period.dateInput}
+        />
+      </span>
     </div>
   );
 
@@ -198,14 +205,6 @@ export function App() {
           </>
         }
       />
-
-      {datePickerOpen ? (
-        <PeriodDatePicker
-          date={selectedDate}
-          onChange={(date) => changePeriod({ mode: 'date', date })}
-          onClose={() => setDatePickerOpen(false)}
-        />
-      ) : null}
 
       <main className="app-main" id="main">
         {screen === 'dashboard' ? (
@@ -278,7 +277,7 @@ export function App() {
         {screen === 'allocations' ? (
           <Allocations onEditEntry={openEdit} target={allocationsTarget} />
         ) : null}
-        {screen === 'cashflow' ? <Cashflow /> : null}
+        {screen === 'cashflow' ? <Cashflow onEditEntry={openEdit} /> : null}
         {screen === 'tags' ? <Tags /> : null}
         {screen === 'accounts' ? <Accounts /> : null}
         {screen === 'settings' ? (

@@ -6,19 +6,16 @@
  * その割当は UI 層（EntrySheet の mode→roles）で行い、ここは debit/credit + metadata を受ける。
  */
 import { newId } from './ids';
-import { accountBalance, filterByDateRange } from './accounting';
 import type { AccountRole } from './accountRoles';
-import { RESERVE_LEDGER_ACCOUNT_ID } from './constants';
-import type { Account, EntryMetadata, JournalEntry, JournalEntryKind, ReserveItem } from './types';
-import { reserveBalances } from './reserve';
+import type { EntryMetadata, JournalEntry, JournalEntryKind } from './types';
 import { nowIso } from '../util/time';
 
-const TRANSFER_FUND_ROLES: AccountRole[] = ['daily-asset', 'reserve-asset'];
+const TRANSFER_FUND_ROLES: AccountRole[] = ['daily-asset'];
 const TRANSFER_LIABILITY_ROLES: AccountRole[] = ['payment-liability', 'other-liability'];
 
 /**
  * 振替（資金移動）として成立する役割の組み合わせか。
- *  - 資金 → 資金（口座間・目的別資金へ/から）
+ *  - 資金 → 資金（口座間）
  *  - 資金 → 負債（返済）
  *  - 負債 → 資金（借入・ローン実行）
  * それ以外（負債→負債、費用/収入カテゴリが絡む等）は不正。
@@ -31,46 +28,6 @@ export function transferFlowValid(srcRole: AccountRole, dstRole: AccountRole): b
     return TRANSFER_FUND_ROLES.includes(dstRole);
   }
   return false;
-}
-
-/**
- * 目的別資金（reserve-asset）から支払う/移動する仕訳で、その資金の残高が不足しないかを判定する。
- * entry が貸方で減らす reserve-asset 口座について、**entry.date 時点**の残高
- *（その日までの既存仕訳 + この entry）が負になるなら不足。fail-closed の保存前チェックに使う。
- *  - otherEntries は「保存対象 entry 以外」の全仕訳（編集時は自分自身を二重計上しない）。
- *  - 未来日付でも、その日付までの既存仕訳を含めて判定する。
- * 不足する口座があれば最初の 1 件を返す。無ければ null。
- */
-export function reserveBalanceShortfall(
-  entry: JournalEntry,
-  accounts: Account[],
-  otherEntries: JournalEntry[],
-  reserves: ReserveItem[] = [],
-): { accountId: string; name: string } | null {
-  const byId = new Map(accounts.map((a) => [a.id, a]));
-  const reduced = new Set(
-    entry.lines
-      .filter((l) => l.side === 'credit' && byId.get(l.accountId)?.role === 'reserve-asset')
-      .map((l) => l.accountId),
-  );
-  if (reduced.size === 0) return null;
-  const asOf = filterByDateRange([...otherEntries, entry], undefined, entry.date);
-  for (const accId of reduced) {
-    // 集約モデル: 取り置き集約口座は口座残高（全目的の合計）でなく、その仕訳の目的(reserveId)
-    // 単位の残高で不足判定する（旅行が 0 でも老後の残高で払えてしまう不具合を防ぐ）。
-    if (accId === RESERVE_LEDGER_ACCOUNT_ID && entry.metadata?.reserveId) {
-      const rid = entry.metadata.reserveId;
-      if ((reserveBalances(asOf).get(rid) ?? 0) < 0) {
-        const name = reserves.find((r) => r.id === rid)?.name ?? byId.get(accId)?.name ?? accId;
-        return { accountId: accId, name };
-      }
-      continue;
-    }
-    if (accountBalance(accId, 'asset', asOf) < 0) {
-      return { accountId: accId, name: byId.get(accId)?.name ?? accId };
-    }
-  }
-  return null;
 }
 
 export interface SimpleEntryInput {
@@ -182,12 +139,9 @@ export function reversalInput(source: JournalEntry): SimpleEntryInput {
     kind: 'normal',
     // 仕訳全体タグは引き継ぐ（タグ別集計に取消を反映させるため）。
     ...(source.tagIds?.length ? { tagIds: source.tagIds } : {}),
-    // 取り置き(reserveId)も引き継ぐ。落とすと集約口座だけ減って目的別残高が
-    // 据え置かれ、「未割り当て」が負になる（side 入れ替えで自動的に減算方向になる）。
     metadata: {
       inputMode: 'reversal',
       reversalOfEntryId: source.id,
-      ...(source.metadata?.reserveId ? { reserveId: source.metadata.reserveId } : {}),
     },
   };
 }

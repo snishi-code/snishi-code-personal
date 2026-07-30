@@ -42,7 +42,7 @@ function entry(
 describe('生活コストの二重計上防止（PL 費用の構成）', () => {
   const accounts: Account[] = [
     acc('cash', 'daily-asset', 'asset'),
-    acc('res', 'reserve-asset', 'asset'),
+    acc('res', 'daily-asset', 'asset'),
     acc('continuing', 'continuing-cost-asset', 'asset'),
     acc('loan', 'other-liability', 'liability'),
     acc('income', 'income-category', 'revenue'),
@@ -53,7 +53,7 @@ describe('生活コストの二重計上防止（PL 費用の構成）', () => {
   const month = { from: '2031-07-01', to: '2031-07-31' };
   const entries: JournalEntry[] = [
     entry('expense', '2031-07-03', 'food', 'cash', 1000), // 通常支出（PL 費用）
-    entry('reserveMove', '2031-07-05', 'res', 'cash', 50000), // 積立（資金移動）
+    entry('parkMove', '2031-07-05', 'res', 'cash', 50000), // 口座間移動（資金移動）
     entry('borrow', '2031-07-10', 'res', 'loan', 2_000_000), // 借入実行
     entry('fundContinuing', '2031-07-15', 'continuing', 'res', 3_000_000), // 資産化
   ];

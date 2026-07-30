@@ -14,11 +14,3 @@ export { APP_ID, SCHEMA_VERSION } from '../data/constants';
  */
 export const CONTINUOUS_COST_LEDGER_ACCOUNT_ID = 'continuing-cost-ledger' as const;
 export const CONTINUOUS_COST_LEDGER_ACCOUNT_NAME = '継続コスト台帳' as const;
-
-/**
- * 取り置き資金（目的別）の残高を寄せる単一の集約口座（role=reserve-asset・内部・聖域化）。
- * 目的ごとに勘定科目を作らず、全取り置きをこの 1 口座に通し、目的別残高は仕訳の `metadata.reserveId`
- * 集計で導出する。勘定科目管理 UI には出さず、資産内訳では資金グループの下部に入れ子表示する。
- */
-export const RESERVE_LEDGER_ACCOUNT_ID = 'reserve-ledger' as const;
-export const RESERVE_LEDGER_ACCOUNT_NAME = '取り置き資金' as const;

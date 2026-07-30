@@ -69,7 +69,6 @@ export function TrendChart({
         <svg
           viewBox={`0 0 ${VB_W} ${VB_H}`}
           className="trend-svg__svg"
-          preserveAspectRatio="xMidYMid meet"
           aria-hidden="true"
           focusable="false"
         >

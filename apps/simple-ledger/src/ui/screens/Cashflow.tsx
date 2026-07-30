@@ -1,6 +1,6 @@
 /*
- * 資金繰り（将来CF）。計画した予定・未来日付の仕訳から自由資金の推移・最低残高を投影し、
- * 取り置き資金（取り置き枠）の管理を行う。
+ * 資金繰り（将来CF）。未来日付の仕訳から「自由に動かせるお金」の推移・最低残高を投影し、
+ * 負債の返済計画（登録済みの返済仕訳の確認・編集を含む）を扱う。
  */
 import { useMemo, useState } from 'react';
 import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
@@ -10,19 +10,18 @@ import { useLedger } from '../../state/store';
 import { deriveBalanceSheet } from '../../domain/accounting';
 import {
   cashDeltaOfEntry,
-  liquidAssetTotal,
+  freeAssetTotal,
+  isFreeAsset,
   nextRepaymentDate,
   projectCashflow,
   uniqueEntriesById,
 } from '../../domain/cashflow';
-import { reserveBalances, unassignedReserveBalance } from '../../domain/reserve';
 import { reportBasis } from '../../domain/reportPeriod';
 import { reportEntriesForAsOf } from '../../domain/reportEntries';
 import { addMonthsToDate } from '../../domain/allocation';
 import { sortAccounts } from '../../domain/accountOrder';
 import { todayLocal } from '../../util/time';
-import type { Account, CashflowSchedule, ReserveItem } from '../../domain/types';
-import { ReserveSheet } from '../ReserveSheet';
+import type { Account, CashflowSchedule, JournalEntry } from '../../domain/types';
 import { Money } from '../money';
 import { TrendChart, type TrendPoint } from '../components/TrendChart';
 import { errorText, t } from '../../i18n';
@@ -34,8 +33,15 @@ function shortDateLabel(date: string): string {
   return `${Number.parseInt(month, 10)}/${Number.parseInt(day, 10)}`;
 }
 
-export function Cashflow() {
-  const { ledger, postSchedule, removeSchedule, createReserve, removeReserve } = useLedger();
+/** 仕訳がこの負債（借方）へ返す金額（返済仕訳の表示額）。 */
+function repaymentAmountOf(entry: JournalEntry, liabilityId: string): number {
+  return entry.lines
+    .filter((l) => l.side === 'debit' && l.accountId === liabilityId)
+    .reduce((s, l) => s + l.amount, 0);
+}
+
+export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) => void }) {
+  const { ledger, postSchedule, removeSchedule } = useLedger();
   const today = todayLocal();
   const basis = useMemo(() => reportBasis({ mode: 'all' }, today), [today]);
   const reportEntries = useMemo(
@@ -43,11 +49,10 @@ export function Cashflow() {
     [basis.asOf, ledger],
   );
   const [untilDate, setUntilDate] = useState(() => addMonthsToDate(todayLocal(), 6));
-  const [reserveOpen, setReserveOpen] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [pendingSchedule, setPendingSchedule] = useState<CashflowSchedule | null>(null);
-  const [pendingReserve, setPendingReserve] = useState<ReserveItem | null>(null);
   const [repayFor, setRepayFor] = useState<{ account: Account; balance: number } | null>(null);
+  // 負債行の展開（登録済みの返済リスト）。行タップ = 新規返済シートとは独立に開閉する。
+  const [openRepayments, setOpenRepayments] = useState<ReadonlySet<string>>(new Set());
 
   const currency = ledger?.settings.currency ?? 'JPY';
 
@@ -56,34 +61,22 @@ export function Cashflow() {
     const entries = reportEntries;
     const schedules = ledger?.cashflowSchedules ?? [];
     const bs = deriveBalanceSheet(accounts, entries, today);
-    const byId = new Map(bs.assets.map((a) => [a.account.id, a.balance] as const));
     const liabById = new Map(bs.liabilities.map((l) => [l.account.id, l.balance] as const));
-    const liquidIds = new Set(
-      accounts
-        .filter((a) => a.role === 'daily-asset' || a.role === 'reserve-asset')
-        .map((a) => a.id),
-    );
-    const isLiquid = (id: string) => liquidIds.has(id);
-    const reserveIds = new Set(accounts.filter((a) => a.role === 'reserve-asset').map((a) => a.id));
-    const isReserve = (id: string) => reserveIds.has(id);
-    const nonLiquidAssetIds = new Set(
-      bs.assets.map((a) => a.account.id).filter((id) => !liquidIds.has(id)),
-    );
-    const totalAssets = liquidAssetTotal(bs.assets, nonLiquidAssetIds);
-    const reserveBalance = [...reserveIds].reduce((s, id) => s + (byId.get(id) ?? 0), 0);
+    const freeIds = new Set(accounts.filter((a) => isFreeAsset(a)).map((a) => a.id));
+    const isFree = (id: string) => freeIds.has(id);
+    const startFree = freeAssetTotal(bs.assets);
     const end = untilDate;
     const futureEntries = ledger ? reportEntriesForAsOf(ledger, end) : [];
     const future = uniqueEntriesById(
       futureEntries.filter(
-        (e) => e.date > today && e.date <= end && e.lines.some((l) => isLiquid(l.accountId)),
+        (e) => e.date > today && e.date <= end && e.lines.some((l) => isFree(l.accountId)),
       ),
     )
       .map((e) => ({
         id: e.id,
         date: e.date,
         title: e.description,
-        delta: cashDeltaOfEntry(e, isLiquid),
-        reserveDelta: cashDeltaOfEntry(e, isReserve),
+        delta: cashDeltaOfEntry(e, isFree),
         amount: e.lines.filter((l) => l.side === 'debit').reduce((s, l) => s + l.amount, 0),
       }))
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -91,32 +84,17 @@ export function Cashflow() {
       liabBalById: liabById,
       futureRows: future,
       projection: projectCashflow({
-        totalAssets,
-        reserveBalance,
+        startFree,
         schedules,
         today,
         untilDate: end,
-        futureEvents: future.map((f) => ({
-          date: f.date,
-          amount: f.delta,
-          reserveAmount: f.reserveDelta,
-        })),
+        futureEvents: future.map((f) => ({ date: f.date, amount: f.delta })),
       }),
     };
   }, [ledger, reportEntries, untilDate, today]);
 
   const accountName = (id: string): string =>
     (ledger?.accounts ?? []).find((a) => a.id === id)?.name ?? '—';
-  const reserves = ledger?.reserves ?? [];
-  const resBalById = useMemo(
-    () => reserveBalances(reportEntries, basis.asOf),
-    [basis.asOf, reportEntries],
-  );
-  const reserveUnassigned = unassignedReserveBalance(
-    projection.reserveBalance,
-    reserves,
-    resBalById,
-  );
   const freeTrend: TrendPoint[] = projection.points.map((p, i) => ({
     key: `${p.date}-${i}`,
     label: shortDateLabel(i === 0 ? today : p.date),
@@ -130,33 +108,29 @@ export function Cashflow() {
     return sortAccounts(accounts)
       .filter((a) => a.role === 'payment-liability' || a.role === 'other-liability')
       .map((a) => {
-        // 返済予定 = 未実績の予定 CF（分割返済など）+ 未来日付の返済実仕訳（借方がこの負債）。
+        // 返済予定 = 未実績の予定 CF（旧版レガシー）+ 未来日付の返済実仕訳（借方がこの負債）。
         const planned = schedules.filter(
           (s) => s.counterAccountId === a.id && s.status === 'planned',
         );
-        const futureRepayments = entries.filter(
-          (e) =>
-            e.date > today &&
-            e.lines.some((l) => l.side === 'debit' && l.accountId === a.id),
-        );
+        const repayments = entries
+          .filter(
+            (e) =>
+              e.date > today &&
+              e.lines.some((l) => l.side === 'debit' && l.accountId === a.id),
+          )
+          .sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
         const remaining =
           planned.reduce((sum, s) => sum + s.amount, 0) +
-          futureRepayments.reduce(
-            (sum, e) =>
-              sum +
-              e.lines
-                .filter((l) => l.side === 'debit' && l.accountId === a.id)
-                .reduce((s2, l) => s2 + l.amount, 0),
-            0,
-          );
-        const count = planned.length + futureRepayments.length;
-        const nextDue = [...planned.map((s) => s.dueDate), ...futureRepayments.map((e) => e.date)]
+          repayments.reduce((sum, e) => sum + repaymentAmountOf(e, a.id), 0);
+        const count = planned.length + repayments.length;
+        const nextDue = [...planned.map((s) => s.dueDate), ...repayments.map((e) => e.date)]
           .sort()[0];
         return {
           id: a.id,
           account: a,
           name: a.name,
           count,
+          repayments,
           remaining,
           nextDue,
           balance: liabBalById.get(a.id) ?? 0,
@@ -164,6 +138,14 @@ export function Cashflow() {
       })
       .filter((x) => x.count > 0 || x.balance !== 0);
   }, [ledger, liabBalById, today]);
+
+  const toggleRepayments = (id: string) =>
+    setOpenRepayments((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   return (
     <section aria-labelledby="cashflow-title" data-ui={UI.cashflow.view}>
@@ -189,28 +171,12 @@ export function Cashflow() {
         style={{ marginTop: 'var(--space-3)' }}
       >
         <div className="stat">
-          <span className="stat__label">{t('cashflow.totalFunds')}</span>
-          <span className="stat__value">
-            <Money amount={projection.startTotal} currency={currency} />
-          </span>
-        </div>
-        <div className="stat">
-          <span className="stat__label">{t('cashflow.reserved')}</span>
-          <span className="stat__value">
-            <Money amount={projection.reserveBalance} currency={currency} />
-          </span>
-        </div>
-        <div className="stat">
           <span className="stat__label">{t('cashflow.freeFunds')}</span>
           <span className="stat__value">
             <Money amount={projection.startFree} currency={currency} signed />
           </span>
         </div>
       </div>
-
-      <p className="field__hint" style={{ marginTop: 'var(--space-2)' }}>
-        {t('cashflow.liquidNote')}
-      </p>
 
       <div className="card card--pad" style={{ marginTop: 'var(--space-3)' }}>
         <div className="kv">
@@ -247,7 +213,11 @@ export function Cashflow() {
       ) : (
         <ul className="card list" data-ui={UI.cashflow.liabilityList}>
           {liabilitySummary.map((l) => (
-            <li key={l.id} className="list__item">
+            <li
+              key={l.id}
+              className="list__item"
+              style={{ flexDirection: 'column', alignItems: 'stretch', gap: 0 }}
+            >
               {/* 行タップ = 返済シート（残高を見ながら返済計画を入力する）。 */}
               <button
                 type="button"
@@ -282,6 +252,41 @@ export function Cashflow() {
                 </div>
                 <Icon name="chevronRight" size={18} />
               </button>
+              {/* 展開 = 登録済みの返済（未来日付の保存仕訳・借方 = この負債）。タップで編集。 */}
+              {l.repayments.length > 0 ? (
+                <>
+                  <button
+                    type="button"
+                    className="collapse-toggle"
+                    aria-expanded={openRepayments.has(l.id)}
+                    onClick={() => toggleRepayments(l.id)}
+                    data-ui={UI.cashflow.repaymentsToggle}
+                  >
+                    <Icon name={openRepayments.has(l.id) ? 'expand' : 'chevronRight'} size={16} />
+                    {t('cashflow.repaymentsRegistered')}
+                  </button>
+                  {openRepayments.has(l.id) ? (
+                    <ul className="list" data-ui={UI.cashflow.repaymentsList}>
+                      {l.repayments.map((e) => (
+                        <li key={e.id}>
+                          <button
+                            type="button"
+                            className="list__row-btn"
+                            onClick={() => onEditEntry(e)}
+                            aria-label={`${t('common.edit')}: ${e.date} ${e.description}`}
+                            data-ui={UI.cashflow.repaymentRow}
+                          >
+                            <span>{e.date}</span>
+                            <span className="list__amount">
+                              <Money amount={repaymentAmountOf(e, l.id)} currency={currency} />
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -370,88 +375,6 @@ export function Cashflow() {
         </>
       )}
 
-      <button
-        type="button"
-        className="collapse-toggle"
-        aria-expanded={showAdvanced}
-        onClick={() => setShowAdvanced((v) => !v)}
-        data-ui={UI.cashflow.advancedToggle}
-        style={{ marginTop: 'var(--space-4)' }}
-      >
-        <Icon name={showAdvanced ? 'expand' : 'chevronRight'} size={16} />
-        {t('cashflow.advancedTitle')}
-      </button>
-      {showAdvanced ? (
-        <div className="stack">
-          <p className="field__hint">{t('cashflow.advancedHint')}</p>
-
-          <div
-            className="section-label"
-            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-          >
-            <span>{t('reserves.title')}</span>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              style={{ minHeight: 36 }}
-              onClick={() => setReserveOpen(true)}
-              data-ui={UI.cashflow.addReserve}
-            >
-              <Icon name="add" size={16} />
-              {t('reserves.add')}
-            </button>
-          </div>
-          {reserves.length === 0 && reserveUnassigned === 0 ? (
-            <div className="card card--pad empty">{t('reserves.empty')}</div>
-          ) : (
-            <ul className="card list" data-ui={UI.cashflow.reserveList}>
-              {reserves.map((r) => {
-                const balance = resBalById.get(r.id) ?? 0;
-                return (
-                  <li key={r.id} className="list__item">
-                    <div className="list__main">
-                      <div className="list__title">{r.name}</div>
-                      <div className="list__sub">
-                        {t('reserves.balance')}: <Money amount={balance} currency={currency} />
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => setPendingReserve(r)}
-                      aria-label={`${t('reserves.delete')}: ${r.name}`}
-                    >
-                      <Icon name="delete" size={18} />
-                    </button>
-                  </li>
-                );
-              })}
-              {reserveUnassigned !== 0 ? (
-                <li
-                  className="list__item"
-                  data-ui={UI.cashflow.reserveUnassigned}
-                >
-                  <div className="list__main">
-                    <div className="list__title">{t('reserves.unassigned')}</div>
-                    <div className="list__sub">
-                      {t('reserves.balance')}:{' '}
-                      <Money amount={reserveUnassigned} currency={currency} />
-                    </div>
-                  </div>
-                </li>
-              ) : null}
-            </ul>
-          )}
-        </div>
-      ) : null}
-
-      {reserveOpen ? (
-        <ReserveSheet
-          onClose={() => setReserveOpen(false)}
-          onSave={(input) => createReserve(input)}
-        />
-      ) : null}
-
       {repayFor ? (
         <RepaymentScheduleSheet
           account={repayFor.account}
@@ -471,21 +394,6 @@ export function Cashflow() {
             const s = pendingSchedule;
             setPendingSchedule(null);
             await removeSchedule(s.id).catch(() => undefined);
-          }}
-        />
-      ) : null}
-
-      {pendingReserve ? (
-        <ConfirmDialog
-          title={t('reserves.deleteConfirmTitle')}
-          body={t('reserves.deleteConfirmBody', { name: pendingReserve.name })}
-          confirmLabel={t('common.delete')}
-          danger
-          onCancel={() => setPendingReserve(null)}
-          onConfirm={async () => {
-            const r = pendingReserve;
-            setPendingReserve(null);
-            await removeReserve(r.id).catch(() => undefined);
           }}
         />
       ) : null}

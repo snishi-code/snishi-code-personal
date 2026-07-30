@@ -11,7 +11,6 @@ import { z } from 'zod';
 import {
   APP_ID,
   CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
-  RESERVE_LEDGER_ACCOUNT_ID,
   SCHEMA_VERSION,
 } from './constants';
 import { counterpartName, counterpartRole } from './adjustment';
@@ -60,6 +59,8 @@ export const accountSchema = z
     role: accountRoleSchema,
     archived: z.boolean(),
     note: z.string().max(500).optional(),
+    // 「自由に動かせる」フラグ（daily-asset のみ・false だけ意味を持つ。下の transform で正規化）。
+    movable: z.boolean().optional(),
     // 返済設定（負債科目のみ。相互参照の整合はパッケージ superRefine で確認する）。
     repaymentAccountId: z.string().min(1).optional(),
     repaymentDay: z.number().int().min(1).max(31).optional(),
@@ -86,6 +87,18 @@ export const accountSchema = z
         path: ['name'],
       });
     }
+  })
+  .transform((a) => {
+    // movable の正規化（保存境界 upsertAccount と同じ規則・fail-soft）:
+    //  - true は undefined へ（既定 ON なのでレコードを最小に保つ）。
+    //  - daily-asset 以外に付いていたら剥がす（拒否せず自己修復）。
+    if (a.movable === undefined) return a;
+    if (a.movable === true || a.role !== 'daily-asset') {
+      const next = { ...a };
+      delete next.movable;
+      return next;
+    }
+    return a;
   });
 
 const tagIdList = z.array(z.string().min(1));
@@ -128,7 +141,6 @@ export const entryMetadataSchema = z
     // 継続コスト資産に紐づく保存仕訳の印。recovery なし = 購入の仕訳 / あり = 回収の振替。
     monthlyCostId: z.string().min(1).optional(),
     monthlyCostRecovery: z.literal(true).optional(),
-    reserveId: z.string().min(1).optional(),
     // 定期ルールからの自動起票の由来（両方セットで持つ。整合はパッケージ superRefine）。
     recurringRuleId: z.string().min(1).optional(),
     recurringMonth: monthSchema.optional(),
@@ -142,7 +154,7 @@ export const cashflowScheduleSchema = z.object({
   direction: z.enum(['inflow', 'outflow', 'transfer']),
   accountId: z.string().min(1),
   counterAccountId: z.string().min(1).optional(),
-  source: z.enum(['manual', 'credit-card', 'installment', 'reserve']),
+  source: z.enum(['manual', 'credit-card', 'installment']),
   status: z.enum(['planned', 'posted', 'cancelled']),
   linkedEntryId: z.string().min(1).optional(),
   entryTagIds: tagIdList.optional(),
@@ -171,16 +183,9 @@ export const recurringRuleSchema = z
   })
   .superRefine((rule, ctx) => {
     if (rule.spreadExpenseAccountId === undefined) return;
-    // 月割りするルールは everyMonths >= 2（支出かつ 2ヶ月以上周期なら自動で継続コスト化。
-    // 毎月払いは普通の支出ルールで表す＝二重の表現を作らない）。
-    if (rule.everyMonths < 2) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: '月割りするルールの周期は 2 ヶ月以上である必要があります',
-        path: ['everyMonths'],
-      });
-    }
-    // 月割りするルールの借方は継続コスト台帳に固定。
+    // 月割りするルールは周期にかかわらず常に継続コスト台帳を経由する（everyMonths >= 1。
+    // 毎月の家賃も「起票日開始・当月末終了」の item が毎月生まれて消える）。
+    // 借方は継続コスト台帳に固定。
     if (rule.debitAccountId !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -189,16 +194,6 @@ export const recurringRuleSchema = z
       });
     }
   });
-
-export const reserveItemSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1).max(120),
-  reserveAccountId: z.string().min(1),
-  parentAccountId: z.string().min(1).optional(),
-  note: z.string().max(500).optional(),
-  createdAt: isoDateTime,
-  updatedAt: isoDateTime,
-});
 
 /** 配分月数の上限（100 年。ルールの CATCH_UP_HARD_CAP_MONTHS と同値）。 */
 const SPREAD_MONTHS_CAP = 1200;
@@ -294,7 +289,6 @@ export const ledgerExportPackageSchema = z
     accounts: z.array(accountSchema),
     journalEntries: z.array(journalEntrySchema),
     cashflowSchedules: z.array(cashflowScheduleSchema),
-    reserves: z.array(reserveItemSchema),
     tags: z.array(tagSchema),
     monthlyCostItems: z.array(monthlyCostItemSchema),
     recurringRules: z.array(recurringRuleSchema),
@@ -326,12 +320,7 @@ export const ledgerExportPackageSchema = z
         activeAccountNames.add(trimmedName);
       }
       // 集約モデルの不変条件（聖域化）: 内部集約ロールは唯一の集約口座 id のみ許す。
-      // これがないと import で目的別の reserve-asset / continuing-cost-asset 科目を再導入できてしまう。
-      if (a.role === 'reserve-asset' && a.id !== RESERVE_LEDGER_ACCOUNT_ID)
-        issue(
-          `取り置き資金(reserve-asset)は集約口座(${RESERVE_LEDGER_ACCOUNT_ID})のみ許可されます（目的別の科目は作れません）`,
-          ['accounts', i, 'id'],
-        );
+      // これがないと import で品目別の continuing-cost-asset 科目を再導入できてしまう。
       if (a.role === 'continuing-cost-asset' && a.id !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID)
         issue(
           `継続コスト台帳(continuing-cost-asset)は集約口座(${CONTINUOUS_COST_LEDGER_ACCOUNT_ID})のみ許可されます`,
@@ -548,7 +537,8 @@ export const ledgerExportPackageSchema = z
           ]);
         }
       }
-      // ⑦（前半）購入の仕訳の形: 借方 = 継続コスト台帳・貸方 role は資金/負債/初期残高。
+      // ⑦（前半）購入の仕訳の形: 借方 = 継続コスト台帳・貸方（支払い元）は起票可能な全 role
+      // （RECURRING_POSTABLE_ROLES = 内部集約・残高調整以外。equity=初期残高も含む）。
       if (mcId !== undefined && !isRecovery) {
         if (!debitLedger) {
           issue(`購入の仕訳「${e.description}」は借方が継続コスト台帳である必要があります`, [
@@ -557,15 +547,12 @@ export const ledgerExportPackageSchema = z
             'lines',
           ]);
         }
-        const creditRole = creditLine ? accountRole.get(creditLine.accountId) : undefined;
-        if (
-          creditRole !== 'daily-asset' &&
-          creditRole !== 'payment-liability' &&
-          creditRole !== 'other-liability' &&
-          creditRole !== 'equity'
-        ) {
+        const creditRole = creditLine
+          ? (accountRole.get(creditLine.accountId) as AccountRole | undefined)
+          : undefined;
+        if (!isRecurringPostableRole(creditRole)) {
           issue(
-            `購入の仕訳「${e.description}」の貸方は資金・負債・初期残高のいずれかである必要があります`,
+            `購入の仕訳「${e.description}」の貸方に内部集約・残高調整の科目は使えません`,
             ['journalEntries', ei, 'lines'],
           );
         }
@@ -620,17 +607,11 @@ export const ledgerExportPackageSchema = z
       );
       if (r.spreadExpenseAccountId !== undefined) {
         // 月割りするルール: 借方 = 継続コスト台帳（rule schema で確認済み）。
-        // 源泉は購入の仕訳の貸方に使える role（資金・カード・ローン）、費用の行き先は
-        // 通常の起票可能科目であること。
-        const creditRole = accountRole.get(r.creditAccountId);
-        if (
-          hasAccount(r.creditAccountId) &&
-          creditRole !== 'daily-asset' &&
-          creditRole !== 'payment-liability' &&
-          creditRole !== 'other-liability'
-        )
+        // 源泉（支払い元 = 購入の仕訳の貸方）と費用の行き先は、種別によらず起票可能な全 role
+        // （内部集約・残高調整のみ除外。台帳自身は不変条件⑧が引き続き禁止する）。
+        if (hasAccount(r.creditAccountId) && !creditPostable)
           issue(
-            `定期ルール「${r.name}」の源泉科目は資金・カード・ローンのいずれかである必要があります`,
+            `定期ルール「${r.name}」の源泉科目は定期ルールに使えません（内部集約・調整科目は自動起票できません）`,
             at('creditAccountId'),
           );
         if (!hasAccount(r.spreadExpenseAccountId))
@@ -656,61 +637,6 @@ export const ledgerExportPackageSchema = z
           at('debitAccountId'),
         );
       }
-    });
-
-    // 目的別資金(reserves)の参照整合性。
-    const reserveIds = new Set<string>();
-    pkg.reserves.forEach((r, ri) => {
-      const at = (...p: (string | number)[]) => ['reserves', ri, ...p];
-      if (reserveIds.has(r.id)) issue(`目的別資金の ID が重複しています(${r.id})`, at('id'));
-      reserveIds.add(r.id);
-      const accType = accountType.get(r.reserveAccountId);
-      if (accType === undefined)
-        issue(`目的別資金「${r.name}」の科目が存在しません`, at('reserveAccountId'));
-      else if (accType !== 'asset')
-        issue(
-          `目的別資金「${r.name}」の科目は資産科目である必要があります`,
-          at('reserveAccountId'),
-        );
-      else if (accountRole.get(r.reserveAccountId) !== 'reserve-asset')
-        issue(
-          `目的別資金「${r.name}」の科目は目的別資金(reserve-asset)である必要があります`,
-          at('reserveAccountId'),
-        );
-      else if (r.reserveAccountId !== RESERVE_LEDGER_ACCOUNT_ID)
-        issue(
-          `目的別資金「${r.name}」は集約口座(${RESERVE_LEDGER_ACCOUNT_ID})に寄せる必要があります（目的別の科目は作れません）`,
-          at('reserveAccountId'),
-        );
-      // 親口座（取り置き元）は任意。あれば日常資産(daily-asset)であること。
-      if (r.parentAccountId !== undefined) {
-        if (!accountType.has(r.parentAccountId))
-          issue(`目的別資金「${r.name}」の取り置き元口座が存在しません`, at('parentAccountId'));
-        else if (accountRole.get(r.parentAccountId) !== 'daily-asset')
-          issue(
-            `目的別資金「${r.name}」の取り置き元口座は日常資産である必要があります`,
-            at('parentAccountId'),
-          );
-      }
-    });
-
-    // 集約モデルの不変条件: 取り置きの仕訳タグ(metadata.reserveId)は既存の ReserveItem を参照し、
-    // かつ集約口座(reserve-ledger)に触れていること（目的別残高がタグ集計で正しく導出できる）。
-    pkg.journalEntries.forEach((e, ei) => {
-      const rid = e.metadata?.reserveId;
-      if (rid === undefined) return;
-      if (!reserveIds.has(rid))
-        issue(`仕訳の reserveId(${rid}) が存在しない取り置きを参照しています`, [
-          'journalEntries',
-          ei,
-          'metadata',
-          'reserveId',
-        ]);
-      if (!e.lines.some((l) => l.accountId === RESERVE_LEDGER_ACCOUNT_ID))
-        issue(
-          `reserveId 付きの仕訳は集約口座(${RESERVE_LEDGER_ACCOUNT_ID})に触れる必要があります`,
-          ['journalEntries', ei, 'metadata', 'reserveId'],
-        );
     });
 
     // 継続コスト資産(monthlyCostItems)の参照整合性 + 不変条件⑤⑥⑦。

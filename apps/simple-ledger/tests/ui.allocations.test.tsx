@@ -67,6 +67,135 @@ describe('追加チューザー', () => {
   });
 });
 
+describe('定期ルールの継続コスト化（月割り）', () => {
+  it('支出ルールは周期 1（毎月）でも常に月割り（継続コスト台帳を経由）される', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const fixedCost = ledger.accounts.find((a) => a.name === '固定費')!;
+
+    await renderReady();
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.unifiedAdd}"]`)!);
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.addChooser}.rule"]`)!);
+
+    const kind = document.querySelector(
+      `[data-ui="${UI.allocations.recurringKind}"]`,
+    ) as HTMLSelectElement;
+    expect(kind.value).toBe('expense');
+    const every = document.querySelector(
+      `[data-ui="${UI.allocations.recurringEvery}"]`,
+    ) as HTMLInputElement;
+    expect(every.value).toBe('1');
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringName}"]`)!, {
+      target: { value: '家賃' },
+    });
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!, {
+      target: { value: '80000' },
+    });
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringFrom}"]`)!, {
+      target: { value: cash.id },
+    });
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringTo}"]`)!, {
+      target: { value: fixedCost.id },
+    });
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
+    await waitFor(
+      () => {
+        expect(
+          document.querySelector(`[data-ui="${UI.allocations.recurringSheet}"]`),
+        ).not.toBeInTheDocument();
+      },
+      { timeout: 3000 },
+    );
+
+    const rule = (await loadLedger()).recurringRules.find((r) => r.name === '家賃');
+    expect(rule).toBeDefined();
+    expect(rule!.everyMonths).toBe(1);
+    // 周期にかかわらず常に台帳経由（費用の行き先 = 選んだ費用カテゴリ・借方 = 台帳固定）。
+    expect(rule!.spreadExpenseAccountId).toBe(fixedCost.id);
+    expect(rule!.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+    expect(rule!.creditAccountId).toBe(cash.id);
+  });
+
+  it('簿記編集ルールも「継続コストとして扱う」で台帳経由にでき、借方欄は費用の行き先になる', async () => {
+    const ledger = await loadLedger();
+    const bank = ledger.accounts.find((a) => a.name === '預金')!;
+    const salary = ledger.accounts.find((a) => a.name === '給与')!;
+
+    await renderReady();
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.unifiedAdd}"]`)!);
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.addChooser}.rule"]`)!);
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringKind}"]`)!, {
+      target: { value: 'manual' },
+    });
+
+    // チェックは既定 OFF。ON にすると借方欄のラベルが「費用の行き先」になる。
+    const spreadToggle = document.querySelector(
+      `[data-ui="${UI.allocations.recurringManualSpread}"]`,
+    ) as HTMLInputElement;
+    expect(spreadToggle.checked).toBe(false);
+    fireEvent.click(spreadToggle);
+    const toSelect = document.querySelector(
+      `[data-ui="${UI.allocations.recurringTo}"]`,
+    ) as HTMLSelectElement;
+    expect(screen.getByLabelText('費用の行き先')).toBe(toSelect);
+
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringName}"]`)!, {
+      target: { value: '健康保険' },
+    });
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!, {
+      target: { value: '4000' },
+    });
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringFrom}"]`)!, {
+      target: { value: bank.id },
+    });
+    // 例: 健康保険 = 貸方 銀行口座・費用の行き先 給与（収入カテゴリも行き先にできる）。
+    fireEvent.change(toSelect, { target: { value: salary.id } });
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
+    await waitFor(
+      () => {
+        expect(
+          document.querySelector(`[data-ui="${UI.allocations.recurringSheet}"]`),
+        ).not.toBeInTheDocument();
+      },
+      { timeout: 3000 },
+    );
+
+    const rule = (await loadLedger()).recurringRules.find((r) => r.name === '健康保険');
+    expect(rule).toBeDefined();
+    expect(rule!.spreadExpenseAccountId).toBe(salary.id);
+    expect(rule!.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+    expect(rule!.creditAccountId).toBe(bank.id);
+
+    // 再編集では簿記編集 + チェック ON のまま開く（支出の定型に収まらないため）。
+    const editButton = await waitFor(
+      () => {
+        const found = document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`);
+        expect(found).toBeInTheDocument();
+        return found!;
+      },
+      { timeout: 3000 },
+    );
+    fireEvent.click(editButton);
+    await waitFor(() => {
+      const kind = document.querySelector(
+        `[data-ui="${UI.allocations.recurringKind}"]`,
+      ) as HTMLSelectElement;
+      expect(kind.value).toBe('manual');
+    });
+    expect(
+      (
+        document.querySelector(
+          `[data-ui="${UI.allocations.recurringManualSpread}"]`,
+        ) as HTMLInputElement
+      ).checked,
+    ).toBe(true);
+    expect(
+      (document.querySelector(`[data-ui="${UI.allocations.recurringTo}"]`) as HTMLSelectElement)
+        .value,
+    ).toBe(salary.id);
+  });
+});
+
 describe('持ち込み登録（継続コスト資産シート）', () => {
   it('過去日 + 終了日なしで登録でき、購入の仕訳は貸方 = 初期残高で立つ', async () => {
     await renderReady();

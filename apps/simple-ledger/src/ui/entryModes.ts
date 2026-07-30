@@ -15,7 +15,7 @@ export interface EntryRole {
 /*
  * 簿記編集（manual）の候補。継続コスト台帳（continuing-cost-asset）は候補から外す —
  * 台帳に触れる保存仕訳は購入の仕訳・回収の振替の 2 種類だけで、どちらも専用導線が作る
- * （保存境界も monthlyCostId なしの台帳仕訳を拒否する）。reserve-asset は現行どおり残す。
+ * （保存境界も monthlyCostId なしの台帳仕訳を拒否する）。
  */
 const MANUAL_ROLES: AccountRole[] = ACCOUNT_ROLES.filter((r) => r !== 'continuing-cost-asset');
 
@@ -33,19 +33,19 @@ export const MODE_ROLES: Record<FormMode, readonly [EntryRole, EntryRole]> = {
     {
       side: 'credit',
       labelKey: 'entry.expense.source',
-      allowedRoles: ['daily-asset', 'reserve-asset', 'payment-liability'],
+      allowedRoles: ['daily-asset', 'payment-liability'],
     },
   ],
   transfer: [
     {
       side: 'credit',
       labelKey: 'entry.transfer.from',
-      allowedRoles: ['daily-asset', 'reserve-asset', 'payment-liability', 'other-liability'],
+      allowedRoles: ['daily-asset', 'payment-liability', 'other-liability'],
     },
     {
       side: 'debit',
       labelKey: 'entry.transfer.to',
-      allowedRoles: ['daily-asset', 'reserve-asset', 'payment-liability', 'other-liability'],
+      allowedRoles: ['daily-asset', 'payment-liability', 'other-liability'],
     },
   ],
   manual: [

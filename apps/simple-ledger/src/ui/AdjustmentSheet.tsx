@@ -166,7 +166,7 @@ export function AdjustmentEditSheet({
 
   const actual = parseSignedAmountText(actualText);
   const delta = actual === null ? 0 : actual - expected;
-  // 補正対象は内部集約口座（取り置き資金・継続コスト台帳）を除いた資産・負債のみ（聖域化）。
+  // 補正対象は内部集約口座（継続コスト台帳）を除いた資産・負債のみ（聖域化）。
   const groups = groupedAccountsByRole(accounts, [...ADJUSTABLE_ACCOUNT_ROLES], accountId);
 
   async function submit() {

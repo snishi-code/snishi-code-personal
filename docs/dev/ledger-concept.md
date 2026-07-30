@@ -33,20 +33,23 @@
 
 ## 中核モデル
 
-- **`Account`（勘定科目）**: `id` / `name` / `type` / `role` / `archived`。
+- **`Account`（勘定科目）**: `id` / `name` / `type` / `role` / `archived` / `movable?`。
   `type` は `asset` / `liability` / `equity` / `revenue` / `expense`（会計分類）。
   `role` は UI 用の役割で、日常入力（収入/支出/振替）の候補制御に使う。正本は
   [`apps/simple-ledger/src/domain/accountRoles.ts`](../../apps/simple-ledger/src/domain/accountRoles.ts)。
   `role` は `type` と整合する（`roleAllowsType`）。
-  - `daily-asset`（現金・預金）/ `reserve-asset`（取り置き資金の集約口座・内部）/
-    `investment-asset`（投資）/ `continuing-cost-asset`（継続コスト台帳＝集約口座・内部）… `type=asset`
+  - `daily-asset`（現金・預金）/ `investment-asset`（投資）/
+    `continuing-cost-asset`（継続コスト台帳＝集約口座・内部）… `type=asset`
   - `payment-liability`（クレジットカード等）/ `other-liability`（ローン等）… `type=liability`
   - `income-category`（`revenue`）/ `expense-category`（`expense`）/ `equity`（`equity`）
   - `system-adjustment`（残高調整費/収入。`expense|revenue`。自動生成・通常入力に出さない）
-  - 内部集約ロール（`continuing-cost-asset` / `reserve-asset`）は勘定科目管理・通常入力候補に
+  - 内部集約ロール（`continuing-cost-asset`）は勘定科目管理・通常入力候補に
     出さない（`isInternalRole`）。BS / 資産内訳には 1 行で表示する。
-  - **取り置き資金からの支払い/移動は、その資金の残高不足を保存前に拒否する**（`reserveBalanceShortfall`、
-    entry.date 時点の残高で判定・fail-closed）。
+  - **`movable`（「自由に動かせる」）は現預金（`daily-asset`）のみのフラグ・既定 ON**。
+    Suica・チャージ残高など「支払いには使えるが自由に引き出せない」ものだけ OFF にする
+    （例外側に印）。保存されるのは `false` だけ（ON は `undefined` へ正規化・保存境界と
+    import 検証の両方）。使い道は資金繰りの原資（下記）だけで、BS / 資産の内訳は従来どおり
+    全資産を出す。
 - **`JournalEntry`（仕訳）**: `date` / `description` / `lines[]` / `kind` / `memo`。
   `lines` は「1 借方・1 貸方・同額」の 2 行のみ（型は複数行を許し将来拡張可能）。
   `kind` は `normal` / `opening`（初期残高）。
@@ -128,8 +131,8 @@ BS 基準日を同時に得る。PL だけ期間末、BS だけ今日、とい�
 | 入力 | フィールド（debit / credit） | 候補ロール |
 |---|---|---|
 | 収入 | 入金先(debit) / カテゴリ(credit) | daily-asset / income-category |
-| 支出 | 使い道(debit) / 支払元(credit) | expense-category / daily・reserve-asset・payment-liability |
-| 振替 | 振替先(debit) / 振替元(credit) | daily/reserve-asset・payment/other-liability（資金移動・返済・借入。`transferFlowValid`） |
+| 支出 | 使い道(debit) / 支払元(credit) | expense-category / daily-asset・payment-liability |
+| 振替 | 振替先(debit) / 振替元(credit) | daily-asset・payment/other-liability（資金移動・返済・借入。`transferFlowValid`） |
 | 詳細(manual) | 借方 / 貸方 | 継続コスト台帳（`continuing-cost-asset`）以外すべて |
 
 例（支出）: カテゴリ=変動費・支払元=現金・1000 →
@@ -191,8 +194,13 @@ BS 基準日を同時に得る。PL だけ期間末、BS だけ今日、とい�
 ### 定期ルールとの連携
 
 定期ルール（`RecurringRule`）は `everyMonths`（必須。1 = 毎月）で起票間隔を持つ。
-**支出ルールかつ `everyMonths >= 2` なら自動で月割りされる**（トグルは無い）:
-`spreadExpenseAccountId` に費用の行き先を持ち、起票 1 回につき
+**支出ルールは周期にかかわらず常に月割りされる**（`everyMonths >= 1`・トグルは無い）。毎月の
+家賃も「起票日開始・当月末終了」の item が毎月生まれて消える＝支出の集計では継続コストに
+分類される（合計は変わらず、分類が通常支出→継続コストへ移るだけ）。**簿記編集（任意の
+科目ペア）のルールも「継続コストとして扱う」チェックで月割りにできる**（例: 健康保険 =
+貸方 銀行 / 費用の行き先 給与。源泉・費用の行き先とも内部集約・残高調整以外の全科目 =
+`RECURRING_POSTABLE_ROLES`）。月割りするルールは `spreadExpenseAccountId` に費用の行き先を
+持ち、起票 1 回につき
 
 - 保存される仕訳 `rec-{ruleId}-{month}`: `借方 継続コスト台帳 / 貸方 源泉`（= 購入の仕訳）
 - item `ccr-{ruleId}-{month}`: 開始日 = 起票日・終了日 = 周期末の月末（必ず埋まる）
@@ -242,8 +250,8 @@ simple-ledger は**監査証跡を固定する帳簿ではなく、生活上の�
 - **後編集・削除**（`updateAdjustment` / `deleteAdjustment`）: 編集時の理論残高は**その補正自身を
   除いて**計算し直す（除外しないと補正が二重に効く）。再計算後 `delta=0` になった補正は削除する。
   補正仕訳は Journal では読み取り専用（専用画面でだけ編集・削除）。
-- 対象は資産・負債のうち内部集約ロール以外（`ADJUSTABLE_ACCOUNT_ROLES`。継続コスト台帳・
-  取り置き集約口座を補正で直接動かすと残存価値・目的別残高の導出と矛盾する）。
+- 対象は資産・負債のうち内部集約ロール以外（`ADJUSTABLE_ACCOUNT_ROLES`。継続コスト台帳を
+  補正で直接動かすと残存価値の導出と矛盾する）。
 
 ## タグ（分析軸）
 
@@ -252,18 +260,28 @@ simple-ledger は**監査証跡を固定する帳簿ではなく、生活上の�
 `JournalEntry.tagIds`。明細タグは廃止済み）。Journal はタグで絞り込み・タグチップ表示。
 参照中タグの物理削除は禁止（アーカイブ）。
 
-## 資金繰りと取り置き資金
+## 資金繰りと「自由に動かせるお金」
 
 - **役割分担（作者と合意した設計正本）**: ホーム = 単発の記録 / 毎月のもの = 続くもののルール
   置き場（実際に金が動く → 自動起票・持ち物の消費 → 導出で月割り・過去に波及）/ 資金繰り =
   負債の返済 + 未来を眺める。
+- **資金繰りの原資は「自由に動かせるお金」1 値**: `daily-asset` かつ `movable !== false` かつ
+  非アーカイブの残高合計（単一正本 = `isFreeAsset` / `freeAssetTotal`・`src/domain/cashflow.ts`）。
+  総資金/自由資金という 2 段の概念は持たない。負債返済の投影原資もこれ。
+  貸借対照表・資産の内訳は従来どおり全資産を出す（資金繰りだけ絞る）。
 - **返済は金額・回数が最初から確定しているので、ルールではなく未来日付の保存される仕訳 N 本**
   （`buildRepaymentEntries` / `createRepaymentEntries`。完済でぴったり終了）。複雑さ（遡及・
   動的再配分）は償却側だけに閉じ込める非対称が肝。返済仕訳には `monthlyCostId` を付けない
   （item 削除で消えると負債残高が狂うため。負債で買った item は削除不可・アーカイブのみ）。
-- **取り置き資金（`ReserveItem`・短期の封筒分けのみ）**: 取り置きは通常の振替で行い、資金繰りでは
-  残高を自由資金から除外して見る（総資産は不変）。目的別の勘定科目を作らず単一の集約口座
-  `reserve-ledger` + `metadata.reserveId` で目的別残高を導出する。目標額・期限・利回りは持たない。
+  資金繰りの負債行を展開すると登録済みの返済（未来日付の保存される仕訳）が並び、タップで
+  そのまま編集できる（紐づけは「借方 = その負債・未来日付」で引く。metadata は増やさない）。
+
+## ホーム→資産の内訳は 4 枠
+
+**預金など（自由に動かせる現預金）→ 自由に動かせないやつ → 投資 → 継続コスト台帳**の順に
+枠で分け、各枠の合計 + 全体合計を出す。継続コスト台帳は 1 行（残存価値の合計・タップで
+「毎月のもの」へ＝内訳は台帳画面で見る）。投資を科目で分けたければ（NISA / iDeCo）科目を
+増やせば分かれる — 専用機能は作らない。
 
 ## 勘定科目の変更ルール（`Account`）
 

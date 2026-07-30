@@ -52,7 +52,6 @@ export function Accounts() {
       referencedAccountIds({
         entries: ledger?.journalEntries ?? [],
         schedules: ledger?.cashflowSchedules ?? [],
-        reserves: ledger?.reserves ?? [],
         monthlyCostItems: ledger?.monthlyCostItems ?? [],
       }),
     [ledger],

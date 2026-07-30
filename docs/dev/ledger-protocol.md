@@ -7,7 +7,7 @@
 
 - **実行時の正本 = IndexedDB**（`DB_NAME = "simple-ledger-v2"`）。ストア:
   `kv`（meta / settings）、`accounts`、`journalEntries`、`cashflowSchedules`、
-  `reserves`、`tags`、`monthlyCostItems`、`recurringRules`、`snapshots`。
+  `tags`、`monthlyCostItems`、`recurringRules`、`snapshots`。
 - **公式交換形式 = JSON**（端末間共有・バックアップ）。JSON をDB代わりに常用しない。
 - **計算で生まれる仕訳は保存しない**: 継続コスト資産の費用の行・ルールの未来投影は
   `reportEntriesForAsOf` が表示のたびに展開する導出専用で、IndexedDB / export / スナップショットの
@@ -20,7 +20,7 @@
 ```jsonc
 {
   "appId": "snishi-code.simple-ledger-v2",
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "ledgerId": "ledger",
   "exportedAt": "2026-07-29T00:00:00.000Z",
   "deviceId": "<uuid>",
@@ -28,7 +28,6 @@
   "accounts": [ /* Account[]（type + role 付き） */ ],
   "journalEntries": [ /* JournalEntry[]（保存される仕訳のみ） */ ],
   "cashflowSchedules": [ /* CashflowSchedule[]（予定キャッシュフロー） */ ],
-  "reserves": [ /* ReserveItem[]（取り置き資金） */ ],
   "tags": [ /* Tag[]（分析タグ） */ ],
   "monthlyCostItems": [ /* MonthlyCostItem[]（継続コスト資産） */ ],
   "recurringRules": [ /* RecurringRule[]（定期ルール） */ ],
@@ -36,11 +35,14 @@
 }
 ```
 
-- `Account.role`: `type` と整合する UI 用役割（`daily-asset` / `reserve-asset`（内部集約）/
+- `Account.role`: `type` と整合する UI 用役割（`daily-asset` /
   `investment-asset` / `continuing-cost-asset`（内部集約＝継続コスト台帳）/ `payment-liability` /
   `other-liability` / `equity` / `income-category` / `expense-category` / `system-adjustment`）。
   詳細は [ledger-concept.md](ledger-concept.md#中核モデル)。import 検証で `role` と `type` の
   整合も確認する。
+- `Account.movable?`（「自由に動かせる」）: `daily-asset` のみ・**保存されるのは `false` だけ**
+  （ON = 既定は `undefined`。`true` や `daily-asset` 以外に付いた値は import 時に strip /
+  剥がして自己修復する）。資金繰りの原資の判定にだけ使う。
 - `revision`: 端末ローカルの編集追跡。保存のたびに +1。
 - 金額（`JournalLine.amount`）は **正の整数・最小通貨単位**（JPY なら円）。
 
@@ -56,6 +58,7 @@
 | **v1→v2**（2026-07-28） | 使われていなかった 2 概念を型・schema・store・UI ごと撤去。IndexedDB は DB_VERSION 3 の upgrade で旧ストアを削除。 |
 | **v2→v3**（2026-07-29・指示書#4） | 廃止概念の一掃（`fixed-asset` / `deferred-asset` role・按分 `allocations`・投資評価損益）・補正の通常化・並び順の正本化・ヘッダーの日付選択化・用語統一。旧 `allocations` ストアを削除（DB_VERSION 4）。 |
 | **v3→v4**（2026-07-30・指示書#5） | **継続コスト資産の4項目モデル一本化**。`MonthlyCostItem` を 8 フィールド化（`startDate`/`endDate?`。`kind`/`costMonths`/`repeatEveryMonths`/`startMonth`/`endMonth`/`paymentSourceAccountId`/`recognitionCreditAccountId`/`status` 等を撤去）。**購入の仕訳を保存される仕訳にする**（`metadata.monthlyCostId`）。回収の振替（`metadata.monthlyCostRecovery`）を追加。`AssetDisposal`（処分）・一時停止・実績動的償却を全廃（`assetDisposals` ストア削除。DB_VERSION 5）。`RecurringRule` に `everyMonths`（必須）と `spreadExpenseAccountId?`（月割りするルール）を追加。科目名「開始残高」→「初期残高」。実データの変換 = `_workspace-management/scripts/convert-ledger-v3-to-v4.mjs`（単発・アプリ内 migration なし）。 |
+| **v4→v5**（2026-07-30・実ユーズレビュー第2弾） | **取り置きの機能ごと全廃**（`reserves` ストア・`ReserveItem`・`metadata.reserveId`・role `reserve-asset`・予定 CF の `source:'reserve'` を撤去。DB_VERSION 6）。**`Account.movable?`（「自由に動かせる」・現預金のみ・`false` だけ保存）を追加**（資金繰りの原資 =「自由に動かせるお金」1 値）。**支出ルールは周期にかかわらず常に台帳経由**（月割りするルールの条件 `everyMonths >= 2` を撤廃・`>= 1`。簿記編集ルールにも継続コスト化を開放し、購入の仕訳の貸方・ルールの源泉/費用の行き先は内部集約・残高調整以外の全 role = `RECURRING_POSTABLE_ROLES`）。過去に起票済みの支出形ルール由来の仕訳も変換で台帳経由へ揃えた。実データの変換 = `_workspace-management/scripts/convert-ledger-v4-to-v5.mjs`（単発・アプリ内 migration なし）。 |
 
 ### `MonthlyCostItem`（継続コスト資産）
 
@@ -84,12 +87,11 @@
 
 `id` / `name` / `scope`（`'entry'` のみ＝仕訳全体。明細タグは廃止）/ `color?` / `archived`。
 
-### `CashflowSchedule` / `ReserveItem`
+### `CashflowSchedule`
 
-- `CashflowSchedule`: 予定キャッシュフロー。`direction`('inflow'|'outflow'|'transfer') /
-  `source`('manual'|'credit-card'|'installment'|'reserve') / `status`('planned'|'posted'|'cancelled')。
-- `ReserveItem`: `id` / `name` / `reserveAccountId`（集約口座 `reserve-ledger` のみ）/
-  `parentAccountId?`（取り置き元の daily-asset）/ `note?`。
+- 予定キャッシュフロー。`direction`('inflow'|'outflow'|'transfer') /
+  `source`('manual'|'credit-card'|'installment') / `status`('planned'|'posted'|'cancelled')。
+  新規生成は無い（レガシーの一覧・実績化・削除のみ）。
 
 ### `JournalEntry.metadata`（任意）
 
@@ -108,8 +110,6 @@
   // 継続コスト資産に紐づく保存仕訳の印。recovery なし = 購入の仕訳 / あり = 回収の振替。
   "monthlyCostId": "<monthlyCostItems[].id>",
   "monthlyCostRecovery": true,
-  // 取り置きの振替。
-  "reserveId": "<reserves[].id>",
   // 定期ルールからの自動起票の由来（必ずペアで持つ）。
   "recurringRuleId": "<recurringRules[].id>",
   "recurringMonth": "2026-07"
@@ -127,13 +127,13 @@ import では strip される）。
 - **仕訳は「1 借方・1 貸方・同額」の 2 行のみ**（複合仕訳 UI 未対応のため fail-closed）。
 - すべての `lines[].accountId` が `accounts[].id` に存在する。`accounts[].id` は一意・
   `role` は `type` と整合・有効（非アーカイブ）な科目名は trim 後で重複不可。
-- 内部集約ロールは唯一の集約口座のみ（`reserve-asset` = `reserve-ledger`、
-  `continuing-cost-asset` = `continuing-cost-ledger`）。
+- 内部集約ロールは唯一の集約口座のみ（`continuing-cost-asset` = `continuing-cost-ledger`）。
 - **継続コスト資産の不変条件**:
   - 各 item に**購入の仕訳がちょうど 1 件**（`metadata.monthlyCostId === item.id`・recovery なし）。
     `monthlyCostId` を持つ仕訳の参照先 item が存在する。
-  - 購入の仕訳の形: 借方 = 継続コスト台帳、貸方 role ∈ {daily-asset, payment-liability,
-    other-liability, equity}、金額 == `item.amount`、**`date === item.startDate`（日レベル）**。
+  - 購入の仕訳の形: 借方 = 継続コスト台帳、貸方 = 内部集約・残高調整以外の全 role
+    （`RECURRING_POSTABLE_ROLES`。equity=初期残高・収入カテゴリも可）、金額 == `item.amount`、
+    **`date === item.startDate`（日レベル）**。
   - **台帳に触れる保存仕訳は必ず `monthlyCostId` を持つ**（購入の仕訳 / 回収の振替の 2 種類だけ）。
   - 回収の振替は貸方 = 台帳（回収額の上限は設けない＝割り振る総額が負になってよい）。
   - `endDate?` は `>= startDate`・配分月数 ≤ 1200 ヶ月。`expenseAccountId` は内部集約・残高調整
@@ -141,11 +141,11 @@ import では strip される）。
   - **同一ルール由来（id `ccr-{ruleId}-…`）の item の月区間が重ならない**。
 - **勘定科目の不変条件: アーカイブ済み（資産・負債）= 全仕訳から計算した最終残高が 0**。
 - 定期ルール: `everyMonths >= 1`。月割りするルール（`spreadExpenseAccountId` あり）は
-  `everyMonths >= 2`・借方 = 継続コスト台帳・源泉 role ∈ {daily-asset, payment-liability,
-  other-liability}。定期ルール由来の仕訳は `recurringRuleId`/`recurringMonth` をペアで持ち、
-  ルールが存在し、同ルール・同月の重複が無い。
+  **周期にかかわらず**借方 = 継続コスト台帳・源泉と費用の行き先は内部集約・残高調整以外の
+  全 role（`RECURRING_POSTABLE_ROLES`）。定期ルール由来の仕訳は `recurringRuleId`/`recurringMonth`
+  をペアで持ち、ルールが存在し、同ルール・同月の重複が無い。
 - 残高補正: `delta === actualBalance − expectedBalance`・対象/相手科目の存在と形・kind=normal。
-- 予定 CF / 取り置き / タグ: id 一意・参照整合（posted の予定 CF は存在する仕訳に紐づく等）。
+- 予定 CF / タグ: id 一意・参照整合（posted の予定 CF は存在する仕訳に紐づく等）。
 
 ### revision の原子性
 
@@ -175,7 +175,7 @@ import では strip される）。
 
 ## migration ポリシー（後方互換をコードで持たない）
 
-- `schemaVersion` を必ず持つ。現行は **`4`**（`SCHEMA_VERSION`・`src/data/constants.ts`）。
+- `schemaVersion` を必ず持つ。現行は **`5`**（`SCHEMA_VERSION`・`src/data/constants.ts`）。
 - **アプリ内に migration チェーンを持たない**（作者決定・単発変換方式）。版を上げたら:
   1. `SCHEMA_VERSION` を +1 する（旧版 JSON / スナップショットは fail-closed に拒否される）。
   2. 実データは書き出した JSON を**単発の変換スクリプト**（`_workspace-management/scripts/`）で

@@ -32,8 +32,7 @@ import {
   type EntryValidationError,
   type SimpleEntryInput,
 } from '../../domain/entry';
-import type { Account, EntryMetadata, InputMode, JournalEntry } from '../../domain/types';
-import { RESERVE_LEDGER_ACCOUNT_ID } from '../../domain/constants';
+import type { EntryMetadata, InputMode, JournalEntry } from '../../domain/types';
 import { t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
 import { todayLocal } from '../../util/time';
@@ -89,30 +88,9 @@ function errorText(
 }
 
 export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => void }) {
-  const { ledger, saveEntry, createContinuousCost, createReserve, saveAccount } = useLedger();
+  const { ledger, saveEntry, createContinuousCost, saveAccount } = useLedger();
   const accounts = ledger?.accounts ?? [];
-  const reserves = ledger?.reserves ?? [];
   const tags = ledger?.tags ?? [];
-  const reserveOptionGroup = (): { type: 'asset'; label: string; accounts: Account[] } | null => {
-    if (reserves.length === 0) return null;
-    return {
-      type: 'asset',
-      label: t('reserves.title'),
-      accounts: reserves.map((r) => ({
-        id: `reserve:${r.id}`,
-        name: r.name,
-        type: 'asset' as const,
-        role: 'reserve-asset' as const,
-        archived: false,
-        createdAt: r.createdAt,
-        updatedAt: r.updatedAt,
-      })),
-    };
-  };
-  const resolveReserveSide = (id: string): { accountId: string; reserveId?: string } =>
-    id.startsWith('reserve:')
-      ? { accountId: RESERVE_LEDGER_ACCOUNT_ID, reserveId: id.slice('reserve:'.length) }
-      : { accountId: id };
 
   const fixed = init.kind === 'transfer-fixed' ? init.fixed : null;
   const [mode, setMode] = useState<FormMode>(
@@ -151,14 +129,10 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const paymentRole = accounts.find((a) => a.id === form.creditAccountId)?.role;
   const isLiabilityPayment =
     paymentRole === 'payment-liability' || paymentRole === 'other-liability';
-  // 継続コスト化は支出フローに加え、簿記編集（manual）でも貸方が資金/負債なら選べる
-  // （継続コストの支払い元にできる役割と同じ条件）。
-  const ccPaymentOk =
-    paymentRole === 'daily-asset' ||
-    paymentRole === 'payment-liability' ||
-    paymentRole === 'other-liability';
+  // 継続コスト化は支出フローと簿記編集（manual）の新規作成で常に選べる。
+  // 支払い元（貸方）の役割は絞らない（保存境界 = RECURRING_POSTABLE_ROLES + equity が正）。
   const canCreateContinuousCost =
-    init.kind === 'create' && (mode === 'expense' || (mode === 'manual' && ccPaymentOk));
+    init.kind === 'create' && (mode === 'expense' || mode === 'manual');
   const [ccMode, setCcMode] = useState(false);
   const [ccTargetName, setCcTargetName] = useState('');
   const [ccCategoryId, setCcCategoryId] = useState('');
@@ -175,10 +149,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [repayCountError, setRepayCountError] = useState(false);
   const [showDetails, setShowDetails] = useState(init.kind === 'edit');
 
-  const canCreateReserve = init.kind === 'create' && mode === 'transfer';
-  const [reserveMode, setReserveMode] = useState(false);
-  const [reserveName, setReserveName] = useState('');
-  const [reserveNameError, setReserveNameError] = useState(false);
   const canArrangeLoan = init.kind === 'create' && mode === 'expense';
   const [loanMode, setLoanMode] = useState(false);
   const [liabilitySheetOpen, setLiabilitySheetOpen] = useState(false);
@@ -189,8 +159,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     ccMode,
     ccTargetName,
     ccCategoryId,
-    reserveMode,
-    reserveName,
     loanMode,
     ccEndDate,
     repayToggle,
@@ -230,8 +198,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   }
 
   function nameOfSide(id: string): string {
-    if (id.startsWith('reserve:'))
-      return reserves.find((r) => r.id === id.slice('reserve:'.length))?.name ?? '—';
     return accounts.find((a) => a.id === id)?.name ?? '—';
   }
   function effectiveForm(): SimpleEntryInput {
@@ -251,15 +217,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   }
 
   async function onSave() {
-    const base = effectiveForm();
-    const srcResolved = resolveReserveSide(base.creditAccountId);
-    const dstResolved = resolveReserveSide(base.debitAccountId);
-    const selectedReserveId = srcResolved.reserveId ?? dstResolved.reserveId;
-    const toSave = {
-      ...base,
-      creditAccountId: srcResolved.accountId,
-      debitAccountId: dstResolved.accountId,
-    };
+    const toSave = effectiveForm();
 
     // 固定側 pass-through の振替: 検証後、保存は呼び出し側（アーカイブ処理）へ委譲する。
     // 固定側は候補リストを経由しない科目（台帳・アーカイブ対象）のため transferFlowValid は通さない。
@@ -333,44 +291,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       return;
     }
 
-    const reserveActive = canCreateReserve && reserveMode;
-    if (reserveActive) {
-      const found: EntryValidationError[] = [];
-      if (toSave.date.trim() === '') found.push('date-required');
-      if (!Number.isInteger(toSave.amount) || toSave.amount < 1) found.push('amount-invalid');
-      if (toSave.creditAccountId === '') found.push('credit-required');
-      setErrors(found);
-      const nameBad = reserveName.trim() === '';
-      setReserveNameError(nameBad);
-      setFlowError(undefined);
-      if (found.length > 0 || nameBad) return;
-      setSubmitting(true);
-      try {
-        const reserve = await createReserve({
-          name: reserveName.trim(),
-          parentAccountId: toSave.creditAccountId,
-        });
-        const srcName = accounts.find((a) => a.id === toSave.creditAccountId)?.name ?? '—';
-        const description =
-          form.description.trim() !== '' ? form.description : `${srcName} → ${reserveName.trim()}`;
-        const metadata: EntryMetadata = {
-          ...toSave.metadata,
-          inputMode: 'transfer',
-          reserveId: reserve.id,
-        };
-        await saveEntry({
-          ...toSave,
-          description,
-          debitAccountId: reserve.reserveAccountId,
-          metadata,
-        });
-        onClose();
-      } catch {
-        setSubmitting(false);
-      }
-      return;
-    }
-
     const found = validateSimpleEntry(toSave);
     setErrors(found);
     if (found.length > 0) return;
@@ -395,7 +315,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       const metadata: EntryMetadata = {
         ...toSave.metadata,
         inputMode: resolveInputMode(),
-        ...(selectedReserveId ? { reserveId: selectedReserveId } : {}),
       };
       await saveEntry({ ...toSave, metadata }, existing);
       onClose();
@@ -493,6 +412,25 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     />
   );
 
+  // 継続コスト化中の行き先側: 継続コスト資産の名前 + 戻すボタン（支出フロー・簿記編集で共用）。
+  const ccNameField = (
+    <>
+      <TextInput
+        label={t('entry.ccTargetName')}
+        required
+        value={ccTargetName}
+        placeholder={t('entry.ccTargetName')}
+        hint={t('entry.ccTargetNameHint')}
+        onChange={setCcTargetName}
+        error={ccNameError ? t('entry.error.description-required') : undefined}
+        dataUi={UI.journal.entry.ccName}
+      />
+      <button type="button" className="collapse-toggle" onClick={() => setCcMode(false)}>
+        {t('entry.ccBackToCategory')}
+      </button>
+    </>
+  );
+
   const flowDef = isManual ? null : MODE_FLOW[mode as FlowMode];
   // 固定側 pass-through: 相手側の候補（振替先/振替元）。台帳・アーカイブ対象は候補に出さない。
   const FIXED_COUNTERPART_ROLES = ['daily-asset', 'payment-liability', 'other-liability'] as const;
@@ -545,21 +483,16 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         </div>
       );
     }
-    const resGroup = reserveOptionGroup();
-    const srcReserve = resGroup && (mode === 'transfer' || mode === 'expense') ? [resGroup] : [];
-    const dstReserve = resGroup && mode === 'transfer' ? [resGroup] : [];
-    const srcGroups = [
-      ...groupedAccountsByRole(accounts, [...flowDef.source.allowedRoles], form.creditAccountId),
-      ...srcReserve,
-    ];
-    const dstGroups = [
-      ...groupedAccountsByRole(
-        accounts,
-        [...flowDef.destination.allowedRoles],
-        form.debitAccountId,
-      ),
-      ...dstReserve,
-    ];
+    const srcGroups = groupedAccountsByRole(
+      accounts,
+      [...flowDef.source.allowedRoles],
+      form.creditAccountId,
+    );
+    const dstGroups = groupedAccountsByRole(
+      accounts,
+      [...flowDef.destination.allowedRoles],
+      form.debitAccountId,
+    );
     const loanGroups = groupedAccountsByRole(accounts, ['other-liability'], form.creditAccountId);
     return (
       <div className="field" data-ui={UI.journal.entry.flow}>
@@ -627,41 +560,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           </div>
           <div className="flow__side">
             {canCreateContinuousCost && ccMode ? (
-              <>
-                <TextInput
-                  label={t('entry.ccTargetName')}
-                  required
-                  value={ccTargetName}
-                  placeholder={t('entry.ccTargetName')}
-                  hint={t('entry.ccTargetNameHint')}
-                  onChange={setCcTargetName}
-                  error={ccNameError ? t('entry.error.description-required') : undefined}
-                  dataUi={UI.journal.entry.ccName}
-                />
-                <button type="button" className="collapse-toggle" onClick={() => setCcMode(false)}>
-                  {t('entry.ccBackToCategory')}
-                </button>
-              </>
-            ) : canCreateReserve && reserveMode ? (
-              <>
-                <TextInput
-                  label={t('entry.reserveTargetName')}
-                  required
-                  value={reserveName}
-                  placeholder={t('entry.reserveTargetName')}
-                  hint={t('entry.reserveTargetNameHint')}
-                  onChange={setReserveName}
-                  error={reserveNameError ? t('entry.error.description-required') : undefined}
-                  dataUi={UI.journal.entry.reserveName}
-                />
-                <button
-                  type="button"
-                  className="collapse-toggle"
-                  onClick={() => setReserveMode(false)}
-                >
-                  {t('entry.reserveBack')}
-                </button>
-              </>
+              ccNameField
             ) : lockedDebit ? (
               // 購入の仕訳の借方 = 継続コスト台帳（固定）。日付・金額・貸方だけ編集できる。
               readOnlyAccount(flowDef.destination.labelKey, form.debitAccountId)
@@ -689,20 +588,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                   >
                     <Icon name="add" size={16} />
                     {t('entry.ccToggle')}
-                  </button>
-                ) : null}
-                {canCreateReserve ? (
-                  <button
-                    type="button"
-                    className="collapse-toggle"
-                    onClick={() => {
-                      setReserveMode(true);
-                      if (reserveName.trim() === '') setReserveName(form.description);
-                    }}
-                    data-ui={UI.journal.entry.reserveCreate}
-                  >
-                    <Icon name="add" size={16} />
-                    {t('entry.reserveCreate')}
                   </button>
                 ) : null}
               </>
@@ -747,7 +632,10 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             →
           </div>
           <div className="flow__side">
-            {lockedDebit ? (
+            {continuousCostActive ? (
+              // 継続コスト化中の借方 = 継続コスト資産の名前（実際の借方は台帳に固定される）。
+              ccNameField
+            ) : lockedDebit ? (
               readOnlyAccount('entry.destination.manual', form.debitAccountId)
             ) : (
               <AccountPicker

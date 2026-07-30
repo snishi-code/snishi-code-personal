@@ -3,10 +3,12 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { createRecurringRule, loadLedger } from '../src/data/repository';
+import { clampDayToMonth } from '../src/domain/recurring';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { Allocations } from '../src/ui/screens/Allocations';
+import { todayLocal } from '../src/util/time';
 import './setup';
 
 beforeAll(() => {
@@ -177,7 +179,7 @@ describe('定期ルールの初回起票日', () => {
   });
 });
 
-describe('月割りするルール（支出 + 周期 >= 2）', () => {
+describe('月割りするルール（支出は周期にかかわらず常に）', () => {
   it('周期 12 の支出ルールは spreadExpenseAccountId を持ち、借方が台帳に固定される', async () => {
     render(<View />);
     await waitFor(() => {
@@ -226,7 +228,7 @@ describe('月割りするルール（支出 + 周期 >= 2）', () => {
     });
   });
 
-  it('周期 1 の支出ルールは月割りしない（普通の支出ルールのまま）', async () => {
+  it('周期 1 の支出ルールも月割りされる（起票日開始・当月末終了の item が生まれる）', async () => {
     render(<View />);
     await waitFor(() => {
       expect(document.querySelector(`[data-ui="${UI.allocations.view}"]`)).toBeInTheDocument();
@@ -253,10 +255,20 @@ describe('月割りするルール（支出 + 周期 >= 2）', () => {
 
     const ledger = await loadLedger();
     const saved = ledger.recurringRules.find((rule) => rule.name === '毎月サブスク');
-    const debit = ledger.accounts.find((account) => account.id === saved!.debitAccountId);
+    const ledgerAccount = ledger.accounts.find(
+      (account) => account.role === 'continuing-cost-asset',
+    )!;
+    const spread = ledger.accounts.find(
+      (account) => account.id === saved!.spreadExpenseAccountId,
+    );
     expect(saved!.everyMonths).toBe(1);
-    expect(saved!.spreadExpenseAccountId).toBeUndefined();
-    expect(debit?.role).toBe('expense-category');
-    expect(ledger.monthlyCostItems).toHaveLength(0);
+    // 周期にかかわらず常に台帳経由（借方 = 台帳・費用の行き先 = 支出カテゴリ）。
+    expect(saved).toMatchObject({ debitAccountId: ledgerAccount.id });
+    expect(spread?.role).toBe('expense-category');
+    // 起票済みぶんの item は起票日開始・当月末終了で毎月生まれて消える。
+    const today = todayLocal();
+    const item = ledger.monthlyCostItems.find((m) => m.id.startsWith(`ccr-${saved!.id}-`));
+    expect(item).toMatchObject({ name: '毎月サブスク', amount: 1000, startDate: today });
+    expect(item!.endDate).toBe(clampDayToMonth(today.slice(0, 7), 31));
   });
 });

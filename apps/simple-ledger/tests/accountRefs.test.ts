@@ -2,12 +2,11 @@ import { describe, expect, it } from 'vitest';
 import './setup';
 import { isAccountReferenced, referencedAccountIds } from '../src/domain/accountRefs';
 import type { AccountRefCollections } from '../src/domain/accountRefs';
-import type { CashflowSchedule, JournalEntry, MonthlyCostItem, ReserveItem } from '../src/domain/types';
+import type { CashflowSchedule, JournalEntry, MonthlyCostItem } from '../src/domain/types';
 
 const empty: AccountRefCollections = {
   entries: [],
   schedules: [],
-  reserves: [],
   monthlyCostItems: [],
 };
 
@@ -49,15 +48,7 @@ const schedule: CashflowSchedule = {
   updatedAt: 'x',
 };
 
-const reserve: ReserveItem = {
-  id: 'r1',
-  name: 'x',
-  reserveAccountId: 'res-acc',
-  createdAt: 'x',
-  updatedAt: 'x',
-};
-
-describe('isAccountReferenced（仕訳/予定CF/目的別資金/継続コスト）', () => {
+describe('isAccountReferenced（仕訳/予定CF/継続コスト）', () => {
   it('仕訳明細の参照を検出する', () => {
     expect(isAccountReferenced('cash', { ...empty, entries: [entry] })).toBe(true);
     expect(isAccountReferenced('food', { ...empty, entries: [entry] })).toBe(true);
@@ -66,9 +57,6 @@ describe('isAccountReferenced（仕訳/予定CF/目的別資金/継続コスト�
   it('予定CF（account/counter）の参照を検出する', () => {
     expect(isAccountReferenced('sched-acc', { ...empty, schedules: [schedule] })).toBe(true);
     expect(isAccountReferenced('sched-counter', { ...empty, schedules: [schedule] })).toBe(true);
-  });
-  it('目的別資金の参照を検出する', () => {
-    expect(isAccountReferenced('res-acc', { ...empty, reserves: [reserve] })).toBe(true);
   });
   it('継続コスト資産の参照は費用の行き先だけ（支払い元は購入の仕訳が仕訳側で参照する）', () => {
     expect(isAccountReferenced('mc-exp', { ...empty, monthlyCostItems: [monthlyCost] })).toBe(true);
@@ -83,7 +71,6 @@ describe('referencedAccountIds', () => {
     const ids = referencedAccountIds({
       entries: [entry],
       schedules: [schedule],
-      reserves: [reserve],
       monthlyCostItems: [monthlyCost],
     });
     for (const id of [
@@ -91,7 +78,6 @@ describe('referencedAccountIds', () => {
       'food',
       'sched-acc',
       'sched-counter',
-      'res-acc',
       'mc-exp',
     ]) {
       expect(ids.has(id)).toBe(true);

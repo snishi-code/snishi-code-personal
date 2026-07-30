@@ -17,7 +17,6 @@ export const STORE = {
   accounts: 'accounts',
   journalEntries: 'journalEntries',
   cashflowSchedules: 'cashflowSchedules',
-  reserves: 'reserves',
   tags: 'tags',
   monthlyCostItems: 'monthlyCostItems',
   recurringRules: 'recurringRules', // 定期ルール（v2 で追加）
@@ -48,9 +47,6 @@ export const db = createDatabase({
     }
     if (!idb.objectStoreNames.contains(STORE.cashflowSchedules)) {
       idb.createObjectStore(STORE.cashflowSchedules, { keyPath: 'id' });
-    }
-    if (!idb.objectStoreNames.contains(STORE.reserves)) {
-      idb.createObjectStore(STORE.reserves, { keyPath: 'id' });
     }
     if (!idb.objectStoreNames.contains(STORE.tags)) {
       idb.createObjectStore(STORE.tags, { keyPath: 'id' });

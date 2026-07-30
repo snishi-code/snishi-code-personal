@@ -7,13 +7,13 @@
  * 箱ごとの作成導線が role を固定する（rolesForType を UI に出さない）。
  *
  * 対応表（ユーザー向け大分類）:
- *  - 現預金・決済資産  = daily-asset（取り置きは親口座の内訳として表示）
+ *  - 現預金・決済資産  = daily-asset
  *  - 投資             = investment-asset
  *  - カード・未払      = payment-liability（短期債務）
  *  - ローン           = other-liability（長期債務）
  *  - 収入カテゴリ      = income-category
  *  - 支出カテゴリ      = expense-category
- * equity / system-adjustment / 内部集約 role（continuing-cost-asset, reserve-asset）は
+ * equity / system-adjustment / 内部集約 role（continuing-cost-asset）は
  * 聖域として一覧・追加・編集候補から隠す。
  */
 import type { AccountRole } from '../domain/accountRoles';

@@ -24,16 +24,17 @@
 | `expenseBreakdown.normalExpense` / `.monthlyCost` / `.total` | 支出の内訳の項目 | 通常支出 / 継続コスト（タップで継続コスト台帳へ）/ 支出合計。支出の推移つき |
 | `netIncome.view` / `.revenue` / `.expense` / `.result` | 収支ルート / 収入 / 支出 / 収支 | ホーム「収支」のタップ先。科目別ドリルはせず、月ごとの残り方（収支の推移）を見せる |
 | `assetsBreakdown.view` / `.row` / `.total` | 資産の内訳ルート / 科目行 / 合計 | ホーム「資産」のタップ先（ストック=期間末時点）。行タップで仕訳へドリル。資産の推移つき |
+| `assetsBreakdown.subtotal.free` / `.fixed` / `.investment` | 資産 4 枠の小計行 | 預金など（自由に動かせる現預金）/ 自由に動かせないやつ（movable OFF）/ 投資 |
+| `assetsBreakdown.ledgerRow` | 継続コスト台帳の 1 行 | 残存価値の合計。タップで「毎月のもの」へ（内訳は台帳画面） |
 | `liabilitiesBreakdown.view` / `.row` / `.total` / `.cashflowLink` | 負債の内訳ルート / 科目行 / 合計 / CF導線 | ホーム「負債」のタップ先（ストック）。`cashflowLink` で資金繰り・返済計画へ |
 | `netAssets.view` / `.row` / `.total` | 純資産ルート / 元手の科目行 / 合計 | ホーム「純資産」のタップ先（ストック）。元手 + 今期の損益 + 純資産の推移 |
 | `dashboard.journal.preview` / `dashboard.journal.openAll` | ホーム下部「期間内の仕訳」 | プレビュー / すべて見る（期間フィルタ） |
-| `period.year.trigger` / `period.month.trigger` | ヘッダー中央の期間コンテキスト表示 | タップで年/月の軽量ピッカーを開く（全期間時は月トリガー無し） |
-| `period.year.picker` / `period.month.picker` | 軽量ピッカー本体（`Popup`） | 背景タップ/Escape で閉じる。タイトル/閉じる/完了ボタン無し |
-| `period.all.row` / `period.year.row` | 年ピッカーの行 | 全期間 / 各年（選択で即反映して閉じる。現在行は `aria-current`） |
-| `period.fullYear.row` / `period.month.row` | 月ピッカーの行 | 年全体 / 各月（同上） |
+| `period.date.trigger` | ヘッダー中央の表示日チップ | 透明な date input を重ねた 1 タップ選択（ポップアップのピッカーは経由しない） |
+| `period.date.input` | チップに重ねた `<input type="date">` | 1 タップで OS カレンダーが開く。`max = 2100-12-31` |
+| `period.year.picker` / `period.year.row` / `period.all.row` | 年・全期間の軽量ピッカー（`Popup`） | ロジックは維持・現在は UI から到達させない（意図的に保留した未完成機能） |
 | `period.trend` / `period.trend.chart` / `period.trend.point` | 推移（自前 SVG・`TrendChart`） | 収支/支出=bar・純資産=line。年別=12ヶ月・全体=年集約。`point` は全体→年のドリルダウン |
 | `cashflow.future.list` | CF 未来の入出金・振替予定 | ホーム未来日付入力が反映される一覧 |
-| `cashflow.advanced.toggle` | CF 取り置き資金の折りたたみ | 下部の補助情報を開閉 |
+| `cashflow.repayments.toggle` / `.list` / `.row` | CF 負債行の「登録済みの返済」展開 | 未来日付の返済仕訳（借方=その負債）の一覧。`row` タップで仕訳の編集シートを開く |
 | `journal.view` | Journal ルート | 仕訳画面の検出 |
 | `journal.entry.list` | Journal 一覧 | 保存される仕訳 + 計算で生まれる仕訳（継続コスト資産の費用行・ルール投影）を日付順で混合表示。計算で生まれた行のタップは「毎月のもの」の元の項目/ルールへ遷移 |
 | `journal.search` | Journal 検索入力 | 検索 |
@@ -51,8 +52,6 @@
 | `journal.entry.ccName` | 継続コスト対象の名前 | 台帳に登録する対象名（自由入力） |
 | `journal.entry.ccCategory` | 費用の行き先 | 継続コスト資産の月割りの行き先 |
 | `journal.entry.ccEndDate` | 終了日（任意） | 空なら費用の割り振りをしない（後から「毎月のもの」で設定できる） |
-| `journal.entry.reserveCreate` | 移動先の「取り置き資産を作る」ボタン | 振替の右辺を取り置き資産名入力へ切替（cc型・チェックボックス廃止） |
-| `journal.entry.reserveName` | 取り置き資産の名前 | 作成する取り置き枠の名（勘定科目は増やさない） |
 | `journal.entry.loanArrange` | 支払い元の「ローンを組む」ボタン | 支出の左辺を既存ローン選択＋新規作成へ切替（cc型・チェックボックス廃止） |
 | `journal.entry.liabilityCreate` | 新しいローンを作成（ローンを組む導線内） | 同じ導線内で other-liability を作成 |
 | `journal.entry.date` | Entry 日付 | 日付入力 |
@@ -66,7 +65,8 @@
 | `journal.entry.memo` | Entry メモ | メモ入力 |
 | `allocations.view` | 毎月のもの ルート | 画面の検出（screen 名は歴史的に allocations） |
 | `allocations.add` / `allocations.add.chooser` | 追加ボタン / 2択チューザー | `.rule` = くり返し記帳 / `.asset` = 継続コスト資産の持ち込み |
-| `allocations.recurring.every` | ルールシートの周期（か月） | 種別=支出 かつ 周期>=2 なら自動で月割り（トグル無し） |
+| `allocations.recurring.every` | ルールシートの周期（か月） | 種別=支出は周期にかかわらず常に月割り（トグル無し） |
+| `allocations.recurring.manualSpread` | 簿記編集の「継続コストとして扱う」チェック | ON で任意の科目ペアを月割りに（費用の行き先 = 借方に選んだ科目） |
 | `allocations.list` / `allocations.item` | 継続コスト資産の一覧 / 1 項目カード | 終了が近い順。`data-ending="true"` = 終了まで1ヶ月以内（背景色変更） |
 | `allocations.showCompleted` | 終了分も表示トグル | 終了日を過ぎた項目（アーカイブ済み）の表示切替 |
 | `allocations.editDialog` | 継続コスト資産シート（登録＝編集） | `edit.name` / `edit.amount` / `edit.startDate`（編集時は読み取り専用 + `edit.openPurchase` で購入の仕訳へ）/ `edit.endDate` + `edit.quickSpan` / `edit.expense` / `edit.save` |
@@ -89,6 +89,7 @@
 | `accounts.role` | 科目シートの役割セレクト | role 選択 |
 | `accounts.adjust` | 各 BS 科目行の「補正」ボタン | 科目選択済みの補正ダイアログを開く（embedded 時） |
 | `accounts.archiveToggle` | 各科目行のアーカイブ/解除 | 今日時点の残高が残る資産・負債は振替シート（EntrySheet transfer 再利用）を経由して 1 tx でアーカイブ |
+| `accounts.movable` | 科目シートの「自由に動かせる」チェック | 現預金の内訳のみ・既定 ON。OFF = 資金繰りの原資に数えない（movable: false だけ保存） |
 | `adjustments.createDialog` | 補正入力ダイアログ | 科目選択済みの残高補正（独立フォーム廃止） |
 | `settings.view` | Settings ルート | 設定の検出 |
 | `settings.manage.list` | 設定「管理」リスト | 補助画面への遷移リスト |

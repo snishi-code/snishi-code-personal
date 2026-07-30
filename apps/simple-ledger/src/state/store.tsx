@@ -10,7 +10,6 @@ import type {
   Ledger,
   MonthlyCostItem,
   RecurringRule,
-  ReserveItem,
   Settings,
   Snapshot,
   Tag,
@@ -51,7 +50,6 @@ export function isPristineSeedLedger(l: Ledger): boolean {
   return (
     l.journalEntries.length === 0 &&
     l.cashflowSchedules.length === 0 &&
-    l.reserves.length === 0 &&
     l.monthlyCostItems.length === 0 &&
     l.tags.length === 0 &&
     isDefaultSettings(l.settings) &&
@@ -79,12 +77,6 @@ interface LedgerContextValue {
   saveSchedules: (schedules: CashflowSchedule[]) => Promise<void>;
   postSchedule: (id: string) => Promise<void>;
   removeSchedule: (id: string) => Promise<void>;
-  createReserve: (input: {
-    name: string;
-    note?: string;
-    parentAccountId?: string;
-  }) => Promise<ReserveItem>;
-  removeReserve: (id: string) => Promise<void>;
   /** 定期ルール（作成/変更後は経過分を即キャッチアップ起票する）。 */
   createRecurringRule: (input: repo.RecurringRuleInput) => Promise<void>;
   saveRecurringRule: (rule: RecurringRule) => Promise<void>;
@@ -313,35 +305,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     async (id) => {
       try {
         await repo.deleteSchedule(id);
-        await refresh();
-        toast.show(t('toast.deleted'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const createReserve = useCallback<LedgerContextValue['createReserve']>(
-    async (input) => {
-      try {
-        const reserve = await repo.createReserve(input);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-        return reserve;
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const removeReserve = useCallback<LedgerContextValue['removeReserve']>(
-    async (id) => {
-      try {
-        await repo.deleteReserve(id);
         await refresh();
         toast.show(t('toast.deleted'), 'success');
       } catch (e) {
@@ -715,8 +678,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveSchedules,
       postSchedule,
       removeSchedule,
-      createReserve,
-      removeReserve,
       createRecurringRule,
       saveRecurringRule,
       setRecurringRulePaused,
@@ -757,8 +718,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveSchedules,
       postSchedule,
       removeSchedule,
-      createReserve,
-      removeReserve,
       createRecurringRule,
       saveRecurringRule,
       setRecurringRulePaused,

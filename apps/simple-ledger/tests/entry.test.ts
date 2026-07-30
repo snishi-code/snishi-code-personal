@@ -2,206 +2,23 @@ import { describe, expect, it } from 'vitest';
 import './setup';
 import {
   buildSimpleEntry,
-  reserveBalanceShortfall,
   reversalInput,
   toSimpleInput,
   transferFlowValid,
   validateSimpleEntry,
 } from '../src/domain/entry';
-import type { Account, JournalEntry, ReserveItem } from '../src/domain/types';
-import { RESERVE_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
-
-describe('reserveBalanceShortfall（目的別資金の残高不足）', () => {
-  const accounts: Account[] = [
-    {
-      id: 'res',
-      name: '自動車購入資金',
-      type: 'asset',
-      role: 'reserve-asset',
-      archived: false,
-      createdAt: 'x',
-      updatedAt: 'x',
-    },
-    {
-      id: 'cash',
-      name: '現金',
-      type: 'asset',
-      role: 'daily-asset',
-      archived: false,
-      createdAt: 'x',
-      updatedAt: 'x',
-    },
-    {
-      id: 'investment',
-      name: '投資資産',
-      type: 'asset',
-      role: 'investment-asset',
-      archived: false,
-      createdAt: 'x',
-      updatedAt: 'x',
-    },
-  ];
-  // 既存: 現金 → 自動車購入資金 へ 100,000 を移し、res 残高 = 100,000。
-  const funding: JournalEntry = {
-    id: 'fund',
-    date: '2026-01-10',
-    description: '積立',
-    kind: 'normal',
-    lines: [
-      { accountId: 'res', side: 'debit', amount: 100000 },
-      { accountId: 'cash', side: 'credit', amount: 100000 },
-    ],
-    createdAt: 'x',
-    updatedAt: 'x',
-  };
-  const purchase = (amount: number, date: string): JournalEntry => ({
-    id: 'buy',
-    date,
-    description: '自動車購入',
-    kind: 'normal',
-    lines: [
-      { accountId: 'investment', side: 'debit', amount },
-      { accountId: 'res', side: 'credit', amount },
-    ],
-    createdAt: 'x',
-    updatedAt: 'x',
-  });
-
-  it('残高内の支出は null（不足なし）', () => {
-    expect(reserveBalanceShortfall(purchase(80000, '2026-02-01'), accounts, [funding])).toBeNull();
-  });
-  it('残高を超える支出は不足（その資金を返す）', () => {
-    const short = reserveBalanceShortfall(purchase(150000, '2026-02-01'), accounts, [funding]);
-    expect(short?.accountId).toBe('res');
-  });
-  it('未来日付でも、その日までの積立を含めて判定する', () => {
-    // 積立(1/10)より前の日付では残高 0 → 不足。
-    expect(
-      reserveBalanceShortfall(purchase(50000, '2026-01-05'), accounts, [funding]),
-    ).not.toBeNull();
-  });
-  it('reserve-asset を貸方で減らさない仕訳は対象外（null）', () => {
-    const incomeToReserve: JournalEntry = {
-      id: 'x',
-      date: '2026-02-01',
-      description: '入金',
-      kind: 'normal',
-      lines: [
-        { accountId: 'res', side: 'debit', amount: 5000 },
-        { accountId: 'cash', side: 'credit', amount: 5000 },
-      ],
-      createdAt: 'x',
-      updatedAt: 'x',
-    };
-    expect(reserveBalanceShortfall(incomeToReserve, accounts, [funding])).toBeNull();
-  });
-});
-
-describe('reserveBalanceShortfall（集約モデル: 目的(reserveId)単位で判定）', () => {
-  const accounts: Account[] = [
-    {
-      id: RESERVE_LEDGER_ACCOUNT_ID,
-      name: '取り置き資金',
-      type: 'asset',
-      role: 'reserve-asset',
-      archived: false,
-      createdAt: 'x',
-      updatedAt: 'x',
-    },
-    {
-      id: 'cash',
-      name: '現金',
-      type: 'asset',
-      role: 'daily-asset',
-      archived: false,
-      createdAt: 'x',
-      updatedAt: 'x',
-    },
-    {
-      id: 'exp',
-      name: '変動費',
-      type: 'expense',
-      role: 'expense-category',
-      archived: false,
-      createdAt: 'x',
-      updatedAt: 'x',
-    },
-  ];
-  const reserves: ReserveItem[] = [
-    {
-      id: 'trip',
-      name: '旅行',
-      reserveAccountId: RESERVE_LEDGER_ACCOUNT_ID,
-      createdAt: 'x',
-      updatedAt: 'x',
-    },
-    {
-      id: 'old',
-      name: '老後',
-      reserveAccountId: RESERVE_LEDGER_ACCOUNT_ID,
-      createdAt: 'x',
-      updatedAt: 'x',
-    },
-  ];
-  // 集約口座へ: 老後に 50,000 取り置き（旅行は 0）。
-  const fundOld: JournalEntry = {
-    id: 'f-old',
-    date: '2026-01-10',
-    description: '老後へ取り置き',
-    kind: 'normal',
-    metadata: { reserveId: 'old' },
-    lines: [
-      { accountId: RESERVE_LEDGER_ACCOUNT_ID, side: 'debit', amount: 50000 },
-      { accountId: 'cash', side: 'credit', amount: 50000 },
-    ],
-    createdAt: 'x',
-    updatedAt: 'x',
-  };
-  const spendFromTrip: JournalEntry = {
-    id: 'spend',
-    date: '2026-02-01',
-    description: '旅行から支払い',
-    kind: 'normal',
-    metadata: { reserveId: 'trip' },
-    lines: [
-      { accountId: 'exp', side: 'debit', amount: 30000 },
-      { accountId: RESERVE_LEDGER_ACCOUNT_ID, side: 'credit', amount: 30000 },
-    ],
-    createdAt: 'x',
-    updatedAt: 'x',
-  };
-
-  it('旅行が 0 円なら、集約口座に老後の残高があっても旅行からの支出は不足になる', () => {
-    const short = reserveBalanceShortfall(spendFromTrip, accounts, [fundOld], reserves);
-    expect(short).not.toBeNull();
-    expect(short?.name).toBe('旅行'); // 目的名で返す
-  });
-  it('その目的に残高があれば不足しない（老後から 40,000）', () => {
-    const spendFromOld: JournalEntry = {
-      ...spendFromTrip,
-      id: 'spend2',
-      metadata: { reserveId: 'old' },
-      lines: [
-        { accountId: 'exp', side: 'debit', amount: 40000 },
-        { accountId: RESERVE_LEDGER_ACCOUNT_ID, side: 'credit', amount: 40000 },
-      ],
-    };
-    expect(reserveBalanceShortfall(spendFromOld, accounts, [fundOld], reserves)).toBeNull();
-  });
-});
+import type { JournalEntry } from '../src/domain/types';
 
 describe('transferFlowValid（振替の役割組み合わせ）', () => {
-  it('資金 ↔ 資金（日常/目的別）は valid', () => {
+  it('資金 ↔ 資金は valid', () => {
     expect(transferFlowValid('daily-asset', 'daily-asset')).toBe(true);
-    expect(transferFlowValid('daily-asset', 'reserve-asset')).toBe(true);
-    expect(transferFlowValid('reserve-asset', 'daily-asset')).toBe(true);
   });
   it('資金 → 負債（返済）は valid', () => {
     expect(transferFlowValid('daily-asset', 'payment-liability')).toBe(true);
-    expect(transferFlowValid('reserve-asset', 'other-liability')).toBe(true);
+    expect(transferFlowValid('daily-asset', 'other-liability')).toBe(true);
   });
   it('負債 → 資金（借入・ローン実行）は valid', () => {
-    expect(transferFlowValid('other-liability', 'reserve-asset')).toBe(true);
+    expect(transferFlowValid('other-liability', 'daily-asset')).toBe(true);
     expect(transferFlowValid('payment-liability', 'daily-asset')).toBe(true);
   });
   it('負債 → 負債 や 費用・収入・投資資産が絡む組み合わせは invalid', () => {
