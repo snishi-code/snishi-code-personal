@@ -1706,9 +1706,34 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   padding: var(--space-3);
 }
 
-.templateEditGroup,
+/* テンプレート階層: 場所（白カード + 淡色見出し）> フォーマット（淡色地）> 項目（白カード）。
+   色は既存トークンだけを使い、左インデントでも親子関係を示す。 */
+.templateEditSection > .formatListRow:first-child {
+  padding: var(--space-2);
+  border: 1px solid var(--primary-border);
+  border-radius: var(--radius-sm);
+  background: var(--primary-light);
+}
+
+.templateEditGroup {
+  margin-left: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.templateEditGroup > .formatListRow:first-child {
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
 .templateEditItem {
-  border-top: 1px solid var(--border);
+  margin-left: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
 }
 
 /* select の選択肢編集 (見出し + 選択肢行 + 追加ボタンの縦積み。行内は settingsField の横並び) */
