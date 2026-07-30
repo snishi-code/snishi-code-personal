@@ -1745,7 +1745,8 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
 }
 
 .templateEditKindRow > .field {
-  flex: 1 1 9rem;
+  /* 7rem × 2 + gap が 375px 端末の実効内容幅 (約 257px) に収まり、スマホでも 1 行に並ぶ */
+  flex: 1 1 7rem;
   min-width: 0;
 }
 

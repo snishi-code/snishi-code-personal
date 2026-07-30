@@ -132,6 +132,12 @@ test('今回メモと固定フォームから完成文を合成し、QRダイア
   await addPatient(page, '202', '検証対象B');
   await openDetail(page, '202 検証対象B');
 
+  // 場所は空でも常時表示: フォーマットを持たない (S)/(A)/(P) も見出しが出る (フィルタ復活の回帰網)。
+  const projectionCard = page.locator(ui(UI.projection.card));
+  for (const heading of ['(S)', '(O)', '(A)', '(P)']) {
+    await expect(projectionCard).toContainText(heading);
+  }
+
   // 今回メモ (自由本文) 入力。
   await page.locator(ui(UI.memo.visit.input)).fill('食欲低下あり');
 
@@ -176,7 +182,7 @@ test('テンプレート編集で選択項目を作り、チップで単一選�
   const templateRow = page.locator('.formatListRow', { hasText: '回診メモ' }).first();
   await templateRow.getByRole('button', { name: '編集', exact: true }).click();
 
-  // text 項目は「種類」と「正常文」がデスクトップ幅で同じ行に並ぶ。
+  // 「種類」と kind 別フィールドが同じ行に並ぶ (先頭項目は BP = 分数なので「種類」+「単位」)。
   const firstKindRow = page.locator('.templateEditKindRow').first();
   await expect(firstKindRow.locator('.field')).toHaveCount(2);
   await expect
@@ -193,6 +199,17 @@ test('テンプレート編集で選択項目を作り、チップで単一選�
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
+  // 種類 + kind 別フィールドは 375px でも 1 行に収まる (行圧縮の主目的はスマホ幅)。
+  await expect
+    .poll(() =>
+      firstKindRow.locator('.field').evaluateAll((fields) => {
+        const tops = fields.map((field) => field.getBoundingClientRect().top);
+        return tops.every((top) => Math.abs(top - (tops[0] ?? top)) < 2);
+      }),
+    )
+    .toBe(true);
+  // 以降の手順はデスクトップ幅へ戻して続ける (他テストと条件を揃える)。
+  await page.setViewportSize({ width: 1280, height: 720 });
 
   await page.locator(ui(UI.templateEdit.kind)).first().selectOption('select');
   await page.locator(ui(UI.templateEdit.save)).click();

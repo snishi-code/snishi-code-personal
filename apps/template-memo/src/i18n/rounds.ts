@@ -134,7 +134,6 @@ export const s = {
     normalCheck: {
       aria: '正常',
       input: (value: string) => `長押しで正常文を入力: ${value}`,
-      empty: '正常文が設定されていません',
       clear: '長押しで正常文を解除（未入力に戻す）',
       edit: '入力済み（長押しで編集）',
     },

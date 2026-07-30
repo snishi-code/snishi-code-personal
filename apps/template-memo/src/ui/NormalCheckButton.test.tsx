@@ -81,6 +81,9 @@ describe('正常チェックの長押しガード', () => {
     expect(manual.input).toHaveFocus();
   });
 
+  // { current: false } を直接注入した単体条件。実 UI ではボタン自身の pointerdown が window の
+  // ガードリスナも解錠するため、ポインタ経路の実保護は長押し要件 + ゴーストクリック (pointerdown を
+  // 伴わない click) の遮断であり、この形の「押している最中に閉じている」状態は通常発生しない。
   it('freshTapRef が閉じている間は長押しでも発火しない', async () => {
     const { normal, onWrite } = renderItem(undefined, false);
     await hold(normal, NORMAL_HOLD_MS + 100);

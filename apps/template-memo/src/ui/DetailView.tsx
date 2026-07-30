@@ -24,18 +24,24 @@ import { s } from '../i18n';
 import { UI } from '../ui-contract';
 
 /**
- * 誤タップガード: 詳細画面へ入った直後と対象切替直後は、新しい pointerdown が来るまで
- * 正常チェックや入力シートを発火させない。
+ * 誤タップガード: 詳細画面へ入った直後と対象切替直後は、新しい入力 (pointerdown / keydown) が
+ * 来るまで正常チェックや入力シートを発火させない。ゴーストクリックは pointerdown を伴わないため
+ * これで弾ける。keydown でも解錠するのは、キーボードのみの利用者 (Tab → Enter 即時発火の
+ * a11y 経路) がポインタ無しでは永久に発火できなくなるのを防ぐため。
  */
 export function useFreshTapGuard(pid: string | null) {
   const freshTapRef = useRef(false);
   useEffect(() => {
     freshTapRef.current = false;
-    const onDown = () => {
+    const onInput = () => {
       freshTapRef.current = true;
     };
-    window.addEventListener('pointerdown', onDown);
-    return () => window.removeEventListener('pointerdown', onDown);
+    window.addEventListener('pointerdown', onInput);
+    window.addEventListener('keydown', onInput);
+    return () => {
+      window.removeEventListener('pointerdown', onInput);
+      window.removeEventListener('keydown', onInput);
+    };
   }, []);
 
   // 詳細ビューは対象切替で再マウントされないため、前対象の pointerdown を持ち越さない。

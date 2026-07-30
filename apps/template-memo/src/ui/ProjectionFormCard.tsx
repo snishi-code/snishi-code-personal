@@ -370,7 +370,8 @@ export function ProjectionFormCard({
         } = partitionSectionGroups(section, patient.projectedValues);
         return (
           <section key={section.id} className="projectionSection" data-ui={UI.projection.section}>
-            <div className="section-label">{section.title}</div>
+            {/* 見出し無し (title 空) の場所は空の見出しブロックを出さない (合成側の挙動と一致)。 */}
+            {section.title !== '' ? <div className="section-label">{section.title}</div> : null}
             {shownGroups.map((group) => (
               <GroupRows
                 key={group.id}

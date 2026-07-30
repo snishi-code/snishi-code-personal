@@ -26,4 +26,17 @@ describe('詳細画面のゴーストタップガード', () => {
     fireEvent.click(button);
     expect(onRead).toHaveBeenLastCalledWith(false);
   });
+
+  it('キーボード操作 (keydown) でも開く (ポインタ無しの a11y 経路を殺さない)', () => {
+    const onRead = vi.fn();
+    render(<GuardProbe pid="patient-a" onRead={onRead} />);
+    const button = screen.getByRole('button', { name: '確認' });
+
+    fireEvent.click(button);
+    expect(onRead).toHaveBeenLastCalledWith(false);
+
+    fireEvent.keyDown(window, { key: 'Tab' });
+    fireEvent.click(button);
+    expect(onRead).toHaveBeenLastCalledWith(true);
+  });
 });
