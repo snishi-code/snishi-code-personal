@@ -3,12 +3,13 @@
  * 移植元: medical 側 hospital-rounds/src/domain/formatValues.ts（実運用で固まった
  * provenance 設計を継承し、キーを配列 index → 安定 itemId に変更した）。
  *
- * 各 item の保存形:
- *   text     : { value, source }  (source ∈ "preset" | "manual") / legacy 文字列
- *   number   : { value: "96", note: "O2 2L" } / legacy 文字列
- *   fraction : { value: "120/53", note: "…" } / legacy 文字列
+ * 各 item の保存形（未入力は '' で保存する）:
+ *   text     : { value, source }  (source ∈ "preset" | "manual")
+ *   number   : { value: "96", note: "O2 2L" }
+ *   fraction : { value: "120/53", note: "…" }
  *
  * note は「テンプレート定義」ではなく「対象ごとの入力値」(SpO2 の酸素投与量など短文注記)。
+ * object 以外（未入力の '' や壊れた import JSON）は fail-safe に「未入力」へ倒す。
  */
 
 import type { TextEntry, NumericEntry } from './types';
@@ -26,38 +27,31 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 // 合成 (composeGroup) は value だけを出すので source は出力に出ない。
 // ============================
 
-export type TextSource = 'empty' | 'preset' | 'manual';
+type TextSource = 'empty' | 'preset' | 'manual';
 
-/** text 保存値から「現在の値文字列」を取り出す（object なら .value、文字列ならそのまま）。 */
+/** text 保存値から「現在の値文字列」を取り出す（object の .value。それ以外は未入力）。 */
 export function readTextValue(stored: unknown): string {
-  if (isPlainObject(stored)) return String(stored.value ?? '');
-  return String(stored ?? '');
+  return isPlainObject(stored) ? String(stored.value ?? '') : '';
 }
 
 /**
  * text 保存値を { value, source } に正規化する。明示 source を持つ object は信頼し、
- * legacy 文字列は現在の正常文と比較して source を推論する（空→empty / =normal→preset /
- * それ以外→manual）。
+ * source 欠落の object は現在の正常文と比較して推論する（=normal→preset / それ以外→manual）。
+ * object 以外・値が空なら empty。
  */
 export function normalizeTextEntry(
   stored: unknown,
   currentNormal: unknown,
 ): { value: string; source: TextSource } {
-  const normal = String(currentNormal ?? '');
-  if (isPlainObject(stored)) {
-    const value = String(stored.value ?? '');
-    const src = stored.source;
-    if (src === 'preset' || src === 'manual') {
-      return { value, source: value === '' ? 'empty' : src };
-    }
-    // source 欠落の object は legacy 同様に推論
-    return { value, source: value === '' ? 'empty' : value === normal ? 'preset' : 'manual' };
-  }
-  const value = String(stored ?? '');
-  return { value, source: value === '' ? 'empty' : value === normal ? 'preset' : 'manual' };
+  if (!isPlainObject(stored)) return { value: '', source: 'empty' };
+  const value = String(stored.value ?? '');
+  if (value === '') return { value, source: 'empty' };
+  const src = stored.source;
+  if (src === 'preset' || src === 'manual') return { value, source: src };
+  return { value, source: value === String(currentNormal ?? '') ? 'preset' : 'manual' };
 }
 
-export type PresetToggleDecision =
+type PresetToggleDecision =
   | { action: 'write'; value: TextEntry }
   | { action: 'clear'; value: '' }
   | { action: 'openEditor' };
@@ -87,12 +81,10 @@ export function manualTextEntry(value: string): TextEntry | '' {
 // number / fraction item
 // ============================
 
-/** number/fraction 保存値を { value, note } に正規化する（legacy 文字列は note="" 扱い）。 */
+/** number/fraction 保存値を { value, note } に正規化する（object 以外は未入力）。 */
 export function readNumericEntry(stored: unknown): { value: string; note: string } {
-  if (isPlainObject(stored)) {
-    return { value: String(stored.value ?? ''), note: String(stored.note ?? '') };
-  }
-  return { value: String(stored ?? ''), note: '' };
+  if (!isPlainObject(stored)) return { value: '', note: '' };
+  return { value: String(stored.value ?? ''), note: String(stored.note ?? '') };
 }
 
 /** number/fraction 保存用の NumericEntry を作る（両方空なら空文字 = 未入力）。 */
@@ -116,12 +108,9 @@ export function readGroupValues(formValues: unknown, groupId: string): Record<st
 export function groupHasInput(values: Record<string, unknown>): boolean {
   for (const key of Object.keys(values)) {
     const raw = values[key];
-    if (isPlainObject(raw)) {
-      if (String(raw.value ?? '').trim() !== '') return true;
-      if (String(raw.note ?? '').trim() !== '') return true;
-    } else if (String(raw ?? '').trim() !== '') {
-      return true;
-    }
+    if (!isPlainObject(raw)) continue; // 未入力の '' / 壊れ値
+    if (String(raw.value ?? '').trim() !== '') return true;
+    if (String(raw.note ?? '').trim() !== '') return true;
   }
   return false;
 }

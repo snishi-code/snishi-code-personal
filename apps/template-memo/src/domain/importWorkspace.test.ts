@@ -166,66 +166,62 @@ describe('listImportCandidates', () => {
 });
 
 describe('convertWorkspaceBackup', () => {
-  it('place 同名を 1 Group にまとめ、選択ユーザーの継続メモ・清書だけを移行する', () => {
+  it('place 同名を 1 つにまとめ、選択ユーザーの継続メモ・清書だけを移行する', () => {
     const converted = convertWorkspaceBackup(jsonOf(makeWorkspaceBackup()), 'usr_a', {
       nowMs: NOW,
     });
 
-    expect(converted.groups.map((group) => group.name)).toEqual(['東エリア', '西エリア']);
-    expect(converted.groups.map((group) => group.sortOrder)).toEqual([1, 2]);
-    const east = converted.groups[0];
+    expect(converted.places.map((place) => place.name)).toEqual(['東エリア', '西エリア']);
+    const east = converted.places[0];
     expect(east).toBeDefined();
 
-    expect(converted.subjects).toHaveLength(3);
-    const first = converted.subjects.find((subject) => subject.name === 'サンプル対象1');
-    const second = converted.subjects.find((subject) => subject.name === 'サンプル対象2');
-    const third = converted.subjects.find((subject) => subject.name === 'サンプル対象3');
+    expect(converted.patients).toHaveLength(3);
+    const first = converted.patients.find((patient) => patient.name === 'サンプル対象1');
+    const second = converted.patients.find((patient) => patient.name === 'サンプル対象2');
+    const third = converted.patients.find((patient) => patient.name === 'サンプル対象3');
     expect(first).toMatchObject({
       name: 'サンプル対象1',
-      code: 'pt_1',
-      location: 'A-01',
-      groupId: east?.id,
-      sortOrder: 1,
+      room: 'A-01',
+      placeId: east?.placeId,
       status: STATUS.NONE,
       problems: ['継続課題'],
-      handover: 'Aの継続メモ',
+      visitMemo: '',
+      standingMemo: 'Aの継続メモ',
       confirmedNote: 'Aの清書',
-      sectionText: {},
-      formValues: {},
-      tagIds: [],
+      tags: [],
+      projectedValues: {},
       archivedAt: 777,
-      createdAt: 100,
       updatedAt: 120,
     });
     expect(second).toMatchObject({
-      groupId: east?.id,
-      sortOrder: 2,
-      handover: '対象2の継続メモ',
-      confirmedNote: '',
+      placeId: east?.placeId,
+      standingMemo: '対象2の継続メモ',
     });
+    expect(second?.confirmedNote).toBeUndefined();
     expect(third).toMatchObject({
-      groupId: null,
-      sortOrder: 1,
+      placeId: '',
       problems: ['確認事項'],
-      handover: '',
+      standingMemo: '',
     });
-    expect(converted.subjects.every((subject) => subject.id.startsWith('sub_'))).toBe(true);
-    expect(JSON.stringify(converted.subjects)).not.toContain('移行しない今回メモ');
-    expect(JSON.stringify(converted.subjects)).not.toContain('fixed:x');
-    expect(JSON.stringify(converted.subjects)).not.toContain('sharedTags');
+    expect(converted.patients.every((patient) => patient.pid.startsWith('pat_'))).toBe(true);
+    // 旧「患者ID」(code 概念) は持ち込まない。
+    expect(JSON.stringify(converted.patients)).not.toContain('pt_1');
+    expect(JSON.stringify(converted.patients)).not.toContain('移行しない今回メモ');
+    expect(JSON.stringify(converted.patients)).not.toContain('fixed:x');
+    expect(JSON.stringify(converted.patients)).not.toContain('sharedTags');
   });
 
   it('ユーザー選択で per-user の継続メモ・清書が切り替わる', () => {
     const converted = convertWorkspaceBackup(jsonOf(makeWorkspaceBackup()), 'usr_b', {
       nowMs: NOW,
     });
-    const first = converted.subjects.find((subject) => subject.name === 'サンプル対象1');
-    expect(first?.handover).toBe('Bの継続メモ');
+    const first = converted.patients.find((patient) => patient.name === 'サンプル対象1');
+    expect(first?.standingMemo).toBe('Bの継続メモ');
     expect(first?.confirmedNote).toBe('Bの清書');
     // usr_b の状態が無い対象は master だけを移し、個人メモは空。
-    expect(converted.subjects.find((subject) => subject.name === 'サンプル対象2')?.handover).toBe(
-      '',
-    );
+    expect(
+      converted.patients.find((patient) => patient.name === 'サンプル対象2')?.standingMemo,
+    ).toBe('');
   });
 
   it('RoundsConfig.textSnippets は新規 id で移し、closingPreset は注記だけにする', () => {
@@ -262,12 +258,12 @@ describe('convertWorkspaceBackup', () => {
     (config?.textSnippets as unknown[]).push(null, { label: '' }, { label: 123 });
 
     const converted = convertWorkspaceBackup(jsonOf(backup), 'usr_a', { nowMs: NOW });
-    expect(converted.subjects).toHaveLength(3);
-    expect(converted.groups).toHaveLength(2);
+    expect(converted.patients).toHaveLength(3);
+    expect(converted.places).toHaveLength(2);
     expect(converted.snippets).toHaveLength(2);
-    expect(converted.subjects.find((subject) => subject.name === 'サンプル対象3')?.handover).toBe(
-      '',
-    );
+    expect(
+      converted.patients.find((patient) => patient.name === 'サンプル対象3')?.standingMemo,
+    ).toBe('');
   });
 
   it('未知のユーザー指定を拒否する', () => {
@@ -302,54 +298,48 @@ describe('workspace backup envelope guard', () => {
 });
 
 describe('prepareWorkspaceImportAppend', () => {
-  it('既存データを含めず、グループと未分類対象の並び順だけを末尾へ補正する', () => {
+  it('既存データを含めず、incoming 側だけを返す（変更しない）', () => {
     const incoming = convertWorkspaceBackup(jsonOf(makeWorkspaceBackup()), 'usr_a', {
       nowMs: NOW,
     });
     const current = {
-      groups: [{ id: 'grp_existing', name: '既存', sortOrder: 7 }],
-      subjects: [
+      places: [{ placeId: 'plc_existing', name: '既存' }],
+      patients: [
         {
-          ...(incoming.subjects[0] as (typeof incoming.subjects)[number]),
-          id: 'sub_existing',
-          groupId: null,
-          sortOrder: 4,
+          ...(incoming.patients[0] as (typeof incoming.patients)[number]),
+          pid: 'pat_existing',
+          placeId: '',
         },
       ],
       snippets: [{ id: 'snp_existing', label: '既存', body: '既存本文' }],
     };
 
     const prepared = prepareWorkspaceImportAppend(incoming, current);
-    expect(prepared.groups.map((group) => group.sortOrder)).toEqual([8, 9]);
-    expect(prepared.subjects.find((subject) => subject.name === 'サンプル対象3')?.sortOrder).toBe(
-      5,
-    );
-    expect(prepared.subjects.find((subject) => subject.name === 'サンプル対象1')?.sortOrder).toBe(
-      1,
-    );
+    expect(prepared.places).toEqual(incoming.places);
+    expect(prepared.patients).toEqual(incoming.patients);
     expect(prepared.snippets).toEqual(incoming.snippets);
   });
 
-  it('ID衝突と取り込み外グループへの参照を拒否する', () => {
+  it('ID衝突と取り込み外 place への参照を拒否する', () => {
     const incoming = convertWorkspaceBackup(jsonOf(makeWorkspaceBackup()), 'usr_a', {
       nowMs: NOW,
     });
     expect(() =>
       prepareWorkspaceImportAppend(incoming, {
-        groups: [incoming.groups[0] as (typeof incoming.groups)[number]],
-        subjects: [],
+        places: [incoming.places[0] as (typeof incoming.places)[number]],
+        patients: [],
         snippets: [],
       }),
     ).toThrow('import id collision');
 
     const broken = {
       ...incoming,
-      subjects: incoming.subjects.map((subject, index) =>
-        index === 0 ? { ...subject, groupId: 'grp_missing' } : subject,
+      patients: incoming.patients.map((patient, index) =>
+        index === 0 ? { ...patient, placeId: 'plc_missing' } : patient,
       ),
     };
     expect(() =>
-      prepareWorkspaceImportAppend(broken, { groups: [], subjects: [], snippets: [] }),
-    ).toThrow('import group reference is invalid');
+      prepareWorkspaceImportAppend(broken, { places: [], patients: [], snippets: [] }),
+    ).toThrow('import place reference is invalid');
   });
 });

@@ -17,17 +17,16 @@
 
 import { newId } from '../data/constants';
 import { readGroupValues, readNumericEntry, readTextValue } from './formValues';
-import type { FormValues, Subject } from './types';
+import type { FormValues, Patient } from './types';
 
 // ============================
 // 型
 // ============================
 
-export type ItemKind = 'text' | 'number' | 'fraction';
-export const ITEM_KINDS: readonly ItemKind[] = Object.freeze(['text', 'number', 'fraction']);
+type ItemKind = 'text' | 'number' | 'fraction';
 
 /** 群の表示方式。always = カード常設（値保存）/ oncall = チップから呼び出し（本文へ挿入）。 */
-export type GroupDisplay = 'always' | 'oncall';
+type GroupDisplay = 'always' | 'oncall';
 
 /** 小項目。text は正常文ワンタップ（normal）対応。 */
 export interface TemplateItem {
@@ -79,8 +78,13 @@ export interface Template {
   name: string;
   /** 合成に問題リストブロックを含めるか（日報などでは false）。 */
   includeProblems: boolean;
-  /** 合成に申し送りブロックを含めるか。 */
+  /** 合成に申し送り（継続メモ）ブロックを含めるか。 */
   includeHandover: boolean;
+  /**
+   * 「今回メモ」(patient.visitMemo) を自由本文として注入するセクションの id。
+   * null = どのセクションにも注入しない。回診メモプリセットは (O) を memoSection にする。
+   */
+  memoSectionId: string | null;
   sections: TemplateSection[];
   updatedAt: number;
 }
@@ -138,12 +142,13 @@ export function composeGroup(
 
 /**
  * セクション 1 つの合成。常設 (always) 群 → 自由本文の順。
+ * 自由本文は呼び出し側が渡す（memoSection には patient.visitMemo が入る）。
  * oncall 群は本文への挿入部品なのでここでは出力しない。
  * 空なら keepWhenEmpty に従い「見出しのみ」か「まるごと省略」。
  */
 export function composeSection(
   section: TemplateSection,
-  sectionText: Record<string, string>,
+  freeTextRaw: string,
   formValues: FormValues,
 ): string {
   const pieces: string[] = [];
@@ -152,7 +157,7 @@ export function composeSection(
     const { text, hasValue } = composeGroup(group, readGroupValues(formValues, group.id));
     if (hasValue) pieces.push(text);
   }
-  const free = section.freeText ? String(sectionText[section.id] ?? '').trim() : '';
+  const free = section.freeText ? String(freeTextRaw ?? '').trim() : '';
   if (free !== '') pieces.push(free);
 
   if (pieces.length === 0) {
@@ -177,38 +182,51 @@ export function composeProblems(problems: readonly string[]): string {
   return rows.join('\n');
 }
 
-/** 文書全体の合成（清書のたたき台）。ブロック間は空行 1 つ。 */
-export function composeDocument(subject: Subject, template: Template): string {
+/** セクションの自由本文（memoSection なら patient.visitMemo・それ以外は空）。 */
+function memoFreeTextOf(patient: Patient, template: Template, section: TemplateSection): string {
+  return section.id === template.memoSectionId ? String(patient.visitMemo ?? '') : '';
+}
+
+/** ブロック合成の共通部（自由本文の決め方だけ差し替える）。 */
+function composeDocumentWith(
+  patient: Patient,
+  template: Template,
+  freeTextOf: (section: TemplateSection) => string,
+): string {
   const blocks: string[] = [];
   if (template.includeProblems) {
-    const p = composeProblems(subject.problems);
+    const p = composeProblems(patient.problems);
     if (p !== '') blocks.push(p);
   }
   if (template.includeHandover) {
-    const h = String(subject.handover ?? '').trim();
+    const h = String(patient.standingMemo ?? '').trim();
     if (h !== '') blocks.push(h);
   }
   for (const section of template.sections) {
-    const s = composeSection(section, subject.sectionText, subject.formValues);
+    const s = composeSection(section, freeTextOf(section), patient.projectedValues);
     if (s !== '') blocks.push(s);
   }
   return normalizeComposedText(blocks.join('\n\n'));
 }
 
+/** 文書全体の合成（清書のたたき台）。ブロック間は空行 1 つ。 */
+export function composeDocument(patient: Patient, template: Template): string {
+  return composeDocumentWith(patient, template, (section) =>
+    memoFreeTextOf(patient, template, section),
+  );
+}
+
 /**
  * 定型清書: 空の自由本文セクションを normal で埋めた状態で合成する
  * （保存はしない。ワンタップで「著変なし/現行加療継続」入りの清書案を作る）。
+ * memoSection には今回メモ (visitMemo) が入り、空なら normal へ倒れる。
  */
-export function composePresetClean(subject: Subject, template: Template): string {
-  const filled: Record<string, string> = { ...subject.sectionText };
-  for (const section of template.sections) {
-    if (!section.freeText) continue;
-    const cur = String(filled[section.id] ?? '').trim();
-    const normal = String(section.normal ?? '');
-    if (cur === '' && normal !== '') filled[section.id] = normal;
-  }
-  const patched: Subject = { ...subject, sectionText: filled };
-  return composeDocument(patched, template);
+export function composePresetClean(patient: Patient, template: Template): string {
+  return composeDocumentWith(patient, template, (section) => {
+    const memo = memoFreeTextOf(patient, template, section);
+    if (memo.trim() !== '') return memo;
+    return String(section.normal ?? '');
+  });
 }
 
 // ============================
@@ -287,11 +305,17 @@ export function normalizeTemplate(raw: unknown): Template | null {
     .map(normalizeSection)
     .filter((s): s is TemplateSection => s !== null);
   if (sections.length === 0) return null;
+  // memoSectionId は実在するセクションだけを許す（迷子参照は null = 注入なし）。
+  const memoSectionId =
+    typeof r.memoSectionId === 'string' && sections.some((s) => s.id === r.memoSectionId)
+      ? r.memoSectionId
+      : null;
   return {
     id: str(r.id) || newId('tpl'),
     name: str(r.name) || '(無題テンプレート)',
     includeProblems: r.includeProblems === true,
     includeHandover: r.includeHandover === true,
+    memoSectionId,
     sections,
     updatedAt: typeof r.updatedAt === 'number' ? r.updatedAt : 0,
   };
@@ -303,11 +327,14 @@ export function normalizeTemplate(raw: unknown): Template | null {
 
 /** 回診メモプリセット（作者の実運用形。id は呼び出しごとに採番 = 端末間衝突なし）。 */
 export function buildRoundPreset(nowMs: number): Template {
+  // (O) を memoSection にする（今回メモ = 所見の自由本文）。
+  const memoSectionId = newId('sec');
   return {
     id: newId('tpl'),
     name: '回診メモ',
     includeProblems: true,
     includeHandover: true,
+    memoSectionId,
     updatedAt: nowMs,
     sections: [
       {
@@ -319,7 +346,7 @@ export function buildRoundPreset(nowMs: number): Template {
         groups: [],
       },
       {
-        id: newId('sec'),
+        id: memoSectionId,
         title: '(O)',
         keepWhenEmpty: true,
         freeText: true,
@@ -402,15 +429,18 @@ export function buildRoundPreset(nowMs: number): Template {
 
 /** 日報プリセット（非医療の汎用例）。 */
 export function buildDailyReportPreset(nowMs: number): Template {
+  // 今回メモは先頭セクション（今日やったこと）へ注入する。
+  const memoSectionId = newId('sec');
   return {
     id: newId('tpl'),
     name: '日報',
     includeProblems: false,
     includeHandover: false,
+    memoSectionId,
     updatedAt: nowMs,
     sections: [
       {
-        id: newId('sec'),
+        id: memoSectionId,
         title: '【今日やったこと】',
         keepWhenEmpty: true,
         freeText: true,

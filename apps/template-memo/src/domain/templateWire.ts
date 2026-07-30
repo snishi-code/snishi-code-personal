@@ -20,7 +20,7 @@ import { packPayload, unpackPayload } from '@snishi/foundation/qr/crypto';
 import { normalizeTemplate, type Template } from './template';
 
 export const TEMPLATE_WIRE_KIND = 'TPL' as const;
-export const TEMPLATE_WIRE_VERSION = 1 as const;
+const TEMPLATE_WIRE_VERSION = 1 as const;
 
 export type TemplateWireErrorCode =
   | 'invalid-template'
@@ -45,7 +45,7 @@ export class TemplateWireError extends Error {
   }
 }
 
-export interface EncodeTemplateWireOptions {
+interface EncodeTemplateWireOptions {
   /** 決定論テスト用。通常は protocol.newBatchId() に任せる。 */
   batchId?: string;
   /** 通常は protocol.MAX_BYTES。小さい値はページングの決定論テスト用。 */
@@ -208,7 +208,7 @@ export type TemplateWireReceiveResult =
       template: Template;
     };
 
-export interface TemplateWireCollector {
+interface TemplateWireCollector {
   receivePage(text: string): Promise<TemplateWireReceiveResult>;
   reset(): void;
   progress(): { got: number; total: number };

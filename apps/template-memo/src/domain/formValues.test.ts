@@ -1,7 +1,7 @@
 /*
  * フォーム入力値ヘルパ（domain/formValues.ts）のテスト。
  *
- * 要点は provenance 設計: legacy 文字列の source 推論と、ワンタップ正常チェック
+ * 要点は provenance 設計: source 欠落 object の推論と、ワンタップ正常チェック
  * （decidePresetToggle）が手入力を絶対に上書き/消去しないこと。
  */
 
@@ -24,29 +24,18 @@ const NORMAL = '明らかなラ音なし';
 // ============================
 
 describe('readTextValue', () => {
-  it('object なら .value・文字列ならそのまま・null/undefined は空文字', () => {
+  it('object なら .value・object 以外（未入力の空文字や null/undefined）は空文字', () => {
     expect(readTextValue({ value: '正常', source: 'manual' })).toBe('正常');
-    expect(readTextValue('legacy 値')).toBe('legacy 値');
+    expect(readTextValue('')).toBe('');
     expect(readTextValue(undefined)).toBe('');
     expect(readTextValue(null)).toBe('');
   });
 });
 
-describe('normalizeTextEntry: legacy 文字列の source 推論', () => {
-  it('空文字 → empty', () => {
+describe('normalizeTextEntry の source 判定', () => {
+  it('未入力（空文字 / undefined）→ empty', () => {
     expect(normalizeTextEntry('', NORMAL)).toEqual({ value: '', source: 'empty' });
     expect(normalizeTextEntry(undefined, NORMAL)).toEqual({ value: '', source: 'empty' });
-  });
-
-  it('正常文と同文 → preset', () => {
-    expect(normalizeTextEntry(NORMAL, NORMAL)).toEqual({ value: NORMAL, source: 'preset' });
-  });
-
-  it('それ以外 → manual', () => {
-    expect(normalizeTextEntry('湿性ラ音あり', NORMAL)).toEqual({
-      value: '湿性ラ音あり',
-      source: 'manual',
-    });
   });
 
   it('明示 source を持つ object は信頼する（normal と同文でも manual のまま）', () => {
@@ -67,7 +56,7 @@ describe('normalizeTextEntry: legacy 文字列の source 推論', () => {
     });
   });
 
-  it('source 欠落の object は legacy 同様に推論する', () => {
+  it('source 欠落の object は現在の正常文と比較して推論する', () => {
     expect(normalizeTextEntry({ value: NORMAL }, NORMAL)).toEqual({
       value: NORMAL,
       source: 'preset',
@@ -96,8 +85,8 @@ describe('decidePresetToggle', () => {
       action: 'clear',
       value: '',
     });
-    // legacy 文字列が normal と同文でも preset と推論されクリア
-    expect(decidePresetToggle(NORMAL, NORMAL)).toEqual({ action: 'clear', value: '' });
+    // source 欠落の object も normal と同文なら preset と推論されクリア
+    expect(decidePresetToggle({ value: NORMAL }, NORMAL)).toEqual({ action: 'clear', value: '' });
   });
 
   it('manual → 手入力を守りエディタへ委ねる', () => {
@@ -127,16 +116,16 @@ describe('manualTextEntry', () => {
 // ============================
 
 describe('readNumericEntry', () => {
-  it('legacy 文字列は note なしの値として読む', () => {
-    expect(readNumericEntry('96')).toEqual({ value: '96', note: '' });
-  });
-
   it('object は value と note を読む・欠落フィールドは空文字', () => {
     expect(readNumericEntry({ value: '96', note: 'O2 2L' })).toEqual({
       value: '96',
       note: 'O2 2L',
     });
     expect(readNumericEntry({ value: '96' })).toEqual({ value: '96', note: '' });
+  });
+
+  it('object 以外（未入力の空文字 / undefined）は未入力として読む', () => {
+    expect(readNumericEntry('')).toEqual({ value: '', note: '' });
     expect(readNumericEntry(undefined)).toEqual({ value: '', note: '' });
   });
 });
@@ -175,9 +164,8 @@ describe('readGroupValues', () => {
 });
 
 describe('groupHasInput', () => {
-  it('value が 1 つでもあれば true（legacy 文字列も）', () => {
+  it('value が 1 つでもあれば true', () => {
     expect(groupHasInput({ a: { value: '96' }, b: '' })).toBe(true);
-    expect(groupHasInput({ a: '96' })).toBe(true);
   });
 
   it('note だけでも true（酸素投与量だけ書いた状態を実入力と数える）', () => {
