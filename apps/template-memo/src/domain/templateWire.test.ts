@@ -176,7 +176,7 @@ describe('template wire fail-closed', () => {
     await expectWireError(
       decodeTemplateWirePages(
         await packedPagesForPlain(
-          JSON.stringify({ v: 2, template: fixtureTemplate(), pad: 'x'.repeat(600) }),
+          JSON.stringify({ v: 1, template: fixtureTemplate(), pad: 'x'.repeat(600) }),
           'version',
         ),
       ),
@@ -186,7 +186,7 @@ describe('template wire fail-closed', () => {
       decodeTemplateWirePages(
         await packedPagesForPlain(
           JSON.stringify({
-            v: 1,
+            v: 2,
             template: { id: 'broken', name: 'broken', sections: [] },
             pad: 'x'.repeat(600),
           }),
@@ -200,7 +200,7 @@ describe('template wire fail-closed', () => {
   it('平文 transport・kind 違い・ページ欠落・バッチ混在を拒否する', async () => {
     const plain = encodePages({
       kind: TEMPLATE_WIRE_KIND,
-      payload: JSON.stringify({ v: 1, template: fixtureTemplate() }),
+      payload: JSON.stringify({ v: 2, template: fixtureTemplate() }),
       batchId: 'plain',
     });
     await expectWireError(decodeTemplateWirePages(plain), 'invalid-transport');

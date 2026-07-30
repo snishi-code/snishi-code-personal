@@ -11,9 +11,9 @@ export const DB_NAME = 'template-memo' as const;
 
 /**
  * IndexedDB のバージョン。store 構成を変える時だけ上げる。
- * v2 = workspace 回診 UI の丸ごと移植（旧 v1 の subjects/groups は捨てて作り直し。移行なし）。
+ * v3 = select/menu・清書廃止を含む新テンプレート形。旧版は捨てて作り直す（移行なし）。
  */
-export const DB_VERSION = 2 as const;
+export const DB_VERSION = 3 as const;
 
 /** エクスポート/import 照合用のアプリ ID（封筒 appId）。 */
 export const APP_ID = 'snishi-code.template-memo' as const;
@@ -21,9 +21,9 @@ export const APP_ID = 'snishi-code.template-memo' as const;
 /**
  * 現行スキーマ版。互換性のない変更ごとに +1 する。migration step は持たない
  * （simple-ledger と同じ単発変換方式。旧版 JSON は fail-closed に拒否し、
- * 必要なら変換ツールを別途用意する）。v2 = Patient/Place モデル（回診 UI 移植）。
+ * 必要なら変換ツールを別途用意する）。v3 = select/menu・清書/定型文廃止。
  */
-export const SCHEMA_VERSION = 2 as const;
+export const SCHEMA_VERSION = 3 as const;
 
 /** バックアップ JSON の kind 識別子。 */
 export const BACKUP_KIND = 'TEMPLATE_MEMO_BACKUP' as const;
@@ -50,7 +50,8 @@ export const ALL_STORES = [
 export const APP_SETTINGS_KEY = 'app';
 
 /** 巻き戻しスナップショット（foundation createSnapshotStore）の専用 DB 名。 */
-export const SNAPSHOT_DB_NAME = 'template-memo-snapshots' as const;
+export const SNAPSHOT_DB_NAME = 'template-memo-snapshots-v3' as const;
+export const LEGACY_SNAPSHOT_DB_NAME = 'template-memo-snapshots' as const;
 
 /**
  * QR 1 ページの最大バイト数（UTF-8）。旧回診と同じ 600B

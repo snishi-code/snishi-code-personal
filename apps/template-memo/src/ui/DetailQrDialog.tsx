@@ -26,7 +26,7 @@ export function DetailQrDialog({
   onClose,
 }: {
   patient: Patient;
-  /** 現在のテンプレート (清書が無い時の本文合成に使う)。 */
+  /** 現在のテンプレート（その場で完成文を合成する）。 */
   template: Template | null;
   /** 改行モード (settings.newlineMode) の参照用。 */
   settings: AppSettings;

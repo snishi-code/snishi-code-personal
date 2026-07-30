@@ -1162,36 +1162,6 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   cursor: pointer;
 }
 
-/* ── 今回メモ / 清書 の折りたたみ (details)。継続メモは常時表示の section のまま。 ── */
-.memoCollapse {
-  /* panelCard の余白を summary/body 側で持つので上下 padding は詰める */
-  padding-top: var(--space-2);
-  padding-bottom: var(--space-2);
-}
-.memoCollapseSummary {
-  cursor: pointer;
-  min-height: 36px;
-  display: flex;
-  align-items: center;
-  list-style: none;
-}
-.memoCollapseSummary::-webkit-details-marker {
-  display: none;
-}
-/* 折りたたみの開閉を示す三角 (▶ / ▼) */
-.memoCollapseSummary::before {
-  content: '▶';
-  font-size: 11px;
-  margin-right: var(--space-2);
-  color: var(--muted);
-}
-.memoCollapse[open] > .memoCollapseSummary::before {
-  content: '▼';
-}
-.memoCollapseBody {
-  margin-top: var(--space-2);
-}
-
 /* ── 今回メモ / 継続メモ (患者ごとの独立 textarea) ── */
 .memoInput {
   width: 100%;

@@ -119,9 +119,9 @@ test('初回起動から対象を追加し、ステータスを未→途中→�
   await expect(statusBtn).toHaveText('✓');
 });
 
-// ── 2. 詳細 → 今回メモ + 固定フォーム → 定型清書 (例文型の合成) → QRダイアログ ──
+// ── 2. 詳細 → 今回メモ + 固定フォーム → その場合成 → QRダイアログ ──
 
-test('今回メモと固定フォームから定型清書を合成し、QRダイアログを表示できる', async ({ page }) => {
+test('今回メモと固定フォームから完成文を合成し、QRダイアログを表示できる', async ({ page }) => {
   await addPatient(page, '202', '検証対象B');
   await openDetail(page, '202 検証対象B');
 
@@ -134,38 +134,67 @@ test('今回メモと固定フォームから定型清書を合成し、QRダイ
   await page.getByRole('button', { name: '全部正常', exact: true }).click();
   await expect(page.getByLabel('肺音', { exact: true })).toHaveValue('明らかなラ音なし');
 
-  // 定型清書: 空セクションは正常文で充填され、memoSection (O) に今回メモが入る。
-  await page.locator(ui(UI.detail.presetClean)).click();
-  await expect(page.getByText('清書を作成しました', { exact: true })).toBeVisible();
-
-  // 回診メモプリセットの合成結果 (例文型) を厳密一致で確認する。
-  const expectedCleanNote = [
-    '(S)',
-    '変わりない',
-    '',
-    '(O)',
-    'BP 120/80mmHg',
-    '',
-    '肺音：明らかなラ音なし',
-    '腸音：正常',
-    '腹部：平坦軟、圧痛なし',
-    '下腿浮腫：なし',
-    '',
-    '食欲低下あり',
-    '',
-    '(A)',
-    '著変なし',
-    '',
-    '(P)',
-    '現行加療継続',
-  ].join('\n');
-  await expect(page.locator(ui(UI.memo.clean.input))).toHaveValue(expectedCleanNote);
-
-  // 転記用QRダイアログ: canvas が実描画される。
+  // 転記用QRを開いた時点で空セクションが正常文で充填され、memoSection (O) に今回メモが入る。
   await page.locator(ui(UI.detail.emrQr)).click();
   const qrDialog = page.locator(ui(UI.detail.qrDialog));
   await expect(qrDialog).toBeVisible();
+  await qrDialog.getByText('本文を確認', { exact: true }).click();
+  await expect(qrDialog).toContainText('(S)');
+  await expect(qrDialog).toContainText('変わりない');
+  await expect(qrDialog).toContainText('BP 120/80mmHg');
+  await expect(qrDialog).toContainText('肺音：明らかなラ音なし');
+  await expect(qrDialog).toContainText('食欲低下あり');
+  await expect(qrDialog).toContainText('現行加療継続');
   await expectRenderedQr(qrDialog.locator(ui(UI.qr.canvas)));
+});
+
+test('呼び出しフォーマットを保存すると入力カードへ昇格する', async ({ page }) => {
+  await addPatient(page, '205', '呼び出し確認');
+  await openDetail(page, '205 呼び出し確認');
+
+  await page.getByRole('button', { name: '血糖', exact: true }).click();
+  await page.getByLabel('Glu', { exact: true }).fill('108');
+  await page.locator(ui(UI.projection.sheetSave)).click();
+
+  await expect(page.getByLabel('Glu', { exact: true })).toHaveValue('108');
+  await expect(page.getByRole('button', { name: '血糖', exact: true })).toHaveCount(0);
+});
+
+test('テンプレート編集で選択項目を作り、チップで単一選択できる', async ({ page }) => {
+  await addPatient(page, '206', '選択確認');
+  await openSettings(page);
+  const templateRow = page.locator('.formatListRow', { hasText: '回診メモ' }).first();
+  await templateRow.getByRole('button', { name: '編集', exact: true }).click();
+
+  await page.locator(ui(UI.templateEdit.kind)).first().selectOption('select');
+  await page.locator(ui(UI.templateEdit.save)).click();
+  await page.locator(ui(UI.settings.homeBottom)).click();
+  await openDetail(page, '206 選択確認');
+
+  const option = page.getByRole('button', { name: '選択肢', exact: true });
+  await option.click();
+  await expect(option).toHaveAttribute('aria-pressed', 'true');
+  await option.click();
+  await expect(option).toHaveAttribute('aria-pressed', 'false');
+});
+
+test('メニュー配置からフォーマットを開いて保存できる', async ({ page }) => {
+  await addPatient(page, '207', 'メニュー確認');
+  await openSettings(page);
+  const templateRow = page.locator('.formatListRow', { hasText: '回診メモ' }).first();
+  await templateRow.getByRole('button', { name: '編集', exact: true }).click();
+
+  const labGroup = page.locator(ui(UI.templateEdit.group), { hasText: '検査所見' }).first();
+  await labGroup.locator(ui(UI.templateEdit.display)).selectOption('menu');
+  await page.locator(ui(UI.templateEdit.save)).click();
+  await page.locator(ui(UI.settings.homeBottom)).click();
+  await openDetail(page, '207 メニュー確認');
+
+  await page.locator(ui(UI.projection.menu)).click();
+  await page.getByRole('button', { name: '検査所見', exact: true }).click();
+  await page.getByLabel('採血', { exact: true }).fill('異常なし');
+  await page.locator(ui(UI.projection.sheetSave)).click();
+  await expect(page.getByLabel('採血', { exact: true })).toHaveValue('異常なし');
 });
 
 // ── 3. ラウンド開始 (確認ダイアログ) → 今回分クリア・問題/継続メモ維持 → 巻き戻しで復元 ──

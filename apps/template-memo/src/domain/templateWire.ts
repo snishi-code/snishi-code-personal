@@ -3,7 +3,7 @@
  *
  * 対象・グループ・設定などを誤って載せないため、送信前に normalizeTemplate() で
  * Template の既知フィールドだけへ射影する。wire JSON は
- *   { v: 1, template: Template }
+ *   { v: 2, template: Template }
  * のみ。transport は C1 (deflate-raw・非暗号) を必須とし、foundation の
  * protocol/crypto を唯一の transport authority として使う。
  */
@@ -20,7 +20,7 @@ import { packPayload, unpackPayload } from '@snishi/foundation/qr/crypto';
 import { normalizeTemplate, type Template } from './template';
 
 export const TEMPLATE_WIRE_KIND = 'TPL' as const;
-const TEMPLATE_WIRE_VERSION = 1 as const;
+const TEMPLATE_WIRE_VERSION = 2 as const;
 
 export type TemplateWireErrorCode =
   | 'invalid-template'

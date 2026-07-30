@@ -1,5 +1,5 @@
 /*
- * テンプレート（定型文の構造定義）と本文合成エンジン。
+ * テンプレート（入力と出力の構造定義）と本文合成エンジン。
  *
  * モデルは 3 階層の木:
  *   Template（文書）→ TemplateSection（大項目 例 "(S)"）→ TemplateGroup（群 例 バイタル/身体所見）
@@ -69,7 +69,7 @@ export interface TemplateSection {
   keepWhenEmpty: boolean;
   /** 自由本文欄を持つか。 */
   freeText: boolean;
-  /** 自由本文の正常文（定型清書で空欄をこれで埋める。例 "著変なし"）。 */
+  /** 自由本文の正常文（完成文の空欄をこれで補う。例 "著変なし"）。 */
   normal?: string;
   groups: TemplateGroup[];
 }
@@ -212,7 +212,7 @@ function composeDocumentWith(
   return normalizeComposedText(blocks.join('\n\n'));
 }
 
-/** 文書全体の合成（清書のたたき台）。ブロック間は空行 1 つ。 */
+/** 文書全体の合成。ブロック間は空行 1 つ。 */
 export function composeDocument(patient: Patient, template: Template): string {
   return composeDocumentWith(patient, template, (section) =>
     memoFreeTextOf(patient, template, section),
@@ -220,8 +220,8 @@ export function composeDocument(patient: Patient, template: Template): string {
 }
 
 /**
- * 定型清書: 空の自由本文セクションを normal で埋めた状態で合成する
- * （保存はしない。ワンタップで「著変なし/現行加療継続」入りの清書案を作る）。
+ * 正常文補完つき完成文: 空の自由本文セクションを normal で埋めて合成する。
+ * 保存はせず、転記用 QR を開くたびに現在値から生成する。
  * memoSection には今回メモ (visitMemo) が入り、空なら normal へ倒れる。
  */
 export function composePresetClean(patient: Patient, template: Template): string {

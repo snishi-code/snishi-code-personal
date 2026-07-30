@@ -1,5 +1,5 @@
 /*
- * QR テキスト（清書の転記用・常に平文）の改行正規化とページ分割。
+ * QR テキスト（合成本文の転記用・常に平文）の改行正規化とページ分割。
  *
  * 系譜: medical 側 hospital-workspace/rounds/ui/qrText.ts の実運用実装を移植し、
  * 改行モードを設定値（NewlineMode: crlf / lf）として選べるよう一般化した。

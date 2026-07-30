@@ -42,7 +42,7 @@ function MemoCard({
   cardUi: string;
   inputUi: string;
   rows?: number;
-  /** 参照のみ (子端末の継続メモ/清書など。編集は正本PCで行う)。 */
+  /** 参照のみ表示する場合。 */
   readOnly?: boolean;
   readOnlyHint?: string;
 }) {
