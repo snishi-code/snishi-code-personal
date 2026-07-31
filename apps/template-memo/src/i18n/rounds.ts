@@ -352,6 +352,8 @@ export const s = {
     responseLabel: 'AIアプリから返されたJSON',
     responsePlaceholder: 'AIの返答をそのまま貼り付けます',
     responseAnalyze: '返答を解析',
+    responseStale:
+      '文章の例が変わったため、この返答は古くなりました。依頼文を作り直してから貼り直してください。',
     responseClear: '返答をクリア',
     responseReady: '候補を解析しました',
     parseError: {

@@ -59,8 +59,15 @@ export function saveBuilderResponse(responseText: string, parsed: ParsedBuilderD
   draft = { ...draft, responseText, parsed };
 }
 
+/**
+ * 貼り付けテキストだけを覚える（解析はしない）。
+ * 本文が変わった時点で既存の解析結果は「古い返答」なので必ず捨てる。
+ * 残すと、貼り直しただけで解析していない本文に対して「解析済み」が出て、
+ * 前の返答の候補がそのまま登録できてしまう。
+ */
 export function rememberBuilderResponse(responseText: string): void {
-  draft = { ...draft, responseText };
+  if (responseText === draft.responseText) return;
+  draft = { ...draft, responseText, parsed: null };
 }
 
 export function clearBuilderResponse(): void {

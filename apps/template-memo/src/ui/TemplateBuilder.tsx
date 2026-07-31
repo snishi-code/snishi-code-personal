@@ -189,7 +189,8 @@ function BuilderResponseDialog({
   onParsed,
   onClear,
 }: {
-  requestId: string;
+  /** null = 文章の例を編集して依頼文が失効した状態。解析はできず、消すことだけできる。 */
+  requestId: string | null;
   initialText: string;
   onClose: () => void;
   onParsed: (parsed: ParsedBuilderDraft) => void;
@@ -201,6 +202,7 @@ function BuilderResponseDialog({
   const [error, setError] = useState<string | null>(null);
 
   function analyze(): void {
+    if (!requestId) return;
     rememberBuilderResponse(text);
     const result = parseBuilderResponse(text, requestId);
     if (!result.ok) {
@@ -240,6 +242,7 @@ function BuilderResponseDialog({
         />
       </label>
       <div aria-live="polite">
+        {!requestId ? <p className="muted">{s.builder.responseStale}</p> : null}
         {status ? <p>{status}</p> : null}
         {error ? (
           <p role="alert" style={errorStyle}>
@@ -259,7 +262,7 @@ function BuilderResponseDialog({
         >
           {s.builder.responseClear}
         </Button>
-        <Button variant="primary" disabled={text.trim() === ''} onClick={analyze}>
+        <Button variant="primary" disabled={!requestId || text.trim() === ''} onClick={analyze}>
           {s.builder.responseAnalyze}
         </Button>
       </div>
@@ -324,14 +327,15 @@ export function TemplateBuilderSection({
         <Button
           variant={parsedCurrent ? 'primary' : 'secondary'}
           dataUi={UI.settings.builderResponse}
-          disabled={!draft.requestId}
+          // 依頼文が失効しても、残った「古い返答」を見て消せるように開ける。
+          disabled={!draft.requestId && draft.responseText === ''}
           onClick={() => setDialog('response')}
         >
           {s.settings.builder.response} · {responseStatus}
         </Button>
         <Button
           variant={parsedCurrent ? 'primary' : 'secondary'}
-          dataUi={UI.settings.builderPreview}
+          dataUi={UI.settings.builderPreviewOpen}
           disabled={!parsedCurrent}
           onClick={() => {
             const parsed = getBuilderDraft().parsed;
@@ -364,7 +368,7 @@ export function TemplateBuilderSection({
           }}
         />
       ) : null}
-      {dialog === 'response' && draft.requestId ? (
+      {dialog === 'response' ? (
         <BuilderResponseDialog
           requestId={draft.requestId}
           initialText={draft.responseText}

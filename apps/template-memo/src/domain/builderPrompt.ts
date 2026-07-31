@@ -98,7 +98,20 @@ export function buildBuilderPrompt(sources: readonly string[], requestId: string
 
   blocks.push(
     [
+      '## 配置 (template.placements)',
+      '- フォーマットは、それを使う場所へ配置して初めて入力欄になる。配置が無いフォーマットは使われない。',
+      '- 作ったフォーマットは、原則すべて placements のどれかに入れること。',
+      '- 1 件の配置は sectionKey（場所の key）と formatKey（フォーマットの key）と display の 3 つで書くこと。',
+      '- sectionKey は frame.sections の key、formatKey は formats の key と正確に一致させること。',
+      '- そのフォーマットの内容が実際に書かれている場所へ配置すること。',
+      '- 同じフォーマットを複数の場所へ配置してよい（配置を 2 件書く）。',
+    ].join('\n'),
+  );
+
+  blocks.push(
+    [
       '## 表示方法 (display)',
+      '- display は配置 (placements) の各件に書くこと。',
       '- 全見本に現れるフォーマットは always、一部の見本だけに現れるフォーマットは oncall にすること。',
       '- display は always / oncall の 2 値だけを使うこと。',
       '- 見本が 2 件以下なら、すべて always にすること。',

@@ -6,6 +6,7 @@ import {
   getBuilderDraft,
   newBuilderSource,
   rememberBuilderResponse,
+  saveBuilderResponse,
   saveBuilderSources,
 } from './builderDraft';
 
@@ -37,5 +38,36 @@ describe('builderDraft', () => {
       parsed: null,
     });
     expect(getBuilderDraft().sources).toHaveLength(1);
+  });
+
+  it('貼り付け本文を書き換えたら解析結果を捨てる（未解析の本文で「解析済み」にしない）', () => {
+    saveBuilderSources([newBuilderSource('完成文章')]);
+    const requestId = createBuilderRequest();
+    const parsed = {
+      candidate: {
+        requestId,
+        frame: { name: 'F', sections: [] },
+        formats: [],
+        template: {
+          name: 'T',
+          includeProblems: false,
+          includeHandover: false,
+          placements: [],
+        },
+        aiWarnings: [],
+      },
+      warnings: [],
+    };
+    saveBuilderResponse('返答A', parsed);
+    expect(getBuilderDraft().parsed).not.toBeNull();
+
+    // 解析を押さずに本文だけ差し替える → 前の候補は無効。
+    rememberBuilderResponse('返答B');
+    expect(getBuilderDraft()).toMatchObject({ responseText: '返答B', parsed: null });
+
+    // 同じ本文の再入力では捨てない（入力のたびに壊さない）。
+    saveBuilderResponse('返答B', parsed);
+    rememberBuilderResponse('返答B');
+    expect(getBuilderDraft().parsed).not.toBeNull();
   });
 });

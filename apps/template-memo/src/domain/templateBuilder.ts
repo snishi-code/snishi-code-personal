@@ -69,11 +69,15 @@ export interface BuilderCandidate {
 export interface BuilderWarning {
   code:
     | 'duplicate-key'
+    | 'invalid-section'
+    | 'invalid-format'
     | 'invalid-item'
     | 'select-downgraded'
+    | 'display-coerced'
     | 'unresolved-placement'
     | 'unresolved-memo'
-    | 'limit-exceeded';
+    | 'limit-exceeded'
+    | 'normalize-dropped';
   message: string;
 }
 
@@ -94,7 +98,7 @@ export type BuilderParseResult =
 
 /**
  * 依頼文とパーサが共有する唯一の期待 JSON 例。
- * 医療へ寄せず、4 種の項目・複数の区切り・自由本文なしの場所・空配置を含める。
+ * 医療へ寄せず、4 種の項目・複数の区切り・自由本文なしの場所・always/oncall 両方の配置を含める。
  */
 export const BUILDER_EXPECTED_JSON = `{
   "kind": "template-memo-builder",
@@ -134,7 +138,10 @@ export const BUILDER_EXPECTED_JSON = `{
     "memoSectionKey": "sec_summary",
     "includeProblems": false,
     "includeHandover": false,
-    "placements": []
+    "placements": [
+      { "sectionKey": "sec_readings", "formatKey": "fmt_readings", "display": "always" },
+      { "sectionKey": "sec_summary", "formatKey": "fmt_appearance", "display": "oncall" }
+    ]
   },
   "warnings": []
 }`;
@@ -259,7 +266,12 @@ function parseItem(
   const label = limited(stringOf(row.label), 20, '項目名', warnings);
   const requestedKind = stringOf(row.kind) as ItemKind;
   let kind: ItemKind = ITEM_KINDS.has(requestedKind) ? requestedKind : 'text';
-  const normal = limited(stringOf(row.normal), 40, `「${label || formatName}」の正常文`, warnings);
+  // normal は text でしか使わない。捨てる値の字数超過を警告しても利用者には意味が取れないため、
+  // text になり得る場合だけ検証する (select は options 不足で text へ降格することがある)。
+  const normal =
+    kind === 'text' || kind === 'select'
+      ? limited(stringOf(row.normal), 40, `「${label || formatName}」の正常文`, warnings)
+      : '';
 
   if (kind === 'select') {
     const seen = new Set<string>();
@@ -328,9 +340,15 @@ export function parseBuilderResponse(text: string, requestId: string): BuilderPa
   const sectionKeys = new Set<string>();
   for (const raw of rawSections.slice(0, 10)) {
     const row = recordOf(raw);
-    if (!row) continue;
+    if (!row) {
+      warnings.push({ code: 'invalid-section', message: '不正な場所を除外しました' });
+      continue;
+    }
     const key = stringOf(row.key);
-    if (!key) continue;
+    if (!key) {
+      warnings.push({ code: 'invalid-section', message: 'key の無い場所を除外しました' });
+      continue;
+    }
     if (sectionKeys.has(key)) {
       warnings.push({ code: 'duplicate-key', message: `重複した場所キー「${key}」を除外しました` });
       continue;
@@ -352,9 +370,15 @@ export function parseBuilderResponse(text: string, requestId: string): BuilderPa
   const rawFormats = Array.isArray(root.formats) ? root.formats : [];
   for (const raw of rawFormats.slice(0, 12)) {
     const row = recordOf(raw);
-    if (!row) continue;
+    if (!row) {
+      warnings.push({ code: 'invalid-format', message: '不正なフォーマットを除外しました' });
+      continue;
+    }
     const key = stringOf(row.key);
-    if (!key) continue;
+    if (!key) {
+      warnings.push({ code: 'invalid-format', message: 'key の無いフォーマットを除外しました' });
+      continue;
+    }
     if (formatKeys.has(key)) {
       warnings.push({
         code: 'duplicate-key',
@@ -424,10 +448,18 @@ export function parseBuilderResponse(text: string, requestId: string): BuilderPa
       continue;
     }
     placementCountBySection.set(sectionKey, count + 1);
+    // menu と未知値は always へ寄せる (合成に必ず出る安全側)。黙って寄せず必ず知らせる。
+    const requestedDisplay = stringOf(row.display);
+    if (requestedDisplay !== '' && requestedDisplay !== 'always' && requestedDisplay !== 'oncall') {
+      warnings.push({
+        code: 'display-coerced',
+        message: `表示方法「${requestedDisplay}」は使えないため「展開」にしました`,
+      });
+    }
     placements.push({
       sectionKey,
       formatKey,
-      display: row.display === 'oncall' ? 'oncall' : 'always',
+      display: requestedDisplay === 'oncall' ? 'oncall' : 'always',
     });
   }
 
@@ -560,12 +592,32 @@ export function buildBundleFromCandidate(candidate: BuilderCandidate): {
     formats: safeFormats,
   });
   if (!normalizedTemplate) throw new Error('生成候補の正規化に失敗しました');
+
+  // 二重防御の「検知」側。ここで件数が減るのは candidate → entity 変換の不具合であり、
+  // 本来は常に 0 件（正常系で warnings が空であることをテストで固定している）。
+  const warnings: BuilderWarning[] = [];
+  const lost = (kindLabel: string, before: number, after: number) => {
+    if (after < before) {
+      warnings.push({
+        code: 'normalize-dropped',
+        message: `${kindLabel}を ${before - after} 件取り込めませんでした`,
+      });
+    }
+  };
+  lost('場所', frame.sections.length, normalizedFrame.sections.length);
+  lost('フォーマット', formats.length, safeFormats.length);
+  lost('配置', template.placements.length, normalizedTemplate.placements.length);
+  for (const [index, format] of formats.entries()) {
+    const after = safeFormats[index];
+    if (after) lost(`「${format.name}」の項目`, format.items.length, after.items.length);
+  }
+
   return {
     bundle: {
       frame: normalizedFrame,
       formats: safeFormats,
       template: normalizedTemplate,
     },
-    warnings: [],
+    warnings,
   };
 }

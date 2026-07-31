@@ -116,6 +116,43 @@ describe('parseBuilderResponse', () => {
     ]);
   });
 
+  it('menu と未知の表示方法は展開へ寄せるが、黙らせず警告する', () => {
+    const raw = expectedResponse();
+    const template = raw.template as Record<string, unknown>;
+    template.placements = [
+      { sectionKey: 'sec_readings', formatKey: 'fmt_readings', display: 'menu' },
+      { sectionKey: 'sec_summary', formatKey: 'fmt_appearance', display: 'いつでも' },
+    ];
+    const parsed = parseBuilderResponse(JSON.stringify(raw), 'req_test');
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.candidate.template.placements.map((placement) => placement.display)).toEqual([
+      'always',
+      'always',
+    ]);
+    expect(parsed.warnings.map((warning) => warning.code)).toEqual([
+      'display-coerced',
+      'display-coerced',
+    ]);
+  });
+
+  it('key の無い場所とフォーマットは黙って消さず警告する', () => {
+    const raw = expectedResponse();
+    const frame = raw.frame as { sections: unknown[] };
+    frame.sections = [...frame.sections, { title: 'key なし', freeText: true }, 'まるごと不正'];
+    raw.formats = [...(raw.formats as unknown[]), { name: 'key なし', items: [] }];
+    const parsed = parseBuilderResponse(JSON.stringify(raw), 'req_test');
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.candidate.frame.sections).toHaveLength(2);
+    expect(parsed.candidate.formats).toHaveLength(2);
+    expect(parsed.warnings.map((warning) => warning.code)).toEqual([
+      'invalid-section',
+      'invalid-section',
+      'invalid-format',
+    ]);
+  });
+
   it('重複keyは先勝ちにし、AIのwarningを候補へ残す', () => {
     const raw = expectedResponse();
     const frame = raw.frame as { sections: unknown[] };
@@ -181,6 +218,32 @@ describe('buildBundleFromCandidate', () => {
     expect(bundle.formats.every((format) => format.titleWrap === '')).toBe(true);
     expect(bundle.template.placements.every((placement) => placement.display !== 'menu')).toBe(
       true,
+    );
+    expect(warnings).toEqual([]);
+  });
+
+  it('お手本JSONの配置が実IDへ解決され、フォーマットが場所へ置かれる', () => {
+    // お手本 (few-shot) が「配置ゼロ」だと、AI もフォーマットをどこにも置かない返答を真似る。
+    // 生成物の入力欄が空になる事故を防ぐため、配置が実際に解決されることを固定する。
+    const parsed = parseBuilderResponse(JSON.stringify(expectedResponse()), 'req_test');
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const { bundle, warnings } = buildBundleFromCandidate(parsed.candidate);
+
+    expect(bundle.template.placements).toHaveLength(2);
+    const sectionIds = new Set(bundle.frame.sections.map((section) => section.id));
+    const formatIds = new Set(bundle.formats.map((format) => format.id));
+    for (const placement of bundle.template.placements) {
+      expect(sectionIds.has(placement.sectionId)).toBe(true);
+      expect(formatIds.has(placement.formatId)).toBe(true);
+    }
+    // always / oncall の両方を示す例であること（display の書き分けの手本になる）。
+    expect(new Set(bundle.template.placements.map((placement) => placement.display))).toEqual(
+      new Set(['always', 'oncall']),
+    );
+    // すべてのフォーマットがどこかへ配置されている（使われない部品を作らせない）。
+    expect(new Set(bundle.template.placements.map((placement) => placement.formatId))).toEqual(
+      formatIds,
     );
     expect(warnings).toEqual([]);
   });

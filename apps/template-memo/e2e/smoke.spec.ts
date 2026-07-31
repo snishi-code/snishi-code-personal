@@ -369,7 +369,7 @@ test('文章の例と固定JSON返答から候補を確認し、テンプレー�
   await dialog.getByRole('button', { name: '返答を解析' }).click();
   await expect(builder.locator(ui(UI.settings.builderResponse))).toContainText('解析済み');
 
-  await builder.locator(ui(UI.settings.builderPreview)).click();
+  await builder.locator(ui(UI.settings.builderPreviewOpen)).click();
   await expect(page.locator(ui(UI.settings.builderPreview))).toContainText('設備点検');
   await page.locator(ui(UI.settings.builderApply)).click();
 

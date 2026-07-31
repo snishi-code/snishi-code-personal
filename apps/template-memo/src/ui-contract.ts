@@ -97,6 +97,7 @@ export const UI = {
     builderSources: 'settings.builder.sources',
     builderPrompt: 'settings.builder.prompt',
     builderResponse: 'settings.builder.response',
+    builderPreviewOpen: 'settings.builder.preview.open',
     builderPreview: 'settings.builder.preview',
     builderApply: 'settings.builder.apply',
     templateSection: 'settings.templates.section',
