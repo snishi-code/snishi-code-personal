@@ -28,7 +28,12 @@ import {
   recurringPostingsDue,
   recurringProjectionEntries,
 } from '../src/domain/recurring';
-import { accountBalance, deriveBalanceSheet, deriveProfitAndLoss, filterByDateRange } from '../src/domain/accounting';
+import {
+  accountBalance,
+  deriveBalanceSheet,
+  deriveProfitAndLoss,
+  filterByDateRange,
+} from '../src/domain/accounting';
 import { livingCostBreakdownForRange } from '../src/domain/livingCost';
 import { reportEntriesForAsOf } from '../src/domain/reportEntries';
 import { reportBasis } from '../src/domain/reportPeriod';
@@ -67,13 +72,13 @@ describe('定期ルールのキャッチアップ起票', () => {
 
     expect(await catchUpRecurringRules('2026-07-23')).toBe(1);
     let ledger = await loadLedger();
-    const posted = ledger.journalEntries.find(
-      (entry) => entry.id === `rec-${created.id}-2026-07`,
-    )!;
+    const posted = ledger.journalEntries.find((entry) => entry.id === `rec-${created.id}-2026-07`)!;
     expect(posted.lines.find((line) => line.side === 'debit')?.accountId).toBe(
       CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
     );
-    expect(ledger.monthlyCostItems.find((item) => item.id === `ccr-${created.id}-2026-07`)).toMatchObject({
+    expect(
+      ledger.monthlyCostItems.find((item) => item.id === `ccr-${created.id}-2026-07`),
+    ).toMatchObject({
       expenseAccountId: fixed.id,
     });
 
@@ -85,9 +90,9 @@ describe('定期ルールのキャッチアップ起票', () => {
       spreadExpenseAccountId: fixed.id,
     });
     // 過去の起票済み事実は編集値で遡及上書きしない。
-    expect(
-      ledger.journalEntries.find((entry) => entry.id === posted.id)?.lines[0]?.amount,
-    ).toBe(80_000);
+    expect(ledger.journalEntries.find((entry) => entry.id === posted.id)?.lines[0]?.amount).toBe(
+      80_000,
+    );
   });
 
   it('経過月ぶんの実仕訳を起票し、2 回目は起票しない（idempotent）', async () => {
@@ -427,9 +432,7 @@ describe('定期ルールのキャッチアップ起票', () => {
     const before = await loadLedger();
 
     const entries = reportEntriesForAsOf(before, '2026-10-31');
-    const allForRule = entries.filter(
-      (entry) => entry.metadata?.recurringRuleId === rule.id,
-    );
+    const allForRule = entries.filter((entry) => entry.metadata?.recurringRuleId === rule.id);
     const forRule = allForRule
       .filter((entry) => entry.metadata?.ccKind !== 'recognition')
       .sort((a, b) => a.date.localeCompare(b.date));
@@ -537,14 +540,8 @@ describe('clampDayToMonth / recurringPostingsDue / recurringProjectionEntries', 
     };
     const projected = recurringProjectionEntries([base], accounts, '2026-10-31');
     expect(
-      projected
-        .filter((entry) => entry.id.startsWith('rec-proj-'))
-        .map((entry) => entry.id),
-    ).toEqual([
-      'rec-proj-rule-2026-08',
-      'rec-proj-rule-2026-09',
-      'rec-proj-rule-2026-10',
-    ]);
+      projected.filter((entry) => entry.id.startsWith('rec-proj-')).map((entry) => entry.id),
+    ).toEqual(['rec-proj-rule-2026-08', 'rec-proj-rule-2026-09', 'rec-proj-rule-2026-10']);
     expect(projected).toHaveLength(6);
     expect(projected.every((entry) => entry.metadata?.continuousCostId !== undefined)).toBe(true);
     expect(recurringProjectionEntries([base], accounts, '2026-10-31')).toEqual(projected);
@@ -610,6 +607,58 @@ describe('clampDayToMonth / recurringPostingsDue / recurringProjectionEntries', 
       projected.find((entry) => entry.metadata?.ccKind === 'recognition')?.metadata
         ?.continuousCostId,
     ).toBe('spread-rule-2026-08');
+  });
+
+  it('費用から直接フローへ変更しても既存itemの被覆中は未来仕訳を重ねない', () => {
+    const accounts: Account[] = [
+      {
+        id: 'cash',
+        name: '現金',
+        type: 'asset',
+        role: 'daily-asset',
+        archived: false,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+      {
+        id: 'investment',
+        name: '投資',
+        type: 'asset',
+        role: 'investment-asset',
+        archived: false,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+    ];
+    const rule = {
+      id: 'changed-rule',
+      name: '変更後の積立',
+      amount: 10_000,
+      dayOfMonth: 1,
+      debitAccountId: 'investment',
+      creditAccountId: 'cash',
+      everyMonths: 1,
+      startMonth: '2026-01',
+      postedThroughMonth: '2026-01',
+      createdAt: 't',
+      updatedAt: 't',
+    };
+    const existingItem = {
+      id: 'ccr-changed-rule-2026-01',
+      name: '変更前の年払い',
+      amount: 120_000,
+      startDate: '2026-01-01',
+      endDate: '2026-12-31',
+      expenseAccountId: 'expense',
+      createdAt: 't',
+      updatedAt: 't',
+    };
+
+    expect(
+      recurringProjectionEntries([rule], accounts, '2027-02-28', [existingItem]).map(
+        (entry) => entry.date,
+      ),
+    ).toEqual(['2027-01-01', '2027-02-01']);
   });
 });
 
@@ -684,9 +733,7 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     expect(item!.startDate).toBe('2026-04-25');
     expect(item!.endDate).toBe('2027-03-31'); // 周期がカバーする最終月の末日（§7-4）
     expect(item!.expenseAccountId).toBe(fixed.id);
-    const purchase = ledger.journalEntries.find(
-      (e) => e.metadata?.monthlyCostId === item!.id,
-    );
+    const purchase = ledger.journalEntries.find((e) => e.metadata?.monthlyCostId === item!.id);
     expect(purchase).toBeDefined();
     expect(purchase!.date).toBe('2026-04-25');
     expect(purchase!.metadata?.recurringRuleId).toBe(rule.id);

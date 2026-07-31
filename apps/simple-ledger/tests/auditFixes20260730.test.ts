@@ -145,7 +145,7 @@ describe('P1-2: 科目アーカイブの残高判定は導出仕訳（計算で�
       name: '年払い',
       amount: 12000,
       startDate: `${start}-01`,
-      endDate: `${addMonths(start, 11)}-28`,
+      endDate: todayLocal(),
       expenseAccountId: target.id,
       creditAccountId: bank.id,
     });
@@ -158,8 +158,8 @@ describe('P1-2: 科目アーカイブの残高判定は導出仕訳（計算で�
   });
 });
 
-describe('P1-3: アーカイブ + 未来仕訳の round-trip（保存できた状態は書き出して復元できる）', () => {
-  it('今日残高 0・未来仕訳ありの科目をアーカイブでき、export が現行 schema を通る', async () => {
+describe('P1-3: 終了点は未来仕訳も包含する', () => {
+  it('今日残高 0 でも未来仕訳がある科目は今日で終了できず、現在状態のexportは有効', async () => {
     const bank = await accountByName('預金');
     const target = makeAccount({ id: 'audit-c', name: '積立予定口座' });
     await upsertAccount(target);
@@ -173,7 +173,9 @@ describe('P1-3: アーカイブ + 未来仕訳の round-trip（保存できた�
         amount: 100,
       }),
     );
-    await archiveAccount(target.id); // 今日残高 0 なので成功する
+    await expect(archiveAccount(target.id)).rejects.toMatchObject({
+      code: 'error.account.referenceOutsidePeriod',
+    });
     const pkg = buildExportPackage(await loadLedger());
     const parsed = ledgerExportPackageSchema.safeParse(pkg);
     expect(parsed.success).toBe(true);
@@ -299,7 +301,7 @@ describe('P1-7: 定期ルールの科目参照の保護', () => {
     });
   });
 
-  it('アーカイブ済み科目を参照するルールは起票しない（残高 0 の不変条件を守る）', async () => {
+  it('開区間のルールが参照する科目は終了できない', async () => {
     const bank = await accountByName('預金');
     const target = makeAccount({
       id: 'audit-rule-archived',
@@ -316,8 +318,9 @@ describe('P1-7: 定期ルールの科目参照の保護', () => {
       creditAccountId: bank.id,
       startMonth: addMonths(todayLocal().slice(0, 7), -2),
     });
-    await archiveAccount(target.id); // 費用科目は残高チェック対象外なので成功する
-    expect(await catchUpRecurringRules(todayLocal())).toBe(0);
+    await expect(archiveAccount(target.id)).rejects.toMatchObject({
+      code: 'error.account.referenceOutsidePeriod',
+    });
   });
 });
 

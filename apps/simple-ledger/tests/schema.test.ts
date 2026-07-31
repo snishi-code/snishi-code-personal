@@ -8,11 +8,7 @@ import {
   monthlyCostItemSchema,
   recurringRuleSchema,
 } from '../src/domain/schema';
-import {
-  APP_ID,
-  CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
-  SCHEMA_VERSION,
-} from '../src/domain/constants';
+import { APP_ID, CONTINUOUS_COST_LEDGER_ACCOUNT_ID, SCHEMA_VERSION } from '../src/domain/constants';
 
 const validEntry = {
   id: 'e1',
@@ -68,13 +64,7 @@ describe('journalEntrySchema', () => {
   });
   it('存在しない日付を拒否し、閏日の実在日を受け入れる', () => {
     expect(journalEntrySchema.safeParse({ ...validEntry, date: '2024-02-29' }).success).toBe(true);
-    for (const date of [
-      '2026-02-29',
-      '2026-02-31',
-      '2026-04-31',
-      '2026-13-01',
-      '2026-00-01',
-    ]) {
+    for (const date of ['2026-02-29', '2026-02-31', '2026-04-31', '2026-13-01', '2026-00-01']) {
       expect(journalEntrySchema.safeParse({ ...validEntry, date }).success).toBe(false);
     }
   });
@@ -99,9 +89,9 @@ describe('年月の暦検証', () => {
     expect(entryMetadataSchema.safeParse({ recurringMonth: '2026-99' }).success).toBe(false);
     expect(recurringRuleSchema.safeParse(rule).success).toBe(true);
     expect(recurringRuleSchema.safeParse({ ...rule, startMonth: '2026-99' }).success).toBe(false);
-    expect(
-      recurringRuleSchema.safeParse({ ...rule, postedThroughMonth: '2026-00' }).success,
-    ).toBe(false);
+    expect(recurringRuleSchema.safeParse({ ...rule, postedThroughMonth: '2026-00' }).success).toBe(
+      false,
+    );
   });
 });
 
@@ -204,6 +194,321 @@ describe('ledgerExportPackageSchema', () => {
       accounts: [...validPkg.accounts, validPkg.accounts[0]],
     };
     expect(ledgerExportPackageSchema.safeParse(dup).success).toBe(false);
+  });
+});
+
+describe('勘定科目の存在期間（schema/import）', () => {
+  const account = (
+    id: string,
+    name: string,
+    type: string,
+    role: string,
+    lifetime: Record<string, unknown> = {},
+  ) => ({
+    id,
+    name,
+    type,
+    role,
+    archived: false,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    ...lifetime,
+  });
+  const cash = account('cash', '預金', 'asset', 'daily-asset');
+  const food = account('food', '食費', 'expense', 'expense-category');
+  const basePackage = (overrides: Record<string, unknown> = {}) => ({
+    appId: APP_ID,
+    schemaVersion: SCHEMA_VERSION,
+    ledgerId: 'ledger',
+    exportedAt: '2026-06-01T00:00:00.000Z',
+    deviceId: 'device',
+    revision: 0,
+    accounts: [cash, food],
+    journalEntries: [],
+    cashflowSchedules: [],
+    tags: [],
+    monthlyCostItems: [],
+    recurringRules: [],
+    settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
+    ...overrides,
+  });
+
+  it('端点なしの旧データと正しい明示端点を受理し、不正日付・開始後の終了を拒否する', () => {
+    expect(accountSchema.safeParse(cash).success).toBe(true);
+    expect(
+      accountSchema.safeParse({
+        ...cash,
+        archived: true,
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+      }).success,
+    ).toBe(true);
+    expect(accountSchema.safeParse({ ...cash, endDate: '2026-12-31' }).success).toBe(false);
+    expect(accountSchema.safeParse({ ...cash, startDate: '2026-02-30' }).success).toBe(false);
+    expect(
+      accountSchema.safeParse({
+        ...cash,
+        archived: true,
+        startDate: '2026-02-02',
+        endDate: '2026-02-01',
+      }).success,
+    ).toBe(false);
+    expect(ledgerExportPackageSchema.safeParse(basePackage()).success).toBe(true);
+  });
+
+  it('exportedAt が不正でも未来終了の同名科目を終了済みと推測しない', () => {
+    const duplicateName = '将来も有効';
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        basePackage({
+          exportedAt: 'invalid',
+          accounts: [
+            {
+              ...cash,
+              name: duplicateName,
+              archived: true,
+              startDate: '2026-01-01',
+              endDate: '2099-12-31',
+            },
+            { ...food, name: duplicateName },
+          ],
+        }),
+      ).success,
+    ).toBe(false);
+  });
+
+  it('明示端点は科目が関与する全仕訳日を包含する', () => {
+    const journalEntries = [
+      {
+        ...validEntry,
+        date: '2026-06-15',
+        lines: [
+          { accountId: 'food', side: 'debit', amount: 1000 },
+          { accountId: 'cash', side: 'credit', amount: 1000 },
+        ],
+      },
+    ];
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        basePackage({
+          accounts: [
+            { ...cash, startDate: '2026-06-15' },
+            {
+              ...food,
+              archived: true,
+              startDate: '2026-06-15',
+              endDate: '2026-06-15',
+            },
+          ],
+          journalEntries,
+        }),
+      ).success,
+    ).toBe(true);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        basePackage({
+          accounts: [{ ...cash, startDate: '2026-06-16' }, food],
+          journalEntries,
+        }),
+      ).success,
+    ).toBe(false);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        basePackage({
+          accounts: [cash, { ...food, archived: true, endDate: '2026-06-14' }],
+          journalEntries,
+        }),
+      ).success,
+    ).toBe(false);
+  });
+
+  it('累計が残る費用の終了点は受理し、明示した両端をround-tripで保持する', () => {
+    const journalEntries = [
+      {
+        ...validEntry,
+        date: '2026-06-15',
+        lines: [
+          { accountId: 'food', side: 'debit', amount: 1000 },
+          { accountId: 'cash', side: 'credit', amount: 1000 },
+        ],
+      },
+    ];
+    const parsed = ledgerExportPackageSchema.safeParse(
+      basePackage({
+        accounts: [
+          { ...cash, startDate: '2026-01-01' },
+          {
+            ...food,
+            archived: true,
+            startDate: '2026-06-01',
+            endDate: '2026-06-30',
+          },
+        ],
+        journalEntries,
+      }),
+    );
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.accounts.find((candidate) => candidate.id === 'food')).toMatchObject({
+        startDate: '2026-06-01',
+        endDate: '2026-06-30',
+      });
+    }
+  });
+
+  it('終了点で残高が残る資産は拒否するが、端点のない旧アーカイブ形状は受理する', () => {
+    const journalEntries = [
+      {
+        ...validEntry,
+        date: '2026-06-15',
+        lines: [
+          { accountId: 'food', side: 'debit', amount: 1000 },
+          { accountId: 'cash', side: 'credit', amount: 1000 },
+        ],
+      },
+    ];
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        basePackage({
+          accounts: [{ ...cash, archived: true, endDate: '2026-06-30' }, food],
+          journalEntries,
+        }),
+      ).success,
+    ).toBe(false);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        basePackage({
+          accounts: [{ ...cash, archived: true }, food],
+        }),
+      ).success,
+    ).toBe(true);
+  });
+
+  it('予定CFの口座・相手科目は期日を包含する', () => {
+    const card = account('card', 'カード', 'liability', 'payment-liability');
+    const schedule = {
+      id: 'schedule',
+      title: '引き落とし',
+      dueDate: '2026-07-10',
+      amount: 1000,
+      direction: 'outflow',
+      accountId: 'cash',
+      counterAccountId: 'card',
+      source: 'manual',
+      status: 'planned',
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        basePackage({
+          accounts: [{ ...cash, endDate: '2026-07-09' }, card],
+          cashflowSchedules: [schedule],
+        }),
+      ).success,
+    ).toBe(false);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        basePackage({
+          accounts: [cash, { ...card, startDate: '2026-07-11' }],
+          cashflowSchedules: [schedule],
+        }),
+      ).success,
+    ).toBe(false);
+  });
+
+  it('継続コストの費用科目と集約台帳はitemの全期間を包含する', () => {
+    const ledger = account(
+      CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      '継続コスト台帳',
+      'asset',
+      'continuing-cost-asset',
+    );
+    const item = {
+      id: 'item',
+      name: '年払い',
+      amount: 1200,
+      startDate: '2026-02-10',
+      endDate: '2026-05-31',
+      expenseAccountId: 'food',
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const purchase = {
+      id: 'purchase',
+      date: item.startDate,
+      description: item.name,
+      kind: 'normal',
+      lines: [
+        { accountId: ledger.id, side: 'debit', amount: item.amount },
+        { accountId: cash.id, side: 'credit', amount: item.amount },
+      ],
+      metadata: { monthlyCostId: item.id },
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const itemPackage = (accounts: unknown[], itemValue: Record<string, unknown> = item) =>
+      basePackage({
+        accounts,
+        journalEntries: [purchase],
+        monthlyCostItems: [itemValue],
+      });
+
+    expect(ledgerExportPackageSchema.safeParse(itemPackage([cash, food, ledger])).success).toBe(
+      true,
+    );
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        itemPackage([cash, { ...food, endDate: '2026-05-30' }, ledger]),
+      ).success,
+    ).toBe(false);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        itemPackage([cash, food, { ...ledger, endDate: '2026-05-30' }]),
+      ).success,
+    ).toBe(false);
+    const openItem = { ...item } as Record<string, unknown>;
+    delete openItem.endDate;
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        itemPackage([cash, { ...food, endDate: '2099-12-31' }, ledger], openItem),
+      ).success,
+    ).toBe(false);
+  });
+
+  it('定期ルールの参照は開始日から終了なしの開区間として扱う', () => {
+    const rule = {
+      id: 'rule',
+      name: '毎月の支出',
+      amount: 1000,
+      dayOfMonth: 31,
+      everyMonths: 1,
+      debitAccountId: 'food',
+      creditAccountId: 'cash',
+      startMonth: '2026-04',
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    expect(
+      ledgerExportPackageSchema.safeParse(basePackage({ recurringRules: [rule] })).success,
+    ).toBe(true);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        basePackage({
+          accounts: [{ ...cash, endDate: '2099-12-31' }, food],
+          recurringRules: [rule],
+        }),
+      ).success,
+    ).toBe(false);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        basePackage({
+          accounts: [cash, { ...food, startDate: '2026-05-01' }],
+          recurringRules: [rule],
+        }),
+      ).success,
+    ).toBe(false);
   });
 });
 
@@ -332,9 +637,8 @@ describe('残高補正 metadata の package 整合性', () => {
   it('相手が system-adjustment で明細と差額が一致する補正だけを受け入れる', () => {
     expect(ledgerExportPackageSchema.safeParse(pkg(entry)).success).toBe(true);
     expect(
-      ledgerExportPackageSchema.safeParse(
-        pkg(entry, { ...counter, role: 'expense-category' }),
-      ).success,
+      ledgerExportPackageSchema.safeParse(pkg(entry, { ...counter, role: 'expense-category' }))
+        .success,
     ).toBe(false);
     expect(
       ledgerExportPackageSchema.safeParse(
@@ -868,7 +1172,7 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
   });
 });
 
-describe('勘定科目のアーカイブ不変条件（アーカイブ済み = 残高 0）', () => {
+describe('終了点がない旧アーカイブ形状の受理', () => {
   const food = {
     id: 'food',
     name: '食費',
@@ -929,11 +1233,9 @@ describe('勘定科目のアーカイブ不変条件（アーカイブ済み = �
     updatedAt: 'x',
   };
 
-  it('アーカイブ済み科目の残高は import で再検証しない（round-trip 保証・監査 P1-3）', () => {
-    // 「アーカイブ済み = 今日残高 0」は時点依存の不変条件なので、アーカイブ操作時点の
-    // 保存境界（upsertAccount / archiveAccount）だけが守る。未来仕訳を含む台帳では
-    // 最終残高が非 0 でも保存できるため、schema で最終残高 0 を要求すると
-    // 「保存に成功した状態を書き出すと取り込めない」round-trip 破壊になる。
+  it('endDate のない旧 archived レコードには終了点残高を要求しない', () => {
+    // 終了点がない旧形状には残高を測る基準日がない。新モデルの終了点残高 0 は
+    // endDate が明示された資産・負債へだけ適用し、この旧 JSON は引き続き受理する。
     expect(
       ledgerExportPackageSchema.safeParse(pkgWith([wallet(true), food], [topUp])).success,
     ).toBe(true);
@@ -1017,9 +1319,9 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
     expect(recurringRuleSchema.safeParse(spreadRule).success).toBe(true);
   });
   it('月割りルールの借方は引き続き台帳固定', () => {
-    expect(
-      recurringRuleSchema.safeParse({ ...spreadRule, debitAccountId: 'bank' }).success,
-    ).toBe(false);
+    expect(recurringRuleSchema.safeParse({ ...spreadRule, debitAccountId: 'bank' }).success).toBe(
+      false,
+    );
   });
 
   const bank = {
@@ -1087,9 +1389,8 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
 
   it('package: 源泉（支払い元）は income-category でも valid（健康保険 = 銀行→給与 の逆方向も可）', () => {
     expect(
-      ledgerExportPackageSchema.safeParse(
-        rulePkg({ ...spreadRule, creditAccountId: 'salary' }),
-      ).success,
+      ledgerExportPackageSchema.safeParse(rulePkg({ ...spreadRule, creditAccountId: 'salary' }))
+        .success,
     ).toBe(true);
   });
   it('package: 費用の行き先は income-category でも valid（健康保険 = 収入減として月割り）', () => {
@@ -1101,14 +1402,12 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
   });
   it('package: 源泉・費用の行き先とも残高調整科目（system-adjustment）は invalid', () => {
     expect(
-      ledgerExportPackageSchema.safeParse(
-        rulePkg({ ...spreadRule, creditAccountId: 'adj' }),
-      ).success,
+      ledgerExportPackageSchema.safeParse(rulePkg({ ...spreadRule, creditAccountId: 'adj' }))
+        .success,
     ).toBe(false);
     expect(
-      ledgerExportPackageSchema.safeParse(
-        rulePkg({ ...spreadRule, spreadExpenseAccountId: 'adj' }),
-      ).success,
+      ledgerExportPackageSchema.safeParse(rulePkg({ ...spreadRule, spreadExpenseAccountId: 'adj' }))
+        .success,
     ).toBe(false);
   });
 });

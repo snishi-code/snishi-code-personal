@@ -2,8 +2,8 @@
  * 予定キャッシュフロー（将来の現金の出入り）の投影と実績化。
  *
  * 「いつ費用認識するか」とは独立に、「いつ現金が動くか」を扱う。
- *  - 投影の原資は**「自由に動かせるお金」1 値**（daily-asset かつ movable !== false かつ
- *    非アーカイブの残高合計）。総資金/自由資金という 2 段の概念は持たない。
+ *  - 投影の原資は**「自由に動かせるお金」1 値**（daily-asset かつ movable !== false で、
+ *    基準日に存在する科目の残高合計）。総資金/自由資金という 2 段の概念は持たない。
  *    貸借対照表・資産内訳は従来どおり全資産を出す（資金繰りだけ絞る）。
  *  - planned な CashflowSchedule を期日順に適用し、将来残高・最低残高を投影する。
  *  - 実績化は 1 件の 2 行仕訳を作る（複合仕訳にしない）。保存は repository（単一 transaction）。
@@ -48,21 +48,25 @@ export function inferScheduleFlow(
 
 /**
  * 「自由に動かせるお金」に数える科目か（資金繰りの原資の単一正本）。
- * daily-asset かつ movable !== false かつ非アーカイブ。
+ * daily-asset かつ movable !== false。有限の終了点を持つ科目は、その終了前後の資金移動を
+ * 投影するため候補に残す（終了点残高 0 と期間ガードにより、終了後の残高は増えない）。
+ * 旧 archived=true / endDateなしだけは終了点不明のため従来どおり除外する。
  * 継続コスト台帳・投資などの asset や、「自由に動かせない」チェックを外した現預金
  * （Suica・チャージ残高など）は原資に入れない。
  */
 export function isFreeAsset(
-  account: Pick<Account, 'role' | 'movable' | 'archived'>,
+  account: Pick<Account, 'role' | 'movable' | 'archived' | 'endDate'>,
 ): boolean {
-  return account.role === 'daily-asset' && account.movable !== false && !account.archived;
+  return (
+    account.role === 'daily-asset' &&
+    account.movable !== false &&
+    !(account.archived && account.endDate === undefined)
+  );
 }
 
 /** 資金繰りの原資 = 「自由に動かせるお金」の残高合計。 */
 export function freeAssetTotal(assets: AccountBalance[]): number {
-  return assets
-    .filter((a) => isFreeAsset(a.account))
-    .reduce((s, a) => s + a.balance, 0);
+  return assets.filter((a) => isFreeAsset(a.account)).reduce((s, a) => s + a.balance, 0);
 }
 
 /**
@@ -128,8 +132,11 @@ export function horizonEnd(today: string, months: number): string {
 export function nextRepaymentDate(today: string, day: number): string {
   const clampToMonth = (ym: string): string => {
     const [y, m] = ym.split('-');
-    const lastDay = new Date(Number.parseInt(y ?? '0', 10), Number.parseInt(m ?? '0', 10), 0)
-      .getDate();
+    const lastDay = new Date(
+      Number.parseInt(y ?? '0', 10),
+      Number.parseInt(m ?? '0', 10),
+      0,
+    ).getDate();
     return `${ym}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
   };
   const inThisMonth = clampToMonth(monthOf(today));

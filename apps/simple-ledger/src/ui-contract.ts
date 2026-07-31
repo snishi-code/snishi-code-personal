@@ -154,6 +154,8 @@ export const UI = {
     archiveToggle: 'accounts.archiveToggle',
     openingAmount: 'accounts.openingAmount',
     openingDate: 'accounts.openingDate',
+    startDate: 'accounts.startDate',
+    endDate: 'accounts.endDate',
     archiveRenameConfirm: 'accounts.archiveRenameConfirm',
     // 「自由に動かせる」チェック（現預金の内訳のみ・OFF = 資金繰りの原資に数えない）
     movable: 'accounts.movable',

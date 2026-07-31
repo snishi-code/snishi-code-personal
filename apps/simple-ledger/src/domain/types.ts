@@ -32,7 +32,17 @@ export interface Account {
    * type と整合する必要がある（src/domain/accountRoles.ts の roleAllowsType）。
    */
   role: AccountRole;
-  /** アーカイブ済みの科目は新規仕訳の選択肢から外すが、過去仕訳の集計には残る。 */
+  /**
+   * 科目が存在する最初の日（両端を含む）。未設定時は createdAt の日付部分を開始点とみなす。
+   * 過去データの import 自体は optional のまま受理し、編集時に明示できる。
+   */
+  startDate?: string;
+  /** 科目が存在する最後の日（両端を含む）。アーカイブ操作で記録し、解除時に削除する。 */
+  endDate?: string;
+  /**
+   * 終了点を持つ（または旧形式で終了済みの）科目。候補表示の現在性はこの値だけで決めず、
+   * 仕訳日と startDate/endDate の線分から導出する。
+   */
   archived: boolean;
   note?: string;
   /**

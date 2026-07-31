@@ -19,6 +19,7 @@ import { findAccountNameConflicts, planArchiveRenames } from '../../domain/accou
 import { sortAccounts } from '../../domain/accountOrder';
 import { newId } from '../../domain/ids';
 import { nowIso, todayLocal } from '../../util/time';
+import { effectiveAccountStartDate } from '../../domain/accountLifetime';
 import { boxForRole, type AccountBox } from '../accountBoxes';
 import { errorText, t } from '../../i18n';
 import { UI } from '../../ui-contract';
@@ -52,6 +53,17 @@ export function AccountSheet({
   const [repaymentDayText, setRepaymentDayText] = useState(
     existing?.repaymentDay !== undefined ? String(existing.repaymentDay) : '',
   );
+  const [startDate, setStartDate] = useState(
+    existing ? (effectiveAccountStartDate(existing) ?? todayLocal()) : todayLocal(),
+  );
+  const [endDate, setEndDate] = useState(
+    existing?.endDate ??
+      (existing?.archived && /^\d{4}-\d{2}-\d{2}/.test(existing.updatedAt)
+        ? existing.updatedAt.slice(0, 10)
+        : existing?.archived
+          ? todayLocal()
+          : ''),
+  );
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
   const [archiveRename, setArchiveRename] = useState<{ name: string; renamed: string } | null>(
@@ -80,9 +92,7 @@ export function AccountSheet({
   ];
   const repaymentDay = repaymentDayText === '' ? null : Number.parseInt(repaymentDayText, 10);
   const openingAmount =
-    openingAmountText === ''
-      ? null
-      : Number.parseInt(openingAmountText.replace(/[^\d]/g, ''), 10);
+    openingAmountText === '' ? null : Number.parseInt(openingAmountText.replace(/[^\d]/g, ''), 10);
 
   async function doSave(renameArchivedConflicts: boolean) {
     const trimmed = name.trim();
@@ -112,7 +122,9 @@ export function AccountSheet({
           name: trimmed,
           type,
           role,
-          archived: existing?.archived ?? false,
+          archived: existing ? endDate !== '' : false,
+          ...(existing ? { startDate } : {}),
+          ...(existing ? { endDate: endDate === '' ? undefined : endDate } : {}),
           ...(note.trim() !== '' ? { note: note.trim() } : {}),
           ...(showMovable && !movable ? { movable: false } : {}),
           ...(showRepayment && repaymentAccountId !== '' ? { repaymentAccountId } : {}),
@@ -136,6 +148,10 @@ export function AccountSheet({
       return;
     }
     if (!existing && !createRole) return; // 追加できない箱（UI からは到達しない）
+    if (existing && (startDate === '' || (endDate !== '' && endDate < startDate))) {
+      setError(t('error.monthlyCost.endBeforeStart'));
+      return;
+    }
     if (
       showOpening &&
       openingAmountText !== '' &&
@@ -147,7 +163,10 @@ export function AccountSheet({
     if (
       showRepayment &&
       repaymentDayText !== '' &&
-      (repaymentDay === null || !Number.isInteger(repaymentDay) || repaymentDay < 1 || repaymentDay > 31)
+      (repaymentDay === null ||
+        !Number.isInteger(repaymentDay) ||
+        repaymentDay < 1 ||
+        repaymentDay > 31)
     ) {
       setError(t('error.account.repaymentDayInvalid'));
       return;
@@ -174,6 +193,8 @@ export function AccountSheet({
     openingDate,
     repaymentAccountId,
     repaymentDayText,
+    startDate,
+    endDate,
   });
   const [initialSnapshot] = useState(snapshot);
   const dirty = snapshot !== initialSnapshot;
@@ -224,6 +245,31 @@ export function AccountSheet({
           error={error}
         />
         {/* メモ欄は UI から撤去（2026-07-23 作者指示）。既存メモは note state 経由で保持される。 */}
+        {existing ? (
+          <div className="form-grid form-grid--2">
+            <TextInput
+              label={t('ccItem.startDate')}
+              type="date"
+              required
+              value={startDate}
+              onChange={(value) => {
+                setStartDate(value);
+                setError(undefined);
+              }}
+              dataUi={UI.accounts.startDate}
+            />
+            <TextInput
+              label={t('ccItem.endDate')}
+              type="date"
+              value={endDate}
+              onChange={(value) => {
+                setEndDate(value);
+                setError(undefined);
+              }}
+              dataUi={UI.accounts.endDate}
+            />
+          </div>
+        ) : null}
         {showMovable ? (
           <label
             style={{

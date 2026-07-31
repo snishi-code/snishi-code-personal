@@ -24,14 +24,26 @@
   "ledgerId": "ledger",
   "exportedAt": "2026-07-29T00:00:00.000Z",
   "deviceId": "<uuid>",
-  "revision": 12,          // foundation 封筒の revision（楽観的衝突検出）
-  "accounts": [ /* Account[]（type + role 付き） */ ],
-  "journalEntries": [ /* JournalEntry[]（保存される仕訳のみ） */ ],
-  "cashflowSchedules": [ /* CashflowSchedule[]（予定キャッシュフロー） */ ],
-  "tags": [ /* Tag[]（分析タグ） */ ],
-  "monthlyCostItems": [ /* MonthlyCostItem[]（継続コスト資産） */ ],
-  "recurringRules": [ /* RecurringRule[]（定期ルール） */ ],
-  "settings": { "ledgerName": "家計簿", "currency": "JPY", "locale": "ja" }
+  "revision": 12, // foundation 封筒の revision（楽観的衝突検出）
+  "accounts": [
+    /* Account[]（type + role 付き） */
+  ],
+  "journalEntries": [
+    /* JournalEntry[]（保存される仕訳のみ） */
+  ],
+  "cashflowSchedules": [
+    /* CashflowSchedule[]（予定キャッシュフロー） */
+  ],
+  "tags": [
+    /* Tag[]（分析タグ） */
+  ],
+  "monthlyCostItems": [
+    /* MonthlyCostItem[]（継続コスト資産） */
+  ],
+  "recurringRules": [
+    /* RecurringRule[]（定期ルール） */
+  ],
+  "settings": { "ledgerName": "家計簿", "currency": "JPY", "locale": "ja" },
 }
 ```
 
@@ -43,6 +55,10 @@
 - `Account.movable?`（「自由に動かせる」）: `daily-asset` のみ・**保存されるのは `false` だけ**
   （ON = 既定は `undefined`。`true` や `daily-asset` 以外に付いた値は import 時に strip /
   剥がして自己修復する）。資金繰りの原資の判定にだけ使う。
+- `Account.startDate?` / `endDate?`: 勘定科目が時間軸上に存在する両端（`YYYY-MM-DD`・両端を含む）。
+  `startDate` 未設定時は `createdAt` の日付部分を表示・保存時の既定開始点とみなす。
+  アーカイブ操作は今日を `endDate` に記録し、アーカイブ解除は `endDate` を消す。
+  schema / DB の版は変えず、端点のない JSON も受理する。
 - `revision`: 端末ローカルの編集追跡。保存のたびに +1。
 - 金額（`JournalLine.amount`）は **正の整数・最小通貨単位**（JPY なら円）。
 
@@ -52,12 +68,12 @@
 > migration step を追加せず、旧版 JSON は unsupported-version で fail-closed に拒否し、
 > 実データは単発の変換スクリプトで前進させる（下記）。
 
-| 版 | 変更 |
-|---|---|
-| **v1** | v1 アプリの最終形（旧 v16 相当）を版 1 として開始（レガシー migration なし）。 |
-| **v1→v2**（2026-07-28） | 使われていなかった 2 概念を型・schema・store・UI ごと撤去。IndexedDB は DB_VERSION 3 の upgrade で旧ストアを削除。 |
-| **v2→v3**（2026-07-29・指示書#4） | 廃止概念の一掃（`fixed-asset` / `deferred-asset` role・按分 `allocations`・投資評価損益）・補正の通常化・並び順の正本化・ヘッダーの日付選択化・用語統一。旧 `allocations` ストアを削除（DB_VERSION 4）。 |
-| **v3→v4**（2026-07-30・指示書#5） | **継続コスト資産の4項目モデル一本化**。`MonthlyCostItem` を 8 フィールド化（`startDate`/`endDate?`。`kind`/`costMonths`/`repeatEveryMonths`/`startMonth`/`endMonth`/`paymentSourceAccountId`/`recognitionCreditAccountId`/`status` 等を撤去）。**購入の仕訳を保存される仕訳にする**（`metadata.monthlyCostId`）。回収の振替（`metadata.monthlyCostRecovery`）を追加。`AssetDisposal`（処分）・一時停止・実績動的償却を全廃（`assetDisposals` ストア削除。DB_VERSION 5）。`RecurringRule` に `everyMonths`（必須）と `spreadExpenseAccountId?`（月割りするルール）を追加。科目名「開始残高」→「初期残高」。実データの変換 = `_workspace-management/scripts/convert-ledger-v3-to-v4.mjs`（単発・アプリ内 migration なし）。 |
+| 版                                             | 変更                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **v1**                                         | v1 アプリの最終形（旧 v16 相当）を版 1 として開始（レガシー migration なし）。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **v1→v2**（2026-07-28）                        | 使われていなかった 2 概念を型・schema・store・UI ごと撤去。IndexedDB は DB_VERSION 3 の upgrade で旧ストアを削除。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| **v2→v3**（2026-07-29・指示書#4）              | 廃止概念の一掃（`fixed-asset` / `deferred-asset` role・按分 `allocations`・投資評価損益）・補正の通常化・並び順の正本化・ヘッダーの日付選択化・用語統一。旧 `allocations` ストアを削除（DB_VERSION 4）。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| **v3→v4**（2026-07-30・指示書#5）              | **継続コスト資産の4項目モデル一本化**。`MonthlyCostItem` を 8 フィールド化（`startDate`/`endDate?`。`kind`/`costMonths`/`repeatEveryMonths`/`startMonth`/`endMonth`/`paymentSourceAccountId`/`recognitionCreditAccountId`/`status` 等を撤去）。**購入の仕訳を保存される仕訳にする**（`metadata.monthlyCostId`）。回収の振替（`metadata.monthlyCostRecovery`）を追加。`AssetDisposal`（処分）・一時停止・実績動的償却を全廃（`assetDisposals` ストア削除。DB_VERSION 5）。`RecurringRule` に `everyMonths`（必須）と `spreadExpenseAccountId?`（月割りするルール）を追加。科目名「開始残高」→「初期残高」。実データの変換 = `_workspace-management/scripts/convert-ledger-v3-to-v4.mjs`（単発・アプリ内 migration なし）。                    |
 | **v4→v5**（2026-07-30・実ユーズレビュー第2弾） | **取り置きの機能ごと全廃**（`reserves` ストア・`ReserveItem`・`metadata.reserveId`・role `reserve-asset`・予定 CF の `source:'reserve'` を撤去。DB_VERSION 6）。**`Account.movable?`（「自由に動かせる」・現預金のみ・`false` だけ保存）を追加**（資金繰りの原資 =「自由に動かせるお金」1 値）。**支出ルールは周期にかかわらず常に台帳経由**（月割りするルールの条件 `everyMonths >= 2` を撤廃・`>= 1`。簿記編集ルールにも継続コスト化を開放し、購入の仕訳の貸方・ルールの源泉/費用の行き先は内部集約・残高調整以外の全 role = `RECURRING_POSTABLE_ROLES`）。過去に起票済みの支出形ルール由来の仕訳も変換で台帳経由へ揃えた。実データの変換 = `_workspace-management/scripts/convert-ledger-v4-to-v5.mjs`（単発・アプリ内 migration なし）。 |
 
 ### `MonthlyCostItem`（継続コスト資産）
@@ -67,7 +83,7 @@
 行き先）/ `createdAt` / `updatedAt`。
 
 - **購入の仕訳**（保存される仕訳・item と 1:1）: `借方 継続コスト台帳(continuing-cost-ledger) /
-  貸方 支払い元`。印は `metadata.monthlyCostId` のみ。持ち込み登録（貸方 = 初期残高 equity）は
+貸方 支払い元`。印は `metadata.monthlyCostId` のみ。持ち込み登録（貸方 = 初期残高 equity）は
   `kind:'opening'`。
 - **回収の振替**（アーカイブ時の売却・返金）: `借方 振替先 / 貸方 継続コスト台帳`・
   `metadata: { monthlyCostId, monthlyCostRecovery: true }`。普通のユーザー入力の振替として
@@ -128,7 +144,11 @@ import では strip される）。
 
 - **仕訳は「1 借方・1 貸方・同額」の 2 行のみ**（複合仕訳 UI 未対応のため fail-closed）。
 - すべての `lines[].accountId` が `accounts[].id` に存在する。`accounts[].id` は一意・
-  `role` は `type` と整合・有効（非アーカイブ）な科目名は trim 後で重複不可。
+  `role` は `type` と整合する。export 日時点で終了済みでない科目名は trim 後で重複不可
+  （未来の終了点を持つ科目はまだ有効として扱う）。
+- 勘定科目の明示された存在期間は、その科目が関与する全仕訳日、予定 CF の期日、
+  継続コスト item の期間、定期ルールの未起票期間を包含する。端点未設定の JSON では
+  `createdAt` を import 拒否の下限には使わず、既存データをそのまま受理する。
 - 内部集約ロールは唯一の集約口座のみ（`continuing-cost-asset` = `continuing-cost-ledger`）。
 - **継続コスト資産の不変条件**:
   - 各 item に**購入の仕訳がちょうど 1 件**（`metadata.monthlyCostId === item.id`・recovery なし）。
@@ -145,9 +165,9 @@ import では strip される）。
   - `endDate?` は `>= startDate`・配分月数 ≤ 1200 ヶ月。`expenseAccountId` は内部集約・残高調整
     以外（`isRecurringPostableRole`）。
   - **同一ルール由来（id `ccr-{ruleId}-…`）の item の月区間が重ならない**。
-- 勘定科目の不変条件「アーカイブ済み（資産・負債）= 残高 0」は**アーカイブ操作時点（今日・
-  導出仕訳込み）の保存境界だけが守り、import では再検証しない**（時点依存の条件のため。
-  最終残高で再検証すると、未来仕訳を含む保存済み台帳の round-trip が壊れる。監査 P1-3・2026-07-30）。
+- `endDate` を持つ**資産・負債**は、その終了点で導出仕訳込みの残高が 0 でなければならない。
+  保存境界と import schema の双方で検証する。費用・収入の累計は「過去に起きたこと」の記録なので
+  残高 0 を要求せず、そのまま終了できる。
 - 定期ルール: `everyMonths` は 1〜1200（配分月数の上限と同じ）。論理的な行き先が費用なら
   **周期にかかわらず**借方 = 継続コスト台帳として item と対で起票する。費用以外は行き先へ
   直接起票する。定期ルール由来の仕訳は `recurringRuleId`/`recurringMonth`
@@ -184,7 +204,7 @@ transaction** で読み、別タブの複数 store 書込みと交差した中�
    - `schemaVersion ≠ 現行` → `unsupported-version`（**migration チェーンは持たない**。実データは
      変換スクリプトで前進させてから import する）。
 3. **完全検証（Zod）** … 上記の不変条件・借方=貸方の一致まで検査。失敗 → `validation-error`
-  （既存データ不変）。
+   （既存データ不変）。
 4. **revision 競合チェック** … ローカルの `revision ≠ ファイルの revision` かつ `force` 未指定
    → `revision-conflict`。**自動上書きしない・自動マージしない**。
 5. **import 前スナップショット** … 現状を `snapshots` に保存。

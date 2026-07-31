@@ -19,6 +19,7 @@ import { addMonths, monthOf, monthsBetween } from './allocation';
 import { ACCOUNT_ROLES, isInternalRole, type AccountRole } from './accountRoles';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from './constants';
 import { continuousCostEntriesForItem } from './continuousCost';
+import { accountExistsAt, recurringRuleReferenceStartDate } from './accountLifetime';
 import type { Account, InputMode, JournalEntry, MonthlyCostItem, RecurringRule } from './types';
 
 /** 表示用の種別（保存しない。勘定の役割から導出する）。 */
@@ -59,9 +60,7 @@ export function recurringExpenseAccountId(
   roleOf: (accountId: string) => AccountRole | undefined,
 ): string | undefined {
   const destinationAccountId = recurringDestinationAccountId(rule);
-  return roleOf(destinationAccountId) === 'expense-category'
-    ? destinationAccountId
-    : undefined;
+  return roleOf(destinationAccountId) === 'expense-category' ? destinationAccountId : undefined;
 }
 
 /**
@@ -92,8 +91,11 @@ export function recurringKindOf(
 /** 「毎月 day 日」を月内へクランプした日付（31 → 2月なら月末）。 */
 export function clampDayToMonth(ym: string, day: number): string {
   const [y, m] = ym.split('-');
-  const lastDay = new Date(Number.parseInt(y ?? '0', 10), Number.parseInt(m ?? '0', 10), 0)
-    .getDate();
+  const lastDay = new Date(
+    Number.parseInt(y ?? '0', 10),
+    Number.parseInt(m ?? '0', 10),
+    0,
+  ).getDate();
   return `${ym}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
 }
 
@@ -232,34 +234,35 @@ export function recurringProjectionEntries(
       : destinationAccountId;
     const debit = byId.get(debitAccountId);
     const credit = byId.get(rule.creditAccountId);
-    if (
-      !destination ||
-      !debit ||
-      !credit ||
-      destinationAccountId === rule.creditAccountId
-    )
+    if (!destination || !debit || !credit || destinationAccountId === rule.creditAccountId)
       continue;
-    // アーカイブ済み科目には起票しない（catch-up と同じ判定。監査 P1-7）。
-    if (credit.archived || !isRecurringPostableRole(credit.role)) continue;
-    if (destination.archived || !isRecurringPostableRole(destination.role)) continue;
+    if (!isRecurringPostableRole(credit.role)) continue;
+    if (!isRecurringPostableRole(destination.role)) continue;
     // 費用ルールの実際の借方は内部台帳。未来投影より前の catch-up が必要なら作成する。
     if (
       spreadsExpense &&
-      (debit.id !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID ||
-        debit.role !== 'continuing-cost-asset' ||
-        debit.archived)
+      (debit.id !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID || debit.role !== 'continuing-cost-asset')
     )
       continue;
     // 既存のルール由来 item が覆う月には投影しない（catch-up も同じ月を起票しない・監査 P1-10）。
     const coveredThrough = spreadsExpense
       ? ruleItemCoverageThrough(rule.id, monthlyCostItems)
       : undefined;
+    const referenceStart = recurringRuleReferenceStartDate(rule, monthlyCostItems);
+    if (referenceStart === undefined) continue;
     // recurringKindOf(continuing-cost-asset, …) は null を返すため、費用ルールは 'expense' 直指定。
     const inputMode: InputMode = spreadsExpense
       ? 'expense'
       : (recurringKindOf(destination.role, credit.role) ?? 'manual');
     for (const posting of recurringPostingsDue(rule, asOf)) {
+      if (posting.date < referenceStart) continue;
       if (coveredThrough !== undefined && posting.month <= coveredThrough) continue;
+      if (
+        !accountExistsAt(destination, posting.date) ||
+        !accountExistsAt(credit, posting.date) ||
+        !accountExistsAt(debit, posting.date)
+      )
+        continue;
       projected.push({
         id: `rec-proj-${rule.id}-${posting.month}`,
         date: posting.date,

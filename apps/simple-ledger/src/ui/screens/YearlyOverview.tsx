@@ -81,15 +81,13 @@ export function YearlyOverview({ period }: { period: ReportPeriod }) {
 
   const scope = useMemo<PeriodMatrixScope>(
     () =>
-      mode === 'year'
-        ? { mode: 'year', year: selectedYear }
-        : { mode: 'all', years: dataYears },
+      mode === 'year' ? { mode: 'year', year: selectedYear } : { mode: 'all', years: dataYears },
     [dataYears, mode, selectedYear],
   );
   const matrix = useMemo(() => {
     if (!ledger || dataYears.length === 0) return null;
     const entries = reportEntriesForAsOf(ledger, periodMatrixAsOf(scope, today));
-    return buildPeriodMatrix(ledger.accounts, entries, scope, today);
+    return buildPeriodMatrix(ledger.accounts, entries, scope);
   }, [dataYears.length, ledger, scope, today]);
 
   const caption =
@@ -272,11 +270,7 @@ function MatrixRow({
     .join(' ');
   return (
     <tr className={classes || undefined}>
-      <th
-        className="yearly-overview__label"
-        scope="row"
-        aria-label={accessibleLabel ?? label}
-      >
+      <th className="yearly-overview__label" scope="row" aria-label={accessibleLabel ?? label}>
         {label}
       </th>
       {values.map((value, index) => (

@@ -142,7 +142,6 @@ export function buildPeriodMatrix(
   accounts: readonly Account[],
   entries: readonly JournalEntry[],
   scope: PeriodMatrixScope,
-  _today: string,
 ): PeriodMatrix {
   const columns = columnsFor(scope);
   const revenue = blankValues(columns);
@@ -183,8 +182,7 @@ export function buildPeriodMatrix(
       if (entry.date > maximumAsOf) break;
       snapshotThrough(entry.date);
 
-      const flowKey =
-        scope.mode === 'year' ? entry.date.slice(0, 7) : entry.date.slice(0, 4);
+      const flowKey = scope.mode === 'year' ? entry.date.slice(0, 7) : entry.date.slice(0, 4);
       const flowColumnIndex = flowColumnByKey.get(flowKey);
       const recognition = isContinuousCostRecognitionEntry(entry);
 

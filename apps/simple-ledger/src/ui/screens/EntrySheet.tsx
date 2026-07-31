@@ -457,7 +457,13 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         accounts,
         fixed.counterpartRoles ?? [...FIXED_COUNTERPART_ROLES],
         counterpartSide === 'debit' ? form.debitAccountId : form.creditAccountId,
-      );
+        form.date,
+      )
+        .map((group) => ({
+          ...group,
+          accounts: group.accounts.filter((account) => account.id !== fixed.accountId),
+        }))
+        .filter((group) => group.accounts.length > 0);
       const counterpartPicker = (
         <AccountPicker
           flat
@@ -467,8 +473,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           groups={counterpartGroups}
           onChange={(id) => setSide(counterpartSide, id)}
           error={
-            (errorText(errors, counterpartSide === 'debit' ? 'debit-required' : 'credit-required') ??
-              sameAccount)
+            errorText(errors, counterpartSide === 'debit' ? 'debit-required' : 'credit-required') ??
+            sameAccount
           }
           dataUi={
             counterpartSide === 'debit'
@@ -502,13 +508,20 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       accounts,
       [...flowDef.source.allowedRoles],
       form.creditAccountId,
+      form.date,
     );
     const dstGroups = groupedAccountsByRole(
       accounts,
       [...flowDef.destination.allowedRoles],
       form.debitAccountId,
+      form.date,
     );
-    const loanGroups = groupedAccountsByRole(accounts, ['other-liability'], form.creditAccountId);
+    const loanGroups = groupedAccountsByRole(
+      accounts,
+      ['other-liability'],
+      form.creditAccountId,
+      form.date,
+    );
     return (
       <div className="field" data-ui={UI.journal.entry.flow}>
         <span className="field__hint">{t(flowDef.flowLabelKey)}</span>
@@ -619,11 +632,12 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     const srcRoles = continuousCostActive
       ? creditRole.allowedRoles.filter((r) => isRecurringPostableRole(r))
       : [...creditRole.allowedRoles];
-    const srcGroups = groupedAccountsByRole(accounts, srcRoles, form.creditAccountId);
+    const srcGroups = groupedAccountsByRole(accounts, srcRoles, form.creditAccountId, form.date);
     const dstGroups = groupedAccountsByRole(
       accounts,
       [...debitRole.allowedRoles],
       form.debitAccountId,
+      form.date,
     );
     return (
       <div className="field" data-ui={UI.journal.entry.flow}>
@@ -695,7 +709,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           label={t('entry.ccCategory')}
           required
           value={ccCategoryId}
-          groups={groupedRecognitionAccounts(accounts, ccCategoryId)}
+          groups={groupedRecognitionAccounts(accounts, ccCategoryId, form.date)}
           onChange={setCcCategoryId}
           error={categoryError ? t('entry.error.category-required') : undefined}
           dataUi={UI.journal.entry.ccCategory}
@@ -725,7 +739,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             <AccountPicker
               label={t('entry.monthlyizeRepayAccount')}
               value={repayAccountId}
-              groups={groupedAccountsByRole(accounts, ['daily-asset'], repayAccountId)}
+              groups={groupedAccountsByRole(accounts, ['daily-asset'], repayAccountId, form.date)}
               onChange={setRepayAccountId}
               error={repayAccountError ? t('entry.error.repayAccount') : undefined}
               dataUi={UI.journal.entry.monthlyizeRepayAccount}

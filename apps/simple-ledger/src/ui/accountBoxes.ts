@@ -18,6 +18,7 @@
  */
 import type { AccountRole } from '../domain/accountRoles';
 import { compareAccountOrder } from '../domain/accountOrder';
+import { accountExistsAt } from '../domain/accountLifetime';
 import type { Account, AccountType } from '../domain/types';
 import type { MessageKey } from '../i18n';
 
@@ -169,11 +170,16 @@ export function accountAccent(account: Account): AccountAccent {
 export function groupAccountsByBox(
   accounts: Account[],
   showArchived: boolean,
+  atDate?: string,
 ): { box: AccountBox; accounts: Account[] }[] {
   return ACCOUNT_BOXES.map((box) => ({
     box,
     accounts: accounts
-      .filter((a) => box.roles.includes(a.role) && (showArchived || !a.archived))
+      .filter(
+        (a) =>
+          box.roles.includes(a.role) &&
+          (showArchived || (atDate === undefined ? !a.archived : accountExistsAt(a, atDate))),
+      )
       .sort(compareAccountOrder),
   }));
 }

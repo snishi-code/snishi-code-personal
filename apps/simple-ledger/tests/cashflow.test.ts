@@ -94,13 +94,21 @@ function sched(over: Partial<CashflowSchedule>): CashflowSchedule {
 }
 
 describe('isFreeAsset / freeAssetTotal（資金繰りの原資 = 自由に動かせるお金）', () => {
-  it('daily-asset かつ movable !== false かつ非アーカイブだけを数える', () => {
+  it('有限の終了点は投影対象に残し、終了点不明の旧アーカイブだけを除外する', () => {
     expect(isFreeAsset(acc('cash', 'daily-asset', 'asset'))).toBe(true);
     // movable: false = 「自由に動かせない」チェックを外したもの（Suica・チャージ残高など）。
     expect(isFreeAsset(acc('suica', 'daily-asset', 'asset', { movable: false }))).toBe(false);
     // undefined = 既定 ON（true と同義）。
     expect(isFreeAsset(acc('bank', 'daily-asset', 'asset', { movable: true }))).toBe(true);
     expect(isFreeAsset(acc('old', 'daily-asset', 'asset', { archived: true }))).toBe(false);
+    expect(
+      isFreeAsset(
+        acc('future-end', 'daily-asset', 'asset', {
+          archived: true,
+          endDate: '2026-12-31',
+        }),
+      ),
+    ).toBe(true);
     expect(isFreeAsset(acc('nisa', 'investment-asset', 'asset'))).toBe(false);
     expect(isFreeAsset(acc('ledger', 'continuing-cost-asset', 'asset'))).toBe(false);
   });
@@ -112,9 +120,10 @@ describe('isFreeAsset / freeAssetTotal（資金繰りの原資 = 自由に動か
       bal('suica', 30000, { movable: false }),
       bal('nisa', 200000, { role: 'investment-asset' }),
       bal('archived', 0, { archived: true }),
+      bal('future-end', 25000, { archived: true, endDate: '2026-12-31' }),
     ];
-    // 100,000 + 50,000（Suica は自由に動かせない・投資は原資でない）。
-    expect(freeAssetTotal(assets)).toBe(150000);
+    // 100,000 + 50,000 + 25,000（有限線分は終了前後の予定まで投影する）。
+    expect(freeAssetTotal(assets)).toBe(175000);
   });
 });
 

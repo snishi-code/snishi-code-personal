@@ -288,7 +288,7 @@ export function App() {
         ) : null}
         {screen === 'cashflow' ? <Cashflow onEditEntry={openEdit} /> : null}
         {screen === 'tags' ? <Tags /> : null}
-        {screen === 'accounts' ? <Accounts /> : null}
+        {screen === 'accounts' ? <Accounts period={period} /> : null}
         {screen === 'settings' ? (
           <Settings onNavigate={go} onOpenOnboarding={() => setOnboardingManualOpen(true)} />
         ) : null}

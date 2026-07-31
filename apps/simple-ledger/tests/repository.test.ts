@@ -320,7 +320,6 @@ describe('予定キャッシュフロー / 目的別資金', () => {
     await postSchedule(schedule.id);
     await expect(postSchedule(schedule.id)).rejects.toThrow();
   });
-
 });
 
 describe('予定CFが参照する科目の保護', () => {
@@ -672,9 +671,9 @@ describe('継続コスト資産の整合性（購入の仕訳・削除・不変�
     expect(savedItem.startDate).toBe('2026-06-20');
     expect(savedItem.amount).toBe(15000);
     // 日付を終了日より後ろへ動かすのは拒否。
-    await expect(
-      upsertEntry({ ...edited, date: '2027-06-01' }),
-    ).rejects.toMatchObject({ code: 'error.monthlyCost.purchaseAfterEnd' });
+    await expect(upsertEntry({ ...edited, date: '2027-06-01' })).rejects.toMatchObject({
+      code: 'error.monthlyCost.purchaseAfterEnd',
+    });
     // 借方（台帳）は差し替えられない。
     await expect(
       upsertEntry({
@@ -708,7 +707,7 @@ describe('継続コスト資産の整合性（購入の仕訳・削除・不変�
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
     const entry = buildSimpleEntry({
-      date: '2026-06-01',
+      date: '2026-06-15',
       description: '台帳へ直接',
       debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
       creditAccountId: cash.id,
@@ -882,9 +881,7 @@ describe('返済計画の一括登録（createRepaymentEntries）', () => {
       title: '暦検証',
     };
 
-    const error = await caught(
-      createRepaymentEntries({ ...base, firstDate: '2026-02-31' }),
-    );
+    const error = await caught(createRepaymentEntries({ ...base, firstDate: '2026-02-31' }));
     expect(error.code).toBe('error.monthlyCost.dateRequired');
     expect((await loadLedger()).journalEntries).toHaveLength(0);
 
@@ -1192,20 +1189,14 @@ describe('継続コスト資産の後編集で過去集計が再計算される�
     const purchase = after.journalEntries.find((e) => e.metadata?.monthlyCostId === item.id)!;
     expect(purchase.lines.every((l) => l.amount === 24000)).toBe(true);
     expect(
-      accountBalance(
-        CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
-        'asset',
-        reportEntriesForAsOf(after, asOf),
-      ),
+      accountBalance(CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 'asset', reportEntriesForAsOf(after, asOf)),
     ).toBeGreaterThanOrEqual(0);
   });
 
   it('費用の行き先の変更は購入の仕訳を壊さない（借方は台帳のまま・§13-6）', async () => {
     const { item, fun } = await setupContinuous();
     const ledger = await loadLedger();
-    const other = ledger.accounts.find(
-      (a) => a.role === 'expense-category' && a.id !== fun.id,
-    )!;
+    const other = ledger.accounts.find((a) => a.role === 'expense-category' && a.id !== fun.id)!;
     await upsertMonthlyCost({ ...item, expenseAccountId: other.id, updatedAt: 'y2' });
     const after = await loadLedger();
     const purchase = after.journalEntries.find((e) => e.metadata?.monthlyCostId === item.id)!;
@@ -1270,7 +1261,8 @@ describe('勘定科目の聖域化（継続コストは集約台帳口座へ寄�
     expect(purchases).toHaveLength(2);
     expect(
       purchases.every(
-        (e) => e.lines.find((l) => l.side === 'debit')?.accountId === CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+        (e) =>
+          e.lines.find((l) => l.side === 'debit')?.accountId === CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
       ),
     ).toBe(true);
   });
@@ -1342,9 +1334,9 @@ describe('初期残高（createOpening / updateOpening / deleteOpening）', () =
     const after = await loadLedger();
     expect(created).toHaveLength(2);
     expect(after.journalEntries.filter((entry) => entry.kind === 'opening')).toHaveLength(2);
-    expect(after.accounts.filter((account) => account.role === 'equity' && !account.archived)).toHaveLength(
-      1,
-    );
+    expect(
+      after.accounts.filter((account) => account.role === 'equity' && !account.archived),
+    ).toHaveLength(1);
     expect(after.meta.revision).toBe(before.meta.revision + 1);
   });
 
@@ -1355,15 +1347,16 @@ describe('初期残高（createOpening / updateOpening / deleteOpening）', () =
     const equityCountBefore = before.accounts.filter((account) => account.role === 'equity').length;
     const originalPut = IDBObjectStore.prototype.put;
     let journalPuts = 0;
-    const putSpy = vi
-      .spyOn(IDBObjectStore.prototype, 'put')
-      .mockImplementation(function (this: IDBObjectStore, value: unknown) {
-        const request = originalPut.call(this, value);
-        if (this.name === STORE.journalEntries && ++journalPuts === 2) {
-          this.transaction.abort();
-        }
-        return request;
-      });
+    const putSpy = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+      this: IDBObjectStore,
+      value: unknown,
+    ) {
+      const request = originalPut.call(this, value);
+      if (this.name === STORE.journalEntries && ++journalPuts === 2) {
+        this.transaction.abort();
+      }
+      return request;
+    });
 
     try {
       await expect(
@@ -1508,7 +1501,9 @@ describe('保存境界の fail-closed（構造・参照検証 + i18n エラー�
       entry.metadata = { ...entry.metadata, ...metadata };
       const error = await caught(upsertEntry(entry));
       expect(error.code).toBe('error.entry.virtual');
-      expect((await loadLedger()).journalEntries.some((saved) => saved.id === entry.id)).toBe(false);
+      expect((await loadLedger()).journalEntries.some((saved) => saved.id === entry.id)).toBe(
+        false,
+      );
     }
   });
 
@@ -1588,7 +1583,6 @@ describe('保存境界の fail-closed（構造・参照検証 + i18n エラー�
     // code そのものではなく、翻訳済みの文言が返ること。
     expect(text).not.toBe(e.code);
   });
-
 });
 
 describe('継続コスト資産の後編集（upsertMonthlyCost 保存境界）', () => {
@@ -1613,9 +1607,7 @@ describe('継続コスト資産の後編集（upsertMonthlyCost 保存境界）'
     const purchaseBefore = before.journalEntries.find(
       (e) => e.metadata?.monthlyCostId === item.id,
     )!;
-    const other = before.accounts.find(
-      (a) => a.role === 'expense-category' && a.id !== food.id,
-    )!;
+    const other = before.accounts.find((a) => a.role === 'expense-category' && a.id !== food.id)!;
     await upsertMonthlyCost({
       ...item,
       name: '新名称',
@@ -1629,9 +1621,7 @@ describe('継続コスト資産の後編集（upsertMonthlyCost 保存境界）'
     expect(saved.endDate).toBe('2027-06-30');
     expect(saved.expenseAccountId).toBe(other.id);
     // 金額を変えていないので購入の仕訳は 1 バイトも変わらない。
-    const purchaseAfter = after.journalEntries.find(
-      (e) => e.metadata?.monthlyCostId === item.id,
-    )!;
+    const purchaseAfter = after.journalEntries.find((e) => e.metadata?.monthlyCostId === item.id)!;
     expect(purchaseAfter).toEqual(purchaseBefore);
   });
 
@@ -1649,9 +1639,7 @@ describe('継続コスト資産の後編集（upsertMonthlyCost 保存境界）'
       (e) => e.metadata?.monthlyCostId === item.id && e.metadata.monthlyCostRecovery !== true,
     )!;
     expect(purchase.lines.every((l) => l.amount === 24000)).toBe(true);
-    const recovery = after.journalEntries.find(
-      (e) => e.metadata?.monthlyCostRecovery === true,
-    )!;
+    const recovery = after.journalEntries.find((e) => e.metadata?.monthlyCostRecovery === true)!;
     expect(recovery.lines.every((l) => l.amount === 3000)).toBe(true); // 不変
   });
 
@@ -1666,12 +1654,12 @@ describe('継続コスト資産の後編集（upsertMonthlyCost 保存境界）'
 
   it('endDate < startDate は保存しない / 存在しない item は notFound', async () => {
     const { item } = await setup();
-    await expect(
-      upsertMonthlyCost({ ...item, endDate: '2026-01-14' }),
-    ).rejects.toMatchObject({ code: 'error.monthlyCost.endBeforeStart' });
-    await expect(
-      upsertMonthlyCost({ ...item, id: 'no-such-item' }),
-    ).rejects.toMatchObject({ code: 'error.monthlyCost.notFound' });
+    await expect(upsertMonthlyCost({ ...item, endDate: '2026-01-14' })).rejects.toMatchObject({
+      code: 'error.monthlyCost.endBeforeStart',
+    });
+    await expect(upsertMonthlyCost({ ...item, id: 'no-such-item' })).rejects.toMatchObject({
+      code: 'error.monthlyCost.notFound',
+    });
   });
 
   it('費用の行き先に内部集約・存在しない科目は保存しない', async () => {
@@ -1778,9 +1766,9 @@ describe('継続コスト資産のアーカイブ（archiveMonthlyCost = 終了�
 
   it('検証: 開始日より前の終了日・存在しない振替先は fail-closed', async () => {
     const { item, food } = await setup();
-    await expect(
-      archiveMonthlyCost({ id: item.id, endDate: '2024-05-31' }),
-    ).rejects.toMatchObject({ code: 'error.monthlyCost.endBeforeStart' });
+    await expect(archiveMonthlyCost({ id: item.id, endDate: '2024-05-31' })).rejects.toMatchObject({
+      code: 'error.monthlyCost.endBeforeStart',
+    });
     await expect(
       archiveMonthlyCost({
         id: item.id,
@@ -1827,15 +1815,29 @@ describe('継続コスト資産のアーカイブ（archiveMonthlyCost = 終了�
 });
 
 describe('勘定科目のアーカイブ（archiveAccount = 残高 0 不変条件 + 振替導線）', () => {
+  it('暗黙開始点より前の終了点は参照がなくても保存しない', async () => {
+    await loadLedger();
+    await expect(
+      upsertAccount({
+        id: newId(),
+        name: '空の線分',
+        type: 'expense',
+        role: 'expense-category',
+        archived: true,
+        endDate: '2098-12-31',
+        createdAt: '2099-01-01T00:00:00.000Z',
+        updatedAt: '2099-01-01T00:00:00.000Z',
+      }),
+    ).rejects.toMatchObject({ code: 'error.account.periodInvalid' });
+  });
+
   it('残高 0 の資産は即アーカイブできる・残高ありは archiveBalance で拒否', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
     const food = ledger.accounts.find((a) => a.name === '変動費')!;
     // 残高 0 のまま → 即アーカイブ。
     await archiveAccount(cash.id);
-    expect(
-      (await loadLedger()).accounts.find((a) => a.id === cash.id)?.archived,
-    ).toBe(true);
+    expect((await loadLedger()).accounts.find((a) => a.id === cash.id)?.archived).toBe(true);
     // アーカイブ解除（チェック不要）。
     await upsertAccount({ ...cash, archived: false, updatedAt: 'y' });
     // 残高をつける → 残高ありのアーカイブは拒否（upsertAccount 経由も archiveAccount 経由も）。
@@ -1848,9 +1850,9 @@ describe('勘定科目のアーカイブ（archiveAccount = 残高 0 不変条�
         amount: 1000,
       }),
     );
-    await expect(
-      upsertAccount({ ...cash, archived: true, updatedAt: 'y2' }),
-    ).rejects.toMatchObject({ code: 'error.account.archiveBalance' });
+    await expect(upsertAccount({ ...cash, archived: true, updatedAt: 'y2' })).rejects.toMatchObject(
+      { code: 'error.account.archiveBalance' },
+    );
     await expect(archiveAccount(cash.id)).rejects.toMatchObject({
       code: 'error.account.archiveBalance',
     });
@@ -1898,16 +1900,17 @@ describe('勘定科目のアーカイブ（archiveAccount = 残高 0 不変条�
           amount: 1,
         }),
       ),
-    ).rejects.toMatchObject({ code: 'error.account.archiveBalance' });
+    ).rejects.toMatchObject({ code: 'error.account.archiveCounterpartType' });
     const unchanged = await loadLedger();
     expect(unchanged.journalEntries.length).toBe(before.journalEntries.length);
     expect(unchanged.accounts.find((a) => a.id === bank.id)?.archived).toBe(false);
   });
 
-  it('費用カテゴリなど非 BS 科目は残高チェックなしでアーカイブできる', async () => {
+  it('費用・収入は累計を残したままアーカイブでき、過去の集計額も変わらない', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
     const food = ledger.accounts.find((a) => a.name === '変動費')!;
+    const income = ledger.accounts.find((a) => a.name === '給与')!;
     await upsertEntry(
       buildSimpleEntry({
         date: '2026-06-01',
@@ -1917,8 +1920,25 @@ describe('勘定科目のアーカイブ（archiveAccount = 残高 0 不変条�
         amount: 500,
       }),
     );
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2026-06-15',
+        description: '収入',
+        debitAccountId: cash.id,
+        creditAccountId: income.id,
+        amount: 1_000,
+      }),
+    );
+    const before = await loadLedger();
+    const expenseBefore = accountBalance(food.id, food.type, before.journalEntries);
+    const incomeBefore = accountBalance(income.id, income.type, before.journalEntries);
     await archiveAccount(food.id);
-    expect((await loadLedger()).accounts.find((a) => a.id === food.id)?.archived).toBe(true);
+    await archiveAccount(income.id);
+    const after = await loadLedger();
+    expect(after.accounts.find((a) => a.id === food.id)?.archived).toBe(true);
+    expect(after.accounts.find((a) => a.id === income.id)?.archived).toBe(true);
+    expect(accountBalance(food.id, food.type, after.journalEntries)).toBe(expenseBefore);
+    expect(accountBalance(income.id, income.type, after.journalEntries)).toBe(incomeBefore);
   });
 });
 
@@ -1957,14 +1977,23 @@ describe('内訳名の重複ルール', () => {
     expect(after.accounts.find((a) => a.id === cash.id)?.note).toBe('メモ');
   });
 
-  it('アーカイブ済みとの同名は未承認なら拒否し、承認すれば（アーカイブ）へ退避して保存する', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    // 『現金』をアーカイブして、同名の新規内訳を作る。
-    await upsertAccount({ ...cash, archived: true, updatedAt: 'y' });
+  it('終了済みとの同名は未承認なら拒否し、承認すれば（アーカイブ）へ退避して保存する', async () => {
+    await loadLedger();
+    const ended = {
+      id: newId(),
+      name: '期間終了科目',
+      type: 'asset' as const,
+      role: 'daily-asset' as const,
+      archived: true,
+      startDate: '2019-01-01',
+      endDate: '2020-01-01',
+      createdAt: '2019-01-01T00:00:00.000Z',
+      updatedAt: '2020-01-01T00:00:00.000Z',
+    };
+    await upsertAccount(ended);
     const newAcc = {
       id: newId(),
-      name: '現金',
+      name: ended.name,
       type: 'asset' as const,
       role: 'daily-asset' as const,
       archived: false,
@@ -1973,18 +2002,49 @@ describe('内訳名の重複ルール', () => {
     };
     const e = await caught(upsertAccount(newAcc));
     expect(e.code).toBe('error.account.nameConflictArchived');
-    // 承認つきで保存 → アーカイブ側が『現金（アーカイブ）』へ退避される。
+    // 承認つきで保存 → 終了済み側が退避される。
     await upsertAccount(newAcc, { renameArchivedConflicts: true });
     const after = await loadLedger();
-    expect(after.accounts.find((a) => a.id === cash.id)?.name).toBe('現金（アーカイブ）');
-    expect(after.accounts.find((a) => a.id === newAcc.id)?.name).toBe('現金');
+    expect(after.accounts.find((a) => a.id === ended.id)?.name).toBe('期間終了科目（アーカイブ）');
+    expect(after.accounts.find((a) => a.id === newAcc.id)?.name).toBe('期間終了科目');
     // 退避名も衝突したら（アーカイブ2）になる。
-    await upsertAccount({ ...newAcc, archived: true, updatedAt: 'z' });
+    await upsertAccount({
+      ...newAcc,
+      archived: true,
+      startDate: '2019-01-01',
+      endDate: '2020-01-01',
+      updatedAt: 'z',
+    });
     const newAcc2 = { ...newAcc, id: newId() };
     await upsertAccount(newAcc2, { renameArchivedConflicts: true });
     const last = await loadLedger();
-    expect(last.accounts.find((a) => a.id === newAcc.id)?.name).toBe('現金（アーカイブ2）');
-    expect(last.accounts.find((a) => a.id === newAcc2.id)?.name).toBe('現金');
+    expect(last.accounts.find((a) => a.id === newAcc.id)?.name).toBe('期間終了科目（アーカイブ2）');
+    expect(last.accounts.find((a) => a.id === newAcc2.id)?.name).toBe('期間終了科目');
+  });
+
+  it('未来に終了する同名科目は今日まだ有効なので退避許可つきでも拒否する', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    await upsertAccount({
+      ...cash,
+      archived: true,
+      startDate: '2020-01-01',
+      endDate: '2099-12-31',
+    });
+    const duplicate = {
+      id: newId(),
+      name: cash.name,
+      type: 'expense' as const,
+      role: 'expense-category' as const,
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+
+    await expect(upsertAccount(duplicate, { renameArchivedConflicts: true })).rejects.toMatchObject(
+      { code: 'error.account.nameConflict' },
+    );
+    expect((await loadLedger()).accounts.find((a) => a.id === cash.id)?.name).toBe('現金');
   });
 
   it('createOpening の新規科目も同じ重複ルールに従う（note も保存される）', async () => {
@@ -2081,6 +2141,19 @@ describe('import の勘定科目名一意性（有効な同名重複を拒否）
     cash.archived = true;
     const outcome = await importFromJsonText(JSON.stringify(pkg));
     expect(outcome.kind).toBe('ok');
+  });
+
+  it('未来に終了する科目はexport日時点で有効なので同名importを拒否する', async () => {
+    await loadLedger();
+    const pkg = JSON.parse(exportToJsonText(await loadLedger()));
+    const cash = pkg.accounts.find((a: { name: string }) => a.name === '現金');
+    cash.name = '預金';
+    cash.archived = true;
+    cash.startDate = '2020-01-01';
+    cash.endDate = '2099-12-31';
+
+    const outcome = await importFromJsonText(JSON.stringify(pkg));
+    expect(outcome.kind).toBe('validation-error');
   });
 
   it('空白違いの有効な同名（「預金」と「預金 」）も重複として拒否する', async () => {
@@ -2248,9 +2321,9 @@ describe('M2 保存境界の回帰（不正日付・導出残高・MonthlyCostIt
         }),
       'error.entry.invalidStructure',
     );
-    expect((await loadLedger()).journalEntries.find((entry) => entry.id === adjustment!.id)).toEqual(
-      adjustment,
-    );
+    expect(
+      (await loadLedger()).journalEntries.find((entry) => entry.id === adjustment!.id),
+    ).toEqual(adjustment);
   });
 
   it.each(['', '2026-02-31'])(
@@ -2291,9 +2364,9 @@ describe('M2 保存境界の回帰（不正日付・導出残高・MonthlyCostIt
     const beforeAdjustment = await loadLedger();
     const basisEntries = reportEntriesForAsOf(beforeAdjustment, date);
     // 購入の仕訳（保存される仕訳）が基準残高に含まれる。
-    expect(
-      basisEntries.some((entry) => entry.metadata?.monthlyCostId === monthlyCost.id),
-    ).toBe(true);
+    expect(basisEntries.some((entry) => entry.metadata?.monthlyCostId === monthlyCost.id)).toBe(
+      true,
+    );
     expect(accountBalance(cash.id, 'asset', basisEntries)).toBe(-12000);
 
     const created = await createAdjustment({
@@ -2391,7 +2464,6 @@ describe('スナップショットの剪定（版上げ時・復旧面）', () =
   });
 });
 
-
 describe('「自由に動かせる」フラグ（Account.movable）の保存境界正規化', () => {
   it('movable: true は undefined へ正規化して保存する（既定 ON・レコード最小）', async () => {
     const ledger = await loadLedger();
@@ -2446,9 +2518,7 @@ describe('継続コスト購入の支払い元の緩和（RECURRING_POSTABLE_ROL
     });
     const after = await loadLedger();
     const item = after.monthlyCostItems.find((m) => m.name === '健康保険（単発）')!;
-    const purchase = after.journalEntries.find(
-      (e) => e.metadata?.monthlyCostId === item.id,
-    )!;
+    const purchase = after.journalEntries.find((e) => e.metadata?.monthlyCostId === item.id)!;
     expect(purchase.lines).toEqual([
       { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: 48000 },
       { accountId: salary.id, side: 'credit', amount: 48000 },

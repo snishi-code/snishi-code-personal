@@ -2,6 +2,7 @@ import { ACCOUNT_TYPES, type Account, type AccountType } from '../domain/types';
 import type { AccountRole } from '../domain/accountRoles';
 import { compareAccountOrder } from '../domain/accountOrder';
 import { RECURRING_POSTABLE_ROLES } from '../domain/recurring';
+import { accountExistsAt } from '../domain/accountLifetime';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
 
@@ -28,6 +29,7 @@ export function groupedAccounts(
   accounts: Account[],
   allowedTypes?: AccountType[],
   includeId?: string,
+  atDate?: string,
 ): AccountGroup[] {
   const types = allowedTypes ?? [...ACCOUNT_TYPES];
   return types
@@ -35,7 +37,11 @@ export function groupedAccounts(
       type,
       label: accountTypeLabel(type),
       accounts: accounts
-        .filter((a) => a.type === type && (!a.archived || a.id === includeId))
+        .filter(
+          (a) =>
+            a.type === type &&
+            (atDate === undefined ? !a.archived || a.id === includeId : accountExistsAt(a, atDate)),
+        )
         .sort(compareAccountOrder),
     }))
     .filter((g) => g.accounts.length > 0);
@@ -50,6 +56,7 @@ export function groupedAccountsByRole(
   accounts: Account[],
   allowedRoles: AccountRole[],
   includeId?: string,
+  atDate?: string,
 ): AccountGroup[] {
   const allow = new Set(allowedRoles);
   return [...ACCOUNT_TYPES]
@@ -57,7 +64,13 @@ export function groupedAccountsByRole(
       type,
       label: accountTypeLabel(type),
       accounts: accounts
-        .filter((a) => a.type === type && (a.id === includeId || (allow.has(a.role) && !a.archived)))
+        .filter(
+          (a) =>
+            a.type === type &&
+            (atDate === undefined
+              ? a.id === includeId || (allow.has(a.role) && !a.archived)
+              : (a.id === includeId || allow.has(a.role)) && accountExistsAt(a, atDate)),
+        )
         .sort(compareAccountOrder),
     }))
     .filter((g) => g.accounts.length > 0);
@@ -96,11 +109,13 @@ export function defaultRecognitionAccountId(accounts: Account[]): string {
 export function groupedRecognitionAccounts(
   accounts: Account[],
   includeId?: string,
+  atDate?: string,
 ): AccountGroup[] {
   const allowed = new Set(RECURRING_POSTABLE_ROLES);
   return groupedAccountsByRole(
     accounts.filter((account) => allowed.has(account.role)),
     [...RECURRING_POSTABLE_ROLES],
     includeId,
+    atDate,
   );
 }

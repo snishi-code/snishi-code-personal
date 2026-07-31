@@ -391,10 +391,11 @@ export const ja = {
   'accounts.archiveRenameConfirm': '変更して続行',
   'accounts.name': '科目名',
   'accounts.balance': '残高',
-  'accounts.archived': 'アーカイブ済み',
+  'accounts.outsideSlice': 'この断面には存在しない',
   'accounts.archive': 'アーカイブ',
+  'accounts.archiveWithTransfer': '累計を振り替えてアーカイブ',
   'accounts.unarchive': 'アーカイブ解除',
-  'accounts.showArchived': 'アーカイブ済みも表示',
+  'accounts.showArchived': 'この断面に存在しない科目も表示',
   'accounts.type.asset': '資産',
   'accounts.type.liability': '負債',
   'accounts.type.equity': '純資産',
@@ -495,6 +496,12 @@ export const ja = {
   'error.account.nameConflict': '同じ名前の内訳が既にあります（別の箱でも重複できません）。',
   'error.account.nameConflictArchived': '同じ名前のアーカイブ済み内訳があります。',
   'error.account.deleteInUse': 'この科目は使用中のため削除できません。アーカイブしてください。',
+  'error.account.periodInvalid': '科目の開始日・終了日を確認してください。',
+  'error.account.referenceOutsidePeriod':
+    'この科目を使う仕訳・予定・ルールが存在期間の外にあります。先に開始日・終了日または参照先を見直してください。',
+  'error.account.archiveDate': 'アーカイブ時の振替日はアーカイブ日と同じ日にしてください。',
+  'error.account.archiveCounterpartType':
+    'アーカイブ時の振替先は、元の科目と同じ区分から選んでください。',
   'error.entry.monthlyCost':
     '購入の仕訳は削除できません。継続コスト資産の項目（毎月のもの）を削除すると一緒に消えます。',
   'error.entry.scheduleLinked':

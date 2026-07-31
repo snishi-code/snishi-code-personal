@@ -72,7 +72,7 @@ describe('buildPeriodMatrix（年間）', () => {
     ];
     const originalOrder = input.map(({ id }) => id);
 
-    const matrix = buildPeriodMatrix(accounts, input, { mode: 'year', year: 2026 }, '2026-06-15');
+    const matrix = buildPeriodMatrix(accounts, input, { mode: 'year', year: 2026 });
 
     expect(matrix.columns).toHaveLength(12);
     expect(matrix.columns[4]).toMatchObject({
@@ -100,7 +100,6 @@ describe('buildPeriodMatrix（年間）', () => {
         entry('repay', '2026-02-01', 'loan', 'cash', 150),
       ],
       { mode: 'year', year: 2026 },
-      '2026-12-31',
     );
 
     expect(matrix.rows.totalAssets.slice(0, 2)).toEqual([1300, 1150]);
@@ -122,7 +121,6 @@ describe('buildPeriodMatrix（年間）', () => {
         entry('normal', '2026-01-25', 'food', 'cash', 50),
       ],
       { mode: 'year', year: 2026 },
-      '2026-12-31',
     );
 
     expect(matrix.rows.expense[0]).toBe(170);
@@ -142,7 +140,6 @@ describe('buildPeriodMatrix（年間）', () => {
         entry('zero-credit', '2026-03-11', 'cash', 'zero', 50),
       ],
       { mode: 'year', year: 2026 },
-      '2026-12-31',
     );
 
     expect(matrix.expenseCategories.map(({ account: a }) => a.id)).toEqual(['cancelled']);
@@ -154,7 +151,6 @@ describe('buildPeriodMatrix（年間）', () => {
       accounts,
       [entry('future', '2027-01-01', 'food', 'cash', 100)],
       { mode: 'year', year: 2027 },
-      '2026-06-15',
     );
 
     expect(matrix.columns.every((column) => column.asOf === column.to)).toBe(true);
@@ -170,12 +166,7 @@ describe('buildPeriodMatrix（年間）', () => {
       entry('future-income', '2027-01-10', 'cash', 'salary', 500),
       entry('future-expense', '2027-01-20', 'food', 'cash', 120),
     ];
-    const matrix = buildPeriodMatrix(
-      accounts,
-      entries,
-      { mode: 'year', year: 2027 },
-      '2026-06-15',
-    );
+    const matrix = buildPeriodMatrix(accounts, entries, { mode: 'year', year: 2027 });
     const pl = deriveProfitAndLoss(accounts, entries, {
       from: '2027-01-01',
       to: '2027-01-31',
@@ -204,7 +195,6 @@ describe('buildPeriodMatrix（全体）', () => {
         entry('future-year', '2027-01-01', 'cash', 'salary', 999),
       ],
       { mode: 'all', years: [2027, 2024, 2026, 2026] },
-      '2026-06-15',
     );
 
     expect(matrix.columns.map(({ key }) => key)).toEqual(['2024', '2026', '2027']);

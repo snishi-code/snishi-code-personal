@@ -7,15 +7,18 @@
  * - 登録済みの初期残高・補正の履歴はこの画面に置かず、仕訳一覧に委ねる。
  * - 初期残高(equity)・調整用(system-adjustment)・内部集約 role は聖域として表示しない。
  */
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
 import { accountBalance, accountHasEntries, filterByDateRange } from '../../domain/accounting';
+import { isDebitNormal } from '../../domain/accounting';
 import { referencedAccountIds } from '../../domain/accountRefs';
 import { reportEntriesForAsOf } from '../../domain/reportEntries';
-import { reportBasis } from '../../domain/reportPeriod';
+import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
 import { buildSimpleEntry } from '../../domain/entry';
 import type { Account } from '../../domain/types';
+import { accountExistsAt } from '../../domain/accountLifetime';
+import { isRecurringPostableRole } from '../../domain/recurring';
 import { groupAccountsByBox, type AccountBox } from '../accountBoxes';
 import { AccountSheet } from './AccountSheet';
 import { AdjustmentCreateSheet } from '../AdjustmentSheet';
@@ -26,7 +29,7 @@ import { nowIso, todayLocal } from '../../util/time';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 
-export function Accounts() {
+export function Accounts({ period = { mode: 'all' } }: { period?: ReportPeriod }) {
   const { ledger, saveAccount, archiveAccount, reorderAccounts } = useLedger();
   const [editing, setEditing] = useState<Account | null>(null);
   const [creatingIn, setCreatingIn] = useState<AccountBox | null>(null);
@@ -40,47 +43,51 @@ export function Accounts() {
   } | null>(null);
 
   const today = todayLocal();
-  const entries = useMemo(() => {
-    if (!ledger) return [];
-    const asOf = reportBasis({ mode: 'all' }, today).asOf;
-    return filterByDateRange(reportEntriesForAsOf(ledger, asOf), undefined, asOf);
-  }, [ledger, today]);
+  const asOf = reportBasis(period, today).asOf;
+  const entries = ledger
+    ? filterByDateRange(reportEntriesForAsOf(ledger, asOf), undefined, asOf)
+    : [];
+  const todayEntries = ledger
+    ? filterByDateRange(reportEntriesForAsOf(ledger, today), undefined, today)
+    : [];
   const currency = ledger?.settings.currency ?? 'JPY';
 
-  const usedIds = useMemo(
-    () =>
-      referencedAccountIds({
-        entries: ledger?.journalEntries ?? [],
-        schedules: ledger?.cashflowSchedules ?? [],
-        monthlyCostItems: ledger?.monthlyCostItems ?? [],
-        recurringRules: ledger?.recurringRules ?? [],
-      }),
-    [ledger],
-  );
+  const usedIds = referencedAccountIds({
+    entries: ledger?.journalEntries ?? [],
+    schedules: ledger?.cashflowSchedules ?? [],
+    monthlyCostItems: ledger?.monthlyCostItems ?? [],
+    recurringRules: ledger?.recurringRules ?? [],
+  });
 
-  const groups = useMemo(
-    () => groupAccountsByBox(ledger?.accounts ?? [], showArchived),
-    [ledger, showArchived],
-  );
+  const groups = groupAccountsByBox(ledger?.accounts ?? [], showArchived, asOf);
+
+  function beginArchiveTransfer(account: Account): void {
+    const balance = accountBalance(account.id, account.type, todayEntries);
+    const debitBalance = isDebitNormal(account.type) ? balance : -balance;
+    setArchiveTransfer({ account, debitBalance });
+  }
 
   async function toggleArchive(account: Account) {
     try {
       if (account.archived) {
-        // アーカイブ解除は残高チェック不要（残高 0 の状態から戻すだけ）。
-        await saveAccount({ ...account, archived: false, updatedAt: nowIso() });
+        // アーカイブ解除は終了点も同時に消し、未来へ再び延ばす。
+        const restored: Account = {
+          ...account,
+          archived: false,
+          endDate: undefined,
+          updatedAt: nowIso(),
+        };
+        await saveAccount(restored);
         return;
       }
-      // 不変条件「アーカイブ済み = 今日時点の残高 0」。残高が残る資産・負債は振替を先に聞く。
+      // 資産・負債だけは「終了点の残高 = 0」。費用・収入の累計は過去の記録なので
+      // 残したまま終了でき、必要な場合だけ別ボタンから任意振替する。
       // 判定は保存境界（archiveAccount）と同じ「導出仕訳（継続コストの費用行・定期ルールの
       // 投影込み）の今日時点残高」で行う（画面に見えている残高と一致させる・監査 P1-2）。
-      if (account.type === 'asset' || account.type === 'liability') {
-        const balance = accountBalance(account.id, account.type, entries);
-        if (balance !== 0) {
-          // 自然符号 → 借方残高へ正規化: 借方残高が残る側なら貸方（振替元）を対象に固定する。
-          const debitBalance = account.type === 'asset' ? balance : -balance;
-          setArchiveTransfer({ account, debitBalance });
-          return;
-        }
+      const balance = accountBalance(account.id, account.type, todayEntries);
+      if ((account.type === 'asset' || account.type === 'liability') && balance !== 0) {
+        beginArchiveTransfer(account);
+        return;
       }
       await archiveAccount(account.id);
     } catch {
@@ -175,7 +182,8 @@ export function Accounts() {
               ) : (
                 <ul className="card list">
                   {accounts.map((account) => {
-                    const orderable = accounts.filter((a) => !a.archived);
+                    const existsAtSlice = accountExistsAt(account, asOf);
+                    const orderable = accounts.filter((a) => accountExistsAt(a, asOf));
                     const orderIndex = orderable.findIndex((a) => a.id === account.id);
                     return (
                       <li key={account.id} className="list__item">
@@ -193,8 +201,8 @@ export function Accounts() {
                             {usedIds.has(account.id) ? (
                               <span className="tag tag--teal">{t('accounts.inUse')}</span>
                             ) : null}
-                            {account.archived ? (
-                              <span className="tag tag--neutral">{t('accounts.archived')}</span>
+                            {!existsAtSlice ? (
+                              <span className="tag tag--neutral">{t('accounts.outsideSlice')}</span>
                             ) : null}
                           </div>
                           <div className="list__sub">
@@ -257,6 +265,18 @@ export function Accounts() {
                             >
                               <Icon name="edit" size={18} />
                             </button>
+                            {accountExistsAt(account, today) &&
+                            (account.type === 'expense' || account.type === 'revenue') &&
+                            accountBalance(account.id, account.type, todayEntries) !== 0 ? (
+                              <button
+                                type="button"
+                                className="icon-btn"
+                                onClick={() => beginArchiveTransfer(account)}
+                                aria-label={`${t('accounts.archiveWithTransfer')}: ${account.name}`}
+                              >
+                                <Icon name="transfer" size={18} />
+                              </button>
+                            ) : null}
                             <button
                               type="button"
                               className="icon-btn"
@@ -289,6 +309,21 @@ export function Accounts() {
               side: archiveTransfer.debitBalance > 0 ? 'credit' : 'debit',
               accountId: archiveTransfer.account.id,
               amount: Math.abs(archiveTransfer.debitBalance),
+              date: today,
+              lockDate: true,
+              counterpartRoles: Array.from(
+                new Set(
+                  (ledger?.accounts ?? [])
+                    .filter(
+                      (account) =>
+                        account.id !== archiveTransfer.account.id &&
+                        account.type === archiveTransfer.account.type &&
+                        accountExistsAt(account, today) &&
+                        isRecurringPostableRole(account.role),
+                    )
+                    .map((account) => account.role),
+                ),
+              ),
               onSave: async (input) => {
                 // 振替仕訳の保存 + archived=true を 1 トランザクションで（キャンセルなら何もしない）。
                 await archiveAccount(archiveTransfer.account.id, buildSimpleEntry(input));

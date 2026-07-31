@@ -197,8 +197,8 @@ describe('仕訳一覧の混合表示', () => {
     expect(fromInput.max).toBe(CONTINUOUS_COST_HARD_CAP);
     fireEvent.change(toInput, { target: { value: `${addMonths(futureMonth, 1)}-01` } });
 
-    const row = await screen.findByText('未来の定期支出');
-    fireEvent.click(row.closest('button')!);
+    const rows = await screen.findAllByText('未来の定期支出');
+    fireEvent.click(rows[0]!.closest('button')!);
     expect(onOpenAllocations).toHaveBeenCalledWith({ ruleId: rule.id });
   });
 
@@ -305,11 +305,7 @@ describe('仕訳一覧の混合表示', () => {
   it('給与（収入科目）フィルタでは貸方を増加色、借方を減少色にし、増減を読み上げる', async () => {
     const { revenue, increaseAmount, decreaseAmount } = await createBalanceChangeFixtures();
 
-    render(
-      <View
-        filter={{ accountId: revenue.id, from: todayLocal(), to: todayLocal() }}
-      />,
-    );
+    render(<View filter={{ accountId: revenue.id, from: todayLocal(), to: todayLocal() }} />);
 
     const increase = await screen.findByLabelText(
       `${revenue.name}の残高が増える金額: ${formatMoney(increaseAmount)}`,
@@ -327,9 +323,7 @@ describe('仕訳一覧の混合表示', () => {
   it('資産科目フィルタでは借方を増加色、貸方を減少色にする', async () => {
     const { asset, increaseAmount, decreaseAmount } = await createBalanceChangeFixtures();
 
-    render(
-      <View filter={{ accountId: asset.id, from: todayLocal(), to: todayLocal() }} />,
-    );
+    render(<View filter={{ accountId: asset.id, from: todayLocal(), to: todayLocal() }} />);
 
     expect(
       await screen.findByLabelText(
@@ -337,9 +331,7 @@ describe('仕訳一覧の混合表示', () => {
       ),
     ).toHaveClass('amount--pos');
     expect(
-      screen.getByLabelText(
-        `${asset.name}の残高が減る金額: ${formatMoney(decreaseAmount)}`,
-      ),
+      screen.getByLabelText(`${asset.name}の残高が減る金額: ${formatMoney(decreaseAmount)}`),
     ).toHaveClass('amount--neg');
   });
 
