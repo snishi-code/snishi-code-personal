@@ -69,7 +69,8 @@ function normalizeFrameSection(raw: unknown): FrameSection | null {
   };
   const normal = str(row.normal);
   if (normal !== '') section.normal = normal;
-  if (section.title === '' && !section.freeText) return null;
+  // 見出しも自由本文も無い場所も残す。フレーム単体では配置の有無が分からないため、
+  // 「フォーマットだけを置く場所」を保存時に黙って消さない（不要な場所は明示的に削除する運用）。
   return section;
 }
 
@@ -82,7 +83,8 @@ export function normalizeFrame(raw: unknown): Frame | null {
   if (sections.length === 0) return null;
   return {
     id: str(row.id) || newId('frm'),
-    name: str(row.name) || '(無題フレーム)',
+    // 空名は許容する（旧 normalize と同じ。表示側が (無題) を補う）。
+    name: str(row.name),
     sections,
   };
 }
@@ -96,7 +98,9 @@ export function normalizeFormat(raw: unknown): Format | null {
   if (items.length === 0) return null;
   return {
     id: str(row.id) || newId('fmt'),
-    name: str(row.name) || '(無題フォーマット)',
+    // 空名は許容する（旧 normalize と同じ）。titleWrap 付き無名フォーマットで
+    // 存在しなかったタイトル行が合成に混入しないよう、ここで代替名を注入しない。
+    name: str(row.name),
     joiner: typeof row.joiner === 'string' ? row.joiner : '\n',
     labelSep: typeof row.labelSep === 'string' ? row.labelSep : '：',
     titleWrap: str(row.titleWrap),
@@ -133,6 +137,14 @@ export function normalizeTemplateDef(raw: unknown, refs?: EntityRefs): TemplateD
   let placements = (Array.isArray(row.placements) ? row.placements : [])
     .map(normalizePlacement)
     .filter((placement): placement is FormatPlacement => placement !== null);
+  // 配置 ID は projectedValues のキー。重複すると 2 配置が同じ値レコードを共有するため、
+  // 先勝ちで落とす（手編集 JSON や取り込み経路の防御）。
+  const seenPlacementIds = new Set<string>();
+  placements = placements.filter((placement) => {
+    if (seenPlacementIds.has(placement.id)) return false;
+    seenPlacementIds.add(placement.id);
+    return true;
+  });
   if (refs && frame) {
     const sectionIds = new Set(frame.sections.map((section) => section.id));
     const formatIds = new Set(refs.formats.map((format) => format.id));
@@ -150,7 +162,7 @@ export function normalizeTemplateDef(raw: unknown, refs?: EntityRefs): TemplateD
 
   return {
     id: str(row.id) || newId('tpl'),
-    name: str(row.name) || '(無題テンプレート)',
+    name: str(row.name),
     frameId,
     memoSectionId,
     includeProblems: row.includeProblems === true,

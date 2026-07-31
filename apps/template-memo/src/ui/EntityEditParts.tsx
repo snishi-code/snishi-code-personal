@@ -48,12 +48,15 @@ export function RowTools({
   onMove,
   onDelete,
   disableDelete = false,
+  deleteLabel = s.common.delete,
 }: {
   index: number;
   count: number;
   onMove: (direction: -1 | 1) => void;
   onDelete: () => void;
   disableDelete?: boolean;
+  /** 削除ボタンの読み上げ名 (配置の「外す」を部品の削除と読み分けるため差し替え可)。 */
+  deleteLabel?: string;
 }) {
   return (
     <span className="formatListActions">
@@ -63,7 +66,7 @@ export function RowTools({
       <IconButton label={s.tpl.moveDown} disabled={index === count - 1} onClick={() => onMove(1)}>
         ↓
       </IconButton>
-      <IconButton label={s.common.delete} disabled={disableDelete} onClick={onDelete}>
+      <IconButton label={deleteLabel} disabled={disableDelete} onClick={onDelete}>
         <Icon name="delete" size={18} />
       </IconButton>
     </span>

@@ -176,12 +176,10 @@ test('呼び出しフォーマットを保存すると入力カードへ昇格�
   await expect(page.getByRole('button', { name: '血糖', exact: true })).toHaveCount(0);
 });
 
-test('テンプレート編集で選択項目を作り、チップで単一選択できる', async ({ page }) => {
+test('フォーマット編集で選択項目を作り、チップで単一選択できる', async ({ page }) => {
   await addPatient(page, '206', '選択確認');
   await openSettings(page);
-  const formatSection = page
-    .locator('.settingsSection')
-    .filter({ has: page.getByText('フォーマット', { exact: true }) });
+  const formatSection = page.locator(ui(UI.settings.formatSection));
   const formatRow = formatSection.locator('.formatListRow', { hasText: 'バイタル' });
   await formatRow.getByRole('button', { name: '編集', exact: true }).click();
 
@@ -298,9 +296,7 @@ test('フォーマット単独QRを受け取り、同じIDはコピーとして�
 
 test('使用中フォーマットは参照テンプレート名を示して削除を拒否する', async ({ page }) => {
   await openSettings(page);
-  const formatSection = page
-    .locator('.settingsSection')
-    .filter({ has: page.getByText('フォーマット', { exact: true }) });
+  const formatSection = page.locator(ui(UI.settings.formatSection));
   const row = formatSection.locator('.formatListRow', { hasText: 'バイタル' });
   await row.getByRole('button', { name: '削除', exact: true }).click();
   await confirmDialog(page);
@@ -308,6 +304,29 @@ test('使用中フォーマットは参照テンプレート名を示して削�
     page.getByText('このフォーマットはテンプレート「回診メモ」で使用中のため削除できません'),
   ).toBeVisible();
   await expect(row).toBeVisible();
+});
+
+test('複製してから編集すれば、元のフォーマットを使うテンプレートは変わらない', async ({ page }) => {
+  await addPatient(page, '208', '複製確認');
+  await openSettings(page);
+  const formatSection = page.locator(ui(UI.settings.formatSection));
+  await formatSection
+    .locator('.formatListRow', { hasText: '身体所見' })
+    .first()
+    .getByRole('button', { name: '複製', exact: true })
+    .click();
+  const copyRow = formatSection.locator('.formatListRow', { hasText: '身体所見のコピー' });
+  await expect(copyRow).toBeVisible();
+
+  // コピー側の先頭項目 (肺音) を書き換えて保存しても、回診メモは元の身体所見を参照したまま。
+  await copyRow.getByRole('button', { name: '編集', exact: true }).click();
+  await page.getByLabel('ラベル（例 肺音）').first().fill('肺音改');
+  await page.locator(ui(UI.formatEdit.save)).click();
+  await page.locator(ui(UI.settings.homeBottom)).click();
+  await openDetail(page, '208 複製確認');
+  const projection = page.locator(ui(UI.projection.card));
+  await expect(projection).toContainText('肺音');
+  await expect(projection).not.toContainText('肺音改');
 });
 
 // ── 3. ラウンド開始 (確認ダイアログ) → 今回分クリア・問題/継続メモ維持 → 巻き戻しで復元 ──

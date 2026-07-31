@@ -1,3 +1,8 @@
+/*
+ * テンプレート編集 = 配置エディタ。フレーム選択と各場所へのフォーマット配置だけを編集し、
+ * 部品の中身はフレーム/フォーマットの編集画面が持つ。draft は deep copy し、保存時に
+ * normalizeTemplateDef を通す (null なら durable state に触れず fail-closed 通知)。
+ */
 import { useState } from 'react';
 import { Button } from '@snishi/foundation/ui/Button';
 import { useToast } from '@snishi/foundation/ui/toast';
@@ -128,11 +133,12 @@ export function TemplateEditView({
           >
             {frames.map((candidate) => (
               <option key={candidate.id} value={candidate.id}>
-                {candidate.name}
+                {candidate.name || s.common.untitled}
               </option>
             ))}
           </select>
         </Field>
+        <p className="muted settingsHint">{s.templateEdit.frameChangeHint}</p>
         <CheckRow
           label={s.tpl.includeProblems}
           checked={draft.includeProblems}
@@ -185,11 +191,12 @@ export function TemplateEditView({
                 >
                   <div className="formatListRow">
                     <span className="pickerRowLabel" data-ui={UI.templateEdit.placementFormat}>
-                      {format.name}
+                      {format.name || s.common.untitled}
                     </span>
                     <RowTools
                       index={index}
                       count={placements.length}
+                      deleteLabel={s.templateEdit.removePlacement}
                       onMove={(direction) => movePlacement(section.id, placement.id, direction)}
                       onDelete={() =>
                         mutate((next) => {
@@ -238,7 +245,7 @@ export function TemplateEditView({
               <option value="">{s.tpl.formatAdd}</option>
               {formats.map((format) => (
                 <option key={format.id} value={format.id}>
-                  {format.name}
+                  {format.name || s.common.untitled}
                 </option>
               ))}
             </select>

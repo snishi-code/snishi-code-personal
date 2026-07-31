@@ -1,3 +1,5 @@
+# template-memo も検証対象に含む (2026-07-31 タスクF)。ワークフロー名とジョブ名 (quality/e2e) は
+# main のブランチ保護 required checks が名前参照しているため、実態が広がっても改名しない。
 name: simple-ledger CI
 
 on:

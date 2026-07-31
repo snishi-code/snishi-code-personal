@@ -504,6 +504,9 @@ export function prepareShareImport(
     frameId: frame.id,
     placements: source.template.placements.map((placement) => ({
       ...placement,
+      // コピー採番時は配置 ID も付け替える。維持すると元テンプレートとコピーが
+      // projectedValues のキーを共有し、対象の入力値が 2 テンプレート間で連動してしまう。
+      id: templateCollides ? newId('plm') : placement.id,
       formatId: formatIdMap.get(placement.formatId) ?? placement.formatId,
     })),
   };

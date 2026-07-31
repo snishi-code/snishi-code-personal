@@ -1,5 +1,6 @@
 // 設定画面 (コピー元: hospital-workspace/rounds/ui/settings/SettingsView.tsx)。
-//   タグ管理 / テンプレート (有効切替・編集・プリセット/空テンプレ追加・QR送受信・削除) / QR出力 (改行) /
+//   タグ管理 / テンプレート (有効切替・編集・プリセット/空テンプレ追加・パッケージQR送受信・削除) /
+//   フレーム (一覧・編集・複製・QR送信・削除) / フォーマット (同) / QR出力 (改行) /
 //   場所の管理 / バックアップ (JSON 書出・復元) / ワークスペース移行 / 巻き戻し / 全削除 /
 //   操作ガイド (準備中プレースホルダ)
 //
@@ -258,34 +259,24 @@ function TemplateSection({
     }
   }
 
-  async function addEmpty(): Promise<void> {
-    if (busy) return;
-    const sectionId = newId('sec');
-    const frame: Frame = {
-      id: newId('frm'),
-      name: '新しいフレーム',
-      sections: [{ id: sectionId, title: '', freeText: true }],
-    };
-    const template: TemplateDef = {
+  function addEmpty(): void {
+    // 何も永続化せず編集画面だけを開く (キャンセルで孤児フレームを残さない)。
+    // フレームは既存の先頭を既定にする (テンプレートが常に 1 個以上ある = その参照フレームも必ず在る)。
+    const frame = store.getFrames()[0];
+    if (!frame) {
+      toast.show(s.toast.saveFailed, 'error');
+      return;
+    }
+    onEdit({
       id: newId('tpl'),
       name: '',
       frameId: frame.id,
       includeProblems: false,
       includeHandover: false,
-      memoSectionId: sectionId,
+      memoSectionId: frame.sections[0]?.id ?? null,
       placements: [],
       updatedAt: Date.now(),
-    };
-    setBusy(true);
-    try {
-      await store.saveFrame(frame);
-      runtime.bump();
-      onEdit(template);
-    } catch (error) {
-      toast.show(errorText(error, s.toast.saveFailed), 'error');
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   return (
@@ -302,7 +293,7 @@ function TemplateSection({
                 disabled={busy || isActive}
                 onClick={() => void activate(tpl.id)}
               >
-                <span className="pickerRowLabel">{tpl.name}</span>
+                <span className="pickerRowLabel">{tpl.name || s.common.untitled}</span>
                 <span className="pickerRowMeta">
                   {isActive ? s.settings.template.active : s.settings.template.use}
                 </span>
@@ -375,7 +366,15 @@ function TemplateSection({
           }}
           onClose={() => setReceiveOpen(false)}
           onSaved={(payload) => {
-            toast.show(s.settings.template.imported(sharePayloadName(payload)));
+            const kindLabel =
+              payload.kind === FRAME_WIRE_KIND
+                ? s.templateQr.frame
+                : payload.kind === FORMAT_WIRE_KIND
+                  ? s.templateQr.format
+                  : s.templateQr.templatePackage;
+            toast.show(
+              s.templateQr.imported(kindLabel, sharePayloadName(payload) || s.common.untitled),
+            );
             runtime.bump();
           }}
         />
@@ -414,7 +413,8 @@ function FrameSettingsSection({
   const frames = store.getFrames();
   const templates = store.getTemplateDefs();
   const [deleteTarget, setDeleteTarget] = useState<Frame | null>(null);
-  const [sendTarget, setSendTarget] = useState<Frame | null>(null);
+  // payload を state に保持する (毎レンダー新オブジェクトだと送信中の再エンコードで batchId が割れる)。
+  const [sendPayload, setSendPayload] = useState<ShareWirePayload | null>(null);
   const [busy, setBusy] = useState(false);
 
   function addFrame(): void {
@@ -453,14 +453,14 @@ function FrameSettingsSection({
   }
 
   return (
-    <div className="card card--pad settingsSection">
+    <div className="card card--pad settingsSection" data-ui={UI.settings.frameSection}>
       <div className="section-label">{s.settings.frame.section}</div>
       {frames.map((frame) => {
         const usageCount = templates.filter((template) => template.frameId === frame.id).length;
         return (
           <div key={frame.id} className="formatListRow">
             <span className="pickerRowMain">
-              <span className="pickerRowLabel">{frame.name}</span>
+              <span className="pickerRowLabel">{frame.name || s.common.untitled}</span>
               <span className="pickerRowMeta">{s.settings.frame.usage(usageCount)}</span>
             </span>
             <span className="formatListActions">
@@ -472,9 +472,12 @@ function FrameSettingsSection({
                 disabled={busy}
                 onClick={() => void duplicate(frame.id)}
               >
-                複
+                {s.common.duplicateShort}
               </IconButton>
-              <IconButton label={s.settings.template.qrSend} onClick={() => setSendTarget(frame)}>
+              <IconButton
+                label={s.settings.template.qrSend}
+                onClick={() => setSendPayload({ kind: FRAME_WIRE_KIND, frame })}
+              >
                 <Icon name="qr" size={16} />
               </IconButton>
               <IconButton
@@ -494,12 +497,9 @@ function FrameSettingsSection({
         </Button>
       </div>
 
-      {sendTarget ? <OverlayBinding onClose={() => setSendTarget(null)} /> : null}
-      {sendTarget ? (
-        <ShareQrSendDialog
-          payload={{ kind: FRAME_WIRE_KIND, frame: sendTarget }}
-          onClose={() => setSendTarget(null)}
-        />
+      {sendPayload ? <OverlayBinding onClose={() => setSendPayload(null)} /> : null}
+      {sendPayload ? (
+        <ShareQrSendDialog payload={sendPayload} onClose={() => setSendPayload(null)} />
       ) : null}
 
       {deleteTarget ? <OverlayBinding onClose={() => setDeleteTarget(null)} /> : null}
@@ -531,7 +531,7 @@ function FormatSettingsSection({
   const formats = store.getFormats();
   const templates = store.getTemplateDefs();
   const [deleteTarget, setDeleteTarget] = useState<Format | null>(null);
-  const [sendTarget, setSendTarget] = useState<Format | null>(null);
+  const [sendPayload, setSendPayload] = useState<ShareWirePayload | null>(null);
   const [busy, setBusy] = useState(false);
 
   function addFormat(): void {
@@ -541,7 +541,7 @@ function FormatSettingsSection({
       joiner: '\n',
       labelSep: '：',
       titleWrap: '',
-      items: [{ id: newId('itm'), label: '項目', kind: 'text' }],
+      items: [{ id: newId('itm'), label: s.tpl.items, kind: 'text' }],
     });
   }
 
@@ -573,7 +573,7 @@ function FormatSettingsSection({
   }
 
   return (
-    <div className="card card--pad settingsSection">
+    <div className="card card--pad settingsSection" data-ui={UI.settings.formatSection}>
       <div className="section-label">{s.settings.format.section}</div>
       {formats.map((format) => {
         const usageCount = templates.filter((template) =>
@@ -582,7 +582,7 @@ function FormatSettingsSection({
         return (
           <div key={format.id} className="formatListRow">
             <span className="pickerRowMain">
-              <span className="pickerRowLabel">{format.name}</span>
+              <span className="pickerRowLabel">{format.name || s.common.untitled}</span>
               <span className="pickerRowMeta">{s.settings.format.usage(usageCount)}</span>
             </span>
             <span className="formatListActions">
@@ -594,9 +594,12 @@ function FormatSettingsSection({
                 disabled={busy}
                 onClick={() => void duplicate(format.id)}
               >
-                複
+                {s.common.duplicateShort}
               </IconButton>
-              <IconButton label={s.settings.template.qrSend} onClick={() => setSendTarget(format)}>
+              <IconButton
+                label={s.settings.template.qrSend}
+                onClick={() => setSendPayload({ kind: FORMAT_WIRE_KIND, format })}
+              >
                 <Icon name="qr" size={16} />
               </IconButton>
               <IconButton
@@ -616,12 +619,9 @@ function FormatSettingsSection({
         </Button>
       </div>
 
-      {sendTarget ? <OverlayBinding onClose={() => setSendTarget(null)} /> : null}
-      {sendTarget ? (
-        <ShareQrSendDialog
-          payload={{ kind: FORMAT_WIRE_KIND, format: sendTarget }}
-          onClose={() => setSendTarget(null)}
-        />
+      {sendPayload ? <OverlayBinding onClose={() => setSendPayload(null)} /> : null}
+      {sendPayload ? (
+        <ShareQrSendDialog payload={sendPayload} onClose={() => setSendPayload(null)} />
       ) : null}
 
       {deleteTarget ? <OverlayBinding onClose={() => setDeleteTarget(null)} /> : null}

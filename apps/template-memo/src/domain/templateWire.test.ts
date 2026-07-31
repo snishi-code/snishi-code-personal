@@ -235,6 +235,12 @@ describe('safe import', () => {
     expect(imported.package.template.placements.map((placement) => placement.formatId)).toEqual(
       imported.package.formats.map((format) => format.id),
     );
+    // 配置 ID も再採番する。維持すると元とコピーが projectedValues キーを共有し、
+    // 同一パッケージの二重取り込みで対象の入力値が 2 テンプレート間で連動してしまう。
+    const sourceIds = new Set(source.template.placements.map((placement) => placement.id));
+    for (const placement of imported.package.template.placements) {
+      expect(sourceIds.has(placement.id)).toBe(false);
+    }
   });
 
   it('衝突がなければIDを維持する', () => {

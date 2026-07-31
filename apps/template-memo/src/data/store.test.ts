@@ -25,6 +25,7 @@ import {
   createHrStore,
   formatInUseMsg,
   frameInUseMsg,
+  LAST_TEMPLATE_UNDELETABLE_MSG,
   PATIENT_NOT_FOUND_MSG,
   PLACE_HAS_PATIENTS_MSG,
   PLACE_ID_REQUIRED_MSG,
@@ -205,6 +206,23 @@ describe('正規化テンプレート部品 CRUD', () => {
 
     expect(store.getFrames().some((frame) => frame.id === copiedFrame.id)).toBe(false);
     expect(store.getFormats().some((format) => format.id === copiedFormat.id)).toBe(false);
+  });
+
+  it('active テンプレートの削除は残りへ付け替え、最後の 1 個は削除できない', async () => {
+    const { db, store } = await setup();
+    const [round, daily] = store.getTemplateDefs();
+    expect(store.getSettings().activeTemplateId).toBe(round!.id);
+
+    await store.deleteTemplateDef(round!.id);
+    expect(store.getSettings().activeTemplateId).toBe(daily!.id);
+    expect(store.getActiveTemplate()?.name).toBe('日報');
+
+    await expect(store.deleteTemplateDef(daily!.id)).rejects.toThrow(LAST_TEMPLATE_UNDELETABLE_MSG);
+
+    // 付け替えは永続化まで含めて 1 操作（再起動しても daily が active のまま）。
+    const reopened = await reopen(db);
+    expect(reopened.getTemplateDefs().map((template) => template.name)).toEqual(['日報']);
+    expect(reopened.getActiveTemplate()?.name).toBe('日報');
   });
 });
 

@@ -1,3 +1,7 @@
+/*
+ * フレーム編集。場所 (見出し/正常文/自由本文欄) の並びを編集する。draft は deep copy し、
+ * 保存時に normalizeFrame を通す (null なら fail-closed 通知)。参照テンプレートへ即時反映。
+ */
 import { useState } from 'react';
 import { Button } from '@snishi/foundation/ui/Button';
 import { useToast } from '@snishi/foundation/ui/toast';

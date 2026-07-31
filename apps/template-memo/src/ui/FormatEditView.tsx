@@ -1,3 +1,8 @@
+/*
+ * フォーマット編集。項目 (ラベル/種類/単位/正常文/選択肢) と合成方法 (joiner/labelSep/titleWrap)
+ * を編集する。draft は deep copy し、保存時に normalizeFormat を通す (null なら fail-closed 通知)。
+ * 変更は参照する全テンプレートへ即時反映されるため、ヘッダに使用数を表示する。
+ */
 import { useState } from 'react';
 import { Button } from '@snishi/foundation/ui/Button';
 import { useToast } from '@snishi/foundation/ui/toast';
@@ -182,6 +187,8 @@ export function FormatEditView({
             <RowTools
               index={index}
               count={draft.items.length}
+              // 項目 0 個のフォーマットは normalizeFormat が保存を拒否するため、最後の 1 つは消させない。
+              disableDelete={draft.items.length === 1}
               onMove={(direction) => mutate((next) => moveInArray(next.items, index, direction))}
               onDelete={() =>
                 mutate((next) => {

@@ -145,4 +145,20 @@ describe('resolveTemplate', () => {
       '#1 HF\n#2 DM\n#3 誤嚥性肺炎\n　7/20- TAZ/PIPC 9g/2\n\n週明けLabo\n家族IC希望あり\n\n(S)\n変わりない\n\n(O)\nBP 120/98mmHg, HR 63\n\n肺音：明らかなラ音なし\n腸音：正常\n腹部：平坦軟、圧痛なし\n下腿浮腫：なし\n\nGlu 108-222-100\n\n(A)\n著変なし\n\n(P)\n現行加療継続';
     expect(composePresetClean(patient, resolved)).toBe(expected);
   });
+
+  it('seed の配置 display を固定する（合成テストでは検知できない回帰網）', () => {
+    const preset = buildRoundPreset(100);
+    const nameOf = new Map(preset.formats.map((format) => [format.id, format.name]));
+    expect(
+      preset.template.placements.map((placement) => [
+        nameOf.get(placement.formatId),
+        placement.display,
+      ]),
+    ).toEqual([
+      ['バイタル', 'always'],
+      ['身体所見', 'always'],
+      ['血糖', 'oncall'],
+      ['検査所見', 'oncall'],
+    ]);
+  });
 });

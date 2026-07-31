@@ -59,6 +59,10 @@ export const s = {
     edit: '編集',
     save: '保存',
     loading: '読み込み中…',
+    // 空名の部品の一覧表示用（データには代替名を保存しない）。
+    untitled: '(無題)',
+    // 複製 IconButton の表示字（複製アイコンが foundation に無いための1字表示）。
+    duplicateShort: '複',
   },
   save: {
     failed: '保存に失敗しました。端末の空き容量をご確認ください',
@@ -228,7 +232,9 @@ export const s = {
   templateEdit: {
     title: 'テンプレートを編集',
     frame: '使用するフレーム',
+    frameChangeHint: 'フレームを変えると配置はリセットされます',
     addFormat: (section: string) => `${section || 'この場所'}へ配置するフォーマット`,
+    removePlacement: '外す',
     saved: 'テンプレートを保存しました',
   },
 
@@ -245,9 +251,7 @@ export const s = {
     sectionTitle: '場所の見出し（例 (S)・【今日やったこと】）',
     sectionNormal: '正常文（空欄を補う文。例 著変なし）',
     sectionFreeText: '自由本文欄を持つ',
-    formats: 'フォーマット',
     formatAdd: '＋フォーマットを配置',
-    formatName: 'フォーマット名（例 バイタル）',
     placementDisplay: '表示方法',
     placementDisplayAlways: '展開',
     placementDisplayOncall: '呼び出し',
@@ -322,6 +326,7 @@ export const s = {
     formats: 'フォーマット',
     none: 'なし',
     collisionSafety: '同じIDがある場合は既存データを上書きせず、コピーとして保存します。',
+    imported: (kindLabel: string, name: string) => `${kindLabel}を読み込みました: ${name}`,
     saveFailed: '部品を保存できませんでした。',
   },
 
@@ -425,7 +430,6 @@ export const s = {
     // 設定: テンプレート (有効切替 / QR送受信 / 削除)
     template: {
       section: 'テンプレート',
-      editTitle: 'テンプレートを編集',
       addRound: '回診メモを追加',
       addDaily: '日報を追加',
       addEmpty: '空のテンプレートを作る',
@@ -433,7 +437,6 @@ export const s = {
       use: '使用する',
       qrSend: 'QR送信',
       qrReceive: 'QRで受け取る',
-      imported: (name: string) => `テンプレートを読み込みました: ${name}`,
       deleteConfirmTitle: 'テンプレートを削除しますか？',
       deleteConfirmBody: (name: string) => `「${name}」を削除します。対象の入力値は消えません。`,
     },

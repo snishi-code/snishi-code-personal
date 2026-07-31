@@ -93,6 +93,8 @@ export const UI = {
   },
   settings: {
     view: 'settings.view',
+    frameSection: 'settings.frames.section',
+    formatSection: 'settings.formats.section',
     homeBottom: 'settings.home.bottom',
     actionBar: 'settings.actionBar', // 下部固定バー (詳細/ホームと共通の枠)
     tagList: 'settings.tags.list',
