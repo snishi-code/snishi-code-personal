@@ -11,6 +11,7 @@
 // 初回起動で store が seed するのは プリセットテンプレート2種 + place『グループ1』のみ (対象 0 件)。
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { BUILDER_EXPECTED_JSON } from '../src/domain/templateBuilder';
 import { UI } from '../src/ui-contract';
 
 /** data-ui 安定名 → CSS セレクタ。 */
@@ -327,6 +328,53 @@ test('複製してから編集すれば、元のフォーマットを使うテ�
   const projection = page.locator(ui(UI.projection.card));
   await expect(projection).toContainText('肺音');
   await expect(projection).not.toContainText('肺音改');
+});
+
+test('文章の例と固定JSON返答から候補を確認し、テンプレート一式を登録できる', async ({ page }) => {
+  await openSettings(page);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+    .toBe(true);
+  const builder = page.locator(ui(UI.settings.builderSection));
+  const formatSection = page.locator(ui(UI.settings.formatSection));
+  const templateSection = page.locator(ui(UI.settings.templateSection));
+  const beforeFormats = await formatSection.locator('.formatListRow').count();
+  const beforeTemplates = await templateSection.locator('.formatListRow').count();
+
+  await builder.locator(ui(UI.settings.builderSources)).click();
+  let dialog = page.getByRole('dialog');
+  await dialog
+    .getByRole('textbox', { name: '文章の例 1' })
+    .fill(
+      '【点検概要】\n定期点検を実施\n【測定値】\n温度 24℃、混合比 1/2、運転モード 自動\n外装：異常なし',
+    );
+  await dialog.getByRole('button', { name: '文章の例を保存' }).click();
+
+  const promptButton = builder.locator(ui(UI.settings.builderPrompt));
+  await expect(promptButton).toContainText('要再作成');
+  await promptButton.click();
+  dialog = page.getByRole('dialog');
+  const prompt = await dialog.locator('textarea[readonly]').inputValue();
+  const requestId = /requestId は「([^」]+)」/.exec(prompt)?.[1];
+  expect(requestId).toBeTruthy();
+  await expect(promptButton).toContainText('作成済み');
+  await dialog.getByRole('button', { name: '閉じる' }).click();
+
+  await builder.locator(ui(UI.settings.builderResponse)).click();
+  dialog = page.getByRole('dialog');
+  await dialog
+    .getByRole('textbox', { name: 'AIアプリから返されたJSON' })
+    .fill(BUILDER_EXPECTED_JSON.replace('<依頼文の requestId をそのまま返す>', requestId!));
+  await dialog.getByRole('button', { name: '返答を解析' }).click();
+  await expect(builder.locator(ui(UI.settings.builderResponse))).toContainText('解析済み');
+
+  await builder.locator(ui(UI.settings.builderPreview)).click();
+  await expect(page.locator(ui(UI.settings.builderPreview))).toContainText('設備点検');
+  await page.locator(ui(UI.settings.builderApply)).click();
+
+  await expect(formatSection.locator('.formatListRow')).toHaveCount(beforeFormats + 2);
+  await expect(templateSection.locator('.formatListRow')).toHaveCount(beforeTemplates + 1);
 });
 
 // ── 3. ラウンド開始 (確認ダイアログ) → 今回分クリア・問題/継続メモ維持 → 巻き戻しで復元 ──

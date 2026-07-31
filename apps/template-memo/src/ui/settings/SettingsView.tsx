@@ -48,6 +48,8 @@ import { ShareQrReceiveDialog } from '../ShareQrReceiveDialog';
 import { TemplateEditView } from '../TemplateEditView';
 import { FrameEditView } from '../FrameEditView';
 import { FormatEditView } from '../FormatEditView';
+import { TemplateBuilderPreview, TemplateBuilderSection } from '../TemplateBuilder';
+import type { ParsedBuilderDraft } from '../builderDraft';
 import { errorText, s } from '../../i18n';
 import { UI } from '../../ui-contract';
 
@@ -280,7 +282,7 @@ function TemplateSection({
   }
 
   return (
-    <div className="card card--pad settingsSection">
+    <div className="card card--pad settingsSection" data-ui={UI.settings.templateSection}>
       <div className="section-label">{s.settings.template.section}</div>
       <div>
         {templates.map((tpl) => {
@@ -1296,6 +1298,7 @@ export function SettingsView({
     | { kind: 'template'; value: TemplateDef }
     | { kind: 'frame'; value: Frame }
     | { kind: 'format'; value: Format }
+    | { kind: 'builder'; value: ParsedBuilderDraft }
     | null
   >(null);
   if (editing) {
@@ -1313,6 +1316,16 @@ export function SettingsView({
         <FrameEditView runtime={runtime} frame={editing.value} onDone={() => setEditing(null)} />
       );
     }
+    if (editing.kind === 'builder') {
+      return (
+        <TemplateBuilderPreview
+          runtime={runtime}
+          candidate={editing.value.candidate}
+          warnings={editing.value.warnings}
+          onDone={() => setEditing(null)}
+        />
+      );
+    }
     return (
       <FormatEditView runtime={runtime} format={editing.value} onDone={() => setEditing(null)} />
     );
@@ -1321,6 +1334,7 @@ export function SettingsView({
   return (
     <section aria-label={s.header.settings} className="settingsView" data-ui={UI.settings.view}>
       <TagManagerSection runtime={runtime} />
+      <TemplateBuilderSection onPreview={(value) => setEditing({ kind: 'builder', value })} />
       <TemplateSection
         runtime={runtime}
         onEdit={(value) => setEditing({ kind: 'template', value })}

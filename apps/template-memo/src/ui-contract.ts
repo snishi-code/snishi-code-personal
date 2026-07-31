@@ -93,6 +93,13 @@ export const UI = {
   },
   settings: {
     view: 'settings.view',
+    builderSection: 'settings.builder.section',
+    builderSources: 'settings.builder.sources',
+    builderPrompt: 'settings.builder.prompt',
+    builderResponse: 'settings.builder.response',
+    builderPreview: 'settings.builder.preview',
+    builderApply: 'settings.builder.apply',
+    templateSection: 'settings.templates.section',
     frameSection: 'settings.frames.section',
     formatSection: 'settings.formats.section',
     homeBottom: 'settings.home.bottom',
