@@ -346,8 +346,6 @@ export const ja = {
   'yearlyOverview.expenseCategory': '費目別: {name}',
   'yearlyOverview.yearCaption': '{year}年の月別一覧',
   'yearlyOverview.allCaption': '全期間の年別一覧',
-  'yearlyOverview.outOfRange': '対象期間外',
-  'yearlyOverview.outOfRangeMark': '—',
   'yearlyOverview.noData': '表示できる仕訳データがありません。',
 
   // 資産の内訳（ホーム「資産」のタップ先）。4 枠（自由 / 自由でない / 投資 / 継続コスト台帳）。

@@ -24,14 +24,11 @@ export interface PeriodMatrixColumn {
   from: string;
   /** 列の暦上の終了日（月末または年末）。 */
   to: string;
-  /**
-   * 実際の集計基準日。当月/当年は today、未来列は null。
-   * null の列は全行とも null（UI では「—」）になる。
-   */
-  asOf: string | null;
+  /** 集計基準日。常に列の暦上の終了日。 */
+  asOf: string;
 }
 
-export type PeriodMatrixValue = number | null;
+export type PeriodMatrixValue = number;
 
 export type PeriodMatrixRowKey =
   | 'revenue'
@@ -70,7 +67,7 @@ function validYear(year: number): boolean {
   return Number.isInteger(year) && year > 0 && year <= 9999;
 }
 
-function columnsFor(scope: PeriodMatrixScope, today: string): PeriodMatrixColumn[] {
+function columnsFor(scope: PeriodMatrixScope): PeriodMatrixColumn[] {
   if (scope.mode === 'year') {
     if (!validYear(scope.year)) return [];
     return Array.from({ length: 12 }, (_, index) => {
@@ -84,7 +81,7 @@ function columnsFor(scope: PeriodMatrixScope, today: string): PeriodMatrixColumn
         month,
         from,
         to,
-        asOf: from > today ? null : today < to ? today : to,
+        asOf: to,
       };
     });
   }
@@ -98,29 +95,32 @@ function columnsFor(scope: PeriodMatrixScope, today: string): PeriodMatrixColumn
       year,
       from,
       to,
-      asOf: from > today ? null : today < to ? today : to,
+      asOf: to,
     };
   });
 }
 
 /**
  * UI が導出仕訳を一度だけ展開するときの最大基準日。
- * 年間は min(年末, today)、全体は today。未来年でも today を返し、マトリクス側で
- * その年の全列を null にする。
+ * 年間は年末、全体は最終列の年末。現在・未来も同じ地図として列末まで展開する。
+ * 全体の有効年が空なら、呼び出し側が安全に空表示できるよう today を返す。
  */
 export function periodMatrixAsOf(scope: PeriodMatrixScope, today: string): string {
-  if (scope.mode === 'all') return today;
-  const yearEnd = `${scope.year}-12-31`;
-  return yearEnd < today ? yearEnd : today;
+  if (scope.mode === 'year') {
+    return validYear(scope.year) ? `${scope.year}-12-31` : today;
+  }
+  const years = Array.from(new Set(scope.years.filter(validYear))).sort((a, b) => a - b);
+  const last = years.at(-1);
+  return last === undefined ? today : `${last}-12-31`;
 }
 
 function blankValues(columns: PeriodMatrixColumn[]): PeriodMatrixValue[] {
-  return columns.map((column) => (column.asOf === null ? null : 0));
+  return columns.map(() => 0);
 }
 
 function addValue(values: PeriodMatrixValue[], index: number, amount: number): void {
   const current = values[index];
-  if (current !== null && current !== undefined) values[index] = current + amount;
+  if (current !== undefined) values[index] = current + amount;
 }
 
 function naturalDelta(account: Account, side: 'debit' | 'credit', amount: number): number {
@@ -135,16 +135,16 @@ function naturalDelta(account: Account, side: 'debit' | 'credit', amount: number
  *
  * - entries は最大基準日まで `reportEntriesForAsOf` した結果を渡す。
  * - 入力配列は変更しない。
- * - 未来列は 0 ではなく null。
+ * - 現在・未来を問わず、列末時点の投影値を数値で返す。
  * - PL、継続コスト、費用カテゴリ、BS のために仕訳を複数回走査しない。
  */
 export function buildPeriodMatrix(
   accounts: readonly Account[],
   entries: readonly JournalEntry[],
   scope: PeriodMatrixScope,
-  today: string,
+  _today: string,
 ): PeriodMatrix {
-  const columns = columnsFor(scope, today);
+  const columns = columnsFor(scope);
   const revenue = blankValues(columns);
   const expense = blankValues(columns);
   const monthlyCost = blankValues(columns);
@@ -162,9 +162,7 @@ export function buildPeriodMatrix(
     const date = a.date.localeCompare(b.date);
     return date !== 0 ? date : a.id.localeCompare(b.id);
   });
-  const activeBoundaries = columns
-    .map((column, index) => ({ index, asOf: column.asOf }))
-    .filter((boundary): boundary is { index: number; asOf: string } => boundary.asOf !== null);
+  const activeBoundaries = columns.map((column, index) => ({ index, asOf: column.asOf }));
   const maximumAsOf = activeBoundaries.at(-1)?.asOf;
 
   let boundaryIndex = 0;
@@ -213,15 +211,13 @@ export function buildPeriodMatrix(
 
   const net = revenue.map((value, index) => {
     const expenseValue = expense[index];
-    return value === null || expenseValue === null || expenseValue === undefined
-      ? null
-      : value - expenseValue;
+    return value - (expenseValue ?? 0);
   });
   const expenseCategories = accounts
     .filter((account) => account.type === 'expense')
     .filter((account) => {
       const values = expenseValuesById.get(account.id);
-      return values?.some((value) => value !== null && value !== 0) === true;
+      return values?.some((value) => value !== 0) === true;
     })
     .sort(compareAccountOrder)
     .map((account) => ({

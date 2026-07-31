@@ -164,7 +164,7 @@ describe('YearlyOverview', () => {
     );
   });
 
-  it('全体へ切り替えるとデータ年を昇順に並べ、未来年をダッシュ表示する', () => {
+  it('全体へ切り替えるとデータ年を昇順に並べ、未来年も投影値を表示する', () => {
     render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
 
     fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.modeAll}"]`)!);
@@ -178,17 +178,19 @@ describe('YearlyOverview', () => {
       '2026年',
       '2027年',
     ]);
-    expect(within(matrix).getAllByLabelText('対象期間外')).not.toHaveLength(0);
-    expect(matrix).toHaveTextContent('—');
+    expect(within(matrix).queryByLabelText('対象期間外')).not.toBeInTheDocument();
+    expect(matrix).not.toHaveTextContent('—');
+    expect(matrix).toHaveTextContent('800');
   });
 
-  it('当年の未来月を0ではなくダッシュで表示する', () => {
+  it('当年の未来月も対象期間外にせず数値で表示する', () => {
     render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
 
     const matrix = document.querySelector(
       `[data-ui="${UI.yearlyOverview.matrix}"]`,
     ) as HTMLElement;
-    expect(within(matrix).getAllByLabelText('対象期間外').length).toBeGreaterThanOrEqual(5);
+    expect(within(matrix).queryByLabelText('対象期間外')).not.toBeInTheDocument();
+    expect(matrix).not.toHaveTextContent('—');
     expect(within(matrix).getByText('7月')).toBeInTheDocument();
     expect(within(matrix).getByText('8月')).toBeInTheDocument();
   });

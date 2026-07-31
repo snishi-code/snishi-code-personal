@@ -41,6 +41,7 @@ function matrixDataYears(ledger: Ledger, today: string): number[] {
   }
   // 起動時catch-upが fail-soft で失敗しても、表示用に投影可能な到来済みルールの年を失わない。
   for (const rule of ledger.recurringRules) {
+    dates.push(`${rule.startMonth}-01`);
     for (const posting of recurringPostingsDue(rule, today)) dates.push(posting.date);
   }
   return dataYearsOf(dates);
@@ -255,7 +256,7 @@ function MatrixRow({
 }: {
   label: string;
   accessibleLabel?: string;
-  values: Array<number | null>;
+  values: number[];
   currency: string;
   signed?: boolean;
   emphasis?: boolean;
@@ -280,13 +281,7 @@ function MatrixRow({
       </th>
       {values.map((value, index) => (
         <td className="yearly-overview__value" key={index}>
-          {value === null ? (
-            <span className="muted" aria-label={t('yearlyOverview.outOfRange')}>
-              {t('yearlyOverview.outOfRangeMark')}
-            </span>
-          ) : (
-            <Money amount={value} currency={currency} signed={signed} />
-          )}
+          <Money amount={value} currency={currency} signed={signed} />
         </td>
       ))}
     </tr>

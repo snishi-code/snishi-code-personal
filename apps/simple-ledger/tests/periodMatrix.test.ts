@@ -4,6 +4,7 @@ import {
   periodMatrixAsOf,
   type PeriodMatrixScope,
 } from '../src/domain/periodMatrix';
+import { deriveBalanceSheet, deriveProfitAndLoss } from '../src/domain/accounting';
 import type { Account, EntryMetadata, JournalEntry } from '../src/domain/types';
 import './setup';
 
@@ -61,7 +62,7 @@ const accounts: Account[] = [
 ];
 
 describe('buildPeriodMatrix（年間）', () => {
-  it('月末・月初を別列へ帰属させ、当月は今日まで、未来列は null にする', () => {
+  it('月末・月初を別列へ帰属させ、当月・未来列も列末まで数値化する', () => {
     const input = [
       entry('future-real', '2026-06-16', 'food', 'cash', 999),
       entry('current-income', '2026-06-15', 'cash', 'salary', 500),
@@ -80,12 +81,12 @@ describe('buildPeriodMatrix（年間）', () => {
       to: '2026-05-31',
       asOf: '2026-05-31',
     });
-    expect(matrix.columns[5]).toMatchObject({ key: '2026-06', asOf: '2026-06-15' });
-    expect(matrix.rows.expense.slice(4, 7)).toEqual([100, 200, null]);
-    expect(matrix.rows.revenue.slice(4, 7)).toEqual([0, 500, null]);
-    expect(matrix.rows.net.slice(4, 7)).toEqual([-100, 300, null]);
-    expect(matrix.rows.totalAssets.slice(4, 7)).toEqual([900, 1200, null]);
-    expect(matrix.rows.netAssets.slice(4, 7)).toEqual([900, 1200, null]);
+    expect(matrix.columns[5]).toMatchObject({ key: '2026-06', asOf: '2026-06-30' });
+    expect(matrix.rows.expense.slice(4, 7)).toEqual([100, 1199, 0]);
+    expect(matrix.rows.revenue.slice(4, 7)).toEqual([0, 500, 0]);
+    expect(matrix.rows.net.slice(4, 7)).toEqual([-100, -699, 0]);
+    expect(matrix.rows.totalAssets.slice(4, 7)).toEqual([900, 201, 201]);
+    expect(matrix.rows.netAssets.slice(4, 7)).toEqual([900, 201, 201]);
     expect(input.map(({ id }) => id)).toEqual(originalOrder);
   });
 
@@ -148,7 +149,7 @@ describe('buildPeriodMatrix（年間）', () => {
     expect(matrix.expenseCategories[0]?.values.slice(0, 3)).toEqual([100, -100, 0]);
   });
 
-  it('未来年は仕訳が渡されても固定行・カテゴリ行をすべて null にする', () => {
+  it('未来年も年末断面として固定行・カテゴリ行を数値で返す', () => {
     const matrix = buildPeriodMatrix(
       accounts,
       [entry('future', '2027-01-01', 'food', 'cash', 100)],
@@ -156,15 +157,41 @@ describe('buildPeriodMatrix（年間）', () => {
       '2026-06-15',
     );
 
-    expect(Object.values(matrix.rows).every((values) => values.every((value) => value === null))).toBe(
-      true,
+    expect(matrix.columns.every((column) => column.asOf === column.to)).toBe(true);
+    expect(matrix.rows.expense[0]).toBe(100);
+    expect(matrix.rows.net[0]).toBe(-100);
+    expect(matrix.rows.totalAssets.every((value) => value === -100)).toBe(true);
+    expect(matrix.expenseCategories[0]?.values[0]).toBe(100);
+  });
+
+  it('未来月列はホームが同じ月末断面で出すPL・BSと一致する', () => {
+    const entries = [
+      entry('opening', '2026-12-31', 'cash', 'equity', 1_000),
+      entry('future-income', '2027-01-10', 'cash', 'salary', 500),
+      entry('future-expense', '2027-01-20', 'food', 'cash', 120),
+    ];
+    const matrix = buildPeriodMatrix(
+      accounts,
+      entries,
+      { mode: 'year', year: 2027 },
+      '2026-06-15',
     );
-    expect(matrix.expenseCategories).toEqual([]);
+    const pl = deriveProfitAndLoss(accounts, entries, {
+      from: '2027-01-01',
+      to: '2027-01-31',
+    });
+    const bs = deriveBalanceSheet(accounts, entries, '2027-01-31');
+
+    expect(matrix.rows.revenue[0]).toBe(pl.totalRevenue);
+    expect(matrix.rows.expense[0]).toBe(pl.totalExpense);
+    expect(matrix.rows.net[0]).toBe(pl.netIncome);
+    expect(matrix.rows.totalAssets[0]).toBe(bs.totalAssets);
+    expect(matrix.rows.netAssets[0]).toBe(bs.netAssets);
   });
 });
 
 describe('buildPeriodMatrix（全体）', () => {
-  it('疎な年列でも中間年の移動を次のBSへ繰り越し、年境界と当年partialを扱う', () => {
+  it('疎な年列でも中間年の移動を次のBSへ繰り越し、全列を年末まで扱う', () => {
     const matrix = buildPeriodMatrix(
       accounts,
       [
@@ -183,25 +210,25 @@ describe('buildPeriodMatrix（全体）', () => {
     expect(matrix.columns.map(({ key }) => key)).toEqual(['2024', '2026', '2027']);
     expect(matrix.columns.map(({ asOf }) => asOf)).toEqual([
       '2024-12-31',
-      '2026-06-15',
-      null,
+      '2026-12-31',
+      '2027-12-31',
     ]);
-    expect(matrix.rows.revenue).toEqual([100, 0, null]);
-    expect(matrix.rows.expense).toEqual([0, 25, null]);
-    expect(matrix.rows.net).toEqual([100, -25, null]);
-    expect(matrix.rows.totalAssets).toEqual([1100, 1325, null]);
-    expect(matrix.rows.netAssets).toEqual([1100, 1125, null]);
-    expect(Object.values(matrix.rows).every((values) => values[2] === null)).toBe(true);
-    expect(matrix.expenseCategories[0]?.values).toEqual([0, 25, null]);
+    expect(matrix.rows.revenue).toEqual([100, 0, 999]);
+    expect(matrix.rows.expense).toEqual([0, 1024, 0]);
+    expect(matrix.rows.net).toEqual([100, -1024, 999]);
+    expect(matrix.rows.totalAssets).toEqual([1100, 326, 1325]);
+    expect(matrix.rows.netAssets).toEqual([1100, 126, 1125]);
+    expect(matrix.expenseCategories[0]?.values).toEqual([0, 1024, 0]);
   });
 });
 
 describe('periodMatrixAsOf', () => {
   it.each([
     [{ mode: 'year', year: 2025 } as PeriodMatrixScope, '2025-12-31'],
-    [{ mode: 'year', year: 2026 } as PeriodMatrixScope, '2026-06-15'],
-    [{ mode: 'year', year: 2027 } as PeriodMatrixScope, '2026-06-15'],
-    [{ mode: 'all', years: [2024, 2026] } as PeriodMatrixScope, '2026-06-15'],
+    [{ mode: 'year', year: 2026 } as PeriodMatrixScope, '2026-12-31'],
+    [{ mode: 'year', year: 2027 } as PeriodMatrixScope, '2027-12-31'],
+    [{ mode: 'all', years: [2026, 2024, 2026] } as PeriodMatrixScope, '2026-12-31'],
+    [{ mode: 'all', years: [] } as PeriodMatrixScope, '2026-06-15'],
   ])('%j の最大展開日を返す', (scope, expected) => {
     expect(periodMatrixAsOf(scope, '2026-06-15')).toBe(expected);
   });
