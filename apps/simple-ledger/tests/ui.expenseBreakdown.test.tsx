@@ -27,9 +27,7 @@ describe('支出内訳の通常支出ドリルダウン', () => {
     );
 
     await waitFor(() => {
-      expect(
-        document.querySelector(`[data-ui="${UI.expenseBreakdown.view}"]`),
-      ).toBeInTheDocument();
+      expect(document.querySelector(`[data-ui="${UI.expenseBreakdown.view}"]`)).toBeInTheDocument();
     });
     fireEvent.click(
       document.querySelector(

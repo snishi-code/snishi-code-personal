@@ -184,11 +184,7 @@ describe('定期ルール存在期間のschema検証', () => {
     expect(
       ledgerExportPackageSchema.safeParse({
         ...valid,
-        recurringRules: [
-          predecessor,
-          successor,
-          { ...successor, id: 'second-successor' },
-        ],
+        recurringRules: [predecessor, successor, { ...successor, id: 'second-successor' }],
       }).success,
     ).toBe(false);
   });

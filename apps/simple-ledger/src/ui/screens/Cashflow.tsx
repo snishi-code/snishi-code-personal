@@ -117,16 +117,17 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
         const repayments = entries
           .filter(
             (e) =>
-              e.date > today &&
-              e.lines.some((l) => l.side === 'debit' && l.accountId === a.id),
+              e.date > today && e.lines.some((l) => l.side === 'debit' && l.accountId === a.id),
           )
           .sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
         const remaining =
           planned.reduce((sum, s) => sum + s.amount, 0) +
           repayments.reduce((sum, e) => sum + repaymentAmountOf(e, a.id), 0);
         const count = planned.length + repayments.length;
-        const nextDue = [...planned.map((s) => s.dueDate), ...repayments.map((e) => e.date)]
-          .sort()[0];
+        const nextDue = [
+          ...planned.map((s) => s.dueDate),
+          ...repayments.map((e) => e.date),
+        ].sort()[0];
         return {
           id: a.id,
           account: a,

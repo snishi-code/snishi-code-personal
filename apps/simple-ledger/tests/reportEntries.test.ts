@@ -63,10 +63,7 @@ describe('reportEntriesForAsOf', () => {
     const entries = reportEntriesForAsOf(
       {
         accounts,
-        journalEntries: [
-          opening('past', '2026-07-01'),
-          opening('future', '2026-08-01'),
-        ],
+        journalEntries: [opening('past', '2026-07-01'), opening('future', '2026-08-01')],
         monthlyCostItems: [],
         recurringRules: [],
       },
@@ -137,8 +134,7 @@ describe('reportEntriesForAsOf', () => {
       (entry) => entry.metadata?.continuousCostId === item.id,
     );
     const juneJanuaryRecognition = june.find(
-      (entry) =>
-        entry.metadata?.continuousCostId === item.id && entry.date === item.startDate,
+      (entry) => entry.metadata?.continuousCostId === item.id && entry.date === item.startDate,
     );
     expect(januaryRecognition?.lines[0]?.amount).toBe(1_000);
     expect(juneJanuaryRecognition?.lines[0]?.amount).toBe(1_000);

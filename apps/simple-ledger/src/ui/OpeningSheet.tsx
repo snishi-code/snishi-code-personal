@@ -104,13 +104,7 @@ export function OpeningRegisterSheet({
   );
 }
 
-export function OpeningEditSheet({
-  entry,
-  onClose,
-}: {
-  entry: JournalEntry;
-  onClose: () => void;
-}) {
+export function OpeningEditSheet({ entry, onClose }: { entry: JournalEntry; onClose: () => void }) {
   const { ledger, updateOpening } = useLedger();
   const accounts = ledger?.accounts ?? [];
   const byId = new Map(accounts.map((a) => [a.id, a] as const));

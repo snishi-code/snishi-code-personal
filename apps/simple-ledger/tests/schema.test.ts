@@ -978,11 +978,7 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
   it('集約台帳の well-known ID を別 role として使うパッケージは invalid', () => {
     const invalid = {
       ...mcPkg([base]),
-      accounts: [
-        cash,
-        food,
-        { ...ccLedger, name: '偽の台帳', role: 'daily-asset' as const },
-      ],
+      accounts: [cash, food, { ...ccLedger, name: '偽の台帳', role: 'daily-asset' as const }],
     };
     expect(ledgerExportPackageSchema.safeParse(invalid).success).toBe(false);
   });

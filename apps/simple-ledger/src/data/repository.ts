@@ -980,8 +980,7 @@ async function archiveAccountUnlocked(id: string, transferEntry?: JournalEntry):
     },
     {
       ruleUsesItemCoverage: (rule) =>
-        recurringExpenseAccountId(rule, (accountId) => ctx.byId.get(accountId)?.role) !==
-        undefined,
+        recurringExpenseAccountId(rule, (accountId) => ctx.byId.get(accountId)?.role) !== undefined,
     },
   );
   if (
@@ -1799,10 +1798,7 @@ function assertRecurringRuleGeneratedDependencies(
         ) {
           throw new LedgerError('error.recurring.generatedDependency');
         }
-        if (
-          rule.spreadExpenseAccountId !== undefined &&
-          itemId !== ruleItemId(rule.id, month)
-        ) {
+        if (rule.spreadExpenseAccountId !== undefined && itemId !== ruleItemId(rule.id, month)) {
           throw new LedgerError('error.recurring.generatedDependency');
         }
         const previousMonth = expectedMonthByItemId.get(itemId);
@@ -1897,17 +1893,7 @@ async function splitRecurringRuleAtDate(args: {
   schedules: CashflowSchedule[];
   ts: string;
 }): Promise<void> {
-  const {
-    existing,
-    proposed,
-    effectiveDate,
-    ctx,
-    rules,
-    entries,
-    items,
-    schedules,
-    ts,
-  } = args;
+  const { existing, proposed, effectiveDate, ctx, rules, entries, items, schedules, ts } = args;
   const predecessor: RecurringRule = {
     ...existing,
     endDate: effectiveDate,
@@ -1939,8 +1925,7 @@ async function splitRecurringRuleAtDate(args: {
     throw new LedgerError('error.recurring.periodInvalid');
   }
   const moved = entries.filter(
-    (entry) =>
-      entry.metadata?.recurringRuleId === existing.id && entry.date >= effectiveDate,
+    (entry) => entry.metadata?.recurringRuleId === existing.id && entry.date >= effectiveDate,
   );
   const { validationCtx, accountsToPut } = prepareRecurringRuleAccountsForSave(
     successor,
@@ -2055,13 +2040,9 @@ async function splitRecurringRuleAtDate(args: {
   const schedulePuts = new Map<string, CashflowSchedule>();
   for (const schedule of schedules) {
     const linkedEntryId =
-      schedule.linkedEntryId !== undefined
-        ? entryIdRemap.get(schedule.linkedEntryId)
-        : undefined;
+      schedule.linkedEntryId !== undefined ? entryIdRemap.get(schedule.linkedEntryId) : undefined;
     const monthlyCostId =
-      schedule.monthlyCostId !== undefined
-        ? itemIdRemap.get(schedule.monthlyCostId)
-        : undefined;
+      schedule.monthlyCostId !== undefined ? itemIdRemap.get(schedule.monthlyCostId) : undefined;
     if (linkedEntryId === undefined && monthlyCostId === undefined) continue;
     const next: CashflowSchedule = {
       ...schedule,
@@ -2346,9 +2327,7 @@ async function upsertRecurringRuleUnlocked(
   const scheduleUpdates = new Map<string, CashflowSchedule>();
   for (const schedule of schedules) {
     const remappedItemId =
-      schedule.monthlyCostId !== undefined
-        ? itemIdRemap.get(schedule.monthlyCostId)
-        : undefined;
+      schedule.monthlyCostId !== undefined ? itemIdRemap.get(schedule.monthlyCostId) : undefined;
     if (remappedItemId === undefined) continue;
     const next = { ...schedule, monthlyCostId: remappedItemId, updatedAt: ts };
     scheduleUpdates.set(next.id, next);
@@ -2448,10 +2427,7 @@ async function setRecurringRulePausedUnlocked(
       const lastAllowedCursor = recurringCursorThroughDate(existing, lastExistingDate);
       if (resumeCursor > lastAllowedCursor) resumeCursor = lastAllowedCursor;
     }
-    if (
-      existing.postedThroughMonth === undefined ||
-      existing.postedThroughMonth < resumeCursor
-    ) {
+    if (existing.postedThroughMonth === undefined || existing.postedThroughMonth < resumeCursor) {
       saved.postedThroughMonth = resumeCursor;
     }
   }
@@ -2521,12 +2497,7 @@ async function deleteRecurringRuleUnlocked(id: string): Promise<void> {
   let missingRace = false;
   try {
     await writeWithRevision(
-      [
-        STORE.recurringRules,
-        STORE.journalEntries,
-        STORE.monthlyCostItems,
-        STORE.cashflowSchedules,
-      ],
+      [STORE.recurringRules, STORE.journalEntries, STORE.monthlyCostItems, STORE.cashflowSchedules],
       (t) => {
         const ruleStore = t.objectStore(STORE.recurringRules);
         const eStore = t.objectStore(STORE.journalEntries);

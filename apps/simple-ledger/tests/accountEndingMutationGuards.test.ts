@@ -424,8 +424,9 @@ describe('終了済み資産と定期ルールの後続操作', () => {
     await expect(setRecurringRulePaused(rule.id, true)).rejects.toMatchObject({
       code: 'error.account.archiveBalance',
     });
-    expect((await loadLedger()).recurringRules.find((candidate) => candidate.id === rule.id)?.paused)
-      .toBeUndefined();
+    expect(
+      (await loadLedger()).recurringRules.find((candidate) => candidate.id === rule.id)?.paused,
+    ).toBeUndefined();
   });
 
   it('終了点残高を0にする定期ルールの削除を拒否する', async () => {
@@ -434,8 +435,8 @@ describe('終了済み資産と定期ルールの後続操作', () => {
     await expect(deleteRecurringRule(rule.id)).rejects.toMatchObject({
       code: 'error.account.archiveBalance',
     });
-    expect(
-      (await loadLedger()).recurringRules.some((candidate) => candidate.id === rule.id),
-    ).toBe(true);
+    expect((await loadLedger()).recurringRules.some((candidate) => candidate.id === rule.id)).toBe(
+      true,
+    );
   });
 });

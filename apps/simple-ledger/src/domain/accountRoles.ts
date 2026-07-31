@@ -59,9 +59,7 @@ export function roleAllowsType(role: AccountRole, type: AccountType): boolean {
  * 勘定科目管理一覧・ロール選択肢から除外する（BS / 資産内訳・CF には残高として現れてよい）。
  *  - continuing-cost-asset: 継続コストの集約台帳口座。
  */
-export const INTERNAL_ACCOUNT_ROLES: readonly AccountRole[] = [
-  'continuing-cost-asset',
-];
+export const INTERNAL_ACCOUNT_ROLES: readonly AccountRole[] = ['continuing-cost-asset'];
 
 export function isInternalRole(role: AccountRole): boolean {
   return INTERNAL_ACCOUNT_ROLES.includes(role);
@@ -74,8 +72,7 @@ export function isInternalRole(role: AccountRole): boolean {
  * UI の補正対象ピッカーと repository の保存境界の双方がこの正本を使う。
  */
 export const ADJUSTABLE_ACCOUNT_ROLES: readonly AccountRole[] = ACCOUNT_ROLES.filter(
-  (r) =>
-    (roleAllowsType(r, 'asset') || roleAllowsType(r, 'liability')) && !isInternalRole(r),
+  (r) => (roleAllowsType(r, 'asset') || roleAllowsType(r, 'liability')) && !isInternalRole(r),
 );
 
 /** type に対する既定 role（type 変更時のリセット先・migration の既定）。 */

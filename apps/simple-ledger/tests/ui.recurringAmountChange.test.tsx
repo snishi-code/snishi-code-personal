@@ -2,11 +2,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
-import {
-  catchUpRecurringRules,
-  createRecurringRule,
-  loadLedger,
-} from '../src/data/repository';
+import { catchUpRecurringRules, createRecurringRule, loadLedger } from '../src/data/repository';
 import * as repository from '../src/data/repository';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { UI } from '../src/ui-contract';
@@ -72,10 +68,9 @@ async function openAmountDecision(nextAmount: string): Promise<void> {
     expect(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)).toBeTruthy();
   });
   fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)!);
-  fireEvent.change(
-    document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!,
-    { target: { value: nextAmount } },
-  );
+  fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!, {
+    target: { value: nextAmount },
+  });
   fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
   await waitFor(() => {
     expect(
@@ -112,14 +107,14 @@ describe('定期ルールの金額変更範囲', () => {
     expect(
       document.querySelector(`[data-ui="${UI.allocations.recurringAmountChangeDialog}"]`),
     ).not.toBeInTheDocument();
-    expect((await loadLedger()).recurringRules.find((rule) => rule.id === original.id)).toMatchObject(
-      {
-        startDate: '2026-04-12',
-        endDate: '2026-06-01',
-        startMonth: '2026-04',
-        dayOfMonth: 20,
-      },
-    );
+    expect(
+      (await loadLedger()).recurringRules.find((rule) => rule.id === original.id),
+    ).toMatchObject({
+      startDate: '2026-04-12',
+      endDate: '2026-06-01',
+      startMonth: '2026-04',
+      dayOfMonth: 20,
+    });
 
     cleanup();
     _resetOverlaysForTests();
@@ -146,9 +141,9 @@ describe('定期ルールの金額変更範囲', () => {
     const original = await seedRule();
     await openAmountDecision('1500');
 
-    expect((await loadLedger()).recurringRules.find((rule) => rule.id === original.id)?.amount).toBe(
-      1_000,
-    );
+    expect(
+      (await loadLedger()).recurringRules.find((rule) => rule.id === original.id)?.amount,
+    ).toBe(1_000);
     fireEvent.click(
       document.querySelector(`[data-ui="${UI.allocations.recurringAmountChangeCancel}"]`)!,
     );
@@ -159,9 +154,9 @@ describe('定期ルールの金額変更範囲', () => {
     expect(document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)).toHaveValue(
       '1500',
     );
-    expect((await loadLedger()).recurringRules.find((rule) => rule.id === original.id)?.amount).toBe(
-      1_000,
-    );
+    expect(
+      (await loadLedger()).recurringRules.find((rule) => rule.id === original.id)?.amount,
+    ).toBe(1_000);
   });
 
   it('金額変更で分けたルールは基準月を固定し、起票日は31日まで変更できる', async () => {
@@ -219,9 +214,9 @@ describe('定期ルールの金額変更範囲', () => {
       expect(dialog?.querySelector('[role="alert"]')).toBeInTheDocument();
       expect(split).not.toBeDisabled();
     });
-    expect((await loadLedger()).recurringRules.find((rule) => rule.id === original.id)?.amount).toBe(
-      1_000,
-    );
+    expect(
+      (await loadLedger()).recurringRules.find((rule) => rule.id === original.id)?.amount,
+    ).toBe(1_000);
   });
 
   it('保存本体の後の自動起票だけが失敗しても、保存済みとして判断画面を閉じる', async () => {
@@ -287,10 +282,9 @@ describe('定期ルールの金額変更範囲', () => {
       expect(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)).toBeTruthy();
     });
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)!);
-    fireEvent.change(
-      document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!,
-      { target: { value: '1500' } },
-    );
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!, {
+      target: { value: '1500' },
+    });
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
 
     await waitFor(() => {

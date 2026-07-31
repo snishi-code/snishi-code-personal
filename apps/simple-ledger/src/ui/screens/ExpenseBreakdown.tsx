@@ -49,10 +49,7 @@ export function ExpenseBreakdown({
     };
   }, [basis.asOf, ledger, range]);
 
-  const trends = useMemo(
-    () => buildSectionTrends(period, ledger, today),
-    [period, ledger, today],
-  );
+  const trends = useMemo(() => buildSectionTrends(period, ledger, today), [period, ledger, today]);
 
   return (
     <section aria-labelledby="expense-breakdown-title" data-ui={UI.expenseBreakdown.view}>

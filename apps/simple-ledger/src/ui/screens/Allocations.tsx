@@ -100,8 +100,7 @@ export function Allocations({
   // 遡及して再配分されるため、ヘッダーの断面を変えても同じ item の月額は変わらない。
   const journalEntries = ledger?.journalEntries ?? [];
   const recovered = recoveredAmountsByItem(journalEntries);
-  const spreadTotalOf = (m: MonthlyCostItem): number =>
-    m.amount - (recovered.get(m.id) ?? 0);
+  const spreadTotalOf = (m: MonthlyCostItem): number => m.amount - (recovered.get(m.id) ?? 0);
   const purchaseEntryOf = (m: MonthlyCostItem): JournalEntry | undefined =>
     (ledger?.journalEntries ?? []).find(
       (e) => e.metadata?.monthlyCostId === m.id && e.metadata.monthlyCostRecovery !== true,
@@ -167,10 +166,7 @@ export function Allocations({
       </div>
 
       {rules.length === 0 && startedItems.length === 0 ? (
-        <div
-          className="card card--pad empty"
-          style={{ margin: 'var(--space-3) 0 var(--space-4)' }}
-        >
+        <div className="card card--pad empty" style={{ margin: 'var(--space-3) 0 var(--space-4)' }}>
           <Icon name="calendar" size={28} />
           <p style={{ marginTop: 'var(--space-3)' }}>{t('monthly.empty')}</p>
         </div>
@@ -196,16 +192,14 @@ export function Allocations({
                     ) : null}
                   </div>
                   <div className="list__sub">
-                    {t('recurring.rulePeriod')}:{' '}
-                    {effectiveRecurringRuleStartDate(r)} 〜{' '}
+                    {t('recurring.rulePeriod')}: {effectiveRecurringRuleStartDate(r)} 〜{' '}
                     {r.endDate !== undefined
                       ? t('recurring.ruleEndBefore', { date: r.endDate })
                       : t('recurring.ruleNoEnd')}
                   </div>
                   <div className="list__sub">
                     {t('recurring.postingSchedule')}: {ruleIntervalLabel(r)}・
-                    {name(r.creditAccountId)} →{' '}
-                    {name(recurringDestinationAccountId(r))}
+                    {name(r.creditAccountId)} → {name(recurringDestinationAccountId(r))}
                     {recurringExpenseAccountId(r, (id) => accountsMap.get(id)?.role) !==
                     undefined ? (
                       <>
@@ -239,9 +233,7 @@ export function Allocations({
                   <button
                     type="button"
                     className="icon-btn"
-                    onClick={() =>
-                      setRecurringRulePaused(r.id, !r.paused).catch(() => undefined)
-                    }
+                    onClick={() => setRecurringRulePaused(r.id, !r.paused).catch(() => undefined)}
                     aria-label={`${r.paused ? t('recurring.resume') : t('recurring.pause')}: ${r.name}`}
                     data-ui={UI.allocations.recurringPause}
                   >
@@ -345,7 +337,11 @@ export function Allocations({
                   <div className="kv">
                     <span className="muted">{t('monthlyCost.monthly')}</span>
                     <span>
-                      {m.endDate === undefined ? '—' : <Money amount={monthly} currency={currency} />}
+                      {m.endDate === undefined ? (
+                        '—'
+                      ) : (
+                        <Money amount={monthly} currency={currency} />
+                      )}
                     </span>
                   </div>
                   <div className="kv">
@@ -505,10 +501,8 @@ function sheetKindForRule(
   roleOf: (id: string) => AccountRole | undefined,
 ): SheetKind {
   return (
-    recurringKindOf(
-      roleOf(recurringDestinationAccountId(rule)),
-      roleOf(rule.creditAccountId),
-    ) ?? 'manual'
+    recurringKindOf(roleOf(recurringDestinationAccountId(rule)), roleOf(rule.creditAccountId)) ??
+    'manual'
   );
 }
 
@@ -534,9 +528,7 @@ function RecurringRuleSheet({
     existing?.creditAccountId,
   );
   const firstFromId = initialFromGroups.flatMap((group) => group.accounts)[0]?.id ?? '';
-  const [creditAccountId, setCreditAccountId] = useState(
-    existing?.creditAccountId ?? firstFromId,
-  );
+  const [creditAccountId, setCreditAccountId] = useState(existing?.creditAccountId ?? firstFromId);
   // 正規化済みの費用ルールでも内部台帳ではなく、利用者が指定した行き先を見せる。
   const existingDebit = existing ? recurringDestinationAccountId(existing) : undefined;
   const initialToGroups = groupedAccountsByRole(
@@ -555,11 +547,7 @@ function RecurringRuleSheet({
     creditAccountId,
   );
   // 行き先は源泉と同一科目を除く（振替の 預金→預金 を防ぐ）。
-  const toGroups = groupedAccountsByRole(
-    accounts,
-    [...RECURRING_POSTABLE_ROLES],
-    debitAccountId,
-  )
+  const toGroups = groupedAccountsByRole(accounts, [...RECURRING_POSTABLE_ROLES], debitAccountId)
     .map((group) => ({
       ...group,
       accounts: group.accounts.filter((account) => account.id !== creditAccountId),
@@ -723,142 +711,141 @@ function RecurringRuleSheet({
   return (
     <>
       <Modal
-      title={existing ? t('recurring.editTitle') : t('recurring.createTitle')}
-      onClose={onClose}
-      dismissMode="if-clean"
-      dataUi={UI.allocations.recurringSheet}
-      footer={
-        <>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={submit}
-            disabled={
-              submitting ||
-              name.trim() === '' ||
-              amountText === '' ||
-              everyText === '' ||
-              (phaseAnchorLocked ? postingDayText === '' : firstPostingDate === '') ||
-              startDate === '' ||
-              creditAccountId === '' ||
-              debitAccountId === ''
-            }
-            data-ui={UI.allocations.recurringSave}
-          >
-            {t('common.save')}
-          </button>
-        </>
-      }
-    >
-      <div className="stack">
-        <p className="field__hint">{t('recurring.sectionIntro')}</p>
-        {error ? (
-          <div className="field__error" role="alert">
-            <Icon name="alert" size={14} />
-            {error}
-          </div>
-        ) : null}
-        <p className="field__hint">{t('recurring.manualHint')}</p>
-        <TextInput
-          label={t('recurring.name')}
-          required
-          value={name}
-          onChange={setName}
-          hint={t('recurring.nameHint')}
-          dataUi={UI.allocations.recurringName}
-        />
-        <AccountPicker
-          label={t('recurring.from.manual')}
-          required
-          value={creditAccountId}
-          onChange={(id) => {
-            setCreditAccountId(id);
-            if (id === debitAccountId) setDebitAccountId('');
-          }}
-          groups={fromGroups}
-          dataUi={UI.allocations.recurringFrom}
-        />
-        <AccountPicker
-          label={
-            accounts.find((account) => account.id === debitAccountId)?.role ===
-            'expense-category'
-              ? t('monthlyCost.expenseCategory')
-              : t('recurring.to.manual')
-          }
-          required
-          value={debitAccountId}
-          onChange={setDebitAccountId}
-          groups={toGroups}
-          dataUi={UI.allocations.recurringTo}
-        />
-        <TextInput
-          label={t('recurring.amount')}
-          required
-          inputMode="numeric"
-          value={amountText}
-          onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
-          hint={t('recurring.amountHint')}
-          dataUi={UI.allocations.recurringAmount}
-        />
-        <TextInput
-          label={t('recurring.intervalMonths')}
-          required
-          inputMode="numeric"
-          value={everyText}
-          onChange={(v) => setEveryText(v.replace(/[^\d]/g, ''))}
-          dataUi={UI.allocations.recurringEvery}
-        />
-        {phaseAnchorLocked ? (
+        title={existing ? t('recurring.editTitle') : t('recurring.createTitle')}
+        onClose={onClose}
+        dismissMode="if-clean"
+        dataUi={UI.allocations.recurringSheet}
+        footer={
+          <>
+            <button type="button" className="btn btn--ghost" onClick={onClose}>
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={submit}
+              disabled={
+                submitting ||
+                name.trim() === '' ||
+                amountText === '' ||
+                everyText === '' ||
+                (phaseAnchorLocked ? postingDayText === '' : firstPostingDate === '') ||
+                startDate === '' ||
+                creditAccountId === '' ||
+                debitAccountId === ''
+              }
+              data-ui={UI.allocations.recurringSave}
+            >
+              {t('common.save')}
+            </button>
+          </>
+        }
+      >
+        <div className="stack">
+          <p className="field__hint">{t('recurring.sectionIntro')}</p>
+          {error ? (
+            <div className="field__error" role="alert">
+              <Icon name="alert" size={14} />
+              {error}
+            </div>
+          ) : null}
+          <p className="field__hint">{t('recurring.manualHint')}</p>
           <TextInput
-            label={t('recurring.postingDayOfMonth')}
+            label={t('recurring.name')}
+            required
+            value={name}
+            onChange={setName}
+            hint={t('recurring.nameHint')}
+            dataUi={UI.allocations.recurringName}
+          />
+          <AccountPicker
+            label={t('recurring.from.manual')}
+            required
+            value={creditAccountId}
+            onChange={(id) => {
+              setCreditAccountId(id);
+              if (id === debitAccountId) setDebitAccountId('');
+            }}
+            groups={fromGroups}
+            dataUi={UI.allocations.recurringFrom}
+          />
+          <AccountPicker
+            label={
+              accounts.find((account) => account.id === debitAccountId)?.role === 'expense-category'
+                ? t('monthlyCost.expenseCategory')
+                : t('recurring.to.manual')
+            }
+            required
+            value={debitAccountId}
+            onChange={setDebitAccountId}
+            groups={toGroups}
+            dataUi={UI.allocations.recurringTo}
+          />
+          <TextInput
+            label={t('recurring.amount')}
             required
             inputMode="numeric"
-            value={postingDayText}
-            onChange={(value) => setPostingDayText(value.replace(/[^\d]/g, ''))}
-            hint={t('recurring.firstPostingDateSplitLocked')}
-            dataUi={UI.allocations.recurringFirstPostingDate}
+            value={amountText}
+            onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
+            hint={t('recurring.amountHint')}
+            dataUi={UI.allocations.recurringAmount}
           />
-        ) : (
           <TextInput
-            label={t('recurring.firstPostingDate')}
+            label={t('recurring.intervalMonths')}
+            required
+            inputMode="numeric"
+            value={everyText}
+            onChange={(v) => setEveryText(v.replace(/[^\d]/g, ''))}
+            dataUi={UI.allocations.recurringEvery}
+          />
+          {phaseAnchorLocked ? (
+            <TextInput
+              label={t('recurring.postingDayOfMonth')}
+              required
+              inputMode="numeric"
+              value={postingDayText}
+              onChange={(value) => setPostingDayText(value.replace(/[^\d]/g, ''))}
+              hint={t('recurring.firstPostingDateSplitLocked')}
+              dataUi={UI.allocations.recurringFirstPostingDate}
+            />
+          ) : (
+            <TextInput
+              label={t('recurring.firstPostingDate')}
+              type="date"
+              required
+              value={firstPostingDate}
+              onChange={setFirstPostingDate}
+              hint={t('recurring.firstPostingDateHint')}
+              dataUi={UI.allocations.recurringFirstPostingDate}
+            />
+          )}
+          <TextInput
+            label={t('recurring.ruleStartDate')}
             type="date"
             required
-            value={firstPostingDate}
-            onChange={setFirstPostingDate}
-            hint={t('recurring.firstPostingDateHint')}
-            dataUi={UI.allocations.recurringFirstPostingDate}
+            value={startDate}
+            onChange={setStartDate}
+            hint={t(
+              startBoundaryLocked
+                ? 'recurring.ruleStartDateSplitLocked'
+                : 'recurring.ruleStartDateHint',
+            )}
+            disabled={startBoundaryLocked}
+            dataUi={UI.allocations.recurringStartDate}
           />
-        )}
-        <TextInput
-          label={t('recurring.ruleStartDate')}
-          type="date"
-          required
-          value={startDate}
-          onChange={setStartDate}
-          hint={t(
-            startBoundaryLocked
-              ? 'recurring.ruleStartDateSplitLocked'
-              : 'recurring.ruleStartDateHint',
-          )}
-          disabled={startBoundaryLocked}
-          dataUi={UI.allocations.recurringStartDate}
-        />
-        <TextInput
-          label={t('recurring.ruleEndDate')}
-          type="date"
-          value={endDate}
-          onChange={setEndDate}
-          hint={t(
-            endBoundaryLocked ? 'recurring.ruleEndDateSplitLocked' : 'recurring.ruleEndDateHint',
-          )}
-          disabled={endBoundaryLocked}
-          dataUi={UI.allocations.recurringEndDate}
-        />
-        {existing?.paused ? <p className="field__hint">{t('recurring.resumeNote')}</p> : null}
-      </div>
+          <TextInput
+            label={t('recurring.ruleEndDate')}
+            type="date"
+            value={endDate}
+            onChange={setEndDate}
+            hint={t(
+              endBoundaryLocked ? 'recurring.ruleEndDateSplitLocked' : 'recurring.ruleEndDateHint',
+            )}
+            disabled={endBoundaryLocked}
+            dataUi={UI.allocations.recurringEndDate}
+          />
+          {existing?.paused ? <p className="field__hint">{t('recurring.resumeNote')}</p> : null}
+        </div>
       </Modal>
       {pendingAmountChange && existing ? (
         <Modal
@@ -920,9 +907,7 @@ function RecurringRuleSheet({
               data-ui={UI.allocations.recurringAmountChangeAll}
             >
               <span>
-                <span className="list__row-btn__label">
-                  {t('recurring.amountChangeAll')}
-                </span>
+                <span className="list__row-btn__label">{t('recurring.amountChangeAll')}</span>
                 <span className="list__sub">{t('recurring.amountChangeAllHint')}</span>
               </span>
               <Icon name="chevronRight" size={16} />

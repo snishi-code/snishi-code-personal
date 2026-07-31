@@ -73,8 +73,7 @@ export function validateSimpleEntry(input: Partial<SimpleEntryInput>): EntryVali
 
 function cleanMetadata(meta: EntryMetadata | undefined): EntryMetadata | undefined {
   if (!meta) return undefined;
-  const has =
-    meta.inputMode !== undefined || meta.reversalOfEntryId !== undefined;
+  const has = meta.inputMode !== undefined || meta.reversalOfEntryId !== undefined;
   return has ? meta : undefined;
 }
 

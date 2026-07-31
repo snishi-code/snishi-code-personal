@@ -661,13 +661,10 @@ export const ja = {
     '金額変更で分けたルールのため、起票周期の基準月は前後のルールから引き継ぎます。日は 1〜31 で変更でき、その日がない月は月末に起票します。',
   'recurring.ruleStartDate': 'ルールの開始日',
   'recurring.ruleStartDateHint': 'このルールが存在し始める日です。',
-  'recurring.ruleStartDateSplitLocked':
-    '金額変更で分けた境界のため、この開始日は変更できません。',
+  'recurring.ruleStartDateSplitLocked': '金額変更で分けた境界のため、この開始日は変更できません。',
   'recurring.ruleEndDate': 'ルールの終了点（任意）',
-  'recurring.ruleEndDateHint':
-    'この日からルールは存在しません。空欄の間は継続します。',
-  'recurring.ruleEndDateSplitLocked':
-    '金額変更で分けた境界のため、この終了点は変更できません。',
+  'recurring.ruleEndDateHint': 'この日からルールは存在しません。空欄の間は継続します。',
+  'recurring.ruleEndDateSplitLocked': '金額変更で分けた境界のため、この終了点は変更できません。',
   'recurring.rulePeriod': 'ルール期間',
   'recurring.ruleEndBefore': '{date} より前まで',
   'recurring.ruleNoEnd': '継続中',

@@ -54,8 +54,7 @@ export function Dashboard({
   const range = basis.flowRange;
   // Journal へは全期間のときクランプ済み range を渡さない（「未来も表示」トグルを殺さないため）。
   const journalFilter = period.mode === 'all' ? {} : range;
-  const inRange = (e: JournalEntry) =>
-    (!range.from || e.date >= range.from) && e.date <= range.to;
+  const inRange = (e: JournalEntry) => (!range.from || e.date >= range.from) && e.date <= range.to;
   const periodEntries = (ledger?.journalEntries ?? []).filter(inRange).slice(0, 5);
   const label = periodLabel(period);
 

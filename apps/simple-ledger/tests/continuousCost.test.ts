@@ -130,9 +130,7 @@ describe('台帳残高（購入の仕訳 + 費用行）', () => {
     // 貸借一致: 全行で debit 合計 = credit 合計。
     const debit = derived.flatMap((e) => e.lines).filter((l) => l.side === 'debit');
     const credit = derived.flatMap((e) => e.lines).filter((l) => l.side === 'credit');
-    expect(debit.reduce((s, l) => s + l.amount, 0)).toBe(
-      credit.reduce((s, l) => s + l.amount, 0),
-    );
+    expect(debit.reduce((s, l) => s + l.amount, 0)).toBe(credit.reduce((s, l) => s + l.amount, 0));
   });
   it('終了日なし: 台帳残高 = 全額のまま・費用 0（§13-2）', () => {
     const open = withoutEnd(item({}));

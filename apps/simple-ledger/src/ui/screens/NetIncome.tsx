@@ -42,10 +42,7 @@ export function NetIncome({
     };
   }, [basis, ledger]);
 
-  const trends = useMemo(
-    () => buildSectionTrends(period, ledger, today),
-    [period, ledger, today],
-  );
+  const trends = useMemo(() => buildSectionTrends(period, ledger, today), [period, ledger, today]);
 
   return (
     <section aria-labelledby="net-income-title" data-ui={UI.netIncome.view}>

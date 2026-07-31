@@ -13,12 +13,7 @@ vi.mock('../src/state/store', () => ({
   useLedger: () => ({ ledger: ledgerState.ledger }),
 }));
 
-function account(
-  id: string,
-  name: string,
-  type: Account['type'],
-  role: Account['role'],
-): Account {
+function account(id: string, name: string, type: Account['type'], role: Account['role']): Account {
   return {
     id,
     name,
@@ -196,18 +191,12 @@ describe('YearlyOverview', () => {
     expect(next).toHaveAccessibleName('2027年へ進む');
 
     fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.modeAll}"]`)!);
-    const matrix = document.querySelector(
-      `[data-ui="${UI.yearlyOverview.matrix}"]`,
-    ) as HTMLElement;
-    expect(within(matrix).getAllByRole('columnheader').map((header) => header.textContent)).toEqual([
-      '項目',
-      '2026年',
-      '2027年',
-      '2028年',
-      '2029年',
-      '2030年',
-      '2031年',
-    ]);
+    const matrix = document.querySelector(`[data-ui="${UI.yearlyOverview.matrix}"]`) as HTMLElement;
+    expect(
+      within(matrix)
+        .getAllByRole('columnheader')
+        .map((header) => header.textContent),
+    ).toEqual(['項目', '2026年', '2027年', '2028年', '2029年', '2030年', '2031年']);
     expect(matrix).not.toHaveTextContent('—');
     const revenueRow = within(matrix).getByRole('rowheader', { name: '収入' }).closest('tr');
     expect(revenueRow).not.toBeNull();
@@ -218,9 +207,7 @@ describe('YearlyOverview', () => {
     render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
 
     fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.modeAll}"]`)!);
-    const matrix = document.querySelector(
-      `[data-ui="${UI.yearlyOverview.matrix}"]`,
-    ) as HTMLElement;
+    const matrix = document.querySelector(`[data-ui="${UI.yearlyOverview.matrix}"]`) as HTMLElement;
     const headers = within(matrix).getAllByRole('columnheader');
     expect(headers.map((header) => header.textContent)).toEqual([
       '項目',
@@ -236,9 +223,7 @@ describe('YearlyOverview', () => {
   it('当年の未来月も対象期間外にせず数値で表示する', () => {
     render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
 
-    const matrix = document.querySelector(
-      `[data-ui="${UI.yearlyOverview.matrix}"]`,
-    ) as HTMLElement;
+    const matrix = document.querySelector(`[data-ui="${UI.yearlyOverview.matrix}"]`) as HTMLElement;
     expect(within(matrix).queryByLabelText('対象期間外')).not.toBeInTheDocument();
     expect(matrix).not.toHaveTextContent('—');
     expect(within(matrix).getByText('7月')).toBeInTheDocument();

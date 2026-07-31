@@ -11,11 +11,7 @@ import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { Allocations } from '../src/ui/screens/Allocations';
-import {
-  archiveMonthlyCost,
-  createContinuousCost,
-  loadLedger,
-} from '../src/data/repository';
+import { archiveMonthlyCost, createContinuousCost, loadLedger } from '../src/data/repository';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import { addMonthsToDate } from '../src/domain/allocation';
 import type { ReportPeriod } from '../src/domain/reportPeriod';
@@ -45,9 +41,7 @@ function View({ period }: { period: ReportPeriod }) {
 
 function ReadyView({ period }: { period: ReportPeriod }) {
   const { status } = useLedger();
-  return status === 'ready' ? (
-    <Allocations period={period} onEditEntry={() => undefined} />
-  ) : null;
+  return status === 'ready' ? <Allocations period={period} onEditEntry={() => undefined} /> : null;
 }
 
 async function renderReady(period: ReportPeriod = { mode: 'all' }) {
@@ -364,9 +358,9 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
     expect(historicalCard.dataset['ending']).toBe('true');
     // どの断面でも 6,000 / 6ヶ月 = 月1,000。5月末の残りは1,000。
     expect(within(historicalCard).getByText('残存価値').closest('.kv')).toHaveTextContent('1,000');
-    expect(
-      within(historicalCard).getByText('今月の計上額').closest('.kv'),
-    ).toHaveTextContent('1,000');
+    expect(within(historicalCard).getByText('今月の計上額').closest('.kv')).toHaveTextContent(
+      '1,000',
+    );
 
     view.rerender(<View period={{ mode: 'date', date: '2024-06-30' }} />);
     const recoveredCard = (await screen.findByText(historical.name)).closest(
@@ -375,9 +369,9 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
     // 回収後は割り振る総額 6,000 / 6ヶ月 = 月1,000、終了日時点の残りは0。
     expect(within(recoveredCard).getByText('月あたり').closest('.kv')).toHaveTextContent('1,000');
     expect(within(recoveredCard).getByText('残存価値').closest('.kv')).toHaveTextContent('0');
-    expect(
-      within(recoveredCard).getByText('今月の計上額').closest('.kv'),
-    ).toHaveTextContent('1,000');
+    expect(within(recoveredCard).getByText('今月の計上額').closest('.kv')).toHaveTextContent(
+      '1,000',
+    );
   });
 
   it('過去断面のカードとアーカイブ操作が同じ全知識の回収額を使う', async () => {
@@ -470,9 +464,7 @@ describe('アーカイブ動線', () => {
 
     const dialog = document.querySelector(`[data-ui="${UI.allocations.archiveDialog}"]`)!;
     expect(dialog).toHaveTextContent('残存価値');
-    const transferButton = document.querySelector(
-      `[data-ui="${UI.allocations.archiveTransfer}"]`,
-    )!;
+    const transferButton = document.querySelector(`[data-ui="${UI.allocations.archiveTransfer}"]`)!;
     expect(transferButton).toBeInTheDocument();
     fireEvent.click(transferButton);
 

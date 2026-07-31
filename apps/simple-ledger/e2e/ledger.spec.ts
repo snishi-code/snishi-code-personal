@@ -51,8 +51,14 @@ test('支出の仕訳作成 → ホームの当月仕訳プレビューへ反映
   await page.locator(ui('journal.entry.item')).fill('E2Eコーヒー');
   await page.locator(ui('journal.entry.amount')).fill('500');
   // 支払い元（資産）と費目（費用）はそれぞれ先頭の科目チップを選ぶ
-  await page.locator(`${ui('journal.entry.flow.source')} label.chip`).first().click();
-  await page.locator(`${ui('journal.entry.flow.destination')} label.chip`).first().click();
+  await page
+    .locator(`${ui('journal.entry.flow.source')} label.chip`)
+    .first()
+    .click();
+  await page
+    .locator(`${ui('journal.entry.flow.destination')} label.chip`)
+    .first()
+    .click();
   await page.locator(ui('journal.entry.save')).click();
   // シートが閉じ、当月プレビューに反映される
   await expect(page.locator(ui('journal.entry.save'))).toBeHidden();

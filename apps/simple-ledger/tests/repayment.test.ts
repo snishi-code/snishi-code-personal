@@ -52,18 +52,18 @@ describe('返済設定（勘定科目）', () => {
     const cash = await accountByRole('daily-asset');
     const card = await accountByRole('payment-liability');
     const expense = (await loadLedger()).accounts.find((a) => a.role === 'expense-category');
-    await expect(
-      upsertAccount({ ...cash, repaymentDay: 27, updatedAt: nowIso() }),
-    ).rejects.toThrow(LedgerError);
+    await expect(upsertAccount({ ...cash, repaymentDay: 27, updatedAt: nowIso() })).rejects.toThrow(
+      LedgerError,
+    );
     await expect(
       upsertAccount({ ...card, repaymentAccountId: expense!.id, updatedAt: nowIso() }),
     ).rejects.toThrow(LedgerError);
-    await expect(
-      upsertAccount({ ...card, repaymentDay: 0, updatedAt: nowIso() }),
-    ).rejects.toThrow(LedgerError);
-    await expect(
-      upsertAccount({ ...card, repaymentDay: 32, updatedAt: nowIso() }),
-    ).rejects.toThrow(LedgerError);
+    await expect(upsertAccount({ ...card, repaymentDay: 0, updatedAt: nowIso() })).rejects.toThrow(
+      LedgerError,
+    );
+    await expect(upsertAccount({ ...card, repaymentDay: 32, updatedAt: nowIso() })).rejects.toThrow(
+      LedgerError,
+    );
   });
 
   it('返済口座を削除すると、負債側の設定ポインタが剥がれる', async () => {

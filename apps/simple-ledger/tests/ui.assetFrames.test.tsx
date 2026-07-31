@@ -191,9 +191,9 @@ describe('負債の内訳 2 枠', () => {
     if (showCard && showLoan) {
       const shortTerm = ui(UI.liabilitiesBreakdown.shortTermSubtotal)!;
       const longTerm = ui(UI.liabilitiesBreakdown.longTermSubtotal)!;
-      expect(shortTerm.compareDocumentPosition(longTerm) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
-        0,
-      );
+      expect(
+        shortTerm.compareDocumentPosition(longTerm) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).not.toBe(0);
     }
   });
 });

@@ -101,11 +101,7 @@ describe('loadLedger の科目順', () => {
       .filter((account) => ids.has(account.id))
       .map((account) => account.id);
 
-    expect(ordered).toEqual([
-      'sort-daily',
-      CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
-      'sort-investment',
-    ]);
+    expect(ordered).toEqual(['sort-daily', CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 'sort-investment']);
   });
 });
 

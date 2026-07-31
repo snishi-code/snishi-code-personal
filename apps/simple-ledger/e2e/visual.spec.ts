@@ -34,8 +34,14 @@ for (const vp of VIEWPORTS) {
     await page.locator(ui('dashboard.entry.expense')).click();
     await page.locator(ui('journal.entry.item')).fill('視覚確認用');
     await page.locator(ui('journal.entry.amount')).fill('1200');
-    await page.locator(`${ui('journal.entry.flow.source')} label.chip`).first().click();
-    await page.locator(`${ui('journal.entry.flow.destination')} label.chip`).first().click();
+    await page
+      .locator(`${ui('journal.entry.flow.source')} label.chip`)
+      .first()
+      .click();
+    await page
+      .locator(`${ui('journal.entry.flow.destination')} label.chip`)
+      .first()
+      .click();
     await page.locator(ui('journal.entry.save')).click();
     await expect(page.locator(ui('journal.entry.save'))).toBeHidden();
 

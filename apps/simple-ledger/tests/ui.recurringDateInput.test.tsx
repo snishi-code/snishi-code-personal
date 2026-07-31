@@ -33,10 +33,7 @@ function View() {
 function ReadyView() {
   const { status } = useLedger();
   return status === 'ready' ? (
-    <Allocations
-      period={{ mode: 'date', date: '2031-02-28' }}
-      onEditEntry={() => undefined}
-    />
+    <Allocations period={{ mode: 'date', date: '2031-02-28' }} onEditEntry={() => undefined} />
   ) : null;
 }
 
@@ -133,10 +130,9 @@ describe('定期ルールの初回起票日', () => {
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)!);
     // 日付欄は 2031-02-28（31 を 2 月へクランプした表示）。日付は触らず金額だけ変えて保存する
     // （金額の変化で「保存が実際に走った」ことを確かめる＝空振りで通らないようにする）。
-    fireEvent.change(
-      document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!,
-      { target: { value: '2000' } },
-    );
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!, {
+      target: { value: '2000' },
+    });
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
     await waitFor(() => {
       expect(
@@ -242,9 +238,7 @@ describe('費用行きルール', () => {
     const ledgerAccount = ledger.accounts.find(
       (account) => account.role === 'continuing-cost-asset',
     )!;
-    const spread = ledger.accounts.find(
-      (account) => account.id === saved!.spreadExpenseAccountId,
-    );
+    const spread = ledger.accounts.find((account) => account.id === saved!.spreadExpenseAccountId);
     expect(saved).toMatchObject({ everyMonths: 12, debitAccountId: ledgerAccount.id });
     expect(spread?.role).toBe('expense-category');
     // 起票済みぶんの item（継続コスト資産）が決定的 ID で生まれている。
@@ -293,9 +287,7 @@ describe('費用行きルール', () => {
     const ledgerAccount = ledger.accounts.find(
       (account) => account.role === 'continuing-cost-asset',
     )!;
-    const spread = ledger.accounts.find(
-      (account) => account.id === saved!.spreadExpenseAccountId,
-    );
+    const spread = ledger.accounts.find((account) => account.id === saved!.spreadExpenseAccountId);
     expect(saved!.everyMonths).toBe(1);
     // 費用行きなので台帳経由（借方 = 台帳・費用の行き先 = 支出カテゴリ）。
     expect(saved).toMatchObject({ debitAccountId: ledgerAccount.id });

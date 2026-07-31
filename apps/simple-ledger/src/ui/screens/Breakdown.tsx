@@ -26,11 +26,7 @@ import type { AccountBalance } from '../../domain/types';
 import type { MessageKey } from '../../i18n';
 import type { Screen } from '../navigation';
 import type { JournalFilter } from './Journal';
-import {
-  ACCOUNT_ACCENTS,
-  boxByKey,
-  type AccountAccent,
-} from '../accountBoxes';
+import { ACCOUNT_ACCENTS, boxByKey, type AccountAccent } from '../accountBoxes';
 
 export type BreakdownSection = 'revenue' | 'asset' | 'liability' | 'equity';
 
@@ -173,10 +169,7 @@ export function Breakdown({
     return { rows: bs.equity, total: bs.netAssets, retained: bs.retainedEarnings };
   }, [asOf, ledger, range, reportEntries, section]);
 
-  const trends = useMemo(
-    () => buildSectionTrends(period, ledger, today),
-    [period, ledger, today],
-  );
+  const trends = useMemo(() => buildSectionTrends(period, ledger, today), [period, ledger, today]);
   const trendData = trends ? trends[cfg.series] : null;
 
   const drill = (accountId: string) =>

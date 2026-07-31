@@ -112,7 +112,10 @@ interface LedgerContextValue {
   deleteOpening: (id: string) => Promise<void>;
   saveAccount: (account: Account, opts?: repo.AccountSaveOptions) => Promise<void>;
   /** アーカイブ（残高が残る資産・負債は振替仕訳を同一 tx で保存して 0 にしてから）。 */
-  archiveAccount: (id: string, transferEntry?: Parameters<typeof repo.archiveAccount>[1]) => Promise<void>;
+  archiveAccount: (
+    id: string,
+    transferEntry?: Parameters<typeof repo.archiveAccount>[1],
+  ) => Promise<void>;
   /** 科目の表示順を保存（並び替え。toast は出さない＝連続操作を妨げない）。 */
   reorderAccounts: (ids: string[]) => Promise<void>;
   removeAccount: (id: string) => Promise<void>;

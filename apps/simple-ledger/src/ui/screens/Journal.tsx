@@ -20,10 +20,7 @@ import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
 import { reportEntriesForAsOf } from '../../domain/reportEntries';
 import { periodRange, type ReportPeriod } from '../../domain/reportPeriod';
 import { isDebitNormal } from '../../domain/accounting';
-import {
-  isContinuousCostRecognitionEntry,
-  isNormalExpenseEntry,
-} from '../../domain/livingCost';
+import { isContinuousCostRecognitionEntry, isNormalExpenseEntry } from '../../domain/livingCost';
 import { tagNames } from '../tagOptions';
 import type { AllocationsTarget } from './Allocations';
 import type { Account, JournalEntry } from '../../domain/types';
@@ -90,9 +87,7 @@ export function Journal({
   const [editingOpening, setEditingOpening] = useState<JournalEntry | null>(null);
   const [pendingOpeningDelete, setPendingOpeningDelete] = useState<JournalEntry | null>(null);
   const [editingAdjustment, setEditingAdjustment] = useState<JournalEntry | null>(null);
-  const [pendingAdjustmentDelete, setPendingAdjustmentDelete] = useState<JournalEntry | null>(
-    null,
-  );
+  const [pendingAdjustmentDelete, setPendingAdjustmentDelete] = useState<JournalEntry | null>(null);
 
   useEffect(() => {
     if (!filter) return;
@@ -153,9 +148,7 @@ export function Journal({
       if (to && e.date > to) return false;
       if (q) {
         // 検索対象 = 摘要・メモ + 借方/貸方の勘定科目名（「食費」で検索 → 食費が絡む仕訳が出る）。
-        const accountNames = e.lines
-          .map((l) => map.get(l.accountId)?.name ?? '')
-          .join(' ');
+        const accountNames = e.lines.map((l) => map.get(l.accountId)?.name ?? '').join(' ');
         const hay = `${e.description} ${e.memo ?? ''} ${accountNames}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
@@ -320,9 +313,7 @@ export function Journal({
             const isAdjustment = !!md?.adjustment;
             const displayedAmount = entry.lines.find((line) => line.side === 'debit')?.amount ?? 0;
             // 科目ドリル中だけ、その科目の自然な残高符号で増減を示す。金額自体には符号を付けない。
-            const balanceChange = filterAccount
-              ? accountBalanceChange(entry, filterAccount)
-              : null;
+            const balanceChange = filterAccount ? accountBalanceChange(entry, filterAccount) : null;
             const balanceChangeClass =
               balanceChange === 'increase'
                 ? 'amount--pos'
@@ -492,10 +483,7 @@ export function Journal({
       ) : null}
 
       {editingAdjustment ? (
-        <AdjustmentEditSheet
-          entry={editingAdjustment}
-          onClose={() => setEditingAdjustment(null)}
-        />
+        <AdjustmentEditSheet entry={editingAdjustment} onClose={() => setEditingAdjustment(null)} />
       ) : null}
       {pendingAdjustmentDelete ? (
         <ConfirmDialog

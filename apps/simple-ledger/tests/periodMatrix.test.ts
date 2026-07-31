@@ -243,14 +243,9 @@ describe('buildPeriodMatrix（全体）', () => {
       accounts,
       journalEntries: [
         entry('opening', '2025-01-01', 'cash', 'equity', 500_000),
-        entry(
-          'purchase',
-          item.startDate,
-          'continuing',
-          'cash',
-          item.amount,
-          { monthlyCostId: item.id },
-        ),
+        entry('purchase', item.startDate, 'continuing', 'cash', item.amount, {
+          monthlyCostId: item.id,
+        }),
         entry('recovery', '2026-03-31', 'cash', 'continuing', 30_000, {
           monthlyCostId: item.id,
           monthlyCostRecovery: true,

@@ -529,10 +529,11 @@ export const ledgerExportPackageSchema = z
         recurringRuleIdSet.has(reservedEntryOrigin.ruleId) &&
         (rrId !== reservedEntryOrigin.ruleId || rrMonth !== reservedEntryOrigin.month)
       ) {
-        issue(
-          '現存する定期ルールの決定的仕訳 ID には対応する由来情報が必要です',
-          ['journalEntries', ei, 'id'],
-        );
+        issue('現存する定期ルールの決定的仕訳 ID には対応する由来情報が必要です', [
+          'journalEntries',
+          ei,
+          'id',
+        ]);
       }
       if ((rrId !== undefined) !== (rrMonth !== undefined)) {
         issue('recurringRuleId と recurringMonth は必ずペアで持つ必要があります', [
@@ -553,10 +554,11 @@ export const ledgerExportPackageSchema = z
       if (rrId !== undefined && rrMonth !== undefined) {
         const recurringRule = recurringRuleById.get(rrId);
         if (e.id !== ruleEntryId(rrId, rrMonth)) {
-          issue(
-            `定期ルール由来仕訳の ID が起票月の決定的 ID と一致しません`,
-            ['journalEntries', ei, 'id'],
-          );
+          issue(`定期ルール由来仕訳の ID が起票月の決定的 ID と一致しません`, [
+            'journalEntries',
+            ei,
+            'id',
+          ]);
         }
         if (e.metadata?.monthlyCostRecovery === true) {
           issue('回収の仕訳に定期ルールの起票由来を付けることはできません', [
@@ -730,7 +732,8 @@ export const ledgerExportPackageSchema = z
       if (r.debitAccountId === r.creditAccountId)
         issue(`定期ルール「${r.name}」の源泉と行き先が同一です`, at('debitAccountId'));
       if ((r.spreadExpenseAccountId ?? r.debitAccountId) === r.creditAccountId)
-        issue(`定期ルール「${r.name}」の源泉と論理的な行き先が同一です`,
+        issue(
+          `定期ルール「${r.name}」の源泉と論理的な行き先が同一です`,
           at(r.spreadExpenseAccountId !== undefined ? 'spreadExpenseAccountId' : 'debitAccountId'),
         );
       const debitPostable = isRecurringPostableRole(
@@ -875,10 +878,7 @@ export const ledgerExportPackageSchema = z
           accountRole.get(purchaseRuleDestination ?? '') === 'expense-category' &&
           mc.id !== ruleItemId(purchaseRule.id, purchaseRuleMonth)
         ) {
-          issue(
-            `費用ルール由来の継続コスト「${mc.name}」は対応する決定的 ID が必要です`,
-            at('id'),
-          );
+          issue(`費用ルール由来の継続コスト「${mc.name}」は対応する決定的 ID が必要です`, at('id'));
         }
       }
 

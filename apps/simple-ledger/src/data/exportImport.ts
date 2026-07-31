@@ -101,7 +101,10 @@ function validatePackage(
   if (!validated.success) {
     const first = validated.error.issues[0];
     const where = first?.path.join('.') ?? '';
-    return { ok: false, detail: `${where ? where + ': ' : ''}${first?.message ?? '形式が不正です。'}` };
+    return {
+      ok: false,
+      detail: `${where ? where + ': ' : ''}${first?.message ?? '形式が不正です。'}`,
+    };
   }
   return { ok: true, pkg: validated.data };
 }
@@ -169,7 +172,8 @@ export async function importFromJsonText(
   const pipeline = createImportPipeline<LedgerExportPackage>({
     appId: APP_ID,
     currentSchemaVersion: SCHEMA_VERSION,
-    migrate: (data, fromVersion) => migrationChain.migrateToVersion(data, fromVersion, SCHEMA_VERSION),
+    migrate: (data, fromVersion) =>
+      migrationChain.migrateToVersion(data, fromVersion, SCHEMA_VERSION),
     validate: validatePackage,
     getCurrentRevision: async () => {
       const checked = await loadLedger();

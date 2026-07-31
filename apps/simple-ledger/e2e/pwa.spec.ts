@@ -72,7 +72,9 @@ test('SW が登録・activate される（使用中乗っ取り防止: 初回ペ
   });
   expect(scope).toBeTruthy();
   // SW は clients.claim() を呼ばない → 初回ロードのこのページは非制御のまま
-  const firstLoadControlled = await page.evaluate(() => navigator.serviceWorker.controller !== null);
+  const firstLoadControlled = await page.evaluate(
+    () => navigator.serviceWorker.controller !== null,
+  );
   expect(firstLoadControlled).toBe(false);
   // 再読込後のページは制御下に入る
   await page.reload();
@@ -102,9 +104,7 @@ test('SW activate が他アプリの cache を削除しない (M1: prefix 限定
   expect(survived).toBe(true);
 });
 
-test('data-env が prod 以外のとき SW は登録されない (M2: 明示 prod のみ登録)', async ({
-  page,
-}) => {
+test('data-env が prod 以外のとき SW は登録されない (M2: 明示 prod のみ登録)', async ({ page }) => {
   // forceProdEnv を使わず test 判定のままロード → serviceWorker registration が存在しない
   await page.goto('./');
   const hasRegistration = await page.evaluate(async () => {

@@ -405,9 +405,7 @@ describe('定期ルールのキャッチアップ起票', () => {
     const oldItemId = `ccr-${rule.id}-2026-07`;
     expect(ledger.recurringRules).toHaveLength(0);
     expect(ledger.monthlyCostItems.some((item) => item.id === oldItemId)).toBe(false);
-    const detachedItem = ledger.monthlyCostItems.find(
-      (item) => item.name === '削除後も残る年払い',
-    );
+    const detachedItem = ledger.monthlyCostItems.find((item) => item.name === '削除後も残る年払い');
     expect(detachedItem).toBeDefined();
     expect(detachedItem?.id.startsWith(`ccr-${rule.id}-`)).toBe(false);
     const purchase = ledger.journalEntries.find(
@@ -859,10 +857,7 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     });
 
     await expect(
-      upsertRecurringRule(
-        { ...rule, amount: 1500 },
-        { amountChangeMode: 'retroactive' },
-      ),
+      upsertRecurringRule({ ...rule, amount: 1500 }, { amountChangeMode: 'retroactive' }),
     ).rejects.toMatchObject({ code: 'error.recurring.generatedDependency' });
     await expect(
       upsertRecurringRule(
@@ -947,7 +942,9 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     });
     // 終了月の起票日は存在期間外。この月自体を処理済みにしない。
     expect(await catchUpRecurringRules('2026-04-18')).toBe(0);
-    const finite = (await loadLedger()).recurringRules.find((candidate) => candidate.id === rule.id)!;
+    const finite = (await loadLedger()).recurringRules.find(
+      (candidate) => candidate.id === rule.id,
+    )!;
     expect(finite.postedThroughMonth).toBeUndefined();
     const reopened = { ...finite };
     delete reopened.endDate;
@@ -1038,17 +1035,15 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     );
 
     ledger = await loadLedger();
-    const last = ledger.recurringRules.find(
-      (rule) => rule.splitFromRuleId === middle.id,
-    )!;
+    const last = ledger.recurringRules.find((rule) => rule.splitFromRuleId === middle.id)!;
     expect(last).toBeDefined();
     await deleteRecurringRule(middle.id);
 
     ledger = await loadLedger();
-    expect(ledger.recurringRules.map((rule) => rule.id).sort()).toEqual(
-      [first.id, last.id].sort(),
-    );
-    expect(ledger.recurringRules.find((rule) => rule.id === last.id)?.splitFromRuleId).toBeUndefined();
+    expect(ledger.recurringRules.map((rule) => rule.id).sort()).toEqual([first.id, last.id].sort());
+    expect(
+      ledger.recurringRules.find((rule) => rule.id === last.id)?.splitFromRuleId,
+    ).toBeUndefined();
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
 
@@ -1090,8 +1085,7 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     expect(await catchUpRecurringRules('2026-05-20')).toBe(0);
     expect(
       (await loadLedger()).journalEntries.filter(
-        (entry) =>
-          entry.date === '2026-05-20' && entry.description === '後継削除後の境界',
+        (entry) => entry.date === '2026-05-20' && entry.description === '後継削除後の境界',
       ),
     ).toHaveLength(1);
   });
@@ -1112,8 +1106,7 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     let ledger = await loadLedger();
     const july = ledger.journalEntries.find(
       (entry) =>
-        entry.metadata?.recurringRuleId === rule.id &&
-        entry.metadata.recurringMonth === '2026-07',
+        entry.metadata?.recurringRuleId === rule.id && entry.metadata.recurringMonth === '2026-07',
     )!;
     await deleteEntry(july.id); // 「7月はスキップ」なのでカーソルは7月のまま。
     ledger = await loadLedger();
@@ -1168,9 +1161,9 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
       ledger.journalEntries.filter((entry) => entry.metadata?.recurringMonth === '2026-04'),
     ).toHaveLength(1);
     expect(
-      ledger.journalEntries.find(
-        (entry) => entry.metadata?.recurringRuleId === successor.id,
-      )?.lines.every((line) => line.amount === 1500),
+      ledger.journalEntries
+        .find((entry) => entry.metadata?.recurringRuleId === successor.id)
+        ?.lines.every((line) => line.amount === 1500),
     ).toBe(true);
     expect(ledger.monthlyCostItems.some((item) => item.id === `ccr-${rule.id}-2026-04`)).toBe(
       false,
@@ -1212,9 +1205,7 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     expect(predecessor.postedThroughMonth).toBe('2026-07');
     expect(successor.postedThroughMonth).toBe('2026-08');
     expect(
-      ledger.journalEntries.find(
-        (entry) => entry.metadata?.recurringRuleId === successor.id,
-      ),
+      ledger.journalEntries.find((entry) => entry.metadata?.recurringRuleId === successor.id),
     ).toMatchObject({ date: '2026-08-01' });
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
@@ -1256,13 +1247,13 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     await catchUpRecurringRules('2026-05-20');
     ledger = await loadLedger();
     expect(
-      ledger.monthlyCostItems.find(
-        (candidate) => candidate.id === `ccr-${successor.id}-2026-05`,
-      ),
+      ledger.monthlyCostItems.find((candidate) => candidate.id === `ccr-${successor.id}-2026-05`),
     ).toMatchObject({ amount: 1500, expenseAccountId: fixed.id });
     // 境界当日の直接フロー（itemなし）と翌月の費用フロー（itemあり）が混在しても、
     // 後継ルールの通常編集は依存関係破損と誤判定しない。
-    const currentSuccessor = ledger.recurringRules.find((candidate) => candidate.id === successor.id)!;
+    const currentSuccessor = ledger.recurringRules.find(
+      (candidate) => candidate.id === successor.id,
+    )!;
     await upsertRecurringRule({ ...currentSuccessor, name: '積立から費用へ（変更後）' });
     ledger = await loadLedger();
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
@@ -1287,10 +1278,7 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
 
     const changed = { ...stored, amount: 1500, everyMonths: 1, debitAccountId: invest.id };
     delete changed.spreadExpenseAccountId;
-    await upsertRecurringRule(
-      changed,
-      { amountChangeMode: 'split', effectiveDate: '2026-04-20' },
-    );
+    await upsertRecurringRule(changed, { amountChangeMode: 'split', effectiveDate: '2026-04-20' });
 
     let ledger = await loadLedger();
     const successor = ledger.recurringRules.find((r) => r.id !== rule.id)!;
@@ -1313,7 +1301,10 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     );
 
     await upsertRecurringRule(
-      { ...ledger.recurringRules.find((candidate) => candidate.id === successor.id)!, amount: 1800 },
+      {
+        ...ledger.recurringRules.find((candidate) => candidate.id === successor.id)!,
+        amount: 1800,
+      },
       { amountChangeMode: 'retroactive' },
     );
     ledger = await loadLedger();
@@ -1351,7 +1342,9 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
       startDate: '2026-04-12',
     });
     await catchUpRecurringRules('2026-04-20');
-    const stored = (await loadLedger()).recurringRules.find((candidate) => candidate.id === rule.id)!;
+    const stored = (await loadLedger()).recurringRules.find(
+      (candidate) => candidate.id === rule.id,
+    )!;
     const changed = { ...stored, everyMonths: 1, debitAccountId: invest.id };
     delete changed.spreadExpenseAccountId;
     await upsertRecurringRule(changed);
@@ -1401,7 +1394,9 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
       startDate: '2026-04-12',
     });
     await catchUpRecurringRules('2026-04-20');
-    const stored = (await loadLedger()).recurringRules.find((candidate) => candidate.id === rule.id)!;
+    const stored = (await loadLedger()).recurringRules.find(
+      (candidate) => candidate.id === rule.id,
+    )!;
     const direct = { ...stored, amount: 1500, everyMonths: 1, debitAccountId: invest.id };
     delete direct.spreadExpenseAccountId;
     await upsertRecurringRule(direct, {
@@ -1432,9 +1427,9 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     ).toBe(expectedItemId);
     // 既存の年払い item が 2027-03 まで被覆するため、当該期間は二重起票しない。
     expect(await catchUpRecurringRules('2026-05-20')).toBe(0);
-    expect(ledgerExportPackageSchema.safeParse(buildExportPackage(await loadLedger())).success).toBe(
-      true,
-    );
+    expect(
+      ledgerExportPackageSchema.safeParse(buildExportPackage(await loadLedger())).success,
+    ).toBe(true);
   });
 
   it('ルール由来仕訳は由来月をまたぐ日付へ編集できない', async () => {
@@ -1473,10 +1468,7 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     });
     // catchUp がカーソルを進めたあと、進める前に読んだ古いオブジェクトで編集を保存する。
     expect(await catchUpRecurringRules('2026-07-23')).toBe(3);
-    await upsertRecurringRule(
-      { ...stale, amount: 12000 },
-      { amountChangeMode: 'retroactive' },
-    );
+    await upsertRecurringRule({ ...stale, amount: 12000 }, { amountChangeMode: 'retroactive' });
     // カーソルが巻き戻っていなければ再起票は 0 件のまま。
     expect(await catchUpRecurringRules('2026-07-23')).toBe(0);
     const ledger = await loadLedger();
