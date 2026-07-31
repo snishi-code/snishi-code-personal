@@ -22,9 +22,9 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 // text item の provenance
 //
 // text item の保存値は「正常文由来 (preset)」か「手入力由来 (manual)」かを区別する。
-// これにより、ワンタップ正常チェックが手入力した本文を誤って上書き/消去しない。
+// これにより、正常チェックが手入力した本文を誤って上書き/消去しない。
 // 正常文の基準は「呼び出し側が渡す現在のテンプレートの normal」= template が正本。
-// 合成 (composeGroup) は value だけを出すので source は出力に出ない。
+// 合成 (composePlacedFormat) は value だけを出すので source は出力に出ない。
 // ============================
 
 type TextSource = 'empty' | 'preset' | 'manual';
@@ -65,11 +65,11 @@ type PresetToggleDecision =
   | { action: 'openEditor' };
 
 /**
- * ワンタップ正常チェックの判定（純関数・ミューテーションしない）。
+ * 正常チェックの判定（純関数・ミューテーションしない）。
  *   empty  → 正常文を preset として書く
  *   preset → クリアする（トグル）
  *   manual → 手入力を守り、エディタを開いて人間に委ねる
- * normal が空のテンプレートではワンタップは成立しない（openEditor に倒す）。
+ * normal が空のフォーマットではチェック入力は成立しない（openEditor に倒す）。
  */
 export function decidePresetToggle(stored: unknown, currentNormal: unknown): PresetToggleDecision {
   const normal = String(currentNormal ?? '');
@@ -103,18 +103,21 @@ export function numericEntry(value: string, note: string): NumericEntry | '' {
 }
 
 // ============================
-// 群 (group) 単位のユーティリティ
+// 配置単位のユーティリティ
 // ============================
 
-/** group の値レコード（formValues[groupId]）を安全に読む。 */
-export function readGroupValues(formValues: unknown, groupId: string): Record<string, unknown> {
+/** 配置の値レコード（formValues[placementId]）を安全に読む。 */
+export function readPlacementValues(
+  formValues: unknown,
+  placementId: string,
+): Record<string, unknown> {
   if (!isPlainObject(formValues)) return {};
-  const rec = formValues[groupId];
+  const rec = formValues[placementId];
   return isPlainObject(rec) ? rec : {};
 }
 
 /** item 1 つでも実入力（空白以外）があるか。 */
-export function groupHasInput(values: Record<string, unknown>): boolean {
+export function placementHasInput(values: Record<string, unknown>): boolean {
   for (const key of Object.keys(values)) {
     const raw = values[key];
     if (!isPlainObject(raw)) continue; // 未入力の '' / 壊れ値

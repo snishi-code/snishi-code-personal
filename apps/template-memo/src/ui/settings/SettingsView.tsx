@@ -258,7 +258,7 @@ function TemplateSection({
           id: sectionId,
           title: '',
           freeText: true,
-          groups: [],
+          formats: [],
         },
       ],
       updatedAt: Date.now(),

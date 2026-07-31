@@ -345,14 +345,14 @@ export function createTemplateWireCollector(): TemplateWireCollector {
 /** 受信確認画面に出す件数（表示ロジックと数え方を一箇所にする）。 */
 export function summarizeTemplate(template: Template): {
   sections: number;
-  groups: number;
+  formats: number;
   items: number;
 } {
-  let groups = 0;
+  let formats = 0;
   let items = 0;
   for (const section of template.sections) {
-    groups += section.groups.length;
-    for (const group of section.groups) items += group.items.length;
+    formats += section.formats.length;
+    for (const format of section.formats) items += format.items.length;
   }
-  return { sections: template.sections.length, groups, items };
+  return { sections: template.sections.length, formats, items };
 }

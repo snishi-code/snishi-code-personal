@@ -1694,14 +1694,14 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
 
 .templateEditView,
 .templateEditSection,
-.templateEditGroup,
+.templateEditPlacement,
 .templateEditItem {
   display: grid;
   gap: var(--space-2);
 }
 
 .templateEditSection,
-.templateEditGroup,
+.templateEditPlacement,
 .templateEditItem {
   padding: var(--space-3);
 }
@@ -1715,14 +1715,14 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   background: var(--primary-light);
 }
 
-.templateEditGroup {
+.templateEditPlacement {
   margin-left: var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
 }
 
-.templateEditGroup > .formatListRow:first-child {
+.templateEditPlacement > .formatListRow:first-child {
   padding: var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);

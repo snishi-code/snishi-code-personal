@@ -32,13 +32,13 @@ function fixtureTemplate(): Template {
         title: '(S)',
         freeText: true,
         normal: '変わりない',
-        groups: [],
+        formats: [],
       },
       {
         id: 'sec_o',
         title: '(O)',
         freeText: true,
-        groups: [
+        formats: [
           {
             id: 'grp_vital',
             name: 'バイタル',
@@ -143,7 +143,7 @@ describe('template wire roundtrip', () => {
   it('件数サマリーは section/group/item を全階層で数える', () => {
     expect(summarizeTemplate(fixtureTemplate())).toEqual({
       sections: 2,
-      groups: 3,
+      formats: 3,
       items: 7,
     });
   });

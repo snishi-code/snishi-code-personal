@@ -226,7 +226,7 @@ export const s = {
     sectionTitle: '場所の見出し（例 (S)・【今日やったこと】）',
     sectionNormal: '正常文（空欄を補う文。例 著変なし）',
     sectionFreeText: '自由本文欄を持つ',
-    groups: 'フォーマット',
+    formats: 'フォーマット',
     groupAdd: 'フォーマットを追加',
     groupName: 'フォーマット名（例 バイタル）',
     groupDisplay: '配置',
@@ -295,8 +295,8 @@ export const s = {
     errorDecode: 'テンプレートQRを読み取れませんでした。',
     reset: '読み取りをやり直す',
     previewTitle: '保存前の確認',
-    counts: (sections: number, groups: number, items: number) =>
-      `セクション ${sections} / 群 ${groups} / 項目 ${items}`,
+    counts: (sections: number, formats: number, items: number) =>
+      `場所 ${sections} / フォーマット ${formats} / 項目 ${items}`,
     included: '含める',
     excluded: '含めない',
     conflictTitle: '同じIDのテンプレートがあります',

@@ -305,7 +305,7 @@ export function TemplateQrReceiveDialog({
             <dt>{s.tpl.name}</dt>
             <dd>{preview.name}</dd>
             <dt>{s.tpl.sections}</dt>
-            <dd>{s.templateQr.counts(summary.sections, summary.groups, summary.items)}</dd>
+            <dd>{s.templateQr.counts(summary.sections, summary.formats, summary.items)}</dd>
             <dt>{s.tpl.includeProblems}</dt>
             <dd>{preview.includeProblems ? s.templateQr.included : s.templateQr.excluded}</dd>
             <dt>{s.tpl.includeHandover}</dt>

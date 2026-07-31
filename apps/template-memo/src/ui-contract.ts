@@ -50,7 +50,7 @@ export const UI = {
   projection: {
     card: 'projection.card',
     section: 'projection.section',
-    group: 'projection.group',
+    placement: 'projection.placement',
     field: 'projection.field', // 各入力要素・選択チップ
     normalBtn: 'projection.normalBtn',
     oncall: 'projection.oncall',
@@ -62,7 +62,7 @@ export const UI = {
   templateEdit: {
     view: 'templateEdit.view',
     section: 'templateEdit.section',
-    group: 'templateEdit.group',
+    placement: 'templateEdit.placement',
     item: 'templateEdit.item',
     field: 'templateEdit.field',
     kind: 'templateEdit.kind',

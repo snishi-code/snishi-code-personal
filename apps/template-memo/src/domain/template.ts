@@ -1,9 +1,9 @@
 /*
- * テンプレート（入力と出力の構造定義）と本文合成エンジン。
+ * 解決済みテンプレートと本文合成エンジン。
  *
- * モデルは 3 階層の木:
- *   Template（文書）→ TemplateSection（大項目 例 "(S)"）→ TemplateGroup（群 例 バイタル/身体所見）
- *   → TemplateItem（小項目 例 肺音/BP）
+ * 永続化の正本は entities.ts の TemplateDef / Frame / Format。ここで定義する Template は
+ * resolveTemplate が入力 UI と合成処理へ渡す読み取り用の形で、PlacedFormat.id には
+ * FormatPlacement.id が入る。
  *
  * 合成は「空の枝を落としながら join する」再帰 1 本（空伝播）。空項目で区切りが
  * 二重になる・空行だけ残る問題を原理的に起こさない。テンプレートに条件分岐や式は
@@ -16,7 +16,12 @@
  */
 
 import { newId } from '../data/constants';
-import { readGroupValues, readNumericEntry, readSelectValue, readTextValue } from './formValues';
+import {
+  readPlacementValues,
+  readNumericEntry,
+  readSelectValue,
+  readTextValue,
+} from './formValues';
 import type { FormValues, Patient } from './types';
 
 // ============================
@@ -25,10 +30,10 @@ import type { FormValues, Patient } from './types';
 
 export type ItemKind = 'text' | 'number' | 'fraction' | 'select';
 
-/** 群の配置。always = 展開 / oncall = 呼び出し / menu = メニュー。値はいずれも保存する。 */
-export type GroupDisplay = 'always' | 'oncall' | 'menu';
+/** 配置方法。always = 展開 / oncall = 呼び出し / menu = メニュー。値はいずれも保存する。 */
+export type PlacementDisplay = 'always' | 'oncall' | 'menu';
 
-/** 小項目。text は正常文ワンタップ（normal）対応。 */
+/** フォーマットの小項目。text は正常文チェック（normal）対応。 */
 export interface TemplateItem {
   id: string;
   label: string;
@@ -43,11 +48,11 @@ export interface TemplateItem {
   showLabel?: boolean;
 }
 
-/** 群（旧 Format 相当）。合成の区切り文字はここが持つ。 */
-export interface TemplateGroup {
+/** 解決済みの配置フォーマット。id は配置 ID。 */
+export interface PlacedFormat {
   id: string;
   name: string;
-  display: GroupDisplay;
+  display: PlacementDisplay;
   /** 項目間の区切り（例 ", " / "\n" / "-"）。 */
   joiner: string;
   /** ラベルと値の区切り（例 "：" / " "）。 */
@@ -60,7 +65,7 @@ export interface TemplateGroup {
   items: TemplateItem[];
 }
 
-/** 大項目（セクション）。自由本文欄 + 群の入れ物。 */
+/** フレーム内の場所。自由本文欄 + 解決済み配置の入れ物。 */
 export interface TemplateSection {
   id: string;
   /** 見出し（例 "(S)" / "今日やったこと"）。空 = 見出し行なし。 */
@@ -69,10 +74,10 @@ export interface TemplateSection {
   freeText: boolean;
   /** 自由本文の正常文（完成文の空欄をこれで補う。例 "著変なし"）。 */
   normal?: string;
-  groups: TemplateGroup[];
+  formats: PlacedFormat[];
 }
 
-/** テンプレート（文書の構造定義）。 */
+/** 入力 UI・合成処理向けの解決済みテンプレート。永続化しない。 */
 export interface Template {
   id: string;
   name: string;
@@ -124,27 +129,27 @@ export function composeItem(item: TemplateItem, rawValue: unknown, labelSep: str
   return `${labelPart}${value}`;
 }
 
-/** 群 1 つの合成。全項目が空なら text='' / hasValue=false（タイトル行も出さない）。 */
-export function composeGroup(
-  group: TemplateGroup,
+/** 配置フォーマット 1 つの合成。全項目が空ならタイトル行も出さない。 */
+export function composePlacedFormat(
+  placedFormat: PlacedFormat,
   values: Record<string, unknown>,
 ): { text: string; hasValue: boolean } {
-  const parts = group.items
-    .map((item) => composeItem(item, values[item.id], group.labelSep))
+  const parts = placedFormat.items
+    .map((item) => composeItem(item, values[item.id], placedFormat.labelSep))
     .filter((s) => s !== '');
   if (parts.length === 0) return { text: '', hasValue: false };
-  const body = parts.join(group.joiner);
-  const wrap = group.titleWrap;
-  if (wrap.length >= 2 && group.name !== '') {
+  const body = parts.join(placedFormat.joiner);
+  const wrap = placedFormat.titleWrap;
+  if (wrap.length >= 2 && placedFormat.name !== '') {
     const open = wrap.slice(0, Math.floor(wrap.length / 2));
     const close = wrap.slice(Math.floor(wrap.length / 2));
-    return { text: `${open}${group.name}${close}\n${body}`, hasValue: true };
+    return { text: `${open}${placedFormat.name}${close}\n${body}`, hasValue: true };
   }
   return { text: body, hasValue: true };
 }
 
 /**
- * セクション 1 つの合成。全群 → 自由本文の順。
+ * 場所 1 つの合成。全配置 → 自由本文の順。
  * 自由本文は呼び出し側が渡す（memoSection には patient.visitMemo が入る）。
  * 空でも見出しは常に残す（不要な場所はテンプレートから場所自体を削除する）。
  */
@@ -154,8 +159,11 @@ export function composeSection(
   formValues: FormValues,
 ): string {
   const pieces: string[] = [];
-  for (const group of section.groups) {
-    const { text, hasValue } = composeGroup(group, readGroupValues(formValues, group.id));
+  for (const placedFormat of section.formats) {
+    const { text, hasValue } = composePlacedFormat(
+      placedFormat,
+      readPlacementValues(formValues, placedFormat.id),
+    );
     if (hasValue) pieces.push(text);
   }
   const free = section.freeText ? String(freeTextRaw ?? '').trim() : '';
@@ -270,8 +278,8 @@ export function normalizeItem(raw: unknown): TemplateItem | null {
   return item;
 }
 
-/** group 1 件の正規化。items が空になった group は捨てる。 */
-export function normalizeGroup(raw: unknown): TemplateGroup | null {
+/** 解決済み配置 1 件の正規化。items が空になった配置は捨てる。 */
+export function normalizePlacedFormat(raw: unknown): PlacedFormat | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
   const items = (Array.isArray(r.items) ? r.items : [])
@@ -279,7 +287,7 @@ export function normalizeGroup(raw: unknown): TemplateGroup | null {
     .filter((i): i is TemplateItem => i !== null);
   if (items.length === 0) return null;
   return {
-    id: str(r.id) || newId('grp'),
+    id: str(r.id) || newId('plm'),
     name: str(r.name),
     display: r.display === 'oncall' || r.display === 'menu' ? r.display : 'always',
     joiner: typeof r.joiner === 'string' ? r.joiner : '\n',
@@ -289,22 +297,22 @@ export function normalizeGroup(raw: unknown): TemplateGroup | null {
   };
 }
 
-/** section 1 件の正規化。title も freeText も groups も無い空 section は捨てる。 */
+/** section 1 件の正規化。title も freeText も formats も無い空 section は捨てる。 */
 export function normalizeSection(raw: unknown): TemplateSection | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
-  const groups = (Array.isArray(r.groups) ? r.groups : [])
-    .map(normalizeGroup)
-    .filter((g): g is TemplateGroup => g !== null);
+  const formats = (Array.isArray(r.formats) ? r.formats : [])
+    .map(normalizePlacedFormat)
+    .filter((g): g is PlacedFormat => g !== null);
   const section: TemplateSection = {
     id: str(r.id) || newId('sec'),
     title: str(r.title),
     freeText: r.freeText !== false,
-    groups,
+    formats,
   };
   const normal = str(r.normal);
   if (normal !== '') section.normal = normal;
-  if (section.title === '' && !section.freeText && groups.length === 0) return null;
+  if (section.title === '' && !section.freeText && formats.length === 0) return null;
   return section;
 }
 
@@ -353,13 +361,13 @@ export function buildRoundPreset(nowMs: number): Template {
         title: '(S)',
         freeText: true,
         normal: '変わりない',
-        groups: [],
+        formats: [],
       },
       {
         id: memoSectionId,
         title: '(O)',
         freeText: true,
-        groups: [
+        formats: [
           {
             id: newId('grp'),
             name: 'バイタル',
@@ -421,14 +429,14 @@ export function buildRoundPreset(nowMs: number): Template {
         title: '(A)',
         freeText: true,
         normal: '著変なし',
-        groups: [],
+        formats: [],
       },
       {
         id: newId('sec'),
         title: '(P)',
         freeText: true,
         normal: '現行加療継続',
-        groups: [],
+        formats: [],
       },
     ],
   };
@@ -450,20 +458,20 @@ export function buildDailyReportPreset(nowMs: number): Template {
         id: memoSectionId,
         title: '【今日やったこと】',
         freeText: true,
-        groups: [],
+        formats: [],
       },
       {
         id: newId('sec'),
         title: '【課題・気づき】',
         freeText: true,
         normal: '特になし',
-        groups: [],
+        formats: [],
       },
       {
         id: newId('sec'),
         title: '【明日の予定】',
         freeText: true,
-        groups: [],
+        formats: [],
       },
     ],
   };

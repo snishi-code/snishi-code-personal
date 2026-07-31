@@ -229,7 +229,7 @@ test('メニュー配置からフォーマットを開いて保存できる', as
   const templateRow = page.locator('.formatListRow', { hasText: '回診メモ' }).first();
   await templateRow.getByRole('button', { name: '編集', exact: true }).click();
 
-  const labGroup = page.locator(ui(UI.templateEdit.group), { hasText: '検査所見' }).first();
+  const labGroup = page.locator(ui(UI.templateEdit.placement), { hasText: '検査所見' }).first();
   await labGroup.locator(ui(UI.templateEdit.display)).selectOption('menu');
   await page.locator(ui(UI.templateEdit.save)).click();
   await page.locator(ui(UI.settings.homeBottom)).click();

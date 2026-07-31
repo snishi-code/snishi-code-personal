@@ -10,18 +10,18 @@ import {
   buildDailyReportPreset,
   buildRoundPreset,
   composeDocument,
-  composeGroup,
+  composePlacedFormat,
   composeItem,
   composePresetClean,
   composeProblems,
   composeSection,
   normalizeComposedText,
-  normalizeGroup,
+  normalizePlacedFormat,
   normalizeItem,
   normalizeSection,
   normalizeTemplate,
   type Template,
-  type TemplateGroup,
+  type PlacedFormat,
   type TemplateItem,
   type TemplateSection,
 } from './template';
@@ -35,7 +35,7 @@ function item(partial: Partial<TemplateItem> & Pick<TemplateItem, 'id'>): Templa
   return { label: '', kind: 'text', ...partial };
 }
 
-function group(partial: Partial<TemplateGroup> & Pick<TemplateGroup, 'id'>): TemplateGroup {
+function group(partial: Partial<PlacedFormat> & Pick<PlacedFormat, 'id'>): PlacedFormat {
   return {
     name: '',
     display: 'always',
@@ -48,7 +48,7 @@ function group(partial: Partial<TemplateGroup> & Pick<TemplateGroup, 'id'>): Tem
 }
 
 function section(partial: Partial<TemplateSection> & Pick<TemplateSection, 'id'>): TemplateSection {
-  return { title: '', freeText: true, groups: [], ...partial };
+  return { title: '', freeText: true, formats: [], ...partial };
 }
 
 function template(partial: Partial<Template>): Template {
@@ -104,7 +104,7 @@ function goldenTemplate(): Template {
         id: 'sec-o',
         title: '(O)',
         freeText: true,
-        groups: [
+        formats: [
           group({
             id: 'grp-vital',
             name: 'バイタル',
@@ -277,10 +277,10 @@ describe('composeItem', () => {
 });
 
 // ============================
-// composeGroup / composeSection（空伝播）
+// composePlacedFormat / composeSection（空伝播）
 // ============================
 
-describe('composeGroup', () => {
+describe('composePlacedFormat', () => {
   const g = group({
     id: 'g',
     name: 'バイタル',
@@ -294,11 +294,14 @@ describe('composeGroup', () => {
   });
 
   it('全項目が空ならタイトル行ごと消える（hasValue=false）', () => {
-    expect(composeGroup(g, { a: { value: '/' }, b: '' })).toEqual({ text: '', hasValue: false });
+    expect(composePlacedFormat(g, { a: { value: '/' }, b: '' })).toEqual({
+      text: '',
+      hasValue: false,
+    });
   });
 
   it('titleWrap があれば群名を囲んだタイトル行が付く', () => {
-    expect(composeGroup(g, { b: { value: '63' } })).toEqual({
+    expect(composePlacedFormat(g, { b: { value: '63' } })).toEqual({
       text: '（バイタル）\nHR 63',
       hasValue: true,
     });
@@ -306,21 +309,21 @@ describe('composeGroup', () => {
 
   it('titleWrap が空ならタイトル行なしで本文だけ', () => {
     const g2 = { ...g, titleWrap: '' };
-    expect(composeGroup(g2, { a: { value: '120/80' }, b: { value: '63' } }).text).toBe(
+    expect(composePlacedFormat(g2, { a: { value: '120/80' }, b: { value: '63' } }).text).toBe(
       'BP 120/80, HR 63',
     );
   });
 
   it('titleWrap があっても name が空ならタイトル行は出ない', () => {
     const g2 = { ...g, name: '' };
-    expect(composeGroup(g2, { b: { value: '63' } }).text).toBe('HR 63');
+    expect(composePlacedFormat(g2, { b: { value: '63' } }).text).toBe('HR 63');
   });
 
   it('項目を並び替えても安定 id で対応する値を読む', () => {
     const reordered = { ...g, items: [g.items[1]!, g.items[0]!] };
-    expect(composeGroup(reordered, { a: { value: '120/80' }, b: { value: '63' } }).text).toBe(
-      '（バイタル）\nHR 63, BP 120/80',
-    );
+    expect(
+      composePlacedFormat(reordered, { a: { value: '120/80' }, b: { value: '63' } }).text,
+    ).toBe('（バイタル）\nHR 63, BP 120/80');
   });
 });
 
@@ -344,7 +347,7 @@ describe('composeSection', () => {
   ];
 
   it('値が全部空の group はタイトル行ごと消え、自由本文だけ残る', () => {
-    const sec = section({ id: 's', title: '(O)', groups: oGroups });
+    const sec = section({ id: 's', title: '(O)', formats: oGroups });
     expect(composeSection(sec, '所見メモ', { g1: { a: '' } })).toBe('(O)\n所見メモ');
   });
 
@@ -359,7 +362,7 @@ describe('composeSection', () => {
   });
 
   it('oncall 群も値があれば所属セクションへ合成する', () => {
-    const sec = section({ id: 's', title: '(O)', groups: oGroups });
+    const sec = section({ id: 's', title: '(O)', formats: oGroups });
     const out = composeSection(sec, '', {
       g1: { a: { value: '63' } },
       g2: { b: { value: '108' } },
@@ -368,7 +371,7 @@ describe('composeSection', () => {
   });
 
   it('freeText=false なら自由本文が入っていても無視する', () => {
-    const sec = section({ id: 's', title: '(O)', freeText: false, groups: oGroups });
+    const sec = section({ id: 's', title: '(O)', freeText: false, formats: oGroups });
     expect(composeSection(sec, '無視されるはず', { g1: { a: { value: '63' } } })).toBe(
       '(O)\nHR 63',
     );
@@ -492,22 +495,22 @@ describe('normalizeItem', () => {
   });
 });
 
-describe('normalizeGroup', () => {
+describe('normalizePlacedFormat', () => {
   it('items が全滅した group は捨てる', () => {
-    expect(normalizeGroup({ name: 'g', items: [{ kind: 'text', label: '' }] })).toBeNull();
-    expect(normalizeGroup({ name: 'g', items: [] })).toBeNull();
+    expect(normalizePlacedFormat({ name: 'g', items: [{ kind: 'text', label: '' }] })).toBeNull();
+    expect(normalizePlacedFormat({ name: 'g', items: [] })).toBeNull();
   });
 
   it('id 採番と区切り既定値（joiner=改行・labelSep=：）', () => {
-    const r = normalizeGroup({ name: 'g', items: [{ kind: 'number', label: 'HR' }] });
-    expect(r?.id).toMatch(/^grp_/);
+    const r = normalizePlacedFormat({ name: 'g', items: [{ kind: 'number', label: 'HR' }] });
+    expect(r?.id).toMatch(/^plm_/);
     expect(r?.joiner).toBe('\n');
     expect(r?.labelSep).toBe('：');
     expect(r?.display).toBe('always');
   });
 
   it('joiner/labelSep は空文字列も有効な設定として保持する', () => {
-    const r = normalizeGroup({
+    const r = normalizePlacedFormat({
       name: 'g',
       joiner: '',
       labelSep: '',
@@ -519,8 +522,8 @@ describe('normalizeGroup', () => {
 });
 
 describe('normalizeSection', () => {
-  it('title も freeText も groups も無い空 section は捨てる', () => {
-    expect(normalizeSection({ title: '', freeText: false, groups: [] })).toBeNull();
+  it('title も freeText も formats も無い空 section は捨てる', () => {
+    expect(normalizeSection({ title: '', freeText: false, formats: [] })).toBeNull();
   });
 
   it('freeText は未指定なら true（自由本文が既定）', () => {
@@ -529,15 +532,15 @@ describe('normalizeSection', () => {
   });
 
   it('壊れ group を落としても section 自体は生きる', () => {
-    const r = normalizeSection({ title: '(O)', groups: [null, { items: [] }] });
-    expect(r?.groups).toEqual([]);
+    const r = normalizeSection({ title: '(O)', formats: [null, { items: [] }] });
+    expect(r?.formats).toEqual([]);
   });
 });
 
 describe('normalizeTemplate', () => {
   it('sections が全滅した壊れテンプレは null', () => {
     expect(
-      normalizeTemplate({ sections: [{ title: '', freeText: false, groups: [] }] }),
+      normalizeTemplate({ sections: [{ title: '', freeText: false, formats: [] }] }),
     ).toBeNull();
     expect(normalizeTemplate({ sections: [] })).toBeNull();
     expect(normalizeTemplate(null)).toBeNull();

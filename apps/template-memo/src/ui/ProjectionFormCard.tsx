@@ -1,12 +1,12 @@
 // 回診入力カード (コピー元: hospital-workspace/rounds/ui/ProjectionFormCard.tsx)。
-// 固定フォーム (fixedFields) をテンプレート合成エンジンの群 (TemplateGroup) へ差し替えた。
+// 解決済みテンプレートの配置フォーマットを対象ごとの入力欄へ投影する。
 //
 // 仕様:
 //   - 現在テンプレートの全場所を表示する（フォーマットが無い場所も見出しを残す）。
-//   - 展開 (always) 群: 行ごとの入力を patient.projectedValues (FormValues) へ write-through 保存。
+//   - 展開 (always) 配置: 行ごとの入力を patient.projectedValues へ write-through 保存。
 //     text 項目は項目名の右に正常文チェックを置く。手入力は openEditor で守る。
-//   - 呼び出し (oncall) / メニュー (menu) 群: シートの値を同じ projectedValues へ保存。
-//   - oncall/menu 群は値が入ると展開カードへ昇格し、全消去で入口へ戻る。
+//   - 呼び出し (oncall) / メニュー (menu) 配置: シートの値を同じ projectedValues へ保存。
+//   - oncall/menu 配置は値が入ると展開カードへ昇格し、全消去で入口へ戻る。
 //   - 場所 (section) ごとに見出し・展開カード・呼び出しチップ・メニューをまとめる。
 //   - 値の読み書きは必ず domain/formValues.ts のヘルパ経由。
 //   - 患者は pid で捕捉する (並び替えで別患者へ書かないため)。MemoCards と同じ write-through。
@@ -18,16 +18,16 @@ import { Modal } from '@snishi/foundation/ui/Modal';
 import type { FormValues, Patient, NumericEntry, TextEntry } from '../domain/types';
 import {
   decidePresetToggle,
-  groupHasInput,
+  placementHasInput,
   manualTextEntry,
   normalizeTextEntry,
   numericEntry,
-  readGroupValues,
+  readPlacementValues,
   readNumericEntry,
   readSelectValue,
   readTextValue,
 } from '../domain/formValues';
-import type { Template, TemplateGroup, TemplateItem, TemplateSection } from '../domain/template';
+import type { Template, PlacedFormat, TemplateItem, TemplateSection } from '../domain/template';
 import type { AppRuntime } from './appRuntime';
 import { useRegisterOverlay } from './registries';
 import { hapticTick } from './feedback';
@@ -35,12 +35,19 @@ import { s } from '../i18n';
 import { UI } from '../ui-contract';
 import { NormalCheckButton } from './NormalCheckButton';
 
-export function partitionSectionGroups(section: TemplateSection, values: FormValues) {
-  const hasInput = (group: TemplateGroup) => groupHasInput(readGroupValues(values, group.id));
+export function partitionSectionPlacements(section: TemplateSection, values: FormValues) {
+  const hasInput = (placement: PlacedFormat) =>
+    placementHasInput(readPlacementValues(values, placement.id));
   return {
-    shown: section.groups.filter((group) => group.display === 'always' || hasInput(group)),
-    oncall: section.groups.filter((group) => group.display === 'oncall' && !hasInput(group)),
-    menu: section.groups.filter((group) => group.display === 'menu' && !hasInput(group)),
+    shown: section.formats.filter(
+      (placement) => placement.display === 'always' || hasInput(placement),
+    ),
+    oncall: section.formats.filter(
+      (placement) => placement.display === 'oncall' && !hasInput(placement),
+    ),
+    menu: section.formats.filter(
+      (placement) => placement.display === 'menu' && !hasInput(placement),
+    ),
   };
 }
 
@@ -176,28 +183,28 @@ export function ItemRow({
   );
 }
 
-/** 群 1 つ分の行列 (見出し + 項目行)。値の読み書きは values/onWrite に委ねる。 */
-function GroupRows({
-  group,
+/** 配置 1 つ分の行列 (見出し + 項目行)。値の読み書きは values/onWrite に委ねる。 */
+function PlacementRows({
+  placement,
   values,
   freshTapRef,
   onWrite,
 }: {
-  group: TemplateGroup;
+  placement: PlacedFormat;
   values: Record<string, unknown>;
   freshTapRef: RefObject<boolean>;
   onWrite: (itemId: string, stored: TextEntry | NumericEntry | '') => void;
 }) {
-  const hasLabelCol = group.items.some((item) => item.label.trim() !== '');
-  const hasNormalCol = group.items.some(
+  const hasLabelCol = placement.items.some((item) => item.label.trim() !== '');
+  const hasNormalCol = placement.items.some(
     (item) => item.kind === 'text' && item.normal !== undefined,
   );
 
   return (
     <>
-      {group.name !== '' ? (
-        <div className="panelCardHead projectionGroupHead" data-ui={UI.projection.group}>
-          <div className="panelLabel">{group.name}</div>
+      {placement.name !== '' ? (
+        <div className="panelCardHead projectionPlacementHead" data-ui={UI.projection.placement}>
+          <div className="panelLabel">{placement.name}</div>
         </div>
       ) : null}
       <div
@@ -205,7 +212,7 @@ function GroupRows({
           hasNormalCol ? ' hasNormal' : ''
         }`}
       >
-        {group.items.map((item) => (
+        {placement.items.map((item) => (
           <ItemRow
             key={item.id}
             item={item}
@@ -222,16 +229,16 @@ function GroupRows({
 }
 
 /**
- * 呼び出し (oncall/menu) 群の入力シート。保存済み値を draft にし、projectedValues へ保存する。
+ * 呼び出し (oncall/menu) 配置の入力シート。保存済み値を draft にし、projectedValues へ保存する。
  */
-function OncallGroupSheet({
-  group,
+function OncallPlacementSheet({
+  placement,
   initialValues,
   freshTapRef,
   onSave,
   onClose,
 }: {
-  group: TemplateGroup;
+  placement: PlacedFormat;
   initialValues: Record<string, unknown>;
   freshTapRef: RefObject<boolean>;
   onSave: (values: Record<string, unknown>) => void;
@@ -241,13 +248,13 @@ function OncallGroupSheet({
   const [values, setValues] = useState<Record<string, unknown>>(() => ({ ...initialValues }));
 
   function save(): void {
-    if (groupHasInput(values) || groupHasInput(initialValues)) onSave(values);
+    if (placementHasInput(values) || placementHasInput(initialValues)) onSave(values);
     onClose();
   }
 
   return (
     <Modal
-      title={group.name || s.detail.noteInput}
+      title={placement.name || s.detail.noteInput}
       onClose={onClose}
       variant="dialog"
       dataUi={UI.projection.sheet}
@@ -258,8 +265,8 @@ function OncallGroupSheet({
         </Button>
       }
     >
-      <GroupRows
-        group={group}
+      <PlacementRows
+        placement={placement}
         values={values}
         freshTapRef={freshTapRef}
         onWrite={(itemId, stored) => setValues((prev) => ({ ...prev, [itemId]: stored }))}
@@ -268,15 +275,15 @@ function OncallGroupSheet({
   );
 }
 
-function MenuGroupDialog({
+function MenuPlacementDialog({
   section,
-  groups,
+  formats,
   onSelect,
   onClose,
 }: {
   section: TemplateSection;
-  groups: TemplateGroup[];
-  onSelect: (group: TemplateGroup) => void;
+  formats: PlacedFormat[];
+  onSelect: (placement: PlacedFormat) => void;
   onClose: () => void;
 }) {
   useRegisterOverlay(onClose);
@@ -289,14 +296,14 @@ function MenuGroupDialog({
       closeLabel={s.common.close}
     >
       <div className="menu-list">
-        {groups.map((group) => (
+        {formats.map((placement) => (
           <button
-            key={group.id}
+            key={placement.id}
             type="button"
             className="menu-item"
-            onClick={() => onSelect(group)}
+            onClick={() => onSelect(placement)}
           >
-            {group.name || s.detail.noteInput}
+            {placement.name || s.detail.noteInput}
           </button>
         ))}
       </div>
@@ -314,7 +321,7 @@ export function ProjectionFormCard({
   freshTapRef: RefObject<boolean>;
 }) {
   const { store } = runtime;
-  const [oncallOpen, setOncallOpen] = useState<TemplateGroup | null>(null);
+  const [oncallOpen, setOncallOpen] = useState<PlacedFormat | null>(null);
   const [menuOpen, setMenuOpen] = useState<TemplateSection | null>(null);
   const template: Template | null = store.getActiveTemplate();
   const sections = template?.sections ?? [];
@@ -326,26 +333,29 @@ export function ProjectionFormCard({
   if (sections.length === 0) return null; // テンプレート未選択または場所が無ければ出さない
 
   function writeValue(
-    groupId: string,
+    placementId: string,
     itemId: string,
     stored: TextEntry | NumericEntry | '',
   ): void {
     const p = live();
     if (!p) return;
     const pv = p.projectedValues && typeof p.projectedValues === 'object' ? p.projectedValues : {};
-    pv[groupId] = { ...readGroupValues(pv, groupId), [itemId]: stored };
+    pv[placementId] = {
+      ...readPlacementValues(pv, placementId),
+      [itemId]: stored,
+    };
     p.projectedValues = pv;
     store.markUpdated(liveNo());
     store.scheduleSave();
     runtime.bump();
   }
 
-  function saveGroup(groupId: string, values: Record<string, unknown>): void {
+  function savePlacement(placementId: string, values: Record<string, unknown>): void {
     const p = live();
     if (!p) return;
     const pv = p.projectedValues && typeof p.projectedValues === 'object' ? p.projectedValues : {};
-    if (groupHasInput(values)) pv[groupId] = { ...values };
-    else delete pv[groupId];
+    if (placementHasInput(values)) pv[placementId] = { ...values };
+    else delete pv[placementId];
     p.projectedValues = pv;
     store.markUpdated(liveNo());
     store.scheduleSave();
@@ -364,41 +374,41 @@ export function ProjectionFormCard({
 
       {sections.map((section) => {
         const {
-          shown: shownGroups,
-          oncall: oncallGroups,
-          menu: menuGroups,
-        } = partitionSectionGroups(section, patient.projectedValues);
+          shown: shownPlacements,
+          oncall: oncallPlacements,
+          menu: menuPlacements,
+        } = partitionSectionPlacements(section, patient.projectedValues);
         return (
           <section key={section.id} className="projectionSection" data-ui={UI.projection.section}>
             {/* 見出し無し (title 空) の場所は空の見出しブロックを出さない (合成側の挙動と一致)。 */}
             {section.title !== '' ? <div className="section-label">{section.title}</div> : null}
-            {shownGroups.map((group) => (
-              <GroupRows
-                key={group.id}
-                group={group}
-                values={readGroupValues(patient.projectedValues, group.id)}
+            {shownPlacements.map((placement) => (
+              <PlacementRows
+                key={placement.id}
+                placement={placement}
+                values={readPlacementValues(patient.projectedValues, placement.id)}
                 freshTapRef={freshTapRef}
-                onWrite={(itemId, stored) => writeValue(group.id, itemId, stored)}
+                onWrite={(itemId, stored) => writeValue(placement.id, itemId, stored)}
               />
             ))}
-            {oncallGroups.length > 0 ? (
+            {oncallPlacements.length > 0 ? (
               <div className="tagSelection projectionOncallRow" data-ui={UI.projection.oncall}>
-                {oncallGroups.map((group) => (
+                {oncallPlacements.map((placement) => (
                   <button
-                    key={group.id}
+                    key={placement.id}
                     type="button"
                     className="tagChip"
                     onClick={() => {
                       if (!freshTapRef.current) return;
-                      setOncallOpen(group);
+                      setOncallOpen(placement);
                     }}
                   >
-                    {group.name || s.detail.noteInput}
+                    {placement.name || s.detail.noteInput}
                   </button>
                 ))}
               </div>
             ) : null}
-            {menuGroups.length > 0 ? (
+            {menuPlacements.length > 0 ? (
               <Button
                 dataUi={UI.projection.menu}
                 aria-label={s.detail.menuOpen(section.title)}
@@ -416,23 +426,23 @@ export function ProjectionFormCard({
       })}
 
       {oncallOpen ? (
-        <OncallGroupSheet
-          group={oncallOpen}
-          initialValues={readGroupValues(patient.projectedValues, oncallOpen.id)}
+        <OncallPlacementSheet
+          placement={oncallOpen}
+          initialValues={readPlacementValues(patient.projectedValues, oncallOpen.id)}
           freshTapRef={freshTapRef}
-          onSave={(values) => saveGroup(oncallOpen.id, values)}
+          onSave={(values) => savePlacement(oncallOpen.id, values)}
           onClose={() => setOncallOpen(null)}
         />
       ) : null}
       {menuOpen ? (
-        <MenuGroupDialog
+        <MenuPlacementDialog
           section={menuOpen}
-          groups={menuOpen.groups.filter((group) =>
-            partitionSectionGroups(menuOpen, patient.projectedValues).menu.includes(group),
+          formats={menuOpen.formats.filter((placement) =>
+            partitionSectionPlacements(menuOpen, patient.projectedValues).menu.includes(placement),
           )}
-          onSelect={(group) => {
+          onSelect={(placement) => {
             setMenuOpen(null);
-            setOncallOpen(group);
+            setOncallOpen(placement);
           }}
           onClose={() => setMenuOpen(null)}
         />

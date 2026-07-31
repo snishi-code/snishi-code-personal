@@ -8,11 +8,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   decidePresetToggle,
-  groupHasInput,
+  placementHasInput,
   manualTextEntry,
   normalizeTextEntry,
   numericEntry,
-  readGroupValues,
+  readPlacementValues,
   readNumericEntry,
   readSelectValue,
   readTextValue,
@@ -166,34 +166,34 @@ describe('numericEntry', () => {
 });
 
 // ============================
-// readGroupValues / groupHasInput
+// readPlacementValues / placementHasInput
 // ============================
 
-describe('readGroupValues', () => {
+describe('readPlacementValues', () => {
   const formValues = { g1: { a: '96' } };
 
   it('該当 group のレコードを返す', () => {
-    expect(readGroupValues(formValues, 'g1')).toEqual({ a: '96' });
+    expect(readPlacementValues(formValues, 'g1')).toEqual({ a: '96' });
   });
 
   it('group 欠落・formValues 非 object・配列は空 record', () => {
-    expect(readGroupValues(formValues, 'g2')).toEqual({});
-    expect(readGroupValues(undefined, 'g1')).toEqual({});
-    expect(readGroupValues({ g1: ['96'] }, 'g1')).toEqual({});
+    expect(readPlacementValues(formValues, 'g2')).toEqual({});
+    expect(readPlacementValues(undefined, 'g1')).toEqual({});
+    expect(readPlacementValues({ g1: ['96'] }, 'g1')).toEqual({});
   });
 });
 
-describe('groupHasInput', () => {
+describe('placementHasInput', () => {
   it('value が 1 つでもあれば true', () => {
-    expect(groupHasInput({ a: { value: '96' }, b: '' })).toBe(true);
+    expect(placementHasInput({ a: { value: '96' }, b: '' })).toBe(true);
   });
 
   it('note だけでも true（酸素投与量だけ書いた状態を実入力と数える）', () => {
-    expect(groupHasInput({ a: { value: '', note: 'O2 2L' } })).toBe(true);
+    expect(placementHasInput({ a: { value: '', note: 'O2 2L' } })).toBe(true);
   });
 
   it('空・空白のみは false', () => {
-    expect(groupHasInput({})).toBe(false);
-    expect(groupHasInput({ a: '', b: '  ', c: { value: ' ', note: '' } })).toBe(false);
+    expect(placementHasInput({})).toBe(false);
+    expect(placementHasInput({ a: '', b: '  ', c: { value: ' ', note: '' } })).toBe(false);
   });
 });

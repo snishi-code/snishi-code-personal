@@ -69,8 +69,8 @@ interface Fixture {
 
 function makeFixture(): Fixture {
   const template = buildRoundPreset(NOW);
-  template.sections[1]?.groups.push({
-    id: 'grp_menu',
+  template.sections[1]?.formats.push({
+    id: 'plm_menu',
     name: '判定',
     display: 'menu',
     joiner: '\n',

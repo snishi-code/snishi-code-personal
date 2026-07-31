@@ -11,10 +11,10 @@ import { useToast } from '@snishi/foundation/ui/toast';
 import { newId } from '../data/constants';
 import {
   normalizeTemplate,
-  type GroupDisplay,
+  type PlacementDisplay,
   type ItemKind,
   type Template,
-  type TemplateGroup,
+  type PlacedFormat,
   type TemplateItem,
   type TemplateSection,
 } from '../domain/template';
@@ -34,7 +34,7 @@ function moveInArray<T>(items: T[], index: number, direction: -1 | 1): void {
 
 // DOM の select 値は許可リストで検証してから型に載せる (fail-closed: 未知値は無変更)。
 const ITEM_KINDS: readonly ItemKind[] = ['text', 'number', 'fraction', 'select'];
-const GROUP_DISPLAYS: readonly GroupDisplay[] = ['always', 'oncall', 'menu'];
+const PLACEMENT_DISPLAYS: readonly PlacementDisplay[] = ['always', 'oncall', 'menu'];
 
 export function morphItemKind(item: TemplateItem, kind: ItemKind): void {
   if (!ITEM_KINDS.includes(kind)) return;
@@ -53,7 +53,7 @@ function newItem(): TemplateItem {
   return { id: newId('itm'), label: '', kind: 'text' };
 }
 
-function newGroup(): TemplateGroup {
+function newPlacedFormat(): PlacedFormat {
   return {
     id: newId('grp'),
     name: '',
@@ -70,7 +70,7 @@ function newSection(): TemplateSection {
     id: newId('sec'),
     title: '',
     freeText: true,
-    groups: [],
+    formats: [],
   };
 }
 
@@ -181,25 +181,25 @@ export function TemplateEditView({
     });
   }
 
-  function mutateGroup(
+  function mutatePlacedFormat(
     sectionId: string,
-    groupId: string,
-    change: (group: TemplateGroup) => void,
+    placementId: string,
+    change: (placedFormat: PlacedFormat) => void,
   ): void {
     mutateSection(sectionId, (section) => {
-      const group = section.groups.find((entry) => entry.id === groupId);
-      if (group) change(group);
+      const placedFormat = section.formats.find((entry) => entry.id === placementId);
+      if (placedFormat) change(placedFormat);
     });
   }
 
   function mutateItem(
     sectionId: string,
-    groupId: string,
+    placementId: string,
     itemId: string,
     change: (item: TemplateItem) => void,
   ): void {
-    mutateGroup(sectionId, groupId, (group) => {
-      const item = group.items.find((entry) => entry.id === itemId);
+    mutatePlacedFormat(sectionId, placementId, (placedFormat) => {
+      const item = placedFormat.items.find((entry) => entry.id === itemId);
       if (item) change(item);
     });
   }
@@ -224,7 +224,7 @@ export function TemplateEditView({
     }
   }
 
-  function renderOptions(sectionId: string, groupId: string, item: TemplateItem) {
+  function renderOptions(sectionId: string, placementId: string, item: TemplateItem) {
     const options = item.options ?? [];
     return (
       <div className="templateEditOptions">
@@ -237,7 +237,7 @@ export function TemplateEditView({
               aria-label={s.tpl.itemOption(index + 1)}
               data-ui={UI.templateEdit.option}
               onChange={(event) =>
-                mutateItem(sectionId, groupId, item.id, (next) => {
+                mutateItem(sectionId, placementId, item.id, (next) => {
                   const values = [...(next.options ?? [])];
                   values[index] = event.target.value;
                   next.options = values;
@@ -250,12 +250,12 @@ export function TemplateEditView({
               // 選択肢 0 個の select は normalizeItem が項目ごと落とすため、最後の 1 つは消させない。
               disableDelete={options.length === 1}
               onMove={(direction) =>
-                mutateItem(sectionId, groupId, item.id, (next) =>
+                mutateItem(sectionId, placementId, item.id, (next) =>
                   moveInArray((next.options ??= []), index, direction),
                 )
               }
               onDelete={() =>
-                mutateItem(sectionId, groupId, item.id, (next) => {
+                mutateItem(sectionId, placementId, item.id, (next) => {
                   next.options = (next.options ?? []).filter((_, i) => i !== index);
                 })
               }
@@ -264,7 +264,7 @@ export function TemplateEditView({
         ))}
         <Button
           onClick={() =>
-            mutateItem(sectionId, groupId, item.id, (next) => (next.options ??= []).push(''))
+            mutateItem(sectionId, placementId, item.id, (next) => (next.options ??= []).push(''))
           }
         >
           {s.tpl.itemOptionAdd}
@@ -275,7 +275,7 @@ export function TemplateEditView({
 
   function renderItem(
     sectionId: string,
-    groupId: string,
+    placementId: string,
     item: TemplateItem,
     index: number,
     count: number,
@@ -290,11 +290,13 @@ export function TemplateEditView({
             index={index}
             count={count}
             onMove={(direction) =>
-              mutateGroup(sectionId, groupId, (group) => moveInArray(group.items, index, direction))
+              mutatePlacedFormat(sectionId, placementId, (placedFormat) =>
+                moveInArray(placedFormat.items, index, direction),
+              )
             }
             onDelete={() =>
-              mutateGroup(sectionId, groupId, (group) => {
-                group.items = group.items.filter((entry) => entry.id !== item.id);
+              mutatePlacedFormat(sectionId, placementId, (placedFormat) => {
+                placedFormat.items = placedFormat.items.filter((entry) => entry.id !== item.id);
               })
             }
           />
@@ -305,7 +307,12 @@ export function TemplateEditView({
             value={item.label}
             data-ui={UI.templateEdit.field}
             onChange={(event) =>
-              mutateItem(sectionId, groupId, item.id, (next) => (next.label = event.target.value))
+              mutateItem(
+                sectionId,
+                placementId,
+                item.id,
+                (next) => (next.label = event.target.value),
+              )
             }
           />
         </Field>
@@ -316,7 +323,7 @@ export function TemplateEditView({
               value={item.kind}
               data-ui={UI.templateEdit.kind}
               onChange={(event) =>
-                mutateItem(sectionId, groupId, item.id, (next) =>
+                mutateItem(sectionId, placementId, item.id, (next) =>
                   morphItemKind(next, event.target.value as ItemKind),
                 )
               }
@@ -335,7 +342,7 @@ export function TemplateEditView({
                 onChange={(event) =>
                   mutateItem(
                     sectionId,
-                    groupId,
+                    placementId,
                     item.id,
                     (next) => (next.normal = event.target.value),
                   )
@@ -350,7 +357,7 @@ export function TemplateEditView({
                 onChange={(event) =>
                   mutateItem(
                     sectionId,
-                    groupId,
+                    placementId,
                     item.id,
                     (next) => (next.unit = event.target.value),
                   )
@@ -359,12 +366,12 @@ export function TemplateEditView({
             </Field>
           )}
         </div>
-        {item.kind === 'select' ? renderOptions(sectionId, groupId, item) : null}
+        {item.kind === 'select' ? renderOptions(sectionId, placementId, item) : null}
         <CheckRow
           label={s.tpl.itemShowLabel}
           checked={item.showLabel !== false}
           onChange={(checked) =>
-            mutateItem(sectionId, groupId, item.id, (next) => {
+            mutateItem(sectionId, placementId, item.id, (next) => {
               if (checked) delete next.showLabel;
               else next.showLabel = false;
             })
@@ -374,24 +381,31 @@ export function TemplateEditView({
     );
   }
 
-  function renderGroup(sectionId: string, group: TemplateGroup, index: number, count: number) {
+  function renderPlacedFormat(
+    sectionId: string,
+    placedFormat: PlacedFormat,
+    index: number,
+    count: number,
+  ) {
     return (
       <section
-        className="card panelCard templateEditGroup"
-        key={group.id}
-        data-ui={UI.templateEdit.group}
+        className="card panelCard templateEditPlacement"
+        key={placedFormat.id}
+        data-ui={UI.templateEdit.placement}
       >
         <div className="formatListRow">
-          <span className="pickerRowLabel">{group.name || `${s.tpl.groups} ${index + 1}`}</span>
+          <span className="pickerRowLabel">
+            {placedFormat.name || `${s.tpl.formats} ${index + 1}`}
+          </span>
           <RowTools
             index={index}
             count={count}
             onMove={(direction) =>
-              mutateSection(sectionId, (section) => moveInArray(section.groups, index, direction))
+              mutateSection(sectionId, (section) => moveInArray(section.formats, index, direction))
             }
             onDelete={() =>
               mutateSection(sectionId, (section) => {
-                section.groups = section.groups.filter((entry) => entry.id !== group.id);
+                section.formats = section.formats.filter((entry) => entry.id !== placedFormat.id);
               })
             }
           />
@@ -399,21 +413,25 @@ export function TemplateEditView({
         <Field label={s.tpl.groupName}>
           <input
             className="input"
-            value={group.name}
+            value={placedFormat.name}
             onChange={(event) =>
-              mutateGroup(sectionId, group.id, (next) => (next.name = event.target.value))
+              mutatePlacedFormat(
+                sectionId,
+                placedFormat.id,
+                (next) => (next.name = event.target.value),
+              )
             }
           />
         </Field>
         <Field label={s.tpl.groupDisplay}>
           <select
             className="select"
-            value={group.display}
+            value={placedFormat.display}
             data-ui={UI.templateEdit.display}
             onChange={(event) => {
-              const display = event.target.value as GroupDisplay;
-              if (!GROUP_DISPLAYS.includes(display)) return;
-              mutateGroup(sectionId, group.id, (next) => (next.display = display));
+              const display = event.target.value as PlacementDisplay;
+              if (!PLACEMENT_DISPLAYS.includes(display)) return;
+              mutatePlacedFormat(sectionId, placedFormat.id, (next) => (next.display = display));
             }}
           >
             <option value="always">{s.tpl.groupDisplayAlways}</option>
@@ -424,12 +442,16 @@ export function TemplateEditView({
         <Field label={s.tpl.groupJoiner}>
           <select
             className="select"
-            value={group.joiner}
+            value={placedFormat.joiner}
             onChange={(event) =>
-              mutateGroup(sectionId, group.id, (next) => (next.joiner = event.target.value))
+              mutatePlacedFormat(
+                sectionId,
+                placedFormat.id,
+                (next) => (next.joiner = event.target.value),
+              )
             }
           >
-            {selectOptions(JOINERS, group.joiner).map((option) => (
+            {selectOptions(JOINERS, placedFormat.joiner).map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
@@ -439,23 +461,29 @@ export function TemplateEditView({
         <Field label={s.tpl.groupLabelSep}>
           <select
             className="select"
-            value={group.labelSep}
+            value={placedFormat.labelSep}
             onChange={(event) =>
-              mutateGroup(sectionId, group.id, (next) => (next.labelSep = event.target.value))
+              mutatePlacedFormat(
+                sectionId,
+                placedFormat.id,
+                (next) => (next.labelSep = event.target.value),
+              )
             }
           >
-            {selectOptions(LABEL_SEPS, group.labelSep).map((option) => (
+            {selectOptions(LABEL_SEPS, placedFormat.labelSep).map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
           </select>
         </Field>
-        {group.items.map((item, itemIndex) =>
-          renderItem(sectionId, group.id, item, itemIndex, group.items.length),
+        {placedFormat.items.map((item, itemIndex) =>
+          renderItem(sectionId, placedFormat.id, item, itemIndex, placedFormat.items.length),
         )}
         <Button
-          onClick={() => mutateGroup(sectionId, group.id, (next) => next.items.push(newItem()))}
+          onClick={() =>
+            mutatePlacedFormat(sectionId, placedFormat.id, (next) => next.items.push(newItem()))
+          }
         >
           {s.tpl.itemAdd}
         </Button>
@@ -508,10 +536,12 @@ export function TemplateEditView({
           checked={section.freeText}
           onChange={(checked) => mutateSection(section.id, (next) => (next.freeText = checked))}
         />
-        {section.groups.map((group, groupIndex) =>
-          renderGroup(section.id, group, groupIndex, section.groups.length),
+        {section.formats.map((placedFormat, placementIndex) =>
+          renderPlacedFormat(section.id, placedFormat, placementIndex, section.formats.length),
         )}
-        <Button onClick={() => mutateSection(section.id, (next) => next.groups.push(newGroup()))}>
+        <Button
+          onClick={() => mutateSection(section.id, (next) => next.formats.push(newPlacedFormat()))}
+        >
           {s.tpl.groupAdd}
         </Button>
       </section>
