@@ -21,7 +21,7 @@ import { reportEntriesForAsOf } from '../../domain/reportEntries';
 import { periodRange, type ReportPeriod } from '../../domain/reportPeriod';
 import { isDebitNormal } from '../../domain/accounting';
 import {
-  isMonthlyCostRecognitionEntry,
+  isContinuousCostRecognitionEntry,
   isNormalExpenseEntry,
 } from '../../domain/livingCost';
 import { tagNames } from '../tagOptions';
@@ -316,7 +316,7 @@ export function Journal({
             const isMonthlyCost =
               md?.monthlyCostId !== undefined ||
               md?.continuousCostId !== undefined ||
-              isMonthlyCostRecognitionEntry(entry);
+              isContinuousCostRecognitionEntry(entry);
             const isAdjustment = !!md?.adjustment;
             const displayedAmount = entry.lines.find((line) => line.side === 'debit')?.amount ?? 0;
             // 科目ドリル中だけ、その科目の自然な残高符号で増減を示す。金額自体には符号を付けない。

@@ -7,7 +7,7 @@
  */
 import { compareAccountOrder } from './accountOrder';
 import { isDebitNormal } from './accounting';
-import { isMonthlyCostRecognitionEntry } from './livingCost';
+import { isContinuousCostRecognitionEntry } from './livingCost';
 import type { Account, JournalEntry } from './types';
 
 export type PeriodMatrixScope =
@@ -188,7 +188,7 @@ export function buildPeriodMatrix(
       const flowKey =
         scope.mode === 'year' ? entry.date.slice(0, 7) : entry.date.slice(0, 4);
       const flowColumnIndex = flowColumnByKey.get(flowKey);
-      const recognition = isMonthlyCostRecognitionEntry(entry);
+      const recognition = isContinuousCostRecognitionEntry(entry);
 
       for (const line of entry.lines) {
         const account = accountById.get(line.accountId);

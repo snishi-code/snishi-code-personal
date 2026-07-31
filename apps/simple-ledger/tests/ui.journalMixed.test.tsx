@@ -6,7 +6,7 @@
  *  - from/to には展開上限（2100-12-31）の max が付く
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider, useLedger } from '../src/state/store';
@@ -352,30 +352,5 @@ describe('仕訳一覧の混合表示', () => {
     expect(amount).not.toHaveClass('amount--pos');
     expect(amount).not.toHaveClass('amount--neg');
     expect(amount).not.toHaveAttribute('aria-label');
-  });
-
-  it('印付きの過去実仕訳にも継続コストタグを表示する', async () => {
-    const ledger = await loadLedger();
-    const asset = ledger.accounts.find((account) => account.role === 'daily-asset')!;
-    const expense = ledger.accounts.find((account) => account.role === 'expense-category')!;
-    const today = todayLocal();
-    const timestamp = `${today}T00:00:00.000Z`;
-    await upsertEntry({
-      id: 'marked-monthly-cost-recognition',
-      date: today,
-      description: '過去帳簿の償却',
-      kind: 'normal',
-      lines: [
-        { accountId: expense.id, side: 'debit', amount: 2400 },
-        { accountId: asset.id, side: 'credit', amount: 2400 },
-      ],
-      metadata: { monthlyCostRecognition: true },
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    });
-
-    render(<View />);
-    const row = (await screen.findByText('過去帳簿の償却')).closest('li')!;
-    expect(within(row).getByText('継続コスト')).toBeInTheDocument();
   });
 });

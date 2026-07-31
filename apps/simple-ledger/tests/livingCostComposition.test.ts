@@ -109,7 +109,7 @@ describe('生活コストの二重計上防止（PL 費用の構成）', () => {
     expect(categories.reduce((sum, row) => sum + row.amount, 0)).toBe(pl.totalExpense);
   });
 
-  it('通常支出フィルタは費用借方の実仕訳・補正だけを残し、仮想/印付きの継続コスト認識・収入・振替を除く', () => {
+  it('通常支出フィルタは費用借方の実仕訳・補正だけを残し、仮想の継続コスト認識・収入・振替を除く', () => {
     const accountById = new Map(accounts.map((account) => [account.id, account] as const));
     const normal = entry('normal', '2031-07-03', 'food', 'cash', 1000);
     const adjustment = entry('adjustment', '2031-07-04', 'adjustExpense', 'cash', 24);
@@ -121,54 +121,28 @@ describe('生活コストの二重計上防止（PL 費用の構成）', () => {
         ccKind: 'recognition',
       },
     };
-    const markedRecognition: JournalEntry = {
-      ...entry('marked-recognition', '2031-07-05', 'food', 'cash', 600),
-      metadata: { monthlyCostRecognition: true },
-    };
     const income = entry('income', '2031-07-06', 'cash', 'income', 3000);
     const transfer = entry('transfer', '2031-07-07', 'res', 'cash', 2000);
 
     expect(
-      [normal, adjustment, recognition, markedRecognition, income, transfer]
+      [normal, adjustment, recognition, income, transfer]
         .filter((candidate) => isNormalExpenseEntry(candidate, accountById))
         .map((candidate) => candidate.id),
     ).toEqual(['normal', 'adjustment']);
   });
 
-  it('印付き実仕訳を通常支出から除外し、継続コスト枠へ分類する', () => {
-    const markedRecognition: JournalEntry = {
-      ...entry('marked-recognition', '2031-07-05', 'food', 'cash', 600),
-      metadata: { monthlyCostRecognition: true },
+  it('仮想認識の貸方は継続コストを減額し、通常支出へ混ぜない', () => {
+    const recognition: JournalEntry = {
+      ...entry('recognition', '2031-07-05', 'food', 'continuing', 600),
+      metadata: { virtual: true, continuousCostId: 'cc-1', ccKind: 'recognition' },
+    };
+    const reversal: JournalEntry = {
+      ...entry('recognition-reversal', '2031-07-06', 'continuing', 'food', 200),
+      metadata: { virtual: true, continuousCostId: 'cc-1', ccKind: 'recognition' },
     };
     const living = livingCostBreakdownForRange(
       accounts,
-      [entry('normal', '2031-07-03', 'food', 'cash', 1000), markedRecognition],
-      month,
-    );
-
-    expect(living).toEqual({ normalExpense: 1000, monthlyCost: 600, total: 1600 });
-  });
-
-  it('印付き実仕訳の取消は継続コストを減額し、通常支出へ混ぜない', () => {
-    const markedRecognition: JournalEntry = {
-      ...entry('marked-recognition', '2031-07-05', 'food', 'cash', 600),
-      metadata: { monthlyCostRecognition: true },
-    };
-    const markedReversal: JournalEntry = {
-      ...entry('marked-reversal', '2031-07-06', 'cash', 'food', 200),
-      metadata: {
-        inputMode: 'reversal',
-        reversalOfEntryId: markedRecognition.id,
-        monthlyCostRecognition: true,
-      },
-    };
-    const living = livingCostBreakdownForRange(
-      accounts,
-      [
-        entry('normal', '2031-07-03', 'food', 'cash', 1000),
-        markedRecognition,
-        markedReversal,
-      ],
+      [entry('normal', '2031-07-03', 'food', 'cash', 1000), recognition, reversal],
       month,
     );
 

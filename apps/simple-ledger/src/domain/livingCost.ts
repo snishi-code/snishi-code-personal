@@ -2,11 +2,11 @@
  * 支出（= ホームの「支出」）の集計。資産経由モデルの単一正本。
  *
  * 入力は **導出専用 entries（`reportEntriesForAsOf` = 実仕訳 + 継続コスト等の仮想仕訳）**。
- * 継続コストは仮想認識 `借方 費用カテゴリ / 貸方 対象資産`(metadata.ccKind==='recognition')、
- * または旧帳簿から取り込んだ印付き実仕訳(metadata.monthlyCostRecognition===true)として
- * すでに PL の費用に含まれるため、**formula を別途足さない**（二重計上しない）。
+ * 継続コストは仮想認識 `借方 費用カテゴリ / 貸方 対象資産`
+ * (`metadata.ccKind==='recognition'`) としてすでに PL の費用に含まれるため、
+ * **formula を別途足さない**（二重計上しない）。
  *
- *  - 通常支出 = 期間内の費用 − 継続コスト認識（仮想仕訳 + 印付き実仕訳）。
+ *  - 通常支出 = 期間内の費用 − 継続コスト認識（仮想仕訳）。
  *  - 継続コスト = 期間内の継続コスト認識の合計。
  *  - 支出合計 = 通常支出 + 継続コスト（= PL の費用合計）。
  * 補正による費用も通常の支出として含める。返済・振替・資産化(funding)は費用ではないので
@@ -34,21 +34,18 @@ export interface ExpenseCategoryAmount {
 /**
  * 仕訳一覧で「通常支出」に分類する判定の単一正本。
  *
- * 借方に費用科目を持つ仕訳のうち、継続コストの導出認識・印付き実仕訳を除外する。
+ * 借方に費用科目を持つ仕訳のうち、継続コストの導出認識を除外する。
  * inputMode や adjustment の有無には依存しないため、簿記編集・残高補正も通常支出に含まれる。
  */
-export function isMonthlyCostRecognitionEntry(entry: JournalEntry): boolean {
-  return (
-    entry.metadata?.ccKind === 'recognition' ||
-    entry.metadata?.monthlyCostRecognition === true
-  );
+export function isContinuousCostRecognitionEntry(entry: JournalEntry): boolean {
+  return entry.metadata?.ccKind === 'recognition';
 }
 
 export function isNormalExpenseEntry(
   entry: JournalEntry,
   accountById: ReadonlyMap<string, Account>,
 ): boolean {
-  if (isMonthlyCostRecognitionEntry(entry)) return false;
+  if (isContinuousCostRecognitionEntry(entry)) return false;
   return entry.lines.some(
     (line) => line.side === 'debit' && accountById.get(line.accountId)?.type === 'expense',
   );
@@ -69,10 +66,9 @@ export function livingCostBreakdownForRange(
   let continuing = 0;
   for (const e of entries) {
     if (!within(e)) continue;
-    if (isMonthlyCostRecognitionEntry(e)) {
+    if (isContinuousCostRecognitionEntry(e)) {
       // 継続コストの認識先は任意の勘定科目にできる。生活コストとして数えるのは費用科目への
-      // 純増減だけ（借方 + / 貸方 -）。印付き実仕訳の取消・部分返金も継続コスト枠で相殺し、
-      // 通常支出のマイナスへ流さない。
+      // 純増減だけ（借方 + / 貸方 -）。
       for (const line of e.lines) {
         if (accountById.get(line.accountId)?.type !== 'expense') continue;
         continuing += line.side === 'debit' ? line.amount : -line.amount;

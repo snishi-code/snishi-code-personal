@@ -74,9 +74,7 @@ export function validateSimpleEntry(input: Partial<SimpleEntryInput>): EntryVali
 function cleanMetadata(meta: EntryMetadata | undefined): EntryMetadata | undefined {
   if (!meta) return undefined;
   const has =
-    meta.inputMode !== undefined ||
-    meta.reversalOfEntryId !== undefined ||
-    meta.monthlyCostRecognition === true;
+    meta.inputMode !== undefined || meta.reversalOfEntryId !== undefined;
   return has ? meta : undefined;
 }
 
@@ -143,10 +141,6 @@ export function reversalInput(source: JournalEntry): SimpleEntryInput {
     metadata: {
       inputMode: 'reversal',
       reversalOfEntryId: source.id,
-      // 旧帳簿の継続コスト認識を取り消す場合も同じ分類へ戻し、通常支出へ混ぜない。
-      ...(source.metadata?.monthlyCostRecognition === true
-        ? { monthlyCostRecognition: true as const }
-        : {}),
     },
   };
 }

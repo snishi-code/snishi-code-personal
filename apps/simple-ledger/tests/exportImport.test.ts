@@ -20,6 +20,8 @@ import {
 import { buildSimpleEntry } from '../src/domain/entry';
 import { APP_ID } from '../src/domain/constants';
 
+const removedRecognitionKey = ['monthly', 'Cost', 'Recognition'].join('');
+
 async function seedWithEntry() {
   const ledger = await loadLedger(); // 既定科目を投入
   const cash = ledger.accounts.find((a) => a.name === '現金')!;
@@ -56,36 +58,19 @@ describe('export/import round trip', () => {
     expect(snaps[0]?.reason).toBe('import前');
   });
 
-  it('台帳に触れない継続コスト認識印を保存・編集で保持し、export→import できる', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    const marked = buildSimpleEntry({
-      date: '2026-03-31',
-      description: '償却 旧帳簿',
-      debitAccountId: food.id,
-      creditAccountId: cash.id,
-      amount: 1000,
-      metadata: { monthlyCostRecognition: true },
-    });
-    await upsertEntry(marked);
+  it('廃止済みの分類印を未知キーとして strip し、旧 JSON の取り込みは受理する', async () => {
+    const ledger = await seedWithEntry();
+    const exported = JSON.parse(exportToJsonText(ledger)) as {
+      journalEntries: Array<{ metadata?: Record<string, unknown> }>;
+    };
+    const first = exported.journalEntries[0]!;
+    first.metadata = { ...first.metadata, [removedRecognitionKey]: true };
 
-    const saved = (await loadLedger()).journalEntries.find((entry) => entry.id === marked.id)!;
-    const editWithoutMetadata = { ...saved };
-    delete editWithoutMetadata.metadata;
-    await upsertEntry({ ...editWithoutMetadata, description: '償却 旧帳簿（編集済み）' });
-    const edited = await loadLedger();
-    expect(
-      edited.journalEntries.find((entry) => entry.id === marked.id)?.metadata
-        ?.monthlyCostRecognition,
-    ).toBe(true);
-
-    const outcome = await importFromJsonText(exportToJsonText(edited));
+    const outcome = await importFromJsonText(JSON.stringify(exported));
     expect(outcome.kind).toBe('ok');
-    expect(
-      (await loadLedger()).journalEntries.find((entry) => entry.id === marked.id)?.metadata
-        ?.monthlyCostRecognition,
-    ).toBe(true);
+    expect((await loadLedger()).journalEntries[0]?.metadata).not.toHaveProperty(
+      removedRecognitionKey,
+    );
   });
 });
 

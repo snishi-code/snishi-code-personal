@@ -142,8 +142,6 @@ export const entryMetadataSchema = z
     // 継続コスト資産に紐づく保存仕訳の印。recovery なし = 購入の仕訳 / あり = 回収の振替。
     monthlyCostId: z.string().min(1).optional(),
     monthlyCostRecovery: z.literal(true).optional(),
-    // 旧帳簿の実仕訳を継続コスト認識として分類する印。台帳・monthlyCostId とは独立。
-    monthlyCostRecognition: z.literal(true).optional(),
     // 定期ルールからの自動起票の由来（両方セットで持つ。整合はパッケージ superRefine）。
     recurringRuleId: z.string().min(1).optional(),
     recurringMonth: monthSchema.optional(),

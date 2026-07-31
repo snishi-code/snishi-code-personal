@@ -117,11 +117,6 @@ export interface EntryMetadata {
   /** 回収の振替の印（monthlyCostId とペア。貸方 = 継続コスト台帳）。 */
   monthlyCostRecovery?: true;
   /**
-   * 旧帳簿から取り込んだ実仕訳を継続コスト認識として分類する印。
-   * 台帳への接触や monthlyCostId を必要とせず、通常の保存仕訳に単独で付けられる。
-   */
-  monthlyCostRecognition?: true;
-  /**
    * 継続コスト（資産経由モデル）の仮想仕訳の印。これらは **保存されない導出専用**で、
    * `reportEntriesForAsOf` の結果にのみ現れる。実仕訳(`journalEntries`)・保存系・export には入れない。
    */

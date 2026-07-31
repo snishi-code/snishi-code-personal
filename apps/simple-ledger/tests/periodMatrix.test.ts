@@ -108,7 +108,7 @@ describe('buildPeriodMatrix（年間）', () => {
     expect(matrix.rows.netAssets[1]).toBe(matrix.rows.totalAssets[1]! - 250);
   });
 
-  it('導出・印付き実仕訳・その取消を継続コストの費用純増減として相殺する', () => {
+  it('導出認識だけを継続コストの費用純増減へ分類する', () => {
     const matrix = buildPeriodMatrix(
       accounts,
       [
@@ -118,25 +118,17 @@ describe('buildPeriodMatrix（年間）', () => {
           virtual: true,
           ccKind: 'recognition',
         }),
-        entry('marked', '2026-01-10', 'food', 'cash', 80, {
-          monthlyCostRecognition: true,
-        }),
-        entry('marked-reversal', '2026-01-20', 'cash', 'food', 30, {
-          inputMode: 'reversal',
-          reversalOfEntryId: 'marked',
-          monthlyCostRecognition: true,
-        }),
         entry('normal', '2026-01-25', 'food', 'cash', 50),
       ],
       { mode: 'year', year: 2026 },
       '2026-12-31',
     );
 
-    expect(matrix.rows.expense[0]).toBe(220);
-    expect(matrix.rows.monthlyCost[0]).toBe(170);
+    expect(matrix.rows.expense[0]).toBe(170);
+    expect(matrix.rows.monthlyCost[0]).toBe(120);
     expect(matrix.expenseCategories.map(({ account: a }) => a.id)).toEqual(['fixed', 'food']);
     expect(matrix.expenseCategories[0]?.values[0]).toBe(120);
-    expect(matrix.expenseCategories[1]?.values[0]).toBe(100);
+    expect(matrix.expenseCategories[1]?.values[0]).toBe(50);
   });
 
   it('全表示列が 0 のカテゴリを除外し、月ごとに増減があれば通期純額 0 でも残す', () => {

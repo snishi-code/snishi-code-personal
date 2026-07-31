@@ -26,6 +26,7 @@ const validEntry = {
   createdAt: '2026-06-01T00:00:00.000Z',
   updatedAt: '2026-06-01T00:00:00.000Z',
 };
+const removedRecognitionKey = ['monthly', 'Cost', 'Recognition'].join('');
 
 describe('journalEntrySchema', () => {
   it('借方=貸方の仕訳を受け入れる', () => {
@@ -251,7 +252,7 @@ describe('entry metadata', () => {
           metadata: {
             inputMode: 'reversal',
             reversalOfEntryId: 'z',
-            monthlyCostRecognition: true,
+            [removedRecognitionKey]: true,
           },
         },
       ],
@@ -265,8 +266,8 @@ describe('entry metadata', () => {
     expect(parsed.success).toBe(true);
     if (parsed.success) {
       expect(parsed.data.journalEntries[0]?.metadata?.inputMode).toBe('reversal');
-      // 台帳科目・monthlyCostId に触れない通常の実仕訳でも印を受理し、strip しない。
-      expect(parsed.data.journalEntries[0]?.metadata?.monthlyCostRecognition).toBe(true);
+      // 廃止済みの旧分類印は未知キーとして strip し、JSON 全体の受理は維持する。
+      expect(parsed.data.journalEntries[0]?.metadata).not.toHaveProperty(removedRecognitionKey);
     }
   });
 });
