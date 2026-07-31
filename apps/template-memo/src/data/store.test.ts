@@ -34,6 +34,7 @@ import {
 import { countActivePatients, createHrSnapshots, REASON } from './snapshots';
 import { applyRoundStartClear } from '../domain/clearPolicy';
 import { normalizePatientArray } from '../domain/normalize';
+import type { TemplatePresetBundle } from '../domain/presets';
 import type { Patient } from '../domain/types';
 
 // ── テスト用 DB（本番 db.ts と同じ store 構成。テストごとに一意な DB 名で分離） ──
@@ -76,6 +77,16 @@ function livePatient(store: HrStore, pid: string): Patient {
   const p = store.getAppState().patients.find((x) => x.pid === pid);
   if (!p) throw new Error(`test: live patient not found: ${pid}`);
   return p;
+}
+
+function activeBundle(store: HrStore): TemplatePresetBundle {
+  const template = store
+    .getTemplateDefs()
+    .find((candidate) => candidate.id === store.getSettings().activeTemplateId)!;
+  const frame = store.getFrames().find((candidate) => candidate.id === template.frameId)!;
+  const formatIds = new Set(template.placements.map((placement) => placement.formatId));
+  const formats = store.getFormats().filter((format) => formatIds.has(format.id));
+  return structuredClone({ frame, formats, template });
 }
 
 // この vitest 環境の global localStorage は Node のスタブ（getItem 等のメソッド無し）で、
@@ -223,6 +234,86 @@ describe('正規化テンプレート部品 CRUD', () => {
     const reopened = await reopen(db);
     expect(reopened.getTemplateDefs().map((template) => template.name)).toEqual(['日報']);
     expect(reopened.getActiveTemplate()?.name).toBe('日報');
+  });
+
+  it('生成一式は全 ID を再採番して 1 tx で追加し、既存行・active・対象入力を変えない', async () => {
+    const { db, store } = await setup();
+    const pid = await store.createPatientInActivePlace('入力中');
+    livePatient(store, pid).projectedValues = { plm_existing: { itm_existing: { value: '42' } } };
+    await store.persistActiveOrThrow();
+
+    // 既存一式そのもの（既存 ID を含む）を渡し、upsert されない二重防御を検証する。
+    const bundle = activeBundle(store);
+    const beforeSettings = structuredClone(store.getSettings());
+    const beforeFrameRows = structuredClone(await db.getAll(STORE_FRAMES));
+    const beforeFormatRows = structuredClone(await db.getAll(STORE_FORMATS));
+    const beforeTemplateRows = structuredClone(await db.getAll(STORE_TEMPLATES));
+
+    await store.saveGeneratedBundle(bundle);
+
+    for (const row of beforeFrameRows as Array<{ id: string }>) {
+      expect(await db.get(STORE_FRAMES, row.id)).toEqual(row);
+    }
+    for (const row of beforeFormatRows as Array<{ id: string }>) {
+      expect(await db.get(STORE_FORMATS, row.id)).toEqual(row);
+    }
+    for (const row of beforeTemplateRows as Array<{ id: string }>) {
+      expect(await db.get(STORE_TEMPLATES, row.id)).toEqual(row);
+    }
+    expect(store.getFrames().at(-1)?.name).toBe(`${bundle.frame.name} (2)`);
+    expect(store.getTemplateDefs().at(-1)?.name).toBe(`${bundle.template.name} (2)`);
+    expect(
+      store
+        .getFormats()
+        .slice(-bundle.formats.length)
+        .map((format) => format.name),
+    ).toEqual(bundle.formats.map((format) => `${format.name} (2)`));
+    expect(store.getSettings()).toEqual(beforeSettings);
+    expect(livePatient(store, pid).projectedValues).toEqual({
+      plm_existing: { itm_existing: { value: '42' } },
+    });
+
+    const registered = store.getTemplateDefs().at(-1)!;
+    expect(registered.id).not.toBe(bundle.template.id);
+    expect(registered.frameId).not.toBe(bundle.frame.id);
+    expect(registered.placements.map((placement) => placement.id)).not.toEqual(
+      bundle.template.placements.map((placement) => placement.id),
+    );
+    expect(store.getActiveTemplate()?.id).toBe(beforeSettings.activeTemplateId);
+  });
+
+  it('生成一式の書き込み途中で失敗してもフレーム・フォーマット・テンプレートを残さない', async () => {
+    const db = makeTestDb();
+    let failGeneratedWrite = false;
+    const failingDb: DatabaseHandle = {
+      ...db,
+      runWrite(stores, fn) {
+        return db.runWrite(stores, (tx) => {
+          fn(tx);
+          if (failGeneratedWrite && stores.includes(STORE_TEMPLATES)) {
+            throw new Error('test: generated write failed');
+          }
+        });
+      },
+    };
+    const store = createHrStore({ db: failingDb });
+    await store.initStore();
+    const bundle = activeBundle(store);
+    const before = {
+      frames: structuredClone(await db.getAll(STORE_FRAMES)),
+      formats: structuredClone(await db.getAll(STORE_FORMATS)),
+      templates: structuredClone(await db.getAll(STORE_TEMPLATES)),
+    };
+
+    failGeneratedWrite = true;
+    await expect(store.saveGeneratedBundle(bundle)).rejects.toThrow('test: generated write failed');
+
+    expect(await db.getAll(STORE_FRAMES)).toEqual(before.frames);
+    expect(await db.getAll(STORE_FORMATS)).toEqual(before.formats);
+    expect(await db.getAll(STORE_TEMPLATES)).toEqual(before.templates);
+    expect(store.getFrames()).toHaveLength(before.frames.length);
+    expect(store.getFormats()).toHaveLength(before.formats.length);
+    expect(store.getTemplateDefs()).toHaveLength(before.templates.length);
   });
 });
 

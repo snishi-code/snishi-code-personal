@@ -9,6 +9,7 @@
 //   - 追加 API はテンプレート/設定/バックアップ (旧 v1 store の機能を HrStore へ集約)。
 
 import { createPointerStore, type PointerStore } from '@snishi/foundation/storage/pointers';
+import { uniqueName } from '@snishi/foundation/qr/protocol';
 import { nextGroupRevision } from '@snishi/foundation/sync/revision';
 import {
   ALL_STORES,
@@ -35,6 +36,7 @@ import {
 } from '../domain/entities';
 import { resolveTemplate } from '../domain/resolveTemplate';
 import { buildDailyReportPreset, buildRoundPreset } from '../domain/presets';
+import type { TemplatePresetBundle } from '../domain/presets';
 import { makeDefaultPatient, normalizePatientArray } from '../domain/normalize';
 import {
   prepareWorkspaceImportAppend,
@@ -114,6 +116,7 @@ export interface HrStore {
   duplicateFormat(formatId: string): Promise<Format>;
   getTemplateDefs(): TemplateDef[];
   saveTemplateDef(template: TemplateDef): Promise<void>;
+  saveGeneratedBundle(bundle: TemplatePresetBundle): Promise<void>;
   deleteTemplateDef(templateId: string): Promise<void>;
   getActiveTemplate(): Template | null;
   setActiveTemplate(templateId: string): Promise<void>;
@@ -501,6 +504,109 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
       templateDefs = templateDefs.some((candidate) => candidate.id === normalized.id)
         ? templateDefs.map((candidate) => (candidate.id === normalized.id ? normalized : candidate))
         : [...templateDefs, normalized];
+      emit({ type: 'workspace', workspaceId: activeViewId() });
+    },
+    async saveGeneratedBundle(bundle) {
+      // 受け取った ID は信用せず、参照関係を保ったまま全て採番し直す。
+      // これにより、呼び出し側の不具合や細工された入力があっても既存行を upsert しない。
+      const sourceFrame = normalizeFrame(bundle.frame);
+      const sourceFormats = bundle.formats.map(normalizeFormat);
+      if (!sourceFrame || sourceFormats.some((format) => !format)) {
+        throw new Error('生成されたテンプレート一式の形式が不正です');
+      }
+      const validSourceFormats = sourceFormats as Format[];
+      const sourceTemplate = normalizeTemplateDef(bundle.template, {
+        frames: [sourceFrame],
+        formats: validSourceFormats,
+      });
+      if (
+        !sourceTemplate ||
+        sourceTemplate.placements.length !== bundle.template.placements.length ||
+        new Set(sourceFrame.sections.map((section) => section.id)).size !==
+          sourceFrame.sections.length ||
+        new Set(validSourceFormats.map((format) => format.id)).size !== validSourceFormats.length
+      ) {
+        throw new Error('生成されたテンプレート一式の参照が不正です');
+      }
+
+      const sectionIdMap = new Map(
+        sourceFrame.sections.map((section) => [section.id, newId('sec')] as const),
+      );
+      const frame: Frame = {
+        ...sourceFrame,
+        id: newId('frm'),
+        name: uniqueName(
+          sourceFrame.name,
+          frames.map((candidate) => candidate.name),
+        ),
+        sections: sourceFrame.sections.map((section) => ({
+          ...section,
+          id: sectionIdMap.get(section.id)!,
+        })),
+      };
+
+      const usedFormatNames = new Set(formats.map((candidate) => candidate.name));
+      const formatIdMap = new Map<string, string>();
+      const generatedFormats: Format[] = validSourceFormats.map((source) => {
+        const id = newId('fmt');
+        formatIdMap.set(source.id, id);
+        const name = uniqueName(source.name, usedFormatNames);
+        usedFormatNames.add(name);
+        return {
+          ...source,
+          id,
+          name,
+          items: source.items.map((item) => ({ ...item, id: newId('itm') })),
+        };
+      });
+
+      const generatedTemplate: TemplateDef = {
+        ...sourceTemplate,
+        id: newId('tpl'),
+        name: uniqueName(
+          sourceTemplate.name,
+          templateDefs.map((candidate) => candidate.name),
+        ),
+        frameId: frame.id,
+        memoSectionId: sourceTemplate.memoSectionId
+          ? (sectionIdMap.get(sourceTemplate.memoSectionId) ?? null)
+          : null,
+        placements: sourceTemplate.placements.map((placement) => ({
+          ...placement,
+          id: newId('plm'),
+          sectionId: sectionIdMap.get(placement.sectionId)!,
+          formatId: formatIdMap.get(placement.formatId)!,
+        })),
+      };
+
+      // 永続化直前にも正規化する。ここで要素が落ちる状態はビルダー側の不具合なので保存しない。
+      const normalizedFrame = normalizeFrame(frame);
+      const normalizedFormats = generatedFormats.map(normalizeFormat);
+      if (!normalizedFrame || normalizedFormats.some((format) => !format)) {
+        throw new Error('生成されたテンプレート一式を正規化できませんでした');
+      }
+      const validFormats = normalizedFormats as Format[];
+      const normalizedTemplate = normalizeTemplateDef(generatedTemplate, {
+        frames: [normalizedFrame],
+        formats: validFormats,
+      });
+      if (
+        !normalizedTemplate ||
+        normalizedTemplate.placements.length !== generatedTemplate.placements.length
+      ) {
+        throw new Error('生成されたテンプレート一式を正規化できませんでした');
+      }
+
+      await db.runWrite([STORE_FRAMES, STORE_FORMATS, STORE_TEMPLATES], (tx) => {
+        tx.objectStore(STORE_FRAMES).put(normalizedFrame);
+        for (const format of validFormats) tx.objectStore(STORE_FORMATS).put(format);
+        tx.objectStore(STORE_TEMPLATES).put(normalizedTemplate);
+      });
+
+      // メモリ上の表示もトランザクション完了後だけ更新する。settings と active は変更しない。
+      frames = [...frames, normalizedFrame];
+      formats = [...formats, ...validFormats];
+      templateDefs = [...templateDefs, normalizedTemplate];
       emit({ type: 'workspace', workspaceId: activeViewId() });
     },
     async deleteTemplateDef(templateId) {
