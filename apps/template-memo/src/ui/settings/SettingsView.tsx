@@ -25,6 +25,7 @@ import {
   type WorkspaceImportData,
 } from '../../domain/importWorkspace';
 import type { Template } from '../../domain/template';
+import type { Format, Frame, TemplateDef } from '../../domain/entities';
 import { buildDailyReportPreset, buildRoundPreset } from '../../domain/presets';
 import { newId } from '../../data/constants';
 import { REASON } from '../../data/snapshots';
@@ -37,6 +38,8 @@ import { downloadTextFile, pickTextFile } from '../files';
 import { TemplateQrSendDialog } from '../TemplateQrSendDialog';
 import { TemplateQrReceiveDialog } from '../TemplateQrReceiveDialog';
 import { TemplateEditView } from '../TemplateEditView';
+import { FrameEditView } from '../FrameEditView';
+import { FormatEditView } from '../FormatEditView';
 import { errorText, s } from '../../i18n';
 import { UI } from '../../ui-contract';
 
@@ -190,16 +193,17 @@ function TemplateSection({
   onEdit,
 }: {
   runtime: AppRuntime;
-  onEdit: (template: Template) => void;
+  onEdit: (template: TemplateDef) => void;
 }) {
   const toast = useToast();
   useRevision(runtime);
   const { store } = runtime;
-  const templates = store.getTemplates();
+  const templates = store.getTemplateDefs();
+  const resolvedTemplates = store.getTemplates();
   const activeId = store.getSettings().activeTemplateId;
   const [sendTarget, setSendTarget] = useState<Template | null>(null);
   const [receiveOpen, setReceiveOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<Template | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<TemplateDef | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function activate(templateId: string): Promise<void> {
@@ -216,11 +220,11 @@ function TemplateSection({
     }
   }
 
-  async function runDelete(target: Template): Promise<void> {
+  async function runDelete(target: TemplateDef): Promise<void> {
     if (busy) return;
     setBusy(true);
     try {
-      await store.deleteTemplate(target.id);
+      await store.deleteTemplateDef(target.id);
       runtime.bump();
     } catch (e) {
       console.error('template delete failed:', e);
@@ -248,24 +252,34 @@ function TemplateSection({
     }
   }
 
-  function addEmpty(): void {
+  async function addEmpty(): Promise<void> {
+    if (busy) return;
     const sectionId = newId('sec');
-    onEdit({
+    const frame: Frame = {
+      id: newId('frm'),
+      name: '新しいフレーム',
+      sections: [{ id: sectionId, title: '', freeText: true }],
+    };
+    const template: TemplateDef = {
       id: newId('tpl'),
       name: '',
+      frameId: frame.id,
       includeProblems: false,
       includeHandover: false,
       memoSectionId: sectionId,
-      sections: [
-        {
-          id: sectionId,
-          title: '',
-          freeText: true,
-          formats: [],
-        },
-      ],
+      placements: [],
       updatedAt: Date.now(),
-    });
+    };
+    setBusy(true);
+    try {
+      await store.saveFrame(frame);
+      runtime.bump();
+      onEdit(template);
+    } catch (error) {
+      toast.show(errorText(error, s.toast.saveFailed), 'error');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -291,7 +305,14 @@ function TemplateSection({
                 <IconButton label={s.common.edit} onClick={() => onEdit(tpl)}>
                   <Icon name="edit" size={16} />
                 </IconButton>
-                <IconButton label={s.settings.template.qrSend} onClick={() => setSendTarget(tpl)}>
+                <IconButton
+                  label={s.settings.template.qrSend}
+                  onClick={() =>
+                    setSendTarget(
+                      resolvedTemplates.find((candidate) => candidate.id === tpl.id) ?? null,
+                    )
+                  }
+                >
                   <Icon name="qr" size={16} />
                 </IconButton>
                 {templates.length > 1 ? (
@@ -312,7 +333,7 @@ function TemplateSection({
         <Button disabled={busy} onClick={() => void addPreset('daily')}>
           {s.settings.template.addDaily}
         </Button>
-        <Button disabled={busy} onClick={addEmpty}>
+        <Button disabled={busy} onClick={() => void addEmpty()}>
           {s.settings.template.addEmpty}
         </Button>
       </div>
@@ -325,7 +346,7 @@ function TemplateSection({
       {receiveOpen ? <OverlayBinding onClose={() => setReceiveOpen(false)} /> : null}
       {receiveOpen ? (
         <TemplateQrReceiveDialog
-          templates={templates}
+          templates={resolvedTemplates}
           onSave={(tpl) => store.saveTemplate(tpl)}
           onClose={() => setReceiveOpen(false)}
           onSaved={(tpl) => {
@@ -349,6 +370,221 @@ function TemplateSection({
             setDeleteTarget(null);
             if (target) void runDelete(target);
           }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function FrameSettingsSection({
+  runtime,
+  onEdit,
+}: {
+  runtime: AppRuntime;
+  onEdit: (frame: Frame) => void;
+}) {
+  const toast = useToast();
+  useRevision(runtime);
+  const { store } = runtime;
+  const frames = store.getFrames();
+  const templates = store.getTemplateDefs();
+  const [deleteTarget, setDeleteTarget] = useState<Frame | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  function addFrame(): void {
+    onEdit({
+      id: newId('frm'),
+      name: '',
+      sections: [{ id: newId('sec'), title: '', freeText: true }],
+    });
+  }
+
+  async function duplicate(frameId: string): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await store.duplicateFrame(frameId);
+      runtime.bump();
+    } catch (error) {
+      toast.show(errorText(error, s.toast.saveFailed), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runDelete(frame: Frame): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await store.deleteFrame(frame.id);
+      runtime.bump();
+    } catch (error) {
+      toast.show(errorText(error, s.toast.saveFailed), 'error');
+    } finally {
+      setBusy(false);
+      setDeleteTarget(null);
+    }
+  }
+
+  return (
+    <div className="card card--pad settingsSection">
+      <div className="section-label">{s.settings.frame.section}</div>
+      {frames.map((frame) => {
+        const usageCount = templates.filter((template) => template.frameId === frame.id).length;
+        return (
+          <div key={frame.id} className="formatListRow">
+            <span className="pickerRowMain">
+              <span className="pickerRowLabel">{frame.name}</span>
+              <span className="pickerRowMeta">{s.settings.frame.usage(usageCount)}</span>
+            </span>
+            <span className="formatListActions">
+              <IconButton label={s.common.edit} onClick={() => onEdit(frame)}>
+                <Icon name="edit" size={16} />
+              </IconButton>
+              <IconButton
+                label={s.common.duplicate}
+                disabled={busy}
+                onClick={() => void duplicate(frame.id)}
+              >
+                複
+              </IconButton>
+              <IconButton
+                label={s.common.delete}
+                disabled={busy}
+                onClick={() => setDeleteTarget(frame)}
+              >
+                <Icon name="delete" size={16} />
+              </IconButton>
+            </span>
+          </div>
+        );
+      })}
+      <div className="settingsRowActions">
+        <Button disabled={busy} onClick={addFrame}>
+          {s.settings.frame.add}
+        </Button>
+      </div>
+
+      {deleteTarget ? <OverlayBinding onClose={() => setDeleteTarget(null)} /> : null}
+      {deleteTarget ? (
+        <ConfirmDialog
+          title={s.settings.frame.deleteConfirmTitle}
+          body={s.settings.frame.deleteConfirmBody(deleteTarget.name)}
+          confirmLabel={s.common.delete}
+          cancelLabel={s.common.cancel}
+          danger
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => void runDelete(deleteTarget)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function FormatSettingsSection({
+  runtime,
+  onEdit,
+}: {
+  runtime: AppRuntime;
+  onEdit: (format: Format) => void;
+}) {
+  const toast = useToast();
+  useRevision(runtime);
+  const { store } = runtime;
+  const formats = store.getFormats();
+  const templates = store.getTemplateDefs();
+  const [deleteTarget, setDeleteTarget] = useState<Format | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  function addFormat(): void {
+    onEdit({
+      id: newId('fmt'),
+      name: '',
+      joiner: '\n',
+      labelSep: '：',
+      titleWrap: '',
+      items: [{ id: newId('itm'), label: '項目', kind: 'text' }],
+    });
+  }
+
+  async function duplicate(formatId: string): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await store.duplicateFormat(formatId);
+      runtime.bump();
+    } catch (error) {
+      toast.show(errorText(error, s.toast.saveFailed), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runDelete(format: Format): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await store.deleteFormat(format.id);
+      runtime.bump();
+    } catch (error) {
+      toast.show(errorText(error, s.toast.saveFailed), 'error');
+    } finally {
+      setBusy(false);
+      setDeleteTarget(null);
+    }
+  }
+
+  return (
+    <div className="card card--pad settingsSection">
+      <div className="section-label">{s.settings.format.section}</div>
+      {formats.map((format) => {
+        const usageCount = templates.filter((template) =>
+          template.placements.some((placement) => placement.formatId === format.id),
+        ).length;
+        return (
+          <div key={format.id} className="formatListRow">
+            <span className="pickerRowMain">
+              <span className="pickerRowLabel">{format.name}</span>
+              <span className="pickerRowMeta">{s.settings.format.usage(usageCount)}</span>
+            </span>
+            <span className="formatListActions">
+              <IconButton label={s.common.edit} onClick={() => onEdit(format)}>
+                <Icon name="edit" size={16} />
+              </IconButton>
+              <IconButton
+                label={s.common.duplicate}
+                disabled={busy}
+                onClick={() => void duplicate(format.id)}
+              >
+                複
+              </IconButton>
+              <IconButton
+                label={s.common.delete}
+                disabled={busy}
+                onClick={() => setDeleteTarget(format)}
+              >
+                <Icon name="delete" size={16} />
+              </IconButton>
+            </span>
+          </div>
+        );
+      })}
+      <div className="settingsRowActions">
+        <Button disabled={busy} onClick={addFormat}>
+          {s.settings.format.add}
+        </Button>
+      </div>
+
+      {deleteTarget ? <OverlayBinding onClose={() => setDeleteTarget(null)} /> : null}
+      {deleteTarget ? (
+        <ConfirmDialog
+          title={s.settings.format.deleteConfirmTitle}
+          body={s.settings.format.deleteConfirmBody(deleteTarget.name)}
+          confirmLabel={s.common.delete}
+          cancelLabel={s.common.cancel}
+          danger
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => void runDelete(deleteTarget)}
         />
       ) : null}
     </div>
@@ -1007,17 +1243,47 @@ export function SettingsView({
   onNavigateHome?: () => void;
 }) {
   useRevision(runtime);
-  const [editing, setEditing] = useState<Template | null>(null);
+  const [editing, setEditing] = useState<
+    | { kind: 'template'; value: TemplateDef }
+    | { kind: 'frame'; value: Frame }
+    | { kind: 'format'; value: Format }
+    | null
+  >(null);
   if (editing) {
+    if (editing.kind === 'template') {
+      return (
+        <TemplateEditView
+          runtime={runtime}
+          template={editing.value}
+          onDone={() => setEditing(null)}
+        />
+      );
+    }
+    if (editing.kind === 'frame') {
+      return (
+        <FrameEditView runtime={runtime} frame={editing.value} onDone={() => setEditing(null)} />
+      );
+    }
     return (
-      <TemplateEditView runtime={runtime} template={editing} onDone={() => setEditing(null)} />
+      <FormatEditView runtime={runtime} format={editing.value} onDone={() => setEditing(null)} />
     );
   }
   // 設定入口はヘッダー右上の 1 つだけ。画面タイトルの見出しは出さない (内容を見れば分かる)。
   return (
     <section aria-label={s.header.settings} className="settingsView" data-ui={UI.settings.view}>
       <TagManagerSection runtime={runtime} />
-      <TemplateSection runtime={runtime} onEdit={setEditing} />
+      <TemplateSection
+        runtime={runtime}
+        onEdit={(value) => setEditing({ kind: 'template', value })}
+      />
+      <FrameSettingsSection
+        runtime={runtime}
+        onEdit={(value) => setEditing({ kind: 'frame', value })}
+      />
+      <FormatSettingsSection
+        runtime={runtime}
+        onEdit={(value) => setEditing({ kind: 'format', value })}
+      />
       <QrOutputSection runtime={runtime} />
       <PlaceSection runtime={runtime} />
       <DataSection runtime={runtime} />

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TemplateItem } from '../domain/template';
-import { morphItemKind } from './TemplateEditView';
+import { morphItemKind } from './FormatEditView';
 
 describe('morphItemKind', () => {
   it('kind ごとの専用フィールドを排他的に初期化する', () => {

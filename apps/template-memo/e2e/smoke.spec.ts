@@ -179,8 +179,11 @@ test('呼び出しフォーマットを保存すると入力カードへ昇格�
 test('テンプレート編集で選択項目を作り、チップで単一選択できる', async ({ page }) => {
   await addPatient(page, '206', '選択確認');
   await openSettings(page);
-  const templateRow = page.locator('.formatListRow', { hasText: '回診メモ' }).first();
-  await templateRow.getByRole('button', { name: '編集', exact: true }).click();
+  const formatSection = page
+    .locator('.settingsSection')
+    .filter({ has: page.getByText('フォーマット', { exact: true }) });
+  const formatRow = formatSection.locator('.formatListRow', { hasText: 'バイタル' });
+  await formatRow.getByRole('button', { name: '編集', exact: true }).click();
 
   // 「種類」と kind 別フィールドが同じ行に並ぶ (先頭項目は BP = 分数なので「種類」+「単位」)。
   const firstKindRow = page.locator('.templateEditKindRow').first();
@@ -194,7 +197,7 @@ test('テンプレート編集で選択項目を作り、チップで単一選�
     )
     .toBe(true);
 
-  // 場所 > フォーマット > 項目の入れ子が、主用途の 375px 幅でも横にはみ出さない。
+  // フォーマット > 項目の入れ子が、主用途の 375px 幅でも横にはみ出さない。
   await page.setViewportSize({ width: 375, height: 812 });
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
@@ -211,8 +214,8 @@ test('テンプレート編集で選択項目を作り、チップで単一選�
   // 以降の手順はデスクトップ幅へ戻して続ける (他テストと条件を揃える)。
   await page.setViewportSize({ width: 1280, height: 720 });
 
-  await page.locator(ui(UI.templateEdit.kind)).first().selectOption('select');
-  await page.locator(ui(UI.templateEdit.save)).click();
+  await page.locator(ui(UI.formatEdit.kind)).first().selectOption('select');
+  await page.locator(ui(UI.formatEdit.save)).click();
   await page.locator(ui(UI.settings.homeBottom)).click();
   await openDetail(page, '206 選択確認');
 

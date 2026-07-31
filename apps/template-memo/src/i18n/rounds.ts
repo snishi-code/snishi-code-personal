@@ -55,6 +55,7 @@ export const s = {
     cancel: 'キャンセル',
     close: '閉じる',
     delete: '削除',
+    duplicate: '複製',
     edit: '編集',
     save: '保存',
     loading: '読み込み中…',
@@ -213,7 +214,25 @@ export const s = {
     title: 'ラウンド入力',
   },
 
-  // テンプレート定義のフィールド名 (QR 受信プレビューの見出し)。
+  componentUsage: (n: number) => `${n}個のテンプレートで使用中（変更はすべてに反映されます）`,
+  frameEdit: {
+    title: 'フレームを編集',
+    name: 'フレーム名',
+    saved: 'フレームを保存しました',
+  },
+  formatEdit: {
+    title: 'フォーマットを編集',
+    name: 'フォーマット名',
+    saved: 'フォーマットを保存しました',
+  },
+  templateEdit: {
+    title: 'テンプレートを編集',
+    frame: '使用するフレーム',
+    addFormat: (section: string) => `${section || 'この場所'}へ配置するフォーマット`,
+    saved: 'テンプレートを保存しました',
+  },
+
+  // フレーム・フォーマット・テンプレート定義のフィールド名。
   tpl: {
     name: 'テンプレート名',
     // 作者語彙は「場所」(セクションはコード識別子のみ)。
@@ -227,14 +246,14 @@ export const s = {
     sectionNormal: '正常文（空欄を補う文。例 著変なし）',
     sectionFreeText: '自由本文欄を持つ',
     formats: 'フォーマット',
-    groupAdd: 'フォーマットを追加',
-    groupName: 'フォーマット名（例 バイタル）',
-    groupDisplay: '配置',
-    groupDisplayAlways: '展開',
-    groupDisplayOncall: '呼び出し',
-    groupDisplayMenu: 'メニュー',
-    groupJoiner: '項目間の区切り',
-    groupLabelSep: 'ラベルと値の区切り',
+    formatAdd: '＋フォーマットを配置',
+    formatName: 'フォーマット名（例 バイタル）',
+    placementDisplay: '表示方法',
+    placementDisplayAlways: '展開',
+    placementDisplayOncall: '呼び出し',
+    placementDisplayMenu: 'メニュー',
+    formatJoiner: '項目間の区切り',
+    formatLabelSep: 'ラベルと値の区切り',
     items: '項目',
     itemAdd: '項目を追加',
     itemLabel: 'ラベル（例 肺音）',
@@ -252,7 +271,6 @@ export const s = {
     itemShowLabel: '合成時にラベルを出す',
     moveUp: '上へ',
     moveDown: '下へ',
-    saved: 'テンプレートを保存しました',
     joinerNewline: '改行',
     joinerCommaSpace: 'カンマ + 空白',
     joinerToten: '読点（、）',
@@ -417,6 +435,20 @@ export const s = {
       imported: (name: string) => `テンプレートを読み込みました: ${name}`,
       deleteConfirmTitle: 'テンプレートを削除しますか？',
       deleteConfirmBody: (name: string) => `「${name}」を削除します。対象の入力値は消えません。`,
+    },
+    frame: {
+      section: 'フレーム',
+      add: 'フレームを作る',
+      usage: (n: number) => `テンプレート ${n}件で使用`,
+      deleteConfirmTitle: 'フレームを削除しますか？',
+      deleteConfirmBody: (name: string) => `「${name}」を削除します。`,
+    },
+    format: {
+      section: 'フォーマット',
+      add: 'フォーマットを作る',
+      usage: (n: number) => `テンプレート ${n}件で使用`,
+      deleteConfirmTitle: 'フォーマットを削除しますか？',
+      deleteConfirmBody: (name: string) => `「${name}」を削除します。`,
     },
     // 設定: QR 出力 (改行モード)
     qrOutput: {

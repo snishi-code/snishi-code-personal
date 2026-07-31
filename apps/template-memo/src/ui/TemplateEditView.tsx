@@ -1,156 +1,16 @@
-/*
- * テンプレート編集画面。設定画面のローカル state から呼び、ルートは増やさない。
- * draft は deep copy し、保存時に normalizeTemplate を通す。全 section が落ちる場合は
- * durable state を変更せず fail-closed で通知する。
- */
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { Button } from '@snishi/foundation/ui/Button';
-import { Icon } from '@snishi/foundation/ui/Icon';
-import { IconButton } from '@snishi/foundation/ui/IconButton';
 import { useToast } from '@snishi/foundation/ui/toast';
 import { newId } from '../data/constants';
-import {
-  normalizeTemplate,
-  type PlacementDisplay,
-  type ItemKind,
-  type Template,
-  type PlacedFormat,
-  type TemplateItem,
-  type TemplateSection,
-} from '../domain/template';
+import { normalizeTemplateDef, type FormatPlacement, type TemplateDef } from '../domain/entities';
+import type { PlacementDisplay } from '../domain/template';
 import { errorText, s } from '../i18n';
 import { UI } from '../ui-contract';
 import type { AppRuntime } from './appRuntime';
+import { CheckRow, clone, Field, RowTools } from './EntityEditParts';
 import { useRegisterEditor } from './registries';
 
-const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
-
-function moveInArray<T>(items: T[], index: number, direction: -1 | 1): void {
-  const next = index + direction;
-  if (index < 0 || next < 0 || index >= items.length || next >= items.length) return;
-  const [item] = items.splice(index, 1);
-  if (item !== undefined) items.splice(next, 0, item);
-}
-
-// DOM の select 値は許可リストで検証してから型に載せる (fail-closed: 未知値は無変更)。
-const ITEM_KINDS: readonly ItemKind[] = ['text', 'number', 'fraction', 'select'];
-const PLACEMENT_DISPLAYS: readonly PlacementDisplay[] = ['always', 'oncall', 'menu'];
-
-export function morphItemKind(item: TemplateItem, kind: ItemKind): void {
-  if (!ITEM_KINDS.includes(kind)) return;
-  // number↔fraction は同じ数値系なので単位を引き継ぐ (旧回診 FormatEditDialog と同じ)。
-  const numeric = (k: ItemKind) => k === 'number' || k === 'fraction';
-  const keepUnit = numeric(item.kind) && numeric(kind) ? item.unit : undefined;
-  item.kind = kind;
-  delete item.unit;
-  delete item.normal;
-  delete item.options;
-  if (keepUnit !== undefined) item.unit = keepUnit;
-  if (kind === 'select') item.options = [s.tpl.itemOptionDefault];
-}
-
-function newItem(): TemplateItem {
-  return { id: newId('itm'), label: '', kind: 'text' };
-}
-
-function newPlacedFormat(): PlacedFormat {
-  return {
-    id: newId('grp'),
-    name: '',
-    display: 'always',
-    joiner: '\n',
-    labelSep: '：',
-    titleWrap: '',
-    items: [newItem()],
-  };
-}
-
-function newSection(): TemplateSection {
-  return {
-    id: newId('sec'),
-    title: '',
-    freeText: true,
-    formats: [],
-  };
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="field">
-      <span className="field__label">{label}</span>
-      {children}
-    </label>
-  );
-}
-
-function CheckRow({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <label className="settingsRadioRow">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-      {label}
-    </label>
-  );
-}
-
-function RowTools({
-  index,
-  count,
-  onMove,
-  onDelete,
-  disableDelete = false,
-}: {
-  index: number;
-  count: number;
-  onMove: (direction: -1 | 1) => void;
-  onDelete: () => void;
-  disableDelete?: boolean;
-}) {
-  return (
-    <span className="formatListActions">
-      <IconButton label={s.tpl.moveUp} disabled={index === 0} onClick={() => onMove(-1)}>
-        ↑
-      </IconButton>
-      <IconButton label={s.tpl.moveDown} disabled={index === count - 1} onClick={() => onMove(1)}>
-        ↓
-      </IconButton>
-      <IconButton label={s.common.delete} disabled={disableDelete} onClick={onDelete}>
-        <Icon name="delete" size={18} />
-      </IconButton>
-    </span>
-  );
-}
-
-const JOINERS = [
-  { value: '\n', label: s.tpl.joinerNewline },
-  { value: ', ', label: s.tpl.joinerCommaSpace },
-  { value: '、', label: s.tpl.joinerToten },
-  { value: '-', label: s.tpl.joinerHyphen },
-  { value: ' ', label: s.tpl.joinerSpace },
-];
-
-const LABEL_SEPS = [
-  { value: '：', label: s.tpl.labelSepColon },
-  { value: ' ', label: s.tpl.labelSepSpace },
-  { value: '', label: s.tpl.labelSepNone },
-];
-
-function selectOptions(candidates: { value: string; label: string }[], current: string) {
-  return candidates.some((option) => option.value === current)
-    ? candidates
-    : [{ value: current, label: JSON.stringify(current) }, ...candidates];
-}
+const DISPLAYS: readonly PlacementDisplay[] = ['always', 'oncall', 'menu'];
 
 export function TemplateEditView({
   runtime,
@@ -158,15 +18,19 @@ export function TemplateEditView({
   onDone,
 }: {
   runtime: AppRuntime;
-  template: Template;
+  template: TemplateDef;
   onDone: () => void;
 }) {
   useRegisterEditor(onDone);
   const toast = useToast();
-  const [draft, setDraft] = useState<Template>(() => clone(template));
+  const frames = runtime.store.getFrames();
+  const formats = runtime.store.getFormats();
+  const [draft, setDraft] = useState<TemplateDef>(() => clone(template));
+  const [editedAt] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
+  const frame = frames.find((candidate) => candidate.id === draft.frameId) ?? null;
 
-  function mutate(change: (next: Template) => void): void {
+  function mutate(change: (next: TemplateDef) => void): void {
     setDraft((current) => {
       const next = clone(current);
       change(next);
@@ -174,48 +38,68 @@ export function TemplateEditView({
     });
   }
 
-  function mutateSection(sectionId: string, change: (section: TemplateSection) => void): void {
+  function mutatePlacement(
+    placementId: string,
+    change: (placement: FormatPlacement) => void,
+  ): void {
     mutate((next) => {
-      const section = next.sections.find((entry) => entry.id === sectionId);
-      if (section) change(section);
+      const placement = next.placements.find((candidate) => candidate.id === placementId);
+      if (placement) change(placement);
     });
   }
 
-  function mutatePlacedFormat(
-    sectionId: string,
-    placementId: string,
-    change: (placedFormat: PlacedFormat) => void,
-  ): void {
-    mutateSection(sectionId, (section) => {
-      const placedFormat = section.formats.find((entry) => entry.id === placementId);
-      if (placedFormat) change(placedFormat);
+  function changeFrame(frameId: string): void {
+    const nextFrame = frames.find((candidate) => candidate.id === frameId);
+    if (!nextFrame) return;
+    mutate((next) => {
+      next.frameId = nextFrame.id;
+      next.memoSectionId = nextFrame.sections[0]?.id ?? null;
+      next.placements = [];
     });
   }
 
-  function mutateItem(
-    sectionId: string,
-    placementId: string,
-    itemId: string,
-    change: (item: TemplateItem) => void,
-  ): void {
-    mutatePlacedFormat(sectionId, placementId, (placedFormat) => {
-      const item = placedFormat.items.find((entry) => entry.id === itemId);
-      if (item) change(item);
+  function addPlacement(sectionId: string, formatId: string): void {
+    if (!formats.some((format) => format.id === formatId)) return;
+    mutate((next) => {
+      next.placements.push({
+        id: newId('plm'),
+        sectionId,
+        formatId,
+        display: 'always',
+      });
+    });
+  }
+
+  function movePlacement(sectionId: string, placementId: string, direction: -1 | 1): void {
+    mutate((next) => {
+      const sectionPlacements = next.placements.filter(
+        (candidate) => candidate.sectionId === sectionId,
+      );
+      const index = sectionPlacements.findIndex((candidate) => candidate.id === placementId);
+      const target = sectionPlacements[index + direction];
+      if (index < 0 || !target) return;
+      const sourceIndex = next.placements.findIndex((candidate) => candidate.id === placementId);
+      const targetIndex = next.placements.findIndex((candidate) => candidate.id === target.id);
+      if (sourceIndex < 0 || targetIndex < 0) return;
+      [next.placements[sourceIndex], next.placements[targetIndex]] = [
+        next.placements[targetIndex]!,
+        next.placements[sourceIndex]!,
+      ];
     });
   }
 
   async function save(): Promise<void> {
     if (busy) return;
-    const normalized = normalizeTemplate({ ...draft, updatedAt: Date.now() });
+    const normalized = normalizeTemplateDef({ ...draft, updatedAt: editedAt }, { frames, formats });
     if (!normalized) {
       toast.show(s.toast.saveFailed, 'error');
       return;
     }
     setBusy(true);
     try {
-      await runtime.store.saveTemplate(normalized);
+      await runtime.store.saveTemplateDef(normalized);
       runtime.bump();
-      toast.show(s.tpl.saved);
+      toast.show(s.templateEdit.saved);
       onDone();
     } catch (error) {
       toast.show(errorText(error, s.toast.saveFailed), 'error');
@@ -224,340 +108,30 @@ export function TemplateEditView({
     }
   }
 
-  function renderOptions(sectionId: string, placementId: string, item: TemplateItem) {
-    const options = item.options ?? [];
-    return (
-      <div className="templateEditOptions">
-        <div className="field__label">{s.tpl.itemOptions}</div>
-        {options.map((option, index) => (
-          <div className="settingsField" key={`${item.id}:${index}`}>
-            <input
-              className="input"
-              value={option}
-              aria-label={s.tpl.itemOption(index + 1)}
-              data-ui={UI.templateEdit.option}
-              onChange={(event) =>
-                mutateItem(sectionId, placementId, item.id, (next) => {
-                  const values = [...(next.options ?? [])];
-                  values[index] = event.target.value;
-                  next.options = values;
-                })
-              }
-            />
-            <RowTools
-              index={index}
-              count={options.length}
-              // 選択肢 0 個の select は normalizeItem が項目ごと落とすため、最後の 1 つは消させない。
-              disableDelete={options.length === 1}
-              onMove={(direction) =>
-                mutateItem(sectionId, placementId, item.id, (next) =>
-                  moveInArray((next.options ??= []), index, direction),
-                )
-              }
-              onDelete={() =>
-                mutateItem(sectionId, placementId, item.id, (next) => {
-                  next.options = (next.options ?? []).filter((_, i) => i !== index);
-                })
-              }
-            />
-          </div>
-        ))}
-        <Button
-          onClick={() =>
-            mutateItem(sectionId, placementId, item.id, (next) => (next.options ??= []).push(''))
-          }
-        >
-          {s.tpl.itemOptionAdd}
-        </Button>
-      </div>
-    );
-  }
-
-  function renderItem(
-    sectionId: string,
-    placementId: string,
-    item: TemplateItem,
-    index: number,
-    count: number,
-  ) {
-    return (
-      <div className="templateEditItem" key={item.id} data-ui={UI.templateEdit.item}>
-        <div className="formatListRow">
-          <span className="pickerRowLabel">
-            {s.tpl.items} {index + 1}
-          </span>
-          <RowTools
-            index={index}
-            count={count}
-            onMove={(direction) =>
-              mutatePlacedFormat(sectionId, placementId, (placedFormat) =>
-                moveInArray(placedFormat.items, index, direction),
-              )
-            }
-            onDelete={() =>
-              mutatePlacedFormat(sectionId, placementId, (placedFormat) => {
-                placedFormat.items = placedFormat.items.filter((entry) => entry.id !== item.id);
-              })
-            }
-          />
-        </div>
-        <Field label={s.tpl.itemLabel}>
-          <input
-            className="input"
-            value={item.label}
-            data-ui={UI.templateEdit.field}
-            onChange={(event) =>
-              mutateItem(
-                sectionId,
-                placementId,
-                item.id,
-                (next) => (next.label = event.target.value),
-              )
-            }
-          />
-        </Field>
-        <div className="settingsField templateEditKindRow">
-          <Field label={s.tpl.itemKind}>
-            <select
-              className="select"
-              value={item.kind}
-              data-ui={UI.templateEdit.kind}
-              onChange={(event) =>
-                mutateItem(sectionId, placementId, item.id, (next) =>
-                  morphItemKind(next, event.target.value as ItemKind),
-                )
-              }
-            >
-              <option value="text">{s.tpl.itemKindText}</option>
-              <option value="number">{s.tpl.itemKindNumber}</option>
-              <option value="fraction">{s.tpl.itemKindFraction}</option>
-              <option value="select">{s.tpl.itemKindSelect}</option>
-            </select>
-          </Field>
-          {item.kind === 'text' ? (
-            <Field label={s.tpl.itemNormal}>
-              <input
-                className="input"
-                value={item.normal ?? ''}
-                onChange={(event) =>
-                  mutateItem(
-                    sectionId,
-                    placementId,
-                    item.id,
-                    (next) => (next.normal = event.target.value),
-                  )
-                }
-              />
-            </Field>
-          ) : item.kind === 'select' ? null : (
-            <Field label={s.tpl.itemUnit}>
-              <input
-                className="input"
-                value={item.unit ?? ''}
-                onChange={(event) =>
-                  mutateItem(
-                    sectionId,
-                    placementId,
-                    item.id,
-                    (next) => (next.unit = event.target.value),
-                  )
-                }
-              />
-            </Field>
-          )}
-        </div>
-        {item.kind === 'select' ? renderOptions(sectionId, placementId, item) : null}
-        <CheckRow
-          label={s.tpl.itemShowLabel}
-          checked={item.showLabel !== false}
-          onChange={(checked) =>
-            mutateItem(sectionId, placementId, item.id, (next) => {
-              if (checked) delete next.showLabel;
-              else next.showLabel = false;
-            })
-          }
-        />
-      </div>
-    );
-  }
-
-  function renderPlacedFormat(
-    sectionId: string,
-    placedFormat: PlacedFormat,
-    index: number,
-    count: number,
-  ) {
-    return (
-      <section
-        className="card panelCard templateEditPlacement"
-        key={placedFormat.id}
-        data-ui={UI.templateEdit.placement}
-      >
-        <div className="formatListRow">
-          <span className="pickerRowLabel">
-            {placedFormat.name || `${s.tpl.formats} ${index + 1}`}
-          </span>
-          <RowTools
-            index={index}
-            count={count}
-            onMove={(direction) =>
-              mutateSection(sectionId, (section) => moveInArray(section.formats, index, direction))
-            }
-            onDelete={() =>
-              mutateSection(sectionId, (section) => {
-                section.formats = section.formats.filter((entry) => entry.id !== placedFormat.id);
-              })
-            }
-          />
-        </div>
-        <Field label={s.tpl.groupName}>
-          <input
-            className="input"
-            value={placedFormat.name}
-            onChange={(event) =>
-              mutatePlacedFormat(
-                sectionId,
-                placedFormat.id,
-                (next) => (next.name = event.target.value),
-              )
-            }
-          />
-        </Field>
-        <Field label={s.tpl.groupDisplay}>
-          <select
-            className="select"
-            value={placedFormat.display}
-            data-ui={UI.templateEdit.display}
-            onChange={(event) => {
-              const display = event.target.value as PlacementDisplay;
-              if (!PLACEMENT_DISPLAYS.includes(display)) return;
-              mutatePlacedFormat(sectionId, placedFormat.id, (next) => (next.display = display));
-            }}
-          >
-            <option value="always">{s.tpl.groupDisplayAlways}</option>
-            <option value="oncall">{s.tpl.groupDisplayOncall}</option>
-            <option value="menu">{s.tpl.groupDisplayMenu}</option>
-          </select>
-        </Field>
-        <Field label={s.tpl.groupJoiner}>
-          <select
-            className="select"
-            value={placedFormat.joiner}
-            onChange={(event) =>
-              mutatePlacedFormat(
-                sectionId,
-                placedFormat.id,
-                (next) => (next.joiner = event.target.value),
-              )
-            }
-          >
-            {selectOptions(JOINERS, placedFormat.joiner).map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label={s.tpl.groupLabelSep}>
-          <select
-            className="select"
-            value={placedFormat.labelSep}
-            onChange={(event) =>
-              mutatePlacedFormat(
-                sectionId,
-                placedFormat.id,
-                (next) => (next.labelSep = event.target.value),
-              )
-            }
-          >
-            {selectOptions(LABEL_SEPS, placedFormat.labelSep).map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        {placedFormat.items.map((item, itemIndex) =>
-          renderItem(sectionId, placedFormat.id, item, itemIndex, placedFormat.items.length),
-        )}
-        <Button
-          onClick={() =>
-            mutatePlacedFormat(sectionId, placedFormat.id, (next) => next.items.push(newItem()))
-          }
-        >
-          {s.tpl.itemAdd}
-        </Button>
-      </section>
-    );
-  }
-
-  function renderSection(section: TemplateSection, index: number, count: number) {
-    return (
-      <section
-        className="card panelCard templateEditSection"
-        key={section.id}
-        data-ui={UI.templateEdit.section}
-      >
-        <div className="formatListRow">
-          <span className="pickerRowLabel">
-            {section.title || `${s.tpl.sections} ${index + 1}`}
-          </span>
-          <RowTools
-            index={index}
-            count={count}
-            onMove={(direction) => mutate((next) => moveInArray(next.sections, index, direction))}
-            onDelete={() =>
-              mutate((next) => {
-                next.sections = next.sections.filter((entry) => entry.id !== section.id);
-              })
-            }
-          />
-        </div>
-        <Field label={s.tpl.sectionTitle}>
-          <input
-            className="input"
-            value={section.title}
-            onChange={(event) =>
-              mutateSection(section.id, (next) => (next.title = event.target.value))
-            }
-          />
-        </Field>
-        <Field label={s.tpl.sectionNormal}>
-          <input
-            className="input"
-            value={section.normal ?? ''}
-            onChange={(event) =>
-              mutateSection(section.id, (next) => (next.normal = event.target.value))
-            }
-          />
-        </Field>
-        <CheckRow
-          label={s.tpl.sectionFreeText}
-          checked={section.freeText}
-          onChange={(checked) => mutateSection(section.id, (next) => (next.freeText = checked))}
-        />
-        {section.formats.map((placedFormat, placementIndex) =>
-          renderPlacedFormat(section.id, placedFormat, placementIndex, section.formats.length),
-        )}
-        <Button
-          onClick={() => mutateSection(section.id, (next) => next.formats.push(newPlacedFormat()))}
-        >
-          {s.tpl.groupAdd}
-        </Button>
-      </section>
-    );
-  }
-
   return (
     <section className="settingsView templateEditView" data-ui={UI.templateEdit.view}>
       <div className="card panelCard">
-        <div className="panelLabel">{s.settings.template.editTitle}</div>
+        <div className="panelLabel">{s.templateEdit.title}</div>
         <Field label={s.tpl.name}>
           <input
             className="input"
             value={draft.name}
             onChange={(event) => mutate((next) => (next.name = event.target.value))}
           />
+        </Field>
+        <Field label={s.templateEdit.frame}>
+          <select
+            className="select"
+            value={draft.frameId}
+            data-ui={UI.templateEdit.frame}
+            onChange={(event) => changeFrame(event.target.value)}
+          >
+            {frames.map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>
+                {candidate.name}
+              </option>
+            ))}
+          </select>
         </Field>
         <CheckRow
           label={s.tpl.includeProblems}
@@ -575,11 +149,14 @@ export function TemplateEditView({
             value={draft.memoSectionId ?? ''}
             data-ui={UI.templateEdit.memoSection}
             onChange={(event) =>
-              mutate((next) => (next.memoSectionId = event.target.value || null))
+              mutate(
+                (next) =>
+                  (next.memoSectionId = event.target.value === '' ? null : event.target.value),
+              )
             }
           >
             <option value="">{s.tpl.memoSectionNone}</option>
-            {draft.sections.map((section, index) => (
+            {frame?.sections.map((section, index) => (
               <option key={section.id} value={section.id}>
                 {section.title || `${s.tpl.sections} ${index + 1}`}
               </option>
@@ -588,10 +165,86 @@ export function TemplateEditView({
         </Field>
       </div>
 
-      {draft.sections.map((section, index) => renderSection(section, index, draft.sections.length))}
-      <Button onClick={() => mutate((next) => next.sections.push(newSection()))}>
-        {s.tpl.sectionAdd}
-      </Button>
+      {frame?.sections.map((section, sectionIndex) => {
+        const placements = draft.placements.filter(
+          (candidate) => candidate.sectionId === section.id,
+        );
+        return (
+          <div className="templateEditSection" key={section.id} data-ui={UI.templateEdit.section}>
+            <div className="panelLabel">
+              {section.title || `${s.tpl.sections} ${sectionIndex + 1}`}
+            </div>
+            {placements.map((placement, index) => {
+              const format = formats.find((candidate) => candidate.id === placement.formatId);
+              if (!format) return null;
+              return (
+                <div
+                  className="templateEditPlacement"
+                  key={placement.id}
+                  data-ui={UI.templateEdit.placement}
+                >
+                  <div className="formatListRow">
+                    <span className="pickerRowLabel" data-ui={UI.templateEdit.placementFormat}>
+                      {format.name}
+                    </span>
+                    <RowTools
+                      index={index}
+                      count={placements.length}
+                      onMove={(direction) => movePlacement(section.id, placement.id, direction)}
+                      onDelete={() =>
+                        mutate((next) => {
+                          next.placements = next.placements.filter(
+                            (candidate) => candidate.id !== placement.id,
+                          );
+                        })
+                      }
+                    />
+                  </div>
+                  <Field label={s.tpl.placementDisplay}>
+                    <select
+                      className="select"
+                      value={placement.display}
+                      data-ui={UI.templateEdit.display}
+                      onChange={(event) =>
+                        mutatePlacement(
+                          placement.id,
+                          (next) =>
+                            (next.display = DISPLAYS.includes(
+                              event.target.value as PlacementDisplay,
+                            )
+                              ? (event.target.value as PlacementDisplay)
+                              : 'always'),
+                        )
+                      }
+                    >
+                      <option value="always">{s.tpl.placementDisplayAlways}</option>
+                      <option value="oncall">{s.tpl.placementDisplayOncall}</option>
+                      <option value="menu">{s.tpl.placementDisplayMenu}</option>
+                    </select>
+                  </Field>
+                </div>
+              );
+            })}
+            <select
+              className="select"
+              value=""
+              aria-label={s.templateEdit.addFormat(section.title)}
+              data-ui={UI.templateEdit.addFormat}
+              onChange={(event) => {
+                const formatId = event.target.value;
+                if (formatId) addPlacement(section.id, formatId);
+              }}
+            >
+              <option value="">{s.tpl.formatAdd}</option>
+              {formats.map((format) => (
+                <option key={format.id} value={format.id}>
+                  {format.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        );
+      })}
 
       <div className="card card--pad settingsRowActions templateEditActions">
         <Button disabled={busy} onClick={onDone}>
