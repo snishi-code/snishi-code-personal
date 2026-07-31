@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'apps/simple-ledger/**'
+      - 'apps/template-memo/**'
       - 'packages/foundation/**'
       - 'package.json'
       - 'package-lock.json'
@@ -14,6 +15,7 @@ on:
   pull_request:
     paths:
       - 'apps/simple-ledger/**'
+      - 'apps/template-memo/**'
       - 'packages/foundation/**'
       - 'package.json'
       - 'package-lock.json'
@@ -62,10 +64,14 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: E2E（主要フロー / PL・BS / a11y axe / PWA / 外部送信ゼロ）
         run: npm run test:e2e --workspace simple-ledger -- --project=chromium
+      - name: E2E（テンプレメモ主要フロー / 部品編集・共有 / バックアップ）
+        run: npm run test:e2e --workspace template-memo -- --project=chromium
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
           name: playwright-report
-          path: apps/simple-ledger/playwright-report/
+          path: |
+            apps/simple-ledger/playwright-report/
+            apps/template-memo/playwright-report/
           retention-days: 7
           if-no-files-found: ignore
