@@ -115,12 +115,8 @@ export interface HrStore {
   getTemplateDefs(): TemplateDef[];
   saveTemplateDef(template: TemplateDef): Promise<void>;
   deleteTemplateDef(templateId: string): Promise<void>;
-  /** タスク C で編集 UI を分離するまでの解決済み互換面。 */
-  getTemplates(): Template[];
   getActiveTemplate(): Template | null;
   setActiveTemplate(templateId: string): Promise<void>;
-  saveTemplate(template: Template): Promise<void>;
-  deleteTemplate(templateId: string): Promise<void>;
   // ── バックアップ / 移行 ──
   exportData(): {
     settings: AppSettings;
@@ -191,12 +187,6 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
   let appState: AppState = { title: defaultTitle, patients: [] };
   let changeHandler: ((ev: StoreChangeEvent) => void) | null = null;
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
-
-  function resolvedTemplates(): Template[] {
-    return templateDefs
-      .map((definition) => resolveTemplate(definition, frames, formats))
-      .filter((template): template is Template => template !== null);
-  }
 
   function emit(ev: StoreChangeEvent): void {
     try {
@@ -530,7 +520,6 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
       templateDefs = rest;
       emit({ type: 'workspace', workspaceId: activeViewId() });
     },
-    getTemplates: () => resolvedTemplates(),
     getActiveTemplate() {
       const definition =
         templateDefs.find((template) => template.id === settings.activeTemplateId) ?? null;
@@ -543,73 +532,6 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
       settings.activeTemplateId = templateId;
       await this.saveSettings();
       emit({ type: 'workspace', workspaceId: activeViewId() });
-    },
-    async saveTemplate(template) {
-      // タスク C の責務分離まで、旧配置エディタの保存を新エンティティへ反映する。
-      const current = templateDefs.find((definition) => definition.id === template.id);
-      const currentFrame = current
-        ? frames.find((frame) => frame.id === current.frameId)
-        : undefined;
-      const frame: Frame = {
-        id: currentFrame?.id ?? newId('frm'),
-        name: currentFrame?.name ?? template.name,
-        sections: template.sections.map((section) => ({
-          id: section.id,
-          title: section.title,
-          freeText: section.freeText,
-          ...(section.normal === undefined ? {} : { normal: section.normal }),
-        })),
-      };
-      const nextFormats = [...formats];
-      const placements = template.sections.flatMap((section) =>
-        section.formats.map((placed) => {
-          const oldPlacement = current?.placements.find((placement) => placement.id === placed.id);
-          const formatId = oldPlacement?.formatId ?? newId('fmt');
-          const format: Format = {
-            id: formatId,
-            name: placed.name,
-            joiner: placed.joiner,
-            labelSep: placed.labelSep,
-            titleWrap: placed.titleWrap,
-            items: placed.items,
-          };
-          const index = nextFormats.findIndex((candidate) => candidate.id === formatId);
-          if (index >= 0) nextFormats[index] = format;
-          else nextFormats.push(format);
-          return {
-            id: placed.id,
-            sectionId: section.id,
-            formatId,
-            display: placed.display,
-          };
-        }),
-      );
-      const definition: TemplateDef = {
-        id: template.id,
-        name: template.name,
-        frameId: frame.id,
-        memoSectionId: template.memoSectionId,
-        includeProblems: template.includeProblems,
-        includeHandover: template.includeHandover,
-        placements,
-        updatedAt: template.updatedAt,
-      };
-      await db.runWrite([STORE_FRAMES, STORE_FORMATS, STORE_TEMPLATES], (tx) => {
-        tx.objectStore(STORE_FRAMES).put(frame);
-        for (const format of nextFormats) tx.objectStore(STORE_FORMATS).put(format);
-        tx.objectStore(STORE_TEMPLATES).put(definition);
-      });
-      frames = frames.some((candidate) => candidate.id === frame.id)
-        ? frames.map((candidate) => (candidate.id === frame.id ? frame : candidate))
-        : [...frames, frame];
-      formats = nextFormats;
-      templateDefs = templateDefs.some((candidate) => candidate.id === definition.id)
-        ? templateDefs.map((candidate) => (candidate.id === definition.id ? definition : candidate))
-        : [...templateDefs, definition];
-      emit({ type: 'workspace', workspaceId: activeViewId() });
-    },
-    async deleteTemplate(templateId) {
-      await this.deleteTemplateDef(templateId);
     },
     exportData() {
       return {

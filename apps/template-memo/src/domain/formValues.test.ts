@@ -172,11 +172,11 @@ describe('numericEntry', () => {
 describe('readPlacementValues', () => {
   const formValues = { g1: { a: '96' } };
 
-  it('該当 group のレコードを返す', () => {
+  it('該当配置のレコードを返す', () => {
     expect(readPlacementValues(formValues, 'g1')).toEqual({ a: '96' });
   });
 
-  it('group 欠落・formValues 非 object・配列は空 record', () => {
+  it('配置欠落・formValues 非 object・配列は空 record', () => {
     expect(readPlacementValues(formValues, 'g2')).toEqual({});
     expect(readPlacementValues(undefined, 'g1')).toEqual({});
     expect(readPlacementValues({ g1: ['96'] }, 'g1')).toEqual({});

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Format, Frame, TemplateDef } from './entities';
 import { buildRoundPreset } from './presets';
 import { resolveTemplate } from './resolveTemplate';
-import { composePresetClean, normalizeTemplate } from './template';
+import { composePresetClean } from './template';
 import type { Patient } from './types';
 
 const frame: Frame = {
@@ -98,10 +98,8 @@ describe('resolveTemplate', () => {
     expect(resolved?.sections.every((section) => section.formats.length === 0)).toBe(true);
   });
 
-  it('迷子フレームはテンプレートごと null にし、解決結果は resolved normalize を通る', () => {
+  it('迷子フレームはテンプレートごと null にする', () => {
     expect(resolveTemplate(definition({ frameId: 'missing-frame' }), [frame], [format])).toBeNull();
-    const resolved = resolveTemplate(definition(), [frame], [format]);
-    expect(normalizeTemplate(resolved)).toEqual(resolved);
   });
 
   it('新 seed の解決結果は作者の回診プリセット本文を完全再現する', () => {

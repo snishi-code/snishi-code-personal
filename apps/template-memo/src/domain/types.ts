@@ -59,7 +59,7 @@ export interface TagDef {
 }
 
 // ============================
-// フォーム値（テンプレート group/item への入力値）
+// フォーム値（テンプレートの配置/item への入力値）
 // ============================
 
 /**
@@ -79,7 +79,7 @@ export interface NumericEntry {
 }
 
 /**
- * フォーム値: formValues[groupId][itemId] = 保存値。
+ * フォーム値: formValues[placementId][itemId] = 保存値。
  * キーは配列 index ではなく安定 id（テンプレート編集で並びが変わっても値が迷子にならない）。
  * 保存形は TextEntry / NumericEntry（未入力は ''）。読み出しは domain/formValues.ts の
  * 正規化ヘルパを必ず通す（object 以外は未入力へ倒す fail-safe）。
@@ -116,7 +116,7 @@ export interface Patient {
   standingMemo: string;
   /**
    * テンプレートのフォーム入力値（今回分）。名前はコピー元 UI に合わせて projectedValues の
-   * まま、型は合成エンジンの FormValues（formValues[groupId][itemId]・provenance 付き）。
+   * まま、型は合成エンジンの FormValues（formValues[placementId][itemId]・provenance 付き）。
    * 読み書きは domain/formValues.ts のヘルパ経由。
    */
   projectedValues: FormValues;

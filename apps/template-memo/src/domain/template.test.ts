@@ -14,17 +14,12 @@ import {
   composeProblems,
   composeSection,
   normalizeComposedText,
-  normalizePlacedFormat,
   normalizeItem,
-  normalizeSection,
-  normalizeTemplate,
   type Template,
   type PlacedFormat,
   type TemplateItem,
   type TemplateSection,
 } from './template';
-import { buildDailyReportPreset, buildRoundPreset } from './presets';
-import { resolveTemplate } from './resolveTemplate';
 import type { Patient } from './types';
 
 // ============================
@@ -35,7 +30,7 @@ function item(partial: Partial<TemplateItem> & Pick<TemplateItem, 'id'>): Templa
   return { label: '', kind: 'text', ...partial };
 }
 
-function group(partial: Partial<PlacedFormat> & Pick<PlacedFormat, 'id'>): PlacedFormat {
+function placedFormat(partial: Partial<PlacedFormat> & Pick<PlacedFormat, 'id'>): PlacedFormat {
   return {
     name: '',
     display: 'always',
@@ -105,8 +100,8 @@ function goldenTemplate(): Template {
         title: '(O)',
         freeText: true,
         formats: [
-          group({
-            id: 'grp-vital',
+          placedFormat({
+            id: 'plm-vital',
             name: 'バイタル',
             display: 'always',
             joiner: ', ',
@@ -117,8 +112,8 @@ function goldenTemplate(): Template {
               item({ id: 'itm-hr', label: 'HR', kind: 'number' }),
             ],
           }),
-          group({
-            id: 'grp-glu',
+          placedFormat({
+            id: 'plm-glu',
             name: '血糖',
             display: 'always',
             joiner: '-',
@@ -130,8 +125,8 @@ function goldenTemplate(): Template {
               item({ id: 'itm-glu3', label: '', kind: 'number' }),
             ],
           }),
-          group({
-            id: 'grp-phys',
+          placedFormat({
+            id: 'plm-phys',
             name: '身体所見',
             display: 'always',
             joiner: '\n',
@@ -169,13 +164,13 @@ function goldenPatient(): Patient {
     // (S)(A)(P) の本文は正常文 (定型清書で充填)。memoSection (O) の今回メモは空。
     visitMemo: '',
     projectedValues: {
-      'grp-vital': { 'itm-bp': { value: '120/98' }, 'itm-hr': { value: '63' } },
-      'grp-glu': {
+      'plm-vital': { 'itm-bp': { value: '120/98' }, 'itm-hr': { value: '63' } },
+      'plm-glu': {
         'itm-glu1': { value: '108' },
         'itm-glu2': { value: '222' },
         'itm-glu3': { value: '100' },
       },
-      'grp-phys': {
+      'plm-phys': {
         'itm-lung': { value: '明らかなラ音なし', source: 'preset' },
         'itm-bowel': { value: '正常', source: 'preset' },
         'itm-abd': { value: '平坦軟、圧痛なし', source: 'preset' },
@@ -281,8 +276,8 @@ describe('composeItem', () => {
 // ============================
 
 describe('composePlacedFormat', () => {
-  const g = group({
-    id: 'g',
+  const format = placedFormat({
+    id: 'placement',
     name: 'バイタル',
     titleWrap: '（）',
     joiner: ', ',
@@ -294,33 +289,39 @@ describe('composePlacedFormat', () => {
   });
 
   it('全項目が空ならタイトル行ごと消える（hasValue=false）', () => {
-    expect(composePlacedFormat(g, { a: { value: '/' }, b: '' })).toEqual({
+    expect(composePlacedFormat(format, { a: { value: '/' }, b: '' })).toEqual({
       text: '',
       hasValue: false,
     });
   });
 
-  it('titleWrap があれば群名を囲んだタイトル行が付く', () => {
-    expect(composePlacedFormat(g, { b: { value: '63' } })).toEqual({
+  it('titleWrap があればフォーマット名を囲んだタイトル行が付く', () => {
+    expect(composePlacedFormat(format, { b: { value: '63' } })).toEqual({
       text: '（バイタル）\nHR 63',
       hasValue: true,
     });
   });
 
   it('titleWrap が空ならタイトル行なしで本文だけ', () => {
-    const g2 = { ...g, titleWrap: '' };
-    expect(composePlacedFormat(g2, { a: { value: '120/80' }, b: { value: '63' } }).text).toBe(
-      'BP 120/80, HR 63',
-    );
+    const withoutTitle = { ...format, titleWrap: '' };
+    expect(
+      composePlacedFormat(withoutTitle, {
+        a: { value: '120/80' },
+        b: { value: '63' },
+      }).text,
+    ).toBe('BP 120/80, HR 63');
   });
 
   it('titleWrap があっても name が空ならタイトル行は出ない', () => {
-    const g2 = { ...g, name: '' };
-    expect(composePlacedFormat(g2, { b: { value: '63' } }).text).toBe('HR 63');
+    const withoutName = { ...format, name: '' };
+    expect(composePlacedFormat(withoutName, { b: { value: '63' } }).text).toBe('HR 63');
   });
 
   it('項目を並び替えても安定 id で対応する値を読む', () => {
-    const reordered = { ...g, items: [g.items[1]!, g.items[0]!] };
+    const reordered = {
+      ...format,
+      items: [format.items[1]!, format.items[0]!],
+    };
     expect(
       composePlacedFormat(reordered, { a: { value: '120/80' }, b: { value: '63' } }).text,
     ).toBe('（バイタル）\nHR 63, BP 120/80');
@@ -328,15 +329,15 @@ describe('composePlacedFormat', () => {
 });
 
 describe('composeSection', () => {
-  const oGroups = [
-    group({
+  const oPlacements = [
+    placedFormat({
       id: 'g1',
       name: 'バイタル',
       joiner: ', ',
       labelSep: ' ',
       items: [item({ id: 'a', label: 'HR', kind: 'number' })],
     }),
-    group({
+    placedFormat({
       id: 'g2',
       name: '血糖',
       display: 'oncall',
@@ -346,8 +347,8 @@ describe('composeSection', () => {
     }),
   ];
 
-  it('値が全部空の group はタイトル行ごと消え、自由本文だけ残る', () => {
-    const sec = section({ id: 's', title: '(O)', formats: oGroups });
+  it('値が全部空の配置はタイトル行ごと消え、自由本文だけ残る', () => {
+    const sec = section({ id: 's', title: '(O)', formats: oPlacements });
     expect(composeSection(sec, '所見メモ', { g1: { a: '' } })).toBe('(O)\n所見メモ');
   });
 
@@ -361,8 +362,8 @@ describe('composeSection', () => {
     expect(composeSection(sec, '', {})).toBe('');
   });
 
-  it('oncall 群も値があれば所属セクションへ合成する', () => {
-    const sec = section({ id: 's', title: '(O)', formats: oGroups });
+  it('oncall 配置も値があれば所属セクションへ合成する', () => {
+    const sec = section({ id: 's', title: '(O)', formats: oPlacements });
     const out = composeSection(sec, '', {
       g1: { a: { value: '63' } },
       g2: { b: { value: '108' } },
@@ -371,7 +372,7 @@ describe('composeSection', () => {
   });
 
   it('freeText=false なら自由本文が入っていても無視する', () => {
-    const sec = section({ id: 's', title: '(O)', freeText: false, formats: oGroups });
+    const sec = section({ id: 's', title: '(O)', freeText: false, formats: oPlacements });
     expect(composeSection(sec, '無視されるはず', { g1: { a: { value: '63' } } })).toBe(
       '(O)\nHR 63',
     );
@@ -492,78 +493,6 @@ describe('normalizeItem', () => {
   it('object でないものは null', () => {
     expect(normalizeItem(null)).toBeNull();
     expect(normalizeItem('x')).toBeNull();
-  });
-});
-
-describe('normalizePlacedFormat', () => {
-  it('items が全滅した group は捨てる', () => {
-    expect(normalizePlacedFormat({ name: 'g', items: [{ kind: 'text', label: '' }] })).toBeNull();
-    expect(normalizePlacedFormat({ name: 'g', items: [] })).toBeNull();
-  });
-
-  it('id 採番と区切り既定値（joiner=改行・labelSep=：）', () => {
-    const r = normalizePlacedFormat({ name: 'g', items: [{ kind: 'number', label: 'HR' }] });
-    expect(r?.id).toMatch(/^plm_/);
-    expect(r?.joiner).toBe('\n');
-    expect(r?.labelSep).toBe('：');
-    expect(r?.display).toBe('always');
-  });
-
-  it('joiner/labelSep は空文字列も有効な設定として保持する', () => {
-    const r = normalizePlacedFormat({
-      name: 'g',
-      joiner: '',
-      labelSep: '',
-      items: [{ kind: 'number', label: 'HR' }],
-    });
-    expect(r?.joiner).toBe('');
-    expect(r?.labelSep).toBe('');
-  });
-});
-
-describe('normalizeSection', () => {
-  it('title も freeText も formats も無い空 section は捨てる', () => {
-    expect(normalizeSection({ title: '', freeText: false, formats: [] })).toBeNull();
-  });
-
-  it('freeText は未指定なら true（自由本文が既定）', () => {
-    const r = normalizeSection({ title: '' });
-    expect(r?.freeText).toBe(true);
-  });
-
-  it('壊れ group を落としても section 自体は生きる', () => {
-    const r = normalizeSection({ title: '(O)', formats: [null, { items: [] }] });
-    expect(r?.formats).toEqual([]);
-  });
-});
-
-describe('normalizeTemplate', () => {
-  it('sections が全滅した壊れテンプレは null', () => {
-    expect(
-      normalizeTemplate({ sections: [{ title: '', freeText: false, formats: [] }] }),
-    ).toBeNull();
-    expect(normalizeTemplate({ sections: [] })).toBeNull();
-    expect(normalizeTemplate(null)).toBeNull();
-    expect(normalizeTemplate('x')).toBeNull();
-  });
-
-  it('id/name/updatedAt の欠落は既定値で救う', () => {
-    const r = normalizeTemplate({ sections: [{ title: '(S)' }] });
-    expect(r?.id).toMatch(/^tpl_/);
-    expect(r?.name).toBe('(無題テンプレート)');
-    expect(r?.updatedAt).toBe(0);
-    // includeProblems/includeHandover は明示 true 以外 false
-    expect(r?.includeProblems).toBe(false);
-    expect(r?.includeHandover).toBe(false);
-  });
-
-  it('プリセット 2 種は normalizeTemplate をそのまま通る（seed の健全性）', () => {
-    const round = buildRoundPreset(1000);
-    const daily = buildDailyReportPreset(1000);
-    const resolvedRound = resolveTemplate(round.template, [round.frame], round.formats);
-    const resolvedDaily = resolveTemplate(daily.template, [daily.frame], daily.formats);
-    expect(normalizeTemplate(resolvedRound)).toEqual(resolvedRound);
-    expect(normalizeTemplate(resolvedDaily)).toEqual(resolvedDaily);
   });
 });
 

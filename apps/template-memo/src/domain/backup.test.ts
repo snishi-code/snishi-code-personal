@@ -157,13 +157,15 @@ describe('parseBackupJson の fail-closed 拒否', () => {
     expect(() => parseBackupJson(json)).toThrow(BACKUP_WRONG_APP_MSG);
   });
 
-  it('schemaVersion 不一致を拒否する（migration しない・旧 v1/v2 封筒も拒否）', () => {
+  it('schemaVersion 不一致を拒否する（migration しない・旧 v1〜v3 封筒も拒否）', () => {
     const newer = envelopeWith({ schemaVersion: SCHEMA_VERSION + 1 });
     expect(() => parseBackupJson(newer)).toThrow(backupSchemaMismatchMsg(SCHEMA_VERSION + 1));
     const v1 = envelopeWith({ schemaVersion: 1 });
     expect(() => parseBackupJson(v1)).toThrow(backupSchemaMismatchMsg(1));
     const v2 = envelopeWith({ schemaVersion: 2 });
     expect(() => parseBackupJson(v2)).toThrow(backupSchemaMismatchMsg(2));
+    const v3 = envelopeWith({ schemaVersion: 3 });
+    expect(() => parseBackupJson(v3)).toThrow(backupSchemaMismatchMsg(3));
   });
 
   it('templates が配列でなければ拒否する', () => {

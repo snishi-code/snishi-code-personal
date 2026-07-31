@@ -4,7 +4,7 @@
  * 封筒は kind / appId / schemaVersion で照合し、合わない JSON は fail-closed に拒否する
  * （medical 側 hospital-workspace/shared/workspaceBackup.ts の流儀を踏襲。zod は使わず手書き検証）。
  * schemaVersion は現行一致のみ受け付ける（migration step は持たない = constants の単発変換方式。
- * v1 の封筒は fail-closed に拒否する）。
+ * v3 以前の封筒は fail-closed に拒否する）。
  *
  * 中身の検証は 2 段構え:
  *   - frames / formats / templates: entities.ts の正規化を通し、壊れ参照は捨てる。
@@ -144,7 +144,7 @@ function normalizePatientRow(raw: unknown, places: readonly PlaceDef[]): Patient
     problems: stringArray(raw.problems),
     visitMemo: str(raw.visitMemo),
     standingMemo: str(raw.standingMemo),
-    // projectedValues の外側 2 層（groupId → itemId → 値）だけを検証する。値そのものは
+    // projectedValues の外側 2 層（placementId → itemId → 値）だけを検証する。値そのものは
     // 読み出し側の domain/formValues.ts の正規化ヘルパに委ねる（ここで形を断定せず、
     // 壊れ値は読み出し時に未入力へ倒れる）。
     projectedValues: normalizeProjectedValues(raw.projectedValues),

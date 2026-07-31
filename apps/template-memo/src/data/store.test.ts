@@ -111,7 +111,7 @@ describe('initStore の初回 seed', () => {
     expect(store.getActivePlace()?.name).toBe('グループ1');
     expect(store.isArchiveViewActive()).toBe(false);
 
-    expect(store.getTemplates().map((t) => t.name)).toEqual(['回診メモ', '日報']);
+    expect(store.getTemplateDefs().map((t) => t.name)).toEqual(['回診メモ', '日報']);
     expect(store.getFrames().map((frame) => frame.name)).toEqual(['SOAP', '日報']);
     expect(store.getFormats().map((format) => format.name)).toEqual([
       'バイタル',
@@ -132,7 +132,7 @@ describe('initStore の初回 seed', () => {
     const store2 = await reopen(db);
 
     expect(store2.listPlaces()).toHaveLength(1);
-    expect(store2.getTemplates()).toHaveLength(2);
+    expect(store2.getTemplateDefs()).toHaveLength(2);
     expect(await db.getAll(STORE_PLACES)).toHaveLength(1);
     expect(await db.getAll(STORE_TEMPLATES)).toHaveLength(2);
     expect(await db.getAll(STORE_FRAMES)).toHaveLength(2);
@@ -184,6 +184,11 @@ describe('正規化テンプレート部品 CRUD', () => {
     expect(copiedFormat.items.map((item) => item.id)).not.toEqual(
       sourceFormat.items.map((item) => item.id),
     );
+    copiedFormat.items[0]!.label = 'コピーだけ変更';
+    await store.saveFormat(copiedFormat);
+    expect(
+      store.getFormats().find((format) => format.id === sourceFormat.id)?.items[0]?.label,
+    ).toBe(sourceFormat.items[0]?.label);
 
     const reopened = await reopen(db);
     expect(reopened.getFrames().some((frame) => frame.id === copiedFrame.id)).toBe(true);

@@ -232,8 +232,8 @@ test('メニュー配置からフォーマットを開いて保存できる', as
   const templateRow = page.locator('.formatListRow', { hasText: '回診メモ' }).first();
   await templateRow.getByRole('button', { name: '編集', exact: true }).click();
 
-  const labGroup = page.locator(ui(UI.templateEdit.placement), { hasText: '検査所見' }).first();
-  await labGroup.locator(ui(UI.templateEdit.display)).selectOption('menu');
+  const labPlacement = page.locator(ui(UI.templateEdit.placement), { hasText: '検査所見' }).first();
+  await labPlacement.locator(ui(UI.templateEdit.display)).selectOption('menu');
   await page.locator(ui(UI.templateEdit.save)).click();
   await page.locator(ui(UI.settings.homeBottom)).click();
   await openDetail(page, '207 メニュー確認');
@@ -243,6 +243,71 @@ test('メニュー配置からフォーマットを開いて保存できる', as
   await page.getByLabel('採血', { exact: true }).fill('異常なし');
   await page.locator(ui(UI.projection.sheetSave)).click();
   await expect(page.getByLabel('採血', { exact: true })).toHaveValue('異常なし');
+});
+
+test('フォーマット単独QRを受け取り、同じIDはコピーとして保存する', async ({ page }) => {
+  await openSettings(page);
+  const pages = await page.evaluate(async () => {
+    // Vite がブラウザへ配信する実モジュールを使い、UI と同じ C1/FMT wire を作る。
+    const wire = await import('/src/domain/templateWire.ts');
+    return wire.encodeShareWirePages(
+      {
+        kind: wire.FORMAT_WIRE_KIND,
+        format: {
+          id: 'fmt_e2e_shared',
+          name: 'QR共有フォーマット',
+          joiner: '\n',
+          labelSep: '：',
+          titleWrap: '',
+          items: [{ id: 'itm_e2e_shared', label: '共有項目', kind: 'text' }],
+        },
+      },
+      { batchId: 'e2e-format' },
+    );
+  });
+
+  async function receive(): Promise<void> {
+    await page.getByRole('button', { name: 'QRで受け取る', exact: true }).click();
+    for (const wirePage of pages) {
+      await page.getByLabel('QR文字列を貼り付け').fill(wirePage);
+      await page.getByRole('button', { name: 'このページを読み取る' }).click();
+    }
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('QR共有フォーマット', { exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: '保存', exact: true }).click();
+  }
+
+  await receive();
+  await receive();
+  const formatSection = page
+    .locator('.settingsSection')
+    .filter({ has: page.getByText('フォーマット', { exact: true }) });
+  await expect(
+    formatSection.locator('.formatListRow', { hasText: 'QR共有フォーマット' }),
+  ).toHaveCount(2);
+
+  const importedRow = formatSection
+    .locator('.formatListRow', {
+      hasText: 'QR共有フォーマット',
+    })
+    .first();
+  await importedRow.getByRole('button', { name: 'QR送信' }).click();
+  await expectRenderedQr(page.getByRole('dialog').locator('canvas'));
+  await page.getByRole('dialog').getByRole('button', { name: '閉じる' }).click();
+});
+
+test('使用中フォーマットは参照テンプレート名を示して削除を拒否する', async ({ page }) => {
+  await openSettings(page);
+  const formatSection = page
+    .locator('.settingsSection')
+    .filter({ has: page.getByText('フォーマット', { exact: true }) });
+  const row = formatSection.locator('.formatListRow', { hasText: 'バイタル' });
+  await row.getByRole('button', { name: '削除', exact: true }).click();
+  await confirmDialog(page);
+  await expect(
+    page.getByText('このフォーマットはテンプレート「回診メモ」で使用中のため削除できません'),
+  ).toBeVisible();
+  await expect(row).toBeVisible();
 });
 
 // ── 3. ラウンド開始 (確認ダイアログ) → 今回分クリア・問題/継続メモ維持 → 巻き戻しで復元 ──
