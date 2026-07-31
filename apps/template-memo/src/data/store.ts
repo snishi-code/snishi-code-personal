@@ -15,6 +15,8 @@ import {
   APP_SETTINGS_KEY,
   LOCAL_PREFIX,
   newId,
+  STORE_FORMATS,
+  STORE_FRAMES,
   STORE_PATIENTS,
   STORE_PLACES,
   STORE_SETTINGS,
@@ -22,12 +24,17 @@ import {
 } from './constants';
 import { db as defaultDb } from './db';
 import type { DatabaseHandle } from '@snishi/foundation/storage/idb';
+import type { Template } from '../domain/template';
 import {
-  buildDailyReportPreset,
-  buildRoundPreset,
-  normalizeTemplate,
-  type Template,
-} from '../domain/template';
+  normalizeFormat,
+  normalizeFrame,
+  normalizeTemplateDef,
+  type Format,
+  type Frame,
+  type TemplateDef,
+} from '../domain/entities';
+import { resolveTemplate } from '../domain/resolveTemplate';
+import { buildDailyReportPreset, buildRoundPreset } from '../domain/presets';
 import { makeDefaultPatient, normalizePatientArray } from '../domain/normalize';
 import {
   prepareWorkspaceImportAppend,
@@ -41,7 +48,11 @@ import type { AppSettings, AppState, Patient, PlaceDef } from '../domain/types';
 export const PLACE_ID_REQUIRED_MSG = '場所が指定されていません';
 export const PATIENT_NOT_FOUND_MSG = '患者が見つかりません';
 export const PLACE_HAS_PATIENTS_MSG = '患者がいる場所は削除できません';
-const LAST_TEMPLATE_UNDELETABLE_MSG = '最後のテンプレートは削除できません';
+export const LAST_TEMPLATE_UNDELETABLE_MSG = '最後のテンプレートは削除できません';
+export const frameInUseMsg = (names: readonly string[]) =>
+  `このフレームはテンプレート「${names.join('」「')}」で使用中のため削除できません`;
+export const formatInUseMsg = (names: readonly string[]) =>
+  `このフォーマットはテンプレート「${names.join('」「')}」で使用中のため削除できません`;
 
 /** アーカイブ一覧の特別ビュー ID (place ではない。復帰/完全削除の入口)。 */
 export const ARCHIVE_VIEW_ID = '__archive__';
@@ -59,7 +70,9 @@ export interface ReplaceAllData {
   settings: AppSettings;
   places: PlaceDef[];
   patients: Patient[];
-  templates: Template[];
+  frames: Frame[];
+  formats: Format[];
+  templates: TemplateDef[];
 }
 
 interface HrStorage {
@@ -90,7 +103,19 @@ export interface HrStore {
   archivePatient(patientId: string): Promise<void>;
   restorePatient(patientId: string, placeId?: string): Promise<void>;
   deletePatientPermanently(patientId: string): Promise<void>;
-  // ── テンプレート ──
+  // ── テンプレート部品 ──
+  getFrames(): Frame[];
+  saveFrame(frame: Frame): Promise<void>;
+  deleteFrame(frameId: string): Promise<void>;
+  duplicateFrame(frameId: string): Promise<Frame>;
+  getFormats(): Format[];
+  saveFormat(format: Format): Promise<void>;
+  deleteFormat(formatId: string): Promise<void>;
+  duplicateFormat(formatId: string): Promise<Format>;
+  getTemplateDefs(): TemplateDef[];
+  saveTemplateDef(template: TemplateDef): Promise<void>;
+  deleteTemplateDef(templateId: string): Promise<void>;
+  /** タスク C で編集 UI を分離するまでの解決済み互換面。 */
   getTemplates(): Template[];
   getActiveTemplate(): Template | null;
   setActiveTemplate(templateId: string): Promise<void>;
@@ -101,7 +126,9 @@ export interface HrStore {
     settings: AppSettings;
     places: PlaceDef[];
     patients: Patient[];
-    templates: Template[];
+    frames: Frame[];
+    formats: Format[];
+    templates: TemplateDef[];
   };
   replaceAll(data: ReplaceAllData): Promise<void>;
   wipeAll(): Promise<void>;
@@ -156,12 +183,20 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
 
   let settings: AppSettings = defaultSettings(0, '');
   let places: PlaceDef[] = [];
-  let templates: Template[] = [];
+  let frames: Frame[] = [];
+  let formats: Format[] = [];
+  let templateDefs: TemplateDef[] = [];
   /** 全患者マスタ (in-memory)。live (appState.patients) は同じ object を共有する。 */
   let allPatients: Patient[] = [];
   let appState: AppState = { title: defaultTitle, patients: [] };
   let changeHandler: ((ev: StoreChangeEvent) => void) | null = null;
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function resolvedTemplates(): Template[] {
+    return templateDefs
+      .map((definition) => resolveTemplate(definition, frames, formats))
+      .filter((template): template is Template => template !== null);
+  }
 
   function emit(ev: StoreChangeEvent): void {
     try {
@@ -238,16 +273,25 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
     const ts = now();
     const round = buildRoundPreset(ts);
     const daily = buildDailyReportPreset(ts);
-    const seededSettings = defaultSettings(ts, round.id);
+    const seededSettings = defaultSettings(ts, round.template.id);
     const seededPlace: PlaceDef = { placeId: newId('plc'), name: DEFAULT_PLACE_NAME };
-    await db.runWrite([STORE_SETTINGS, STORE_TEMPLATES, STORE_PLACES], (tx) => {
-      tx.objectStore(STORE_TEMPLATES).put(round);
-      tx.objectStore(STORE_TEMPLATES).put(daily);
-      tx.objectStore(STORE_PLACES).put(seededPlace);
-      tx.objectStore(STORE_SETTINGS).put(seededSettings);
-    });
+    await db.runWrite(
+      [STORE_SETTINGS, STORE_TEMPLATES, STORE_FRAMES, STORE_FORMATS, STORE_PLACES],
+      (tx) => {
+        tx.objectStore(STORE_TEMPLATES).put(round.template);
+        tx.objectStore(STORE_TEMPLATES).put(daily.template);
+        tx.objectStore(STORE_FRAMES).put(round.frame);
+        tx.objectStore(STORE_FRAMES).put(daily.frame);
+        for (const format of round.formats) tx.objectStore(STORE_FORMATS).put(format);
+        for (const format of daily.formats) tx.objectStore(STORE_FORMATS).put(format);
+        tx.objectStore(STORE_PLACES).put(seededPlace);
+        tx.objectStore(STORE_SETTINGS).put(seededSettings);
+      },
+    );
     settings = seededSettings;
-    templates = [round, daily];
+    frames = [round.frame, daily.frame];
+    formats = [...round.formats, ...daily.formats];
+    templateDefs = [round.template, daily.template];
     places = [seededPlace];
   }
 
@@ -259,19 +303,28 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
   // 初期化は単発 (memoize)。StrictMode の二重 effect / 二重呼び出しで seed を重複させない。
   let initPromise: Promise<void> | null = null;
   async function doInit(): Promise<void> {
-    const [settingsRec, placeRows, patientRows, templateRows] = await Promise.all([
-      db.get<AppSettings>(STORE_SETTINGS, APP_SETTINGS_KEY),
-      db.getAll<unknown>(STORE_PLACES),
-      db.getAll<unknown>(STORE_PATIENTS),
-      db.getAll<unknown>(STORE_TEMPLATES),
-    ]);
+    const [settingsRec, placeRows, patientRows, frameRows, formatRows, templateRows] =
+      await Promise.all([
+        db.get<AppSettings>(STORE_SETTINGS, APP_SETTINGS_KEY),
+        db.getAll<unknown>(STORE_PLACES),
+        db.getAll<unknown>(STORE_PATIENTS),
+        db.getAll<unknown>(STORE_FRAMES),
+        db.getAll<unknown>(STORE_FORMATS),
+        db.getAll<unknown>(STORE_TEMPLATES),
+      ]);
     if (!settingsRec) {
       // 初回起動: プリセット 2 種 + place 1 つを seed し、回診メモを有効にする。
       await seedDefaults();
     } else {
       settings = settingsRec;
       places = normalizePlaceRows(placeRows);
-      templates = templateRows.map(normalizeTemplate).filter((t): t is Template => t !== null);
+      frames = frameRows.map(normalizeFrame).filter((frame): frame is Frame => frame !== null);
+      formats = formatRows
+        .map(normalizeFormat)
+        .filter((format): format is Format => format !== null);
+      templateDefs = templateRows
+        .map((row) => normalizeTemplateDef(row, { frames, formats }))
+        .filter((template): template is TemplateDef => template !== null);
     }
     allPatients = normalizePatientArray(patientRows);
     const view = activeViewId();
@@ -386,31 +439,84 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
       rebuildLive();
       emit({ type: 'workspace', workspaceId: activeViewId() });
     },
-    getTemplates: () => templates,
-    getActiveTemplate() {
-      return templates.find((t) => t.id === settings.activeTemplateId) ?? null;
-    },
-    async setActiveTemplate(templateId) {
-      if (!templates.some((t) => t.id === templateId)) {
-        throw new Error(`template not found: ${templateId}`);
-      }
-      settings.activeTemplateId = templateId;
-      await this.saveSettings();
+    getFrames: () => frames,
+    async saveFrame(frame) {
+      const normalized = normalizeFrame(frame);
+      if (!normalized) throw new Error('フレームの形式が不正です');
+      await db.put(STORE_FRAMES, normalized);
+      frames = frames.some((candidate) => candidate.id === normalized.id)
+        ? frames.map((candidate) => (candidate.id === normalized.id ? normalized : candidate))
+        : [...frames, normalized];
       emit({ type: 'workspace', workspaceId: activeViewId() });
     },
-    async saveTemplate(template) {
-      await db.put(STORE_TEMPLATES, template);
-      const exists = templates.some((t) => t.id === template.id);
-      templates = exists
-        ? templates.map((t) => (t.id === template.id ? template : t))
-        : [...templates, template];
+    async deleteFrame(frameId) {
+      const usedBy = templateDefs
+        .filter((template) => template.frameId === frameId)
+        .map((template) => template.name);
+      if (usedBy.length > 0) throw new Error(frameInUseMsg(usedBy));
+      await db.deleteRecord(STORE_FRAMES, frameId);
+      frames = frames.filter((frame) => frame.id !== frameId);
       emit({ type: 'workspace', workspaceId: activeViewId() });
     },
-    async deleteTemplate(templateId) {
-      const rest = templates.filter((t) => t.id !== templateId);
+    async duplicateFrame(frameId) {
+      const source = frames.find((frame) => frame.id === frameId);
+      if (!source) throw new Error('フレームが見つかりません');
+      const duplicate: Frame = {
+        ...source,
+        id: newId('frm'),
+        name: `${source.name}のコピー`,
+        sections: source.sections.map((section) => ({ ...section, id: newId('sec') })),
+      };
+      await this.saveFrame(duplicate);
+      return duplicate;
+    },
+    getFormats: () => formats,
+    async saveFormat(format) {
+      const normalized = normalizeFormat(format);
+      if (!normalized) throw new Error('フォーマットの形式が不正です');
+      await db.put(STORE_FORMATS, normalized);
+      formats = formats.some((candidate) => candidate.id === normalized.id)
+        ? formats.map((candidate) => (candidate.id === normalized.id ? normalized : candidate))
+        : [...formats, normalized];
+      emit({ type: 'workspace', workspaceId: activeViewId() });
+    },
+    async deleteFormat(formatId) {
+      const usedBy = templateDefs
+        .filter((template) =>
+          template.placements.some((placement) => placement.formatId === formatId),
+        )
+        .map((template) => template.name);
+      if (usedBy.length > 0) throw new Error(formatInUseMsg(usedBy));
+      await db.deleteRecord(STORE_FORMATS, formatId);
+      formats = formats.filter((format) => format.id !== formatId);
+      emit({ type: 'workspace', workspaceId: activeViewId() });
+    },
+    async duplicateFormat(formatId) {
+      const source = formats.find((format) => format.id === formatId);
+      if (!source) throw new Error('フォーマットが見つかりません');
+      const duplicate: Format = {
+        ...source,
+        id: newId('fmt'),
+        name: `${source.name}のコピー`,
+        items: source.items.map((item) => ({ ...item, id: newId('itm') })),
+      };
+      await this.saveFormat(duplicate);
+      return duplicate;
+    },
+    getTemplateDefs: () => templateDefs,
+    async saveTemplateDef(template) {
+      const normalized = normalizeTemplateDef(template, { frames, formats });
+      if (!normalized) throw new Error('テンプレートの形式が不正です');
+      await db.put(STORE_TEMPLATES, normalized);
+      templateDefs = templateDefs.some((candidate) => candidate.id === normalized.id)
+        ? templateDefs.map((candidate) => (candidate.id === normalized.id ? normalized : candidate))
+        : [...templateDefs, normalized];
+      emit({ type: 'workspace', workspaceId: activeViewId() });
+    },
+    async deleteTemplateDef(templateId) {
+      const rest = templateDefs.filter((template) => template.id !== templateId);
       const fallback = rest[0];
       if (!fallback) throw new Error(LAST_TEMPLATE_UNDELETABLE_MSG);
-      // active を消す時は残りの先頭へ付け替える (active 不在の状態を作らない)。
       if (settings.activeTemplateId === templateId) {
         settings.activeTemplateId = fallback.id;
         settings.updatedAt = now();
@@ -421,15 +527,98 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
       } else {
         await db.deleteRecord(STORE_TEMPLATES, templateId);
       }
-      templates = rest;
+      templateDefs = rest;
       emit({ type: 'workspace', workspaceId: activeViewId() });
+    },
+    getTemplates: () => resolvedTemplates(),
+    getActiveTemplate() {
+      const definition =
+        templateDefs.find((template) => template.id === settings.activeTemplateId) ?? null;
+      return definition ? resolveTemplate(definition, frames, formats) : null;
+    },
+    async setActiveTemplate(templateId) {
+      if (!templateDefs.some((template) => template.id === templateId)) {
+        throw new Error(`template not found: ${templateId}`);
+      }
+      settings.activeTemplateId = templateId;
+      await this.saveSettings();
+      emit({ type: 'workspace', workspaceId: activeViewId() });
+    },
+    async saveTemplate(template) {
+      // タスク C の責務分離まで、旧配置エディタの保存を新エンティティへ反映する。
+      const current = templateDefs.find((definition) => definition.id === template.id);
+      const currentFrame = current
+        ? frames.find((frame) => frame.id === current.frameId)
+        : undefined;
+      const frame: Frame = {
+        id: currentFrame?.id ?? newId('frm'),
+        name: currentFrame?.name ?? template.name,
+        sections: template.sections.map((section) => ({
+          id: section.id,
+          title: section.title,
+          freeText: section.freeText,
+          ...(section.normal === undefined ? {} : { normal: section.normal }),
+        })),
+      };
+      const nextFormats = [...formats];
+      const placements = template.sections.flatMap((section) =>
+        section.formats.map((placed) => {
+          const oldPlacement = current?.placements.find((placement) => placement.id === placed.id);
+          const formatId = oldPlacement?.formatId ?? newId('fmt');
+          const format: Format = {
+            id: formatId,
+            name: placed.name,
+            joiner: placed.joiner,
+            labelSep: placed.labelSep,
+            titleWrap: placed.titleWrap,
+            items: placed.items,
+          };
+          const index = nextFormats.findIndex((candidate) => candidate.id === formatId);
+          if (index >= 0) nextFormats[index] = format;
+          else nextFormats.push(format);
+          return {
+            id: placed.id,
+            sectionId: section.id,
+            formatId,
+            display: placed.display,
+          };
+        }),
+      );
+      const definition: TemplateDef = {
+        id: template.id,
+        name: template.name,
+        frameId: frame.id,
+        memoSectionId: template.memoSectionId,
+        includeProblems: template.includeProblems,
+        includeHandover: template.includeHandover,
+        placements,
+        updatedAt: template.updatedAt,
+      };
+      await db.runWrite([STORE_FRAMES, STORE_FORMATS, STORE_TEMPLATES], (tx) => {
+        tx.objectStore(STORE_FRAMES).put(frame);
+        for (const format of nextFormats) tx.objectStore(STORE_FORMATS).put(format);
+        tx.objectStore(STORE_TEMPLATES).put(definition);
+      });
+      frames = frames.some((candidate) => candidate.id === frame.id)
+        ? frames.map((candidate) => (candidate.id === frame.id ? frame : candidate))
+        : [...frames, frame];
+      formats = nextFormats;
+      templateDefs = templateDefs.some((candidate) => candidate.id === definition.id)
+        ? templateDefs.map((candidate) => (candidate.id === definition.id ? definition : candidate))
+        : [...templateDefs, definition];
+      emit({ type: 'workspace', workspaceId: activeViewId() });
+    },
+    async deleteTemplate(templateId) {
+      await this.deleteTemplateDef(templateId);
     },
     exportData() {
       return {
         settings,
         places,
         patients: allPatients,
-        templates,
+        frames,
+        formats,
+        templates: templateDefs,
       };
     },
     async replaceAll(data) {
@@ -437,12 +626,16 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
         for (const name of ALL_STORES) tx.objectStore(name).clear();
         tx.objectStore(STORE_SETTINGS).put(data.settings);
         for (const p of data.patients) tx.objectStore(STORE_PATIENTS).put(p);
-        for (const g of data.places) tx.objectStore(STORE_PLACES).put(g);
+        for (const place of data.places) tx.objectStore(STORE_PLACES).put(place);
+        for (const frame of data.frames) tx.objectStore(STORE_FRAMES).put(frame);
+        for (const format of data.formats) tx.objectStore(STORE_FORMATS).put(format);
         for (const t of data.templates) tx.objectStore(STORE_TEMPLATES).put(t);
       });
       settings = data.settings;
       places = data.places;
-      templates = data.templates;
+      frames = data.frames;
+      formats = data.formats;
+      templateDefs = data.templates;
       allPatients = data.patients;
       const view = activeViewId();
       if (view) pointers.set(PK_ACTIVE_PLACE, view);

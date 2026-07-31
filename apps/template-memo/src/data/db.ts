@@ -1,14 +1,16 @@
 /*
  * IndexedDB 接続（foundation の薄いラッパを使用）。store 作成はここだけで行う。
  *
- * v3 = select/menu・清書廃止を含む新スキーマ。リリース前の dev データのみのため、
- * upgrade では既存 store を全削除して v3 構成を作り直す（移行なし）。
+ * v4 = Frame / Format / TemplateDef を独立 store に保存する正規化スキーマ。
+ * 作者決定により upgrade では既存 store を全削除して作り直す（データ移行なし）。
  */
 
 import { createDatabase, type DatabaseHandle } from '@snishi/foundation/storage/idb';
 import {
   DB_NAME,
   DB_VERSION,
+  STORE_FORMATS,
+  STORE_FRAMES,
   STORE_PATIENTS,
   STORE_PLACES,
   STORE_SETTINGS,
@@ -28,6 +30,8 @@ export const db: DatabaseHandle = createDatabase({
     idb.createObjectStore(STORE_PATIENTS, { keyPath: 'pid' });
     idb.createObjectStore(STORE_PLACES, { keyPath: 'placeId' });
     idb.createObjectStore(STORE_TEMPLATES, { keyPath: 'id' });
+    idb.createObjectStore(STORE_FRAMES, { keyPath: 'id' });
+    idb.createObjectStore(STORE_FORMATS, { keyPath: 'id' });
     // 予備の kv store（out-of-line key。現在は未使用）。
     idb.createObjectStore(STORE_SNAPSHOTS);
   },

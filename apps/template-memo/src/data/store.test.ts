@@ -12,6 +12,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDatabase, type DatabaseHandle } from '@snishi/foundation/storage/idb';
 import {
   DB_VERSION,
+  STORE_FORMATS,
+  STORE_FRAMES,
   STORE_PATIENTS,
   STORE_PLACES,
   STORE_SETTINGS,
@@ -21,6 +23,8 @@ import {
 import {
   ARCHIVE_VIEW_ID,
   createHrStore,
+  formatInUseMsg,
+  frameInUseMsg,
   PATIENT_NOT_FOUND_MSG,
   PLACE_HAS_PATIENTS_MSG,
   PLACE_ID_REQUIRED_MSG,
@@ -45,6 +49,8 @@ function makeTestDb(): DatabaseHandle {
       idb.createObjectStore(STORE_PATIENTS, { keyPath: 'pid' });
       idb.createObjectStore(STORE_PLACES, { keyPath: 'placeId' });
       idb.createObjectStore(STORE_TEMPLATES, { keyPath: 'id' });
+      idb.createObjectStore(STORE_FRAMES, { keyPath: 'id' });
+      idb.createObjectStore(STORE_FORMATS, { keyPath: 'id' });
       idb.createObjectStore(STORE_SNAPSHOTS);
     },
   });
@@ -106,6 +112,13 @@ describe('initStore の初回 seed', () => {
     expect(store.isArchiveViewActive()).toBe(false);
 
     expect(store.getTemplates().map((t) => t.name)).toEqual(['回診メモ', '日報']);
+    expect(store.getFrames().map((frame) => frame.name)).toEqual(['SOAP', '日報']);
+    expect(store.getFormats().map((format) => format.name)).toEqual([
+      'バイタル',
+      '身体所見',
+      '血糖',
+      '検査所見',
+    ]);
     expect(store.getActiveTemplate()?.name).toBe('回診メモ');
     expect(store.getSettings().newlineMode).toBe('crlf');
     expect(store.getAppState().patients).toEqual([]);
@@ -122,6 +135,71 @@ describe('initStore の初回 seed', () => {
     expect(store2.getTemplates()).toHaveLength(2);
     expect(await db.getAll(STORE_PLACES)).toHaveLength(1);
     expect(await db.getAll(STORE_TEMPLATES)).toHaveLength(2);
+    expect(await db.getAll(STORE_FRAMES)).toHaveLength(2);
+    expect(await db.getAll(STORE_FORMATS)).toHaveLength(4);
+  });
+});
+
+// ============================
+// フレーム / フォーマット / テンプレート定義
+// ============================
+
+describe('正規化テンプレート部品 CRUD', () => {
+  it('active テンプレートは配置 ID を持つ解決済み形で返す', async () => {
+    const { store } = await setup();
+    const definition = store.getTemplateDefs().find((template) => template.name === '回診メモ')!;
+    const resolved = store.getActiveTemplate();
+    const placementIds = definition.placements.map((placement) => placement.id);
+    expect(
+      resolved?.sections.flatMap((section) => section.formats.map((placed) => placed.id)),
+    ).toEqual(placementIds);
+  });
+
+  it('使用中のフレームとフォーマットは参照テンプレート名を示して削除拒否する', async () => {
+    const { store } = await setup();
+    const definition = store.getTemplateDefs().find((template) => template.name === '回診メモ')!;
+    const formatId = definition.placements[0]!.formatId;
+
+    await expect(store.deleteFrame(definition.frameId)).rejects.toThrow(
+      frameInUseMsg(['回診メモ']),
+    );
+    await expect(store.deleteFormat(formatId)).rejects.toThrow(formatInUseMsg(['回診メモ']));
+  });
+
+  it('フレームとフォーマットの複製は子 ID も新しくし、再起動後も残る', async () => {
+    const { db, store } = await setup();
+    const sourceFrame = store.getFrames()[0]!;
+    const sourceFormat = store.getFormats()[0]!;
+
+    const copiedFrame = await store.duplicateFrame(sourceFrame.id);
+    const copiedFormat = await store.duplicateFormat(sourceFormat.id);
+
+    expect(copiedFrame.name).toBe(`${sourceFrame.name}のコピー`);
+    expect(copiedFrame.id).not.toBe(sourceFrame.id);
+    expect(copiedFrame.sections.map((section) => section.id)).not.toEqual(
+      sourceFrame.sections.map((section) => section.id),
+    );
+    expect(copiedFormat.name).toBe(`${sourceFormat.name}のコピー`);
+    expect(copiedFormat.id).not.toBe(sourceFormat.id);
+    expect(copiedFormat.items.map((item) => item.id)).not.toEqual(
+      sourceFormat.items.map((item) => item.id),
+    );
+
+    const reopened = await reopen(db);
+    expect(reopened.getFrames().some((frame) => frame.id === copiedFrame.id)).toBe(true);
+    expect(reopened.getFormats().some((format) => format.id === copiedFormat.id)).toBe(true);
+  });
+
+  it('未使用部品は削除できる', async () => {
+    const { store } = await setup();
+    const copiedFrame = await store.duplicateFrame(store.getFrames()[0]!.id);
+    const copiedFormat = await store.duplicateFormat(store.getFormats()[0]!.id);
+
+    await store.deleteFrame(copiedFrame.id);
+    await store.deleteFormat(copiedFormat.id);
+
+    expect(store.getFrames().some((frame) => frame.id === copiedFrame.id)).toBe(false);
+    expect(store.getFormats().some((format) => format.id === copiedFormat.id)).toBe(false);
   });
 });
 

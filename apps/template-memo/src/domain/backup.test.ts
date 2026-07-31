@@ -15,7 +15,8 @@ import {
   buildBackupJson,
   parseBackupJson,
 } from './backup';
-import { buildRoundPreset, type Template } from './template';
+import type { Format, Frame, TemplateDef } from './entities';
+import { buildRoundPreset } from './presets';
 import type { AppSettings, Patient, PlaceDef } from './types';
 
 const NOW = 1_753_000_000_000;
@@ -38,7 +39,7 @@ function makePatient(over: Partial<Patient> = {}): Patient {
     visitMemo: '今回メモ本文',
     standingMemo: '申し送りメモ',
     projectedValues: {
-      grp_1: {
+      plm_1: {
         itm_1: { value: '120/80' },
         itm_2: { value: '96', note: 'O2 2L' },
         itm_3: { value: '明らかなラ音なし', source: 'preset' },
@@ -64,15 +65,16 @@ interface Fixture {
   settings: AppSettings;
   places: PlaceDef[];
   patients: Patient[];
-  templates: Template[];
+  frames: Frame[];
+  formats: Format[];
+  templates: TemplateDef[];
 }
 
 function makeFixture(): Fixture {
-  const template = buildRoundPreset(NOW);
-  template.sections[1]?.formats.push({
-    id: 'plm_menu',
+  const preset = buildRoundPreset(NOW);
+  const decision: Format = {
+    id: 'fmt_decision',
     name: '判定',
-    display: 'menu',
     joiner: '\n',
     labelSep: '：',
     titleWrap: '',
@@ -84,10 +86,24 @@ function makeFixture(): Fixture {
         options: ['経過観察', '精査'],
       },
     ],
+  };
+  preset.formats.push(decision);
+  preset.template.placements.push({
+    id: 'plm_menu',
+    sectionId: preset.frame.sections[1]!.id,
+    formatId: decision.id,
+    display: 'menu',
   });
   const places = [makePlace('plc_a', '第1グループ')];
   const patients = [makePatient({ placeId: 'plc_a' })];
-  return { settings: makeSettings(template.id), places, patients, templates: [template] };
+  return {
+    settings: makeSettings(preset.template.id),
+    places,
+    patients,
+    frames: [preset.frame],
+    formats: preset.formats,
+    templates: [preset.template],
+  };
 }
 
 /** 正常な封筒を組んでから一部を差し替えた JSON を作る（拒否系テスト用）。 */
@@ -108,12 +124,14 @@ describe('buildBackupJson → parseBackupJson roundtrip', () => {
     expect(env.exportedAt).toBe(new Date(NOW).toISOString());
   });
 
-  it('build→parse で settings/places/patients/templates が一致する', () => {
+  it('build→parse で settings/places/patients/frames/formats/templates が一致する', () => {
     const data = makeFixture();
     const parsed = parseBackupJson(buildBackupJson(data, NOW));
     expect(parsed.settings).toEqual(data.settings);
     expect(parsed.places).toEqual(data.places);
     expect(parsed.patients).toEqual(data.patients);
+    expect(parsed.frames).toEqual(data.frames);
+    expect(parsed.formats).toEqual(data.formats);
     expect(parsed.templates).toEqual(data.templates);
   });
 });

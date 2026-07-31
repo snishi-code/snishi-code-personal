@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { Format, Frame, TemplateDef } from './entities';
+import { buildRoundPreset } from './presets';
 import { resolveTemplate } from './resolveTemplate';
-import { normalizeTemplate } from './template';
+import { composePresetClean, normalizeTemplate } from './template';
+import type { Patient } from './types';
 
 const frame: Frame = {
   id: 'frame-soap',
@@ -100,5 +102,49 @@ describe('resolveTemplate', () => {
     expect(resolveTemplate(definition({ frameId: 'missing-frame' }), [frame], [format])).toBeNull();
     const resolved = resolveTemplate(definition(), [frame], [format]);
     expect(normalizeTemplate(resolved)).toEqual(resolved);
+  });
+
+  it('新 seed の解決結果は作者の回診プリセット本文を完全再現する', () => {
+    const preset = buildRoundPreset(100);
+    const resolved = resolveTemplate(preset.template, [preset.frame], preset.formats)!;
+    const placed = (name: string) =>
+      resolved.sections.flatMap((section) => section.formats).find((entry) => entry.name === name)!;
+    const itemId = (formatName: string, label: string, offset = 0) => {
+      const matches = placed(formatName).items.filter((item) => item.label === label);
+      return matches[offset]!.id;
+    };
+    const vitals = placed('バイタル');
+    const physical = placed('身体所見');
+    const glucose = placed('血糖');
+    const patient: Patient = {
+      pid: 'patient-golden',
+      name: '',
+      room: '',
+      placeId: '',
+      status: 'none',
+      tags: [],
+      problems: ['HF', 'DM', '誤嚥性肺炎\n　7/20- TAZ/PIPC 9g/2'],
+      visitMemo: '',
+      standingMemo: '週明けLabo\n家族IC希望あり',
+      projectedValues: {
+        [vitals.id]: {
+          [itemId('バイタル', 'BP')]: { value: '120/98' },
+          [itemId('バイタル', 'HR')]: { value: '63' },
+        },
+        [glucose.id]: {
+          [itemId('血糖', 'Glu')]: { value: '108' },
+          [itemId('血糖', '', 0)]: { value: '222' },
+          [itemId('血糖', '', 1)]: { value: '100' },
+        },
+        [physical.id]: Object.fromEntries(
+          physical.items.map((item) => [item.id, { value: item.normal, source: 'preset' }]),
+        ),
+      },
+      updatedAt: 0,
+      archivedAt: null,
+    };
+    const expected =
+      '#1 HF\n#2 DM\n#3 誤嚥性肺炎\n　7/20- TAZ/PIPC 9g/2\n\n週明けLabo\n家族IC希望あり\n\n(S)\n変わりない\n\n(O)\nBP 120/98mmHg, HR 63\n\n肺音：明らかなラ音なし\n腸音：正常\n腹部：平坦軟、圧痛なし\n下腿浮腫：なし\n\nGlu 108-222-100\n\n(A)\n著変なし\n\n(P)\n現行加療継続';
+    expect(composePresetClean(patient, resolved)).toBe(expected);
   });
 });

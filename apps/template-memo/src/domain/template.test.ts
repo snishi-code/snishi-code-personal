@@ -7,8 +7,6 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  buildDailyReportPreset,
-  buildRoundPreset,
   composeDocument,
   composePlacedFormat,
   composeItem,
@@ -25,6 +23,8 @@ import {
   type TemplateItem,
   type TemplateSection,
 } from './template';
+import { buildDailyReportPreset, buildRoundPreset } from './presets';
+import { resolveTemplate } from './resolveTemplate';
 import type { Patient } from './types';
 
 // ============================
@@ -560,8 +560,10 @@ describe('normalizeTemplate', () => {
   it('プリセット 2 種は normalizeTemplate をそのまま通る（seed の健全性）', () => {
     const round = buildRoundPreset(1000);
     const daily = buildDailyReportPreset(1000);
-    expect(normalizeTemplate(round)).toEqual(round);
-    expect(normalizeTemplate(daily)).toEqual(daily);
+    const resolvedRound = resolveTemplate(round.template, [round.frame], round.formats);
+    const resolvedDaily = resolveTemplate(daily.template, [daily.frame], daily.formats);
+    expect(normalizeTemplate(resolvedRound)).toEqual(resolvedRound);
+    expect(normalizeTemplate(resolvedDaily)).toEqual(resolvedDaily);
   });
 });
 

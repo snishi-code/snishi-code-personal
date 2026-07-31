@@ -24,7 +24,8 @@ import {
   type WorkspaceImportCandidate,
   type WorkspaceImportData,
 } from '../../domain/importWorkspace';
-import { buildDailyReportPreset, buildRoundPreset, type Template } from '../../domain/template';
+import type { Template } from '../../domain/template';
+import { buildDailyReportPreset, buildRoundPreset } from '../../domain/presets';
 import { newId } from '../../data/constants';
 import { REASON } from '../../data/snapshots';
 import { useRevision, type AppRuntime } from '../appRuntime';
@@ -234,9 +235,11 @@ function TemplateSection({
     if (busy) return;
     setBusy(true);
     try {
-      const template =
+      const preset =
         kind === 'round' ? buildRoundPreset(Date.now()) : buildDailyReportPreset(Date.now());
-      await store.saveTemplate(template);
+      await store.saveFrame(preset.frame);
+      for (const format of preset.formats) await store.saveFormat(format);
+      await store.saveTemplateDef(preset.template);
       runtime.bump();
     } catch (error) {
       toast.show(errorText(error, s.toast.saveFailed), 'error');

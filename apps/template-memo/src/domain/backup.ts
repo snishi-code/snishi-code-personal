@@ -7,7 +7,7 @@
  * v1 の封筒は fail-closed に拒否する）。
  *
  * 中身の検証は 2 段構え:
- *   - templates: normalizeTemplate（domain/template.ts が正本）で正規化し、壊れは捨てる。
+ *   - frames / formats / templates: entities.ts の正規化を通し、壊れ参照は捨てる。
  *     全滅したら復元先が成立しないので throw（active テンプレート不在の状態を作らない）。
  *   - patients / places / settings: 1 件ずつ防御的に正規化する。id/name の型不正 row だけを
  *     捨てて生き残りを救い、row 内の配列/オブジェクト欄は型不正なら空に落とす。
@@ -19,7 +19,14 @@
 
 import { APP_ID, BACKUP_KIND, SCHEMA_VERSION } from '../data/constants';
 import type { ReplaceAllData } from '../data/store';
-import { normalizeTemplate, type Template } from './template';
+import {
+  normalizeFormat,
+  normalizeFrame,
+  normalizeTemplateDef,
+  type Format,
+  type Frame,
+  type TemplateDef,
+} from './entities';
 import { normalizeProjectedValues } from './normalize';
 import {
   isPatientStatus,
@@ -44,7 +51,9 @@ interface BackupBundle {
   settings: AppSettings;
   places: PlaceDef[];
   patients: Patient[];
-  templates: Template[];
+  frames: Frame[];
+  formats: Format[];
+  templates: TemplateDef[];
 }
 
 // ── エラー文言定数（正本） ──
@@ -66,10 +75,7 @@ export const backupFieldBrokenMsg = (name: string) => `バックアップの ${n
 // ============================
 
 /** 全データを封筒に包んで JSON 文字列にする（人が中を確認できるよう整形出力）。 */
-export function buildBackupJson(
-  data: { settings: AppSettings; places: PlaceDef[]; patients: Patient[]; templates: Template[] },
-  nowMs = Date.now(),
-): string {
+export function buildBackupJson(data: ReplaceAllData, nowMs = Date.now()): string {
   const bundle: BackupBundle = {
     kind: BACKUP_KIND,
     appId: APP_ID,
@@ -78,6 +84,8 @@ export function buildBackupJson(
     settings: data.settings,
     places: data.places,
     patients: data.patients,
+    frames: data.frames,
+    formats: data.formats,
     templates: data.templates,
   };
   return JSON.stringify(bundle, null, 2);
@@ -157,7 +165,7 @@ function normalizeTagRow(raw: unknown): TagDef | null {
  * activeTemplateId は検証済み templates に実在するものだけを許し、
  * 無ければ先頭 template へ付け替える（active 不在の状態を作らない）。
  */
-function normalizeSettings(raw: unknown, templates: readonly Template[]): AppSettings {
+function normalizeSettings(raw: unknown, templates: readonly TemplateDef[]): AppSettings {
   const fallback = templates[0];
   if (!fallback) throw new Error(BACKUP_NO_TEMPLATES_MSG); // 呼び出し側で保証済みの防御
   const r = isPlainObject(raw) ? raw : {};
@@ -195,11 +203,21 @@ export function parseBackupJson(text: string): ReplaceAllData {
     throw new Error(backupSchemaMismatchMsg(parsed.schemaVersion));
   }
 
+  if (!Array.isArray(parsed.frames)) throw new Error(backupFieldBrokenMsg('frames'));
+  const frames = parsed.frames
+    .map(normalizeFrame)
+    .filter((frame): frame is Frame => frame !== null);
+
+  if (!Array.isArray(parsed.formats)) throw new Error(backupFieldBrokenMsg('formats'));
+  const formats = parsed.formats
+    .map(normalizeFormat)
+    .filter((format): format is Format => format !== null);
+
   // templates が全滅すると active テンプレート不在になるため、復元自体を中止する。
   if (!Array.isArray(parsed.templates)) throw new Error(backupFieldBrokenMsg('templates'));
   const templates = parsed.templates
-    .map(normalizeTemplate)
-    .filter((t): t is Template => t !== null);
+    .map((row) => normalizeTemplateDef(row, { frames, formats }))
+    .filter((template): template is TemplateDef => template !== null);
   if (templates.length === 0) throw new Error(BACKUP_NO_TEMPLATES_MSG);
 
   if (!Array.isArray(parsed.places)) throw new Error(backupFieldBrokenMsg('places'));
@@ -211,5 +229,5 @@ export function parseBackupJson(text: string): ReplaceAllData {
     .filter((s): s is Patient => s !== null);
 
   const settings = normalizeSettings(parsed.settings, templates);
-  return { settings, patients, places, templates };
+  return { settings, patients, places, frames, formats, templates };
 }
