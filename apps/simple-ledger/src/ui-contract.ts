@@ -6,11 +6,10 @@
  * - 詳細とポリシーは docs/dev/ui-contract.md。
  */
 export const UI = {
-  // 期間（データ抽出条件）。ヘッダー中央の「現在コンテキスト表示」+ 軽量ピッカー。ホーム/財務諸表/仕訳で共有
+  // 期間（データ抽出条件）。ヘッダー中央の「現在コンテキスト表示」。ホーム/財務諸表/仕訳で共有
   period: {
-    // ヘッダーの日付表示（タップで日付ピッカーを開く）
+    // ヘッダーの日付チップ（透明な date input を重ねた 1 タップ選択）
     dateTrigger: 'period.date.trigger',
-    datePicker: 'period.date.picker',
     dateInput: 'period.date.input',
     // 年・全期間はロジックを維持するが、現在は UI から到達させない。
     yearPicker: 'period.year.picker',
@@ -61,19 +60,27 @@ export const UI = {
     expense: 'netIncome.expense',
     result: 'netIncome.result',
   },
-  // 資産の内訳
+  // 資産の内訳（4 枠: 自由に動かせるお金 / 自由に動かせないお金 / 投資 / 継続コスト台帳）
   assetsBreakdown: {
     view: 'assetsBreakdown.view',
     row: 'assetsBreakdown.row',
     total: 'assetsBreakdown.total',
-    reserveSub: 'assetsBreakdown.reserveSub',
-    reserveUnassigned: 'assetsBreakdown.reserveUnassigned',
+    freeSubtotal: 'assetsBreakdown.subtotal.free',
+    fixedSubtotal: 'assetsBreakdown.subtotal.fixed',
+    investmentSubtotal: 'assetsBreakdown.subtotal.investment',
+    ledgerSubtotal: 'assetsBreakdown.subtotal.ledger',
+    frame: 'assetsBreakdown.frame',
+    // 継続コスト台帳の 1 行（残存価値合計・タップで「毎月のもの」へ）
+    ledgerRow: 'assetsBreakdown.ledgerRow',
   },
   // 負債の内訳
   liabilitiesBreakdown: {
     view: 'liabilitiesBreakdown.view',
     row: 'liabilitiesBreakdown.row',
     total: 'liabilitiesBreakdown.total',
+    shortTermSubtotal: 'liabilitiesBreakdown.subtotal.shortTermDebt',
+    longTermSubtotal: 'liabilitiesBreakdown.subtotal.longTermDebt',
+    frame: 'liabilitiesBreakdown.frame',
     cashflowLink: 'liabilitiesBreakdown.cashflowLink',
   },
   // 純資産
@@ -87,6 +94,7 @@ export const UI = {
     list: 'journal.entry.list',
     search: 'journal.search',
     clearAccountFilter: 'journal.filter.clearAccount',
+    clearNormalExpenseFilter: 'journal.filter.clearNormalExpense',
     showFuture: 'journal.filter.showFuture',
     filterTag: 'journal.filter.tag',
     entry: {
@@ -107,8 +115,6 @@ export const UI = {
       ccName: 'journal.entry.ccName',
       ccCategory: 'journal.entry.ccCategory',
       ccEndDate: 'journal.entry.ccEndDate',
-      reserveCreate: 'journal.entry.reserveCreate',
-      reserveName: 'journal.entry.reserveName',
       loanArrange: 'journal.entry.loanArrange',
       liabilityCreate: 'journal.entry.liabilityCreate',
       liabilityCreateName: 'journal.entry.liabilityCreate.name',
@@ -133,12 +139,15 @@ export const UI = {
     save: 'accounts.save',
     list: 'accounts.list',
     box: 'accounts.box',
+    notMovableBadge: 'accounts.notMovableBadge',
     adjust: 'accounts.adjust',
     // アーカイブ/解除ボタン。残高が残る資産・負債は振替シート（EntrySheet transfer 再利用）を経由する
     archiveToggle: 'accounts.archiveToggle',
     openingAmount: 'accounts.openingAmount',
     openingDate: 'accounts.openingDate',
     archiveRenameConfirm: 'accounts.archiveRenameConfirm',
+    // 「自由に動かせる」チェック（現預金の内訳のみ・OFF = 資金繰りの原資に数えない）
+    movable: 'accounts.movable',
     // 返済設定（負債の編集シートのみ）
     repaymentAccount: 'accounts.repaymentAccount',
     repaymentDay: 'accounts.repaymentDay',
@@ -156,11 +165,11 @@ export const UI = {
     // 統一追加フロー（2択: .rule = くり返し記帳 / .asset = 継続コスト資産の持ち込み）
     unifiedAdd: 'allocations.add',
     addChooser: 'allocations.add.chooser',
-    // 定期ルール（くり返し記帳 = 実仕訳の自動起票。支出 + 周期>=2 は自動で月割り）
+    // 定期ルール（くり返し記帳 = 実仕訳の自動起票。チェック ON のとき月割り）
     recurringList: 'allocations.recurring.list',
     recurringAdd: 'allocations.recurring.add',
     recurringSheet: 'allocations.recurring.sheet',
-    recurringKind: 'allocations.recurring.kind',
+    recurringManualSpread: 'allocations.recurring.manualSpread',
     recurringName: 'allocations.recurring.name',
     recurringAmount: 'allocations.recurring.amount',
     recurringEvery: 'allocations.recurring.every',
@@ -255,16 +264,14 @@ export const UI = {
     repaySave: 'cashflow.repay.save',
     freeTrend: 'cashflow.freeTrend',
     futureList: 'cashflow.future.list',
-    advancedToggle: 'cashflow.advanced.toggle',
     scheduleEntryTags: 'cashflow.schedule.entryTags',
     scheduleAccountTags: 'cashflow.schedule.accountTags',
     scheduleCounterTags: 'cashflow.schedule.counterTags',
     summary: 'cashflow.summary',
-    addReserve: 'cashflow.reserve.create',
-    reserveList: 'cashflow.reserve.list',
-    reserveUnassigned: 'cashflow.reserve.unassigned',
-    reserveSave: 'cashflow.reserve.save',
-    reserveName: 'cashflow.reserve.name',
+    // 負債行の展開 = 登録済みの返済（未来日付の保存仕訳）。タップで仕訳の編集シートへ
+    repaymentsToggle: 'cashflow.repayments.toggle',
+    repaymentsList: 'cashflow.repayments.list',
+    repaymentRow: 'cashflow.repayments.row',
   },
   settings: {
     view: 'settings.view',

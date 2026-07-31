@@ -122,12 +122,20 @@ describe('remainingValue', () => {
     expect(remainingValue(yr, '2026-12-31')).toBe(0);
     expect(remainingValue(yr, '2030-01-01')).toBe(0);
   });
-  it('回収があるとき: 配り切ると amount − spreadTotal が残る＝回収の振替が台帳から持ち出す分', () => {
-    // 240,000・2024-06〜2026-06 = 25ヶ月・回収 30,000 → 費用 210,000・残り 30,000。
+  it('回収があるとき: 配り切ると残存価値 0（回収の振替は台帳から持ち出し済み・監査 P2-1）', () => {
+    // 240,000・2024-06〜2026-06 = 25ヶ月・回収 30,000 → 費用 210,000・認識完了後の残りは 0
+    // （台帳残高 = 購入 240,000 − 回収 30,000 − 認識 210,000 = 0 と一致する単一正本）。
     const sold = item({ amount: 240000, startDate: '2024-06-01', endDate: '2026-06-15' });
-    expect(remainingValue(sold, '2026-06-15', 210000)).toBe(30000);
+    expect(remainingValue(sold, '2026-06-15', 210000)).toBe(0);
+    // 認識途中: 認識済み 8,400 × 24 = 201,600 → 残り 210,000 − 201,600 = 8,400。
+    expect(remainingValue(sold, '2026-05-31', 210000)).toBe(8400);
     // 月あたりは 210,000 / 25 = 8,400（§6-1 の検算）
     expect(representativeMonthlyAmount(sold, 210000)).toBe(8400);
+  });
+  it('終了日なし + 回収あり: 残存価値 = spreadTotal（認識 0 のまま回収分だけ減る）', () => {
+    const held = withoutEnd(item({ amount: 12000 }));
+    expect(remainingValue(held, '2026-06-15', 9000)).toBe(9000);
+    expect(remainingValue(held, '2026-06-15')).toBe(12000);
   });
 });
 

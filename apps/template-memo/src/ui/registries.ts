@@ -7,8 +7,7 @@
 // - overlay: 最前面 (= 最後に開いたもの) を 1 つだけ閉じる。
 // - editing: inline 編集モード。Back 1 回 = 編集解除のみ
 //   (view 遷移と同時に未保存ドラフトを黙って消さない — v1 HR 修正#3)。
-//   ※ 現在の UI に inline 編集モードは無く、editors へ登録する呼び出し元は 1 つも無い。
-//     App.tsx が useAppHistory の isEditing / exitEdit へ配線しているため口だけ残している。
+//   テンプレート編集画面が editors へ登録し、端末 Back で設定画面へ戻る。
 
 import { useEffect, useRef } from 'react';
 
@@ -56,6 +55,22 @@ export function useRegisterOverlay(onClose: () => void): void {
     return () => {
       const i = overlays.indexOf(entry);
       if (i >= 0) overlays.splice(i, 1);
+    };
+  }, []);
+}
+
+/** 編集画面のマウント中だけ Back で閉じる処理を登録する。 */
+export function useRegisterEditor(onExit: () => void): void {
+  const ref = useRef(onExit);
+  useEffect(() => {
+    ref.current = onExit;
+  });
+  useEffect(() => {
+    const entry: EditorEntry = { exit: () => ref.current() };
+    editors.push(entry);
+    return () => {
+      const i = editors.indexOf(entry);
+      if (i >= 0) editors.splice(i, 1);
     };
   }, []);
 }

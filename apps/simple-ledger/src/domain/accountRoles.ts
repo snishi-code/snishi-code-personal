@@ -3,8 +3,8 @@
  *
  * Account.type は会計分類（asset/liability/equity/revenue/expense）であり、
  * 日常入力（収入/支出/振替）の選択肢制御に直接使うと粒度が粗すぎる
- * （例: 取り置き資金・投資資産・残高調整科目はすべて asset/expense/revenue
- *  だが、通常入力に出してはいけない）。
+ * （例: 投資資産・残高調整科目はどちらも asset/expense/revenue だが、
+ *  通常入力に出してはいけない）。
  *
  * そこで UI 用の役割 AccountRole を type とは別に持つ。type とは整合させる
  * （roleAllowsType）。日常入力の候補は role で絞る。
@@ -13,7 +13,6 @@ import type { AccountType } from './types';
 
 export type AccountRole =
   | 'daily-asset'
-  | 'reserve-asset'
   | 'investment-asset'
   | 'continuing-cost-asset'
   | 'payment-liability'
@@ -25,7 +24,6 @@ export type AccountRole =
 
 export const ACCOUNT_ROLES: readonly AccountRole[] = [
   'daily-asset',
-  'reserve-asset',
   'investment-asset',
   'continuing-cost-asset',
   'payment-liability',
@@ -39,7 +37,6 @@ export const ACCOUNT_ROLES: readonly AccountRole[] = [
 /** role が取りうる会計 type（複数可）。schema / 保存時の整合検証に使う。 */
 export const ROLE_TYPES: Record<AccountRole, AccountType[]> = {
   'daily-asset': ['asset'],
-  'reserve-asset': ['asset'],
   'investment-asset': ['asset'],
   // 継続コストの集約台帳口座（『継続コスト台帳』・内部集約・自動・ユーザー選択不可）。
   // 品目ごとに作らず単一口座へ残存価値を寄せる。支払いを資産化し、認識で費消する。
@@ -60,12 +57,10 @@ export function roleAllowsType(role: AccountRole, type: AccountType): boolean {
 /**
  * 内部・自動生成・聖域化のロール。ユーザーが勘定科目管理画面で手作成/編集する対象ではない。
  * 勘定科目管理一覧・ロール選択肢から除外する（BS / 資産内訳・CF には残高として現れてよい）。
- *  - continuing-cost-asset: 継続コストの集約台帳口座（v14）。
- *  - reserve-asset: 取り置き資金の集約口座。作成・管理は取り置き資金 UI で行う。
+ *  - continuing-cost-asset: 継続コストの集約台帳口座。
  */
 export const INTERNAL_ACCOUNT_ROLES: readonly AccountRole[] = [
   'continuing-cost-asset',
-  'reserve-asset',
 ];
 
 export function isInternalRole(role: AccountRole): boolean {
@@ -74,8 +69,8 @@ export function isInternalRole(role: AccountRole): boolean {
 
 /**
  * 残高補正の対象にできる役割（資産・負債のうち内部集約 role を除く）。
- * 取り置き資金(reserve-asset)・継続コスト台帳(continuing-cost-asset)は集約口座であり、
- * 補正で直接動かすと目的別残高・残存価値の導出と矛盾するため対象外（fail-closed）。
+ * 継続コスト台帳(continuing-cost-asset)は集約口座であり、補正で直接動かすと
+ * 残存価値の導出と矛盾するため対象外（fail-closed）。
  * UI の補正対象ピッカーと repository の保存境界の双方がこの正本を使う。
  */
 export const ADJUSTABLE_ACCOUNT_ROLES: readonly AccountRole[] = ACCOUNT_ROLES.filter(

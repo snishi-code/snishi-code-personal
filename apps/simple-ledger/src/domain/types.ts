@@ -36,6 +36,14 @@ export interface Account {
   archived: boolean;
   note?: string;
   /**
+   * 「自由に動かせる」フラグ（role: daily-asset のみ・既定 ON）。
+   * **`false` のときだけ「自由に動かせない」**（undefined = 動かせる）。`true` は保存境界で
+   * undefined へ正規化する（レコードを最小に保つ）。false の科目（Suica・チャージ残高など、
+   * 支払いには使えるが自由に引き出せないもの）は資金繰りの原資「自由に動かせるお金」から外れる。
+   * 貸借対照表・資産内訳は従来どおり全資産を出す（資金繰りだけ絞る）。
+   */
+  movable?: boolean;
+  /**
    * 返済設定（負債科目のみ: payment-liability / other-liability）。
    * 毎月の返済元となる資金口座（role: daily-asset）。資金繰り画面の返済予定作成で既定値になる。
    * 予定の自動生成はしない（予定 CF は明示登録・実績化のまま）。
@@ -108,12 +116,6 @@ export interface EntryMetadata {
   monthlyCostId?: string;
   /** 回収の振替の印（monthlyCostId とペア。貸方 = 継続コスト台帳）。 */
   monthlyCostRecovery?: true;
-  /**
-   * 取り置き資金（聖域化・集約モデル）の目的を表す ReserveItem の ID。
-   * 取り置きは目的ごとの勘定科目を作らず、単一の集約口座（reserve-ledger）に寄せ、目的別残高は
-   * この `reserveId` 付き仕訳の集計で導出する（`reserveBalances`）。
-   */
-  reserveId?: string;
   /**
    * 継続コスト（資産経由モデル）の仮想仕訳の印。これらは **保存されない導出専用**で、
    * `reportEntriesForAsOf` の結果にのみ現れる。実仕訳(`journalEntries`)・保存系・export には入れない。
@@ -221,7 +223,7 @@ export interface RecurringRule {
  * 予定は通常仕訳一覧へ大量生成せず、ここに置く。実績化で 1 件の仕訳を作る。
  */
 export type CashflowDirection = 'inflow' | 'outflow' | 'transfer';
-export type CashflowSource = 'manual' | 'credit-card' | 'installment' | 'reserve';
+export type CashflowSource = 'manual' | 'credit-card' | 'installment';
 export type CashflowStatus = 'planned' | 'posted' | 'cancelled';
 
 export interface CashflowSchedule {
@@ -244,26 +246,6 @@ export interface CashflowSchedule {
   entryTagIds?: string[];
   /** 月額化コスト（負債払い）の返済予定として生成されたとき、紐づく MonthlyCostItem の ID。 */
   monthlyCostId?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
- * 目的別資金（取り置き）。**聖域化・集約モデル / A=短期の封筒分けのみ**。目的ごとの勘定科目は作らず、
- * 単一の集約口座（reserve-ledger『取り置き資金』）に寄せる。目的別残高は仕訳の `metadata.reserveId`
- * 集計で導出する（`reserveBalances`）。**目標額・目標期限・利回りは持たない**（長期の目標/投資前提は将来別途）。
- */
-export interface ReserveItem {
-  id: string;
-  name: string;
-  /** 取り置き残高を寄せる集約口座（全取り置き共通の reserve-ledger）。 */
-  reserveAccountId: string;
-  /**
-   * どの資金口座から取り置いたか（daily-asset。既定=表示順先頭）。資産内訳で親口座の下部構造として
-   * 見せる手がかり。将来は投資資産などにも拡張する余地（現状は表示の所属ヒントに留める）。
-   */
-  parentAccountId?: string;
-  note?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -328,7 +310,6 @@ export interface LedgerExportPackage {
   accounts: Account[];
   journalEntries: JournalEntry[];
   cashflowSchedules: CashflowSchedule[];
-  reserves: ReserveItem[];
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   /** 定期ルール。交換 JSON では必須（旧形式はリポジトリ外で一度だけ変換する）。 */
@@ -381,7 +362,6 @@ export interface Ledger {
   /** 実仕訳（保存される正本）。保存系・export・残高チェックはこれだけを見る。 */
   journalEntries: JournalEntry[];
   cashflowSchedules: CashflowSchedule[];
-  reserves: ReserveItem[];
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   recurringRules: RecurringRule[];

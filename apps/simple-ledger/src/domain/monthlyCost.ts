@@ -55,20 +55,25 @@ export function representativeMonthlyAmount(
   return monthlyAmounts(spreadTotal, span.n)[0] ?? 0;
 }
 
-/** asOf 時点でまだ費用になっていない額（= 残存価値）。終了日なしは全額。 */
+/**
+ * asOf 時点でまだ費用になっていない額（= 残存価値）。
+ * 単一正本 = `割り振る総額（購入額 − 回収額 = spreadTotal） − asOf までの認識額`。
+ * 台帳残高のこの item ぶんと一致する（回収額を二重に引かない・引き忘れない。監査 P2-1）。
+ * 終了日なしは認識 0 なので spreadTotal がそのまま残る。
+ */
 export function remainingValue(
   item: MonthlyCostItem,
   asOf: string,
   spreadTotal: number = item.amount,
 ): number {
   const span = recognitionSpan(item);
-  if (!span) return item.amount;
+  if (!span) return spreadTotal;
   const amounts = monthlyAmounts(spreadTotal, span.n);
   let done = 0;
   for (let k = 0; k < span.n; k++) {
     if (recognitionDate(item, span.from, k) <= asOf) done += amounts[k] ?? 0;
   }
-  return item.amount - done;
+  return spreadTotal - done;
 }
 
 /* ── アーカイブの導出規則（status フィールドは持たない・猶予なし） ── */

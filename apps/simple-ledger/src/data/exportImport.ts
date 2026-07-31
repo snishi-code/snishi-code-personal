@@ -8,7 +8,7 @@
  *  4. 検証・置換が成功するまで既存 DB を壊さない（置換は単一トランザクションで原子的）。
  *  5. revision 不一致は自動上書きせず、呼び出し側の確認（force）を求める。MVP は自動マージしない。
  *
- * v2 の封筒は APP_ID('snishi-code.simple-ledger-v2') + SCHEMA_VERSION（現行 4）。
+ * v2 の封筒は APP_ID('snishi-code.simple-ledger-v2') + SCHEMA_VERSION（現行 5）。
  * migration チェーンは**空**（後方互換をコードで持たない作者決定。旧版が読みたければ
  * 単発変換で対応する）。現行版以外（版 1・v1 の 16・未来版）は unsupported-version で
  * fail-closed に拒否される。
@@ -20,7 +20,13 @@ import { buildExportText, buildExportFileName } from '@snishi/foundation/exchang
 import { APP_ID, SCHEMA_VERSION } from '../domain/constants';
 import { ledgerExportPackageSchema } from '../domain/schema';
 import type { Ledger, LedgerExportPackage } from '../domain/types';
-import { loadLedger, makeSnapshotId, replaceLedger, saveSnapshot } from './repository';
+import {
+  loadLedger,
+  makeSnapshotId,
+  replaceLedger,
+  saveSnapshot,
+  type LedgerVersion,
+} from './repository';
 import { nowIso } from '../util/time';
 
 /**
@@ -43,7 +49,6 @@ export function buildExportPackage(ledger: Ledger): LedgerExportPackage {
     accounts: ledger.accounts,
     journalEntries: ledger.journalEntries,
     cashflowSchedules: ledger.cashflowSchedules,
-    reserves: ledger.reserves,
     tags: ledger.tags,
     monthlyCostItems: ledger.monthlyCostItems,
     recurringRules: ledger.recurringRules,
@@ -51,9 +56,17 @@ export function buildExportPackage(ledger: Ledger): LedgerExportPackage {
   };
 }
 
-/** export を整形 JSON 文字列にする。 */
+/**
+ * export を整形 JSON 文字列にする。書き出す前に必ず現行 schema を通す（fail-closed・監査 P1-4）。
+ * ここで失敗する状態はどこかの保存境界の欠陥なので、「現行版を名乗る復元不能 JSON」を
+ * 黙って作るより明示して止める（スナップショットは安全網なので対象外・復元時に検証する）。
+ */
 export function exportToJsonText(ledger: Ledger): string {
-  return buildExportText(buildExportPackage(ledger));
+  const validated = validatePackage(buildExportPackage(ledger));
+  if (!validated.ok) {
+    throw new Error(`エクスポートが現行スキーマの検証を通りません: ${validated.detail}`);
+  }
+  return buildExportText(validated.pkg);
 }
 
 /** ダウンロード用ファイル名（端末ローカル生成・外部送信なし）。 */
@@ -93,24 +106,49 @@ function validatePackage(
   return { ok: true, pkg: validated.data };
 }
 
-/** 検証済みパッケージで台帳全体を原子置換する（meta.revision は封筒の revision に合わせる）。 */
-async function replaceWithPackage(pkg: LedgerExportPackage, current: Ledger): Promise<void> {
-  await replaceLedger({
-    meta: {
-      ...current.meta,
-      schemaVersion: SCHEMA_VERSION,
-      revision: pkg.revision,
-      updatedAt: nowIso(),
+/**
+ * 検証済みパッケージで台帳全体を原子置換する。
+ * revision は置換 transaction 内で「DB 現在値と封筒の大きい方 + 1」へ必ず進める。
+ * snapshot 作成時の revision を expectedRevision として固定し、その後に別タブが書いていれば
+ * 全置換を abort する（再監査 P1 対応）。
+ *
+ * 封筒の revision をそのまま据えると、別タブが import 前の revision と同じ値を見て
+ * CAS を通過し、古い画面のデータを新しい台帳へ書き込めてしまう。復元（restoreFromSnapshot）が
+ * current.revision + 1 へ進めるのと同じ規則。以後の import は封筒 revision と一致しなくなるが、
+ * それは「置換後の台帳はその封筒より新しい」という事実どおり（revision-conflict → force で通す）。
+ */
+function versionOf(ledger: Ledger): LedgerVersion {
+  return { deviceId: ledger.meta.deviceId, revision: ledger.meta.revision };
+}
+
+function sameVersion(a: LedgerVersion, b: LedgerVersion): boolean {
+  return a.deviceId === b.deviceId && a.revision === b.revision;
+}
+
+async function replaceWithPackage(
+  pkg: LedgerExportPackage,
+  current: Ledger,
+  expectedVersion: LedgerVersion = versionOf(current),
+): Promise<void> {
+  await replaceLedger(
+    {
+      meta: {
+        ...current.meta,
+        schemaVersion: SCHEMA_VERSION,
+        // replaceLedger が DB 現在値との max + 1 を採番するため、ここでは封筒値を floor として渡す。
+        revision: pkg.revision,
+        updatedAt: nowIso(),
+      },
+      settings: pkg.settings,
+      accounts: pkg.accounts,
+      journalEntries: pkg.journalEntries,
+      cashflowSchedules: pkg.cashflowSchedules,
+      tags: pkg.tags,
+      monthlyCostItems: pkg.monthlyCostItems,
+      recurringRules: pkg.recurringRules,
     },
-    settings: pkg.settings,
-    accounts: pkg.accounts,
-    journalEntries: pkg.journalEntries,
-    cashflowSchedules: pkg.cashflowSchedules,
-    reserves: pkg.reserves,
-    tags: pkg.tags,
-    monthlyCostItems: pkg.monthlyCostItems,
-    recurringRules: pkg.recurringRules,
-  });
+    expectedVersion,
+  );
 }
 
 /**
@@ -126,28 +164,45 @@ export async function importFromJsonText(
   // 呼び出しごとに closure で組み立てる。
   let snapshotId = '';
   let current: Ledger | null = null;
+  let checkedVersion: LedgerVersion | null = null;
+  let expectedVersion: LedgerVersion | null = null;
   const pipeline = createImportPipeline<LedgerExportPackage>({
     appId: APP_ID,
     currentSchemaVersion: SCHEMA_VERSION,
     migrate: (data, fromVersion) => migrationChain.migrateToVersion(data, fromVersion, SCHEMA_VERSION),
     validate: validatePackage,
-    getCurrentRevision: async () => (await loadLedger()).meta.revision,
+    getCurrentRevision: async () => {
+      const checked = await loadLedger();
+      checkedVersion = versionOf(checked);
+      return checked.meta.revision;
+    },
     // 置換前スナップショット（既存状態を保存してから置換）。throw したら置換に進まない。
     snapshotBefore: async () => {
-      current = await loadLedger();
+      const snapshotCurrent = await loadLedger();
+      const snapshotVersion = versionOf(snapshotCurrent);
+      // force なしでは step ⑤で確認した版を固定する。確認後〜snapshot 前の更新を、
+      // 新しい current として黙って採用して上書きしない。force 時は snapshot 時点を基準にする。
+      if (!opts.force && (!checkedVersion || !sameVersion(checkedVersion, snapshotVersion))) {
+        throw new Error('error.common.staleData');
+      }
+      current = snapshotCurrent;
+      expectedVersion = snapshotVersion;
       snapshotId = makeSnapshotId();
-      await saveSnapshot({
-        id: snapshotId,
-        createdAt: nowIso(),
-        reason: 'import前',
-        data: buildExportPackage(current),
-      });
+      await saveSnapshot(
+        {
+          id: snapshotId,
+          createdAt: nowIso(),
+          reason: 'import前',
+          data: buildExportPackage(current),
+        },
+        snapshotVersion,
+      );
     },
     // 原子置換（repository.replaceLedger = runWrite で全 store を 1 トランザクション置換）。
     replaceAll: async (pkg) => {
       // snapshotBefore が先に成功している（pipeline の順序保証）ため current は必ずある。
-      if (!current) current = await loadLedger();
-      await replaceWithPackage(pkg, current);
+      if (!current || !expectedVersion) throw new Error('import snapshot is missing');
+      await replaceWithPackage(pkg, current, expectedVersion);
     },
   });
 
@@ -195,28 +250,34 @@ export async function restoreFromSnapshot(snapshotData: LedgerExportPackage): Pr
   // 先に検証する（失敗時は既存データを一切変更しない）。
   const pkg = migrateAndValidateSnapshot(snapshotData);
   const current = await loadLedger();
-  await saveSnapshot({
-    id: makeSnapshotId(),
-    createdAt: nowIso(),
-    reason: '復元前',
-    data: buildExportPackage(current),
-  });
-  await replaceLedger({
-    meta: {
-      ...current.meta,
-      schemaVersion: SCHEMA_VERSION,
-      revision: current.meta.revision + 1,
-      updatedAt: nowIso(),
+  await saveSnapshot(
+    {
+      id: makeSnapshotId(),
+      createdAt: nowIso(),
+      reason: '復元前',
+      data: buildExportPackage(current),
     },
-    settings: pkg.settings,
-    accounts: pkg.accounts,
-    journalEntries: pkg.journalEntries,
-    cashflowSchedules: pkg.cashflowSchedules,
-    reserves: pkg.reserves,
-    tags: pkg.tags,
-    monthlyCostItems: pkg.monthlyCostItems,
-    recurringRules: pkg.recurringRules,
-  });
+    versionOf(current),
+  );
+  await replaceLedger(
+    {
+      meta: {
+        ...current.meta,
+        schemaVersion: SCHEMA_VERSION,
+        // 復元は封筒の世代を採用せず、現在のローカル世代を floor にして +1 する。
+        revision: current.meta.revision,
+        updatedAt: nowIso(),
+      },
+      settings: pkg.settings,
+      accounts: pkg.accounts,
+      journalEntries: pkg.journalEntries,
+      cashflowSchedules: pkg.cashflowSchedules,
+      tags: pkg.tags,
+      monthlyCostItems: pkg.monthlyCostItems,
+      recurringRules: pkg.recurringRules,
+    },
+    versionOf(current),
+  );
   return loadLedger();
 }
 

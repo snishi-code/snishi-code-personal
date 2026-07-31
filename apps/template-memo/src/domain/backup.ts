@@ -27,7 +27,6 @@ import {
   type AppSettings,
   type Patient,
   type PlaceDef,
-  type Snippet,
   type TagDef,
 } from './types';
 
@@ -127,7 +126,6 @@ function normalizePatientRow(raw: unknown, places: readonly PlaceDef[]): Patient
     typeof raw.placeId === 'string' && places.some((p) => p.placeId === raw.placeId)
       ? raw.placeId
       : (places[0]?.placeId ?? '');
-  const confirmedNote = str(raw.confirmedNote);
   return {
     pid: raw.pid,
     name: raw.name,
@@ -138,7 +136,6 @@ function normalizePatientRow(raw: unknown, places: readonly PlaceDef[]): Patient
     problems: stringArray(raw.problems),
     visitMemo: str(raw.visitMemo),
     standingMemo: str(raw.standingMemo),
-    ...(confirmedNote !== '' ? { confirmedNote } : {}),
     // projectedValues の外側 2 層（groupId → itemId → 値）だけを検証する。値そのものは
     // 読み出し側の domain/formValues.ts の正規化ヘルパに委ねる（ここで形を断定せず、
     // 壊れ値は読み出し時に未入力へ倒れる）。
@@ -153,13 +150,6 @@ function normalizeTagRow(raw: unknown): TagDef | null {
   if (!isPlainObject(raw)) return null;
   if (typeof raw.name !== 'string' || raw.name.trim() === '') return null;
   return { name: raw.name, color: raw.color === 'amber' ? 'amber' : 'gray' };
-}
-
-/** snippet 1 件の正規化（settings 内の配列)。id の型不正 row は捨てる。 */
-function normalizeSnippetRow(raw: unknown): Snippet | null {
-  if (!isPlainObject(raw)) return null;
-  if (typeof raw.id !== 'string' || raw.id === '') return null;
-  return { id: raw.id, label: str(raw.label), body: str(raw.body) };
 }
 
 /**
@@ -181,9 +171,6 @@ function normalizeSettings(raw: unknown, templates: readonly Template[]): AppSet
     tags: (Array.isArray(r.tags) ? r.tags : [])
       .map(normalizeTagRow)
       .filter((t): t is TagDef => t !== null),
-    snippets: (Array.isArray(r.snippets) ? r.snippets : [])
-      .map(normalizeSnippetRow)
-      .filter((s): s is Snippet => s !== null),
     newlineMode: r.newlineMode === 'lf' ? 'lf' : 'crlf',
     updatedAt: num(r.updatedAt),
   };

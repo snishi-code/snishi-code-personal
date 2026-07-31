@@ -99,17 +99,23 @@ export function ExpenseBreakdown({
       </div>
 
       <div className="stat-grid" style={{ marginTop: 'var(--space-4)' }}>
-        <div className="stat" data-ui={UI.expenseBreakdown.normalExpense}>
-          <span className="stat__label">{t('expenseBreakdown.normalExpense')}</span>
+        <button
+          type="button"
+          className="stat stat--btn"
+          onClick={() => onDrillDown({ expenseKind: 'normal', ...range })}
+          data-ui={UI.expenseBreakdown.normalExpense}
+        >
+          <span className="stat__label">
+            {t('expenseBreakdown.normalExpense')} <Icon name="chevronRight" size={12} />
+          </span>
           <span className="stat__value">
             <Money amount={breakdown.normalExpense} currency={currency} />
           </span>
-        </div>
+        </button>
         <button
           type="button"
           className="stat stat--btn"
           onClick={() => onNavigate('allocations')}
-          aria-label={t('expenseBreakdown.monthlyCost')}
           data-ui={UI.expenseBreakdown.monthlyCost}
         >
           <span className="stat__label">

@@ -12,6 +12,7 @@ import type {
   JournalEntry,
   ProfitAndLoss,
 } from './types';
+import { compareAccountOrder } from './accountOrder';
 
 /** asset / expense は借方が正。liability / equity / revenue は貸方が正。 */
 export function isDebitNormal(type: AccountType): boolean {
@@ -69,6 +70,7 @@ function balancesFor(
       .map((account) => ({ account, balance: accountBalance(account.id, type, entries) }))
       // 残高 0 かつアーカイブ済みは表示から外す。残高があれば（アーカイブでも）残す。
       .filter((b) => b.balance !== 0 || !b.account.archived)
+      .sort((a, b) => compareAccountOrder(a.account, b.account))
   );
 }
 

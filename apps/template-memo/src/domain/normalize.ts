@@ -41,7 +41,7 @@ export function normalizeProjectedValues(raw: unknown): FormValues {
 
 /**
  * 「空患者」= 追加した直後の未入力スロット相当: ステータスが NONE (白) で、かつ name/room/
- * tags/problems/今回メモ/継続メモ/清書/フォーム値 がすべて初期値 (pid と updatedAt は無視)。
+ * tags/problems/今回メモ/継続メモ/フォーム値 がすべて初期値 (pid と updatedAt は無視)。
  * YELLOW/GREEN/BLUE/GRAY はユーザーが明示的にステータスを付けた状態なので削除対象外。
  */
 export function isPatientEmpty(p: Patient | null | undefined): boolean {
@@ -53,7 +53,6 @@ export function isPatientEmpty(p: Patient | null | undefined): boolean {
   if (problemsHaveInput(p.problems)) return false;
   if (typeof p.visitMemo === 'string' && p.visitMemo.trim() !== '') return false;
   if (typeof p.standingMemo === 'string' && p.standingMemo.trim() !== '') return false;
-  if (typeof p.confirmedNote === 'string' && p.confirmedNote.trim() !== '') return false;
   if (p.projectedValues && Object.keys(p.projectedValues).length > 0) return false;
   return true;
 }
@@ -83,7 +82,6 @@ export function normalizePatientArray(arr: readonly unknown[] | null | undefined
           : [],
       visitMemo: r && typeof r.visitMemo === 'string' ? r.visitMemo : '',
       standingMemo: r && typeof r.standingMemo === 'string' ? r.standingMemo : '',
-      confirmedNote: r && typeof r.confirmedNote === 'string' ? r.confirmedNote : undefined,
       // ※ ここに追加しないと whitelist で reload 時に黙って消える。
       projectedValues: normalizeProjectedValues(r ? r.projectedValues : undefined),
       updatedAt: r && typeof r.updatedAt === 'number' ? r.updatedAt : 0,

@@ -49,11 +49,10 @@ describe('compareAccountOrder', () => {
     expect(sorted.map((a) => a.name)).toEqual(['ん', 'さ', 'か', 'あ']);
   });
 
-  it('資産は現預金 → 取り置き → 継続コスト → 投資の role 優先順にする', () => {
+  it('資産は現預金 → 継続コスト → 投資の role 優先順にする', () => {
     const list = [
       roleAcc('投資', 'asset', 'investment-asset', 0),
       roleAcc('継続', 'asset', 'continuing-cost-asset', 0),
-      roleAcc('取り置き', 'asset', 'reserve-asset', 0),
       roleAcc('現金B', 'asset', 'daily-asset', 1),
       roleAcc('現金A', 'asset', 'daily-asset', 0),
     ];
@@ -61,7 +60,6 @@ describe('compareAccountOrder', () => {
     expect([...list].sort(compareAccountOrder).map((a) => a.id)).toEqual([
       '現金A',
       '現金B',
-      '取り置き',
       '継続',
       '投資',
     ]);
@@ -93,7 +91,6 @@ describe('loadLedger の科目順', () => {
     const inserted = [
       roleAcc('sort-investment', 'asset', 'investment-asset', 0),
       roleAcc('sort-continuing', 'asset', 'continuing-cost-asset', 0),
-      roleAcc('sort-reserve', 'asset', 'reserve-asset', 0),
       roleAcc('sort-daily', 'asset', 'daily-asset', 99),
     ];
     for (const account of inserted) await upsertAccount(account);
@@ -103,12 +100,12 @@ describe('loadLedger の科目順', () => {
       .filter((account) => ids.has(account.id))
       .map((account) => account.id);
 
-    expect(ordered).toEqual(['sort-daily', 'sort-reserve', 'sort-continuing', 'sort-investment']);
+    expect(ordered).toEqual(['sort-daily', 'sort-continuing', 'sort-investment']);
   });
 });
 
 describe('ACCOUNT_BOXES と role 順の整合', () => {
-  it('画面に出す箱は比較関数と同じ順で、内部の取り置き・継続コストを独立箱にしない', () => {
+  it('画面に出す箱は比較関数と同じ順で、内部の継続コスト台帳を独立箱にしない', () => {
     expect(ACCOUNT_BOXES.map((box) => box.key)).toEqual([
       'cash',
       'investment',
@@ -127,7 +124,6 @@ describe('ACCOUNT_BOXES と role 順の整合', () => {
       representatives.map((account) => account.id),
     );
     const boxedRoles = ACCOUNT_BOXES.flatMap((box) => box.roles);
-    expect(boxedRoles).not.toContain('reserve-asset');
     expect(boxedRoles).not.toContain('continuing-cost-asset');
   });
 });

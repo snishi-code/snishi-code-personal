@@ -1,17 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import './setup';
 import {
+  accountSchema,
   entryMetadataSchema,
   journalEntrySchema,
   ledgerExportPackageSchema,
   monthlyCostItemSchema,
   recurringRuleSchema,
-  reserveItemSchema,
 } from '../src/domain/schema';
 import {
   APP_ID,
   CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
-  RESERVE_LEDGER_ACCOUNT_ID,
   SCHEMA_VERSION,
 } from '../src/domain/constants';
 
@@ -135,7 +134,6 @@ describe('ledgerExportPackageSchema', () => {
     ],
     journalEntries: [validEntry],
     cashflowSchedules: [],
-    reserves: [],
     tags: [],
     monthlyCostItems: [],
     recurringRules: [],
@@ -168,23 +166,6 @@ describe('ledgerExportPackageSchema', () => {
       expect(
         (parsed.data.settings as unknown as Record<string, unknown>).expectedAnnualReturnBps,
       ).toBeUndefined();
-    }
-  });
-  it('取り置きの旧目標フィールド（targetAmount/targetDate）は reserveItemSchema で strip される', () => {
-    const parsed = reserveItemSchema.safeParse({
-      id: 'r',
-      name: '旅行',
-      reserveAccountId: RESERVE_LEDGER_ACCOUNT_ID,
-      targetAmount: 100,
-      targetDate: '2026-12-31',
-      createdAt: 'x',
-      updatedAt: 'x',
-    });
-    expect(parsed.success).toBe(true);
-    if (parsed.success) {
-      const res = parsed.data as unknown as Record<string, unknown>;
-      expect(res.targetAmount).toBeUndefined();
-      expect(res.targetDate).toBeUndefined();
     }
   });
   it('appId が違うと拒否する', () => {
@@ -268,7 +249,6 @@ describe('entry metadata', () => {
         { ...validEntry, metadata: { inputMode: 'reversal', reversalOfEntryId: 'z' } },
       ],
       cashflowSchedules: [],
-      reserves: [],
       tags: [],
       monthlyCostItems: [],
       recurringRules: [],
@@ -333,7 +313,6 @@ describe('残高補正 metadata の package 整合性', () => {
     accounts: [target, counterValue],
     journalEntries: [entryValue],
     cashflowSchedules: [],
-    reserves: [],
     tags: [],
     monthlyCostItems: [],
     recurringRules: [],
@@ -404,7 +383,7 @@ describe('journalEntrySchema 行数ルール（MVP: 1 借方・1 貸方）', () 
   });
 });
 
-describe('予定CF・目的別資金の検証（package）', () => {
+describe('予定CFの検証（package）', () => {
   const bank = {
     id: 'bank',
     name: '普通預金',
@@ -423,16 +402,6 @@ describe('予定CF・目的別資金の検証（package）', () => {
     createdAt: 'x',
     updatedAt: 'x',
   };
-  // 集約モデル: 取り置きは目的別科目でなく単一の集約口座に寄せる（id は集約口座固定）。
-  const reserveAcc = {
-    id: RESERVE_LEDGER_ACCOUNT_ID,
-    name: '取り置き資金',
-    type: 'asset',
-    role: 'reserve-asset',
-    archived: false,
-    createdAt: 'x',
-    updatedAt: 'x',
-  };
   function cfPkg(over: Record<string, unknown> = {}) {
     return {
       appId: APP_ID,
@@ -441,7 +410,7 @@ describe('予定CF・目的別資金の検証（package）', () => {
       exportedAt: '2026-06-01T00:00:00.000Z',
       deviceId: 'd',
       revision: 0,
-      accounts: [bank, card, reserveAcc],
+      accounts: [bank, card],
       journalEntries: [],
       cashflowSchedules: [
         {
@@ -458,15 +427,6 @@ describe('予定CF・目的別資金の検証（package）', () => {
           updatedAt: 'x',
         },
       ],
-      reserves: [
-        {
-          id: 'r1',
-          name: '結婚資金',
-          reserveAccountId: RESERVE_LEDGER_ACCOUNT_ID,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
       tags: [],
       monthlyCostItems: [],
       recurringRules: [],
@@ -475,7 +435,7 @@ describe('予定CF・目的別資金の検証（package）', () => {
     };
   }
 
-  it('正しい予定CF・目的別資金は valid', () => {
+  it('正しい予定CFは valid', () => {
     expect(ledgerExportPackageSchema.safeParse(cfPkg()).success).toBe(true);
   });
   it('予定CF の口座が資産でないと invalid', () => {
@@ -510,70 +470,6 @@ describe('予定CF・目的別資金の検証（package）', () => {
           counterAccountId: 'card',
           source: 'manual',
           status: 'posted',
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-    });
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
-  });
-  it('目的別資金の科目が資産でないと invalid', () => {
-    const bad = cfPkg({
-      reserves: [{ id: 'r1', name: 'x', reserveAccountId: 'card', createdAt: 'x', updatedAt: 'x' }],
-    });
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
-  });
-  it('目的別資金の科目の role が reserve-asset でないと invalid（bank は daily-asset）', () => {
-    const bad = cfPkg({
-      reserves: [{ id: 'r1', name: 'x', reserveAccountId: 'bank', createdAt: 'x', updatedAt: 'x' }],
-    });
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
-  });
-  it('集約モデルの不変条件: 目的別の reserve-asset 科目（集約口座以外）は invalid（import で再導入させない）', () => {
-    // 集約口座でない reserve-asset 科目を足し、それを reserveAccountId に使う = 旧モデル。
-    const bad = cfPkg({
-      accounts: [
-        bank,
-        card,
-        reserveAcc,
-        {
-          id: 'per-purpose',
-          name: '旅行積立',
-          type: 'asset',
-          role: 'reserve-asset',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-      reserves: [
-        { id: 'r1', name: '旅行', reserveAccountId: 'per-purpose', createdAt: 'x', updatedAt: 'x' },
-      ],
-    });
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
-  });
-  it('集約モデルの不変条件: metadata.reserveId が存在しない取り置きを参照すると invalid', () => {
-    const bad = cfPkg({
-      reserves: [
-        {
-          id: 'r1',
-          name: '旅行',
-          reserveAccountId: RESERVE_LEDGER_ACCOUNT_ID,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-      journalEntries: [
-        {
-          id: 'e-bad',
-          date: '2026-02-01',
-          description: '取り置き',
-          kind: 'normal',
-          metadata: { inputMode: 'transfer', reserveId: 'nope' },
-          lines: [
-            { accountId: RESERVE_LEDGER_ACCOUNT_ID, side: 'debit', amount: 10000 },
-            { accountId: 'bank', side: 'credit', amount: 10000 },
-          ],
           createdAt: 'x',
           updatedAt: 'x',
         },
@@ -618,7 +514,6 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
         },
       ],
       cashflowSchedules: [],
-      reserves: [],
       tags: [
         {
           id: 'trip',
@@ -737,7 +632,6 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
       accounts: [cash, food, ccLedger],
       journalEntries: entries ?? items.map((item) => purchaseOf(item)),
       cashflowSchedules: [],
-      reserves: [],
       tags: [],
       monthlyCostItems: items,
       recurringRules: [],
@@ -782,7 +676,7 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
       ).success,
     ).toBe(false);
   });
-  it('⑦ 購入の仕訳は日付・金額が item と完全一致（日レベル）・借方 = 台帳・貸方 role 制限', () => {
+  it('⑦ 購入の仕訳は日付・金額が item と完全一致（日レベル）・借方 = 台帳', () => {
     // 同じ月でも日が違えば invalid（月レベル一致にしない＝初月の台帳マイナスを防ぐ）。
     expect(
       ledgerExportPackageSchema.safeParse(mcPkg([base], [purchaseOf(base, { date: '2026-06-01' })]))
@@ -820,7 +714,9 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
         ),
       ).success,
     ).toBe(false);
-    // 貸方 role が費用カテゴリ（資金・負債・初期残高のどれでもない）。
+  });
+  it('⑦ 購入の仕訳の貸方（支払い元）は起票可能な全 role（費用カテゴリも可・内部集約は不可）', () => {
+    // 貸方 = 費用カテゴリも valid（種別の役割制限は撤廃。給与など income-category も同様）。
     expect(
       ledgerExportPackageSchema.safeParse(
         mcPkg(
@@ -835,7 +731,30 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
           ],
         ),
       ).success,
-    ).toBe(false);
+    ).toBe(true);
+    // 貸方 = 残高調整科目（system-adjustment）は invalid（RECURRING_POSTABLE_ROLES 外）。
+    const adj = {
+      id: 'adj',
+      name: '残高調整費',
+      type: 'expense',
+      role: 'system-adjustment',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const pkg = mcPkg(
+      [base],
+      [
+        purchaseOf(base, {
+          lines: [
+            { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: 12000 },
+            { accountId: 'adj', side: 'credit', amount: 12000 },
+          ],
+        }),
+      ],
+    ) as Record<string, unknown>;
+    pkg.accounts = [cash, food, ccLedger, adj];
+    expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(false);
   });
   it('⑧ 台帳にふれる保存仕訳は monthlyCostId が必須（§13-14 の import 側）', () => {
     const plain = {
@@ -960,7 +879,6 @@ describe('勘定科目のアーカイブ不変条件（アーカイブ済み = �
       accounts,
       journalEntries: entries,
       cashflowSchedules: [],
-      reserves: [],
       tags: [],
       monthlyCostItems: [],
       recurringRules: [],
@@ -1001,17 +919,186 @@ describe('勘定科目のアーカイブ不変条件（アーカイブ済み = �
     updatedAt: 'x',
   };
 
-  it('残高が 0 でない資産をアーカイブ済みにした package は invalid', () => {
+  it('アーカイブ済み科目の残高は import で再検証しない（round-trip 保証・監査 P1-3）', () => {
+    // 「アーカイブ済み = 今日残高 0」は時点依存の不変条件なので、アーカイブ操作時点の
+    // 保存境界（upsertAccount / archiveAccount）だけが守る。未来仕訳を含む台帳では
+    // 最終残高が非 0 でも保存できるため、schema で最終残高 0 を要求すると
+    // 「保存に成功した状態を書き出すと取り込めない」round-trip 破壊になる。
     expect(
       ledgerExportPackageSchema.safeParse(pkgWith([wallet(true), food], [topUp])).success,
-    ).toBe(false);
-  });
-  it('最終残高 0 なら archived でも valid・未アーカイブは残高があっても valid', () => {
+    ).toBe(true);
     expect(
       ledgerExportPackageSchema.safeParse(pkgWith([wallet(true), food], [topUp, spend])).success,
     ).toBe(true);
     expect(
       ledgerExportPackageSchema.safeParse(pkgWith([wallet(false), food], [topUp])).success,
     ).toBe(true);
+  });
+});
+
+describe('accountSchema の movable（「自由に動かせる」フラグ）正規化', () => {
+  const daily = {
+    id: 'cash',
+    name: '現金',
+    type: 'asset',
+    role: 'daily-asset',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+
+  it('movable: false（daily-asset）は保持する', () => {
+    const parsed = accountSchema.safeParse({ ...daily, movable: false });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.movable).toBe(false);
+  });
+  it('movable: true は undefined へ正規化する（レコードを最小に保つ）', () => {
+    const parsed = accountSchema.safeParse({ ...daily, movable: true });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.movable).toBeUndefined();
+      expect('movable' in parsed.data).toBe(false);
+    }
+  });
+  it('daily-asset 以外に付いた movable は剥がす（fail-soft・拒否しない）', () => {
+    const invest = { ...daily, id: 'nisa', name: 'NISA', role: 'investment-asset' };
+    const parsed = accountSchema.safeParse({ ...invest, movable: false });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect('movable' in parsed.data).toBe(false);
+  });
+  it('package を通しても movable: false が保持される', () => {
+    const pkg = {
+      appId: APP_ID,
+      schemaVersion: SCHEMA_VERSION,
+      ledgerId: 'ledger',
+      exportedAt: '2026-06-01T00:00:00.000Z',
+      deviceId: 'd',
+      revision: 0,
+      accounts: [{ ...daily, id: 'suica', name: 'Suica', movable: false }],
+      journalEntries: [],
+      cashflowSchedules: [],
+      tags: [],
+      monthlyCostItems: [],
+      recurringRules: [],
+      settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
+    };
+    const parsed = ledgerExportPackageSchema.safeParse(pkg);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.accounts[0]?.movable).toBe(false);
+  });
+});
+
+describe('月割りするルールの schema（周期にかかわらず台帳経由・支払い元は全 role）', () => {
+  const spreadRule = {
+    id: 'r-rent',
+    name: '家賃',
+    amount: 80000,
+    dayOfMonth: 27,
+    everyMonths: 1,
+    spreadExpenseAccountId: 'fixed',
+    debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+    creditAccountId: 'bank',
+    startMonth: '2026-07',
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+
+  it('everyMonths = 1 の月割りルールは valid（毎月の家賃も台帳経由）', () => {
+    expect(recurringRuleSchema.safeParse(spreadRule).success).toBe(true);
+  });
+  it('月割りルールの借方は引き続き台帳固定', () => {
+    expect(
+      recurringRuleSchema.safeParse({ ...spreadRule, debitAccountId: 'bank' }).success,
+    ).toBe(false);
+  });
+
+  const bank = {
+    id: 'bank',
+    name: '普通預金',
+    type: 'asset',
+    role: 'daily-asset',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  const salary = {
+    id: 'salary',
+    name: '給与',
+    type: 'revenue',
+    role: 'income-category',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  const fixed = {
+    id: 'fixed',
+    name: '固定費',
+    type: 'expense',
+    role: 'expense-category',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  const ccLedger = {
+    id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+    name: '継続コスト台帳',
+    type: 'asset',
+    role: 'continuing-cost-asset',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  const adj = {
+    id: 'adj',
+    name: '残高調整費',
+    type: 'expense',
+    role: 'system-adjustment',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  function rulePkg(rule: Record<string, unknown>) {
+    return {
+      appId: APP_ID,
+      schemaVersion: SCHEMA_VERSION,
+      ledgerId: 'ledger',
+      exportedAt: '2026-06-01T00:00:00.000Z',
+      deviceId: 'd',
+      revision: 0,
+      accounts: [bank, salary, fixed, ccLedger, adj],
+      journalEntries: [],
+      cashflowSchedules: [],
+      tags: [],
+      monthlyCostItems: [],
+      recurringRules: [rule],
+      settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
+    };
+  }
+
+  it('package: 源泉（支払い元）は income-category でも valid（健康保険 = 銀行→給与 の逆方向も可）', () => {
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        rulePkg({ ...spreadRule, creditAccountId: 'salary' }),
+      ).success,
+    ).toBe(true);
+  });
+  it('package: 費用の行き先は income-category でも valid（健康保険 = 収入減として月割り）', () => {
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        rulePkg({ ...spreadRule, spreadExpenseAccountId: 'salary' }),
+      ).success,
+    ).toBe(true);
+  });
+  it('package: 源泉・費用の行き先とも残高調整科目（system-adjustment）は invalid', () => {
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        rulePkg({ ...spreadRule, creditAccountId: 'adj' }),
+      ).success,
+    ).toBe(false);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        rulePkg({ ...spreadRule, spreadExpenseAccountId: 'adj' }),
+      ).success,
+    ).toBe(false);
   });
 });

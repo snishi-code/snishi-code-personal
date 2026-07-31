@@ -42,7 +42,7 @@ function entry(
 describe('expenseCategoryBreakdownForRange（費用カテゴリ別内訳）', () => {
   const accounts: Account[] = [
     acc('cash', 'daily-asset', 'asset'),
-    acc('ccAsset', 'reserve-asset', 'asset'), // 継続コスト対象資産
+    acc('ccAsset', 'continuing-cost-asset', 'asset'), // 継続コスト台帳
     acc('food', 'expense-category', 'expense'),
     acc('fixed', 'expense-category', 'expense'),
     acc('adjustment', 'system-adjustment', 'expense'),

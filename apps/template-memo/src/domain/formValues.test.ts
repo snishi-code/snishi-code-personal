@@ -14,6 +14,7 @@ import {
   numericEntry,
   readGroupValues,
   readNumericEntry,
+  readSelectValue,
   readTextValue,
 } from './formValues';
 
@@ -29,6 +30,18 @@ describe('readTextValue', () => {
     expect(readTextValue('')).toBe('');
     expect(readTextValue(undefined)).toBe('');
     expect(readTextValue(null)).toBe('');
+  });
+
+  it('source の無い数値形は kind 変更の残骸として落とす', () => {
+    expect(readTextValue({ value: '96' })).toBe('');
+  });
+});
+
+describe('readSelectValue', () => {
+  it('現在の選択肢にある TextEntry だけを読む', () => {
+    expect(readSelectValue({ value: '精査', source: 'manual' }, ['経過観察', '精査'])).toBe('精査');
+    expect(readSelectValue({ value: '旧自由文', source: 'manual' }, ['経過観察', '精査'])).toBe('');
+    expect(readSelectValue({ value: '96' }, ['96'])).toBe('');
   });
 });
 
@@ -127,6 +140,13 @@ describe('readNumericEntry', () => {
   it('object 以外（未入力の空文字 / undefined）は未入力として読む', () => {
     expect(readNumericEntry('')).toEqual({ value: '', note: '' });
     expect(readNumericEntry(undefined)).toEqual({ value: '', note: '' });
+  });
+
+  it('source 付き text/select 形は kind 変更の残骸として落とす', () => {
+    expect(readNumericEntry({ value: '精査', source: 'manual' })).toEqual({
+      value: '',
+      note: '',
+    });
   });
 });
 

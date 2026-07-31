@@ -26,10 +26,11 @@ for (const vp of VIEWPORTS) {
     await page.setViewportSize({ width: vp.width, height: vp.height });
     // 初回オンボーディングを既読化してから起動する（撮影・クリックを遮らないように）。
     await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
-    await page.goto('./');
+    // sample fixture には継続コスト台帳と movable=false 科目があり、今回追加した意味色も撮影できる。
+    await page.goto('./?fixture=sample');
     await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
 
-    // 空画面だけでなくデータのある画面も確認するため、仕訳を 1 件作る
+    // 現在期間の仕訳導線も確認できるよう、サンプル台帳へ当日分を 1 件追加する。
     await page.locator(ui('dashboard.entry.expense')).click();
     await page.locator(ui('journal.entry.item')).fill('視覚確認用');
     await page.locator(ui('journal.entry.amount')).fill('1200');
@@ -64,6 +65,33 @@ for (const vp of VIEWPORTS) {
       fullPage: true,
     });
     await page.locator(ui('journal.entry.cancel')).click();
+
+    // 資産・負債の枠分け（意味色・小計・継続コスト台帳を含む）。
+    await page.locator(ui('dashboard.stat.assets')).click();
+    await expect(page.locator(ui('assetsBreakdown.view'))).toBeVisible();
+    await expectNoHorizontalScroll(page, `assetsBreakdown ${vp.name}`);
+    await page.screenshot({
+      path: `test-results/screenshots/ledger-assets-${vp.name}.png`,
+      fullPage: true,
+    });
+    await page.locator(ui('nav.home')).click();
+    await page.locator(ui('dashboard.stat.liabilities')).click();
+    await expect(page.locator(ui('liabilitiesBreakdown.view'))).toBeVisible();
+    await expectNoHorizontalScroll(page, `liabilitiesBreakdown ${vp.name}`);
+    await page.screenshot({
+      path: `test-results/screenshots/ledger-liabilities-${vp.name}.png`,
+      fullPage: true,
+    });
+
+    // 勘定科目（箱見出しの意味色）。
+    await page.locator(ui('nav.menu.button')).click();
+    await page.locator(ui('nav.accounts')).click();
+    await expect(page.locator(ui('accounts.view'))).toBeVisible();
+    await expectNoHorizontalScroll(page, `accounts ${vp.name}`);
+    await page.screenshot({
+      path: `test-results/screenshots/ledger-accounts-${vp.name}.png`,
+      fullPage: true,
+    });
 
     // 設定
     await page.locator(ui('nav.menu.button')).click();

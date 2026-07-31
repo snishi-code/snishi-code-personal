@@ -91,7 +91,6 @@ async function addCandidateFixtures() {
       'asset',
       'continuing-cost-asset',
     ),
-    reserve: account('recognition-reserve', '行き先・取り置き', 'asset', 'reserve-asset'),
     adjustment: account(
       'recognition-adjustment',
       '行き先・残高調整',
@@ -126,7 +125,6 @@ describe('継続コスト資産の費用の行き先候補', () => {
   it('共通候補は通常科目を全会計区分から返し、内部・調整・アーカイブを除外する', () => {
     const roleType: Record<AccountRole, AccountType> = {
       'daily-asset': 'asset',
-      'reserve-asset': 'asset',
       'investment-asset': 'asset',
       'continuing-cost-asset': 'asset',
       'payment-liability': 'liability',
@@ -161,7 +159,6 @@ describe('継続コスト資産の費用の行き先候補', () => {
     );
     expect(ids).not.toEqual(
       expect.arrayContaining([
-        'role-reserve-asset',
         'role-continuing-cost-asset',
         'role-system-adjustment',
         archived.id,
@@ -228,14 +225,38 @@ describe('継続コスト資産の費用の行き先候補', () => {
         expect(within(picker).getByRole('radio', { name })).toBeInTheDocument();
       }
     });
-    for (const name of [
-      '行き先・アーカイブ済み',
-      '行き先・内部台帳',
-      '行き先・取り置き',
-      '行き先・残高調整',
-    ]) {
+    for (const name of ['行き先・アーカイブ済み', '行き先・内部台帳', '行き先・残高調整']) {
       expect(within(picker).queryByRole('radio', { name })).not.toBeInTheDocument();
     }
+  });
+
+  it('簿記編集の新規作成では支払い元の役割に関係なく継続コスト化を選べる', async () => {
+    await loadLedger();
+    render(
+      <Providers>
+        <EntrySheet init={{ kind: 'create', mode: 'manual' }} onClose={() => undefined} />
+      </Providers>,
+    );
+
+    // 貸方を選ぶ前（役割チェックなし）からトグルが出る。
+    const toggle = await waitFor(() => {
+      const found = document.querySelector(`[data-ui="${UI.journal.entry.ccToggle}"]`);
+      expect(found).toBeInTheDocument();
+      return found!;
+    });
+    fireEvent.click(toggle);
+
+    // 借方側は継続コスト資産の名前に変わり（科目ピッカーは消える）、費用の行き先が出る。
+    expect(document.querySelector(`[data-ui="${UI.journal.entry.ccName}"]`)).toBeInTheDocument();
+    expect(
+      document.querySelector(`[data-ui="${UI.journal.entry.ccCategory}"]`),
+    ).toBeInTheDocument();
+    expect(
+      document.querySelector(`[data-ui="${UI.journal.entry.flowDestination}"]`),
+    ).not.toBeInTheDocument();
+    expect(
+      document.querySelector(`[data-ui="${UI.journal.entry.flowSource}"]`),
+    ).toBeInTheDocument();
   });
 
   it('持ち込みシートでも同じ費用の行き先候補を使う', async () => {
@@ -257,7 +278,6 @@ describe('継続コスト資産の費用の行き先候補', () => {
     await expectBroadCandidates(select, [
       '行き先・アーカイブ済み',
       '行き先・内部台帳',
-      '行き先・取り置き',
       '行き先・残高調整',
     ]);
   });
@@ -304,7 +324,6 @@ describe('継続コスト資産の費用の行き先候補', () => {
     await expectBroadCandidates(select, [
       fixtures.archived.name,
       fixtures.internal.name,
-      fixtures.reserve.name,
       fixtures.adjustment.name,
     ]);
   });

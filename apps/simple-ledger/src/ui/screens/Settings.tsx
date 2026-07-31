@@ -23,7 +23,9 @@ import type { Settings as LedgerSettings, Snapshot } from '../../domain/types';
 
 const APP_VERSION = '0.1.0';
 
-function importErrorMessage(outcome: Exclude<ImportOutcome, { kind: 'ok' | 'revision-conflict' }>): string {
+export function importErrorMessage(
+  outcome: Exclude<ImportOutcome, { kind: 'ok' | 'revision-conflict' }>,
+): string {
   switch (outcome.kind) {
     case 'parse-error':
       return t('import.error.parse');
@@ -35,6 +37,14 @@ function importErrorMessage(outcome: Exclude<ImportOutcome, { kind: 'ok' | 'revi
       // v2: reason enum 廃止。detail 文字列を直接表示する。
       return outcome.detail ?? t('import.error.unknownVersion');
     case 'storage-error':
+      // repository が返す既知のエラーコードは翻訳し、IndexedDB 等の具体的な
+      // storage error は診断可能な detail をそのまま表示する。
+      if (
+        outcome.detail === 'error.common.staleData' ||
+        outcome.detail === 'error.common.revisionExhausted'
+      ) {
+        return t(outcome.detail);
+      }
       return outcome.detail;
   }
 }

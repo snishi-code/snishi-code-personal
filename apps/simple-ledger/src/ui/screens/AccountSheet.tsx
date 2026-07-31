@@ -43,6 +43,9 @@ export function AccountSheet({
   const [name, setName] = useState(existing?.name ?? '');
   // メモ入力欄は撤去済みだが、既存の note は保存時にそのまま引き継ぐ（消さない）。
   const [note] = useState(existing?.note ?? '');
+  // 「自由に動かせる」は現預金の箱のみ・既定 ON。OFF のときだけ movable=false を保存する
+  // （Suica・チャージ残高など、資金繰りの原資に数えない例外側に印を付ける）。
+  const [movable, setMovable] = useState(existing ? existing.movable !== false : true);
   const [openingAmountText, setOpeningAmountText] = useState('');
   const [openingDate, setOpeningDate] = useState(todayLocal());
   const [repaymentAccountId, setRepaymentAccountId] = useState(existing?.repaymentAccountId ?? '');
@@ -57,6 +60,8 @@ export function AccountSheet({
 
   // 初期残高は新規作成 × 資産/負債の箱のみ（収入/支出/聖域には出さない）。
   const showOpening = !existing && !!box?.opening;
+  // 「自由に動かせる」チェックは現預金（daily-asset）の内訳のみ。
+  const showMovable = (existing?.role ?? createRole) === 'daily-asset';
   // 返済設定は負債（カード・未払 / ローン）の編集時のみ（新規は作成後に編集で設定する）。
   const showRepayment =
     !!existing && (existing.role === 'payment-liability' || existing.role === 'other-liability');
@@ -91,6 +96,7 @@ export function AccountSheet({
             type: box.type,
             role: box.createRole,
             ...(note.trim() !== '' ? { note: note.trim() } : {}),
+            ...(showMovable && !movable ? { movable: false } : {}),
           },
           amount: openingAmount,
           date: openingDate,
@@ -108,6 +114,7 @@ export function AccountSheet({
           role,
           archived: existing?.archived ?? false,
           ...(note.trim() !== '' ? { note: note.trim() } : {}),
+          ...(showMovable && !movable ? { movable: false } : {}),
           ...(showRepayment && repaymentAccountId !== '' ? { repaymentAccountId } : {}),
           ...(showRepayment && repaymentDay !== null ? { repaymentDay } : {}),
           createdAt: existing?.createdAt ?? ts,
@@ -162,6 +169,7 @@ export function AccountSheet({
   const snapshot = JSON.stringify({
     name,
     note,
+    movable,
     openingAmountText,
     openingDate,
     repaymentAccountId,
@@ -216,6 +224,24 @@ export function AccountSheet({
           error={error}
         />
         {/* メモ欄は UI から撤去（2026-07-23 作者指示）。既存メモは note state 経由で保持される。 */}
+        {showMovable ? (
+          <label
+            style={{
+              display: 'inline-flex',
+              gap: 8,
+              alignItems: 'center',
+              minHeight: 'var(--tap)',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={movable}
+              onChange={(e) => setMovable(e.target.checked)}
+              data-ui={UI.accounts.movable}
+            />
+            {t('accounts.movable')}
+          </label>
+        ) : null}
         {showRepayment ? (
           <>
             <SelectInput

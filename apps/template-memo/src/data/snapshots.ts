@@ -6,7 +6,7 @@ import { createSnapshotStore, type SnapshotStore } from '@snishi/foundation/snap
 import type { PointerStore } from '@snishi/foundation/storage/pointers';
 import { type Patient } from '../domain/types';
 import { isPatientEmpty } from '../domain/normalize';
-import { SNAPSHOT_DB_NAME } from './constants';
+import { LEGACY_SNAPSHOT_DB_NAME, SNAPSHOT_DB_NAME } from './constants';
 
 export const REASON = Object.freeze({
   CLEAR: 'clear',
@@ -54,6 +54,14 @@ export function createHrSnapshots(
   tombstones: PointerStore,
   now?: () => number,
 ): SnapshotStore<SnapshotData> {
+  // v2 以前の Patient 形を含む旧 DB は復元に使わない。接続のたびに削除を試みる (冪等)。
+  if (typeof indexedDB !== 'undefined') {
+    try {
+      indexedDB.deleteDatabase(LEGACY_SNAPSHOT_DB_NAME);
+    } catch {
+      // 旧 DB の削除失敗は新 DB の fail-closed な復元経路を妨げない。
+    }
+  }
   return createSnapshotStore<SnapshotData>({
     dbName: SNAPSHOT_DB_NAME,
     ttlDays: SNAPSHOT_TTL_DAYS,

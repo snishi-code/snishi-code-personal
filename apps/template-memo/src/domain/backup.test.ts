@@ -37,7 +37,6 @@ function makePatient(over: Partial<Patient> = {}): Patient {
     problems: ['発熱\n経過観察中'],
     visitMemo: '今回メモ本文',
     standingMemo: '申し送りメモ',
-    confirmedNote: '清書テキスト',
     projectedValues: {
       grp_1: {
         itm_1: { value: '120/80' },
@@ -56,7 +55,6 @@ function makeSettings(activeTemplateId: string): AppSettings {
     key: 'app',
     activeTemplateId,
     tags: [{ name: '要注意', color: 'amber' }],
-    snippets: [{ id: 'snp_1', label: '採血', body: '採血: __' }],
     newlineMode: 'lf',
     updatedAt: NOW,
   };
@@ -71,6 +69,22 @@ interface Fixture {
 
 function makeFixture(): Fixture {
   const template = buildRoundPreset(NOW);
+  template.sections[1]?.groups.push({
+    id: 'grp_menu',
+    name: '判定',
+    display: 'menu',
+    joiner: '\n',
+    labelSep: '：',
+    titleWrap: '',
+    items: [
+      {
+        id: 'itm_select',
+        label: '方針',
+        kind: 'select',
+        options: ['経過観察', '精査'],
+      },
+    ],
+  });
   const places = [makePlace('plc_a', '第1グループ')];
   const patients = [makePatient({ placeId: 'plc_a' })];
   return { settings: makeSettings(template.id), places, patients, templates: [template] };
@@ -125,11 +139,13 @@ describe('parseBackupJson の fail-closed 拒否', () => {
     expect(() => parseBackupJson(json)).toThrow(BACKUP_WRONG_APP_MSG);
   });
 
-  it('schemaVersion 不一致を拒否する（migration しない・旧 v1 封筒も拒否）', () => {
+  it('schemaVersion 不一致を拒否する（migration しない・旧 v1/v2 封筒も拒否）', () => {
     const newer = envelopeWith({ schemaVersion: SCHEMA_VERSION + 1 });
     expect(() => parseBackupJson(newer)).toThrow(backupSchemaMismatchMsg(SCHEMA_VERSION + 1));
     const v1 = envelopeWith({ schemaVersion: 1 });
     expect(() => parseBackupJson(v1)).toThrow(backupSchemaMismatchMsg(1));
+    const v2 = envelopeWith({ schemaVersion: 2 });
+    expect(() => parseBackupJson(v2)).toThrow(backupSchemaMismatchMsg(2));
   });
 
   it('templates が配列でなければ拒否する', () => {
@@ -206,7 +222,6 @@ describe('parseBackupJson の防御的正規化', () => {
     expect(parsed.settings.key).toBe('app');
     expect(parsed.settings.activeTemplateId).toBe(parsed.templates[0]!.id);
     expect(parsed.settings.tags).toEqual([]);
-    expect(parsed.settings.snippets).toEqual([]);
     expect(parsed.settings.newlineMode).toBe('crlf');
   });
 });

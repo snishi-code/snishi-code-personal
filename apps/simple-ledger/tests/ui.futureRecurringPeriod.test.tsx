@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { App } from '../src/App';
+import { CONTINUOUS_COST_HARD_CAP } from '../src/domain/continuousCost';
 import { createRecurringRule, loadLedger } from '../src/data/repository';
 import { clearOnboardingDone, markOnboardingDone } from '../src/data/localFlags';
 import { LedgerProvider } from '../src/state/store';
@@ -26,7 +27,7 @@ afterEach(() => {
 });
 
 describe('未来開始の定期ルールへの期間ナビゲーション', () => {
-  it('ヘッダーの日付ピッカーから未来の断面を選べる', async () => {
+  it('ヘッダーの日付チップ（透明な date input・1 タップ）で未来の断面を選べる', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((account) => account.role === 'daily-asset')!;
     const expense = ledger.accounts.find((account) => account.role === 'expense-category')!;
@@ -51,15 +52,16 @@ describe('未来開始の定期ルールへの期間ナビゲーション', () =
       expect(document.querySelector('[data-ui="dashboard.view"]')).toBeInTheDocument();
     });
 
-    const trigger = document.querySelector(
-      `[data-ui="${UI.period.dateTrigger}"]`,
-    ) as HTMLButtonElement;
+    const trigger = document.querySelector(`[data-ui="${UI.period.dateTrigger}"]`) as HTMLElement;
     expect(trigger).toHaveTextContent(todayLocal());
 
-    fireEvent.click(trigger);
+    // ポップアップ経由なし: チップ内の透明な date input が常在し、値変更で即 period が更新される。
     const dateInput = document.querySelector(
       `[data-ui="${UI.period.dateInput}"]`,
     ) as HTMLInputElement;
+    expect(dateInput.type).toBe('date');
+    expect(dateInput.value).toBe(todayLocal());
+    expect(dateInput.max).toBe(CONTINUOUS_COST_HARD_CAP);
     fireEvent.change(dateInput, { target: { value: `${futureYear}-04-15` } });
 
     await waitFor(() => {
@@ -67,7 +69,9 @@ describe('未来開始の定期ルールへの期間ナビゲーション', () =
         `${futureYear}-04-15`,
       );
     });
+    expect(dateInput.value).toBe(`${futureYear}-04-15`);
 
     expect(document.querySelector('[data-ui="period.year.trigger"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-ui="period.date.picker"]')).not.toBeInTheDocument();
   });
 });

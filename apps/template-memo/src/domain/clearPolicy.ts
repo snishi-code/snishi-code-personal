@@ -13,7 +13,6 @@ import { STATUS, type Patient } from './types';
  * クリアする:
  *   - status: 黄 / 緑 / 灰 → none
  *   - 今回メモ (visitMemo)
- *   - 清書 (confirmedNote)
  *   - 今回分のフォーム入力値 (projectedValues)
  *
  * 残す:
@@ -28,8 +27,6 @@ export function applyRoundStartClear(p: Patient, now: number): void {
     p.status = STATUS.NONE;
   }
   p.visitMemo = '';
-  // confirmedNote を消さないと前回の清書が QR の本文採用で次回へ残る (visitMemo より優先される)。
-  p.confirmedNote = undefined;
   // 今回分のフォーム入力値。継続メモのようには残さない (今回ラウンド分)。
   p.projectedValues = {};
   p.updatedAt = nextGroupRevision(now, p.updatedAt);

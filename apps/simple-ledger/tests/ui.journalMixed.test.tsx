@@ -10,11 +10,12 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider, useLedger } from '../src/state/store';
-import { Journal } from '../src/ui/screens/Journal';
+import { Journal, type JournalFilter } from '../src/ui/screens/Journal';
 import {
   createContinuousCost,
   createRecurringRule,
   loadLedger,
+  upsertEntry,
 } from '../src/data/repository';
 import { CONTINUOUS_COST_HARD_CAP } from '../src/domain/continuousCost';
 import { addMonths, addMonthsToDate, monthOf } from '../src/domain/allocation';
@@ -37,14 +38,23 @@ afterEach(() => {
 function View({
   onEditEntry = () => undefined,
   onOpenAllocations = () => undefined,
+  onClearFilter = () => undefined,
+  filter = null,
 }: {
   onEditEntry?: (entry: JournalEntry) => void;
   onOpenAllocations?: (target: AllocationsTarget) => void;
+  onClearFilter?: () => void;
+  filter?: JournalFilter | null;
 }) {
   return (
     <ToastProvider>
       <LedgerProvider>
-        <ReadyView onEditEntry={onEditEntry} onOpenAllocations={onOpenAllocations} />
+        <ReadyView
+          onEditEntry={onEditEntry}
+          onOpenAllocations={onOpenAllocations}
+          onClearFilter={onClearFilter}
+          filter={filter}
+        />
       </LedgerProvider>
     </ToastProvider>
   );
@@ -53,9 +63,13 @@ function View({
 function ReadyView({
   onEditEntry,
   onOpenAllocations,
+  onClearFilter,
+  filter,
 }: {
   onEditEntry: (entry: JournalEntry) => void;
   onOpenAllocations: (target: AllocationsTarget) => void;
+  onClearFilter: () => void;
+  filter: JournalFilter | null;
 }) {
   const { status } = useLedger();
   if (status !== 'ready') return null;
@@ -64,9 +78,9 @@ function ReadyView({
       onEditEntry={onEditEntry}
       onReverse={() => undefined}
       onOpenAllocations={onOpenAllocations}
-      filter={null}
+      filter={filter}
       period={{ mode: 'all' }}
-      onClearAccountFilter={() => undefined}
+      onClearFilter={onClearFilter}
     />
   );
 }
@@ -168,5 +182,69 @@ describe('仕訳一覧の混合表示', () => {
     expect(onEditEntry).toHaveBeenCalledTimes(1);
     const edited = onEditEntry.mock.calls[0]![0] as JournalEntry;
     expect(edited.metadata?.monthlyCostId).toBe(item.id);
+  });
+
+  it('通常支出フィルタは通常の費用だけを表示し、解除チップを出す', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((account) => account.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((account) => account.role === 'expense-category')!;
+    const revenue = ledger.accounts.find((account) => account.role === 'income-category')!;
+    const today = todayLocal();
+    const timestamp = `${today}T00:00:00.000Z`;
+
+    await upsertEntry({
+      id: 'normal-expense-filter-target',
+      date: today,
+      description: '通常支出フィルタ対象',
+      kind: 'normal',
+      lines: [
+        { accountId: expense.id, side: 'debit', amount: 1000 },
+        { accountId: cash.id, side: 'credit', amount: 1000 },
+      ],
+      metadata: { inputMode: 'expense' },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    await upsertEntry({
+      id: 'normal-expense-filter-income',
+      date: today,
+      description: '通常支出ではない収入',
+      kind: 'normal',
+      lines: [
+        { accountId: cash.id, side: 'debit', amount: 3000 },
+        { accountId: revenue.id, side: 'credit', amount: 3000 },
+      ],
+      metadata: { inputMode: 'income' },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    await createContinuousCost({
+      name: '通常支出ではない継続コスト',
+      amount: 500,
+      startDate: today,
+      endDate: today,
+      expenseAccountId: expense.id,
+      creditAccountId: cash.id,
+    });
+
+    const onClearFilter = vi.fn();
+    render(
+      <View
+        filter={{ expenseKind: 'normal', from: today, to: today }}
+        onClearFilter={onClearFilter}
+      />,
+    );
+    await screen.findByText('通常支出フィルタ対象');
+
+    expect(screen.queryByText('通常支出ではない収入')).not.toBeInTheDocument();
+    expect(screen.queryByText('通常支出ではない継続コスト')).not.toBeInTheDocument();
+    expect(screen.getByText('通常支出のみ')).toBeInTheDocument();
+
+    fireEvent.click(
+      document.querySelector(
+        `[data-ui="${UI.journal.clearNormalExpenseFilter}"]`,
+      ) as HTMLButtonElement,
+    );
+    expect(onClearFilter).toHaveBeenCalledTimes(1);
   });
 });

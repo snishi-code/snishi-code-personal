@@ -1,31 +1,56 @@
 // 詳細 (患者) ビュー:
 //   - 患者ヘッダ: メタボタン (ステータス形マーク + 部屋 + 氏名) → 患者情報ポップアップ
-//   - プロブレムリスト → 継続メモ → 入力フォーム → 今回メモ → 定型文 → 清書 → 定型清書
+//   - プロブレムリスト → 継続メモ → 入力フォーム → 今回メモ (常時開)
 //     → 転記用QR ボタン → 患者管理
-//     (清書が入った患者では今回メモを畳んで清書を開く)
 //   - 下部固定バーは [ホーム] のみ (患者固有の操作は画面内の日本語ボタンへ)
 //   - 患者切替は横スワイプ (補助操作)。前/次ボタンは持たない。
 //
 // メモは visitMemo / standingMemo の 2 欄に集約する (write-through 保存は MemoCards 側)。
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@snishi/foundation/ui/Button';
 import { Icon } from '@snishi/foundation/ui/Icon';
-import { useToast } from '@snishi/foundation/ui/toast';
 import { BottomActionBar } from './BottomActionBar';
 import { STATUS } from '../domain/types';
 import { useRevision, type AppRuntime } from './appRuntime';
 import { formatPatientLabel, statusClass, STATUS_MARK } from './patientDisplay';
 import { ProblemListCard } from './ProblemListCard';
 import { ProjectionFormCard } from './ProjectionFormCard';
-import { VisitMemoCard, StandingMemoCard, CleanNoteCard } from './MemoCards';
+import { VisitMemoCard, StandingMemoCard } from './MemoCards';
 import { DetailQrDialog } from './DetailQrDialog';
 import { PatientEditPopup } from './PatientEditPopup';
 import { PatientLifecyclePanel } from './PatientLifecyclePanel';
-import { composePresetClean } from '../domain/template';
-import { SnippetInsertRow } from './SnippetPicker';
 import { s } from '../i18n';
 import { UI } from '../ui-contract';
+
+/**
+ * 誤タップガード: 詳細画面へ入った直後と対象切替直後は、新しい入力 (pointerdown / keydown) が
+ * 来るまで正常チェックや入力シートを発火させない。ゴーストクリックは pointerdown を伴わないため
+ * これで弾ける。keydown でも解錠するのは、キーボードのみの利用者 (Tab → Enter 即時発火の
+ * a11y 経路) がポインタ無しでは永久に発火できなくなるのを防ぐため。
+ */
+export function useFreshTapGuard(pid: string | null) {
+  const freshTapRef = useRef(false);
+  useEffect(() => {
+    freshTapRef.current = false;
+    const onInput = () => {
+      freshTapRef.current = true;
+    };
+    window.addEventListener('pointerdown', onInput);
+    window.addEventListener('keydown', onInput);
+    return () => {
+      window.removeEventListener('pointerdown', onInput);
+      window.removeEventListener('keydown', onInput);
+    };
+  }, []);
+
+  // 詳細ビューは対象切替で再マウントされないため、前対象の pointerdown を持ち越さない。
+  useEffect(() => {
+    freshTapRef.current = false;
+  }, [pid]);
+
+  return freshTapRef;
+}
 
 export function DetailView({
   runtime,
@@ -41,26 +66,19 @@ export function DetailView({
   onNavigateHome?: () => void;
 }) {
   useRevision(runtime);
-  const toast = useToast();
   const { store } = runtime;
   const appState = store.getAppState();
   const patient = appState.patients[selectedNo - 1] ?? null;
+  const freshTapRef = useFreshTapGuard(patient?.pid ?? null);
 
   const [qrOpen, setQrOpen] = useState(false);
   const [metaOpen, setMetaOpen] = useState(false);
-  // 清書作成の成功で清書欄を開かせるシグナル (定型清書 → CleanNoteCard・remount しない)。
-  const [cleanOpenSignal, setCleanOpenSignal] = useState(0);
-  // 定型文挿入の成功で今回メモ欄を開かせるシグナル (畳んだまま挿入しても結果が見えるように)。
-  const [visitOpenSignal, setVisitOpenSignal] = useState(0);
   // 横スワイプ開始座標 (hook なので early return より前で確保する)。
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
   if (!patient) return null;
 
   const label = formatPatientLabel(patient, String(selectedNo));
-  // 清書 (confirmedNote) が入っているか。入っていれば今回メモを畳んで清書を開く (初期開閉)。
-  const hasConfirmedNote =
-    typeof patient.confirmedNote === 'string' && patient.confirmedNote.trim() !== '';
 
   // 横スワイプで患者切替 (前/次ボタンの代替・補助操作)。
   //   - 入力中の誤爆を避けるため、開始点が input/textarea/select/button/a/contenteditable の内部なら無視する。
@@ -96,37 +114,6 @@ export function DetailView({
     }
   }
 
-  // 定型清書 (テンプレート合成): 問題/継続メモ/フォーム値/今回メモを合成し、空の自由本文は
-  // 正常文で充填して清書へ。押す=確認行為 (自動挿入はしない)。
-  const presetPid = patient.pid;
-  async function onPresetClean(): Promise<void> {
-    // 患者は pid で live を引き直す (MemoCards と同じ write-through 経路・render ローカルを変異しない)。
-    const p = store.getAppState().patients.find((x) => x.pid === presetPid) ?? null;
-    if (!p) return;
-    const template = store.getActiveTemplate();
-    if (!template) {
-      toast.show(s.presetClean.failed, 'error');
-      return;
-    }
-    const note = composePresetClean(p, template);
-    if (!note) {
-      toast.show(s.presetClean.empty, 'error');
-      return;
-    }
-    try {
-      // 既に清書がある間はボタン自体を出さない (上書きしない)。
-      p.confirmedNote = note;
-      const no = store.getAppState().patients.findIndex((x) => x.pid === presetPid) + 1;
-      store.markUpdated(no, { bumpLight: false });
-      await store.persistActiveOrThrow();
-      toast.show(s.presetClean.done, 'success');
-      setCleanOpenSignal((n) => n + 1);
-    } catch (e) {
-      console.error('preset clean note failed:', e);
-      toast.show(s.presetClean.failed, 'error');
-    }
-  }
-
   return (
     <section
       aria-label={s.patientSheet.title}
@@ -159,9 +146,9 @@ export function DetailView({
       {/* プロブレムリスト (患者ごとの独立データ。転記用QR の先頭 = QR 順と一致) */}
       <ProblemListCard runtime={runtime} patient={patient} />
 
-      {/* 患者作業状態 (継続メモ/入力フォーム/今回メモ/清書)。テンプレート未選択でも
-          status/今回メモ/継続メモ/清書は使える (スマホ主用途を止めない)。入力フォーム
-          (ProjectionFormCard) は群が無ければ自ら非表示になるため、fieldset での一括ロックはしない。 */}
+      {/* 患者作業状態 (継続メモ/入力フォーム/今回メモ)。テンプレート未選択でも
+          status/今回メモ/継続メモは使える (スマホ主用途を止めない)。入力フォームは
+          テンプレートの場所が無ければ自ら非表示になるため、fieldset での一括ロックはしない。 */}
       <fieldset className="editLock">
         {/* 継続メモ → 今回メモ: プロブレムの後・患者管理の前。上から「継続情報を見て、今回分を書く」
               流れにする (継続メモ = 患者ごとの背景 / 今回メモ = 今回の入力・転記用QR の本文候補)。 */}
@@ -169,46 +156,10 @@ export function DetailView({
 
         {/* 入力フォーム (テンプレート投影の入力欄)。継続メモの後、今回メモの前に置く。
               プロブレム/継続メモ = ずっと参照する背景、入力フォーム/今回メモ = 今回入力する情報。 */}
-        <ProjectionFormCard runtime={runtime} patient={patient} />
+        <ProjectionFormCard runtime={runtime} patient={patient} freshTapRef={freshTapRef} />
 
-        {/* 今回メモ → 定型文 → 清書。清書 (confirmedNote) があれば今回メモを畳んで清書を開く。
-              patient.pid を key にして患者切替/再入場で開閉初期値をリセットする (入力中は remount しない)。 */}
-        <VisitMemoCard
-          key={`visit:${patient.pid}`}
-          runtime={runtime}
-          patient={patient}
-          initialOpen={!hasConfirmedNote}
-          forceOpenSignal={visitOpenSignal}
-        />
-        {/* 定型文 (今回メモへの挿入部品)。今回メモの直下 = 挿入先のすぐそば。 */}
-        <SnippetInsertRow
-          runtime={runtime}
-          patient={patient}
-          onInserted={() => setVisitOpenSignal((n) => n + 1)}
-        />
-        <CleanNoteCard
-          key={`clean:${patient.pid}`}
-          runtime={runtime}
-          patient={patient}
-          initialOpen={hasConfirmedNote}
-          forceOpenSignal={cleanOpenSignal}
-        />
-
-        {/* 定型清書: 今回メモ + テンプレートの定型文 (正常文) をワンタップで清書へ。
-              清書が入っている間は出さない (上書きしない。作り直しは清書欄を空にしてから)。
-              自動挿入はしない: 押す=確認行為を 1 つ残す。 */}
-        {!hasConfirmedNote ? (
-          <div className="card card--pad detailPresetCleanRow">
-            <Button
-              variant="primary"
-              dataUi={UI.detail.presetClean}
-              onClick={() => void onPresetClean()}
-            >
-              {s.presetClean.label}
-            </Button>
-            <p className="muted">{s.presetClean.hint}</p>
-          </div>
-        ) : null}
+        {/* 今回メモは継続メモと同じく常時表示。患者切替時の key remount は維持する。 */}
+        <VisitMemoCard key={`visit:${patient.pid}`} runtime={runtime} patient={patient} />
       </fieldset>
 
       {/* 患者固有の操作は画面内の日本語ボタンへ (下部バーは共通の [ホーム] に寄せる)。 */}

@@ -9,7 +9,7 @@
  * （当時のストア構成）を **version 1 で一括作成**する（レガシー migration は持たない）。
  * 旧 fundingGoals ストアは作らない（v1 schema v16 で撤去済みのレガシー）。
  */
-import { createDatabase } from '@snishi/foundation/storage/idb';
+import { createDatabase, txDone } from '@snishi/foundation/storage/idb';
 import { DB_NAME, DB_VERSION } from './constants';
 
 export const STORE = {
@@ -17,7 +17,6 @@ export const STORE = {
   accounts: 'accounts',
   journalEntries: 'journalEntries',
   cashflowSchedules: 'cashflowSchedules',
-  reserves: 'reserves',
   tags: 'tags',
   monthlyCostItems: 'monthlyCostItems',
   recurringRules: 'recurringRules', // 定期ルール（v2 で追加）
@@ -49,9 +48,6 @@ export const db = createDatabase({
     if (!idb.objectStoreNames.contains(STORE.cashflowSchedules)) {
       idb.createObjectStore(STORE.cashflowSchedules, { keyPath: 'id' });
     }
-    if (!idb.objectStoreNames.contains(STORE.reserves)) {
-      idb.createObjectStore(STORE.reserves, { keyPath: 'id' });
-    }
     if (!idb.objectStoreNames.contains(STORE.tags)) {
       idb.createObjectStore(STORE.tags, { keyPath: 'id' });
     }
@@ -74,8 +70,10 @@ export function _resetConnectionForTests(): void {
 
 /**
  * 復旧用: 接続を閉じて DB を丸ごと削除する（VersionError で新旧どちらのビルドも開けなくなった
- * 端末の最終復旧手段。ErrorBoundary の復旧画面から呼ぶ）。blocked でも待ち続けず解決する
- * （呼び出し側が直後に reload するため、削除は再起動後に完了する）。
+ * 端末の最終復旧手段。ErrorBoundary の復旧画面から呼ぶ）。
+ * 成功扱いは onsuccess のみ（fail-closed・監査 P2-5）: error / blocked（別タブが接続を
+ * 保持している等）を成功と見なして reload すると、DB が残ったまま同じ致命状態へ戻るため、
+ * reject して呼び出し側が明示・再試行できるようにする。
  */
 export async function wipeDatabase(): Promise<void> {
   try {
@@ -83,11 +81,13 @@ export async function wipeDatabase(): Promise<void> {
   } catch {
     // 接続が開けていない（VersionError 等）場合はそのまま削除へ。
   }
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
     const request = indexedDB.deleteDatabase(DB_NAME);
     request.onsuccess = () => resolve();
-    request.onerror = () => resolve();
-    request.onblocked = () => resolve();
+    request.onerror = () =>
+      reject(request.error ?? new Error('データベースを削除できませんでした'));
+    request.onblocked = () =>
+      reject(new Error('他のタブ/ウィンドウが DB を開いているため削除できません'));
   });
 }
 
@@ -119,4 +119,18 @@ export async function runWrite(
   fn: (t: IDBTransaction) => void,
 ): Promise<void> {
   await db.runWrite(stores as string[], fn);
+}
+
+/**
+ * 複数ストアを同一時点の readonly transaction で読む。
+ * fn は最初の await より前に必要な request をすべて発行すること。
+ */
+export async function runRead<T>(
+  stores: StoreName[],
+  fn: (t: IDBTransaction) => Promise<T>,
+): Promise<T> {
+  const idb = await db.open();
+  const t = idb.transaction(stores as string[], 'readonly');
+  const [value] = await Promise.all([fn(t), txDone(t)]);
+  return value;
 }

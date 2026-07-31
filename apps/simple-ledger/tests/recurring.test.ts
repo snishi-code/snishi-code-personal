@@ -15,7 +15,6 @@ import './setup';
 import {
   catchUpRecurringRules,
   createRecurringRule,
-  createReserve,
   deleteEntry,
   deleteMonthlyCost,
   deleteRecurringRule,
@@ -30,12 +29,10 @@ import {
   recurringProjectionEntries,
 } from '../src/domain/recurring';
 import { accountBalance, deriveBalanceSheet, deriveProfitAndLoss, filterByDateRange } from '../src/domain/accounting';
+import { livingCostBreakdownForRange } from '../src/domain/livingCost';
 import { reportEntriesForAsOf } from '../src/domain/reportEntries';
 import { reportBasis } from '../src/domain/reportPeriod';
-import {
-  CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
-  RESERVE_LEDGER_ACCOUNT_ID,
-} from '../src/domain/constants';
+import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import { buildExportPackage } from '../src/data/exportImport';
 import { ledgerExportPackageSchema } from '../src/domain/schema';
 import { LedgerError } from '../src/domain/errors';
@@ -88,7 +85,17 @@ describe('定期ルールのキャッチアップ起票', () => {
       startMonth: '2026-05',
     });
 
-    await Promise.all([catchUpRecurringRules('2026-07-23'), catchUpRecurringRules('2026-07-23')]);
+    const outcomes = await Promise.allSettled([
+      catchUpRecurringRules('2026-07-23'),
+      catchUpRecurringRules('2026-07-23'),
+    ]);
+    // 同一タブでは事前読込から直列化され、先行が3件、後続が最新カーソルを見て0件になる。
+    expect(outcomes.every((outcome) => outcome.status === 'fulfilled')).toBe(true);
+    expect(
+      outcomes
+        .flatMap((outcome) => (outcome.status === 'fulfilled' ? [outcome.value] : []))
+        .sort((a, b) => a - b),
+    ).toEqual([0, 3]);
 
     const posted = (await loadLedger()).journalEntries.filter(
       (entry) => entry.metadata?.recurringRuleId === rule.id,
@@ -317,14 +324,24 @@ describe('定期ルールのキャッチアップ起票', () => {
         startMonth: '2026-07',
       }),
     ).rejects.toThrow(LedgerError);
-    // 目的別資金の集約口座（reserve-asset）は毎月起票の対象外。
-    await createReserve({ name: '旅行積立' });
+    // 継続コスト台帳（内部集約）は簿記編集ルールの科目に直接指定できない
+    // （台帳経由は spreadExpenseAccountId を持つ月割りルールだけ）。
+    const fixed = await accountByName('固定費');
+    await createRecurringRule({
+      name: '台帳を生むための家賃',
+      amount: 100000,
+      dayOfMonth: 27,
+      spreadExpenseAccountId: fixed.id,
+      debitAccountId: bank.id, // spread では無視され台帳に固定される
+      creditAccountId: bank.id,
+      startMonth: '2026-07',
+    });
     await expect(
       createRecurringRule({
-        name: 'reserve',
+        name: 'ledger-direct',
         amount: 100,
         dayOfMonth: 1,
-        debitAccountId: RESERVE_LEDGER_ACCOUNT_ID,
+        debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
         creditAccountId: bank.id,
         startMonth: '2026-07',
       }),
@@ -468,10 +485,70 @@ describe('clampDayToMonth / recurringPostingsDue / recurringProjectionEntries', 
       'rec-proj-rule-2026-09',
       'rec-proj-rule-2026-10',
     ]);
+    expect(projected.every((entry) => entry.metadata?.continuousCostId === undefined)).toBe(true);
     expect(recurringProjectionEntries([base], accounts, '2026-10-31')).toEqual(projected);
     expect(recurringProjectionEntries([{ ...base, paused: true }], accounts, '2026-10-31')).toEqual(
       [],
     );
+  });
+
+  it('月割りルールの投影購入行は費用行と同じ継続コストIDを持つ', () => {
+    const accounts: Account[] = [
+      {
+        id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+        name: '継続コスト台帳',
+        type: 'asset',
+        role: 'continuing-cost-asset',
+        archived: false,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+      {
+        id: 'cash',
+        name: '現金',
+        type: 'asset',
+        role: 'daily-asset',
+        archived: false,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+      {
+        id: 'expense',
+        name: '固定費',
+        type: 'expense',
+        role: 'expense-category',
+        archived: false,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+    ];
+    const projected = recurringProjectionEntries(
+      [
+        {
+          id: 'spread-rule',
+          name: '家賃',
+          amount: 80000,
+          dayOfMonth: 27,
+          debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+          creditAccountId: 'cash',
+          spreadExpenseAccountId: 'expense',
+          everyMonths: 1,
+          startMonth: '2026-07',
+          postedThroughMonth: '2026-07',
+          createdAt: 't',
+          updatedAt: 't',
+        },
+      ],
+      accounts,
+      '2026-08-31',
+    );
+
+    const purchase = projected.find((entry) => entry.id === 'rec-proj-spread-rule-2026-08');
+    expect(purchase?.metadata?.continuousCostId).toBe('spread-rule-2026-08');
+    expect(
+      projected.find((entry) => entry.metadata?.ccKind === 'recognition')?.metadata
+        ?.continuousCostId,
+    ).toBe('spread-rule-2026-08');
   });
 });
 
@@ -608,20 +685,96 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     expect(pl.totalExpense).toBe(60000);
   });
 
-  it('月割りするルールは everyMonths >= 2 が必要（毎月払いは普通の支出ルール）', async () => {
+  it('everyMonths = 1 でも月割りできる（毎月の家賃も台帳経由: item は起票日開始・当月末終了）', async () => {
     const bank = await accountByName('預金');
     const fixed = await accountByName('固定費');
-    await expect(
-      createRecurringRule({
-        name: '毎月なのに月割り',
-        amount: 1000,
-        dayOfMonth: 1,
-        everyMonths: 1,
-        spreadExpenseAccountId: fixed.id,
-        debitAccountId: fixed.id,
-        creditAccountId: bank.id,
-        startMonth: '2026-07',
-      }),
-    ).rejects.toMatchObject({ code: 'error.recurring.invalidStructure' });
+    const rule = await createRecurringRule({
+      name: '家賃',
+      amount: 80000,
+      dayOfMonth: 27,
+      everyMonths: 1,
+      spreadExpenseAccountId: fixed.id,
+      debitAccountId: fixed.id, // spread では無視され台帳に固定される
+      creditAccountId: bank.id,
+      startMonth: '2026-06',
+    });
+    // 6/27・7/27 の 2 起票（今日 = 2026-07-27）。
+    expect(await catchUpRecurringRules('2026-07-27')).toBe(2);
+    const ledger = await loadLedger();
+    const june = ledger.monthlyCostItems.find((m) => m.id === `ccr-${rule.id}-2026-06`)!;
+    expect(june.startDate).toBe('2026-06-27');
+    expect(june.endDate).toBe('2026-06-30'); // 周期 1 → 当月末（毎月生まれて消える）
+    const july = ledger.monthlyCostItems.find((m) => m.id === `ccr-${rule.id}-2026-07`)!;
+    expect(july.endDate).toBe('2026-07-31');
+    // 支出内訳では「継続コスト」に分類される（6 月ぶんは 6 月内で全額認識）。
+    const derived = reportEntriesForAsOf(ledger, '2026-07-31');
+    const juneCost = livingCostBreakdownForRange(ledger.accounts, derived, {
+      from: '2026-06-01',
+      to: '2026-06-30',
+    });
+    expect(juneCost.monthlyCost).toBe(80000);
+    expect(juneCost.normalExpense).toBe(0);
+    // 台帳残高は月末で 0（起票日開始・当月末終了 = 同月内で費消しきる）。
+    const balance = accountBalance(
+      CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      'asset',
+      filterByDateRange(derived, undefined, '2026-07-31'),
+    );
+    expect(balance).toBe(0);
+    // export → schema round-trip。
+    expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
+  });
+
+  it('支払い元（貸方）の役割制限なし: 健康保険 = 銀行→給与 を台帳経由で登録できる', async () => {
+    const bank = await accountByName('預金');
+    const salary = await accountByName('給与'); // income-category
+    // 費用の行き先 = 給与（収入減として認識）・支払い元 = 銀行。
+    const rule = await createRecurringRule({
+      name: '健康保険',
+      amount: 4000,
+      dayOfMonth: 1,
+      everyMonths: 1,
+      spreadExpenseAccountId: salary.id,
+      debitAccountId: bank.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-07',
+    });
+    expect(await catchUpRecurringRules('2026-07-23')).toBe(1);
+    const ledger = await loadLedger();
+    const item = ledger.monthlyCostItems.find((m) => m.id === `ccr-${rule.id}-2026-07`)!;
+    expect(item.expenseAccountId).toBe(salary.id);
+    const derived = reportEntriesForAsOf(ledger, '2026-07-31');
+    // 月末断面: 銀行 −4,000・給与（revenue）−4,000・台帳 0。
+    expect(accountBalance(bank.id, 'asset', derived)).toBeLessThan(0);
+    expect(accountBalance(salary.id, 'revenue', derived)).toBe(-4000);
+    expect(
+      accountBalance(CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 'asset', derived),
+    ).toBe(0);
+    expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
+  });
+
+  it('支払い元（貸方）に income-category を指定した月割りルールも起票できる', async () => {
+    const salary = await accountByName('給与');
+    const fixed = await accountByName('固定費');
+    const rule = await createRecurringRule({
+      name: '天引きの月割り',
+      amount: 3000,
+      dayOfMonth: 1,
+      everyMonths: 1,
+      spreadExpenseAccountId: fixed.id,
+      debitAccountId: fixed.id,
+      creditAccountId: salary.id, // 支払い元 = 給与（income-category）
+      startMonth: '2026-07',
+    });
+    expect(await catchUpRecurringRules('2026-07-23')).toBe(1);
+    const ledger = await loadLedger();
+    const purchase = ledger.journalEntries.find(
+      (e) => e.metadata?.monthlyCostId === `ccr-${rule.id}-2026-07`,
+    )!;
+    expect(purchase.lines).toEqual([
+      { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: 3000 },
+      { accountId: salary.id, side: 'credit', amount: 3000 },
+    ]);
+    expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
 });

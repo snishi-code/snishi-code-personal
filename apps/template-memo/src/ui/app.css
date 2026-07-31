@@ -1162,36 +1162,6 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   cursor: pointer;
 }
 
-/* ── 今回メモ / 清書 の折りたたみ (details)。継続メモは常時表示の section のまま。 ── */
-.memoCollapse {
-  /* panelCard の余白を summary/body 側で持つので上下 padding は詰める */
-  padding-top: var(--space-2);
-  padding-bottom: var(--space-2);
-}
-.memoCollapseSummary {
-  cursor: pointer;
-  min-height: 36px;
-  display: flex;
-  align-items: center;
-  list-style: none;
-}
-.memoCollapseSummary::-webkit-details-marker {
-  display: none;
-}
-/* 折りたたみの開閉を示す三角 (▶ / ▼) */
-.memoCollapseSummary::before {
-  content: '▶';
-  font-size: 11px;
-  margin-right: var(--space-2);
-  color: var(--muted);
-}
-.memoCollapse[open] > .memoCollapseSummary::before {
-  content: '▼';
-}
-.memoCollapseBody {
-  margin-top: var(--space-2);
-}
-
 /* ── 今回メモ / 継続メモ (患者ごとの独立 textarea) ── */
 .memoInput {
   width: 100%;
@@ -1206,15 +1176,111 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
 }
 
 /* ── 回診入力カード (note-assist セット投影の入力欄。patient.projectedValues へ保存) ── */
-.projectionField {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+/* 群本文 grid: [ラベル] [正常] [値]。群単位で列構成を決めて縦を揃える。
+   列幅: ラベル fit-content(min(8rem,30vw)) / 正常 44px。 */
+.projectionRows {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 4px;
   margin-bottom: var(--space-2);
 }
+
+.projectionRows.hasNormal {
+  grid-template-columns: var(--hr-cell-h) minmax(0, 1fr);
+}
+
+.projectionRows.hasLabel {
+  grid-template-columns: fit-content(min(8rem, 30vw)) minmax(0, 1fr);
+}
+
+.projectionRows.hasLabel.hasNormal {
+  grid-template-columns: fit-content(min(8rem, 30vw)) var(--hr-cell-h) minmax(0, 1fr);
+}
+
+.projectionField {
+  display: contents;
+}
+
 .projectionFieldLabel {
-  font-size: 13px;
-  color: var(--muted);
+  min-width: 0;
+  padding: 10px 8px 0 0;
+  color: var(--text);
+  font-size: var(--hr-label-font);
+  font-weight: 700;
+  word-break: break-word;
+}
+
+.projectionRows .input,
+.projectionRows .tagSelection {
+  min-width: 0;
+}
+
+/* 正常チェック (44px・緑枠・押下済みは緑塗り)。
+   発火は長押し (NORMAL_HOLD_MS=350ms と .pressing アニメ時間を同期)。 */
+.formatNormalBtn {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  justify-content: center;
+  width: var(--hr-cell-h);
+  height: var(--hr-cell-h);
+  min-width: var(--hr-cell-h);
+  min-height: var(--hr-cell-h);
+  padding: 0;
+  border: 1px solid var(--success-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--success);
+  font-size: 18px;
+  font-weight: 800;
+  /* 長押し中のテキスト選択・iOS コールアウトを抑止 */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+
+.formatNormalBtn.on {
+  border-color: var(--success);
+  background: var(--success-light);
+  color: var(--success);
+  animation: hrNormalPulse 0.25s ease-out;
+}
+
+/* 長押し中: 下から緑が満ちていき、満ちきったら発火する (押せている可視化) */
+.formatNormalBtn.pressing {
+  animation: hrNormalHold 0.35s linear forwards;
+}
+
+@keyframes hrNormalHold {
+  from {
+    box-shadow: inset 0 0 0 0 var(--success-light);
+  }
+  to {
+    border-color: var(--success);
+    box-shadow: inset 0 calc(-1 * var(--hr-cell-h)) 0 0 var(--success-light);
+  }
+}
+
+/* 正常チェック成功の体感: ON になった瞬間だけ軽く弾む */
+@keyframes hrNormalPulse {
+  0% {
+    transform: scale(0.85);
+  }
+  60% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.formatNormalBtn:disabled {
+  opacity: 0.4;
+}
+
+.projectionNormalSpacer {
+  min-width: var(--hr-cell-h);
 }
 
 /* 電子カルテ用QR ボタン行 (患者詳細内の日本語ボタン)。中央寄せで主操作として見せる。 */
@@ -1620,38 +1686,81 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   font-size: 15px;
 }
 
-/* ── 定型文 (今回メモへの挿入部品・2026-07-24) ── */
-.detailSnippetRow {
-  margin: 4px 0 8px;
-}
-.snippetList {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.snippetItemBtn {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  text-align: left;
-}
-.snippetItemLabel {
-  font-weight: 600;
-}
-.snippetItemPreview {
-  font-size: 0.85em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
-}
-
 /* ============================================================================
    template-memo 固有の追記 (コピー移植後も残す最小限)。
    - tm-*: 温存ファイル (TemplateQrSendDialog / TemplateQrReceiveDialog) が使う 3 クラス。
    - settingsRadioRow: 設定「QR出力」の改行モードラジオ行。
    ============================================================================ */
+
+.templateEditView,
+.templateEditSection,
+.templateEditGroup,
+.templateEditItem {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.templateEditSection,
+.templateEditGroup,
+.templateEditItem {
+  padding: var(--space-3);
+}
+
+/* テンプレート階層: 場所（白カード + 淡色見出し）> フォーマット（淡色地）> 項目（白カード）。
+   色は既存トークンだけを使い、左インデントでも親子関係を示す。 */
+.templateEditSection > .formatListRow:first-child {
+  padding: var(--space-2);
+  border: 1px solid var(--primary-border);
+  border-radius: var(--radius-sm);
+  background: var(--primary-light);
+}
+
+.templateEditGroup {
+  margin-left: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.templateEditGroup > .formatListRow:first-child {
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.templateEditItem {
+  margin-left: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+/* 項目の「種類」と kind 別設定（単位 / 正常文）を同じ行へ圧縮。
+   狭幅では flex-wrap し、各入力の 44px 操作領域と可読幅を維持する。 */
+.templateEditKindRow {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  margin: 0;
+}
+
+.templateEditKindRow > .field {
+  /* 7rem × 2 + gap が 375px 端末の実効内容幅 (約 257px) に収まり、スマホでも 1 行に並ぶ */
+  flex: 1 1 7rem;
+  min-width: 0;
+}
+
+/* select の選択肢編集 (見出し + 選択肢行 + 追加ボタンの縦積み。行内は settingsField の横並び) */
+.templateEditOptions {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.templateEditActions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+}
 
 .tm-card {
   border: 1px solid var(--border, #e2e8f0);

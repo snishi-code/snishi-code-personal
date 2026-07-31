@@ -16,8 +16,6 @@ const TYPE_ORDER: Record<Account['type'], number> = {
 
 const ROLE_ORDER: Partial<Record<Account['role'], number>> = {
   'daily-asset': 0,
-  // 取り置きは独立分類ではなく、現預金グループの末尾に置く。
-  'reserve-asset': 1,
   'continuing-cost-asset': 2,
   'investment-asset': 3,
   'payment-liability': 0,

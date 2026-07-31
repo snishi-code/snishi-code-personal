@@ -2,9 +2,10 @@
  * 勘定科目のチップピッカー（単一選択）。
  * foundation の Field / Icon を使用。
  */
-import { useId } from 'react';
+import { useId, type CSSProperties } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import type { AccountGroup } from './accountOptions';
+import { accountAccent } from './accountBoxes';
 import { t } from '../i18n';
 
 export function AccountPicker({
@@ -77,7 +78,17 @@ export function AccountPicker({
         </div>
       ) : (
         groups.map((g) => (
-          <div className="picker__group" key={g.type} role="group" aria-label={g.label}>
+          <div
+            className="picker__group"
+            key={g.type}
+            role="group"
+            aria-label={g.label}
+            style={
+              g.accounts[0]
+                ? ({ '--account-accent': accountAccent(g.accounts[0]) } as CSSProperties)
+                : undefined
+            }
+          >
             <div className="picker__group-label">{g.label}</div>
             <div className="picker__chips">
               {g.accounts.map((a) => (

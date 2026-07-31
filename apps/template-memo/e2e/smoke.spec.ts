@@ -1,4 +1,4 @@
-// E2E smoke: コピー移植後の実 UI (workspace 回診 surface と同じ操作フロー) を 4 本で叩く。
+// E2E smoke: コピー移植後の実 UI (workspace 回診 surface と同じ操作フロー) を一通り叩く。
 //
 // セレクタ方針 (ui-contract.ts / foundation ui/contract.ts):
 //   - 第一選択は data-ui (文言変更で壊れない安定名)。名簿 (src/ui-contract.ts の UI) 経由で参照する。
@@ -74,6 +74,13 @@ async function confirmDialog(page: Page): Promise<void> {
   await expect(dialog).toBeHidden();
 }
 
+/** 正常チェックを長押しして確定する。 */
+async function hold(page: Page, target: Locator, ms = 450): Promise<void> {
+  await target.dispatchEvent('pointerdown', { pointerType: 'touch' });
+  await page.waitForTimeout(ms);
+  await target.dispatchEvent('pointerup', { pointerType: 'touch' });
+}
+
 /** QR canvas が実際に描画されている (幅 > 0 の正方形 + 非ゼロ画素がある) ことを確認する。 */
 async function expectRenderedQr(canvas: Locator): Promise<void> {
   await expect(canvas).toBeVisible();
@@ -119,53 +126,120 @@ test('初回起動から対象を追加し、ステータスを未→途中→�
   await expect(statusBtn).toHaveText('✓');
 });
 
-// ── 2. 詳細 → 今回メモ + 固定フォーム → 定型清書 (例文型の合成) → QRダイアログ ──
+// ── 2. 詳細 → 今回メモ + 固定フォーム → その場合成 → QRダイアログ ──
 
-test('今回メモと固定フォームから定型清書を合成し、QRダイアログを表示できる', async ({ page }) => {
+test('今回メモと固定フォームから完成文を合成し、QRダイアログを表示できる', async ({ page }) => {
   await addPatient(page, '202', '検証対象B');
   await openDetail(page, '202 検証対象B');
+
+  // 場所は空でも常時表示: フォーマットを持たない (S)/(A)/(P) も見出しが出る (フィルタ復活の回帰網)。
+  const projectionCard = page.locator(ui(UI.projection.card));
+  for (const heading of ['(S)', '(O)', '(A)', '(P)']) {
+    await expect(projectionCard).toContainText(heading);
+  }
 
   // 今回メモ (自由本文) 入力。
   await page.locator(ui(UI.memo.visit.input)).fill('食欲低下あり');
 
-  // 固定フォーム (ラウンド入力カード): バイタルの BP と、身体所見の「全部正常」ワンタップ。
+  // 固定フォーム (ラウンド入力カード): バイタルの BP と、肺音の正常チェックを入力。
   // (BP/肺音/正常文はプリセットテンプレート『回診メモ』のデータであり UI 文言ではない)
   await page.getByLabel('BP', { exact: true }).fill('120/80');
-  await page.getByRole('button', { name: '全部正常', exact: true }).click();
+  const lungRow = page.locator('.projectionField', {
+    has: page.getByLabel('肺音', { exact: true }),
+  });
+  await hold(page, lungRow.locator(ui(UI.projection.normalBtn)));
   await expect(page.getByLabel('肺音', { exact: true })).toHaveValue('明らかなラ音なし');
 
-  // 定型清書: 空セクションは正常文で充填され、memoSection (O) に今回メモが入る。
-  await page.locator(ui(UI.detail.presetClean)).click();
-  await expect(page.getByText('清書を作成しました', { exact: true })).toBeVisible();
-
-  // 回診メモプリセットの合成結果 (例文型) を厳密一致で確認する。
-  const expectedCleanNote = [
-    '(S)',
-    '変わりない',
-    '',
-    '(O)',
-    'BP 120/80mmHg',
-    '',
-    '肺音：明らかなラ音なし',
-    '腸音：正常',
-    '腹部：平坦軟、圧痛なし',
-    '下腿浮腫：なし',
-    '',
-    '食欲低下あり',
-    '',
-    '(A)',
-    '著変なし',
-    '',
-    '(P)',
-    '現行加療継続',
-  ].join('\n');
-  await expect(page.locator(ui(UI.memo.clean.input))).toHaveValue(expectedCleanNote);
-
-  // 転記用QRダイアログ: canvas が実描画される。
+  // 転記用QRを開いた時点で空セクションが正常文で充填され、memoSection (O) に今回メモが入る。
   await page.locator(ui(UI.detail.emrQr)).click();
   const qrDialog = page.locator(ui(UI.detail.qrDialog));
   await expect(qrDialog).toBeVisible();
+  await qrDialog.getByText('本文を確認', { exact: true }).click();
+  await expect(qrDialog).toContainText('(S)');
+  await expect(qrDialog).toContainText('変わりない');
+  await expect(qrDialog).toContainText('BP 120/80mmHg');
+  await expect(qrDialog).toContainText('肺音：明らかなラ音なし');
+  await expect(qrDialog).toContainText('食欲低下あり');
+  await expect(qrDialog).toContainText('現行加療継続');
   await expectRenderedQr(qrDialog.locator(ui(UI.qr.canvas)));
+});
+
+test('呼び出しフォーマットを保存すると入力カードへ昇格する', async ({ page }) => {
+  await addPatient(page, '205', '呼び出し確認');
+  await openDetail(page, '205 呼び出し確認');
+
+  await page.getByRole('button', { name: '血糖', exact: true }).click();
+  await page.getByLabel('Glu', { exact: true }).fill('108');
+  await page.locator(ui(UI.projection.sheetSave)).click();
+
+  await expect(page.getByLabel('Glu', { exact: true })).toHaveValue('108');
+  await expect(page.getByRole('button', { name: '血糖', exact: true })).toHaveCount(0);
+});
+
+test('テンプレート編集で選択項目を作り、チップで単一選択できる', async ({ page }) => {
+  await addPatient(page, '206', '選択確認');
+  await openSettings(page);
+  const templateRow = page.locator('.formatListRow', { hasText: '回診メモ' }).first();
+  await templateRow.getByRole('button', { name: '編集', exact: true }).click();
+
+  // 「種類」と kind 別フィールドが同じ行に並ぶ (先頭項目は BP = 分数なので「種類」+「単位」)。
+  const firstKindRow = page.locator('.templateEditKindRow').first();
+  await expect(firstKindRow.locator('.field')).toHaveCount(2);
+  await expect
+    .poll(() =>
+      firstKindRow.locator('.field').evaluateAll((fields) => {
+        const tops = fields.map((field) => field.getBoundingClientRect().top);
+        return tops.every((top) => Math.abs(top - (tops[0] ?? top)) < 2);
+      }),
+    )
+    .toBe(true);
+
+  // 場所 > フォーマット > 項目の入れ子が、主用途の 375px 幅でも横にはみ出さない。
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+    .toBe(true);
+  // 種類 + kind 別フィールドは 375px でも 1 行に収まる (行圧縮の主目的はスマホ幅)。
+  await expect
+    .poll(() =>
+      firstKindRow.locator('.field').evaluateAll((fields) => {
+        const tops = fields.map((field) => field.getBoundingClientRect().top);
+        return tops.every((top) => Math.abs(top - (tops[0] ?? top)) < 2);
+      }),
+    )
+    .toBe(true);
+  // 以降の手順はデスクトップ幅へ戻して続ける (他テストと条件を揃える)。
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  await page.locator(ui(UI.templateEdit.kind)).first().selectOption('select');
+  await page.locator(ui(UI.templateEdit.save)).click();
+  await page.locator(ui(UI.settings.homeBottom)).click();
+  await openDetail(page, '206 選択確認');
+
+  const option = page.getByRole('button', { name: '選択肢', exact: true });
+  await option.click();
+  await expect(option).toHaveAttribute('aria-pressed', 'true');
+  await option.click();
+  await expect(option).toHaveAttribute('aria-pressed', 'false');
+});
+
+test('メニュー配置からフォーマットを開いて保存できる', async ({ page }) => {
+  await addPatient(page, '207', 'メニュー確認');
+  await openSettings(page);
+  const templateRow = page.locator('.formatListRow', { hasText: '回診メモ' }).first();
+  await templateRow.getByRole('button', { name: '編集', exact: true }).click();
+
+  const labGroup = page.locator(ui(UI.templateEdit.group), { hasText: '検査所見' }).first();
+  await labGroup.locator(ui(UI.templateEdit.display)).selectOption('menu');
+  await page.locator(ui(UI.templateEdit.save)).click();
+  await page.locator(ui(UI.settings.homeBottom)).click();
+  await openDetail(page, '207 メニュー確認');
+
+  await page.locator(ui(UI.projection.menu)).click();
+  await page.getByRole('button', { name: '検査所見', exact: true }).click();
+  await page.getByLabel('採血', { exact: true }).fill('異常なし');
+  await page.locator(ui(UI.projection.sheetSave)).click();
+  await expect(page.getByLabel('採血', { exact: true })).toHaveValue('異常なし');
 });
 
 // ── 3. ラウンド開始 (確認ダイアログ) → 今回分クリア・問題/継続メモ維持 → 巻き戻しで復元 ──

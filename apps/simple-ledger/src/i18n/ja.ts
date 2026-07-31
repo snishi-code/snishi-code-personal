@@ -83,28 +83,26 @@ export const ja = {
 
   'cashflow.title': '資金繰り',
   'cashflow.intro':
-    '未来日付の仕訳から、自由資金の推移を見ます。カード・ローンは行をタップすると返済計画を登録できます。',
-  'cashflow.liquidNote':
-    '総資金は現金・預金・取り置きなどの流動資金です（投資・継続コストの残存価値は含めません）。',
+    '未来日付の仕訳から、自由に動かせるお金の推移を見ます。カード・ローンは行をタップすると返済計画を登録できます。',
   'cashflow.until': '表示終了日',
   'cashflow.untilHint': '今日からこの日までの入出金予定を投影します。',
-  'cashflow.totalFunds': '総資金',
-  'cashflow.reserved': '取り置き',
-  'cashflow.freeFunds': '自由資金',
-  'cashflow.minFree': '期間内の最低自由資金',
-  'cashflow.depleteWarning': 'この期間に自由資金がマイナスになる予定があります。',
+  'cashflow.freeFunds': '自由に動かせるお金',
+  'cashflow.minFree': '期間内の最低額',
+  'cashflow.depleteWarning': 'この期間に自由に動かせるお金がマイナスになる予定があります。',
   'cashflow.nextDue': '次回支払日',
   'cashflow.installmentsLeft': '残り {count} 回',
   'cashflow.post': '実績化',
   'cashflow.postNeedsCounter': '相手科目を設定すると実績化できます。',
   'cashflow.deleteSchedule': '削除',
-  // CF 再構成: 自由資金推移・負債返済を主役に、未来予定はホーム入力へ寄せる。
-  'cashflow.freeTrendTitle': '自由資金の推移',
+  // CF 再構成: 自由に動かせるお金の推移・負債返済を主役に、未来予定はホーム入力へ寄せる。
+  'cashflow.freeTrendTitle': '自由に動かせるお金の推移',
   'cashflow.debtTitle': '支払用負債・返済予定',
   'cashflow.debtIntro': '負債ごとに、残りの支払予定・次回支払日・残回数を確認できます。',
   'cashflow.debtBalance': '残高',
   'cashflow.debtNoPlan': '返済予定が未登録です。',
   'cashflow.debtNoPlanHint': '残高があるなら、ホームの「支出」で未来日付の返済を登録できます。',
+  // 負債行の展開 = 登録済みの返済（未来日付の保存仕訳）。タップで仕訳の編集シートへ。
+  'cashflow.repaymentsRegistered': '登録済みの返済',
   'cashflow.futureTitle': '未来の入出金・振替予定',
   'cashflow.futureIntro':
     'ホームの 収入 / 支出 / 振替 で未来日付を選ぶと、ここに表示され資金繰りに反映されます。',
@@ -112,23 +110,6 @@ export const ja = {
   'cashflow.scheduleSecondaryTitle': '分割・定期の返済予定',
   'cashflow.scheduleSecondaryHint':
     '以前のバージョンで作られた返済予定です。新しくは作られません（返済は未来日付の振替仕訳として登録されます）。実績化または削除で整理できます。',
-  'cashflow.advancedTitle': '取り置き資金',
-  'cashflow.advancedHint':
-    '近い支払い予定に備えて、預金から自由資金を取り分けます（CF の主役ではなく補助情報）。',
-
-  'reserves.title': '取り置き資金',
-  'reserves.intro':
-    '使う予定が決まったお金を取り置きます。取り置きは振替（普通預金 → 取り置き資金）で行い、自由資金から除外して見られます。総資産は変わりません。',
-  'reserves.add': '取り置き資金を追加',
-  'reserves.empty': '取り置き資金はありません。',
-  'reserves.name': '名称',
-  'reserves.namePlaceholder': '例: 飲み会用 / 秋旅行',
-  'reserves.note': 'メモ',
-  'reserves.balance': '現在残高',
-  'reserves.unassigned': '未割り当て',
-  'reserves.delete': '削除',
-  'reserves.form.title': '取り置き資金',
-  'reserves.error.name': '名称を入力してください。',
 
   // 負債の新規作成（支出の支払い方法 / 振替の源泉・行き先から）
   'liability.form.title': '新しい負債を作る',
@@ -140,10 +121,6 @@ export const ja = {
   'liability.role.card': 'クレジットカード等',
   'liability.role.loan': '借入・ローン',
   'liability.error.name': '名称を入力してください。',
-  'reserves.deleteConfirmTitle': '取り置き資金の枠を削除しますか？',
-  'reserves.deleteConfirmBody':
-    '「{name}」の枠を削除します。取り置いた資金は「未割り当て」に戻り、仕訳は残ります。',
-
 
   'tags.title': 'タグ',
   'tags.intro':
@@ -298,13 +275,6 @@ export const ja = {
   'entry.monthlyizeRepayStart': '初回引落日',
   'entry.monthlyizeRepayStartHint': '購入日とは別に、最初に現金が引き落とされる日を入れます。',
   'entry.error.category-required': '費用の行き先を選んでください。',
-  // 取り置き資金は両辺で常時選択できる（チェックボックス廃止）。新規作成は振替の移動先（右辺）の
-  // 「取り置き資産を作る」で名称入力へ切替（継続コスト化と同じ片側切替挙動）。
-  'entry.reserveCreate': '取り置き資産を作る',
-  'entry.reserveTargetName': '取り置き資産の名前',
-  'entry.reserveTargetNameHint':
-    '移動先に作る取り置き枠の名前です（例: 旅行積立 / 車の頭金）。勘定科目は増えません。',
-  'entry.reserveBack': '取り置き資産をやめる',
   // 支出の支払い元（左辺）のローン導線。「ローンを組む」で既存ローン選択＋新規ローン作成へ切り替える。
   'entry.loanArrange': 'ローンを組む',
   'entry.loanArrangePick': '組むローンを選ぶ',
@@ -316,6 +286,8 @@ export const ja = {
   'journal.reversalTag': '取消/返金',
   'journal.filteredByAccount': '「{name}」で絞り込み中',
   'journal.clearAccountFilter': '科目の絞り込みを解除',
+  'journal.filteredByNormalExpense': '通常支出のみ',
+  'journal.clearNormalExpenseFilter': '通常支出の絞り込みを解除',
   'journal.showFuture': '将来予定も表示',
 
   // 期間フィルタの選択肢ラベル（タグ画面などで再利用）。
@@ -323,11 +295,9 @@ export const ja = {
   'statements.thisMonth': '今月',
   'statements.thisYear': '今年',
 
-  // 期間: ヘッダーの日付表示 + 日付ピッカー。年・全期間のロジックは内部に維持する。
-  'period.date': '日付',
+  // 期間: ヘッダーの日付チップ（透明な date input の 1 タップ選択）。年・全期間のロジックは内部に維持する。
   'period.dateLabel': '{year}年{month}月{day}日',
   'period.openDate': '対象の日付を選ぶ',
-  'period.pickerDate': '対象日',
   'period.yearUnit': '{year}年',
   'period.allPeriod': '全期間',
   'period.pickerYear': '対象期間（年）',
@@ -338,7 +308,7 @@ export const ja = {
   'breakdown.drilldownHint': '科目をタップすると、その仕訳を一覧で確認できます。',
   'breakdown.viewEntries': '「{name}」の仕訳を表示',
   'breakdown.asOfDate': '{date} 時点の残高',
-  'breakdown.reserveOf': 'うち {name}',
+  'breakdown.subtotal': '小計',
 
   // 収入の内訳（ホーム「収入」のタップ先）。
   'income.title': '収入の内訳',
@@ -354,11 +324,15 @@ export const ja = {
   'netIncome.result': '収支',
   'netIncome.trend': '収支の推移',
 
-  // 資産の内訳（ホーム「資産」のタップ先）。
+  // 資産の内訳（ホーム「資産」のタップ先）。4 枠（自由 / 自由でない / 投資 / 継続コスト台帳）。
   'assets.title': '資産の内訳',
   'assets.intro': '持っているお金・資産の内訳と、月ごとの推移です。',
   'assets.total': '資産合計',
   'assets.trend': '資産の推移',
+  'assets.frame.free': '自由に動かせるお金',
+  'assets.frame.fixed': '自由に動かせないお金',
+  'assets.frame.investment': '投資',
+  'assets.frame.ledger': '継続コスト台帳',
 
   // 負債の内訳（ホーム「負債」のタップ先）。
   'liabilities.title': '負債の内訳',
@@ -403,7 +377,6 @@ export const ja = {
   'accounts.type.revenue': '収益',
   'accounts.type.expense': '費用',
   'accounts.role.daily-asset': '日常資産（現金・預金）',
-  'accounts.role.reserve-asset': '取り置き資金',
   'accounts.role.investment-asset': '投資資産',
   'accounts.role.continuing-cost-asset': '継続コスト台帳（内部集約）',
   'accounts.role.payment-liability': '支払用負債（クレジットカード等）',
@@ -470,6 +443,10 @@ export const ja = {
 
   // 復旧画面（ErrorBoundary）。DB の版不整合（VersionError）で開けない詰みからの最終手段。
   'recovery.wipe': 'DB を初期化して再起動',
+  'recovery.wipeFailed':
+    'DB を削除できませんでした。このアプリを開いている他のタブ・ウィンドウをすべて閉じてください（閉じた時点で削除が完了することがあります）。そのあとページを再読み込みして、もう一度お試しください。',
+  'recovery.schemaMismatchHint':
+    '旧版データのままでは JSON の読み込みもできません。手順: ①「DB を初期化して再起動」で初期化 → ②起動後に設定から、現行版へ変換済みの JSON を読み込んでください。',
 
   'toast.saved': '保存しました。',
   'toast.deleted': '削除しました。',
@@ -504,7 +481,6 @@ export const ja = {
   'error.entry.invalidStructure': '仕訳の形式が正しくないため保存できません。',
   'error.entry.unknownAccount': '仕訳が存在しない勘定科目を参照しています。',
   'error.entry.accountRoleMismatch': '仕訳の勘定科目の役割と区分が一致していません。',
-  'error.reserve.shortfall': '取り置き資金「{name}」の残高が不足しています。',
   'error.tag.unknown': '存在しないタグを参照しています。',
   'error.tag.duplicateName': '同じ名前の有効なタグが既にあります。',
   'error.tag.deleteInUse': 'このタグは使用中のため削除できません。アーカイブしてください。',
@@ -515,8 +491,7 @@ export const ja = {
   'error.schedule.unknownAccount': '予定が存在しない口座を参照しています。',
   'error.adjust.targetNotFound': '対象科目が見つかりません。',
   'error.adjust.assetLiabilityOnly': '残高補正できるのは資産・負債の科目です。',
-  'error.adjust.internalRole':
-    '取り置き資金・継続コスト台帳は内部の集約口座のため残高補正できません。',
+  'error.adjust.internalRole': '継続コスト台帳は内部の集約口座のため残高補正できません。',
   'error.adjust.notFound': '対象の残高補正が見つかりません。',
   'error.adjust.notAdjustment': 'この仕訳は残高補正ではありません。',
   'error.opening.assetLiabilityOnly': '初期残高を登録できるのは資産・負債の科目です。',
@@ -541,7 +516,18 @@ export const ja = {
   'error.entry.ledgerAccount': '継続コスト台帳の科目は継続コスト資産の登録からだけ使えます。',
   'error.account.archiveBalance':
     '残高が残っている科目はアーカイブできません。先に振替で残高を 0 にしてください。',
-  'error.recurring.everyMonthsInvalid': '周期は 1 か月以上の整数で入力してください。',
+  'error.recurring.everyMonthsInvalid': '周期は 1〜1200 か月の整数で入力してください。',
+  // 監査 2026-07-30 対応で新設したエラーコード。
+  'error.monthlyCost.recoveryBeforeStart':
+    '回収の振替の日付は開始日（購入の仕訳の日付）以降にしてください。',
+  'error.monthlyCost.editLiability':
+    '負債（カード・ローン）で購入した項目は、支払い元・金額・日付を変更できません（自動作成した返済の仕訳と合わなくなるため）。終了はアーカイブ（終了日の設定）を使ってください。',
+  'error.common.staleData':
+    '別のタブ（またはウィンドウ）でデータが変更されています。ページを再読み込みしてから、もう一度お試しください。',
+  'error.common.revisionExhausted':
+    'データの更新番号が上限に達したため保存できません。JSON バックアップを書き出してから、DB を初期化して読み込み直してください。',
+  'error.db.schemaVersionMismatch':
+    '保存データのスキーマ版({found})がこのアプリの版({expected})と一致しません。JSON バックアップの読み込み、または「DB を初期化して再起動」で復旧してください。',
 
   // 戻る操作（dirty guard・終了確認）
   'guard.discardTitle': '変更を破棄しますか？',
@@ -570,6 +556,10 @@ export const ja = {
   'opening.registerIntro':
     'この科目にはまだ記録がありません。いまの実残高は補正（差額が収入/支出扱い）ではなく、初期残高として登録します。',
   'opening.registerSave': '初期残高を登録',
+
+  // 「自由に動かせる」チェック（現預金の内訳のみ・既定 ON。OFF = 資金繰りの原資に数えない）
+  'accounts.movable': '自由に動かせる',
+  'accounts.notMovable': '自由に動かせない',
 
   // 返済設定（負債の勘定科目）と資金繰りの返済予定
   'accounts.repaymentAccount': '返済口座',
@@ -610,7 +600,6 @@ export const ja = {
     '支払日に実際の仕訳として自動で記帳されます（アプリを開いたときにまとめて起票）。金額が変わった月は、できた仕訳をその月だけ編集してください。',
   'recurring.createTitle': '定期ルールを追加',
   'recurring.editTitle': '定期ルールを編集',
-  'recurring.kindLabel': '種別',
   'recurring.kind.expense': '支出（定期の支払い）',
   'recurring.kind.income': '収入（給与など）',
   'recurring.kind.transfer': '振替（積立など）',
@@ -621,16 +610,13 @@ export const ja = {
   'recurring.amountHint': '月によって金額が違う場合は、起票された仕訳をその月だけ編集します。',
   'recurring.intervalMonths': '周期（か月）',
   'recurring.firstPostingDate': '初回の起票日',
-  'recurring.from.expense': '支払い元',
-  'recurring.to.expense': '費用カテゴリ',
-  'recurring.from.income': '収入カテゴリ',
-  'recurring.to.income': '受け取り口座',
-  'recurring.from.transfer': '移動元',
-  'recurring.to.transfer': '移動先（資金・投資）',
+  'recurring.refBroken':
+    '参照している科目が削除またはアーカイブされています。このルールの起票は止まっています（編集で科目を選び直してください）。',
   'recurring.from.manual': '貸方（支払い元・減る側）',
   'recurring.to.manual': '借方（増える・使う側）',
   'recurring.manualHint':
     '任意の科目を直接指定できます（例: 健康保険は「銀行 → 収入」で収入減、積立は「カード → 投資」）。',
+  'recurring.manualSpread': '継続コストとして扱う',
   'recurring.everyMonthDay': '毎月{day}日',
   'recurring.everyNMonthsDay': '{n}か月ごと {day}日',
   'recurring.paused': '停止中',

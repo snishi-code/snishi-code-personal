@@ -5,10 +5,13 @@
  */
 import { afterEach } from 'vitest';
 import { _resetConnectionForTests } from '../src/data/db';
+import { _resetRepositoryStateForTests } from '../src/data/repository';
 import { DB_NAME } from '../src/data/constants';
 
 afterEach(async () => {
   _resetConnectionForTests();
+  // revision トラッカ等のモジュール状態を破棄する（DB を消すのに合わせてテスト間で持ち越さない）。
+  _resetRepositoryStateForTests();
   await new Promise<void>((resolve) => {
     const req = indexedDB.deleteDatabase(DB_NAME);
     req.onsuccess = () => resolve();

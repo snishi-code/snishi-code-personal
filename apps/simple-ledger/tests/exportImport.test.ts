@@ -241,13 +241,7 @@ describe('テスト用フィクスチャ（loadSampleFixture）', () => {
     // sample.json の中身が IndexedDB 正本として入る。
     expect(after.journalEntries.length).toBeGreaterThanOrEqual(15);
     expect(after.monthlyCostItems.length).toBeGreaterThanOrEqual(1);
-    expect(after.reserves.length).toBeGreaterThanOrEqual(1);
     expect(after.tags.length).toBeGreaterThanOrEqual(1);
-    // 集約モデル: reserve-asset 科目は単一の集約口座『取り置き資金』。目的名（旅行資金）は ReserveItem 側。
-    expect(
-      after.accounts.some((a) => a.name === '取り置き資金' && a.role === 'reserve-asset'),
-    ).toBe(true);
-    expect(after.reserves.some((r) => r.name === '旅行資金')).toBe(true);
     // 再読込しても永続化されている。
     const reloaded = await loadLedger();
     expect(reloaded.journalEntries.length).toBe(after.journalEntries.length);

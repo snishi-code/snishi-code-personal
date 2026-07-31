@@ -129,7 +129,6 @@ function defaultSettings(nowMs: number, activeTemplateId: string): AppSettings {
     key: 'app',
     activeTemplateId,
     tags: [],
-    snippets: [],
     newlineMode: 'crlf',
     updatedAt: nowMs,
   };
@@ -465,7 +464,6 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
       const prepared = prepareWorkspaceImportAppend(data, {
         places,
         patients: allPatients,
-        snippets: settings.snippets,
       });
       // place 未解決 ('') の患者は先頭 place へ倒す (未所属で不可視にしない)。
       const fallbackPlace = prepared.places[0]?.placeId ?? places[0]?.placeId ?? '';
@@ -476,7 +474,6 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
           ? p
           : { ...p, placeId: fallbackPlace },
       );
-      settings.snippets = [...settings.snippets, ...prepared.snippets];
       settings.updatedAt = now();
       await db.runWrite([STORE_PLACES, STORE_PATIENTS, STORE_SETTINGS], (tx) => {
         for (const g of prepared.places) tx.objectStore(STORE_PLACES).put(g);

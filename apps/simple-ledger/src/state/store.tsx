@@ -10,7 +10,6 @@ import type {
   Ledger,
   MonthlyCostItem,
   RecurringRule,
-  ReserveItem,
   Settings,
   Snapshot,
   Tag,
@@ -31,6 +30,7 @@ import { useToast } from '@snishi/foundation/ui/toast';
 import { clearOnboardingDone } from '../data/localFlags';
 import { todayLocal } from '../util/time';
 import { errorText, t } from '../i18n';
+import { LedgerError } from '../domain/errors';
 
 /** `?fixture=sample` が指定されているか（手動テスト用。本番通常起動では false）。 */
 function sampleFixtureRequested(): boolean {
@@ -51,7 +51,6 @@ export function isPristineSeedLedger(l: Ledger): boolean {
   return (
     l.journalEntries.length === 0 &&
     l.cashflowSchedules.length === 0 &&
-    l.reserves.length === 0 &&
     l.monthlyCostItems.length === 0 &&
     l.tags.length === 0 &&
     isDefaultSettings(l.settings) &&
@@ -63,6 +62,8 @@ interface LedgerContextValue {
   status: 'loading' | 'ready' | 'error';
   ledger: Ledger | null;
   error?: string;
+  /** 起動失敗の LedgerError コード（復旧画面が版不一致の専用導線を出す判定に使う）。 */
+  errorCode?: string;
   refresh: () => Promise<void>;
   saveEntry: (
     input: SimpleEntryInput,
@@ -79,12 +80,6 @@ interface LedgerContextValue {
   saveSchedules: (schedules: CashflowSchedule[]) => Promise<void>;
   postSchedule: (id: string) => Promise<void>;
   removeSchedule: (id: string) => Promise<void>;
-  createReserve: (input: {
-    name: string;
-    note?: string;
-    parentAccountId?: string;
-  }) => Promise<ReserveItem>;
-  removeReserve: (id: string) => Promise<void>;
   /** 定期ルール（作成/変更後は経過分を即キャッチアップ起票する）。 */
   createRecurringRule: (input: repo.RecurringRuleInput) => Promise<void>;
   saveRecurringRule: (rule: RecurringRule) => Promise<void>;
@@ -134,6 +129,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [errorCode, setErrorCode] = useState<string | undefined>(undefined);
 
   const refresh = useCallback(async () => {
     const next = await repo.loadLedger();
@@ -148,6 +144,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const applyRecoveredLedger = useCallback((next: Ledger) => {
     setLedger(next);
     setError(undefined);
+    setErrorCode(undefined);
     setStatus('ready');
   }, []);
 
@@ -172,7 +169,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         }
       } catch (e) {
         if (active) {
-          setError(e instanceof Error ? e.message : String(e));
+          // LedgerError（schemaVersion 不一致など）は i18n 文言で復旧画面に出す。
+          setError(errorText(e));
+          setErrorCode(e instanceof LedgerError ? e.code : undefined);
           setStatus('error');
         }
       }
@@ -313,35 +312,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     async (id) => {
       try {
         await repo.deleteSchedule(id);
-        await refresh();
-        toast.show(t('toast.deleted'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const createReserve = useCallback<LedgerContextValue['createReserve']>(
-    async (input) => {
-      try {
-        const reserve = await repo.createReserve(input);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-        return reserve;
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const removeReserve = useCallback<LedgerContextValue['removeReserve']>(
-    async (id) => {
-      try {
-        await repo.deleteReserve(id);
         await refresh();
         toast.show(t('toast.deleted'), 'success');
       } catch (e) {
@@ -626,7 +596,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       URL.revokeObjectURL(url);
       toast.show(t('toast.exported'), 'success');
     } catch (e) {
-      toast.show(t('toast.error'), 'error');
+      // export は書き出し前に schema 検証で throw し得る。原因（どの項目が不正か）を出す。
+      toast.show(errorText(e), 'error');
       throw e;
     }
   }, [ledger, toast]);
@@ -704,6 +675,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       status,
       ledger,
       ...(error !== undefined ? { error } : {}),
+      ...(errorCode !== undefined ? { errorCode } : {}),
       refresh,
       saveEntry,
       removeEntry,
@@ -715,8 +687,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveSchedules,
       postSchedule,
       removeSchedule,
-      createReserve,
-      removeReserve,
       createRecurringRule,
       saveRecurringRule,
       setRecurringRulePaused,
@@ -746,6 +716,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       status,
       ledger,
       error,
+      errorCode,
       refresh,
       saveEntry,
       removeEntry,
@@ -757,8 +728,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveSchedules,
       postSchedule,
       removeSchedule,
-      createReserve,
-      removeReserve,
       createRecurringRule,
       saveRecurringRule,
       setRecurringRulePaused,

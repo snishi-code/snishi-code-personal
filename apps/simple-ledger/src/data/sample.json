@@ -1,6 +1,6 @@
 {
   "appId": "snishi-code.simple-ledger-v2",
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "ledgerId": "sample-ledger",
   "exportedAt": "2026-04-01T00:00:00.000Z",
   "deviceId": "sample-device",
@@ -34,6 +34,7 @@
       "name": "チャージ残高",
       "type": "asset",
       "role": "daily-asset",
+      "movable": false,
       "archived": false,
       "createdAt": "2026-01-01T00:00:00.000Z",
       "updatedAt": "2026-01-01T00:00:00.000Z"
@@ -43,15 +44,6 @@
       "name": "投資",
       "type": "asset",
       "role": "investment-asset",
-      "archived": false,
-      "createdAt": "2026-01-01T00:00:00.000Z",
-      "updatedAt": "2026-01-01T00:00:00.000Z"
-    },
-    {
-      "id": "reserve-ledger",
-      "name": "取り置き資金",
-      "type": "asset",
-      "role": "reserve-asset",
       "archived": false,
       "createdAt": "2026-01-01T00:00:00.000Z",
       "updatedAt": "2026-01-01T00:00:00.000Z"
@@ -475,33 +467,6 @@
       "updatedAt": "2026-01-25T00:00:00.000Z"
     },
     {
-      "id": "ent-travel-01",
-      "date": "2026-01-28",
-      "description": "旅行資金へ取り置き",
-      "kind": "normal",
-      "lines": [
-        {
-          "accountId": "reserve-ledger",
-          "side": "debit",
-          "amount": 30000
-        },
-        {
-          "accountId": "acc-bank",
-          "side": "credit",
-          "amount": 30000
-        }
-      ],
-      "metadata": {
-        "inputMode": "transfer",
-        "reserveId": "res-travel"
-      },
-      "tagIds": [
-        "tag-travel"
-      ],
-      "createdAt": "2026-01-28T00:00:00.000Z",
-      "updatedAt": "2026-01-28T00:00:00.000Z"
-    },
-    {
       "id": "ent-work-01",
       "date": "2026-01-30",
       "description": "書籍（仕事）",
@@ -521,9 +486,7 @@
       "metadata": {
         "inputMode": "expense"
       },
-      "tagIds": [
-        "tag-work"
-      ],
+      "tagIds": ["tag-work"],
       "createdAt": "2026-01-30T00:00:00.000Z",
       "updatedAt": "2026-01-30T00:00:00.000Z"
     },
@@ -708,9 +671,7 @@
       "metadata": {
         "inputMode": "expense"
       },
-      "tagIds": [
-        "tag-travel"
-      ],
+      "tagIds": ["tag-travel"],
       "createdAt": "2026-03-18T00:00:00.000Z",
       "updatedAt": "2026-03-18T00:00:00.000Z"
     },
@@ -835,16 +796,6 @@
       "status": "planned",
       "createdAt": "2026-03-01T00:00:00.000Z",
       "updatedAt": "2026-03-01T00:00:00.000Z"
-    }
-  ],
-  "reserves": [
-    {
-      "id": "res-travel",
-      "name": "旅行資金",
-      "reserveAccountId": "reserve-ledger",
-      "note": "夏の旅行用",
-      "createdAt": "2026-01-01T00:00:00.000Z",
-      "updatedAt": "2026-01-28T00:00:00.000Z"
     }
   ],
   "tags": [

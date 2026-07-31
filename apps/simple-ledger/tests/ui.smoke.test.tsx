@@ -67,7 +67,7 @@ describe('Journal スモーク', () => {
           onOpenAllocations={() => undefined}
           filter={null}
           period={{ mode: 'date', date: '2025-01-31' }}
-          onClearAccountFilter={() => undefined}
+          onClearFilter={() => undefined}
         />
       </Providers>,
     );

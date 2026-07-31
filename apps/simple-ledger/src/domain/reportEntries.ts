@@ -19,6 +19,11 @@ export function reportEntriesForAsOf(ledger: ReportEntrySource, asOf: string): J
   const realThroughAsOf = ledger.journalEntries.filter((entry) => entry.date <= asOf);
   return [
     ...entriesWithContinuousCost(realThroughAsOf, ledger.monthlyCostItems, asOf),
-    ...recurringProjectionEntries(ledger.recurringRules, ledger.accounts, asOf),
+    ...recurringProjectionEntries(
+      ledger.recurringRules,
+      ledger.accounts,
+      asOf,
+      ledger.monthlyCostItems,
+    ),
   ];
 }

@@ -30,7 +30,6 @@ function fixtureTemplate(): Template {
       {
         id: 'sec_s',
         title: '(S)',
-        keepWhenEmpty: true,
         freeText: true,
         normal: '変わりない',
         groups: [],
@@ -38,7 +37,6 @@ function fixtureTemplate(): Template {
       {
         id: 'sec_o',
         title: '(O)',
-        keepWhenEmpty: true,
         freeText: true,
         groups: [
           {
@@ -52,6 +50,12 @@ function fixtureTemplate(): Template {
               { id: 'itm_bp', label: 'BP', kind: 'fraction', unit: 'mmHg' },
               { id: 'itm_hr', label: 'HR', kind: 'number' },
               { id: 'itm_lung', label: '肺音', kind: 'text', normal: '明らかなラ音なし' },
+              {
+                id: 'itm_course',
+                label: '方針',
+                kind: 'select',
+                options: ['経過観察', '精査'],
+              },
             ],
           },
           {
@@ -65,6 +69,15 @@ function fixtureTemplate(): Template {
               { id: 'itm_blood', label: '採血', kind: 'text' },
               { id: 'itm_xp', label: '胸部Xp', kind: 'text' },
             ],
+          },
+          {
+            id: 'grp_menu',
+            name: '画像所見',
+            display: 'menu',
+            joiner: '\n',
+            labelSep: '：',
+            titleWrap: '',
+            items: [{ id: 'itm_ct', label: 'CT', kind: 'text' }],
           },
         ],
       },
@@ -130,8 +143,8 @@ describe('template wire roundtrip', () => {
   it('件数サマリーは section/group/item を全階層で数える', () => {
     expect(summarizeTemplate(fixtureTemplate())).toEqual({
       sections: 2,
-      groups: 2,
-      items: 5,
+      groups: 3,
+      items: 7,
     });
   });
 });
@@ -161,7 +174,7 @@ describe('template wire fail-closed', () => {
     await expectWireError(
       decodeTemplateWirePages(
         await packedPagesForPlain(
-          JSON.stringify({ v: 2, template: fixtureTemplate(), pad: 'x'.repeat(600) }),
+          JSON.stringify({ v: 1, template: fixtureTemplate(), pad: 'x'.repeat(600) }),
           'version',
         ),
       ),
@@ -171,7 +184,7 @@ describe('template wire fail-closed', () => {
       decodeTemplateWirePages(
         await packedPagesForPlain(
           JSON.stringify({
-            v: 1,
+            v: 2,
             template: { id: 'broken', name: 'broken', sections: [] },
             pad: 'x'.repeat(600),
           }),
@@ -185,7 +198,7 @@ describe('template wire fail-closed', () => {
   it('平文 transport・kind 違い・ページ欠落・バッチ混在を拒否する', async () => {
     const plain = encodePages({
       kind: TEMPLATE_WIRE_KIND,
-      payload: JSON.stringify({ v: 1, template: fixtureTemplate() }),
+      payload: JSON.stringify({ v: 2, template: fixtureTemplate() }),
       batchId: 'plain',
     });
     await expectWireError(decodeTemplateWirePages(plain), 'invalid-transport');

@@ -11,7 +11,7 @@ import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { Accounts } from '../src/ui/screens/Accounts';
-import { createOpenings, loadLedger } from '../src/data/repository';
+import { createOpenings, loadLedger, upsertAccount } from '../src/data/repository';
 import { accountBalance } from '../src/domain/accounting';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
@@ -84,6 +84,10 @@ describe('勘定科目のアーカイブ', () => {
     const destination = document.querySelector(
       `[data-ui="${UI.journal.entry.flowDestination}"]`,
     ) as HTMLElement;
+    // 科目アーカイブは従来どおり資産・負債だけ。月額回収で広げた費用科目は候補にしない。
+    expect(
+      within(destination).queryByRole('radio', { name: '変動費' }),
+    ).not.toBeInTheDocument();
     fireEvent.click(within(destination).getByRole('radio', { name: '現金' }));
     fireEvent.click(document.querySelector(`[data-ui="${UI.journal.entry.save}"]`)!);
 
@@ -122,5 +126,22 @@ describe('勘定科目のアーカイブ', () => {
       expect(after.accounts.find((a) => a.name === 'チャージ残高')?.archived).toBe(false);
       expect(after.journalEntries.filter((e) => e.kind !== 'opening')).toHaveLength(0);
     });
+  });
+});
+
+describe('勘定科目の色分けと可動性表示', () => {
+  it('箱見出しにアクセントを付け、movable=false を一覧のバッジで示す', async () => {
+    const ledger = await loadLedger();
+    const charge = ledger.accounts.find((account) => account.name === 'チャージ残高')!;
+    await upsertAccount({ ...charge, movable: false });
+
+    await renderReady();
+
+    const heading = document.querySelector(`[data-ui="${UI.accounts.box}.cash"]`);
+    expect(heading).toHaveAttribute('style', expect.stringContaining('--account-accent'));
+    expect(screen.getByText('チャージ残高')).toBeInTheDocument();
+    expect(document.querySelector(`[data-ui="${UI.accounts.notMovableBadge}"]`)).toHaveTextContent(
+      '自由に動かせない',
+    );
   });
 });
