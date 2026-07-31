@@ -1,4 +1,4 @@
-import { entriesWithContinuousCost } from './continuousCost';
+import { continuousCostEntries } from './continuousCost';
 import { recurringProjectionEntries } from './recurring';
 import type { Ledger, JournalEntry } from './types';
 
@@ -18,7 +18,11 @@ type ReportEntrySource = Pick<
 export function reportEntriesForAsOf(ledger: ReportEntrySource, asOf: string): JournalEntry[] {
   const realThroughAsOf = ledger.journalEntries.filter((entry) => entry.date <= asOf);
   return [
-    ...entriesWithContinuousCost(realThroughAsOf, ledger.monthlyCostItems, asOf),
+    ...realThroughAsOf,
+    // 回収・金額・期間は「現在わかっている全事実」を導出パラメータにする。
+    // 表示する実仕訳と仮想行の日付だけを asOf で切るため、後日の回収による再配分は
+    // 過去・現在・未来のどの断面でも同じになる。
+    ...continuousCostEntries(ledger.monthlyCostItems, ledger.journalEntries, asOf),
     ...recurringProjectionEntries(
       ledger.recurringRules,
       ledger.accounts,

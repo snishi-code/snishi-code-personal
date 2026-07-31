@@ -89,22 +89,12 @@ export function Allocations({
   const name = (id?: string): string => (id ? (accountsMap.get(id)?.name ?? '—') : '—');
 
   // 回収の振替を差し引いた「割り振る総額」（負になってよい＝過去にわたる費用減）。
-  // 集計は選択日までの保存仕訳に限定する（未来日付の回収を過去の一覧へ先取りしない。
-  // reportEntriesForAsOf が実仕訳を asOf で切ってから展開するのと同じ扱い・監査 P2-2）。
+  // 導出パラメータは常に現在わかっている全実仕訳から求める。後日の回収も全期間へ
+  // 遡及して再配分されるため、ヘッダーの断面を変えても同じ item の月額は変わらない。
   const journalEntries = ledger?.journalEntries ?? [];
-  const recoveredAtAsOf = recoveredAmountsByItem(
-    journalEntries.filter((e) => e.date <= asOf),
-  );
-  const recoveredAtToday =
-    asOf === today
-      ? recoveredAtAsOf
-      : recoveredAmountsByItem(journalEntries.filter((e) => e.date <= today));
-  const displaySpreadTotalOf = (m: MonthlyCostItem): number =>
-    m.amount - (recoveredAtAsOf.get(m.id) ?? 0);
-  // ヘッダー日付は表示だけのタイムマシン。アーカイブ/回収の書込導線へは、実際の今日までの
-  // 回収額を渡し、過去表示から既存回収を二重計上したり未来回収を先取りしたりしない。
-  const operationSpreadTotalOf = (m: MonthlyCostItem): number =>
-    m.amount - (recoveredAtToday.get(m.id) ?? 0);
+  const recovered = recoveredAmountsByItem(journalEntries);
+  const spreadTotalOf = (m: MonthlyCostItem): number =>
+    m.amount - (recovered.get(m.id) ?? 0);
   const purchaseEntryOf = (m: MonthlyCostItem): JournalEntry | undefined =>
     (ledger?.journalEntries ?? []).find(
       (e) => e.metadata?.monthlyCostId === m.id && e.metadata.monthlyCostRecovery !== true,
@@ -287,7 +277,7 @@ export function Allocations({
 
           <div className="stack" data-ui={UI.allocations.list}>
             {items.map((m) => {
-              const spreadTotal = displaySpreadTotalOf(m);
+              const spreadTotal = spreadTotalOf(m);
               const ending = isEndingSoon(m, asOf);
               const monthly = representativeMonthlyAmount(m, spreadTotal);
               return (
@@ -409,7 +399,7 @@ export function Allocations({
       {archiving ? (
         <MonthlyCostArchiveDialog
           item={archiving}
-          spreadTotal={operationSpreadTotalOf(archiving)}
+          spreadTotal={spreadTotalOf(archiving)}
           onClose={() => setArchiving(null)}
         />
       ) : null}

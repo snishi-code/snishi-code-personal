@@ -138,6 +138,8 @@ import では strip される）。
   - 回収の振替は貸方 = 台帳・**借方 ≠ 台帳（自己振替禁止）**・借方 role は
     `RECURRING_POSTABLE_ROLES`（内部集約・残高調整以外の全 role）・**`date >= item.startDate`**
     （回収額の上限は設けない＝割り振る総額が負になってよい）。
+    導出時の回収額は基準日までではなく、現在保存されている全実仕訳から集計する。表示する実仕訳と
+    仮想認識行の日付は `asOf` までに切るため、後日の回収は配分へ遡及するが回収仕訳自体は過去へ現れない。
   - `endDate?` は `>= startDate`・配分月数 ≤ 1200 ヶ月。`expenseAccountId` は内部集約・残高調整
     以外（`isRecurringPostableRole`）。
   - **同一ルール由来（id `ccr-{ruleId}-…`）の item の月区間が重ならない**。

@@ -344,7 +344,7 @@ describe('終了まで1ヶ月以内のマーカー', () => {
 });
 
 describe('ヘッダー日付に追従する一覧と金額', () => {
-  it('選択日より後の項目を隠し、当時は有効だった終了済み項目と当時までの回収額を表示する', async () => {
+  it('選択日より後の項目を隠し、回収は全知識としてどの断面にも同じ配分で表示する', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
@@ -356,7 +356,7 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
       expenseAccountId: expense.id,
       creditAccountId: cash.id,
     });
-    // 回収は 6 月末。5 月末の断面には先取りせず、6 月末の断面から反映する。
+    // 回収日は 6 月末だが、現在の全知識として全認識月へ遡及して再配分する。
     await archiveMonthlyCost({
       id: historical.id,
       endDate: '2024-06-30',
@@ -384,11 +384,11 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
     expect(screen.queryByText('未来開始の項目')).not.toBeInTheDocument();
     // 実際の今日は終了済みでも、選択日にはまだ有効。終了まで1ヶ月なのでマーカーも D 基準。
     expect(historicalCard.dataset['ending']).toBe('true');
-    // 6月末の回収をまだ含めず、12,000 / 6ヶ月 = 月2,000、5月末残り2,000。
-    expect(within(historicalCard).getByText('残存価値').closest('.kv')).toHaveTextContent('2,000');
+    // どの断面でも 6,000 / 6ヶ月 = 月1,000。5月末の残りは1,000。
+    expect(within(historicalCard).getByText('残存価値').closest('.kv')).toHaveTextContent('1,000');
     expect(
       within(historicalCard).getByText('今月の計上額').closest('.kv'),
-    ).toHaveTextContent('2,000');
+    ).toHaveTextContent('1,000');
 
     view.rerender(<View period={{ mode: 'date', date: '2024-06-30' }} />);
     const recoveredCard = (await screen.findByText(historical.name)).closest(
@@ -402,7 +402,7 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
     ).toHaveTextContent('1,000');
   });
 
-  it('過去断面の表示額をアーカイブ操作へ流用せず、書込導線は今日までの回収を使う', async () => {
+  it('過去断面のカードとアーカイブ操作が同じ全知識の回収額を使う', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
@@ -423,8 +423,8 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
     const card = (await screen.findByText(item.name)).closest(
       `[data-ui="${UI.allocations.item}"]`,
     ) as HTMLElement;
-    // 過去表示は回収前なので残存価値 2,000。
-    expect(within(card).getByText('残存価値').closest('.kv')).toHaveTextContent('2,000');
+    // 後日の回収を全知識として反映するため、過去断面でも残存価値は1,000。
+    expect(within(card).getByText('残存価値').closest('.kv')).toHaveTextContent('1,000');
 
     fireEvent.click(screen.getByRole('button', { name: `アーカイブ: ${item.name}` }));
     const dialog = document.querySelector(
@@ -435,8 +435,7 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
       document.querySelector(`[data-ui="${UI.allocations.archiveDate}"]`) as HTMLInputElement,
       { target: { value: '2024-05-31' } },
     );
-    // 操作は実今日までの回収済み 6,000 を使うため、6,000 / 6ヶ月の5ヶ月認識後 = 残存1,000。
-    // 過去表示用の回収前総額12,000を誤用すると2,000になり、このassertが失敗する。
+    // 表示と操作の両方が同じ全知識を使うため、値は変わらない。
     expect(within(dialog).getByText('残存価値').closest('.kv')).toHaveTextContent('1,000');
     expect(
       document.querySelector(`[data-ui="${UI.allocations.archiveTransfer}"]`),
