@@ -1,11 +1,8 @@
 /*
- * テンプレート QR の wire authority。
+ * フレーム・フォーマット・テンプレートパッケージ QR の wire authority。
  *
- * 対象・グループ・設定などを誤って載せないため、送信前に normalizeTemplate() で
- * Template の既知フィールドだけへ射影する。wire JSON は
- *   { v: 2, template: Template }
- * のみ。transport は C1 (deflate-raw・非暗号) を必須とし、foundation の
- * protocol/crypto を唯一の transport authority として使う。
+ * transport はすべて C1（deflate-raw・非暗号）。対象・グループ・入力値を型として
+ * 受け取らず、各 normalize 関数で既知フィールドだけへ射影してから送信する。
  */
 
 import {
@@ -14,16 +11,44 @@ import {
   encodePages,
   HEADER_BUDGET,
   MAX_BYTES,
+  uniqueName,
   type DecodedPage,
 } from '@snishi/foundation/qr/protocol';
 import { packPayload, unpackPayload } from '@snishi/foundation/qr/crypto';
-import { normalizeTemplate, type Template } from './template';
+import { newId } from '../data/constants';
+import {
+  normalizeFormat,
+  normalizeFrame,
+  normalizeTemplateDef,
+  type Format,
+  type Frame,
+  type TemplateDef,
+} from './entities';
 
 export const TEMPLATE_WIRE_KIND = 'TPL' as const;
-const TEMPLATE_WIRE_VERSION = 2 as const;
+export const FRAME_WIRE_KIND = 'FRM' as const;
+export const FORMAT_WIRE_KIND = 'FMT' as const;
+export type ShareWireKind =
+  | typeof TEMPLATE_WIRE_KIND
+  | typeof FRAME_WIRE_KIND
+  | typeof FORMAT_WIRE_KIND;
+
+export interface TemplatePackage {
+  v: 3;
+  template: TemplateDef;
+  frame: Frame;
+  formats: Format[];
+}
+
+export type ShareWirePayload =
+  | { kind: typeof TEMPLATE_WIRE_KIND; package: TemplatePackage }
+  | { kind: typeof FRAME_WIRE_KIND; frame: Frame }
+  | { kind: typeof FORMAT_WIRE_KIND; format: Format };
 
 export type TemplateWireErrorCode =
   | 'invalid-template'
+  | 'invalid-frame'
+  | 'invalid-format'
   | 'compression-required'
   | 'empty-pages'
   | 'invalid-page'
@@ -34,7 +59,6 @@ export type TemplateWireErrorCode =
   | 'invalid-json'
   | 'wrong-version';
 
-/** UI が i18n 文言へ写像できる、安定したエラーコード付き例外。 */
 export class TemplateWireError extends Error {
   readonly code: TemplateWireErrorCode;
 
@@ -45,16 +69,9 @@ export class TemplateWireError extends Error {
   }
 }
 
-interface EncodeTemplateWireOptions {
-  /** 決定論テスト用。通常は protocol.newBatchId() に任せる。 */
+interface EncodeOptions {
   batchId?: string;
-  /** 通常は protocol.MAX_BYTES。小さい値はページングの決定論テスト用。 */
   maxBytes?: number;
-}
-
-interface TemplateWireEnvelope {
-  v: typeof TEMPLATE_WIRE_VERSION;
-  template: Template;
 }
 
 function fail(code: TemplateWireErrorCode, cause?: unknown): never {
@@ -65,38 +82,82 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-/**
- * Template だけを C1 圧縮し、TPL ページ列へする。
- *
- * packPayload は CompressionStream 非対応時や圧縮で短くならない時に平文へ
- * fallback するが、この wire は C1 必須なので、その場合は QR を出さず fail-closed。
- */
-export async function encodeTemplateWirePages(
-  template: Template,
-  options: EncodeTemplateWireOptions = {},
-): Promise<string[]> {
-  const normalized = normalizeTemplate(template);
-  if (!normalized) fail('invalid-template');
+function isShareWireKind(value: string): value is ShareWireKind {
+  return value === TEMPLATE_WIRE_KIND || value === FRAME_WIRE_KIND || value === FORMAT_WIRE_KIND;
+}
 
-  const envelope: TemplateWireEnvelope = {
-    v: TEMPLATE_WIRE_VERSION,
-    template: normalized,
+export function buildTemplatePackage(
+  template: TemplateDef,
+  frames: readonly Frame[],
+  formats: readonly Format[],
+): TemplatePackage {
+  const frame = frames.find((candidate) => candidate.id === template.frameId);
+  if (!frame) fail('invalid-frame');
+  const referencedIds = new Set(template.placements.map((placement) => placement.formatId));
+  const referencedFormats = formats.filter((format) => referencedIds.has(format.id));
+  const normalizedFrame = normalizeFrame(frame);
+  const normalizedFormats = referencedFormats
+    .map(normalizeFormat)
+    .filter((format): format is Format => format !== null);
+  const normalizedTemplate = normalizeTemplateDef(template, {
+    frames: normalizedFrame ? [normalizedFrame] : [],
+    formats: normalizedFormats,
+  });
+  if (!normalizedFrame) fail('invalid-frame');
+  if (normalizedFormats.length !== referencedIds.size) fail('invalid-format');
+  if (!normalizedTemplate) fail('invalid-template');
+  return {
+    v: 3,
+    template: normalizedTemplate,
+    frame: normalizedFrame,
+    formats: normalizedFormats,
   };
+}
 
+function normalizePayload(payload: ShareWirePayload): {
+  kind: ShareWireKind;
+  envelope: object;
+} {
+  if (payload.kind === TEMPLATE_WIRE_KIND) {
+    const normalized = buildTemplatePackage(
+      payload.package.template,
+      [payload.package.frame],
+      payload.package.formats,
+    );
+    return { kind: payload.kind, envelope: normalized };
+  }
+  if (payload.kind === FRAME_WIRE_KIND) {
+    const frame = normalizeFrame(payload.frame);
+    if (!frame) fail('invalid-frame');
+    return { kind: payload.kind, envelope: { v: 1, frame } };
+  }
+  const format = normalizeFormat(payload.format);
+  if (!format) fail('invalid-format');
+  return { kind: payload.kind, envelope: { v: 1, format } };
+}
+
+export async function encodeShareWirePages(
+  source: ShareWirePayload,
+  options: EncodeOptions = {},
+): Promise<string[]> {
+  const { kind, envelope } = normalizePayload(source);
   let payload: string;
   try {
-    payload = await packPayload(JSON.stringify(envelope), { compress: true });
+    // foundation は圧縮後の方が短い時だけ C1 を返す。小さな単独部品も
+    // wire 規約どおり C1 にするため、JSON として無害な末尾空白を圧縮用に補う。
+    const plain = JSON.stringify(envelope);
+    payload = await packPayload(plain.padEnd(Math.max(plain.length, 512), ' '), {
+      compress: true,
+    });
   } catch (error) {
     fail('compression-required', error);
   }
   if (!payload.startsWith('C1:')) fail('compression-required');
 
   const maxBytes = options.maxBytes ?? MAX_BYTES;
-  // protocol の chunk budget が正になることを呼び出し側で保証する。
   if (!Number.isFinite(maxBytes) || maxBytes <= HEADER_BUDGET) fail('invalid-page');
-
   const pages = encodePages({
-    kind: TEMPLATE_WIRE_KIND,
+    kind,
     payload,
     batchId: options.batchId,
     maxBytes,
@@ -105,10 +166,13 @@ export async function encodeTemplateWirePages(
   return pages;
 }
 
-function decodeAndValidatePages(pageTexts: readonly string[]): DecodedPage[] {
+function decodeAndValidatePages(pageTexts: readonly string[]): {
+  kind: ShareWireKind;
+  pages: DecodedPage[];
+} {
   if (!Array.isArray(pageTexts) || pageTexts.length === 0) fail('empty-pages');
-
   const decoded: DecodedPage[] = [];
+  let kind: ShareWireKind | null = null;
   let batchId: string | null = null;
   let totalPages: number | null = null;
   const seen = new Map<number, string>();
@@ -116,7 +180,7 @@ function decodeAndValidatePages(pageTexts: readonly string[]): DecodedPage[] {
   for (const text of pageTexts) {
     const page = decodePage(text);
     if (!page) fail('invalid-page');
-    if (page.kind !== TEMPLATE_WIRE_KIND) fail('wrong-kind');
+    if (!isShareWireKind(page.kind)) fail('wrong-kind');
     if (
       !Number.isSafeInteger(page.pageNum) ||
       !Number.isSafeInteger(page.totalPages) ||
@@ -126,38 +190,34 @@ function decodeAndValidatePages(pageTexts: readonly string[]): DecodedPage[] {
     ) {
       fail('invalid-page');
     }
-
+    if (kind === null) kind = page.kind;
+    else if (kind !== page.kind) fail('mixed-batch');
     if (batchId === null) batchId = page.batchId;
     else if (batchId !== page.batchId) fail('mixed-batch');
-
     if (totalPages === null) totalPages = page.totalPages;
     else if (totalPages !== page.totalPages) fail('mixed-batch');
 
     const prior = seen.get(page.pageNum);
-    // 同じページの同内容再読取は許容。内容が違う重複は曖昧なので拒否する。
     if (prior !== undefined && prior !== page.content) fail('mixed-batch');
     if (prior === undefined) {
       seen.set(page.pageNum, page.content);
       decoded.push(page);
     }
   }
-
-  if (totalPages === null || seen.size !== totalPages) fail('incomplete-pages');
-  return decoded;
+  if (kind === null || totalPages === null || seen.size !== totalPages) {
+    fail('incomplete-pages');
+  }
+  return { kind, pages: decoded };
 }
 
-async function decodeTransportPayload(payload: string): Promise<Template> {
-  // この wire は C1 のみ。plain/E1/E2 を透過的に受けると仕様外データを
-  // テンプレートとして適用してしまうため、unpack 前に prefix を照合する。
+async function decodeEnvelope(kind: ShareWireKind, payload: string): Promise<ShareWirePayload> {
   if (!payload.startsWith('C1:')) fail('invalid-transport');
-
   let plain: string;
   try {
     plain = await unpackPayload(payload);
   } catch (error) {
     fail('invalid-transport', error);
   }
-
   let parsed: unknown;
   try {
     parsed = JSON.parse(plain);
@@ -165,25 +225,51 @@ async function decodeTransportPayload(payload: string): Promise<Template> {
     fail('invalid-json', error);
   }
   if (!isPlainObject(parsed)) fail('invalid-json');
-  if (parsed.v !== TEMPLATE_WIRE_VERSION) fail('wrong-version');
 
-  const template = normalizeTemplate(parsed.template);
-  if (!template) fail('invalid-template');
-  return template;
+  if (kind === TEMPLATE_WIRE_KIND) {
+    if (parsed.v !== 3) fail('wrong-version');
+    const frame = normalizeFrame(parsed.frame);
+    const formats = (Array.isArray(parsed.formats) ? parsed.formats : [])
+      .map(normalizeFormat)
+      .filter((format): format is Format => format !== null);
+    if (!frame) fail('invalid-frame');
+    const template = normalizeTemplateDef(parsed.template, {
+      frames: [frame],
+      formats,
+    });
+    if (!template) fail('invalid-template');
+    const referencedIds = new Set(template.placements.map((placement) => placement.formatId));
+    if (
+      formats.length !== (Array.isArray(parsed.formats) ? parsed.formats.length : 0) ||
+      formats.some((format) => !referencedIds.has(format.id)) ||
+      referencedIds.size !== formats.length
+    ) {
+      fail('invalid-format');
+    }
+    return { kind, package: { v: 3, template, frame, formats } };
+  }
+
+  if (parsed.v !== 1) fail('wrong-version');
+  if (kind === FRAME_WIRE_KIND) {
+    const frame = normalizeFrame(parsed.frame);
+    if (!frame) fail('invalid-frame');
+    return { kind, frame };
+  }
+  const format = normalizeFormat(parsed.format);
+  if (!format) fail('invalid-format');
+  return { kind, format };
 }
 
-/**
- * 順不同・同内容重複を許容して全ページを復元し、C1→JSON→Template を検証する。
- * 欠落・バッチ混在・kind 違い・解凍/JSON/normalize 失敗はすべて throw。
- */
-export async function decodeTemplateWirePages(pageTexts: readonly string[]): Promise<Template> {
+export async function decodeShareWirePages(
+  pageTexts: readonly string[],
+): Promise<ShareWirePayload> {
   const decoded = decodeAndValidatePages(pageTexts);
-  const payload = assemblePages(decoded);
+  const payload = assemblePages(decoded.pages);
   if (payload === null) fail('incomplete-pages');
-  return decodeTransportPayload(payload);
+  return decodeEnvelope(decoded.kind, payload);
 }
 
-export type TemplateWireReceiveResult =
+export type ShareWireReceiveResult =
   | {
       status: 'rejected';
       consumed: false;
@@ -205,28 +291,22 @@ export type TemplateWireReceiveResult =
       got: number;
       total: number;
       newBatch: boolean;
-      template: Template;
+      payload: ShareWirePayload;
     };
 
-interface TemplateWireCollector {
-  receivePage(text: string): Promise<TemplateWireReceiveResult>;
+export interface ShareWireCollector {
+  receivePage(text: string): Promise<ShareWireReceiveResult>;
   reset(): void;
   progress(): { got: number; total: number };
 }
 
-/**
- * カメラ/貼り付け兼用の増分受信バッファ。
- *
- * 形式・kind 不一致は consumed:false で現在のバッファを維持する。正常な別 batch の
- * 先頭が来た時だけ古い断片を破棄する。全ページの decode に失敗した場合もバッファを
- * 維持し、UI がエラーと入力を残したまま明示的に reset できるようにする。
- */
-export function createTemplateWireCollector(): TemplateWireCollector {
+export function createShareWireCollector(): ShareWireCollector {
+  let kind: ShareWireKind | null = null;
   let batchId: string | null = null;
   let total = 0;
   const pages = new Map<number, string>();
-
   const reset = () => {
+    kind = null;
     batchId = null;
     total = 0;
     pages.clear();
@@ -246,7 +326,7 @@ export function createTemplateWireCollector(): TemplateWireCollector {
           total,
         };
       }
-      if (page.kind !== TEMPLATE_WIRE_KIND) {
+      if (!isShareWireKind(page.kind)) {
         return {
           status: 'rejected',
           consumed: false,
@@ -273,11 +353,12 @@ export function createTemplateWireCollector(): TemplateWireCollector {
       }
 
       let newBatch = false;
-      if (batchId !== null && batchId !== page.batchId) {
+      if (batchId !== null && (batchId !== page.batchId || kind !== page.kind)) {
         reset();
         newBatch = true;
       }
       if (batchId === null) {
+        kind = page.kind;
         batchId = page.batchId;
         total = page.totalPages;
       } else if (total !== page.totalPages) {
@@ -320,14 +401,14 @@ export function createTemplateWireCollector(): TemplateWireCollector {
           newBatch,
         };
       }
-
+      if (!kind || !batchId) fail('incomplete-pages');
       const pageTexts: string[] = [];
       for (let n = 1; n <= total; n += 1) {
         const content = pages.get(n);
         if (content === undefined) fail('incomplete-pages');
-        pageTexts.push(`RND_${TEMPLATE_WIRE_KIND} #${batchId} ${n}/${total}\n${content}`);
+        pageTexts.push(`RND_${kind} #${batchId} ${n}/${total}\n${content}`);
       }
-      const template = await decodeTemplateWirePages(pageTexts);
+      const payload = await decodeShareWirePages(pageTexts);
       const completedTotal = total;
       reset();
       return {
@@ -336,23 +417,104 @@ export function createTemplateWireCollector(): TemplateWireCollector {
         got: completedTotal,
         total: completedTotal,
         newBatch,
-        template,
+        payload,
       };
     },
   };
 }
 
-/** 受信確認画面に出す件数（表示ロジックと数え方を一箇所にする）。 */
-export function summarizeTemplate(template: Template): {
-  sections: number;
-  formats: number;
-  items: number;
-} {
-  let formats = 0;
-  let items = 0;
-  for (const section of template.sections) {
-    formats += section.formats.length;
-    for (const format of section.formats) items += format.items.length;
+export interface ExistingShareEntities {
+  templates: readonly TemplateDef[];
+  frames: readonly Frame[];
+  formats: readonly Format[];
+}
+
+/** ID 衝突時だけコピーを採番し、テンプレートパッケージ内の参照も同時に付け替える。 */
+export function prepareShareImport(
+  payload: ShareWirePayload,
+  existing: ExistingShareEntities,
+): ShareWirePayload {
+  if (payload.kind === FRAME_WIRE_KIND) {
+    if (!existing.frames.some((frame) => frame.id === payload.frame.id)) return payload;
+    return {
+      kind: payload.kind,
+      frame: {
+        ...payload.frame,
+        id: newId('frm'),
+        name: uniqueName(
+          payload.frame.name,
+          existing.frames.map((frame) => frame.name),
+        ),
+      },
+    };
   }
-  return { sections: template.sections.length, formats, items };
+  if (payload.kind === FORMAT_WIRE_KIND) {
+    if (!existing.formats.some((format) => format.id === payload.format.id)) return payload;
+    return {
+      kind: payload.kind,
+      format: {
+        ...payload.format,
+        id: newId('fmt'),
+        name: uniqueName(
+          payload.format.name,
+          existing.formats.map((format) => format.name),
+        ),
+      },
+    };
+  }
+
+  const source = payload.package;
+  const frameCollides = existing.frames.some((frame) => frame.id === source.frame.id);
+  const frame = frameCollides
+    ? {
+        ...source.frame,
+        id: newId('frm'),
+        name: uniqueName(
+          source.frame.name,
+          existing.frames.map((candidate) => candidate.name),
+        ),
+      }
+    : source.frame;
+  const formatIdMap = new Map<string, string>();
+  const formats = source.formats.map((format) => {
+    if (!existing.formats.some((candidate) => candidate.id === format.id)) return format;
+    const id = newId('fmt');
+    formatIdMap.set(format.id, id);
+    return {
+      ...format,
+      id,
+      name: uniqueName(
+        format.name,
+        existing.formats.map((candidate) => candidate.name),
+      ),
+    };
+  });
+  const templateCollides = existing.templates.some(
+    (template) => template.id === source.template.id,
+  );
+  const template: TemplateDef = {
+    ...source.template,
+    id: templateCollides ? newId('tpl') : source.template.id,
+    name: templateCollides
+      ? uniqueName(
+          source.template.name,
+          existing.templates.map((candidate) => candidate.name),
+        )
+      : source.template.name,
+    frameId: frame.id,
+    placements: source.template.placements.map((placement) => ({
+      ...placement,
+      formatId: formatIdMap.get(placement.formatId) ?? placement.formatId,
+    })),
+  };
+  return {
+    kind: payload.kind,
+    package: { v: 3, template, frame, formats },
+  };
+}
+
+export function sharePayloadName(payload: ShareWirePayload): string {
+  if (payload.kind === TEMPLATE_WIRE_KIND) return payload.package.template.name;
+  if (payload.kind === FRAME_WIRE_KIND) return payload.frame.name;
+  return payload.format.name;
 }

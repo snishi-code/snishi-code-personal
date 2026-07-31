@@ -24,8 +24,15 @@ import {
   type WorkspaceImportCandidate,
   type WorkspaceImportData,
 } from '../../domain/importWorkspace';
-import type { Template } from '../../domain/template';
 import type { Format, Frame, TemplateDef } from '../../domain/entities';
+import {
+  buildTemplatePackage,
+  FORMAT_WIRE_KIND,
+  FRAME_WIRE_KIND,
+  sharePayloadName,
+  TEMPLATE_WIRE_KIND,
+  type ShareWirePayload,
+} from '../../domain/templateWire';
 import { buildDailyReportPreset, buildRoundPreset } from '../../domain/presets';
 import { newId } from '../../data/constants';
 import { REASON } from '../../data/snapshots';
@@ -35,8 +42,8 @@ import { BottomActionBar } from '../BottomActionBar';
 import { deleteTagAt, renameTagAt, setTagColor } from '../tags';
 import { OverlayBinding, useRegisterOverlay } from '../registries';
 import { downloadTextFile, pickTextFile } from '../files';
-import { TemplateQrSendDialog } from '../TemplateQrSendDialog';
-import { TemplateQrReceiveDialog } from '../TemplateQrReceiveDialog';
+import { ShareQrSendDialog } from '../ShareQrSendDialog';
+import { ShareQrReceiveDialog } from '../ShareQrReceiveDialog';
 import { TemplateEditView } from '../TemplateEditView';
 import { FrameEditView } from '../FrameEditView';
 import { FormatEditView } from '../FormatEditView';
@@ -199,9 +206,8 @@ function TemplateSection({
   useRevision(runtime);
   const { store } = runtime;
   const templates = store.getTemplateDefs();
-  const resolvedTemplates = store.getTemplates();
   const activeId = store.getSettings().activeTemplateId;
-  const [sendTarget, setSendTarget] = useState<Template | null>(null);
+  const [sendTarget, setSendTarget] = useState<ShareWirePayload | null>(null);
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TemplateDef | null>(null);
   const [busy, setBusy] = useState(false);
@@ -308,9 +314,10 @@ function TemplateSection({
                 <IconButton
                   label={s.settings.template.qrSend}
                   onClick={() =>
-                    setSendTarget(
-                      resolvedTemplates.find((candidate) => candidate.id === tpl.id) ?? null,
-                    )
+                    setSendTarget({
+                      kind: TEMPLATE_WIRE_KIND,
+                      package: buildTemplatePackage(tpl, store.getFrames(), store.getFormats()),
+                    })
                   }
                 >
                   <Icon name="qr" size={16} />
@@ -340,17 +347,35 @@ function TemplateSection({
 
       {sendTarget ? <OverlayBinding onClose={() => setSendTarget(null)} /> : null}
       {sendTarget ? (
-        <TemplateQrSendDialog template={sendTarget} onClose={() => setSendTarget(null)} />
+        <ShareQrSendDialog payload={sendTarget} onClose={() => setSendTarget(null)} />
       ) : null}
 
       {receiveOpen ? <OverlayBinding onClose={() => setReceiveOpen(false)} /> : null}
       {receiveOpen ? (
-        <TemplateQrReceiveDialog
-          templates={resolvedTemplates}
-          onSave={(tpl) => store.saveTemplate(tpl)}
+        <ShareQrReceiveDialog
+          existing={{
+            templates: store.getTemplateDefs(),
+            frames: store.getFrames(),
+            formats: store.getFormats(),
+          }}
+          onSave={async (payload) => {
+            if (payload.kind === FRAME_WIRE_KIND) {
+              await store.saveFrame(payload.frame);
+              return;
+            }
+            if (payload.kind === FORMAT_WIRE_KIND) {
+              await store.saveFormat(payload.format);
+              return;
+            }
+            await store.saveFrame(payload.package.frame);
+            for (const format of payload.package.formats) {
+              await store.saveFormat(format);
+            }
+            await store.saveTemplateDef(payload.package.template);
+          }}
           onClose={() => setReceiveOpen(false)}
-          onSaved={(tpl) => {
-            toast.show(s.settings.template.imported(tpl.name));
+          onSaved={(payload) => {
+            toast.show(s.settings.template.imported(sharePayloadName(payload)));
             runtime.bump();
           }}
         />
@@ -389,6 +414,7 @@ function FrameSettingsSection({
   const frames = store.getFrames();
   const templates = store.getTemplateDefs();
   const [deleteTarget, setDeleteTarget] = useState<Frame | null>(null);
+  const [sendTarget, setSendTarget] = useState<Frame | null>(null);
   const [busy, setBusy] = useState(false);
 
   function addFrame(): void {
@@ -448,6 +474,9 @@ function FrameSettingsSection({
               >
                 複
               </IconButton>
+              <IconButton label={s.settings.template.qrSend} onClick={() => setSendTarget(frame)}>
+                <Icon name="qr" size={16} />
+              </IconButton>
               <IconButton
                 label={s.common.delete}
                 disabled={busy}
@@ -464,6 +493,14 @@ function FrameSettingsSection({
           {s.settings.frame.add}
         </Button>
       </div>
+
+      {sendTarget ? <OverlayBinding onClose={() => setSendTarget(null)} /> : null}
+      {sendTarget ? (
+        <ShareQrSendDialog
+          payload={{ kind: FRAME_WIRE_KIND, frame: sendTarget }}
+          onClose={() => setSendTarget(null)}
+        />
+      ) : null}
 
       {deleteTarget ? <OverlayBinding onClose={() => setDeleteTarget(null)} /> : null}
       {deleteTarget ? (
@@ -494,6 +531,7 @@ function FormatSettingsSection({
   const formats = store.getFormats();
   const templates = store.getTemplateDefs();
   const [deleteTarget, setDeleteTarget] = useState<Format | null>(null);
+  const [sendTarget, setSendTarget] = useState<Format | null>(null);
   const [busy, setBusy] = useState(false);
 
   function addFormat(): void {
@@ -558,6 +596,9 @@ function FormatSettingsSection({
               >
                 複
               </IconButton>
+              <IconButton label={s.settings.template.qrSend} onClick={() => setSendTarget(format)}>
+                <Icon name="qr" size={16} />
+              </IconButton>
               <IconButton
                 label={s.common.delete}
                 disabled={busy}
@@ -574,6 +615,14 @@ function FormatSettingsSection({
           {s.settings.format.add}
         </Button>
       </div>
+
+      {sendTarget ? <OverlayBinding onClose={() => setSendTarget(null)} /> : null}
+      {sendTarget ? (
+        <ShareQrSendDialog
+          payload={{ kind: FORMAT_WIRE_KIND, format: sendTarget }}
+          onClose={() => setSendTarget(null)}
+        />
+      ) : null}
 
       {deleteTarget ? <OverlayBinding onClose={() => setDeleteTarget(null)} /> : null}
       {deleteTarget ? (

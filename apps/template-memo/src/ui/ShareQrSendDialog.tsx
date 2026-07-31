@@ -1,10 +1,3 @@
-/*
- * テンプレート QR 送信ダイアログ。
- *
- * domain/templateWire が作った TPL/C1 ページだけを表示する。対象データを受け取る
- * props 自体を持たず、wire authority 側でも Template の既知フィールドへ射影する。
- */
-
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { drawQrToCanvas } from '@snishi/foundation/qr/render';
@@ -13,20 +6,15 @@ import { Icon } from '@snishi/foundation/ui/Icon';
 import { IconButton } from '@snishi/foundation/ui/IconButton';
 import { Modal } from '@snishi/foundation/ui/Modal';
 import { useWakeLock } from '@snishi/foundation/ui/useWakeLock';
-import type { Template } from '../domain/template';
-import { encodeTemplateWirePages, TemplateWireError } from '../domain/templateWire';
+import {
+  encodeShareWirePages,
+  sharePayloadName,
+  TemplateWireError,
+  type ShareWirePayload,
+} from '../domain/templateWire';
 import { s } from '../i18n';
 
 const AUTO_ADVANCE_MS = 900;
-
-function encodeErrorMessage(error: unknown): string {
-  if (error instanceof TemplateWireError) {
-    if (error.code === 'compression-required') return s.templateQr.errorCompression;
-    if (error.code === 'invalid-template') return s.templateQr.errorTemplate;
-  }
-  return s.templateQr.errorEncode;
-}
-
 const errorStyle: CSSProperties = { color: 'var(--danger)' };
 const toggleRowStyle: CSSProperties = {
   display: 'flex',
@@ -35,25 +23,40 @@ const toggleRowStyle: CSSProperties = {
   minHeight: 44,
 };
 
-export interface TemplateQrSendDialogProps {
-  template: Template;
-  onClose: () => void;
+function encodeErrorMessage(error: unknown): string {
+  if (error instanceof TemplateWireError) {
+    if (error.code === 'compression-required') return s.templateQr.errorCompression;
+    if (
+      error.code === 'invalid-template' ||
+      error.code === 'invalid-frame' ||
+      error.code === 'invalid-format'
+    ) {
+      return s.templateQr.errorEntity;
+    }
+  }
+  return s.templateQr.errorEncode;
 }
 
 type EncodeState =
-  | { source: Template; status: 'preparing' }
-  | { source: Template; status: 'ready'; pages: string[] }
-  | { source: Template; status: 'error'; message: string };
+  | { source: ShareWirePayload; status: 'preparing' }
+  | { source: ShareWirePayload; status: 'ready'; pages: string[] }
+  | { source: ShareWirePayload; status: 'error'; message: string };
 
-export function TemplateQrSendDialog({ template, onClose }: TemplateQrSendDialogProps) {
+export function ShareQrSendDialog({
+  payload,
+  onClose,
+}: {
+  payload: ShareWirePayload;
+  onClose: () => void;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [encodeState, setEncodeState] = useState<EncodeState>({
-    source: template,
+    source: payload,
     status: 'preparing',
   });
   const [drawError, setDrawError] = useState<string | null>(null);
   const activeEncodeState: EncodeState =
-    encodeState.source === template ? encodeState : { source: template, status: 'preparing' };
+    encodeState.source === payload ? encodeState : { source: payload, status: 'preparing' };
   const pages = activeEncodeState.status === 'ready' ? activeEncodeState.pages : [];
   const encodeError = activeEncodeState.status === 'error' ? activeEncodeState.message : null;
   const preparing = activeEncodeState.status === 'preparing';
@@ -64,21 +67,20 @@ export function TemplateQrSendDialog({ template, onClose }: TemplateQrSendDialog
     initialPlaying: true,
   });
   const currentPage = pages[pager.index] ?? '';
-
   useWakeLock(pages.length > 0);
 
   useEffect(() => {
     let cancelled = false;
-    void encodeTemplateWirePages(template)
+    void encodeShareWirePages(payload)
       .then((nextPages) => {
         if (!cancelled) {
-          setEncodeState({ source: template, status: 'ready', pages: nextPages });
+          setEncodeState({ source: payload, status: 'ready', pages: nextPages });
         }
       })
       .catch((error: unknown) => {
         if (!cancelled) {
           setEncodeState({
-            source: template,
+            source: payload,
             status: 'error',
             message: encodeErrorMessage(error),
           });
@@ -87,7 +89,7 @@ export function TemplateQrSendDialog({ template, onClose }: TemplateQrSendDialog
     return () => {
       cancelled = true;
     };
-  }, [template]);
+  }, [payload]);
 
   useEffect(() => {
     if (currentPage === '') return;
@@ -98,7 +100,7 @@ export function TemplateQrSendDialog({ template, onClose }: TemplateQrSendDialog
         drawQrToCanvas(currentPage, canvas);
         setDrawError(null);
       } catch (error) {
-        console.error('template qr draw failed', error);
+        console.error('share qr draw failed', error);
         setDrawError(s.templateQr.errorDraw);
       }
     }, 0);
@@ -113,7 +115,7 @@ export function TemplateQrSendDialog({ template, onClose }: TemplateQrSendDialog
       closeLabel={s.common.close}
     >
       <p>
-        <strong>{template.name}</strong>
+        <strong>{sharePayloadName(payload)}</strong>
       </p>
       <p className="muted">{s.templateQr.sendHint}</p>
 
@@ -137,7 +139,6 @@ export function TemplateQrSendDialog({ template, onClose }: TemplateQrSendDialog
               {drawError}
             </p>
           ) : null}
-
           <div className="toolbar" style={{ alignItems: 'center', marginBottom: 0 }}>
             <span className="muted">{s.qr.page(pager.index + 1, pages.length)}</span>
             {pages.length > 1 ? (
@@ -162,7 +163,6 @@ export function TemplateQrSendDialog({ template, onClose }: TemplateQrSendDialog
               </>
             ) : null}
           </div>
-
           {pages.length > 1 ? (
             <label style={toggleRowStyle}>
               <input
