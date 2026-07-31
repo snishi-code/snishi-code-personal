@@ -34,14 +34,26 @@ describe('buildBuilderPrompt', () => {
     );
   });
 
+  it('記法に依存しない読み取り方の原則を必ず含む', () => {
+    const prompt = buildBuilderPrompt(['【概要】\n点検を実施'], 'req_rule');
+    // 見出し記号がある文章しか読めないと誤解させないための指示（実測で規則ベースが全滅した領域）。
+    expect(prompt).toContain('大きなまとまりの中に小さなまとまりが入る');
+    expect(prompt).toContain('字下げ（インデント）');
+    expect(prompt).toContain('記号の有無で判断しないこと');
+    // 表記揺れを理由に項目が割れるのを防ぐ指示。
+    expect(prompt).toContain('表記の揺れは同じものとして扱うこと');
+    // 区切り文字の種類に縛られないための指示。
+    expect(prompt).toContain('区切り文字が何であってもラベルと値として読み取ること');
+  });
+
   it('依頼文全体のgolden fingerprintを固定する', () => {
     const prompt = buildBuilderPrompt(
       ['【概要】\n定期点検を実施', '【概要】\n臨時点検を実施'],
       'req_golden',
     );
     expect({ length: prompt.length, fingerprint: fingerprint(prompt) }).toEqual({
-      length: 4254,
-      fingerprint: 'f8c63001',
+      length: 4893,
+      fingerprint: '4f287cb6',
     });
   });
 });
