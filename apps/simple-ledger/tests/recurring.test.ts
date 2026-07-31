@@ -34,9 +34,10 @@ import { reportEntriesForAsOf } from '../src/domain/reportEntries';
 import { reportBasis } from '../src/domain/reportPeriod';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import { buildExportPackage } from '../src/data/exportImport';
+import { putRecord, STORE } from '../src/data/db';
 import { ledgerExportPackageSchema } from '../src/domain/schema';
 import { LedgerError } from '../src/domain/errors';
-import type { Account } from '../src/domain/types';
+import type { Account, RecurringRule } from '../src/domain/types';
 
 async function accountByName(name: string): Promise<Account> {
   const ledger = await loadLedger();
@@ -46,6 +47,49 @@ async function accountByName(name: string): Promise<Account> {
 }
 
 describe('定期ルールのキャッチアップ起票', () => {
+  it('spreadなし・借方が費用の旧形式も次回分からitem経由にし、編集保存で新形式へ正規化する', async () => {
+    const bank = await accountByName('預金');
+    const fixed = await accountByName('固定費');
+    const created = await createRecurringRule({
+      name: '旧形式の家賃',
+      amount: 80_000,
+      dayOfMonth: 1,
+      debitAccountId: fixed.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-07',
+    });
+    const legacy: RecurringRule = {
+      ...created,
+      debitAccountId: fixed.id,
+    };
+    delete legacy.spreadExpenseAccountId;
+    await putRecord(STORE.recurringRules, legacy);
+
+    expect(await catchUpRecurringRules('2026-07-23')).toBe(1);
+    let ledger = await loadLedger();
+    const posted = ledger.journalEntries.find(
+      (entry) => entry.id === `rec-${created.id}-2026-07`,
+    )!;
+    expect(posted.lines.find((line) => line.side === 'debit')?.accountId).toBe(
+      CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+    );
+    expect(ledger.monthlyCostItems.find((item) => item.id === `ccr-${created.id}-2026-07`)).toMatchObject({
+      expenseAccountId: fixed.id,
+    });
+
+    await upsertRecurringRule({ ...legacy, amount: 81_000 });
+    ledger = await loadLedger();
+    expect(ledger.recurringRules.find((rule) => rule.id === created.id)).toMatchObject({
+      amount: 81_000,
+      debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      spreadExpenseAccountId: fixed.id,
+    });
+    // 過去の起票済み事実は編集値で遡及上書きしない。
+    expect(
+      ledger.journalEntries.find((entry) => entry.id === posted.id)?.lines[0]?.amount,
+    ).toBe(80_000);
+  });
+
   it('経過月ぶんの実仕訳を起票し、2 回目は起票しない（idempotent）', async () => {
     const bank = await accountByName('預金');
     const invest = await accountByName('投資');
@@ -383,8 +427,11 @@ describe('定期ルールのキャッチアップ起票', () => {
     const before = await loadLedger();
 
     const entries = reportEntriesForAsOf(before, '2026-10-31');
-    const forRule = entries
-      .filter((entry) => entry.metadata?.recurringRuleId === rule.id)
+    const allForRule = entries.filter(
+      (entry) => entry.metadata?.recurringRuleId === rule.id,
+    );
+    const forRule = allForRule
+      .filter((entry) => entry.metadata?.ccKind !== 'recognition')
       .sort((a, b) => a.date.localeCompare(b.date));
     expect(forRule.map((entry) => entry.metadata?.recurringMonth)).toEqual([
       '2026-07',
@@ -403,10 +450,10 @@ describe('定期ルールのキャッチアップ起票', () => {
     );
 
     const octoberBasis = reportBasis({ mode: 'date', date: '2026-10-31' }, '2026-07-23');
-    expect(deriveProfitAndLoss(before.accounts, forRule, octoberBasis.flowRange).totalExpense).toBe(
-      80000,
-    );
-    expect(deriveBalanceSheet(before.accounts, forRule, octoberBasis.asOf).assets).toEqual(
+    expect(
+      deriveProfitAndLoss(before.accounts, allForRule, octoberBasis.flowRange).totalExpense,
+    ).toBe(80000);
+    expect(deriveBalanceSheet(before.accounts, allForRule, octoberBasis.asOf).assets).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           account: expect.objectContaining({ id: bank.id }),
@@ -465,6 +512,15 @@ describe('clampDayToMonth / recurringPostingsDue / recurringProjectionEntries', 
         createdAt: 't',
         updatedAt: 't',
       },
+      {
+        id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+        name: '継続コスト台帳',
+        type: 'asset',
+        role: 'continuing-cost-asset',
+        archived: false,
+        createdAt: 't',
+        updatedAt: 't',
+      },
     ];
     const base = {
       id: 'rule',
@@ -480,12 +536,17 @@ describe('clampDayToMonth / recurringPostingsDue / recurringProjectionEntries', 
       updatedAt: 't',
     };
     const projected = recurringProjectionEntries([base], accounts, '2026-10-31');
-    expect(projected.map((entry) => entry.id)).toEqual([
+    expect(
+      projected
+        .filter((entry) => entry.id.startsWith('rec-proj-'))
+        .map((entry) => entry.id),
+    ).toEqual([
       'rec-proj-rule-2026-08',
       'rec-proj-rule-2026-09',
       'rec-proj-rule-2026-10',
     ]);
-    expect(projected.every((entry) => entry.metadata?.continuousCostId === undefined)).toBe(true);
+    expect(projected).toHaveLength(6);
+    expect(projected.every((entry) => entry.metadata?.continuousCostId !== undefined)).toBe(true);
     expect(recurringProjectionEntries([base], accounts, '2026-10-31')).toEqual(projected);
     expect(recurringProjectionEntries([{ ...base, paused: true }], accounts, '2026-10-31')).toEqual(
       [],
@@ -725,10 +786,10 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
 
-  it('支払い元（貸方）の役割制限なし: 健康保険 = 銀行→給与 を台帳経由で登録できる', async () => {
+  it('費用以外の行き先はspread指定の旧入力でも直接フローへ正規化する', async () => {
     const bank = await accountByName('預金');
     const salary = await accountByName('給与'); // income-category
-    // 費用の行き先 = 給与（収入減として認識）・支払い元 = 銀行。
+    // 行き先 = 給与（収入減）・支払い元 = 銀行。給与は費用科目ではないため直接フロー。
     const rule = await createRecurringRule({
       name: '健康保険',
       amount: 4000,
@@ -741,15 +802,14 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     });
     expect(await catchUpRecurringRules('2026-07-23')).toBe(1);
     const ledger = await loadLedger();
-    const item = ledger.monthlyCostItems.find((m) => m.id === `ccr-${rule.id}-2026-07`)!;
-    expect(item.expenseAccountId).toBe(salary.id);
+    const saved = ledger.recurringRules.find((candidate) => candidate.id === rule.id)!;
+    expect(saved.spreadExpenseAccountId).toBeUndefined();
+    expect(saved.debitAccountId).toBe(salary.id);
+    expect(ledger.monthlyCostItems.find((m) => m.id === `ccr-${rule.id}-2026-07`)).toBeUndefined();
     const derived = reportEntriesForAsOf(ledger, '2026-07-31');
-    // 月末断面: 銀行 −4,000・給与（revenue）−4,000・台帳 0。
+    // 月末断面: 銀行 −4,000・給与（revenue）−4,000。item は作らない。
     expect(accountBalance(bank.id, 'asset', derived)).toBeLessThan(0);
     expect(accountBalance(salary.id, 'revenue', derived)).toBe(-4000);
-    expect(
-      accountBalance(CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 'asset', derived),
-    ).toBe(0);
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
 

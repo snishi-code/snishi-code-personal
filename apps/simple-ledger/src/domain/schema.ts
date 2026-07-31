@@ -173,7 +173,8 @@ export const recurringRuleSchema = z
     // 何か月ごとに起票するか（必須。1 = 毎月）。上限は配分月数と同じ（監査 P2-3:
     // これが無いと rule だけ保存できて生成 item が配分上限で保存できない）。
     everyMonths: z.number().int().min(1).max(CATCH_UP_HARD_CAP_MONTHS),
-    // 費用の行き先（あれば月割りするルール = 継続コスト化）。
+    // 正規化済みの費用の行き先。旧形式（spread なし・debit が費用）も v5 のまま受理し、
+    // 読み込み/起票側が行き先 role から同じ意味に解釈する。
     spreadExpenseAccountId: z.string().min(1).optional(),
     debitAccountId: z.string().min(1),
     creditAccountId: z.string().min(1),
@@ -185,7 +186,7 @@ export const recurringRuleSchema = z
   })
   .superRefine((rule, ctx) => {
     if (rule.spreadExpenseAccountId === undefined) return;
-    // 月割りするルールは周期にかかわらず常に継続コスト台帳を経由する（everyMonths >= 1。
+    // 正規化済みの費用ルールは周期にかかわらず常に継続コスト台帳を経由する（everyMonths >= 1。
     // 毎月の家賃も「起票日開始・当月末終了」の item が毎月生まれて消える）。
     // 借方は継続コスト台帳に固定。
     if (rule.debitAccountId !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID) {
@@ -636,9 +637,9 @@ export const ledgerExportPackageSchema = z
         accountRole.get(r.creditAccountId) as AccountRole | undefined,
       );
       if (r.spreadExpenseAccountId !== undefined) {
-        // 月割りするルール: 借方 = 継続コスト台帳（rule schema で確認済み）。
-        // 源泉（支払い元 = 購入の仕訳の貸方）と費用の行き先は、種別によらず起票可能な全 role
-        // （内部集約・残高調整のみ除外。台帳自身は不変条件⑧が引き続き禁止する）。
+        // spread を持つ保存形: 借方 = 継続コスト台帳（rule schema で確認済み）。
+        // 過去に作成できた費用以外の spread も受理し、実行時は spread 側を直接の行き先に
+        // 読み替える。アプリで編集保存すると role に応じた新形式へ正規化される。
         if (hasAccount(r.creditAccountId) && !creditPostable)
           issue(
             `定期ルール「${r.name}」の源泉科目は定期ルールに使えません（内部集約・調整科目は自動起票できません）`,

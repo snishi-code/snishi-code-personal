@@ -79,9 +79,11 @@
 ### `RecurringRule`（定期ルール）
 
 `id` / `name` / `amount` / `dayOfMonth` / `everyMonths`（必須。1 = 毎月）/
-`spreadExpenseAccountId?`（**あれば月割りするルール** = 起票が購入の仕訳 + item を対で作る）/
-`debitAccountId`（月割りルールでは継続コスト台帳に固定）/ `creditAccountId` / `startMonth`
+`spreadExpenseAccountId?`（正規化済みの費用の行き先）/
+`debitAccountId`（費用ルールでは継続コスト台帳、費用以外では行き先）/ `creditAccountId` / `startMonth`
 （位相の基点）/ `postedThroughMonth?`（起票カーソル）/ `paused?`。
+spread なし・debit が費用の保存済み v5 も受理し、次の catch-up から同じ費用ルールとして解釈する。
+編集保存時は spread + 台帳借方の新形式へ正規化する。
 
 ### `Tag`（分析タグ）
 
@@ -146,9 +148,9 @@ import では strip される）。
 - 勘定科目の不変条件「アーカイブ済み（資産・負債）= 残高 0」は**アーカイブ操作時点（今日・
   導出仕訳込み）の保存境界だけが守り、import では再検証しない**（時点依存の条件のため。
   最終残高で再検証すると、未来仕訳を含む保存済み台帳の round-trip が壊れる。監査 P1-3・2026-07-30）。
-- 定期ルール: `everyMonths` は 1〜1200（配分月数の上限と同じ）。月割りするルール（`spreadExpenseAccountId` あり）は
-  **周期にかかわらず**借方 = 継続コスト台帳・源泉と費用の行き先は内部集約・残高調整以外の
-  全 role（`RECURRING_POSTABLE_ROLES`）。定期ルール由来の仕訳は `recurringRuleId`/`recurringMonth`
+- 定期ルール: `everyMonths` は 1〜1200（配分月数の上限と同じ）。論理的な行き先が費用なら
+  **周期にかかわらず**借方 = 継続コスト台帳として item と対で起票する。費用以外は行き先へ
+  直接起票する。定期ルール由来の仕訳は `recurringRuleId`/`recurringMonth`
   をペアで持ち、ルールが存在し、同ルール・同月の重複が無い。
 - 残高補正: `delta === actualBalance − expectedBalance`・対象/相手科目の存在と形・kind=normal。
 - 予定 CF / タグ: id 一意・参照整合（posted の予定 CF は存在する仕訳に紐づく等）。

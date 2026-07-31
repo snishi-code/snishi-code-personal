@@ -86,11 +86,7 @@ describe('定期ルールの継続コスト化（月割り）', () => {
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.addChooser}.rule"]`)!);
 
     expect(screen.queryByText('種別')).not.toBeInTheDocument();
-    const spreadToggle = document.querySelector(
-      `[data-ui="${UI.allocations.recurringManualSpread}"]`,
-    ) as HTMLInputElement;
-    expect(spreadToggle).toBeInTheDocument();
-    expect(spreadToggle.checked).toBe(false);
+    expect(document.querySelector('[data-ui="allocations.recurring.manualSpread"]')).toBeNull();
     const every = document.querySelector(
       `[data-ui="${UI.allocations.recurringEvery}"]`,
     ) as HTMLInputElement;
@@ -158,25 +154,19 @@ describe('定期ルールの継続コスト化（月割り）', () => {
     });
   });
 
-  it('「継続コストとして扱う」で台帳経由にでき、借方欄は費用の行き先になる', async () => {
+  it('行き先に費用科目を選ぶだけで自動的に台帳経由になる', async () => {
     const ledger = await loadLedger();
     const bank = ledger.accounts.find((a) => a.name === '預金')!;
-    const salary = ledger.accounts.find((a) => a.name === '給与')!;
+    const fixed = ledger.accounts.find((a) => a.name === '固定費')!;
 
     await renderReady();
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.unifiedAdd}"]`)!);
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.addChooser}.rule"]`)!);
 
-    // チェックは既定 OFF。ON にすると借方欄のラベルが「費用の行き先」になる。
-    const spreadToggle = document.querySelector(
-      `[data-ui="${UI.allocations.recurringManualSpread}"]`,
-    ) as HTMLInputElement;
-    expect(spreadToggle.checked).toBe(false);
-    fireEvent.click(spreadToggle);
     const toPicker = document.querySelector(
       `[data-ui="${UI.allocations.recurringTo}"]`,
     ) as HTMLElement;
-    expect(toPicker).toHaveTextContent('費用の行き先');
+    expect(document.querySelector('[data-ui="allocations.recurring.manualSpread"]')).toBeNull();
 
     fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringName}"]`)!, {
       target: { value: '健康保険' },
@@ -190,8 +180,7 @@ describe('定期ルールの継続コスト化（月割り）', () => {
         { name: bank.name },
       ),
     );
-    // 例: 健康保険 = 貸方 銀行口座・費用の行き先 給与（収入カテゴリも行き先にできる）。
-    fireEvent.click(within(toPicker).getByRole('radio', { name: salary.name }));
+    fireEvent.click(within(toPicker).getByRole('radio', { name: fixed.name }));
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
     await waitFor(
       () => {
@@ -204,11 +193,11 @@ describe('定期ルールの継続コスト化（月割り）', () => {
 
     const rule = (await loadLedger()).recurringRules.find((r) => r.name === '健康保険');
     expect(rule).toBeDefined();
-    expect(rule!.spreadExpenseAccountId).toBe(salary.id);
+    expect(rule!.spreadExpenseAccountId).toBe(fixed.id);
     expect(rule!.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
     expect(rule!.creditAccountId).toBe(bank.id);
 
-    // 再編集でもチェック ON と選択中の科目を保持する。
+    // 再編集でもチェックは存在せず、論理的な行き先だけを保持する。
     const editButton = await waitFor(
       () => {
         const found = document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`);
@@ -218,22 +207,11 @@ describe('定期ルールの継続コスト化（月割り）', () => {
       { timeout: 3000 },
     );
     fireEvent.click(editButton);
-    await waitFor(() => {
-      expect(
-        document.querySelector(`[data-ui="${UI.allocations.recurringManualSpread}"]`),
-      ).toBeInTheDocument();
-    });
-    expect(
-      (
-        document.querySelector(
-          `[data-ui="${UI.allocations.recurringManualSpread}"]`,
-        ) as HTMLInputElement
-      ).checked,
-    ).toBe(true);
+    expect(document.querySelector('[data-ui="allocations.recurring.manualSpread"]')).toBeNull();
     expect(
       within(document.querySelector(`[data-ui="${UI.allocations.recurringTo}"]`)!).getByRole(
         'radio',
-        { name: salary.name },
+        { name: fixed.name },
       ),
     ).toBeChecked();
   });

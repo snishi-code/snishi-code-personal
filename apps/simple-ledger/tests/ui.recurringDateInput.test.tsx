@@ -184,8 +184,8 @@ describe('定期ルールの初回起票日', () => {
   });
 });
 
-describe('月割りするルール', () => {
-  it('周期 12 でも月割り ON なら spreadExpenseAccountId を持ち、借方が台帳に固定される', async () => {
+describe('費用行きルール', () => {
+  it('周期 12 でも費用を選ぶだけで spreadExpenseAccountId を持ち、借方が台帳に固定される', async () => {
     render(<View />);
     await waitFor(() => {
       expect(document.querySelector(`[data-ui="${UI.allocations.view}"]`)).toBeInTheDocument();
@@ -209,9 +209,7 @@ describe('月割りするルール', () => {
         { name: '固定費' },
       ),
     );
-    fireEvent.click(
-      document.querySelector(`[data-ui="${UI.allocations.recurringManualSpread}"]`)!,
-    );
+    expect(document.querySelector('[data-ui="allocations.recurring.manualSpread"]')).toBeNull();
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
 
     await waitFor(
@@ -242,7 +240,7 @@ describe('月割りするルール', () => {
     });
   });
 
-  it('周期 1 でも月割り ON なら起票日開始・当月末終了の item が生まれる', async () => {
+  it('周期 1 でも費用を選ぶだけで起票日開始・当月末終了の item が生まれる', async () => {
     render(<View />);
     await waitFor(() => {
       expect(document.querySelector(`[data-ui="${UI.allocations.view}"]`)).toBeInTheDocument();
@@ -262,9 +260,7 @@ describe('月割りするルール', () => {
         { name: '固定費' },
       ),
     );
-    fireEvent.click(
-      document.querySelector(`[data-ui="${UI.allocations.recurringManualSpread}"]`)!,
-    );
+    expect(document.querySelector('[data-ui="allocations.recurring.manualSpread"]')).toBeNull();
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
 
     await waitFor(
@@ -285,7 +281,7 @@ describe('月割りするルール', () => {
       (account) => account.id === saved!.spreadExpenseAccountId,
     );
     expect(saved!.everyMonths).toBe(1);
-    // 月割り ON なので台帳経由（借方 = 台帳・費用の行き先 = 支出カテゴリ）。
+    // 費用行きなので台帳経由（借方 = 台帳・費用の行き先 = 支出カテゴリ）。
     expect(saved).toMatchObject({ debitAccountId: ledgerAccount.id });
     expect(spread?.role).toBe('expense-category');
     // 起票済みぶんの item は起票日開始・当月末終了で毎月生まれて消える。

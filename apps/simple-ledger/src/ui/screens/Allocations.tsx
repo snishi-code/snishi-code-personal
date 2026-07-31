@@ -1,7 +1,7 @@
 /*
  * 毎月のもの。
  *  - くり返し記帳（定期ルール）: 実仕訳の自動起票（正本は起票された仕訳）。
- *    貸方・借方を簿記編集で直接指定し、「継続コストとして扱う」チェックで台帳経由にできる。
+ *    貸方・借方を簿記編集で直接指定し、行き先が費用なら自動で継続コスト台帳を経由する。
  *  - 継続コスト資産: 項目名・金額・開始日・終了日の4項目。終了日までの月割りは導出で、
  *    終了日を過ぎたら一覧から消える（アーカイブ = 終了日の設定）。
  */
@@ -38,6 +38,8 @@ import {
   CATCH_UP_HARD_CAP_MONTHS,
   RECURRING_POSTABLE_ROLES,
   clampDayToMonth,
+  recurringDestinationAccountId,
+  recurringExpenseAccountId,
   recurringKindOf,
   type RecurringKind,
 } from '../../domain/recurring';
@@ -115,12 +117,7 @@ export function Allocations({
   // 黙ってスキップしない＝一覧の行で警告する（監査 P1-7）。削除は accountRefs が塞ぐため、
   // 通常ここに出るのはアーカイブ由来だけ。
   const ruleRefBroken = (r: RecurringRule): boolean => {
-    const ids = [
-      r.creditAccountId,
-      ...(r.spreadExpenseAccountId !== undefined
-        ? [r.spreadExpenseAccountId]
-        : [r.debitAccountId]),
-    ];
+    const ids = [r.creditAccountId, recurringDestinationAccountId(r)];
     return ids.some((id) => {
       const account = accountsMap.get(id);
       return !account || account.archived;
@@ -196,8 +193,9 @@ export function Allocations({
                   </div>
                   <div className="list__sub">
                     {ruleIntervalLabel(r)}・{name(r.creditAccountId)} →{' '}
-                    {name(r.spreadExpenseAccountId ?? r.debitAccountId)}
-                    {r.spreadExpenseAccountId !== undefined ? (
+                    {name(recurringDestinationAccountId(r))}
+                    {recurringExpenseAccountId(r, (id) => accountsMap.get(id)?.role) !==
+                    undefined ? (
                       <>
                         ・{t('monthlyCost.monthly')}{' '}
                         <Money
@@ -487,31 +485,25 @@ function AddChooserSheet({
 type SheetKind = RecurringKind | 'manual';
 
 /**
- * ルールの表示・編集用の種別（保存しない）。月割りするルール（借方=台帳）は、
- * 費用の行き先と源泉が支出の定型（資金/カード → 費用カテゴリ）なら支出、
- * それ以外（例: 健康保険 = 銀行 → 給与）は簿記編集（継続コスト化 ON）として扱う。
+ * ルールの表示・編集用の種別（保存しない）。利用者が指定した論理的な行き先と
+ * 源泉の role から導出する（費用ルールの保存上の借方=内部台帳は判定に使わない）。
  */
 function sheetKindForRule(
   rule: RecurringRule,
   roleOf: (id: string) => AccountRole | undefined,
 ): SheetKind {
-  if (rule.spreadExpenseAccountId !== undefined) {
-    const creditRole = roleOf(rule.creditAccountId);
-    return roleOf(rule.spreadExpenseAccountId) === 'expense-category' &&
-      (creditRole === 'daily-asset' || creditRole === 'payment-liability')
-      ? 'expense'
-      : 'manual';
-  }
   return (
-    recurringKindOf(roleOf(rule.debitAccountId), roleOf(rule.creditAccountId)) ?? 'manual'
+    recurringKindOf(
+      roleOf(recurringDestinationAccountId(rule)),
+      roleOf(rule.creditAccountId),
+    ) ?? 'manual'
   );
 }
 
 /**
  * 定期ルールの追加・編集シート。周期（everyMonths）付き。
  * 独自の種別 UI は持たず、簿記編集と同じく貸方・借方を直接指定する。
- * 「継続コストとして扱う」ON のときだけ、画面上の借方を費用の行き先として
- * 継続コスト台帳経由にする。
+ * 行き先が費用科目なら保存境界が自動で継続コスト台帳経由へ正規化する。
  */
 function RecurringRuleSheet({
   existing,
@@ -523,9 +515,6 @@ function RecurringRuleSheet({
   const { ledger, createRecurringRule, saveRecurringRule } = useLedger();
   const accounts = sortAccounts(ledger?.accounts ?? []);
 
-  const existingSpread = existing?.spreadExpenseAccountId !== undefined;
-  // 「継続コストとして扱う」（既定 OFF・月割りする既存ルールは ON で開く）。
-  const [manualSpread, setManualSpread] = useState(existingSpread);
   const initialFromGroups = groupedAccountsByRole(
     accounts,
     [...RECURRING_POSTABLE_ROLES],
@@ -535,10 +524,8 @@ function RecurringRuleSheet({
   const [creditAccountId, setCreditAccountId] = useState(
     existing?.creditAccountId ?? firstFromId,
   );
-  // 月割りするルールの「行き先」は費用の行き先（spreadExpenseAccountId）を見せる（台帳は見せない）。
-  const existingDebit = existing
-    ? (existing.spreadExpenseAccountId ?? existing.debitAccountId)
-    : undefined;
+  // 正規化済みの費用ルールでも内部台帳ではなく、利用者が指定した行き先を見せる。
+  const existingDebit = existing ? recurringDestinationAccountId(existing) : undefined;
   const initialToGroups = groupedAccountsByRole(
     accounts,
     [...RECURRING_POSTABLE_ROLES],
@@ -607,7 +594,6 @@ function RecurringRuleSheet({
         firstPostingDate.slice(8, 10)
         ? existing.dayOfMonth
         : day;
-    const spread = manualSpread;
     setSubmitting(true);
     setError(undefined);
     try {
@@ -623,8 +609,9 @@ function RecurringRuleSheet({
           startMonth,
           updatedAt: nowIso(),
         };
-        if (spread) next.spreadExpenseAccountId = debitAccountId;
-        else delete next.spreadExpenseAccountId;
+        // 保存境界が選択した行き先 role から新形式へ正規化する。既存 spread を残すと
+        // 変更前の行き先が優先されるため、画面からは常に論理的な借方だけを渡す。
+        delete next.spreadExpenseAccountId;
         await saveRecurringRule(next);
       } else {
         await createRecurringRule({
@@ -632,7 +619,6 @@ function RecurringRuleSheet({
           amount,
           dayOfMonth: day,
           everyMonths,
-          ...(spread ? { spreadExpenseAccountId: debitAccountId } : {}),
           debitAccountId,
           creditAccountId,
           startMonth,
@@ -685,17 +671,6 @@ function RecurringRuleSheet({
           </div>
         ) : null}
         <p className="field__hint">{t('recurring.manualHint')}</p>
-        <label
-          style={{ display: 'inline-flex', gap: 8, alignItems: 'center', minHeight: 'var(--tap)' }}
-        >
-          <input
-            type="checkbox"
-            checked={manualSpread}
-            onChange={(e) => setManualSpread(e.target.checked)}
-            data-ui={UI.allocations.recurringManualSpread}
-          />
-          {t('recurring.manualSpread')}
-        </label>
         <TextInput
           label={t('recurring.name')}
           required
@@ -715,9 +690,13 @@ function RecurringRuleSheet({
           groups={fromGroups}
           dataUi={UI.allocations.recurringFrom}
         />
-        {/* 継続コストとして扱うルールの借方欄 = 費用の行き先（実仕訳の借方は台帳固定）。 */}
         <AccountPicker
-          label={manualSpread ? t('monthlyCost.expenseCategory') : t('recurring.to.manual')}
+          label={
+            accounts.find((account) => account.id === debitAccountId)?.role ===
+            'expense-category'
+              ? t('monthlyCost.expenseCategory')
+              : t('recurring.to.manual')
+          }
           required
           value={debitAccountId}
           onChange={setDebitAccountId}

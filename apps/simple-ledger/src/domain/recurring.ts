@@ -9,9 +9,11 @@
  *  - 停止中は起票しない。再開時は startMonth を書き換えず（周期の位相を保つ）、
  *    postedThroughMonth を前月に置いて停止中の月を遡って起票しない（repository 側）。
  *  - everyMonths（必須。1 = 毎月）で間引く。位相は startMonth 基点。
- *  - spreadExpenseAccountId を持つルールは**月割りするルール**（継続コスト化）:
+ *  - 行き先が費用科目のルールは**必ず継続コスト化**する:
  *    起票は `借方 継続コスト台帳 / 貸方 源泉` + item 自動生成（repository 側）。
  *    投影もここで購入行 + 費用行（cc-recogp）を両方出す＝未来断面で台帳が積み上がらない。
+ *  - spreadExpenseAccountId は正規化済みの保存表現。旧形式（spread なし・借方が費用）も
+ *    行き先 role から同じ意味に解釈する。費用以外は行き先へ直接起票する。
  */
 import { addMonths, monthOf, monthsBetween } from './allocation';
 import { ACCOUNT_ROLES, isInternalRole, type AccountRole } from './accountRoles';
@@ -35,6 +37,31 @@ export const RECURRING_POSTABLE_ROLES: readonly AccountRole[] = ACCOUNT_ROLES.fi
 /** この役割の科目を定期ルールの借方/貸方に使ってよいか。 */
 export function isRecurringPostableRole(role: AccountRole | undefined): boolean {
   return role !== undefined && RECURRING_POSTABLE_ROLES.includes(role);
+}
+
+/**
+ * 画面・保存・起票で使うルールの論理的な行き先。
+ *
+ * 正規化済みの費用ルールは debitAccountId が内部台帳なので、利用者が指定した行き先は
+ * spreadExpenseAccountId にある。旧形式の spread なしルールと費用以外のルールは借方が行き先。
+ * 旧版で作成できた「spread あり・行き先が費用以外」も、spread 側を論理的な行き先として
+ * 直接フローへ読み替える。
+ */
+export function recurringDestinationAccountId(
+  rule: Pick<RecurringRule, 'debitAccountId' | 'spreadExpenseAccountId'>,
+): string {
+  return rule.spreadExpenseAccountId ?? rule.debitAccountId;
+}
+
+/** 行き先 role から継続コスト化を自動判定する（spread の有無は判定材料にしない）。 */
+export function recurringExpenseAccountId(
+  rule: Pick<RecurringRule, 'debitAccountId' | 'spreadExpenseAccountId'>,
+  roleOf: (accountId: string) => AccountRole | undefined,
+): string | undefined {
+  const destinationAccountId = recurringDestinationAccountId(rule);
+  return roleOf(destinationAccountId) === 'expense-category'
+    ? destinationAccountId
+    : undefined;
 }
 
 /**
@@ -119,7 +146,7 @@ export function recurringPostingsDue(rule: RecurringRule, today: string): Recurr
   return out;
 }
 
-/* ── 月割りするルール（spreadExpenseAccountId あり）が自動生成する item ── */
+/* ── 費用行きルールが自動生成する item ── */
 
 /** ルール生成 item の決定的 ID。由来メタは持たない（ID が由来を符号化する）。 */
 export function ruleItemId(ruleId: string, month: string): string {
@@ -162,16 +189,16 @@ export function ruleItemCoverageThrough(
 export function buildRuleItem(
   rule: RecurringRule,
   posting: RecurringPosting,
+  expenseAccountId: string,
   ts: { createdAt: string; updatedAt: string },
-): MonthlyCostItem | null {
-  if (rule.spreadExpenseAccountId === undefined) return null;
+): MonthlyCostItem {
   return {
     id: ruleItemId(rule.id, posting.month),
     name: rule.name,
     amount: rule.amount,
     startDate: posting.date,
     endDate: ruleItemEndDate(posting.month, rule.everyMonths),
-    expenseAccountId: rule.spreadExpenseAccountId,
+    expenseAccountId,
     createdAt: ts.createdAt,
     updatedAt: ts.updatedAt,
   };
@@ -181,7 +208,7 @@ export function buildRuleItem(
  * 選択した基準日までの、未起票分を表示専用の仮想仕訳として投影する。
  * 永続化とカーソル更新は行わず、postedThroughMonth より後だけを出すため実仕訳と二重計上しない。
  *
- * 月割りするルール（spreadExpenseAccountId あり）は購入行に加えて**費用行も投影する**
+ * 行き先が費用科目のルールは購入行に加えて**費用行も投影する**
  * （`cc-recogp-{ruleId}-{postingMonth}-{YYYY-MM}`）。これを落とすと未来断面で
  * 継続コスト台帳が購入行ぶんだけ積み上がり、純資産が実在しない額まで膨らむ。
  * 二重展開はしない: 起票済み月は item 側（continuousCostEntries）が展開し、
@@ -196,29 +223,41 @@ export function recurringProjectionEntries(
   const byId = new Map(accounts.map((account) => [account.id, account] as const));
   const projected: JournalEntry[] = [];
   for (const rule of rules) {
-    const spread = rule.spreadExpenseAccountId !== undefined;
-    const debit = byId.get(rule.debitAccountId);
+    const destinationAccountId = recurringDestinationAccountId(rule);
+    const destination = byId.get(destinationAccountId);
+    const expenseAccountId = recurringExpenseAccountId(rule, (id) => byId.get(id)?.role);
+    const spreadsExpense = expenseAccountId !== undefined;
+    const debitAccountId = spreadsExpense
+      ? CONTINUOUS_COST_LEDGER_ACCOUNT_ID
+      : destinationAccountId;
+    const debit = byId.get(debitAccountId);
     const credit = byId.get(rule.creditAccountId);
-    if (!debit || !credit) continue;
-    // アーカイブ済み科目には起票しない（catch-up と同じ判定。監査 P1-7）。
-    if (credit.archived) continue;
-    if (!isRecurringPostableRole(credit.role)) continue;
-    // 月割りルールの借方は継続コスト台帳に固定（postable ではないので別枠で検証する）。
-    if (spread) {
-      if (rule.debitAccountId !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID) continue;
-      const spreadAccount = rule.spreadExpenseAccountId
-        ? byId.get(rule.spreadExpenseAccountId)
-        : undefined;
-      if (!spreadAccount || spreadAccount.archived) continue;
-    } else if (debit.archived || !isRecurringPostableRole(debit.role)) {
+    if (
+      !destination ||
+      !debit ||
+      !credit ||
+      destinationAccountId === rule.creditAccountId
+    )
       continue;
-    }
+    // アーカイブ済み科目には起票しない（catch-up と同じ判定。監査 P1-7）。
+    if (credit.archived || !isRecurringPostableRole(credit.role)) continue;
+    if (destination.archived || !isRecurringPostableRole(destination.role)) continue;
+    // 費用ルールの実際の借方は内部台帳。未来投影より前の catch-up が必要なら作成する。
+    if (
+      spreadsExpense &&
+      (debit.id !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID ||
+        debit.role !== 'continuing-cost-asset' ||
+        debit.archived)
+    )
+      continue;
     // 既存のルール由来 item が覆う月には投影しない（catch-up も同じ月を起票しない・監査 P1-10）。
-    const coveredThrough = spread ? ruleItemCoverageThrough(rule.id, monthlyCostItems) : undefined;
-    // recurringKindOf(continuing-cost-asset, …) は null を返すため、月割りルールは 'expense' 直指定。
-    const inputMode: InputMode = spread
+    const coveredThrough = spreadsExpense
+      ? ruleItemCoverageThrough(rule.id, monthlyCostItems)
+      : undefined;
+    // recurringKindOf(continuing-cost-asset, …) は null を返すため、費用ルールは 'expense' 直指定。
+    const inputMode: InputMode = spreadsExpense
       ? 'expense'
-      : (recurringKindOf(debit.role, credit.role) ?? 'manual');
+      : (recurringKindOf(destination.role, credit.role) ?? 'manual');
     for (const posting of recurringPostingsDue(rule, asOf)) {
       if (coveredThrough !== undefined && posting.month <= coveredThrough) continue;
       projected.push({
@@ -227,7 +266,7 @@ export function recurringProjectionEntries(
         description: rule.name,
         kind: 'normal',
         lines: [
-          { accountId: rule.debitAccountId, side: 'debit', amount: rule.amount },
+          { accountId: debitAccountId, side: 'debit', amount: rule.amount },
           { accountId: rule.creditAccountId, side: 'credit', amount: rule.amount },
         ],
         metadata: {
@@ -238,32 +277,30 @@ export function recurringProjectionEntries(
           // 月割りルールの投影購入行も、同じ投影から生まれる費用行と同じ
           // ephemeral item ID を持たせる。仕訳一覧では両方を「継続コスト」と表示する。
           // virtual 行だけの印であり、保存境界の continuousCostId 拒否は維持する。
-          ...(spread ? { continuousCostId: `${rule.id}-${posting.month}` } : {}),
+          ...(spreadsExpense ? { continuousCostId: `${rule.id}-${posting.month}` } : {}),
         },
         createdAt: rule.createdAt,
         updatedAt: rule.updatedAt,
       });
-      if (spread) {
-        const ephemeral = buildRuleItem(rule, posting, {
+      if (spreadsExpense) {
+        const ephemeral = buildRuleItem(rule, posting, expenseAccountId, {
           createdAt: rule.createdAt,
           updatedAt: rule.updatedAt,
         });
-        if (ephemeral) {
-          // id を `{ruleId}-{postingMonth}` にすると費用行 ID が
-          // `cc-recogp-{ruleId}-{postingMonth}-{YYYY-MM}` になる（item 由来の cc-recog と衝突しない）。
-          // metadata に recurringRuleId を足す＝仕訳一覧のタップでルールへ飛べる（投影 item は実在しないため）。
-          projected.push(
-            ...continuousCostEntriesForItem(
-              { ...ephemeral, id: `${rule.id}-${posting.month}` },
-              asOf,
-              ephemeral.amount,
-              'cc-recogp',
-            ).map((e) => ({
-              ...e,
-              metadata: { ...e.metadata, recurringRuleId: rule.id, recurringMonth: posting.month },
-            })),
-          );
-        }
+        // id を `{ruleId}-{postingMonth}` にすると費用行 ID が
+        // `cc-recogp-{ruleId}-{postingMonth}-{YYYY-MM}` になる（item 由来の cc-recog と衝突しない）。
+        // metadata に recurringRuleId を足す＝仕訳一覧のタップでルールへ飛べる（投影 item は実在しないため）。
+        projected.push(
+          ...continuousCostEntriesForItem(
+            { ...ephemeral, id: `${rule.id}-${posting.month}` },
+            asOf,
+            ephemeral.amount,
+            'cc-recogp',
+          ).map((e) => ({
+            ...e,
+            metadata: { ...e.metadata, recurringRuleId: rule.id, recurringMonth: posting.month },
+          })),
+        );
       }
     }
   }

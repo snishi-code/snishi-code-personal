@@ -174,11 +174,10 @@ export const UI = {
     // 統一追加フロー（2択: .rule = くり返し記帳 / .asset = 継続コスト資産の持ち込み）
     unifiedAdd: 'allocations.add',
     addChooser: 'allocations.add.chooser',
-    // 定期ルール（くり返し記帳 = 実仕訳の自動起票。チェック ON のとき月割り）
+    // 定期ルール（くり返し記帳。費用行きは自動で継続コスト化）
     recurringList: 'allocations.recurring.list',
     recurringAdd: 'allocations.recurring.add',
     recurringSheet: 'allocations.recurring.sheet',
-    recurringManualSpread: 'allocations.recurring.manualSpread',
     recurringName: 'allocations.recurring.name',
     recurringAmount: 'allocations.recurring.amount',
     recurringEvery: 'allocations.recurring.every',
