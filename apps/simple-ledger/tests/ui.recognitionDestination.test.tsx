@@ -8,6 +8,7 @@ import { Allocations } from '../src/ui/screens/Allocations';
 import { createContinuousCost, loadLedger, upsertAccount } from '../src/data/repository';
 import { groupedRecognitionAccounts, recognitionAccountOptions } from '../src/ui/accountOptions';
 import { ACCOUNT_ROLES, type AccountRole } from '../src/domain/accountRoles';
+import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import type { Account, AccountType } from '../src/domain/types';
@@ -71,7 +72,12 @@ async function addCandidateFixtures() {
       'revenue',
       'income-category',
     ),
-    internal: account('recognition-internal', '行き先・内部台帳', 'asset', 'continuing-cost-asset'),
+    internal: account(
+      CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      '行き先・内部台帳',
+      'asset',
+      'continuing-cost-asset',
+    ),
     adjustment: account(
       'recognition-adjustment',
       '行き先・残高調整',

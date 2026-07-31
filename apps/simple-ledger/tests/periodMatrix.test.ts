@@ -5,7 +5,15 @@ import {
   type PeriodMatrixScope,
 } from '../src/domain/periodMatrix';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../src/domain/accounting';
-import type { Account, EntryMetadata, JournalEntry } from '../src/domain/types';
+import { reportEntriesForAsOf } from '../src/domain/reportEntries';
+import { SCHEMA_VERSION } from '../src/domain/constants';
+import type {
+  Account,
+  EntryMetadata,
+  JournalEntry,
+  Ledger,
+  MonthlyCostItem,
+} from '../src/domain/types';
 import './setup';
 
 function account(
@@ -209,6 +217,66 @@ describe('buildPeriodMatrix（全体）', () => {
     expect(matrix.rows.totalAssets).toEqual([1100, 326, 1325]);
     expect(matrix.rows.netAssets).toEqual([1100, 126, 1125]);
     expect(matrix.expenseCategories[0]?.values).toEqual([0, 1024, 0]);
+  });
+
+  it('後年の回収を全知識として使い、年間表示と全体表示の同じ年を一致させる', () => {
+    const item: MonthlyCostItem = {
+      id: 'cross-year-cost',
+      name: '年またぎ費用',
+      amount: 60_000,
+      startDate: '2025-10-05',
+      endDate: '2026-03-31',
+      expenseAccountId: 'fixed',
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const ledger: Ledger = {
+      meta: {
+        id: 'ledger',
+        schemaVersion: SCHEMA_VERSION,
+        revision: 1,
+        deviceId: 'device',
+        createdAt: 'x',
+        updatedAt: 'x',
+      },
+      settings: { ledgerName: 'test', currency: 'JPY', locale: 'ja' },
+      accounts,
+      journalEntries: [
+        entry('opening', '2025-01-01', 'cash', 'equity', 500_000),
+        entry(
+          'purchase',
+          item.startDate,
+          'continuing',
+          'cash',
+          item.amount,
+          { monthlyCostId: item.id },
+        ),
+        entry('recovery', '2026-03-31', 'cash', 'continuing', 30_000, {
+          monthlyCostId: item.id,
+          monthlyCostRecovery: true,
+        }),
+      ],
+      cashflowSchedules: [],
+      tags: [],
+      monthlyCostItems: [item],
+      recurringRules: [],
+    };
+
+    const annualEntries = reportEntriesForAsOf(ledger, '2025-12-31');
+    const allEntries = reportEntriesForAsOf(ledger, '2026-12-31');
+    const annual = buildPeriodMatrix(accounts, annualEntries, { mode: 'year', year: 2025 });
+    const all = buildPeriodMatrix(accounts, allEntries, {
+      mode: 'all',
+      years: [2025, 2026],
+    });
+    const annualTotal = (values: readonly number[]) =>
+      values.reduce((sum, value) => sum + value, 0);
+
+    expect(annualTotal(annual.rows.monthlyCost)).toBe(15_000);
+    expect(annualTotal(annual.rows.monthlyCost)).toBe(all.rows.monthlyCost[0]);
+    expect(annualTotal(annual.rows.expense)).toBe(all.rows.expense[0]);
+    expect(annual.rows.totalAssets[11]).toBe(all.rows.totalAssets[0]);
+    expect(annual.rows.netAssets[11]).toBe(all.rows.netAssets[0]);
   });
 });
 

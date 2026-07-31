@@ -69,12 +69,14 @@ export function TextInput({
   error,
   dataUi,
   inputMode,
+  disabled,
 }: BaseProps & {
   value: string;
   onChange: (v: string) => void;
   type?: 'text' | 'date' | 'number' | 'time';
   placeholder?: string;
   inputMode?: 'numeric';
+  disabled?: boolean;
 }) {
   const id = useId();
   return (
@@ -86,6 +88,7 @@ export function TextInput({
         value={value}
         placeholder={placeholder}
         inputMode={inputMode}
+        disabled={disabled}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? `${id}-err` : hint ? `${id}-hint` : undefined}
         onChange={(e) => onChange(e.target.value)}

@@ -77,6 +77,7 @@ describe('勘定科目の存在期間', () => {
           debitAccountId: 'investment',
           creditAccountId: 'cash',
           startMonth: '2026-04',
+          startDate: '2026-04-01',
           createdAt: 'x',
           updatedAt: 'x',
         },
@@ -105,6 +106,7 @@ describe('勘定科目の存在期間', () => {
       creditAccountId: 'cash',
       spreadExpenseAccountId: 'expense',
       startMonth: '2026-01',
+      startDate: '2026-01-01',
       postedThroughMonth: '2026-04',
       createdAt: 'x',
       updatedAt: 'x',
@@ -137,6 +139,7 @@ describe('勘定科目の存在期間', () => {
       creditAccountId: 'cash',
       spreadExpenseAccountId: 'expense',
       startMonth: '2026-01',
+      startDate: '2026-01-01',
       createdAt: 'x',
       updatedAt: 'x',
     };

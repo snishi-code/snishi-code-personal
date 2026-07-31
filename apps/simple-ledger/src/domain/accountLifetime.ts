@@ -6,6 +6,7 @@
  */
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from './constants';
 import { isValidIsoDate } from './calendar';
+import { parseRuleItemId } from './recurringIds';
 import type {
   Account,
   CashflowSchedule,
@@ -42,6 +43,33 @@ function ruleFirstDate(startMonth: string, dayOfMonth: number): string {
   return `${startMonth}-${String(Math.min(dayOfMonth, lastDay)).padStart(2, '0')}`;
 }
 
+/** 定期ルールの存在開始日。各回の item が生まれる起票日とは別概念である。 */
+export function effectiveRecurringRuleStartDate(rule: RecurringRule): string {
+  return rule.startDate;
+}
+
+/** 定期ルールの半開区間 [startDate, endDate) が指定日を含むか。 */
+export function ruleExistsAt(rule: RecurringRule, date: string): boolean {
+  return (
+    effectiveRecurringRuleStartDate(rule) <= date &&
+    (rule.endDate === undefined || date < rule.endDate)
+  );
+}
+
+/** 有効な ISO 日付の前日。rule.endDate は排他的、Account の参照終端は包含なので変換する。 */
+function previousDate(date: string): string {
+  const [year, month, day] = date.split('-').map(Number);
+  const value = new Date(Date.UTC(2000, (month ?? 1) - 1, day ?? 1));
+  value.setUTCFullYear(year ?? 0);
+  value.setUTCDate(value.getUTCDate() - 1);
+  return value.toISOString().slice(0, 10);
+}
+
+/** 排他的終了日の直前にルールが存在する最後の日。終了なしなら未定義。 */
+export function recurringRuleLastExistingDate(rule: RecurringRule): string | undefined {
+  return rule.endDate !== undefined ? previousDate(rule.endDate) : undefined;
+}
+
 function monthIndex(month: string): number {
   const [year, value] = month.split('-').map(Number);
   return (year ?? 0) * 12 + ((value ?? 1) - 1);
@@ -65,23 +93,33 @@ export function recurringRuleReferenceStartDate(
   items: readonly MonthlyCostItem[],
 ): string | undefined {
   let coveredThrough = rule.postedThroughMonth;
-  const prefix = `ccr-${rule.id}-`;
   for (const item of items) {
-    if (!item.id.startsWith(prefix)) continue;
+    if (parseRuleItemId(item.id)?.ruleId !== rule.id) continue;
     const itemThrough = item.endDate?.slice(0, 7) ?? '9999-12';
     if (coveredThrough === undefined || itemThrough > coveredThrough) coveredThrough = itemThrough;
   }
   if (coveredThrough === '9999-12') return undefined;
-  if (coveredThrough === undefined || coveredThrough < rule.startMonth) {
-    return ruleFirstDate(rule.startMonth, rule.dayOfMonth);
-  }
   const start = monthIndex(rule.startMonth);
-  const after = monthIndex(coveredThrough);
   const step = Math.max(1, rule.everyMonths);
-  const phase = Math.max(0, Math.floor((after - start) / step) + 1);
-  const nextIndex = start + phase * step;
+  const after = coveredThrough === undefined ? start - 1 : monthIndex(coveredThrough);
+  let phase = Math.max(0, Math.floor((after - start) / step) + 1);
+
+  // 明示された存在開始より前の周期日は飛ばす。年月だけで位相を合わせ、同月内の日付差は
+  // 最後に 1 周期進めることで 4/22 開始・毎月20日のような境界を正しく扱う。
+  const effectiveStart = effectiveRecurringRuleStartDate(rule);
+  const effectiveStartMonth = monthIndex(effectiveStart.slice(0, 7));
+  phase = Math.max(phase, Math.max(0, Math.ceil((effectiveStartMonth - start) / step)));
+  let nextIndex = start + phase * step;
   if (nextIndex > 9999 * 12 + 11) return undefined;
-  return ruleFirstDate(monthFromIndex(nextIndex), rule.dayOfMonth);
+  let candidate = ruleFirstDate(monthFromIndex(nextIndex), rule.dayOfMonth);
+  if (candidate < effectiveStart) {
+    phase += 1;
+    nextIndex = start + phase * step;
+    if (nextIndex > 9999 * 12 + 11) return undefined;
+    candidate = ruleFirstDate(monthFromIndex(nextIndex), rule.dayOfMonth);
+  }
+  if (rule.endDate !== undefined && candidate >= rule.endDate) return undefined;
+  return candidate;
 }
 
 function timestampDate(value: string): string | undefined {
@@ -124,6 +162,7 @@ export function accountIsRetiredAt(account: Account, date: string): boolean {
 export function accountReferenceIntervals(
   accountId: string,
   collections: AccountLifetimeCollections,
+  options: { ruleUsesItemCoverage?: (rule: RecurringRule) => boolean } = {},
 ): AccountReferenceInterval[] {
   const intervals: AccountReferenceInterval[] = [];
 
@@ -153,11 +192,16 @@ export function accountReferenceIntervals(
       rule.creditAccountId === accountId ||
       rule.spreadExpenseAccountId === accountId
     ) {
-      const referenceStart = recurringRuleReferenceStartDate(rule, collections.monthlyCostItems);
+      const referenceStart = recurringRuleReferenceStartDate(
+        rule,
+        options.ruleUsesItemCoverage?.(rule) === false ? [] : collections.monthlyCostItems,
+      );
       if (referenceStart === undefined) continue;
+      const referenceEnd = recurringRuleLastExistingDate(rule);
       intervals.push({
         kind: 'recurringRule',
         from: referenceStart,
+        ...(referenceEnd !== undefined ? { to: referenceEnd } : {}),
       });
     }
   }

@@ -474,6 +474,8 @@ export const ja = {
     '旧版データのままでは JSON の読み込みもできません。手順: ①「DB を初期化して再起動」で初期化 → ②起動後に設定から、現行版へ変換済みの JSON を読み込んでください。',
 
   'toast.saved': '保存しました。',
+  'toast.recurringSavedFollowupFailed':
+    'ルールは保存しましたが、自動起票または画面の再読込に失敗しました。画面を開き直してください。',
   'toast.deleted': '削除しました。',
   'toast.exported': '書き出しました。',
   'toast.restored': '復元しました。',
@@ -547,6 +549,16 @@ export const ja = {
   'error.account.archiveBalance':
     '残高が残っている科目はアーカイブできません。先に振替で残高を 0 にしてください。',
   'error.recurring.everyMonthsInvalid': '周期は 1〜1200 か月の整数で入力してください。',
+  'error.recurring.dayOfMonthInvalid': '起票日は 1〜31 日の整数で入力してください。',
+  'error.recurring.periodInvalid': 'ルールの開始日・終了日を確認してください。',
+  'error.recurring.amountChangeModeRequired':
+    '金額の変更方法（全期間、または今日から）を選んでください。',
+  'error.recurring.splitPhaseLocked':
+    '金額変更で分けたルールは、起票周期の基準月を変更できません。',
+  'error.recurring.splitDependency':
+    '今日分の仕訳または継続コスト資産を安全に分けられません。対象の起票内容を確認してください。',
+  'error.recurring.generatedDependency':
+    '自動起票の仕訳と継続コスト資産の対応が壊れているため操作できません。バックアップを書き出してデータを確認してください。',
   // 監査 2026-07-30 対応で新設したエラーコード。
   'error.monthlyCost.recoveryBeforeStart':
     '回収の振替の日付は開始日（購入の仕訳の日付）以降にしてください。',
@@ -638,9 +650,40 @@ export const ja = {
   'recurring.name': '摘要',
   'recurring.nameHint': '起票される仕訳の名前（例: NISA積立 / 給与 / Netflix）。',
   'recurring.amount': '金額',
-  'recurring.amountHint': '月によって金額が違う場合は、起票された仕訳をその月だけ編集します。',
+  'recurring.amountHint':
+    '金額を変えるときは、全期間を変えるか、今日から新しい金額に分けるかを選べます。',
   'recurring.intervalMonths': '周期（か月）',
-  'recurring.firstPostingDate': '初回の起票日',
+  'recurring.firstPostingDate': '起票周期の基準日',
+  'recurring.postingDayOfMonth': '毎回の起票日（1〜31 日）',
+  'recurring.firstPostingDateHint':
+    '毎回の起票日と周期の位相を決める日です。ルールの存在期間とは別です。',
+  'recurring.firstPostingDateSplitLocked':
+    '金額変更で分けたルールのため、起票周期の基準月は前後のルールから引き継ぎます。日は 1〜31 で変更でき、その日がない月は月末に起票します。',
+  'recurring.ruleStartDate': 'ルールの開始日',
+  'recurring.ruleStartDateHint': 'このルールが存在し始める日です。',
+  'recurring.ruleStartDateSplitLocked':
+    '金額変更で分けた境界のため、この開始日は変更できません。',
+  'recurring.ruleEndDate': 'ルールの終了点（任意）',
+  'recurring.ruleEndDateHint':
+    'この日からルールは存在しません。空欄の間は継続します。',
+  'recurring.ruleEndDateSplitLocked':
+    '金額変更で分けた境界のため、この終了点は変更できません。',
+  'recurring.rulePeriod': 'ルール期間',
+  'recurring.ruleEndBefore': '{date} より前まで',
+  'recurring.ruleNoEnd': '継続中',
+  'recurring.postingSchedule': '起票',
+  'recurring.amountChangeTitle': '金額の変更方法',
+  'recurring.amountChangeBody':
+    'これまでの金額も変えるか、{date} を境に新しいルールへ分けるかを選んでください。',
+  'recurring.amountChangeWholeOnlyBody':
+    'このルールは {date} の時点では存在しないため、その日を境に分けられません。全期間の金額変更だけ選べます。',
+  'recurring.amountChangeAll': '全期間の金額を変更',
+  'recurring.amountChangeAllHint':
+    '過去に起票された仕訳と継続コスト資産も、新しい金額へ変更します。',
+  'recurring.amountChangeFromToday': '{date} から新しい金額',
+  'recurring.amountChangeFromTodayHint':
+    '現在のルールは {date} より前までとし、その日から新しいルールを開始します。起票周期の基準月は現在のルールから引き継ぎ、日と周期は編集内容を使います。',
+  'recurring.amountChangeBack': '編集に戻る',
   'recurring.refBroken':
     '参照している科目が削除またはアーカイブされています。このルールの起票は止まっています（編集で科目を選び直してください）。',
   'recurring.from.manual': '貸方（支払い元・減る側）',

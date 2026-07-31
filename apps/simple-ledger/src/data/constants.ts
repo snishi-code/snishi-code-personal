@@ -22,12 +22,13 @@ export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
 /**
  * 現行スキーマ版。v2 は v1 の最終形（v16 相当の最新モデル）を **1** として開始した
  * （レガシー migration は持たない・仕様§16）。互換性のない変更ごとに +1 する。
+ * version 6 = 定期ルールを時間軸上の線分にし、RecurringRule.startDate を必須化。
  * version 5 = 取り置き機能の全廃（store・仕訳メタデータ・専用 role を含む）+
  * Account.movable（「自由に動かせる」フラグ）追加。
  * migration step は追加しない（作者決定＝後方互換を持たない）。旧版 JSON /
  * スナップショットは unsupported-version として fail-closed に拒否される。
  */
-export const SCHEMA_VERSION = 5 as const;
+export const SCHEMA_VERSION = 6 as const;
 
 /**
  * revision は JSON / IndexedDB の双方で安全な整数だけを扱う。

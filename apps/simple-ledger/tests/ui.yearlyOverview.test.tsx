@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, within } from '@testing-library/react';
 import { YearlyOverview } from '../src/ui/screens/YearlyOverview';
 import type { Account, JournalEntry, Ledger } from '../src/domain/types';
 import * as reportEntriesModule from '../src/domain/reportEntries';
+import { SCHEMA_VERSION } from '../src/domain/constants';
 import { UI } from '../src/ui-contract';
 import './setup';
 
@@ -60,7 +61,7 @@ function fixtureLedger(): Ledger {
   return {
     meta: {
       id: 'ledger',
-      schemaVersion: 5,
+      schemaVersion: SCHEMA_VERSION,
       revision: 1,
       deviceId: 'device',
       createdAt: 'x',
@@ -151,6 +152,7 @@ describe('YearlyOverview', () => {
           debitAccountId: 'food',
           creditAccountId: 'cash',
           startMonth: '2025-01',
+          startDate: '2025-01-01',
           createdAt: 'x',
           updatedAt: 'x',
         },
@@ -162,6 +164,54 @@ describe('YearlyOverview', () => {
     expect(document.querySelector(`[data-ui="${UI.yearlyOverview.view}"]`)).toHaveTextContent(
       '2025年',
     );
+  });
+
+  it('有限のルール線分が伸びる未来年を全体列と年送り候補に含める', () => {
+    ledgerState.ledger = {
+      ...fixtureLedger(),
+      journalEntries: [entry('opening', '2026-01-01', 'cash', 'equity', 10_000)],
+      recurringRules: [
+        {
+          id: 'future-rule-span',
+          name: '未来までの定期収入',
+          amount: 100,
+          dayOfMonth: 1,
+          everyMonths: 1,
+          debitAccountId: 'cash',
+          creditAccountId: 'salary',
+          startMonth: '2026-01',
+          startDate: '2026-01-01',
+          endDate: '2032-01-01',
+          postedThroughMonth: '2026-06',
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+    };
+
+    render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
+    const next = document.querySelector(
+      `[data-ui="${UI.yearlyOverview.nextYear}"]`,
+    ) as HTMLButtonElement;
+    expect(next).toHaveAccessibleName('2027年へ進む');
+
+    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.modeAll}"]`)!);
+    const matrix = document.querySelector(
+      `[data-ui="${UI.yearlyOverview.matrix}"]`,
+    ) as HTMLElement;
+    expect(within(matrix).getAllByRole('columnheader').map((header) => header.textContent)).toEqual([
+      '項目',
+      '2026年',
+      '2027年',
+      '2028年',
+      '2029年',
+      '2030年',
+      '2031年',
+    ]);
+    expect(matrix).not.toHaveTextContent('—');
+    const revenueRow = within(matrix).getByRole('rowheader', { name: '収入' }).closest('tr');
+    expect(revenueRow).not.toBeNull();
+    expect(within(revenueRow!).getAllByRole('cell').at(-1)).toHaveTextContent('1,200');
   });
 
   it('全体へ切り替えるとデータ年を昇順に並べ、未来年も投影値を表示する', () => {

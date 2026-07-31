@@ -12,15 +12,25 @@
  *  - 行き先が費用科目のルールは**必ず継続コスト化**する:
  *    起票は `借方 継続コスト台帳 / 貸方 源泉` + item 自動生成（repository 側）。
  *    投影もここで購入行 + 費用行（cc-recogp）を両方出す＝未来断面で台帳が積み上がらない。
- *  - spreadExpenseAccountId は正規化済みの保存表現。旧形式（spread なし・借方が費用）も
- *    行き先 role から同じ意味に解釈する。費用以外は行き先へ直接起票する。
+ *  - spreadExpenseAccountId は正規化済みの費用行き保存表現。費用以外は借方へ
+ *    直接起票する。v6 はこの二形だけを受理する。
  */
 import { addMonths, monthOf, monthsBetween } from './allocation';
 import { ACCOUNT_ROLES, isInternalRole, type AccountRole } from './accountRoles';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from './constants';
 import { continuousCostEntriesForItem } from './continuousCost';
-import { accountExistsAt, recurringRuleReferenceStartDate } from './accountLifetime';
+import { parseRuleItemId, ruleItemId } from './recurringIds';
+import {
+  accountExistsAt,
+  recurringRuleLastExistingDate,
+  recurringRuleReferenceStartDate,
+  ruleExistsAt,
+} from './accountLifetime';
 import type { Account, InputMode, JournalEntry, MonthlyCostItem, RecurringRule } from './types';
+
+/** repository/UI 向けの意味が明確な別名。判定の正本は accountLifetime.ruleExistsAt。 */
+export const recurringRuleExistsAt = ruleExistsAt;
+export { parseRuleEntryId, parseRuleItemId, ruleEntryId, ruleItemId } from './recurringIds';
 
 /** 表示用の種別（保存しない。勘定の役割から導出する）。 */
 export type RecurringKind = 'expense' | 'income' | 'transfer';
@@ -44,9 +54,7 @@ export function isRecurringPostableRole(role: AccountRole | undefined): boolean 
  * 画面・保存・起票で使うルールの論理的な行き先。
  *
  * 正規化済みの費用ルールは debitAccountId が内部台帳なので、利用者が指定した行き先は
- * spreadExpenseAccountId にある。旧形式の spread なしルールと費用以外のルールは借方が行き先。
- * 旧版で作成できた「spread あり・行き先が費用以外」も、spread 側を論理的な行き先として
- * 直接フローへ読み替える。
+ * spreadExpenseAccountId にある。費用以外の正規形は借方がそのまま行き先になる。
  */
 export function recurringDestinationAccountId(
   rule: Pick<RecurringRule, 'debitAccountId' | 'spreadExpenseAccountId'>,
@@ -99,6 +107,15 @@ export function clampDayToMonth(ym: string, day: number): string {
   return `${ym}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
 }
 
+/**
+ * 指定日まで走査済みにしてよい最後の月。
+ * その月の予定日が指定日より後なら前月に留め、未到来の発生を飛ばさない。
+ */
+export function recurringCursorThroughDate(rule: RecurringRule, date: string): string {
+  const month = monthOf(date);
+  return clampDayToMonth(month, rule.dayOfMonth) <= date ? month : addMonths(month, -1);
+}
+
 /** 暴走防止の上限（1 回の catch-up で走査する月数。超過分は次回の catch-up が続きを処理する）。 */
 export const CATCH_UP_HARD_CAP_MONTHS = 1200;
 
@@ -114,7 +131,10 @@ export interface RecurringPosting {
  * 最後の月より先へ進まない（上限を超えた月が「処理済み」になって永久に飛ばされない）。
  */
 function catchUpWindow(rule: RecurringRule, today: string): { first: number; last: number } | null {
-  const span = monthsBetween(rule.startMonth, monthOf(today));
+  // 終了済みルールは排他的終了日の月まで見れば十分。today までカーソル走査を伸ばさない。
+  const ended = rule.endDate !== undefined && rule.endDate <= today;
+  const horizon = ended ? (recurringRuleLastExistingDate(rule) ?? today) : today;
+  const span = monthsBetween(rule.startMonth, monthOf(horizon));
   if (span < 0) return null;
   const first =
     rule.postedThroughMonth !== undefined && rule.postedThroughMonth >= rule.startMonth
@@ -126,8 +146,8 @@ function catchUpWindow(rule: RecurringRule, today: string): { first: number; las
 
 /**
  * 今日までに起票すべき月を列挙する。
- *  - 対象 = startMonth 〜 今日の月のうち、起票日がすでに到来していて（date <= today）、
- *    カーソル（postedThroughMonth）より後の月。
+ *  - 対象 = startMonth 〜 今日の月のうち、起票日がすでに到来し（date <= today）、
+ *    ルールの存在期間 [startDate, endDate) に含まれ、カーソルより後の月。
  *  - 停止中は空。まだ起票日が来ていない当月は含めない（到来した次回起動で起票される）。
  *  - 1 回に走査するのはカーソルの次から CATCH_UP_HARD_CAP_MONTHS か月まで（catchUpWindow）。
  */
@@ -143,17 +163,13 @@ export function recurringPostingsDue(rule: RecurringRule, today: string): Recurr
     if (rule.postedThroughMonth !== undefined && month <= rule.postedThroughMonth) continue;
     const date = clampDayToMonth(month, rule.dayOfMonth);
     if (date > today) break; // 起票日が未到来（以降の月も未来）
+    if (!ruleExistsAt(rule, date)) continue;
     out.push({ month, date });
   }
   return out;
 }
 
 /* ── 費用行きルールが自動生成する item ── */
-
-/** ルール生成 item の決定的 ID。由来メタは持たない（ID が由来を符号化する）。 */
-export function ruleItemId(ruleId: string, month: string): string {
-  return `ccr-${ruleId}-${month}`;
-}
 
 /**
  * ルール生成 item の終了日 = 周期がカバーする最終月の末日（厳密式）。
@@ -174,10 +190,9 @@ export function ruleItemCoverageThrough(
   ruleId: string,
   items: readonly MonthlyCostItem[],
 ): string | undefined {
-  const prefix = `ccr-${ruleId}-`;
   let through: string | undefined;
   for (const item of items) {
-    if (!item.id.startsWith(prefix)) continue;
+    if (parseRuleItemId(item.id)?.ruleId !== ruleId) continue;
     const to = item.endDate !== undefined ? monthOf(item.endDate) : '9999-12';
     if (through === undefined || to > through) through = to;
   }
@@ -248,7 +263,10 @@ export function recurringProjectionEntries(
     const coveredThrough = spreadsExpense
       ? ruleItemCoverageThrough(rule.id, monthlyCostItems)
       : undefined;
-    const referenceStart = recurringRuleReferenceStartDate(rule, monthlyCostItems);
+    const referenceStart = recurringRuleReferenceStartDate(
+      rule,
+      spreadsExpense ? monthlyCostItems : [],
+    );
     if (referenceStart === undefined) continue;
     // recurringKindOf(continuing-cost-asset, …) は null を返すため、費用ルールは 'expense' 直指定。
     const inputMode: InputMode = spreadsExpense
@@ -315,10 +333,12 @@ export function recurringCursorAfter(rule: RecurringRule, today: string): string
   if (rule.paused) return rule.postedThroughMonth;
   const window = catchUpWindow(rule, today);
   if (!window) return rule.postedThroughMonth;
-  const currentYm = monthOf(today);
-  // 当月の起票日が未到来なら前月まで、到来済みなら当月まで。
-  const currentDue = clampDayToMonth(currentYm, rule.dayOfMonth) <= today;
-  let through = currentDue ? currentYm : addMonths(currentYm, -1);
+  const ended = rule.endDate !== undefined && rule.endDate <= today;
+  const horizon = ended ? (recurringRuleLastExistingDate(rule) ?? today) : today;
+  // 終了月も、起票日が実際の最終存在日までに来た場合だけ処理済みとする。
+  // 存在期間外の予定日までカーソルを進めると、後から endDate を外して線分を
+  // 再び伸ばしたときに、未起票の当月分を永久に飛ばしてしまう。
+  let through = recurringCursorThroughDate(rule, horizon);
   // 走査していない月をカーソルが飛び越えない（recurringPostingsDue と同じ窓・監査 P1-9）。
   const scannedThrough = addMonths(rule.startMonth, window.last);
   if (through > scannedThrough) through = scannedThrough;

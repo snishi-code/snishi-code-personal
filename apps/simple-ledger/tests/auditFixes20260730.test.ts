@@ -337,6 +337,7 @@ describe('P1-8: catch-up は既存の生成物（決定的 ID）を上書きし�
       debitAccountId: expense.id,
       creditAccountId: bank.id,
       startMonth,
+      startDate: `${startMonth}-01`,
     });
     await catchUpRecurringRules(todayLocal());
     const entryId = `rec-${rule.id}-${startMonth}`;
@@ -376,6 +377,7 @@ describe('P1-9: catch-up の走査窓とカーソル（上限超過の月を飛�
     debitAccountId: 'a',
     creditAccountId: 'b',
     startMonth: '1900-01',
+    startDate: '1900-01-01',
     createdAt: 'x',
     updatedAt: 'x',
   };
@@ -410,6 +412,7 @@ describe('P1-10: 周期短縮後、既存のルール由来 item が覆う月へ
       debitAccountId: expense.id,
       creditAccountId: bank.id,
       startMonth: '2026-01',
+      startDate: '2026-01-01',
     });
     expect(await catchUpRecurringRules('2026-01-15')).toBe(1); // 2026-01 起票（〜2026-12 を覆う）
 
@@ -444,6 +447,7 @@ describe('P2-3: 定期ルールの everyMonths 上限（配分上限と同じ 1,
     debitAccountId: 'a',
     creditAccountId: 'b',
     startMonth: '2026-01',
+    startDate: '2026-01-01',
     createdAt: 'x',
     updatedAt: 'x',
   };

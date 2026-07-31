@@ -9,6 +9,7 @@ import { compareAccountOrder } from '../src/domain/accountOrder';
 import { ACCOUNT_BOXES, groupAccountsByBox } from '../src/ui/accountBoxes';
 import { ledgerExportPackageSchema } from '../src/domain/schema';
 import { buildExportPackage } from '../src/data/exportImport';
+import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import type { Account } from '../src/domain/types';
 
 function acc(name: string, sortIndex?: number): Account {
@@ -90,7 +91,7 @@ describe('loadLedger の科目順', () => {
   it('保存順に依存せず role の単一正本で並べて返す', async () => {
     const inserted = [
       roleAcc('sort-investment', 'asset', 'investment-asset', 0),
-      roleAcc('sort-continuing', 'asset', 'continuing-cost-asset', 0),
+      roleAcc(CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 'asset', 'continuing-cost-asset', 0),
       roleAcc('sort-daily', 'asset', 'daily-asset', 99),
     ];
     for (const account of inserted) await upsertAccount(account);
@@ -100,7 +101,11 @@ describe('loadLedger の科目順', () => {
       .filter((account) => ids.has(account.id))
       .map((account) => account.id);
 
-    expect(ordered).toEqual(['sort-daily', 'sort-continuing', 'sort-investment']);
+    expect(ordered).toEqual([
+      'sort-daily',
+      CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      'sort-investment',
+    ]);
   });
 });
 

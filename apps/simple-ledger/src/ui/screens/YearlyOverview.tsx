@@ -11,6 +11,10 @@ import {
   periodMatrixAsOf,
   type PeriodMatrixScope,
 } from '../../domain/periodMatrix';
+import {
+  effectiveRecurringRuleStartDate,
+  recurringRuleLastExistingDate,
+} from '../../domain/accountLifetime';
 import { dataYearsOf, type ReportPeriod } from '../../domain/reportPeriod';
 import { reportEntriesForAsOf } from '../../domain/reportEntries';
 import { recurringPostingsDue } from '../../domain/recurring';
@@ -30,7 +34,8 @@ function yearOfPeriod(period: ReportPeriod, today: string): number {
 }
 
 /**
- * 実仕訳に加え、複数年へまたがる継続コストの認識期間も「データのある年」に含める。
+ * 実仕訳に加え、複数年へまたがる継続コストと有限の定期ルールの存在期間も
+ * 「データのある年」に含める。
  * reportEntriesForAsOf を年候補づくりで別途呼ばず、画面の仕訳展開を常に1回に保つ。
  */
 function matrixDataYears(ledger: Ledger, today: string): number[] {
@@ -41,7 +46,14 @@ function matrixDataYears(ledger: Ledger, today: string): number[] {
   }
   // 起動時catch-upが fail-soft で失敗しても、表示用に投影可能な到来済みルールの年を失わない。
   for (const rule of ledger.recurringRules) {
-    dates.push(`${rule.startMonth}-01`);
+    const startDate = effectiveRecurringRuleStartDate(rule);
+    dates.push(startDate);
+    // 有限のルール線分は、まだ実起票が無い未来年も投影できるデータ期間である。
+    // endDate は排他的なので、直前の日を最後の表示年として扱う。
+    const lastExistingDate = recurringRuleLastExistingDate(rule);
+    if (!rule.paused && lastExistingDate !== undefined) {
+      addSpanYears(dates, startDate, lastExistingDate);
+    }
     for (const posting of recurringPostingsDue(rule, today)) dates.push(posting.date);
   }
   return dataYearsOf(dates);
@@ -49,8 +61,12 @@ function matrixDataYears(ledger: Ledger, today: string): number[] {
 
 function addRecognitionYears(dates: string[], item: MonthlyCostItem): void {
   if (!item.endDate) return;
-  const startYear = Number.parseInt(item.startDate.slice(0, 4), 10);
-  const endYear = Number.parseInt(item.endDate.slice(0, 4), 10);
+  addSpanYears(dates, item.startDate, item.endDate);
+}
+
+function addSpanYears(dates: string[], startDate: string, endDate: string): void {
+  const startYear = Number.parseInt(startDate.slice(0, 4), 10);
+  const endYear = Number.parseInt(endDate.slice(0, 4), 10);
   if (!Number.isFinite(startYear) || !Number.isFinite(endYear) || endYear < startYear) return;
   // schema の日付範囲内でも、破損値から無制限に配列を増やさない。
   for (let year = startYear, count = 0; year <= endYear && count < 200; year++, count++) {

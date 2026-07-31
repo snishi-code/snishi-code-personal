@@ -41,6 +41,7 @@ async function seedEndedRuleSourceCoveredByOpenItem(): Promise<{
     debitAccountId: expense.id,
     creditAccountId: source.id,
     startMonth: '2025-01',
+    startDate: '2025-01-01',
   });
   expect(await catchUpRecurringRules('2025-01-31')).toBe(1);
 
@@ -72,6 +73,44 @@ async function seedEndedRuleSourceCoveredByOpenItem(): Promise<{
 }
 
 describe('ルール由来 item の変更後も科目の存在期間を包含する', () => {
+  it('終了点付きルールの有限な次回参照は科目終了日内なら許可する', async () => {
+    const source = await accountByName('給与');
+    const expense = await accountByName('固定費');
+    const rule = await createRecurringRule({
+      name: '有限ルールの年払い',
+      amount: 1_200,
+      dayOfMonth: 1,
+      everyMonths: 12,
+      debitAccountId: expense.id,
+      creditAccountId: source.id,
+      startMonth: '2025-01',
+      startDate: '2025-01-01',
+      endDate: '2026-06-01',
+    });
+    await catchUpRecurringRules('2025-01-31');
+    let ledger = await loadLedger();
+    const generated = ledger.monthlyCostItems.find(
+      (candidate) => candidate.id === `ccr-${rule.id}-2025-01`,
+    )!;
+    const openItem = { ...generated };
+    delete openItem.endDate;
+    await upsertMonthlyCost(openItem);
+
+    ledger = await loadLedger();
+    await upsertAccount({
+      ...ledger.accounts.find((candidate) => candidate.id === source.id)!,
+      archived: true,
+      endDate: '2026-05-31',
+    });
+    await upsertMonthlyCost({ ...openItem, endDate: '2025-12-31' });
+
+    ledger = await loadLedger();
+    expect(ledger.monthlyCostItems.find((item) => item.id === generated.id)?.endDate).toBe(
+      '2025-12-31',
+    );
+    expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
+  });
+
   it('upsertMonthlyCostで有限化して終了済み科目への次回参照を復活させない', async () => {
     const { item, source } = await seedEndedRuleSourceCoveredByOpenItem();
 

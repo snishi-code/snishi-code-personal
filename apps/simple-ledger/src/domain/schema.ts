@@ -26,10 +26,14 @@ import {
   accountIsRetiredAt,
   accountLifetimeViolation,
   accountReferenceIntervals,
+  effectiveRecurringRuleStartDate,
+  recurringRuleLastExistingDate,
+  ruleExistsAt,
 } from './accountLifetime';
 import { accountEndingBalanceViolations } from './accountEnding';
 import { isValidIsoDate, isValidIsoMonth } from './calendar';
 import { CATCH_UP_HARD_CAP_MONTHS, isRecurringPostableRole } from './recurring';
+import { parseRuleEntryId, parseRuleItemId, ruleEntryId, ruleItemId } from './recurringIds';
 
 const isoDate = z
   .string()
@@ -193,18 +197,51 @@ export const recurringRuleSchema = z
     // 何か月ごとに起票するか（必須。1 = 毎月）。上限は配分月数と同じ（監査 P2-3:
     // これが無いと rule だけ保存できて生成 item が配分上限で保存できない）。
     everyMonths: z.number().int().min(1).max(CATCH_UP_HARD_CAP_MONTHS),
-    // 正規化済みの費用の行き先。旧形式（spread なし・debit が費用）も v5 のまま受理し、
-    // 読み込み/起票側が行き先 role から同じ意味に解釈する。
+    // 正規化済みの費用の行き先。v6 は後方互換を持たず、保存形を
+    // spread=費用科目 + debit=継続コスト台帳の一つに限定する。
     spreadExpenseAccountId: z.string().min(1).optional(),
     debitAccountId: z.string().min(1),
     creditAccountId: z.string().min(1),
     startMonth: monthSchema,
+    // ルールの存在期間（半開区間）。周期 anchor と混同しないよう開始点は必須。
+    startDate: isoDate,
+    splitFromRuleId: z.string().min(1).optional(),
+    splitEndLocked: z.literal(true).optional(),
+    endDate: isoDate.optional(),
     postedThroughMonth: monthSchema.optional(),
     paused: z.boolean().optional(),
     createdAt: isoDateTime,
     updatedAt: isoDateTime,
   })
   .superRefine((rule, ctx) => {
+    const effectiveStart = effectiveRecurringRuleStartDate(rule);
+    const lastExistingDate = recurringRuleLastExistingDate(rule);
+    if (rule.endDate !== undefined && effectiveStart >= rule.endDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '定期ルールの終了日は開始日より後である必要があります',
+        path: ['endDate'],
+      });
+    }
+    if (rule.splitEndLocked && rule.endDate === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '分割済みの終了境界には終了日が必要です',
+        path: ['endDate'],
+      });
+    }
+    if (
+      rule.endDate !== undefined &&
+      rule.postedThroughMonth !== undefined &&
+      lastExistingDate !== undefined &&
+      rule.postedThroughMonth > monthOf(lastExistingDate)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '終了済み定期ルールの起票カーソルは終了月より後へ進められません',
+        path: ['postedThroughMonth'],
+      });
+    }
     if (rule.spreadExpenseAccountId === undefined) return;
     // 正規化済みの費用ルールは周期にかかわらず常に継続コスト台帳を経由する（everyMonths >= 1。
     // 毎月の家賃も「起票日開始・当月末終了」の item が毎月生まれて消える）。
@@ -351,6 +388,14 @@ export const ledgerExportPackageSchema = z
           `継続コスト台帳(continuing-cost-asset)は集約口座(${CONTINUOUS_COST_LEDGER_ACCOUNT_ID})のみ許可されます`,
           ['accounts', i, 'id'],
         );
+      if (
+        a.id === CONTINUOUS_COST_LEDGER_ACCOUNT_ID &&
+        (a.role !== 'continuing-cost-asset' || a.type !== 'asset')
+      )
+        issue(
+          `集約口座(${CONTINUOUS_COST_LEDGER_ACCOUNT_ID})は資産の継続コスト台帳である必要があります`,
+          ['accounts', i, 'role'],
+        );
     });
     const hasAccount = (id: string) => accountType.has(id);
 
@@ -382,6 +427,7 @@ export const ledgerExportPackageSchema = z
     const monthlyCostIdSet = new Set(pkg.monthlyCostItems.map((m) => m.id));
     const monthlyCostById = new Map(pkg.monthlyCostItems.map((m) => [m.id, m]));
     const recurringRuleIdSet = new Set(pkg.recurringRules.map((r) => r.id));
+    const recurringRuleById = new Map(pkg.recurringRules.map((r) => [r.id, r] as const));
     const recurringPostingMonths = new Map<string, Set<string>>();
     // item ごとの購入の仕訳（monthlyCostId あり・monthlyCostRecovery なし）。不変条件⑥⑦に使う。
     const purchaseEntriesByItem = new Map<string, (typeof pkg.journalEntries)[number][]>();
@@ -477,6 +523,17 @@ export const ledgerExportPackageSchema = z
       // （ルール削除時はメタデータを剥がして通常仕訳へ戻す運用なので、存在は強制できる）。
       const rrId = e.metadata?.recurringRuleId;
       const rrMonth = e.metadata?.recurringMonth;
+      const reservedEntryOrigin = parseRuleEntryId(e.id);
+      if (
+        reservedEntryOrigin !== undefined &&
+        recurringRuleIdSet.has(reservedEntryOrigin.ruleId) &&
+        (rrId !== reservedEntryOrigin.ruleId || rrMonth !== reservedEntryOrigin.month)
+      ) {
+        issue(
+          '現存する定期ルールの決定的仕訳 ID には対応する由来情報が必要です',
+          ['journalEntries', ei, 'id'],
+        );
+      }
       if ((rrId !== undefined) !== (rrMonth !== undefined)) {
         issue('recurringRuleId と recurringMonth は必ずペアで持つ必要があります', [
           'journalEntries',
@@ -494,6 +551,35 @@ export const ledgerExportPackageSchema = z
         ]);
       }
       if (rrId !== undefined && rrMonth !== undefined) {
+        const recurringRule = recurringRuleById.get(rrId);
+        if (e.id !== ruleEntryId(rrId, rrMonth)) {
+          issue(
+            `定期ルール由来仕訳の ID が起票月の決定的 ID と一致しません`,
+            ['journalEntries', ei, 'id'],
+          );
+        }
+        if (e.metadata?.monthlyCostRecovery === true) {
+          issue('回収の仕訳に定期ルールの起票由来を付けることはできません', [
+            'journalEntries',
+            ei,
+            'metadata',
+            'recurringRuleId',
+          ]);
+        }
+        if (rrMonth !== monthOf(e.date)) {
+          issue(`定期ルール由来仕訳の日付(${e.date})と recurringMonth(${rrMonth})が一致しません`, [
+            'journalEntries',
+            ei,
+            'metadata',
+            'recurringMonth',
+          ]);
+        }
+        if (recurringRule !== undefined && !ruleExistsAt(recurringRule, e.date)) {
+          issue(
+            `定期ルール由来仕訳の日付(${e.date})がルール「${recurringRule.name}」の存在期間外です`,
+            ['journalEntries', ei, 'date'],
+          );
+        }
         const months = recurringPostingMonths.get(rrId) ?? new Set<string>();
         if (months.has(rrMonth)) {
           issue(`同じ定期ルール・月の仕訳が重複しています(${rrId}, ${rrMonth})`, [
@@ -643,6 +729,10 @@ export const ledgerExportPackageSchema = z
         issue(`定期ルール「${r.name}」の源泉科目が存在しません`, at('creditAccountId'));
       if (r.debitAccountId === r.creditAccountId)
         issue(`定期ルール「${r.name}」の源泉と行き先が同一です`, at('debitAccountId'));
+      if ((r.spreadExpenseAccountId ?? r.debitAccountId) === r.creditAccountId)
+        issue(`定期ルール「${r.name}」の源泉と論理的な行き先が同一です`,
+          at(r.spreadExpenseAccountId !== undefined ? 'spreadExpenseAccountId' : 'debitAccountId'),
+        );
       const debitPostable = isRecurringPostableRole(
         accountRole.get(r.debitAccountId) as AccountRole | undefined,
       );
@@ -650,9 +740,8 @@ export const ledgerExportPackageSchema = z
         accountRole.get(r.creditAccountId) as AccountRole | undefined,
       );
       if (r.spreadExpenseAccountId !== undefined) {
-        // spread を持つ保存形: 借方 = 継続コスト台帳（rule schema で確認済み）。
-        // 過去に作成できた費用以外の spread も受理し、実行時は spread 側を直接の行き先に
-        // 読み替える。アプリで編集保存すると role に応じた新形式へ正規化される。
+        // spread を持つ保存形: 借方 = 継続コスト台帳（rule schema で確認済み）、
+        // spread = 費用科目。旧形式は v5 の単発変換側で正規化する。
         if (hasAccount(r.creditAccountId) && !creditPostable)
           issue(
             `定期ルール「${r.name}」の源泉科目は定期ルールに使えません（内部集約・調整科目は自動起票できません）`,
@@ -663,13 +752,9 @@ export const ledgerExportPackageSchema = z
             `定期ルール「${r.name}」の費用の行き先が存在しません`,
             at('spreadExpenseAccountId'),
           );
-        else if (
-          !isRecurringPostableRole(
-            accountRole.get(r.spreadExpenseAccountId) as AccountRole | undefined,
-          )
-        )
+        else if (accountRole.get(r.spreadExpenseAccountId) !== 'expense-category')
           issue(
-            `定期ルール「${r.name}」の費用の行き先に内部集約・残高調整の科目は使えません`,
+            `定期ルール「${r.name}」の費用の行き先は費用科目である必要があります`,
             at('spreadExpenseAccountId'),
           );
       } else if (
@@ -683,6 +768,56 @@ export const ledgerExportPackageSchema = z
           `定期ルール「${r.name}」の科目は定期ルールに使えません（内部集約・調整科目は自動起票できません）`,
           at('debitAccountId'),
         );
+      } else if (accountRole.get(r.debitAccountId) === 'expense-category') {
+        issue(
+          `費用行きの定期ルール「${r.name}」は継続コスト台帳経由の保存形である必要があります`,
+          at('spreadExpenseAccountId'),
+        );
+      }
+    });
+
+    // 金額変更で分割した segment は、直前の終了点と後継の開始点が一致する。
+    // 1 つの旧 segment から複数の後継を生やすと未来起票が二重化するため拒否する。
+    const successorByPredecessor = new Set<string>();
+    pkg.recurringRules.forEach((rule, ri) => {
+      if (rule.splitFromRuleId === undefined) return;
+      const predecessor = recurringRuleById.get(rule.splitFromRuleId);
+      if (!predecessor || predecessor.id === rule.id) {
+        issue(`定期ルール「${rule.name}」の分割元が存在しません`, [
+          'recurringRules',
+          ri,
+          'splitFromRuleId',
+        ]);
+        return;
+      }
+      if (successorByPredecessor.has(predecessor.id)) {
+        issue(`定期ルール「${predecessor.name}」に複数の後継があります`, [
+          'recurringRules',
+          ri,
+          'splitFromRuleId',
+        ]);
+      }
+      successorByPredecessor.add(predecessor.id);
+      if (predecessor.endDate !== rule.startDate) {
+        issue(`定期ルール「${rule.name}」の分割境界が元ルールの終了点と一致しません`, [
+          'recurringRules',
+          ri,
+          'startDate',
+        ]);
+      }
+      if (predecessor.startMonth !== rule.startMonth) {
+        issue(`定期ルール「${rule.name}」の分割後に起票周期の位相が変わっています`, [
+          'recurringRules',
+          ri,
+          'startMonth',
+        ]);
+      }
+      if (!predecessor.splitEndLocked) {
+        issue(`定期ルール「${predecessor.name}」の分割終了点がロックされていません`, [
+          'recurringRules',
+          pkg.recurringRules.findIndex((candidate) => candidate.id === predecessor.id),
+          'splitEndLocked',
+        ]);
       }
     });
 
@@ -690,7 +825,6 @@ export const ledgerExportPackageSchema = z
     const monthlyCostIds = new Set<string>();
     // ⑤ ルール生成 item（id = `ccr-{ruleId}-{month}`）の月区間（同一ルール内で重複不可）。
     const ruleItemSpans = new Map<string, { name: string; from: string; to: string }[]>();
-    const ccrIdPattern = /^ccr-(.+)-(\d{4}-\d{2})$/;
     pkg.monthlyCostItems.forEach((mc, mi) => {
       const at = (...p: (string | number)[]) => ['monthlyCostItems', mi, ...p];
       if (monthlyCostIds.has(mc.id)) issue(`継続コストの ID が重複しています(${mc.id})`, at('id'));
@@ -728,12 +862,57 @@ export const ledgerExportPackageSchema = z
             `継続コスト「${mc.name}」の金額(${mc.amount})が購入の仕訳の金額(${debitAmount})と一致しません`,
             at('amount'),
           );
+
+        const purchaseRuleId = purchase.metadata?.recurringRuleId;
+        const purchaseRuleMonth = purchase.metadata?.recurringMonth;
+        const purchaseRule =
+          purchaseRuleId !== undefined ? recurringRuleById.get(purchaseRuleId) : undefined;
+        const purchaseRuleDestination =
+          purchaseRule?.spreadExpenseAccountId ?? purchaseRule?.debitAccountId;
+        if (
+          purchaseRule !== undefined &&
+          purchaseRuleMonth !== undefined &&
+          accountRole.get(purchaseRuleDestination ?? '') === 'expense-category' &&
+          mc.id !== ruleItemId(purchaseRule.id, purchaseRuleMonth)
+        ) {
+          issue(
+            `費用ルール由来の継続コスト「${mc.name}」は対応する決定的 ID が必要です`,
+            at('id'),
+          );
+        }
       }
 
       // ⑤ の収集: ルール生成 item の月区間。
-      const ccr = ccrIdPattern.exec(mc.id);
+      const ccr = parseRuleItemId(mc.id);
       if (ccr) {
-        const ruleId = ccr[1]!;
+        const { ruleId, month: postingMonth } = ccr;
+        const recurringRule = recurringRuleById.get(ruleId);
+        // 物理削除時は item を通常 ID へ付け替える。ccr ID のままなら由来ルールが必須。
+        if (recurringRule === undefined) {
+          issue(`継続コスト「${mc.name}」の由来ルール(${ruleId})が存在しません`, at('id'));
+        } else if (!ruleExistsAt(recurringRule, mc.startDate)) {
+          issue(
+            `継続コスト「${mc.name}」の作成日(${mc.startDate})が定期ルールの存在期間外です`,
+            at('startDate'),
+          );
+        }
+        if (postingMonth !== monthOf(mc.startDate)) {
+          issue(
+            `継続コスト「${mc.name}」の作成月(${monthOf(mc.startDate)})が ID の起票月(${postingMonth})と一致しません`,
+            at('startDate'),
+          );
+        }
+        const purchase = purchases.length === 1 ? purchases[0] : undefined;
+        if (
+          purchase !== undefined &&
+          (purchase.metadata?.recurringRuleId !== ruleId ||
+            purchase.metadata?.recurringMonth !== postingMonth)
+        ) {
+          issue(
+            `ルール由来の継続コスト「${mc.name}」の購入仕訳に対応するルール/月の由来がありません`,
+            at('id'),
+          );
+        }
         const spans = ruleItemSpans.get(ruleId) ?? [];
         spans.push({
           name: mc.name,
@@ -762,8 +941,9 @@ export const ledgerExportPackageSchema = z
     }
 
     // 科目の存在期間は、明示された端点だけを import 境界で検証する。
-    // startDate 未設定の旧 JSON は createdAt を下限として強制せず、そのまま受理する。
-    // 定期ルールは終了日を持たないため、参照科目も終了点なしの開区間である必要がある。
+    // 定期ルールの startDate は schema v6 で必須。旧版 JSON は読み替えず版境界で拒否する。
+    // 定期ルールは半開の存在期間を、科目参照では排他的終了日の前日までの有限区間へ変換する。
+    // 終了日のないルールだけは、参照科目にも終了点なしの開区間を要求する。
     const lifetimeCollections = {
       entries: pkg.journalEntries,
       schedules: pkg.cashflowSchedules,
@@ -773,7 +953,11 @@ export const ledgerExportPackageSchema = z
     pkg.accounts.forEach((account, ai) => {
       const violation = accountLifetimeViolation(
         account,
-        accountReferenceIntervals(account.id, lifetimeCollections),
+        accountReferenceIntervals(account.id, lifetimeCollections, {
+          ruleUsesItemCoverage: (rule) =>
+            accountRole.get(rule.spreadExpenseAccountId ?? rule.debitAccountId) ===
+            'expense-category',
+        }),
       );
       if (!violation) return;
       const edge = violation.edge === 'start' ? '開始日' : '終了日';

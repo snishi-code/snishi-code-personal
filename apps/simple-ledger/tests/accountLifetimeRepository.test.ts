@@ -97,6 +97,7 @@ describe('勘定科目の存在期間（保存境界）', () => {
         debitAccountId: archivedFixed.id,
         creditAccountId: cash.id,
         startMonth: '2026-07',
+        startDate: '2026-07-01',
       }),
     ).rejects.toMatchObject({ code: 'error.account.referenceOutsidePeriod' });
   });
@@ -113,6 +114,7 @@ describe('勘定科目の存在期間（保存境界）', () => {
       debitAccountId: fixed.id,
       creditAccountId: cash.id,
       startMonth: '2026-01',
+      startDate: '2026-01-01',
     });
     expect(await catchUpRecurringRules('2026-01-15')).toBe(1);
 

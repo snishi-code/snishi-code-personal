@@ -59,7 +59,11 @@ describe('定期ルールの初回起票日', () => {
     const firstDate = document.querySelector(
       `[data-ui="${UI.allocations.recurringFirstPostingDate}"]`,
     ) as HTMLInputElement;
+    const ruleStartDate = document.querySelector(
+      `[data-ui="${UI.allocations.recurringStartDate}"]`,
+    ) as HTMLInputElement;
     expect(firstDate.type).toBe('date');
+    expect(ruleStartDate).toHaveValue(todayLocal());
 
     fireEvent.change(name, { target: { value: '未来の定期支出' } });
     fireEvent.change(amount, { target: { value: '1500' } });
@@ -82,7 +86,11 @@ describe('定期ルールの初回起票日', () => {
     const saved = (await loadLedger()).recurringRules.find(
       (rule) => rule.name === '未来の定期支出',
     );
-    expect(saved).toMatchObject({ startMonth: '2031-03', dayOfMonth: 31 });
+    expect(saved).toMatchObject({
+      startMonth: '2031-03',
+      dayOfMonth: 31,
+      startDate: todayLocal(),
+    });
   });
 
   it('編集時は存在しない日をその月の最終日へ丸めて日付欄へ戻す', async () => {
@@ -130,6 +138,14 @@ describe('定期ルールの初回起票日', () => {
       { target: { value: '2000' } },
     );
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
+    await waitFor(() => {
+      expect(
+        document.querySelector(`[data-ui="${UI.allocations.recurringAmountChangeDialog}"]`),
+      ).toBeInTheDocument();
+    });
+    fireEvent.click(
+      document.querySelector(`[data-ui="${UI.allocations.recurringAmountChangeAll}"]`)!,
+    );
 
     await waitFor(
       () => {

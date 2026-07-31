@@ -20,7 +20,7 @@
 ```jsonc
 {
   "appId": "snishi-code.simple-ledger-v2",
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "ledgerId": "ledger",
   "exportedAt": "2026-07-29T00:00:00.000Z",
   "deviceId": "<uuid>",
@@ -75,6 +75,7 @@
 | **v2→v3**（2026-07-29・指示書#4）              | 廃止概念の一掃（`fixed-asset` / `deferred-asset` role・按分 `allocations`・投資評価損益）・補正の通常化・並び順の正本化・ヘッダーの日付選択化・用語統一。旧 `allocations` ストアを削除（DB_VERSION 4）。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | **v3→v4**（2026-07-30・指示書#5）              | **継続コスト資産の4項目モデル一本化**。`MonthlyCostItem` を 8 フィールド化（`startDate`/`endDate?`。`kind`/`costMonths`/`repeatEveryMonths`/`startMonth`/`endMonth`/`paymentSourceAccountId`/`recognitionCreditAccountId`/`status` 等を撤去）。**購入の仕訳を保存される仕訳にする**（`metadata.monthlyCostId`）。回収の振替（`metadata.monthlyCostRecovery`）を追加。`AssetDisposal`（処分）・一時停止・実績動的償却を全廃（`assetDisposals` ストア削除。DB_VERSION 5）。`RecurringRule` に `everyMonths`（必須）と `spreadExpenseAccountId?`（月割りするルール）を追加。科目名「開始残高」→「初期残高」。実データの変換 = `_workspace-management/scripts/convert-ledger-v3-to-v4.mjs`（単発・アプリ内 migration なし）。                    |
 | **v4→v5**（2026-07-30・実ユーズレビュー第2弾） | **取り置きの機能ごと全廃**（`reserves` ストア・`ReserveItem`・`metadata.reserveId`・role `reserve-asset`・予定 CF の `source:'reserve'` を撤去。DB_VERSION 6）。**`Account.movable?`（「自由に動かせる」・現預金のみ・`false` だけ保存）を追加**（資金繰りの原資 =「自由に動かせるお金」1 値）。**支出ルールは周期にかかわらず常に台帳経由**（月割りするルールの条件 `everyMonths >= 2` を撤廃・`>= 1`。簿記編集ルールにも継続コスト化を開放し、購入の仕訳の貸方・ルールの源泉/費用の行き先は内部集約・残高調整以外の全 role = `RECURRING_POSTABLE_ROLES`）。過去に起票済みの支出形ルール由来の仕訳も変換で台帳経由へ揃えた。実データの変換 = `_workspace-management/scripts/convert-ledger-v4-to-v5.mjs`（単発・アプリ内 migration なし）。 |
+| **v5→v6**（2026-07-31・定期ルール線分化）      | `RecurringRule.startDate`（存在開始日・必須）と `endDate?`（排他的終了点）を追加。金額変更は全期間遡及または当日分割を明示選択し、ルール削除時も既起票事実を保持する。既存 v5 はアプリ内で読み替えず、リポジトリ外の単発変換で開始日と由来整合を確定してから取り込む。ストア構成は不変のため DB_VERSION 6 を据え置く。 |
 
 ### `MonthlyCostItem`（継続コスト資産）
 
@@ -97,9 +98,39 @@
 `id` / `name` / `amount` / `dayOfMonth` / `everyMonths`（必須。1 = 毎月）/
 `spreadExpenseAccountId?`（正規化済みの費用の行き先）/
 `debitAccountId`（費用ルールでは継続コスト台帳、費用以外では行き先）/ `creditAccountId` / `startMonth`
-（位相の基点）/ `postedThroughMonth?`（起票カーソル）/ `paused?`。
-spread なし・debit が費用の保存済み v5 も受理し、次の catch-up から同じ費用ルールとして解釈する。
-編集保存時は spread + 台帳借方の新形式へ正規化する。
+（周期の位相 anchor）/ `startDate`（存在開始日・含む・必須）/ `splitFromRuleId?`（金額分割の直前 segment）/
+`splitEndLocked?: true`（分割済み終了点の不変印）/
+`endDate?`（存在終了日・含まない）/
+`postedThroughMonth?`（起票カーソル）/ `paused?`。
+
+- 存在期間は半開区間 **`[startDate, endDate)`**。`startDate` は必須で、`endDate` がある場合は
+  開始日より後でなければならない。
+- `startMonth` は `everyMonths` の周期の位相だけを決め、存在期間とは独立する。起票日が存在期間内に
+  入るときだけ catch-up・未来投影の対象になる。
+- `paused` は一時停止であり、`endDate` を設定しない。再開時も `startMonth` を変えず、停止中の月を
+  遡って起票しない。恒久終了（アーカイブ）は `endDate` を設定して表す。
+- 金額の遡及変更は、同じ `rule.id` が自動生成した全保存仕訳・item の金額を、利用者が手編集した月も
+  含めて新額へ同一トランザクションで揃える。
+- 今日からの金額変更は旧ルールを `endDate=today`、新しい id の後継ルールを `startDate=today` として
+  分割する。今日以降にすでに起票された仕訳・item は後継へ移管し、今日より前の事実は旧ルールに残す。
+  移管時に変更するのは由来 ID と今回選択した金額だけで、個別編集済みの摘要・科目・item の名称・
+  期間・認識先は保持する。後継の金額以外の設定は次の未起票回から適用する。`startMonth` の位相は
+  後継へ引き継ぐため、分割日と起票日は別の概念である。
+- 分割後継は `splitFromRuleId` で直前 segment を指し、旧 `endDate` = 新 `startDate` を不変とする。
+  片側だけの境界編集による重複起票を防ぐため、連鎖中の開始・終了点は UI/保存境界で固定する。
+  旧 segment の `splitEndLocked` は後継を物理削除した後も残し、中立化した後継の仕訳を旧ルールが
+  再起票しないよう境界を閉じ続ける。削除した segment を指す残存後継の `splitFromRuleId` は、
+  同一 transaction で剥がす。
+- ルール削除は、起票済みの仕訳・item を削除しない。ルールへの由来参照を同一トランザクションで
+  剥がし、仕訳の `rec-{ruleId}-{month}` と item の `ccr-{ruleId}-{month}` を通常 ID へ付け替える。
+  反転仕訳の `reversalOfEntryId`、予定 CF の `linkedEntryId` / `monthlyCostId` も同じ transaction で
+  更新して独立した事実にした後、ルールだけを削除する。
+- 「今日から」の分割は、旧ルールが今日より前に少なくとも1日存在し、今日も存在期間内にある場合だけ
+  選択できる。開始前・開始当日・終了後は空の旧 segment を作らず、全期間変更だけを許可する。
+
+schema v6 の費用ルールは `spreadExpenseAccountId` = 費用科目、
+`debitAccountId` = 継続コスト台帳の正規形だけを受理する。spread なし・debit が費用の v5 形式は
+アプリ内で読み替えず、リポジトリ外の単発変換で正規化してから取り込む。
 
 ### `Tag`（分析タグ）
 
@@ -171,7 +202,11 @@ import では strip される）。
 - 定期ルール: `everyMonths` は 1〜1200（配分月数の上限と同じ）。論理的な行き先が費用なら
   **周期にかかわらず**借方 = 継続コスト台帳として item と対で起票する。費用以外は行き先へ
   直接起票する。定期ルール由来の仕訳は `recurringRuleId`/`recurringMonth`
-  をペアで持ち、ルールが存在し、同ルール・同月の重複が無い。
+  をペアで持ち、ルールが存在し、同ルール・同月の重複が無い。`startDate` は必須で、`endDate` は
+  開始日より後の exclusive endpoint であることを検証する。起票月の日付がルールの半開存在期間に含まれ、
+  参照科目の存在期間にも含まれることを保存境界・import の双方で確認する。
+  金額の遡及変更、今日での segment 分割、削除時の由来解除は、ルール・仕訳・item・revision を
+  単一 readwrite transaction で更新し、途中状態を保存しない。
 - 残高補正: `delta === actualBalance − expectedBalance`・対象/相手科目の存在と形・kind=normal。
 - 予定 CF / タグ: id 一意・参照整合（posted の予定 CF は存在する仕訳に紐づく等）。
 
@@ -220,7 +255,7 @@ step 4 で見た `deviceId + revision` は step 5 の保存 transaction でも�
 
 ## migration ポリシー（後方互換をコードで持たない）
 
-- `schemaVersion` を必ず持つ。現行は **`5`**（`SCHEMA_VERSION`・`src/data/constants.ts`）。
+- `schemaVersion` を必ず持つ。現行は **`6`**（`SCHEMA_VERSION`・`src/data/constants.ts`）。
 - **アプリ内に migration チェーンを持たない**（作者決定・単発変換方式）。版を上げたら:
   1. `SCHEMA_VERSION` を +1 する（旧版 JSON / スナップショットは fail-closed に拒否される）。
   2. 実データは書き出した JSON を**単発の変換スクリプト**（`_workspace-management/scripts/`）で
@@ -229,6 +264,9 @@ step 4 で見た `deviceId + revision` は step 5 の保存 transaction でも�
      ストアを削除して不足を作る」冪等な形（`src/data/db.ts`）。
 - 未対応版は **fail-closed**（取り込まない）。復旧面はルート直下の ErrorBoundary
   （JSON import / DB 全消去の 2 ボタン）が受ける。
+- 2026-07-31 の定期ルール線分化は保存形式を厳格化するため `SCHEMA_VERSION=6` へ上げる。
+  ストア構成は変えないので `DB_VERSION=6` は据え置く。v5 の未設定開始日をアプリ内で推測せず、
+  期間外の起票、orphan の `ccr` item、由来のない購入仕訳とともに fail-closed に拒否する。
 
 ## 外部送信ゼロとの関係
 

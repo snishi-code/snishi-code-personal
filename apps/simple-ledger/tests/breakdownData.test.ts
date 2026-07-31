@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../src/domain/accounting';
 import { reportEntriesForAsOf } from '../src/domain/reportEntries';
 import { reportBasis } from '../src/domain/reportPeriod';
+import { SCHEMA_VERSION } from '../src/domain/constants';
 import type { Account, JournalEntry, Ledger } from '../src/domain/types';
 import { buildSectionTrends } from '../src/ui/screens/breakdownData';
 import './setup';
@@ -63,7 +64,7 @@ function ledgerOf(journalEntries: JournalEntry[]): Ledger {
   return {
     meta: {
       id: 'ledger',
-      schemaVersion: 1,
+      schemaVersion: SCHEMA_VERSION,
       revision: 0,
       deviceId: 'test',
       createdAt: ts,

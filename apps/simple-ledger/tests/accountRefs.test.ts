@@ -64,6 +64,7 @@ const rule: RecurringRule = {
   debitAccountId: 'rule-debit',
   creditAccountId: 'rule-credit',
   startMonth: '2026-06',
+  startDate: '2026-06-01',
   createdAt: 'x',
   updatedAt: 'x',
 };

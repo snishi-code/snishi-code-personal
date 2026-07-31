@@ -5,7 +5,7 @@
  *  - 継続コスト資産: 項目名・金額・開始日・終了日の4項目。終了日までの月割りは導出で、
  *    終了日を過ぎたら一覧から消える（アーカイブ = 終了日の設定）。
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Modal } from '../overlays';
 import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
@@ -43,6 +43,11 @@ import {
   recurringKindOf,
   type RecurringKind,
 } from '../../domain/recurring';
+import {
+  accountExistsAt,
+  effectiveRecurringRuleStartDate,
+  ruleExistsAt as recurringRuleExistsAt,
+} from '../../domain/accountLifetime';
 import { quickSpanEndDate } from '../ccQuickSpan';
 import { Money } from '../money';
 import { EntrySheet } from './EntrySheet';
@@ -112,15 +117,14 @@ export function Allocations({
     .sort(compareMonthlyCostItems);
 
   const allRules = ledger?.recurringRules ?? [];
-  const rules = allRules.filter((r) => r.startMonth <= currentYm);
-  // 参照科目が削除/アーカイブ済みのルールは catch-up が起票を止める（fail-soft）。
-  // 黙ってスキップしない＝一覧の行で警告する（監査 P1-7）。削除は accountRefs が塞ぐため、
-  // 通常ここに出るのはアーカイブ由来だけ。
+  const rules = allRules.filter((r) => recurringRuleExistsAt(r, asOf));
+  // 参照科目が削除済み、または選択断面で存在期間外なら行で警告する。
+  // catch-up も各起票日の科目存在期間を照合して fail-soft に起票を止める。
   const ruleRefBroken = (r: RecurringRule): boolean => {
     const ids = [r.creditAccountId, recurringDestinationAccountId(r)];
     return ids.some((id) => {
       const account = accountsMap.get(id);
-      return !account || account.archived;
+      return !account || !accountExistsAt(account, asOf);
     });
   };
   const ruleKindLabel = (r: RecurringRule): string => {
@@ -192,7 +196,15 @@ export function Allocations({
                     ) : null}
                   </div>
                   <div className="list__sub">
-                    {ruleIntervalLabel(r)}・{name(r.creditAccountId)} →{' '}
+                    {t('recurring.rulePeriod')}:{' '}
+                    {effectiveRecurringRuleStartDate(r)} 〜{' '}
+                    {r.endDate !== undefined
+                      ? t('recurring.ruleEndBefore', { date: r.endDate })
+                      : t('recurring.ruleNoEnd')}
+                  </div>
+                  <div className="list__sub">
+                    {t('recurring.postingSchedule')}: {ruleIntervalLabel(r)}・
+                    {name(r.creditAccountId)} →{' '}
                     {name(recurringDestinationAccountId(r))}
                     {recurringExpenseAccountId(r, (id) => accountsMap.get(id)?.role) !==
                     undefined ? (
@@ -514,6 +526,7 @@ function RecurringRuleSheet({
 }) {
   const { ledger, createRecurringRule, saveRecurringRule } = useLedger();
   const accounts = sortAccounts(ledger?.accounts ?? []);
+  const currency = ledger?.settings.currency ?? 'JPY';
 
   const initialFromGroups = groupedAccountsByRole(
     accounts,
@@ -563,11 +576,58 @@ function RecurringRuleSheet({
   const [firstPostingDate, setFirstPostingDate] = useState(() =>
     existing ? clampDayToMonth(existing.startMonth, existing.dayOfMonth) : todayLocal(),
   );
+  const [postingDayText, setPostingDayText] = useState(
+    existing !== undefined ? String(existing.dayOfMonth) : '',
+  );
+  const [startDate, setStartDate] = useState(
+    existing ? effectiveRecurringRuleStartDate(existing) : todayLocal(),
+  );
+  const [endDate, setEndDate] = useState(existing?.endDate ?? '');
   const [error, setError] = useState<string | undefined>(undefined);
+  const [pendingAmountChange, setPendingAmountChange] = useState<{
+    rule: RecurringRule;
+    effectiveDate: string;
+  } | null>(null);
+  const [amountChangeError, setAmountChangeError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const startBoundaryLocked = existing?.splitFromRuleId !== undefined;
+  const endBoundaryLocked = existing?.splitEndLocked === true;
+  const phaseAnchorLocked = startBoundaryLocked || endBoundaryLocked;
+  const canSplitAtEffectiveDate =
+    pendingAmountChange !== null &&
+    existing !== undefined &&
+    pendingAmountChange.effectiveDate > effectiveRecurringRuleStartDate(existing) &&
+    recurringRuleExistsAt(existing, pendingAmountChange.effectiveDate) &&
+    (pendingAmountChange.rule.endDate === undefined ||
+      pendingAmountChange.effectiveDate < pendingAmountChange.rule.endDate);
+
+  async function persistExisting(
+    rule: RecurringRule,
+    options?: {
+      amountChangeMode?: 'retroactive' | 'split';
+      effectiveDate?: string;
+    },
+  ) {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    setError(undefined);
+    setAmountChangeError(undefined);
+    try {
+      await saveRecurringRule(rule, options);
+      onClose();
+    } catch (e) {
+      const message = errorText(e);
+      if (pendingAmountChange) setAmountChangeError(message);
+      else setError(message);
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  }
 
   async function submit() {
-    if (submitting) return;
+    if (submittingRef.current) return;
     const amount = amountText === '' ? 0 : Number.parseInt(amountText, 10);
     if (!Number.isInteger(amount) || amount < 1) {
       setError(t('error.common.amountInvalid'));
@@ -583,18 +643,33 @@ function RecurringRuleSheet({
       setError(t('error.recurring.everyMonthsInvalid'));
       return;
     }
-    const day = Number.parseInt(firstPostingDate.slice(8, 10), 10);
-    const startMonth = monthOf(firstPostingDate);
+    if (!isValidIsoDate(startDate)) {
+      setError(t('error.recurring.periodInvalid'));
+      return;
+    }
+    if (endDate !== '' && (!isValidIsoDate(endDate) || endDate <= startDate)) {
+      setError(t('error.recurring.periodInvalid'));
+      return;
+    }
+    const day = phaseAnchorLocked
+      ? Number.parseInt(postingDayText, 10)
+      : Number.parseInt(firstPostingDate.slice(8, 10), 10);
+    if (!Number.isInteger(day) || day < 1 || day > 31) {
+      setError(t('error.recurring.dayOfMonthInvalid'));
+      return;
+    }
+    const startMonth =
+      phaseAnchorLocked && existing ? existing.startMonth : monthOf(firstPostingDate);
     // 日付欄は「元の dayOfMonth をその月へクランプした結果」を表示している。表示どおりのまま
     // なら日を触っていない＝元の値を保つ（2 月のルールを開いて保存しただけで 31 → 28 に
     // 落ち、以後の起票日がずれるのを防ぐ）。日を変えたときだけ入力値を採用する。
     const dayOfMonth =
+      !phaseAnchorLocked &&
       existing !== undefined &&
       clampDayToMonth(startMonth, existing.dayOfMonth).slice(8, 10) ===
         firstPostingDate.slice(8, 10)
         ? existing.dayOfMonth
         : day;
-    setSubmitting(true);
     setError(undefined);
     try {
       if (existing) {
@@ -607,13 +682,24 @@ function RecurringRuleSheet({
           debitAccountId,
           creditAccountId,
           startMonth,
+          startDate,
           updatedAt: nowIso(),
         };
+        if (endDate !== '') next.endDate = endDate;
+        else delete next.endDate;
         // 保存境界が選択した行き先 role から新形式へ正規化する。既存 spread を残すと
         // 変更前の行き先が優先されるため、画面からは常に論理的な借方だけを渡す。
         delete next.spreadExpenseAccountId;
-        await saveRecurringRule(next);
+        if (amount !== existing.amount) {
+          setPendingAmountChange({ rule: next, effectiveDate: todayLocal() });
+          setAmountChangeError(undefined);
+          return;
+        }
+        await persistExisting(next);
+        return;
       } else {
+        submittingRef.current = true;
+        setSubmitting(true);
         await createRecurringRule({
           name: name.trim(),
           amount,
@@ -622,17 +708,21 @@ function RecurringRuleSheet({
           debitAccountId,
           creditAccountId,
           startMonth,
+          startDate,
+          ...(endDate !== '' ? { endDate } : {}),
         });
       }
       onClose();
     } catch (e) {
       setError(errorText(e));
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
 
   return (
-    <Modal
+    <>
+      <Modal
       title={existing ? t('recurring.editTitle') : t('recurring.createTitle')}
       onClose={onClose}
       dismissMode="if-clean"
@@ -651,7 +741,8 @@ function RecurringRuleSheet({
               name.trim() === '' ||
               amountText === '' ||
               everyText === '' ||
-              firstPostingDate === '' ||
+              (phaseAnchorLocked ? postingDayText === '' : firstPostingDate === '') ||
+              startDate === '' ||
               creditAccountId === '' ||
               debitAccountId === ''
             }
@@ -720,17 +811,154 @@ function RecurringRuleSheet({
           onChange={(v) => setEveryText(v.replace(/[^\d]/g, ''))}
           dataUi={UI.allocations.recurringEvery}
         />
+        {phaseAnchorLocked ? (
+          <TextInput
+            label={t('recurring.postingDayOfMonth')}
+            required
+            inputMode="numeric"
+            value={postingDayText}
+            onChange={(value) => setPostingDayText(value.replace(/[^\d]/g, ''))}
+            hint={t('recurring.firstPostingDateSplitLocked')}
+            dataUi={UI.allocations.recurringFirstPostingDate}
+          />
+        ) : (
+          <TextInput
+            label={t('recurring.firstPostingDate')}
+            type="date"
+            required
+            value={firstPostingDate}
+            onChange={setFirstPostingDate}
+            hint={t('recurring.firstPostingDateHint')}
+            dataUi={UI.allocations.recurringFirstPostingDate}
+          />
+        )}
         <TextInput
-          label={t('recurring.firstPostingDate')}
+          label={t('recurring.ruleStartDate')}
           type="date"
           required
-          value={firstPostingDate}
-          onChange={setFirstPostingDate}
-          dataUi={UI.allocations.recurringFirstPostingDate}
+          value={startDate}
+          onChange={setStartDate}
+          hint={t(
+            startBoundaryLocked
+              ? 'recurring.ruleStartDateSplitLocked'
+              : 'recurring.ruleStartDateHint',
+          )}
+          disabled={startBoundaryLocked}
+          dataUi={UI.allocations.recurringStartDate}
+        />
+        <TextInput
+          label={t('recurring.ruleEndDate')}
+          type="date"
+          value={endDate}
+          onChange={setEndDate}
+          hint={t(
+            endBoundaryLocked ? 'recurring.ruleEndDateSplitLocked' : 'recurring.ruleEndDateHint',
+          )}
+          disabled={endBoundaryLocked}
+          dataUi={UI.allocations.recurringEndDate}
         />
         {existing?.paused ? <p className="field__hint">{t('recurring.resumeNote')}</p> : null}
       </div>
-    </Modal>
+      </Modal>
+      {pendingAmountChange && existing ? (
+        <Modal
+          title={t('recurring.amountChangeTitle')}
+          variant="dialog"
+          dismissMode="never"
+          onClose={() => {
+            if (submitting) return;
+            setPendingAmountChange(null);
+            setAmountChangeError(undefined);
+          }}
+          dataUi={UI.allocations.recurringAmountChangeDialog}
+          footer={
+            <button
+              type="button"
+              className="btn btn--ghost"
+              disabled={submitting}
+              onClick={() => {
+                setPendingAmountChange(null);
+                setAmountChangeError(undefined);
+              }}
+              data-ui={UI.allocations.recurringAmountChangeCancel}
+            >
+              {t('recurring.amountChangeBack')}
+            </button>
+          }
+        >
+          <div className="stack">
+            <p>
+              {t(
+                canSplitAtEffectiveDate
+                  ? 'recurring.amountChangeBody'
+                  : 'recurring.amountChangeWholeOnlyBody',
+                { date: pendingAmountChange.effectiveDate },
+              )}
+            </p>
+            <div className="kv">
+              <span className="muted">{t('recurring.amount')}</span>
+              <span>
+                <Money amount={existing.amount} currency={currency} /> →{' '}
+                <Money amount={pendingAmountChange.rule.amount} currency={currency} />
+              </span>
+            </div>
+            {amountChangeError ? (
+              <div className="field__error" role="alert">
+                <Icon name="alert" size={14} />
+                {amountChangeError}
+              </div>
+            ) : null}
+            <button
+              type="button"
+              className="list__row-btn"
+              disabled={submitting}
+              onClick={() =>
+                persistExisting(pendingAmountChange.rule, {
+                  amountChangeMode: 'retroactive',
+                })
+              }
+              data-ui={UI.allocations.recurringAmountChangeAll}
+            >
+              <span>
+                <span className="list__row-btn__label">
+                  {t('recurring.amountChangeAll')}
+                </span>
+                <span className="list__sub">{t('recurring.amountChangeAllHint')}</span>
+              </span>
+              <Icon name="chevronRight" size={16} />
+            </button>
+            {canSplitAtEffectiveDate ? (
+              <button
+                type="button"
+                className="list__row-btn"
+                disabled={submitting}
+                onClick={() =>
+                  persistExisting(pendingAmountChange.rule, {
+                    amountChangeMode: 'split',
+                    effectiveDate: pendingAmountChange.effectiveDate,
+                  })
+                }
+                data-ui={UI.allocations.recurringAmountChangeFromToday}
+              >
+                <span>
+                  <span className="list__row-btn__label">
+                    {t('recurring.amountChangeFromToday', {
+                      date: pendingAmountChange.effectiveDate,
+                    })}
+                  </span>
+                  <span className="list__sub">
+                    {t('recurring.amountChangeFromTodayHint', {
+                      date: pendingAmountChange.effectiveDate,
+                    })}
+                  </span>
+                </span>
+                <Icon name="chevronRight" size={16} />
+              </button>
+            ) : null}
+          </div>
+        </Modal>
+      ) : null}
+    </>
   );
 }
 

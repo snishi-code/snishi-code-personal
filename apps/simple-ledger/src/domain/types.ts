@@ -207,8 +207,8 @@ export interface RecurringRule {
   /**
    * 正規化済みの費用の行き先（任意）。行き先 role が費用なら必ず継続コスト化し、
    * 起票のたびに item（id = `ccr-{ruleId}-{month}`・endDate = 周期末）を同一 tx で自動生成し、
-   * 購入の仕訳の借方は継続コスト台帳に固定される。旧形式ではこの値が無く debitAccountId が
-   * 費用を指すことがあり、読み込み側は同じ意味に解釈する。
+   * 購入の仕訳の借方は継続コスト台帳に固定される。v6 の費用ルールはこの
+   * 正規形だけを保存する。
    */
   spreadExpenseAccountId?: string;
   /** 保存上の借方（費用ルールでは継続コスト台帳、費用以外では論理的な行き先）。 */
@@ -217,6 +217,17 @@ export interface RecurringRule {
   creditAccountId: string;
   /** 位相の基点 'YYYY-MM'（再開時も書き換えない＝周期の位相を保つ）。 */
   startMonth: string;
+  /** ルールの存在開始日（含む）。起票周期の位相とは独立する。 */
+  startDate: string;
+  /** 金額変更の分割で生まれた後継 segment が参照する直前のルール。 */
+  splitFromRuleId?: string;
+  /** 後継を物理削除した後も保持する、分割済み終了境界のロック。 */
+  splitEndLocked?: true;
+  /**
+   * ルールの存在終了日（含まない）。未設定 = 将来へ継続する。
+   * 指定日の起票を旧ルールに含めず、同日開始の後継ルールへ一意に渡せるよう半開区間にする。
+   */
+  endDate?: string;
   /**
    * 起票済みカーソル（この月まで処理済み）。キャッチアップが管理する。
    * 起票済み仕訳をユーザーが削除しても再起票しない（スキップの尊重）。

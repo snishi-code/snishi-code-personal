@@ -80,6 +80,7 @@ describe('年月の暦検証', () => {
     debitAccountId: 'expense',
     creditAccountId: 'bank',
     startMonth: '2026-12',
+    startDate: '2026-12-01',
     createdAt: 'x',
     updatedAt: 'x',
   };
@@ -88,6 +89,9 @@ describe('年月の暦検証', () => {
     expect(entryMetadataSchema.safeParse({ recurringMonth: '2026-12' }).success).toBe(true);
     expect(entryMetadataSchema.safeParse({ recurringMonth: '2026-99' }).success).toBe(false);
     expect(recurringRuleSchema.safeParse(rule).success).toBe(true);
+    const missingStartDate = { ...rule } as Record<string, unknown>;
+    delete missingStartDate.startDate;
+    expect(recurringRuleSchema.safeParse(missingStartDate).success).toBe(false);
     expect(recurringRuleSchema.safeParse({ ...rule, startMonth: '2026-99' }).success).toBe(false);
     expect(recurringRuleSchema.safeParse({ ...rule, postedThroughMonth: '2026-00' }).success).toBe(
       false,
@@ -478,25 +482,35 @@ describe('勘定科目の存在期間（schema/import）', () => {
   });
 
   it('定期ルールの参照は開始日から終了なしの開区間として扱う', () => {
+    const ledger = account(
+      CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      '継続コスト台帳',
+      'asset',
+      'continuing-cost-asset',
+    );
     const rule = {
       id: 'rule',
       name: '毎月の支出',
       amount: 1000,
       dayOfMonth: 31,
       everyMonths: 1,
-      debitAccountId: 'food',
+      debitAccountId: ledger.id,
+      spreadExpenseAccountId: 'food',
       creditAccountId: 'cash',
       startMonth: '2026-04',
+      startDate: '2026-04-01',
       createdAt: 'x',
       updatedAt: 'x',
     };
     expect(
-      ledgerExportPackageSchema.safeParse(basePackage({ recurringRules: [rule] })).success,
+      ledgerExportPackageSchema.safeParse(
+        basePackage({ accounts: [cash, food, ledger], recurringRules: [rule] }),
+      ).success,
     ).toBe(true);
     expect(
       ledgerExportPackageSchema.safeParse(
         basePackage({
-          accounts: [{ ...cash, endDate: '2099-12-31' }, food],
+          accounts: [{ ...cash, endDate: '2099-12-31' }, food, ledger],
           recurringRules: [rule],
         }),
       ).success,
@@ -504,7 +518,7 @@ describe('勘定科目の存在期間（schema/import）', () => {
     expect(
       ledgerExportPackageSchema.safeParse(
         basePackage({
-          accounts: [cash, { ...food, startDate: '2026-05-01' }],
+          accounts: [cash, { ...food, startDate: '2026-05-01' }, ledger],
           recurringRules: [rule],
         }),
       ).success,
@@ -961,6 +975,17 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
     expect(monthlyCostItemSchema.safeParse(open).success).toBe(true);
     expect(ledgerExportPackageSchema.safeParse(mcPkg([open])).success).toBe(true);
   });
+  it('集約台帳の well-known ID を別 role として使うパッケージは invalid', () => {
+    const invalid = {
+      ...mcPkg([base]),
+      accounts: [
+        cash,
+        food,
+        { ...ccLedger, name: '偽の台帳', role: 'daily-asset' as const },
+      ],
+    };
+    expect(ledgerExportPackageSchema.safeParse(invalid).success).toBe(false);
+  });
   it('endDate < startDate / 暦にない日付 / 1200ヶ月超は item schema で invalid', () => {
     expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2026-06-14' }).success).toBe(false);
     expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2027-02-30' }).success).toBe(false);
@@ -1140,12 +1165,44 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
       createdAt: 'x',
       updatedAt: 'x',
     });
+    const rule = {
+      id: 'rule1',
+      name: '火災保険',
+      amount: 60000,
+      dayOfMonth: 25,
+      everyMonths: 12,
+      debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      spreadExpenseAccountId: 'food',
+      creditAccountId: 'cash',
+      startMonth: '2026-04',
+      startDate: '2026-04-01',
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const rulePkg = (items: Record<string, unknown>[]) => ({
+      ...mcPkg(
+        items,
+        items.map((item) => {
+          const month = (item.id as string).slice(-7);
+          return purchaseOf(item, {
+            id: `rec-${rule.id}-${month}`,
+            metadata: {
+              inputMode: 'expense',
+              monthlyCostId: item.id,
+              recurringRuleId: rule.id,
+              recurringMonth: month,
+            },
+          });
+        }),
+      ),
+      recurringRules: [rule],
+    });
     const a = cycle('2026-04', '2026-04-25', '2027-03-31');
     const b = cycle('2027-04', '2027-04-25', '2028-03-31');
-    expect(ledgerExportPackageSchema.safeParse(mcPkg([a, b])).success).toBe(true);
+    expect(ledgerExportPackageSchema.safeParse(rulePkg([a, b])).success).toBe(true);
     // a の終了日を伸ばして 2027-04 と重ねると invalid（当該月が 2 倍計上される）。
     const overlapped = { ...a, endDate: '2027-04-30' };
-    const pkg = mcPkg([overlapped, b]);
+    const pkg = rulePkg([overlapped, b]);
     expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(false);
   });
   it('仕訳・予定CF の monthlyCostId が存在しないと invalid', () => {
@@ -1311,6 +1368,7 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
     debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
     creditAccountId: 'bank',
     startMonth: '2026-07',
+    startDate: '2026-07-01',
     createdAt: 'x',
     updatedAt: 'x',
   };
@@ -1393,12 +1451,28 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
         .success,
     ).toBe(true);
   });
-  it('package: 費用の行き先は income-category でも valid（健康保険 = 収入減として月割り）', () => {
+  it('package: 費用の論理的な行き先と源泉が同一なルールは invalid', () => {
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        rulePkg({ ...spreadRule, creditAccountId: spreadRule.spreadExpenseAccountId }),
+      ).success,
+    ).toBe(false);
+  });
+  it('package: spread の行き先は費用科目だけ valid', () => {
     expect(
       ledgerExportPackageSchema.safeParse(
         rulePkg({ ...spreadRule, spreadExpenseAccountId: 'salary' }),
       ).success,
-    ).toBe(true);
+    ).toBe(false);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        rulePkg({
+          ...spreadRule,
+          spreadExpenseAccountId: undefined,
+          debitAccountId: 'fixed',
+        }),
+      ).success,
+    ).toBe(false);
   });
   it('package: 源泉・費用の行き先とも残高調整科目（system-adjustment）は invalid', () => {
     expect(

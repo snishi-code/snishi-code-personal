@@ -82,7 +82,10 @@ interface LedgerContextValue {
   removeSchedule: (id: string) => Promise<void>;
   /** 定期ルール（作成/変更後は経過分を即キャッチアップ起票する）。 */
   createRecurringRule: (input: repo.RecurringRuleInput) => Promise<void>;
-  saveRecurringRule: (rule: RecurringRule) => Promise<void>;
+  saveRecurringRule: (
+    rule: RecurringRule,
+    options?: repo.RecurringRuleSaveOptions,
+  ) => Promise<void>;
   /** 停止/再開（再開は位相を保ち、停止中の月を遡って起票しない）。 */
   setRecurringRulePaused: (id: string, paused: boolean) => Promise<void>;
   removeRecurringRule: (id: string) => Promise<void>;
@@ -322,35 +325,52 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [refresh, toast],
   );
 
+  const finishRecurringMutation = useCallback(async () => {
+    // ルール本体の保存後に起票または再読込だけが失敗しても、再送可能な
+    // 「未保存」扱いに戻さない。新規では別 ID の同一ルール、分割では
+    // 追加 segment を重複保存し得るため、durable 境界の後は警告だけで完了する。
+    let followupError: unknown;
+    try {
+      await repo.catchUpRecurringRules(todayLocal());
+    } catch (e) {
+      followupError = e;
+    }
+    try {
+      await refresh();
+    } catch (e) {
+      followupError ??= e;
+    }
+    if (followupError !== undefined) {
+      toast.show(t('toast.recurringSavedFollowupFailed'), 'error');
+    } else {
+      toast.show(t('toast.saved'), 'success');
+    }
+  }, [refresh, toast]);
+
   const createRecurringRule = useCallback<LedgerContextValue['createRecurringRule']>(
     async (input) => {
       try {
         await repo.createRecurringRule(input);
-        // 開始月が過去〜当月なら、その場で経過分を起票する（登録直後に仕訳が見える）。
-        await repo.catchUpRecurringRules(todayLocal());
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
       } catch (e) {
         toast.show(errorText(e), 'error');
         throw e;
       }
+      await finishRecurringMutation();
     },
-    [refresh, toast],
+    [finishRecurringMutation, toast],
   );
 
   const saveRecurringRule = useCallback<LedgerContextValue['saveRecurringRule']>(
-    async (rule) => {
+    async (rule, options) => {
       try {
-        await repo.upsertRecurringRule(rule);
-        await repo.catchUpRecurringRules(todayLocal());
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
+        await repo.upsertRecurringRule(rule, options);
       } catch (e) {
         toast.show(errorText(e), 'error');
         throw e;
       }
+      await finishRecurringMutation();
     },
-    [refresh, toast],
+    [finishRecurringMutation, toast],
   );
 
   const setRecurringRulePaused = useCallback<LedgerContextValue['setRecurringRulePaused']>(

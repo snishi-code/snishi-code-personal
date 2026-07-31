@@ -10,10 +10,13 @@ import {
   archiveMonthlyCost,
   createAdjustment,
   createContinuousCost,
+  createRecurringRule,
   deleteAdjustment,
   deleteEntry,
   deleteMonthlyCost,
+  deleteRecurringRule,
   loadLedger,
+  setRecurringRulePaused,
   upsertAccount,
   upsertEntry,
   upsertMonthlyCost,
@@ -21,7 +24,7 @@ import {
 import { accountBalance } from '../src/domain/accounting';
 import { buildSimpleEntry } from '../src/domain/entry';
 import { reportEntriesForAsOf } from '../src/domain/reportEntries';
-import type { Account, JournalEntry, MonthlyCostItem } from '../src/domain/types';
+import type { Account, JournalEntry, MonthlyCostItem, RecurringRule } from '../src/domain/types';
 
 const START_DATE = '2025-01-01';
 const END_DATE = '2025-12-31';
@@ -203,6 +206,37 @@ async function seedEndedAssetBackedByContinuousCost(options?: {
   return { target, item, ...(recovery ? { recovery } : {}) };
 }
 
+async function seedEndedAssetBalancedByRecurringRule(): Promise<{
+  target: Account;
+  rule: RecurringRule;
+}> {
+  const target = balanceSheetAccount('ended-recurring-asset', '定期ルールで閉じた資産');
+  await upsertAccount(target);
+  const income = await accountByName('給与');
+  const bank = await accountByName('預金');
+  await upsertEntry(
+    buildSimpleEntry({
+      date: '2025-01-10',
+      description: '定期振替前残高',
+      debitAccountId: target.id,
+      creditAccountId: income.id,
+      amount: 100,
+    }),
+  );
+  const rule = await createRecurringRule({
+    name: '終了前の残高消し込み',
+    amount: 100,
+    dayOfMonth: 1,
+    debitAccountId: bank.id,
+    creditAccountId: target.id,
+    startMonth: '2025-12',
+    startDate: '2025-12-01',
+    endDate: '2025-12-02',
+  });
+  await endAccountAtZero(target.id);
+  return { target, rule };
+}
+
 describe('終了済み資産・負債と通常仕訳', () => {
   it('終了済み資産の残高を発生させる通常仕訳の追加を拒否する', async () => {
     const { target } = await seedEndedAssetWithNormalEntries();
@@ -358,6 +392,50 @@ describe('終了済み資産と継続コストの後続操作', () => {
     });
     expect(
       (await loadLedger()).monthlyCostItems.some((candidate) => candidate.id === item.id),
+    ).toBe(true);
+  });
+});
+
+describe('終了済み資産と定期ルールの後続操作', () => {
+  it('終了点残高を発生させる定期ルールの新規作成を拒否する', async () => {
+    const target = balanceSheetAccount('ended-before-rule-asset', '終了後にルールを追加する資産');
+    await upsertAccount(target);
+    await endAccountAtZero(target.id);
+    const bank = await accountByName('預金');
+
+    await expect(
+      createRecurringRule({
+        name: '終了残高を壊す追加ルール',
+        amount: 100,
+        dayOfMonth: 1,
+        debitAccountId: target.id,
+        creditAccountId: bank.id,
+        startMonth: '2025-12',
+        startDate: '2025-12-01',
+        endDate: '2025-12-02',
+      }),
+    ).rejects.toMatchObject({ code: 'error.account.archiveBalance' });
+    expect((await loadLedger()).recurringRules).toHaveLength(0);
+  });
+
+  it('終了点残高を0にする定期ルールの停止を拒否する', async () => {
+    const { rule } = await seedEndedAssetBalancedByRecurringRule();
+
+    await expect(setRecurringRulePaused(rule.id, true)).rejects.toMatchObject({
+      code: 'error.account.archiveBalance',
+    });
+    expect((await loadLedger()).recurringRules.find((candidate) => candidate.id === rule.id)?.paused)
+      .toBeUndefined();
+  });
+
+  it('終了点残高を0にする定期ルールの削除を拒否する', async () => {
+    const { rule } = await seedEndedAssetBalancedByRecurringRule();
+
+    await expect(deleteRecurringRule(rule.id)).rejects.toMatchObject({
+      code: 'error.account.archiveBalance',
+    });
+    expect(
+      (await loadLedger()).recurringRules.some((candidate) => candidate.id === rule.id),
     ).toBe(true);
   });
 });
