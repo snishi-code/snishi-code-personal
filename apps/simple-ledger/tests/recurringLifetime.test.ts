@@ -10,7 +10,6 @@ import {
   recurringCursorAfter,
   recurringPostingsDue,
   recurringProjectionEntries,
-  ruleItemCoverageThrough,
 } from '../src/domain/recurring';
 import type { Account, RecurringRule } from '../src/domain/types';
 
@@ -144,7 +143,7 @@ describe('定期ルールの存在期間（半開区間）', () => {
 
   it('科目参照は次の起票日から排他的終了日の前日までの有限区間になる', () => {
     const subject = rule({ endDate: '2026-06-15' });
-    expect(recurringRuleReferenceStartDate(subject, [])).toBe('2026-04-20');
+    expect(recurringRuleReferenceStartDate(subject)).toBe('2026-04-20');
     expect(
       accountReferenceIntervals('cash', {
         entries: [],
@@ -157,23 +156,11 @@ describe('定期ルールの存在期間（半開区間）', () => {
 
   it('存在終了日までに次の周期日がなければ将来参照もない', () => {
     expect(
-      recurringRuleReferenceStartDate(rule({ startDate: '2026-04-22', endDate: '2026-05-20' }), []),
+      recurringRuleReferenceStartDate(rule({ startDate: '2026-04-22', endDate: '2026-05-20' })),
     ).toBeUndefined();
   });
 
-  it('rule idが前方一致しても別ルールのitemを取り違えない', () => {
-    const item = {
-      id: 'ccr-a-b-2026-04',
-      name: '別ルール',
-      amount: 1000,
-      startDate: '2026-04-20',
-      endDate: '2026-04-30',
-      expenseAccountId: 'expense',
-      createdAt: 'x',
-      updatedAt: 'x',
-    };
-    expect(parseRuleItemId(item.id)).toEqual({ ruleId: 'a-b', month: '2026-04' });
-    expect(ruleItemCoverageThrough('a', [item])).toBeUndefined();
-    expect(ruleItemCoverageThrough('a-b', [item])).toBe('2026-04');
+  it('rule idにハイフンがあってもitem idを正しく分解する', () => {
+    expect(parseRuleItemId('ccr-a-b-2026-04')).toEqual({ ruleId: 'a-b', month: '2026-04' });
   });
 });

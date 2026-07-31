@@ -215,14 +215,12 @@ export interface RecurringRule {
   debitAccountId: string;
   /** 源泉（資金 / カード / 収入カテゴリ）。 */
   creditAccountId: string;
-  /** 位相の基点 'YYYY-MM'（再開時も書き換えない＝周期の位相を保つ）。 */
+  /** 位相の基点 'YYYY-MM'。 */
   startMonth: string;
   /** ルールの存在開始日（含む）。起票周期の位相とは独立する。 */
   startDate: string;
   /** 金額変更の分割で生まれた後継 segment が参照する直前のルール。 */
   splitFromRuleId?: string;
-  /** 後継を物理削除した後も保持する、分割済み終了境界のロック。 */
-  splitEndLocked?: true;
   /**
    * ルールの存在終了日（含まない）。未設定 = 将来へ継続する。
    * 指定日の起票を旧ルールに含めず、同日開始の後継ルールへ一意に渡せるよう半開区間にする。
@@ -233,8 +231,6 @@ export interface RecurringRule {
    * 起票済み仕訳をユーザーが削除しても再起票しない（スキップの尊重）。
    */
   postedThroughMonth?: string;
-  /** 停止中は起票しない。 */
-  paused?: boolean;
   createdAt: string;
   updatedAt: string;
 }

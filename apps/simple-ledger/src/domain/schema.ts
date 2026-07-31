@@ -27,7 +27,7 @@ import {
   accountLifetimeViolation,
   accountReferenceIntervals,
   effectiveRecurringRuleStartDate,
-  recurringRuleLastExistingDate,
+  recurringLineageViolations,
   ruleExistsAt,
 } from './accountLifetime';
 import { accountEndingBalanceViolations } from './accountEnding';
@@ -206,40 +206,18 @@ export const recurringRuleSchema = z
     // ルールの存在期間（半開区間）。周期 anchor と混同しないよう開始点は必須。
     startDate: isoDate,
     splitFromRuleId: z.string().min(1).optional(),
-    splitEndLocked: z.literal(true).optional(),
     endDate: isoDate.optional(),
     postedThroughMonth: monthSchema.optional(),
-    paused: z.boolean().optional(),
     createdAt: isoDateTime,
     updatedAt: isoDateTime,
   })
   .superRefine((rule, ctx) => {
     const effectiveStart = effectiveRecurringRuleStartDate(rule);
-    const lastExistingDate = recurringRuleLastExistingDate(rule);
     if (rule.endDate !== undefined && effectiveStart >= rule.endDate) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: '定期ルールの終了日は開始日より後である必要があります',
         path: ['endDate'],
-      });
-    }
-    if (rule.splitEndLocked && rule.endDate === undefined) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: '分割済みの終了境界には終了日が必要です',
-        path: ['endDate'],
-      });
-    }
-    if (
-      rule.endDate !== undefined &&
-      rule.postedThroughMonth !== undefined &&
-      lastExistingDate !== undefined &&
-      rule.postedThroughMonth > monthOf(lastExistingDate)
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: '終了済み定期ルールの起票カーソルは終了月より後へ進められません',
-        path: ['postedThroughMonth'],
       });
     }
     if (rule.spreadExpenseAccountId === undefined) return;
@@ -779,55 +757,29 @@ export const ledgerExportPackageSchema = z
       }
     });
 
-    // 金額変更で分割した segment は、直前の終了点と後継の開始点が一致する。
-    // 1 つの旧 segment から複数の後継を生やすと未来起票が二重化するため拒否する。
-    const successorByPredecessor = new Set<string>();
-    pkg.recurringRules.forEach((rule, ri) => {
-      if (rule.splitFromRuleId === undefined) return;
-      const predecessor = recurringRuleById.get(rule.splitFromRuleId);
-      if (!predecessor || predecessor.id === rule.id) {
-        issue(`定期ルール「${rule.name}」の分割元が存在しません`, [
-          'recurringRules',
-          ri,
-          'splitFromRuleId',
-        ]);
-        return;
-      }
-      if (successorByPredecessor.has(predecessor.id)) {
-        issue(`定期ルール「${predecessor.name}」に複数の後継があります`, [
-          'recurringRules',
-          ri,
-          'splitFromRuleId',
-        ]);
-      }
-      successorByPredecessor.add(predecessor.id);
-      if (predecessor.endDate !== rule.startDate) {
-        issue(`定期ルール「${rule.name}」の分割境界が元ルールの終了点と一致しません`, [
+    // splitFromRuleId でつながる同一系譜では、半開存在期間が互いに重ならない。
+    // 境界の一致・後継数・周期 anchor は個別に拘束せず、存在期間の1不変条件へ集約する。
+    for (const violation of recurringLineageViolations(pkg.recurringRules)) {
+      const ri = pkg.recurringRules.findIndex((rule) => rule.id === violation.ruleId);
+      const rule = pkg.recurringRules[ri];
+      if (!rule) continue;
+      if (violation.kind === 'overlap') {
+        issue(`定期ルール「${rule.name}」の存在期間が同じ系譜の別ルールと重なっています`, [
           'recurringRules',
           ri,
           'startDate',
         ]);
-      }
-      if (predecessor.startMonth !== rule.startMonth) {
-        issue(`定期ルール「${rule.name}」の分割後に起票周期の位相が変わっています`, [
+      } else {
+        issue(`定期ルール「${rule.name}」の分割元参照が不正です`, [
           'recurringRules',
           ri,
-          'startMonth',
+          'splitFromRuleId',
         ]);
       }
-      if (!predecessor.splitEndLocked) {
-        issue(`定期ルール「${predecessor.name}」の分割終了点がロックされていません`, [
-          'recurringRules',
-          pkg.recurringRules.findIndex((candidate) => candidate.id === predecessor.id),
-          'splitEndLocked',
-        ]);
-      }
-    });
+    }
 
-    // 継続コスト資産(monthlyCostItems)の参照整合性 + 不変条件⑤⑥⑦。
+    // 継続コスト資産(monthlyCostItems)の参照整合性。
     const monthlyCostIds = new Set<string>();
-    // ⑤ ルール生成 item（id = `ccr-{ruleId}-{month}`）の月区間（同一ルール内で重複不可）。
-    const ruleItemSpans = new Map<string, { name: string; from: string; to: string }[]>();
     pkg.monthlyCostItems.forEach((mc, mi) => {
       const at = (...p: (string | number)[]) => ['monthlyCostItems', mi, ...p];
       if (monthlyCostIds.has(mc.id)) issue(`継続コストの ID が重複しています(${mc.id})`, at('id'));
@@ -844,7 +796,7 @@ export const ledgerExportPackageSchema = z
           at('expenseAccountId'),
         );
 
-      // ⑥⑦ 購入の仕訳がちょうど 1 件・金額と日付が item と完全一致（日レベル。
+      // 購入の仕訳がちょうど 1 件・金額と日付が item と完全一致（日レベル。
       // 月レベルにすると初月クランプが効かず台帳マイナスが再発する）。
       const purchases = purchaseEntriesByItem.get(mc.id) ?? [];
       if (purchases.length !== 1) {
@@ -882,7 +834,6 @@ export const ledgerExportPackageSchema = z
         }
       }
 
-      // ⑤ の収集: ルール生成 item の月区間。
       const ccr = parseRuleItemId(mc.id);
       if (ccr) {
         const { ruleId, month: postingMonth } = ccr;
@@ -913,32 +864,8 @@ export const ledgerExportPackageSchema = z
             at('id'),
           );
         }
-        const spans = ruleItemSpans.get(ruleId) ?? [];
-        spans.push({
-          name: mc.name,
-          from: monthOf(mc.startDate),
-          // 終了日なしは開区間（以降ずっと）として扱う。
-          to: mc.endDate !== undefined ? monthOf(mc.endDate) : '9999-12',
-        });
-        ruleItemSpans.set(ruleId, spans);
       }
     });
-
-    // ⑤ 同一ルール由来の item どうしで月区間が重ならないこと（重なると当該月が 2 倍計上され、
-    // 台帳は最終的に閉じるため検知されない）。
-    for (const [ruleId, spans] of ruleItemSpans) {
-      const sorted = [...spans].sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
-      for (let i = 1; i < sorted.length; i++) {
-        const prev = sorted[i - 1]!;
-        const cur = sorted[i]!;
-        if (cur.from <= prev.to) {
-          issue(
-            `定期ルール(${ruleId})由来の継続コスト「${prev.name}」「${cur.name}」の期間が重なっています`,
-            ['monthlyCostItems'],
-          );
-        }
-      }
-    }
 
     // 科目の存在期間は、明示された端点だけを import 境界で検証する。
     // 定期ルールの startDate は schema v6 で必須。旧版 JSON は読み替えず版境界で拒否する。
@@ -953,11 +880,7 @@ export const ledgerExportPackageSchema = z
     pkg.accounts.forEach((account, ai) => {
       const violation = accountLifetimeViolation(
         account,
-        accountReferenceIntervals(account.id, lifetimeCollections, {
-          ruleUsesItemCoverage: (rule) =>
-            accountRole.get(rule.spreadExpenseAccountId ?? rule.debitAccountId) ===
-            'expense-category',
-        }),
+        accountReferenceIntervals(account.id, lifetimeCollections),
       );
       if (!violation) return;
       const edge = violation.edge === 'start' ? '開始日' : '終了日';

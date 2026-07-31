@@ -172,6 +172,7 @@ export const UI = {
     list: 'allocations.list',
     // 継続コスト資産の 1 項目カード（data-ending="true" = 終了まで1ヶ月以内）
     item: 'allocations.item',
+    // 終了した定期ルールと継続コスト資産を再表示する共通トグル
     showCompleted: 'allocations.showCompleted',
     // 統一追加フロー（2択: .rule = くり返し記帳 / .asset = 継続コスト資産の持ち込み）
     unifiedAdd: 'allocations.add',
@@ -194,7 +195,9 @@ export const UI = {
     recurringAmountChangeFromToday: 'allocations.recurring.amountChange.fromToday',
     recurringAmountChangeCancel: 'allocations.recurring.amountChange.cancel',
     recurringEdit: 'allocations.recurring.edit',
-    recurringPause: 'allocations.recurring.pause',
+    // 終了 = today を排他的終点へ。同じ設定で新しく始める = 系譜なしの独立ルール作成。
+    recurringEnd: 'allocations.recurring.end',
+    recurringRestart: 'allocations.recurring.restart',
     recurringDelete: 'allocations.recurring.delete',
     // 継続コスト資産シート（登録＝編集の 1 コンポーネント）
     edit: 'allocations.edit',

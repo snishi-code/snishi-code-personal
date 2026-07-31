@@ -100,9 +100,23 @@ describe('勘定科目の存在期間（保存境界）', () => {
         startDate: '2026-07-01',
       }),
     ).rejects.toMatchObject({ code: 'error.account.referenceOutsidePeriod' });
+
+    await expect(
+      createRecurringRule({
+        name: '有限でもitemは年末まで残る',
+        amount: 12_000,
+        dayOfMonth: 20,
+        everyMonths: 12,
+        debitAccountId: archivedFixed.id,
+        creditAccountId: cash.id,
+        startMonth: '2026-01',
+        startDate: '2026-01-01',
+        endDate: '2026-02-01',
+      }),
+    ).rejects.toMatchObject({ code: 'error.account.referenceOutsidePeriod' });
   });
 
-  it('費用ルール編集はカーソルと既存item被覆後の次回日だけを新しい科目へ要求する', async () => {
+  it('費用ルール編集はitem被覆で抑止せず、カーソル後の次回日から新しい科目を使う', async () => {
     let ledger = await loadLedger();
     const cash = ledger.accounts.find((account) => account.name === '預金')!;
     const fixed = ledger.accounts.find((account) => account.name === '固定費')!;
@@ -138,11 +152,10 @@ describe('勘定科目の存在期間（保存境界）', () => {
     });
 
     ledger = await loadLedger();
-    // 2026年は既存itemが覆う。新しい支払口座をルール開始月まで不必要に延ばさない。
-    expect(
-      ledger.accounts.find((account) => account.id === futureCash.id)?.startDate,
-    ).toBeUndefined();
-    expect(await catchUpRecurringRules('2026-12-31')).toBe(0);
+    expect(ledger.accounts.find((account) => account.id === futureCash.id)?.startDate).toBe(
+      '2026-02-01',
+    );
+    expect(await catchUpRecurringRules('2026-12-31')).toBe(11);
     expect(await catchUpRecurringRules('2027-01-01')).toBe(1);
 
     ledger = await loadLedger();

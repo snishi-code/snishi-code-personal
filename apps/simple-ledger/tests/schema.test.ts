@@ -894,7 +894,7 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
   });
 });
 
-describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証（⑤⑥⑦⑧⑨）', () => {
+describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証（⑥⑦⑧⑨）', () => {
   const cash = {
     id: 'cash',
     name: '現金',
@@ -1150,7 +1150,7 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
       ).success,
     ).toBe(false);
   });
-  it('⑤ 同一ルール由来の item（ccr-{ruleId}-{month}）の月区間が重なると invalid（§13-12）', () => {
+  it('同一ルール由来の item は生成後に独立し、月区間が重なっても valid', () => {
     const cycle = (month: string, startDate: string, endDate: string) => ({
       id: `ccr-rule1-${month}`,
       name: '火災保険',
@@ -1196,10 +1196,10 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
     const a = cycle('2026-04', '2026-04-25', '2027-03-31');
     const b = cycle('2027-04', '2027-04-25', '2028-03-31');
     expect(ledgerExportPackageSchema.safeParse(rulePkg([a, b])).success).toBe(true);
-    // a の終了日を伸ばして 2027-04 と重ねると invalid（当該月が 2 倍計上される）。
+    // a の終了日を伸ばして 2027-04 と重ねても、それぞれの生成事実を保つ。
     const overlapped = { ...a, endDate: '2027-04-30' };
     const pkg = rulePkg([overlapped, b]);
-    expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(false);
+    expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(true);
   });
   it('仕訳・予定CF の monthlyCostId が存在しないと invalid', () => {
     const dangling = purchaseOf(base, { metadata: { inputMode: 'expense', monthlyCostId: 'no' } });

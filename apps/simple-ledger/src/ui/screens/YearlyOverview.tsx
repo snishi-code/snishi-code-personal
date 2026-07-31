@@ -51,7 +51,7 @@ function matrixDataYears(ledger: Ledger, today: string): number[] {
     // 有限のルール線分は、まだ実起票が無い未来年も投影できるデータ期間である。
     // endDate は排他的なので、直前の日を最後の表示年として扱う。
     const lastExistingDate = recurringRuleLastExistingDate(rule);
-    if (!rule.paused && lastExistingDate !== undefined) {
+    if (lastExistingDate !== undefined) {
       addSpanYears(dates, startDate, lastExistingDate);
     }
     for (const posting of recurringPostingsDue(rule, today)) dates.push(posting.date);

@@ -95,7 +95,7 @@ describe('勘定科目の存在期間', () => {
     ).toBeUndefined();
   });
 
-  it('定期ルールの参照開始はカーソルと既存item被覆後の次回周期日になる', () => {
+  it('定期ルールの参照開始はカーソル後の次回周期日になる', () => {
     const rule = {
       id: 'rule',
       name: '年払い',
@@ -111,24 +111,10 @@ describe('勘定科目の存在期間', () => {
       createdAt: 'x',
       updatedAt: 'x',
     };
-    expect(recurringRuleReferenceStartDate(rule, [])).toBe('2026-07-31');
-    expect(
-      recurringRuleReferenceStartDate(rule, [
-        {
-          id: 'ccr-rule-2026-07',
-          name: '年払い',
-          amount: 12000,
-          startDate: '2026-07-31',
-          endDate: '2026-10-31',
-          expenseAccountId: 'expense',
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ]),
-    ).toBe('2027-01-31');
+    expect(recurringRuleReferenceStartDate(rule)).toBe('2026-07-31');
   });
 
-  it('終了日なしの既存itemが将来を覆うとルールの次回参照は存在しない', () => {
+  it('既存itemの期間はルールの次回参照を止めない', () => {
     const rule = {
       id: 'rule',
       name: '保留',
@@ -153,7 +139,7 @@ describe('勘定科目の存在期間', () => {
       updatedAt: 'x',
     };
 
-    expect(recurringRuleReferenceStartDate(rule, [openItem])).toBeUndefined();
+    expect(recurringRuleReferenceStartDate(rule)).toBe('2026-01-01');
     expect(
       accountReferenceIntervals('cash', {
         entries: [],
@@ -161,7 +147,34 @@ describe('勘定科目の存在期間', () => {
         monthlyCostItems: [openItem],
         recurringRules: [rule],
       }),
-    ).toEqual([]);
+    ).toEqual([{ kind: 'recurringRule', from: '2026-01-01' }]);
+  });
+
+  it('有限の費用ルールは最後に生成するitemの終端まで費用科目を参照する', () => {
+    const rule = {
+      id: 'annual-rule',
+      name: '年払い',
+      amount: 12000,
+      dayOfMonth: 20,
+      everyMonths: 12,
+      debitAccountId: 'continuing-cost-ledger',
+      creditAccountId: 'cash',
+      spreadExpenseAccountId: 'expense',
+      startMonth: '2026-01',
+      startDate: '2026-01-01',
+      endDate: '2026-02-01',
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+
+    expect(
+      accountReferenceIntervals('expense', {
+        entries: [],
+        schedules: [],
+        monthlyCostItems: [],
+        recurringRules: [rule],
+      }),
+    ).toEqual([{ kind: 'recurringRule', from: '2026-01-20', to: '2026-12-31' }]);
   });
 
   it('仕訳ピッカーはヘッダーではなく入力日付時点で存在する科目だけを返す', () => {

@@ -474,6 +474,8 @@ export const ja = {
     '旧版データのままでは JSON の読み込みもできません。手順: ①「DB を初期化して再起動」で初期化 → ②起動後に設定から、現行版へ変換済みの JSON を読み込んでください。',
 
   'toast.saved': '保存しました。',
+  'toast.recurringCatchUpPartialFailed':
+    '一部の定期ルールを自動起票できませんでした。ルールの科目と期間を確認してください。',
   'toast.recurringSavedFollowupFailed':
     'ルールは保存しましたが、自動起票または画面の再読込に失敗しました。画面を開き直してください。',
   'toast.deleted': '削除しました。',
@@ -553,8 +555,6 @@ export const ja = {
   'error.recurring.periodInvalid': 'ルールの開始日・終了日を確認してください。',
   'error.recurring.amountChangeModeRequired':
     '金額の変更方法（全期間、または今日から）を選んでください。',
-  'error.recurring.splitPhaseLocked':
-    '金額変更で分けたルールは、起票周期の基準月を変更できません。',
   'error.recurring.splitDependency':
     '今日分の仕訳または継続コスト資産を安全に分けられません。対象の起票内容を確認してください。',
   'error.recurring.generatedDependency':
@@ -654,17 +654,12 @@ export const ja = {
     '金額を変えるときは、全期間を変えるか、今日から新しい金額に分けるかを選べます。',
   'recurring.intervalMonths': '周期（か月）',
   'recurring.firstPostingDate': '起票周期の基準日',
-  'recurring.postingDayOfMonth': '毎回の起票日（1〜31 日）',
   'recurring.firstPostingDateHint':
     '毎回の起票日と周期の位相を決める日です。ルールの存在期間とは別です。',
-  'recurring.firstPostingDateSplitLocked':
-    '金額変更で分けたルールのため、起票周期の基準月は前後のルールから引き継ぎます。日は 1〜31 で変更でき、その日がない月は月末に起票します。',
   'recurring.ruleStartDate': 'ルールの開始日',
   'recurring.ruleStartDateHint': 'このルールが存在し始める日です。',
-  'recurring.ruleStartDateSplitLocked': '金額変更で分けた境界のため、この開始日は変更できません。',
   'recurring.ruleEndDate': 'ルールの終了点（任意）',
   'recurring.ruleEndDateHint': 'この日からルールは存在しません。空欄の間は継続します。',
-  'recurring.ruleEndDateSplitLocked': '金額変更で分けた境界のため、この終了点は変更できません。',
   'recurring.rulePeriod': 'ルール期間',
   'recurring.ruleEndBefore': '{date} より前まで',
   'recurring.ruleNoEnd': '継続中',
@@ -673,7 +668,7 @@ export const ja = {
   'recurring.amountChangeBody':
     'これまでの金額も変えるか、{date} を境に新しいルールへ分けるかを選んでください。',
   'recurring.amountChangeWholeOnlyBody':
-    'このルールは {date} の時点では存在しないため、その日を境に分けられません。全期間の金額変更だけ選べます。',
+    'このルールには {date} より前またはその日以降の期間がないため、その日を境に分けられません。全期間の金額変更だけ選べます。',
   'recurring.amountChangeAll': '全期間の金額を変更',
   'recurring.amountChangeAllHint':
     '過去に起票された仕訳と継続コスト資産も、新しい金額へ変更します。',
@@ -689,10 +684,8 @@ export const ja = {
     '行き先が費用なら自動で継続コストとして期間配分し、資産・負債・収入なら直接記帳します。',
   'recurring.everyMonthDay': '毎月{day}日',
   'recurring.everyNMonthsDay': '{n}か月ごと {day}日',
-  'recurring.paused': '停止中',
-  'recurring.pause': '停止',
-  'recurring.resume': '再開',
-  'recurring.resumeNote': '再開すると今月ぶんから起票されます（停止中の月は起票されません）。',
+  'recurring.end': '終了',
+  'recurring.restart': '同じ設定で新しく始める',
   'recurring.deleteConfirmTitle': '定期ルールを削除',
   'recurring.deleteConfirmBody':
     '「{name}」を削除します。起票済みの仕訳・できた継続コスト資産はそのまま残ります。',

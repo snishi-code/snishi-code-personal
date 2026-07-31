@@ -16,10 +16,10 @@ import {
   deleteMonthlyCost,
   deleteRecurringRule,
   loadLedger,
-  setRecurringRulePaused,
   upsertAccount,
   upsertEntry,
   upsertMonthlyCost,
+  upsertRecurringRule,
 } from '../src/data/repository';
 import { accountBalance } from '../src/domain/accounting';
 import { buildSimpleEntry } from '../src/domain/entry';
@@ -418,15 +418,17 @@ describe('終了済み資産と定期ルールの後続操作', () => {
     expect((await loadLedger()).recurringRules).toHaveLength(0);
   });
 
-  it('終了点残高を0にする定期ルールの停止を拒否する', async () => {
+  it('終了点残高を0にする定期ルールの期間変更を拒否する', async () => {
     const { rule } = await seedEndedAssetBalancedByRecurringRule();
 
-    await expect(setRecurringRulePaused(rule.id, true)).rejects.toMatchObject({
+    await expect(
+      upsertRecurringRule({ ...rule, startDate: '2025-12-02', endDate: '2025-12-03' }),
+    ).rejects.toMatchObject({
       code: 'error.account.archiveBalance',
     });
     expect(
-      (await loadLedger()).recurringRules.find((candidate) => candidate.id === rule.id)?.paused,
-    ).toBeUndefined();
+      (await loadLedger()).recurringRules.find((candidate) => candidate.id === rule.id)?.startDate,
+    ).toBe('2025-12-01');
   });
 
   it('終了点残高を0にする定期ルールの削除を拒否する', async () => {

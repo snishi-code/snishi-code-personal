@@ -99,28 +99,28 @@
 `spreadExpenseAccountId?`（正規化済みの費用の行き先）/
 `debitAccountId`（費用ルールでは継続コスト台帳、費用以外では行き先）/ `creditAccountId` / `startMonth`
 （周期の位相 anchor）/ `startDate`（存在開始日・含む・必須）/ `splitFromRuleId?`（金額分割の直前 segment）/
-`splitEndLocked?: true`（分割済み終了点の不変印）/
 `endDate?`（存在終了日・含まない）/
-`postedThroughMonth?`（起票カーソル）/ `paused?`。
+`postedThroughMonth?`（起票カーソル）。
 
 - 存在期間は半開区間 **`[startDate, endDate)`**。`startDate` は必須で、`endDate` がある場合は
   開始日より後でなければならない。
 - `startMonth` は `everyMonths` の周期の位相だけを決め、存在期間とは独立する。起票日が存在期間内に
   入るときだけ catch-up・未来投影の対象になる。
-- `paused` は一時停止であり、`endDate` を設定しない。再開時も `startMonth` を変えず、停止中の月を
-  遡って起票しない。恒久終了（アーカイブ）は `endDate` を設定して表す。
+- 終了は `endDate=today` として表す。同じ設定をもう一度使う操作では、金額・周期・位相・フローを
+  引き継ぎ、`startDate=today`・`endDate` なしの独立したルールを作る。id・時刻・起票カーソル・
+  `splitFromRuleId` は引き継がない。
 - 金額の遡及変更は、同じ `rule.id` が自動生成した全保存仕訳・item の金額を、利用者が手編集した月も
-  含めて新額へ同一トランザクションで揃える。
+  含めて新額へ同一トランザクションで揃える。これは登録金額を最初から訂正するために利用者が選ぶ
+  明示操作であり、生成済み item を通常編集で書き換えない原則の例外である。
 - 今日からの金額変更は旧ルールを `endDate=today`、新しい id の後継ルールを `startDate=today` として
   分割する。今日以降にすでに起票された仕訳・item は後継へ移管し、今日より前の事実は旧ルールに残す。
   移管時に変更するのは由来 ID と今回選択した金額だけで、個別編集済みの摘要・科目・item の名称・
   期間・認識先は保持する。後継の金額以外の設定は次の未起票回から適用する。`startMonth` の位相は
   後継へ引き継ぐため、分割日と起票日は別の概念である。
-- 分割後継は `splitFromRuleId` で直前 segment を指し、旧 `endDate` = 新 `startDate` を不変とする。
-  片側だけの境界編集による重複起票を防ぐため、連鎖中の開始・終了点は UI/保存境界で固定する。
-  旧 segment の `splitEndLocked` は後継を物理削除した後も残し、中立化した後継の仕訳を旧ルールが
-  再起票しないよう境界を閉じ続ける。削除した segment を指す残存後継の `splitFromRuleId` は、
-  同一 transaction で剥がす。
+- 分割後継は `splitFromRuleId` で直前 segment を指す。同じ連鎖の全ルールは、半開存在期間どうしが
+  重ならないことだけを系譜の不変条件とする。境界間の空白、開始点・終了点・周期位相の変更は
+  非重複を守る限り許可する。削除した segment を指す残存後継の `splitFromRuleId` は、同一
+  transaction で剥がす。
 - ルール削除は、起票済みの仕訳・item を削除しない。ルールへの由来参照を同一トランザクションで
   剥がし、仕訳の `rec-{ruleId}-{month}` と item の `ccr-{ruleId}-{month}` を通常 ID へ付け替える。
   反転仕訳の `reversalOfEntryId`、予定 CF の `linkedEntryId` / `monthlyCostId` も同じ transaction で
@@ -195,7 +195,8 @@ import では strip される）。
     仮想認識行の日付は `asOf` までに切るため、後日の回収は配分へ遡及するが回収仕訳自体は過去へ現れない。
   - `endDate?` は `>= startDate`・配分月数 ≤ 1200 ヶ月。`expenseAccountId` は内部集約・残高調整
     以外（`isRecurringPostableRole`）。
-  - **同一ルール由来（id `ccr-{ruleId}-…`）の item の月区間が重ならない**。
+  - ルール由来 item の配分期間は、後から周期を変更して生まれた item と重なってよい。同じルール・
+    同じ起票月の二重生成は、決定的 ID と起票カーソルで防ぐ。
 - `endDate` を持つ**資産・負債**は、その終了点で導出仕訳込みの残高が 0 でなければならない。
   保存境界と import schema の双方で検証する。費用・収入の累計は「過去に起きたこと」の記録なので
   残高 0 を要求せず、そのまま終了できる。
@@ -205,6 +206,10 @@ import では strip される）。
   をペアで持ち、ルールが存在し、同ルール・同月の重複が無い。`startDate` は必須で、`endDate` は
   開始日より後の exclusive endpoint であることを検証する。起票月の日付がルールの半開存在期間に含まれ、
   参照科目の存在期間にも含まれることを保存境界・import の双方で確認する。
+  `splitFromRuleId` で連なる同一系譜では、ルールの半開存在期間どうしが重ならないことを保存境界・
+  import の双方で検証する。
+  catch-up はルール単位で検証・起票し、1 本の失敗で他のルールを止めない。失敗したルールは
+  書き込まずに飛ばして処理を続け、画面には個別データを含めない共通警告を出す。
   金額の遡及変更、今日での segment 分割、削除時の由来解除は、ルール・仕訳・item・revision を
   単一 readwrite transaction で更新し、途中状態を保存しない。
 - 残高補正: `delta === actualBalance − expectedBalance`・対象/相手科目の存在と形・kind=normal。

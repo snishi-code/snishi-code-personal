@@ -23,11 +23,6 @@ export function reportEntriesForAsOf(ledger: ReportEntrySource, asOf: string): J
     // 表示する実仕訳と仮想行の日付だけを asOf で切るため、後日の回収による再配分は
     // 過去・現在・未来のどの断面でも同じになる。
     ...continuousCostEntries(ledger.monthlyCostItems, ledger.journalEntries, asOf),
-    ...recurringProjectionEntries(
-      ledger.recurringRules,
-      ledger.accounts,
-      asOf,
-      ledger.monthlyCostItems,
-    ),
+    ...recurringProjectionEntries(ledger.recurringRules, ledger.accounts, asOf),
   ];
 }

@@ -46,6 +46,7 @@ import {
 import {
   accountExistsAt,
   effectiveRecurringRuleStartDate,
+  recurringRuleLastExistingDate,
   ruleExistsAt as recurringRuleExistsAt,
 } from '../../domain/accountLifetime';
 import { quickSpanEndDate } from '../ccQuickSpan';
@@ -74,7 +75,8 @@ export function Allocations({
   /** 仕訳一覧の計算で生まれた行タップからの遷移対象（開くシート。同一オブジェクトは 1 回だけ消費）。 */
   target?: AllocationsTarget | null;
 }) {
-  const { ledger, removeMonthlyCost, setRecurringRulePaused, removeRecurringRule } = useLedger();
+  const { ledger, removeMonthlyCost, createRecurringRule, saveRecurringRule, removeRecurringRule } =
+    useLedger();
   const [showEnded, setShowEnded] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<MonthlyCostItem | null>(null);
   const [itemSheet, setItemSheet] = useState<{ existing?: MonthlyCostItem } | null>(null);
@@ -82,6 +84,8 @@ export function Allocations({
   const [chooserOpen, setChooserOpen] = useState(false);
   const [ruleSheet, setRuleSheet] = useState<{ existing?: RecurringRule } | null>(null);
   const [pendingRuleDelete, setPendingRuleDelete] = useState<RecurringRule | null>(null);
+  const [pendingRuleActionId, setPendingRuleActionId] = useState<string | null>(null);
+  const ruleActionInFlight = useRef(false);
   // 表示だけはヘッダーの断面へ追従する。シート内の書込日・catch-up は period を受け取らず、
   // 引き続き実際の今日を基準にする（過去/未来表示が durable state を動かさない）。
   const today = todayLocal();
@@ -116,14 +120,21 @@ export function Allocations({
     .sort(compareMonthlyCostItems);
 
   const allRules = ledger?.recurringRules ?? [];
-  const rules = allRules.filter((r) => recurringRuleExistsAt(r, asOf));
+  const startedRules = allRules.filter((r) => effectiveRecurringRuleStartDate(r) <= asOf);
+  const rules = startedRules.filter((r) => showEnded || recurringRuleExistsAt(r, asOf));
+  const hasEndedAtAsOf =
+    startedRules.some((r) => !recurringRuleExistsAt(r, asOf)) ||
+    startedItems.some((m) => isArchived(m, asOf));
   // 参照科目が削除済み、または選択断面で存在期間外なら行で警告する。
   // catch-up も各起票日の科目存在期間を照合して fail-soft に起票を止める。
   const ruleRefBroken = (r: RecurringRule): boolean => {
+    const referenceDate = recurringRuleExistsAt(r, asOf)
+      ? asOf
+      : (recurringRuleLastExistingDate(r) ?? asOf);
     const ids = [r.creditAccountId, recurringDestinationAccountId(r)];
     return ids.some((id) => {
       const account = accountsMap.get(id);
-      return !account || !accountExistsAt(account, asOf);
+      return !account || !accountExistsAt(account, referenceDate);
     });
   };
   const ruleKindLabel = (r: RecurringRule): string => {
@@ -134,6 +145,44 @@ export function Allocations({
     r.everyMonths >= 2
       ? t('recurring.everyNMonthsDay', { n: r.everyMonths, day: r.dayOfMonth })
       : t('recurring.everyMonthDay', { day: r.dayOfMonth });
+
+  const runRecurringRuleAction = async (
+    ruleId: string,
+    action: () => Promise<void>,
+  ): Promise<void> => {
+    if (ruleActionInFlight.current) return;
+    ruleActionInFlight.current = true;
+    setPendingRuleActionId(ruleId);
+    try {
+      await action();
+    } finally {
+      ruleActionInFlight.current = false;
+      setPendingRuleActionId(null);
+    }
+  };
+
+  const endRecurringRule = async (rule: RecurringRule): Promise<void> => {
+    const effectiveDate = todayLocal();
+    await runRecurringRuleAction(rule.id, () =>
+      saveRecurringRule({ ...rule, endDate: effectiveDate, updatedAt: nowIso() }),
+    );
+  };
+
+  const restartRecurringRule = async (rule: RecurringRule): Promise<void> => {
+    const effectiveDate = todayLocal();
+    await runRecurringRuleAction(rule.id, () =>
+      createRecurringRule({
+        name: rule.name,
+        amount: rule.amount,
+        dayOfMonth: rule.dayOfMonth,
+        everyMonths: rule.everyMonths,
+        debitAccountId: recurringDestinationAccountId(rule),
+        creditAccountId: rule.creditAccountId,
+        startMonth: rule.startMonth,
+        startDate: effectiveDate,
+      }),
+    );
+  };
 
   // 仕訳一覧の計算で生まれた行タップからの遷移: 対象のシートを開く。
   // effect ではなく「render 中の派生調整」パターン（同一 target は 1 回だけ消費する）。
@@ -165,7 +214,27 @@ export function Allocations({
         </button>
       </div>
 
-      {rules.length === 0 && startedItems.length === 0 ? (
+      {hasEndedAtAsOf ? (
+        <label
+          style={{
+            display: 'inline-flex',
+            gap: 8,
+            alignItems: 'center',
+            minHeight: 'var(--tap)',
+            margin: 'var(--space-3) 0 0',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={showEnded}
+            onChange={(e) => setShowEnded(e.target.checked)}
+            data-ui={UI.allocations.showCompleted}
+          />
+          {t('monthlyCost.showEnded')}
+        </label>
+      ) : null}
+
+      {startedRules.length === 0 && startedItems.length === 0 ? (
         <div className="card card--pad empty" style={{ margin: 'var(--space-3) 0 var(--space-4)' }}>
           <Icon name="calendar" size={28} />
           <p style={{ marginTop: 'var(--space-3)' }}>{t('monthly.empty')}</p>
@@ -182,101 +251,102 @@ export function Allocations({
             style={{ marginBottom: 'var(--space-4)' }}
             data-ui={UI.allocations.recurringList}
           >
-            {rules.map((r) => (
-              <li key={r.id} className="list__item">
-                <div className="list__main">
-                  <div className="list__title">
-                    {r.name} <span className="tag tag--teal">{ruleKindLabel(r)}</span>{' '}
-                    {r.paused ? (
-                      <span className="tag tag--neutral">{t('recurring.paused')}</span>
-                    ) : null}
-                  </div>
-                  <div className="list__sub">
-                    {t('recurring.rulePeriod')}: {effectiveRecurringRuleStartDate(r)} 〜{' '}
-                    {r.endDate !== undefined
-                      ? t('recurring.ruleEndBefore', { date: r.endDate })
-                      : t('recurring.ruleNoEnd')}
-                  </div>
-                  <div className="list__sub">
-                    {t('recurring.postingSchedule')}: {ruleIntervalLabel(r)}・
-                    {name(r.creditAccountId)} → {name(recurringDestinationAccountId(r))}
-                    {recurringExpenseAccountId(r, (id) => accountsMap.get(id)?.role) !==
-                    undefined ? (
-                      <>
-                        ・{t('monthlyCost.monthly')}{' '}
-                        <Money
-                          amount={monthlyAmounts(r.amount, r.everyMonths)[0] ?? 0}
-                          currency={currency}
-                        />
-                      </>
-                    ) : null}
-                  </div>
-                  {ruleRefBroken(r) ? (
-                    <div className="field__error" role="alert">
-                      {t('recurring.refBroken')}
+            {rules.map((r) => {
+              const start = effectiveRecurringRuleStartDate(r);
+              const activeToday = recurringRuleExistsAt(r, today);
+              const canEndToday = activeToday && start < today;
+              const canRestartToday = !activeToday && r.endDate !== undefined && r.endDate <= today;
+              return (
+                <li key={r.id} className="list__item">
+                  <div className="list__main">
+                    <div className="list__title">
+                      {r.name} <span className="tag tag--teal">{ruleKindLabel(r)}</span>
                     </div>
-                  ) : null}
-                </div>
-                <span className="list__amount">
-                  <Money amount={r.amount} currency={currency} />
-                </span>
-                <div className="row-actions">
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    onClick={() => setRuleSheet({ existing: r })}
-                    aria-label={`${t('common.edit')}: ${r.name}`}
-                    data-ui={UI.allocations.recurringEdit}
-                  >
-                    <Icon name="edit" size={18} />
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    onClick={() => setRecurringRulePaused(r.id, !r.paused).catch(() => undefined)}
-                    aria-label={`${r.paused ? t('recurring.resume') : t('recurring.pause')}: ${r.name}`}
-                    data-ui={UI.allocations.recurringPause}
-                  >
-                    <Icon name={r.paused ? 'restore' : 'archive'} size={18} />
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    onClick={() => setPendingRuleDelete(r)}
-                    aria-label={`${t('common.delete')}: ${r.name}`}
-                    data-ui={UI.allocations.recurringDelete}
-                  >
-                    <Icon name="delete" size={18} />
-                  </button>
-                </div>
-              </li>
-            ))}
+                    <div className="list__sub">
+                      {t('recurring.rulePeriod')}: {effectiveRecurringRuleStartDate(r)} 〜{' '}
+                      {r.endDate !== undefined
+                        ? t('recurring.ruleEndBefore', { date: r.endDate })
+                        : t('recurring.ruleNoEnd')}
+                    </div>
+                    <div className="list__sub">
+                      {t('recurring.postingSchedule')}: {ruleIntervalLabel(r)}・
+                      {name(r.creditAccountId)} → {name(recurringDestinationAccountId(r))}
+                      {recurringExpenseAccountId(r, (id) => accountsMap.get(id)?.role) !==
+                      undefined ? (
+                        <>
+                          ・{t('monthlyCost.monthly')}{' '}
+                          <Money
+                            amount={monthlyAmounts(r.amount, r.everyMonths)[0] ?? 0}
+                            currency={currency}
+                          />
+                        </>
+                      ) : null}
+                    </div>
+                    {ruleRefBroken(r) ? (
+                      <div className="field__error" role="alert">
+                        {t('recurring.refBroken')}
+                      </div>
+                    ) : null}
+                  </div>
+                  <span className="list__amount">
+                    <Money amount={r.amount} currency={currency} />
+                  </span>
+                  <div className="row-actions">
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      onClick={() => setRuleSheet({ existing: r })}
+                      aria-label={`${t('common.edit')}: ${r.name}`}
+                      data-ui={UI.allocations.recurringEdit}
+                    >
+                      <Icon name="edit" size={18} />
+                    </button>
+                    {canEndToday ? (
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        disabled={pendingRuleActionId !== null}
+                        onClick={() => endRecurringRule(r).catch(() => undefined)}
+                        aria-label={`${t('recurring.end')}: ${r.name}`}
+                        data-ui={UI.allocations.recurringEnd}
+                      >
+                        <Icon name="archive" size={18} />
+                      </button>
+                    ) : null}
+                    {canRestartToday ? (
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        disabled={pendingRuleActionId !== null}
+                        onClick={() => restartRecurringRule(r).catch(() => undefined)}
+                        aria-label={`${t('recurring.restart')}: ${r.name}`}
+                        data-ui={UI.allocations.recurringRestart}
+                      >
+                        <Icon name="restore" size={18} />
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      onClick={() => setPendingRuleDelete(r)}
+                      aria-label={`${t('common.delete')}: ${r.name}`}
+                      data-ui={UI.allocations.recurringDelete}
+                    >
+                      <Icon name="delete" size={18} />
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </>
       )}
 
-      {startedItems.length === 0 ? null : (
+      {items.length === 0 ? null : (
         <>
           <p className="section-label" style={{ marginBottom: 'var(--space-2)' }}>
             {t('monthlyCost.sectionTitle')}
           </p>
-          <label
-            style={{
-              display: 'inline-flex',
-              gap: 8,
-              alignItems: 'center',
-              margin: '0 0 var(--space-3)',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={showEnded}
-              onChange={(e) => setShowEnded(e.target.checked)}
-              data-ui={UI.allocations.showCompleted}
-            />
-            {t('monthlyCost.showEnded')}
-          </label>
-
           <div className="stack" data-ui={UI.allocations.list}>
             {items.map((m) => {
               const spreadTotal = spreadTotalOf(m);
@@ -564,9 +634,6 @@ function RecurringRuleSheet({
   const [firstPostingDate, setFirstPostingDate] = useState(() =>
     existing ? clampDayToMonth(existing.startMonth, existing.dayOfMonth) : todayLocal(),
   );
-  const [postingDayText, setPostingDayText] = useState(
-    existing !== undefined ? String(existing.dayOfMonth) : '',
-  );
   const [startDate, setStartDate] = useState(
     existing ? effectiveRecurringRuleStartDate(existing) : todayLocal(),
   );
@@ -579,9 +646,6 @@ function RecurringRuleSheet({
   const [amountChangeError, setAmountChangeError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
-  const startBoundaryLocked = existing?.splitFromRuleId !== undefined;
-  const endBoundaryLocked = existing?.splitEndLocked === true;
-  const phaseAnchorLocked = startBoundaryLocked || endBoundaryLocked;
   const canSplitAtEffectiveDate =
     pendingAmountChange !== null &&
     existing !== undefined &&
@@ -639,20 +703,16 @@ function RecurringRuleSheet({
       setError(t('error.recurring.periodInvalid'));
       return;
     }
-    const day = phaseAnchorLocked
-      ? Number.parseInt(postingDayText, 10)
-      : Number.parseInt(firstPostingDate.slice(8, 10), 10);
+    const day = Number.parseInt(firstPostingDate.slice(8, 10), 10);
     if (!Number.isInteger(day) || day < 1 || day > 31) {
       setError(t('error.recurring.dayOfMonthInvalid'));
       return;
     }
-    const startMonth =
-      phaseAnchorLocked && existing ? existing.startMonth : monthOf(firstPostingDate);
+    const startMonth = monthOf(firstPostingDate);
     // 日付欄は「元の dayOfMonth をその月へクランプした結果」を表示している。表示どおりのまま
     // なら日を触っていない＝元の値を保つ（2 月のルールを開いて保存しただけで 31 → 28 に
     // 落ち、以後の起票日がずれるのを防ぐ）。日を変えたときだけ入力値を採用する。
     const dayOfMonth =
-      !phaseAnchorLocked &&
       existing !== undefined &&
       clampDayToMonth(startMonth, existing.dayOfMonth).slice(8, 10) ===
         firstPostingDate.slice(8, 10)
@@ -729,7 +789,7 @@ function RecurringRuleSheet({
                 name.trim() === '' ||
                 amountText === '' ||
                 everyText === '' ||
-                (phaseAnchorLocked ? postingDayText === '' : firstPostingDate === '') ||
+                firstPostingDate === '' ||
                 startDate === '' ||
                 creditAccountId === '' ||
                 debitAccountId === ''
@@ -798,39 +858,22 @@ function RecurringRuleSheet({
             onChange={(v) => setEveryText(v.replace(/[^\d]/g, ''))}
             dataUi={UI.allocations.recurringEvery}
           />
-          {phaseAnchorLocked ? (
-            <TextInput
-              label={t('recurring.postingDayOfMonth')}
-              required
-              inputMode="numeric"
-              value={postingDayText}
-              onChange={(value) => setPostingDayText(value.replace(/[^\d]/g, ''))}
-              hint={t('recurring.firstPostingDateSplitLocked')}
-              dataUi={UI.allocations.recurringFirstPostingDate}
-            />
-          ) : (
-            <TextInput
-              label={t('recurring.firstPostingDate')}
-              type="date"
-              required
-              value={firstPostingDate}
-              onChange={setFirstPostingDate}
-              hint={t('recurring.firstPostingDateHint')}
-              dataUi={UI.allocations.recurringFirstPostingDate}
-            />
-          )}
+          <TextInput
+            label={t('recurring.firstPostingDate')}
+            type="date"
+            required
+            value={firstPostingDate}
+            onChange={setFirstPostingDate}
+            hint={t('recurring.firstPostingDateHint')}
+            dataUi={UI.allocations.recurringFirstPostingDate}
+          />
           <TextInput
             label={t('recurring.ruleStartDate')}
             type="date"
             required
             value={startDate}
             onChange={setStartDate}
-            hint={t(
-              startBoundaryLocked
-                ? 'recurring.ruleStartDateSplitLocked'
-                : 'recurring.ruleStartDateHint',
-            )}
-            disabled={startBoundaryLocked}
+            hint={t('recurring.ruleStartDateHint')}
             dataUi={UI.allocations.recurringStartDate}
           />
           <TextInput
@@ -838,13 +881,9 @@ function RecurringRuleSheet({
             type="date"
             value={endDate}
             onChange={setEndDate}
-            hint={t(
-              endBoundaryLocked ? 'recurring.ruleEndDateSplitLocked' : 'recurring.ruleEndDateHint',
-            )}
-            disabled={endBoundaryLocked}
+            hint={t('recurring.ruleEndDateHint')}
             dataUi={UI.allocations.recurringEndDate}
           />
-          {existing?.paused ? <p className="field__hint">{t('recurring.resumeNote')}</p> : null}
         </div>
       </Modal>
       {pendingAmountChange && existing ? (
@@ -906,10 +945,10 @@ function RecurringRuleSheet({
               }
               data-ui={UI.allocations.recurringAmountChangeAll}
             >
-              <span>
-                <span className="list__row-btn__label">{t('recurring.amountChangeAll')}</span>
-                <span className="list__sub">{t('recurring.amountChangeAllHint')}</span>
-              </span>
+              <div className="list__main">
+                <div className="list__title">{t('recurring.amountChangeAll')}</div>
+                <div className="list__sub">{t('recurring.amountChangeAllHint')}</div>
+              </div>
               <Icon name="chevronRight" size={16} />
             </button>
             {canSplitAtEffectiveDate ? (
@@ -925,18 +964,18 @@ function RecurringRuleSheet({
                 }
                 data-ui={UI.allocations.recurringAmountChangeFromToday}
               >
-                <span>
-                  <span className="list__row-btn__label">
+                <div className="list__main">
+                  <div className="list__title">
                     {t('recurring.amountChangeFromToday', {
                       date: pendingAmountChange.effectiveDate,
                     })}
-                  </span>
-                  <span className="list__sub">
+                  </div>
+                  <div className="list__sub">
                     {t('recurring.amountChangeFromTodayHint', {
                       date: pendingAmountChange.effectiveDate,
                     })}
-                  </span>
-                </span>
+                  </div>
+                </div>
                 <Icon name="chevronRight" size={16} />
               </button>
             ) : null}

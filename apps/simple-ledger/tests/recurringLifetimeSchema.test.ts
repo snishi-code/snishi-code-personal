@@ -115,10 +115,10 @@ describe('定期ルール存在期間のschema検証', () => {
     );
     expect(
       recurringRuleSchema.safeParse(directRule({ postedThroughMonth: '2026-06' })).success,
-    ).toBe(false);
+    ).toBe(true);
     expect(
       recurringRuleSchema.safeParse(directRule({ postedThroughMonth: '2026-05' })).success,
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('linked仕訳は存在期間内かつ recurringMonth が日付の月と一致する', () => {
@@ -147,12 +147,12 @@ describe('定期ルール存在期間のschema検証', () => {
     ).toBe(false);
   });
 
-  it('分割後継は存在する直前segmentと同じ境界を共有し、後継は1本に限る', () => {
-    const predecessor = directRule({ endDate: '2026-04-22', splitEndLocked: true });
+  it('同一系譜の半開区間の重なりだけを拒否する', () => {
+    const predecessor = directRule({ endDate: '2026-04-22' });
     const successor = directRule({
       id: 'successor',
       startDate: '2026-04-22',
-      endDate: undefined,
+      endDate: '2026-05-10',
       splitFromRuleId: predecessor.id,
     });
     const valid = { ...pkg(predecessor), recurringRules: [predecessor, successor] };
@@ -166,25 +166,43 @@ describe('定期ルール存在期間のschema検証', () => {
     expect(
       ledgerExportPackageSchema.safeParse({
         ...valid,
-        recurringRules: [predecessor, { ...successor, startDate: '2026-04-23' }],
+        recurringRules: [predecessor, { ...successor, startDate: '2026-04-21' }],
       }).success,
     ).toBe(false);
+    // 境界に隙間があっても、存在期間が重ならなければ受理する。
+    expect(
+      ledgerExportPackageSchema.safeParse({
+        ...valid,
+        recurringRules: [predecessor, { ...successor, startDate: '2026-04-23' }],
+      }).success,
+    ).toBe(true);
+    // 位相の変更も、存在期間の非重複とは独立した設定として受理する。
     expect(
       ledgerExportPackageSchema.safeParse({
         ...valid,
         recurringRules: [predecessor, { ...successor, startMonth: '2026-05' }],
       }).success,
-    ).toBe(false);
+    ).toBe(true);
+    // 1 本の元ルールから複数の線分が続いても、系譜全体で重ならなければ受理する。
     expect(
       ledgerExportPackageSchema.safeParse({
         ...valid,
-        recurringRules: [{ ...predecessor, splitEndLocked: undefined }, successor],
+        recurringRules: [
+          predecessor,
+          successor,
+          {
+            ...successor,
+            id: 'second-successor',
+            startDate: '2026-05-10',
+            endDate: undefined,
+          },
+        ],
       }).success,
-    ).toBe(false);
+    ).toBe(true);
     expect(
       ledgerExportPackageSchema.safeParse({
         ...valid,
-        recurringRules: [predecessor, successor, { ...successor, id: 'second-successor' }],
+        recurringRules: [{ ...predecessor, splitFromRuleId: successor.id }, successor],
       }).success,
     ).toBe(false);
   });

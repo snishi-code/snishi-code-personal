@@ -80,6 +80,51 @@ async function openAmountDecision(nextAmount: string): Promise<void> {
 }
 
 describe('定期ルールの金額変更範囲', () => {
+  it('終了したルールは一覧から再表示し、同じ設定の独立した線分として新しく始められる', async () => {
+    const original = await seedRule();
+    render(<View />);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.allocations.recurringEnd}"]`)).toBeTruthy();
+    });
+
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringEnd}"]`)!);
+    await waitFor(async () => {
+      expect(
+        (await loadLedger()).recurringRules.find((rule) => rule.id === original.id)?.endDate,
+      ).toBe('2026-04-18');
+    });
+
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.allocations.showCompleted}"]`)).toBeTruthy();
+    });
+    const showEnded = document.querySelector(
+      `[data-ui="${UI.allocations.showCompleted}"]`,
+    ) as HTMLInputElement;
+    fireEvent.click(showEnded);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.allocations.recurringRestart}"]`)).toBeTruthy();
+    });
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringRestart}"]`)!);
+
+    await waitFor(async () => {
+      expect((await loadLedger()).recurringRules).toHaveLength(2);
+    });
+    const ledger = await loadLedger();
+    const restarted = ledger.recurringRules.find((rule) => rule.id !== original.id)!;
+    expect(restarted).toMatchObject({
+      name: original.name,
+      amount: original.amount,
+      dayOfMonth: original.dayOfMonth,
+      everyMonths: original.everyMonths,
+      startMonth: original.startMonth,
+      startDate: '2026-04-18',
+      creditAccountId: original.creditAccountId,
+    });
+    expect(restarted.splitFromRuleId).toBeUndefined();
+    expect(restarted.endDate).toBeUndefined();
+    expect(restarted.postedThroughMonth).toBeUndefined();
+  });
+
   it('存在期間と起票周期の基準日を別の入力として保存する', async () => {
     const original = await seedRule();
     render(<View />);
@@ -159,7 +204,7 @@ describe('定期ルールの金額変更範囲', () => {
     ).toBe(1_000);
   });
 
-  it('金額変更で分けたルールは基準月を固定し、起票日は31日まで変更できる', async () => {
+  it('金額変更で分けたルールも、系譜と重ならなければ期間と位相を編集できる', async () => {
     const original = await seedRule();
     await repository.upsertRecurringRule(
       { ...original, amount: 1500 },
@@ -174,9 +219,15 @@ describe('定期ルールの金額変更範囲', () => {
     const dayInput = document.querySelector(
       `[data-ui="${UI.allocations.recurringFirstPostingDate}"]`,
     )!;
-    expect(dayInput).toHaveAttribute('inputmode', 'numeric');
-    expect(dayInput).toHaveValue('20');
-    fireEvent.change(dayInput, { target: { value: '31' } });
+    expect(dayInput).toHaveAttribute('type', 'date');
+    expect(dayInput).toHaveValue('2026-04-20');
+    fireEvent.change(dayInput, { target: { value: '2026-05-31' } });
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringStartDate}"]`)!, {
+      target: { value: '2026-04-19' },
+    });
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringEndDate}"]`)!, {
+      target: { value: '2026-06-01' },
+    });
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
 
     await waitFor(() => {
@@ -186,7 +237,12 @@ describe('定期ルールの金額変更範囲', () => {
     });
     const ledger = await loadLedger();
     const changed = ledger.recurringRules.find((rule) => rule.id !== original.id)!;
-    expect(changed).toMatchObject({ startMonth: '2026-04', dayOfMonth: 31 });
+    expect(changed).toMatchObject({
+      startMonth: '2026-05',
+      dayOfMonth: 31,
+      startDate: '2026-04-19',
+      endDate: '2026-06-01',
+    });
   });
 
   it('保存の連打を二重送信せず、失敗時は判断画面と入力を保つ', async () => {

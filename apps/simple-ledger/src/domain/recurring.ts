@@ -6,8 +6,6 @@
  *  - アプリ起動時に経過月ぶんをキャッチアップ起票する（idempotent）。
  *  - 起票済み管理はルール側のカーソル（postedThroughMonth）で行う。ユーザーが起票済み
  *    仕訳を削除しても再起票しない（「今月はスキップ」を尊重する）。
- *  - 停止中は起票しない。再開時は startMonth を書き換えず（周期の位相を保つ）、
- *    postedThroughMonth を前月に置いて停止中の月を遡って起票しない（repository 側）。
  *  - everyMonths（必須。1 = 毎月）で間引く。位相は startMonth 基点。
  *  - 行き先が費用科目のルールは**必ず継続コスト化**する:
  *    起票は `借方 継続コスト台帳 / 貸方 源泉` + item 自動生成（repository 側）。
@@ -19,9 +17,10 @@ import { addMonths, monthOf, monthsBetween } from './allocation';
 import { ACCOUNT_ROLES, isInternalRole, type AccountRole } from './accountRoles';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from './constants';
 import { continuousCostEntriesForItem } from './continuousCost';
-import { parseRuleItemId, ruleItemId } from './recurringIds';
+import { ruleItemId } from './recurringIds';
 import {
   accountExistsAt,
+  recurringRuleItemEndDate,
   recurringRuleLastExistingDate,
   recurringRuleReferenceStartDate,
   ruleExistsAt,
@@ -148,11 +147,10 @@ function catchUpWindow(rule: RecurringRule, today: string): { first: number; las
  * 今日までに起票すべき月を列挙する。
  *  - 対象 = startMonth 〜 今日の月のうち、起票日がすでに到来し（date <= today）、
  *    ルールの存在期間 [startDate, endDate) に含まれ、カーソルより後の月。
- *  - 停止中は空。まだ起票日が来ていない当月は含めない（到来した次回起動で起票される）。
+ *  - まだ起票日が来ていない当月は含めない（到来した次回起動で起票される）。
  *  - 1 回に走査するのはカーソルの次から CATCH_UP_HARD_CAP_MONTHS か月まで（catchUpWindow）。
  */
 export function recurringPostingsDue(rule: RecurringRule, today: string): RecurringPosting[] {
-  if (rule.paused) return [];
   const window = catchUpWindow(rule, today);
   if (!window) return [];
   const out: RecurringPosting[] = [];
@@ -176,27 +174,7 @@ export function recurringPostingsDue(rule: RecurringRule, today: string): Recurr
  * 「起票日 + 周期 − 1日」は day=1 のときしか一致しない（13ヶ月配分になる）ので使わない。
  */
 export function ruleItemEndDate(postingMonth: string, everyMonths: number): string {
-  return clampDayToMonth(addMonths(postingMonth, everyMonths - 1), 31);
-}
-
-/**
- * ルール由来 item（id = `ccr-{ruleId}-{month}`）が費用の割り振りでカバーする最終月。
- * 周期の変更（例: 12 か月ごと → 毎月）後も、既存 item が覆う月へ新しい item を重ねない
- * （重なると当該月の費用が二重計上され、import schema の不変条件⑤も破る）ための単一正本。
- * 終了日なし（ユーザーが編集で外した）は開区間として '9999-12' 扱い＝以降は起票しない
- * （どの月に重ねても schema ⑤が拒否するため）。ルール由来 item が無ければ undefined。
- */
-export function ruleItemCoverageThrough(
-  ruleId: string,
-  items: readonly MonthlyCostItem[],
-): string | undefined {
-  let through: string | undefined;
-  for (const item of items) {
-    if (parseRuleItemId(item.id)?.ruleId !== ruleId) continue;
-    const to = item.endDate !== undefined ? monthOf(item.endDate) : '9999-12';
-    if (through === undefined || to > through) through = to;
-  }
-  return through;
+  return recurringRuleItemEndDate(postingMonth, everyMonths);
 }
 
 /**
@@ -235,7 +213,6 @@ export function recurringProjectionEntries(
   rules: RecurringRule[],
   accounts: Account[],
   asOf: string,
-  monthlyCostItems: readonly MonthlyCostItem[] = [],
 ): JournalEntry[] {
   const byId = new Map(accounts.map((account) => [account.id, account] as const));
   const projected: JournalEntry[] = [];
@@ -259,14 +236,7 @@ export function recurringProjectionEntries(
       (debit.id !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID || debit.role !== 'continuing-cost-asset')
     )
       continue;
-    // 既存のルール由来 item が覆う月には投影しない（catch-up も同じ月を起票しない・監査 P1-10）。
-    const coveredThrough = spreadsExpense
-      ? ruleItemCoverageThrough(rule.id, monthlyCostItems)
-      : undefined;
-    const referenceStart = recurringRuleReferenceStartDate(
-      rule,
-      spreadsExpense ? monthlyCostItems : [],
-    );
+    const referenceStart = recurringRuleReferenceStartDate(rule);
     if (referenceStart === undefined) continue;
     // recurringKindOf(continuing-cost-asset, …) は null を返すため、費用ルールは 'expense' 直指定。
     const inputMode: InputMode = spreadsExpense
@@ -274,7 +244,6 @@ export function recurringProjectionEntries(
       : (recurringKindOf(destination.role, credit.role) ?? 'manual');
     for (const posting of recurringPostingsDue(rule, asOf)) {
       if (posting.date < referenceStart) continue;
-      if (coveredThrough !== undefined && posting.month <= coveredThrough) continue;
       if (
         !accountExistsAt(destination, posting.date) ||
         !accountExistsAt(credit, posting.date) ||
@@ -330,7 +299,6 @@ export function recurringProjectionEntries(
 
 /** キャッチアップ後にルールへ書き戻すカーソル（起票日が到来した最後の月。走査した窓の中まで）。 */
 export function recurringCursorAfter(rule: RecurringRule, today: string): string | undefined {
-  if (rule.paused) return rule.postedThroughMonth;
   const window = catchUpWindow(rule, today);
   if (!window) return rule.postedThroughMonth;
   const ended = rule.endDate !== undefined && rule.endDate <= today;
