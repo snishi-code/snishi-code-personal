@@ -268,7 +268,7 @@ describe('追補監査の画面回帰', () => {
 
     render(
       <Providers>
-        <Allocations onEditEntry={() => undefined} />
+        <Allocations period={{ mode: 'all' }} onEditEntry={() => undefined} />
       </Providers>,
     );
     await waitFor(() => {

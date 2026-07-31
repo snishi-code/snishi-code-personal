@@ -37,7 +37,7 @@
 | `cashflow.future.list` | CF 未来の入出金・振替予定 | ホーム未来日付入力が反映される一覧 |
 | `cashflow.repayments.toggle` / `.list` / `.row` | CF 負債行の「登録済みの返済」展開 | 未来日付の返済仕訳（借方=その負債）の一覧。`row` タップで仕訳の編集シートを開く |
 | `journal.view` | Journal ルート | 仕訳画面の検出 |
-| `journal.entry.list` | Journal 一覧 | 保存される仕訳 + 計算で生まれる仕訳（継続コスト資産の費用行・ルール投影）を日付順で混合表示。計算で生まれた行のタップは「毎月のもの」の元の項目/ルールへ遷移 |
+| `journal.entry.list` | Journal 一覧 | 保存される仕訳 + 計算で生まれる仕訳（継続コスト資産の費用行・ルール投影）を日付順で混合表示。計算で生まれた行のタップは「毎月のもの」の元の項目/ルールへ遷移。科目絞り込み中はその科目の残高増減を金額の色とアクセシブル名で示す |
 | `journal.search` | Journal 検索入力 | 検索 |
 | `journal.filter.clearAccount` | 科目絞り込み解除 | ドリルダウン解除 |
 | `journal.filter.clearNormalExpense` | 通常支出絞り込み解除 | 支出内訳からの通常支出ドリルダウン解除 |

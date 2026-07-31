@@ -110,6 +110,8 @@
   // 継続コスト資産に紐づく保存仕訳の印。recovery なし = 購入の仕訳 / あり = 回収の振替。
   "monthlyCostId": "<monthlyCostItems[].id>",
   "monthlyCostRecovery": true,
+  // 旧帳簿の実仕訳を継続コスト認識へ分類する独立印（台帳・monthlyCostId への参照ではない）。
+  "monthlyCostRecognition": true,
   // 定期ルールからの自動起票の由来（必ずペアで持つ）。
   "recurringRuleId": "<recurringRules[].id>",
   "recurringMonth": "2026-07"
@@ -119,6 +121,9 @@
 `virtual` / `continuousCostId` / `ccKind` は**計算で生まれる仕訳専用の印**で、
 `entryMetadataSchema` に存在しない（保存される仕訳に付けると保存境界が例外で拒否し、
 import では strip される）。
+`monthlyCostRecognition` は反対に**保存される実仕訳の分類印**で、`true` だけを許可する。
+継続コスト台帳へ触れず単独で付けられ、編集・export / import でも保持する。
+印付き仕訳の取消/返金は逆仕訳にも印を引き継ぎ、費用科目の貸方を継続コストの減額として扱う。
 
 ### 構造・参照整合性（import 検証）
 
@@ -141,6 +146,9 @@ import では strip される）。
   - `endDate?` は `>= startDate`・配分月数 ≤ 1200 ヶ月。`expenseAccountId` は内部集約・残高調整
     以外（`isRecurringPostableRole`）。
   - **同一ルール由来（id `ccr-{ruleId}-…`）の item の月区間が重ならない**。
+- `monthlyCostRecognition:true` は旧帳簿の保存済み費用行を表示分類するだけで、
+  `monthlyCostId`・item 参照・継続コスト台帳への接触を要求しない。台帳接触仕訳の上記規則は
+  この印の有無にかかわらず同じように検証する。
 - 勘定科目の不変条件「アーカイブ済み（資産・負債）= 残高 0」は**アーカイブ操作時点（今日・
   導出仕訳込み）の保存境界だけが守り、import では再検証しない**（時点依存の条件のため。
   最終残高で再検証すると、未来仕訳を含む保存済み台帳の round-trip が壊れる。監査 P1-3・2026-07-30）。

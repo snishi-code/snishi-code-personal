@@ -11,9 +11,14 @@ import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { Allocations } from '../src/ui/screens/Allocations';
-import { createContinuousCost, loadLedger } from '../src/data/repository';
+import {
+  archiveMonthlyCost,
+  createContinuousCost,
+  loadLedger,
+} from '../src/data/repository';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import { addMonthsToDate } from '../src/domain/allocation';
+import type { ReportPeriod } from '../src/domain/reportPeriod';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { todayLocal } from '../src/util/time';
@@ -28,26 +33,29 @@ afterEach(() => {
   _resetOverlaysForTests();
 });
 
-function View() {
+function View({ period }: { period: ReportPeriod }) {
   return (
     <ToastProvider>
       <LedgerProvider>
-        <ReadyView />
+        <ReadyView period={period} />
       </LedgerProvider>
     </ToastProvider>
   );
 }
 
-function ReadyView() {
+function ReadyView({ period }: { period: ReportPeriod }) {
   const { status } = useLedger();
-  return status === 'ready' ? <Allocations onEditEntry={() => undefined} /> : null;
+  return status === 'ready' ? (
+    <Allocations period={period} onEditEntry={() => undefined} />
+  ) : null;
 }
 
-async function renderReady() {
-  render(<View />);
+async function renderReady(period: ReportPeriod = { mode: 'all' }) {
+  const view = render(<View period={period} />);
   await waitFor(() => {
     expect(document.querySelector(`[data-ui="${UI.allocations.view}"]`)).toBeInTheDocument();
   });
+  return view;
 }
 
 describe('追加チューザー', () => {
@@ -332,6 +340,107 @@ describe('終了まで1ヶ月以内のマーカー', () => {
     expect(cards[0]!.dataset['ending']).toBe('true');
     expect(cards[1]!.dataset['ending']).toBeUndefined();
     expect(cards[2]!.dataset['ending']).toBeUndefined();
+  });
+});
+
+describe('ヘッダー日付に追従する一覧と金額', () => {
+  it('選択日より後の項目を隠し、当時は有効だった終了済み項目と当時までの回収額を表示する', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+
+    const historical = await createContinuousCost({
+      name: '当時の年払い',
+      amount: 12000,
+      startDate: '2024-01-01',
+      expenseAccountId: expense.id,
+      creditAccountId: cash.id,
+    });
+    // 回収は 6 月末。5 月末の断面には先取りせず、6 月末の断面から反映する。
+    await archiveMonthlyCost({
+      id: historical.id,
+      endDate: '2024-06-30',
+      recovery: { destinationAccountId: cash.id, amount: 6000 },
+    });
+    await createContinuousCost({
+      name: '未来開始の項目',
+      amount: 6000,
+      startDate: '2026-07-01',
+      endDate: '2026-12-31',
+      expenseAccountId: expense.id,
+      creditAccountId: cash.id,
+    });
+
+    const view = await renderReady({ mode: 'date', date: '2023-12-31' });
+    expect(screen.queryByText(historical.name)).not.toBeInTheDocument();
+    expect(screen.queryByText('未来開始の項目')).not.toBeInTheDocument();
+    expect(screen.getByText(/まだ登録がありません/)).toBeInTheDocument();
+
+    view.rerender(<View period={{ mode: 'date', date: '2024-05-31' }} />);
+    const historicalCard = (await screen.findByText(historical.name)).closest(
+      `[data-ui="${UI.allocations.item}"]`,
+    ) as HTMLElement;
+    expect(historicalCard).not.toBeNull();
+    expect(screen.queryByText('未来開始の項目')).not.toBeInTheDocument();
+    // 実際の今日は終了済みでも、選択日にはまだ有効。終了まで1ヶ月なのでマーカーも D 基準。
+    expect(historicalCard.dataset['ending']).toBe('true');
+    // 6月末の回収をまだ含めず、12,000 / 6ヶ月 = 月2,000、5月末残り2,000。
+    expect(within(historicalCard).getByText('残存価値').closest('.kv')).toHaveTextContent('2,000');
+    expect(
+      within(historicalCard).getByText('今月の計上額').closest('.kv'),
+    ).toHaveTextContent('2,000');
+
+    view.rerender(<View period={{ mode: 'date', date: '2024-06-30' }} />);
+    const recoveredCard = (await screen.findByText(historical.name)).closest(
+      `[data-ui="${UI.allocations.item}"]`,
+    ) as HTMLElement;
+    // 回収後は割り振る総額 6,000 / 6ヶ月 = 月1,000、終了日時点の残りは0。
+    expect(within(recoveredCard).getByText('月あたり').closest('.kv')).toHaveTextContent('1,000');
+    expect(within(recoveredCard).getByText('残存価値').closest('.kv')).toHaveTextContent('0');
+    expect(
+      within(recoveredCard).getByText('今月の計上額').closest('.kv'),
+    ).toHaveTextContent('1,000');
+  });
+
+  it('過去断面の表示額をアーカイブ操作へ流用せず、書込導線は今日までの回収を使う', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    const item = await createContinuousCost({
+      name: '回収済みの過去項目',
+      amount: 12000,
+      startDate: '2024-01-01',
+      expenseAccountId: expense.id,
+      creditAccountId: cash.id,
+    });
+    await archiveMonthlyCost({
+      id: item.id,
+      endDate: '2024-06-30',
+      recovery: { destinationAccountId: cash.id, amount: 6000 },
+    });
+
+    await renderReady({ mode: 'date', date: '2024-05-31' });
+    const card = (await screen.findByText(item.name)).closest(
+      `[data-ui="${UI.allocations.item}"]`,
+    ) as HTMLElement;
+    // 過去表示は回収前なので残存価値 2,000。
+    expect(within(card).getByText('残存価値').closest('.kv')).toHaveTextContent('2,000');
+
+    fireEvent.click(screen.getByRole('button', { name: `アーカイブ: ${item.name}` }));
+    const dialog = document.querySelector(
+      `[data-ui="${UI.allocations.archiveDialog}"]`,
+    ) as HTMLElement;
+    // 配分最終日では回収額にかかわらず残存0になるため、途中日へ変えて差を固定する。
+    fireEvent.change(
+      document.querySelector(`[data-ui="${UI.allocations.archiveDate}"]`) as HTMLInputElement,
+      { target: { value: '2024-05-31' } },
+    );
+    // 操作は実今日までの回収済み 6,000 を使うため、6,000 / 6ヶ月の5ヶ月認識後 = 残存1,000。
+    // 過去表示用の回収前総額12,000を誤用すると2,000になり、このassertが失敗する。
+    expect(within(dialog).getByText('残存価値').closest('.kv')).toHaveTextContent('1,000');
+    expect(
+      document.querySelector(`[data-ui="${UI.allocations.archiveTransfer}"]`),
+    ).toBeInTheDocument();
   });
 });
 

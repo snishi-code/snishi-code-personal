@@ -6,7 +6,7 @@
  *  - from/to には展開上限（2100-12-31）の max が付く
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider, useLedger } from '../src/state/store';
@@ -22,8 +22,9 @@ import { addMonths, addMonthsToDate, monthOf } from '../src/domain/allocation';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { todayLocal } from '../src/util/time';
+import { formatMoney } from '../src/util/format';
 import type { AllocationsTarget } from '../src/ui/screens/Allocations';
-import type { JournalEntry } from '../src/domain/types';
+import type { Account, JournalEntry } from '../src/domain/types';
 import './setup';
 
 beforeAll(() => {
@@ -83,6 +84,52 @@ function ReadyView({
       onClearFilter={onClearFilter}
     />
   );
+}
+
+async function createBalanceChangeFixtures(): Promise<{
+  asset: Account;
+  revenue: Account;
+  increaseAmount: number;
+  decreaseAmount: number;
+}> {
+  const ledger = await loadLedger();
+  const asset = ledger.accounts.find((account) => account.role === 'daily-asset')!;
+  const revenue = ledger.accounts.find((account) => account.role === 'income-category')!;
+  const today = todayLocal();
+  const timestamp = `${today}T00:00:00.000Z`;
+  const increaseAmount = 5000;
+  const decreaseAmount = 1200;
+
+  // 資産は借方、収入は貸方にあると自然な残高が増える。
+  await upsertEntry({
+    id: 'balance-change-increase',
+    date: today,
+    description: '残高が増える仕訳',
+    kind: 'normal',
+    lines: [
+      { accountId: asset.id, side: 'debit', amount: increaseAmount },
+      { accountId: revenue.id, side: 'credit', amount: increaseAmount },
+    ],
+    metadata: { inputMode: 'income' },
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+  // 逆側に置けば、両科目とも自然な残高が減る。
+  await upsertEntry({
+    id: 'balance-change-decrease',
+    date: today,
+    description: '残高が減る仕訳',
+    kind: 'normal',
+    lines: [
+      { accountId: revenue.id, side: 'debit', amount: decreaseAmount },
+      { accountId: asset.id, side: 'credit', amount: decreaseAmount },
+    ],
+    metadata: { inputMode: 'reversal' },
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+
+  return { asset, revenue, increaseAmount, decreaseAmount };
 }
 
 describe('仕訳一覧の混合表示', () => {
@@ -239,6 +286,13 @@ describe('仕訳一覧の混合表示', () => {
     expect(screen.queryByText('通常支出ではない収入')).not.toBeInTheDocument();
     expect(screen.queryByText('通常支出ではない継続コスト')).not.toBeInTheDocument();
     expect(screen.getByText('通常支出のみ')).toBeInTheDocument();
+    const normalExpenseAmount = screen
+      .getByText('通常支出フィルタ対象')
+      .closest('li')!
+      .querySelector('.list__amount')!;
+    expect(normalExpenseAmount).not.toHaveClass('amount--pos');
+    expect(normalExpenseAmount).not.toHaveClass('amount--neg');
+    expect(normalExpenseAmount).not.toHaveAttribute('aria-label');
 
     fireEvent.click(
       document.querySelector(
@@ -246,5 +300,82 @@ describe('仕訳一覧の混合表示', () => {
       ) as HTMLButtonElement,
     );
     expect(onClearFilter).toHaveBeenCalledTimes(1);
+  });
+
+  it('給与（収入科目）フィルタでは貸方を増加色、借方を減少色にし、増減を読み上げる', async () => {
+    const { revenue, increaseAmount, decreaseAmount } = await createBalanceChangeFixtures();
+
+    render(
+      <View
+        filter={{ accountId: revenue.id, from: todayLocal(), to: todayLocal() }}
+      />,
+    );
+
+    const increase = await screen.findByLabelText(
+      `${revenue.name}の残高が増える金額: ${formatMoney(increaseAmount)}`,
+    );
+    const decrease = screen.getByLabelText(
+      `${revenue.name}の残高が減る金額: ${formatMoney(decreaseAmount)}`,
+    );
+    expect(increase).toHaveClass('amount--pos');
+    expect(decrease).toHaveClass('amount--neg');
+    expect(increase).toHaveTextContent(formatMoney(increaseAmount));
+    expect(decrease).toHaveTextContent(formatMoney(decreaseAmount));
+    expect(increase).not.toHaveTextContent('+');
+  });
+
+  it('資産科目フィルタでは借方を増加色、貸方を減少色にする', async () => {
+    const { asset, increaseAmount, decreaseAmount } = await createBalanceChangeFixtures();
+
+    render(
+      <View filter={{ accountId: asset.id, from: todayLocal(), to: todayLocal() }} />,
+    );
+
+    expect(
+      await screen.findByLabelText(
+        `${asset.name}の残高が増える金額: ${formatMoney(increaseAmount)}`,
+      ),
+    ).toHaveClass('amount--pos');
+    expect(
+      screen.getByLabelText(
+        `${asset.name}の残高が減る金額: ${formatMoney(decreaseAmount)}`,
+      ),
+    ).toHaveClass('amount--neg');
+  });
+
+  it('科目フィルタなしでは金額を増減色にしない', async () => {
+    await createBalanceChangeFixtures();
+
+    render(<View />);
+    const rowTitle = await screen.findByText('残高が増える仕訳');
+    const amount = rowTitle.closest('li')!.querySelector('.list__amount')!;
+    expect(amount).not.toHaveClass('amount--pos');
+    expect(amount).not.toHaveClass('amount--neg');
+    expect(amount).not.toHaveAttribute('aria-label');
+  });
+
+  it('印付きの過去実仕訳にも継続コストタグを表示する', async () => {
+    const ledger = await loadLedger();
+    const asset = ledger.accounts.find((account) => account.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((account) => account.role === 'expense-category')!;
+    const today = todayLocal();
+    const timestamp = `${today}T00:00:00.000Z`;
+    await upsertEntry({
+      id: 'marked-monthly-cost-recognition',
+      date: today,
+      description: '過去帳簿の償却',
+      kind: 'normal',
+      lines: [
+        { accountId: expense.id, side: 'debit', amount: 2400 },
+        { accountId: asset.id, side: 'credit', amount: 2400 },
+      ],
+      metadata: { monthlyCostRecognition: true },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+
+    render(<View />);
+    const row = (await screen.findByText('過去帳簿の償却')).closest('li')!;
+    expect(within(row).getByText('継続コスト')).toBeInTheDocument();
   });
 });

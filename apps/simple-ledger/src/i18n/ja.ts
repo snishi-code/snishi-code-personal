@@ -289,6 +289,8 @@ export const ja = {
   'journal.filteredByNormalExpense': '通常支出のみ',
   'journal.clearNormalExpenseFilter': '通常支出の絞り込みを解除',
   'journal.showFuture': '将来予定も表示',
+  'journal.accountBalanceIncrease': '{name}の残高が増える金額: {amount}',
+  'journal.accountBalanceDecrease': '{name}の残高が減る金額: {amount}',
 
   // 期間フィルタの選択肢ラベル（タグ画面などで再利用）。
   'statements.allPeriods': '全期間',

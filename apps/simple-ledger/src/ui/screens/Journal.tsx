@@ -19,10 +19,15 @@ import { entryHasTag } from '../../domain/tags';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
 import { reportEntriesForAsOf } from '../../domain/reportEntries';
 import { periodRange, type ReportPeriod } from '../../domain/reportPeriod';
-import { isNormalExpenseEntry } from '../../domain/livingCost';
+import { isDebitNormal } from '../../domain/accounting';
+import {
+  isMonthlyCostRecognitionEntry,
+  isNormalExpenseEntry,
+} from '../../domain/livingCost';
 import { tagNames } from '../tagOptions';
 import type { AllocationsTarget } from './Allocations';
 import type { Account, JournalEntry } from '../../domain/types';
+import { formatMoney } from '../../util/format';
 
 export interface JournalFilter {
   accountId?: string;
@@ -36,6 +41,21 @@ function flowText(map: Map<string, Account>, entry: JournalEntry): string {
   const credit = entry.lines.find((l) => l.side === 'credit');
   const name = (id?: string) => (id ? (map.get(id)?.name ?? '—') : '—');
   return `${name(credit?.accountId)} → ${name(debit?.accountId)}`;
+}
+
+type AccountBalanceChange = 'increase' | 'decrease' | null;
+
+/**
+ * 科目の自然な残高符号で、この仕訳が対象科目を増やすか減らすかを返す。
+ * 複合仕訳で同じ科目が両側にある場合も、借貸の純額で判定する。
+ */
+function accountBalanceChange(entry: JournalEntry, account: Account): AccountBalanceChange {
+  const increaseSide = isDebitNormal(account.type) ? 'debit' : 'credit';
+  const delta = entry.lines.reduce((sum, line) => {
+    if (line.accountId !== account.id) return sum;
+    return sum + (line.side === increaseSide ? line.amount : -line.amount);
+  }, 0);
+  return delta > 0 ? 'increase' : delta < 0 ? 'decrease' : null;
 }
 
 export function Journal({
@@ -293,8 +313,34 @@ export function Journal({
             const isRecovery = md?.monthlyCostRecovery === true;
             // 購入の仕訳（継続コスト資産と 1:1）: 編集シートを開ける（借方は台帳固定・削除不可）。
             const isPurchase = !isVirtual && md?.monthlyCostId !== undefined && !isRecovery;
-            const isMonthlyCost = md?.monthlyCostId !== undefined || md?.continuousCostId !== undefined;
+            const isMonthlyCost =
+              md?.monthlyCostId !== undefined ||
+              md?.continuousCostId !== undefined ||
+              isMonthlyCostRecognitionEntry(entry);
             const isAdjustment = !!md?.adjustment;
+            const displayedAmount = entry.lines.find((line) => line.side === 'debit')?.amount ?? 0;
+            // 科目ドリル中だけ、その科目の自然な残高符号で増減を示す。金額自体には符号を付けない。
+            const balanceChange = filterAccount
+              ? accountBalanceChange(entry, filterAccount)
+              : null;
+            const balanceChangeClass =
+              balanceChange === 'increase'
+                ? 'amount--pos'
+                : balanceChange === 'decrease'
+                  ? 'amount--neg'
+                  : '';
+            const balanceChangeLabel =
+              balanceChange === 'increase'
+                ? t('journal.accountBalanceIncrease', {
+                    name: filterAccount?.name ?? '',
+                    amount: formatMoney(displayedAmount, currency),
+                  })
+                : balanceChange === 'decrease'
+                  ? t('journal.accountBalanceDecrease', {
+                      name: filterAccount?.name ?? '',
+                      amount: formatMoney(displayedAmount, currency),
+                    })
+                  : undefined;
             // 持ち込みの購入の仕訳は kind='opening' だが、専用シートではなく購入の仕訳として編集する。
             const isOpening = entry.kind === 'opening' && !isPurchase;
             // タップ: 計算で生まれた行は「毎月のもの」の元のルール/項目へ。opening / adjustment は
@@ -354,11 +400,11 @@ export function Journal({
                 >
                   {title}
                 </button>
-                <span className="list__amount">
-                  <Money
-                    amount={entry.lines.find((l) => l.side === 'debit')?.amount ?? 0}
-                    currency={currency}
-                  />
+                <span
+                  className={`list__amount ${balanceChangeClass}`.trim()}
+                  aria-label={balanceChangeLabel}
+                >
+                  <Money amount={displayedAmount} currency={currency} />
                 </span>
                 {isVirtual || isPurchase ? null : isAdjustment ? (
                   <button

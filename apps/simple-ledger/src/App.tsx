@@ -282,7 +282,7 @@ export function App() {
           />
         ) : null}
         {screen === 'allocations' ? (
-          <Allocations onEditEntry={openEdit} target={allocationsTarget} />
+          <Allocations period={period} onEditEntry={openEdit} target={allocationsTarget} />
         ) : null}
         {screen === 'cashflow' ? <Cashflow onEditEntry={openEdit} /> : null}
         {screen === 'tags' ? <Tags /> : null}

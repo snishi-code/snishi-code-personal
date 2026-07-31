@@ -32,7 +32,12 @@ function View() {
 
 function ReadyView() {
   const { status } = useLedger();
-  return status === 'ready' ? <Allocations onEditEntry={() => undefined} /> : null;
+  return status === 'ready' ? (
+    <Allocations
+      period={{ mode: 'date', date: '2031-02-28' }}
+      onEditEntry={() => undefined}
+    />
+  ) : null;
 }
 
 describe('定期ルールの初回起票日', () => {

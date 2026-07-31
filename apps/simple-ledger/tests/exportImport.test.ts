@@ -55,6 +55,38 @@ describe('export/import round trip', () => {
     expect(snaps.length).toBeGreaterThan(0);
     expect(snaps[0]?.reason).toBe('import前');
   });
+
+  it('台帳に触れない継続コスト認識印を保存・編集で保持し、export→import できる', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '変動費')!;
+    const marked = buildSimpleEntry({
+      date: '2026-03-31',
+      description: '償却 旧帳簿',
+      debitAccountId: food.id,
+      creditAccountId: cash.id,
+      amount: 1000,
+      metadata: { monthlyCostRecognition: true },
+    });
+    await upsertEntry(marked);
+
+    const saved = (await loadLedger()).journalEntries.find((entry) => entry.id === marked.id)!;
+    const editWithoutMetadata = { ...saved };
+    delete editWithoutMetadata.metadata;
+    await upsertEntry({ ...editWithoutMetadata, description: '償却 旧帳簿（編集済み）' });
+    const edited = await loadLedger();
+    expect(
+      edited.journalEntries.find((entry) => entry.id === marked.id)?.metadata
+        ?.monthlyCostRecognition,
+    ).toBe(true);
+
+    const outcome = await importFromJsonText(exportToJsonText(edited));
+    expect(outcome.kind).toBe('ok');
+    expect(
+      (await loadLedger()).journalEntries.find((entry) => entry.id === marked.id)?.metadata
+        ?.monthlyCostRecognition,
+    ).toBe(true);
+  });
 });
 
 describe('fail-closed', () => {

@@ -246,7 +246,14 @@ describe('entry metadata', () => {
         },
       ],
       journalEntries: [
-        { ...validEntry, metadata: { inputMode: 'reversal', reversalOfEntryId: 'z' } },
+        {
+          ...validEntry,
+          metadata: {
+            inputMode: 'reversal',
+            reversalOfEntryId: 'z',
+            monthlyCostRecognition: true,
+          },
+        },
       ],
       cashflowSchedules: [],
       tags: [],
@@ -258,6 +265,8 @@ describe('entry metadata', () => {
     expect(parsed.success).toBe(true);
     if (parsed.success) {
       expect(parsed.data.journalEntries[0]?.metadata?.inputMode).toBe('reversal');
+      // 台帳科目・monthlyCostId に触れない通常の実仕訳でも印を受理し、strip しない。
+      expect(parsed.data.journalEntries[0]?.metadata?.monthlyCostRecognition).toBe(true);
     }
   });
 });

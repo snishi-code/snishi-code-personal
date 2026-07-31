@@ -127,6 +127,17 @@ describe('buildSimpleEntry metadata', () => {
     });
     expect(e.metadata?.inputMode).toBe('income');
   });
+  it('継続コスト認識印だけの metadata も保持する', () => {
+    const e = buildSimpleEntry({
+      date: '2026-06-01',
+      description: '旧帳簿の償却',
+      debitAccountId: 'expense',
+      creditAccountId: 'legacy-asset',
+      amount: 1000,
+      metadata: { monthlyCostRecognition: true },
+    });
+    expect(e.metadata).toEqual({ monthlyCostRecognition: true });
+  });
   it('空 metadata は付けない', () => {
     const e = buildSimpleEntry({
       date: '2026-06-01',
@@ -175,6 +186,18 @@ describe('reversalInput', () => {
     });
     expect(reversalInput(future).date).toBe('2036-06-01');
     expect(reversalInput(source).date).toBe('2026-06-01');
+  });
+
+  it('継続コスト認識印を引き継ぎ、取消を通常支出へ混ぜない', () => {
+    const marked: JournalEntry = {
+      ...source,
+      metadata: { monthlyCostRecognition: true },
+    };
+    expect(reversalInput(marked).metadata).toMatchObject({
+      inputMode: 'reversal',
+      reversalOfEntryId: source.id,
+      monthlyCostRecognition: true,
+    });
   });
 
   it('逆仕訳を仕訳化すると元と反対向き・同額で貸借一致する', () => {

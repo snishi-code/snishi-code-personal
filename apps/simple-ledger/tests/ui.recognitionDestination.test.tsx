@@ -263,7 +263,7 @@ describe('継続コスト資産の費用の行き先候補', () => {
     await addCandidateFixtures();
     render(
       <Providers>
-        <Allocations onEditEntry={() => undefined} />
+        <Allocations period={{ mode: 'all' }} onEditEntry={() => undefined} />
       </Providers>,
     );
     fireEvent.click(
@@ -298,7 +298,7 @@ describe('継続コスト資産の費用の行き先候補', () => {
 
     render(
       <Providers>
-        <Allocations onEditEntry={() => undefined} />
+        <Allocations period={{ mode: 'all' }} onEditEntry={() => undefined} />
       </Providers>,
     );
     fireEvent.click(

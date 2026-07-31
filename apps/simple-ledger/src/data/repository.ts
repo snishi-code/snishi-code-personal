@@ -771,7 +771,19 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
       throw new LedgerError('error.entry.monthlyCost');
     }
     const ctx = await loadSaveContext();
-    const savable = assertEntrySavable(entry, ctx);
+    // 旧帳簿の継続コスト認識印は台帳系の印とは独立した分類情報。新規仕訳に付けることも
+    // 許可し、既存の印は編集入力が metadata を省略しても保存境界で剥がさない。
+    const candidate =
+      existing?.metadata?.monthlyCostRecognition === true
+        ? {
+            ...entry,
+            metadata: {
+              ...entry.metadata,
+              monthlyCostRecognition: true as const,
+            },
+          }
+        : entry;
+    const savable = assertEntrySavable(candidate, ctx);
     await assertEntryTagsValid(savable);
     await writeWithRevision([STORE.journalEntries], (t) => {
       t.objectStore(STORE.journalEntries).put(savable);
@@ -785,6 +797,9 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
     ...entry.metadata,
     monthlyCostId: existingMcId,
     ...(existingRecovery ? { monthlyCostRecovery: true as const } : {}),
+    ...(existing?.metadata?.monthlyCostRecognition === true
+      ? { monthlyCostRecognition: true as const }
+      : {}),
   };
   if (!existingRecovery) delete metadata.monthlyCostRecovery;
   const ctx = await loadSaveContext();

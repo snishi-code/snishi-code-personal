@@ -32,6 +32,7 @@ import {
 } from '../accountOptions';
 import { monthlyAmounts, monthOf } from '../../domain/allocation';
 import { isValidIsoDate } from '../../domain/calendar';
+import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
 import { nowIso, todayLocal } from '../../util/time';
 import {
   CATCH_UP_HARD_CAP_MONTHS,
@@ -55,9 +56,12 @@ export interface AllocationsTarget {
 }
 
 export function Allocations({
+  period,
   onEditEntry,
   target,
 }: {
+  /** ヘッダーで選んだ断面。「毎月のもの」の一覧・表示額だけがこの日付に追従する。 */
+  period: ReportPeriod;
   /** 購入の仕訳を開く（開始日の変更は仕訳側で行う）。 */
   onEditEntry: (entry: JournalEntry) => void;
   /** 仕訳一覧の計算で生まれた行タップからの遷移対象（開くシート。同一オブジェクトは 1 回だけ消費）。 */
@@ -71,9 +75,11 @@ export function Allocations({
   const [chooserOpen, setChooserOpen] = useState(false);
   const [ruleSheet, setRuleSheet] = useState<{ existing?: RecurringRule } | null>(null);
   const [pendingRuleDelete, setPendingRuleDelete] = useState<RecurringRule | null>(null);
-  // 「毎月のもの」は集計ではなく登録簿なので、ヘッダー選択日ではなく実際の今日で判定する。
+  // 表示だけはヘッダーの断面へ追従する。シート内の書込日・catch-up は period を受け取らず、
+  // 引き続き実際の今日を基準にする（過去/未来表示が durable state を動かさない）。
   const today = todayLocal();
-  const currentYm = monthOf(today);
+  const asOf = reportBasis(period, today).asOf;
+  const currentYm = monthOf(asOf);
   const currency = ledger?.settings.currency ?? 'JPY';
 
   const accountsMap = useMemo(
@@ -83,24 +89,38 @@ export function Allocations({
   const name = (id?: string): string => (id ? (accountsMap.get(id)?.name ?? '—') : '—');
 
   // 回収の振替を差し引いた「割り振る総額」（負になってよい＝過去にわたる費用減）。
-  // 集計は今日までの保存仕訳に限定する（未来日付の回収を今日の一覧へ先取りしない。
+  // 集計は選択日までの保存仕訳に限定する（未来日付の回収を過去の一覧へ先取りしない。
   // reportEntriesForAsOf が実仕訳を asOf で切ってから展開するのと同じ扱い・監査 P2-2）。
-  const recovered = recoveredAmountsByItem(
-    (ledger?.journalEntries ?? []).filter((e) => e.date <= today),
+  const journalEntries = ledger?.journalEntries ?? [];
+  const recoveredAtAsOf = recoveredAmountsByItem(
+    journalEntries.filter((e) => e.date <= asOf),
   );
-  const spreadTotalOf = (m: MonthlyCostItem): number => m.amount - (recovered.get(m.id) ?? 0);
+  const recoveredAtToday =
+    asOf === today
+      ? recoveredAtAsOf
+      : recoveredAmountsByItem(journalEntries.filter((e) => e.date <= today));
+  const displaySpreadTotalOf = (m: MonthlyCostItem): number =>
+    m.amount - (recoveredAtAsOf.get(m.id) ?? 0);
+  // ヘッダー日付は表示だけのタイムマシン。アーカイブ/回収の書込導線へは、実際の今日までの
+  // 回収額を渡し、過去表示から既存回収を二重計上したり未来回収を先取りしたりしない。
+  const operationSpreadTotalOf = (m: MonthlyCostItem): number =>
+    m.amount - (recoveredAtToday.get(m.id) ?? 0);
   const purchaseEntryOf = (m: MonthlyCostItem): JournalEntry | undefined =>
     (ledger?.journalEntries ?? []).find(
       (e) => e.metadata?.monthlyCostId === m.id && e.metadata.monthlyCostRecovery !== true,
     );
 
   const allItems = ledger?.monthlyCostItems ?? [];
+  // 開始前の項目はその断面にはまだ存在しない。showEnded は終了済みだけを再表示し、
+  // 未来開始の項目まで先取りしない。
+  const startedItems = allItems.filter((m) => m.startDate <= asOf);
   // loadLedger は終了が近い順で返すが、編集直後の state 由来でも順序が崩れないよう再ソートする。
-  const items = [...allItems]
-    .filter((m) => showEnded || !isArchived(m, today))
+  const items = [...startedItems]
+    .filter((m) => showEnded || !isArchived(m, asOf))
     .sort(compareMonthlyCostItems);
 
-  const rules = ledger?.recurringRules ?? [];
+  const allRules = ledger?.recurringRules ?? [];
+  const rules = allRules.filter((r) => r.startMonth <= currentYm);
   // 参照科目が削除/アーカイブ済みのルールは catch-up が起票を止める（fail-soft）。
   // 黙ってスキップしない＝一覧の行で警告する（監査 P1-7）。削除は accountRefs が塞ぐため、
   // 通常ここに出るのはアーカイブ由来だけ。
@@ -133,7 +153,7 @@ export function Allocations({
     const targetItem =
       target.itemId !== undefined ? allItems.find((m) => m.id === target.itemId) : undefined;
     const targetRule =
-      target.ruleId !== undefined ? rules.find((r) => r.id === target.ruleId) : undefined;
+      target.ruleId !== undefined ? allRules.find((r) => r.id === target.ruleId) : undefined;
     if (targetItem) setItemSheet({ existing: targetItem });
     else if (targetRule) setRuleSheet({ existing: targetRule });
   }
@@ -155,7 +175,7 @@ export function Allocations({
         </button>
       </div>
 
-      {rules.length === 0 && allItems.length === 0 ? (
+      {rules.length === 0 && startedItems.length === 0 ? (
         <div
           className="card card--pad empty"
           style={{ margin: 'var(--space-3) 0 var(--space-4)' }}
@@ -243,7 +263,7 @@ export function Allocations({
         </>
       )}
 
-      {allItems.length === 0 ? null : (
+      {startedItems.length === 0 ? null : (
         <>
           <p className="section-label" style={{ marginBottom: 'var(--space-2)' }}>
             {t('monthlyCost.sectionTitle')}
@@ -267,8 +287,8 @@ export function Allocations({
 
           <div className="stack" data-ui={UI.allocations.list}>
             {items.map((m) => {
-              const spreadTotal = spreadTotalOf(m);
-              const ending = isEndingSoon(m, today);
+              const spreadTotal = displaySpreadTotalOf(m);
+              const ending = isEndingSoon(m, asOf);
               const monthly = representativeMonthlyAmount(m, spreadTotal);
               return (
                 <div
@@ -337,7 +357,7 @@ export function Allocations({
                   <div className="kv">
                     <span className="muted">{t('ccItem.remainingValue')}</span>
                     <span>
-                      <Money amount={remainingValue(m, today, spreadTotal)} currency={currency} />
+                      <Money amount={remainingValue(m, asOf, spreadTotal)} currency={currency} />
                     </span>
                   </div>
                   <div className="kv">
@@ -389,7 +409,7 @@ export function Allocations({
       {archiving ? (
         <MonthlyCostArchiveDialog
           item={archiving}
-          spreadTotal={spreadTotalOf(archiving)}
+          spreadTotal={operationSpreadTotalOf(archiving)}
           onClose={() => setArchiving(null)}
         />
       ) : null}
