@@ -93,6 +93,23 @@ for (const vp of VIEWPORTS) {
       fullPage: true,
     });
 
+    // 年間・全体（ページ全体ではなく表のコンテナだけを横スクロール）。
+    await page.locator(ui('nav.menu.button')).click();
+    await page.locator(ui('nav.yearlyOverview')).click();
+    await expect(page.locator(ui('yearlyOverview.view'))).toBeVisible();
+    await expect(page.locator(ui('yearlyOverview.matrix'))).toBeVisible();
+    await expectNoHorizontalScroll(page, `yearlyOverview ${vp.name}`);
+    if (vp.width === 390) {
+      const matrixScrolls = await page.locator(ui('yearlyOverview.matrix')).evaluate((element) => {
+        return element.scrollWidth > element.clientWidth;
+      });
+      expect(matrixScrolls, 'mobile: 年間表のコンテナ内で横スクロールできる').toBe(true);
+    }
+    await page.screenshot({
+      path: `test-results/screenshots/ledger-yearly-overview-${vp.name}.png`,
+      fullPage: true,
+    });
+
     // 設定
     await page.locator(ui('nav.menu.button')).click();
     await page.locator(ui('nav.settings')).click();

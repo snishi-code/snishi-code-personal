@@ -10,6 +10,7 @@ export type Screen =
   | 'liabilitiesBreakdown'
   | 'netAssets'
   | 'journal'
+  | 'yearlyOverview'
   | 'allocations'
   | 'cashflow'
   | 'tags'
@@ -23,9 +24,11 @@ export interface NavItem {
 }
 
 /**
- * ハンバーガーメニューのトップレベル項目（管理・補助機能に絞る）。
+ * ハンバーガーメニューのトップレベル項目。
+ * ホームとは独立した俯瞰画面と、管理・補助機能を並べる。
  */
 export const NAV_ITEMS: NavItem[] = [
+  { screen: 'yearlyOverview', labelKey: 'nav.yearlyOverview', icon: 'chart' },
   { screen: 'allocations', labelKey: 'nav.allocations', icon: 'calendar' },
   { screen: 'cashflow', labelKey: 'nav.cashflow', icon: 'trending' },
   { screen: 'accounts', labelKey: 'nav.accounts', icon: 'wallet' },
@@ -35,6 +38,4 @@ export const NAV_ITEMS: NavItem[] = [
 /**
  * 設定画面「管理」セクションから遷移する補助画面。
  */
-export const MANAGEMENT_ITEMS: NavItem[] = [
-  { screen: 'tags', labelKey: 'nav.tags', icon: 'tag' },
-];
+export const MANAGEMENT_ITEMS: NavItem[] = [{ screen: 'tags', labelKey: 'nav.tags', icon: 'tag' }];

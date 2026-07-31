@@ -5,10 +5,10 @@
  * 旧名称（INPUT / PL / BS / CF / INVENTORY）はキーにも値にも使わない。
  */
 export const ja = {
-
   'nav.accounts': '勘定科目',
   'nav.allocations': '毎月のもの',
   'nav.cashflow': '資金繰り',
+  'nav.yearlyOverview': '年間・全体',
   'nav.tags': 'タグ',
   'nav.settings': '設定',
   'nav.help': 'ヘルプ',
@@ -326,6 +326,30 @@ export const ja = {
   'netIncome.result': '収支',
   'netIncome.trend': '収支の推移',
 
+  // 年間・全体（旧帳簿の年次シート相当。月別 / 年別の表だけを表示する）。
+  'yearlyOverview.title': '年間・全体',
+  'yearlyOverview.intro': '収支・費目・資産の推移を、月別または年別の表で確認できます。',
+  'yearlyOverview.modeYear': '年間',
+  'yearlyOverview.modeAll': '全体',
+  'yearlyOverview.previousYear': '{year}年へ戻る',
+  'yearlyOverview.nextYear': '{year}年へ進む',
+  'yearlyOverview.noPreviousYear': '前のデータ年はありません',
+  'yearlyOverview.noNextYear': '次のデータ年はありません',
+  'yearlyOverview.monthLabel': '{month}月',
+  'yearlyOverview.itemColumn': '項目',
+  'yearlyOverview.revenue': '収入',
+  'yearlyOverview.expense': '支出',
+  'yearlyOverview.net': '収支',
+  'yearlyOverview.monthlyCost': '継続コスト',
+  'yearlyOverview.totalAssets': '総資産',
+  'yearlyOverview.netAssets': '純資産',
+  'yearlyOverview.expenseCategory': '費目別: {name}',
+  'yearlyOverview.yearCaption': '{year}年の月別一覧',
+  'yearlyOverview.allCaption': '全期間の年別一覧',
+  'yearlyOverview.outOfRange': '対象期間外',
+  'yearlyOverview.outOfRangeMark': '—',
+  'yearlyOverview.noData': '表示できる仕訳データがありません。',
+
   // 資産の内訳（ホーム「資産」のタップ先）。4 枠（自由 / 自由でない / 投資 / 継続コスト台帳）。
   'assets.title': '資産の内訳',
   'assets.intro': '持っているお金・資産の内訳と、月ごとの推移です。',
@@ -458,7 +482,6 @@ export const ja = {
   'toast.posted': '実績化しました。',
   'toast.error': 'エラーが発生しました。',
 
-
   'help.title': 'ヘルプ',
   'help.body':
     'これは複式簿記の家計簿です。日々の収入・支出・振替を記録すると、ホームと各項目（収入/支出/収支/資産/負債/純資産）の内訳・推移に自動で反映されます。データは端末内にのみ保存され、外部送信はありません。バックアップや端末間共有は設定の「JSON で書き出し／読み込み」を使ってください。',
@@ -541,7 +564,8 @@ export const ja = {
   'exit.confirmLabel': '終了する',
 
   // 符号付き金額入力（マイナス残高の初期残高・補正の実残高）
-  'common.signedAmountHint': 'マイナスは先頭に -（例: -3000）。立替金が相手側に振れている場合などに。',
+  'common.signedAmountHint':
+    'マイナスは先頭に -（例: -3000）。立替金が相手側に振れている場合などに。',
 
   // 支出内訳 → 仕訳一覧ドリルダウン
   'expenseBreakdown.drillDown': '{name} の仕訳を見る',
@@ -551,7 +575,6 @@ export const ja = {
   'accounts.reorderDone': '並び替えを終了',
   'accounts.moveUp': '上へ',
   'accounts.moveDown': '下へ',
-
 
   // 履歴の無い既存科目への初期残高登録（勘定科目画面の補正導線から自動分岐）
   'opening.registerTitle': '初期残高を登録（{name}）',
@@ -593,7 +616,8 @@ export const ja = {
   // 毎月のもの（くり返し記帳 = 実仕訳の自動起票 / 継続コスト資産 = 月割りの導出）
   'monthly.title': '毎月のもの',
   'monthly.add': '追加',
-  'monthly.empty': 'まだ登録がありません。「追加」からサブスク・給与・積立・持ち物などを登録できます。',
+  'monthly.empty':
+    'まだ登録がありません。「追加」からサブスク・給与・積立・持ち物などを登録できます。',
   'monthly.pick.rule': 'くり返し記帳',
   'monthly.pick.asset': 'いま持っているものを登録',
 

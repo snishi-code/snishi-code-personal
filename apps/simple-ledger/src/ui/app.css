@@ -105,6 +105,107 @@
   color: var(--neg);
 }
 
+/* ── 年間・全体マトリクス ── */
+.yearly-overview__intro {
+  margin-bottom: var(--space-3);
+}
+.yearly-overview__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+/* foundation の Segmented は既定 38px。分析画面でも 44px のタップ領域を保証する。 */
+.yearly-overview__mode .segmented__btn {
+  min-height: var(--tap);
+}
+.yearly-overview__year-nav {
+  display: grid;
+  grid-template-columns: var(--tap) minmax(88px, auto) var(--tap);
+  align-items: center;
+  gap: var(--space-1);
+}
+.yearly-overview__year-button {
+  min-width: var(--tap);
+  padding: 0;
+  font-size: 18px;
+}
+.yearly-overview__year {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.yearly-overview__scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+.yearly-overview__table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.yearly-overview__table th,
+.yearly-overview__table td {
+  height: var(--tap);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.yearly-overview__table tbody tr:last-child th,
+.yearly-overview__table tbody tr:last-child td {
+  border-bottom: none;
+}
+.yearly-overview__label {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 112px;
+  min-width: 112px;
+  max-width: 112px;
+  text-align: left;
+  overflow-wrap: anywhere;
+  box-shadow: 1px 0 0 var(--border);
+}
+.yearly-overview__corner {
+  z-index: 2;
+}
+.yearly-overview__value {
+  width: 112px;
+  min-width: 112px;
+  text-align: right;
+  white-space: nowrap;
+}
+.yearly-overview__table thead th {
+  color: var(--muted);
+  font-weight: 700;
+  background: var(--bg);
+}
+.yearly-overview__row--emphasis th,
+.yearly-overview__row--emphasis td {
+  font-weight: 700;
+  background: var(--bg);
+}
+.yearly-overview__row--category th {
+  padding-left: var(--space-5);
+  color: var(--muted);
+  font-weight: 500;
+}
+.yearly-overview__row--section th,
+.yearly-overview__row--section td {
+  border-top: 2px solid var(--border);
+}
+.yearly-overview__empty {
+  padding: var(--space-5) 0;
+  text-align: center;
+}
+
 /* ── Statement rows ── */
 .stmt-row {
   display: flex;

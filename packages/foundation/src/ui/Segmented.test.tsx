@@ -1,5 +1,5 @@
 /*
- * Segmented コントロールのテスト: 基本レンダリングと aria-selected。
+ * Segmented コントロールのテスト: 基本レンダリングと aria-pressed。
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
@@ -23,10 +23,10 @@ describe('Segmented', () => {
     expect(screen.getByRole('button', { name: '全期間' })).toBeInTheDocument();
   });
 
-  it('value に対応するボタンが aria-selected=true', () => {
+  it('value に対応するボタンが aria-pressed=true', () => {
     render(<Segmented items={items} value="b" onChange={vi.fn()} />);
-    expect(screen.getByRole('button', { name: '年次' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('button', { name: '月次' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByRole('button', { name: '年次' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '月次' })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('ボタンをクリックすると onChange を正しいキーで呼ぶ', () => {

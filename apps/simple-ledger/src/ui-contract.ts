@@ -89,6 +89,15 @@ export const UI = {
     row: 'netAssets.row',
     total: 'netAssets.total',
   },
+  // 年間・全体（年別の月次表 / 全期間の年次表）
+  yearlyOverview: {
+    view: 'yearlyOverview.view',
+    modeYear: 'yearlyOverview.mode.year',
+    modeAll: 'yearlyOverview.mode.all',
+    prevYear: 'yearlyOverview.year.previous',
+    nextYear: 'yearlyOverview.year.next',
+    matrix: 'yearlyOverview.matrix',
+  },
   journal: {
     view: 'journal.view',
     list: 'journal.entry.list',

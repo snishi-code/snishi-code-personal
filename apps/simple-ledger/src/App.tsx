@@ -22,6 +22,7 @@ import { Breakdown } from './ui/screens/Breakdown';
 import { ExpenseBreakdown } from './ui/screens/ExpenseBreakdown';
 import { NetIncome } from './ui/screens/NetIncome';
 import { Journal, type JournalFilter } from './ui/screens/Journal';
+import { YearlyOverview } from './ui/screens/YearlyOverview';
 import { Allocations, type AllocationsTarget } from './ui/screens/Allocations';
 import { Cashflow } from './ui/screens/Cashflow';
 import { Tags } from './ui/screens/Tags';
@@ -281,6 +282,7 @@ export function App() {
             onClearFilter={() => setJournalFilter(null)}
           />
         ) : null}
+        {screen === 'yearlyOverview' ? <YearlyOverview period={period} /> : null}
         {screen === 'allocations' ? (
           <Allocations period={period} onEditEntry={openEdit} target={allocationsTarget} />
         ) : null}
