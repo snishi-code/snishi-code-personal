@@ -2348,7 +2348,15 @@ async function deleteRecurringRuleUnlocked(id: string): Promise<void> {
       let next = rule;
       if (rule.splitFromRuleId === id) {
         next = { ...next, updatedAt: ts };
-        delete next.splitFromRuleId;
+        // 参照を捨てるのではなく祖父へ付け替える。捨てると系譜が 2 つの連結成分へ割れ、
+        // 「同一系譜は存在期間が重ならない」不変条件が前後の segment の間で効かなくなる
+        // ＝前 segment の終了日を外して同じ月を二重起票できてしまう（監査 P2-2）。
+        // 削除対象が系譜の根のときだけ、付け替え先が無いので切る。
+        if (existing.splitFromRuleId !== undefined) {
+          next.splitFromRuleId = existing.splitFromRuleId;
+        } else {
+          delete next.splitFromRuleId;
+        }
       }
       if (
         rule.id === existing.splitFromRuleId &&

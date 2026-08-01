@@ -69,6 +69,38 @@ export function recurringRuleLastExistingDate(rule: RecurringRule): string | und
   return rule.endDate !== undefined ? previousDate(rule.endDate) : undefined;
 }
 
+/** 有効な ISO 日付の翌日。排他的終了日を「その日まで有効」から作るのに使う。 */
+function nextDate(date: string): string {
+  const [year, month, day] = date.split('-').map(Number);
+  const value = new Date(Date.UTC(2000, (month ?? 1) - 1, day ?? 1));
+  value.setUTCFullYear(year ?? 0);
+  value.setUTCDate(value.getUTCDate() + 1);
+  return value.toISOString().slice(0, 10);
+}
+
+/**
+ * 「今日で終了する」ときに置ける最小の排他的終了日。
+ *
+ * 終了は「今日から存在しない」ではなく「**今日以降は生まない**」である。今日すでに起票済みなら
+ * その事実はルールが存在していた間に起きたので、終了点は翌日でなければ半開区間の外へ出てしまう
+ * （保存境界の `assertGeneratedEntriesInsideRule` が拒否する）。
+ * 生成済み事実の最終日 + 1 日と今日の、遅い方を返す。
+ */
+export function earliestRecurringRuleEndDate(
+  rule: RecurringRule,
+  entries: readonly JournalEntry[],
+  today: string,
+): string {
+  let last: string | undefined;
+  for (const entry of entries) {
+    if (entry.metadata?.recurringRuleId !== rule.id) continue;
+    if (last === undefined || entry.date > last) last = entry.date;
+  }
+  if (last === undefined) return today;
+  const afterLast = nextDate(last);
+  return afterLast > today ? afterLast : today;
+}
+
 function monthIndex(month: string): number {
   const [year, value] = month.split('-').map(Number);
   return (year ?? 0) * 12 + ((value ?? 1) - 1);

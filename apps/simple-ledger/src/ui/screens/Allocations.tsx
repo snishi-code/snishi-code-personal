@@ -45,6 +45,7 @@ import {
 } from '../../domain/recurring';
 import {
   accountExistsAt,
+  earliestRecurringRuleEndDate,
   effectiveRecurringRuleStartDate,
   recurringRuleLastExistingDate,
   ruleExistsAt as recurringRuleExistsAt,
@@ -162,7 +163,13 @@ export function Allocations({
   };
 
   const endRecurringRule = async (rule: RecurringRule): Promise<void> => {
-    const effectiveDate = todayLocal();
+    // 「終了」= 今日以降は生まない。今日すでに起票済みならその事実は存在期間の中にあるので、
+    // 終了点は翌日に置く（今日に置くと半開区間の外へ出て保存境界が拒否する）。
+    const effectiveDate = earliestRecurringRuleEndDate(
+      rule,
+      ledger?.journalEntries ?? [],
+      todayLocal(),
+    );
     await runRecurringRuleAction(rule.id, () =>
       saveRecurringRule({ ...rule, endDate: effectiveDate, updatedAt: nowIso() }),
     );
@@ -254,7 +261,8 @@ export function Allocations({
             {rules.map((r) => {
               const start = effectiveRecurringRuleStartDate(r);
               const activeToday = recurringRuleExistsAt(r, today);
-              const canEndToday = activeToday && start < today;
+              // 終了点が既に入っているルールは、押しても同じ終了点を書き直すだけなので出さない。
+              const canEndToday = activeToday && start < today && r.endDate === undefined;
               const canRestartToday = !activeToday && r.endDate !== undefined && r.endDate <= today;
               return (
                 <li key={r.id} className="list__item">

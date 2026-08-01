@@ -23,6 +23,7 @@ import {
   upsertRecurringRule,
 } from '../src/data/repository';
 import { clampDayToMonth, recurringProjectionEntries } from '../src/domain/recurring';
+import { earliestRecurringRuleEndDate } from '../src/domain/accountLifetime';
 import {
   accountBalance,
   deriveBalanceSheet,
@@ -973,7 +974,7 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
 
-  it('分割連鎖の中間segmentを削除すると、後継の連鎖参照も同時に外す', async () => {
+  it('分割連鎖の中間segmentを削除しても系譜はつながったままで、旧segmentを開き直せない', async () => {
     const bank = await accountByName('預金');
     const invest = await accountByName('投資');
     const first = await createRecurringRule({
@@ -1003,10 +1004,16 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
 
     ledger = await loadLedger();
     expect(ledger.recurringRules.map((rule) => rule.id).sort()).toEqual([first.id, last.id].sort());
-    expect(
-      ledger.recurringRules.find((rule) => rule.id === last.id)?.splitFromRuleId,
-    ).toBeUndefined();
+    // 参照を捨てず祖父へ付け替える。捨てると系譜が割れ、first の終了日を外して
+    // 同じ月を first と last の両方から起票できてしまう（監査 P2-2）。
+    const survivor = ledger.recurringRules.find((rule) => rule.id === last.id)!;
+    expect(survivor.splitFromRuleId).toBe(first.id);
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
+
+    // 系譜がつながっているので、first を無期限へ開き直す編集は拒否される。
+    const reopened = ledger.recurringRules.find((rule) => rule.id === first.id)!;
+    const { endDate: _dropped, ...withoutEnd } = reopened;
+    await expect(upsertRecurringRule(withoutEnd)).rejects.toThrow();
   });
 
   it('分割後継の削除後に旧segmentを開いても、継承したカーソルで事実を再起票しない', async () => {
@@ -1048,6 +1055,80 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
         (entry) => entry.date === '2026-05-20' && entry.description === '後継削除後の境界',
       ),
     ).toHaveLength(1);
+  });
+
+  it('カーソルが遅れている状態で起票日を後ろへ動かして分割しても、同じ月を二重起票しない', async () => {
+    // 分割後継のカーソルは「旧segmentが境界前に起票し得る最後の位相」と継承値の遅い方を採る。
+    // 継承値だけを使うと、旧が 7/20 に起票する月を後継も 7/31 に起票して 2 件になる（監査 P3-1）。
+    const bank = await accountByName('預金');
+    const invest = await accountByName('投資');
+    const rule = await createRecurringRule({
+      name: 'カーソル遅れの分割',
+      amount: 1000,
+      dayOfMonth: 20,
+      debitAccountId: invest.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-06',
+      startDate: '2026-06-01',
+    });
+    await catchUpRecurringRules('2026-07-15');
+    expect((await loadLedger()).recurringRules[0]?.postedThroughMonth).toBe('2026-06');
+
+    await upsertRecurringRule(
+      { ...(await loadLedger()).recurringRules[0]!, amount: 1500, dayOfMonth: 31 },
+      { amountChangeMode: 'split', effectiveDate: '2026-07-31' },
+    );
+    let ledger = await loadLedger();
+    const successor = ledger.recurringRules.find((r) => r.id !== rule.id)!;
+    expect(successor.postedThroughMonth).toBe('2026-07');
+
+    await catchUpRecurringRules('2026-07-31');
+    ledger = await loadLedger();
+    const july = ledger.journalEntries
+      .filter((e) => e.description === 'カーソル遅れの分割' && e.date.startsWith('2026-07'))
+      .map((e) => `${e.date} ${e.lines.find((l) => l.side === 'debit')?.amount}`)
+      .sort();
+    expect(july).toEqual(['2026-07-20 1000']);
+
+    await catchUpRecurringRules('2026-08-31');
+    expect(
+      (await loadLedger()).journalEntries
+        .filter((e) => e.description === 'カーソル遅れの分割' && e.date.startsWith('2026-08'))
+        .map((e) => `${e.date} ${e.lines.find((l) => l.side === 'debit')?.amount}`),
+    ).toEqual(['2026-08-31 1500']);
+  });
+
+  it('当日すでに起票済みのルールも「終了」できる（終了点は翌日）', async () => {
+    // 「終了」= 今日以降は生まない。今日の事実は存在期間の中にあるので終了点は翌日になる（監査 P2-1）。
+    const bank = await accountByName('預金');
+    const invest = await accountByName('投資');
+    await createRecurringRule({
+      name: '当日終了',
+      amount: 1000,
+      dayOfMonth: 20,
+      debitAccountId: invest.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-04',
+      startDate: '2026-04-12',
+    });
+    await catchUpRecurringRules('2026-04-20');
+    const ledger = await loadLedger();
+    const rule = ledger.recurringRules[0]!;
+    // 当日を終了点にすると、当日の起票が半開区間の外に出て保存境界が拒否する。
+    await expect(upsertRecurringRule({ ...rule, endDate: '2026-04-20' })).rejects.toThrow();
+    // UI が使う最小終了点は翌日。
+    expect(earliestRecurringRuleEndDate(rule, ledger.journalEntries, '2026-04-20')).toBe(
+      '2026-04-21',
+    );
+    await upsertRecurringRule({
+      ...rule,
+      endDate: earliestRecurringRuleEndDate(rule, ledger.journalEntries, '2026-04-20'),
+    });
+    expect((await loadLedger()).recurringRules[0]?.endDate).toBe('2026-04-21');
+    // 起票が無い日に終了するなら今日のまま。
+    expect(earliestRecurringRuleEndDate(rule, ledger.journalEntries, '2026-05-01')).toBe(
+      '2026-05-01',
+    );
   });
 
   it('終了点を縮めてもカーソルを後退させず、利用者のスキップを保つ', async () => {
