@@ -42,7 +42,7 @@ function matrixDataYears(ledger: Ledger, today: string): number[] {
   const dates = ledger.journalEntries.map((entry) => entry.date);
   for (const item of ledger.monthlyCostItems) {
     dates.push(item.startDate);
-    addRecognitionYears(dates, item);
+    addMonthlyAllocationYears(dates, item);
   }
   // 起動時catch-upが fail-soft で失敗しても、表示用に投影可能な到来済みルールの年を失わない。
   for (const rule of ledger.recurringRules) {
@@ -59,7 +59,7 @@ function matrixDataYears(ledger: Ledger, today: string): number[] {
   return dataYearsOf(dates);
 }
 
-function addRecognitionYears(dates: string[], item: MonthlyCostItem): void {
+function addMonthlyAllocationYears(dates: string[], item: MonthlyCostItem): void {
   if (!item.endDate) return;
   addSpanYears(dates, item.startDate, item.endDate);
 }

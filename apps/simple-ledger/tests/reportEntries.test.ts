@@ -73,7 +73,7 @@ describe('reportEntriesForAsOf', () => {
     expect(entries.map((entry) => entry.id)).toEqual(['past']);
   });
 
-  it('未来日の回収を全知識として過去の認識へ遡及するが、回収仕訳自体は基準日前へ漏らさない', () => {
+  it('未来日の回収を全知識として過去の月割りへ遡及するが、回収仕訳自体は基準日前へ漏らさない', () => {
     const item: MonthlyCostItem = {
       id: 'annual',
       name: '年払い',
@@ -130,14 +130,12 @@ describe('reportEntriesForAsOf', () => {
       '2026-06-30',
     );
 
-    const januaryRecognition = january.find(
-      (entry) => entry.metadata?.continuousCostId === item.id,
-    );
-    const juneJanuaryRecognition = june.find(
+    const januaryAllocation = january.find((entry) => entry.metadata?.continuousCostId === item.id);
+    const juneJanuaryAllocation = june.find(
       (entry) => entry.metadata?.continuousCostId === item.id && entry.date === item.startDate,
     );
-    expect(januaryRecognition?.lines[0]?.amount).toBe(1_000);
-    expect(juneJanuaryRecognition?.lines[0]?.amount).toBe(1_000);
+    expect(januaryAllocation?.lines[0]?.amount).toBe(1_000);
+    expect(juneJanuaryAllocation?.lines[0]?.amount).toBe(1_000);
     expect(january.some((entry) => entry.id === recovery.id)).toBe(false);
     expect(june.some((entry) => entry.id === recovery.id)).toBe(true);
   });

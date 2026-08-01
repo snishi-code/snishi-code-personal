@@ -50,7 +50,7 @@ describe('createContinuousCost（持ち込み = 初期残高払い）', () => {
       { accountId: equity!.id, side: 'credit', amount: 12000 },
     ]);
 
-    // BS: 6月末断面 → 台帳 = 12000 − 認識6ヶ月ぶん 6000。equity = 12000。
+    // BS: 6月末断面 → 台帳 = 12000 − 月割り6ヶ月ぶん 6000。equity = 12000。
     const derived = reportEntriesForAsOf(ledger, '2026-06-30');
     const bs = deriveBalanceSheet(ledger.accounts, derived, '2026-06-30');
     const ccLedger = bs.assets.find((a) => a.account.id === CONTINUOUS_COST_LEDGER_ACCOUNT_ID);

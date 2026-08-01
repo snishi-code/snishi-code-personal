@@ -6,7 +6,10 @@ import { LedgerProvider } from '../src/state/store';
 import { EntrySheet } from '../src/ui/screens/EntrySheet';
 import { Allocations } from '../src/ui/screens/Allocations';
 import { createContinuousCost, loadLedger, upsertAccount } from '../src/data/repository';
-import { groupedRecognitionAccounts, recognitionAccountOptions } from '../src/ui/accountOptions';
+import {
+  groupedMonthlyAllocationAccounts,
+  monthlyAllocationAccountOptions,
+} from '../src/ui/accountOptions';
 import { ACCOUNT_ROLES, type AccountRole } from '../src/domain/accountRoles';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import { UI } from '../src/ui-contract';
@@ -54,20 +57,20 @@ function account(
 async function addCandidateFixtures() {
   await loadLedger();
   const fixtures = {
-    investment: account('recognition-investment', '行き先・投資資産', 'asset', 'investment-asset'),
+    investment: account('allocation-investment', '行き先・投資資産', 'asset', 'investment-asset'),
     liability: account(
-      'recognition-liability',
+      'allocation-liability',
       '行き先・その他負債',
       'liability',
       'other-liability',
     ),
     archived: {
-      ...account('recognition-archived', '行き先・アーカイブ済み', 'asset', 'daily-asset', true),
+      ...account('allocation-archived', '行き先・アーカイブ済み', 'asset', 'daily-asset', true),
       startDate: '2026-07-27',
       endDate: '2026-07-30',
     },
     currentArchived: account(
-      'recognition-current-archived',
+      'allocation-current-archived',
       '行き先・編集中のアーカイブ',
       'revenue',
       'income-category',
@@ -79,7 +82,7 @@ async function addCandidateFixtures() {
       'continuing-cost-asset',
     ),
     adjustment: account(
-      'recognition-adjustment',
+      'allocation-adjustment',
       '行き先・残高調整',
       'expense',
       'system-adjustment',
@@ -131,7 +134,9 @@ describe('継続コスト資産の費用の行き先候補', () => {
       'income-category',
       true,
     );
-    const ids = recognitionAccountOptions([...accounts, archived]).map((option) => option.value);
+    const ids = monthlyAllocationAccountOptions([...accounts, archived]).map(
+      (option) => option.value,
+    );
 
     expect(ids).toEqual(
       expect.arrayContaining([
@@ -148,13 +153,17 @@ describe('継続コスト資産の費用の行き先候補', () => {
       expect.arrayContaining(['role-continuing-cost-asset', 'role-system-adjustment', archived.id]),
     );
     expect(
-      recognitionAccountOptions([...accounts, archived], archived.id).map((option) => option.value),
+      monthlyAllocationAccountOptions([...accounts, archived], archived.id).map(
+        (option) => option.value,
+      ),
     ).toContain(archived.id);
     expect(
-      recognitionAccountOptions(accounts, 'role-system-adjustment').map((option) => option.value),
+      monthlyAllocationAccountOptions(accounts, 'role-system-adjustment').map(
+        (option) => option.value,
+      ),
     ).not.toContain('role-system-adjustment');
     expect(
-      groupedRecognitionAccounts([...accounts, archived])
+      groupedMonthlyAllocationAccounts([...accounts, archived])
         .flatMap((group) => group.accounts)
         .map((candidate) => candidate.id),
     ).toEqual(expect.arrayContaining(ids));

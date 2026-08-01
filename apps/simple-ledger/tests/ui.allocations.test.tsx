@@ -328,7 +328,7 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
       expenseAccountId: expense.id,
       creditAccountId: cash.id,
     });
-    // 回収日は 6 月末だが、現在の全知識として全認識月へ遡及して再配分する。
+    // 回収日は 6 月末だが、現在の全知識としてすべての月割り対象月へ遡及して再配分する。
     await archiveMonthlyCost({
       id: historical.id,
       endDate: '2024-06-30',

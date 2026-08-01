@@ -326,7 +326,7 @@ export function accountReferenceIntervals(
     }
   }
   for (const item of collections.monthlyCostItems) {
-    // expenseAccountId と、仮想認識行の貸方になる集約台帳が item の期間中ずっと存在する。
+    // expenseAccountId と、仮想月割り行の貸方になる集約台帳が item の期間中ずっと存在する。
     if (item.expenseAccountId === accountId || accountId === CONTINUOUS_COST_LEDGER_ACCOUNT_ID) {
       intervals.push({
         kind: 'monthlyCost',

@@ -1,7 +1,7 @@
 /*
  * 予定キャッシュフロー（将来の現金の出入り）の投影と実績化。
  *
- * 「いつ費用認識するか」とは独立に、「いつ現金が動くか」を扱う。
+ * 「いつ月割りするか」とは独立に、「いつ現金が動くか」を扱う。
  *  - 投影の原資は**「自由に動かせるお金」1 値**（daily-asset かつ movable !== false で、
  *    基準日に存在する科目の残高合計）。総資金/自由資金という 2 段の概念は持たない。
  *    貸借対照表・資産内訳は従来どおり全資産を出す（資金繰りだけ絞る）。
@@ -154,7 +154,7 @@ export function nextRepaymentDate(today: string, day: number): string {
  *  - 返済: 借方 負債 / 貸方 現金 → −amount（負債は原資でない）
  *  - 振替(自由→自由): 借方 現金A / 貸方 現金B → 0
  *  - 振替(自由→movable=false): 借方 Suica / 貸方 現金 → −amount（自由に動かせるお金が減る）
- *  - 月次認識（現金が動かない）→ 0
+ *  - 月割り（現金が動かない）→ 0
  */
 export function cashDeltaOfEntry(
   entry: JournalEntry,

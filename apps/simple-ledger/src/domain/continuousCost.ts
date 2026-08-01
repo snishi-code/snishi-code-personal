@@ -3,10 +3,10 @@
  *
  * 購入の仕訳は**保存される仕訳**（`借方 継続コスト台帳 / 貸方 支払い元`・
  * metadata.monthlyCostId 付き）になったため、ここで生まれるのは
- * **費用の行（recognition）だけ**: `借方 費用の行き先 / 貸方 継続コスト台帳`。
+ * **月割りの行（monthly-allocation）だけ**: `借方 月割り先 / 貸方 継続コスト台帳`。
  *
- *  - 終了日が未設定の item からは 1 本も生まれない（monthlyCost.ts の recognitionSpan が正本）。
- *  - 初月の認識日は startDate、2ヶ月目以降は月初。購入（startDate）より前に費用が立たない
+ *  - 終了日が未設定の item からは 1 本も生まれない（monthlyCost.ts の monthlyAllocationSpan が正本）。
+ *  - 初月の月割り日は startDate、2ヶ月目以降は月初。購入（startDate）より前に月割り行が立たない
  *    ＝どの日付断面でも台帳がマイナスにならない。
  *  - 回収の振替（metadata.monthlyCostRecovery）が保存されていれば、割り振る総額から差し引く
  *    （spreadTotal = amount − 回収額。負になってよい＝過去にわたる費用減・マイナス表示）。
@@ -15,7 +15,7 @@
  */
 import { addMonths, monthlyAmounts } from './allocation';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from './constants';
-import { recognitionDate, recognitionSpan } from './monthlyCost';
+import { monthlyAllocationDate, monthlyAllocationSpan } from './monthlyCost';
 import type { JournalEntry, MonthlyCostItem } from './types';
 
 /** 仮想展開の上限（無限ループ防止・極端な未来クエリの安全弁）。 */
@@ -23,22 +23,22 @@ export const CONTINUOUS_COST_HARD_CAP = '2100-12-31';
 
 /**
  * 1 つの item を upTo までの費用行（計算で生まれる仕訳）に展開する。
- * ID は `{idPrefix}-{itemId}-{YYYY-MM}`（既定 `cc-recog-…`。ルール投影は `cc-recogp-…`）。
+ * ID は `{idPrefix}-{itemId}-{YYYY-MM}`（既定 `cc-alloc-…`。ルール投影は `cc-allocp-…`）。
  */
 export function continuousCostEntriesForItem(
   item: MonthlyCostItem,
   upTo: string,
   spreadTotal: number = item.amount,
-  idPrefix = 'cc-recog',
+  idPrefix = 'cc-alloc',
 ): JournalEntry[] {
-  const span = recognitionSpan(item);
+  const span = monthlyAllocationSpan(item);
   if (!span) return []; // 終了日なし = 何も生まれない
   const cap = upTo < CONTINUOUS_COST_HARD_CAP ? upTo : CONTINUOUS_COST_HARD_CAP;
   const amounts = monthlyAmounts(spreadTotal, span.n);
   const out: JournalEntry[] = [];
   for (let k = 0; k < span.n; k++) {
     const ym = addMonths(span.from, k);
-    const date = recognitionDate(item, span.from, k);
+    const date = monthlyAllocationDate(item, span.from, k);
     if (date > cap) break;
     const amount = amounts[k] ?? 0;
     if (amount === 0) continue;
@@ -51,7 +51,7 @@ export function continuousCostEntriesForItem(
         { accountId: item.expenseAccountId, side: 'debit', amount },
         { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'credit', amount },
       ],
-      metadata: { virtual: true, continuousCostId: item.id, ccKind: 'recognition' },
+      metadata: { virtual: true, continuousCostId: item.id, ccKind: 'monthly-allocation' },
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
     });

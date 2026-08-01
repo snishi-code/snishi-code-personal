@@ -22,7 +22,7 @@ const validEntry = {
   createdAt: '2026-06-01T00:00:00.000Z',
   updatedAt: '2026-06-01T00:00:00.000Z',
 };
-const removedRecognitionKey = ['monthly', 'Cost', 'Recognition'].join('');
+const removedLegacyMonthlyCostKey = ['monthly', 'Cost', 'Recognition'].join('');
 
 describe('journalEntrySchema', () => {
   it('借方=貸方の仕訳を受け入れる', () => {
@@ -571,7 +571,7 @@ describe('entry metadata', () => {
           metadata: {
             inputMode: 'reversal',
             reversalOfEntryId: 'z',
-            [removedRecognitionKey]: true,
+            [removedLegacyMonthlyCostKey]: true,
           },
         },
       ],
@@ -586,7 +586,9 @@ describe('entry metadata', () => {
     if (parsed.success) {
       expect(parsed.data.journalEntries[0]?.metadata?.inputMode).toBe('reversal');
       // 廃止済みの旧分類印は未知キーとして strip し、JSON 全体の受理は維持する。
-      expect(parsed.data.journalEntries[0]?.metadata).not.toHaveProperty(removedRecognitionKey);
+      expect(parsed.data.journalEntries[0]?.metadata).not.toHaveProperty(
+        removedLegacyMonthlyCostKey,
+      );
     }
   });
 });

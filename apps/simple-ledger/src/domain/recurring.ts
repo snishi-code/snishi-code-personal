@@ -9,7 +9,7 @@
  *  - everyMonths（必須。1 = 毎月）で間引く。位相は startMonth 基点。
  *  - 行き先が費用科目のルールは**必ず継続コスト化**する:
  *    起票は `借方 継続コスト台帳 / 貸方 源泉` + item 自動生成（repository 側）。
- *    投影もここで購入行 + 費用行（cc-recogp）を両方出す＝未来断面で台帳が積み上がらない。
+ *    投影もここで購入行 + 月割り行（cc-allocp）を両方出す＝未来断面で台帳が積み上がらない。
  *  - spreadExpenseAccountId は正規化済みの費用行き保存表現。費用以外は借方へ
  *    直接起票する。v6 はこの二形だけを受理する。
  */
@@ -204,7 +204,7 @@ export function buildRuleItem(
  * 永続化とカーソル更新は行わず、postedThroughMonth より後だけを出すため実仕訳と二重計上しない。
  *
  * 行き先が費用科目のルールは購入行に加えて**費用行も投影する**
- * （`cc-recogp-{ruleId}-{postingMonth}-{YYYY-MM}`）。これを落とすと未来断面で
+ * （`cc-allocp-{ruleId}-{postingMonth}-{YYYY-MM}`）。これを落とすと未来断面で
  * 継続コスト台帳が購入行ぶんだけ積み上がり、純資産が実在しない額まで膨らむ。
  * 二重展開はしない: 起票済み月は item 側（continuousCostEntries）が展開し、
  * ここはカーソルより後の月だけを出す。
@@ -278,14 +278,14 @@ export function recurringProjectionEntries(
           updatedAt: rule.updatedAt,
         });
         // id を `{ruleId}-{postingMonth}` にすると費用行 ID が
-        // `cc-recogp-{ruleId}-{postingMonth}-{YYYY-MM}` になる（item 由来の cc-recog と衝突しない）。
+        // `cc-allocp-{ruleId}-{postingMonth}-{YYYY-MM}` になる（item 由来の cc-alloc と衝突しない）。
         // metadata に recurringRuleId を足す＝仕訳一覧のタップでルールへ飛べる（投影 item は実在しないため）。
         projected.push(
           ...continuousCostEntriesForItem(
             { ...ephemeral, id: `${rule.id}-${posting.month}` },
             asOf,
             ephemeral.amount,
-            'cc-recogp',
+            'cc-allocp',
           ).map((e) => ({
             ...e,
             metadata: { ...e.metadata, recurringRuleId: rule.id, recurringMonth: posting.month },

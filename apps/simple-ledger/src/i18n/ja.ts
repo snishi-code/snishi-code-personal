@@ -681,7 +681,7 @@ export const ja = {
   'recurring.from.manual': '貸方（支払い元・減る側）',
   'recurring.to.manual': '借方（増える・使う側）',
   'recurring.manualHint':
-    '行き先が費用なら自動で継続コストとして期間配分し、資産・負債・収入なら直接記帳します。',
+    '行き先が費用なら自動で継続コストとして月割りし、資産・負債・収入なら直接記帳します。',
   'recurring.everyMonthDay': '毎月{day}日',
   'recurring.everyNMonthsDay': '{n}か月ごと {day}日',
   'recurring.end': '終了',

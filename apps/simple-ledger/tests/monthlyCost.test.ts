@@ -12,7 +12,7 @@ import {
   isArchived,
   isEndingSoon,
   monthlyCostForMonth,
-  recognitionSpan,
+  monthlyAllocationSpan,
   remainingValue,
   representativeMonthlyAmount,
 } from '../src/domain/monthlyCost';
@@ -40,16 +40,18 @@ function withoutEnd(base: MonthlyCostItem): MonthlyCostItem {
   return next;
 }
 
-describe('recognitionSpan', () => {
+describe('monthlyAllocationSpan', () => {
   it('開始日〜終了日の月バケット（日は配分に使わない）', () => {
-    expect(recognitionSpan(item({}))).toEqual({ from: '2026-01', n: 12 });
-    expect(recognitionSpan(item({ startDate: '2026-07-20', endDate: '2026-07-25' }))).toEqual({
-      from: '2026-07',
-      n: 1,
-    });
+    expect(monthlyAllocationSpan(item({}))).toEqual({ from: '2026-01', n: 12 });
+    expect(monthlyAllocationSpan(item({ startDate: '2026-07-20', endDate: '2026-07-25' }))).toEqual(
+      {
+        from: '2026-07',
+        n: 1,
+      },
+    );
   });
   it('終了日なしは null（配分しない）', () => {
-    expect(recognitionSpan(withoutEnd(item({})))).toBeNull();
+    expect(monthlyAllocationSpan(withoutEnd(item({})))).toBeNull();
   });
 });
 
@@ -110,7 +112,7 @@ describe('monthlyCostForMonth', () => {
 });
 
 describe('remainingValue', () => {
-  it('初月の認識日は startDate（それより前の asOf では減らない）', () => {
+  it('初月の月割り日は startDate（それより前の asOf では減らない）', () => {
     const yr = item({});
     expect(remainingValue(yr, '2026-01-14')).toBe(12000);
     expect(remainingValue(yr, '2026-01-15')).toBe(11000);
@@ -123,16 +125,16 @@ describe('remainingValue', () => {
     expect(remainingValue(yr, '2030-01-01')).toBe(0);
   });
   it('回収があるとき: 配り切ると残存価値 0（回収の振替は台帳から持ち出し済み・監査 P2-1）', () => {
-    // 240,000・2024-06〜2026-06 = 25ヶ月・回収 30,000 → 費用 210,000・認識完了後の残りは 0
-    // （台帳残高 = 購入 240,000 − 回収 30,000 − 認識 210,000 = 0 と一致する単一正本）。
+    // 240,000・2024-06〜2026-06 = 25ヶ月・回収 30,000 → 費用 210,000・月割り完了後の残りは 0
+    // （台帳残高 = 購入 240,000 − 回収 30,000 − 月割り 210,000 = 0 と一致する単一正本）。
     const sold = item({ amount: 240000, startDate: '2024-06-01', endDate: '2026-06-15' });
     expect(remainingValue(sold, '2026-06-15', 210000)).toBe(0);
-    // 認識途中: 認識済み 8,400 × 24 = 201,600 → 残り 210,000 − 201,600 = 8,400。
+    // 月割り途中: 月割り済み 8,400 × 24 = 201,600 → 残り 210,000 − 201,600 = 8,400。
     expect(remainingValue(sold, '2026-05-31', 210000)).toBe(8400);
     // 月あたりは 210,000 / 25 = 8,400（§6-1 の検算）
     expect(representativeMonthlyAmount(sold, 210000)).toBe(8400);
   });
-  it('終了日なし + 回収あり: 残存価値 = spreadTotal（認識 0 のまま回収分だけ減る）', () => {
+  it('終了日なし + 回収あり: 残存価値 = spreadTotal（月割り 0 のまま回収分だけ減る）', () => {
     const held = withoutEnd(item({ amount: 12000 }));
     expect(remainingValue(held, '2026-06-15', 9000)).toBe(9000);
     expect(remainingValue(held, '2026-06-15')).toBe(12000);

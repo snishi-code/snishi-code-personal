@@ -13,7 +13,7 @@ import { Icon } from '@snishi/foundation/ui/Icon';
 import { AccountPicker } from '../AccountPicker';
 import { TagPicker } from '../TagPicker';
 import { LiabilitySheet } from '../LiabilitySheet';
-import { groupedAccountsByRole, groupedRecognitionAccounts } from '../accountOptions';
+import { groupedAccountsByRole, groupedMonthlyAllocationAccounts } from '../accountOptions';
 import { tagsForEntry } from '../tagOptions';
 import {
   FORM_MODE_TITLE,
@@ -709,7 +709,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           label={t('entry.ccCategory')}
           required
           value={ccCategoryId}
-          groups={groupedRecognitionAccounts(accounts, ccCategoryId, form.date)}
+          groups={groupedMonthlyAllocationAccounts(accounts, ccCategoryId, form.date)}
           onChange={setCcCategoryId}
           error={categoryError ? t('entry.error.category-required') : undefined}
           dataUi={UI.journal.entry.ccCategory}

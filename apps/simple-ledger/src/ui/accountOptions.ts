@@ -81,7 +81,7 @@ export function groupedAccountsByRole(
  * ユーザーが仕訳先にできる通常科目は会計区分を問わず許可し、内部集約科目と
  * 残高調整科目だけを除外する。編集中の現在値はアーカイブ済みでも残す。
  */
-export function recognitionAccountOptions(
+export function monthlyAllocationAccountOptions(
   accounts: Account[],
   includeId?: string,
 ): { value: string; label: string }[] {
@@ -97,16 +97,16 @@ export function recognitionAccountOptions(
  * （名前順の先頭が負債科目だと、触らず保存したとき通常の費用計上が負債への振替として
  * 静かに保存されてしまうため）。費用カテゴリが無いときだけ候補の先頭に落とす。
  */
-export function defaultRecognitionAccountId(accounts: Account[]): string {
+export function defaultMonthlyAllocationAccountId(accounts: Account[]): string {
   const expense = accounts
     .filter((a) => a.role === 'expense-category' && !a.archived)
     .sort(compareAccountOrder)[0];
   if (expense) return expense.id;
-  return recognitionAccountOptions(accounts)[0]?.value ?? '';
+  return monthlyAllocationAccountOptions(accounts)[0]?.value ?? '';
 }
 
 /** AccountPicker 用の費用の行き先候補（区分別グループ）。 */
-export function groupedRecognitionAccounts(
+export function groupedMonthlyAllocationAccounts(
   accounts: Account[],
   includeId?: string,
   atDate?: string,

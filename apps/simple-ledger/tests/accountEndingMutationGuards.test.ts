@@ -309,7 +309,7 @@ describe('終了済み資産と残高補正', () => {
 });
 
 describe('終了済み資産と継続コストの後続操作', () => {
-  it('認識額を変えて終了残高を壊す item の金額変更を拒否する', async () => {
+  it('月割り額を変えて終了残高を壊す item の金額変更を拒否する', async () => {
     const { item } = await seedEndedAssetBackedByContinuousCost();
 
     await expect(upsertMonthlyCost({ ...item, amount: 1_200 })).rejects.toMatchObject({
@@ -320,7 +320,7 @@ describe('終了済み資産と継続コストの後続操作', () => {
     ).toBe(600);
   });
 
-  it('認識を外して終了残高を壊す item の行き先変更を拒否する', async () => {
+  it('月割りを外して終了残高を壊す item の行き先変更を拒否する', async () => {
     const { item } = await seedEndedAssetBackedByContinuousCost();
     const otherDestination = await accountByName('変動費');
 
@@ -335,7 +335,7 @@ describe('終了済み資産と継続コストの後続操作', () => {
     ).toBe(item.expenseAccountId);
   });
 
-  it('認識額を遡及変更して終了残高を壊す回収の追加を拒否する', async () => {
+  it('月割り額を遡及変更して終了残高を壊す回収の追加を拒否する', async () => {
     const { item } = await seedEndedAssetBackedByContinuousCost();
     const bank = await accountByName('預金');
 
@@ -356,7 +356,7 @@ describe('終了済み資産と継続コストの後続操作', () => {
     ).toBe(false);
   });
 
-  it('認識額を遡及変更して終了残高を壊す回収の編集を拒否する', async () => {
+  it('月割り額を遡及変更して終了残高を壊す回収の編集を拒否する', async () => {
     const { recovery } = await seedEndedAssetBackedByContinuousCost({ recoveryAmount: 100 });
     const changed = {
       ...recovery!,
@@ -373,7 +373,7 @@ describe('終了済み資産と継続コストの後続操作', () => {
     ).toBe(true);
   });
 
-  it('認識額を遡及変更して終了残高を壊す回収の削除を拒否する', async () => {
+  it('月割り額を遡及変更して終了残高を壊す回収の削除を拒否する', async () => {
     const { recovery } = await seedEndedAssetBackedByContinuousCost({ recoveryAmount: 100 });
 
     await expect(deleteEntry(recovery!.id)).rejects.toMatchObject({
@@ -384,7 +384,7 @@ describe('終了済み資産と継続コストの後続操作', () => {
     );
   });
 
-  it('認識行を消して終了残高を壊す item の削除を拒否する', async () => {
+  it('月割り行を消して終了残高を壊す item の削除を拒否する', async () => {
     const { item } = await seedEndedAssetBackedByContinuousCost();
 
     await expect(deleteMonthlyCost(item.id)).rejects.toMatchObject({

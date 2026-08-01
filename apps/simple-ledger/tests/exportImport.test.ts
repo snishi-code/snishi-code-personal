@@ -20,7 +20,7 @@ import {
 import { buildSimpleEntry } from '../src/domain/entry';
 import { APP_ID } from '../src/domain/constants';
 
-const removedRecognitionKey = ['monthly', 'Cost', 'Recognition'].join('');
+const removedLegacyMonthlyCostKey = ['monthly', 'Cost', 'Recognition'].join('');
 
 async function seedWithEntry() {
   const ledger = await loadLedger(); // 既定科目を投入
@@ -64,12 +64,12 @@ describe('export/import round trip', () => {
       journalEntries: Array<{ metadata?: Record<string, unknown> }>;
     };
     const first = exported.journalEntries[0]!;
-    first.metadata = { ...first.metadata, [removedRecognitionKey]: true };
+    first.metadata = { ...first.metadata, [removedLegacyMonthlyCostKey]: true };
 
     const outcome = await importFromJsonText(JSON.stringify(exported));
     expect(outcome.kind).toBe('ok');
     expect((await loadLedger()).journalEntries[0]?.metadata).not.toHaveProperty(
-      removedRecognitionKey,
+      removedLegacyMonthlyCostKey,
     );
   });
 });

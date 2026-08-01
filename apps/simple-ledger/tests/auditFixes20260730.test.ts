@@ -495,11 +495,11 @@ describe('既存itemと後続ルールの独立性', () => {
       after.monthlyCostItems.find((item) => item.id === `ccr-${normallyEditedRule.id}-2026-01`),
     ).toMatchObject({ amount: 3000, endDate: '2026-12-31' });
 
-    const februaryRecognitions = reportEntriesForAsOf(after, '2026-02-28')
+    const februaryAllocations = reportEntriesForAsOf(after, '2026-02-28')
       .filter((entry) => entry.date >= '2026-02-01' && entry.date <= '2026-02-28')
-      .filter((entry) => entry.metadata?.ccKind === 'recognition');
+      .filter((entry) => entry.metadata?.ccKind === 'monthly-allocation');
     const expenseForItems = (itemIds: Set<string>): number =>
-      februaryRecognitions
+      februaryAllocations
         .filter((entry) => itemIds.has(entry.metadata?.continuousCostId ?? ''))
         .flatMap((entry) => entry.lines)
         .filter((line) => line.accountId === expense.id && line.side === 'debit')

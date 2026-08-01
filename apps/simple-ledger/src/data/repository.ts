@@ -1149,7 +1149,7 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
   await assertEntryTagsValid(savable);
   await assertEndedBalancesAfterEntryChange(ctx, entries, {
     replacement: savable,
-    // 回収額・購入額・購入日は item の認識額を全期間へ遡及させるため、明細上の
+    // 回収額・購入額・購入日は item の月割り額を全期間へ遡及させるため、明細上の
     // 科目だけでなく終了点を持つ全資産・負債を再検証する。
     affectedAccountIds: new Set(ctx.byId.keys()),
     ...(mirroredItem
@@ -3335,7 +3335,7 @@ function findOrCreateContinuousCostLedgerAccount(
  *     `metadata.monthlyCostId` 付き。支払い元未指定なら貸方 = 初期残高(equity)・`kind:'opening'`
  *     （持ち込み登録。PL を通らない）。
  *  2. **item**: 項目名・金額・開始日・終了日（任意）・費用の行き先。
- * 費用の行（recognition）は保存しない——`continuousCost.ts` が必要範囲だけ計算で展開する。
+ * 月割りの行（monthly-allocation）は保存しない——`continuousCost.ts` が必要範囲だけ計算で展開する。
  * 負債資金 + 返済情報があれば、返済実仕訳（未来日付の振替 N 本）も同じ tx で作る（★6）。
  * 返済は実予定なので monthlyCostId は付けない＝item 削除でも残す・編集/削除自由。
  */
@@ -3478,7 +3478,7 @@ async function createContinuousCostUnlocked(input: ContinuousCostInput): Promise
  *  - **金額の変更**は購入の仕訳（monthlyCostId・回収フラグなし）の両側金額へミラーする。
  *    回収の振替はミラー対象にしない（書き換えるとアーカイブ時の会計が壊れる）。
  *  - **費用の行き先の変更は仕訳に一切触れない**（購入の仕訳の借方は台帳固定。
- *    旧実装の「借方を認識先へ書き換える」は新モデルでは資産化を破壊するため撤去済み）。
+ *    旧実装の「借方を月割り先へ書き換える」は新モデルでは資産化を破壊するため撤去済み）。
  *  - 終了日の変更は保存されるデータをこれ以上動かさない——費用の行は導出なので、
  *    次の描画で全期間が新しい月数で再計算される（遡及処理は存在しない）。
  */

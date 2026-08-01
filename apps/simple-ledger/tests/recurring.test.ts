@@ -491,7 +491,7 @@ describe('定期ルールのキャッチアップ起票', () => {
     const entries = reportEntriesForAsOf(before, '2026-10-31');
     const allForRule = entries.filter((entry) => entry.metadata?.recurringRuleId === rule.id);
     const forRule = allForRule
-      .filter((entry) => entry.metadata?.ccKind !== 'recognition')
+      .filter((entry) => entry.metadata?.ccKind !== 'monthly-allocation')
       .sort((a, b) => a.date.localeCompare(b.date));
     expect(forRule.map((entry) => entry.metadata?.recurringMonth)).toEqual([
       '2026-07',
@@ -648,7 +648,7 @@ describe('clampDayToMonth / recurringProjectionEntries', () => {
     const purchase = projected.find((entry) => entry.id === 'rec-proj-spread-rule-2026-08');
     expect(purchase?.metadata?.continuousCostId).toBe('spread-rule-2026-08');
     expect(
-      projected.find((entry) => entry.metadata?.ccKind === 'recognition')?.metadata
+      projected.find((entry) => entry.metadata?.ccKind === 'monthly-allocation')?.metadata
         ?.continuousCostId,
     ).toBe('spread-rule-2026-08');
   });
@@ -1610,8 +1610,8 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     await catchUpRecurringRules('2026-07-23');
     const ledger = await loadLedger();
     const derived = reportEntriesForAsOf(ledger, '2031-12-31');
-    // 投影は購入行だけでなく費用行（cc-recogp）も出す。
-    expect(derived.some((e) => e.id.startsWith(`cc-recogp-${rule.id}-`))).toBe(true);
+    // 投影は購入行だけでなく月割り行（cc-allocp）も出す。
+    expect(derived.some((e) => e.id.startsWith(`cc-allocp-${rule.id}-`))).toBe(true);
     // 台帳残高 = 2031-04 サイクルの未費消ぶんのみ（2032-01〜03 = 15,000）。購入総額 360,000 にはならない。
     const balance = accountBalance(
       CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
@@ -1649,7 +1649,7 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     expect(june.endDate).toBe('2026-06-30'); // 周期 1 → 当月末（毎月生まれて消える）
     const july = ledger.monthlyCostItems.find((m) => m.id === `ccr-${rule.id}-2026-07`)!;
     expect(july.endDate).toBe('2026-07-31');
-    // 支出内訳では「継続コスト」に分類される（6 月ぶんは 6 月内で全額認識）。
+    // 支出内訳では「継続コスト」に分類される（6 月ぶんは 6 月内で全額月割り）。
     const derived = reportEntriesForAsOf(ledger, '2026-07-31');
     const juneCost = livingCostBreakdownForRange(ledger.accounts, derived, {
       from: '2026-06-01',

@@ -7,7 +7,7 @@
  */
 import { compareAccountOrder } from './accountOrder';
 import { isDebitNormal } from './accounting';
-import { isContinuousCostRecognitionEntry } from './livingCost';
+import { isContinuousCostMonthlyAllocationEntry } from './livingCost';
 import type { Account, JournalEntry } from './types';
 
 export type PeriodMatrixScope =
@@ -184,7 +184,7 @@ export function buildPeriodMatrix(
 
       const flowKey = scope.mode === 'year' ? entry.date.slice(0, 7) : entry.date.slice(0, 4);
       const flowColumnIndex = flowColumnByKey.get(flowKey);
-      const recognition = isContinuousCostRecognitionEntry(entry);
+      const monthlyAllocation = isContinuousCostMonthlyAllocationEntry(entry);
 
       for (const line of entry.lines) {
         const account = accountById.get(line.accountId);
@@ -200,7 +200,7 @@ export function buildPeriodMatrix(
           addValue(expense, flowColumnIndex, delta);
           const categoryValues = expenseValuesById.get(account.id);
           if (categoryValues) addValue(categoryValues, flowColumnIndex, delta);
-          if (recognition) addValue(monthlyCost, flowColumnIndex, delta);
+          if (monthlyAllocation) addValue(monthlyCost, flowColumnIndex, delta);
         }
       }
     }

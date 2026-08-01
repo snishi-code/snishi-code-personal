@@ -1,7 +1,7 @@
 /*
  * 継続コスト資産の「計算で生まれる仕訳」エンジンの不変条件を固定する。
  *  - 購入の仕訳は保存される仕訳（このエンジンからは生まれない）。生まれるのは費用行だけ。
- *  - 初月の認識日は startDate ＝どの日付断面でも台帳がマイナスにならない（§13-5）。
+ *  - 初月の月割り日は startDate ＝どの日付断面でも台帳がマイナスにならない（§13-5）。
  *  - 終了日なしは 1 本も生まれない（§13-2）。
  *  - 回収の振替は割り振る総額から差し引かれ、台帳は終了時に 0 で閉じる（§13-8）。
  */
@@ -82,7 +82,7 @@ describe('continuousCostEntriesForItem', () => {
     expect(es).toHaveLength(12);
     expect(es[0]?.date).toBe('2031-01-15');
     expect(es[1]?.date).toBe('2031-02-01');
-    expect(es.every((e) => e.metadata?.ccKind === 'recognition')).toBe(true);
+    expect(es.every((e) => e.metadata?.ccKind === 'monthly-allocation')).toBe(true);
     expect(es.every((e) => e.metadata?.virtual === true)).toBe(true);
     const total = es.reduce(
       (s, e) => s + (e.lines.find((l) => l.side === 'debit')?.amount ?? 0),
@@ -90,10 +90,10 @@ describe('continuousCostEntriesForItem', () => {
     );
     expect(total).toBe(12000);
   });
-  it('ID は cc-recog-{itemId}-{YYYY-MM}（決定的）', () => {
+  it('ID は cc-alloc-{itemId}-{YYYY-MM}（決定的）', () => {
     const es = continuousCostEntriesForItem(item({}), '2031-12-31');
-    expect(es[0]?.id).toBe('cc-recog-yt-2031-01');
-    expect(es[11]?.id).toBe('cc-recog-yt-2031-12');
+    expect(es[0]?.id).toBe('cc-alloc-yt-2031-01');
+    expect(es[11]?.id).toBe('cc-alloc-yt-2031-12');
     expect(continuousCostEntriesForItem(item({}), '2031-12-31').map((e) => e.id)).toEqual(
       es.map((e) => e.id),
     );
@@ -162,9 +162,9 @@ describe('回収の振替（アーカイブの売却・返金）', () => {
     });
     const real = [purchaseOf(washer, 'bank'), recoveryOf(washer, 30000, '2026-06-15')];
     const derived = entriesWithContinuousCost(real, [washer], '2026-12-31');
-    const recog = derived.filter((e) => e.metadata?.ccKind === 'recognition');
-    expect(recog).toHaveLength(25); // 2024-06〜2026-06
-    expect(recog[0]?.lines[0]?.amount).toBe(8400); // 210,000 / 25
+    const allocations = derived.filter((e) => e.metadata?.ccKind === 'monthly-allocation');
+    expect(allocations).toHaveLength(25); // 2024-06〜2026-06
+    expect(allocations[0]?.lines[0]?.amount).toBe(8400); // 210,000 / 25
     // 全期間の費用合計 = 210,000（実際に減った価値）
     expect(accountBalance('fixedcost', 'expense', derived)).toBe(210000);
     // 台帳は 0 で閉じる: 240,000 − 210,000 − 30,000
@@ -183,9 +183,9 @@ describe('回収の振替（アーカイブの売却・返金）', () => {
     });
     const real = [purchaseOf(insurance), recoveryOf(insurance, 30000, '2026-06-30')];
     const derived = entriesWithContinuousCost(real, [insurance], '2026-12-31');
-    const recog = derived.filter((e) => e.metadata?.ccKind === 'recognition');
-    expect(recog).toHaveLength(6);
-    expect(recog.every((e) => e.lines[0]?.amount === 5000)).toBe(true);
+    const allocations = derived.filter((e) => e.metadata?.ccKind === 'monthly-allocation');
+    expect(allocations).toHaveLength(6);
+    expect(allocations.every((e) => e.lines[0]?.amount === 5000)).toBe(true);
     expect(balanceAt(derived, LEDGER, '2026-12-31')).toBe(0);
   });
   it('回収額が購入額を超えたら費用行がマイナス＝過去にわたる費用減（上限なし・作者決定）', () => {

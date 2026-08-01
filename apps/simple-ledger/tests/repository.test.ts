@@ -1160,7 +1160,7 @@ describe('継続コスト資産の後編集で過去集計が再計算される�
   }
   const recogOf = (entries: JournalEntry[], id: string) =>
     entries.filter(
-      (e) => e.metadata?.continuousCostId === id && e.metadata?.ccKind === 'recognition',
+      (e) => e.metadata?.continuousCostId === id && e.metadata?.ccKind === 'monthly-allocation',
     );
 
   it('金額を後編集すると過去の費用行が再計算され、購入の仕訳の金額もミラーされる', async () => {
@@ -1488,7 +1488,7 @@ describe('保存境界の fail-closed（構造・参照検証 + i18n エラー�
     const forbidden: NonNullable<JournalEntry['metadata']>[] = [
       { virtual: true },
       { continuousCostId: 'cc-1' },
-      { ccKind: 'recognition' },
+      { ccKind: 'monthly-allocation' },
     ];
     for (const [index, metadata] of forbidden.entries()) {
       const entry = buildSimpleEntry({
@@ -1731,7 +1731,8 @@ describe('継続コスト資産のアーカイブ（archiveMonthlyCost = 終了�
     // 会計（§6-1 の検算）: 2024-06〜2026-06 = 25ヶ月・月あたり 8,400・台帳は 0 で閉じる。
     const derived = reportEntriesForAsOf(after, '2026-12-31');
     const recogs = derived.filter(
-      (e) => e.metadata?.continuousCostId === item.id && e.metadata?.ccKind === 'recognition',
+      (e) =>
+        e.metadata?.continuousCostId === item.id && e.metadata?.ccKind === 'monthly-allocation',
     );
     expect(recogs).toHaveLength(25);
     expect(recogs[0]?.lines[0]?.amount).toBe(8400);

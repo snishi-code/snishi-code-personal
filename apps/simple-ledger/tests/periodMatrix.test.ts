@@ -116,7 +116,7 @@ describe('buildPeriodMatrix（年間）', () => {
     expect(matrix.rows.netAssets[1]).toBe(matrix.rows.totalAssets[1]! - 250);
   });
 
-  it('導出認識だけを継続コストの費用純増減へ分類する', () => {
+  it('導出月割りだけを継続コストの費用純増減へ分類する', () => {
     const matrix = buildPeriodMatrix(
       accounts,
       [
@@ -124,7 +124,7 @@ describe('buildPeriodMatrix（年間）', () => {
         entry('opening-continuing', '2025-12-31', 'continuing', 'equity', 500),
         entry('derived', '2026-01-31', 'fixed', 'continuing', 120, {
           virtual: true,
-          ccKind: 'recognition',
+          ccKind: 'monthly-allocation',
         }),
         entry('normal', '2026-01-25', 'food', 'cash', 50),
       ],

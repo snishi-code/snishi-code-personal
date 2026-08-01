@@ -8,7 +8,7 @@ export { APP_ID, MAX_LEDGER_REVISION, SCHEMA_VERSION } from '../data/constants';
 
 /**
  * 継続コストの残存価値を寄せる単一の集約台帳口座（role=continuing-cost-asset・内部集約）。
- * 品目ごとに資産科目を作らず、全継続コストの funding/recognition をこの 1 口座に通す。
+ * 品目ごとに資産科目を作らず、全継続コストの funding/monthly-allocation をこの 1 口座に通す。
  * find-or-create で 1 つだけ存在させる（ADJUSTMENT_ACCOUNTS と同じシングルトン方針）。
  * 勘定科目管理 UI には出さず、BS / 資産内訳には 1 行で表示する。
  */

@@ -26,9 +26,9 @@ import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../../domain/constants';
 import { lastExpenseCategoryId, rememberExpenseCategoryId } from '../../data/localFlags';
 import { sortAccounts } from '../../domain/accountOrder';
 import {
-  defaultRecognitionAccountId,
+  defaultMonthlyAllocationAccountId,
   groupedAccountsByRole,
-  recognitionAccountOptions,
+  monthlyAllocationAccountOptions,
 } from '../accountOptions';
 import { monthlyAmounts, monthOf } from '../../domain/allocation';
 import { isValidIsoDate } from '../../domain/calendar';
@@ -1014,7 +1014,10 @@ function ContinuousCostItemSheet({
 }) {
   const { ledger, createContinuousCost, saveMonthlyCost } = useLedger();
   const accounts = ledger?.accounts ?? [];
-  const recognitionOptions = recognitionAccountOptions(accounts, existing?.expenseAccountId);
+  const monthlyAllocationOptions = monthlyAllocationAccountOptions(
+    accounts,
+    existing?.expenseAccountId,
+  );
 
   const [name, setName] = useState(existing?.name ?? '');
   const [amountText, setAmountText] = useState(
@@ -1026,8 +1029,8 @@ function ContinuousCostItemSheet({
   const [expenseAccountId, setExpenseAccountId] = useState(() => {
     if (existing) return existing.expenseAccountId;
     const last = lastExpenseCategoryId();
-    if (last && recognitionOptions.some((o) => o.value === last)) return last;
-    return defaultRecognitionAccountId(accounts);
+    if (last && monthlyAllocationOptions.some((o) => o.value === last)) return last;
+    return defaultMonthlyAllocationAccountId(accounts);
   });
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
@@ -1184,7 +1187,7 @@ function ContinuousCostItemSheet({
           label={t('monthlyCost.expenseCategory')}
           value={expenseAccountId}
           onChange={setExpenseAccountId}
-          options={recognitionOptions}
+          options={monthlyAllocationOptions}
           dataUi={UI.allocations.editExpense}
         />
       </div>
@@ -1218,7 +1221,7 @@ function MonthlyCostArchiveDialog({
   const [submitting, setSubmitting] = useState(false);
 
   // 変更前の item の割り振りで「その日までに費用になっていない残り」。
-  // remainingValue が回収済みを織り込んだ単一正本（spreadTotal − 認識済み）なので、
+  // remainingValue が回収済みを織り込んだ単一正本（spreadTotal − 月割り済み）なので、
   // ここで回収額をもう一度引かない（一覧と同じ値になる・監査 P2-1）。
   const remaining = isValidIsoDate(endDate)
     ? remainingValue(item, endDate, spreadTotal)

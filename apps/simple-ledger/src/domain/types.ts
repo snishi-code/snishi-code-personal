@@ -133,8 +133,8 @@ export interface EntryMetadata {
   virtual?: true;
   /** 仮想仕訳が属する MonthlyCostItem(継続コスト)の ID。 */
   continuousCostId?: string;
-  /** 仮想仕訳の種別。funding=資産化(支払元→対象資産) / recognition=認識(対象資産→認識先)。 */
-  ccKind?: 'funding' | 'recognition';
+  /** 仮想仕訳の種別。funding=資産化（支払元→対象資産）/ monthly-allocation=月割り（対象資産→月割り先）。 */
+  ccKind?: 'funding' | 'monthly-allocation';
   /**
    * 定期ルールから自動起票された仕訳の由来（recurringMonth とペア）。
    * 起票後は通常の仕訳として編集・削除できる。ルール削除時はこのメタデータを剥がして
@@ -237,7 +237,7 @@ export interface RecurringRule {
 
 /**
  * 予定キャッシュフロー（将来の現金の出入り）。
- * 「いつ費用認識するか」とは別概念で、「いつ現金が動くか」を保持する。
+ * 「いつ月割りするか」とは別概念で、「いつ現金が動くか」を保持する。
  * 予定は通常仕訳一覧へ大量生成せず、ここに置く。実績化で 1 件の仕訳を作る。
  */
 export type CashflowDirection = 'inflow' | 'outflow' | 'transfer';
