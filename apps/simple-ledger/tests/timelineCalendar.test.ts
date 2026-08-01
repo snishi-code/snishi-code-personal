@@ -152,6 +152,43 @@ describe('buildTimelineCalendar', () => {
     expect(row?.dots[0]?.flows.map((flow) => flow.id)).toEqual(['evening', 'morning']);
   });
 
+  it('日表示は同日の入出金が相殺してもポッチを残し、月・年は純額0を省く', () => {
+    const entries = [
+      entry('outflow', '2026-01-10', 'expense', 'cash-a', 50),
+      entry('inflow', '2026-01-10', 'cash-a', 'expense', 50),
+    ];
+
+    const daily = build({ entries, zoom: 'day' });
+    const dailyAccount = daily.boxes
+      .find((box) => box.key === 'assetFree')
+      ?.accountRows.find((row) => row.account.id === 'cash-a');
+    const dailyBox = daily.boxes.find((box) => box.key === 'assetFree');
+    expect(dailyAccount?.dots).toHaveLength(1);
+    expect(dailyAccount?.dots[0]).toMatchObject({
+      bucketKey: '2026-01-10',
+      netChange: 0,
+    });
+    expect(dailyAccount?.dots[0]?.flows.map((flow) => flow.id)).toEqual(['inflow', 'outflow']);
+    expect(dailyBox?.dots).toHaveLength(1);
+    expect(dailyBox?.dots[0]?.netChange).toBe(0);
+
+    const monthly = build({ entries, zoom: 'month' });
+    expect(
+      monthly.boxes
+        .find((box) => box.key === 'assetFree')
+        ?.accountRows.find((row) => row.account.id === 'cash-a')?.dots,
+    ).toEqual([]);
+    expect(monthly.boxes.find((box) => box.key === 'assetFree')?.dots).toEqual([]);
+
+    const yearly = build({ entries, zoom: 'year' });
+    expect(
+      yearly.boxes
+        .find((box) => box.key === 'assetFree')
+        ?.accountRows.find((row) => row.account.id === 'cash-a')?.dots,
+    ).toEqual([]);
+    expect(yearly.boxes.find((box) => box.key === 'assetFree')?.dots).toEqual([]);
+  });
+
   it('実仕訳・月割り・未来ルール・予定CFを同じflowにし、開く先だけを解決する', () => {
     const item: MonthlyCostItem = {
       id: 'item-1',

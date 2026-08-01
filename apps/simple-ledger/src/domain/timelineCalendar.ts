@@ -301,26 +301,35 @@ function addFlow(map: DotMap, bucketKey: string, delta: number, flow: TimelineFl
   map.set(bucketKey, current);
 }
 
-function dotsOf(map: DotMap, bucketOrder: ReadonlyMap<string, number>): TimelineFlowDot[] {
-  return [...map.entries()]
-    .filter(([, value]) => value.netChange !== 0)
-    .map(([bucketKey, value]) => {
-      const flows = [...value.flows.values()].sort(
-        (left, right) => left.date.localeCompare(right.date) || left.id.localeCompare(right.id),
-      );
-      return {
-        kind: 'flow' as const,
-        bucketKey,
-        date: flows[0]?.date ?? bucketKey,
-        netChange: value.netChange,
-        flows,
-      };
-    })
-    .sort(
-      (left, right) =>
-        (bucketOrder.get(left.bucketKey) ?? Number.MAX_SAFE_INTEGER) -
-        (bucketOrder.get(right.bucketKey) ?? Number.MAX_SAFE_INTEGER),
-    );
+function dotsOf(
+  map: DotMap,
+  bucketOrder: ReadonlyMap<string, number>,
+  zoom: TimelineZoom,
+): TimelineFlowDot[] {
+  return (
+    [...map.entries()]
+      // 日表示は「その日にフローがあった」こと自体をポッチとして残す。同日内で
+      // 入出金が相殺して純額 0 になっても、flows の一覧から個別の移動を確認できる。
+      // 月・年表示だけは俯瞰用の純増減なので、純額 0 のバケットを省く。
+      .filter(([, value]) => (zoom === 'day' ? value.flows.size > 0 : value.netChange !== 0))
+      .map(([bucketKey, value]) => {
+        const flows = [...value.flows.values()].sort(
+          (left, right) => left.date.localeCompare(right.date) || left.id.localeCompare(right.id),
+        );
+        return {
+          kind: 'flow' as const,
+          bucketKey,
+          date: flows[0]?.date ?? bucketKey,
+          netChange: value.netChange,
+          flows,
+        };
+      })
+      .sort(
+        (left, right) =>
+          (bucketOrder.get(left.bucketKey) ?? Number.MAX_SAFE_INTEGER) -
+          (bucketOrder.get(right.bucketKey) ?? Number.MAX_SAFE_INTEGER),
+      )
+  );
 }
 
 interface ItemCandidate {
@@ -482,7 +491,7 @@ export function buildTimelineCalendar(input: BuildTimelineCalendarInput): Timeli
       projected: candidate.projected,
       originRuleId: candidate.originRuleId,
       spans: [span],
-      dots: dotsOf(itemDots.get(candidate.item.id) ?? new Map(), bucketOrder),
+      dots: dotsOf(itemDots.get(candidate.item.id) ?? new Map(), bucketOrder, input.zoom),
     };
   });
   const visibleMonthlyRows = monthlyRowsAll.filter(
@@ -539,7 +548,7 @@ export function buildTimelineCalendar(input: BuildTimelineCalendarInput): Timeli
         boxKey: definition.key,
         account,
         spans: [accountSpan(account)],
-        dots: dotsOf(accountDots.get(account.id) ?? new Map(), bucketOrder),
+        dots: dotsOf(accountDots.get(account.id) ?? new Map(), bucketOrder, input.zoom),
       }));
       const accountRows = allAccountRows.filter(
         (row) =>
@@ -551,7 +560,7 @@ export function buildTimelineCalendar(input: BuildTimelineCalendarInput): Timeli
         kind: 'box',
         key: definition.key,
         spans,
-        dots: dotsOf(boxDots.get(definition.key) ?? new Map(), bucketOrder),
+        dots: dotsOf(boxDots.get(definition.key) ?? new Map(), bucketOrder, input.zoom),
         accountRows,
         ...(definition.kind === 'continuousCost'
           ? { continuousCost: { ruleGroups, standaloneItems } }
