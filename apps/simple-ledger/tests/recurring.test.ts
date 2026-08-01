@@ -1011,9 +1011,9 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
 
     // 系譜がつながっているので、first を無期限へ開き直す編集は拒否される。
-    const reopened = ledger.recurringRules.find((rule) => rule.id === first.id)!;
-    const { endDate: _dropped, ...withoutEnd } = reopened;
-    await expect(upsertRecurringRule(withoutEnd)).rejects.toThrow();
+    const reopened = { ...ledger.recurringRules.find((rule) => rule.id === first.id)! };
+    delete reopened.endDate;
+    await expect(upsertRecurringRule(reopened)).rejects.toThrow();
   });
 
   it('分割後継の削除後に旧segmentを開いても、継承したカーソルで事実を再起票しない', async () => {
