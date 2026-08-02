@@ -2,7 +2,7 @@
  * 資金繰り（将来CF）。未来日付の仕訳から「自由に動かせるお金」の推移・最低残高を投影し、
  * 負債の返済計画（登録済みの返済仕訳の確認・編集を含む）を扱う。
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { ConfirmDialog, Modal } from '../overlays';
@@ -40,7 +40,14 @@ function repaymentAmountOf(entry: JournalEntry, liabilityId: string): number {
     .reduce((s, l) => s + l.amount, 0);
 }
 
-export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) => void }) {
+export function Cashflow({
+  onEditEntry,
+  targetScheduleId,
+}: {
+  onEditEntry: (entry: JournalEntry) => void;
+  /** タイムラインから開いた旧形式の予定 CF。該当行へ移動して強調する。 */
+  targetScheduleId?: string | null;
+}) {
   const { ledger, postSchedule, removeSchedule } = useLedger();
   const today = todayLocal();
   const basis = useMemo(() => reportBasis({ mode: 'all' }, today), [today]);
@@ -53,6 +60,13 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
   const [repayFor, setRepayFor] = useState<{ account: Account; balance: number } | null>(null);
   // 負債行の展開（登録済みの返済リスト）。行タップ = 新規返済シートとは独立に開閉する。
   const [openRepayments, setOpenRepayments] = useState<ReadonlySet<string>>(new Set());
+  const targetScheduleRef = useRef<HTMLLIElement | null>(null);
+
+  useEffect(() => {
+    const row = targetScheduleRef.current;
+    if (!targetScheduleId || !row || typeof row.scrollIntoView !== 'function') return;
+    row.scrollIntoView({ block: 'center' });
+  }, [ledger, targetScheduleId]);
 
   const currency = ledger?.settings.currency ?? 'JPY';
 
@@ -97,6 +111,19 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
 
   const accountName = (id: string): string =>
     (ledger?.accounts ?? []).find((a) => a.id === id)?.name ?? '—';
+  // タイムラインで選んだ予定は、資金繰りの既定期間（今日〜6か月）外でも詳細行を見せる。
+  // 投影計算の期間自体は変えず、一覧への補足だけに留める。
+  const displayedSchedules = useMemo(() => {
+    const target = ledger?.cashflowSchedules.find(
+      (schedule) => schedule.id === targetScheduleId && schedule.status === 'planned',
+    );
+    if (!target || projection.schedules.some((schedule) => schedule.id === target.id)) {
+      return projection.schedules;
+    }
+    return [...projection.schedules, target].sort((left, right) =>
+      left.dueDate.localeCompare(right.dueDate),
+    );
+  }, [ledger, projection.schedules, targetScheduleId]);
   const freeTrend: TrendPoint[] = projection.points.map((p, i) => ({
     key: `${p.date}-${i}`,
     label: shortDateLabel(i === 0 ? today : p.date),
@@ -324,15 +351,20 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
 
       {/* 旧バージョンで作られた予定 CF（分割返済など）のレガシー表示。新規には作られない
           （返済は未来日付の実仕訳として登録される）ため、残っている時だけセクションごと表示する。 */}
-      {projection.schedules.length === 0 ? null : (
+      {displayedSchedules.length === 0 ? null : (
         <>
           <p className="section-label">{t('cashflow.scheduleSecondaryTitle')}</p>
           <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
             {t('cashflow.scheduleSecondaryHint')}
           </p>
           <ul className="card list" data-ui={UI.cashflow.list}>
-            {projection.schedules.map((s) => (
-              <li key={s.id} className="list__item">
+            {displayedSchedules.map((s) => (
+              <li
+                key={s.id}
+                className={`list__item${s.id === targetScheduleId ? ' cashflow-schedule--targeted' : ''}`}
+                ref={s.id === targetScheduleId ? targetScheduleRef : undefined}
+                data-targeted={s.id === targetScheduleId ? 'true' : undefined}
+              >
                 <div className="list__main">
                   <div className="list__title">{s.title}</div>
                   <div className="list__sub">

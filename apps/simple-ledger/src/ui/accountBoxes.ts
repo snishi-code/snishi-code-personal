@@ -48,6 +48,103 @@ export const ACCOUNT_ACCENTS = {
 
 export type AccountAccent = (typeof ACCOUNT_ACCENTS)[keyof typeof ACCOUNT_ACCENTS];
 
+/**
+ * タイムラインで使う 9 個の大きな箱。
+ *
+ * 勘定科目管理の 6 箱に、資産内訳で既に使っている「自由に動かせる / 動かせない」
+ * の分割、内部の継続コスト台帳、純資産を合わせたもの。順序も両画面の既存順に揃える。
+ * 残高調整科目は利用者が管理する線分ではないため含めない。
+ */
+export type TimelineAccountBoxKey =
+  | 'assetFree'
+  | 'assetFixed'
+  | 'investment'
+  | 'continuingCost'
+  | 'shortTermDebt'
+  | 'longTermDebt'
+  | 'income'
+  | 'expense'
+  | 'equity';
+
+export interface TimelineAccountBox {
+  key: TimelineAccountBoxKey;
+  labelKey: MessageKey;
+  accent: AccountAccent;
+  includes: (account: Account) => boolean;
+}
+
+export const TIMELINE_ACCOUNT_BOXES: readonly TimelineAccountBox[] = [
+  {
+    key: 'assetFree',
+    labelKey: 'assets.frame.free',
+    accent: ACCOUNT_ACCENTS.assetFree,
+    includes: (account) => account.role === 'daily-asset' && account.movable !== false,
+  },
+  {
+    key: 'assetFixed',
+    labelKey: 'assets.frame.fixed',
+    accent: ACCOUNT_ACCENTS.assetFixed,
+    includes: (account) => account.role === 'daily-asset' && account.movable === false,
+  },
+  {
+    key: 'investment',
+    labelKey: 'assets.frame.investment',
+    accent: ACCOUNT_ACCENTS.investment,
+    includes: (account) => account.role === 'investment-asset',
+  },
+  {
+    key: 'continuingCost',
+    labelKey: 'assets.frame.ledger',
+    accent: ACCOUNT_ACCENTS.continuingCost,
+    includes: (account) => account.role === 'continuing-cost-asset',
+  },
+  {
+    key: 'shortTermDebt',
+    labelKey: 'box.shortTermDebt',
+    accent: ACCOUNT_ACCENTS.shortTermDebt,
+    includes: (account) => account.role === 'payment-liability',
+  },
+  {
+    key: 'longTermDebt',
+    labelKey: 'box.longTermDebt',
+    accent: ACCOUNT_ACCENTS.longTermDebt,
+    includes: (account) => account.role === 'other-liability',
+  },
+  {
+    key: 'income',
+    labelKey: 'box.income',
+    accent: ACCOUNT_ACCENTS.income,
+    includes: (account) => account.role === 'income-category',
+  },
+  {
+    key: 'expense',
+    labelKey: 'box.expense',
+    accent: ACCOUNT_ACCENTS.expense,
+    includes: (account) => account.role === 'expense-category',
+  },
+  {
+    key: 'equity',
+    labelKey: 'accounts.type.equity',
+    accent: ACCOUNT_ACCENTS.equity,
+    includes: (account) => account.role === 'equity',
+  },
+];
+
+export function timelineBoxForAccount(account: Account): TimelineAccountBox | undefined {
+  return TIMELINE_ACCOUNT_BOXES.find((box) => box.includes(account));
+}
+
+/**
+ * 箱の純増減へフローを割り当てるときの分類。
+ * 残高調整科目は内訳としては隠したまま、損益方向の箱へだけ所属させる。
+ */
+export function timelineFlowBoxForAccount(account: Account): TimelineAccountBox | undefined {
+  const visible = timelineBoxForAccount(account);
+  if (visible || account.role !== 'system-adjustment') return visible;
+  const key = account.type === 'revenue' ? 'income' : account.type === 'expense' ? 'expense' : null;
+  return key === null ? undefined : TIMELINE_ACCOUNT_BOXES.find((box) => box.key === key);
+}
+
 export interface AccountBox {
   key: AccountBoxKey;
   labelKey: MessageKey;

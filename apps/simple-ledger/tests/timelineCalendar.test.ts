@@ -326,6 +326,53 @@ describe('buildTimelineCalendar', () => {
     ).toEqual(['past-item', 'future-item']);
   });
 
+  it('終了日不明の旧アーカイブ科目を未来へ開いた線分として描かない', () => {
+    const archivedWithoutEnd = {
+      ...account('legacy-ended', 'asset', 'daily-asset', '2020-01-01'),
+      archived: true,
+    };
+    const current = account('current', 'asset', 'daily-asset', '2026-01-01');
+    const customBoxes: TimelineBoxDefinition[] = [
+      { key: 'assetFree', accountIds: [archivedWithoutEnd.id, current.id] },
+    ];
+
+    const normal = build({ accounts: [archivedWithoutEnd, current], boxes: customBoxes });
+    expect(normal.boxes[0]?.accountRows.map((row) => row.account.id)).toEqual(['current']);
+
+    const withEnded = build({
+      accounts: [archivedWithoutEnd, current],
+      boxes: customBoxes,
+      showOutsideRange: true,
+    });
+    const legacyRow = withEnded.boxes[0]?.accountRows.find(
+      (row) => row.account.id === archivedWithoutEnd.id,
+    );
+    expect(legacyRow?.spans).toEqual([]);
+  });
+
+  it('内部の残高調整科目を内訳に出さず、損益箱の純増減へ含める', () => {
+    const adjustment = account('balance-expense', 'expense', 'system-adjustment', '2025-01-01');
+    const customAccounts = [...accounts, adjustment];
+    const customBoxes: TimelineBoxDefinition[] = [
+      { key: 'assetFree', accountIds: ['cash-a', 'cash-b'] },
+      {
+        key: 'expense',
+        accountIds: [],
+        flowAccountIds: [adjustment.id],
+      },
+    ];
+    const model = build({
+      accounts: customAccounts,
+      boxes: customBoxes,
+      entries: [entry('adjustment', '2026-01-10', adjustment.id, 'cash-a', 50)],
+    });
+
+    expect(model.boxes.find((box) => box.key === 'assetFree')?.dots[0]?.netChange).toBe(-50);
+    const expenseBox = model.boxes.find((box) => box.key === 'expense');
+    expect(expenseBox?.dots[0]?.netChange).toBe(50);
+    expect(expenseBox?.accountRows).toEqual([]);
+  });
+
   it('費用ルールの帯へ実itemを束ね、未起票月のitemと生成ポッチを未来投影する', () => {
     const rule: RecurringRule = {
       id: 'rent-rule',

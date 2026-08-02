@@ -64,6 +64,7 @@ export function Journal({
   onOpenAllocations,
   filter,
   period,
+  targetEntryId,
   onClearFilter,
 }: {
   onEditEntry: (entry: JournalEntry) => void;
@@ -72,6 +73,8 @@ export function Journal({
   onOpenAllocations: (target: AllocationsTarget) => void;
   filter: JournalFilter | null;
   period: ReportPeriod;
+  /** タイムラインなど外部画面から開く保存仕訳。種類ごとの既存編集シートへ解決する。 */
+  targetEntryId?: string | null;
   onClearFilter: () => void;
 }) {
   const { ledger, removeEntry, deleteOpening, deleteAdjustment } = useLedger();
@@ -87,9 +90,16 @@ export function Journal({
   const [showFuture, setShowFuture] = useState(false);
   const [tagFilter, setTagFilter] = useState('');
   const [pendingDelete, setPendingDelete] = useState<JournalEntry | null>(null);
-  const [editingOpening, setEditingOpening] = useState<JournalEntry | null>(null);
+  const initialTarget = targetEntryId
+    ? (ledger?.journalEntries.find((entry) => entry.id === targetEntryId) ?? null)
+    : null;
+  const [editingOpening, setEditingOpening] = useState<JournalEntry | null>(() =>
+    initialTarget?.kind === 'opening' ? initialTarget : null,
+  );
   const [pendingOpeningDelete, setPendingOpeningDelete] = useState<JournalEntry | null>(null);
-  const [editingAdjustment, setEditingAdjustment] = useState<JournalEntry | null>(null);
+  const [editingAdjustment, setEditingAdjustment] = useState<JournalEntry | null>(() =>
+    initialTarget?.metadata?.adjustment ? initialTarget : null,
+  );
   const [pendingAdjustmentDelete, setPendingAdjustmentDelete] = useState<JournalEntry | null>(null);
 
   useEffect(() => {

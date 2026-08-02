@@ -127,3 +127,28 @@ for (const vp of VIEWPORTS) {
     });
   });
 }
+
+test('タイムラインは 390px でページを横にはみ出さず、表示領域内だけを横スクロールできる', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
+  await page.goto('./?fixture=sample');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.timeline')).click();
+  await expect(page.locator(ui('timeline.view'))).toBeVisible();
+
+  const viewport = page.locator(ui('timeline.viewport'));
+  await expect(viewport).toBeVisible();
+  await expectNoHorizontalScroll(page, 'timeline mobile-390x844');
+  const viewportScrolls = await viewport.evaluate((element) => {
+    return element.scrollWidth > element.clientWidth;
+  });
+  expect(viewportScrolls, 'mobile: タイムラインの表示領域内で横スクロールできる').toBe(true);
+  await page.screenshot({
+    path: 'test-results/screenshots/ledger-timeline-mobile-390x844.png',
+    fullPage: true,
+  });
+});

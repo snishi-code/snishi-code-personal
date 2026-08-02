@@ -206,6 +206,321 @@
   text-align: center;
 }
 
+/* ── タイムラインカレンダー ── */
+.timeline-calendar {
+  min-width: 0;
+}
+.timeline-calendar__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.timeline-calendar__zoom .segmented__btn {
+  min-height: var(--tap);
+}
+.timeline-calendar__range-button {
+  min-width: var(--tap);
+  padding: 0;
+  font-size: 18px;
+}
+.timeline-calendar__show-ended {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap);
+  margin-bottom: var(--space-3);
+}
+.timeline-calendar__viewport {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior-inline: contain;
+}
+.timeline-calendar__canvas {
+  position: relative;
+  width: max-content;
+  min-width: 100%;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  --timeline-label-width: 132px;
+  --timeline-row-height: 52px;
+}
+.timeline-calendar__header-row,
+.timeline-calendar__row {
+  display: grid;
+  grid-template-columns:
+    var(--timeline-label-width)
+    repeat(var(--timeline-bucket-count), var(--timeline-bucket-width));
+  width: max-content;
+  min-width: 100%;
+}
+.timeline-calendar__header-row {
+  min-height: 28px;
+}
+.timeline-calendar__header-label,
+.timeline-calendar__header-cell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0 var(--space-2);
+  color: var(--muted);
+  font-weight: 700;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.timeline-calendar__header-label {
+  position: sticky;
+  left: 0;
+  z-index: 8;
+  box-shadow: 1px 0 0 var(--border);
+}
+.timeline-calendar__header-cell {
+  justify-content: center;
+  overflow: hidden;
+}
+.timeline-calendar__body {
+  position: relative;
+}
+.timeline-calendar__row {
+  position: relative;
+  min-height: var(--timeline-row-height);
+  transition: opacity 120ms ease;
+}
+.timeline-calendar__row + .timeline-calendar__row {
+  border-top: 1px solid var(--border);
+}
+.timeline-calendar__row--detail {
+  background: color-mix(in srgb, var(--timeline-accent) 4%, var(--surface));
+}
+.timeline-calendar__row--dimmed {
+  opacity: 0.3;
+}
+.timeline-calendar__row-label {
+  position: sticky;
+  left: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  min-width: 0;
+  min-height: var(--timeline-row-height);
+  padding: 0 var(--space-2);
+  color: var(--text);
+  text-align: left;
+  background: var(--surface);
+  border: 0;
+  border-left: 4px solid var(--timeline-accent, var(--border));
+  box-shadow: 1px 0 0 var(--border);
+  font: inherit;
+}
+button.timeline-calendar__row-label {
+  cursor: pointer;
+}
+.timeline-calendar__row-label--detail {
+  padding-left: var(--space-4);
+  color: var(--muted);
+}
+.timeline-calendar__row-label--item {
+  padding-left: var(--space-6);
+}
+.timeline-calendar__row-label-text {
+  /* 狭幅で「自由に動かせるお金/動かせないお金」が同じ見出しに切れないよう、
+     1 行省略ではなく 2 行までの折返しで見分けを保つ。 */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  min-width: 0;
+  overflow: hidden;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.timeline-calendar__track {
+  position: relative;
+  grid-column: 2 / -1;
+  min-height: var(--timeline-row-height);
+  background-color: var(--surface);
+  background-image: repeating-linear-gradient(
+    to right,
+    transparent 0,
+    transparent calc(var(--timeline-bucket-width) - 1px),
+    var(--border) calc(var(--timeline-bucket-width) - 1px),
+    var(--border) var(--timeline-bucket-width)
+  );
+}
+.timeline-calendar__band {
+  position: absolute;
+  top: 17px;
+  height: 18px;
+  min-width: 2px;
+  border: 1px solid var(--timeline-accent, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--timeline-accent) 22%, var(--surface));
+}
+.timeline-calendar__dot {
+  position: absolute;
+  top: 4px;
+  z-index: 3;
+  width: var(--tap);
+  min-width: var(--tap);
+  height: var(--tap);
+  padding: 0;
+  transform: translateX(-50%);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.timeline-calendar__dot::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 11px;
+  height: 11px;
+  transform: translate(-50%, -50%);
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--primary-strong);
+  box-shadow: 0 0 0 1px var(--primary-strong);
+}
+.timeline-calendar__dot--positive::before {
+  background: var(--pos);
+  box-shadow: 0 0 0 1px var(--pos);
+}
+.timeline-calendar__dot--negative::before {
+  background: var(--neg);
+  box-shadow: 0 0 0 1px var(--neg);
+}
+.timeline-calendar__dot--generation::before {
+  background: var(--surface);
+  border-color: var(--timeline-accent, var(--primary-strong));
+  box-shadow: 0 0 0 1px var(--timeline-accent, var(--primary-strong));
+}
+.timeline-calendar__dot[aria-expanded='true']::before {
+  width: 15px;
+  height: 15px;
+}
+.timeline-calendar__today-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 2px;
+  background: var(--primary-strong);
+  pointer-events: none;
+}
+.timeline-calendar__connector {
+  position: absolute;
+  top: 0;
+  left: var(--timeline-label-width);
+  z-index: 4;
+  overflow: visible;
+  pointer-events: none;
+}
+.timeline-calendar__connector line {
+  stroke: var(--primary-strong);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+}
+.timeline-calendar__popover {
+  position: absolute;
+  top: calc(50% + 18px);
+  z-index: 12;
+  width: min(300px, calc(100vw - var(--space-6)));
+  padding: var(--space-3);
+  transform: translateX(var(--timeline-popover-shift, -50%));
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg, var(--shadow));
+}
+.timeline-calendar__popover-title {
+  margin: 0 0 var(--space-2);
+  font-weight: 700;
+}
+.timeline-calendar__flow-list {
+  max-height: 220px;
+  overflow-y: auto;
+}
+.timeline-calendar__flow-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--tap);
+  padding: var(--space-2);
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font: inherit;
+}
+.timeline-calendar__flow-button[aria-pressed='true'],
+.timeline-calendar__flow-button:hover {
+  background: var(--bg);
+}
+.timeline-calendar__flow-main {
+  min-width: 0;
+}
+.timeline-calendar__flow-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.timeline-calendar__flow-date {
+  color: var(--muted);
+  font-size: 11px;
+}
+.timeline-calendar__popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-2);
+}
+.timeline-calendar__empty {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: min(100vw, 360px);
+  min-height: var(--timeline-row-height);
+  padding: var(--space-5);
+  color: var(--muted);
+  text-align: center;
+  background: var(--surface);
+}
+
+.cashflow-schedule--targeted {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+@media (max-width: 480px) {
+  .timeline-calendar__canvas {
+    --timeline-label-width: 116px;
+  }
+  .timeline-calendar__row-label {
+    padding-inline: var(--space-1);
+  }
+  .timeline-calendar__row-label--detail {
+    padding-left: var(--space-3);
+  }
+  .timeline-calendar__row-label--item {
+    padding-left: var(--space-5);
+  }
+}
+
 /* ── Statement rows ── */
 .stmt-row {
   display: flex;

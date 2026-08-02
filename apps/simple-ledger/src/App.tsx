@@ -23,6 +23,7 @@ import { ExpenseBreakdown } from './ui/screens/ExpenseBreakdown';
 import { NetIncome } from './ui/screens/NetIncome';
 import { Journal, type JournalFilter } from './ui/screens/Journal';
 import { YearlyOverview } from './ui/screens/YearlyOverview';
+import { TimelineCalendar } from './ui/screens/TimelineCalendar';
 import { Allocations, type AllocationsTarget } from './ui/screens/Allocations';
 import { Cashflow } from './ui/screens/Cashflow';
 import { Tags } from './ui/screens/Tags';
@@ -47,8 +48,10 @@ export function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [entryInit, setEntryInit] = useState<EntryInit | null>(null);
   const [journalFilter, setJournalFilter] = useState<JournalFilter | null>(null);
+  const [journalTargetEntryId, setJournalTargetEntryId] = useState<string | null>(null);
   // 仕訳一覧の計算で生まれた行タップ → 「毎月のもの」で開くシートの対象（1 回で消費）。
   const [allocationsTarget, setAllocationsTarget] = useState<AllocationsTarget | null>(null);
+  const [cashflowTargetId, setCashflowTargetId] = useState<string | null>(null);
   const [exitConfirm, setExitConfirm] = useState(false);
   // オンボーディングは「初回状態からの派生 + ユーザー操作の上書き」で開閉する
   // （effect での setState を避ける。render 中の派生調整パターン）。
@@ -69,7 +72,9 @@ export function App() {
   const screen = view as Screen;
   const go = (s: Screen) => {
     setJournalFilter(null);
+    setJournalTargetEntryId(null);
     setAllocationsTarget(null);
+    setCashflowTargetId(null);
     navigate(s);
   };
   // ヘッダーの日付を変えたら明示フィルターより日付を優先する（フィルターが居座らない）。
@@ -121,6 +126,7 @@ export function App() {
   // 日付だけの絞り込み（解除チップが出ない）が居座らない。
   const goJournalFiltered = (filter: JournalFilter) => {
     navigate('journal');
+    setJournalTargetEntryId(null);
     setJournalFilter(filter);
   };
 
@@ -128,6 +134,29 @@ export function App() {
   const goAllocationsFor = (target: AllocationsTarget) => {
     navigate('allocations');
     setAllocationsTarget(target);
+  };
+
+  // タイムラインは保存仕訳の種類を再解釈せず、仕訳一覧の既存 resolver へ ID を渡す。
+  // これにより通常仕訳だけでなく、初期残高・残高補正も各専用シートで開く。
+  const goJournalEntry = (entryId: string) => {
+    const entry = ledger.journalEntries.find((candidate) => candidate.id === entryId);
+    if (!entry) return;
+    const isPurchase =
+      entry.metadata?.monthlyCostId !== undefined && entry.metadata.monthlyCostRecovery !== true;
+    const needsJournalResolver =
+      !!entry.metadata?.adjustment || (entry.kind === 'opening' && !isPurchase);
+    navigate('journal');
+    setJournalFilter(null);
+    if (needsJournalResolver) setJournalTargetEntryId(entryId);
+    else {
+      setJournalTargetEntryId(null);
+      openEdit(entry);
+    }
+  };
+
+  const goCashflowSchedule = (scheduleId: string) => {
+    navigate('cashflow');
+    setCashflowTargetId(scheduleId);
   };
 
   const today = todayLocal();
@@ -279,14 +308,25 @@ export function App() {
             onOpenAllocations={goAllocationsFor}
             filter={journalFilter}
             period={period}
+            targetEntryId={journalTargetEntryId}
             onClearFilter={() => setJournalFilter(null)}
+          />
+        ) : null}
+        {screen === 'timeline' ? (
+          <TimelineCalendar
+            period={period}
+            onOpenEntry={goJournalEntry}
+            onOpenAllocations={goAllocationsFor}
+            onOpenCashflowSchedule={goCashflowSchedule}
           />
         ) : null}
         {screen === 'yearlyOverview' ? <YearlyOverview period={period} /> : null}
         {screen === 'allocations' ? (
           <Allocations period={period} onEditEntry={openEdit} target={allocationsTarget} />
         ) : null}
-        {screen === 'cashflow' ? <Cashflow onEditEntry={openEdit} /> : null}
+        {screen === 'cashflow' ? (
+          <Cashflow onEditEntry={openEdit} targetScheduleId={cashflowTargetId} />
+        ) : null}
         {screen === 'tags' ? <Tags /> : null}
         {screen === 'accounts' ? <Accounts period={period} /> : null}
         {screen === 'settings' ? (
