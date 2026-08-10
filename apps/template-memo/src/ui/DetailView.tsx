@@ -3,7 +3,8 @@
 //   - プロブレムリスト → 継続メモ → 入力フォーム → 今回メモ (常時開)
 //     → 転記用QR ボタン → 患者管理
 //   - 下部固定バーは [ホーム] のみ (患者固有の操作は画面内の日本語ボタンへ)
-//   - 患者切替は横スワイプ (補助操作)。前/次ボタンは持たない。
+//   - 患者切替はホーム一覧経由のみ (画面内の切替操作は持たない。旧・横スワイプ切替は
+//     無自覚な画面遷移で入力ミスを生むため削除した)
 //
 // メモは visitMemo / standingMemo の 2 欄に集約する (write-through 保存は MemoCards 側)。
 
@@ -55,13 +56,11 @@ export function useFreshTapGuard(pid: string | null) {
 export function DetailView({
   runtime,
   selectedNo,
-  onSelectNo,
   onNavigateHome,
 }: {
   runtime: AppRuntime;
   /** 1-based 患者番号 */
   selectedNo: number;
-  onSelectNo: (no: number) => void;
   /** 削除/復元の成功後にホームへ戻す */
   onNavigateHome?: () => void;
 }) {
@@ -73,54 +72,13 @@ export function DetailView({
 
   const [qrOpen, setQrOpen] = useState(false);
   const [metaOpen, setMetaOpen] = useState(false);
-  // 横スワイプ開始座標 (hook なので early return より前で確保する)。
-  const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
   if (!patient) return null;
 
   const label = formatPatientLabel(patient, String(selectedNo));
 
-  // 横スワイプで患者切替 (前/次ボタンの代替・補助操作)。
-  //   - 入力中の誤爆を避けるため、開始点が input/textarea/select/button/a/contenteditable の内部なら無視する。
-  //   - 横移動が主 (|dx| >= 70 かつ |dx| > |dy| * 1.5) のときだけ発火する (縦スクロールと分離)。
-  //   - 左スワイプ = 次患者 / 右スワイプ = 前患者。範囲外 (先頭で右 / 末尾で左) へは移動しない。
-  // touch のみ (mouse/pointer drag は対象外)。移動は onSelectNo に委ね、scroll リセットは呼び出し元が行う。
-  const total = appState.patients.length;
-
-  function onTouchStart(e: React.TouchEvent<HTMLElement>): void {
-    const target = e.target as HTMLElement | null;
-    if (target?.closest('input, textarea, select, button, a, [contenteditable="true"]')) {
-      swipeStartRef.current = null; // 入力/操作要素上の開始は患者切替にしない
-      return;
-    }
-    const touch = e.touches[0];
-    swipeStartRef.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
-  }
-
-  function onTouchEnd(e: React.TouchEvent<HTMLElement>): void {
-    const start = swipeStartRef.current;
-    swipeStartRef.current = null;
-    if (!start) return;
-    const touch = e.changedTouches[0];
-    if (!touch) return;
-    const dx = touch.clientX - start.x;
-    const dy = touch.clientY - start.y;
-    if (Math.abs(dx) < 70) return; // 横移動が小さい
-    if (Math.abs(dx) <= Math.abs(dy) * 1.5) return; // 縦寄り (スクロール) は無視
-    if (dx < 0) {
-      if (selectedNo < total) onSelectNo(selectedNo + 1); // 左スワイプ = 次患者
-    } else {
-      if (selectedNo > 1) onSelectNo(selectedNo - 1); // 右スワイプ = 前患者
-    }
-  }
-
   return (
-    <section
-      aria-label={s.patientSheet.title}
-      className="detailView"
-      onTouchStart={onTouchStart}
-      onTouchEnd={onTouchEnd}
-    >
+    <section aria-label={s.patientSheet.title} className="detailView">
       {/* 上部 = 患者名・病室の表示 (タップで患者情報編集)。操作系は下部固定バー / 画面内ボタンへ。 */}
       <div className="viewToolbar detailToolbar">
         {/* 患者名ボタンのみ。タップで患者情報ポップアップ (氏名/部屋/ステータス/タグ編集を含む)。 */}
@@ -178,8 +136,8 @@ export function DetailView({
         }}
       />
 
-      {/* 下部固定の操作バー: [ホーム] のみ。患者切替は横スワイプ (補助操作) へ寄せ、
-          誤タップの一因だった前/次 icon ボタンは持たない。患者固有の QR / ステータス変更も
+      {/* 下部固定の操作バー: [ホーム] のみ。誤タップの一因だった前/次 icon ボタンも
+          横スワイプ切替も持たない (患者切替はホーム経由)。患者固有の QR / ステータス変更も
           下部バーに置かない (画面内ボタン / ポップアップへ)。 */}
       <BottomActionBar
         className="detailActionBar"
