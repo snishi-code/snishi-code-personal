@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, within } from '@testing-library/react';
 import { YearlyOverview } from '../src/ui/screens/YearlyOverview';
 import type { Account, JournalEntry, Ledger } from '../src/domain/types';
 import * as reportEntriesModule from '../src/domain/reportEntries';
-import { SCHEMA_VERSION } from '../src/domain/constants';
+import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID, SCHEMA_VERSION } from '../src/domain/constants';
 import { UI } from '../src/ui-contract';
 import './setup';
 
@@ -217,6 +217,141 @@ describe('YearlyOverview', () => {
     expect(within(matrix).queryByLabelText('対象期間外')).not.toBeInTheDocument();
     expect(matrix).not.toHaveTextContent('—');
     expect(matrix).toHaveTextContent('800');
+  });
+
+  it('表示地平セレクタは全体モードだけに出し、既定=実績のみは従来の歯抜け列のまま', () => {
+    render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
+    expect(
+      document.querySelector(`[data-ui="${UI.yearlyOverview.horizonActual}"]`),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.modeAll}"]`)!);
+    const actual = document.querySelector(
+      `[data-ui="${UI.yearlyOverview.horizonActual}"]`,
+    ) as HTMLButtonElement;
+    expect(actual).toHaveAttribute('aria-pressed', 'true');
+    const matrix = document.querySelector(`[data-ui="${UI.yearlyOverview.matrix}"]`) as HTMLElement;
+    expect(
+      within(matrix)
+        .getAllByRole('columnheader')
+        .map((header) => header.textContent),
+    ).toEqual(['項目', '2024年', '2026年', '2027年']);
+  });
+
+  it('地平の切替で列数が変わる: +30年=今年+30まで連続、2100年まで=最終列2100年', () => {
+    render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
+    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.modeAll}"]`)!);
+    const matrix = document.querySelector(`[data-ui="${UI.yearlyOverview.matrix}"]`) as HTMLElement;
+    expect(within(matrix).getAllByRole('columnheader')).toHaveLength(4);
+
+    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.horizonPlus30}"]`)!);
+    const plus30Headers = within(matrix)
+      .getAllByRole('columnheader')
+      .map((header) => header.textContent);
+    // 2024〜2056（今日=2026の+30年）の連続33列。歯抜けだった2025年も埋まる。
+    expect(plus30Headers).toHaveLength(1 + (2056 - 2024 + 1));
+    expect(plus30Headers[1]).toBe('2024年');
+    expect(plus30Headers).toContain('2025年');
+    expect(plus30Headers.at(-1)).toBe('2056年');
+
+    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.horizonHardCap}"]`)!);
+    const hardCapHeaders = within(matrix)
+      .getAllByRole('columnheader')
+      .map((header) => header.textContent);
+    expect(hardCapHeaders).toHaveLength(1 + (2100 - 2024 + 1));
+    expect(hardCapHeaders.at(-1)).toBe('2100年');
+
+    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.horizonActual}"]`)!);
+    expect(within(matrix).getAllByRole('columnheader')).toHaveLength(4);
+  });
+
+  it('実績が今年+30より長ければ、+30年でも実績の最終年まで表示する', () => {
+    ledgerState.ledger = {
+      ...fixtureLedger(),
+      journalEntries: [entry('opening', '2026-01-01', 'cash', 'equity', 10_000)],
+      recurringRules: [
+        {
+          id: 'long-rule',
+          name: '長期の定期収入',
+          amount: 100,
+          dayOfMonth: 1,
+          everyMonths: 1,
+          debitAccountId: 'cash',
+          creditAccountId: 'salary',
+          startMonth: '2026-01',
+          startDate: '2026-01-01',
+          endDate: '2060-02-01',
+          postedThroughMonth: '2026-06',
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+    };
+
+    render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
+    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.modeAll}"]`)!);
+    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.horizonPlus30}"]`)!);
+    const matrix = document.querySelector(`[data-ui="${UI.yearlyOverview.matrix}"]`) as HTMLElement;
+    expect(
+      within(matrix)
+        .getAllByRole('columnheader')
+        .map((header) => header.textContent)
+        .at(-1),
+    ).toBe('2060年');
+  });
+
+  it('終了日なしの定期ルールを延長地平の未来列へ購入行+月割りで投影する', () => {
+    const base = fixtureLedger();
+    ledgerState.ledger = {
+      ...base,
+      accounts: [
+        ...base.accounts,
+        account(
+          CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+          '継続コスト台帳',
+          'asset',
+          'continuing-cost-asset',
+        ),
+      ],
+      journalEntries: [entry('opening', '2026-01-01', 'cash', 'equity', 1_000_000)],
+      recurringRules: [
+        {
+          id: 'endless-rule',
+          name: '終了日なしの保険',
+          amount: 100,
+          dayOfMonth: 1,
+          everyMonths: 1,
+          debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+          spreadExpenseAccountId: 'food',
+          creditAccountId: 'cash',
+          startMonth: '2026-01',
+          startDate: '2026-01-01',
+          postedThroughMonth: '2026-06',
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ],
+    };
+
+    render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
+    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.modeAll}"]`)!);
+    const matrix = document.querySelector(`[data-ui="${UI.yearlyOverview.matrix}"]`) as HTMLElement;
+    // 実績のみでは終了日なしルールは地平を延ばさない（データ年=2026のみ）。
+    expect(within(matrix).getAllByRole('columnheader')).toHaveLength(2);
+
+    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.horizonPlus30}"]`)!);
+    const headers = within(matrix)
+      .getAllByRole('columnheader')
+      .map((header) => header.textContent);
+    expect(headers.at(-1)).toBe('2056年');
+    const lastCellOf = (rowName: string) => {
+      const row = within(matrix).getByRole('rowheader', { name: rowName }).closest('tr');
+      expect(row).not.toBeNull();
+      return within(row!).getAllByRole('cell').at(-1);
+    };
+    // 最終年も 12 か月ぶんの月割り（100×12）が費用・継続コスト行へ乗る。
+    expect(lastCellOf('支出')).toHaveTextContent('1,200');
+    expect(lastCellOf('継続コスト')).toHaveTextContent('1,200');
   });
 
   it('当年の未来月も対象期間外にせず数値で表示する', () => {

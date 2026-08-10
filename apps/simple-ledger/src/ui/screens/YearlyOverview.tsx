@@ -3,6 +3,11 @@
  *
  * 表示対象の最大基準日まで reportEntriesForAsOf を一度だけ呼び、展開済み仕訳を
  * periodMatrix の単一走査へ渡す。年送りはこの画面内だけで完結し、ヘッダー期間は変更しない。
+ *
+ * 全体ビューには表示地平セレクタ（実績のみ / +30年 / 2100年まで）を持つ。
+ * 実績のみ = matrixDataYears そのまま（従来挙動）。延長地平は列の最終年を先へ延ばし、
+ * 終了日なしの定期ルールも選択地平の年末（periodMatrixAsOf）まで投影する。
+ * 選択は画面ローカルの状態で保存しない（既定 = 実績のみ）。
  */
 import { useMemo, useState } from 'react';
 import { Segmented } from '@snishi/foundation/ui/Segmented';
@@ -15,6 +20,7 @@ import {
   effectiveRecurringRuleStartDate,
   recurringRuleLastExistingDate,
 } from '../../domain/accountLifetime';
+import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
 import { dataYearsOf, type ReportPeriod } from '../../domain/reportPeriod';
 import { reportEntriesForAsOf } from '../../domain/reportEntries';
 import { recurringPostingsDue } from '../../domain/recurring';
@@ -26,6 +32,15 @@ import { UI } from '../../ui-contract';
 import { Money } from '../money';
 
 type OverviewMode = 'year' | 'all';
+
+/** 全体ビューの表示地平。actual = データのある年だけ（既定・従来挙動）。 */
+type OverviewHorizon = 'actual' | 'plus30' | 'hardCap';
+
+/** +30年地平が今日の年へ足す年数。 */
+const HORIZON_EXTRA_YEARS = 30;
+
+/** 2100年地平の最終年。仮想展開の上限（CONTINUOUS_COST_HARD_CAP）と同じ年。 */
+const HORIZON_HARD_CAP_YEAR = Number.parseInt(CONTINUOUS_COST_HARD_CAP.slice(0, 4), 10);
 
 function yearOfPeriod(period: ReportPeriod, today: string): number {
   if (period.mode === 'year') return period.year;
@@ -74,6 +89,34 @@ function addSpanYears(dates: string[], startDate: string, endDate: string): void
   }
 }
 
+/**
+ * 全体ビューの年列。実績のみは matrixDataYears の年集合そのまま（歯抜けも従来どおり）＝
+ * 現行挙動を 1 バイトも変えない。延長地平は最初のデータ年から地平の年まで**連続**で埋める。
+ * 地平の年が実績の最終年より手前でも実績の列は落とさない（max で長い方を採る）。
+ * データが無ければ地平だけで列を作らない（従来どおり空表示）。
+ */
+function horizonYears(
+  dataYears: readonly number[],
+  horizon: OverviewHorizon,
+  today: string,
+): number[] {
+  const firstYear = dataYears[0];
+  const lastActualYear = dataYears.at(-1);
+  if (horizon === 'actual' || firstYear === undefined || lastActualYear === undefined) {
+    return [...dataYears];
+  }
+  const todayYear = Number.parseInt(today.slice(0, 4), 10);
+  const horizonYear =
+    horizon === 'plus30' ? todayYear + HORIZON_EXTRA_YEARS : HORIZON_HARD_CAP_YEAR;
+  const lastYear = Math.max(lastActualYear, horizonYear);
+  const years: number[] = [];
+  // schema の日付範囲内でも、破損値から無制限に列を増やさない（addSpanYears と同じ上限）。
+  for (let year = firstYear, count = 0; year <= lastYear && count < 200; year++, count++) {
+    years.push(year);
+  }
+  return years;
+}
+
 function previousDataYear(years: readonly number[], selectedYear: number): number | undefined {
   for (let index = years.length - 1; index >= 0; index--) {
     const year = years[index];
@@ -88,6 +131,8 @@ export function YearlyOverview({ period }: { period: ReportPeriod }) {
   const preferredYear = yearOfPeriod(period, today);
   const dataYears = useMemo(() => (ledger ? matrixDataYears(ledger, today) : []), [ledger, today]);
   const [mode, setMode] = useState<OverviewMode>('year');
+  // 表示地平は全体ビューだけが使う画面ローカル状態（保存しない・既定 = 実績のみ）。
+  const [horizon, setHorizon] = useState<OverviewHorizon>('actual');
   // 初期年はヘッダー年そのもの。候補外なら両側の最寄りデータ年へ移動できるが、
   // 画面を開いた瞬間に別の年へ丸めない。
   const [selectedYear, setSelectedYear] = useState(preferredYear);
@@ -95,10 +140,16 @@ export function YearlyOverview({ period }: { period: ReportPeriod }) {
   const nextYear = dataYears.find((year) => year > selectedYear);
   const currency = ledger?.settings.currency ?? 'JPY';
 
+  const overviewYears = useMemo(
+    () => horizonYears(dataYears, horizon, today),
+    [dataYears, horizon, today],
+  );
   const scope = useMemo<PeriodMatrixScope>(
     () =>
-      mode === 'year' ? { mode: 'year', year: selectedYear } : { mode: 'all', years: dataYears },
-    [dataYears, mode, selectedYear],
+      mode === 'year'
+        ? { mode: 'year', year: selectedYear }
+        : { mode: 'all', years: overviewYears },
+    [mode, overviewYears, selectedYear],
   );
   const matrix = useMemo(() => {
     if (!ledger || dataYears.length === 0) return null;
@@ -137,6 +188,34 @@ export function YearlyOverview({ period }: { period: ReportPeriod }) {
             onChange={(value) => setMode(value === 'all' ? 'all' : 'year')}
           />
         </div>
+
+        {mode === 'all' && dataYears.length > 0 ? (
+          <div className="yearly-overview__horizon">
+            <Segmented
+              value={horizon}
+              items={[
+                {
+                  key: 'actual',
+                  label: t('yearlyOverview.horizonActual'),
+                  dataUi: UI.yearlyOverview.horizonActual,
+                },
+                {
+                  key: 'plus30',
+                  label: t('yearlyOverview.horizonPlus30', { years: HORIZON_EXTRA_YEARS }),
+                  dataUi: UI.yearlyOverview.horizonPlus30,
+                },
+                {
+                  key: 'hardCap',
+                  label: t('yearlyOverview.horizonHardCap', { year: HORIZON_HARD_CAP_YEAR }),
+                  dataUi: UI.yearlyOverview.horizonHardCap,
+                },
+              ]}
+              onChange={(value) =>
+                setHorizon(value === 'plus30' || value === 'hardCap' ? value : 'actual')
+              }
+            />
+          </div>
+        ) : null}
 
         {mode === 'year' && dataYears.length > 0 ? (
           <div className="yearly-overview__year-nav">

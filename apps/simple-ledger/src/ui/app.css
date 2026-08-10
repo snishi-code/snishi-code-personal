@@ -118,7 +118,8 @@
   margin-bottom: var(--space-3);
 }
 /* foundation の Segmented は既定 38px。分析画面でも 44px のタップ領域を保証する。 */
-.yearly-overview__mode .segmented__btn {
+.yearly-overview__mode .segmented__btn,
+.yearly-overview__horizon .segmented__btn {
   min-height: var(--tap);
 }
 .yearly-overview__year-nav {
