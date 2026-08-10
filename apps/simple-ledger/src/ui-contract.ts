@@ -126,6 +126,12 @@ export const UI = {
     clearNormalExpenseFilter: 'journal.filter.clearNormalExpense',
     showFuture: 'journal.filter.showFuture',
     filterTag: 'journal.filter.tag',
+    // 表示専用の並び替え（C-4）と抽出結果の件数+合計（C-3）。
+    sortByDate: 'journal.sort.date',
+    sortByAmount: 'journal.sort.amount',
+    sortDesc: 'journal.sort.desc',
+    sortAsc: 'journal.sort.asc',
+    summary: 'journal.summary',
     entry: {
       save: 'journal.entry.save',
       cancel: 'journal.entry.cancel',

@@ -473,13 +473,18 @@ button.timeline-calendar__row-label {
   min-width: 0;
 }
 .timeline-calendar__flow-name {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.timeline-calendar__flow-date {
+.timeline-calendar__flow-sub {
+  display: block;
+  overflow: hidden;
   color: var(--muted);
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .timeline-calendar__popover-actions {
   display: flex;

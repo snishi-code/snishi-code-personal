@@ -32,6 +32,7 @@ const food: Account = {
 const flow = {
   id: 'entry-1',
   date: '2026-02-10',
+  description: '昼のラーメン',
   amount: 1200,
   sourceAccountId: cash.id,
   destinationAccountId: food.id,
@@ -128,12 +129,18 @@ describe('TimelineCalendarView', () => {
     expect(document.body).toHaveTextContent('預金');
   });
 
-  it('フローのポッチから矢印・金額を出し、実体の遷移 target を渡す', () => {
+  it('フローのポッチから摘要・矢印・金額を出し、実体の遷移 target を渡す', () => {
     const onOpenTarget = vi.fn();
     render(<Harness onOpenTarget={onOpenTarget} />);
 
     fireEvent.click(document.querySelector(`[data-ui="${UI.timeline.flowDot}"]`)!);
 
+    // 摘要が 1 行目（何の仕訳か）、科目の対と日付が 2 行目。
+    const flowName = document.querySelector('.timeline-calendar__flow-name')!;
+    expect(flowName).toHaveTextContent('昼のラーメン');
+    const flowSub = document.querySelector('.timeline-calendar__flow-sub')!;
+    expect(flowSub).toHaveTextContent('預金 → 食費');
+    expect(flowSub).toHaveTextContent('2026-02-10');
     expect(document.querySelector(`[data-ui="${UI.timeline.popover}"]`)).toHaveTextContent(
       '預金 → 食費',
     );

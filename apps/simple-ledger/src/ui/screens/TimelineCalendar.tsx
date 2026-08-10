@@ -44,6 +44,8 @@ interface TimelineBucketView {
 interface TimelineFlowView {
   id: string;
   date: string;
+  /** 仕訳の摘要（導出行は item 名 / ルール名）。何のフローかを行で判別するために出す。 */
+  description: string;
   amount: number;
   sourceAccountId: string;
   destinationAccountId: string;
@@ -1038,13 +1040,15 @@ function TimelineFlowPopover({
               onClick={() => onSelectFlow(flow)}
             >
               <span className="timeline-calendar__flow-main">
-                <span className="timeline-calendar__flow-name">
+                {/* 1 行目 = 摘要（何の仕訳か）。科目の対と日付は 2 行目へ。長い摘要は省略。 */}
+                <span className="timeline-calendar__flow-name">{flow.description}</span>
+                <span className="timeline-calendar__flow-sub">
                   {t('timeline.flow', {
                     credit: name(flow.sourceAccountId),
                     debit: name(flow.destinationAccountId),
                   })}
+                  ・{flow.date}
                 </span>
-                <span className="timeline-calendar__flow-date">{flow.date}</span>
               </span>
               <span>{formatMoney(flow.amount, currency)}</span>
             </button>

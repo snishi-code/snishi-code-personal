@@ -218,6 +218,12 @@ export const ja = {
   'journal.deleteConfirmTitle': '仕訳を削除しますか？',
   'journal.deleteConfirmBody': '「{description}」を削除します。この操作は取り消せません。',
   'journal.count': '{count}件',
+  'journal.total': '合計',
+  'journal.sort': '並び替え',
+  'journal.sortDate': '日付',
+  'journal.sortAmount': '金額',
+  'journal.sortDesc': '降順',
+  'journal.sortAsc': '昇順',
 
   'entry.editTitle': '仕訳を編集',
   'entry.date': '日付',

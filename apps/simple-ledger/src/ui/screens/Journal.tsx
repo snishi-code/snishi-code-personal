@@ -1,12 +1,15 @@
 /*
  * 仕訳一覧。保存される仕訳と計算で生まれる仕訳（継続コスト資産の費用行・定期ルールの投影）を
  * **区別せず全部**日付順で出す（reportEntriesForAsOf が単一の正本。export には混ぜない）。
+ * 並び替え（日付/金額 × 昇/降・既定 = 日付降順）は表示専用。抽出結果には件数と合計を出し、
+ * 合計の対象 = 表示している行の集合（科目タップ抽出 = 方向つき和 / それ以外 = 単純和）。
  * 展開範囲 = いま表示している範囲（to → 今日 or 保存仕訳の最も遠い日付。上限 2100-12-31）。
  * 行タップ: 通常 = 編集 / 初期残高・補正 = 専用シート / 購入の仕訳 = 編集（借方は台帳固定）/
  * 計算で生まれた行 = 「毎月のもの」の元の項目・ルールのシートへ遷移。
  */
 import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
+import { Segmented } from '@snishi/foundation/ui/Segmented';
 import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import { AdjustmentEditSheet } from '../AdjustmentSheet';
@@ -19,7 +22,12 @@ import { entryHasTag } from '../../domain/tags';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
 import { reportEntriesForAsOf } from '../../domain/reportEntries';
 import { periodRange, type ReportPeriod } from '../../domain/reportPeriod';
-import { isDebitNormal } from '../../domain/accounting';
+import {
+  entryAmount,
+  isDebitNormal,
+  summarizeEntries,
+  summarizeEntriesForAccount,
+} from '../../domain/accounting';
 import {
   isContinuousCostMonthlyAllocationEntry,
   isNormalExpenseEntry,
@@ -89,6 +97,9 @@ export function Journal({
   );
   const [showFuture, setShowFuture] = useState(false);
   const [tagFilter, setTagFilter] = useState('');
+  // 表示専用の並び替え（既定 = 日付降順・従来の並びそのもの）。データ・保存には影響しない。
+  const [sortKey, setSortKey] = useState<'date' | 'amount'>('date');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [pendingDelete, setPendingDelete] = useState<JournalEntry | null>(null);
   const initialTarget = targetEntryId
     ? (ledger?.journalEntries.find((entry) => entry.id === targetEntryId) ?? null)
@@ -168,6 +179,30 @@ export function Journal({
       return true;
     });
   }, [source, query, from, to, accountFilterId, normalExpenseOnly, tagFilter, map]);
+
+  // 表示専用の並び替え（C-4）。filtered は基準順（日付降順・同日は登録の新しい順・同時刻は
+  // id 昇順）なので、安定ソートにより同値（同日・同額）の並びは必ず基準順を保つ。
+  const sorted = useMemo(() => {
+    if (sortKey === 'date' && sortDirection === 'desc') return filtered; // 既定 = 基準順そのもの
+    const direction = sortDirection === 'asc' ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      if (sortKey === 'date') {
+        return a.date < b.date ? -direction : a.date > b.date ? direction : 0;
+      }
+      return (entryAmount(a) - entryAmount(b)) * direction;
+    });
+  }, [filtered, sortKey, sortDirection]);
+
+  // 抽出結果の件数と合計（C-3）。対象 = いま表示している行の集合そのもの（sorted は filtered の
+  // 並び替えなので集合は同じ）＝ユーザーが数えたら必ず合う。科目タップ抽出中はその科目視点の
+  // 方向つき和（増減の純額）、それ以外は単純和（仕訳ごとに金額 1 回・二重計上なし）。
+  const summary = useMemo(
+    () =>
+      filterAccount
+        ? summarizeEntriesForAccount(filterAccount, filtered, () => true)
+        : summarizeEntries(filtered, () => true),
+    [filterAccount, filtered],
+  );
 
   const hasDateOrQuery = query !== '' || from !== '' || to !== '';
 
@@ -286,6 +321,25 @@ export function Journal({
         ) : null}
       </div>
 
+      <div className="toolbar" role="group" aria-label={t('journal.sort')}>
+        <Segmented
+          value={sortKey}
+          items={[
+            { key: 'date', label: t('journal.sortDate'), dataUi: UI.journal.sortByDate },
+            { key: 'amount', label: t('journal.sortAmount'), dataUi: UI.journal.sortByAmount },
+          ]}
+          onChange={(key) => setSortKey(key === 'amount' ? 'amount' : 'date')}
+        />
+        <Segmented
+          value={sortDirection}
+          items={[
+            { key: 'desc', label: t('journal.sortDesc'), dataUi: UI.journal.sortDesc },
+            { key: 'asc', label: t('journal.sortAsc'), dataUi: UI.journal.sortAsc },
+          ]}
+          onChange={(key) => setSortDirection(key === 'asc' ? 'asc' : 'desc')}
+        />
+      </div>
+
       <div
         style={{
           display: 'flex',
@@ -295,8 +349,9 @@ export function Journal({
           margin: 'var(--space-2) 0',
         }}
       >
-        <span className="muted" style={{ fontSize: 13 }}>
-          {t('journal.count', { count: filtered.length })}
+        <span className="muted" style={{ fontSize: 13 }} data-ui={UI.journal.summary}>
+          {t('journal.count', { count: summary.count })}・{t('journal.total')}{' '}
+          <Money amount={summary.total} currency={currency} signed={filterAccount !== undefined} />
         </span>
         <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
           <input
@@ -313,7 +368,7 @@ export function Journal({
         <div className="card card--pad empty">{t('journal.empty')}</div>
       ) : (
         <ul className="card list" data-ui={UI.journal.list}>
-          {filtered.map((entry) => {
+          {sorted.map((entry) => {
             const md = entry.metadata;
             const isVirtual = md?.virtual === true;
             const isRecovery = md?.monthlyCostRecovery === true;
