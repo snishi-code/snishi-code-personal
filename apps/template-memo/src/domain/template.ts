@@ -83,7 +83,7 @@ export interface Template {
   name: string;
   /** 合成に問題リストブロックを含めるか（日報などでは false）。 */
   includeProblems: boolean;
-  /** 合成に申し送り（継続メモ）ブロックを含めるか。 */
+  /** 合成に継続メモブロックを含めるか。 */
   includeHandover: boolean;
   sections: TemplateSection[];
   updatedAt: number;

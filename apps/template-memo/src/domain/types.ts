@@ -115,7 +115,7 @@ export interface Patient {
    * ラウンド開始で常にクリアする。合成では freeText の場所だけがこの本文を拾う。
    */
   sectionTexts: Record<string, string>;
-  /** 継続メモ（申し送り）。ラウンド開始でクリアしない。 */
+  /** 継続メモ。ラウンド開始でクリアしない。 */
   standingMemo: string;
   /**
    * テンプレートのフォーム入力値（今回分）。名前はコピー元 UI に合わせて projectedValues の

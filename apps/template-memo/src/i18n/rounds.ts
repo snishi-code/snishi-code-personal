@@ -243,7 +243,7 @@ export const s = {
     // 作者語彙は「場所」(セクションはコード識別子のみ)。
     sections: '場所',
     includeProblems: '合成に問題リストを含める',
-    includeHandover: '合成に申し送りを含める',
+    includeHandover: '合成に継続メモを含める',
     sectionAdd: '場所を追加',
     sectionTitle: '場所の見出し（例 (S)・【今日やったこと】）',
     sectionNormal: '正常文（空欄を補う文。例 著変なし）',

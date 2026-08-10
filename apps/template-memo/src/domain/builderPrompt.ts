@@ -151,7 +151,7 @@ export function buildBuilderPrompt(sources: readonly string[], requestId: string
     [
       '## includeProblems / includeHandover',
       '- 番号付きの課題一覧が文章へ含まれる構成なら includeProblems を true にすること。',
-      '- 引き継ぎ・申し送りに相当する段落が含まれる構成なら includeHandover を true にすること。',
+      '- 引き継ぎ・申し送り・継続メモに相当する段落が含まれる構成なら includeHandover を true にすること。',
       '- 判断できなければ false にすること。',
     ].join('\n'),
   );

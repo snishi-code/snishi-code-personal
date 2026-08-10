@@ -192,7 +192,7 @@ describe('composePresetClean golden（作者の実運用例文）', () => {
     expect(out).not.toContain('#1');
   });
 
-  it('includeHandover=false なら申し送りブロックが落ちる', () => {
+  it('includeHandover=false なら継続メモブロックが落ちる', () => {
     const tpl = { ...goldenTemplate(), includeHandover: false };
     const out = composePresetClean(goldenPatient(), tpl);
     expect(out).not.toContain('週明けLabo');

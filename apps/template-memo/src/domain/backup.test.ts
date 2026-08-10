@@ -37,7 +37,7 @@ function makePatient(over: Partial<Patient> = {}): Patient {
     tags: ['要注意'],
     problems: ['発熱\n経過観察中'],
     sectionTexts: { sec_s: '本人の訴え', sec_o: '所見の本文' },
-    standingMemo: '申し送りメモ',
+    standingMemo: '継続メモ本文',
     projectedValues: {
       plm_1: {
         itm_1: { value: '120/80' },
