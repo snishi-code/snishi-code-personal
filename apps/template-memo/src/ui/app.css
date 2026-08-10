@@ -1162,7 +1162,7 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   cursor: pointer;
 }
 
-/* ── 今回メモ / 継続メモ (患者ごとの独立 textarea) ── */
+/* ── 継続メモ / 場所ごとの自由入力欄 (独立 textarea) ── */
 .memoInput {
   width: 100%;
   min-width: 0;
@@ -1213,6 +1213,11 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
 .projectionRows .input,
 .projectionRows .tagSelection {
   min-width: 0;
+}
+
+/* 場所ごとの自由入力欄 (freeText の場所の末尾)。次の場所と間隔を空ける。 */
+.projectionFreeText {
+  margin-bottom: var(--space-2);
 }
 
 /* 正常チェック (44px・緑枠・押下済みは緑塗り)。

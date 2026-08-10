@@ -3,20 +3,19 @@
 // テンプレート合成エンジン (domain/template.ts) へ置き換えた。
 //
 // 本文は現在のテンプレートで composePresetClean した合成文
-// (問題 + 継続メモ + フォーム値 + 今回メモ + 空欄セクションの正常文) を出す。
+// (問題 + 継続メモ + フォーム値 + 場所ごとの自由本文 + 空欄セクションの正常文) を出す。
 
 import type { Patient } from './types';
 import { composePresetClean, type Template } from './template';
 
 /**
- * 患者画面 QR の本文を合成する。template が無い (null) 場合は今回メモだけに倒す
- * (クラッシュさせない fail-soft)。
+ * 患者画面 QR の本文を合成する。template が無い (null) 場合は空文字へ倒す
+ * (クラッシュさせない fail-soft。自由本文は場所の持ち物なので、場所が無ければ本文も無い)。
  */
 export function buildTabPayload(
   patient: Patient | null | undefined,
   template: Template | null | undefined,
 ): string {
   if (!patient) return '';
-  if (template) return composePresetClean(patient, template);
-  return typeof patient.visitMemo === 'string' ? patient.visitMemo.trim() : '';
+  return template ? composePresetClean(patient, template) : '';
 }

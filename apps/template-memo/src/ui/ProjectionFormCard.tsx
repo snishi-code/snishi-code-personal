@@ -7,7 +7,9 @@
 //     text 項目は項目名の右に正常文チェックを置く。手入力は openEditor で守る。
 //   - 呼び出し (oncall) / メニュー (menu) 配置: シートの値を同じ projectedValues へ保存。
 //   - oncall/menu 配置は値が入ると展開カードへ昇格し、全消去で入口へ戻る。
-//   - 場所 (section) ごとに見出し・展開カード・呼び出しチップ・メニューをまとめる。
+//   - freeText の場所には自由入力欄 (textarea) を出し、patient.sectionTexts[場所id] へ
+//     write-through 保存する (今回分。ラウンド開始でクリアされる)。
+//   - 場所 (section) ごとに見出し・展開カード・呼び出しチップ・メニュー・自由入力欄をまとめる。
 //   - 値の読み書きは必ず domain/formValues.ts のヘルパ経由。
 //   - 患者は pid で捕捉する (並び替えで別患者へ書かないため)。MemoCards と同じ write-through。
 
@@ -30,6 +32,7 @@ import {
 import type { Template, PlacedFormat, TemplateItem, TemplateSection } from '../domain/template';
 import type { AppRuntime } from './appRuntime';
 import { useRegisterOverlay } from './registries';
+import { autosize } from './MemoCards';
 import { hapticTick } from './feedback';
 import { s } from '../i18n';
 import { UI } from '../ui-contract';
@@ -350,6 +353,19 @@ export function ProjectionFormCard({
     runtime.bump();
   }
 
+  /** 場所ごとの自由本文。空になったら key ごと落とす (空値レコードを残さない)。 */
+  function writeSectionText(sectionId: string, text: string): void {
+    const p = live();
+    if (!p) return;
+    const texts = p.sectionTexts && typeof p.sectionTexts === 'object' ? p.sectionTexts : {};
+    if (text === '') delete texts[sectionId];
+    else texts[sectionId] = text;
+    p.sectionTexts = texts;
+    store.markUpdated(liveNo());
+    store.scheduleSave();
+    runtime.bump();
+  }
+
   function savePlacement(placementId: string, values: Record<string, unknown>): void {
     const p = live();
     if (!p) return;
@@ -372,7 +388,7 @@ export function ProjectionFormCard({
         <div className="panelLabel">{s.projection.title}</div>
       </div>
 
-      {sections.map((section) => {
+      {sections.map((section, sectionIndex) => {
         const {
           shown: shownPlacements,
           oncall: oncallPlacements,
@@ -420,6 +436,23 @@ export function ProjectionFormCard({
                 <Icon name="menu" size={18} />
                 {s.detail.menuOpen(section.title)}
               </Button>
+            ) : null}
+            {/* 自由入力欄は場所の末尾 (合成順 = 配置 → 自由本文 に合わせる)。
+                key に pid を含め、対象切替で必ず再マウントする (前対象の入力を持ち越さない)。 */}
+            {section.freeText ? (
+              <textarea
+                key={`${patient.pid}:${section.id}`}
+                className="textarea memoInput projectionFreeText"
+                rows={2}
+                value={String(patient.sectionTexts?.[section.id] ?? '')}
+                aria-label={section.title || s.projection.freeTextAria(sectionIndex + 1)}
+                data-ui={UI.projection.freeText}
+                onFocus={(e) => autosize(e.currentTarget)}
+                onChange={(e) => {
+                  writeSectionText(section.id, e.target.value);
+                  autosize(e.currentTarget);
+                }}
+              />
             ) : null}
           </section>
         );

@@ -1,12 +1,12 @@
 // 詳細 (患者) ビュー:
 //   - 患者ヘッダ: メタボタン (ステータス形マーク + 部屋 + 氏名) → 患者情報ポップアップ
-//   - プロブレムリスト → 継続メモ → 入力フォーム → 今回メモ (常時開)
-//     → 転記用QR ボタン → 患者管理
+//   - プロブレムリスト → 継続メモ → 入力フォーム → 転記用QR ボタン → 患者管理
 //   - 下部固定バーは [ホーム] のみ (患者固有の操作は画面内の日本語ボタンへ)
 //   - 患者切替はホーム一覧経由のみ (画面内の切替操作は持たない。旧・横スワイプ切替は
 //     無自覚な画面遷移で入力ミスを生むため削除した)
 //
-// メモは visitMemo / standingMemo の 2 欄に集約する (write-through 保存は MemoCards 側)。
+// 今回分の自由本文は入力フォーム (ProjectionFormCard) の各場所が持つ。この画面が持つ独立メモは
+// 継続メモ (standingMemo) だけ (write-through 保存は MemoCards 側)。
 
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@snishi/foundation/ui/Button';
@@ -17,7 +17,7 @@ import { useRevision, type AppRuntime } from './appRuntime';
 import { formatPatientLabel, statusClass, STATUS_MARK } from './patientDisplay';
 import { ProblemListCard } from './ProblemListCard';
 import { ProjectionFormCard } from './ProjectionFormCard';
-import { VisitMemoCard, StandingMemoCard } from './MemoCards';
+import { StandingMemoCard } from './MemoCards';
 import { DetailQrDialog } from './DetailQrDialog';
 import { PatientEditPopup } from './PatientEditPopup';
 import { PatientLifecyclePanel } from './PatientLifecyclePanel';
@@ -104,20 +104,16 @@ export function DetailView({
       {/* プロブレムリスト (患者ごとの独立データ。転記用QR の先頭 = QR 順と一致) */}
       <ProblemListCard runtime={runtime} patient={patient} />
 
-      {/* 患者作業状態 (継続メモ/入力フォーム/今回メモ)。テンプレート未選択でも
-          status/今回メモ/継続メモは使える (スマホ主用途を止めない)。入力フォームは
-          テンプレートの場所が無ければ自ら非表示になるため、fieldset での一括ロックはしない。 */}
+      {/* 患者作業状態 (継続メモ/入力フォーム)。テンプレート未選択でも status/継続メモは使える
+          (スマホ主用途を止めない)。入力フォームはテンプレートの場所が無ければ自ら非表示になるため、
+          fieldset での一括ロックはしない。 */}
       <fieldset className="editLock">
-        {/* 継続メモ → 今回メモ: プロブレムの後・患者管理の前。上から「継続情報を見て、今回分を書く」
-              流れにする (継続メモ = 患者ごとの背景 / 今回メモ = 今回の入力・転記用QR の本文候補)。 */}
+        {/* 継続メモ → 入力フォーム: プロブレムの後・患者管理の前。上から「継続情報を見て、今回分を
+              書く」流れにする (継続メモ = 患者ごとの背景 / 入力フォーム = 今回分の入力)。 */}
         <StandingMemoCard runtime={runtime} patient={patient} />
 
-        {/* 入力フォーム (テンプレート投影の入力欄)。継続メモの後、今回メモの前に置く。
-              プロブレム/継続メモ = ずっと参照する背景、入力フォーム/今回メモ = 今回入力する情報。 */}
+        {/* 入力フォーム (テンプレート投影の入力欄 + 場所ごとの自由入力欄)。今回分はここへ書く。 */}
         <ProjectionFormCard runtime={runtime} patient={patient} freshTapRef={freshTapRef} />
-
-        {/* 今回メモは継続メモと同じく常時表示。患者切替時の key remount は維持する。 */}
-        <VisitMemoCard key={`visit:${patient.pid}`} runtime={runtime} patient={patient} />
       </fieldset>
 
       {/* 患者固有の操作は画面内の日本語ボタンへ (下部バーは共通の [ホーム] に寄せる)。 */}

@@ -93,7 +93,7 @@ export type FormValues = Record<string, Record<string, unknown>>;
 /**
  * 1 レコード = 1 件のフラット構造（place は参照属性）。アーカイブは archivedAt のソフトデリート。
  *
- * 「今回分」(ラウンド開始・クリアで消えるもの) = status(青以外) / visitMemo /
+ * 「今回分」(ラウンド開始・クリアで消えるもの) = status(青以外) / sectionTexts /
  * projectedValues。
  * 「継続」(消えないもの) = name / room / placeId / problems / standingMemo / tags。
  */
@@ -110,8 +110,11 @@ export interface Patient {
   tags: string[];
   /** プロブレムリスト。番号は保存せず、表示・合成時に配列順から自動付番する。 */
   problems: string[];
-  /** 今回メモ。ラウンド開始で常にクリアする。合成・QR の本文候補。 */
-  visitMemo: string;
+  /**
+   * 場所ごとの自由本文（今回分）。key = フレームの場所 id・値 = その場所に書いた本文。
+   * ラウンド開始で常にクリアする。合成では freeText の場所だけがこの本文を拾う。
+   */
+  sectionTexts: Record<string, string>;
   /** 継続メモ（申し送り）。ラウンド開始でクリアしない。 */
   standingMemo: string;
   /**

@@ -52,7 +52,6 @@ function template(partial: Partial<Template>): Template {
     name: 'テスト',
     includeProblems: false,
     includeHandover: false,
-    memoSectionId: null,
     sections: [],
     updatedAt: 0,
     ...partial,
@@ -68,7 +67,7 @@ function patient(partial: Partial<Patient>): Patient {
     placeId: '',
     tags: [],
     problems: [],
-    visitMemo: '',
+    sectionTexts: {},
     standingMemo: '',
     projectedValues: {},
     updatedAt: 0,
@@ -82,12 +81,11 @@ function patient(partial: Partial<Patient>): Patient {
 // ============================
 
 /** 回診メモ相当のテンプレート（golden 用。血糖も always にして 3 群とも出力する）。
- *  memoSection = (O)。(S)(A)(P) は正常文を持ち、定型清書 (composePresetClean) で埋まる。 */
+ *  自由本文は各場所が持つ。(S)(A)(P) は正常文を持ち、定型清書 (composePresetClean) で埋まる。 */
 function goldenTemplate(): Template {
   return template({
     includeProblems: true,
     includeHandover: true,
-    memoSectionId: 'sec-o',
     sections: [
       section({
         id: 'sec-s',
@@ -161,8 +159,8 @@ function goldenPatient(): Patient {
   return patient({
     problems: ['HF', 'DM', '誤嚥性肺炎\n　7/20- TAZ/PIPC 9g/2'],
     standingMemo: '週明けLabo\n家族IC希望あり',
-    // (S)(A)(P) の本文は正常文 (定型清書で充填)。memoSection (O) の今回メモは空。
-    visitMemo: '',
+    // (S)(A)(P) の本文は正常文 (定型清書で充填)。(O) の自由本文は空。
+    sectionTexts: {},
     projectedValues: {
       'plm-vital': { 'itm-bp': { value: '120/98' }, 'itm-hr': { value: '63' } },
       'plm-glu': {
@@ -207,8 +205,8 @@ describe('composePresetClean golden（作者の実運用例文）', () => {
     expect(out).toContain('　7/20- TAZ/PIPC 9g/2\n\n(S)');
   });
 
-  it('composeDocument は今回メモを memoSection (O) の自由本文として注入する', () => {
-    const p = { ...goldenPatient(), visitMemo: '右下肺に湿性ラ音' };
+  it('composeDocument は (O) に書いた自由本文をその場所へ出す', () => {
+    const p = { ...goldenPatient(), sectionTexts: { 'sec-o': '右下肺に湿性ラ音' } };
     const out = composeDocument(p, goldenTemplate());
     // (O) は群の後に自由本文。 (S)(A)(P) は normal を充填しない (見出しのみ)。
     expect(out).toContain('下腿浮腫：なし\n\n右下肺に湿性ラ音\n\n(A)');
@@ -410,7 +408,6 @@ describe('composeProblems', () => {
 
 describe('composePresetClean', () => {
   const tpl = template({
-    memoSectionId: 's1',
     sections: [
       section({ id: 's1', title: '(S)', normal: '変わりない' }),
       section({ id: 's2', title: '(A)', normal: '著変なし' }),
@@ -418,8 +415,8 @@ describe('composePresetClean', () => {
     ],
   });
 
-  it('空の freeText セクションだけ normal で埋まり、今回メモ入力済みは上書きしない', () => {
-    const sub = patient({ visitMemo: '食欲低下あり' });
+  it('空の freeText セクションだけ normal で埋まり、入力済みの自由本文は上書きしない', () => {
+    const sub = patient({ sectionTexts: { s1: '食欲低下あり' } });
     expect(composePresetClean(sub, tpl)).toBe('(S)\n食欲低下あり\n\n(A)\n著変なし\n\n(P)');
   });
 
@@ -435,10 +432,22 @@ describe('composePresetClean', () => {
     expect(composePresetClean(patient({}), tpl2)).toBe('(S)');
   });
 
-  it('patient は不変（visitMemo / projectedValues を書き換えない）', () => {
-    const sub = patient({ visitMemo: '', projectedValues: {} });
+  it('freeText=false の場所は sectionTexts に残存値があっても合成に混ぜない', () => {
+    const tpl2 = template({
+      sections: [
+        section({ id: 's1', title: '(S)', freeText: false, normal: 'x' }),
+        section({ id: 's2', title: '(A)' }),
+      ],
+    });
+    const sub = patient({ sectionTexts: { s1: '残存した自由本文', s2: '生きている本文' } });
+    expect(composeDocument(sub, tpl2)).toBe('(S)\n\n(A)\n生きている本文');
+    expect(composePresetClean(sub, tpl2)).toBe('(S)\n\n(A)\n生きている本文');
+  });
+
+  it('patient は不変（sectionTexts / projectedValues を書き換えない）', () => {
+    const sub = patient({ sectionTexts: {}, projectedValues: {} });
     composePresetClean(sub, tpl);
-    expect(sub.visitMemo).toBe('');
+    expect(sub.sectionTexts).toEqual({});
     expect(sub.projectedValues).toEqual({});
   });
 });

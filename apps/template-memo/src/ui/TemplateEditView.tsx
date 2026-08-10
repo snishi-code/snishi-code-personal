@@ -58,7 +58,6 @@ export function TemplateEditView({
     if (!nextFrame) return;
     mutate((next) => {
       next.frameId = nextFrame.id;
-      next.memoSectionId = nextFrame.sections[0]?.id ?? null;
       next.placements = [];
     });
   }
@@ -149,26 +148,6 @@ export function TemplateEditView({
           checked={draft.includeHandover}
           onChange={(checked) => mutate((next) => (next.includeHandover = checked))}
         />
-        <Field label={s.tpl.memoSection}>
-          <select
-            className="select"
-            value={draft.memoSectionId ?? ''}
-            data-ui={UI.templateEdit.memoSection}
-            onChange={(event) =>
-              mutate(
-                (next) =>
-                  (next.memoSectionId = event.target.value === '' ? null : event.target.value),
-              )
-            }
-          >
-            <option value="">{s.tpl.memoSectionNone}</option>
-            {frame?.sections.map((section, index) => (
-              <option key={section.id} value={section.id}>
-                {section.title || `${s.tpl.sections} ${index + 1}`}
-              </option>
-            ))}
-          </select>
-        </Field>
       </div>
 
       {frame?.sections.map((section, sectionIndex) => {

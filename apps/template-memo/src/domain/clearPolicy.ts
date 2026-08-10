@@ -12,7 +12,7 @@ import { STATUS, type Patient } from './types';
  *
  * クリアする:
  *   - status: 黄 / 緑 / 灰 → none
- *   - 今回メモ (visitMemo)
+ *   - 場所ごとの自由本文 (sectionTexts)
  *   - 今回分のフォーム入力値 (projectedValues)
  *
  * 残す:
@@ -26,7 +26,7 @@ export function applyRoundStartClear(p: Patient, now: number): void {
   if (p.status === STATUS.YELLOW || p.status === STATUS.GREEN || p.status === STATUS.GRAY) {
     p.status = STATUS.NONE;
   }
-  p.visitMemo = '';
+  p.sectionTexts = {};
   // 今回分のフォーム入力値。継続メモのようには残さない (今回ラウンド分)。
   p.projectedValues = {};
   p.updatedAt = nextGroupRevision(now, p.updatedAt);

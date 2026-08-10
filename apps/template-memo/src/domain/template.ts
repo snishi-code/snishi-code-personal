@@ -85,11 +85,6 @@ export interface Template {
   includeProblems: boolean;
   /** 合成に申し送り（継続メモ）ブロックを含めるか。 */
   includeHandover: boolean;
-  /**
-   * 「今回メモ」(patient.visitMemo) を自由本文として注入するセクションの id。
-   * null = どのセクションにも注入しない。回診メモプリセットは (O) を memoSection にする。
-   */
-  memoSectionId: string | null;
   sections: TemplateSection[];
   updatedAt: number;
 }
@@ -150,7 +145,7 @@ export function composePlacedFormat(
 
 /**
  * 場所 1 つの合成。全配置 → 自由本文の順。
- * 自由本文は呼び出し側が渡す（memoSection には patient.visitMemo が入る）。
+ * 自由本文は呼び出し側が渡す（その場所の patient.sectionTexts[section.id]）。
  * 空でも見出しは常に残す（不要な場所はテンプレートから場所自体を削除する）。
  */
 export function composeSection(
@@ -191,9 +186,9 @@ export function composeProblems(problems: readonly string[]): string {
   return rows.join('\n');
 }
 
-/** セクションの自由本文（memoSection なら patient.visitMemo・それ以外は空）。 */
-function memoFreeTextOf(patient: Patient, template: Template, section: TemplateSection): string {
-  return section.id === template.memoSectionId ? String(patient.visitMemo ?? '') : '';
+/** その場所へ書かれた自由本文（sectionTexts は場所 id をキーに持つ）。 */
+function sectionFreeTextOf(patient: Patient, section: TemplateSection): string {
+  return String(patient.sectionTexts?.[section.id] ?? '');
 }
 
 /** ブロック合成の共通部（自由本文の決め方だけ差し替える）。 */
@@ -220,20 +215,18 @@ function composeDocumentWith(
 
 /** 文書全体の合成。ブロック間は空行 1 つ。 */
 export function composeDocument(patient: Patient, template: Template): string {
-  return composeDocumentWith(patient, template, (section) =>
-    memoFreeTextOf(patient, template, section),
-  );
+  return composeDocumentWith(patient, template, (section) => sectionFreeTextOf(patient, section));
 }
 
 /**
  * 正常文補完つき完成文: 空の自由本文セクションを normal で埋めて合成する。
  * 保存はせず、転記用 QR を開くたびに現在値から生成する。
- * memoSection には今回メモ (visitMemo) が入り、空なら normal へ倒れる。
+ * 各場所の自由本文が空なら、その場所の normal へ倒れる。
  */
 export function composePresetClean(patient: Patient, template: Template): string {
   return composeDocumentWith(patient, template, (section) => {
-    const memo = memoFreeTextOf(patient, template, section);
-    if (memo.trim() !== '') return memo;
+    const free = sectionFreeTextOf(patient, section);
+    if (free.trim() !== '') return free;
     return String(section.normal ?? '');
   });
 }

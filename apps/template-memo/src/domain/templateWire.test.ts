@@ -72,7 +72,6 @@ function fixture(): {
     id: 'tpl_fixture',
     name: '受け渡しテスト',
     frameId: frame.id,
-    memoSectionId: 'sec_o',
     includeProblems: true,
     includeHandover: false,
     placements: [
@@ -145,6 +144,39 @@ describe('share wire roundtrip', () => {
     await expect(decodeShareWirePages([...pages.slice().reverse(), pages[0]!])).resolves.toEqual(
       source.payload,
     );
+  });
+
+  // 完了走査の唯一の例外: 「memoSectionId 入り v3 fixture テスト」。
+  // 旧端末が送った TPL v3 には廃止済みの memoSectionId が載っている。wire 版は据え置きなので、
+  // 取り込めること（拒否しない）と、結果に旧キーが残らないこと（未知キーとして落ちる）を固定する。
+  it('旧 v3 パッケージの memoSectionId は取込を壊さず、結果にも残らない', async () => {
+    const source = fixture();
+    const legacy = {
+      kind: TEMPLATE_WIRE_KIND,
+      package: {
+        v: 3,
+        template: { ...source.template, memoSectionId: 'sec_o' },
+        frame: source.frame,
+        formats: source.formats,
+      },
+    } as unknown as ShareWirePayload;
+    // 送信側の正規化を通さず、旧端末が作った plain JSON をそのままページ化する。
+    const pages = await packedPagesForPlain(
+      TEMPLATE_WIRE_KIND,
+      JSON.stringify({
+        v: 3,
+        template: { ...source.template, memoSectionId: 'sec_o' },
+        frame: source.frame,
+        formats: source.formats,
+      }),
+      'legacy-memo',
+    );
+    const decoded = await decodeShareWirePages(pages);
+    expect(decoded).toEqual(source.payload);
+    expect(JSON.stringify(decoded)).not.toContain('memoSectionId');
+    // 送信側でも旧キーは新パッケージに載らない（entities から消えているため）。
+    const reEncoded = await encodeShareWirePages(legacy, { batchId: 'legacy-out', maxBytes: 100 });
+    await expect(decodeShareWirePages(reEncoded)).resolves.toEqual(source.payload);
   });
 
   it.each([

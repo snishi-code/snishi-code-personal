@@ -275,7 +275,6 @@ function TemplateSection({
       frameId: frame.id,
       includeProblems: false,
       includeHandover: false,
-      memoSectionId: frame.sections[0]?.id ?? null,
       placements: [],
       updatedAt: Date.now(),
     });

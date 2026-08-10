@@ -127,9 +127,11 @@ test('初回起動から対象を追加し、ステータスを未→途中→�
   await expect(statusBtn).toHaveText('✓');
 });
 
-// ── 2. 詳細 → 今回メモ + 固定フォーム → その場合成 → QRダイアログ ──
+// ── 2. 詳細 → 場所ごとの自由入力欄 + 固定フォーム → その場合成 → QRダイアログ ──
 
-test('今回メモと固定フォームから完成文を合成し、QRダイアログを表示できる', async ({ page }) => {
+test('場所ごとの自由入力と固定フォームから完成文を合成し、QRダイアログを表示できる', async ({
+  page,
+}) => {
   await addPatient(page, '202', '検証対象B');
   await openDetail(page, '202 検証対象B');
 
@@ -139,8 +141,13 @@ test('今回メモと固定フォームから完成文を合成し、QRダイア
     await expect(projectionCard).toContainText(heading);
   }
 
-  // 今回メモ (自由本文) 入力。
-  await page.locator(ui(UI.memo.visit.input)).fill('食欲低下あり');
+  // SOAP プリセットは 4 場所とも freeText: 自由入力欄が場所の数だけ出る。
+  const freeTexts = projectionCard.locator(ui(UI.projection.freeText));
+  await expect(freeTexts).toHaveCount(4);
+
+  // (S) と (O) へ別々の自由本文を入れる (取り違えると完成文の並びで検知できる)。
+  await freeTexts.nth(0).fill('食欲低下あり');
+  await freeTexts.nth(1).fill('右下肺に湿性ラ音');
 
   // 固定フォーム (ラウンド入力カード): バイタルの BP と、肺音の正常チェックを入力。
   // (BP/肺音/正常文はプリセットテンプレート『回診メモ』のデータであり UI 文言ではない)
@@ -151,18 +158,45 @@ test('今回メモと固定フォームから完成文を合成し、QRダイア
   await hold(page, lungRow.locator(ui(UI.projection.normalBtn)));
   await expect(page.getByLabel('肺音', { exact: true })).toHaveValue('明らかなラ音なし');
 
-  // 転記用QRを開いた時点で空セクションが正常文で充填され、memoSection (O) に今回メモが入る。
+  // 転記用QRを開いた時点で、空の場所は正常文で充填され、自由本文はそれぞれの場所へ載る。
   await page.locator(ui(UI.detail.emrQr)).click();
   const qrDialog = page.locator(ui(UI.detail.qrDialog));
   await expect(qrDialog).toBeVisible();
   await qrDialog.getByText('本文を確認', { exact: true }).click();
-  await expect(qrDialog).toContainText('(S)');
-  await expect(qrDialog).toContainText('変わりない');
+  // (S) の下に S の本文 → (O) の下にフォーム値と O の本文 → 空の (A)(P) は正常文へ倒れる。
+  await expect(qrDialog).toContainText('(S)\n食欲低下あり');
   await expect(qrDialog).toContainText('BP 120/80mmHg');
   await expect(qrDialog).toContainText('肺音：明らかなラ音なし');
-  await expect(qrDialog).toContainText('食欲低下あり');
-  await expect(qrDialog).toContainText('現行加療継続');
+  await expect(qrDialog).toContainText(
+    '(O)\nBP 120/80mmHg\n\n肺音：明らかなラ音なし\n\n右下肺に湿性ラ音\n\n(A)\n著変なし',
+  );
+  await expect(qrDialog).toContainText('(P)\n現行加療継続');
+  // (S) を空にすると normal (変わりない) へ倒れる。
+  await qrDialog.getByRole('button', { name: '閉じる' }).click();
+  await freeTexts.nth(0).fill('');
+  await page.locator(ui(UI.detail.emrQr)).click();
+  await qrDialog.getByText('本文を確認', { exact: true }).click();
+  await expect(qrDialog).toContainText('(S)\n変わりない');
   await expectRenderedQr(qrDialog.locator(ui(UI.qr.canvas)));
+});
+
+test('freeText を外した場所には自由入力欄が出ない', async ({ page }) => {
+  await addPatient(page, '209', '自由本文なし確認');
+  await openSettings(page);
+  const frameSection = page.locator(ui(UI.settings.frameSection));
+  await frameSection
+    .locator('.formatListRow', { hasText: 'SOAP' })
+    .first()
+    .getByRole('button', { name: '編集', exact: true })
+    .click();
+  // 先頭の場所 (S) の「自由本文欄を持つ」を外す。
+  await page.getByRole('checkbox', { name: '自由本文欄を持つ' }).first().uncheck();
+  await page.locator(ui(UI.frameEdit.save)).click();
+  await page.locator(ui(UI.settings.homeBottom)).click();
+  await openDetail(page, '209 自由本文なし確認');
+
+  const projectionCard = page.locator(ui(UI.projection.card));
+  await expect(projectionCard.locator(ui(UI.projection.freeText))).toHaveCount(3);
 });
 
 test('呼び出しフォーマットを保存すると入力カードへ昇格する', async ({ page }) => {
@@ -384,23 +418,28 @@ test('ラウンド開始で今回分をクリアし（問題・継続メモは�
 }) => {
   await addPatient(page, '303', '検証対象C');
 
-  // クリア対象/維持対象の両方を作る: ステータス黄 + 問題 + 継続メモ + 今回メモ。
+  // クリア対象/維持対象の両方を作る: ステータス黄 + 問題 + 継続メモ + 自由本文 + フォーム値。
   await pickStatus(page, STATUS_INDEX.yellow);
   await openDetail(page, '303 検証対象C');
   await page.locator(ui(UI.problem.input)).first().fill('誤嚥性肺炎');
   await page.locator(ui(UI.memo.standing.input)).fill('継続メモ本文');
-  await page.locator(ui(UI.memo.visit.input)).fill('今回メモ本文');
+  const freeTexts = page.locator(ui(UI.projection.card)).locator(ui(UI.projection.freeText));
+  await freeTexts.nth(0).fill('Sの自由本文');
+  await freeTexts.nth(1).fill('Oの自由本文');
+  await page.getByLabel('BP', { exact: true }).fill('120/80');
   await page.locator(ui(UI.detail.home)).click();
 
   // ラウンド開始 (= 記録クリア)。確認ダイアログを経由する。
   await page.locator(ui(UI.home.start)).click();
   await confirmDialog(page);
 
-  // クリア結果: ステータス 未 / 今回メモ空。問題リスト・継続メモは残る。
+  // クリア結果: ステータス 未 / 自由本文・フォーム値は空。問題リスト・継続メモは残る。
   const statusBtn = page.locator(ui(UI.home.statusZone));
   await expect(statusBtn).toHaveClass(/status-none/);
   await openDetail(page, '303 検証対象C');
-  await expect(page.locator(ui(UI.memo.visit.input))).toHaveValue('');
+  await expect(freeTexts.nth(0)).toHaveValue('');
+  await expect(freeTexts.nth(1)).toHaveValue('');
+  await expect(page.getByLabel('BP', { exact: true })).toHaveValue('');
   await expect(page.locator(ui(UI.problem.input)).first()).toHaveValue('誤嚥性肺炎');
   await expect(page.locator(ui(UI.memo.standing.input))).toHaveValue('継続メモ本文');
   await page.locator(ui(UI.detail.home)).click();
@@ -412,11 +451,12 @@ test('ラウンド開始で今回分をクリアし（問題・継続メモは�
   await restoreRow.locator(ui(UI.settings.restoreAction)).click();
   await confirmDialog(page);
 
-  // 復元結果: ステータス黄と今回メモが戻る。
+  // 復元結果: ステータス黄と場所ごとの自由本文が戻る (取り違えず元の場所へ)。
   await page.locator(ui(UI.settings.homeBottom)).click();
   await expect(statusBtn).toHaveClass(/status-yellow/);
   await openDetail(page, '303 検証対象C');
-  await expect(page.locator(ui(UI.memo.visit.input))).toHaveValue('今回メモ本文');
+  await expect(freeTexts.nth(0)).toHaveValue('Sの自由本文');
+  await expect(freeTexts.nth(1)).toHaveValue('Oの自由本文');
   await expect(page.locator(ui(UI.memo.standing.input))).toHaveValue('継続メモ本文');
 });
 

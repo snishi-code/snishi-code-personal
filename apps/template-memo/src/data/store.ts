@@ -568,9 +568,6 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
           templateDefs.map((candidate) => candidate.name),
         ),
         frameId: frame.id,
-        memoSectionId: sourceTemplate.memoSectionId
-          ? (sectionIdMap.get(sourceTemplate.memoSectionId) ?? null)
-          : null,
         placements: sourceTemplate.placements.map((placement) => ({
           ...placement,
           id: newId('plm'),

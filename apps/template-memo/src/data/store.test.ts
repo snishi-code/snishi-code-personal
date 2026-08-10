@@ -33,7 +33,7 @@ import {
 } from './store';
 import { countActivePatients, createHrSnapshots, REASON } from './snapshots';
 import { applyRoundStartClear } from '../domain/clearPolicy';
-import { normalizePatientArray } from '../domain/normalize';
+import { isPatientEmpty, makeDefaultPatient, normalizePatientArray } from '../domain/normalize';
 import type { TemplatePresetBundle } from '../domain/presets';
 import type { Patient } from '../domain/types';
 
@@ -346,7 +346,7 @@ describe('患者 CRUD', () => {
     p.room = '101';
     p.tags = ['要確認'];
     p.problems = ['問題1'];
-    p.visitMemo = '今回メモ';
+    p.sectionTexts = { sec_s: '場所Sの自由本文' };
     p.standingMemo = '継続メモ';
     await store.persistActiveOrThrow();
 
@@ -357,7 +357,7 @@ describe('患者 CRUD', () => {
       room: '101',
       tags: ['要確認'],
       problems: ['問題1'],
-      visitMemo: '今回メモ',
+      sectionTexts: { sec_s: '場所Sの自由本文' },
       standingMemo: '継続メモ',
     });
   });
@@ -426,7 +426,7 @@ describe('ラウンド開始クリア（HomeView.runClear と同じ固定ポリ�
     expect(livePatient(store, blue).status).toBe('blue');
   });
 
-  it('今回メモ/フォーム値をクリアし、問題/継続メモ/タグは維持する（永続化まで）', async () => {
+  it('自由本文/フォーム値をクリアし、問題/継続メモ/タグは維持する（永続化まで）', async () => {
     const { db, store } = await setup();
     const pid = await store.createPatientInActivePlace('対象A');
     const p = livePatient(store, pid);
@@ -434,7 +434,7 @@ describe('ラウンド開始クリア（HomeView.runClear と同じ固定ポリ�
     p.room = '101';
     p.tags = ['要確認'];
     p.problems = ['HF', 'DM'];
-    p.visitMemo = '今回の観察メモ';
+    p.sectionTexts = { sec_o: '今回の観察メモ' };
     p.standingMemo = '週明けLabo';
     p.projectedValues = { grp_v: { itm_bp: { value: '120/80' } } };
     await store.persistActiveOrThrow();
@@ -446,9 +446,9 @@ describe('ラウンド開始クリア（HomeView.runClear と同じ固定ポリ�
     // 再起動相当で読み直しても、クリア結果が正しく永続化されている。
     const store2 = await reopen(db);
     const after = livePatient(store2, pid);
-    // クリアされる: status(黄緑灰) / 今回メモ / フォーム値。
+    // クリアされる: status(黄緑灰) / 場所ごとの自由本文 / フォーム値。
     expect(after.status).toBe('none');
-    expect(after.visitMemo).toBe('');
+    expect(after.sectionTexts).toEqual({});
     expect(after.projectedValues).toEqual({});
     // 維持される: 名前 / 位置 / タグ / 問題 / 継続メモ。
     expect(after.name).toBe('対象A');
@@ -520,13 +520,13 @@ describe('アーカイブ（ソフトデリート）と復帰', () => {
 // ============================
 
 describe('Undo（snapshot: クリア前へ巻き戻す）', () => {
-  it('クリア前 capture → 復元で今回メモ/ステータスが戻り、restore_undo も積まれる', async () => {
+  it('クリア前 capture → 復元で自由本文/ステータスが戻り、restore_undo も積まれる', async () => {
     const { db, store } = await setup();
     const snapshots = createHrSnapshots(store.storage.pointers);
     const pid = await store.createPatientInActivePlace('巻き戻し対象');
     const p = livePatient(store, pid);
     p.status = 'green';
-    p.visitMemo = 'クリアで消えるメモ';
+    p.sectionTexts = { sec_o: 'クリアで消えるメモ' };
     p.projectedValues = { grp_v: { itm_hr: { value: '63' } } };
     await store.persistActiveOrThrow();
 
@@ -541,7 +541,7 @@ describe('Undo（snapshot: クリア前へ巻き戻す）', () => {
     );
     for (const q of state.patients) applyRoundStartClear(q, Date.now());
     await store.persistActiveOrThrow();
-    expect(livePatient(store, pid).visitMemo).toBe('');
+    expect(livePatient(store, pid).sectionTexts).toEqual({});
 
     // SettingsView.RestoreSection と同じ流れ: 復元ポイント一覧 → setAppState + fail-closed 保存。
     const points = await snapshots.list(scopeId);
@@ -566,11 +566,11 @@ describe('Undo（snapshot: クリア前へ巻き戻す）', () => {
     // live もマスタ（再起動後）もクリア前の状態へ戻る。
     expect(livePatient(store, pid)).toMatchObject({
       status: 'green',
-      visitMemo: 'クリアで消えるメモ',
+      sectionTexts: { sec_o: 'クリアで消えるメモ' },
       projectedValues: { grp_v: { itm_hr: { value: '63' } } },
     });
     const store2 = await reopen(db);
-    expect(livePatient(store2, pid).visitMemo).toBe('クリアで消えるメモ');
+    expect(livePatient(store2, pid).sectionTexts).toEqual({ sec_o: 'クリアで消えるメモ' });
 
     // 復元の取り消し用に restore_undo が積まれている（クリア直後の状態）。
     const after = await snapshots.list(scopeId);
@@ -641,5 +641,46 @@ describe('place（グループ）CRUD', () => {
     await store.switchPlace(dest.placeId);
     const store2 = await reopen(db);
     expect(store2.getActivePlace()?.placeId).toBe(dest.placeId);
+  });
+});
+
+// ============================
+// normalizePatientArray（store 読み出しの whitelist）
+// ============================
+
+describe('normalizePatientArray の sectionTexts 正規化', () => {
+  it('string 値のエントリだけを残す（非文字列・配列・入れ子は捨てる）', () => {
+    const [p] = normalizePatientArray([
+      {
+        pid: 'pat_x',
+        name: '対象X',
+        sectionTexts: {
+          ok: '生きる',
+          empty: '',
+          num: 7,
+          bool: true,
+          nul: null,
+          arr: ['x'],
+          nested: { a: 'b' },
+        },
+      },
+    ]);
+    expect(p!.sectionTexts).toEqual({ ok: '生きる', empty: '' });
+  });
+
+  it('object でない sectionTexts は空にする（配列も含む）', () => {
+    const rows = normalizePatientArray([
+      { pid: 'pat_a', name: 'A', sectionTexts: 'broken' },
+      { pid: 'pat_b', name: 'B', sectionTexts: ['x'] },
+      { pid: 'pat_c', name: 'C' },
+    ]);
+    expect(rows.map((row) => row.sectionTexts)).toEqual([{}, {}, {}]);
+  });
+
+  it('isPatientEmpty は自由本文が 1 つでも埋まっていれば空扱いしない', () => {
+    const base = makeDefaultPatient();
+    expect(isPatientEmpty(base)).toBe(true);
+    expect(isPatientEmpty({ ...base, sectionTexts: { s1: '   ' } })).toBe(true);
+    expect(isPatientEmpty({ ...base, sectionTexts: { s1: '書いた' } })).toBe(false);
   });
 });

@@ -50,8 +50,7 @@ export function HomeView({
   const archive = store.isArchiveViewActive();
 
   // ラウンド開始 (= 記録クリア)。クリア対象はユーザー選択式にせず、コード固定ポリシー (design.md「クリア方針」)。
-  //   クリアする: status 黄/緑/灰 → none / 今回メモ (visitMemo) /
-  //               inputHash (visitMemo から都度算出するので visitMemo クリアで自動失効) /
+  //   クリアする: status 黄/緑/灰 → none / 場所ごとの自由本文 (sectionTexts) /
   //               今回セッション用入力値 (projectedValues)。
   //   残す: status 青 (持ち越し/要注意) / 継続メモ (standingMemo) / タグ / プロブレムリスト。
   // fail-closed: 保存できなければ live を戻して中断。
@@ -84,7 +83,7 @@ export function HomeView({
   return (
     <section aria-label={s.header.home} className="homeView">
       <div className="viewToolbar">
-        {/* ラウンド開始。テンプレート未選択でも開始できる (status/今回メモ等のクリアはテンプレートに依存しない)。 */}
+        {/* ラウンド開始。テンプレート未選択でも開始できる (status 等のクリアはテンプレートに依存しない)。 */}
         <Button
           onClick={() => setClearConfirm(true)}
           title={s.home.start.tooltip}

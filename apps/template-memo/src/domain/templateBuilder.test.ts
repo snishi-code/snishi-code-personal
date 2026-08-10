@@ -98,7 +98,6 @@ describe('parseBuilderResponse', () => {
     ];
     raw.template = {
       name: '点検',
-      memoSectionKey: 'missing',
       includeProblems: false,
       includeHandover: false,
       placements: [{ sectionKey: 'sec_summary', formatKey: 'missing', display: 'always' }],
@@ -108,11 +107,9 @@ describe('parseBuilderResponse', () => {
     if (!parsed.ok) return;
     expect(parsed.candidate.formats[0]?.items[0]).toEqual({ label: '状態', kind: 'text' });
     expect(parsed.candidate.template.placements).toEqual([]);
-    expect(parsed.candidate.template.memoSectionKey).toBeUndefined();
     expect(parsed.warnings.map((warning) => warning.code)).toEqual([
       'select-downgraded',
       'unresolved-placement',
-      'unresolved-memo',
     ]);
   });
 
@@ -200,21 +197,18 @@ describe('buildBundleFromCandidate', () => {
     expect(first.warnings).toEqual([]);
   });
 
-  it('場所normalを作らずtitleWrapを空にし、memo場所をfreeText=trueへ固定する', () => {
+  it('場所normalを作らずtitleWrapを空にし、freeText は返答のとおりに写す', () => {
     const raw = expectedResponse();
     const frame = raw.frame as { sections: Record<string, unknown>[] };
     frame.sections[1]!.normal = 'AIが作った場所の正常文';
-    const template = raw.template as Record<string, unknown>;
-    template.memoSectionKey = 'sec_readings';
     const parsed = parseBuilderResponse(JSON.stringify(raw), 'req_test');
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     const { bundle, warnings } = buildBundleFromCandidate(parsed.candidate);
     expect(bundle.frame.sections.every((section) => section.normal === undefined)).toBe(true);
-    expect(
-      bundle.frame.sections.find((section) => section.id === bundle.template.memoSectionId)
-        ?.freeText,
-    ).toBe(true);
+    // freeText は AI の返答をそのまま写す（お手本 = 概要 true / 測定値 false）。
+    // freeText:true の場所にだけ自由入力欄が出るため、勝手に true へ上書きしない。
+    expect(bundle.frame.sections.map((section) => section.freeText)).toEqual([true, false]);
     expect(bundle.formats.every((format) => format.titleWrap === '')).toBe(true);
     expect(bundle.template.placements.every((placement) => placement.display !== 'menu')).toBe(
       true,

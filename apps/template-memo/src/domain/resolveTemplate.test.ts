@@ -28,7 +28,6 @@ function definition(overrides: Partial<TemplateDef> = {}): TemplateDef {
     id: 'template-round',
     name: '回診',
     frameId: frame.id,
-    memoSectionId: 'section-o',
     includeProblems: true,
     includeHandover: true,
     placements: [
@@ -72,10 +71,9 @@ describe('resolveTemplate', () => {
     expect(new Set(ids).size).toBe(2);
   });
 
-  it('迷子配置は落とし、迷子 memoSection は null にする', () => {
+  it('迷子配置は落とす（迷子の場所・迷子のフォーマットとも）', () => {
     const resolved = resolveTemplate(
       definition({
-        memoSectionId: 'missing-section',
         placements: [
           {
             id: 'missing-section-placement',
@@ -94,7 +92,6 @@ describe('resolveTemplate', () => {
       [frame],
       [format],
     );
-    expect(resolved?.memoSectionId).toBeNull();
     expect(resolved?.sections.every((section) => section.formats.length === 0)).toBe(true);
   });
 
@@ -122,7 +119,7 @@ describe('resolveTemplate', () => {
       status: 'none',
       tags: [],
       problems: ['HF', 'DM', '誤嚥性肺炎\n　7/20- TAZ/PIPC 9g/2'],
-      visitMemo: '',
+      sectionTexts: {},
       standingMemo: '週明けLabo\n家族IC希望あり',
       projectedValues: {
         [vitals.id]: {

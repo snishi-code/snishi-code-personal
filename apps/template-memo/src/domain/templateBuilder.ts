@@ -58,7 +58,6 @@ export interface BuilderCandidate {
   formats: BuilderFormatCandidate[];
   template: {
     name: string;
-    memoSectionKey?: string;
     includeProblems: boolean;
     includeHandover: boolean;
     placements: BuilderPlacementCandidate[];
@@ -75,7 +74,6 @@ export interface BuilderWarning {
     | 'select-downgraded'
     | 'display-coerced'
     | 'unresolved-placement'
-    | 'unresolved-memo'
     | 'limit-exceeded'
     | 'normalize-dropped';
   message: string;
@@ -135,7 +133,6 @@ export const BUILDER_EXPECTED_JSON = `{
   ],
   "template": {
     "name": "設備点検メモ",
-    "memoSectionKey": "sec_summary",
     "includeProblems": false,
     "includeHandover": false,
     "placements": [
@@ -463,19 +460,6 @@ export function parseBuilderResponse(text: string, requestId: string): BuilderPa
     });
   }
 
-  let memoSectionKey = stringOf(templateRow.memoSectionKey);
-  if (memoSectionKey && !sectionKeys.has(memoSectionKey)) {
-    warnings.push({
-      code: 'unresolved-memo',
-      message: `今回メモの場所「${memoSectionKey}」が見つからないため設定しませんでした`,
-    });
-    memoSectionKey = '';
-  }
-  if (memoSectionKey) {
-    const memoSection = sections.find((section) => section.key === memoSectionKey);
-    if (memoSection) memoSection.freeText = true;
-  }
-
   const aiWarnings = (Array.isArray(root.warnings) ? root.warnings : [])
     .map(stringOf)
     .filter(Boolean)
@@ -491,7 +475,6 @@ export function parseBuilderResponse(text: string, requestId: string): BuilderPa
     includeHandover: templateRow.includeHandover === true,
     placements,
   };
-  if (memoSectionKey) template.memoSectionKey = memoSectionKey;
 
   return {
     ok: true,
@@ -536,7 +519,7 @@ export function buildBundleFromCandidate(candidate: BuilderCandidate): {
       return {
         id,
         title: section.title,
-        freeText: section.freeText || candidate.template.memoSectionKey === section.key,
+        freeText: section.freeText,
       };
     }),
   };
@@ -559,9 +542,6 @@ export function buildBundleFromCandidate(candidate: BuilderCandidate): {
     id: newId('tpl'),
     name: candidate.template.name,
     frameId: frame.id,
-    memoSectionId: candidate.template.memoSectionKey
-      ? (sectionIdByKey.get(candidate.template.memoSectionKey) ?? null)
-      : null,
     includeProblems: candidate.template.includeProblems,
     includeHandover: candidate.template.includeHandover,
     placements: candidate.template.placements.flatMap((placement) => {

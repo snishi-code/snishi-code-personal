@@ -84,7 +84,6 @@ export function buildRoundPreset(nowMs: number): TemplatePresetBundle {
     id: newId('tpl'),
     name: '回診メモ',
     frameId: frame.id,
-    memoSectionId: sectionO,
     includeProblems: true,
     includeHandover: true,
     placements: formats.map((format, index) => ({
@@ -118,7 +117,6 @@ export function buildDailyReportPreset(nowMs: number): TemplatePresetBundle {
     id: newId('tpl'),
     name: '日報',
     frameId: frame.id,
-    memoSectionId: today,
     includeProblems: false,
     includeHandover: false,
     placements: [],

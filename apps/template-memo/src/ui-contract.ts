@@ -41,9 +41,8 @@ export const UI = {
     moveUp: 'problem.moveUp',
     moveDown: 'problem.moveDown',
   },
-  // 今回メモ / 継続メモ (患者ごとの独立 textarea)
+  // 継続メモ (患者ごとの独立 textarea)
   memo: {
-    visit: { card: 'memo.visit.card', input: 'memo.visit.input' },
     standing: { card: 'memo.standing.card', input: 'memo.standing.input' },
   },
   // テンプレート投影の入力欄 (患者ごとに projectedValues へ保存)
@@ -52,6 +51,7 @@ export const UI = {
     section: 'projection.section',
     placement: 'projection.placement',
     field: 'projection.field', // 各入力要素・選択チップ
+    freeText: 'projection.freeText', // freeText の場所に出る自由入力 textarea
     normalBtn: 'projection.normalBtn',
     oncall: 'projection.oncall',
     menu: 'projection.menu',
@@ -67,7 +67,6 @@ export const UI = {
     placementFormat: 'templateEdit.placement.format',
     addFormat: 'templateEdit.placement.add',
     display: 'templateEdit.display',
-    memoSection: 'templateEdit.memoSection',
     save: 'templateEdit.save',
   },
   frameEdit: {

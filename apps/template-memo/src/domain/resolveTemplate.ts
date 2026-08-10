@@ -36,18 +36,11 @@ export function resolveTemplate(
     placedBySection.set(placement.sectionId, current);
   }
 
-  const memoSectionId =
-    definition.memoSectionId &&
-    frame.sections.some((section) => section.id === definition.memoSectionId)
-      ? definition.memoSectionId
-      : null;
-
   return {
     id: definition.id,
     name: definition.name,
     includeProblems: definition.includeProblems,
     includeHandover: definition.includeHandover,
-    memoSectionId,
     sections: frame.sections.map((section) => ({
       ...section,
       formats: placedBySection.get(section.id) ?? [],

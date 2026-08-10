@@ -39,11 +39,8 @@ export const s = {
   },
 
   memo: {
-    // 今回メモ / 継続メモ (対象ごとの独立メモ。今回=ラウンド開始でクリア / 継続=残す)
-    visit: {
-      label: '今回メモ',
-      placeholder: '今回のラウンドのメモ。音声入力した内容や転記先へ渡したい内容。',
-    },
+    // 継続メモ (対象ごとの独立メモ。ラウンド開始でも残す)。
+    // 今回分の自由本文は入力フォームの各場所（freeText）が持つ。
     standing: {
       label: '継続メモ',
       placeholder: '次回以降も残したい個人メモ。',
@@ -85,7 +82,7 @@ export const s = {
       btn: 'ラウンド開始',
       tooltip: '新しいラウンドを開始（記録をクリア）',
       confirm:
-        '新しいラウンドを開始します。前回の記録をクリアしてよろしいですか？\n（ステータス（青以外）・今回メモ・フォーム値をクリアします。問題リスト・継続メモ・タグは残ります）',
+        '新しいラウンドを開始します。前回の記録をクリアしてよろしいですか？\n（ステータス（青以外）・入力フォームの内容をクリアします。問題リスト・継続メモ・タグは残ります）',
     },
     patientQr: {
       title: 'この対象の転記用QRを表示',
@@ -125,7 +122,7 @@ export const s = {
   },
 
   detail: {
-    // detail.nav.prev / detail.nav.next は廃止 (前/次ボタン撤去・対象切替は横スワイプ)。
+    // detail.nav.prev / detail.nav.next は廃止 (前/次ボタン撤去・対象切替はホーム一覧経由のみ)。
     home: { aria: 'ホームへ戻る' },
     // 対象画面 QR (転記用・平文)。対象詳細内の日本語ボタンで開く。
     emrQr: { btn: '転記用QRを表示' },
@@ -216,6 +213,8 @@ export const s = {
   // 対象画面のラウンド入力カード (テンプレートの常設フォーム)。
   projection: {
     title: 'ラウンド入力',
+    // 見出しの無い場所に出る自由入力欄の aria-label (見出しがあれば見出しを使う)。
+    freeTextAria: (n: number) => `場所 ${n} の自由入力`,
   },
 
   componentUsage: (n: number) => `${n}個のテンプレートで使用中（変更はすべてに反映されます）`,
@@ -245,8 +244,6 @@ export const s = {
     sections: '場所',
     includeProblems: '合成に問題リストを含める',
     includeHandover: '合成に申し送りを含める',
-    memoSection: '今回メモを入れる場所',
-    memoSectionNone: '入れない',
     sectionAdd: '場所を追加',
     sectionTitle: '場所の見出し（例 (S)・【今日やったこと】）',
     sectionNormal: '正常文（空欄を補う文。例 著変なし）',
@@ -563,7 +560,7 @@ export const s = {
       user: '移行するユーザー',
       counts: (subjects: number, groups: number) => `対象 ${subjects} 件 / グループ ${groups} 件`,
       appendOnly:
-        '現在のデータは残したまま、上記のデータを追加します。今回メモ・状態・タグ・フォーム値は移行しません。',
+        '現在のデータは残したまま、上記のデータを追加します。入力フォームの内容・状態・タグは移行しません。',
       apply: '既存データへ追加',
       imported: (subjects: number, groups: number) =>
         `対象 ${subjects} 件・グループ ${groups} 件を追加しました`,

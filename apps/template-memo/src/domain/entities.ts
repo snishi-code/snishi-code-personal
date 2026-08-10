@@ -43,7 +43,6 @@ export interface TemplateDef {
   id: string;
   name: string;
   frameId: string;
-  memoSectionId: string | null;
   includeProblems: boolean;
   includeHandover: boolean;
   placements: FormatPlacement[];
@@ -153,18 +152,10 @@ export function normalizeTemplateDef(raw: unknown, refs?: EntityRefs): TemplateD
     );
   }
 
-  const requestedMemoSectionId = typeof row.memoSectionId === 'string' ? row.memoSectionId : null;
-  const memoSectionId =
-    requestedMemoSectionId &&
-    (!frame || frame.sections.some((section) => section.id === requestedMemoSectionId))
-      ? requestedMemoSectionId
-      : null;
-
   return {
     id: str(row.id) || newId('tpl'),
     name: str(row.name),
     frameId,
-    memoSectionId,
     includeProblems: row.includeProblems === true,
     includeHandover: row.includeHandover === true,
     placements,

@@ -93,7 +93,6 @@ function makeWorkspaceBackup(): Record<string, unknown> {
           userId: 'usr_a',
           patientId: 'pt_1',
           status: 'green',
-          visitMemo: '移行しない今回メモ',
           standingMemo: 'Aの継続メモ',
           confirmedNote: 'Aの清書',
           projectedValues: { 'fixed:x': '移行しない' },
@@ -105,7 +104,6 @@ function makeWorkspaceBackup(): Record<string, unknown> {
           userId: 'usr_b',
           patientId: 'pt_1',
           status: 'blue',
-          visitMemo: 'Bの今回メモ',
           standingMemo: 'Bの継続メモ',
           confirmedNote: 'Bの清書',
           projectedValues: {},
@@ -117,7 +115,6 @@ function makeWorkspaceBackup(): Record<string, unknown> {
           userId: 'usr_a',
           patientId: 'pt_2',
           status: 'yellow',
-          visitMemo: '破棄',
           standingMemo: '対象2の継続メモ',
           projectedValues: { x: '破棄' },
           tags: ['破棄'],
@@ -181,7 +178,7 @@ describe('convertWorkspaceBackup', () => {
       placeId: east?.placeId,
       status: STATUS.NONE,
       problems: ['継続課題'],
-      visitMemo: '',
+      sectionTexts: {},
       standingMemo: 'Aの継続メモ',
       tags: [],
       projectedValues: {},
@@ -200,7 +197,6 @@ describe('convertWorkspaceBackup', () => {
     expect(converted.patients.every((patient) => patient.pid.startsWith('pat_'))).toBe(true);
     // 旧「患者ID」(code 概念) は持ち込まない。
     expect(JSON.stringify(converted.patients)).not.toContain('pt_1');
-    expect(JSON.stringify(converted.patients)).not.toContain('移行しない今回メモ');
     expect(JSON.stringify(converted.patients)).not.toContain('fixed:x');
     expect(JSON.stringify(converted.patients)).not.toContain('sharedTags');
     // 清書 (confirmedNote) は本体廃止済み。旧バックアップにあっても持ち込まない。

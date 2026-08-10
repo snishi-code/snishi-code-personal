@@ -27,7 +27,7 @@ import {
   type Frame,
   type TemplateDef,
 } from './entities';
-import { normalizeProjectedValues } from './normalize';
+import { normalizeProjectedValues, normalizeSectionTexts } from './normalize';
 import {
   isPatientStatus,
   STATUS,
@@ -142,8 +142,9 @@ function normalizePatientRow(raw: unknown, places: readonly PlaceDef[]): Patient
     status: isPatientStatus(raw.status) ? raw.status : STATUS.NONE,
     tags: stringArray(raw.tags),
     problems: stringArray(raw.problems),
-    visitMemo: str(raw.visitMemo),
     standingMemo: str(raw.standingMemo),
+    // 場所ごとの自由本文は string 値のエントリだけを残す（store 経路と同じ whitelist）。
+    sectionTexts: normalizeSectionTexts(raw.sectionTexts),
     // projectedValues の外側 2 層（placementId → itemId → 値）だけを検証する。値そのものは
     // 読み出し側の domain/formValues.ts の正規化ヘルパに委ねる（ここで形を断定せず、
     // 壊れ値は読み出し時に未入力へ倒れる）。

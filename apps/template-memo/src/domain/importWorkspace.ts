@@ -4,7 +4,7 @@
  * これは同期・互換レイヤではない。移行元の現行 DB schema v7 だけを理解し、
  * template-memo へ追記できる形へ一度だけ変換する。暗号化バックアップは対象外
  * （旧アプリで平文を書き出し直してもらう）。患者ごとの「今回分」
- * (status / visitMemo / projectedValues / tags) は意味が異なるため意図的に移行しない。
+ * (status / sectionTexts / projectedValues / tags) は意味が異なるため意図的に移行しない。
  * 旧「患者ID」(code 概念) はこのアプリに無いので落とす。
  */
 
@@ -240,7 +240,7 @@ function convertPatients(
       problems: stringList(raw.problems),
       // 現行 source の「継続メモ」は RoundsPatientState.standingMemo。
       standingMemo: typeof state?.standingMemo === 'string' ? state.standingMemo : '',
-      // visitMemo / projectedValues / tags は「今回分・個人分」のため移行しない。
+      // sectionTexts / projectedValues / tags は「今回分・個人分」のため移行しない。
       archivedAt: archivedAt !== null && archivedAt > 0 ? archivedAt : null,
       updatedAt,
     });

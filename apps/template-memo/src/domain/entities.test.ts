@@ -39,7 +39,6 @@ describe('永続化エンティティの正規化', () => {
       id: 'template-round',
       name: '回診',
       frameId: frame.id,
-      memoSectionId: 'missing-section',
       placements: [
         {
           id: 'placement-ok',
@@ -61,7 +60,6 @@ describe('永続化エンティティの正規化', () => {
     };
 
     expect(normalizeTemplateDef(raw, { frames: [frame], formats: [format] })).toMatchObject({
-      memoSectionId: null,
       placements: [
         {
           id: 'placement-ok',
