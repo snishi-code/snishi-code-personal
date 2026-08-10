@@ -119,6 +119,16 @@ describe('fail-closed', () => {
     expect(outcome.kind).toBe('unsupported-version');
   });
 
+  it('v7 パッケージ（schemaVersion 7）は unsupported-version で拒否される（後方互換なし）', async () => {
+    const before = await seedWithEntry();
+    const pkg = buildExportPackage(before);
+    const outcome = await importFromJsonText(JSON.stringify({ ...pkg, schemaVersion: 7 }));
+    expect(outcome.kind).toBe('unsupported-version');
+    // 既存データは変更されない。
+    const after = await loadLedger();
+    expect(after.journalEntries.length).toBe(before.journalEntries.length);
+  });
+
   it('v1 アプリのファイル（appId=snishi-code.simple-ledger）は not-our-file（識別子分離・仕様§7）', async () => {
     await seedWithEntry();
     // v1 の最終版 (schemaVersion 16) でも appId 不一致で fail-closed に拒否される
@@ -269,15 +279,25 @@ describe('export package 形状', () => {
     expect(pkg).toHaveProperty('settings');
   });
 
-  it('schemaVersion 7 で、廃止済みの cashflowSchedules フィールドを含まない', async () => {
+  it('schemaVersion 8 で、廃止済みの cashflowSchedules フィールドを含まない', async () => {
     const ledger = await seedWithEntry();
     const pkg = buildExportPackage(ledger);
     expect(pkg.schemaVersion).toBe(SCHEMA_VERSION);
-    expect(pkg.schemaVersion).toBe(7);
+    expect(pkg.schemaVersion).toBe(8);
     expect(pkg).not.toHaveProperty('cashflowSchedules');
     // 文字列化した export JSON にも痕跡が残らない。
     const parsed = JSON.parse(exportToJsonText(ledger)) as Record<string, unknown>;
     expect(Object.keys(parsed)).not.toContain('cashflowSchedules');
+  });
+
+  it('v8 の必須フィールド（importProfiles / profileBindings / importDecisions）を含む', async () => {
+    const ledger = await seedWithEntry();
+    const pkg = buildExportPackage(ledger);
+    expect(Array.isArray(pkg.importProfiles)).toBe(true);
+    expect(Array.isArray(pkg.profileBindings)).toBe(true);
+    expect(Array.isArray(pkg.importDecisions)).toBe(true);
+    // fresh DB には組み込み PayPay profile が seed されている（§1-1）。
+    expect(pkg.importProfiles.some((p) => p.builtin?.builtinId === 'paypay-csv')).toBe(true);
   });
 });
 

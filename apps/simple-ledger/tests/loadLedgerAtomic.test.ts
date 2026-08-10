@@ -33,6 +33,9 @@ describe('loadLedger の原子的読取り', () => {
         STORE.tags,
         STORE.monthlyCostItems,
         STORE.recurringRules,
+        STORE.importProfiles,
+        STORE.profileBindings,
+        STORE.importDecisions,
       ]),
     );
   });

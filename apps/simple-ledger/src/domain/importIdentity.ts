@@ -48,8 +48,44 @@ export function fingerprintSource(rawLine: string): string {
 
 /** SHA-256 の 16 進表現（WebCrypto・端末内のみ）。 */
 export async function sha256Hex(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return sha256HexOfBytes(new TextEncoder().encode(text));
+}
+
+/** バイト列の SHA-256（ファイル本体の fileHash・§5-2 層0 に使う）。 */
+export async function sha256HexOfBytes(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes as BufferSource);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/* ── profile digest（§5-1: provenance に保存し、レビュー中の profile 変更を検出する） ── */
+
+/**
+ * 決定的な canonical JSON（オブジェクトキーを再帰的に辞書順へ並べ替える）。
+ * 同じ内容の DSL は保存順序に関わらず同一の文字列 = 同一の digest になる。
+ * JSON に載らない値（undefined / 関数）はプロパティごと落ちる（JSON.stringify と同じ規則）。
+ */
+export function canonicalJsonText(value: unknown): string {
+  return JSON.stringify(sortKeysDeep(value));
+}
+
+function sortKeysDeep(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortKeysDeep);
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return Object.fromEntries(entries.map(([k, v]) => [k, sortKeysDeep(v)]));
+  }
+  return value;
+}
+
+/**
+ * profile DSL の digest = canonical JSON の SHA-256（§5-1）。
+ * レビュー表示時に取得し、適用時に再計算値と照合する（不一致 = profile が変更された =
+ * 適用を全拒否して作り直す）。
+ */
+export async function profileDslDigest(dsl: unknown): Promise<string> {
+  return sha256Hex(canonicalJsonText(dsl));
 }
 
 /* ── rowKey ── */

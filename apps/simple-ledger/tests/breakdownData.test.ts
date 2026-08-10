@@ -76,6 +76,9 @@ function ledgerOf(journalEntries: JournalEntry[]): Ledger {
     tags: [],
     monthlyCostItems: [],
     recurringRules: [],
+    importProfiles: [],
+    profileBindings: [],
+    importDecisions: [],
   };
 }
 

@@ -51,6 +51,9 @@ export function buildExportPackage(ledger: Ledger): LedgerExportPackage {
     tags: ledger.tags,
     monthlyCostItems: ledger.monthlyCostItems,
     recurringRules: ledger.recurringRules,
+    importProfiles: ledger.importProfiles,
+    profileBindings: ledger.profileBindings,
+    importDecisions: ledger.importDecisions,
     settings: ledger.settings,
   };
 }
@@ -147,6 +150,9 @@ async function replaceWithPackage(
       tags: pkg.tags,
       monthlyCostItems: pkg.monthlyCostItems,
       recurringRules: pkg.recurringRules,
+      importProfiles: pkg.importProfiles,
+      profileBindings: pkg.profileBindings,
+      importDecisions: pkg.importDecisions,
     },
     expectedVersion,
   );
@@ -276,6 +282,9 @@ export async function restoreFromSnapshot(snapshotData: LedgerExportPackage): Pr
       tags: pkg.tags,
       monthlyCostItems: pkg.monthlyCostItems,
       recurringRules: pkg.recurringRules,
+      importProfiles: pkg.importProfiles,
+      profileBindings: pkg.profileBindings,
+      importDecisions: pkg.importDecisions,
     },
     versionOf(current),
   );

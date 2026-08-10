@@ -73,7 +73,15 @@ export function validateSimpleEntry(input: Partial<SimpleEntryInput>): EntryVali
 
 function cleanMetadata(meta: EntryMetadata | undefined): EntryMetadata | undefined {
   if (!meta) return undefined;
-  const has = meta.inputMode !== undefined || meta.reversalOfEntryId !== undefined;
+  // CSV 取込由来のメタ（importSource 系・§1-3）も「意味のある metadata」として保持する。
+  // inputMode / reversalOfEntryId だけを見ると、取込由来しか持たない仕訳の編集で
+  // metadata ごと落ちる（Codex 指摘）。
+  const has =
+    meta.inputMode !== undefined ||
+    meta.reversalOfEntryId !== undefined ||
+    meta.importSource !== undefined ||
+    meta.importSourceIdentity !== undefined ||
+    meta.importRowKey !== undefined;
   return has ? meta : undefined;
 }
 

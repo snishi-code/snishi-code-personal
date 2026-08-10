@@ -586,6 +586,43 @@ export const ja = {
     '終了日は費用化の開始日以降にしてください。費用化を始める前にやめる場合は、先に費用化の開始日を戻して（または空にして）から終了日を設定してください。',
   'error.monthlyCost.purchaseAfterAllocation':
     '購入の仕訳の日付は費用化の開始日以前にしてください。後ろへ動かす場合は、先に項目の費用化の開始日を変更してください。',
+  // CSV 取込（Import Profile・v8）。画面文言は UI フェーズで追加し、ここはエラー code のみ。
+  'error.importProfile.invalidStructure': '取込プロファイルの形式が不正です。',
+  'error.importProfile.builtinReserved':
+    '組み込みプロファイルの印は付けられません（組み込みは「組み込みプロファイルを復元」だけが作ります）。',
+  'error.importProfile.notFound': '取込プロファイルが見つかりません。',
+  'error.importBinding.invalidStructure': '取込の紐付け（プロファイル設定）の形式が不正です。',
+  'error.importBinding.duplicate':
+    '同じプロファイル・取込元の紐付けが既にあります。既存の紐付けを編集してください。',
+  'error.importBinding.ownAccountRole': '自口座には現預金の内訳（日常資産）を選んでください。',
+  'error.importBinding.chargeSourceRole':
+    'チャージ源泉には現預金の内訳（日常資産）を選んでください。',
+  'error.importBinding.destinationRole':
+    '計上先に使えない科目です（内部集約・残高調整は選べません）。',
+  'error.importBinding.sameAccount': '自口座と相手方に同じ科目は指定できません。',
+  'error.import.emptyBatch': '適用する行がありません。',
+  'error.import.invalidBatch': '取込の適用内容が不正です。レビューを作り直してください。',
+  'error.import.duplicateRowKey': '同じ行が二重に選択されています。レビューを作り直してください。',
+  'error.import.rowKeyMismatch': '行キーが取込元と一致しません。レビューを作り直してください。',
+  'error.import.alreadyDecided':
+    '既に取込済み・無視済みの行が含まれています。解除してからやり直してください。',
+  'error.import.profileChanged':
+    '取込プロファイルがレビュー表示のあとに変更されています。レビューを作り直してください。',
+  'error.import.linkTargetMissing': 'リンク先の仕訳が見つかりません。',
+  'error.import.entryIdConflict': '仕訳 ID が既存の仕訳と重複しています。',
+  // CSV ファイル読み取り（CsvImportError の code に対応。errorText が code から引く）。
+  'error.csvImport.csv-decode-failed':
+    'ファイルを文字コード {encoding} として読み取れませんでした。プロファイルのエンコーディング設定を確認してください。',
+  'error.csvImport.csv-invalid-delimiter': '区切り文字の指定が不正です（{delimiter}）。',
+  'error.csvImport.csv-unclosed-quote':
+    'CSV の引用符が閉じていません（{line} 行目付近）。ファイルが壊れていないか確認してください。',
+  'error.csvImport.csv-invalid-quote':
+    'CSV の引用符の使い方が不正です（{line} 行目付近）。ファイルが壊れていないか確認してください。',
+  'error.csvImport.csv-header-row-missing':
+    'ヘッダー行が見つかりません（設定位置: {headerRowIndex}・レコード数: {recordCount}）。',
+  'error.csvImport.csv-duplicate-header': 'ヘッダーの列名が重複しています（{name}）。',
+  'error.csvImport.csv-column-missing':
+    'プロファイルが参照する列「{column}」がこのファイルにありません。プロファイルとファイルの組み合わせを確認してください。',
   'error.common.staleData':
     '別のタブ（またはウィンドウ）でデータが変更されています。ページを再読み込みしてから、もう一度お試しください。',
   'error.common.revisionExhausted':

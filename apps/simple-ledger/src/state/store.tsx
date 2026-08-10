@@ -51,6 +51,11 @@ export function isPristineSeedLedger(l: Ledger): boolean {
     l.journalEntries.length === 0 &&
     l.monthlyCostItems.length === 0 &&
     l.tags.length === 0 &&
+    // CSV 取込のユーザーデータ（紐付け・決定・ユーザー定義 profile）があれば初期状態ではない。
+    // 組み込み profile（builtin あり）は seed 由来なので数えない。
+    l.profileBindings.length === 0 &&
+    l.importDecisions.length === 0 &&
+    l.importProfiles.every((p) => p.builtin !== undefined) &&
     isDefaultSettings(l.settings) &&
     isDefaultSeedAccounts(l.accounts)
   );

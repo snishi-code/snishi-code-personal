@@ -38,6 +38,7 @@ import {
   isRecurringSpreadDestinationRole,
 } from './recurring';
 import { parseRuleEntryId, parseRuleItemId, ruleEntryId, ruleItemId } from './recurringIds';
+import { importProfileSchema } from './importDsl';
 
 const isoDate = z
   .string()
@@ -173,6 +174,10 @@ export const entryMetadataSchema = z.object({
   // 定期ルールからの自動起票の由来（両方セットで持つ。整合はパッケージ superRefine）。
   recurringRuleId: z.string().min(1).optional(),
   recurringMonth: monthSchema.optional(),
+  // CSV 取込の由来（§1-3・表示用の複製）。判定の正本は importDecisions（§1-2）。
+  importSource: z.string().min(1).optional(),
+  importSourceIdentity: z.string().min(1).optional(),
+  importRowKey: z.string().min(1).optional(),
 });
 
 export const recurringRuleSchema = z
@@ -320,6 +325,64 @@ export const settingsSchema = z.object({
   locale: z.literal('ja'),
 });
 
+/* ── CSV 取込（Import Profile・§1）。台帳 JSON のドクトリンどおり strip（`.strict()` 禁止）。
+ * 未知キーの明示拒否は DSL（importProfileDslSchema）だけの例外（§2）。 ── */
+
+/**
+ * ProfileBinding（§1-1b）。科目参照は **soft reference** のため、参照先科目の存在・role は
+ * ここでは検証しない（削除・アーカイブで壊れてよい。適用/保存時に repository が検証し、
+ * 欠けていれば再選択を促す）。
+ */
+export const profileBindingSchema = z.object({
+  id: z.string().min(1),
+  profileId: z.string().min(1),
+  sourceIdentity: z.string().min(1).max(120),
+  ownAccountId: z.string().min(1),
+  kindDestinations: z.record(z.string().min(1).max(120), z.string().min(1)),
+  chargeSourceAccountId: z.string().min(1).optional(),
+  createdAt: isoDateTime,
+  updatedAt: isoDateTime,
+});
+
+export const importDecisionProvenanceSchema = z.object({
+  profileId: z.string().min(1),
+  profileDigest: z.string().min(1),
+  fileHash: z.string().min(1),
+  sourceIdentity: z.string().min(1).max(120),
+  identityVersion: z.number().int().min(1),
+});
+
+/**
+ * ImportDecision（§1-2）。registered / linked は entryId 必須・ignored は entryId 禁止。
+ * entryId の実在は検証しない（dangling は照合時に未解決へ出して掃除する防御が正本。
+ * ここで拒否すると、壊れかけの状態からのバックアップ書き出しまで塞いでしまう）。
+ */
+export const importDecisionSchema = z
+  .object({
+    key: z.string().min(1),
+    status: z.enum(['registered', 'linked', 'ignored']),
+    entryId: z.string().min(1).optional(),
+    decidedAt: isoDateTime,
+    provenance: importDecisionProvenanceSchema,
+  })
+  .superRefine((decision, ctx) => {
+    if (decision.status === 'ignored') {
+      if (decision.entryId !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'ignored の取込決定に entryId は持てません',
+          path: ['entryId'],
+        });
+      }
+    } else if (decision.entryId === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${decision.status} の取込決定には entryId が必要です`,
+        path: ['entryId'],
+      });
+    }
+  });
+
 /**
  * エクスポートパッケージ。import の入口検証。
  * appId / schemaVersion は厳格に確認する（未対応版は取り込まない=fail-closed）。
@@ -338,6 +401,10 @@ export const ledgerExportPackageSchema = z
     tags: z.array(tagSchema),
     monthlyCostItems: z.array(monthlyCostItemSchema),
     recurringRules: z.array(recurringRuleSchema),
+    // CSV 取込（v8 で追加・必須。旧形式はリポジトリ外で一度だけ変換する＝recurringRules と同じ扱い）。
+    importProfiles: z.array(importProfileSchema),
+    profileBindings: z.array(profileBindingSchema),
+    importDecisions: z.array(importDecisionSchema),
     settings: settingsSchema,
   })
   .superRefine((pkg, ctx) => {
@@ -922,6 +989,40 @@ export const ledgerExportPackageSchema = z
 
     pkg.journalEntries.forEach((e, ei) => {
       checkTags(e.tagIds, ['journalEntries', ei, 'tagIds']);
+    });
+
+    // ── CSV 取込（v8）。profile/binding/decision の科目・profile・仕訳参照は soft reference
+    // （§1-1b/§1-2: 壊れは適用時に未解決として扱い掃除する）のためここでは拘束せず、
+    // 各ストアの主キー相当（id / (profileId, sourceIdentity) / key）の一意性だけを守る。 ──
+    const profileIds = new Set<string>();
+    pkg.importProfiles.forEach((p, pi) => {
+      if (profileIds.has(p.id))
+        issue(`取込プロファイルの ID が重複しています(${p.id})`, ['importProfiles', pi, 'id']);
+      profileIds.add(p.id);
+    });
+    const bindingIds = new Set<string>();
+    const bindingPairs = new Set<string>();
+    pkg.profileBindings.forEach((b, bi) => {
+      if (bindingIds.has(b.id))
+        issue(`取込の紐付けの ID が重複しています(${b.id})`, ['profileBindings', bi, 'id']);
+      bindingIds.add(b.id);
+      // 同一 (profile, 取込元) に紐付けは 1 つ（区切り衝突しない JSON 組でキー化する）。
+      const pair = JSON.stringify([b.profileId, b.sourceIdentity.trim()]);
+      if (bindingPairs.has(pair))
+        issue(`同じプロファイル・取込元の紐付けが重複しています(${b.sourceIdentity})`, [
+          'profileBindings',
+          bi,
+          'sourceIdentity',
+        ]);
+      bindingPairs.add(pair);
+      if (b.sourceIdentity.trim() === '')
+        issue('取込元識別子が空白のみです。', ['profileBindings', bi, 'sourceIdentity']);
+    });
+    const decisionKeys = new Set<string>();
+    pkg.importDecisions.forEach((d, di) => {
+      if (decisionKeys.has(d.key))
+        issue(`取込決定の行キーが重複しています(${d.key})`, ['importDecisions', di, 'key']);
+      decisionKeys.add(d.key);
     });
   });
 
