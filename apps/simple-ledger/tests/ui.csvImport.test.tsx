@@ -113,6 +113,19 @@ function selectProfile(profileId: string = PAYPAY_PROFILE_ID): void {
 /** binding の不変な取込元 ID（行キーの名前空間・表示名「PayPay本体」とは別・監査 P1-3）。 */
 const UI_SOURCE_ID = 'source-ui-paypay';
 
+/**
+ * 科目の開始日を CSV の行日付より前へ寄せる。個別行の編集はホームの仕訳入力シートを
+ * 再利用するため（監査 P1-2）、候補は既存規則どおり仕訳日付での存在（accountExistsAt）で
+ * 絞られる。seed 科目の暗黙開始日（createdAt = 今日）は合成 CSV の 2026-08 より後になり
+ * 得るので、テストデータ側を整合させる。
+ */
+async function backdateAccounts(names: string[], startDate = '2026-01-01'): Promise<void> {
+  const ledger = await loadLedger();
+  for (const name of names) {
+    await putRecord(STORE.accounts, { ...account(ledger, name), startDate });
+  }
+}
+
 /** binding をデータ層で先に用意する（セットアップシート UI はハッピーパス側で検証）。 */
 async function seedBinding(): Promise<void> {
   const ledger = await loadLedger();
@@ -194,6 +207,8 @@ async function waitForProfileSelect(): Promise<void> {
 
 describe('CSV 取込 — ハッピーパス（§4）', () => {
   it('セットアップ → 件数会計 → 一括/個別適用 → 完了 → 再読込で全行スキップ', async () => {
+    // 個別行の編集（EntrySheet 再利用）は仕訳日付で候補を絞るため、開始日を行日付より前へ。
+    await backdateAccounts(['チャージ残高', '変動費']);
     const screen = renderScreen();
     await waitForProfileSelect();
 
@@ -230,24 +245,28 @@ describe('CSV 取込 — ハッピーパス（§4）', () => {
     expect(kvValue(counts, 'スキップ')).toBe('0');
     expect(kvValue(counts, 'エラー')).toBe('0');
 
-    // レビュー: 3 行種。既定計上先のある獲得・チャージにだけ一括適用が出る。
+    // レビュー: 3 行種。一括適用は計上先をダイアログで選ぶため全行種に出る（監査 P1-4）。
     expect(qa(UI.csvImport.row)).toHaveLength(3);
-    expect(qa(UI.csvImport.kindBulk)).toHaveLength(2);
+    expect(qa(UI.csvImport.kindBulk)).toHaveLength(3);
 
-    // 支払い（最古の行）は行単位選択: 行タップ → シートで計上先（変動費）を選んで適用。
+    // 支払い（最古の行）は行単位選択: 行タップ → 仕訳入力シート（EntrySheet 再利用・監査
+    // P1-2）が支出モードで開き、計上先（変動費）を選んで保存。
     // 日付昇順で適用する（暗黙開始日の科目は最初の参照で開始点が固定されるため、
     // 新しい日付から適用すると後から古い行が期間外参照で拒否される既存仕様）。
     fireEvent.click(within(kindGroupOf('支払い')).getByText('支払い コンビニ'));
     await waitFor(() => {
-      expect(q(UI.csvImport.applySheet)).not.toBeNull();
+      expect(q(UI.journal.entry.save)).not.toBeNull();
     });
-    fireEvent.click(within(q(UI.csvImport.applyCounter)!).getByRole('radio', { name: '変動費' }));
-    fireEvent.click(q(UI.csvImport.applySave)!);
+    fireEvent.click(
+      within(q(UI.journal.entry.flowDestination)!).getByRole('radio', { name: '変動費' }),
+    );
+    fireEvent.click(q(UI.journal.entry.save)!);
     await waitFor(() => {
       expect(qa(UI.csvImport.row)).toHaveLength(2);
     });
 
-    // 獲得の一括適用: 確認に対象件数と仕訳形（借方 自口座 / 貸方 計上先）が出る。
+    // 獲得の一括適用: binding の既定（その他収入）が計上先に初期選択され、対象件数と
+    // 仕訳形（借方 自口座 / 貸方 計上先）が出る。
     fireEvent.click(
       within(kindGroupOf('ポイント、残高の獲得')).getByRole('button', { name: 'まとめて適用' }),
     );
@@ -256,9 +275,7 @@ describe('CSV 取込 — ハッピーパス（§4）', () => {
     });
     const bulkBody = q(UI.csvImport.bulkConfirm)!.textContent ?? '';
     expect(bulkBody).toContain('借方 チャージ残高 / 貸方 その他収入 — 1 件');
-    fireEvent.click(
-      within(q(UI.csvImport.bulkConfirm)!).getByRole('button', { name: 'まとめて適用' }),
-    );
+    fireEvent.click(q(UI.csvImport.bulkSave)!);
     await waitFor(() => {
       expect(qa(UI.csvImport.row)).toHaveLength(1);
     });
@@ -303,6 +320,203 @@ describe('CSV 取込 — ハッピーパス（§4）', () => {
     expect(after.journalEntries.filter((e) => e.metadata?.importSource !== undefined)).toHaveLength(
       3,
     );
+  });
+});
+
+describe('CSV 取込 — 個別行の編集 = 仕訳入力シートの再利用（監査 P1-2・作者決定 2026-08-11）', () => {
+  it('行タップで EntrySheet が CSV 値でプレフィルされ、支出モードの保存が仕訳 + decision を作る', async () => {
+    const before = await loadLedger();
+    await backdateAccounts(['チャージ残高', '変動費']);
+    await seedBinding();
+    renderScreen();
+    await waitForProfileSelect();
+    selectProfile();
+    selectFile(csvFile(SINGLE_PAYMENT_CSV));
+    await waitFor(() => {
+      expect(qa(UI.csvImport.row)).toHaveLength(1);
+    });
+
+    fireEvent.click(within(qa(UI.csvImport.row)[0]!).getByText('支払い コンビニ'));
+    await waitFor(() => {
+      expect(q(UI.journal.entry.save)).not.toBeNull();
+    });
+    // プレフィル: 日付・項目・金額 = CSV 行の値。支払い元（貸方）= 自口座が選択済み。
+    expect((q(UI.journal.entry.date) as HTMLInputElement).value).toBe('2026-08-01');
+    expect((q(UI.journal.entry.item) as HTMLInputElement).value).toBe('支払い コンビニ');
+    expect((q(UI.journal.entry.amount) as HTMLInputElement).value).toBe('1000');
+    expect(
+      within(q(UI.journal.entry.flowSource)!).getByRole('radio', {
+        name: 'チャージ残高',
+      }),
+    ).toBeChecked();
+
+    // 計上先（借方）を選んで保存 → 仕訳と decision が同一バッチで作られる。
+    fireEvent.click(
+      within(q(UI.journal.entry.flowDestination)!).getByRole('radio', { name: '変動費' }),
+    );
+    fireEvent.click(q(UI.journal.entry.save)!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.complete)).not.toBeNull();
+    });
+    const after = await loadLedger();
+    const imported = after.journalEntries.filter((e) => e.metadata?.importSource !== undefined);
+    expect(imported).toHaveLength(1);
+    expect(imported[0]!.lines).toEqual([
+      { accountId: account(before, '変動費').id, side: 'debit', amount: 1000 },
+      { accountId: account(before, 'チャージ残高').id, side: 'credit', amount: 1000 },
+    ]);
+    expect(after.importDecisions).toHaveLength(1);
+    expect(after.importDecisions[0]!.status).toBe('registered');
+    expect(after.importDecisions[0]!.entryId).toBe(imported[0]!.id);
+  });
+
+  it('簿記編集で自由なペアが通り、借貸同一は既存規則どおり弾かれる（CSV 側の追加制限なし）', async () => {
+    const before = await loadLedger();
+    await backdateAccounts(['チャージ残高', '預金']);
+    await seedBinding();
+    renderScreen();
+    await waitForProfileSelect();
+    selectProfile();
+    selectFile(csvFile(SINGLE_PAYMENT_CSV));
+    await waitFor(() => {
+      expect(qa(UI.csvImport.row)).toHaveLength(1);
+    });
+
+    // 行タップ → 支出モードで開く → 簿記編集へ切り替え（既存の manualSwitch）。
+    fireEvent.click(within(qa(UI.csvImport.row)[0]!).getByText('支払い コンビニ'));
+    await waitFor(() => {
+      expect(q(UI.journal.entry.manualSwitch)).not.toBeNull();
+    });
+    fireEvent.click(q(UI.journal.entry.manualSwitch)!);
+
+    // 借方に自口座と同じ科目 → 保存は既存の same-account 規則で拒否（決定は作られない）。
+    fireEvent.click(
+      within(q(UI.journal.entry.flowDestination)!).getByRole('radio', { name: 'チャージ残高' }),
+    );
+    fireEvent.click(q(UI.journal.entry.save)!);
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('借方と貸方に同じ科目は選べません');
+    });
+    expect((await loadLedger()).importDecisions).toHaveLength(0);
+
+    // 借方を預金へ（支出フローでは組めない 資金 → 資金 のペア）→ 既存規則どおり保存できる。
+    fireEvent.click(
+      within(q(UI.journal.entry.flowDestination)!).getByRole('radio', { name: '預金' }),
+    );
+    fireEvent.click(q(UI.journal.entry.save)!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.complete)).not.toBeNull();
+    });
+    const after = await loadLedger();
+    const imported = after.journalEntries.filter((e) => e.metadata?.importSource !== undefined);
+    expect(imported).toHaveLength(1);
+    expect(imported[0]!.lines).toEqual([
+      { accountId: account(before, '預金').id, side: 'debit', amount: 1000 },
+      { accountId: account(before, 'チャージ残高').id, side: 'credit', amount: 1000 },
+    ]);
+    expect(after.importDecisions).toHaveLength(1);
+  });
+});
+
+describe('CSV 取込 — 行種一括適用の一般化（監査 P1-4）', () => {
+  /** 既定計上先の無い行種（支払い）2 件の CSV。 */
+  const TWO_PAYMENTS_CSV = [
+    CSV_HEADER,
+    '2026/08/01 10:00:00,1000,-,支払い,店A,B001',
+    '2026/08/02 11:00:00,2000,-,支払い,店B,B002',
+  ].join('\n');
+
+  it('計上先をダイアログで選んで N 件を一括登録し、「既定にする」で binding が学習する', async () => {
+    const before = await loadLedger();
+    await seedBinding();
+    renderScreen();
+    await waitForProfileSelect();
+    selectProfile();
+    selectFile(csvFile(TWO_PAYMENTS_CSV, 'two-payments.csv'));
+    await waitFor(() => {
+      expect(qa(UI.csvImport.row)).toHaveLength(2);
+    });
+
+    // 既定計上先の無い支払いにも一括ボタンが出る（P1-4 の一般化）。
+    fireEvent.click(within(kindGroupOf('支払い')).getByRole('button', { name: 'まとめて適用' }));
+    await waitFor(() => {
+      expect(q(UI.csvImport.bulkConfirm)).not.toBeNull();
+    });
+    // 計上先を選ぶまで実行できない（fail-closed）。
+    expect((q(UI.csvImport.bulkSave) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(q(UI.csvImport.bulkCounter)!).getByRole('radio', { name: '変動費' }));
+    expect(q(UI.csvImport.bulkConfirm)!.textContent).toContain(
+      '借方 変動費 / 貸方 チャージ残高 — 2 件',
+    );
+    fireEvent.click(q(UI.csvImport.bulkLearn)!);
+    fireEvent.click(q(UI.csvImport.bulkSave)!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.complete)).not.toBeNull();
+    });
+
+    const after = await loadLedger();
+    const imported = after.journalEntries.filter((e) => e.metadata?.importSource !== undefined);
+    expect(imported).toHaveLength(2);
+    expect(after.importDecisions).toHaveLength(2);
+    expect(after.importDecisions.every((d) => d.status === 'registered')).toBe(true);
+    for (const entry of imported) {
+      expect(entry.lines.find((l) => l.side === 'debit')?.accountId).toBe(
+        account(before, '変動費').id,
+      );
+      expect(entry.lines.find((l) => l.side === 'credit')?.accountId).toBe(
+        account(before, 'チャージ残高').id,
+      );
+    }
+    // binding 学習（適用と同一 tx の bindingUpdate）: 行種 → 計上先が既定になる。
+    const binding = after.profileBindings.find((b) => b.id === 'binding-ui-test')!;
+    expect(binding.kindDestinations['支払い']).toBe(account(before, '変動費').id);
+  });
+
+  it('組み込み以外の profile（既定計上先なし）でも一括ボタンが出て適用できる', async () => {
+    const before = await loadLedger();
+    // FP 系の DSL を別 profile として保存し、kindDestinations 無しの binding を用意する。
+    const ts = new Date().toISOString();
+    await upsertImportProfile({
+      id: 'generic-bulk-ui',
+      name: '一般プロファイル',
+      dsl: FP_DSL,
+      createdAt: ts,
+      updatedAt: ts,
+    });
+    await upsertProfileBinding({
+      id: 'binding-generic-bulk',
+      profileId: 'generic-bulk-ui',
+      sourceId: 'source-generic-bulk',
+      sourceIdentity: '一般口座',
+      ownAccountId: account(before, 'チャージ残高').id,
+      kindDestinations: {},
+      createdAt: ts,
+      updatedAt: ts,
+    });
+    renderScreen();
+    await waitForProfileSelect();
+    selectProfile('generic-bulk-ui');
+    selectFile(csvFile(fpCsv(2), 'generic-bulk.csv'));
+    await waitFor(() => {
+      expect(qa(UI.csvImport.row)).toHaveLength(2);
+    });
+
+    // 旧仕様（既定計上先がある行種にしか出ない）では出なかった一括ボタンが出る。
+    fireEvent.click(within(kindGroupOf('支払い')).getByRole('button', { name: 'まとめて適用' }));
+    await waitFor(() => {
+      expect(q(UI.csvImport.bulkConfirm)).not.toBeNull();
+    });
+    // 行種の推定が付かない profile は簿記編集と同じ全候補（独自の絞り込みなし）。
+    fireEvent.click(within(q(UI.csvImport.bulkCounter)!).getByRole('radio', { name: '変動費' }));
+    fireEvent.click(q(UI.csvImport.bulkSave)!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.complete)).not.toBeNull();
+    });
+    const after = await loadLedger();
+    expect(after.journalEntries.filter((e) => e.metadata?.importSource !== undefined)).toHaveLength(
+      2,
+    );
+    expect(after.importDecisions).toHaveLength(2);
   });
 });
 

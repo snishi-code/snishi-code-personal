@@ -15,6 +15,14 @@
  *  - 決定済み一覧（§4-6）: profile・status で絞り込み、無視・リンクの解除（確認 1 つ・冪等）と
  *    リンク先仕訳の表示へ到達できる。登録済み（registered）の解除は仕訳の削除が正道
  *    （削除 cascade が decision を同時解除する）なので、ここには解除ボタンを出さない。
+ *  - 個別行の「編集して適用」はホームの仕訳入力シート（EntrySheet）をそのまま再利用する
+ *    （作者決定 2026-08-11・監査 P1-2）。候補・検証は通常入力と完全に同一で、CSV 側の
+ *    追加制限・追加緩和は作らない。保存だけが register action（仕訳 + decision の同一 tx）
+ *    へ流れる。
+ *  - 行種一括適用は計上先をダイアログ内で選ぶ一般形（監査 P1-4）。既定計上先の無い行種・
+ *    組み込み以外の profile でも一括でき、候補は既存の仕訳入力の候補規則（MODE_FLOW /
+ *    MODE_ROLES）を正本にする。「この計上先を既定にする」で binding の kindDestinations へ
+ *    学習できる（適用と同一 tx・bindingUpdate）。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
@@ -22,6 +30,7 @@ import { Segmented } from '@snishi/foundation/ui/Segmented';
 import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { ConfirmDialog, Modal, useDirtyGuard } from '../overlays';
 import { CsvImportProfiles } from './CsvImportProfiles';
+import { EntrySheet } from './EntrySheet';
 import { AccountPicker } from '../AccountPicker';
 import { Money } from '../money';
 import { useLedger } from '../../state/store';
@@ -60,13 +69,15 @@ import {
   type ImportKindHint,
   type PaypayKind,
 } from '../../domain/importProfilePresets';
-import { buildSimpleEntry } from '../../domain/entry';
+import { buildSimpleEntry, type SimpleEntryInput } from '../../domain/entry';
 import { isRecurringPostableRole } from '../../domain/recurring';
 import { newId } from '../../domain/ids';
-import { groupedAccountsByRole, groupedMonthlyAllocationAccounts } from '../accountOptions';
+import { groupedAccountsByRole } from '../accountOptions';
+import { MODE_FLOW, MODE_ROLES, type FormMode } from '../entryModes';
 import { errorText, t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import { nowIso } from '../../util/time';
+import type { AccountRole } from '../../domain/accountRoles';
 import type {
   Account,
   ImportDecision,
@@ -262,11 +273,82 @@ function unresolvedGroups(
   return [...byKind].map(([kind, rows]) => ({ kind, rows }));
 }
 
-/** 一括適用の対象（既定計上先があり、dangling でない行だけ・§1-2）。 */
+/**
+ * 一括適用の対象（dangling でない行・§1-2）。計上先はダイアログ内で選ぶため、
+ * 既定計上先の有無では絞らない（監査 P1-4 の一般化）。
+ */
 function bulkApplicableRows(rows: readonly ReviewRow[]): ReviewRow[] {
-  return rows.filter(
-    (r) => r.defaultCounterId !== undefined && r.resolution.status !== 'unresolved-dangling',
-  );
+  return rows.filter((r) => r.resolution.status !== 'unresolved-dangling');
+}
+
+/**
+ * 行種 → 仕訳入力シートの初期モード（作者決定 2026-08-11・監査 P1-2）。
+ * PayPay 組み込みのヒントから推定し、判定不能は簿記編集（manual）に落とす。
+ * どのモードからでも簿記編集へ切り替えられるので、ここの推定は初期タブでしかない
+ * （CSV 側の追加制限は作らない）。
+ */
+function formModeForRow(profile: ImportProfile, row: NormalizedRow): FormMode {
+  const hint = paypayHint(profile, row.kind);
+  if (hint === undefined) return 'manual';
+  if (hint.counter === 'expense-per-row') return 'expense';
+  // 獲得（自口座が借方）だけ収入フローに合う。取消（逆向き）は簿記編集で。
+  if (hint.counter === 'income-category') return row.ownSide === 'debit' ? 'income' : 'manual';
+  if (hint.counter === 'charge-source') return 'transfer';
+  // per-row-counterparty のうち自分の銀行口座への出金（口座送金）だけ振替。
+  // 送った/受け取った金額は相手が人なので簿記編集で自由に組む。
+  return row.kind === '口座送金' ? 'transfer' : 'manual';
+}
+
+/** EntrySheet の初期値: CSV 行の値 + 自口座を行の借/貸側へ + 既定計上先があれば相手側へ。 */
+function importEntryInput(reviewRow: ReviewRow, ownAccountId: string): SimpleEntryInput {
+  const row = reviewRow.row;
+  const counter = reviewRow.defaultCounterId ?? '';
+  return {
+    date: row.date,
+    description: row.description || row.kind,
+    debitAccountId: row.ownSide === 'debit' ? ownAccountId : counter,
+    creditAccountId: row.ownSide === 'debit' ? counter : ownAccountId,
+    amount: row.amount,
+    kind: 'normal',
+  };
+}
+
+/**
+ * 一括適用の計上先候補 role。既存の仕訳入力の候補規則（MODE_FLOW / MODE_ROLES）を正本に、
+ * 行種の推定モードと自口座側から相手側の role を引く。モードや自口座側が行ごとに割れる
+ * 行種は簿記編集と同じ全候補に落とす（独自の絞り込みを発明しない）。
+ */
+function bulkCounterRoles(profile: ImportProfile, rows: readonly ReviewRow[]): AccountRole[] {
+  const modes = new Set(rows.map((r) => formModeForRow(profile, r.row)));
+  const sides = new Set(rows.map((r) => r.row.ownSide));
+  const mode = modes.size === 1 ? [...modes][0]! : 'manual';
+  if (mode === 'manual' || sides.size !== 1) return [...MODE_ROLES.manual[0]!.allowedRoles];
+  const flow = MODE_FLOW[mode];
+  // 自口座が借方なら相手は貸方（source）、自口座が貸方なら相手は借方（destination）。
+  return [...sides][0] === 'debit'
+    ? [...flow.source.allowedRoles]
+    : [...flow.destination.allowedRoles];
+}
+
+/** 一括確認の仕訳形表示（自口座側で 借方/貸方 が分かれ得るため両方数える）。 */
+function bulkShapeLines(
+  rows: readonly ReviewRow[],
+  ownName: string,
+  counterName: string,
+): string[] {
+  const lines: string[] = [];
+  for (const side of ['debit', 'credit'] as const) {
+    const count = rows.filter((r) => r.row.ownSide === side).length;
+    if (count === 0) continue;
+    lines.push(
+      t('csvImport.bulkShapeLine', {
+        debit: side === 'debit' ? ownName : counterName,
+        credit: side === 'debit' ? counterName : ownName,
+        count,
+      }),
+    );
+  }
+  return lines;
 }
 
 /* ── メイン画面 ── */
@@ -369,8 +451,13 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
     }
   }
 
-  /** 一括適用・個別適用・リンク・無視の共通経路。成功／失敗のどちらでもレビューを作り直す。 */
-  async function runApply(actions: ImportBatchAction[]) {
+  /**
+   * 一括適用・個別適用・リンク・無視の共通経路。成功／失敗のどちらでもレビューを作り直す。
+   * 失敗は再 throw する（toast は store が出し済み。EntrySheet 再利用の行編集が
+   * シートを開いたままにする判断に使う）。bindingUpdate は一括適用の「既定にする」学習
+   * （適用と同一 tx・§4-4）。
+   */
+  async function runApplyOrThrow(actions: ImportBatchAction[], bindingUpdate?: ProfileBinding) {
     if (!review || busy || actions.length === 0) return;
     setBusy(true);
     try {
@@ -381,13 +468,20 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
         fileHash: review.fileHash,
         fileTotalRowCount: review.evaluation.totalRowCount,
         actions,
+        ...(bindingUpdate !== undefined ? { bindingUpdate } : {}),
         expectedLedgerVersion: review.ledgerVersion,
       });
-    } catch {
-      // store が toast 済み。stale / alreadyDecided もレビュー作り直しで回復する。
     } finally {
       setBusy(false);
       setRebuildTick((n) => n + 1);
+    }
+  }
+
+  async function runApply(actions: ImportBatchAction[], bindingUpdate?: ProfileBinding) {
+    try {
+      await runApplyOrThrow(actions, bindingUpdate);
+    } catch {
+      // store が toast 済み。stale / alreadyDecided もレビュー作り直しで回復する。
     }
   }
 
@@ -409,21 +503,15 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
     }
   }
 
-  function registerAction(
-    row: NormalizedRow,
-    counterAccountId: string,
-    override?: { date: string; description: string; amount: number },
-  ): ImportBatchAction {
-    const date = override?.date ?? row.date;
-    const description = override?.description ?? (row.description || row.kind);
-    const amount = override?.amount ?? row.amount;
+  /** ワンタップ適用・一括適用の register action（自口座を行の借/貸側・相手側 = 計上先）。 */
+  function registerAction(row: NormalizedRow, counterAccountId: string): ImportBatchAction {
     const own = review!.ownAccountId;
     const entry = buildSimpleEntry({
-      date,
-      description,
+      date: row.date,
+      description: row.description || row.kind,
       debitAccountId: row.ownSide === 'debit' ? own : counterAccountId,
       creditAccountId: row.ownSide === 'debit' ? counterAccountId : own,
-      amount,
+      amount: row.amount,
     });
     return { kind: 'register', rowKey: row.rowKey, entry };
   }
@@ -443,25 +531,6 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
 
   const accountName = (id: string | undefined): string =>
     id !== undefined ? (accountsById.get(id)?.name ?? '—') : '—';
-
-  /** 一括確認の仕訳形表示（自口座側で 借方/貸方 が分かれ得るため両方数える）。 */
-  function bulkShapeLines(rows: ReviewRow[]): string[] {
-    const lines: string[] = [];
-    for (const side of ['debit', 'credit'] as const) {
-      const subset = rows.filter((r) => r.row.ownSide === side);
-      if (subset.length === 0) continue;
-      const counter = accountName(subset[0]!.defaultCounterId);
-      const own = accountName(review?.ownAccountId);
-      lines.push(
-        t('csvImport.bulkShapeLine', {
-          debit: side === 'debit' ? own : counter,
-          credit: side === 'debit' ? counter : own,
-          count: subset.length,
-        }),
-      );
-    }
-    return lines;
-  }
 
   /* ── 決定済み一覧（§4-6） ── */
 
@@ -1021,51 +1090,63 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
         />
       ) : null}
 
-      {/* 一括適用の確認（対象件数と仕訳形・§4 手順 4） */}
-      {bulkKind !== null && review ? (
-        <ConfirmDialog
-          title={t('csvImport.bulkConfirmTitle', { kind: bulkKind })}
-          body={bulkShapeLines(
-            groups
-              .find((g) => g.kind === bulkKind)
-              ?.rows.filter((r) => r.defaultCounterId !== undefined) ?? [],
-          ).join(' ／ ')}
-          confirmLabel={t('csvImport.bulkApply')}
-          dataUi={UI.csvImport.bulkConfirm}
-          onCancel={() => setBulkKind(null)}
-          onConfirm={async () => {
-            const rows =
-              groups
-                .find((g) => g.kind === bulkKind)
-                ?.rows.filter((r) => r.defaultCounterId !== undefined) ?? [];
+      {/* 一括適用（計上先の選択 + 対象件数と仕訳形・§4 手順 4・監査 P1-4） */}
+      {bulkKind !== null && review && profile && binding ? (
+        <BulkApplySheet
+          kind={bulkKind}
+          rows={bulkApplicableRows(groups.find((g) => g.kind === bulkKind)?.rows ?? [])}
+          profile={profile}
+          binding={binding}
+          accounts={accounts}
+          ownAccountId={review.ownAccountId}
+          busy={busy}
+          onClose={() => setBulkKind(null)}
+          onApply={async (counterAccountId, learnDefault) => {
+            const rows = bulkApplicableRows(groups.find((g) => g.kind === bulkKind)?.rows ?? []);
+            const kind = bulkKind;
             setBulkKind(null);
+            // 「既定にする」学習は binding の行種→計上先へ（適用と同一 tx・保存境界が
+            // role 整合と sourceId 不変を再検証する）。
+            const bindingUpdate = learnDefault
+              ? {
+                  ...binding,
+                  kindDestinations: { ...binding.kindDestinations, [kind]: counterAccountId },
+                  updatedAt: nowIso(),
+                }
+              : undefined;
             // 日付昇順で適用する: 暗黙開始日の科目は最古の参照日まで線分が伸びる仕様のため、
             // 新しい日付を先に保存すると同一バッチ内の古い行が期間外参照で全拒否される。
             const ordered = [...rows].sort((a, b) => a.row.date.localeCompare(b.row.date));
-            await runApply(ordered.map((r) => registerAction(r.row, r.defaultCounterId!)));
+            await runApply(
+              ordered.map((r) => registerAction(r.row, counterAccountId)),
+              bindingUpdate,
+            );
           }}
         />
       ) : null}
 
-      {/* 個別行の適用/編集シート */}
-      {applyTarget && review ? (
-        <RowApplySheet
-          reviewRow={applyTarget}
-          accounts={accounts}
-          ownAccountName={accountName(review.ownAccountId)}
-          busy={busy}
-          onClose={() => setApplyTarget(null)}
-          onApply={async (input) => {
-            const target = applyTarget;
-            setApplyTarget(null);
-            await runApply([
-              registerAction(target.row, input.counterAccountId, {
-                date: input.date,
-                description: input.description,
-                amount: input.amount,
-              }),
-            ]);
+      {/* 個別行の「編集して適用」= ホームの仕訳入力シートの再利用（監査 P1-2）。
+          候補・検証は通常入力と同一。保存だけ register action（仕訳 + decision の同一 tx）
+          へ流れ、失敗時はシートが開いたまま（toast は store）。 */}
+      {applyTarget && review && profile ? (
+        <EntrySheet
+          init={{
+            kind: 'import',
+            context: {
+              mode: formModeForRow(profile, applyTarget.row),
+              input: importEntryInput(applyTarget, review.ownAccountId),
+              onSave: async (input) => {
+                await runApplyOrThrow([
+                  {
+                    kind: 'register',
+                    rowKey: applyTarget.row.rowKey,
+                    entry: buildSimpleEntry(input),
+                  },
+                ]);
+              },
+            },
           }}
+          onClose={() => setApplyTarget(null)}
         />
       ) : null}
 
@@ -1283,113 +1364,106 @@ function BindingSetupSheet({
   );
 }
 
-/* ── 個別行の適用/編集シート（そのまま適用 = 初期値のまま適用） ── */
+/* ── 行種一括適用シート（計上先の選択 + 仕訳形の確認・監査 P1-4） ── */
 
-function RowApplySheet({
-  reviewRow,
+function BulkApplySheet({
+  kind,
+  rows,
+  profile,
+  binding,
   accounts,
-  ownAccountName,
+  ownAccountId,
   busy,
   onClose,
   onApply,
 }: {
-  reviewRow: ReviewRow;
+  kind: string;
+  rows: ReviewRow[];
+  profile: ImportProfile;
+  binding: ProfileBinding;
   accounts: Account[];
-  ownAccountName: string;
+  ownAccountId: string;
   busy: boolean;
   onClose: () => void;
-  onApply: (input: {
-    date: string;
-    description: string;
-    amount: number;
-    counterAccountId: string;
-  }) => Promise<void>;
+  onApply: (counterAccountId: string, learnDefault: boolean) => Promise<void>;
 }) {
-  const row = reviewRow.row;
-  const [date, setDate] = useState(row.date);
-  const [description, setDescription] = useState(row.description || row.kind);
-  const [amountText, setAmountText] = useState(String(row.amount));
-  const [counterAccountId, setCounterAccountId] = useState(reviewRow.defaultCounterId ?? '');
+  // 初期値 = binding の既定計上先（あれば）。無い行種（支払い等）はここで選ぶ。
+  const initialCounterId = defaultCounterFor(profile, binding, kind) ?? '';
+  const [counterAccountId, setCounterAccountId] = useState(initialCounterId);
+  const [learnDefault, setLearnDefault] = useState(false);
 
-  const dirty =
-    date !== row.date ||
-    description !== (row.description || row.kind) ||
-    amountText !== String(row.amount) ||
-    counterAccountId !== (reviewRow.defaultCounterId ?? '');
+  const dirty = counterAccountId !== initialCounterId || learnDefault;
   const { requestClose, discardConfirm } = useDirtyGuard(dirty, onClose);
 
-  const amount = /^\d+$/.test(amountText) ? Number.parseInt(amountText, 10) : NaN;
-  const valid =
-    date !== '' &&
-    description.trim() !== '' &&
-    Number.isSafeInteger(amount) &&
-    amount > 0 &&
-    counterAccountId !== '';
+  // 自口座と同一の計上先は全行が借貸同一仕訳になる（既存の仕訳入力と同じ規則で拒否）。
+  const sameAsOwn = counterAccountId !== '' && counterAccountId === ownAccountId;
+  const valid = counterAccountId !== '' && !sameAsOwn;
 
+  const nameOf = (id: string): string => accounts.find((a) => a.id === id)?.name ?? '—';
   const counterName =
-    accounts.find((a) => a.id === counterAccountId)?.name ?? t('csvImport.applyCounter');
-  const shape =
-    row.ownSide === 'debit'
-      ? { debit: ownAccountName, credit: counterName }
-      : { debit: counterName, credit: ownAccountName };
+    counterAccountId === '' ? t('csvImport.bulkCounter') : nameOf(counterAccountId);
+  const shapeLines = bulkShapeLines(rows, nameOf(ownAccountId), counterName);
+
+  // 「既定にする」は binding の kindDestinations が受け付ける計上先（自口座以外・
+  // 仕訳先にできる通常科目）を選んだときだけ出す（保存境界の role 検証と同じ条件）。
+  const canLearn =
+    valid && isRecurringPostableRole(accounts.find((a) => a.id === counterAccountId)?.role);
 
   return (
     <>
       <Modal
-        title={t('csvImport.applyTitle')}
+        title={t('csvImport.bulkConfirmTitle', { kind })}
         onClose={requestClose}
         dismissMode="if-clean"
-        dataUi={UI.csvImport.applySheet}
+        dataUi={UI.csvImport.bulkConfirm}
         footer={
           <button
             type="button"
             className="btn btn--primary btn--block"
             onClick={() => {
               if (!valid || busy) return;
-              void onApply({ date, description: description.trim(), amount, counterAccountId });
+              void onApply(counterAccountId, learnDefault && canLearn);
             }}
             disabled={!valid || busy}
-            data-ui={UI.csvImport.applySave}
+            data-ui={UI.csvImport.bulkSave}
           >
-            {t('csvImport.applySave')}
+            {t('csvImport.bulkApply')}
           </button>
         }
       >
         <div className="stack">
-          <p className="field__hint">
-            {t('csvImport.applyShape', { debit: shape.debit, credit: shape.credit })}
-          </p>
-          <TextInput
-            label={t('csvImport.applyDate')}
-            type="date"
-            value={date}
-            onChange={setDate}
-            required
-            dataUi={UI.csvImport.applyDate}
-          />
-          <TextInput
-            label={t('csvImport.applyDescription')}
-            value={description}
-            onChange={setDescription}
-            required
-            dataUi={UI.csvImport.applyDescription}
-          />
-          <TextInput
-            label={t('csvImport.applyAmount')}
-            value={amountText}
-            onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
-            inputMode="numeric"
-            required
-            dataUi={UI.csvImport.applyAmount}
-          />
           <AccountPicker
-            label={t('csvImport.applyCounter')}
-            groups={groupedMonthlyAllocationAccounts(accounts, counterAccountId || undefined)}
+            label={t('csvImport.bulkCounter')}
+            groups={groupedAccountsByRole(
+              accounts,
+              bulkCounterRoles(profile, rows),
+              counterAccountId || undefined,
+            )}
             value={counterAccountId}
             onChange={setCounterAccountId}
             required
-            dataUi={UI.csvImport.applyCounter}
+            {...(sameAsOwn ? { error: t('entry.error.same-account') } : {})}
+            dataUi={UI.csvImport.bulkCounter}
           />
+          {canLearn ? (
+            <label
+              style={{
+                display: 'inline-flex',
+                gap: 8,
+                alignItems: 'center',
+                minHeight: 'var(--tap)',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={learnDefault}
+                onChange={(e) => setLearnDefault(e.target.checked)}
+                data-ui={UI.csvImport.bulkLearn}
+              />
+              {t('csvImport.bulkLearn', { kind })}
+            </label>
+          ) : null}
+          <p className="field__hint">{shapeLines.join(' ／ ')}</p>
         </div>
       </Modal>
       {discardConfirm}

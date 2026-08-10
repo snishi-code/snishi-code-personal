@@ -345,19 +345,17 @@ export const UI = {
     kindGroup: 'csvImport.review.kindGroup',
     kindBulk: 'csvImport.review.kindBulk',
     bulkConfirm: 'csvImport.review.bulkConfirm',
+    bulkCounter: 'csvImport.review.bulkCounter',
+    bulkLearn: 'csvImport.review.bulkLearn',
+    bulkSave: 'csvImport.review.bulkSave',
     row: 'csvImport.review.row',
     rowApply: 'csvImport.review.row.apply',
     rowLink: 'csvImport.review.row.link',
     rowIgnore: 'csvImport.review.row.ignore',
     rowRelease: 'csvImport.review.row.release',
     complete: 'csvImport.review.complete',
-    // 個別行の適用/編集シート
-    applySheet: 'csvImport.apply.sheet',
-    applyDate: 'csvImport.apply.date',
-    applyDescription: 'csvImport.apply.description',
-    applyAmount: 'csvImport.apply.amount',
-    applyCounter: 'csvImport.apply.counter',
-    applySave: 'csvImport.apply.save',
+    // 個別行の「編集して適用」はホームの仕訳入力シート（journal.entry.*）を再利用する
+    // （監査 P1-2）。取込専用の apply.* シートは廃止。
     // 既存仕訳へのリンクシート（類似候補 + 検索）
     linkSheet: 'csvImport.link.sheet',
     linkSearch: 'csvImport.link.search',

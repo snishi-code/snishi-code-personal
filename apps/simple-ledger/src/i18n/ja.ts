@@ -702,6 +702,8 @@ export const ja = {
   'csvImport.kindCount': '{count} 件',
   'csvImport.bulkApply': 'まとめて適用',
   'csvImport.bulkConfirmTitle': '「{kind}」をまとめて適用',
+  'csvImport.bulkCounter': '計上先',
+  'csvImport.bulkLearn': 'この計上先を「{kind}」の既定にする',
   'csvImport.bulkShapeLine': '借方 {debit} / 貸方 {credit} — {count} 件',
   'csvImport.rowFlagged': '要再確認',
   'csvImport.occurrenceShortage':
@@ -713,14 +715,7 @@ export const ja = {
   'csvImport.rowApply': '適用',
   'csvImport.rowLink': '既存仕訳へリンク',
   'csvImport.rowIgnore': '無視',
-  // 個別行の適用/編集シート
-  'csvImport.applyTitle': '行を適用',
-  'csvImport.applyShape': '仕訳形: 借方 {debit} / 貸方 {credit}',
-  'csvImport.applyDate': '日付',
-  'csvImport.applyDescription': '摘要',
-  'csvImport.applyAmount': '金額',
-  'csvImport.applyCounter': '計上先',
-  'csvImport.applySave': '適用する',
+  // 個別行の「編集して適用」はホームの仕訳入力シート（entry.*）を再利用する（監査 P1-2）
   // 既存仕訳へのリンク（§5-2 層2 は提示のみ・決めるのはユーザー）
   'csvImport.linkTitle': '既存仕訳へリンク',
   'csvImport.linkIntro': 'この行を、すでに登録済みの仕訳へ結び付けます（新しい仕訳は作りません）。',

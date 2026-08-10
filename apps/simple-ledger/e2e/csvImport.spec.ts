@@ -88,11 +88,11 @@ test('CSV取込: 一括適用で仕訳が増え、reload 後に同じ CSV を読
   await expect(page.locator(ui('csvImport.review.row'))).toHaveCount(2);
   await expect(page.locator(ui('csvImport.review.kindBulk'))).toHaveCount(1);
 
-  // 一括適用（確認 → 実行）。全行決定で「取込完了」になる。
+  // 一括適用（計上先は binding の既定が初期選択 → 実行）。全行決定で「取込完了」になる。
   await page.locator(ui('csvImport.review.kindBulk')).click();
   const bulkConfirm = page.locator(ui('csvImport.review.bulkConfirm'));
   await expect(bulkConfirm).toBeVisible();
-  await bulkConfirm.locator(ui('dialog.confirm')).click();
+  await bulkConfirm.locator(ui('csvImport.review.bulkSave')).click();
   await expect(page.locator(ui('csvImport.review.complete'))).toBeVisible();
   await expect(page.locator(ui('csvImport.review.row'))).toHaveCount(0);
 
