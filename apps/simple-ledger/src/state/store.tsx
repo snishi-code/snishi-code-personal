@@ -8,6 +8,7 @@ import type {
   Account,
   Ledger,
   MonthlyCostItem,
+  ProfileBinding,
   RecurringRule,
   Settings,
   Snapshot,
@@ -118,6 +119,12 @@ interface LedgerContextValue {
   reorderAccounts: (ids: string[]) => Promise<void>;
   removeAccount: (id: string) => Promise<void>;
   saveSettings: (settings: Settings) => Promise<void>;
+  /** CSV 取込: binding（取込元の紐付け・§1-1b）の作成・編集。 */
+  saveProfileBinding: (binding: ProfileBinding) => Promise<ProfileBinding>;
+  /** CSV 取込: レビュー済み行の一括適用（原子性は repository が保証・§4-4）。 */
+  applyCsvImportBatch: (input: repo.ApplyImportBatchInput) => Promise<repo.ImportBatchResult>;
+  /** CSV 取込: 決定の解除（無視・リンクの解除 = 行を未解決へ戻す・§4-6）。 */
+  removeCsvImportDecisions: (rowKeys: string[]) => Promise<number>;
   exportJson: () => void;
   importJson: (text: string, force?: boolean) => Promise<ImportOutcome>;
   listSnapshots: () => Promise<Snapshot[]>;
@@ -561,6 +568,51 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [refresh, toast],
   );
 
+  const saveProfileBinding = useCallback<LedgerContextValue['saveProfileBinding']>(
+    async (binding) => {
+      try {
+        const saved = await repo.upsertProfileBinding(binding);
+        await refresh();
+        toast.show(t('toast.saved'), 'success');
+        return saved;
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const applyCsvImportBatch = useCallback<LedgerContextValue['applyCsvImportBatch']>(
+    async (input) => {
+      try {
+        const result = await repo.applyImportBatch(input);
+        await refresh();
+        toast.show(t('csvImport.appliedToast', { count: input.actions.length }), 'success');
+        return result;
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
+  const removeCsvImportDecisions = useCallback<LedgerContextValue['removeCsvImportDecisions']>(
+    async (rowKeys) => {
+      try {
+        const removed = await repo.removeImportDecisions(rowKeys);
+        await refresh();
+        if (removed > 0) toast.show(t('csvImport.removedToast'), 'success');
+        return removed;
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+    },
+    [refresh, toast],
+  );
+
   const exportJson = useCallback<LedgerContextValue['exportJson']>(() => {
     if (!ledger) return;
     try {
@@ -691,6 +743,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       reorderAccounts,
       removeAccount,
       saveSettings,
+      saveProfileBinding,
+      applyCsvImportBatch,
+      removeCsvImportDecisions,
       exportJson,
       importJson,
       listSnapshots,
@@ -728,6 +783,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       reorderAccounts,
       removeAccount,
       saveSettings,
+      saveProfileBinding,
+      applyCsvImportBatch,
+      removeCsvImportDecisions,
       exportJson,
       importJson,
       listSnapshots,
