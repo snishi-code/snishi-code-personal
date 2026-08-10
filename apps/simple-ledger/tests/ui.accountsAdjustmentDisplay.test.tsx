@@ -12,7 +12,13 @@ import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { Accounts } from '../src/ui/screens/Accounts';
-import { createAdjustment, createOpenings, loadLedger, upsertEntry } from '../src/data/repository';
+import {
+  createAdjustment,
+  createOpenings,
+  loadLedger,
+  upsertAccount,
+  upsertEntry,
+} from '../src/data/repository';
 import { buildSimpleEntry } from '../src/domain/entry';
 import {
   groupedMonthlyAllocationAccounts,
@@ -167,6 +173,47 @@ describe('科目一覧の費用・収入表示（C-1・ヘッダー期間の発�
     const rowAll = rowOf('固定費');
     expect(rowAll.textContent).toContain('全期間の発生額');
     expect(rowAll.textContent).toContain(formatMoney(1_500, 'JPY'));
+  });
+
+  it('期間途中で終了した費用科目も、期間内の発生額があれば一覧に出る（P1-3）', async () => {
+    const ledger = await loadLedger();
+    const bank = ledger.accounts.find((a) => a.name === '預金')!;
+    await createOpenings([{ accountId: bank.id, amount: 10_000, date: '2020-01-01' }]);
+    await upsertAccount({
+      id: 'spring-course',
+      name: '春の講座',
+      type: 'expense',
+      role: 'expense-category',
+      archived: false,
+      startDate: '2026-01-01',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2026-03-10',
+        description: '受講料',
+        debitAccountId: 'spring-course',
+        creditAccountId: bank.id,
+        amount: 500,
+        kind: 'normal',
+      }),
+    );
+    // 年の途中でアーカイブ（終了日 = 2026-08-31 < 期間末 2026-12-31）。
+    const account = (await loadLedger()).accounts.find((a) => a.id === 'spring-course')!;
+    await upsertAccount({ ...account, archived: true, endDate: '2026-08-31' });
+
+    // 期間末の一点では存在しないが、期間内の発生額があるので一覧から消えない（ホームの
+    // 支出には出るのに一覧に出ない不一致を防ぐ）。
+    await renderReady({ mode: 'year', year: 2026 });
+    const row = rowOf('春の講座');
+    expect(row.textContent).toContain('2026年の発生額');
+    expect(row.textContent).toContain(formatMoney(500, 'JPY'));
+
+    // 発生の無い年は従来どおり出ない。
+    cleanup();
+    await renderReady({ mode: 'year', year: 2025 });
+    expect(screen.queryByText('春の講座')).toBeNull();
   });
 
   it('資産はスライス時点の残高のまま（表示仕様は変えない）', async () => {

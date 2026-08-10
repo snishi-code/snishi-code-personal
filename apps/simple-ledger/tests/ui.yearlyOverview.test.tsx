@@ -265,6 +265,37 @@ describe('YearlyOverview', () => {
     expect(within(matrix).getAllByRole('columnheader')).toHaveLength(4);
   });
 
+  it('最初のデータ年が極端に古くても、200列上限は古い側を切り詰めて地平年まで届く（P1-5）', () => {
+    const base = fixtureLedger();
+    ledgerState.ledger = {
+      ...base,
+      journalEntries: [
+        entry('ancient', '1880-01-01', 'cash', 'equity', 1000),
+        ...base.journalEntries,
+      ],
+    };
+
+    render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
+    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.modeAll}"]`)!);
+    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.horizonHardCap}"]`)!);
+    const matrix = document.querySelector(`[data-ui="${UI.yearlyOverview.matrix}"]`) as HTMLElement;
+    const headers = within(matrix)
+      .getAllByRole('columnheader')
+      .map((header) => header.textContent);
+    // 上限は最終年（地平）側を守る: 2100 年を必ず含み、超過分は古い側を切り詰める。
+    expect(headers.at(-1)).toBe('2100年');
+    expect(headers).toHaveLength(1 + 200);
+    expect(headers[1]).toBe('1901年');
+
+    // 実績のみへ戻すと従来どおり 1880 年を含む歯抜け列のまま。
+    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.horizonActual}"]`)!);
+    const actualHeaders = within(matrix)
+      .getAllByRole('columnheader')
+      .map((header) => header.textContent);
+    expect(actualHeaders[1]).toBe('1880年');
+    expect(actualHeaders.at(-1)).toBe('2027年');
+  });
+
   it('実績が今年+30より長ければ、+30年でも実績の最終年まで表示する', () => {
     ledgerState.ledger = {
       ...fixtureLedger(),

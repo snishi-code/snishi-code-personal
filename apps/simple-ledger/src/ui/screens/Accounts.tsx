@@ -8,7 +8,8 @@
  * - 初期残高(equity)・内部集約 role は聖域として表示しない。残高調整(system-adjustment)は
  *   収入・費用の内訳として表示だけする（「自動」バッジ付き・管理操作は出さない）。
  * - 費用・収入の内訳はヘッダー期間（ホームと同じ選択期間）の発生額、資産・負債は
- *   スライス時点の残高を表示する。
+ *   スライス時点の残高を表示する。期間途中で終了した費用・収入も、期間内の発生額が
+ *   あれば一覧に出す（期間末の一点で絞らない・監査 P1-3）。
  */
 import { useState, type CSSProperties } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
@@ -70,7 +71,13 @@ export function Accounts({ period = { mode: 'all' } }: { period?: ReportPeriod }
     recurringRules: ledger?.recurringRules ?? [],
   });
 
-  const groups = groupAccountsByBox(ledger?.accounts ?? [], showArchived, asOf);
+  // 費用・収入は期間途中で終了しても、期間内の発生額 ≠ 0 なら一覧に出す（監査 P1-3）。
+  const groups = groupAccountsByBox(
+    ledger?.accounts ?? [],
+    showArchived,
+    asOf,
+    (account) => summarizeEntriesForAccount(account, flowEntries, () => true).total !== 0,
+  );
 
   function beginArchiveTransfer(account: Account): void {
     const balance = accountBalance(account.id, account.type, todayEntries);

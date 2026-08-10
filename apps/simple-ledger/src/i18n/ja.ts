@@ -95,6 +95,7 @@ export const ja = {
   'ccItem.allocationStartDate': '費用化の開始日（任意・既定 = 購入日）',
   'ccItem.allocationStartHint': '購入日より後にすると、その間は台帳（保管庫）に価値が置かれます',
   'ccItem.period': '期間',
+  'ccItem.allocationFrom': '費用化 {date}〜',
   'ccItem.remainingValue': '残存価値',
   'ccItem.archiveTitle': 'アーカイブ',
   'ccItem.transferTarget': '振替先を選ぶ',

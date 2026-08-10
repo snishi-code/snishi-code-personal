@@ -272,20 +272,32 @@ export function accountAccent(account: Account): AccountAccent {
  * 科目を箱ごとにグループ化する（勘定科目画面用）。
  * 聖域 role のうち残高調整だけは type で収入・費用の箱へ表示する（boxIncludesAccount）。
  * equity / 内部集約は含めない。showArchived=false ならアーカイブ済みを除く。
+ *
+ * 費用・収入（残高調整含む）は、期間途中で終了して期間末（atDate）に存在しなくても、
+ * 期間内の発生額が 0 でなければ表示する（hasPeriodActivity。ホームの支出には出るのに
+ * 一覧から消える不一致を防ぐ・監査 P1-3）。資産・負債はスライス時点の存在で絞る従来のまま。
  */
 export function groupAccountsByBox(
   accounts: Account[],
   showArchived: boolean,
   atDate?: string,
+  hasPeriodActivity?: (account: Account) => boolean,
 ): { box: AccountBox; accounts: Account[] }[] {
-  return ACCOUNT_BOXES.map((box) => ({
-    box,
-    accounts: accounts
-      .filter(
-        (a) =>
-          boxIncludesAccount(box, a) &&
-          (showArchived || (atDate === undefined ? !a.archived : accountExistsAt(a, atDate))),
-      )
-      .sort(compareAccountOrder),
-  }));
+  return ACCOUNT_BOXES.map((box) => {
+    const isFlowBox = box.type === 'revenue' || box.type === 'expense';
+    return {
+      box,
+      accounts: accounts
+        .filter(
+          (a) =>
+            boxIncludesAccount(box, a) &&
+            (showArchived ||
+              (atDate === undefined
+                ? !a.archived
+                : accountExistsAt(a, atDate) ||
+                  (isFlowBox && hasPeriodActivity !== undefined && hasPeriodActivity(a)))),
+        )
+        .sort(compareAccountOrder),
+    };
+  });
 }

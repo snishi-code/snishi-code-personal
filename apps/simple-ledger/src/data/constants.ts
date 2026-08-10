@@ -11,9 +11,11 @@
 export const DB_NAME = 'simple-ledger-v2' as const;
 
 /**
- * IndexedDB のバージョン。version 7 で予定キャッシュフロー（cashflowSchedules）ストアを削除した
- * （機能ごと全廃 = 予定は未来日付の通常仕訳へ一本化。version 6 は取り置き機能のストア削除、
- * version 5 は旧・処分機能のストア削除、version 4 は旧 allocations ストアの削除）。
+ * IndexedDB のバージョン。version 7 で予定キャッシュフロー（cashflowSchedules）ストアを
+ * 現行構成から外した（機能ごと全廃 = 予定は未来日付の通常仕訳へ一本化）。
+ * upgrade は不足ストアの作成だけを行い、**旧版のストアは削除しない**（旧版 DB は
+ * schemaVersion 検査で復旧面へ送られ、復旧面の「DB 初期化」= DB 削除でのみ消える。
+ * 黙って削除しない・監査 P1-1）。
  */
 export const DB_VERSION = 7 as const;
 

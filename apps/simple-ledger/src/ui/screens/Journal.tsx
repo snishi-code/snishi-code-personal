@@ -321,7 +321,7 @@ export function Journal({
         ) : null}
       </div>
 
-      <div className="toolbar" role="group" aria-label={t('journal.sort')}>
+      <div className="toolbar journal__sort" role="group" aria-label={t('journal.sort')}>
         <Segmented
           value={sortKey}
           items={[

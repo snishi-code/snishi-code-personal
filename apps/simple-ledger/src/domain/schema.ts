@@ -264,7 +264,11 @@ export const monthlyCostItemSchema = z
         path: ['allocationStartDate'],
       });
     }
-    if (monthsBetween(monthOf(item.startDate), monthOf(item.endDate)) + 1 > SPREAD_MONTHS_CAP) {
+    // 配分月数は実際の等分数と同じ基準 = 費用化開始月（allocationStartDate ?? startDate）〜
+    // 終了月で数える（購入日基準にすると、費用化開始を遅らせた item の上限が実配分より
+    // 厳しくなる・監査 P2-2）。
+    const spreadFrom = monthOf(item.allocationStartDate ?? item.startDate);
+    if (monthsBetween(spreadFrom, monthOf(item.endDate)) + 1 > SPREAD_MONTHS_CAP) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: `配分月数が上限(${SPREAD_MONTHS_CAP}ヶ月)を超えています`,

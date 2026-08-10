@@ -327,6 +327,69 @@ describe('持ち込み登録（継続コスト資産シート）', () => {
   });
 });
 
+describe('費用化の開始日の表示と期間クイックボタン（P2-1 / P2-3）', () => {
+  it('期間クイックボタンの起点は費用化の開始日（未設定なら購入日）', async () => {
+    const ledger = await loadLedger();
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    const item = await createContinuousCost({
+      name: '前払いの保守',
+      amount: 60000,
+      startDate: '2026-01-10',
+      allocationStartDate: '2027-02-01',
+      expenseAccountId: expense.id,
+    });
+
+    await renderReady();
+    fireEvent.click(await screen.findByRole('button', { name: `編集: ${item.name}` }));
+    const quickSpan = document.querySelector(
+      `[data-ui="${UI.allocations.editQuickSpan}"]`,
+    ) as HTMLElement;
+    const endInput = document.querySelector(
+      `[data-ui="${UI.allocations.editEndDate}"]`,
+    ) as HTMLInputElement;
+
+    // 起点 = 費用化の開始日（2027-02）から 1 年（購入日起点なら 2026-12-31 になってしまう）。
+    fireEvent.click(within(quickSpan).getByRole('button', { name: '1年' }));
+    expect(endInput.value).toBe('2028-01-31');
+
+    // 費用化の開始日を空にすると従来どおり購入日起点。
+    fireEvent.change(
+      document.querySelector(`[data-ui="${UI.allocations.editAllocationStartDate}"]`)!,
+      { target: { value: '' } },
+    );
+    fireEvent.click(within(quickSpan).getByRole('button', { name: '1年' }));
+    expect(endInput.value).toBe('2026-12-31');
+  });
+
+  it('一覧の期間表示は費用化の開始日を設定した項目だけ追加表示する', async () => {
+    const ledger = await loadLedger();
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    await createContinuousCost({
+      name: '前払いの保守',
+      amount: 60000,
+      startDate: '2026-01-10',
+      allocationStartDate: '2027-02-01',
+      expenseAccountId: expense.id,
+    });
+    await createContinuousCost({
+      name: '普通の年払い',
+      amount: 12000,
+      startDate: '2026-01-10',
+      expenseAccountId: expense.id,
+    });
+
+    await renderReady();
+    const deferredCard = (await screen.findByText('前払いの保守')).closest(
+      `[data-ui="${UI.allocations.item}"]`,
+    ) as HTMLElement;
+    expect(deferredCard.textContent).toContain('費用化 2027-02-01〜');
+    const plainCard = screen
+      .getByText('普通の年払い')
+      .closest(`[data-ui="${UI.allocations.item}"]`) as HTMLElement;
+    expect(plainCard.textContent).not.toContain('費用化');
+  });
+});
+
 describe('終了まで1ヶ月以内のマーカー', () => {
   it('1ヶ月以内の項目だけ data-ending が付き、並びは終了が近い順', async () => {
     const ledger = await loadLedger();

@@ -93,6 +93,7 @@ function addSpanYears(dates: string[], startDate: string, endDate: string): void
  * 全体ビューの年列。実績のみは matrixDataYears の年集合そのまま（歯抜けも従来どおり）＝
  * 現行挙動を 1 バイトも変えない。延長地平は最初のデータ年から地平の年まで**連続**で埋める。
  * 地平の年が実績の最終年より手前でも実績の列は落とさない（max で長い方を採る）。
+ * 200 列を超える場合は古い側を切り詰める（地平年を必ず含める）。
  * データが無ければ地平だけで列を作らない（従来どおり空表示）。
  */
 function horizonYears(
@@ -109,9 +110,12 @@ function horizonYears(
   const horizonYear =
     horizon === 'plus30' ? todayYear + HORIZON_EXTRA_YEARS : HORIZON_HARD_CAP_YEAR;
   const lastYear = Math.max(lastActualYear, horizonYear);
+  // schema の日付範囲内でも、破損値から無制限に列を増やさない（addSpanYears と同じ 200 列上限）。
+  // 上限は**最終年（地平）側を守る**: 超える場合は古い側を切り詰め、地平年を必ず含める
+  // （最初のデータ年が極端に古くても 2100 等へ届かず途中で止まらない・監査 P1-5）。
+  const cappedFirstYear = Math.max(firstYear, lastYear - 200 + 1);
   const years: number[] = [];
-  // schema の日付範囲内でも、破損値から無制限に列を増やさない（addSpanYears と同じ上限）。
-  for (let year = firstYear, count = 0; year <= lastYear && count < 200; year++, count++) {
+  for (let year = cappedFirstYear; year <= lastYear; year++) {
     years.push(year);
   }
   return years;

@@ -427,6 +427,10 @@ export function Allocations({
                     <span className="muted">{t('ccItem.period')}</span>
                     <span>
                       {m.startDate} 〜 {m.endDate ?? '—'}
+                      {/* 費用化の開始日を遅らせた item だけ、月割りの起点を追加表示（監査 P2-3）。 */}
+                      {m.allocationStartDate !== undefined
+                        ? `（${t('ccItem.allocationFrom', { date: m.allocationStartDate })}）`
+                        : ''}
                     </span>
                   </div>
                   <div className="kv">
@@ -1043,6 +1047,10 @@ function ContinuousCostItemSheet({
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
+  // 期間クイックボタンの起点 = 費用化の開始日（domain の allocationStartOf と同じ既定:
+  // 空 = 購入日）。費用化開始を遅らせた item の「1年」は費用化開始から 1 年になる（監査 P2-1）。
+  const quickSpanFrom = allocationStartDate.trim() !== '' ? allocationStartDate.trim() : startDate;
+
   // 過去から再計算される項目の変更予告（破壊的操作の予告なので削らない）。
   const pastFieldsChanged =
     existing !== undefined &&
@@ -1200,7 +1208,7 @@ function ContinuousCostItemSheet({
               type="button"
               className="btn btn--ghost"
               style={{ minHeight: 'var(--tap)' }}
-              onClick={() => setEndDate(quickSpanEndDate(startDate, years))}
+              onClick={() => setEndDate(quickSpanEndDate(quickSpanFrom, years))}
             >
               {t('ccItem.quickSpan', { years })}
             </button>

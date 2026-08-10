@@ -25,17 +25,17 @@ export const STORE = {
 export type StoreName = (typeof STORE)[keyof typeof STORE];
 
 /**
- * foundation の DatabaseHandle。現行 STORE との差分で廃止ストアを削除するので冪等。
+ * foundation の DatabaseHandle。upgrade は不足ストアの作成だけを行うので冪等。
  */
 export const db = createDatabase({
   name: DB_NAME,
   version: DB_VERSION,
   upgrade: (idb) => {
-    // 現行 STORE に無いレガシーストアを削除する。
-    const wanted = new Set<string>(Object.values(STORE));
-    for (const name of Array.from(idb.objectStoreNames)) {
-      if (!wanted.has(name)) idb.deleteObjectStore(name);
-    }
+    // 現行 STORE に無い未知（レガシー）ストアは**温存する**（黙って削除しない）。
+    // v7 は後方互換を持たない＝旧版 DB は repository の assertSchemaVersionCurrent が
+    // 復旧面へ送り、旧版データは復旧面の「DB 初期化」（wipeDatabase = deleteDatabase）
+    // でのみ消える。upgrade が先にストアを消すと、復旧面に着く前にデータが失われる
+    // （「黙って削除しない」原則違反・監査 P1-1）。
     if (!idb.objectStoreNames.contains(STORE.kv)) idb.createObjectStore(STORE.kv);
     if (!idb.objectStoreNames.contains(STORE.accounts)) {
       idb.createObjectStore(STORE.accounts, { keyPath: 'id' });

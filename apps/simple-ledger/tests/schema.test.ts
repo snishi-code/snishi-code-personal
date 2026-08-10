@@ -859,6 +859,24 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
     // ちょうど 1200ヶ月（2026-06 〜 2126-05）は valid。
     expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2126-05-31' }).success).toBe(true);
   });
+  it('配分月数の上限は費用化開始月〜終了月で数える（実際の等分数と同じ基準・P2-2）', () => {
+    // 購入月（2026-06）からは 1206 ヶ月でも、費用化開始（2026-12）からちょうど 1200 ヶ月なら valid。
+    expect(
+      monthlyCostItemSchema.safeParse({
+        ...base,
+        allocationStartDate: '2026-12-01',
+        endDate: '2126-11-30',
+      }).success,
+    ).toBe(true);
+    // 費用化開始から 1201 ヶ月は invalid。
+    expect(
+      monthlyCostItemSchema.safeParse({
+        ...base,
+        allocationStartDate: '2026-12-01',
+        endDate: '2126-12-01',
+      }).success,
+    ).toBe(false);
+  });
   it('費用化の開始日（allocationStartDate）は明示値のみ検証: startDate〜endDate の内側だけ valid（§D）', () => {
     // 内側（両端含む）は valid。package でも valid（購入の仕訳は startDate 基準のまま）。
     const mid = { ...base, allocationStartDate: '2026-12-01' };
@@ -1096,6 +1114,21 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
     const overlapped = { ...a, endDate: '2027-04-30' };
     const pkg = rulePkg([overlapped, b]);
     expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(true);
+    // ccr- item の唯一の縛り = ルール存在期間内の誕生（P1-2 決着の裏面・既存検証の固定）:
+    // startDate がルールの存在期間（2026-04-01〜）より前の item は invalid。
+    const outside = cycle('2026-03', '2026-03-25', '2027-02-28');
+    const outsideResult = ledgerExportPackageSchema.safeParse(rulePkg([outside]));
+    expect(outsideResult.success).toBe(false);
+    expect(
+      outsideResult.success
+        ? []
+        : outsideResult.error.issues.filter((issue) =>
+            issue.message.includes('定期ルールの存在期間外'),
+          ),
+    ).not.toHaveLength(0);
+    // ccr- item への allocationStartDate は禁止しない（通常 item と同権）。
+    const deferred = { ...a, allocationStartDate: '2026-10-01' };
+    expect(ledgerExportPackageSchema.safeParse(rulePkg([deferred, b])).success).toBe(true);
   });
   it('仕訳の monthlyCostId が存在しないと invalid', () => {
     const dangling = purchaseOf(base, { metadata: { inputMode: 'expense', monthlyCostId: 'no' } });
