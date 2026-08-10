@@ -194,6 +194,8 @@ describe('プロファイル管理 — JSON 貼付での追加（fail-closed・�
     await waitFor(() => {
       expect(q(UI.csvImport.pasteSheet)!.textContent).toContain('DSL の検証に失敗しました');
     });
+    // 理由は日本語で読める（zod の英語 message をそのまま出さない）。
+    expect(q(UI.csvImport.pasteSheet)!.textContent).toContain('使えない項目があります（bogus）');
     expect((await loadLedger()).importProfiles).toHaveLength(1);
 
     // ③ 正しい JSON → 保存されて一覧に出る（ユーザー定義 = 組み込み印なし）。
@@ -269,6 +271,8 @@ describe('AI プロファイルビルダー（§6）', () => {
     await waitFor(() => {
       expect(document.body.textContent).toContain('DSL の検証に失敗しました');
     });
+    // 欠けている項目が日本語の場所名で分かる（AI に何を直させるかが読める）。
+    expect(document.body.textContent).toContain('ファイル形式: 必須の項目がありません');
     expect(q(UI.csvImport.builderPreview)).toBeNull();
 
     // 返書③ 正しい返書（```json フェンス込みの文章）→ 実適用プレビュー。

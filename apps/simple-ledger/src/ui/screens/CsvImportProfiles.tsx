@@ -7,6 +7,7 @@
  *    restoreBuiltinImportProfiles の配線・結果は toast）。
  *  - 追加は JSON 貼付（parseImportProfileDsl の strict 検証・fail-closed・部分保存なし）。
  *    編集は v1 では「JSON を表示してコピー → 貼付で新規 / 上書き」（フォームエディタは作らない）。
+ *  - 検証失敗の表示は importDslIssueText（zod issue → 日本語）。英語の既定 message は出さない。
  *
  * AI ビルダー（アプリは AI に接続しない）:
  *  1. 未知 CSV を選択 → ヘッダー + サンプル行（先頭 5 行）を抽出
@@ -18,7 +19,6 @@
  *  5. 確認 → 名前 → 保存（失敗は部分保存しない・再貼付で何度でもやり直せる）→ 取込フローへ続く導線
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ZodError } from 'zod';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { SelectInput, TextArea, TextInput } from '@snishi/foundation/ui/Field';
 import { useToast } from '@snishi/foundation/ui/toast';
@@ -46,6 +46,7 @@ import {
 } from '../../domain/importPrompt';
 import { profileDslDigest } from '../../domain/importIdentity';
 import { newId } from '../../domain/ids';
+import { dslIssuesText } from '../importDslIssueText';
 import { errorText, t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import { nowIso } from '../../util/time';
@@ -54,18 +55,6 @@ import { nowIso } from '../../util/time';
 const SAMPLE_ROW_COUNT = 5;
 /** 実適用プレビューに出す正規化行の先頭件数（件数会計は常に全行）。 */
 const PREVIEW_ROW_COUNT = 5;
-
-/** ZodError（DSL 検証失敗）をユーザー表示文言へ（fail-closed の理由を見せて作り直させる）。 */
-function dslIssuesText(e: unknown): string {
-  if (e instanceof ZodError) {
-    const issues = e.issues
-      .slice(0, 5)
-      .map((i) => (i.path.length > 0 ? `${i.path.join('.')}: ${i.message}` : i.message))
-      .join(' / ');
-    return t('csvImport.profiles.dslInvalid', { issues });
-  }
-  return errorText(e);
-}
 
 /** クリップボードへコピー（失敗は false。外部送信なし・端末内のみ）。 */
 async function copyToClipboard(text: string): Promise<boolean> {
@@ -328,7 +317,8 @@ function ProfilePasteSheet({
     try {
       dsl = parseImportProfileDsl(value);
     } catch (e) {
-      setJsonError(dslIssuesText(e));
+      // 検証失敗は日本語で理由を見せる（元の JSON を渡すと必須欠落と型違いを区別できる）。
+      setJsonError(dslIssuesText(e, value));
       return;
     }
     setSubmitting(true);
@@ -542,7 +532,7 @@ function ProfileBuilderPanel({
     try {
       dsl = parseImportProfileDsl(value);
     } catch (e) {
-      setReplyError(dslIssuesText(e));
+      setReplyError(dslIssuesText(e, value));
       return;
     }
     try {
