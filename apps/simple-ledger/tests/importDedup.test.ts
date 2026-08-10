@@ -1,0 +1,231 @@
+import { describe, expect, it } from 'vitest';
+import './setup';
+import type { JournalEntry } from '../src/domain/types';
+import { externalRowKey, fingerprintRowKey } from '../src/domain/importIdentity';
+import {
+  resolveImportRows,
+  type DedupRow,
+  type ImportDecisionSummary,
+} from '../src/domain/importDedup';
+
+function entry(id: string, date: string, amount: number, accountId = 'paypay'): JournalEntry {
+  return {
+    id,
+    date,
+    description: id,
+    kind: 'normal',
+    lines: [
+      { accountId: 'food', side: 'debit', amount },
+      { accountId, side: 'credit', amount },
+    ],
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+}
+
+function dedupRow(rowKey: string, overrides: Partial<DedupRow> = {}): DedupRow {
+  return { rowKey, date: '2026-08-01', amount: 100, ownSide: 'credit', ...overrides };
+}
+
+const SRC = 'PayPay本体';
+
+describe('resolveImportRows（層1: rowKey 決定的照合）', () => {
+  it('registered 決定 + 実在仕訳 = decided', () => {
+    const key = externalRowKey(SRC, ['id-1', '支払い']);
+    const decisions = new Map<string, ImportDecisionSummary>([
+      [key, { status: 'registered', entryId: 'e1' }],
+    ]);
+    const r = resolveImportRows({
+      rows: [dedupRow(key)],
+      decisions,
+      existingEntries: [entry('e1', '2026-08-01', 100)],
+    });
+    expect(r).toHaveLength(1);
+    expect(r[0]!.status).toBe('decided');
+    expect(r[0]!.decision?.entryId).toBe('e1');
+  });
+
+  it('ignored 決定 = decided（entryId 不要）', () => {
+    const key = externalRowKey(SRC, ['id-2', '支払い']);
+    const decisions = new Map<string, ImportDecisionSummary>([[key, { status: 'ignored' }]]);
+    const r = resolveImportRows({ rows: [dedupRow(key)], decisions, existingEntries: [] });
+    expect(r[0]!.status).toBe('decided');
+  });
+
+  it('決定なし = unresolved', () => {
+    const key = externalRowKey(SRC, ['id-3', '支払い']);
+    const r = resolveImportRows({
+      rows: [dedupRow(key)],
+      decisions: new Map(),
+      existingEntries: [],
+    });
+    expect(r[0]!.status).toBe('unresolved');
+  });
+
+  it('決定はあるが仕訳が実在しない = unresolved-dangling（黙って skip しない）', () => {
+    const key = externalRowKey(SRC, ['id-4', '支払い']);
+    const decisions = new Map<string, ImportDecisionSummary>([
+      [key, { status: 'linked', entryId: 'gone' }],
+    ]);
+    const r = resolveImportRows({ rows: [dedupRow(key)], decisions, existingEntries: [] });
+    expect(r[0]!.status).toBe('unresolved-dangling');
+    expect(r[0]!.decision?.status).toBe('linked');
+  });
+
+  it('決定的照合は date / amount に依存しない（rowKey だけで決まる）', () => {
+    const key = externalRowKey(SRC, ['id-5', '支払い']);
+    const decisions = new Map<string, ImportDecisionSummary>([
+      [key, { status: 'registered', entryId: 'e1' }],
+    ]);
+    const r = resolveImportRows({
+      rows: [dedupRow(key, { date: '2030-01-01', amount: 99999 })],
+      decisions,
+      existingEntries: [entry('e1', '2026-08-01', 100)],
+    });
+    expect(r[0]!.status).toBe('decided');
+  });
+});
+
+describe('resolveImportRows（§5-1 出現数防御）', () => {
+  const fp = 'aa'.repeat(32);
+
+  it('既知 occurrence 数とファイル内出現数の不一致 → その fingerprint の全行が未解決', () => {
+    // 既知 = occurrence 2 まで決定済み。ファイル内には 1 行しか無い = 食い違い。
+    const decisions = new Map<string, ImportDecisionSummary>([
+      [fingerprintRowKey(SRC, fp, 1), { status: 'registered', entryId: 'e1' }],
+      [fingerprintRowKey(SRC, fp, 2), { status: 'registered', entryId: 'e2' }],
+    ]);
+    const r = resolveImportRows({
+      rows: [dedupRow(fingerprintRowKey(SRC, fp, 1))],
+      decisions,
+      existingEntries: [entry('e1', '2026-08-01', 100), entry('e2', '2026-08-01', 100)],
+    });
+    expect(r[0]!.status).toBe('unresolved-count-mismatch');
+  });
+
+  it('出現数が一致すれば occurrence ごとに決定的照合される', () => {
+    const decisions = new Map<string, ImportDecisionSummary>([
+      [fingerprintRowKey(SRC, fp, 1), { status: 'registered', entryId: 'e1' }],
+    ]);
+    const rows = [dedupRow(fingerprintRowKey(SRC, fp, 1)), dedupRow(fingerprintRowKey(SRC, fp, 2))];
+    // 既知 max occurrence = 1 だがファイル内は 2 行 → 食い違い扱い（安全側）。
+    const mismatch = resolveImportRows({
+      rows,
+      decisions,
+      existingEntries: [entry('e1', '2026-08-01', 100)],
+    });
+    expect(mismatch.map((x) => x.status)).toEqual([
+      'unresolved-count-mismatch',
+      'unresolved-count-mismatch',
+    ]);
+
+    // 既知 max occurrence = 2・ファイル内 2 行 → occurrence 1 は decided / 2 は dangling でなく判定どおり。
+    const decisions2 = new Map<string, ImportDecisionSummary>([
+      [fingerprintRowKey(SRC, fp, 1), { status: 'registered', entryId: 'e1' }],
+      [fingerprintRowKey(SRC, fp, 2), { status: 'ignored' }],
+    ]);
+    const matched = resolveImportRows({
+      rows,
+      decisions: decisions2,
+      existingEntries: [entry('e1', '2026-08-01', 100)],
+    });
+    expect(matched.map((x) => x.status)).toEqual(['decided', 'decided']);
+  });
+
+  it('ファイル内で rowKey が衝突（同一 externalId が複数行）→ 全該当行が未解決', () => {
+    const key = externalRowKey(SRC, ['dup-id', '支払い']);
+    const other = externalRowKey(SRC, ['unique-id', '支払い']);
+    const r = resolveImportRows({
+      rows: [dedupRow(key), dedupRow(key), dedupRow(other)],
+      decisions: new Map(),
+      existingEntries: [],
+    });
+    expect(r.map((x) => x.status)).toEqual([
+      'unresolved-count-mismatch',
+      'unresolved-count-mismatch',
+      'unresolved',
+    ]);
+  });
+
+  it('sourceIdentity が違えば同じ fingerprint でも別名前空間（不一致にならない)', () => {
+    const decisions = new Map<string, ImportDecisionSummary>([
+      [fingerprintRowKey('別の口座', fp, 1), { status: 'ignored' }],
+      [fingerprintRowKey('別の口座', fp, 2), { status: 'ignored' }],
+    ]);
+    const r = resolveImportRows({
+      rows: [dedupRow(fingerprintRowKey(SRC, fp, 1))],
+      decisions,
+      existingEntries: [],
+    });
+    expect(r[0]!.status).toBe('unresolved');
+  });
+});
+
+describe('resolveImportRows（層2: 類似候補は提示のみ）', () => {
+  it('日付±N日・同額・自口座一致の既存仕訳を候補として返す（status は変えない）', () => {
+    const key = externalRowKey(SRC, ['id-9', '支払い']);
+    const near = entry('near', '2026-08-02', 100);
+    const far = entry('far', '2026-08-20', 100);
+    const otherAmount = entry('other-amount', '2026-08-01', 999);
+    const otherAccount = entry('other-account', '2026-08-01', 100, 'cash');
+    const r = resolveImportRows({
+      rows: [dedupRow(key)],
+      decisions: new Map(),
+      existingEntries: [far, near, otherAmount, otherAccount],
+      ownAccountId: 'paypay',
+    });
+    expect(r[0]!.status).toBe('unresolved');
+    expect(r[0]!.similarEntryIds).toEqual(['near']);
+  });
+
+  it('ownAccountId が無ければ候補は出さない（自口座一致を満たせない）', () => {
+    const key = externalRowKey(SRC, ['id-10', '支払い']);
+    const r = resolveImportRows({
+      rows: [dedupRow(key)],
+      decisions: new Map(),
+      existingEntries: [entry('near', '2026-08-01', 100)],
+    });
+    expect(r[0]!.similarEntryIds).toEqual([]);
+  });
+
+  it('自口座の side が一致しない仕訳は候補にしない', () => {
+    const key = externalRowKey(SRC, ['id-11', '支払い']);
+    const r = resolveImportRows({
+      rows: [dedupRow(key, { ownSide: 'debit' })],
+      decisions: new Map(),
+      existingEntries: [entry('credit-side', '2026-08-01', 100)],
+      ownAccountId: 'paypay',
+    });
+    expect(r[0]!.similarEntryIds).toEqual([]);
+  });
+
+  it('decided の行には候補を出さない（レビュー対象でない）', () => {
+    const key = externalRowKey(SRC, ['id-12', '支払い']);
+    const decisions = new Map<string, ImportDecisionSummary>([
+      [key, { status: 'registered', entryId: 'e1' }],
+    ]);
+    const r = resolveImportRows({
+      rows: [dedupRow(key)],
+      decisions,
+      existingEntries: [entry('e1', '2026-08-01', 100)],
+      ownAccountId: 'paypay',
+    });
+    expect(r[0]!.similarEntryIds).toEqual([]);
+  });
+});
+
+describe('resolveImportRows（groupId 不参加）', () => {
+  it('groupId が付いた行でも判定・候補が変わらない', () => {
+    const key = externalRowKey(SRC, ['id-13', '支払い']);
+    const base = dedupRow(key);
+    const withGroup = { ...base, groupId: 'g1' } as DedupRow;
+    const input = {
+      decisions: new Map<string, ImportDecisionSummary>(),
+      existingEntries: [entry('near', '2026-08-01', 100)],
+      ownAccountId: 'paypay',
+    };
+    const a = resolveImportRows({ ...input, rows: [base] });
+    const b = resolveImportRows({ ...input, rows: [withGroup] });
+    expect(b).toEqual(a);
+  });
+});
