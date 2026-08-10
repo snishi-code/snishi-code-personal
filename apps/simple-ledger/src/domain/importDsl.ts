@@ -263,7 +263,7 @@ export function conditionColumns(cond: ImportCondition): string[] {
 
 /**
  * 正規化行の共通部（§1-4 NormalizedRow から rowKey / groupId を除いた形）。
- * rowKey は sourceIdentity（binding 由来）が要るため importIdentity.attachRowKeys が付与する。
+ * rowKey は sourceId（binding 由来の不変な取込元 ID）が要るため importIdentity.attachRowKeys が付与する。
  */
 export interface NormalizedRowCore {
   /** ISO 日付（YYYY-MM-DD）。日時は日付へ切り捨て済み。 */

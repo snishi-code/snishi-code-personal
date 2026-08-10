@@ -3701,7 +3701,7 @@ async function upsertImportProfileUnlocked(profile: ImportProfile): Promise<Impo
 
 /**
  * Import Profile の削除（組み込みも削除できる・削除後に自動復活しない・§1-1）。
- * binding / decision は残す（soft reference。sourceIdentity の連続性を保ち、
+ * binding / decision は残す（soft reference。sourceId の連続性を保ち、
  * 「組み込みを復元」で同じ紐付け・決定へ再接続できる）。冪等（無ければ何もしない）。
  */
 async function deleteImportProfileUnlocked(id: string): Promise<void> {
@@ -3735,6 +3735,8 @@ async function restoreBuiltinImportProfilesUnlocked(): Promise<ImportProfile[]> 
 /**
  * ProfileBinding の保存境界検証（§1-1b・fail-closed）。
  *  - 紐付け先 profile は保存時点で存在すること（保存後の削除で壊れるのは soft reference として許す）。
+ *  - sourceId（行キーの名前空間・監査 P1-3）は空白不可・全 binding で一意・既存 binding では
+ *    変更不可（改名は表示名 sourceIdentity の編集で行う）。
  *  - 自口座・チャージ源泉は日常資産（daily-asset）。行種→計上先は起票可能 role
  *    （内部集約・残高調整は不可）。同一科目を借貸両側（自口座と相手方）に指定するのは拒否。
  *  - 同一 (profileId, sourceIdentity) の紐付けは 1 つ。
@@ -3750,8 +3752,18 @@ function assertProfileBindingSavable(
   const saved = parsed.data as ProfileBinding;
   const identity = saved.sourceIdentity.trim();
   if (identity === '') throw new LedgerError('error.importBinding.invalidStructure');
+  if (saved.sourceId.trim() === '') throw new LedgerError('error.importBinding.invalidStructure');
   if (!profiles.some((p) => p.id === saved.profileId)) {
     throw new LedgerError('error.importProfile.notFound');
+  }
+  // sourceId は不変（rowKey / decision の名前空間。変えると過去の決定が照合できなくなる）。
+  const prev = bindings.find((b) => b.id === saved.id);
+  if (prev !== undefined && prev.sourceId !== saved.sourceId) {
+    throw new LedgerError('error.importBinding.sourceIdImmutable');
+  }
+  // sourceId は全 binding で一意（共有すると別取込元の決定が黙って混線する・監査 P1-3）。
+  if (bindings.some((b) => b.id !== saved.id && b.sourceId === saved.sourceId)) {
+    throw new LedgerError('error.importBinding.sourceIdDuplicate');
   }
   if (
     bindings.some(
@@ -3802,7 +3814,7 @@ async function upsertProfileBindingUnlocked(binding: ProfileBinding): Promise<Pr
   return saved;
 }
 
-/** binding の取得（profile × 取込元識別子で高々 1 件・§1-1b）。 */
+/** binding の取得（profile × 取込元表示名で高々 1 件・§1-1b）。 */
 export async function findProfileBinding(
   profileId: string,
   sourceIdentity: string,
@@ -3810,6 +3822,39 @@ export async function findProfileBinding(
   const bindings = await getAll<ProfileBinding>(STORE.profileBindings);
   const identity = sourceIdentity.trim();
   return bindings.find((b) => b.profileId === profileId && b.sourceIdentity.trim() === identity);
+}
+
+/**
+ * 適用時の binding 再検証（監査 P1-3・§4-4）。検証するのは「binding が存在し、指す科目が
+ * 実在して role が binding の定義と整合していること」だけ（作者決定 8/11: 仕訳レベルの
+ * 借貸同一科目・行種→role の新たな制限は足さない。仕訳日付での科目生存は既存の
+ * assertEntrySavable の管轄なのでここで重複実装しない）。
+ */
+function assertBindingUsableForImport(
+  binding: ProfileBinding | undefined,
+  profileId: string,
+  accounts: Map<string, Account>,
+): ProfileBinding {
+  if (!binding || binding.profileId !== profileId) {
+    throw new LedgerError('error.importBinding.notFound');
+  }
+  const own = accounts.get(binding.ownAccountId);
+  if (!own || own.role !== 'daily-asset') {
+    throw new LedgerError('error.importBinding.ownAccountRole');
+  }
+  if (binding.chargeSourceAccountId !== undefined) {
+    const source = accounts.get(binding.chargeSourceAccountId);
+    if (!source || source.role !== 'daily-asset') {
+      throw new LedgerError('error.importBinding.chargeSourceRole');
+    }
+  }
+  for (const accountId of Object.values(binding.kindDestinations)) {
+    const account = accounts.get(accountId);
+    if (!account || !isRecurringPostableRole(account.role)) {
+      throw new LedgerError('error.importBinding.destinationRole');
+    }
+  }
+  return binding;
 }
 
 /**
@@ -3862,8 +3907,12 @@ export interface ApplyImportBatchInput {
   profileId: string;
   /** レビュー表示時点の profile digest（§5-1）。適用時に再計算値と照合し、不一致は全拒否。 */
   profileDigest: string;
-  /** 取込元識別子（binding のユーザー命名・行キーの名前空間）。 */
-  sourceIdentity: string;
+  /**
+   * 適用に使う binding（取込元）の ID（監査 P1-3）。存在・profile 整合・参照科目の実在と
+   * role 整合を適用時（tx 内でも）再検証し、壊れていれば全件拒否する。行キーの名前空間は
+   * この binding の sourceId。
+   */
+  bindingId: string;
   /** 行キー生成アルゴリズムの版。省略時は現行（IMPORT_IDENTITY_VERSION）。 */
   identityVersion?: number;
   /** 由来ファイルの SHA-256（provenance とファイル記録に載せる）。 */
@@ -3892,7 +3941,8 @@ export interface ImportBatchResult {
  *
  *  - entries + decisions + ファイル記録 + binding 学習 + meta revision を 1 tx で保存する。
  *  - 適用前（事前検証）に ledger 全体と profile digest を検証し、さらに tx 内で
- *    profile の同一性（canonical JSON 比較）・決定の不在・台帳世代（revision CAS）を再検証する。
+ *    profile の同一性（canonical JSON 比較）・決定の不在・binding の存在と科目 role 整合
+ *    （監査 P1-3）・台帳世代（revision CAS）を再検証する。
  *    どれかが変わっていれば **1 件も書かずに** abort する（全件不変）。
  *  - 二重タップは serializeMutation の直列化 + 決定済みキーの拒否で冪等に落ちる
  *    （同一バッチの再実行は error.import.alreadyDecided で全拒否）。
@@ -3902,8 +3952,7 @@ async function applyImportBatchUnlocked(input: ApplyImportBatchInput): Promise<I
   if (!Number.isInteger(input.fileTotalRowCount) || input.fileTotalRowCount < 0) {
     throw new LedgerError('error.import.invalidBatch');
   }
-  const sourceIdentity = input.sourceIdentity.trim();
-  if (sourceIdentity === '' || input.fileHash === '' || input.profileDigest === '') {
+  if (input.bindingId === '' || input.fileHash === '' || input.profileDigest === '') {
     throw new LedgerError('error.import.invalidBatch');
   }
   const identityVersion = input.identityVersion ?? IMPORT_IDENTITY_VERSION;
@@ -3913,18 +3962,6 @@ async function applyImportBatchUnlocked(input: ApplyImportBatchInput): Promise<I
   for (const action of input.actions) {
     if (rowKeys.has(action.rowKey)) throw new LedgerError('error.import.duplicateRowKey');
     rowKeys.add(action.rowKey);
-  }
-  // rowKey は自分の作った canonical tuple で、取込元識別子・版がバッチと一致していること
-  // （別の取込元の決定を書き込む取り違えを塞ぐ）。
-  for (const key of rowKeys) {
-    const parsed = parseRowKey(key);
-    if (
-      parsed === undefined ||
-      parsed.sourceIdentity !== sourceIdentity ||
-      parsed.identityVersion !== identityVersion
-    ) {
-      throw new LedgerError('error.import.rowKeyMismatch');
-    }
   }
 
   const [profiles, decisions, entries, accounts, monthlyCostItems, recurringRules, bindings, tags] =
@@ -3938,6 +3975,29 @@ async function applyImportBatchUnlocked(input: ApplyImportBatchInput): Promise<I
       getAll<ProfileBinding>(STORE.profileBindings),
       tagMap(),
     ]);
+
+  const ctx: SaveContext = { byId: accountsById(accounts) };
+
+  // binding の存在・profile 整合・参照科目の実在と role 整合（監査 P1-3。tx 内でも再検証する）。
+  const binding = assertBindingUsableForImport(
+    bindings.find((b) => b.id === input.bindingId),
+    input.profileId,
+    ctx.byId,
+  );
+  const sourceId = binding.sourceId;
+
+  // rowKey は自分の作った canonical tuple で、取込元 ID・版がバッチの binding と一致していること
+  // （別の取込元の決定を書き込む取り違えを塞ぐ）。
+  for (const key of rowKeys) {
+    const parsed = parseRowKey(key);
+    if (
+      parsed === undefined ||
+      parsed.sourceId !== sourceId ||
+      parsed.identityVersion !== identityVersion
+    ) {
+      throw new LedgerError('error.import.rowKeyMismatch');
+    }
+  }
 
   // profile の存在と digest（§5-1: レビュー表示中の profile 変更 = 適用拒否・作り直し）。
   const profile = profiles.find((p) => p.id === input.profileId);
@@ -3953,7 +4013,6 @@ async function applyImportBatchUnlocked(input: ApplyImportBatchInput): Promise<I
     if (decidedKeys.has(key)) throw new LedgerError('error.import.alreadyDecided');
   }
 
-  const ctx: SaveContext = { byId: accountsById(accounts) };
   const ts = nowIso();
   const existingEntryIds = new Set(entries.map((e) => e.id));
   const newEntryIds = new Set<string>();
@@ -3964,7 +4023,7 @@ async function applyImportBatchUnlocked(input: ApplyImportBatchInput): Promise<I
     profileId: input.profileId,
     profileDigest: input.profileDigest,
     fileHash: input.fileHash,
-    sourceIdentity,
+    sourceId,
     identityVersion,
   };
 
@@ -3995,7 +4054,7 @@ async function applyImportBatchUnlocked(input: ApplyImportBatchInput): Promise<I
       metadata: {
         ...entry.metadata,
         importSource: input.profileId,
-        importSourceIdentity: sourceIdentity,
+        importSourceIdentity: binding.sourceIdentity.trim(),
         importRowKey: action.rowKey,
       },
     };
@@ -4044,12 +4103,13 @@ async function applyImportBatchUnlocked(input: ApplyImportBatchInput): Promise<I
     }
   }
 
-  // binding 学習（§4-4: 適用と同一 tx で保存）。バッチの profile / 取込元と一致すること。
+  // binding 学習（§4-4: 適用と同一 tx で保存）。バッチの binding / profile と一致すること
+  // （sourceId の不変は assertProfileBindingSavable が既存 binding との比較で守る）。
   let savedBinding: ProfileBinding | undefined;
   if (input.bindingUpdate !== undefined) {
     if (
-      input.bindingUpdate.profileId !== input.profileId ||
-      input.bindingUpdate.sourceIdentity.trim() !== sourceIdentity
+      input.bindingUpdate.id !== input.bindingId ||
+      input.bindingUpdate.profileId !== input.profileId
     ) {
       throw new LedgerError('error.import.invalidBatch');
     }
@@ -4084,6 +4144,7 @@ async function applyImportBatchUnlocked(input: ApplyImportBatchInput): Promise<I
 
   let digestRace = false;
   let decidedRace = false;
+  let bindingRace: LedgerError | undefined;
   try {
     await writeWithRevision(
       [
@@ -4094,14 +4155,17 @@ async function applyImportBatchUnlocked(input: ApplyImportBatchInput): Promise<I
         STORE.importProfiles,
       ],
       (t) => {
-        // tx 内の再検証: profile の同一性と決定の不在。digest は async 計算のため、
-        // 事前検証済みの canonical JSON との同値比較で置き換える（一致 = digest も一致）。
+        // tx 内の再検証: profile の同一性・決定の不在・binding の存在と科目 role 整合
+        // （監査 P1-3）。digest は async 計算のため、事前検証済みの canonical JSON との
+        // 同値比較で置き換える（一致 = digest も一致）。
         const profileProbe = t.objectStore(STORE.importProfiles).get(input.profileId);
         const decisionsProbe = t.objectStore(STORE.importDecisions).getAll();
+        const bindingProbe = t.objectStore(STORE.profileBindings).get(input.bindingId);
+        const accountsProbe = t.objectStore(STORE.accounts).getAll();
         let completed = 0;
         const applyWhenReady = () => {
           completed += 1;
-          if (completed !== 2) return;
+          if (completed !== 4) return;
           const currentProfile = profileProbe.result as ImportProfile | undefined;
           if (!currentProfile || canonicalJsonText(currentProfile.dsl) !== canonicalDsl) {
             digestRace = true;
@@ -4111,6 +4175,23 @@ async function applyImportBatchUnlocked(input: ApplyImportBatchInput): Promise<I
           const currentDecisions = decisionsProbe.result as ImportDecision[];
           if (currentDecisions.some((d) => rowKeys.has(d.key))) {
             decidedRace = true;
+            t.abort();
+            return;
+          }
+          try {
+            const currentBinding = assertBindingUsableForImport(
+              bindingProbe.result as ProfileBinding | undefined,
+              input.profileId,
+              accountsById(accountsProbe.result as Account[]),
+            );
+            // sourceId は不変だが、binding の入れ替え（削除→別 ID 再作成の同 ID 再利用）まで
+            // 含めて rowKey の名前空間が事前検証時と同じことを確かめる。
+            if (currentBinding.sourceId !== sourceId) {
+              throw new LedgerError('error.import.rowKeyMismatch');
+            }
+          } catch (e) {
+            bindingRace =
+              e instanceof LedgerError ? e : new LedgerError('error.importBinding.notFound');
             t.abort();
             return;
           }
@@ -4125,12 +4206,15 @@ async function applyImportBatchUnlocked(input: ApplyImportBatchInput): Promise<I
         };
         profileProbe.onsuccess = applyWhenReady;
         decisionsProbe.onsuccess = applyWhenReady;
+        bindingProbe.onsuccess = applyWhenReady;
+        accountsProbe.onsuccess = applyWhenReady;
       },
       input.expectedLedgerVersion,
     );
   } catch (error) {
     if (digestRace) throw new LedgerError('error.import.profileChanged');
     if (decidedRace) throw new LedgerError('error.import.alreadyDecided');
+    if (bindingRace !== undefined) throw bindingRace;
     throw error;
   }
   return { entries: savableEntries, decisions: newDecisions };

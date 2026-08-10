@@ -152,18 +152,18 @@ export interface FingerprintOccurrenceShortage {
  * グループを返す（n < k = 過去の取込より行が少ないファイル）。**情報提示のみ**:
  * 決定の削除も強制レビューもしない。decisionKeys にはファイル外の rowKey を含む
  * **全決定のキー**を渡すこと（ファイル内のキーだけでは occurrence k を見落とす）。
- * 名前空間（sourceIdentity・identityVersion）が違う決定は突き合わせない。
+ * 名前空間（sourceId・identityVersion）が違う決定は突き合わせない。
  */
 export function findOccurrenceShortages(
   rows: readonly Pick<DedupRow, 'rowKey'>[],
   decisionKeys: Iterable<string>,
 ): FingerprintOccurrenceShortage[] {
-  // ファイル内の出現数（(sourceIdentity, version, fingerprint) グループ別・出現順を保つ）。
+  // ファイル内の出現数（(sourceId, version, fingerprint) グループ別・出現順を保つ）。
   const fileCounts = new Map<string, { fingerprint: string; count: number }>();
   for (const row of rows) {
     const parsed = parseRowKey(row.rowKey);
     if (parsed === undefined || parsed.body.type !== 'fp') continue;
-    const g = encodeGroup([parsed.sourceIdentity, parsed.identityVersion, parsed.body.fingerprint]);
+    const g = encodeGroup([parsed.sourceId, parsed.identityVersion, parsed.body.fingerprint]);
     const current = fileCounts.get(g);
     if (current !== undefined) current.count += 1;
     else fileCounts.set(g, { fingerprint: parsed.body.fingerprint, count: 1 });
@@ -175,7 +175,7 @@ export function findOccurrenceShortages(
   for (const key of decisionKeys) {
     const parsed = parseRowKey(key);
     if (parsed === undefined || parsed.body.type !== 'fp') continue;
-    const g = encodeGroup([parsed.sourceIdentity, parsed.identityVersion, parsed.body.fingerprint]);
+    const g = encodeGroup([parsed.sourceId, parsed.identityVersion, parsed.body.fingerprint]);
     if (!fileCounts.has(g)) continue;
     const prev = knownCounts.get(g) ?? 0;
     if (parsed.body.occurrence > prev) knownCounts.set(g, parsed.body.occurrence);

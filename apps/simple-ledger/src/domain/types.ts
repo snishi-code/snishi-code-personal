@@ -281,14 +281,19 @@ export interface JournalEntry {
  *
  * **soft reference**: 参照先の科目・profile が削除/アーカイブされても binding は壊れてよい。
  * 適用時に検証し、欠けていれば再選択を促す（fail-closed・黙って別科目に落ちない）。
- * profile を削除しても binding は残す（sourceIdentity の連続性を保ち、「組み込みを復元」で
+ * profile を削除しても binding は残す（sourceId の連続性を保ち、「組み込みを復元」で
  * 同じ紐付けへ再接続できるようにする）。
  */
 export interface ProfileBinding {
   id: string;
   /** 紐付ける ImportProfile の ID（soft reference）。 */
   profileId: string;
-  /** ユーザー命名の取込元識別子（例:「PayPay本体」）。行キーの名前空間（§5-1）。 */
+  /**
+   * 不変の取込元 ID（作成時に採番する UUID・以後変更不可）。行キーの名前空間（§5-1・監査 P1-3:
+   * ユーザー命名の表示名で名前空間を切ると、別 profile の同名取込元と決定が黙って混線する）。
+   */
+  sourceId: string;
+  /** ユーザー命名の取込元表示名（例:「PayPay本体」）。名前空間は sourceId が担うため編集できる。 */
   sourceIdentity: string;
   /** 自口座（role: daily-asset）。 */
   ownAccountId: string;
@@ -310,7 +315,8 @@ export interface ImportDecisionProvenance {
   profileDigest: string;
   /** 由来ファイルの SHA-256。 */
   fileHash: string;
-  sourceIdentity: string;
+  /** 決定時の binding の不変な取込元 ID（行キーの名前空間・§5-1）。表示名は binding から引く。 */
+  sourceId: string;
   /** 行キー生成アルゴリズムの版（§5-1）。 */
   identityVersion: number;
 }

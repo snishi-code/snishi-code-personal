@@ -1,11 +1,12 @@
 /*
  * 行の同一性（行キー・指示書 §5-1）。
  *
- *  - rowKey = canonical tuple [sourceIdentity, identityVersion, 種別, 本体...]。
+ *  - rowKey = canonical tuple [sourceId, identityVersion, 種別, 本体...]。
  *    エンコードは **JSON 配列**（単純文字列連結は禁止＝区切り文字の衝突で
  *    ['a,b','c'] と ['a','b,c'] が同一視される穴を作らない）。
- *  - sourceIdentity は binding のユーザー命名識別子（取込元口座）。externalId は
- *    金融口座内でのみ一意のため、profile ではなく取込元で名前空間を切る。
+ *  - sourceId は binding の不変な取込元 ID（作成時に採番する UUID・監査 P1-3）。externalId は
+ *    金融口座内でのみ一意のため、profile でもユーザー命名の表示名でもなく、改名・重複命名の
+ *    影響を受けない取込元 ID で名前空間を切る。
  *  - externalId 定義があれば ['ext', ...tuple]、無ければ
  *    ['fp', SHA-256(生行のトリム済み文字列), occurrence]。
  *  - occurrence = 同一 fingerprint のファイル内出現順（1 始まり）。生行に日付が含まれる
@@ -91,20 +92,20 @@ export async function profileDslDigest(dsl: unknown): Promise<string> {
 /* ── rowKey ── */
 
 export function externalRowKey(
-  sourceIdentity: string,
+  sourceId: string,
   tuple: readonly string[],
   identityVersion: number = IMPORT_IDENTITY_VERSION,
 ): string {
-  return encodeCanonicalTuple([sourceIdentity, identityVersion, 'ext', ...tuple]);
+  return encodeCanonicalTuple([sourceId, identityVersion, 'ext', ...tuple]);
 }
 
 export function fingerprintRowKey(
-  sourceIdentity: string,
+  sourceId: string,
   fingerprint: string,
   occurrence: number,
   identityVersion: number = IMPORT_IDENTITY_VERSION,
 ): string {
-  return encodeCanonicalTuple([sourceIdentity, identityVersion, 'fp', fingerprint, occurrence]);
+  return encodeCanonicalTuple([sourceId, identityVersion, 'fp', fingerprint, occurrence]);
 }
 
 /**
@@ -113,22 +114,23 @@ export function fingerprintRowKey(
  * （ファイル全体では attachRowKeys を使う）。
  */
 export async function rowKeyForRow(
-  sourceIdentity: string,
+  sourceId: string,
   row: Pick<EvaluatedImportRow, 'rawLine' | 'externalIdTuple'>,
   options: { occurrence?: number; identityVersion?: number } = {},
 ): Promise<string> {
   const identityVersion = options.identityVersion ?? IMPORT_IDENTITY_VERSION;
   if (row.externalIdTuple !== undefined) {
-    return externalRowKey(sourceIdentity, row.externalIdTuple, identityVersion);
+    return externalRowKey(sourceId, row.externalIdTuple, identityVersion);
   }
   const fp = await sha256Hex(fingerprintSource(row.rawLine));
-  return fingerprintRowKey(sourceIdentity, fp, options.occurrence ?? 1, identityVersion);
+  return fingerprintRowKey(sourceId, fp, options.occurrence ?? 1, identityVersion);
 }
 
 /* ── rowKey の解読（デデュープ層が出現数照合に使う） ── */
 
 export interface ParsedRowKey {
-  sourceIdentity: string;
+  /** 名前空間 = binding の不変な取込元 ID（§5-1）。 */
+  sourceId: string;
   identityVersion: number;
   body: { type: 'ext'; tuple: string[] } | { type: 'fp'; fingerprint: string; occurrence: number };
 }
@@ -137,12 +139,12 @@ export interface ParsedRowKey {
 export function parseRowKey(key: string): ParsedRowKey | undefined {
   const tuple = decodeCanonicalTuple(key);
   if (tuple === undefined || tuple.length < 3) return undefined;
-  const [sourceIdentity, identityVersion, type, ...rest] = tuple;
-  if (typeof sourceIdentity !== 'string') return undefined;
+  const [sourceId, identityVersion, type, ...rest] = tuple;
+  if (typeof sourceId !== 'string') return undefined;
   if (typeof identityVersion !== 'number' || !Number.isInteger(identityVersion)) return undefined;
   if (type === 'ext') {
     if (!rest.every((p): p is string => typeof p === 'string')) return undefined;
-    return { sourceIdentity, identityVersion, body: { type: 'ext', tuple: rest } };
+    return { sourceId, identityVersion, body: { type: 'ext', tuple: rest } };
   }
   if (type === 'fp') {
     const [fingerprint, occurrence] = rest;
@@ -150,7 +152,7 @@ export function parseRowKey(key: string): ParsedRowKey | undefined {
     if (typeof occurrence !== 'number' || !Number.isInteger(occurrence) || occurrence < 1) {
       return undefined;
     }
-    return { sourceIdentity, identityVersion, body: { type: 'fp', fingerprint, occurrence } };
+    return { sourceId, identityVersion, body: { type: 'fp', fingerprint, occurrence } };
   }
   return undefined;
 }
@@ -180,7 +182,7 @@ export interface RowKeyAttachment {
  */
 export async function attachRowKeys(
   rows: readonly EvaluatedImportRow[],
-  sourceIdentity: string,
+  sourceId: string,
   identityVersion: number = IMPORT_IDENTITY_VERSION,
 ): Promise<RowKeyAttachment> {
   const fingerprintCounts = new Map<string, number>();
@@ -190,7 +192,7 @@ export async function attachRowKeys(
     if (row.externalIdTuple !== undefined) {
       keyed.push({
         ...row,
-        rowKey: externalRowKey(sourceIdentity, row.externalIdTuple, identityVersion),
+        rowKey: externalRowKey(sourceId, row.externalIdTuple, identityVersion),
       });
       continue;
     }
@@ -204,7 +206,7 @@ export async function attachRowKeys(
     fingerprintCounts.set(fp, occurrence);
     keyed.push({
       ...row,
-      rowKey: fingerprintRowKey(sourceIdentity, fp, occurrence, identityVersion),
+      rowKey: fingerprintRowKey(sourceId, fp, occurrence, identityVersion),
     });
   }
   return { rows: keyed, fingerprintCounts };

@@ -593,8 +593,13 @@ export const ja = {
     '組み込みプロファイルの印は付けられません（組み込みは「組み込みプロファイルを復元」だけが作ります）。',
   'error.importProfile.notFound': '取込プロファイルが見つかりません。',
   'error.importBinding.invalidStructure': '取込の紐付け（プロファイル設定）の形式が不正です。',
+  'error.importBinding.notFound':
+    '取込元の紐付けが見つかりません。取込元をセットアップし直してください。',
   'error.importBinding.duplicate':
     '同じプロファイル・取込元の紐付けが既にあります。既存の紐付けを編集してください。',
+  'error.importBinding.sourceIdImmutable':
+    '取込元 ID は変更できません（取込済みの判定と紐づいています）。',
+  'error.importBinding.sourceIdDuplicate': '取込元 ID が別の紐付けと重複しています。',
   'error.importBinding.ownAccountRole': '自口座には現預金の内訳（日常資産）を選んでください。',
   'error.importBinding.chargeSourceRole':
     'チャージ源泉には現預金の内訳（日常資産）を選んでください。',
@@ -653,8 +658,7 @@ export const ja = {
     'プロファイルは科目を直接覚えません。この端末の台帳のどの科目に取り込むかをここで決めます。',
   'csvImport.setupIdentity': '取込元の名前',
   'csvImport.setupIdentityHint':
-    '例:「PayPay本体」。取込済みの判定はこの名前ごとに記録されます（あとから変更できません）。',
-  'csvImport.setupIdentityLocked': '取込済みの判定と紐づいているため変更できません。',
+    '例:「PayPay本体」。表示用の名前です（取込済みの判定は内部 ID ごとに記録され、名前はあとから変更できます）。',
   'csvImport.setupOwn': '自口座',
   'csvImport.setupOwnHint': 'この CSV の残高にあたる科目（現預金の内訳）。',
   'csvImport.setupIncome': '獲得・取消の計上先',
@@ -733,6 +737,7 @@ export const ja = {
   'csvImport.status.linked': 'リンク',
   'csvImport.status.ignored': '無視',
   'csvImport.decisionEntryMissing': '（仕訳なし）',
+  'csvImport.decisionSourceUnknown': '（不明な取込元）',
   'csvImport.openEntry': '仕訳を見る',
   'csvImport.removeDecision': '解除',
   'csvImport.removeConfirmTitle.linked': 'リンクを解除',

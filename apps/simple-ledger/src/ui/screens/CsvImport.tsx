@@ -5,7 +5,7 @@
  * 変換（件数会計を常時表示・§4-2 の保存則）→ 決定的スキップ（ImportDecision 照合・§4 手順3）→
  * レビューキュー（画面内 state・保存しない）→ applyImportBatch（原子性は data 層・§4-4）。
  *
- *  - レビューの配線順序: loadLedger → evaluateProfileText → attachRowKeys(sourceIdentity) →
+ *  - レビューの配線順序: loadLedger → evaluateProfileText → attachRowKeys(binding.sourceId) →
  *    resolveImportRows（決定は台帳スナップショットの全件・**読み取り専用**）。dangling は自動で
  *    削除せず「要再確認」行としてレビューへ出し、解除はユーザーの明示操作（store 経由）だけが
  *    行う（§1-2）。同一 fingerprint の出現数が過去の決定より少ないファイル（n < k）は決定を
@@ -161,8 +161,8 @@ interface ReviewState {
   profileId: string;
   /** レビュー表示時点の profile digest（§5-1。適用時に repository が再照合する）。 */
   profileDigest: string;
+  /** 適用に使う binding。存在・科目 role 整合は適用時に repository が再検証する（監査 P1-3）。 */
   bindingId: string;
-  sourceIdentity: string;
   ownAccountId: string;
   evaluation: ProfileEvaluation;
   /** rowKey 付きの正規化行（入力順）。resolutions と同順。 */
@@ -192,7 +192,8 @@ async function computeReview(
 
   const text = decodeCsvBytes(file.bytes, profile.dsl.fileFormat.encoding);
   const evaluation = evaluateProfileText(profile.dsl, text);
-  const attachment = await attachRowKeys(evaluation.normalized, binding.sourceIdentity.trim());
+  // 行キーの名前空間は不変の sourceId（表示名の改名・重複命名に影響されない・監査 P1-3）。
+  const attachment = await attachRowKeys(evaluation.normalized, binding.sourceId);
   const fileHash = await sha256HexOfBytes(file.bytes);
   const profileDigest = await profileDslDigest(profile.dsl);
 
@@ -222,7 +223,6 @@ async function computeReview(
     profileId,
     profileDigest,
     bindingId,
-    sourceIdentity: binding.sourceIdentity.trim(),
     ownAccountId: binding.ownAccountId,
     evaluation,
     rows: attachment.rows,
@@ -377,7 +377,7 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
       await applyCsvImportBatch({
         profileId: review.profileId,
         profileDigest: review.profileDigest,
-        sourceIdentity: review.sourceIdentity,
+        bindingId: review.bindingId,
         fileHash: review.fileHash,
         fileTotalRowCount: review.evaluation.totalRowCount,
         actions,
@@ -466,6 +466,11 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
   /* ── 決定済み一覧（§4-6） ── */
 
   const allDecisions = useMemo(() => ledger?.importDecisions ?? [], [ledger]);
+  // 決定の取込元表示名は sourceId から現在の binding を引く（表示名は編集可能・監査 P1-3）。
+  const sourceNameById = useMemo(
+    () => new Map((ledger?.profileBindings ?? []).map((b) => [b.sourceId, b.sourceIdentity])),
+    [ledger],
+  );
   const decisionProfileOptions = useMemo(() => {
     const ids = new Set(allDecisions.map((d) => d.provenance.profileId));
     return [...ids].map((id) => ({
@@ -964,7 +969,9 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
                         {readableRowKey(d.key)}
                       </div>
                       <div className="list__sub">
-                        {d.provenance.sourceIdentity}・{d.decidedAt.slice(0, 10)}
+                        {sourceNameById.get(d.provenance.sourceId) ??
+                          t('csvImport.decisionSourceUnknown')}
+                        ・{d.decidedAt.slice(0, 10)}
                         {d.entryId !== undefined
                           ? `・${entry?.description ?? t('csvImport.decisionEntryMissing')}`
                           : ''}
@@ -1171,9 +1178,10 @@ function BindingSetupSheet({
       const binding: ProfileBinding = {
         id: existing?.id ?? newId(),
         profileId: profile.id,
-        // 取込元識別子は行キーの名前空間（§5-1）。既存 binding では変更させない
-        // （改名すると過去の決定が照合できず全行が再出現するため）。
-        sourceIdentity: existing ? existing.sourceIdentity : identity.trim(),
+        // 行キーの名前空間は不変の sourceId（作成時に採番・以後変更不可・監査 P1-3）。
+        // 表示名 sourceIdentity は編集できる（改名しても過去の決定は照合され続ける）。
+        sourceId: existing?.sourceId ?? newId(),
+        sourceIdentity: identity.trim(),
         ownAccountId,
         kindDestinations,
         ...(chargeAccountId !== '' ? { chargeSourceAccountId: chargeAccountId } : {}),
@@ -1214,12 +1222,7 @@ function BindingSetupSheet({
             value={identity}
             onChange={setIdentity}
             required
-            disabled={existing !== null}
-            hint={
-              existing !== null
-                ? t('csvImport.setupIdentityLocked')
-                : t('csvImport.setupIdentityHint')
-            }
+            hint={t('csvImport.setupIdentityHint')}
             dataUi={UI.csvImport.setupIdentity}
           />
           <AccountPicker

@@ -53,18 +53,18 @@ describe('sha256Hex', () => {
 });
 
 describe('rowKeyForRow', () => {
-  it('externalId 定義があれば ext キー（sourceIdentity で名前空間が切れる）', async () => {
+  it('externalId 定義があれば ext キー（sourceId で名前空間が切れる）', async () => {
     const r = row({ externalIdTuple: ['0504', '支払い'] });
-    const key = await rowKeyForRow('PayPay本体', r);
-    expect(key).toBe(externalRowKey('PayPay本体', ['0504', '支払い']));
+    const key = await rowKeyForRow('source-a', r);
+    expect(key).toBe(externalRowKey('source-a', ['0504', '支払い']));
     expect(decodeCanonicalTuple(key)).toEqual([
-      'PayPay本体',
+      'source-a',
       IMPORT_IDENTITY_VERSION,
       'ext',
       '0504',
       '支払い',
     ]);
-    const other = await rowKeyForRow('PayPayもう1台', r);
+    const other = await rowKeyForRow('source-b', r);
     expect(other).not.toBe(key);
   });
 
@@ -80,13 +80,13 @@ describe('parseRowKey', () => {
   it('ext / fp キーを構造へ戻す', () => {
     const ext = parseRowKey(externalRowKey('src', ['a', 'b']));
     expect(ext).toEqual({
-      sourceIdentity: 'src',
+      sourceId: 'src',
       identityVersion: 1,
       body: { type: 'ext', tuple: ['a', 'b'] },
     });
     const fp = parseRowKey(fingerprintRowKey('src', 'deadbeef', 3));
     expect(fp).toEqual({
-      sourceIdentity: 'src',
+      sourceId: 'src',
       identityVersion: 1,
       body: { type: 'fp', fingerprint: 'deadbeef', occurrence: 3 },
     });

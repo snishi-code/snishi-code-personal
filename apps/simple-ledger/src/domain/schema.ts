@@ -336,6 +336,8 @@ export const settingsSchema = z.object({
 export const profileBindingSchema = z.object({
   id: z.string().min(1),
   profileId: z.string().min(1),
+  /** 不変の取込元 ID（行キーの名前空間・監査 P1-3）。表示名と違い作成後は変更不可。 */
+  sourceId: z.string().min(1),
   sourceIdentity: z.string().min(1).max(120),
   ownAccountId: z.string().min(1),
   kindDestinations: z.record(z.string().min(1).max(120), z.string().min(1)),
@@ -348,7 +350,8 @@ export const importDecisionProvenanceSchema = z.object({
   profileId: z.string().min(1),
   profileDigest: z.string().min(1),
   fileHash: z.string().min(1),
-  sourceIdentity: z.string().min(1).max(120),
+  /** 決定時の binding の不変な取込元 ID（行キーの名前空間・§5-1）。 */
+  sourceId: z.string().min(1),
   identityVersion: z.number().int().min(1),
 });
 
@@ -993,7 +996,7 @@ export const ledgerExportPackageSchema = z
 
     // ── CSV 取込（v8）。profile/binding/decision の科目・profile・仕訳参照は soft reference
     // （§1-1b/§1-2: 壊れは適用時に未解決として扱い掃除する）のためここでは拘束せず、
-    // 各ストアの主キー相当（id / (profileId, sourceIdentity) / key）の一意性だけを守る。 ──
+    // 各ストアの主キー相当（id / sourceId / (profileId, sourceIdentity) / key）の一意性だけを守る。 ──
     const profileIds = new Set<string>();
     pkg.importProfiles.forEach((p, pi) => {
       if (profileIds.has(p.id))
@@ -1001,12 +1004,20 @@ export const ledgerExportPackageSchema = z
       profileIds.add(p.id);
     });
     const bindingIds = new Set<string>();
+    const bindingSourceIds = new Set<string>();
     const bindingPairs = new Set<string>();
     pkg.profileBindings.forEach((b, bi) => {
       if (bindingIds.has(b.id))
         issue(`取込の紐付けの ID が重複しています(${b.id})`, ['profileBindings', bi, 'id']);
       bindingIds.add(b.id);
-      // 同一 (profile, 取込元) に紐付けは 1 つ（区切り衝突しない JSON 組でキー化する）。
+      // 取込元 ID（行キーの名前空間）は全 binding で一意（監査 P1-3: 共有すると別取込元の
+      // 決定が黙って混線する）。
+      if (bindingSourceIds.has(b.sourceId))
+        issue(`取込元 ID が重複しています(${b.sourceId})`, ['profileBindings', bi, 'sourceId']);
+      bindingSourceIds.add(b.sourceId);
+      if (b.sourceId.trim() === '')
+        issue('取込元 ID が空白のみです。', ['profileBindings', bi, 'sourceId']);
+      // 同一 (profile, 取込元表示名) に紐付けは 1 つ（区切り衝突しない JSON 組でキー化する）。
       const pair = JSON.stringify([b.profileId, b.sourceIdentity.trim()]);
       if (bindingPairs.has(pair))
         issue(`同じプロファイル・取込元の紐付けが重複しています(${b.sourceIdentity})`, [

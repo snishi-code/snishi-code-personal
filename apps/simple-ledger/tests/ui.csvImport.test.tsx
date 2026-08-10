@@ -110,6 +110,9 @@ function selectProfile(profileId: string = PAYPAY_PROFILE_ID): void {
   fireEvent.change(select!, { target: { value: profileId } });
 }
 
+/** binding の不変な取込元 ID（行キーの名前空間・表示名「PayPay本体」とは別・監査 P1-3）。 */
+const UI_SOURCE_ID = 'source-ui-paypay';
+
 /** binding をデータ層で先に用意する（セットアップシート UI はハッピーパス側で検証）。 */
 async function seedBinding(): Promise<void> {
   const ledger = await loadLedger();
@@ -118,6 +121,7 @@ async function seedBinding(): Promise<void> {
   await upsertProfileBinding({
     id: 'binding-ui-test',
     profileId: PAYPAY_PROFILE_ID,
+    sourceId: UI_SOURCE_ID,
     sourceIdentity: 'PayPay本体',
     ownAccountId: account(ledger, 'チャージ残高').id,
     kindDestinations: {
@@ -166,6 +170,7 @@ async function seedFpProfileAndBinding(): Promise<void> {
   await upsertProfileBinding({
     id: 'binding-fp-ui-test',
     profileId: FP_PROFILE_ID,
+    sourceId: 'source-ui-fp',
     sourceIdentity: FP_SOURCE,
     ownAccountId: account(ledger, 'チャージ残高').id,
     kindDestinations: { 支払い: account(ledger, '変動費').id },
@@ -393,6 +398,52 @@ describe('CSV 取込 — 個別行の決定（リンク・無視・解除）', (
       expect(qa(UI.csvImport.row)).toHaveLength(1);
     });
   });
+
+  it('取込元の表示名を変更しても決定は生きている（sourceId 名前空間・監査 P1-3）', async () => {
+    await loadLedger();
+    await seedBinding();
+    renderScreen();
+    await waitForProfileSelect();
+    selectProfile();
+    selectFile(csvFile(SINGLE_PAYMENT_CSV));
+    await waitFor(() => {
+      expect(qa(UI.csvImport.row)).toHaveLength(1);
+    });
+
+    // 1 行を無視で決定してから、取込元の表示名を編集する（編集入力は disabled でない）。
+    fireEvent.click(qa(UI.csvImport.rowIgnore)[0]!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.complete)).not.toBeNull();
+    });
+    fireEvent.click(q(UI.csvImport.sourceEdit)!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.setup)).not.toBeNull();
+    });
+    const identityInput = q(UI.csvImport.setupIdentity) as HTMLInputElement;
+    expect(identityInput.disabled).toBe(false);
+    fireEvent.change(identityInput, { target: { value: 'PayPay改名後' } });
+    fireEvent.click(q(UI.csvImport.setupSave)!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.setup)).toBeNull();
+    });
+
+    // 改名後もレビューは決定済みを除外し続ける（rowKey の名前空間は sourceId のため無傷）。
+    await waitFor(() => {
+      expect(q(UI.csvImport.counts)!.textContent).toContain('決定済み 1 件を除外し');
+    });
+    expect(qa(UI.csvImport.row)).toHaveLength(0);
+    const ledger = await loadLedger();
+    expect(ledger.importDecisions).toHaveLength(1);
+    expect(ledger.profileBindings[0]!.sourceIdentity).toBe('PayPay改名後');
+    expect(ledger.profileBindings[0]!.sourceId).toBe(UI_SOURCE_ID);
+
+    // 決定済み一覧の取込元表示も現在の表示名で出る。
+    fireEvent.click(q(UI.csvImport.tabDecisions)!);
+    await waitFor(() => {
+      expect(qa(UI.csvImport.decisionRow).length).toBeGreaterThan(0);
+    });
+    expect(qa(UI.csvImport.decisionRow)[0]!.textContent).toContain('PayPay改名後');
+  });
 });
 
 describe('CSV 取込 — エラー行の件数会計（§4-2 の保存則）', () => {
@@ -582,7 +633,7 @@ describe('CSV 取込 — dangling 決定（自動削除せず明示解除だけ�
     // 通常経路では仕訳削除 cascade が決定を同時解除するため、ここでは DB へ直書きする）。
     const ts = new Date().toISOString();
     await putRecord(STORE.importDecisions, {
-      key: externalRowKey('PayPay本体', ['L001', '支払い']),
+      key: externalRowKey(UI_SOURCE_ID, ['L001', '支払い']),
       status: 'registered',
       entryId: 'ghost-missing-entry',
       decidedAt: ts,
@@ -590,7 +641,7 @@ describe('CSV 取込 — dangling 決定（自動削除せず明示解除だけ�
         profileId: PAYPAY_PROFILE_ID,
         profileDigest: 'digest-x',
         fileHash: 'file-x',
-        sourceIdentity: 'PayPay本体',
+        sourceId: UI_SOURCE_ID,
         identityVersion: 1,
       },
     });

@@ -138,7 +138,7 @@ describe('resolveImportRows（occurrence の単純化 = 部分適用が決定を
     expect(r[0]!.status).toBe('decided');
   });
 
-  it('sourceIdentity が違えば同じ fingerprint でも別名前空間（照合されない)', () => {
+  it('sourceId が違えば同じ fingerprint でも別名前空間（照合されない)', () => {
     const decisions = new Map<string, ImportDecisionSummary>([
       [fingerprintRowKey('別の口座', fp, 1), { status: 'ignored' }],
       [fingerprintRowKey('別の口座', fp, 2), { status: 'ignored' }],
@@ -181,7 +181,7 @@ describe('findOccurrenceShortages（n < k の情報提示・決定は無傷）',
     expect(findOccurrenceShortages(rows, keys)).toEqual([]);
   });
 
-  it('sourceIdentity が違う決定は突き合わせない（別名前空間）', () => {
+  it('sourceId が違う決定は突き合わせない（別名前空間）', () => {
     const rows = [dedupRow(fingerprintRowKey(SRC, fp, 1))];
     const keys = [fingerprintRowKey('別の口座', fp, 4)];
     expect(findOccurrenceShortages(rows, keys)).toEqual([]);

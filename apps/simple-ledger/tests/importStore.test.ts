@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import './setup';
 import {
   applyImportBatch,
+  deleteAccount,
   deleteEntry,
   deleteImportProfile,
   findProfileBinding,
@@ -45,6 +46,8 @@ import type { ImportProfile, ImportProfileDsl } from '../src/domain/importDsl';
 import type { JournalEntry, Ledger, ProfileBinding } from '../src/domain/types';
 
 const SOURCE = 'PayPay本体';
+/** 行キーの名前空間 = binding の不変な取込元 ID（表示名 SOURCE とは別・監査 P1-3）。 */
+const SOURCE_ID = 'source-paypay-1';
 const FILE_HASH = 'file-hash-1';
 
 /** テスト用のユーザー定義 DSL（全行が row になる最小形）。 */
@@ -80,6 +83,7 @@ function binding(ledger: Ledger, overrides: Partial<ProfileBinding> = {}): Profi
   return {
     id: 'binding-1',
     profileId: PAYPAY_PROFILE_ID,
+    sourceId: SOURCE_ID,
     sourceIdentity: SOURCE,
     ownAccountId: account(ledger, 'チャージ残高').id,
     kindDestinations: { 'ポイント、残高の獲得': account(ledger, 'その他収入').id },
@@ -88,6 +92,11 @@ function binding(ledger: Ledger, overrides: Partial<ProfileBinding> = {}): Profi
     updatedAt: '2026-08-11T00:00:00.000Z',
     ...overrides,
   };
+}
+
+/** applyImportBatch は binding の実在が必須（監査 P1-3）のため、適用系テストは先に seed する。 */
+async function seedPaypayBinding(overrides: Partial<ProfileBinding> = {}): Promise<ProfileBinding> {
+  return upsertProfileBinding(binding(await loadLedger(), overrides));
 }
 
 async function paypayDigest(): Promise<string> {
@@ -105,7 +114,7 @@ function batchInput(
   return {
     profileId: PAYPAY_PROFILE_ID,
     profileDigest: digest,
-    sourceIdentity: SOURCE,
+    bindingId: 'binding-1',
     fileHash: FILE_HASH,
     fileTotalRowCount: 10,
     actions,
@@ -125,7 +134,7 @@ function paymentEntry(ledger: Ledger, amount: number, description = '取込 支�
 }
 
 function rk(no: string, kind = '支払い'): string {
-  return externalRowKey(SOURCE, [no, kind]);
+  return externalRowKey(SOURCE_ID, [no, kind]);
 }
 
 describe('組み込み profile の seed / 削除 / 復元（§1-1）', () => {
@@ -212,13 +221,15 @@ describe('ProfileBinding の保存境界（§1-1b）', () => {
     ).rejects.toMatchObject({ code: 'error.importBinding.destinationRole' });
   });
 
-  it('存在しない profile への binding と、同一 (profile, 取込元) の重複を拒否', async () => {
+  it('存在しない profile への binding と、同一 (profile, 取込元表示名) の重複を拒否', async () => {
     const ledger = await loadLedger();
     await expect(
       upsertProfileBinding(binding(ledger, { profileId: 'missing-profile' })),
     ).rejects.toMatchObject({ code: 'error.importProfile.notFound' });
     await upsertProfileBinding(binding(ledger));
-    await expect(upsertProfileBinding(binding(ledger, { id: 'binding-2' }))).rejects.toMatchObject({
+    await expect(
+      upsertProfileBinding(binding(ledger, { id: 'binding-2', sourceId: 'source-paypay-2' })),
+    ).rejects.toMatchObject({
       code: 'error.importBinding.duplicate',
     });
     // 同じ id への上書き（編集）は通る。
@@ -227,11 +238,29 @@ describe('ProfileBinding の保存境界（§1-1b）', () => {
       undefined,
     );
   });
+
+  it('sourceId は不変（既存 binding の変更を拒否）・全 binding で一意（監査 P1-3）', async () => {
+    const ledger = await loadLedger();
+    await upsertProfileBinding(binding(ledger));
+    // 既存 binding の sourceId 変更は拒否（過去の決定が照合できなくなる）。
+    await expect(
+      upsertProfileBinding(binding(ledger, { sourceId: 'source-paypay-renamed' })),
+    ).rejects.toMatchObject({ code: 'error.importBinding.sourceIdImmutable' });
+    // 別 binding が同じ sourceId を名乗るのも拒否（名前空間の混線）。
+    await expect(
+      upsertProfileBinding(binding(ledger, { id: 'binding-2', sourceIdentity: '別名の取込元' })),
+    ).rejects.toMatchObject({ code: 'error.importBinding.sourceIdDuplicate' });
+    // 表示名の変更は sourceId 不変のまま通る（監査 P1-3 の緩和面）。
+    await upsertProfileBinding(binding(ledger, { sourceIdentity: 'PayPay改名後' }));
+    const renamed = await findProfileBinding(PAYPAY_PROFILE_ID, 'PayPay改名後');
+    expect(renamed?.sourceId).toBe(SOURCE_ID);
+  });
 });
 
 describe('applyImportBatch の一括適用（§4-4）', () => {
   it('register / link / ignore を単一適用で保存し、由来メタとファイル記録が付く', async () => {
     const ledger = await loadLedger();
+    await seedPaypayBinding();
     const digest = await paypayDigest();
     const entry = paymentEntry(ledger, 1200);
     const result = await applyImportBatch(
@@ -264,12 +293,12 @@ describe('applyImportBatch の一括適用（§4-4）', () => {
     });
     expect(decisions.get(rk('3', 'ポイント、残高の獲得'))).toMatchObject({ status: 'ignored' });
     expect(decisions.get(rk('3', 'ポイント、残高の獲得'))?.entryId).toBe(undefined);
-    // provenance が保存される（§5-1）。
+    // provenance が保存される（§5-1。名前空間は表示名ではなく不変の sourceId）。
     expect(decisions.get(rk('1'))?.provenance).toMatchObject({
       profileId: PAYPAY_PROFILE_ID,
       profileDigest: digest,
       fileHash: FILE_HASH,
-      sourceIdentity: SOURCE,
+      sourceId: SOURCE_ID,
       identityVersion: 1,
     });
     // ファイル記録（情報表示と再開用）。
@@ -279,19 +308,29 @@ describe('applyImportBatch の一括適用（§4-4）', () => {
     });
   });
 
-  it('binding 学習を適用と同一バッチで保存できる', async () => {
+  it('binding 学習（既存 binding の更新）を適用と同一バッチで保存できる', async () => {
     const ledger = await loadLedger();
+    await seedPaypayBinding();
     const digest = await paypayDigest();
+    const learned = binding(ledger, {
+      kindDestinations: {
+        'ポイント、残高の獲得': account(ledger, 'その他収入').id,
+        支払い: account(ledger, '変動費').id,
+      },
+    });
     await applyImportBatch(
       batchInput(digest, [{ kind: 'ignore', rowKey: rk('10') }], {
-        bindingUpdate: binding(ledger),
+        bindingUpdate: learned,
       }),
     );
-    expect((await findProfileBinding(PAYPAY_PROFILE_ID, SOURCE))?.id).toBe('binding-1');
+    expect((await findProfileBinding(PAYPAY_PROFILE_ID, SOURCE))?.kindDestinations['支払い']).toBe(
+      account(ledger, '変動費').id,
+    );
   });
 
   it('原子性: 不正行（存在しない科目）が混ざったバッチは 0 件更新', async () => {
     const ledger = await loadLedger();
+    await seedPaypayBinding();
     const digest = await paypayDigest();
     const good = paymentEntry(ledger, 800);
     const bad: JournalEntry = {
@@ -317,6 +356,7 @@ describe('applyImportBatch の一括適用（§4-4）', () => {
   });
 
   it('リンク先が存在しないバッチは全拒否（0 件更新）', async () => {
+    await seedPaypayBinding();
     const digest = await paypayDigest();
     await expect(
       applyImportBatch(
@@ -328,6 +368,7 @@ describe('applyImportBatch の一括適用（§4-4）', () => {
 
   it('二重適用: 同一バッチの再実行は alreadyDecided で全拒否（結果は 1 回目のまま）', async () => {
     const ledger = await loadLedger();
+    await seedPaypayBinding();
     const digest = await paypayDigest();
     const entry = paymentEntry(ledger, 300);
     const input = batchInput(digest, [
@@ -346,6 +387,7 @@ describe('applyImportBatch の一括適用（§4-4）', () => {
   });
 
   it('stale revision: レビュー後に台帳が変わっていれば全拒否', async () => {
+    await seedPaypayBinding();
     const ledger = await loadLedger();
     const digest = await paypayDigest();
     const staleVersion = { deviceId: ledger.meta.deviceId, revision: ledger.meta.revision };
@@ -362,6 +404,7 @@ describe('applyImportBatch の一括適用（§4-4）', () => {
   });
 
   it('profile digest 不一致（レビュー中の profile 変更）は全拒否', async () => {
+    await seedPaypayBinding();
     const digest = await paypayDigest();
     // レビュー表示後に profile が編集された（DSL が変わった）状況: 別 DSL のユーザー profile を
     // 同じ ID にはできないため、digest の食い違いそのものを渡して検証する。
@@ -374,12 +417,21 @@ describe('applyImportBatch の一括適用（§4-4）', () => {
     expect((await loadLedger()).importDecisions).toHaveLength(1);
   });
 
-  it('取込元識別子と一致しない rowKey・バッチ内重複・既存 ID 上書きを拒否', async () => {
+  it('取込元 ID と一致しない rowKey・バッチ内重複・既存 ID 上書きを拒否', async () => {
     const ledger = await loadLedger();
+    await seedPaypayBinding();
     const digest = await paypayDigest();
     await expect(
       applyImportBatch(
-        batchInput(digest, [{ kind: 'ignore', rowKey: externalRowKey('別の口座', ['1', 'x']) }]),
+        batchInput(digest, [
+          { kind: 'ignore', rowKey: externalRowKey('other-source-id', ['1', 'x']) },
+        ]),
+      ),
+    ).rejects.toMatchObject({ code: 'error.import.rowKeyMismatch' });
+    // 表示名（sourceIdentity）で作ったキーも通らない（名前空間は sourceId・監査 P1-3）。
+    await expect(
+      applyImportBatch(
+        batchInput(digest, [{ kind: 'ignore', rowKey: externalRowKey(SOURCE, ['1', 'x']) }]),
       ),
     ).rejects.toMatchObject({ code: 'error.import.rowKeyMismatch' });
     await expect(
@@ -405,11 +457,97 @@ describe('applyImportBatch の一括適用（§4-4）', () => {
       ),
     ).rejects.toMatchObject({ code: 'error.import.entryIdConflict' });
   });
+
+  it('binding 再検証: 存在しない bindingId は全拒否（0 件更新・監査 P1-3）', async () => {
+    await seedPaypayBinding();
+    const digest = await paypayDigest();
+    await expect(
+      applyImportBatch(
+        batchInput(digest, [{ kind: 'ignore', rowKey: rk('110') }], {
+          bindingId: 'missing-binding',
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'error.importBinding.notFound' });
+    // binding と profile の不整合（別 profile の binding）も拒否。
+    await upsertImportProfile(userProfile());
+    await expect(
+      applyImportBatch(
+        batchInput(digest, [{ kind: 'ignore', rowKey: rk('110') }], {
+          profileId: 'user-profile-1',
+          profileDigest: await profileDslDigest(USER_DSL),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'error.importBinding.notFound' });
+    expect((await loadLedger()).importDecisions).toHaveLength(0);
+  });
+
+  it('binding 再検証: 参照科目の消失（計上先の削除）は全拒否（0 件更新・監査 P1-3）', async () => {
+    const ledger = await loadLedger();
+    await seedPaypayBinding();
+    const digest = await paypayDigest();
+    // binding が計上先に指す「その他収入」を削除（未参照の科目は削除できる = soft reference が壊れる）。
+    await deleteAccount(account(ledger, 'その他収入').id);
+    await expect(
+      applyImportBatch(batchInput(digest, [{ kind: 'ignore', rowKey: rk('111') }])),
+    ).rejects.toMatchObject({ code: 'error.importBinding.destinationRole' });
+    expect((await loadLedger()).importDecisions).toHaveLength(0);
+    expect(await getImportFileRecords()).toEqual({});
+  });
+
+  it('別 profile ×同名の取込元でも sourceId が違えば rowKey は衝突しない（監査 P1-3）', async () => {
+    const ledger = await loadLedger();
+    await seedPaypayBinding();
+    await upsertImportProfile(userProfile());
+    // 別 profile に同じ表示名「PayPay本体」の取込元を作る（sourceId は別）。
+    await upsertProfileBinding(
+      binding(ledger, {
+        id: 'binding-user',
+        profileId: 'user-profile-1',
+        sourceId: 'source-user-1',
+        kindDestinations: {},
+      }),
+    );
+    // 同じ externalId タプルでも名前空間（sourceId）が違うため rowKey 自体が別物。
+    expect(externalRowKey(SOURCE_ID, ['1', '支払い'])).not.toBe(
+      externalRowKey('source-user-1', ['1', '支払い']),
+    );
+    // PayPay 側で決定済みでも、user 側の同じタプルの行は alreadyDecided にならず適用できる。
+    const digest = await paypayDigest();
+    await applyImportBatch(batchInput(digest, [{ kind: 'ignore', rowKey: rk('1') }]));
+    await applyImportBatch(
+      batchInput(
+        await profileDslDigest(USER_DSL),
+        [{ kind: 'ignore', rowKey: externalRowKey('source-user-1', ['1', '支払い']) }],
+        { profileId: 'user-profile-1', bindingId: 'binding-user' },
+      ),
+    );
+    const after = await loadLedger();
+    expect(after.importDecisions).toHaveLength(2);
+    expect(new Set(after.importDecisions.map((d) => d.provenance.sourceId))).toEqual(
+      new Set([SOURCE_ID, 'source-user-1']),
+    );
+  });
+
+  it('取込元の表示名を変更しても既存 decision は生きている（sourceId 不変・監査 P1-3）', async () => {
+    const ledger = await loadLedger();
+    await seedPaypayBinding();
+    const digest = await paypayDigest();
+    await applyImportBatch(batchInput(digest, [{ kind: 'ignore', rowKey: rk('120') }]));
+    // 表示名を変更（sourceId は不変）。
+    await upsertProfileBinding(binding(ledger, { sourceIdentity: 'PayPay改名後' }));
+    // 同じ行の再決定は alreadyDecided = 過去の決定が改名後も照合されている。
+    await expect(
+      applyImportBatch(batchInput(digest, [{ kind: 'ignore', rowKey: rk('120') }])),
+    ).rejects.toMatchObject({ code: 'error.import.alreadyDecided' });
+    const decisions = await getImportDecisions([rk('120')]);
+    expect(decisions.get(rk('120'))?.provenance.sourceId).toBe(SOURCE_ID);
+  });
 });
 
 describe('decision のライフサイクル（§1-2・§4 手順 6）', () => {
   it('仕訳の削除で、その仕訳を参照する decision（registered / linked）が同一 tx で解除される', async () => {
     const ledger = await loadLedger();
+    await seedPaypayBinding();
     const digest = await paypayDigest();
     const entry = paymentEntry(ledger, 900);
     await applyImportBatch(
@@ -428,6 +566,7 @@ describe('decision のライフサイクル（§1-2・§4 手順 6）', () => {
 
   it('無視の解除 / リンクの解除は decision 削除の対称 1 操作で冪等', async () => {
     const ledger = await loadLedger();
+    await seedPaypayBinding();
     const digest = await paypayDigest();
     const entry = paymentEntry(ledger, 700);
     await applyImportBatch(
@@ -451,6 +590,7 @@ describe('decision のライフサイクル（§1-2・§4 手順 6）', () => {
 
   it('仕訳の編集で import 由来メタが保持される（entry.ts の更新ヘルパー修正の固定）', async () => {
     const ledger = await loadLedger();
+    await seedPaypayBinding();
     const digest = await paypayDigest();
     const entry = paymentEntry(ledger, 1500);
     await applyImportBatch(batchInput(digest, [{ kind: 'register', rowKey: rk('95'), entry }]));
@@ -473,13 +613,13 @@ describe('decision のライフサイクル（§1-2・§4 手順 6）', () => {
 
 describe('importDecisionSchema の status ↔ entryId 相関（§1-2）', () => {
   const base = {
-    key: fingerprintRowKey(SOURCE, 'ab'.repeat(32), 1),
+    key: fingerprintRowKey(SOURCE_ID, 'ab'.repeat(32), 1),
     decidedAt: '2026-08-11T00:00:00.000Z',
     provenance: {
       profileId: PAYPAY_PROFILE_ID,
       profileDigest: 'digest',
       fileHash: FILE_HASH,
-      sourceIdentity: SOURCE,
+      sourceId: SOURCE_ID,
       identityVersion: 1,
     },
   };
