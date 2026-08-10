@@ -169,6 +169,8 @@ export const UI = {
     list: 'accounts.list',
     box: 'accounts.box',
     notMovableBadge: 'accounts.notMovableBadge',
+    // 残高調整科目（system-adjustment）の「自動」バッジ。表示のみ＝管理操作は出さない
+    systemBadge: 'accounts.systemBadge',
     adjust: 'accounts.adjust',
     // アーカイブ/解除ボタン。残高が残る資産・負債は振替シート（EntrySheet transfer 再利用）を経由する
     archiveToggle: 'accounts.archiveToggle',

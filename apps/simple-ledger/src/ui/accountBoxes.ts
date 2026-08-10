@@ -13,8 +13,10 @@
  *  - ローン           = other-liability（長期債務）
  *  - 収入カテゴリ      = income-category
  *  - 支出カテゴリ      = expense-category
- * equity / system-adjustment / 内部集約 role（continuing-cost-asset）は
- * 聖域として一覧・追加・編集候補から隠す。
+ * equity / 内部集約 role（continuing-cost-asset）は聖域として一覧・追加・編集候補から隠す。
+ * system-adjustment（残高調整）は type に基づき収入・費用の箱へ「表示だけ」所属させる
+ * （boxIncludesAccount）。管理操作（追加・名前変更・並び替え・アーカイブ）と
+ * 行き先ピッカーからは引き続き除外する＝科目管理としては聖域のまま。
  */
 import type { AccountRole } from '../domain/accountRoles';
 import { compareAccountOrder } from '../domain/accountOrder';
@@ -53,7 +55,7 @@ export type AccountAccent = (typeof ACCOUNT_ACCENTS)[keyof typeof ACCOUNT_ACCENT
  *
  * 勘定科目管理の 6 箱に、資産内訳で既に使っている「自由に動かせる / 動かせない」
  * の分割、内部の継続コスト台帳、純資産を合わせたもの。順序も両画面の既存順に揃える。
- * 残高調整科目は利用者が管理する線分ではないため含めない。
+ * 残高調整科目は type に基づき収入・費用の箱へ通常の内訳として所属させる（表示だけ普通に）。
  */
 export type TimelineAccountBoxKey =
   | 'assetFree'
@@ -114,13 +116,17 @@ export const TIMELINE_ACCOUNT_BOXES: readonly TimelineAccountBox[] = [
     key: 'income',
     labelKey: 'box.income',
     accent: ACCOUNT_ACCENTS.income,
-    includes: (account) => account.role === 'income-category',
+    includes: (account) =>
+      account.role === 'income-category' ||
+      (account.role === 'system-adjustment' && account.type === 'revenue'),
   },
   {
     key: 'expense',
     labelKey: 'box.expense',
     accent: ACCOUNT_ACCENTS.expense,
-    includes: (account) => account.role === 'expense-category',
+    includes: (account) =>
+      account.role === 'expense-category' ||
+      (account.role === 'system-adjustment' && account.type === 'expense'),
   },
   {
     key: 'equity',
@@ -132,17 +138,6 @@ export const TIMELINE_ACCOUNT_BOXES: readonly TimelineAccountBox[] = [
 
 export function timelineBoxForAccount(account: Account): TimelineAccountBox | undefined {
   return TIMELINE_ACCOUNT_BOXES.find((box) => box.includes(account));
-}
-
-/**
- * 箱の純増減へフローを割り当てるときの分類。
- * 残高調整科目は内訳としては隠したまま、損益方向の箱へだけ所属させる。
- */
-export function timelineFlowBoxForAccount(account: Account): TimelineAccountBox | undefined {
-  const visible = timelineBoxForAccount(account);
-  if (visible || account.role !== 'system-adjustment') return visible;
-  const key = account.type === 'revenue' ? 'income' : account.type === 'expense' ? 'expense' : null;
-  return key === null ? undefined : TIMELINE_ACCOUNT_BOXES.find((box) => box.key === key);
 }
 
 export interface AccountBox {
@@ -234,9 +229,22 @@ const BOX_BY_ROLE: ReadonlyMap<AccountRole, AccountBox> = new Map(
   ACCOUNT_BOXES.flatMap((box) => box.roles.map((role) => [role, box] as const)),
 );
 
-/** role が属する箱。聖域 role（equity / system-adjustment / 内部集約）は undefined。 */
+/**
+ * role が属する箱（作成・管理導線の正本）。聖域 role
+ * （equity / system-adjustment / 内部集約）は undefined のまま＝管理操作を出さない。
+ * system-adjustment の「表示だけ」の所属は boxIncludesAccount が持つ。
+ */
 export function boxForRole(role: AccountRole): AccountBox | undefined {
   return BOX_BY_ROLE.get(role);
+}
+
+/**
+ * 科目一覧の表示上の所属。roles（管理対象）に加えて、残高調整科目を type で
+ * 収入・費用の箱へ含める（作者決定: 収入・費用項目の 1 つとして表示。科目管理は聖域のまま）。
+ */
+export function boxIncludesAccount(box: AccountBox, account: Account): boolean {
+  if (box.roles.includes(account.role)) return true;
+  return account.role === 'system-adjustment' && box.type === account.type;
 }
 
 export function boxByKey(key: AccountBoxKey): AccountBox {
@@ -262,7 +270,8 @@ export function accountAccent(account: Account): AccountAccent {
 
 /**
  * 科目を箱ごとにグループ化する（勘定科目画面用）。
- * 聖域 role の科目は含めない。showArchived=false ならアーカイブ済みを除く。
+ * 聖域 role のうち残高調整だけは type で収入・費用の箱へ表示する（boxIncludesAccount）。
+ * equity / 内部集約は含めない。showArchived=false ならアーカイブ済みを除く。
  */
 export function groupAccountsByBox(
   accounts: Account[],
@@ -274,7 +283,7 @@ export function groupAccountsByBox(
     accounts: accounts
       .filter(
         (a) =>
-          box.roles.includes(a.role) &&
+          boxIncludesAccount(box, a) &&
           (showArchived || (atDate === undefined ? !a.archived : accountExistsAt(a, atDate))),
       )
       .sort(compareAccountOrder),

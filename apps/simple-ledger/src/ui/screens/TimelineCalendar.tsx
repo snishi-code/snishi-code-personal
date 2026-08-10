@@ -22,11 +22,7 @@ import { todayLocal } from '../../util/time';
 import { formatMoney } from '../../util/format';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
-import {
-  TIMELINE_ACCOUNT_BOXES,
-  timelineFlowBoxForAccount,
-  type AccountAccent,
-} from '../accountBoxes';
+import { TIMELINE_ACCOUNT_BOXES, timelineBoxForAccount, type AccountAccent } from '../accountBoxes';
 import type { Account, MonthlyCostItem, RecurringRule } from '../../domain/types';
 import type { ReportPeriod } from '../../domain/reportPeriod';
 
@@ -577,7 +573,7 @@ export function TimelineCalendarView({
   const renderedRowById = new Map(rows.map((row, index) => [row.id, { row, index }] as const));
   const accountBoxKey = (accountId: string): string | undefined => {
     const account = accountById.get(accountId);
-    return account ? timelineFlowBoxForAccount(account)?.key : undefined;
+    return account ? timelineBoxForAccount(account)?.key : undefined;
   };
 
   const counterpartRow = (() => {
@@ -1176,9 +1172,6 @@ export function TimelineCalendar({
     const boxes = TIMELINE_ACCOUNT_BOXES.map((box) => ({
       key: box.key,
       accountIds: ledger.accounts.filter(box.includes).map((account) => account.id),
-      flowAccountIds: ledger.accounts
-        .filter((account) => timelineFlowBoxForAccount(account)?.key === box.key)
-        .map((account) => account.id),
       ...(box.key === 'continuingCost' ? { kind: 'continuousCost' as const } : {}),
     }));
     const calculated = buildTimelineCalendar({

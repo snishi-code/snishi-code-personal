@@ -405,6 +405,8 @@ export const ja = {
   'accounts.archiveRenameConfirm': '変更して続行',
   'accounts.name': '科目名',
   'accounts.balance': '残高',
+  'accounts.periodAmount': '{period}の発生額',
+  'accounts.autoBadge': '自動',
   'accounts.outsideSlice': 'この断面には存在しない',
   'accounts.archive': 'アーカイブ',
   'accounts.archiveWithTransfer': '累計を振り替えてアーカイブ',

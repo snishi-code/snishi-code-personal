@@ -106,13 +106,8 @@ export interface TimelineContinuousCostRows {
 
 export interface TimelineBoxDefinition {
   key: string;
-  /** 箱を開いたときに帯として並べる科目。 */
+  /** 箱に属する科目（内訳の帯・箱の純増減の両方）。残高調整科目も通常の内訳として含める。 */
   accountIds: readonly string[];
-  /**
-   * 箱の純増減だけへ含める科目。省略時は accountIds と同じ。
-   * 残高補正の内部科目など、内訳には出さずフローだけ所属させる場合に使う。
-   */
-  flowAccountIds?: readonly string[];
   kind?: 'accounts' | 'continuousCost';
 }
 
@@ -407,8 +402,7 @@ export function buildTimelineCalendar(input: BuildTimelineCalendarInput): Timeli
   const accountById = new Map(input.accounts.map((account) => [account.id, account] as const));
   const accountToBox = new Map<string, string>();
   for (const box of input.boxes) {
-    for (const accountId of box.flowAccountIds ?? box.accountIds)
-      accountToBox.set(accountId, box.key);
+    for (const accountId of box.accountIds) accountToBox.set(accountId, box.key);
   }
 
   const accountDots = new Map<string, DotMap>();

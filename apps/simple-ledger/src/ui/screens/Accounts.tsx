@@ -5,12 +5,20 @@
  * - ユーザーは箱の中の内訳だけを追加・名前変更・アーカイブできる（削除は出さない）。
  * - 資産・負債の内訳行には残高補正の導線を置く（補正は対象科目が決まってから行う操作のため）。
  * - 登録済みの初期残高・補正の履歴はこの画面に置かず、仕訳一覧に委ねる。
- * - 初期残高(equity)・調整用(system-adjustment)・内部集約 role は聖域として表示しない。
+ * - 初期残高(equity)・内部集約 role は聖域として表示しない。残高調整(system-adjustment)は
+ *   収入・費用の内訳として表示だけする（「自動」バッジ付き・管理操作は出さない）。
+ * - 費用・収入の内訳はヘッダー期間（ホームと同じ選択期間）の発生額、資産・負債は
+ *   スライス時点の残高を表示する。
  */
 import { useState, type CSSProperties } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
-import { accountBalance, accountHasEntries, filterByDateRange } from '../../domain/accounting';
+import {
+  accountBalance,
+  accountHasEntries,
+  filterByDateRange,
+  summarizeEntriesForAccount,
+} from '../../domain/accounting';
 import { isDebitNormal } from '../../domain/accounting';
 import { referencedAccountIds } from '../../domain/accountRefs';
 import { reportEntriesForAsOf } from '../../domain/reportEntries';
@@ -25,6 +33,7 @@ import { AdjustmentCreateSheet } from '../AdjustmentSheet';
 import { OpeningRegisterSheet } from '../OpeningSheet';
 import { EntrySheet } from './EntrySheet';
 import { Money } from '../money';
+import { periodLabel } from '../periodLabel';
 import { nowIso, todayLocal } from '../../util/time';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
@@ -43,10 +52,13 @@ export function Accounts({ period = { mode: 'all' } }: { period?: ReportPeriod }
   } | null>(null);
 
   const today = todayLocal();
-  const asOf = reportBasis(period, today).asOf;
+  const basis = reportBasis(period, today);
+  const asOf = basis.asOf;
   const entries = ledger
     ? filterByDateRange(reportEntriesForAsOf(ledger, asOf), undefined, asOf)
     : [];
+  // 費用・収入の発生額はホームと同じ期間（flowRange）で数える（C-1。導出＝統一エンジン）。
+  const flowEntries = filterByDateRange(entries, basis.flowRange.from, basis.flowRange.to);
   const todayEntries = ledger
     ? filterByDateRange(reportEntriesForAsOf(ledger, today), undefined, today)
     : [];
@@ -148,6 +160,7 @@ export function Accounts({ period = { mode: 'all' } }: { period?: ReportPeriod }
       <div className="stack" data-ui={UI.accounts.list}>
         {groups.map(({ box, accounts }) => {
           const canAdjust = box.type === 'asset' || box.type === 'liability';
+          const isFlowBox = box.type === 'revenue' || box.type === 'expense';
           return (
             <div key={box.key}>
               <div
@@ -182,13 +195,22 @@ export function Accounts({ period = { mode: 'all' } }: { period?: ReportPeriod }
                 <ul className="card list">
                   {accounts.map((account) => {
                     const existsAtSlice = accountExistsAt(account, asOf);
-                    const orderable = accounts.filter((a) => accountExistsAt(a, asOf));
+                    // 残高調整科目は表示だけ（管理操作・並び替えの対象にしない）。
+                    const isSystemManaged = account.role === 'system-adjustment';
+                    const orderable = accounts.filter(
+                      (a) => accountExistsAt(a, asOf) && a.role !== 'system-adjustment',
+                    );
                     const orderIndex = orderable.findIndex((a) => a.id === account.id);
                     return (
                       <li key={account.id} className="list__item">
                         <div className="list__main">
                           <div className="list__title account-list__title">
                             <span>{account.name}</span>
+                            {isSystemManaged ? (
+                              <span className="tag tag--neutral" data-ui={UI.accounts.systemBadge}>
+                                {t('accounts.autoBadge')}
+                              </span>
+                            ) : null}
                             {account.role === 'daily-asset' && account.movable === false ? (
                               <span
                                 className="tag tag--asset-muted"
@@ -205,14 +227,29 @@ export function Accounts({ period = { mode: 'all' } }: { period?: ReportPeriod }
                             ) : null}
                           </div>
                           <div className="list__sub">
-                            {t('accounts.balance')}:{' '}
-                            <Money
-                              amount={accountBalance(account.id, account.type, entries)}
-                              currency={currency}
-                            />
+                            {isFlowBox ? (
+                              <>
+                                {t('accounts.periodAmount', { period: periodLabel(period) })}:{' '}
+                                <Money
+                                  amount={
+                                    summarizeEntriesForAccount(account, flowEntries, () => true)
+                                      .total
+                                  }
+                                  currency={currency}
+                                />
+                              </>
+                            ) : (
+                              <>
+                                {t('accounts.balance')}:{' '}
+                                <Money
+                                  amount={accountBalance(account.id, account.type, entries)}
+                                  currency={currency}
+                                />
+                              </>
+                            )}
                           </div>
                         </div>
-                        {reordering ? (
+                        {isSystemManaged ? null : reordering ? (
                           orderIndex >= 0 ? (
                             <div className="row-actions">
                               <button

@@ -330,16 +330,12 @@ describe('buildTimelineCalendar', () => {
     expect(legacyRow?.spans).toEqual([]);
   });
 
-  it('内部の残高調整科目を内訳に出さず、損益箱の純増減へ含める', () => {
+  it('残高調整科目を費用箱の通常の内訳として表示し、箱の純増減にも含める', () => {
     const adjustment = account('balance-expense', 'expense', 'system-adjustment', '2025-01-01');
     const customAccounts = [...accounts, adjustment];
     const customBoxes: TimelineBoxDefinition[] = [
       { key: 'assetFree', accountIds: ['cash-a', 'cash-b'] },
-      {
-        key: 'expense',
-        accountIds: [],
-        flowAccountIds: [adjustment.id],
-      },
+      { key: 'expense', accountIds: [adjustment.id] },
     ];
     const model = build({
       accounts: customAccounts,
@@ -350,7 +346,10 @@ describe('buildTimelineCalendar', () => {
     expect(model.boxes.find((box) => box.key === 'assetFree')?.dots[0]?.netChange).toBe(-50);
     const expenseBox = model.boxes.find((box) => box.key === 'expense');
     expect(expenseBox?.dots[0]?.netChange).toBe(50);
-    expect(expenseBox?.accountRows).toEqual([]);
+    // 内訳の帯としても現れる（聖域は科目管理だけ・表示は普通に）。
+    const adjustmentRow = expenseBox?.accountRows.find((row) => row.account.id === adjustment.id);
+    expect(adjustmentRow).toBeDefined();
+    expect(adjustmentRow?.dots[0]?.netChange).toBe(50);
   });
 
   it('費用ルールの帯へ実itemを束ね、未起票月のitemと生成ポッチを未来投影する', () => {

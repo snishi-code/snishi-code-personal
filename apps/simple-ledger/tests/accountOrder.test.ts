@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import './setup';
 import { loadLedger, reorderAccounts, upsertAccount } from '../src/data/repository';
 import { compareAccountOrder } from '../src/domain/accountOrder';
-import { ACCOUNT_BOXES, groupAccountsByBox } from '../src/ui/accountBoxes';
+import { ACCOUNT_BOXES, groupAccountsByBox, timelineBoxForAccount } from '../src/ui/accountBoxes';
 import { ledgerExportPackageSchema } from '../src/domain/schema';
 import { buildExportPackage } from '../src/data/exportImport';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
@@ -126,6 +126,40 @@ describe('ACCOUNT_BOXES と role 順の整合', () => {
     );
     const boxedRoles = ACCOUNT_BOXES.flatMap((box) => box.roles);
     expect(boxedRoles).not.toContain('continuing-cost-asset');
+  });
+});
+
+describe('残高調整科目の箱所属（表示だけ普通に・C-7）', () => {
+  const adjExpense = roleAcc('残高調整費', 'expense', 'system-adjustment');
+  const adjRevenue = roleAcc('残高調整収入', 'revenue', 'system-adjustment');
+  const capital = roleAcc('初期残高', 'equity', 'equity');
+  const internal = roleAcc('継続コスト台帳', 'asset', 'continuing-cost-asset');
+  const income = roleAcc('給与', 'revenue', 'income-category', 0);
+  const expense = roleAcc('変動費', 'expense', 'expense-category', 0);
+
+  it('type に基づき収入・費用の箱へ含め、通常内訳の後ろに並ぶ', () => {
+    const groups = groupAccountsByBox(
+      [adjExpense, adjRevenue, capital, internal, income, expense],
+      false,
+    );
+    expect(groups.find((g) => g.box.key === 'income')!.accounts.map((a) => a.id)).toEqual([
+      '給与',
+      '残高調整収入',
+    ]);
+    expect(groups.find((g) => g.box.key === 'expense')!.accounts.map((a) => a.id)).toEqual([
+      '変動費',
+      '残高調整費',
+    ]);
+    // equity・内部集約は引き続きどの箱にも出ない（聖域のまま）。
+    const shown = groups.flatMap((g) => g.accounts.map((a) => a.id));
+    expect(shown).not.toContain('初期残高');
+    expect(shown).not.toContain('継続コスト台帳');
+  });
+
+  it('タイムラインの箱も同じ type ベースの所属（timelineBoxForAccount）', () => {
+    expect(timelineBoxForAccount(adjRevenue)?.key).toBe('income');
+    expect(timelineBoxForAccount(adjExpense)?.key).toBe('expense');
+    expect(timelineBoxForAccount(capital)?.key).toBe('equity');
   });
 });
 
