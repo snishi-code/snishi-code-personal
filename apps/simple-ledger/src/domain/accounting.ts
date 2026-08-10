@@ -11,12 +11,25 @@ import type {
   BalanceSheet,
   JournalEntry,
   ProfitAndLoss,
+  Side,
 } from './types';
 import { compareAccountOrder } from './accountOrder';
 
 /** asset / expense は借方が正。liability / equity / revenue は貸方が正。 */
 export function isDebitNormal(type: AccountType): boolean {
   return type === 'asset' || type === 'expense';
+}
+
+/**
+ * 1 行の金額を、その科目の自然な符号（増加 = 正）の増減へ変換する。
+ * asset/expense は借方が増、liability/equity/revenue は貸方が増（isDebitNormal が正本）。
+ * periodMatrix・抽出→合計エンジンが共有する符号規則の単一正本。
+ */
+export function naturalDelta(account: Account, side: Side, amount: number): number {
+  const increases =
+    (side === 'debit' && isDebitNormal(account.type)) ||
+    (side === 'credit' && !isDebitNormal(account.type));
+  return increases ? amount : -amount;
 }
 
 /** 1 科目の、自然な符号での残高を計算する。 */
@@ -154,4 +167,100 @@ export function monthRange(year: number, month1to12: number): { from: string; to
   const lastDay = new Date(Date.UTC(year, month1to12, 0)).getUTCDate();
   const to = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
   return { from, to };
+}
+
+/* ── 抽出 → 合計の統一エンジン ──
+ *
+ * 「導出込み仕訳列（reportEntriesForAsOf の結果）→ 条件（述語）→ 件数と合計」を
+ * 1 箇所で定義する。合計規則は 2 モード:
+ *  - 方向つき和（科目視点・summarizeEntriesForAccount）: 指定科目の行だけを naturalDelta で合算。
+ *  - 単純和（テキスト抽出視点・summarizeEntries）: 仕訳ごとに金額を 1 回だけ数える
+ *    （= 各仕訳の借方合計。現行は 1 借 1 貸同額なので仕訳の金額そのもの。
+ *     借方行と貸方行を両方足す二重計上をしない。将来複合仕訳が入っても
+ *     「借方合計を 1 回」の定義は変わらない）。
+ */
+
+/** 抽出結果の件数と合計。 */
+export interface EntrySummary {
+  /** 条件に一致した仕訳の件数。 */
+  count: number;
+  /** 合計。規則は呼び出したモード（方向つき和 / 単純和）で決まる。 */
+  total: number;
+}
+
+/** 仕訳 1 件の金額 = 借方合計（単純和の単位。現行の 1 借 1 貸では仕訳の金額そのもの）。 */
+export function entryAmount(entry: JournalEntry): number {
+  let total = 0;
+  for (const line of entry.lines) {
+    if (line.side === 'debit') total += line.amount;
+  }
+  return total;
+}
+
+/** 単純和（テキスト抽出視点）: 条件に一致した仕訳の件数と、仕訳ごとの金額（借方合計）の合計。 */
+export function summarizeEntries(
+  entries: JournalEntry[],
+  predicate: (entry: JournalEntry) => boolean,
+): EntrySummary {
+  let count = 0;
+  let total = 0;
+  for (const entry of entries) {
+    if (!predicate(entry)) continue;
+    count += 1;
+    total += entryAmount(entry);
+  }
+  return { count, total };
+}
+
+/**
+ * 方向つき和（科目視点）: 条件に一致し、かつ指定科目の行を持つ仕訳の件数と、
+ * その科目の行だけを naturalDelta（自然な符号）で合算した合計。
+ * 指定科目の行を持たない仕訳は件数にも合計にも入れない。
+ */
+export function summarizeEntriesForAccount(
+  account: Account,
+  entries: JournalEntry[],
+  predicate: (entry: JournalEntry) => boolean,
+): EntrySummary {
+  let count = 0;
+  let total = 0;
+  for (const entry of entries) {
+    if (!predicate(entry)) continue;
+    let matched = false;
+    for (const line of entry.lines) {
+      if (line.accountId !== account.id) continue;
+      matched = true;
+      total += naturalDelta(account, line.side, line.amount);
+    }
+    if (matched) count += 1;
+  }
+  return { count, total };
+}
+
+/* ── equity の集計上の定義（正本） ──
+ *
+ * equity は損益（収支）に含めない。純資産の変動を説明する独立項である。恒等式:
+ *   年末純資産 − 前年末純資産 = 当年の収支（収益 − 費用） + 当年の equity 自然増減
+ * （自然増減 = 貸方正）。periodMatrix・accounting 系はこの定義を共有し、
+ * equity を収益・費用のどちらにも算入しない（deriveProfitAndLoss / buildPeriodMatrix の
+ * revenue・expense に equity 行は入らない）。
+ */
+
+/** 期間内（両端を含む・未指定の端は無制限）の equity 自然増減（貸方正）。恒等式の右辺第 2 項。 */
+export function equityNaturalDelta(
+  accounts: Account[],
+  allEntries: JournalEntry[],
+  range?: { from?: string; to?: string },
+): number {
+  const equityById = new Map(
+    accounts.filter((a) => a.type === 'equity').map((a) => [a.id, a] as const),
+  );
+  let total = 0;
+  for (const entry of filterByDateRange(allEntries, range?.from, range?.to)) {
+    for (const line of entry.lines) {
+      const account = equityById.get(line.accountId);
+      if (account) total += naturalDelta(account, line.side, line.amount);
+    }
+  }
+  return total;
 }

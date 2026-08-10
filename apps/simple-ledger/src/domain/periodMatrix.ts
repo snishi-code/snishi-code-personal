@@ -6,7 +6,7 @@
  * この関数内では導出仕訳を再展開しない。
  */
 import { compareAccountOrder } from './accountOrder';
-import { isDebitNormal } from './accounting';
+import { naturalDelta } from './accounting';
 import { isContinuousCostMonthlyAllocationEntry } from './livingCost';
 import type { Account, JournalEntry } from './types';
 
@@ -121,13 +121,6 @@ function blankValues(columns: PeriodMatrixColumn[]): PeriodMatrixValue[] {
 function addValue(values: PeriodMatrixValue[], index: number, amount: number): void {
   const current = values[index];
   if (current !== undefined) values[index] = current + amount;
-}
-
-function naturalDelta(account: Account, side: 'debit' | 'credit', amount: number): number {
-  const increases =
-    (side === 'debit' && isDebitNormal(account.type)) ||
-    (side === 'credit' && !isDebitNormal(account.type));
-  return increases ? amount : -amount;
 }
 
 /**
