@@ -82,3 +82,16 @@ ${sampleCsv}
 \`\`\`
 `;
 }
+
+/**
+ * AI の返書テキストから DSL の JSON 部分を取り出す（§6-3・決定的）。
+ *  - プロンプトは「\`\`\`json フェンス 1 個で出力」と指示しているので、最初のフェンス
+ *    （\`\`\`json / 素の \`\`\` どちらも可）の中身を採る。
+ *  - フェンスが無ければ全文を JSON とみなす（AI が生 JSON だけを返した場合）。
+ *  - ここでは切り出しだけを行う。JSON.parse と DSL 検証（parseImportProfileDsl・
+ *    fail-closed）は呼び出し側の管轄。
+ */
+export function extractProfileBuilderReplyJson(text: string): string {
+  const fence = /```(?:json)?[^\S\n]*\n([\s\S]*?)```/i.exec(text);
+  return (fence !== null ? fence[1]! : text).trim();
+}

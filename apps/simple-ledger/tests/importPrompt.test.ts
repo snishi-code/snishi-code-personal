@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import './setup';
-import { PROMPT_INJECTION_GUARD, buildProfileBuilderPrompt } from '../src/domain/importPrompt';
+import {
+  PROMPT_INJECTION_GUARD,
+  buildProfileBuilderPrompt,
+  extractProfileBuilderReplyJson,
+} from '../src/domain/importPrompt';
 
 const input = {
   header: ['日付', '金額', '内容'],
@@ -49,5 +53,33 @@ describe('buildProfileBuilderPrompt', () => {
     expect(prompt).toContain('テスト銀行の入出金明細');
     expect(prompt).toContain('cp932');
     expect(prompt).toContain('日付\t金額\t内容');
+  });
+});
+
+describe('extractProfileBuilderReplyJson（§6-3・返書からの JSON 切り出し）', () => {
+  const json = '{"dslVersion": 1}';
+
+  it('```json フェンスの中身を採る（前後の説明文は無視）', () => {
+    const reply = `できました。\n\`\`\`json\n${json}\n\`\`\`\n以上です。`;
+    expect(extractProfileBuilderReplyJson(reply)).toBe(json);
+  });
+
+  it('言語タグの無い素の ``` フェンスも受ける', () => {
+    const reply = `\`\`\`\n${json}\n\`\`\``;
+    expect(extractProfileBuilderReplyJson(reply)).toBe(json);
+  });
+
+  it('複数フェンスがあれば最初のフェンスを採る（プロンプトは 1 個と指示している）', () => {
+    const reply = `\`\`\`json\n${json}\n\`\`\`\n\`\`\`json\n{"other": true}\n\`\`\``;
+    expect(extractProfileBuilderReplyJson(reply)).toBe(json);
+  });
+
+  it('フェンスが無ければ全文をトリムして返す（生 JSON だけの返書）', () => {
+    expect(extractProfileBuilderReplyJson(`  ${json}\n`)).toBe(json);
+  });
+
+  it('切り出しは行うだけで JSON の妥当性は判定しない（検証は parseImportProfileDsl の管轄）', () => {
+    expect(extractProfileBuilderReplyJson('こんにちは')).toBe('こんにちは');
+    expect(extractProfileBuilderReplyJson('')).toBe('');
   });
 });

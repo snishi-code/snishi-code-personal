@@ -19,6 +19,7 @@ import { Icon } from '@snishi/foundation/ui/Icon';
 import { Segmented } from '@snishi/foundation/ui/Segmented';
 import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { ConfirmDialog, Modal, useDirtyGuard } from '../overlays';
+import { CsvImportProfiles } from './CsvImportProfiles';
 import { AccountPicker } from '../AccountPicker';
 import { Money } from '../money';
 import { useLedger } from '../../state/store';
@@ -274,7 +275,7 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
   const { ledger, applyCsvImportBatch, removeCsvImportDecisions } = useLedger();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [tab, setTab] = useState<'flow' | 'decisions'>('flow');
+  const [tab, setTab] = useState<'flow' | 'decisions' | 'profiles'>('flow');
   const [fileData, setFileData] = useState<{ name: string; bytes: Uint8Array } | null>(null);
   const [profileId, setProfileId] = useState('');
   const [bindingChoice, setBindingChoice] = useState('');
@@ -475,8 +476,13 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
               label: t('csvImport.tabDecisions'),
               dataUi: UI.csvImport.tabDecisions,
             },
+            {
+              key: 'profiles',
+              label: t('csvImport.tabProfiles'),
+              dataUi: UI.csvImport.tabProfiles,
+            },
           ]}
-          onChange={(key) => setTab(key === 'decisions' ? 'decisions' : 'flow')}
+          onChange={(key) => setTab(key === 'decisions' || key === 'profiles' ? key : 'flow')}
         />
       </div>
 
@@ -814,6 +820,22 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
             </div>
           ) : null}
         </>
+      ) : tab === 'profiles' ? (
+        /* プロファイル管理 + AI ビルダー（§1-1 / §6・別ファイル） */
+        <CsvImportProfiles
+          onContinueToImport={(newProfileId, file) => {
+            // ビルダー保存後の導線（§6-6）: 保存した profile と選択済みファイルで
+            // 通常の取込フローへ（binding 未設定ならセットアップシートの gate が出る）。
+            setTab('flow');
+            setProfileId(newProfileId);
+            setBindingChoice('');
+            setBuiltReview(null);
+            setFileError(null);
+            setShowSkipDetail(false);
+            setShowErrorDetail(false);
+            setFileData(file);
+          }}
+        />
       ) : (
         /* 決定済み一覧（§4-6） */
         <>

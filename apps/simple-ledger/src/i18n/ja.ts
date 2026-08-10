@@ -739,6 +739,75 @@ export const ja = {
   'csvImport.fpKey': '指紋 {hash}… #{n}',
   'csvImport.appliedToast': '{count} 件を適用しました。',
   'csvImport.removedToast': '解除しました。',
+
+  // CSV 取込 — プロファイル管理（§1-1）
+  'csvImport.tabProfiles': 'プロファイル',
+  'csvImport.profiles.intro':
+    '取込プロファイル（CSV → 仕訳の変換規則）の管理。組み込みも削除できます。',
+  'csvImport.profiles.empty': 'プロファイルがありません。',
+  'csvImport.profiles.builtinTag': '組み込み',
+  'csvImport.profiles.meta': 'DSL v{version}・{digest}',
+  'csvImport.profiles.viewJson': 'JSON を表示',
+  'csvImport.profiles.delete': '削除',
+  'csvImport.profiles.deleteConfirmTitle': 'プロファイルを削除',
+  'csvImport.profiles.deleteConfirmBody':
+    '「{name}」を削除します。取込元の設定と決定済みの判定は残るため、同じプロファイルを入れ直せば続きから使えます。組み込みは「組み込みプロファイルを復元」で戻せます。',
+  'csvImport.profiles.restoreBuiltin': '組み込みプロファイルを復元',
+  'csvImport.profiles.restoredToast': '組み込みプロファイル {count} 件を原本の内容へ戻しました。',
+  'csvImport.profiles.pasteOpen': 'JSON を貼り付けて追加',
+  'csvImport.profiles.pasteTitle': 'プロファイルの追加（JSON 貼付）',
+  'csvImport.profiles.pasteIntro':
+    '変換規則（DSL v1）の JSON を貼り付けて検証し、プロファイルとして保存します。検証に失敗した場合は何も保存しません。',
+  'csvImport.profiles.pasteTarget': '保存先',
+  'csvImport.profiles.pasteTargetNew': '新規追加',
+  'csvImport.profiles.pasteTargetOverwrite': '上書き: {name}',
+  'csvImport.profiles.pasteName': '名前',
+  'csvImport.profiles.pasteJson': 'DSL JSON',
+  'csvImport.profiles.pasteSave': '検証して保存',
+  'csvImport.profiles.jsonTitle': 'プロファイルの JSON',
+  'csvImport.profiles.jsonHint':
+    '編集はこの JSON をコピーし、「JSON を貼り付けて追加」から新規または上書きで保存してください。',
+  'csvImport.profiles.copy': 'コピー',
+  'csvImport.profiles.copied': 'コピーしました。',
+  'csvImport.profiles.copyFailed': 'コピーできませんでした。手動で選択してコピーしてください。',
+  'csvImport.profiles.jsonParseError': 'JSON として読み取れません。',
+  'csvImport.profiles.dslInvalid': 'DSL の検証に失敗しました（{issues}）。',
+
+  // CSV 取込 — AI プロファイルビルダー（§6・アプリは AI に接続しない）
+  'csvImport.builder.open': 'AI でプロファイルを作る',
+  'csvImport.builder.title': 'AI プロファイルビルダー',
+  'csvImport.builder.intro':
+    'アプリは AI に接続しません。下の依頼文をコピーして手元の AI に貼り、返ってきた JSON をここへ貼り戻して検証・保存します。',
+  'csvImport.builder.close': '閉じる',
+  'csvImport.builder.fileLabel': '未知の CSV ファイル',
+  'csvImport.builder.filePick': 'CSV を選ぶ',
+  'csvImport.builder.encoding': '文字コード',
+  'csvImport.builder.delimiter': '区切り文字',
+  'csvImport.builder.headerRow': 'ヘッダー行の位置（0 始まり）',
+  'csvImport.builder.note': '取込元の説明（任意）',
+  'csvImport.builder.noteHint': '例: ◯◯銀行の入出金明細',
+  'csvImport.builder.maskTitle': '列ごとの送信設定',
+  'csvImport.builder.maskIntro':
+    'AI へ送るサンプル {count} 行の実値を列ごとに選べます。マスク = 値を *** に置き換えて送る／除外 = 列ごと送らない。',
+  'csvImport.builder.maskMode.raw': 'そのまま',
+  'csvImport.builder.maskMode.mask': 'マスク',
+  'csvImport.builder.maskMode.omit': '除外',
+  'csvImport.builder.promptTitle': '依頼文（AI に送る内容の完全プレビュー）',
+  'csvImport.builder.promptHint':
+    'AI に渡るのはこのテキストだけです。コピーする前に内容を確認してください。',
+  'csvImport.builder.promptCopy': '依頼文をコピー',
+  'csvImport.builder.replyTitle': 'AI の返書を貼り付け',
+  'csvImport.builder.reply': '返書',
+  'csvImport.builder.replyHint':
+    '返書のうち ```json フェンスの JSON を読み取ります。何度でも貼り直せます。',
+  'csvImport.builder.check': '検証して適用プレビュー',
+  'csvImport.builder.replyEmpty': '返書を貼り付けてください。',
+  'csvImport.builder.previewTitle': '実適用プレビュー（このファイルの全行勘定）',
+  'csvImport.builder.previewIntro':
+    '貼り付けた変換規則を選択中の CSV 全体へ適用した結果です。件数が合わない場合は AI に修正を依頼して貼り直してください。',
+  'csvImport.builder.previewRows': '正規化行の先頭 {count} 件',
+  'csvImport.builder.name': 'プロファイル名',
+  'csvImport.builder.save': '保存して取込へ進む',
   'error.common.staleData':
     '別のタブ（またはウィンドウ）でデータが変更されています。ページを再読み込みしてから、もう一度お試しください。',
   'error.common.revisionExhausted':
