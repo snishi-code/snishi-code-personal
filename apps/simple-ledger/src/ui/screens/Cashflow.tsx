@@ -2,10 +2,10 @@
  * 資金繰り（将来CF）。未来日付の仕訳から「自由に動かせるお金」の推移・最低残高を投影し、
  * 負債の返済計画（登録済みの返済仕訳の確認・編集を含む）を扱う。
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
-import { ConfirmDialog, Modal } from '../overlays';
+import { Modal } from '../overlays';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet } from '../../domain/accounting';
 import {
@@ -21,7 +21,7 @@ import { reportEntriesForAsOf } from '../../domain/reportEntries';
 import { addMonthsToDate } from '../../domain/allocation';
 import { sortAccounts } from '../../domain/accountOrder';
 import { todayLocal } from '../../util/time';
-import type { Account, CashflowSchedule, JournalEntry } from '../../domain/types';
+import type { Account, JournalEntry } from '../../domain/types';
 import { Money } from '../money';
 import { TrendChart, type TrendPoint } from '../components/TrendChart';
 import { errorText, t } from '../../i18n';
@@ -40,15 +40,8 @@ function repaymentAmountOf(entry: JournalEntry, liabilityId: string): number {
     .reduce((s, l) => s + l.amount, 0);
 }
 
-export function Cashflow({
-  onEditEntry,
-  targetScheduleId,
-}: {
-  onEditEntry: (entry: JournalEntry) => void;
-  /** タイムラインから開いた旧形式の予定 CF。該当行へ移動して強調する。 */
-  targetScheduleId?: string | null;
-}) {
-  const { ledger, postSchedule, removeSchedule } = useLedger();
+export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) => void }) {
+  const { ledger } = useLedger();
   const today = todayLocal();
   const basis = useMemo(() => reportBasis({ mode: 'all' }, today), [today]);
   const reportEntries = useMemo(
@@ -56,30 +49,22 @@ export function Cashflow({
     [basis.asOf, ledger],
   );
   const [untilDate, setUntilDate] = useState(() => addMonthsToDate(todayLocal(), 6));
-  const [pendingSchedule, setPendingSchedule] = useState<CashflowSchedule | null>(null);
   const [repayFor, setRepayFor] = useState<{ account: Account; balance: number } | null>(null);
   // 負債行の展開（登録済みの返済リスト）。行タップ = 新規返済シートとは独立に開閉する。
   const [openRepayments, setOpenRepayments] = useState<ReadonlySet<string>>(new Set());
-  const targetScheduleRef = useRef<HTMLLIElement | null>(null);
-
-  useEffect(() => {
-    const row = targetScheduleRef.current;
-    if (!targetScheduleId || !row || typeof row.scrollIntoView !== 'function') return;
-    row.scrollIntoView({ block: 'center' });
-  }, [ledger, targetScheduleId]);
 
   const currency = ledger?.settings.currency ?? 'JPY';
 
   const { projection, liabBalById, futureRows } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     const entries = reportEntries;
-    const schedules = ledger?.cashflowSchedules ?? [];
     const bs = deriveBalanceSheet(accounts, entries, today);
     const liabById = new Map(bs.liabilities.map((l) => [l.account.id, l.balance] as const));
     const freeIds = new Set(accounts.filter((a) => isFreeAsset(a)).map((a) => a.id));
     const isFree = (id: string) => freeIds.has(id);
     const startFree = freeAssetTotal(bs.assets);
     const end = untilDate;
+    // 投影の入力 = 導出込み仕訳（reportEntriesForAsOf を表示終了日まで展開した結果）。
     const futureEntries = ledger ? reportEntriesForAsOf(ledger, end) : [];
     const future = uniqueEntriesById(
       futureEntries.filter(
@@ -99,31 +84,16 @@ export function Cashflow({
       futureRows: future,
       projection: projectCashflow({
         startFree,
-        schedules,
+        entries: futureEntries,
         today,
-        // 予定 CF も未来仕訳（cashDeltaOfEntry）と同じ free 判定で増減を出す（監査 P2-4）。
         isFree,
         untilDate: end,
-        futureEvents: future.map((f) => ({ date: f.date, amount: f.delta })),
       }),
     };
   }, [ledger, reportEntries, untilDate, today]);
 
   const accountName = (id: string): string =>
     (ledger?.accounts ?? []).find((a) => a.id === id)?.name ?? '—';
-  // タイムラインで選んだ予定は、資金繰りの既定期間（今日〜6か月）外でも詳細行を見せる。
-  // 投影計算の期間自体は変えず、一覧への補足だけに留める。
-  const displayedSchedules = useMemo(() => {
-    const target = ledger?.cashflowSchedules.find(
-      (schedule) => schedule.id === targetScheduleId && schedule.status === 'planned',
-    );
-    if (!target || projection.schedules.some((schedule) => schedule.id === target.id)) {
-      return projection.schedules;
-    }
-    return [...projection.schedules, target].sort((left, right) =>
-      left.dueDate.localeCompare(right.dueDate),
-    );
-  }, [ledger, projection.schedules, targetScheduleId]);
   const freeTrend: TrendPoint[] = projection.points.map((p, i) => ({
     key: `${p.date}-${i}`,
     label: shortDateLabel(i === 0 ? today : p.date),
@@ -132,29 +102,20 @@ export function Cashflow({
 
   const liabilitySummary = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const schedules = ledger?.cashflowSchedules ?? [];
     const entries = ledger?.journalEntries ?? [];
     return sortAccounts(accounts)
       .filter((a) => a.role === 'payment-liability' || a.role === 'other-liability')
       .map((a) => {
-        // 返済予定 = 未実績の予定 CF（旧版レガシー）+ 未来日付の返済実仕訳（借方がこの負債）。
-        const planned = schedules.filter(
-          (s) => s.counterAccountId === a.id && s.status === 'planned',
-        );
+        // 返済予定 = 未来日付の返済実仕訳（借方がこの負債）。
         const repayments = entries
           .filter(
             (e) =>
               e.date > today && e.lines.some((l) => l.side === 'debit' && l.accountId === a.id),
           )
           .sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
-        const remaining =
-          planned.reduce((sum, s) => sum + s.amount, 0) +
-          repayments.reduce((sum, e) => sum + repaymentAmountOf(e, a.id), 0);
-        const count = planned.length + repayments.length;
-        const nextDue = [
-          ...planned.map((s) => s.dueDate),
-          ...repayments.map((e) => e.date),
-        ].sort()[0];
+        const remaining = repayments.reduce((sum, e) => sum + repaymentAmountOf(e, a.id), 0);
+        const count = repayments.length;
+        const nextDue = repayments.map((e) => e.date).sort()[0];
         return {
           id: a.id,
           account: a,
@@ -349,87 +310,11 @@ export function Cashflow({
         </ul>
       )}
 
-      {/* 旧バージョンで作られた予定 CF（分割返済など）のレガシー表示。新規には作られない
-          （返済は未来日付の実仕訳として登録される）ため、残っている時だけセクションごと表示する。 */}
-      {displayedSchedules.length === 0 ? null : (
-        <>
-          <p className="section-label">{t('cashflow.scheduleSecondaryTitle')}</p>
-          <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
-            {t('cashflow.scheduleSecondaryHint')}
-          </p>
-          <ul className="card list" data-ui={UI.cashflow.list}>
-            {displayedSchedules.map((s) => (
-              <li
-                key={s.id}
-                className={`list__item${s.id === targetScheduleId ? ' cashflow-schedule--targeted' : ''}`}
-                ref={s.id === targetScheduleId ? targetScheduleRef : undefined}
-                data-targeted={s.id === targetScheduleId ? 'true' : undefined}
-              >
-                <div className="list__main">
-                  <div className="list__title">{s.title}</div>
-                  <div className="list__sub">
-                    {s.dueDate}・{accountName(s.accountId)}
-                    {s.counterAccountId ? ` ↔ ${accountName(s.counterAccountId)}` : ''}
-                  </div>
-                </div>
-                <span
-                  className={`list__amount ${
-                    s.direction === 'inflow'
-                      ? 'amount--pos'
-                      : s.direction === 'transfer'
-                        ? 'muted'
-                        : 'amount--neg'
-                  }`}
-                >
-                  {s.direction === 'inflow' ? '+' : s.direction === 'transfer' ? '→ ' : '−'}
-                  <Money amount={s.amount} currency={currency} />
-                </span>
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  style={{ minHeight: 36 }}
-                  disabled={!s.counterAccountId}
-                  title={s.counterAccountId ? undefined : t('cashflow.postNeedsCounter')}
-                  onClick={() => postSchedule(s.id).catch(() => undefined)}
-                  data-ui={UI.cashflow.schedulePost}
-                >
-                  <Icon name="check" size={16} />
-                  {t('cashflow.post')}
-                </button>
-                <button
-                  type="button"
-                  className="icon-btn"
-                  onClick={() => setPendingSchedule(s)}
-                  aria-label={`${t('cashflow.deleteSchedule')}: ${s.title}`}
-                >
-                  <Icon name="delete" size={18} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-
       {repayFor ? (
         <RepaymentScheduleSheet
           account={repayFor.account}
           balance={repayFor.balance}
           onClose={() => setRepayFor(null)}
-        />
-      ) : null}
-
-      {pendingSchedule ? (
-        <ConfirmDialog
-          title={t('cashflow.deleteSchedule')}
-          body={pendingSchedule.title}
-          confirmLabel={t('common.delete')}
-          danger
-          onCancel={() => setPendingSchedule(null)}
-          onConfirm={async () => {
-            const s = pendingSchedule;
-            setPendingSchedule(null);
-            await removeSchedule(s.id).catch(() => undefined);
-          }}
         />
       ) : null}
     </section>
@@ -441,7 +326,7 @@ export function Cashflow({
  * 勘定科目の返済設定（返済口座・毎月の返済日）が既定値になる。金額の既定はいまの残高（全額）。
  *  - 回数 1（既定）: カードの次回引落など、支払日の振替仕訳（借方 負債 / 貸方 返済口座）を 1 本。
  *  - 回数 N: 毎月同額のローン。総額を N 回に配分した未来の振替仕訳を一括登録（合計は総額に一致）。
- * どちらも予定 CF は経由しない。未来日付の実仕訳として仕訳一覧・資金繰りの投影に乗る。
+ * どちらも未来日付の実仕訳として仕訳一覧・資金繰りの投影に乗る。
  */
 function RepaymentScheduleSheet({
   account,

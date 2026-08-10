@@ -66,10 +66,9 @@ describe('テスト用 JSON（sample.json）', () => {
     expect(result.success).toBe(true);
   });
 
-  it('手動テストに十分な量のデータを含む（仕訳・月額化・予定CF・タグ）', () => {
+  it('手動テストに十分な量のデータを含む（仕訳・月額化・タグ）', () => {
     expect(sample.journalEntries.length).toBeGreaterThanOrEqual(15);
     expect(sample.monthlyCostItems.length).toBeGreaterThanOrEqual(1);
-    expect(sample.cashflowSchedules.length).toBeGreaterThanOrEqual(1);
     expect(sample.tags.length).toBeGreaterThanOrEqual(1);
     // 全仕訳は MVP 仕様どおり 1 借方・1 貸方の 2 行。
     for (const e of sample.journalEntries) {

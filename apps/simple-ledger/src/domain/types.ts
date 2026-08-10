@@ -55,8 +55,8 @@ export interface Account {
   movable?: boolean;
   /**
    * 返済設定（負債科目のみ: payment-liability / other-liability）。
-   * 毎月の返済元となる資金口座（role: daily-asset）。資金繰り画面の返済予定作成で既定値になる。
-   * 予定の自動生成はしない（予定 CF は明示登録・実績化のまま）。
+   * 毎月の返済元となる資金口座（role: daily-asset）。資金繰り画面の返済計画
+   * （未来日付の実仕訳の一括起票）で既定値になる。予定の自動生成はしない。
    */
   repaymentAccountId?: string;
   /** 毎月の返済日（1〜31）。31 など月に無い日はその月の月末として扱う。 */
@@ -181,7 +181,16 @@ export interface MonthlyCostItem {
   startDate: string;
   /** 終了日 'YYYY-MM-DD'。任意。未設定 = まだ費用にしない。 */
   endDate?: string;
-  /** 費用の行き先（費用カテゴリ等。内部集約・残高調整は不可）。 */
+  /**
+   * 費用化の開始日 'YYYY-MM-DD'。任意。**未設定 = 購入日（startDate）から月割り**。
+   * 設定すると月割りの起点（初月の月割り日・等分の月数）だけがこの日基準になり、
+   * 購入日〜費用化開始日の間は台帳（保管庫）に価値が置かれたままになる。
+   *  - 不変条件: `startDate ≤ allocationStartDate`（endDate 設定時は `≤ endDate`）。
+   *  - 科目線分への要求範囲は従来どおり startDate〜endDate（配分は必ずその内側）。
+   *  - ルール由来 item（`ccr-`）には設定しない（周期どおり配分する）。
+   */
+  allocationStartDate?: string;
+  /** 計上先（費用カテゴリのほか、給与など収入カテゴリも可。内部集約・残高調整は不可）。 */
   expenseAccountId: string;
   createdAt: string;
   updatedAt: string;
@@ -191,8 +200,8 @@ export interface MonthlyCostItem {
  * 定期ルール（毎月の支出・収入・振替）。
  * 「実仕訳の自動起票」方式: ルールは起票の道具で、正本は起票された実仕訳
  * （金額が揺れる月は起票後にその月の仕訳を編集する）。展開は domain/recurring.ts。
- * 行き先が費用なら起票時に継続コスト item を作り、ルール自体は費用を直接作らない。
- * 費用以外（収入・振替・積立）は行き先へ直接起票する。
+ * 行き先が費用または収入（差引形 = 給与から差し引く形）なら起票時に継続コスト item を作り、
+ * ルール自体は費用/収入減を直接作らない。それ以外（収入・振替・積立）は行き先へ直接起票する。
  */
 export interface RecurringRule {
   id: string;
@@ -205,13 +214,13 @@ export interface RecurringRule {
   /** 何か月ごとに起票するか（必須。1 = 毎月）。位相の基点は startMonth。 */
   everyMonths: number;
   /**
-   * 正規化済みの費用の行き先（任意）。行き先 role が費用なら必ず継続コスト化し、
+   * 正規化済みの計上先（任意）。行き先 role が費用または収入（差引形）なら必ず継続コスト化し、
    * 起票のたびに item（id = `ccr-{ruleId}-{month}`・endDate = 周期末）を同一 tx で自動生成し、
-   * 購入の仕訳の借方は継続コスト台帳に固定される。v6 の費用ルールはこの
+   * 購入の仕訳の借方は継続コスト台帳に固定される。v7 の費用・差引形ルールはこの
    * 正規形だけを保存する。
    */
   spreadExpenseAccountId?: string;
-  /** 保存上の借方（費用ルールでは継続コスト台帳、費用以外では論理的な行き先）。 */
+  /** 保存上の借方（月割りルールでは継続コスト台帳、それ以外では論理的な行き先）。 */
   debitAccountId: string;
   /** 源泉（資金 / カード / 収入カテゴリ）。 */
   creditAccountId: string;
@@ -231,39 +240,6 @@ export interface RecurringRule {
    * 起票済み仕訳をユーザーが削除しても再起票しない（スキップの尊重）。
    */
   postedThroughMonth?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
- * 予定キャッシュフロー（将来の現金の出入り）。
- * 「いつ月割りするか」とは別概念で、「いつ現金が動くか」を保持する。
- * 予定は通常仕訳一覧へ大量生成せず、ここに置く。実績化で 1 件の仕訳を作る。
- */
-export type CashflowDirection = 'inflow' | 'outflow' | 'transfer';
-export type CashflowSource = 'manual' | 'credit-card' | 'installment';
-export type CashflowStatus = 'planned' | 'posted' | 'cancelled';
-
-export interface CashflowSchedule {
-  id: string;
-  title: string;
-  /** ISO 日付 (YYYY-MM-DD)。 */
-  dueDate: string;
-  /** 正の整数（最小通貨単位）。 */
-  amount: number;
-  direction: CashflowDirection;
-  /** 現金が出入りする口座（asset）。 */
-  accountId: string;
-  /** 相手科目。負債返済なら liability、収入予定なら revenue 等。実績化に必要。 */
-  counterAccountId?: string;
-  source: CashflowSource;
-  status: CashflowStatus;
-  /** posted のとき、作成された仕訳の ID。 */
-  linkedEntryId?: string;
-  /** 実績化時に仕訳へコピーする仕訳全体タグ。 */
-  entryTagIds?: string[];
-  /** 月額化コスト（負債払い）の返済予定として生成されたとき、紐づく MonthlyCostItem の ID。 */
-  monthlyCostId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -327,7 +303,6 @@ export interface LedgerExportPackage {
   revision: number;
   accounts: Account[];
   journalEntries: JournalEntry[];
-  cashflowSchedules: CashflowSchedule[];
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   /** 定期ルール。交換 JSON では必須（旧形式はリポジトリ外で一度だけ変換する）。 */
@@ -379,7 +354,6 @@ export interface Ledger {
   accounts: Account[];
   /** 実仕訳（保存される正本）。保存系・export・残高チェックはこれだけを見る。 */
   journalEntries: JournalEntry[];
-  cashflowSchedules: CashflowSchedule[];
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   recurringRules: RecurringRule[];

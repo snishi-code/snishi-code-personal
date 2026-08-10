@@ -140,6 +140,90 @@ describe('台帳残高（購入の仕訳 + 費用行）', () => {
   });
 });
 
+describe('費用化の開始日（購入日との分離 §D・受け入れ基準）', () => {
+  it('今日 60,000 で購入・費用化 = 6ヶ月後の1ヶ月 → それまで台帳 60,000・費用 0、費用化月に全額', () => {
+    // 購入 2026-08-10・費用化 2027-02-01〜2027-02-28（= 6ヶ月後の 1 ヶ月）。
+    const deferred = item({
+      id: 'd',
+      amount: 60000,
+      startDate: '2026-08-10',
+      allocationStartDate: '2027-02-01',
+      endDate: '2027-02-28',
+    });
+    const derived = entriesWithContinuousCost([purchaseOf(deferred)], [deferred], '2027-12-31');
+    // 購入月〜費用化前月の各断面: 台帳残高 60,000・費用 0。
+    for (const asOf of ['2026-08-10', '2026-08-31', '2026-11-30', '2027-01-31']) {
+      expect(balanceAt(derived, LEDGER, asOf)).toBe(60000);
+      expect(accountBalance('fun', 'expense', filterByDateRange(derived, undefined, asOf))).toBe(0);
+    }
+    // 費用化月に 60,000 が計上先へ乗り、台帳は 0 で閉じる。
+    expect(
+      accountBalance('fun', 'expense', filterByDateRange(derived, undefined, '2027-02-01')),
+    ).toBe(60000);
+    expect(balanceAt(derived, LEDGER, '2027-02-01')).toBe(0);
+    // どの断面でも台帳がマイナスにならない（購入前は 0）。
+    expect(balanceAt(derived, LEDGER, '2026-08-09')).toBe(0);
+    for (const asOf of ['2026-08-09', '2026-08-10', '2027-01-31', '2027-02-01', '2027-12-31']) {
+      expect(balanceAt(derived, LEDGER, asOf)).toBeGreaterThanOrEqual(0);
+    }
+    // 費用行は 1 本だけ・日付 = 費用化の開始日。
+    const allocations = derived.filter((e) => e.metadata?.ccKind === 'monthly-allocation');
+    expect(allocations).toHaveLength(1);
+    expect(allocations[0]?.date).toBe('2027-02-01');
+  });
+  it('計上先が収入カテゴリ（差引形）でも同じく費用化月に乗る（借方 = 計上先）', () => {
+    const deferred = item({
+      id: 'sal',
+      amount: 60000,
+      startDate: '2026-08-10',
+      allocationStartDate: '2027-02-01',
+      endDate: '2027-02-28',
+      expenseAccountId: 'salary',
+    });
+    const derived = entriesWithContinuousCost(
+      [purchaseOf(deferred, 'bank')],
+      [deferred],
+      '2027-12-31',
+    );
+    const allocations = derived.filter((e) => e.metadata?.ccKind === 'monthly-allocation');
+    expect(allocations).toHaveLength(1);
+    expect(allocations[0]?.lines[0]).toEqual({ accountId: 'salary', side: 'debit', amount: 60000 });
+    expect(balanceAt(derived, LEDGER, '2027-02-01')).toBe(0);
+  });
+  it('回収ありでも spreadTotal の再配分は費用化期間で効く・台帳は 0 で閉じる', () => {
+    // 購入 2026-01-15・費用化 2026-07-01〜2026-12-31（6ヶ月）・回収 30,000。
+    const deferred = item({
+      id: 'r',
+      amount: 60000,
+      startDate: '2026-01-15',
+      allocationStartDate: '2026-07-01',
+      endDate: '2026-12-31',
+    });
+    const real = [purchaseOf(deferred), recoveryOf(deferred, 30000, '2026-12-31')];
+    const derived = entriesWithContinuousCost(real, [deferred], '2027-12-31');
+    const allocations = derived.filter((e) => e.metadata?.ccKind === 'monthly-allocation');
+    expect(allocations).toHaveLength(6);
+    expect(allocations[0]?.date).toBe('2026-07-01');
+    expect(allocations.every((e) => e.lines[0]?.amount === 5000)).toBe(true);
+    // 費用化前の断面は台帳 = 全額のまま。
+    expect(balanceAt(derived, LEDGER, '2026-06-30')).toBe(60000);
+    // 全期間の費用 = 30,000・台帳は 0 で閉じる（60,000 − 30,000 − 30,000）。
+    expect(accountBalance('fun', 'expense', derived)).toBe(30000);
+    expect(balanceAt(derived, LEDGER, '2027-12-31')).toBe(0);
+  });
+  it('HARD_CAP(2100-12-31) は費用化の開始日を使う item にも従来どおり効く', () => {
+    const far = item({
+      id: 'far',
+      startDate: '2099-01-01',
+      allocationStartDate: '2100-11-01',
+      endDate: '2101-06-30',
+    });
+    const es = continuousCostEntriesForItem(far, '2105-01-01');
+    expect(es.length).toBeGreaterThan(0);
+    expect(es.every((e) => e.date <= CONTINUOUS_COST_HARD_CAP)).toBe(true);
+  });
+});
+
 describe('回収の振替（アーカイブの売却・返金）', () => {
   it('recoveredAmountsByItem: 回収の振替だけを item ごとに合計する', () => {
     const yr = item({});

@@ -54,7 +54,6 @@ export function Accounts({ period = { mode: 'all' } }: { period?: ReportPeriod }
 
   const usedIds = referencedAccountIds({
     entries: ledger?.journalEntries ?? [],
-    schedules: ledger?.cashflowSchedules ?? [],
     monthlyCostItems: ledger?.monthlyCostItems ?? [],
     recurringRules: ledger?.recurringRules ?? [],
   });

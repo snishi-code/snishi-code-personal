@@ -1,20 +1,14 @@
 /*
  * 横軸=時間、縦軸=勘定科目の「箱」としたタイムラインの純関数モデル。
  *
- * UI はこの結果を描くだけにし、実仕訳 / 月割り / 定期ルール投影 / 予定 CF の違いを
+ * UI はこの結果を描くだけにし、実仕訳 / 月割り / 定期ルール投影 の違いを
  * ポッチの見た目へ持ち込まない。違いは「開く」先を解決する target だけに残す。
  */
 import { addMonths, monthOf } from './allocation';
 import { effectiveAccountStartDate, recurringRuleLastExistingDate } from './accountLifetime';
 import { buildRuleItem, recurringExpenseAccountId, recurringPostingsDue } from './recurring';
 import { parseRuleItemId } from './recurringIds';
-import type {
-  Account,
-  CashflowSchedule,
-  JournalEntry,
-  MonthlyCostItem,
-  RecurringRule,
-} from './types';
+import type { Account, JournalEntry, MonthlyCostItem, RecurringRule } from './types';
 
 export type TimelineZoom = 'day' | 'month' | 'year';
 
@@ -39,8 +33,7 @@ export interface TimelineSpan {
 export type TimelineTarget =
   | { kind: 'entry'; entryId: string }
   | { kind: 'monthlyCost'; monthlyCostId: string }
-  | { kind: 'recurringRule'; recurringRuleId: string }
-  | { kind: 'cashflowSchedule'; cashflowScheduleId: string };
+  | { kind: 'recurringRule'; recurringRuleId: string };
 
 /** すべてのフローポッチが共有する、貸方（源泉）→借方（行き先）の正規形。 */
 export interface TimelineFlow {
@@ -145,7 +138,6 @@ export interface BuildTimelineCalendarInput {
   entries: readonly JournalEntry[];
   monthlyCostItems: readonly MonthlyCostItem[];
   recurringRules: readonly RecurringRule[];
-  cashflowSchedules: readonly CashflowSchedule[];
   boxes: readonly TimelineBoxDefinition[];
   range: TimelineDateRange;
   zoom: TimelineZoom;
@@ -283,23 +275,6 @@ function flowOfEntry(entry: JournalEntry): TimelineFlow | undefined {
   };
 }
 
-function flowOfSchedule(schedule: CashflowSchedule): TimelineFlow | undefined {
-  if (schedule.status !== 'planned' || schedule.counterAccountId === undefined) return undefined;
-  const inflow = schedule.direction === 'inflow';
-  const destinationAccountId = inflow ? schedule.accountId : schedule.counterAccountId;
-  const sourceAccountId = inflow ? schedule.counterAccountId : schedule.accountId;
-  if (destinationAccountId === sourceAccountId) return undefined;
-  return {
-    id: `schedule-${schedule.id}`,
-    date: schedule.dueDate,
-    description: schedule.title,
-    amount: schedule.amount,
-    sourceAccountId,
-    destinationAccountId,
-    target: { kind: 'cashflowSchedule', cashflowScheduleId: schedule.id },
-  };
-}
-
 interface DotAccumulator {
   netChange: number;
   flows: Map<string, TimelineFlow>;
@@ -422,7 +397,7 @@ function generationDotsOf(
 }
 
 /**
- * reportEntries と予定 CF を一度だけ走査し、科目×バケット / 箱×バケットへ同時に配る。
+ * reportEntries（実仕訳 + 全導出行）を一度だけ走査し、科目×バケット / 箱×バケットへ同時に配る。
  * 箱内で完結するフローは箱へ加えないため、箱レベルでは必ず相手の箱が存在する。
  */
 export function buildTimelineCalendar(input: BuildTimelineCalendarInput): TimelineCalendar {
@@ -444,11 +419,6 @@ export function buildTimelineCalendar(input: BuildTimelineCalendarInput): Timeli
     if (entry.date < input.range.start || entry.date > input.range.end) continue;
     const flow = flowOfEntry(entry);
     if (flow) flows.push({ flow, entry });
-  }
-  for (const schedule of input.cashflowSchedules) {
-    if (schedule.dueDate < input.range.start || schedule.dueDate > input.range.end) continue;
-    const flow = flowOfSchedule(schedule);
-    if (flow) flows.push({ flow });
   }
 
   for (const record of flows) {

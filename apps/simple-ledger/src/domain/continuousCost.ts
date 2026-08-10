@@ -6,7 +6,8 @@
  * **月割りの行（monthly-allocation）だけ**: `借方 月割り先 / 貸方 継続コスト台帳`。
  *
  *  - 終了日が未設定の item からは 1 本も生まれない（monthlyCost.ts の monthlyAllocationSpan が正本）。
- *  - 初月の月割り日は startDate、2ヶ月目以降は月初。購入（startDate）より前に月割り行が立たない
+ *  - 初月の月割り日は費用化の開始日（allocationStartDate ?? startDate）、2ヶ月目以降は月初。
+ *    起点は購入日以降（保存境界が保証）なので、購入（startDate）より前に月割り行が立たない
  *    ＝どの日付断面でも台帳がマイナスにならない。
  *  - 回収の振替（metadata.monthlyCostRecovery）が保存されていれば、割り振る総額から差し引く
  *    （spreadTotal = amount − 回収額。負になってよい＝過去にわたる費用減・マイナス表示）。

@@ -106,7 +106,6 @@ interface TimelineCalendarProps {
   period: ReportPeriod;
   onOpenEntry: (entryId: string) => void;
   onOpenAllocations: (target: { itemId?: string; ruleId?: string }) => void;
-  onOpenCashflowSchedule: (scheduleId: string) => void;
 }
 
 interface RenderRow {
@@ -1136,7 +1135,6 @@ export function TimelineCalendar({
   period,
   onOpenEntry,
   onOpenAllocations,
-  onOpenCashflowSchedule,
 }: TimelineCalendarProps) {
   const { ledger } = useLedger();
   const today = todayLocal();
@@ -1188,7 +1186,6 @@ export function TimelineCalendar({
       entries: reportEntriesForAsOf(ledger, visibleRange.to),
       monthlyCostItems: ledger.monthlyCostItems,
       recurringRules: ledger.recurringRules,
-      cashflowSchedules: ledger.cashflowSchedules,
       boxes,
       range: { start: visibleRange.from, end: visibleRange.to },
       zoom,
@@ -1209,8 +1206,7 @@ export function TimelineCalendar({
   const openTarget = (target: TimelineOpenTarget) => {
     if (target.kind === 'entry') onOpenEntry(target.entryId);
     else if (target.kind === 'monthlyCost') onOpenAllocations({ itemId: target.monthlyCostId });
-    else if (target.kind === 'recurringRule') onOpenAllocations({ ruleId: target.recurringRuleId });
-    else onOpenCashflowSchedule(target.cashflowScheduleId);
+    else onOpenAllocations({ ruleId: target.recurringRuleId });
   };
 
   return (

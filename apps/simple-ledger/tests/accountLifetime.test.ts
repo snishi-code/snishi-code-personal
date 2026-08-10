@@ -49,23 +49,9 @@ describe('勘定科目の存在期間', () => {
     expect(accountExistsAt(subject, '2026-02-01')).toBe(false);
   });
 
-  it('仕訳・予定・item・ruleの参照期間を集約し、線分を短くする変更を検出する', () => {
+  it('仕訳・item・ruleの参照期間を集約し、線分を短くする変更を検出する', () => {
     const references = accountReferenceIntervals('cash', {
       entries: [entry('2026-02-01')],
-      schedules: [
-        {
-          id: 'schedule',
-          title: '予定',
-          dueDate: '2026-03-01',
-          amount: 100,
-          direction: 'outflow',
-          accountId: 'cash',
-          source: 'manual',
-          status: 'planned',
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
       monthlyCostItems: [],
       recurringRules: [
         {
@@ -93,6 +79,27 @@ describe('勘定科目の存在期間', () => {
     expect(
       accountLifetimeViolation(account({ startDate: '2026-02-01' }), references),
     ).toBeUndefined();
+  });
+
+  it('item の参照期間は費用化の開始日に依らず startDate〜endDate（§D: accountLifetime 不変）', () => {
+    const deferredItem = {
+      id: 'm-deferred',
+      name: '前払い',
+      amount: 60000,
+      startDate: '2026-01-15',
+      allocationStartDate: '2026-07-01',
+      endDate: '2026-12-31',
+      expenseAccountId: 'expense',
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    expect(
+      accountReferenceIntervals('expense', {
+        entries: [],
+        monthlyCostItems: [deferredItem],
+        recurringRules: [],
+      }),
+    ).toEqual([{ kind: 'monthlyCost', from: '2026-01-15', to: '2026-12-31' }]);
   });
 
   it('定期ルールの参照開始はカーソル後の次回周期日になる', () => {
@@ -143,7 +150,6 @@ describe('勘定科目の存在期間', () => {
     expect(
       accountReferenceIntervals('cash', {
         entries: [],
-        schedules: [],
         monthlyCostItems: [openItem],
         recurringRules: [rule],
       }),
@@ -170,7 +176,6 @@ describe('勘定科目の存在期間', () => {
     expect(
       accountReferenceIntervals('expense', {
         entries: [],
-        schedules: [],
         monthlyCostItems: [],
         recurringRules: [rule],
       }),

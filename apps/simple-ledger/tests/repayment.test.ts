@@ -1,26 +1,19 @@
 /*
- * カード・ローンの返済設定（Account.repaymentAccountId / repaymentDay）と返済予定。
+ * カード・ローンの返済設定（Account.repaymentAccountId / repaymentDay）。
  *  - 負債科目にのみ設定でき、返済口座は存在する日常資産。
  *  - 返済口座の削除で設定ポインタが剥がれる（fail-soft）。
- *  - 返済予定（outflow・counter=負債）の実績化は 借方 負債 / 貸方 返済口座。
  *  - nextRepaymentDate は「毎月 day 日」を月末クランプで返す。
  */
 import { describe, expect, it } from 'vitest';
 import './setup';
-import {
-  deleteAccount,
-  loadLedger,
-  postSchedule,
-  upsertAccount,
-  upsertSchedule,
-} from '../src/data/repository';
+import { deleteAccount, loadLedger, upsertAccount } from '../src/data/repository';
 import { nextRepaymentDate } from '../src/domain/cashflow';
 import { ledgerExportPackageSchema } from '../src/domain/schema';
 import { buildExportPackage } from '../src/data/exportImport';
 import { LedgerError } from '../src/domain/errors';
 import { newId } from '../src/domain/ids';
 import { nowIso } from '../src/util/time';
-import type { Account, CashflowSchedule } from '../src/domain/types';
+import type { Account } from '../src/domain/types';
 
 async function accountByRole(role: string): Promise<Account> {
   const ledger = await loadLedger();
@@ -83,36 +76,6 @@ describe('返済設定（勘定科目）', () => {
     await deleteAccount(subBank.id);
     const saved = (await loadLedger()).accounts.find((a) => a.id === card.id);
     expect(saved?.repaymentAccountId).toBeUndefined();
-  });
-});
-
-describe('返済予定の実績化', () => {
-  it('outflow（返済口座 → 負債）の実績化は 借方 負債 / 貸方 返済口座', async () => {
-    const card = await accountByRole('payment-liability');
-    const bank = await accountByRole('daily-asset');
-    const ts = nowIso();
-    const schedule: CashflowSchedule = {
-      id: newId(),
-      title: `${card.name}の返済`,
-      dueDate: '2026-08-27',
-      amount: 45000,
-      direction: 'outflow',
-      accountId: bank.id,
-      counterAccountId: card.id,
-      source: 'credit-card',
-      status: 'planned',
-      createdAt: ts,
-      updatedAt: ts,
-    };
-    await upsertSchedule(schedule);
-    const entry = await postSchedule(schedule.id);
-    expect(entry.lines).toEqual([
-      { accountId: card.id, side: 'debit', amount: 45000 },
-      { accountId: bank.id, side: 'credit', amount: 45000 },
-    ]);
-    const saved = (await loadLedger()).cashflowSchedules.find((s) => s.id === schedule.id);
-    expect(saved?.status).toBe('posted');
-    expect(saved?.linkedEntryId).toBe(entry.id);
   });
 });
 

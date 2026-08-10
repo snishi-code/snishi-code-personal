@@ -16,7 +16,6 @@ export const STORE = {
   kv: 'kv', // meta / settings の単一レコード置き場（out-of-line key）
   accounts: 'accounts',
   journalEntries: 'journalEntries',
-  cashflowSchedules: 'cashflowSchedules',
   tags: 'tags',
   monthlyCostItems: 'monthlyCostItems',
   recurringRules: 'recurringRules', // 定期ルール（v2 で追加）
@@ -44,9 +43,6 @@ export const db = createDatabase({
     if (!idb.objectStoreNames.contains(STORE.journalEntries)) {
       const s = idb.createObjectStore(STORE.journalEntries, { keyPath: 'id' });
       s.createIndex('date', 'date', { unique: false });
-    }
-    if (!idb.objectStoreNames.contains(STORE.cashflowSchedules)) {
-      idb.createObjectStore(STORE.cashflowSchedules, { keyPath: 'id' });
     }
     if (!idb.objectStoreNames.contains(STORE.tags)) {
       idb.createObjectStore(STORE.tags, { keyPath: 'id' });

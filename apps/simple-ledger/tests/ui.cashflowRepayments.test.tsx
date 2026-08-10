@@ -14,7 +14,6 @@ import {
   createOpenings,
   createRepaymentEntries,
   loadLedger,
-  upsertSchedule,
   upsertAccount,
 } from '../src/data/repository';
 import { addMonthsToDate } from '../src/domain/allocation';
@@ -33,11 +32,11 @@ afterEach(() => {
   _resetOverlaysForTests();
 });
 
-function view(onEditEntry: (entry: JournalEntry) => void, targetScheduleId?: string) {
+function view(onEditEntry: (entry: JournalEntry) => void) {
   return (
     <ToastProvider>
       <LedgerProvider>
-        <Cashflow onEditEntry={onEditEntry} targetScheduleId={targetScheduleId} />
+        <Cashflow onEditEntry={onEditEntry} />
       </LedgerProvider>
     </ToastProvider>
   );
@@ -46,35 +45,6 @@ function view(onEditEntry: (entry: JournalEntry) => void, targetScheduleId?: str
 const ui = (name: string) => document.querySelector(`[data-ui="${name}"]`);
 
 describe('資金繰り', () => {
-  it('タイムラインから指定された予定CFの行を強調する', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((account) => account.role === 'daily-asset')!;
-    const expense = ledger.accounts.find((account) => account.role === 'expense-category')!;
-    const now = new Date().toISOString();
-    await upsertSchedule({
-      id: 'timeline-schedule',
-      title: 'タイムラインから開く予定',
-      // 資金繰りの既定6か月を越えていても、タイムラインの対象は一覧へ補足表示する。
-      dueDate: addMonthsToDate(todayLocal(), 12),
-      amount: 5000,
-      direction: 'outflow',
-      accountId: cash.id,
-      counterAccountId: expense.id,
-      source: 'manual',
-      status: 'planned',
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    render(view(() => undefined, 'timeline-schedule'));
-    const target = await waitFor(() => {
-      const found = document.querySelector('[data-targeted="true"]');
-      expect(found).toBeInTheDocument();
-      return found!;
-    });
-    expect(target).toHaveTextContent('タイムラインから開く予定');
-  });
-
   it('上部は「自由に動かせるお金」1 値（movable=false は除外・総資金/取り置きの段は無い）', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;

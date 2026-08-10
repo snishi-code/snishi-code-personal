@@ -79,18 +79,21 @@ export const ja = {
   'monthlyCost.amount': '金額',
   'monthlyCost.monthly': '月あたり',
   'monthlyCost.thisMonth': '今月の計上額',
-  'monthlyCost.expenseCategory': '費用の行き先',
+  // 計上先 = 月割り（継続コスト）の費用/収入の行き先。income 行き（差引形）も通るため中立表記。
+  'monthlyCost.expenseCategory': '計上先',
   'monthlyCost.editTitle': '継続コスト資産を編集',
   'monthlyCost.name': '名称',
   'monthlyCost.showEnded': '終了分も表示',
   // 過去から再計算される項目を変えたときの注意（破壊的操作の予告。不具合ではなく仕様）。
   'monthlyCost.pastRecalcWarning':
-    '金額・期間・費用の行き先を変えると、過去の支出・収支・残存価値もさかのぼって再計算されます。',
+    '金額・期間・計上先を変えると、過去の支出・収支・残存価値もさかのぼって再計算されます。',
   'monthlyCost.deleteConfirmTitle': '継続コスト資産を削除しますか？',
   'monthlyCost.deleteConfirmBody':
     '「{name}」を削除します。購入の仕訳と回収の振替も一緒に削除されます。登録済みの返済仕訳（未来日付の振替）は残ります。',
   'ccItem.startDate': '開始日',
   'ccItem.endDate': '終了日（任意）',
+  'ccItem.allocationStartDate': '費用化の開始日（任意・既定 = 購入日）',
+  'ccItem.allocationStartHint': '購入日より後にすると、その間は台帳（保管庫）に価値が置かれます',
   'ccItem.period': '期間',
   'ccItem.remainingValue': '残存価値',
   'ccItem.archiveTitle': 'アーカイブ',
@@ -108,9 +111,6 @@ export const ja = {
   'cashflow.depleteWarning': 'この期間に自由に動かせるお金がマイナスになる予定があります。',
   'cashflow.nextDue': '次回支払日',
   'cashflow.installmentsLeft': '残り {count} 回',
-  'cashflow.post': '実績化',
-  'cashflow.postNeedsCounter': '相手科目を設定すると実績化できます。',
-  'cashflow.deleteSchedule': '削除',
   // CF 再構成: 自由に動かせるお金の推移・負債返済を主役に、未来予定はホーム入力へ寄せる。
   'cashflow.freeTrendTitle': '自由に動かせるお金の推移',
   'cashflow.debtTitle': '支払用負債・返済予定',
@@ -124,9 +124,6 @@ export const ja = {
   'cashflow.futureIntro':
     'ホームの 収入 / 支出 / 振替 で未来日付を選ぶと、ここに表示され資金繰りに反映されます。',
   'cashflow.futureEmpty': '未来日付の予定はありません。',
-  'cashflow.scheduleSecondaryTitle': '分割・定期の返済予定',
-  'cashflow.scheduleSecondaryHint':
-    '以前のバージョンで作られた返済予定です。新しくは作られません（返済は未来日付の振替仕訳として登録されます）。実績化または削除で整理できます。',
 
   // 負債の新規作成（支出の支払い方法 / 振替の源泉・行き先から）
   'liability.form.title': '新しい負債を作る',
@@ -269,7 +266,7 @@ export const ja = {
   'entry.ccTargetName': '継続コスト資産の名前',
   'entry.ccTargetNameHint':
     '継続コスト資産として登録する項目名です（例: 自動車 / 洗濯機）。勘定科目は増えません。',
-  'entry.ccCategory': '費用の行き先',
+  'entry.ccCategory': '計上先',
   'entry.error.loanNotExpense':
     'ローン（その他負債）は通常の支出の支払い元にできません。継続コスト化するか、借入として振替で実行してください。',
   // 返済を資金繰りに入れるトグル ON 時の必須検証（口座・回数が無いと CF が作られないため fail closed）。
@@ -291,7 +288,7 @@ export const ja = {
   'entry.monthlyizeRepayCount': '返済回数',
   'entry.monthlyizeRepayStart': '初回引落日',
   'entry.monthlyizeRepayStartHint': '購入日とは別に、最初に現金が引き落とされる日を入れます。',
-  'entry.error.category-required': '費用の行き先を選んでください。',
+  'entry.error.category-required': '計上先を選んでください。',
   // 支出の支払い元（左辺）のローン導線。「ローンを組む」で既存ローン選択＋新規ローン作成へ切り替える。
   'entry.loanArrange': 'ローンを組む',
   'entry.loanArrangePick': '組むローンを選ぶ',
@@ -499,7 +496,6 @@ export const ja = {
   'toast.exported': '書き出しました。',
   'toast.restored': '復元しました。',
   'toast.reset': 'すべてのデータを削除しました。',
-  'toast.posted': '実績化しました。',
   'toast.error': 'エラーが発生しました。',
 
   'help.title': 'ヘルプ',
@@ -525,8 +521,6 @@ export const ja = {
     'アーカイブ時の振替先は、元の科目と同じ区分から選んでください。',
   'error.entry.monthlyCost':
     '購入の仕訳は削除できません。継続コスト資産の項目（毎月のもの）を削除すると一緒に消えます。',
-  'error.entry.scheduleLinked':
-    '実績化済みの予定に紐づく仕訳は編集・削除できません。資金繰りの予定から操作してください。',
   'error.entry.adjustment': '残高補正の仕訳は、仕訳一覧の補正行から編集・削除してください。',
   'error.entry.virtual': '導出専用の仮想仕訳は保存できません。',
   'error.entry.invalidStructure': '仕訳の形式が正しくないため保存できません。',
@@ -535,11 +529,6 @@ export const ja = {
   'error.tag.unknown': '存在しないタグを参照しています。',
   'error.tag.duplicateName': '同じ名前の有効なタグが既にあります。',
   'error.tag.deleteInUse': 'このタグは使用中のため削除できません。アーカイブしてください。',
-  'error.schedule.notFound': '予定が見つかりません。',
-  'error.schedule.alreadyProcessed': 'この予定は既に処理済みです。',
-  'error.schedule.counterRequired': '相手科目が未設定の予定は実績化できません。',
-  'error.schedule.invalidStructure': '予定の形式が正しくないため保存できません。',
-  'error.schedule.unknownAccount': '予定が存在しない口座を参照しています。',
   'error.adjust.targetNotFound': '対象科目が見つかりません。',
   'error.adjust.assetLiabilityOnly': '残高補正できるのは資産・負債の科目です。',
   'error.adjust.internalRole': '継続コスト台帳は内部の集約口座のため残高補正できません。',
@@ -550,15 +539,13 @@ export const ja = {
   'error.common.nameRequired': '名称を入力してください。',
   'error.common.amountInvalid': '金額は 1 以上の整数で入力してください。',
   'error.monthlyCost.dateRequired': '開始日（購入の仕訳の日付）を入力してください。',
-  'error.monthlyCost.expenseCategory': '費用の行き先の勘定科目を選んでください。',
+  'error.monthlyCost.expenseCategory': '計上先の勘定科目を選んでください。',
   'error.monthlyCost.paymentSource':
     '支払い元は資金（現金・預金）かカード・ローンを選んでください。',
   'error.monthlyCost.repaymentAccount': '返済口座は日常資産を選んでください。',
   'error.monthlyCost.notFound': '対象の継続コスト資産が見つかりません。',
   'error.monthlyCost.invalidStructure': '継続コスト資産の内容が不正です。',
   'error.monthlyCost.endBeforeStart': '終了日は開始日以降にしてください。',
-  'error.monthlyCost.deletePosted':
-    '返済が実績化済みのため削除できません。アーカイブ（終了日の設定）を使ってください。',
   // 4項目モデル（指示書#5）で新設したエラーコード。
   'error.monthlyCost.purchaseAfterEnd': '購入の仕訳の日付は終了日以前にしてください。',
   'error.monthlyCost.deleteLiability':
@@ -581,6 +568,12 @@ export const ja = {
     '回収の振替の日付は開始日（購入の仕訳の日付）以降にしてください。',
   'error.monthlyCost.editLiability':
     '負債（カード・ローン）で購入した項目は、支払い元・金額・日付を変更できません（自動作成した返済の仕訳と合わなくなるため）。終了はアーカイブ（終了日の設定）を使ってください。',
+  // 費用化の開始日（購入日との分離・指示書§D）で新設したエラーコード。
+  'error.monthlyCost.allocationBeforeStart': '費用化の開始日は購入日（開始日）以降にしてください。',
+  'error.monthlyCost.allocationAfterEnd':
+    '終了日は費用化の開始日以降にしてください。費用化を始める前にやめる場合は、先に費用化の開始日を戻して（または空にして）から終了日を設定してください。',
+  'error.monthlyCost.purchaseAfterAllocation':
+    '購入の仕訳の日付は費用化の開始日以前にしてください。後ろへ動かす場合は、先に項目の費用化の開始日を変更してください。',
   'error.common.staleData':
     '別のタブ（またはウィンドウ）でデータが変更されています。ページを再読み込みしてから、もう一度お試しください。',
   'error.common.revisionExhausted':
@@ -698,7 +691,7 @@ export const ja = {
   'recurring.from.manual': '貸方（支払い元・減る側）',
   'recurring.to.manual': '借方（増える・使う側）',
   'recurring.manualHint':
-    '行き先が費用なら自動で継続コストとして月割りし、資産・負債・収入なら直接記帳します。',
+    '行き先が費用または収入（給与から差し引く形）なら自動で継続コストとして月割りし、資産・負債なら直接記帳します。',
   'recurring.everyMonthDay': '毎月{day}日',
   'recurring.everyNMonthsDay': '{n}か月ごと {day}日',
   'recurring.end': '終了',

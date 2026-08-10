@@ -2,16 +2,10 @@ import { describe, expect, it } from 'vitest';
 import './setup';
 import { isAccountReferenced, referencedAccountIds } from '../src/domain/accountRefs';
 import type { AccountRefCollections } from '../src/domain/accountRefs';
-import type {
-  CashflowSchedule,
-  JournalEntry,
-  MonthlyCostItem,
-  RecurringRule,
-} from '../src/domain/types';
+import type { JournalEntry, MonthlyCostItem, RecurringRule } from '../src/domain/types';
 
 const empty: AccountRefCollections = {
   entries: [],
-  schedules: [],
   monthlyCostItems: [],
   recurringRules: [],
 };
@@ -40,20 +34,6 @@ const entry: JournalEntry = {
   updatedAt: 'x',
 };
 
-const schedule: CashflowSchedule = {
-  id: 's1',
-  title: 'x',
-  dueDate: '2026-07-10',
-  amount: 100,
-  direction: 'outflow',
-  accountId: 'sched-acc',
-  counterAccountId: 'sched-counter',
-  source: 'manual',
-  status: 'planned',
-  createdAt: 'x',
-  updatedAt: 'x',
-};
-
 const rule: RecurringRule = {
   id: 'r1',
   name: 'x',
@@ -69,15 +49,11 @@ const rule: RecurringRule = {
   updatedAt: 'x',
 };
 
-describe('isAccountReferenced（仕訳/予定CF/継続コスト）', () => {
+describe('isAccountReferenced（仕訳/継続コスト/定期ルール）', () => {
   it('仕訳明細の参照を検出する', () => {
     expect(isAccountReferenced('cash', { ...empty, entries: [entry] })).toBe(true);
     expect(isAccountReferenced('food', { ...empty, entries: [entry] })).toBe(true);
     expect(isAccountReferenced('nope', { ...empty, entries: [entry] })).toBe(false);
-  });
-  it('予定CF（account/counter）の参照を検出する', () => {
-    expect(isAccountReferenced('sched-acc', { ...empty, schedules: [schedule] })).toBe(true);
-    expect(isAccountReferenced('sched-counter', { ...empty, schedules: [schedule] })).toBe(true);
   });
   it('継続コスト資産の参照は費用の行き先だけ（支払い元は購入の仕訳が仕訳側で参照する）', () => {
     expect(isAccountReferenced('mc-exp', { ...empty, monthlyCostItems: [monthlyCost] })).toBe(true);
@@ -97,20 +73,10 @@ describe('referencedAccountIds', () => {
   it('全コレクションの参照 ID を集める', () => {
     const ids = referencedAccountIds({
       entries: [entry],
-      schedules: [schedule],
       monthlyCostItems: [monthlyCost],
       recurringRules: [rule],
     });
-    for (const id of [
-      'cash',
-      'food',
-      'sched-acc',
-      'sched-counter',
-      'mc-exp',
-      'rule-debit',
-      'rule-credit',
-      'rule-spread',
-    ]) {
+    for (const id of ['cash', 'food', 'mc-exp', 'rule-debit', 'rule-credit', 'rule-spread']) {
       expect(ids.has(id)).toBe(true);
     }
     expect(ids.has('unused')).toBe(false);

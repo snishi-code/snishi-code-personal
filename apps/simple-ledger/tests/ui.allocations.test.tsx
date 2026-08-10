@@ -209,6 +209,60 @@ describe('定期ルールの継続コスト化（月割り）', () => {
       ),
     ).toBeChecked();
   });
+
+  it('行き先に収入科目（差引形）を選んでも台帳経由になり、種別が「収入」と表示されない', async () => {
+    const ledger = await loadLedger();
+    const bank = ledger.accounts.find((a) => a.name === '預金')!;
+    const salary = ledger.accounts.find((a) => a.name === '給与')!;
+
+    await renderReady();
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.unifiedAdd}"]`)!);
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.addChooser}.rule"]`)!);
+
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringName}"]`)!, {
+      target: { value: '医師賠償責任保険' },
+    });
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!, {
+      target: { value: '60000' },
+    });
+    fireEvent.click(
+      within(document.querySelector(`[data-ui="${UI.allocations.recurringFrom}"]`)!).getByRole(
+        'radio',
+        { name: bank.name },
+      ),
+    );
+    const toPicker = document.querySelector(
+      `[data-ui="${UI.allocations.recurringTo}"]`,
+    ) as HTMLElement;
+    fireEvent.click(within(toPicker).getByRole('radio', { name: salary.name }));
+    // 収入行き（差引形）でもラベルは中立の「計上先」になる（費用行きと同じ扱い）。
+    expect(within(toPicker).getByText(/計上先/)).toBeInTheDocument();
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
+    await waitFor(
+      () => {
+        expect(
+          document.querySelector(`[data-ui="${UI.allocations.recurringSheet}"]`),
+        ).not.toBeInTheDocument();
+      },
+      { timeout: 3000 },
+    );
+
+    // 保存正規形は費用ルールと同一（借方 = 台帳・spread = 元の収入科目）。
+    const rule = (await loadLedger()).recurringRules.find((r) => r.name === '医師賠償責任保険');
+    expect(rule).toBeDefined();
+    expect(rule!.spreadExpenseAccountId).toBe(salary.id);
+    expect(rule!.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+    expect(rule!.creditAccountId).toBe(bank.id);
+
+    // 一覧の種別タグが「収入（給与など）」と誤読されない（差引形は簿記編集扱い）。
+    const list = await waitFor(() => {
+      const found = document.querySelector(`[data-ui="${UI.allocations.recurringList}"]`);
+      expect(found).toBeInTheDocument();
+      return found as HTMLElement;
+    });
+    expect(within(list).getByText('簿記編集（科目を直接指定）')).toBeInTheDocument();
+    expect(within(list).queryByText('収入（給与など）')).not.toBeInTheDocument();
+  });
 });
 
 describe('持ち込み登録（継続コスト資産シート）', () => {

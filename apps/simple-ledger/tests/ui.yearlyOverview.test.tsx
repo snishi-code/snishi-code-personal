@@ -70,7 +70,6 @@ function fixtureLedger(): Ledger {
       entry('current-income', '2026-06-30', 'cash', 'salary', 500),
       entry('future-income', '2027-01-01', 'cash', 'salary', 800),
     ],
-    cashflowSchedules: [],
     tags: [],
     monthlyCostItems: [],
     recurringRules: [],

@@ -147,7 +147,6 @@ describe('定期ルールの存在期間（半開区間）', () => {
     expect(
       accountReferenceIntervals('cash', {
         entries: [],
-        schedules: [],
         monthlyCostItems: [],
         recurringRules: [subject],
       }),

@@ -128,7 +128,6 @@ describe('ledgerExportPackageSchema', () => {
       },
     ],
     journalEntries: [validEntry],
-    cashflowSchedules: [],
     tags: [],
     monthlyCostItems: [],
     recurringRules: [],
@@ -229,7 +228,6 @@ describe('勘定科目の存在期間（schema/import）', () => {
     revision: 0,
     accounts: [cash, food],
     journalEntries: [],
-    cashflowSchedules: [],
     tags: [],
     monthlyCostItems: [],
     recurringRules: [],
@@ -389,39 +387,6 @@ describe('勘定科目の存在期間（schema/import）', () => {
     ).toBe(true);
   });
 
-  it('予定CFの口座・相手科目は期日を包含する', () => {
-    const card = account('card', 'カード', 'liability', 'payment-liability');
-    const schedule = {
-      id: 'schedule',
-      title: '引き落とし',
-      dueDate: '2026-07-10',
-      amount: 1000,
-      direction: 'outflow',
-      accountId: 'cash',
-      counterAccountId: 'card',
-      source: 'manual',
-      status: 'planned',
-      createdAt: 'x',
-      updatedAt: 'x',
-    };
-    expect(
-      ledgerExportPackageSchema.safeParse(
-        basePackage({
-          accounts: [{ ...cash, endDate: '2026-07-09' }, card],
-          cashflowSchedules: [schedule],
-        }),
-      ).success,
-    ).toBe(false);
-    expect(
-      ledgerExportPackageSchema.safeParse(
-        basePackage({
-          accounts: [cash, { ...card, startDate: '2026-07-11' }],
-          cashflowSchedules: [schedule],
-        }),
-      ).success,
-    ).toBe(false);
-  });
-
   it('継続コストの費用科目と集約台帳はitemの全期間を包含する', () => {
     const ledger = account(
       CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
@@ -575,7 +540,6 @@ describe('entry metadata', () => {
           },
         },
       ],
-      cashflowSchedules: [],
       tags: [],
       monthlyCostItems: [],
       recurringRules: [],
@@ -643,7 +607,6 @@ describe('残高補正 metadata の package 整合性', () => {
     revision: 0,
     accounts: [target, counterValue],
     journalEntries: [entryValue],
-    cashflowSchedules: [],
     tags: [],
     monthlyCostItems: [],
     recurringRules: [],
@@ -713,102 +676,6 @@ describe('journalEntrySchema 行数ルール（MVP: 1 借方・1 貸方）', () 
   });
 });
 
-describe('予定CFの検証（package）', () => {
-  const bank = {
-    id: 'bank',
-    name: '普通預金',
-    type: 'asset',
-    role: 'daily-asset',
-    archived: false,
-    createdAt: 'x',
-    updatedAt: 'x',
-  };
-  const card = {
-    id: 'card',
-    name: 'カード',
-    type: 'liability',
-    role: 'payment-liability',
-    archived: false,
-    createdAt: 'x',
-    updatedAt: 'x',
-  };
-  function cfPkg(over: Record<string, unknown> = {}) {
-    return {
-      appId: APP_ID,
-      schemaVersion: SCHEMA_VERSION,
-      ledgerId: 'ledger',
-      exportedAt: '2026-06-01T00:00:00.000Z',
-      deviceId: 'd',
-      revision: 0,
-      accounts: [bank, card],
-      journalEntries: [],
-      cashflowSchedules: [
-        {
-          id: 's1',
-          title: 'カード引き落とし',
-          dueDate: '2026-07-10',
-          amount: 50000,
-          direction: 'outflow',
-          accountId: 'bank',
-          counterAccountId: 'card',
-          source: 'credit-card',
-          status: 'planned',
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-      tags: [],
-      monthlyCostItems: [],
-      recurringRules: [],
-      settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
-      ...over,
-    };
-  }
-
-  it('正しい予定CFは valid', () => {
-    expect(ledgerExportPackageSchema.safeParse(cfPkg()).success).toBe(true);
-  });
-  it('予定CF の口座が資産でないと invalid', () => {
-    const bad = cfPkg({
-      cashflowSchedules: [
-        {
-          id: 's1',
-          title: 'x',
-          dueDate: '2026-07-10',
-          amount: 100,
-          direction: 'outflow',
-          accountId: 'card',
-          source: 'manual',
-          status: 'planned',
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-    });
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
-  });
-  it('posted の予定CF が仕訳に紐づかないと invalid', () => {
-    const bad = cfPkg({
-      cashflowSchedules: [
-        {
-          id: 's1',
-          title: 'x',
-          dueDate: '2026-07-10',
-          amount: 100,
-          direction: 'outflow',
-          accountId: 'bank',
-          counterAccountId: 'card',
-          source: 'manual',
-          status: 'posted',
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-    });
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
-  });
-});
-
 describe('タグ(tags) の scope・参照検証（package）', () => {
   const acc = (id: string, type: string) => ({
     id,
@@ -843,7 +710,6 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
           updatedAt: 'x',
         },
       ],
-      cashflowSchedules: [],
       tags: [
         {
           id: 'trip',
@@ -961,7 +827,6 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
       revision: 0,
       accounts: [cash, food, ccLedger],
       journalEntries: entries ?? items.map((item) => purchaseOf(item)),
-      cashflowSchedules: [],
       tags: [],
       monthlyCostItems: items,
       recurringRules: [],
@@ -993,6 +858,35 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
     expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2126-06-30' }).success).toBe(false);
     // ちょうど 1200ヶ月（2026-06 〜 2126-05）は valid。
     expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2126-05-31' }).success).toBe(true);
+  });
+  it('費用化の開始日（allocationStartDate）は明示値のみ検証: startDate〜endDate の内側だけ valid（§D）', () => {
+    // 内側（両端含む）は valid。package でも valid（購入の仕訳は startDate 基準のまま）。
+    const mid = { ...base, allocationStartDate: '2026-12-01' };
+    expect(monthlyCostItemSchema.safeParse(mid).success).toBe(true);
+    expect(ledgerExportPackageSchema.safeParse(mcPkg([mid])).success).toBe(true);
+    expect(
+      monthlyCostItemSchema.safeParse({ ...base, allocationStartDate: '2026-06-15' }).success,
+    ).toBe(true);
+    expect(
+      monthlyCostItemSchema.safeParse({ ...base, allocationStartDate: '2027-05-31' }).success,
+    ).toBe(true);
+    // 購入日より前 / 終了日より後 / 暦にない日付は invalid。
+    expect(
+      monthlyCostItemSchema.safeParse({ ...base, allocationStartDate: '2026-06-14' }).success,
+    ).toBe(false);
+    expect(
+      monthlyCostItemSchema.safeParse({ ...base, allocationStartDate: '2027-06-01' }).success,
+    ).toBe(false);
+    expect(
+      monthlyCostItemSchema.safeParse({ ...base, allocationStartDate: '2027-02-30' }).success,
+    ).toBe(false);
+    // 終了日なしでも保存できる（配分は発生しないだけ）。購入日より前は終了日なしでも invalid。
+    const open = { ...base, allocationStartDate: '2026-12-01' };
+    delete (open as Record<string, unknown>).endDate;
+    expect(monthlyCostItemSchema.safeParse(open).success).toBe(true);
+    expect(
+      monthlyCostItemSchema.safeParse({ ...open, allocationStartDate: '2026-06-14' }).success,
+    ).toBe(false);
   });
   it('存在しない/内部集約の expenseAccountId は package で invalid', () => {
     expect(
@@ -1203,27 +1097,9 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
     const pkg = rulePkg([overlapped, b]);
     expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(true);
   });
-  it('仕訳・予定CF の monthlyCostId が存在しないと invalid', () => {
+  it('仕訳の monthlyCostId が存在しないと invalid', () => {
     const dangling = purchaseOf(base, { metadata: { inputMode: 'expense', monthlyCostId: 'no' } });
     expect(ledgerExportPackageSchema.safeParse(mcPkg([], [dangling])).success).toBe(false);
-    const pkg = mcPkg([base]) as Record<string, unknown>;
-    pkg.cashflowSchedules = [
-      {
-        id: 's1',
-        title: '返済',
-        dueDate: '2026-07-10',
-        amount: 100,
-        direction: 'outflow',
-        accountId: 'cash',
-        counterAccountId: 'cash',
-        source: 'installment',
-        status: 'planned',
-        monthlyCostId: 'nope',
-        createdAt: 'x',
-        updatedAt: 'x',
-      },
-    ];
-    expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(false);
   });
 });
 
@@ -1247,7 +1123,6 @@ describe('終了点がない旧アーカイブ形状の受理', () => {
       revision: 0,
       accounts,
       journalEntries: entries,
-      cashflowSchedules: [],
       tags: [],
       monthlyCostItems: [],
       recurringRules: [],
@@ -1343,7 +1218,6 @@ describe('accountSchema の movable（「自由に動かせる」フラグ）正
       revision: 0,
       accounts: [{ ...daily, id: 'suica', name: 'Suica', movable: false }],
       journalEntries: [],
-      cashflowSchedules: [],
       tags: [],
       monthlyCostItems: [],
       recurringRules: [],
@@ -1435,7 +1309,6 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
       revision: 0,
       accounts: [bank, salary, fixed, ccLedger, adj],
       journalEntries: [],
-      cashflowSchedules: [],
       tags: [],
       monthlyCostItems: [],
       recurringRules: [rule],
@@ -1456,10 +1329,21 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
       ).success,
     ).toBe(false);
   });
-  it('package: spread の行き先は費用科目だけ valid', () => {
+  it('package: spread の計上先は費用または収入の科目が valid（差引形 = spread に income-category）', () => {
+    // 差引形の v7 正規形: spread = 給与（income-category）・借方 = 台帳。
     expect(
       ledgerExportPackageSchema.safeParse(
         rulePkg({ ...spreadRule, spreadExpenseAccountId: 'salary' }),
+      ).success,
+    ).toBe(true);
+    // 費用行き・差引形とも、借方直接の旧形は保存形として invalid（spread 形のみ）。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        rulePkg({
+          ...spreadRule,
+          spreadExpenseAccountId: undefined,
+          debitAccountId: 'fixed',
+        }),
       ).success,
     ).toBe(false);
     expect(
@@ -1467,7 +1351,7 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
         rulePkg({
           ...spreadRule,
           spreadExpenseAccountId: undefined,
-          debitAccountId: 'fixed',
+          debitAccountId: 'salary',
         }),
       ).success,
     ).toBe(false);

@@ -73,7 +73,6 @@ function ledgerOf(journalEntries: JournalEntry[]): Ledger {
     settings: { ledgerName: 'test', currency: 'JPY', locale: 'ja' },
     accounts,
     journalEntries,
-    cashflowSchedules: [],
     tags: [],
     monthlyCostItems: [],
     recurringRules: [],

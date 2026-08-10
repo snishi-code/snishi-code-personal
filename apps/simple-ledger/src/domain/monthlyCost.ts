@@ -9,8 +9,9 @@
  *  - **月割り**（日割りしない）。startDate/endDate の「日」は配分に使わない。
  *  - **終了日が未設定なら費用の割り振りをしない**（n が決まらないので配分できないだけ。
  *    特別扱いの分岐を作らない）。残存価値 = 全額。
- *  - 初月の月割り日は startDate、2ヶ月目以降は月初（monthlyAllocationDate）。購入の仕訳より前に
- *    費用行が立って台帳がマイナスになる断面を構造的に防ぐ。
+ *  - 月割りの起点は **費用化の開始日（allocationStartDate ?? startDate）**。初月の月割り日は
+ *    起点日、2ヶ月目以降は月初（monthlyAllocationDate）。起点は購入日以降（保存境界が保証）
+ *    なので、購入の仕訳より前に費用行が立って台帳がマイナスになる断面を構造的に防ぐ。
  *  - 端数は monthlyAmounts（合計が必ず配分総額に一致）。
  *  - spreadTotal は既定 item.amount。アーカイブ時の回収の振替があるときだけ
  *    `amount − 回収額` が渡る（負になってよい＝過去にわたる費用減）。item.amount は
@@ -19,17 +20,22 @@
 import { addMonths, addMonthsToDate, monthlyAmounts, monthOf, monthsBetween } from './allocation';
 import type { MonthlyCostItem } from './types';
 
-/** 月バケット。終了日が無ければ null（= 配分しない）。 */
+/** 月割りの起点日（費用化の開始日）。未設定 = 購入日（startDate）。 */
+export function allocationStartOf(item: MonthlyCostItem): string {
+  return item.allocationStartDate ?? item.startDate;
+}
+
+/** 月バケット（費用化開始月〜終了月）。終了日が無ければ null（= 配分しない）。 */
 export function monthlyAllocationSpan(item: MonthlyCostItem): { from: string; n: number } | null {
   if (item.endDate === undefined) return null;
-  const from = monthOf(item.startDate);
+  const from = monthOf(allocationStartOf(item));
   const n = monthsBetween(from, monthOf(item.endDate)) + 1; // n >= 1 は保存境界が保証
   return { from, n };
 }
 
-/** k 番目に費用になる日。初月だけ startDate、2ヶ月目以降は月初。 */
+/** k 番目に費用になる日。初月だけ費用化の開始日、2ヶ月目以降は月初。 */
 export function monthlyAllocationDate(item: MonthlyCostItem, from: string, k: number): string {
-  return k === 0 ? item.startDate : `${addMonths(from, k)}-01`;
+  return k === 0 ? allocationStartOf(item) : `${addMonths(from, k)}-01`;
 }
 
 /** その月に費用として割り振られる額。寄与しない月・終了日なしは 0。 */

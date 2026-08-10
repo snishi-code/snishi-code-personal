@@ -92,7 +92,6 @@ function pkg(
     revision: 0,
     accounts: [cash, investment, expense, costLedger],
     journalEntries,
-    cashflowSchedules: [],
     tags: [],
     monthlyCostItems,
     recurringRules: [rule],

@@ -6,22 +6,15 @@
  */
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from './constants';
 import { isValidIsoDate } from './calendar';
-import type {
-  Account,
-  CashflowSchedule,
-  JournalEntry,
-  MonthlyCostItem,
-  RecurringRule,
-} from './types';
+import type { Account, JournalEntry, MonthlyCostItem, RecurringRule } from './types';
 
 export interface AccountLifetimeCollections {
   entries: readonly JournalEntry[];
-  schedules: readonly CashflowSchedule[];
   monthlyCostItems: readonly MonthlyCostItem[];
   recurringRules: readonly RecurringRule[];
 }
 
-export type AccountReferenceKind = 'entry' | 'schedule' | 'monthlyCost' | 'recurringRule';
+export type AccountReferenceKind = 'entry' | 'monthlyCost' | 'recurringRule';
 
 export interface AccountReferenceInterval {
   kind: AccountReferenceKind;
@@ -318,11 +311,6 @@ export function accountReferenceIntervals(
   for (const entry of collections.entries) {
     if (entry.lines.some((line) => line.accountId === accountId)) {
       intervals.push({ kind: 'entry', from: entry.date, to: entry.date });
-    }
-  }
-  for (const schedule of collections.schedules) {
-    if (schedule.accountId === accountId || schedule.counterAccountId === accountId) {
-      intervals.push({ kind: 'schedule', from: schedule.dueDate, to: schedule.dueDate });
     }
   }
   for (const item of collections.monthlyCostItems) {

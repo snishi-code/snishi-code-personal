@@ -225,6 +225,8 @@ export const UI = {
     editName: 'allocations.edit.name',
     editAmount: 'allocations.edit.amount',
     editStartDate: 'allocations.edit.startDate',
+    // 費用化の開始日（任意・既定 = 購入日）。購入日より後にすると台帳に価値が置かれたままになる。
+    editAllocationStartDate: 'allocations.edit.allocationStartDate',
     editEndDate: 'allocations.edit.endDate',
     editQuickSpan: 'allocations.edit.quickSpan',
     editOpenPurchase: 'allocations.edit.openPurchase',
@@ -279,19 +281,8 @@ export const UI = {
   cashflow: {
     view: 'cashflow.view',
     until: 'cashflow.until',
-    addSchedule: 'cashflow.schedule.create',
-    list: 'cashflow.schedule.list',
-    scheduleSave: 'cashflow.schedule.save',
-    schedulePost: 'cashflow.schedule.post',
-    scheduleName: 'cashflow.schedule.name',
-    scheduleAmount: 'cashflow.schedule.amount',
-    scheduleAccount: 'cashflow.schedule.account',
-    scheduleCounter: 'cashflow.schedule.counter',
-    scheduleFlowSource: 'cashflow.schedule.flow.source',
-    scheduleFlowDestination: 'cashflow.schedule.flow.destination',
-    scheduleInstallments: 'cashflow.schedule.installments',
     liabilityList: 'cashflow.liability.list',
-    // カード・ローンの返済予定づくり（負債行から開く）
+    // カード・ローンの返済計画づくり（負債行から開く）
     repayAdd: 'cashflow.repay.add',
     liabilityRow: 'cashflow.liability.row',
     repaySheet: 'cashflow.repay.sheet',
@@ -303,9 +294,6 @@ export const UI = {
     repaySave: 'cashflow.repay.save',
     freeTrend: 'cashflow.freeTrend',
     futureList: 'cashflow.future.list',
-    scheduleEntryTags: 'cashflow.schedule.entryTags',
-    scheduleAccountTags: 'cashflow.schedule.accountTags',
-    scheduleCounterTags: 'cashflow.schedule.counterTags',
     summary: 'cashflow.summary',
     // 負債行の展開 = 登録済みの返済（未来日付の保存仕訳）。タップで仕訳の編集シートへ
     repaymentsToggle: 'cashflow.repayments.toggle',

@@ -6,7 +6,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from 'react';
 import type {
   Account,
-  CashflowSchedule,
   Ledger,
   MonthlyCostItem,
   RecurringRule,
@@ -50,7 +49,6 @@ function sampleFixtureRequested(): boolean {
 export function isPristineSeedLedger(l: Ledger): boolean {
   return (
     l.journalEntries.length === 0 &&
-    l.cashflowSchedules.length === 0 &&
     l.monthlyCostItems.length === 0 &&
     l.tags.length === 0 &&
     isDefaultSettings(l.settings) &&
@@ -77,9 +75,6 @@ interface LedgerContextValue {
   removeMonthlyCost: (id: string) => Promise<void>;
   /** アーカイブ = 終了日の設定（+ 残存価値の回収の振替を同一 tx で任意に）。 */
   archiveMonthlyCost: (input: MonthlyCostArchiveInput) => Promise<void>;
-  saveSchedules: (schedules: CashflowSchedule[]) => Promise<void>;
-  postSchedule: (id: string) => Promise<void>;
-  removeSchedule: (id: string) => Promise<void>;
   /** 定期ルール（作成/変更後は経過分を即キャッチアップ起票する）。 */
   createRecurringRule: (input: repo.RecurringRuleInput) => Promise<void>;
   saveRecurringRule: (
@@ -290,48 +285,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await repo.archiveMonthlyCost(input);
         await refresh();
         toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const saveSchedules = useCallback<LedgerContextValue['saveSchedules']>(
-    async (schedules) => {
-      try {
-        await repo.upsertSchedules(schedules);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const postSchedule = useCallback<LedgerContextValue['postSchedule']>(
-    async (id) => {
-      try {
-        await repo.postSchedule(id);
-        await refresh();
-        toast.show(t('toast.posted'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const removeSchedule = useCallback<LedgerContextValue['removeSchedule']>(
-    async (id) => {
-      try {
-        await repo.deleteSchedule(id);
-        await refresh();
-        toast.show(t('toast.deleted'), 'success');
       } catch (e) {
         toast.show(errorText(e), 'error');
         throw e;
@@ -716,9 +669,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveMonthlyCost,
       removeMonthlyCost,
       archiveMonthlyCost,
-      saveSchedules,
-      postSchedule,
-      removeSchedule,
       createRecurringRule,
       saveRecurringRule,
       removeRecurringRule,
@@ -756,9 +706,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveMonthlyCost,
       removeMonthlyCost,
       archiveMonthlyCost,
-      saveSchedules,
-      postSchedule,
-      removeSchedule,
       createRecurringRule,
       saveRecurringRule,
       removeRecurringRule,

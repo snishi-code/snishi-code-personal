@@ -1,50 +1,15 @@
 /*
- * 予定キャッシュフロー（将来の現金の出入り）の投影と実績化。
+ * 資金繰り（将来の現金の見通し）の投影。
  *
- * 「いつ月割りするか」とは独立に、「いつ現金が動くか」を扱う。
+ * 「予定」= 未来日付の通常仕訳（v7 で予定キャッシュフローを全廃・一本化）。
  *  - 投影の原資は**「自由に動かせるお金」1 値**（daily-asset かつ movable !== false で、
  *    基準日に存在する科目の残高合計）。総資金/自由資金という 2 段の概念は持たない。
  *    貸借対照表・資産内訳は従来どおり全資産を出す（資金繰りだけ絞る）。
- *  - planned な CashflowSchedule を期日順に適用し、将来残高・最低残高を投影する。
- *  - 実績化は 1 件の 2 行仕訳を作る（複合仕訳にしない）。保存は repository（単一 transaction）。
+ *  - 投影の入力は導出込み仕訳（reportEntriesForAsOf を表示終了日まで展開した結果）。
+ *    未来日付の実仕訳・継続コストの導出行・定期ルールの投影が同じ列で扱われる。
  */
-import { newId } from './ids';
-import { nowIso } from '../util/time';
-import { LedgerError } from './errors';
 import { addMonths, monthOf } from './allocation';
-import type {
-  Account,
-  AccountBalance,
-  CashflowDirection,
-  CashflowSchedule,
-  JournalEntry,
-} from './types';
-
-/**
- * 予定 CF の「源泉 → 行き先」(A → B) から、保存する {現金が動く口座 accountId / 相手 counter /
- * 入金 or 出金 direction} を role から推定する。日常入力と同じ A → B 形にするための変換。
- *  - 収入カテゴリ → 日常資産: 入金(inflow)。現金が動くのは日常資産。
- *  - 日常資産 → 費用カテゴリ: 出金(outflow)。
- *  - 日常資産 → 支払用負債: 返済/支払い(outflow)。
- *  - 日常資産 → 日常資産: 口座間移動(transfer)。自由に動かせるお金の総額は変えない。
- *    accountId=移動元、counterAccountId=移動先。実績化は 借方 移動先 / 貸方 移動元。
- * 上記以外（負債→費用など現金移動が一意でない組み合わせ）は推定不能として null。
- */
-export function inferScheduleFlow(
-  src: Account,
-  dst: Account,
-): { accountId: string; counterAccountId: string; direction: CashflowDirection } | null {
-  if (src.role === 'income-category' && dst.role === 'daily-asset')
-    return { accountId: dst.id, counterAccountId: src.id, direction: 'inflow' };
-  if (
-    src.role === 'daily-asset' &&
-    (dst.role === 'expense-category' || dst.role === 'payment-liability')
-  )
-    return { accountId: src.id, counterAccountId: dst.id, direction: 'outflow' };
-  if (src.role === 'daily-asset' && dst.role === 'daily-asset')
-    return { accountId: src.id, counterAccountId: dst.id, direction: 'transfer' };
-  return null;
-}
+import type { Account, AccountBalance, JournalEntry } from './types';
 
 /**
  * 「自由に動かせるお金」に数える科目か（資金繰りの原資の単一正本）。
@@ -69,37 +34,6 @@ export function freeAssetTotal(assets: AccountBalance[]): number {
   return assets.filter((a) => isFreeAsset(a.account)).reduce((s, a) => s + a.balance, 0);
 }
 
-/**
- * 予定 CF を実績化する仕訳。
- *  - outflow（現金が出ていく）/ transfer（口座間移動）: 借方 counter / 貸方 account
- *  - inflow（現金が入る）:                              借方 account / 貸方 counter
- * transfer は accountId=移動元 / counterAccountId=移動先 なので、借方 移動先 / 貸方 移動元 になる。
- */
-export function buildScheduleEntry(schedule: CashflowSchedule): JournalEntry {
-  if (!schedule.counterAccountId) {
-    throw new LedgerError('error.schedule.counterRequired');
-  }
-  const ts = nowIso();
-  const asset = schedule.accountId;
-  const counter = schedule.counterAccountId;
-  const debit = schedule.direction === 'inflow' ? asset : counter;
-  const credit = schedule.direction === 'inflow' ? counter : asset;
-  return {
-    id: newId(),
-    date: schedule.dueDate,
-    description: schedule.title,
-    kind: 'normal',
-    lines: [
-      { accountId: debit, side: 'debit', amount: schedule.amount },
-      { accountId: credit, side: 'credit', amount: schedule.amount },
-    ],
-    metadata: { inputMode: 'manual' },
-    ...(schedule.entryTagIds?.length ? { tagIds: schedule.entryTagIds } : {}),
-    createdAt: ts,
-    updatedAt: ts,
-  };
-}
-
 export interface CashflowPoint {
   date: string;
   /** その時点の「自由に動かせるお金」。 */
@@ -112,7 +46,6 @@ export interface CashflowProjection {
   points: CashflowPoint[];
   /** 投影期間中の最低額。 */
   minFree: number;
-  schedules: CashflowSchedule[];
 }
 
 /** 同じ仮想仕訳が複数の投影経路から渡されても、未来 CF では 1 回だけ扱う。 */
@@ -168,64 +101,40 @@ export function cashDeltaOfEntry(
   return delta;
 }
 
-/** 投影に積む将来の現金イベント（予定 CF と未来仕訳を統一して扱う）。 */
-export interface FutureCashEvent {
-  date: string;
-  /** 「自由に動かせるお金」の符号つき増減。 */
-  amount: number;
-}
-
 /**
- * 予定 CF 1 件が「自由に動かせるお金」に与える純増減（cashDeltaOfEntry の予定 CF 版）。
- * 実績化仕訳（buildScheduleEntry）と同じ借方/貸方に組んでから free 判定する＝
- * movable=false の科目への入出金・振替も実仕訳と同じ扱いになる（監査 P2-4:
- * direction だけで判定すると、自由→非自由の振替 −額・非自由への入金 +額 を取りこぼす）。
- */
-export function scheduleCashDelta(
-  schedule: Pick<CashflowSchedule, 'amount' | 'direction' | 'accountId' | 'counterAccountId'>,
-  isFree: (accountId: string) => boolean,
-): number {
-  const debit = schedule.direction === 'inflow' ? schedule.accountId : schedule.counterAccountId;
-  const credit = schedule.direction === 'inflow' ? schedule.counterAccountId : schedule.accountId;
-  let delta = 0;
-  if (debit !== undefined && isFree(debit)) delta += schedule.amount;
-  if (credit !== undefined && isFree(credit)) delta -= schedule.amount;
-  return delta;
-}
-
-/**
- * planned な予定 + 未来日付の通常仕訳を期日順に適用して将来残高を投影する。
+ * 未来日付の導出込み仕訳を期日順に適用して将来残高を投影する。
  *
- * futureEvents は「未来日付仕訳（date > today）の現金デルタ」。startFree は today 時点の残高なので、
- * 未来仕訳はまだ含まれておらず、予定 CF と二重計上にならない（予定は status==='planned' で未実績）。
+ * `entries` は reportEntriesForAsOf を表示終了日まで展開した結果を渡す（導出込み仕訳が
+ * 投影の唯一の入力）。startFree は today 時点の残高なので、today より後の仕訳だけを積む。
+ * 同一 ID の重複（複数の投影経路から来た仮想仕訳）は 1 回だけ数え、
+ * 「自由に動かせるお金」にふれない仕訳は点を作らない。
  *
  * 終端は `untilDate`（表示終了日）を指定すればそこまで、無ければ `months` ぶん先（既定 6 か月）。
  */
 export function projectCashflow(params: {
   /** today 時点の「自由に動かせるお金」（freeAssetTotal の結果）。 */
   startFree: number;
-  schedules: CashflowSchedule[];
+  /** 導出込み仕訳（reportEntriesForAsOf を表示終了日まで展開した結果）。 */
+  entries: JournalEntry[];
   today: string;
-  /** 「自由に動かせるお金」に数える科目か（未来仕訳の cashDeltaOfEntry と同じ判定を渡す）。 */
+  /** 「自由に動かせるお金」に数える科目か（cashDeltaOfEntry と同じ判定を渡す）。 */
   isFree: (accountId: string) => boolean;
   /** 月数ぶん先を終端にする（後方互換）。`untilDate` 指定時は無視される。 */
   months?: number;
   /** 表示終了日 'YYYY-MM-DD'。指定時はこの日までを投影する（months より優先）。 */
   untilDate?: string;
-  futureEvents?: FutureCashEvent[];
 }): CashflowProjection {
-  const { startFree, schedules, today, isFree, futureEvents = [] } = params;
+  const { startFree, entries, today, isFree } = params;
   const end = params.untilDate ?? horizonEnd(today, params.months ?? 6);
-  const planned = schedules
-    .filter((s) => s.status === 'planned' && s.dueDate >= today && s.dueDate <= end)
-    .slice()
-    .sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0));
-
-  // 予定 CF と未来仕訳を 1 本のイベント列に統合し、期日順に積む。
-  const events: FutureCashEvent[] = [
-    ...planned.map((s) => ({ date: s.dueDate, amount: scheduleCashDelta(s, isFree) })),
-    ...futureEvents.filter((e) => e.date > today && e.date <= end),
-  ].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const events = uniqueEntriesById(entries)
+    .filter(
+      (entry) =>
+        entry.date > today &&
+        entry.date <= end &&
+        entry.lines.some((line) => isFree(line.accountId)),
+    )
+    .map((entry) => ({ date: entry.date, amount: cashDeltaOfEntry(entry, isFree) }))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
   const points: CashflowPoint[] = [{ date: today, free: startFree }];
   let free = startFree;
@@ -236,5 +145,5 @@ export function projectCashflow(params: {
 
   const minFree = points.reduce((m, p) => Math.min(m, p.free), startFree);
 
-  return { startFree, points, minFree, schedules: planned };
+  return { startFree, points, minFree };
 }

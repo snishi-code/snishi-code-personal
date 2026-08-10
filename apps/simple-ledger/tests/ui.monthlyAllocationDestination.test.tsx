@@ -199,7 +199,8 @@ describe('継続コスト資産の費用の行き先候補', () => {
       expect(found).toBeInTheDocument();
       return found!;
     });
-    expect(within(picker).getByText('費用の行き先')).toBeInTheDocument();
+    // 計上先 = 中立表記（income 行きの差引形も通るため「費用の行き先」とは表示しない）。
+    expect(within(picker).getByText('計上先')).toBeInTheDocument();
     await waitFor(() => {
       for (const name of [
         '現金',
@@ -262,7 +263,7 @@ describe('継続コスト資産の費用の行き先候補', () => {
       }),
     );
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.addChooser}.asset"]`)!);
-    const select = await screen.findByLabelText('費用の行き先');
+    const select = await screen.findByLabelText('計上先');
     await expectBroadCandidates(select, [
       '行き先・アーカイブ済み',
       '行き先・内部台帳',

@@ -38,6 +38,7 @@ import {
   CATCH_UP_HARD_CAP_MONTHS,
   RECURRING_POSTABLE_ROLES,
   clampDayToMonth,
+  isRecurringSpreadDestinationRole,
   recurringDestinationAccountId,
   recurringExpenseAccountId,
   recurringKindOf,
@@ -587,7 +588,7 @@ function sheetKindForRule(
 /**
  * 定期ルールの追加・編集シート。周期（everyMonths）付き。
  * 独自の種別 UI は持たず、簿記編集と同じく貸方・借方を直接指定する。
- * 行き先が費用科目なら保存境界が自動で継続コスト台帳経由へ正規化する。
+ * 行き先が費用・収入（差引形）科目なら保存境界が自動で継続コスト台帳経由へ正規化する。
  */
 function RecurringRuleSheet({
   existing,
@@ -607,7 +608,7 @@ function RecurringRuleSheet({
   );
   const firstFromId = initialFromGroups.flatMap((group) => group.accounts)[0]?.id ?? '';
   const [creditAccountId, setCreditAccountId] = useState(existing?.creditAccountId ?? firstFromId);
-  // 正規化済みの費用ルールでも内部台帳ではなく、利用者が指定した行き先を見せる。
+  // 正規化済みの月割りルールでも内部台帳ではなく、利用者が指定した行き先を見せる。
   const existingDebit = existing ? recurringDestinationAccountId(existing) : undefined;
   const initialToGroups = groupedAccountsByRole(
     accounts,
@@ -839,7 +840,10 @@ function RecurringRuleSheet({
           />
           <AccountPicker
             label={
-              accounts.find((account) => account.id === debitAccountId)?.role === 'expense-category'
+              // 費用・収入（差引形）行きは台帳経由の月割りになるため「計上先」と表示する。
+              isRecurringSpreadDestinationRole(
+                accounts.find((account) => account.id === debitAccountId)?.role,
+              )
                 ? t('monthlyCost.expenseCategory')
                 : t('recurring.to.manual')
             }
@@ -1025,6 +1029,10 @@ function ContinuousCostItemSheet({
   );
   const [startDate, setStartDate] = useState(existing?.startDate ?? todayLocal());
   const [endDate, setEndDate] = useState(existing?.endDate ?? '');
+  // 費用化の開始日（任意）。空 = 購入日から月割り（既定挙動）。
+  const [allocationStartDate, setAllocationStartDate] = useState(
+    existing?.allocationStartDate ?? '',
+  );
   // 費用の行き先の既定値は「前回選んだもの」（連続登録の切り替え手間を減らす）。
   const [expenseAccountId, setExpenseAccountId] = useState(() => {
     if (existing) return existing.expenseAccountId;
@@ -1040,6 +1048,7 @@ function ContinuousCostItemSheet({
     existing !== undefined &&
     (amountText !== String(existing.amount) ||
       endDate !== (existing.endDate ?? '') ||
+      allocationStartDate !== (existing.allocationStartDate ?? '') ||
       expenseAccountId !== existing.expenseAccountId);
 
   async function submit() {
@@ -1062,6 +1071,8 @@ function ContinuousCostItemSheet({
         };
         if (endDate.trim() === '') delete next.endDate;
         else next.endDate = endDate.trim();
+        if (allocationStartDate.trim() === '') delete next.allocationStartDate;
+        else next.allocationStartDate = allocationStartDate.trim();
         await saveMonthlyCost(next);
       } else {
         await createContinuousCost({
@@ -1069,6 +1080,9 @@ function ContinuousCostItemSheet({
           amount,
           startDate,
           ...(endDate.trim() !== '' ? { endDate: endDate.trim() } : {}),
+          ...(allocationStartDate.trim() !== ''
+            ? { allocationStartDate: allocationStartDate.trim() }
+            : {}),
           expenseAccountId,
         });
       }
@@ -1163,6 +1177,15 @@ function ContinuousCostItemSheet({
             dataUi={UI.allocations.editStartDate}
           />
         )}
+        {/* 費用化の開始日（任意・既定 = 購入日）。購入日〜この日の間は台帳に価値が置かれたまま。 */}
+        <TextInput
+          label={t('ccItem.allocationStartDate')}
+          type="date"
+          value={allocationStartDate}
+          onChange={setAllocationStartDate}
+          dataUi={UI.allocations.editAllocationStartDate}
+        />
+        <p className="field__hint">{t('ccItem.allocationStartHint')}</p>
         <TextInput
           label={t('ccItem.endDate')}
           type="date"

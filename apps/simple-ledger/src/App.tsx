@@ -51,7 +51,6 @@ export function App() {
   const [journalTargetEntryId, setJournalTargetEntryId] = useState<string | null>(null);
   // 仕訳一覧の計算で生まれた行タップ → 「毎月のもの」で開くシートの対象（1 回で消費）。
   const [allocationsTarget, setAllocationsTarget] = useState<AllocationsTarget | null>(null);
-  const [cashflowTargetId, setCashflowTargetId] = useState<string | null>(null);
   const [exitConfirm, setExitConfirm] = useState(false);
   // オンボーディングは「初回状態からの派生 + ユーザー操作の上書き」で開閉する
   // （effect での setState を避ける。render 中の派生調整パターン）。
@@ -74,7 +73,6 @@ export function App() {
     setJournalFilter(null);
     setJournalTargetEntryId(null);
     setAllocationsTarget(null);
-    setCashflowTargetId(null);
     navigate(s);
   };
   // ヘッダーの日付を変えたら明示フィルターより日付を優先する（フィルターが居座らない）。
@@ -152,11 +150,6 @@ export function App() {
       setJournalTargetEntryId(null);
       openEdit(entry);
     }
-  };
-
-  const goCashflowSchedule = (scheduleId: string) => {
-    navigate('cashflow');
-    setCashflowTargetId(scheduleId);
   };
 
   const today = todayLocal();
@@ -317,16 +310,13 @@ export function App() {
             period={period}
             onOpenEntry={goJournalEntry}
             onOpenAllocations={goAllocationsFor}
-            onOpenCashflowSchedule={goCashflowSchedule}
           />
         ) : null}
         {screen === 'yearlyOverview' ? <YearlyOverview period={period} /> : null}
         {screen === 'allocations' ? (
           <Allocations period={period} onEditEntry={openEdit} target={allocationsTarget} />
         ) : null}
-        {screen === 'cashflow' ? (
-          <Cashflow onEditEntry={openEdit} targetScheduleId={cashflowTargetId} />
-        ) : null}
+        {screen === 'cashflow' ? <Cashflow onEditEntry={openEdit} /> : null}
         {screen === 'tags' ? <Tags /> : null}
         {screen === 'accounts' ? <Accounts period={period} /> : null}
         {screen === 'settings' ? (

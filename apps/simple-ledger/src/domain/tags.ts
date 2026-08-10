@@ -2,22 +2,15 @@
  * タグのドメインヘルパ。タグは PL/BS を変えない分析軸。
  * タグは常に「仕訳全体（entry）」に付く（旅行・帰省・学会 等のイベント/目的ラベル）。
  */
-import type { CashflowSchedule, JournalEntry, Tag } from './types';
+import type { JournalEntry, Tag } from './types';
 import type { MessageKey } from '../i18n';
 import { filterByDateRange } from './accounting';
 
 /* ── 使用状況・代入検証（UI と repository で共通の不変条件を使う） ── */
 
-/** タグが仕訳または予定CFから参照されているか（削除可否の判定に使う）。 */
-export function isTagReferenced(
-  tagId: string,
-  entries: JournalEntry[],
-  schedules: CashflowSchedule[],
-): boolean {
-  return (
-    entries.some((e) => e.tagIds?.includes(tagId)) ||
-    schedules.some((s) => s.entryTagIds?.includes(tagId))
-  );
+/** タグが仕訳から参照されているか（削除可否の判定に使う）。 */
+export function isTagReferenced(tagId: string, entries: JournalEntry[]): boolean {
+  return entries.some((e) => e.tagIds?.includes(tagId));
 }
 
 /**

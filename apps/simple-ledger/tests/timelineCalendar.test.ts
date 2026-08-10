@@ -6,7 +6,6 @@ import {
 } from '../src/domain/timelineCalendar';
 import type {
   Account,
-  CashflowSchedule,
   EntryMetadata,
   JournalEntry,
   MonthlyCostItem,
@@ -79,7 +78,6 @@ function build(options: Partial<Parameters<typeof buildTimelineCalendar>[0]> = {
     entries: [],
     monthlyCostItems: [],
     recurringRules: [],
-    cashflowSchedules: [],
     boxes,
     range: { start: '2026-01-01', end: '2026-01-31' },
     zoom: 'day',
@@ -189,7 +187,7 @@ describe('buildTimelineCalendar', () => {
     expect(yearly.boxes.find((box) => box.key === 'assetFree')?.dots).toEqual([]);
   });
 
-  it('実仕訳・月割り・未来ルール・予定CFを同じflowにし、開く先だけを解決する', () => {
+  it('実仕訳・月割り・未来ルールを同じflowにし、開く先だけを解決する', () => {
     const item: MonthlyCostItem = {
       id: 'item-1',
       name: 'item',
@@ -200,22 +198,8 @@ describe('buildTimelineCalendar', () => {
       createdAt: ts,
       updatedAt: ts,
     };
-    const schedule: CashflowSchedule = {
-      id: 'schedule-1',
-      title: 'schedule',
-      dueDate: '2026-01-15',
-      amount: 30,
-      direction: 'outflow',
-      accountId: 'cash-a',
-      counterAccountId: 'expense',
-      source: 'manual',
-      status: 'planned',
-      createdAt: ts,
-      updatedAt: ts,
-    };
     const model = build({
       monthlyCostItems: [item],
-      cashflowSchedules: [schedule],
       entries: [
         entry('real', '2026-01-05', 'expense', 'cash-a', 20),
         entry('allocation', '2026-01-06', 'expense', 'ledger', 10, {
@@ -240,10 +224,6 @@ describe('buildTimelineCalendar', () => {
     expect(targetById.get('projection')).toEqual({
       kind: 'recurringRule',
       recurringRuleId: 'rule-1',
-    });
-    expect(targetById.get('schedule-schedule-1')).toEqual({
-      kind: 'cashflowSchedule',
-      cashflowScheduleId: 'schedule-1',
     });
   });
 

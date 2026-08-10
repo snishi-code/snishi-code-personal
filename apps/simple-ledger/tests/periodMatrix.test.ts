@@ -251,7 +251,6 @@ describe('buildPeriodMatrix（全体）', () => {
           monthlyCostRecovery: true,
         }),
       ],
-      cashflowSchedules: [],
       tags: [],
       monthlyCostItems: [item],
       recurringRules: [],
