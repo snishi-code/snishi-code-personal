@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Button } from '@snishi/foundation/ui/Button';
 import { Icon } from '@snishi/foundation/ui/Icon';
@@ -6,6 +6,7 @@ import { IconButton } from '@snishi/foundation/ui/IconButton';
 import { Modal } from '@snishi/foundation/ui/Modal';
 import { useToast } from '@snishi/foundation/ui/toast';
 import { buildBuilderPrompt } from '../domain/builderPrompt';
+import { planBundleReuse, type FormatReusePlan } from '../domain/entityReuse';
 import {
   BUILDER_RESPONSE_MAX_CHARS,
   buildBundleFromCandidate,
@@ -426,6 +427,47 @@ export function TemplateBuilderPreview({
     ),
   );
 
+  // 登録時（store.saveGeneratedBundle）と同じ関数で再利用計画を立て、確認画面に明示する。
+  // ここで作るバンドルは表示用の使い捨てで、永続化はしない。
+  const reuse = useMemo(() => {
+    const bundle = (() => {
+      try {
+        return buildBundleFromCandidate(selectedCandidate(candidate, selected)).bundle;
+      } catch {
+        return null; // 登録時に同じ例外が出て toast で知らせるので、ここでは注記を出さないだけ。
+      }
+    })();
+    if (!bundle) return null;
+    const plan = planBundleReuse(bundle, runtime.store.getFrames(), runtime.store.getFormats());
+    // bundle.formats は selectedCandidate.formats と同じ並び。index で候補キーへ戻す。
+    const selectedKeys = candidate.formats
+      .filter((format) => selected.has(format.key))
+      .map((format) => format.key);
+    const planByKey = new Map<string, FormatReusePlan>();
+    const mergeTargetKey = new Map<FormatReusePlan, string>();
+    bundle.formats.forEach((format, index) => {
+      const key = selectedKeys[index];
+      const entry = plan.formatPlanById.get(format.id);
+      if (key === undefined || !entry) return;
+      planByKey.set(key, entry);
+      if (!mergeTargetKey.has(entry)) mergeTargetKey.set(entry, key);
+    });
+    return { frame: plan.frame, planByKey, mergeTargetKey };
+  }, [candidate, selected, runtime]);
+
+  function reuseNotes(formatKey: string): string[] {
+    const entry = reuse?.planByKey.get(formatKey);
+    if (!reuse || !entry) return [];
+    if (reuse.mergeTargetKey.get(entry) !== formatKey) {
+      return [s.builder.reuseMergedInto(entry.candidate.name || s.common.untitled)];
+    }
+    const notes: string[] = [];
+    if (entry.mergedIds.length > 1) notes.push(s.builder.reuseMerged(entry.mergedIds.length));
+    if (entry.existing)
+      notes.push(s.builder.reuseExisting(entry.existing.name || s.common.untitled));
+    return notes;
+  }
+
   async function apply(): Promise<void> {
     if (busy) return;
     setBusy(true);
@@ -453,6 +495,11 @@ export function TemplateBuilderPreview({
       <div className="templateEditSection">
         <h3>{s.builder.frame}</h3>
         <p>{candidate.frame.name}</p>
+        {reuse?.frame.existing ? (
+          <p className="muted" data-ui={UI.settings.builderReuse}>
+            {s.builder.reuseExisting(reuse.frame.existing.name || s.common.untitled)}
+          </p>
+        ) : null}
         <h3>{s.builder.sections}</h3>
         <ul>
           {candidate.frame.sections.map((section) => (
@@ -484,6 +531,11 @@ export function TemplateBuilderPreview({
                   })
                 }
               />
+              {reuseNotes(format.key).map((note) => (
+                <p className="muted" data-ui={UI.settings.builderReuse} key={note}>
+                  {note}
+                </p>
+              ))}
               <p className="muted">
                 {s.builder.placements}:{' '}
                 {placements.length > 0

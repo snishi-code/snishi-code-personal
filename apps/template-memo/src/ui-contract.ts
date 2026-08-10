@@ -98,6 +98,7 @@ export const UI = {
     builderResponse: 'settings.builder.response',
     builderPreviewOpen: 'settings.builder.preview.open',
     builderPreview: 'settings.builder.preview',
+    builderReuse: 'settings.builder.reuse', // 候補確認画面の「既存を再利用/統合」注記
     builderApply: 'settings.builder.apply',
     templateSection: 'settings.templates.section',
     frameSection: 'settings.frames.section',

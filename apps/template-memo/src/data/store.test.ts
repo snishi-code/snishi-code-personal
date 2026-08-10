@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDatabase, type DatabaseHandle } from '@snishi/foundation/storage/idb';
 import {
   DB_VERSION,
+  newId,
   STORE_FORMATS,
   STORE_FRAMES,
   STORE_PATIENTS,
@@ -34,6 +35,7 @@ import {
 import { countActivePatients, createHrSnapshots, REASON } from './snapshots';
 import { applyRoundStartClear } from '../domain/clearPolicy';
 import { isPatientEmpty, makeDefaultPatient, normalizePatientArray } from '../domain/normalize';
+import type { Format, Frame, TemplateDef } from '../domain/entities';
 import type { TemplatePresetBundle } from '../domain/presets';
 import type { Patient } from '../domain/types';
 
@@ -77,6 +79,55 @@ function livePatient(store: HrStore, pid: string): Patient {
   const p = store.getAppState().patients.find((x) => x.pid === pid);
   if (!p) throw new Error(`test: live patient not found: ${pid}`);
   return p;
+}
+
+/**
+ * テンプレート作成アシストが作る「毎回 ID が新しい・構造は同じ」生成一式。
+ * 同じ返答を 2 回登録した状況を作るため、呼ぶたびに全 ID を採番し直す。
+ */
+function generatedBundle(readingsName = '測定結果'): TemplatePresetBundle {
+  const sectionSummary = newId('sec');
+  const sectionReadings = newId('sec');
+  const frame: Frame = {
+    id: newId('frm'),
+    name: '設備点検',
+    sections: [
+      { id: sectionSummary, title: '【点検概要】', freeText: true },
+      { id: sectionReadings, title: '【測定値】', freeText: false },
+    ],
+  };
+  const readings: Format = {
+    id: newId('fmt'),
+    name: readingsName,
+    joiner: ', ',
+    labelSep: ' ',
+    titleWrap: '',
+    items: [
+      { id: newId('itm'), label: '温度', kind: 'number', unit: '℃' },
+      { id: newId('itm'), label: '運転モード', kind: 'select', options: ['自動', '手動'] },
+    ],
+  };
+  const appearance: Format = {
+    id: newId('fmt'),
+    name: '外観',
+    joiner: '\n',
+    labelSep: '：',
+    titleWrap: '',
+    items: [{ id: newId('itm'), label: '外装', kind: 'text', normal: '異常なし' }],
+  };
+  const template: TemplateDef = {
+    id: newId('tpl'),
+    name: '設備点検メモ',
+    frameId: frame.id,
+    includeProblems: false,
+    includeHandover: false,
+    placements: [
+      { id: newId('plm'), sectionId: sectionReadings, formatId: readings.id, display: 'always' },
+      { id: newId('plm'), sectionId: sectionSummary, formatId: appearance.id, display: 'oncall' },
+    ],
+    updatedAt: 0,
+  };
+  return { frame, formats: [readings, appearance], template };
 }
 
 function activeBundle(store: HrStore): TemplatePresetBundle {
@@ -236,13 +287,13 @@ describe('正規化テンプレート部品 CRUD', () => {
     expect(reopened.getActiveTemplate()?.name).toBe('日報');
   });
 
-  it('生成一式は全 ID を再採番して 1 tx で追加し、既存行・active・対象入力を変えない', async () => {
+  it('構造一致する既存部品は再利用し、既存行・active・対象入力を変えずテンプレートだけ足す', async () => {
     const { db, store } = await setup();
     const pid = await store.createPatientInActivePlace('入力中');
     livePatient(store, pid).projectedValues = { plm_existing: { itm_existing: { value: '42' } } };
     await store.persistActiveOrThrow();
 
-    // 既存一式そのもの（既存 ID を含む）を渡し、upsert されない二重防御を検証する。
+    // 既存一式そのもの（＝構造が完全に一致する候補）を渡す。部品は 1 個も増えない。
     const bundle = activeBundle(store);
     const beforeSettings = structuredClone(store.getSettings());
     const beforeFrameRows = structuredClone(await db.getAll(STORE_FRAMES));
@@ -251,23 +302,16 @@ describe('正規化テンプレート部品 CRUD', () => {
 
     await store.saveGeneratedBundle(bundle);
 
-    for (const row of beforeFrameRows as Array<{ id: string }>) {
-      expect(await db.get(STORE_FRAMES, row.id)).toEqual(row);
-    }
-    for (const row of beforeFormatRows as Array<{ id: string }>) {
-      expect(await db.get(STORE_FORMATS, row.id)).toEqual(row);
-    }
+    // 既存行は 1 バイトも書かない（再利用は「書かない」ことで実現する）。
+    expect(await db.getAll(STORE_FRAMES)).toEqual(beforeFrameRows);
+    expect(await db.getAll(STORE_FORMATS)).toEqual(beforeFormatRows);
     for (const row of beforeTemplateRows as Array<{ id: string }>) {
       expect(await db.get(STORE_TEMPLATES, row.id)).toEqual(row);
     }
-    expect(store.getFrames().at(-1)?.name).toBe(`${bundle.frame.name} (2)`);
+    expect(store.getFrames()).toHaveLength(beforeFrameRows.length);
+    expect(store.getFormats()).toHaveLength(beforeFormatRows.length);
+    expect(store.getTemplateDefs()).toHaveLength(beforeTemplateRows.length + 1);
     expect(store.getTemplateDefs().at(-1)?.name).toBe(`${bundle.template.name} (2)`);
-    expect(
-      store
-        .getFormats()
-        .slice(-bundle.formats.length)
-        .map((format) => format.name),
-    ).toEqual(bundle.formats.map((format) => `${format.name} (2)`));
     expect(store.getSettings()).toEqual(beforeSettings);
     expect(livePatient(store, pid).projectedValues).toEqual({
       plm_existing: { itm_existing: { value: '42' } },
@@ -275,11 +319,175 @@ describe('正規化テンプレート部品 CRUD', () => {
 
     const registered = store.getTemplateDefs().at(-1)!;
     expect(registered.id).not.toBe(bundle.template.id);
-    expect(registered.frameId).not.toBe(bundle.frame.id);
+    expect(registered.frameId).toBe(bundle.frame.id); // 既存フレームを指す
     expect(registered.placements.map((placement) => placement.id)).not.toEqual(
       bundle.template.placements.map((placement) => placement.id),
     );
+    // 配置は既存フォーマット / 既存の場所を指す（複製を作らない）。
+    expect(registered.placements.map((placement) => placement.formatId)).toEqual(
+      bundle.template.placements.map((placement) => placement.formatId),
+    );
+    expect(registered.placements.map((placement) => placement.sectionId)).toEqual(
+      bundle.template.placements.map((placement) => placement.sectionId),
+    );
     expect(store.getActiveTemplate()?.id).toBe(beforeSettings.activeTemplateId);
+  });
+
+  it('構造一致する既存が無い生成一式は全 ID を再採番して 1 tx で追加する', async () => {
+    const { store } = await setup();
+    const bundle = generatedBundle();
+    const beforeFrames = store.getFrames().length;
+    const beforeFormats = store.getFormats().length;
+
+    await store.saveGeneratedBundle(bundle);
+
+    expect(store.getFrames()).toHaveLength(beforeFrames + 1);
+    expect(store.getFormats()).toHaveLength(beforeFormats + 2);
+    const frame = store.getFrames().at(-1)!;
+    expect(frame.id).not.toBe(bundle.frame.id);
+    expect(frame.sections.map((section) => section.id)).not.toEqual(
+      bundle.frame.sections.map((section) => section.id),
+    );
+    const registered = store.getTemplateDefs().at(-1)!;
+    expect(registered.id).not.toBe(bundle.template.id);
+    expect(registered.frameId).toBe(frame.id);
+    expect(new Set(registered.placements.map((placement) => placement.formatId))).toEqual(
+      new Set(
+        store
+          .getFormats()
+          .slice(-2)
+          .map((format) => format.id),
+      ),
+    );
+  });
+
+  it('同じ生成一式を 2 回登録しても部品は増えず、テンプレートだけ 1 件増える', async () => {
+    const { db, store } = await setup();
+    const pid = await store.createPatientInActivePlace('入力中');
+    await store.persistActiveOrThrow();
+    await store.saveGeneratedBundle(generatedBundle());
+
+    const beforeFrameRows = structuredClone(await db.getAll(STORE_FRAMES));
+    const beforeFormatRows = structuredClone(await db.getAll(STORE_FORMATS));
+    const beforePatientRows = structuredClone(await db.getAll(STORE_PATIENTS));
+    const beforeSettings = structuredClone(store.getSettings());
+    const beforeTemplates = store.getTemplateDefs().length;
+
+    await store.saveGeneratedBundle(generatedBundle());
+
+    expect(await db.getAll(STORE_FRAMES)).toEqual(beforeFrameRows);
+    expect(await db.getAll(STORE_FORMATS)).toEqual(beforeFormatRows);
+    expect(await db.getAll(STORE_PATIENTS)).toEqual(beforePatientRows);
+    expect(store.getTemplateDefs()).toHaveLength(beforeTemplates + 1);
+    expect(store.getSettings()).toEqual(beforeSettings);
+    expect(store.getActiveTemplate()?.id).toBe(beforeSettings.activeTemplateId);
+    expect(livePatient(store, pid).name).toBe('入力中');
+
+    // 2 回目のテンプレートは 1 回目に作られた部品の ID を指す。
+    const registered = store.getTemplateDefs().at(-1)!;
+    const reusedFrame = store.getFrames().find((frame) => frame.name === '設備点検')!;
+    expect(registered.frameId).toBe(reusedFrame.id);
+    const sectionIds = new Set(reusedFrame.sections.map((section) => section.id));
+    const formatIds = new Set(store.getFormats().map((format) => format.id));
+    for (const placement of registered.placements) {
+      expect(sectionIds.has(placement.sectionId)).toBe(true);
+      expect(formatIds.has(placement.formatId)).toBe(true);
+    }
+  });
+
+  it('既存に同名・別内容があっても、2 回目は構造一致で再利用して連番を伸ばさない', async () => {
+    const { store } = await setup();
+    // seed の「バイタル」は BP/HR/SpO2/BT。候補の「バイタル」は別内容。
+    expect(store.getFormats().map((format) => format.name)).toContain('バイタル');
+
+    await store.saveGeneratedBundle(generatedBundle('バイタル'));
+    expect(store.getFormats().map((format) => format.name)).toContain('バイタル (2)');
+    const afterFirst = structuredClone(store.getFormats());
+
+    await store.saveGeneratedBundle(generatedBundle('バイタル'));
+
+    expect(store.getFormats()).toEqual(afterFirst);
+    expect(store.getFormats().map((format) => format.name)).not.toContain('バイタル (3)');
+    const reused = store.getFormats().find((format) => format.name === 'バイタル (2)')!;
+    expect(
+      store
+        .getTemplateDefs()
+        .at(-1)!
+        .placements.map((p) => p.formatId),
+    ).toContain(reused.id);
+  });
+
+  it('名前だけ違う既存部品も構造一致なら再利用する', async () => {
+    const { store } = await setup();
+    await store.saveGeneratedBundle(generatedBundle());
+    const frame = store.getFrames().find((candidate) => candidate.name === '設備点検')!;
+    const format = store.getFormats().find((candidate) => candidate.name === '測定結果')!;
+    await store.saveFrame({ ...frame, name: 'inspection frame' });
+    await store.saveFormat({ ...format, name: 'readings' });
+    const beforeFrames = store.getFrames().length;
+    const beforeFormats = store.getFormats().length;
+
+    await store.saveGeneratedBundle(generatedBundle());
+
+    expect(store.getFrames()).toHaveLength(beforeFrames);
+    expect(store.getFormats()).toHaveLength(beforeFormats);
+    expect(store.getTemplateDefs().at(-1)!.frameId).toBe(frame.id);
+    expect(
+      store
+        .getTemplateDefs()
+        .at(-1)!
+        .placements.map((p) => p.formatId),
+    ).toContain(format.id);
+  });
+
+  it('一部だけ違う生成一式は、違うフォーマットだけ新規作成して残りを再利用する', async () => {
+    const { store } = await setup();
+    await store.saveGeneratedBundle(generatedBundle());
+    const beforeFrames = store.getFrames().length;
+    const beforeFormats = store.getFormats().length;
+    const appearance = store.getFormats().find((format) => format.name === '外観')!;
+
+    const changed = generatedBundle();
+    changed.formats[0]!.items[0]!.unit = 'K'; // 「測定結果」の単位を 1 個だけ変える
+    await store.saveGeneratedBundle(changed);
+
+    expect(store.getFrames()).toHaveLength(beforeFrames); // フレームは再利用
+    expect(store.getFormats()).toHaveLength(beforeFormats + 1);
+    expect(store.getFormats().at(-1)?.name).toBe('測定結果 (2)');
+    const registered = store.getTemplateDefs().at(-1)!;
+    expect(registered.placements.map((placement) => placement.formatId)).toEqual([
+      store.getFormats().at(-1)!.id,
+      appearance.id,
+    ]);
+  });
+
+  it('バンドル内の名前違い・同構造フォーマットは 1 個へ統合し、先に現れた名前を使う', async () => {
+    const { store } = await setup();
+    const bundle = generatedBundle();
+    const source = bundle.formats[0]!;
+    const twin: Format = {
+      ...structuredClone(source),
+      id: newId('fmt'),
+      name: '測定結果（別名）',
+      items: source.items.map((item) => ({ ...item, id: newId('itm') })),
+    };
+    bundle.formats.push(twin);
+    bundle.template.placements.push({
+      id: newId('plm'),
+      sectionId: bundle.frame.sections[0]!.id,
+      formatId: twin.id,
+      display: 'always',
+    });
+    const beforeFormats = store.getFormats().length;
+
+    await store.saveGeneratedBundle(bundle);
+
+    expect(store.getFormats()).toHaveLength(beforeFormats + 2); // 統合されて 3 → 2
+    expect(store.getFormats().map((format) => format.name)).not.toContain('測定結果（別名）');
+    const registered = store.getTemplateDefs().at(-1)!;
+    const merged = store.getFormats().find((format) => format.name === '測定結果')!;
+    expect(registered.placements).toHaveLength(3);
+    expect(registered.placements.filter((p) => p.formatId === merged.id)).toHaveLength(2);
   });
 
   it('生成一式の書き込み途中で失敗してもフレーム・フォーマット・テンプレートを残さない', async () => {

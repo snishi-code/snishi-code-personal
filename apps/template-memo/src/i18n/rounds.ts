@@ -374,6 +374,10 @@ export const s = {
     sectionNoFreeText: '自由本文欄なし',
     formats: 'フォーマット',
     formatItems: (n: number) => `項目 ${n}件`,
+    // 構造が一致する既存部品は新しく作らず再利用する。名前が違っても内容が同じなら再利用対象。
+    reuseExisting: (name: string) => `既存『${name}』を再利用`,
+    reuseMerged: (n: number) => `同じ内容の候補 ${n} 件を統合`,
+    reuseMergedInto: (name: string) => `『${name}』と同じ内容のため統合`,
     placements: '配置',
     placement: (section: string, display: string) => `${section}へ${display}で配置`,
     noPlacement: '配置なし',

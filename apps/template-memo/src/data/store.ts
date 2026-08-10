@@ -34,6 +34,7 @@ import {
   type Frame,
   type TemplateDef,
 } from '../domain/entities';
+import { planBundleReuse } from '../domain/entityReuse';
 import { resolveTemplate } from '../domain/resolveTemplate';
 import { buildDailyReportPreset, buildRoundPreset } from '../domain/presets';
 import type { TemplatePresetBundle } from '../domain/presets';
@@ -507,8 +508,10 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
       emit({ type: 'workspace', workspaceId: activeViewId() });
     },
     async saveGeneratedBundle(bundle) {
-      // 受け取った ID は信用せず、参照関係を保ったまま全て採番し直す。
+      // 受け取った ID は信用せず、参照関係を保ったまま採番し直す。
       // これにより、呼び出し側の不具合や細工された入力があっても既存行を upsert しない。
+      // ただし構造が一致する既存部品は「新規レコードを作らず既存 ID を指す」形で再利用し、
+      // 同じ内容の部品が登録のたびに増えるのを防ぐ（再利用側は 1 バイトも書かない）。
       const sourceFrame = normalizeFrame(bundle.frame);
       const sourceFormats = bundle.formats.map(normalizeFormat);
       if (!sourceFrame || sourceFormats.some((format) => !format)) {
@@ -529,37 +532,56 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
         throw new Error('生成されたテンプレート一式の参照が不正です');
       }
 
-      const sectionIdMap = new Map(
-        sourceFrame.sections.map((section) => [section.id, newId('sec')] as const),
+      // 確認画面（TemplateBuilder）と同じ関数で計画を立てる（見せた内容と登録結果をずらさない）。
+      const plan = planBundleReuse(
+        { frame: sourceFrame, formats: validSourceFormats, template: sourceTemplate },
+        frames,
+        formats,
       );
-      const frame: Frame = {
-        ...sourceFrame,
-        id: newId('frm'),
-        name: uniqueName(
-          sourceFrame.name,
-          frames.map((candidate) => candidate.name),
-        ),
-        sections: sourceFrame.sections.map((section) => ({
-          ...section,
-          id: sectionIdMap.get(section.id)!,
-        })),
-      };
 
+      // ── フレーム: 再利用なら既存の場所 ID へ読み替え、新規なら全採番 ──
+      const reusedFrame = plan.frame.existing;
+      const sectionIdMap = new Map<string, string>(plan.frame.sectionIdMap);
+      let generatedFrame: Frame | null = null;
+      if (!reusedFrame) {
+        for (const section of sourceFrame.sections) sectionIdMap.set(section.id, newId('sec'));
+        generatedFrame = {
+          ...sourceFrame,
+          id: newId('frm'),
+          name: uniqueName(
+            sourceFrame.name,
+            frames.map((candidate) => candidate.name),
+          ),
+          sections: sourceFrame.sections.map((section) => ({
+            ...section,
+            id: sectionIdMap.get(section.id)!,
+          })),
+        };
+      }
+
+      // ── フォーマット: 統合後の代表ごとに「既存を指す」か「新規採番」かを決める ──
       const usedFormatNames = new Set(formats.map((candidate) => candidate.name));
       const formatIdMap = new Map<string, string>();
-      const generatedFormats: Format[] = validSourceFormats.map((source) => {
-        const id = newId('fmt');
-        formatIdMap.set(source.id, id);
-        const name = uniqueName(source.name, usedFormatNames);
-        usedFormatNames.add(name);
-        return {
-          ...source,
-          id,
-          name,
-          items: source.items.map((item) => ({ ...item, id: newId('itm') })),
-        };
-      });
+      const generatedFormats: Format[] = [];
+      for (const entry of plan.formats) {
+        let targetId: string;
+        if (entry.existing) {
+          targetId = entry.existing.id;
+        } else {
+          targetId = newId('fmt');
+          const name = uniqueName(entry.candidate.name, usedFormatNames);
+          usedFormatNames.add(name);
+          generatedFormats.push({
+            ...entry.candidate,
+            id: targetId,
+            name,
+            items: entry.candidate.items.map((item) => ({ ...item, id: newId('itm') })),
+          });
+        }
+        for (const sourceId of entry.mergedIds) formatIdMap.set(sourceId, targetId);
+      }
 
+      // テンプレートは常に新規（既存テンプレートを置き換えない）。
       const generatedTemplate: TemplateDef = {
         ...sourceTemplate,
         id: newId('tpl'),
@@ -567,26 +589,31 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
           sourceTemplate.name,
           templateDefs.map((candidate) => candidate.name),
         ),
-        frameId: frame.id,
+        frameId: reusedFrame ? reusedFrame.id : generatedFrame!.id,
         placements: sourceTemplate.placements.map((placement) => ({
           ...placement,
           id: newId('plm'),
-          sectionId: sectionIdMap.get(placement.sectionId)!,
-          formatId: formatIdMap.get(placement.formatId)!,
+          // 読み替えに失敗した参照は '' になり、直後の正規化で件数が合わず保存を止める。
+          sectionId: sectionIdMap.get(placement.sectionId) ?? '',
+          formatId: formatIdMap.get(placement.formatId) ?? '',
         })),
       };
 
       // 永続化直前にも正規化する。ここで要素が落ちる状態はビルダー側の不具合なので保存しない。
-      const normalizedFrame = normalizeFrame(frame);
+      const normalizedFrame = generatedFrame ? normalizeFrame(generatedFrame) : null;
       const normalizedFormats = generatedFormats.map(normalizeFormat);
-      if (!normalizedFrame || normalizedFormats.some((format) => !format)) {
+      if ((generatedFrame && !normalizedFrame) || normalizedFormats.some((format) => !format)) {
         throw new Error('生成されたテンプレート一式を正規化できませんでした');
       }
       const validFormats = normalizedFormats as Format[];
-      const normalizedTemplate = normalizeTemplateDef(generatedTemplate, {
-        frames: [normalizedFrame],
-        formats: validFormats,
-      });
+      const refFrame = normalizedFrame ?? reusedFrame;
+      const normalizedTemplate = refFrame
+        ? normalizeTemplateDef(generatedTemplate, {
+            frames: [refFrame],
+            // 再利用したフォーマットは既存側にしかないため、参照検証には両方を渡す。
+            formats: [...formats, ...validFormats],
+          })
+        : null;
       if (
         !normalizedTemplate ||
         normalizedTemplate.placements.length !== generatedTemplate.placements.length
@@ -595,13 +622,14 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
       }
 
       await db.runWrite([STORE_FRAMES, STORE_FORMATS, STORE_TEMPLATES], (tx) => {
-        tx.objectStore(STORE_FRAMES).put(normalizedFrame);
+        // 再利用した既存レコードは put しない（名前も内容も変えない）。
+        if (normalizedFrame) tx.objectStore(STORE_FRAMES).put(normalizedFrame);
         for (const format of validFormats) tx.objectStore(STORE_FORMATS).put(format);
         tx.objectStore(STORE_TEMPLATES).put(normalizedTemplate);
       });
 
       // メモリ上の表示もトランザクション完了後だけ更新する。settings と active は変更しない。
-      frames = [...frames, normalizedFrame];
+      if (normalizedFrame) frames = [...frames, normalizedFrame];
       formats = [...formats, ...validFormats];
       templateDefs = [...templateDefs, normalizedTemplate];
       emit({ type: 'workspace', workspaceId: activeViewId() });
