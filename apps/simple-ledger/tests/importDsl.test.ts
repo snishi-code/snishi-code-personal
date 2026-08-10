@@ -233,6 +233,42 @@ describe('evaluateProfile（保存則: 全行 = normalized + skip + error）', (
     expect(r.errors.map((e) => e.reasonCode)).toEqual(['unknown-kind']);
   });
 
+  it('externalId のファイル内衝突は該当する全行が external-id-duplicate の error になる', () => {
+    // 同一タプルが複数行 → 決定的照合が成立しない = 評価段階で error に倒す（保存則に出す）。
+    // どちらか片方に寄せない（全行 error）・衝突しない行は普通に normalized のまま。
+    const dsl: ImportProfileDsl = { ...baseDsl, externalId: { columns: ['相手'] } };
+    const text = [
+      header,
+      '2026/08/01,100,-,支払い,重複ID',
+      '2026/08/02,200,-,支払い,一意ID',
+      '2026/08/03,300,-,支払い,重複ID',
+    ].join('\n');
+    const r = evaluateProfileText(dsl, text);
+    expect(r.normalized.map((n) => n.externalIdTuple)).toEqual([['一意ID']]);
+    expect(r.errors).toEqual([
+      { rowIndex: 2, reasonCode: 'external-id-duplicate', detail: '重複ID' },
+      { rowIndex: 4, reasonCode: 'external-id-duplicate', detail: '重複ID' },
+    ]);
+    // 保存則: 総行数 = normalized + skipped + errors は衝突後も崩れない。
+    expect(r.normalized.length + r.skipped.length + r.errors.length).toBe(r.totalRowCount);
+  });
+
+  it('externalId 衝突の error は他の error と行順で並ぶ', () => {
+    const dsl: ImportProfileDsl = { ...baseDsl, externalId: { columns: ['相手'] } };
+    const text = [
+      header,
+      '2026/08/01,100,-,支払い,重複ID',
+      '2026/08/02,abc,-,支払い,別の店', // 金額不正（衝突より前の行番号ではない）
+      '2026/08/03,300,-,支払い,重複ID',
+    ].join('\n');
+    const r = evaluateProfileText(dsl, text);
+    expect(r.errors.map((e) => [e.rowIndex, e.reasonCode])).toEqual([
+      [2, 'external-id-duplicate'],
+      [3, 'amount-parse-failed'],
+      [4, 'external-id-duplicate'],
+    ]);
+  });
+
   it('externalId が全列空の行は external-id-empty で error になる', () => {
     const dsl: ImportProfileDsl = {
       ...baseDsl,

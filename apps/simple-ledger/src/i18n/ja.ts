@@ -689,6 +689,7 @@ export const ja = {
   'csvImport.rowError.amount-not-positive': '金額が正の数ではありません',
   'csvImport.rowError.unknown-kind': 'どの行種にも当てはまりません',
   'csvImport.rowError.external-id-empty': '識別子の列がすべて空です',
+  'csvImport.rowError.external-id-duplicate': '同じ識別子の行がファイル内に複数あります',
   // レビューキュー（§4 手順 4）
   'csvImport.reviewTitle': 'レビュー（残り {count} 件）',
   'csvImport.reviewComplete': '取込完了',
@@ -699,6 +700,11 @@ export const ja = {
   'csvImport.bulkConfirmTitle': '「{kind}」をまとめて適用',
   'csvImport.bulkShapeLine': '借方 {debit} / 貸方 {credit} — {count} 件',
   'csvImport.rowFlagged': '要再確認',
+  'csvImport.occurrenceShortage':
+    '同一内容の行が過去の取込時より少ないファイルです（{count} 種類）。過去の決定はそのまま保持されます。',
+  'csvImport.danglingNote':
+    '過去の決定が参照する仕訳が見つかりません。解除すると未決定に戻り、取り込み直せます。',
+  'csvImport.danglingRelease': '決定を解除して取り込み直す',
   'csvImport.rowNeedsAccount': '計上先を選んで適用',
   'csvImport.rowApply': '適用',
   'csvImport.rowLink': '既存仕訳へリンク',

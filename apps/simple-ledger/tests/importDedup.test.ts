@@ -3,6 +3,7 @@ import './setup';
 import type { JournalEntry } from '../src/domain/types';
 import { externalRowKey, fingerprintRowKey } from '../src/domain/importIdentity';
 import {
+  findOccurrenceShortages,
   resolveImportRows,
   type DedupRow,
   type ImportDecisionSummary,
@@ -86,11 +87,45 @@ describe('resolveImportRows（層1: rowKey 決定的照合）', () => {
   });
 });
 
-describe('resolveImportRows（§5-1 出現数防御）', () => {
+describe('resolveImportRows（occurrence の単純化 = 部分適用が決定を壊さない）', () => {
   const fp = 'aa'.repeat(32);
 
-  it('既知 occurrence 数とファイル内出現数の不一致 → その fingerprint の全行が未解決', () => {
-    // 既知 = occurrence 2 まで決定済み。ファイル内には 1 行しか無い = 食い違い。
+  it('部分適用の残り（n > k）: 決定済み occurrence は decided・残りは普通の未解決', () => {
+    // 同一生行 3 件のうち occurrence 1 だけ適用済み → 1 は decided / 2, 3 は unresolved。
+    // 旧仕様はここを count-mismatch にして決定を削除させていた（P1 バグの根）。
+    const decisions = new Map<string, ImportDecisionSummary>([
+      [fingerprintRowKey(SRC, fp, 1), { status: 'registered', entryId: 'e1' }],
+    ]);
+    const rows = [
+      dedupRow(fingerprintRowKey(SRC, fp, 1)),
+      dedupRow(fingerprintRowKey(SRC, fp, 2)),
+      dedupRow(fingerprintRowKey(SRC, fp, 3)),
+    ];
+    const r = resolveImportRows({
+      rows,
+      decisions,
+      existingEntries: [entry('e1', '2026-08-01', 100)],
+    });
+    expect(r.map((x) => x.status)).toEqual(['decided', 'unresolved', 'unresolved']);
+  });
+
+  it('出現数が一致すれば occurrence ごとに決定的照合される', () => {
+    const rows = [dedupRow(fingerprintRowKey(SRC, fp, 1)), dedupRow(fingerprintRowKey(SRC, fp, 2))];
+    const decisions = new Map<string, ImportDecisionSummary>([
+      [fingerprintRowKey(SRC, fp, 1), { status: 'registered', entryId: 'e1' }],
+      [fingerprintRowKey(SRC, fp, 2), { status: 'ignored' }],
+    ]);
+    const matched = resolveImportRows({
+      rows,
+      decisions,
+      existingEntries: [entry('e1', '2026-08-01', 100)],
+    });
+    expect(matched.map((x) => x.status)).toEqual(['decided', 'decided']);
+  });
+
+  it('過去より行が少ないファイル（n < k）でも決定どおり decided（判定は変えない）', () => {
+    // 過去に occurrence 2 まで決定済み・今回のファイルは 1 行 → 1 は decided のまま。
+    // 警告は findOccurrenceShortages が別途返す（決定の削除はどの経路でも起きない）。
     const decisions = new Map<string, ImportDecisionSummary>([
       [fingerprintRowKey(SRC, fp, 1), { status: 'registered', entryId: 'e1' }],
       [fingerprintRowKey(SRC, fp, 2), { status: 'registered', entryId: 'e2' }],
@@ -100,54 +135,10 @@ describe('resolveImportRows（§5-1 出現数防御）', () => {
       decisions,
       existingEntries: [entry('e1', '2026-08-01', 100), entry('e2', '2026-08-01', 100)],
     });
-    expect(r[0]!.status).toBe('unresolved-count-mismatch');
+    expect(r[0]!.status).toBe('decided');
   });
 
-  it('出現数が一致すれば occurrence ごとに決定的照合される', () => {
-    const decisions = new Map<string, ImportDecisionSummary>([
-      [fingerprintRowKey(SRC, fp, 1), { status: 'registered', entryId: 'e1' }],
-    ]);
-    const rows = [dedupRow(fingerprintRowKey(SRC, fp, 1)), dedupRow(fingerprintRowKey(SRC, fp, 2))];
-    // 既知 max occurrence = 1 だがファイル内は 2 行 → 食い違い扱い（安全側）。
-    const mismatch = resolveImportRows({
-      rows,
-      decisions,
-      existingEntries: [entry('e1', '2026-08-01', 100)],
-    });
-    expect(mismatch.map((x) => x.status)).toEqual([
-      'unresolved-count-mismatch',
-      'unresolved-count-mismatch',
-    ]);
-
-    // 既知 max occurrence = 2・ファイル内 2 行 → occurrence 1 は decided / 2 は dangling でなく判定どおり。
-    const decisions2 = new Map<string, ImportDecisionSummary>([
-      [fingerprintRowKey(SRC, fp, 1), { status: 'registered', entryId: 'e1' }],
-      [fingerprintRowKey(SRC, fp, 2), { status: 'ignored' }],
-    ]);
-    const matched = resolveImportRows({
-      rows,
-      decisions: decisions2,
-      existingEntries: [entry('e1', '2026-08-01', 100)],
-    });
-    expect(matched.map((x) => x.status)).toEqual(['decided', 'decided']);
-  });
-
-  it('ファイル内で rowKey が衝突（同一 externalId が複数行）→ 全該当行が未解決', () => {
-    const key = externalRowKey(SRC, ['dup-id', '支払い']);
-    const other = externalRowKey(SRC, ['unique-id', '支払い']);
-    const r = resolveImportRows({
-      rows: [dedupRow(key), dedupRow(key), dedupRow(other)],
-      decisions: new Map(),
-      existingEntries: [],
-    });
-    expect(r.map((x) => x.status)).toEqual([
-      'unresolved-count-mismatch',
-      'unresolved-count-mismatch',
-      'unresolved',
-    ]);
-  });
-
-  it('sourceIdentity が違えば同じ fingerprint でも別名前空間（不一致にならない)', () => {
+  it('sourceIdentity が違えば同じ fingerprint でも別名前空間（照合されない)', () => {
     const decisions = new Map<string, ImportDecisionSummary>([
       [fingerprintRowKey('別の口座', fp, 1), { status: 'ignored' }],
       [fingerprintRowKey('別の口座', fp, 2), { status: 'ignored' }],
@@ -158,6 +149,42 @@ describe('resolveImportRows（§5-1 出現数防御）', () => {
       existingEntries: [],
     });
     expect(r[0]!.status).toBe('unresolved');
+  });
+});
+
+describe('findOccurrenceShortages（n < k の情報提示・決定は無傷）', () => {
+  const fp = 'aa'.repeat(32);
+  const fp2 = 'bb'.repeat(32);
+
+  it('ファイル内出現数が決定済み occurrence の最大値を下回るグループを返す', () => {
+    const rows = [dedupRow(fingerprintRowKey(SRC, fp, 1))];
+    const keys = [
+      fingerprintRowKey(SRC, fp, 1),
+      fingerprintRowKey(SRC, fp, 3), // 過去のファイルには 3 件あった
+    ];
+    expect(findOccurrenceShortages(rows, keys)).toEqual([
+      { fingerprint: fp, knownCount: 3, fileCount: 1 },
+    ]);
+  });
+
+  it('n ≥ k のグループ・ext キー・ファイル外の fingerprint は返さない', () => {
+    const rows = [
+      dedupRow(fingerprintRowKey(SRC, fp, 1)),
+      dedupRow(fingerprintRowKey(SRC, fp, 2)),
+      dedupRow(externalRowKey(SRC, ['id-1', '支払い'])),
+    ];
+    const keys = [
+      fingerprintRowKey(SRC, fp, 1), // k=1 ≤ n=2
+      fingerprintRowKey(SRC, fp2, 5), // ファイルに無い fingerprint は対象外
+      externalRowKey(SRC, ['id-1', '支払い']), // ext キーは occurrence を持たない
+    ];
+    expect(findOccurrenceShortages(rows, keys)).toEqual([]);
+  });
+
+  it('sourceIdentity が違う決定は突き合わせない（別名前空間）', () => {
+    const rows = [dedupRow(fingerprintRowKey(SRC, fp, 1))];
+    const keys = [fingerprintRowKey('別の口座', fp, 4)];
+    expect(findOccurrenceShortages(rows, keys)).toEqual([]);
   });
 });
 

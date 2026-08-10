@@ -14,10 +14,18 @@ import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { CsvImport } from '../src/ui/screens/CsvImport';
 import { LedgerProvider } from '../src/state/store';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
-import { loadLedger, upsertEntry, upsertProfileBinding } from '../src/data/repository';
+import {
+  loadLedger,
+  upsertEntry,
+  upsertImportProfile,
+  upsertProfileBinding,
+} from '../src/data/repository';
+import { putRecord, STORE } from '../src/data/db';
 import { buildSimpleEntry } from '../src/domain/entry';
+import { externalRowKey } from '../src/domain/importIdentity';
 import { PAYPAY_PROFILE_ID } from '../src/domain/importProfilePresets';
 import { UI } from '../src/ui-contract';
+import type { ImportProfileDsl } from '../src/domain/importDsl';
 import type { Account, Ledger } from '../src/domain/types';
 import './setup';
 
@@ -96,10 +104,10 @@ function selectFile(file: File): void {
   fireEvent.change(input!, { target: { files: [file] } });
 }
 
-function selectProfile(): void {
+function selectProfile(profileId: string = PAYPAY_PROFILE_ID): void {
   const select = q(UI.csvImport.profile);
   expect(select).not.toBeNull();
-  fireEvent.change(select!, { target: { value: PAYPAY_PROFILE_ID } });
+  fireEvent.change(select!, { target: { value: profileId } });
 }
 
 /** binding をデータ層で先に用意する（セットアップシート UI はハッピーパス側で検証）。 */
@@ -117,6 +125,50 @@ async function seedBinding(): Promise<void> {
       'ポイント、残高の取消': income.id,
     },
     chargeSourceAccountId: account(ledger, '預金').id,
+    createdAt: ts,
+    updatedAt: ts,
+  });
+}
+
+/* ── fingerprint キー（externalId 無し profile）用のヘルパー ── */
+
+const FP_PROFILE_ID = 'fp-profile-ui';
+const FP_SOURCE = '指紋口座';
+
+/** externalId を定義しない最小 DSL（行キーは fingerprint + occurrence になる）。 */
+const FP_DSL: ImportProfileDsl = {
+  dslVersion: 1,
+  fileFormat: { encoding: 'utf-8', delimiter: ',', headerRowIndex: 0 },
+  columns: {
+    date: { column: '日付', format: 'YYYY-MM-DD' },
+    amount: { mode: 'signed', column: '金額', positiveDirection: 'inflow' },
+    description: { columns: ['内容'] },
+  },
+  kindRules: [{ when: { op: 'contains', column: '内容', value: '' }, kind: '支払い' }],
+};
+
+const FP_HEADER = '日付,金額,内容';
+/** 同一生行（= 同一 fingerprint）を n 件並べた CSV。 */
+function fpCsv(sameRowCount: number): string {
+  return [FP_HEADER, ...Array<string>(sameRowCount).fill('2026-08-01,-1000,コンビニ')].join('\n');
+}
+
+async function seedFpProfileAndBinding(): Promise<void> {
+  const ledger = await loadLedger();
+  const ts = new Date().toISOString();
+  await upsertImportProfile({
+    id: FP_PROFILE_ID,
+    name: '指紋テスト',
+    dsl: FP_DSL,
+    createdAt: ts,
+    updatedAt: ts,
+  });
+  await upsertProfileBinding({
+    id: 'binding-fp-ui-test',
+    profileId: FP_PROFILE_ID,
+    sourceIdentity: FP_SOURCE,
+    ownAccountId: account(ledger, 'チャージ残高').id,
+    kindDestinations: { 支払い: account(ledger, '変動費').id },
     createdAt: ts,
     updatedAt: ts,
   });
@@ -413,6 +465,206 @@ describe('CSV 取込 — binding セットアップの拒否（§1-1b）', () =>
     expect(ledger.profileBindings[0]!.chargeSourceAccountId).not.toBe(
       ledger.profileBindings[0]!.ownAccountId,
     );
+  });
+});
+
+describe('CSV 取込 — fingerprint 行の部分適用（P1 回帰: 決定の誤削除禁止）', () => {
+  it('同一生行 3 件の 1 件だけ適用 → 決定は無傷・残りは普通の未解決・再適用で二重仕訳にならない', async () => {
+    await loadLedger();
+    await seedFpProfileAndBinding();
+    renderScreen();
+    await waitForProfileSelect();
+    selectProfile(FP_PROFILE_ID);
+    selectFile(csvFile(fpCsv(3), 'fp3.csv'));
+    await waitFor(() => {
+      expect(qa(UI.csvImport.row)).toHaveLength(3);
+    });
+
+    // occurrence 1 だけワンタップ適用 → 旧仕様はここで count-mismatch 扱いになり
+    // 生きた決定を黙って削除していた（本テストの主目的）。
+    fireEvent.click(qa(UI.csvImport.rowApply)[0]!);
+    await waitFor(() => {
+      expect(qa(UI.csvImport.row)).toHaveLength(2);
+    });
+    let ledger = await loadLedger();
+    expect(ledger.importDecisions).toHaveLength(1);
+    expect(
+      ledger.journalEntries.filter((e) => e.metadata?.importSource !== undefined),
+    ).toHaveLength(1);
+    // 残り 2 行は警告バッジ無しの普通の未解決（mismatch 扱いしない）。
+    expect(document.body.textContent).not.toContain('要再確認');
+    expect(q(UI.csvImport.occurrenceShortage)).toBeNull();
+
+    // 同じファイルを読み直しても決定は消えない・決定済み 1 件を除外して残り 2 件が出る。
+    // （旧レビューと新レビューは同一表示になるため、いったん消えてから再表示されるのを待つ）
+    selectFile(csvFile(fpCsv(3), 'fp3-again.csv'));
+    await waitFor(() => {
+      expect(q(UI.csvImport.counts)).toBeNull();
+    });
+    await waitFor(() => {
+      expect(q(UI.csvImport.counts)!.textContent).toContain('決定済み 1 件を除外し');
+    });
+    expect(qa(UI.csvImport.row)).toHaveLength(2);
+    ledger = await loadLedger();
+    expect(ledger.importDecisions).toHaveLength(1);
+
+    // 残り 2 件を適用しきる → 3 決定・3 仕訳。
+    fireEvent.click(qa(UI.csvImport.rowApply)[0]!);
+    await waitFor(() => {
+      expect(qa(UI.csvImport.row)).toHaveLength(1);
+    });
+    fireEvent.click(qa(UI.csvImport.rowApply)[0]!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.complete)).not.toBeNull();
+    });
+
+    // 再読込 → 全行決定的スキップ・仕訳は 3 件のまま（二重仕訳なし）。
+    selectFile(csvFile(fpCsv(3), 'fp3-final.csv'));
+    await waitFor(() => {
+      expect(q(UI.csvImport.counts)).toBeNull();
+    });
+    await waitFor(() => {
+      expect(q(UI.csvImport.counts)!.textContent).toContain('決定済み 3 件を除外し');
+    });
+    expect(qa(UI.csvImport.row)).toHaveLength(0);
+    expect(q(UI.csvImport.complete)).not.toBeNull();
+    ledger = await loadLedger();
+    expect(ledger.importDecisions).toHaveLength(3);
+    expect(
+      ledger.journalEntries.filter((e) => e.metadata?.importSource !== undefined),
+    ).toHaveLength(3);
+  });
+});
+
+describe('CSV 取込 — 出現数が過去より少ないファイル（n < k は警告バナーのみ）', () => {
+  it('過去 2 件決定済み・今回 1 行のファイル → 警告を情報提示し決定は無傷', async () => {
+    await loadLedger();
+    await seedFpProfileAndBinding();
+    renderScreen();
+    await waitForProfileSelect();
+    selectProfile(FP_PROFILE_ID);
+
+    // 同一生行 2 件のファイルを全行適用（k = 2）。
+    selectFile(csvFile(fpCsv(2), 'fp2.csv'));
+    await waitFor(() => {
+      expect(qa(UI.csvImport.row)).toHaveLength(2);
+    });
+    fireEvent.click(qa(UI.csvImport.rowApply)[0]!);
+    await waitFor(() => {
+      expect(qa(UI.csvImport.row)).toHaveLength(1);
+    });
+    fireEvent.click(qa(UI.csvImport.rowApply)[0]!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.complete)).not.toBeNull();
+    });
+
+    // 同一生行が 1 件しか無いファイル（n = 1 < k = 2）→ 警告バナー + 決定どおり除外。
+    selectFile(csvFile(fpCsv(1), 'fp1.csv'));
+    await waitFor(() => {
+      expect(q(UI.csvImport.occurrenceShortage)).not.toBeNull();
+    });
+    expect(q(UI.csvImport.occurrenceShortage)!.textContent).toContain(
+      '過去の取込時より少ないファイル',
+    );
+    expect(q(UI.csvImport.counts)!.textContent).toContain('決定済み 1 件を除外し');
+    expect(qa(UI.csvImport.row)).toHaveLength(0);
+    // 決定は 1 件も消えていない（旧仕様はここで 2 件とも削除していた）。
+    const ledger = await loadLedger();
+    expect(ledger.importDecisions).toHaveLength(2);
+  });
+});
+
+describe('CSV 取込 — dangling 決定（自動削除せず明示解除だけが消す）', () => {
+  it('参照先仕訳の無い決定 → 要再確認 + 解除ボタンのみ・解除後に普通の未解決へ戻る', async () => {
+    await loadLedger();
+    await seedBinding();
+    // 参照先仕訳が実在しない registered 決定を直接注入する（破損状態の再現。
+    // 通常経路では仕訳削除 cascade が決定を同時解除するため、ここでは DB へ直書きする）。
+    const ts = new Date().toISOString();
+    await putRecord(STORE.importDecisions, {
+      key: externalRowKey('PayPay本体', ['L001', '支払い']),
+      status: 'registered',
+      entryId: 'ghost-missing-entry',
+      decidedAt: ts,
+      provenance: {
+        profileId: PAYPAY_PROFILE_ID,
+        profileDigest: 'digest-x',
+        fileHash: 'file-x',
+        sourceIdentity: 'PayPay本体',
+        identityVersion: 1,
+      },
+    });
+
+    renderScreen();
+    await waitForProfileSelect();
+    selectProfile();
+    selectFile(csvFile(SINGLE_PAYMENT_CSV));
+    await waitFor(() => {
+      expect(qa(UI.csvImport.row)).toHaveLength(1);
+    });
+
+    // レビューには出るが適用不可: バッジ + 説明 + 解除ボタンだけ（適用/リンク/無視は無い）。
+    const row = qa(UI.csvImport.row)[0]!;
+    expect(row.textContent).toContain('要再確認');
+    expect(row.textContent).toContain('仕訳が見つかりません');
+    expect(qa(UI.csvImport.rowApply)).toHaveLength(0);
+    expect(qa(UI.csvImport.rowLink)).toHaveLength(0);
+    expect(qa(UI.csvImport.rowIgnore)).toHaveLength(0);
+    expect(q(UI.csvImport.rowRelease)).not.toBeNull();
+    // 一括適用ボタンも出ない（dangling は一括の対象外）。
+    expect(qa(UI.csvImport.kindBulk)).toHaveLength(0);
+    // レビューを組み立てただけでは決定は消えない（読み取り専用）。
+    expect((await loadLedger()).importDecisions).toHaveLength(1);
+
+    // 明示解除 → store 経由で削除され、React 側の決定済み一覧も空になり、行は普通の未解決へ
+    // （支払い行に既定計上先は無いので、リンク・無視の操作が戻ることを確認する）。
+    fireEvent.click(q(UI.csvImport.rowRelease)!);
+    await waitFor(() => {
+      expect(qa(UI.csvImport.rowIgnore)).toHaveLength(1);
+    });
+    expect(qa(UI.csvImport.rowLink)).toHaveLength(1);
+    expect(q(UI.csvImport.rowRelease)).toBeNull();
+    expect(document.body.textContent).not.toContain('要再確認');
+    expect((await loadLedger()).importDecisions).toHaveLength(0);
+    fireEvent.click(q(UI.csvImport.tabDecisions)!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.decisionsList)).toBeNull();
+    });
+  });
+});
+
+describe('CSV 取込 — externalId のファイル内衝突（評価段階の error 行）', () => {
+  it('同一識別子の行は全行 error として件数会計に出て、レビューに出ない', async () => {
+    await loadLedger();
+    await seedBinding();
+    renderScreen();
+    await waitForProfileSelect();
+    selectProfile();
+    // T001 が 2 行で衝突（externalId = [取引番号, 取引内容]）・T900 は一意。
+    const dupCsv = [
+      CSV_HEADER,
+      '2026/08/01 10:00:00,100,-,支払い,店A,T001',
+      '2026/08/02 10:00:00,200,-,支払い,店B,T001',
+      '2026/08/03 10:00:00,300,-,支払い,店C,T900',
+    ].join('\n');
+    selectFile(csvFile(dupCsv, 'dup.csv'));
+
+    await waitFor(() => {
+      expect(q(UI.csvImport.counts)).not.toBeNull();
+    });
+    const counts = q(UI.csvImport.counts)!;
+    // 保存則: 総行数 3 = 取込対象 1 + スキップ 0 + エラー 2。
+    expect(kvValue(counts, '総行数')).toBe('3');
+    expect(kvValue(counts, '取込対象')).toBe('1');
+    expect(kvValue(counts, 'スキップ')).toBe('0');
+    expect(kvValue(counts, 'エラー')).toBe('2');
+    fireEvent.click(q(UI.csvImport.errorToggle)!);
+    expect(q(UI.csvImport.errorList)!.textContent).toContain(
+      '同じ識別子の行がファイル内に複数あります',
+    );
+    // レビューは一意な行だけ・決定は 1 件も作られていない。
+    expect(qa(UI.csvImport.row)).toHaveLength(1);
+    expect((await loadLedger()).importDecisions).toHaveLength(0);
   });
 });
 

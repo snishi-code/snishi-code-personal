@@ -3812,7 +3812,10 @@ export async function findProfileBinding(
   return bindings.find((b) => b.profileId === profileId && b.sourceIdentity.trim() === identity);
 }
 
-/** 取込決定の照合読み出し（rowKey 一括・§4 手順 3 の決定的スキップに使う）。 */
+/**
+ * 取込決定の照合読み出し（rowKey 一括）。レビュー構築（§4 手順 3）はファイル外 occurrence の
+ * 決定も要るため loadLedger の全件（importDecisions）を使う — こちらは部分読み出し用。
+ */
 export async function getImportDecisions(
   rowKeys: readonly string[],
 ): Promise<Map<string, ImportDecision>> {

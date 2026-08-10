@@ -6,8 +6,10 @@
  * レビューキュー（画面内 state・保存しない）→ applyImportBatch（原子性は data 層・§4-4）。
  *
  *  - レビューの配線順序: loadLedger → evaluateProfileText → attachRowKeys(sourceIdentity) →
- *    getImportDecisions → resolveImportRows。dangling / count-mismatch は decision を掃除して
- *    未解決へ戻す（§1-2・§5-1。黙って skip しない）。
+ *    resolveImportRows（決定は台帳スナップショットの全件・**読み取り専用**）。dangling は自動で
+ *    削除せず「要再確認」行としてレビューへ出し、解除はユーザーの明示操作（store 経由）だけが
+ *    行う（§1-2）。同一 fingerprint の出現数が過去の決定より少ないファイル（n < k）は決定を
+ *    無傷のまま、件数会計の近くに警告バナーで情報提示する（§5-1）。
  *  - 適用は expectedLedgerVersion（レビュー時点の meta 世代）+ profileDigest で全拒否できる
  *    （stale なレビューで保存しない）。適用成功・失敗のどちらでもレビューを作り直して同期する。
  *  - 決定済み一覧（§4-6）: profile・status で絞り込み、無視・リンクの解除（確認 1 つ・冪等）と
@@ -24,10 +26,8 @@ import { AccountPicker } from '../AccountPicker';
 import { Money } from '../money';
 import { useLedger } from '../../state/store';
 import {
-  getImportDecisions,
   getImportFileRecords,
   loadLedger as loadLedgerSnapshot,
-  removeImportDecisions as cleanImportDecisions,
   type ImportBatchAction,
   type LedgerVersion,
 } from '../../data/repository';
@@ -47,8 +47,11 @@ import {
   type NormalizedRow,
 } from '../../domain/importIdentity';
 import {
+  findOccurrenceShortages,
   resolveImportRows,
+  type FingerprintOccurrenceShortage,
   type ImportDecisionStatus,
+  type ImportDecisionSummary,
   type ImportRowResolution,
 } from '../../domain/importDedup';
 import {
@@ -165,26 +168,26 @@ interface ReviewState {
   /** rowKey 付きの正規化行（入力順）。resolutions と同順。 */
   rows: NormalizedRow[];
   resolutions: ImportRowResolution[];
-  /** dangling / 出現数不一致で決定から未解決へ戻した行（バッジ表示・§1-2/§5-1）。 */
-  flagged: Set<string>;
+  /** 同一 fingerprint の出現数が過去の決定より少ないグループ（警告バナーの材料・§5-1）。 */
+  occurrenceShortages: FingerprintOccurrenceShortage[];
   /** レビュー表示時点の台帳世代（適用の revision CAS に渡す・§4-4）。 */
   ledgerVersion: LedgerVersion;
   fileRecord?: ImportFileRecord;
 }
 
 /**
- * レビューを組み立てる（§4 手順 1〜3。書込みは dangling / count-mismatch の decision 掃除のみ）。
- * 掃除が起きたら決定の読み直しと再照合を 1 回だけ行う（掃除後の台帳世代を取り直す）。
+ * レビューを組み立てる（§4 手順 1〜3）。**完全に読み取り専用** — decision の削除・変更は
+ * 一切しない。dangling の解除はレビュー行のユーザー明示操作（store 経由）だけが行う（§1-2）。
  */
 async function computeReview(
   file: { name: string; bytes: Uint8Array },
   profileId: string,
   bindingId: string,
 ): Promise<ReviewState> {
-  const first = await loadLedgerSnapshot();
-  const profile = first.importProfiles.find((p) => p.id === profileId);
+  const ledger = await loadLedgerSnapshot();
+  const profile = ledger.importProfiles.find((p) => p.id === profileId);
   if (!profile) throw new Error(t('error.importProfile.notFound'));
-  const binding = first.profileBindings.find((b) => b.id === bindingId);
+  const binding = ledger.profileBindings.find((b) => b.id === bindingId);
   if (!binding) throw new Error(t('csvImport.setupNeeded'));
 
   const text = decodeCsvBytes(file.bytes, profile.dsl.fileFormat.encoding);
@@ -192,50 +195,42 @@ async function computeReview(
   const attachment = await attachRowKeys(evaluation.normalized, binding.sourceIdentity.trim());
   const fileHash = await sha256HexOfBytes(file.bytes);
   const profileDigest = await profileDslDigest(profile.dsl);
-  const rowKeys = attachment.rows.map((row) => row.rowKey);
-  const flagged = new Set<string>();
 
-  for (let pass = 0; ; pass += 1) {
-    const ledger = pass === 0 ? first : await loadLedgerSnapshot();
-    const decisions = await getImportDecisions(rowKeys);
-    const resolutions = resolveImportRows({
-      rows: attachment.rows,
-      decisions: new Map(
-        [...decisions].map(([key, d]) => [
-          key,
-          { status: d.status, ...(d.entryId !== undefined ? { entryId: d.entryId } : {}) },
-        ]),
-      ),
-      existingEntries: ledger.journalEntries,
-      ownAccountId: binding.ownAccountId,
-    });
-    const returned = resolutions.filter(
-      (r) => r.status === 'unresolved-dangling' || r.status === 'unresolved-count-mismatch',
-    );
-    for (const r of returned) flagged.add(r.rowKey);
-    const stale = returned.filter((r) => r.decision !== undefined).map((r) => r.rowKey);
-    if (stale.length > 0 && pass === 0) {
-      // 決定の掃除（§1-2）。次のパスで台帳世代と決定を読み直す。
-      await cleanImportDecisions(stale);
-      continue;
-    }
-    const fileRecord = (await getImportFileRecords())[fileHash];
-    return {
-      file,
-      fileHash,
-      profileId,
-      profileDigest,
-      bindingId,
-      sourceIdentity: binding.sourceIdentity.trim(),
-      ownAccountId: binding.ownAccountId,
-      evaluation,
-      rows: attachment.rows,
-      resolutions,
-      flagged,
-      ledgerVersion: { deviceId: ledger.meta.deviceId, revision: ledger.meta.revision },
-      ...(fileRecord !== undefined ? { fileRecord } : {}),
-    };
-  }
+  // 決定は台帳スナップショットの**全件**を使う（仕訳と同一トランザクション読み）。
+  // ファイル外の rowKey も含めるのは、同一 fingerprint の決定済み occurrence 数（k）を
+  // ファイル内のキーだけでは見落とすため（n < k の警告材料・§5-1）。
+  const decisions = new Map<string, ImportDecisionSummary>(
+    ledger.importDecisions.map((d) => [
+      d.key,
+      { status: d.status, ...(d.entryId !== undefined ? { entryId: d.entryId } : {}) },
+    ]),
+  );
+  const resolutions = resolveImportRows({
+    rows: attachment.rows,
+    decisions,
+    existingEntries: ledger.journalEntries,
+    ownAccountId: binding.ownAccountId,
+  });
+  const occurrenceShortages = findOccurrenceShortages(
+    attachment.rows,
+    ledger.importDecisions.map((d) => d.key),
+  );
+  const fileRecord = (await getImportFileRecords())[fileHash];
+  return {
+    file,
+    fileHash,
+    profileId,
+    profileDigest,
+    bindingId,
+    sourceIdentity: binding.sourceIdentity.trim(),
+    ownAccountId: binding.ownAccountId,
+    evaluation,
+    rows: attachment.rows,
+    resolutions,
+    occurrenceShortages,
+    ledgerVersion: { deviceId: ledger.meta.deviceId, revision: ledger.meta.revision },
+    ...(fileRecord !== undefined ? { fileRecord } : {}),
+  };
 }
 
 /* ── レビュー行のビュー（未解決のみ・行種でグループ化） ── */
@@ -243,7 +238,6 @@ async function computeReview(
 interface ReviewRow {
   row: NormalizedRow;
   resolution: ImportRowResolution;
-  flagged: boolean;
   defaultCounterId: string | undefined;
 }
 
@@ -259,7 +253,6 @@ function unresolvedGroups(
     const entry: ReviewRow = {
       row,
       resolution,
-      flagged: review.flagged.has(row.rowKey),
       defaultCounterId: defaultCounterFor(profile, binding, row.kind),
     };
     const list = byKind.get(row.kind);
@@ -267,6 +260,13 @@ function unresolvedGroups(
     else byKind.set(row.kind, [entry]);
   });
   return [...byKind].map(([kind, rows]) => ({ kind, rows }));
+}
+
+/** 一括適用の対象（既定計上先があり、dangling でない行だけ・§1-2）。 */
+function bulkApplicableRows(rows: readonly ReviewRow[]): ReviewRow[] {
+  return rows.filter(
+    (r) => r.defaultCounterId !== undefined && r.resolution.status !== 'unresolved-dangling',
+  );
 }
 
 /* ── メイン画面 ── */
@@ -385,6 +385,24 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
       });
     } catch {
       // store が toast 済み。stale / alreadyDecided もレビュー作り直しで回復する。
+    } finally {
+      setBusy(false);
+      setRebuildTick((n) => n + 1);
+    }
+  }
+
+  /**
+   * dangling 決定の明示解除（§1-2）。自動では絶対に消さない — このボタンだけが
+   * removeCsvImportDecisions（store 経由 = toast + React 側一覧の更新）を呼び、
+   * 解除後にレビューを作り直して行を普通の未解決へ戻す。
+   */
+  async function releaseDanglingDecision(rowKey: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await removeCsvImportDecisions([rowKey]);
+    } catch {
+      // store が toast 済み。作り直しで現状と同期する。
     } finally {
       setBusy(false);
       setRebuildTick((n) => n + 1);
@@ -639,6 +657,20 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
                   })}
                 </p>
               ) : null}
+              {/* n < k の情報提示（§5-1）: 決定は無傷のまま・削除も強制レビューもしない。 */}
+              {review.occurrenceShortages.length > 0 ? (
+                <p
+                  className="field__hint"
+                  role="status"
+                  style={{ marginTop: 6, display: 'flex', gap: 6 }}
+                  data-ui={UI.csvImport.occurrenceShortage}
+                >
+                  <Icon name="alert" size={16} />
+                  {t('csvImport.occurrenceShortage', {
+                    count: review.occurrenceShortages.length,
+                  })}
+                </p>
+              ) : null}
               {review.evaluation.skipped.length > 0 ? (
                 <div style={{ marginTop: 8 }}>
                   <button
@@ -717,7 +749,7 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
             <div data-ui={UI.csvImport.reviewList}>
               <p className="section-label">{t('csvImport.reviewTitle', { count: remaining })}</p>
               {groups.map((group) => {
-                const bulkRows = group.rows.filter((r) => r.defaultCounterId !== undefined);
+                const bulkRows = bulkApplicableRows(group.rows);
                 return (
                   <div className="card" data-ui={UI.csvImport.kindGroup} key={group.kind}>
                     <div
@@ -744,75 +776,107 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
                       ) : null}
                     </div>
                     <ul className="list">
-                      {group.rows.map((r) => (
-                        <li key={r.row.rowKey} className="list__item" data-ui={UI.csvImport.row}>
-                          <button
-                            type="button"
-                            className="list__main"
-                            style={{ background: 'transparent', border: 'none', textAlign: 'left' }}
-                            onClick={() => setApplyTarget(r)}
-                            aria-label={`${t('csvImport.rowNeedsAccount')}: ${
-                              r.row.description || r.row.kind
-                            }`}
-                          >
-                            <div className="list__title">
-                              {r.flagged ? (
+                      {group.rows.map((r) =>
+                        r.resolution.status === 'unresolved-dangling' ? (
+                          /* dangling（§1-2）: 参照先仕訳が無い決定。自動削除せず、明示解除
+                             するまで適用・リンク・無視のどれもできない（fail-closed）。 */
+                          <li key={r.row.rowKey} className="list__item" data-ui={UI.csvImport.row}>
+                            <div className="list__main">
+                              <div className="list__title">
                                 <span className="tag tag--warning">
                                   {t('csvImport.rowFlagged')}
-                                </span>
-                              ) : null}{' '}
-                              {r.row.description || r.row.kind}
+                                </span>{' '}
+                                {r.row.description || r.row.kind}
+                              </div>
+                              <div className="list__sub">
+                                {r.row.date}・{t('csvImport.danglingNote')}
+                              </div>
                             </div>
-                            <div className="list__sub">
-                              {r.row.date}
-                              {r.defaultCounterId !== undefined
-                                ? `・${accountName(r.defaultCounterId)}`
-                                : ''}
-                            </div>
-                          </button>
-                          <span className="list__amount">
-                            <Money amount={r.row.amount} currency={currency} />
-                          </span>
-                          {r.defaultCounterId !== undefined ? (
+                            <span className="list__amount">
+                              <Money amount={r.row.amount} currency={currency} />
+                            </span>
+                            <button
+                              type="button"
+                              className="btn btn--ghost"
+                              disabled={busy}
+                              onClick={() => void releaseDanglingDecision(r.row.rowKey)}
+                              aria-label={`${t('csvImport.danglingRelease')}: ${
+                                r.row.description || r.row.kind
+                              }`}
+                              data-ui={UI.csvImport.rowRelease}
+                            >
+                              {t('csvImport.danglingRelease')}
+                            </button>
+                          </li>
+                        ) : (
+                          <li key={r.row.rowKey} className="list__item" data-ui={UI.csvImport.row}>
+                            <button
+                              type="button"
+                              className="list__main"
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                textAlign: 'left',
+                              }}
+                              onClick={() => setApplyTarget(r)}
+                              aria-label={`${t('csvImport.rowNeedsAccount')}: ${
+                                r.row.description || r.row.kind
+                              }`}
+                            >
+                              <div className="list__title">{r.row.description || r.row.kind}</div>
+                              <div className="list__sub">
+                                {r.row.date}
+                                {r.defaultCounterId !== undefined
+                                  ? `・${accountName(r.defaultCounterId)}`
+                                  : ''}
+                              </div>
+                            </button>
+                            <span className="list__amount">
+                              <Money amount={r.row.amount} currency={currency} />
+                            </span>
+                            {r.defaultCounterId !== undefined ? (
+                              <button
+                                type="button"
+                                className="icon-btn"
+                                disabled={busy}
+                                onClick={() =>
+                                  runApply([registerAction(r.row, r.defaultCounterId!)])
+                                }
+                                aria-label={`${t('csvImport.rowApply')}: ${
+                                  r.row.description || r.row.kind
+                                }`}
+                                data-ui={UI.csvImport.rowApply}
+                              >
+                                <Icon name="check" size={18} />
+                              </button>
+                            ) : null}
                             <button
                               type="button"
                               className="icon-btn"
                               disabled={busy}
-                              onClick={() => runApply([registerAction(r.row, r.defaultCounterId!)])}
-                              aria-label={`${t('csvImport.rowApply')}: ${
+                              onClick={() => setLinkTarget(r)}
+                              aria-label={`${t('csvImport.rowLink')}: ${
                                 r.row.description || r.row.kind
                               }`}
-                              data-ui={UI.csvImport.rowApply}
+                              data-ui={UI.csvImport.rowLink}
                             >
-                              <Icon name="check" size={18} />
+                              <Icon name="transfer" size={18} />
                             </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            className="icon-btn"
-                            disabled={busy}
-                            onClick={() => setLinkTarget(r)}
-                            aria-label={`${t('csvImport.rowLink')}: ${
-                              r.row.description || r.row.kind
-                            }`}
-                            data-ui={UI.csvImport.rowLink}
-                          >
-                            <Icon name="transfer" size={18} />
-                          </button>
-                          <button
-                            type="button"
-                            className="icon-btn"
-                            disabled={busy}
-                            onClick={() => runApply([{ kind: 'ignore', rowKey: r.row.rowKey }])}
-                            aria-label={`${t('csvImport.rowIgnore')}: ${
-                              r.row.description || r.row.kind
-                            }`}
-                            data-ui={UI.csvImport.rowIgnore}
-                          >
-                            <Icon name="close" size={18} />
-                          </button>
-                        </li>
-                      ))}
+                            <button
+                              type="button"
+                              className="icon-btn"
+                              disabled={busy}
+                              onClick={() => runApply([{ kind: 'ignore', rowKey: r.row.rowKey }])}
+                              aria-label={`${t('csvImport.rowIgnore')}: ${
+                                r.row.description || r.row.kind
+                              }`}
+                              data-ui={UI.csvImport.rowIgnore}
+                            >
+                              <Icon name="close" size={18} />
+                            </button>
+                          </li>
+                        ),
+                      )}
                     </ul>
                   </div>
                 );

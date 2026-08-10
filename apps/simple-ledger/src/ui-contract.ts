@@ -335,6 +335,7 @@ export const UI = {
     // 件数会計（§4-2 保存則・常時表示）と明細
     counts: 'csvImport.counts',
     fileRecord: 'csvImport.fileRecord',
+    occurrenceShortage: 'csvImport.counts.occurrenceShortage',
     skipToggle: 'csvImport.skip.toggle',
     skipList: 'csvImport.skip.list',
     errorToggle: 'csvImport.error.toggle',
@@ -348,6 +349,7 @@ export const UI = {
     rowApply: 'csvImport.review.row.apply',
     rowLink: 'csvImport.review.row.link',
     rowIgnore: 'csvImport.review.row.ignore',
+    rowRelease: 'csvImport.review.row.release',
     complete: 'csvImport.review.complete',
     // 個別行の適用/編集シート
     applySheet: 'csvImport.apply.sheet',

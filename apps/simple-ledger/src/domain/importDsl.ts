@@ -297,7 +297,8 @@ export type ImportRowErrorCode =
   | 'amount-neither'
   | 'amount-not-positive'
   | 'unknown-kind'
-  | 'external-id-empty';
+  | 'external-id-empty'
+  | 'external-id-duplicate';
 
 /** 明示 skip の組み込み理由コード。profile 由来は `rule:<reason>` になる。 */
 export type ImportRowSkipCode = 'blank-line' | 'before-header' | `rule:${string}`;
@@ -530,6 +531,34 @@ export function evaluateProfile(
       ownSide,
       ...(externalIdTuple !== undefined ? { externalIdTuple } : {}),
     });
+  }
+
+  // externalId のファイル内衝突: 同一タプルが複数行にあると決定的照合（§5-1）が成立しない。
+  // デデュープ層へ持ち込まず、評価段階で該当する**全行**を error に倒して件数会計へ出す
+  // （黙って片方に寄せない・決定の削除にもつながらない）。
+  if (externalIdIdx !== undefined) {
+    const tupleCounts = new Map<string, number>();
+    for (const row of normalized) {
+      if (row.externalIdTuple === undefined) continue;
+      const key = JSON.stringify(row.externalIdTuple);
+      tupleCounts.set(key, (tupleCounts.get(key) ?? 0) + 1);
+    }
+    if ([...tupleCounts.values()].some((count) => count > 1)) {
+      for (let i = normalized.length - 1; i >= 0; i -= 1) {
+        const row = normalized[i]!;
+        if (row.externalIdTuple === undefined) continue;
+        if ((tupleCounts.get(JSON.stringify(row.externalIdTuple)) ?? 0) > 1) {
+          errors.push({
+            rowIndex: row.rowIndex,
+            reasonCode: 'external-id-duplicate',
+            detail: row.externalIdTuple.join(' / ').slice(0, 120),
+          });
+          normalized.splice(i, 1);
+        }
+      }
+      // 衝突分の error は後から足すため、明細表示を行順へ戻す。
+      errors.sort((a, b) => a.rowIndex - b.rowIndex);
+    }
   }
 
   return {
