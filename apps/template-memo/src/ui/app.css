@@ -1518,6 +1518,16 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   margin: 0 0 var(--space-2);
 }
 
+/* 節の見出し行 (右端に節のボタン = QRで受け取る)。下余白は行が持ち、見出し自体は持たない
+   (見出しの margin が残ると flex 中央揃えでボタンだけ上へずれる)。 */
+.settingsSectionHead {
+  margin-bottom: var(--space-2);
+}
+
+.settingsSection .settingsSectionHead .section-label {
+  margin-bottom: 0;
+}
+
 .settingsHint {
   font-size: 12px;
   margin: var(--space-1) 0 var(--space-2);
@@ -1753,6 +1763,20 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   /* 7rem × 2 + gap が 375px 端末の実効内容幅 (約 257px) に収まり、スマホでも 1 行に並ぶ */
   flex: 1 1 7rem;
   min-width: 0;
+}
+
+/* 区切りの自由入力 (入力欄 + 見えない文字の注意書き)。
+   注意書きは入力欄のすぐ下に付け、余白は塊の外側だけに持たせる (次の項目の説明に見えないように)。 */
+.formatSepBlock {
+  margin-bottom: var(--space-4);
+}
+
+.formatSepBlock .field {
+  margin-bottom: 0;
+}
+
+.formatSepBlock .settingsHint {
+  margin-bottom: 0;
 }
 
 /* select の選択肢編集 (見出し + 選択肢行 + 追加ボタンの縦積み。行内は settingsField の横並び) */

@@ -7,10 +7,11 @@
 // 剥離: ユーザー管理 / 共有タグ / 研究ログ / AI (回診設定 slot) / 同期。
 // 移設: テンプレQR送受信・JSONバックアップ/復元・全削除 (旧 v1 SettingsView から)。
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Button } from '@snishi/foundation/ui/Button';
 import { IconButton } from '@snishi/foundation/ui/IconButton';
 import { Icon } from '@snishi/foundation/ui/Icon';
+import { Modal } from '@snishi/foundation/ui/Modal';
 import { ConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
 import { useToast } from '@snishi/foundation/ui/toast';
 import type { RestorePoint } from '@snishi/foundation/snapshot/snapshots';
@@ -34,7 +35,7 @@ import { useRevision, type AppRuntime } from '../appRuntime';
 import { AddTagWidget } from '../TagPicker';
 import { BottomActionBar } from '../BottomActionBar';
 import { deleteTagAt, renameTagAt, setTagColor } from '../tags';
-import { OverlayBinding } from '../registries';
+import { OverlayBinding, useRegisterOverlay } from '../registries';
 import { downloadTextFile, pickTextFile } from '../files';
 import { ShareQrSendDialog } from '../ShareQrSendDialog';
 import { ShareQrReceiveDialog } from '../ShareQrReceiveDialog';
@@ -187,9 +188,119 @@ function TagManagerSection({ runtime }: { runtime: AppRuntime }) {
 }
 
 // ============================
-// テンプレート (有効切替 / 編集 / プリセット・空テンプレ追加 / QR送受信 / 削除)。
-// 編集は TemplateEditView (設定画面のローカル state で切替・ルートは増やさない)。
+// 「QRで受け取る」(テンプレート / フレーム / フォーマットの 3 節の見出し右上に置く)。
+// 受信ダイアログは TPL/FRM/FMT の 3 種すべてを受理するため、状態と保存の分岐はこの 1 箇所だけに置き、
+// 各節はこのボタンを置くだけにする (節ごとに分岐を書き写さない)。
 // ============================
+
+function ShareQrReceiveButton({ runtime }: { runtime: AppRuntime }) {
+  const toast = useToast();
+  const { store } = runtime;
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      {/* 見出し右上。アイコンのみだと「受け取る」意図が伝わらないので文字ラベルを出す。 */}
+      <Button onClick={() => setOpen(true)}>
+        <Icon name="scan" size={16} />
+        {s.settings.template.qrReceive}
+      </Button>
+
+      {open ? <OverlayBinding onClose={() => setOpen(false)} /> : null}
+      {open ? (
+        <ShareQrReceiveDialog
+          existing={{
+            templates: store.getTemplateDefs(),
+            frames: store.getFrames(),
+            formats: store.getFormats(),
+          }}
+          onSave={async (payload) => {
+            if (payload.kind === FRAME_WIRE_KIND) {
+              await store.saveFrame(payload.frame);
+              return;
+            }
+            if (payload.kind === FORMAT_WIRE_KIND) {
+              await store.saveFormat(payload.format);
+              return;
+            }
+            await store.saveFrame(payload.package.frame);
+            for (const format of payload.package.formats) {
+              await store.saveFormat(format);
+            }
+            await store.saveTemplateDef(payload.package.template);
+          }}
+          onClose={() => setOpen(false)}
+          onSaved={(payload) => {
+            const kindLabel =
+              payload.kind === FRAME_WIRE_KIND
+                ? s.templateQr.frame
+                : payload.kind === FORMAT_WIRE_KIND
+                  ? s.templateQr.format
+                  : s.templateQr.templatePackage;
+            toast.show(
+              s.templateQr.imported(kindLabel, sharePayloadName(payload) || s.common.untitled),
+            );
+            runtime.bump();
+          }}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/** 節の見出し行 (左=見出し / 右端=節のボタン)。DetailQrDialog と同じ qrCardHead パターン。 */
+function SectionHead({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="qrCardHead settingsSectionHead">
+      <div className="section-label">{title}</div>
+      <span className="qrCardHeadSpacer" />
+      {children}
+    </div>
+  );
+}
+
+// ============================
+// テンプレート (有効切替 / 編集 / 複製 / プリセット・空テンプレ追加 / QR送受信 / 削除)。
+// 編集は TemplateEditView (設定画面のローカル state で切替・ルートは増やさない)。
+// 追加は ＋ 1 個に集約し、プリセット (回診メモ / 日報) と空テンプレはメニューで選ばせる。
+// ============================
+
+/** ＋ から開く追加メニュー (プリセット 2 種 + 空テンプレ)。ProjectionFormCard の配置メニューと同じ形。 */
+function TemplateAddMenuDialog({
+  onSelect,
+  onClose,
+}: {
+  onSelect: (kind: 'round' | 'daily' | 'empty') => void;
+  onClose: () => void;
+}) {
+  useRegisterOverlay(onClose);
+  const items: { kind: 'round' | 'daily' | 'empty'; label: string }[] = [
+    { kind: 'round', label: s.settings.template.addRound },
+    { kind: 'daily', label: s.settings.template.addDaily },
+    { kind: 'empty', label: s.settings.template.addEmpty },
+  ];
+  return (
+    <Modal
+      title={s.settings.template.add}
+      onClose={onClose}
+      variant="dialog"
+      closeLabel={s.common.close}
+    >
+      <div className="menu-list">
+        {items.map((item) => (
+          <button
+            key={item.kind}
+            type="button"
+            className="menu-item"
+            onClick={() => onSelect(item.kind)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+    </Modal>
+  );
+}
 
 function TemplateSection({
   runtime,
@@ -204,7 +315,7 @@ function TemplateSection({
   const templates = store.getTemplateDefs();
   const activeId = store.getSettings().activeTemplateId;
   const [sendTarget, setSendTarget] = useState<ShareWirePayload | null>(null);
-  const [receiveOpen, setReceiveOpen] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TemplateDef | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -234,6 +345,19 @@ function TemplateSection({
     } finally {
       setBusy(false);
       setDeleteTarget(null);
+    }
+  }
+
+  async function duplicate(templateId: string): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await store.duplicateTemplateDef(templateId);
+      runtime.bump();
+    } catch (error) {
+      toast.show(errorText(error, s.toast.saveFailed), 'error');
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -275,7 +399,9 @@ function TemplateSection({
 
   return (
     <div className="card card--pad settingsSection" data-ui={UI.settings.templateSection}>
-      <div className="section-label">{s.settings.template.section}</div>
+      <SectionHead title={s.settings.template.section}>
+        <ShareQrReceiveButton runtime={runtime} />
+      </SectionHead>
       <div>
         {templates.map((tpl) => {
           const isActive = tpl.id === activeId;
@@ -295,6 +421,13 @@ function TemplateSection({
               <span className="formatListActions">
                 <IconButton label={s.common.edit} onClick={() => onEdit(tpl)}>
                   <Icon name="edit" size={16} />
+                </IconButton>
+                <IconButton
+                  label={s.common.duplicate}
+                  disabled={busy}
+                  onClick={() => void duplicate(tpl.id)}
+                >
+                  <Icon name="copy" size={18} />
                 </IconButton>
                 <IconButton
                   label={s.settings.template.qrSend}
@@ -318,16 +451,13 @@ function TemplateSection({
         })}
       </div>
       <div className="settingsRowActions">
-        <Button onClick={() => setReceiveOpen(true)}>{s.settings.template.qrReceive}</Button>
-        <Button disabled={busy} onClick={() => void addPreset('round')}>
-          {s.settings.template.addRound}
-        </Button>
-        <Button disabled={busy} onClick={() => void addPreset('daily')}>
-          {s.settings.template.addDaily}
-        </Button>
-        <Button disabled={busy} onClick={() => void addEmpty()}>
-          {s.settings.template.addEmpty}
-        </Button>
+        <IconButton
+          label={s.settings.template.add}
+          disabled={busy}
+          onClick={() => setAddMenuOpen(true)}
+        >
+          <Icon name="add" size={16} />
+        </IconButton>
       </div>
 
       {sendTarget ? <OverlayBinding onClose={() => setSendTarget(null)} /> : null}
@@ -335,42 +465,14 @@ function TemplateSection({
         <ShareQrSendDialog payload={sendTarget} onClose={() => setSendTarget(null)} />
       ) : null}
 
-      {receiveOpen ? <OverlayBinding onClose={() => setReceiveOpen(false)} /> : null}
-      {receiveOpen ? (
-        <ShareQrReceiveDialog
-          existing={{
-            templates: store.getTemplateDefs(),
-            frames: store.getFrames(),
-            formats: store.getFormats(),
+      {addMenuOpen ? (
+        <TemplateAddMenuDialog
+          onSelect={(kind) => {
+            setAddMenuOpen(false);
+            if (kind === 'empty') addEmpty();
+            else void addPreset(kind);
           }}
-          onSave={async (payload) => {
-            if (payload.kind === FRAME_WIRE_KIND) {
-              await store.saveFrame(payload.frame);
-              return;
-            }
-            if (payload.kind === FORMAT_WIRE_KIND) {
-              await store.saveFormat(payload.format);
-              return;
-            }
-            await store.saveFrame(payload.package.frame);
-            for (const format of payload.package.formats) {
-              await store.saveFormat(format);
-            }
-            await store.saveTemplateDef(payload.package.template);
-          }}
-          onClose={() => setReceiveOpen(false)}
-          onSaved={(payload) => {
-            const kindLabel =
-              payload.kind === FRAME_WIRE_KIND
-                ? s.templateQr.frame
-                : payload.kind === FORMAT_WIRE_KIND
-                  ? s.templateQr.format
-                  : s.templateQr.templatePackage;
-            toast.show(
-              s.templateQr.imported(kindLabel, sharePayloadName(payload) || s.common.untitled),
-            );
-            runtime.bump();
-          }}
+          onClose={() => setAddMenuOpen(false)}
         />
       ) : null}
 
@@ -448,7 +550,9 @@ function FrameSettingsSection({
 
   return (
     <div className="card card--pad settingsSection" data-ui={UI.settings.frameSection}>
-      <div className="section-label">{s.settings.frame.section}</div>
+      <SectionHead title={s.settings.frame.section}>
+        <ShareQrReceiveButton runtime={runtime} />
+      </SectionHead>
       {frames.map((frame) => {
         const usageCount = templates.filter((template) => template.frameId === frame.id).length;
         return (
@@ -466,7 +570,7 @@ function FrameSettingsSection({
                 disabled={busy}
                 onClick={() => void duplicate(frame.id)}
               >
-                {s.common.duplicateShort}
+                <Icon name="copy" size={18} />
               </IconButton>
               <IconButton
                 label={s.settings.template.qrSend}
@@ -486,9 +590,9 @@ function FrameSettingsSection({
         );
       })}
       <div className="settingsRowActions">
-        <Button disabled={busy} onClick={addFrame}>
-          {s.settings.frame.add}
-        </Button>
+        <IconButton label={s.settings.frame.add} disabled={busy} onClick={addFrame}>
+          <Icon name="add" size={16} />
+        </IconButton>
       </div>
 
       {sendPayload ? <OverlayBinding onClose={() => setSendPayload(null)} /> : null}
@@ -568,7 +672,9 @@ function FormatSettingsSection({
 
   return (
     <div className="card card--pad settingsSection" data-ui={UI.settings.formatSection}>
-      <div className="section-label">{s.settings.format.section}</div>
+      <SectionHead title={s.settings.format.section}>
+        <ShareQrReceiveButton runtime={runtime} />
+      </SectionHead>
       {formats.map((format) => {
         const usageCount = templates.filter((template) =>
           template.placements.some((placement) => placement.formatId === format.id),
@@ -588,7 +694,7 @@ function FormatSettingsSection({
                 disabled={busy}
                 onClick={() => void duplicate(format.id)}
               >
-                {s.common.duplicateShort}
+                <Icon name="copy" size={18} />
               </IconButton>
               <IconButton
                 label={s.settings.template.qrSend}
@@ -608,9 +714,9 @@ function FormatSettingsSection({
         );
       })}
       <div className="settingsRowActions">
-        <Button disabled={busy} onClick={addFormat}>
-          {s.settings.format.add}
-        </Button>
+        <IconButton label={s.settings.format.add} disabled={busy} onClick={addFormat}>
+          <Icon name="add" size={16} />
+        </IconButton>
       </div>
 
       {sendPayload ? <OverlayBinding onClose={() => setSendPayload(null)} /> : null}

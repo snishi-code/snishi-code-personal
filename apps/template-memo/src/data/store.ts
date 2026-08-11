@@ -113,6 +113,7 @@ export interface HrStore {
   duplicateFormat(formatId: string): Promise<Format>;
   getTemplateDefs(): TemplateDef[];
   saveTemplateDef(template: TemplateDef): Promise<void>;
+  duplicateTemplateDef(templateId: string): Promise<TemplateDef>;
   saveGeneratedBundle(bundle: TemplatePresetBundle): Promise<void>;
   deleteTemplateDef(templateId: string): Promise<void>;
   getActiveTemplate(): Template | null;
@@ -501,6 +502,23 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
         ? templateDefs.map((candidate) => (candidate.id === normalized.id ? normalized : candidate))
         : [...templateDefs, normalized];
       emit({ type: 'workspace', workspaceId: activeViewId() });
+    },
+    async duplicateTemplateDef(templateId) {
+      const source = templateDefs.find((template) => template.id === templateId);
+      if (!source) throw new Error('テンプレートが見つかりません');
+      const duplicate: TemplateDef = {
+        ...source,
+        id: newId('tpl'),
+        name: `${source.name}のコピー`,
+        // 配置 ID は対象ごとの入力値 (projectedValues) のキー。使い回すと複製元と複製先が
+        // 同じ入力値を共有してしまうため、必ず採番し直す。
+        placements: source.placements.map((placement) => ({ ...placement, id: newId('plm') })),
+        // フレームは独立した再利用部品なので共有する (複製時にフレームまで増やさない)。
+        updatedAt: now(),
+      };
+      await this.saveTemplateDef(duplicate);
+      // active は変えない (複製は「使用中」を奪わない)。
+      return duplicate;
     },
     async saveGeneratedBundle(bundle) {
       // 受け取った ID は信用せず、参照関係を保ったまま採番し直す。

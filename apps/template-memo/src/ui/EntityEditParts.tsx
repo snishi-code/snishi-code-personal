@@ -72,23 +72,3 @@ export function RowTools({
     </span>
   );
 }
-
-export const JOINERS = [
-  { value: '\n', label: s.tpl.joinerNewline },
-  { value: ', ', label: s.tpl.joinerCommaSpace },
-  { value: '、', label: s.tpl.joinerToten },
-  { value: '-', label: s.tpl.joinerHyphen },
-  { value: ' ', label: s.tpl.joinerSpace },
-];
-
-export const LABEL_SEPS = [
-  { value: '：', label: s.tpl.labelSepColon },
-  { value: ' ', label: s.tpl.labelSepSpace },
-  { value: '', label: s.tpl.labelSepNone },
-];
-
-export function selectOptions(candidates: { value: string; label: string }[], current: string) {
-  return candidates.some((option) => option.value === current)
-    ? candidates
-    : [{ value: current, label: JSON.stringify(current) }, ...candidates];
-}

@@ -12,16 +12,7 @@ import type { ItemKind, TemplateItem } from '../domain/template';
 import { errorText, s } from '../i18n';
 import { UI } from '../ui-contract';
 import type { AppRuntime } from './appRuntime';
-import {
-  CheckRow,
-  clone,
-  Field,
-  JOINERS,
-  LABEL_SEPS,
-  moveInArray,
-  RowTools,
-  selectOptions,
-} from './EntityEditParts';
+import { CheckRow, clone, Field, moveInArray, RowTools } from './EntityEditParts';
 import { useRegisterEditor } from './registries';
 
 const ITEM_KINDS: readonly ItemKind[] = ['text', 'number', 'fraction', 'select'];
@@ -148,33 +139,32 @@ export function FormatEditView({
             onChange={(event) => mutate((next) => (next.name = event.target.value))}
           />
         </Field>
-        <div className="settingsField templateEditKindRow">
+        {/*
+          区切りは候補から選ばせず、入れたい文字をそのまま入力させる (改行も入れられるよう textarea)。
+          trim すると既定 ', ' の末尾スペースが消え、空文字 (= ラベル区切り「なし」) も作れなくなるため、
+          入力値は一切加工せずそのまま保存する。
+        */}
+        <div className="formatSepBlock">
           <Field label={s.tpl.formatJoiner}>
-            <select
-              className="select"
+            <textarea
+              className="textarea"
+              rows={2}
               value={draft.joiner}
               onChange={(event) => mutate((next) => (next.joiner = event.target.value))}
-            >
-              {selectOptions(JOINERS, draft.joiner).map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+            />
           </Field>
+          <p className="muted settingsHint">{s.tpl.formatSepHint}</p>
+        </div>
+        <div className="formatSepBlock">
           <Field label={s.tpl.formatLabelSep}>
-            <select
-              className="select"
+            <textarea
+              className="textarea"
+              rows={2}
               value={draft.labelSep}
               onChange={(event) => mutate((next) => (next.labelSep = event.target.value))}
-            >
-              {selectOptions(LABEL_SEPS, draft.labelSep).map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+            />
           </Field>
+          <p className="muted settingsHint">{s.tpl.formatSepHint}</p>
         </div>
       </div>
 

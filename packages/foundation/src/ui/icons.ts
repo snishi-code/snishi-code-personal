@@ -38,6 +38,7 @@ export const CONCEPT = {
   favorite: 'star', // お気に入り (アウトライン = 未選択)
   favoriteFilled: 'starFilled', // お気に入り (塗り = 選択中)
   expand: 'chevronDown', // 展開 / シェブロン下
+  copy: 'copy', // 複製 / コピー
   // ledger 由来の追加概念
   alert: 'alert', // 警告 / エラー
   check: 'check', // チェック / 完了

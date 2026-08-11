@@ -58,8 +58,6 @@ export const s = {
     loading: '読み込み中…',
     // 空名の部品の一覧表示用（データには代替名を保存しない）。
     untitled: '(無題)',
-    // 複製 IconButton の表示字（複製アイコンが foundation に無いための1字表示）。
-    duplicateShort: '複',
   },
   save: {
     failed: '保存に失敗しました。端末の空き容量をご確認ください',
@@ -255,6 +253,8 @@ export const s = {
     placementDisplayMenu: 'メニュー',
     formatJoiner: '項目間の区切り',
     formatLabelSep: 'ラベルと値の区切り',
+    // 区切りは自由入力 (改行・空白も有効文字)。見えない文字が入ることを明示する。
+    formatSepHint: '改行や空白もそのまま使えます。空行は1つまで（改行2つ）入ります。',
     items: '項目',
     itemAdd: '項目を追加',
     itemLabel: 'ラベル（例 肺音）',
@@ -272,14 +272,6 @@ export const s = {
     itemShowLabel: '合成時にラベルを出す',
     moveUp: '上へ',
     moveDown: '下へ',
-    joinerNewline: '改行',
-    joinerCommaSpace: 'カンマ + 空白',
-    joinerToten: '読点（、）',
-    joinerHyphen: 'ハイフン（-）',
-    joinerSpace: '空白',
-    labelSepColon: 'コロン（：）',
-    labelSepSpace: '空白',
-    labelSepNone: 'なし',
   },
 
   // テンプレートパッケージ / フレーム / フォーマットの QR 受け渡し。
@@ -514,6 +506,8 @@ export const s = {
     // 設定: テンプレート (有効切替 / QR送受信 / 削除)
     template: {
       section: 'テンプレート',
+      // ＋ボタンの読み上げ名 (押すとプリセット選択メニューが開く)。
+      add: 'テンプレートを作る',
       addRound: '回診メモを追加',
       addDaily: '日報を追加',
       addEmpty: '空のテンプレートを作る',

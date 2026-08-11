@@ -258,6 +258,54 @@ describe('正規化テンプレート部品 CRUD', () => {
     expect(reopened.getFormats().some((format) => format.id === copiedFormat.id)).toBe(true);
   });
 
+  it('テンプレートの複製は配置 ID を採番し直し、フレーム共有・元テンプレート・active は変えない', async () => {
+    const { db, store } = await setup();
+    const source = store.getTemplateDefs().find((template) => template.name === '回診メモ')!;
+    const before = structuredClone(source);
+    const beforeActive = store.getSettings().activeTemplateId;
+    const beforeFrames = store.getFrames().length;
+
+    const copy = await store.duplicateTemplateDef(source.id);
+
+    // 名前は「〜のコピー」・本体 ID は新規。
+    expect(copy.name).toBe(`${before.name}のコピー`);
+    expect(copy.id).not.toBe(before.id);
+
+    // 配置 ID は対象ごとの入力値のキーなので全て採番し直す (参照先は元と同じ)。
+    expect(copy.placements).toHaveLength(before.placements.length);
+    expect(copy.placements.length).toBeGreaterThan(0);
+    const sourcePlacementIds = new Set(before.placements.map((placement) => placement.id));
+    expect(copy.placements.some((placement) => sourcePlacementIds.has(placement.id))).toBe(false);
+    expect(new Set(copy.placements.map((placement) => placement.id)).size).toBe(
+      copy.placements.length,
+    );
+    expect(
+      copy.placements.map(({ sectionId, formatId, display }) => ({
+        sectionId,
+        formatId,
+        display,
+      })),
+    ).toEqual(
+      before.placements.map(({ sectionId, formatId, display }) => ({
+        sectionId,
+        formatId,
+        display,
+      })),
+    );
+
+    // フレームは独立した再利用部品なので共有する (フレームは 1 個も増えない)。
+    expect(copy.frameId).toBe(before.frameId);
+    expect(store.getFrames()).toHaveLength(beforeFrames);
+
+    // 元テンプレートは 1 バイトも変わらない (メモリ・DB 行とも)。
+    expect(store.getTemplateDefs().find((template) => template.id === before.id)).toEqual(before);
+    expect(await db.get(STORE_TEMPLATES, before.id)).toEqual(before);
+
+    // 使用中テンプレートは奪わない。
+    expect(store.getSettings().activeTemplateId).toBe(beforeActive);
+    expect(store.getTemplateDefs().some((template) => template.id === copy.id)).toBe(true);
+  });
+
   it('未使用部品は削除できる', async () => {
     const { store } = await setup();
     const copiedFrame = await store.duplicateFrame(store.getFrames()[0]!.id);

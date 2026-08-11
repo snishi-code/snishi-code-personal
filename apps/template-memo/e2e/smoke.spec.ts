@@ -300,7 +300,12 @@ test('フォーマット単独QRを受け取り、同じIDはコピーとして�
   });
 
   async function receive(): Promise<void> {
-    await page.getByRole('button', { name: 'QRで受け取る', exact: true }).click();
+    // 「QRで受け取る」は 3 節 (テンプレート/フレーム/フォーマット) の見出しに同じ名前で並ぶため、
+    // 受け取る部品の節 (ここではフォーマット) に絞って掴む。
+    await page
+      .locator(ui(UI.settings.formatSection))
+      .getByRole('button', { name: 'QRで受け取る', exact: true })
+      .click();
     for (const wirePage of pages) {
       await page.getByLabel('QR文字列を貼り付け').fill(wirePage);
       await page.getByRole('button', { name: 'このページを読み取る' }).click();
