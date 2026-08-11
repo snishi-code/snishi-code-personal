@@ -356,6 +356,9 @@ export const ja = {
   'yearlyOverview.horizonPlus30': '+{years}年',
   'yearlyOverview.horizonHardCap': '{year}年まで',
   'yearlyOverview.projectionNote': '未来列は定期ルール・継続コスト・投資利回りの投影を含みます。',
+  // 桁あふれで投影を打ち切った科目の注記（アプリ都合の端点を名乗る・仮の数字が本物の顔をしない）。
+  'yearlyOverview.projectionTruncatedNote':
+    '「{name}」の投影は金額が計算上限を超えるため {month} で打ち切りました。それ以降の列にこの科目の投影は含まれません。',
   'yearlyOverview.previousYear': '{year}年へ戻る',
   'yearlyOverview.nextYear': '{year}年へ進む',
   'yearlyOverview.noPreviousYear': '前のデータ年はありません',
@@ -640,6 +643,10 @@ export const ja = {
   'error.account.repaymentDayInvalid': '返済日は 1〜31 で入力してください。',
 
   // 投資の利回り投影（投資科目の編集シート・§D）
+  'projection.entryDescription': '投影: {name}',
+  'projection.suggestedAccountName': '投資益',
+  'accounts.projectionAccountArchivedHint':
+    '計上先はアーカイブ済みのため、投影は生成されません。別の収入科目を選ぶか、アーカイブを解除してください。',
   'accounts.annualReturn': '想定利回り（年率%）',
   'accounts.annualReturnHint':
     '空欄 = 投影なし。設定すると、未来の断面にだけ毎月「計上先 → この科目」の評価益（投影）が現れます。',

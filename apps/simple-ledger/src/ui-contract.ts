@@ -100,6 +100,8 @@ export const UI = {
     prevYear: 'yearlyOverview.year.previous',
     nextYear: 'yearlyOverview.year.next',
     matrix: 'yearlyOverview.matrix',
+    projectionNote: 'yearlyOverview.projectionNote',
+    projectionTruncatedNote: 'yearlyOverview.projectionTruncatedNote',
   },
   // 横軸=時間、縦軸=勘定科目の箱。保存データを変更しない閲覧専用の地図。
   timeline: {

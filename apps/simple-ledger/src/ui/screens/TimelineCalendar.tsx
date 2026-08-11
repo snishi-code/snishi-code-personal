@@ -49,7 +49,8 @@ interface TimelineFlowView {
   amount: number;
   sourceAccountId: string;
   destinationAccountId: string;
-  target: TimelineOpenTarget;
+  /** 未定義 = 開く先の無い導出行（フローは表示するが「開く」を出さない）。 */
+  target?: TimelineOpenTarget;
 }
 
 interface TimelineDotView {
@@ -104,6 +105,8 @@ interface TimelineCalendarProps {
   period: ReportPeriod;
   onOpenEntry: (entryId: string) => void;
   onOpenAllocations: (target: { itemId?: string; ruleId?: string }) => void;
+  /** 投資利回りの投影行の「開く」: その利回りを宣言した投資科目の編集シートへ。 */
+  onOpenAccount: (accountId: string) => void;
 }
 
 interface RenderRow {
@@ -1055,12 +1058,12 @@ function TimelineFlowPopover({
           </li>
         ))}
       </ul>
-      {selectedFlow ? (
+      {selectedFlow?.target !== undefined ? (
         <div className="timeline-calendar__popover-actions">
           <button
             type="button"
             className="btn btn--primary"
-            onClick={() => onOpenTarget(selectedFlow.target)}
+            onClick={() => onOpenTarget(selectedFlow.target!)}
             data-ui={UI.timeline.open}
           >
             {t('timeline.open')}
@@ -1135,6 +1138,7 @@ export function TimelineCalendar({
   period,
   onOpenEntry,
   onOpenAllocations,
+  onOpenAccount,
 }: TimelineCalendarProps) {
   const { ledger } = useLedger();
   const today = todayLocal();
@@ -1201,10 +1205,23 @@ export function TimelineCalendar({
     zoom,
   ]);
 
+  // 「開く」先の分岐。TimelineTarget は導出行の起票元（derivedEntryOrigin）と同じ union
+  // なので、種類が増えるとここが型エラーで落ちる（黙って捨てる・空 ID で誤遷移する余地を残さない）。
   const openTarget = (target: TimelineOpenTarget) => {
-    if (target.kind === 'entry') onOpenEntry(target.entryId);
-    else if (target.kind === 'monthlyCost') onOpenAllocations({ itemId: target.monthlyCostId });
-    else onOpenAllocations({ ruleId: target.recurringRuleId });
+    switch (target.kind) {
+      case 'entry':
+        onOpenEntry(target.entryId);
+        return;
+      case 'monthlyCost':
+        onOpenAllocations({ itemId: target.monthlyCostId });
+        return;
+      case 'recurringRule':
+        onOpenAllocations({ ruleId: target.recurringRuleId });
+        return;
+      case 'investmentAccount':
+        onOpenAccount(target.accountId);
+        return;
+    }
   };
 
   return (

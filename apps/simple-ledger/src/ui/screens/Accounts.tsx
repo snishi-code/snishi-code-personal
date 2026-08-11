@@ -39,9 +39,24 @@ import { nowIso, todayLocal } from '../../util/time';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 
-export function Accounts({ period = { mode: 'all' } }: { period?: ReportPeriod }) {
+export function Accounts({
+  period = { mode: 'all' },
+  target,
+}: {
+  period?: ReportPeriod;
+  /** 投影行タップからの遷移対象（開く編集シート。同一オブジェクトは 1 回だけ消費）。 */
+  target?: { accountId: string } | null;
+}) {
   const { ledger, saveAccount, archiveAccount, reorderAccounts } = useLedger();
   const [editing, setEditing] = useState<Account | null>(null);
+  // 仕訳一覧・タイムラインの投影行タップからの遷移: 対象科目の編集シートを開く。
+  // effect ではなく「render 中の派生調整」パターン（Allocations と同じ・1 回だけ消費）。
+  const [consumedTarget, setConsumedTarget] = useState<{ accountId: string } | null>(null);
+  if (target != null && target !== consumedTarget && ledger) {
+    setConsumedTarget(target);
+    const targetAccount = ledger.accounts.find((account) => account.id === target.accountId);
+    if (targetAccount) setEditing(targetAccount);
+  }
   const [creatingIn, setCreatingIn] = useState<AccountBox | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [reordering, setReordering] = useState(false);

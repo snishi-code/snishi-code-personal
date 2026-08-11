@@ -396,12 +396,48 @@ describe('YearlyOverview', () => {
   });
 
   it('表示単位ごとに仕訳の仮想展開を1回だけ行う', () => {
-    // 画面の展開入口は displayEntriesForAsOf（投影込みの表示 API）。
-    const expand = vi.spyOn(reportEntriesModule, 'displayEntriesForAsOf');
+    // 画面の展開入口は displayEntriesResultForAsOf（投影込み+打ち切り診断の表示 API）。
+    const expand = vi.spyOn(reportEntriesModule, 'displayEntriesResultForAsOf');
     render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
     expect(expand).toHaveBeenCalledTimes(1);
 
     fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.modeAll}"]`)!);
     expect(expand).toHaveBeenCalledTimes(2);
+  });
+
+  it('年間モードでも未来月を含む年には投影の注記を出す（過去年には出さない）', () => {
+    const { unmount } = render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
+    // 2026 年は未来月（8〜12月）を含む = 投影が混ざるので注記を出す。
+    expect(
+      document.querySelector(`[data-ui="${UI.yearlyOverview.projectionNote}"]`),
+    ).toBeInTheDocument();
+    unmount();
+
+    // 2024 年は全月が過去 = 投影ゼロなので注記を出さない。
+    render(<YearlyOverview period={{ mode: 'date', date: '2024-05-10' }} />);
+    expect(
+      document.querySelector(`[data-ui="${UI.yearlyOverview.projectionNote}"]`),
+    ).not.toBeInTheDocument();
+  });
+
+  it('桁あふれで投影を打ち切った科目は、打ち切り月とともに注記で名乗る', () => {
+    // 打ち切りは作者が宣言した端点ではなくアプリ都合の端点なので、黙って横ばいの顔をさせない
+    // （監査 2026-08-12・案1）。
+    const ledger = fixtureLedger();
+    ledger.accounts.push({
+      ...account('invest', '投資', 'asset', 'investment-asset'),
+      annualReturnBp: 100_000, // 年率 1000% = 月利 ≈ 22.1%
+      projectionAccountId: 'salary',
+    });
+    ledger.journalEntries.push(
+      entry('invest-opening', '2026-01-01', 'invest', 'equity', 3_500_000_000_000_000),
+    );
+    ledgerState.ledger = ledger;
+
+    render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
+    const note = document.querySelector(`[data-ui="${UI.yearlyOverview.projectionTruncatedNote}"]`);
+    expect(note).toBeInTheDocument();
+    expect(note).toHaveTextContent('投資');
+    expect(note).toHaveTextContent('2026-09');
   });
 });

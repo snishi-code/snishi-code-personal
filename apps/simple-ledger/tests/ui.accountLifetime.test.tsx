@@ -169,6 +169,46 @@ describe('科目編集シートの存在期間', () => {
     expect(Object.prototype.hasOwnProperty.call(saved, 'startDate')).toBe(false);
   });
 
+  it('初期残高付きの新規作成（資産の箱）でも開始日を持たない（§A 案1 適用漏れの回帰）', async () => {
+    // b945c59 の掃除は同じ関数の隣の分岐（既存科目への初期残高）だけを直し、newAccount 分岐の
+    // startDate 直書きが残っていた（監査 2026-08-12）。当時の「新規作成」テストは初期残高欄の
+    // 出ない expense 箱だったためすり抜けた＝ここで必ず**資産箱 × 初期残高あり**を固定する。
+    await loadLedger();
+    const onClose = vi.fn();
+    function ReadyCreateSheet() {
+      const { status } = useLedger();
+      return status === 'ready' ? (
+        <AccountSheet box={boxForRole('daily-asset')} onClose={onClose} />
+      ) : null;
+    }
+    render(
+      <Providers>
+        <ReadyCreateSheet />
+      </Providers>,
+    );
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.accounts.save}"]`)).toBeInTheDocument();
+    });
+    // 新規モードには開始日欄自体が無い（初期残高の日付欄は開始日ではない）。
+    expect(document.querySelector('[data-ui="accounts.startDate"]')).toBeNull();
+    fireEvent.change(screen.getByLabelText(/科目名/), { target: { value: '新しい口座' } });
+    fireEvent.change(document.querySelector(`[data-ui="${UI.accounts.openingAmount}"]`)!, {
+      target: { value: '100000' },
+    });
+    fireEvent.click(document.querySelector(`[data-ui="${UI.accounts.save}"]`)!);
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    const saved = (await loadLedger()).accounts.find((account) => account.name === '新しい口座')!;
+    expect(saved.startDate).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(saved, 'startDate')).toBe(false);
+    // 初期残高の仕訳自体は今日の日付で起票されている（事実の起票は残る）。
+    const opening = (await loadLedger()).journalEntries.find(
+      (entry) =>
+        entry.kind === 'opening' && entry.lines.some((line) => line.accountId === saved.id),
+    );
+    expect(opening).toBeDefined();
+  });
+
   it('初出仕訳より後へ開始点を縮める保存は拒否する', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((account) => account.name === '預金')!;

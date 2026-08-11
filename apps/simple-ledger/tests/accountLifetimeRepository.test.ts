@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   catchUpRecurringRules,
   createContinuousCost,
+  createOpening,
   createRecurringRule,
   loadLedger,
   upsertAccount,
@@ -241,6 +242,39 @@ describe('勘定科目の存在期間（保存境界）', () => {
     const cleared = (await loadLedger()).accounts.find((account) => account.id === cash.id)!;
     expect(cleared.startDate).toBeUndefined();
     expect(Object.prototype.hasOwnProperty.call(cleared, 'startDate')).toBe(false);
+  });
+
+  it('初期残高付きの新規科目にも開始日は書かれない（それより古い仕訳を後から保存できる）', async () => {
+    // §A 案1 作者決定3 の適用漏れ回帰（監査 2026-08-12）。同じ createOpeningsUnlocked でも
+    // newAccount 分岐だけ startDate: input.date の直書きが残り、「今日、口座を初期残高付きで
+    // 作る」という最も自然な操作が error.account.referenceOutsidePeriod を再発させていた。
+    await createOpening({
+      newAccount: { name: '新しい口座', type: 'asset', role: 'daily-asset' },
+      amount: 100_000,
+      date: '2026-05-01',
+    });
+    let ledger = await loadLedger();
+    const created = ledger.accounts.find((account) => account.name === '新しい口座')!;
+    expect(created.startDate).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(created, 'startDate')).toBe(false);
+
+    // 開始日が無い = 過去へ開いた線分。初期残高の日付より古い仕訳も保存できる。
+    const fixed = ledger.accounts.find((account) => account.name === '固定費')!;
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2020-01-01',
+        description: '初期残高より古い実データ',
+        debitAccountId: fixed.id,
+        creditAccountId: created.id,
+        amount: 500,
+        kind: 'normal',
+      }),
+    );
+    ledger = await loadLedger();
+    expect(
+      ledger.journalEntries.some((entry) => entry.description === '初期残高より古い実データ'),
+    ).toBe(true);
+    expect(ledger.accounts.find((account) => account.id === created.id)?.startDate).toBeUndefined();
   });
 
   it('system 科目（継続コスト台帳）の開始点は必要な最古日まで自動延長される（不変）', async () => {

@@ -2821,13 +2821,15 @@ async function createOpeningsUnlocked(inputs: OpeningInput[]): Promise<JournalEn
         workingAccounts = workingAccounts.map((account) => renamedById.get(account.id) ?? account);
         for (const renamed of renamedArchived) accountsToPut.set(renamed.id, renamed);
       }
+      // 初期残高の日付は「起票された事実」であって、科目の線分の端点（性質の宣言）ではない。
+      // 開始日は既定で空欄 = 過去へ開いた線分のまま作る（§A 案1・作者決定3）。この導線には
+      // 開始日の入力欄が無い＝作者が宣言していない端点をアプリが作らない。
       target = {
         id: newId(),
         name: name.trim(),
         type,
         role,
         archived: false,
-        startDate: input.date,
         ...(note !== undefined && note.trim() !== '' ? { note: note.trim() } : {}),
         // 「自由に動かせない」印は daily-asset の false だけ保存する（upsertAccount と同じ規則）。
         ...(input.newAccount.movable === false && role === 'daily-asset' ? { movable: false } : {}),

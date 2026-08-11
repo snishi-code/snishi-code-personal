@@ -6,7 +6,7 @@
  * 合計の対象 = 表示している行の集合（科目タップ抽出 = 方向つき和 / それ以外 = 単純和）。
  * 展開範囲 = いま表示している範囲（to → 今日 or 保存仕訳の最も遠い日付。上限 2100-12-31）。
  * 行タップ: 通常 = 編集 / 初期残高・補正 = 専用シート / 購入の仕訳 = 編集（借方は台帳固定）/
- * 計算で生まれた行 = 「毎月のもの」の元の項目・ルールのシートへ遷移。
+ * 計算で生まれた行 = 起票元（項目・ルール・投資科目。derivedEntryOrigin が単一正本）へ遷移。
  */
 import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
@@ -21,6 +21,7 @@ import { UI } from '../../ui-contract';
 import { todayLocal } from '../../util/time';
 import { entryHasTag } from '../../domain/tags';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
+import { derivedEntryOrigin } from '../../domain/derivedOrigin';
 import { displayEntriesForAsOf } from '../../domain/reportEntries';
 import { periodRange, type ReportPeriod } from '../../domain/reportPeriod';
 import {
@@ -71,6 +72,7 @@ export function Journal({
   onEditEntry,
   onReverse,
   onOpenAllocations,
+  onOpenAccount,
   filter,
   period,
   targetEntryId,
@@ -80,6 +82,8 @@ export function Journal({
   onReverse: (entry: JournalEntry) => void;
   /** 計算で生まれた行のタップ: 「毎月のもの」へ遷移し、元の項目/ルールのシートを開く。 */
   onOpenAllocations: (target: AllocationsTarget) => void;
+  /** 投資利回りの投影行のタップ: 勘定科目へ遷移し、その投資科目の編集シートを開く。 */
+  onOpenAccount: (accountId: string) => void;
   filter: JournalFilter | null;
   period: ReportPeriod;
   /** タイムラインなど外部画面から開く保存仕訳。種類ごとの既存編集シートへ解決する。 */
@@ -403,15 +407,19 @@ export function Journal({
                   : undefined;
             // 持ち込みの購入の仕訳は kind='opening' だが、専用シートではなく購入の仕訳として編集する。
             const isOpening = entry.kind === 'opening' && !isPurchase;
-            // タップ: 計算で生まれた行は「毎月のもの」の元のルール/項目へ。opening / adjustment は
-            // 専用シート。それ以外（購入の仕訳・回収の振替を含む）は編集シート。
+            // タップ: 計算で生まれた行は起票元（derivedEntryOrigin が単一正本）へ —
+            // ルール投影 = そのルール / 月割り = その項目 / 投資利回りの投影 = その投資科目。
+            // 由来を名乗らない導出行はタップ不可（既定の遷移先へ流さない＝誤遷移させない）。
+            // opening / adjustment は専用シート。それ以外（購入・回収の振替を含む）は編集シート。
+            const origin = derivedEntryOrigin(entry);
             const onRowTap = isVirtual
-              ? () =>
-                  onOpenAllocations(
-                    md?.recurringRuleId !== undefined
-                      ? { ruleId: md.recurringRuleId }
-                      : { itemId: md?.continuousCostId ?? '' },
-                  )
+              ? origin === undefined
+                ? undefined
+                : origin.kind === 'recurringRule'
+                  ? () => onOpenAllocations({ ruleId: origin.recurringRuleId })
+                  : origin.kind === 'monthlyCost'
+                    ? () => onOpenAllocations({ itemId: origin.monthlyCostId })
+                    : () => onOpenAccount(origin.accountId)
               : isAdjustment
                 ? () => setEditingAdjustment(entry)
                 : isOpening
@@ -451,15 +459,22 @@ export function Journal({
             );
             return (
               <li key={entry.id} className="list__item">
-                <button
-                  type="button"
-                  className="list__main"
-                  onClick={onRowTap}
-                  style={{ background: 'transparent', border: 'none', textAlign: 'left' }}
-                  aria-label={`${t('common.edit')}: ${entry.description}`}
-                >
-                  {title}
-                </button>
+                {onRowTap === undefined ? (
+                  // 開く先の無い導出行: ボタンにしない（押せるのに何も起きない/誤遷移する UI を作らない）。
+                  <div className="list__main" style={{ textAlign: 'left' }}>
+                    {title}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="list__main"
+                    onClick={onRowTap}
+                    style={{ background: 'transparent', border: 'none', textAlign: 'left' }}
+                    aria-label={`${t('common.edit')}: ${entry.description}`}
+                  >
+                    {title}
+                  </button>
+                )}
                 <span
                   className={`list__amount ${balanceChangeClass}`.trim()}
                   aria-label={balanceChangeLabel}

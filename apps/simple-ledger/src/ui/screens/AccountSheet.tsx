@@ -19,7 +19,6 @@ import { findAccountNameConflicts, planArchiveRenames } from '../../domain/accou
 import { sortAccounts } from '../../domain/accountOrder';
 import {
   annualReturnBpToPercentText,
-  INVESTMENT_PROJECTION_SUGGESTED_NAME,
   parseAnnualReturnPercentText,
 } from '../../domain/investmentProjection';
 import { newId } from '../../domain/ids';
@@ -92,19 +91,23 @@ export function AccountSheet({
     !!existing && (existing.role === 'payment-liability' || existing.role === 'other-liability');
   // 想定利回りは投資科目の編集時のみ（返済設定と同じく、新規は作成後に編集で設定する）。
   const showReturn = !!existing && existing.role === 'investment-asset';
-  // 計上先の候補 = 収入科目。名前「投資益」の科目があればサジェストとして先頭に出す
-  // （自動確定はしない＝既定は未設定のまま）。
+  // 計上先の候補 = 収入科目。サジェスト名（i18n 正本・既定「投資益」）の科目があれば
+  // 選択肢の先頭に出す（自動確定はしない＝既定は未設定のまま）。
+  const suggestedProjectionName = t('projection.suggestedAccountName');
   const projectionOptions = [
     { value: '', label: t('accounts.repaymentUnset') },
     ...sortAccounts(accounts)
       .filter((a) => a.role === 'income-category' && (!a.archived || a.id === projectionAccountId))
       .sort(
         (a, b) =>
-          Number(b.name === INVESTMENT_PROJECTION_SUGGESTED_NAME) -
-          Number(a.name === INVESTMENT_PROJECTION_SUGGESTED_NAME),
+          Number(b.name === suggestedProjectionName) - Number(a.name === suggestedProjectionName),
       )
       .map((a) => ({ value: a.id, label: a.name })),
   ];
+  // 計上先がアーカイブ済みだと投影は生成されない（fail-closed）。設定済みに見えるまま
+  // 黙って消えないよう、選択中の計上先の状態をここで名乗る。
+  const projectionAccountArchived =
+    projectionAccountId !== '' && accounts.some((a) => a.id === projectionAccountId && a.archived);
   const annualReturnBp =
     annualReturnText === '' ? null : parseAnnualReturnPercentText(annualReturnText);
   const repaymentOptions = [
@@ -377,7 +380,11 @@ export function AccountSheet({
                 setError(undefined);
               }}
               options={projectionOptions}
-              hint={t('accounts.projectionAccountHint')}
+              hint={
+                projectionAccountArchived
+                  ? t('accounts.projectionAccountArchivedHint')
+                  : t('accounts.projectionAccountHint')
+              }
               dataUi={UI.accounts.projectionAccount}
             />
           </>

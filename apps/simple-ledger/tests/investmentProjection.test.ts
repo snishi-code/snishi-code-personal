@@ -2,8 +2,9 @@
  * 投資の利回り投影（§D 2026-08-11）。
  *
  *  - エンジン（domain/investmentProjection.ts）: 月次複利の既知値・未来仕訳の織り込み・
- *    負利回りの逆向き行・各種ガード（bp 未設定/0・計上先欠落・role 不整合・自分自身）・
- *    2100 打ち切り・桁あふれ停止・過去断面の today 非依存。
+ *    負利回りの逆向き行・各種ガード（bp 未設定/0・計上先欠落・role 不整合・自分自身・
+ *    終了点宣言済み科目は投影対象外 = 案B）・2100 打ち切り・桁あふれの打ち切り診断
+ *    （truncations で名乗る）・過去断面の today 非依存。
  *  - API 分離（Codex 指摘の回帰）: reportEntriesForAsOf（保存不変条件）には投影が決して
  *    混ざらない。displayEntriesForAsOf（表示）だけに現れる。
  *  - 保存境界（repository）: セット必須・role ガード・soft reference（計上先が消えても
@@ -17,7 +18,11 @@ import {
   monthlyReturnRate,
   parseAnnualReturnPercentText,
 } from '../src/domain/investmentProjection';
-import { displayEntriesForAsOf, reportEntriesForAsOf } from '../src/domain/reportEntries';
+import {
+  displayEntriesForAsOf,
+  displayEntriesResultForAsOf,
+  reportEntriesForAsOf,
+} from '../src/domain/reportEntries';
 import {
   deriveBalanceSheet,
   deriveProfitAndLoss,
@@ -206,12 +211,42 @@ describe('investmentProjectionEntries: 生成しない条件（fail-closed）', 
     expect(projectionRows(displayEntriesForAsOf(tiny, '2026-12-31', TODAY))).toEqual([]);
   });
 
-  it('アーカイブ（線分終了）後の月には生まれない', () => {
+  it('終了点（endDate）を宣言した科目には一切投影しない（表示と保存の矛盾を作らない）', () => {
+    // 旧挙動（終了日の当日まで投影する）は、作者が実仕訳で残高 0 にして終了した科目に
+    // 表示だけ投影益の残高が残り、終了後の全断面へ伝播していた（監査 2026-08-12・案B）。
+    const withdrawAll = entry('close', '2026-03-31', 'cash', 'invest', 100_000);
     const ended = source({
       accounts: [{ ...invest, archived: true, endDate: '2026-03-31' }, gain, cash, capital],
+      journalEntries: [
+        entry('opening', '2026-01-01', 'invest', 'capital', 100_000, 'opening'),
+        withdrawAll,
+      ],
     });
-    const rows = projectionRows(displayEntriesForAsOf(ended, '2026-12-31', TODAY));
-    expect(rows.map((r) => r.date)).toEqual(['2026-02-01', '2026-03-01']);
+    expect(projectionRows(displayEntriesForAsOf(ended, '2026-12-31', TODAY))).toEqual([]);
+    // 終了日当日・終了後のどの断面でも、表示上の残高 = 保存上の残高 = 0。
+    for (const asOf of ['2026-03-31', '2026-06-30', '2026-12-31']) {
+      const display = displayEntriesForAsOf(ended, asOf, TODAY);
+      const balance = display.reduce(
+        (sum, e) =>
+          sum +
+          e.lines.reduce(
+            (s, line) =>
+              line.accountId === 'invest'
+                ? s + (line.side === 'debit' ? line.amount : -line.amount)
+                : s,
+            0,
+          ),
+        0,
+      );
+      expect(balance).toBe(0);
+    }
+  });
+
+  it('終了点不明の旧アーカイブ科目にも投影しない', () => {
+    const legacyArchived = source({
+      accounts: [{ ...invest, archived: true }, gain, cash, capital],
+    });
+    expect(projectionRows(displayEntriesForAsOf(legacyArchived, '2026-12-31', TODAY))).toEqual([]);
   });
 });
 
@@ -222,7 +257,7 @@ describe('investmentProjectionEntries: 上限', () => {
     expect(rows.at(-1)!.date <= '2100-12-31').toBe(true);
   });
 
-  it('桁あふれ: 残高が MAX_SAFE_INTEGER/2 を超える月から停止し、それ以前の行は維持する', () => {
+  it('桁あふれ: 停止した月から行を生成せず、打ち切りを truncations として名乗る', () => {
     const huge = source({
       accounts: [
         { ...invest, annualReturnBp: 100_000 }, // 年率 1000% = 月利 ≈ 22.1%
@@ -234,10 +269,26 @@ describe('investmentProjectionEntries: 上限', () => {
         entry('opening', '2026-01-01', 'invest', 'capital', 3_500_000_000_000_000, 'opening'),
       ],
     });
-    const rows = projectionRows(displayEntriesForAsOf(huge, '2027-12-31', TODAY));
+    const display = displayEntriesResultForAsOf(huge, '2027-12-31', TODAY);
+    const rows = projectionRows(display.entries);
     expect(rows.map((r) => [r.date, r.lines[0]?.amount])).toEqual([
       ['2026-02-01', 774_159_926_091_978],
     ]);
+    // 「行が無い」に 3 つの意味（対象外 / 0 円 / 計算を諦めた）を畳まない: 打ち切りは
+    // 構造化された診断として返り、UI が注記として名乗れる（黙って横ばいの顔をしない）。
+    expect(display.investmentProjectionTruncations).toEqual([
+      { accountId: 'invest', month: '2026-03' },
+    ]);
+  });
+
+  it('打ち切りが起きなければ truncations は空（正常打ち切り = asOf/2100 は診断に含めない）', () => {
+    expect(
+      displayEntriesResultForAsOf(source({}), '2026-06-30', TODAY).investmentProjectionTruncations,
+    ).toEqual([]);
+    // 2100 cap まで完走しても、作者の実データ規模+現実的利回りでは打ち切りにならない。
+    expect(
+      displayEntriesResultForAsOf(source({}), '2150-12-31', TODAY).investmentProjectionTruncations,
+    ).toEqual([]);
   });
 });
 
@@ -504,8 +555,8 @@ describe('保存境界（repository）', () => {
       projectionAccountId: income.id,
       updatedAt: nowIso(),
     });
-    // 未来日付の引き出しで実残高を 0 にし、その日を終了点にする。表示上は終了点まで
-    // 評価益の投影が乗り得るが、保存判断（残高 0）は投影なしの実質計算で行われる。
+    // 未来日付の引き出しで実残高を 0 にし、その日を終了点にする。保存判断（残高 0）は
+    // 投影なしの実質計算で行われ、終了点を宣言した科目には表示側も投影しない（案B）。
     await upsertEntry(
       buildSimpleEntry({
         date: '2099-12-31',

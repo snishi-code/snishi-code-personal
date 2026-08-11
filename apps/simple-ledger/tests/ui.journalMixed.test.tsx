@@ -15,6 +15,7 @@ import {
   createContinuousCost,
   createRecurringRule,
   loadLedger,
+  upsertAccount,
   upsertEntry,
 } from '../src/data/repository';
 import { CONTINUOUS_COST_HARD_CAP } from '../src/domain/continuousCost';
@@ -39,11 +40,13 @@ afterEach(() => {
 function View({
   onEditEntry = () => undefined,
   onOpenAllocations = () => undefined,
+  onOpenAccount = () => undefined,
   onClearFilter = () => undefined,
   filter = null,
 }: {
   onEditEntry?: (entry: JournalEntry) => void;
   onOpenAllocations?: (target: AllocationsTarget) => void;
+  onOpenAccount?: (accountId: string) => void;
   onClearFilter?: () => void;
   filter?: JournalFilter | null;
 }) {
@@ -53,6 +56,7 @@ function View({
         <ReadyView
           onEditEntry={onEditEntry}
           onOpenAllocations={onOpenAllocations}
+          onOpenAccount={onOpenAccount}
           onClearFilter={onClearFilter}
           filter={filter}
         />
@@ -64,11 +68,13 @@ function View({
 function ReadyView({
   onEditEntry,
   onOpenAllocations,
+  onOpenAccount,
   onClearFilter,
   filter,
 }: {
   onEditEntry: (entry: JournalEntry) => void;
   onOpenAllocations: (target: AllocationsTarget) => void;
+  onOpenAccount: (accountId: string) => void;
   onClearFilter: () => void;
   filter: JournalFilter | null;
 }) {
@@ -79,6 +85,7 @@ function ReadyView({
       onEditEntry={onEditEntry}
       onReverse={() => undefined}
       onOpenAllocations={onOpenAllocations}
+      onOpenAccount={onOpenAccount}
       filter={filter}
       period={{ mode: 'all' }}
       onClearFilter={onClearFilter}
@@ -200,6 +207,49 @@ describe('仕訳一覧の混合表示', () => {
     const rows = await screen.findAllByText('未来の定期支出');
     fireEvent.click(rows[0]!.closest('button')!);
     expect(onOpenAllocations).toHaveBeenCalledWith({ ruleId: rule.id });
+  });
+
+  it('投資利回りの投影行はタップで、利回りを宣言した投資科目へ遷移する（誤遷移の回帰）', async () => {
+    // 旧実装は未知の virtual を itemId: '' で「毎月のもの」へ握り潰していた（監査 2026-08-12）。
+    const ledger = await loadLedger();
+    const invest = ledger.accounts.find((a) => a.role === 'investment-asset')!;
+    const income = ledger.accounts.find((a) => a.role === 'income-category')!;
+    const today = todayLocal();
+    const timestamp = `${today}T00:00:00.000Z`;
+    await upsertEntry({
+      id: 'invest-balance',
+      date: today,
+      description: '投資残高',
+      kind: 'normal',
+      lines: [
+        { accountId: invest.id, side: 'debit', amount: 100_000 },
+        { accountId: income.id, side: 'credit', amount: 100_000 },
+      ],
+      metadata: { inputMode: 'income' },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    await upsertAccount({
+      ...(await loadLedger()).accounts.find((a) => a.id === invest.id)!,
+      annualReturnBp: 1200,
+      projectionAccountId: income.id,
+      updatedAt: timestamp,
+    });
+
+    const onOpenAccount = vi.fn();
+    const onOpenAllocations = vi.fn();
+    render(<View onOpenAccount={onOpenAccount} onOpenAllocations={onOpenAllocations} />);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.journal.view}"]`)).toBeInTheDocument();
+    });
+
+    const toInput = document.querySelector('#journal-to') as HTMLInputElement;
+    fireEvent.change(toInput, { target: { value: `${addMonths(monthOf(today), 1)}-15` } });
+
+    const rows = await screen.findAllByText(`投影: ${invest.name}`);
+    fireEvent.click(rows[0]!.closest('button')!);
+    expect(onOpenAccount).toHaveBeenCalledWith(invest.id);
+    expect(onOpenAllocations).not.toHaveBeenCalled();
   });
 
   it('購入の仕訳はタップで編集でき、削除ボタンは出ない', async () => {

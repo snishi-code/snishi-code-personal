@@ -1,5 +1,8 @@
 import { continuousCostEntries } from './continuousCost';
-import { investmentProjectionEntries } from './investmentProjection';
+import {
+  investmentProjectionResult,
+  type InvestmentProjectionTruncation,
+} from './investmentProjection';
 import { recurringProjectionEntries } from './recurring';
 import type { Ledger, JournalEntry } from './types';
 
@@ -45,6 +48,28 @@ export function displayEntriesForAsOf(
   asOf: string,
   today: string,
 ): JournalEntry[] {
+  return displayEntriesResultForAsOf(ledger, asOf, today).entries;
+}
+
+export interface DisplayEntriesResult {
+  entries: JournalEntry[];
+  /**
+   * 算術限界で投影を打ち切った科目。**アプリ都合の端点**なので、これを消費する画面は
+   * 「投影を含む」と言い続けず、止まった事実を名乗る（仮の数字が本物の顔をしない）。
+   */
+  investmentProjectionTruncations: InvestmentProjectionTruncation[];
+}
+
+/** `displayEntriesForAsOf` と同じ結果に、投影が黙って止まっていないかの診断を添えて返す。 */
+export function displayEntriesResultForAsOf(
+  ledger: ReportEntrySource,
+  asOf: string,
+  today: string,
+): DisplayEntriesResult {
   const base = reportEntriesForAsOf(ledger, asOf);
-  return [...base, ...investmentProjectionEntries(ledger.accounts, base, asOf, today)];
+  const projection = investmentProjectionResult(ledger.accounts, base, asOf, today);
+  return {
+    entries: [...base, ...projection.entries],
+    investmentProjectionTruncations: projection.truncations,
+  };
 }

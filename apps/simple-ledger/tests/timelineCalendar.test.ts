@@ -227,6 +227,39 @@ describe('buildTimelineCalendar', () => {
     });
   });
 
+  it('投資利回りの投影行もフローに出し、開く先 = 利回りを宣言した投資科目に解決する', () => {
+    // 起票元の対応表は derivedEntryOrigin（単一正本）。ここが 2 画面に手書きされていた頃、
+    // タイムラインは投影行を黙って捨てていた（監査 2026-08-12 の回帰）。
+    const model = build({
+      entries: [
+        entry('inv-proj-cash-a-2026-01', '2026-01-01', 'cash-a', 'income', 949, {
+          virtual: true,
+          investmentProjectionOf: 'cash-a',
+        }),
+      ],
+    });
+    const allFlows = model.boxes.flatMap((box) => box.dots.flatMap((dot) => dot.flows));
+    const flow = allFlows.find((candidate) => candidate.id === 'inv-proj-cash-a-2026-01');
+    expect(flow).toBeDefined();
+    expect(flow!.target).toEqual({ kind: 'investmentAccount', accountId: 'cash-a' });
+  });
+
+  it('由来を名乗らない導出行もフローから捨てない（開く先だけが無い）', () => {
+    // 未知の種類の導出行が「片方の画面では消え、数字がずれる」ことを防ぐ:
+    // フロー（金額・純増減）は残し、target だけを undefined にする。
+    const model = build({
+      entries: [entry('unknown-virtual', '2026-01-10', 'cash-a', 'income', 500, { virtual: true })],
+    });
+    const allFlows = model.boxes.flatMap((box) => box.dots.flatMap((dot) => dot.flows));
+    const flow = allFlows.find((candidate) => candidate.id === 'unknown-virtual');
+    expect(flow).toBeDefined();
+    expect(flow!.amount).toBe(500);
+    expect(flow!.target).toBeUndefined();
+    // 純増減にも織り込まれている（黙って消えない）。
+    const incomeBox = model.boxes.find((box) => box.key === 'income')!;
+    expect(incomeBox.dots.some((dot) => dot.netChange !== 0)).toBe(true);
+  });
+
   it('横軸に交差する過去科目・未来itemだけを並べ、終了分表示で範囲外も戻す', () => {
     const datedAccounts = [
       account('past', 'asset', 'daily-asset', '2020-01-01', '2024-12-31'),

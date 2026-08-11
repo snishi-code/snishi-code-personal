@@ -1,8 +1,9 @@
 /*
  * 年間・全体ビュー。
  *
- * 表示対象の最大基準日まで displayEntriesForAsOf を一度だけ呼び、展開済み仕訳を
+ * 表示対象の最大基準日まで displayEntriesResultForAsOf を一度だけ呼び、展開済み仕訳を
  * periodMatrix の単一走査へ渡す。年送りはこの画面内だけで完結し、ヘッダー期間は変更しない。
+ * 投影が桁あふれで打ち切られた科目は同じ結果の truncations から注記として名乗る。
  *
  * 全体ビューには表示地平セレクタ（実績のみ / +30年 / 2100年まで）を持つ。
  * 実績のみ = matrixDataYears そのまま（従来挙動）。延長地平は列の最終年を先へ延ばし、
@@ -22,7 +23,7 @@ import {
 } from '../../domain/accountLifetime';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
 import { dataYearsOf, type ReportPeriod } from '../../domain/reportPeriod';
-import { displayEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { recurringPostingsDue } from '../../domain/recurring';
 import type { Ledger, MonthlyCostItem } from '../../domain/types';
 import { useLedger } from '../../state/store';
@@ -155,11 +156,23 @@ export function YearlyOverview({ period }: { period: ReportPeriod }) {
         : { mode: 'all', years: overviewYears },
     [mode, overviewYears, selectedYear],
   );
-  const matrix = useMemo(() => {
+  const matrixAsOf = periodMatrixAsOf(scope, today);
+  const matrixResult = useMemo(() => {
     if (!ledger || dataYears.length === 0) return null;
-    const entries = displayEntriesForAsOf(ledger, periodMatrixAsOf(scope, today), today);
-    return buildPeriodMatrix(ledger.accounts, entries, scope);
-  }, [dataYears.length, ledger, scope, today]);
+    const display = displayEntriesResultForAsOf(ledger, matrixAsOf, today);
+    return {
+      matrix: buildPeriodMatrix(ledger.accounts, display.entries, scope),
+      // 桁あふれで投影を打ち切った科目（アプリ都合の端点）。注記として名乗る。
+      truncations: display.investmentProjectionTruncations.map((truncation) => ({
+        ...truncation,
+        name: ledger.accounts.find((account) => account.id === truncation.accountId)?.name ?? '—',
+      })),
+    };
+  }, [dataYears.length, ledger, matrixAsOf, scope, today]);
+  const matrix = matrixResult?.matrix ?? null;
+  const truncations = matrixResult?.truncations ?? [];
+  // 表示対象に未来断面が含まれるか（年間モードでも未来月には投影が混ざる）。
+  const includesFuture = matrixAsOf > today;
 
   const caption =
     mode === 'year'
@@ -219,7 +232,9 @@ export function YearlyOverview({ period }: { period: ReportPeriod }) {
                 setHorizon(value === 'plus30' || value === 'hardCap' ? value : 'actual')
               }
             />
-            <p className="field__hint">{t('yearlyOverview.projectionNote')}</p>
+            <p className="field__hint" data-ui={UI.yearlyOverview.projectionNote}>
+              {t('yearlyOverview.projectionNote')}
+            </p>
           </div>
         ) : null}
 
@@ -262,6 +277,28 @@ export function YearlyOverview({ period }: { period: ReportPeriod }) {
             </button>
           </div>
         ) : null}
+
+        {/* 年間モードにも未来月には投影が混ざる。何が混ざるかを全体モードと同様に明示する。 */}
+        {mode === 'year' && dataYears.length > 0 && includesFuture ? (
+          <p className="field__hint" data-ui={UI.yearlyOverview.projectionNote}>
+            {t('yearlyOverview.projectionNote')}
+          </p>
+        ) : null}
+
+        {/* 桁あふれで投影を打ち切った科目: アプリ都合の端点を名乗る（黙って横ばいの顔をしない）。 */}
+        {truncations.map((truncation) => (
+          <p
+            className="field__hint"
+            role="note"
+            key={truncation.accountId}
+            data-ui={UI.yearlyOverview.projectionTruncatedNote}
+          >
+            {t('yearlyOverview.projectionTruncatedNote', {
+              name: truncation.name,
+              month: truncation.month,
+            })}
+          </p>
+        ))}
       </div>
 
       {matrix ? (

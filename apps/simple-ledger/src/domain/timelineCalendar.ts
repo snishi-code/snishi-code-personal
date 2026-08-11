@@ -6,6 +6,7 @@
  */
 import { addMonths, monthOf } from './allocation';
 import { recurringRuleLastExistingDate } from './accountLifetime';
+import { derivedEntryOrigin, type DerivedEntryOrigin } from './derivedOrigin';
 import { buildRuleItem, recurringExpenseAccountId, recurringPostingsDue } from './recurring';
 import { parseRuleItemId } from './recurringIds';
 import type { Account, JournalEntry, MonthlyCostItem, RecurringRule } from './types';
@@ -30,10 +31,11 @@ export interface TimelineSpan {
   endDate?: string;
 }
 
-export type TimelineTarget =
-  | { kind: 'entry'; entryId: string }
-  | { kind: 'monthlyCost'; monthlyCostId: string }
-  | { kind: 'recurringRule'; recurringRuleId: string };
+/**
+ * 「開く」先。実仕訳はその仕訳、導出行は起票元（derivedEntryOrigin が単一正本）。
+ * 導出行の種類が増えたら derivedOrigin.ts に足せば、ここへも型で伝播する。
+ */
+export type TimelineTarget = { kind: 'entry'; entryId: string } | DerivedEntryOrigin;
 
 /** すべてのフローポッチが共有する、貸方（源泉）→借方（行き先）の正規形。 */
 export interface TimelineFlow {
@@ -43,7 +45,11 @@ export interface TimelineFlow {
   amount: number;
   sourceAccountId: string;
   destinationAccountId: string;
-  target: TimelineTarget;
+  /**
+   * 未定義 = 由来を名乗らない導出行（開く先が無い）。フロー自体は落とさない
+   * （黙って捨てると画面ごとに見える数字がずれる）。UI は「開く」を出さないだけにする。
+   */
+  target?: TimelineTarget;
 }
 
 export interface TimelineFlowDot {
@@ -247,20 +253,17 @@ function mergeSpans(spans: readonly TimelineSpan[]): TimelineSpan[] {
 
 function flowTargetOf(entry: JournalEntry): TimelineTarget | undefined {
   if (entry.metadata?.virtual !== true) return { kind: 'entry', entryId: entry.id };
-  if (entry.metadata.recurringRuleId !== undefined) {
-    return { kind: 'recurringRule', recurringRuleId: entry.metadata.recurringRuleId };
-  }
-  if (entry.metadata.continuousCostId !== undefined) {
-    return { kind: 'monthlyCost', monthlyCostId: entry.metadata.continuousCostId };
-  }
-  return undefined;
+  // 導出行 → 起票元の対応表は derivedEntryOrigin（単一正本）に委ねる。画面ごとに
+  // 手書きすると、種類が増えたとき片方だけ更新され「一方は黙って行を捨て、もう一方は
+  // 空 ID で誤遷移する」状態になる（投資の利回り投影で実際に起きた）。
+  return derivedEntryOrigin(entry);
 }
 
 function flowOfEntry(entry: JournalEntry): TimelineFlow | undefined {
   const debit = entry.lines.find((line) => line.side === 'debit');
   const credit = entry.lines.find((line) => line.side === 'credit');
   const target = flowTargetOf(entry);
-  if (!debit || !credit || !target || debit.accountId === credit.accountId) return undefined;
+  if (!debit || !credit || debit.accountId === credit.accountId) return undefined;
   return {
     id: entry.id,
     date: entry.date,
@@ -268,7 +271,8 @@ function flowOfEntry(entry: JournalEntry): TimelineFlow | undefined {
     amount: debit.amount,
     sourceAccountId: credit.accountId,
     destinationAccountId: debit.accountId,
-    target,
+    // 開く先が無い導出行もフローとしては残す（残高・純増減から黙って消さない）。
+    ...(target !== undefined ? { target } : {}),
   };
 }
 

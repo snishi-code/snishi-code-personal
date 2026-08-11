@@ -51,6 +51,8 @@ export function App() {
   const [journalTargetEntryId, setJournalTargetEntryId] = useState<string | null>(null);
   // 仕訳一覧の計算で生まれた行タップ → 「毎月のもの」で開くシートの対象（1 回で消費）。
   const [allocationsTarget, setAllocationsTarget] = useState<AllocationsTarget | null>(null);
+  // 投資利回りの投影行タップ → 勘定科目で開く編集シートの対象（1 回で消費）。
+  const [accountsTarget, setAccountsTarget] = useState<{ accountId: string } | null>(null);
   const [exitConfirm, setExitConfirm] = useState(false);
   // オンボーディングは「初回状態からの派生 + ユーザー操作の上書き」で開閉する
   // （effect での setState を避ける。render 中の派生調整パターン）。
@@ -73,6 +75,7 @@ export function App() {
     setJournalFilter(null);
     setJournalTargetEntryId(null);
     setAllocationsTarget(null);
+    setAccountsTarget(null);
     navigate(s);
   };
   // ヘッダーの日付を変えたら明示フィルターより日付を優先する（フィルターが居座らない）。
@@ -132,6 +135,12 @@ export function App() {
   const goAllocationsFor = (target: AllocationsTarget) => {
     navigate('allocations');
     setAllocationsTarget(target);
+  };
+
+  // 仕訳一覧・タイムライン → 勘定科目（投資利回りの投影行の由来 = 利回りを宣言した科目を開く）。
+  const goAccountFor = (accountId: string) => {
+    navigate('accounts');
+    setAccountsTarget({ accountId });
   };
 
   // タイムラインは保存仕訳の種類を再解釈せず、仕訳一覧の既存 resolver へ ID を渡す。
@@ -299,6 +308,7 @@ export function App() {
             onEditEntry={openEdit}
             onReverse={openReversal}
             onOpenAllocations={goAllocationsFor}
+            onOpenAccount={goAccountFor}
             filter={journalFilter}
             period={period}
             targetEntryId={journalTargetEntryId}
@@ -310,6 +320,7 @@ export function App() {
             period={period}
             onOpenEntry={goJournalEntry}
             onOpenAllocations={goAllocationsFor}
+            onOpenAccount={goAccountFor}
           />
         ) : null}
         {screen === 'yearlyOverview' ? <YearlyOverview period={period} /> : null}
@@ -318,7 +329,7 @@ export function App() {
         ) : null}
         {screen === 'cashflow' ? <Cashflow onEditEntry={openEdit} /> : null}
         {screen === 'tags' ? <Tags /> : null}
-        {screen === 'accounts' ? <Accounts period={period} /> : null}
+        {screen === 'accounts' ? <Accounts period={period} target={accountsTarget} /> : null}
         {screen === 'settings' ? (
           <Settings onNavigate={go} onOpenOnboarding={() => setOnboardingManualOpen(true)} />
         ) : null}

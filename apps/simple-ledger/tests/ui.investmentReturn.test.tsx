@@ -161,6 +161,40 @@ describe('投資科目の想定利回り編集', () => {
     expect(saved.annualReturnBp).toBeUndefined();
   });
 
+  it('計上先がアーカイブ済みなら「投影は生成されない」と名乗る（黙って消えない）', async () => {
+    const gainId = await addGainAccount();
+    render(
+      <Providers>
+        <Accounts />
+      </Providers>,
+    );
+    await openEdit('投資');
+    fireEvent.change(returnInput()!, { target: { value: '3' } });
+    fireEvent.change(projectionSelect()!, { target: { value: gainId } });
+    await saveSheet();
+
+    // 計上先をアーカイブ（終了）する。投影エンジンは fail-closed で生成を止めるが、
+    // 設定は残るため、編集シートで状態を名乗る（次点1・監査 2026-08-12）。
+    const gain = (await loadLedger()).accounts.find((a) => a.id === gainId)!;
+    await upsertAccount({
+      ...gain,
+      archived: true,
+      endDate: '2026-01-31',
+      updatedAt: nowIso(),
+    });
+
+    cleanup();
+    _resetOverlaysForTests();
+    render(
+      <Providers>
+        <Accounts />
+      </Providers>,
+    );
+    await openEdit('投資');
+    expect(projectionSelect()!.value).toBe(gainId);
+    await screen.findByText(/計上先はアーカイブ済みのため、投影は生成されません/);
+  });
+
   it('投資以外（現金）の編集には利回り欄が出ない', async () => {
     render(
       <Providers>

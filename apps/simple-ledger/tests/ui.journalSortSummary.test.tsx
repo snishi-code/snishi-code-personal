@@ -48,6 +48,7 @@ function ReadyView({ filter }: { filter: JournalFilter | null }) {
       onEditEntry={() => undefined}
       onReverse={() => undefined}
       onOpenAllocations={() => undefined}
+      onOpenAccount={() => undefined}
       filter={filter}
       period={{ mode: 'all' }}
       onClearFilter={() => undefined}

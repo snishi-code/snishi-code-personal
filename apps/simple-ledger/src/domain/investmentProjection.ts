@@ -11,8 +11,14 @@
  *    その科目の仕訳（未来の積立・引出・ルール投影）を残高へ織り込みながら複利で進める。
  *  - 評価益は各月円へ丸め（Math.round・決定的）。0 円の月・残高 0 以下の月は行を生成しない。
  *    負利回り（元本減）は逆向き（借方 計上先 / 貸方 投資）。
- *  - 上限: 要求 asOf と CONTINUOUS_COST_HARD_CAP（2100）で打ち切り。残高が
- *    Number.MAX_SAFE_INTEGER/2 を超える月はその科目の生成を停止する（それ以前の行は維持）。
+ *  - 上限: 要求 asOf と CONTINUOUS_COST_HARD_CAP（2100）で打ち切り。どちらも作者へ宣言済みの
+ *    端点（地平セレクタ・date input の max）なので、黙って止まっても嘘にならない。
+ *  - 算術限界（IEEE754 の安全整数域）で計算を諦めた科目は**戻り値で名乗る**
+ *    （`InvestmentProjectionResult.truncations`）。行が無いことの意味を「対象外」「0 円」
+ *    「計算できなくなった」の 3 つに畳まない＝アプリ都合の端点を隠さない。
+ *  - 終了点（endDate）を宣言した科目には**一切投影しない**。終了点の残高 0 は保存側の
+ *    不変条件（`reportEntriesForAsOf` ベース）で担保されるため、投影を積むと表示だけが
+ *    終了後も残高を持ち、作者の宣言をアプリの推測が上書きしてしまう。
  *  - 生成した行は保存されない導出専用（metadata.virtual + investmentProjectionOf）。
  *    `displayEntriesForAsOf` の結果にだけ現れ、保存不変条件（`reportEntriesForAsOf`）へは
  *    決して合流しない（仮の利回りを保存判断へ逆流させない・Codex 指摘）。
@@ -22,17 +28,31 @@
 import { addMonths, monthOf } from './allocation';
 import { accountExistsAt } from './accountLifetime';
 import { CONTINUOUS_COST_HARD_CAP } from './continuousCost';
+import { t } from '../i18n';
 import type { Account, JournalEntry } from './types';
 
 /** 想定利回り（年率 bp）の範囲。schema / 保存境界 / UI 変換が同じ正本を参照する。 */
 export const ANNUAL_RETURN_BP_MIN = -9999;
 export const ANNUAL_RETURN_BP_MAX = 100_000;
 
-/** 計上先サジェストの既定名（この名前の収入科目があれば選択肢の先頭に出す。自動確定はしない）。 */
-export const INVESTMENT_PROJECTION_SUGGESTED_NAME = '投資益' as const;
-
 /** 桁あふれガード（残高がこの値を超えたらその科目の生成を停止する）。 */
 const PROJECTION_BALANCE_LIMIT = Number.MAX_SAFE_INTEGER / 2;
+
+/**
+ * 算術限界で投影を打ち切った科目。`month` 以降の行は生成していない。
+ * これは作者が宣言した端点ではなく**アプリ都合の端点**なので、画面はこれを名乗る。
+ */
+export interface InvestmentProjectionTruncation {
+  accountId: string;
+  /** 生成できなくなった最初の月（`YYYY-MM`）。 */
+  month: string;
+}
+
+/** 投影の生成結果。行と、アプリ都合で止まった事実を分けて返す。 */
+export interface InvestmentProjectionResult {
+  entries: JournalEntry[];
+  truncations: InvestmentProjectionTruncation[];
+}
 
 /** 月利 = (1 + bp/10000)^(1/12) − 1。中間計算の浮動小数は許容（保存されない表示専用の導出）。 */
 export function monthlyReturnRate(annualReturnBp: number): number {
@@ -55,25 +75,30 @@ function balanceDelta(entry: JournalEntry, accountId: string): number {
 }
 
 /**
- * 全対象科目の投影行を生成する。
+ * 全対象科目の投影行と、算術限界で打ち切った科目を返す。
  *
  * `derivedEntries` には基準日（asOf）まで展開した導出込み仕訳（`reportEntriesForAsOf` の結果）
  * を渡す。today 以前の断面には 1 行も生まれない（起点以前へ不適用・過去は today に不変）。
  */
-export function investmentProjectionEntries(
+export function investmentProjectionResult(
   accounts: readonly Account[],
   derivedEntries: readonly JournalEntry[],
   asOf: string,
   today: string,
-): JournalEntry[] {
+): InvestmentProjectionResult {
   const byId = new Map(accounts.map((account) => [account.id, account] as const));
   const cap = asOf < CONTINUOUS_COST_HARD_CAP ? asOf : CONTINUOUS_COST_HARD_CAP;
-  if (cap <= today) return []; // 未来の断面を要求されていない = 投影なし
+  if (cap <= today) return { entries: [], truncations: [] }; // 未来の断面を要求されていない
   const out: JournalEntry[] = [];
+  const truncations: InvestmentProjectionTruncation[] = [];
 
   for (const account of accounts) {
     // 対象: investment-asset・annualReturnBp ≠ 0・計上先設定済み（未設定/0 = 投影なし）。
     if (account.role !== 'investment-asset') continue;
+    // 終了点を宣言した科目（および終了点不明の旧アーカイブ科目）は投影しない。
+    // 終了は作者の宣言で、その日の残高 0 は保存側の不変条件が担保する。ここで評価益を
+    // 積むと、表示世界だけが終了後も残高を持ち続ける（表示と保存の矛盾）。
+    if (account.endDate !== undefined || account.archived) continue;
     const bp = account.annualReturnBp;
     if (bp === undefined || bp === 0 || !Number.isInteger(bp)) continue;
     if (bp < ANNUAL_RETURN_BP_MIN || bp > ANNUAL_RETURN_BP_MAX) continue;
@@ -99,25 +124,28 @@ export function investmentProjectionEntries(
     for (let month = addMonths(monthOf(today), 1); ; month = addMonths(month, 1)) {
       const date = `${month}-01`;
       if (date > cap) break;
-      if (account.endDate !== undefined && date > account.endDate) break; // 線分終了後は生成しない
       // その月初より前の仕訳（未来の積立・引出・ルール投影）を残高へ織り込む。
       while (cursor < future.length && future[cursor]!.date < date) {
         balance += balanceDelta(future[cursor]!, account.id);
         cursor += 1;
       }
-      // アーカイブ済み（終了点不明の旧形式含む）・存在期間外の断面には行を立てない。
+      // 存在期間外（未来開始・計上先の期間外）の断面には行を立てない。
       if (!accountExistsAt(account, date) || !accountExistsAt(projectionAccount, date)) continue;
       if (balance <= 0) continue; // 残高 0 以下には適用しない（生成なし・複利も進めない）
       const gain = Math.round(balance * rate);
       if (gain === 0) continue;
       const next = balance + gain;
       // 桁あふれガード: 超える月からはこの科目の生成を停止する（それ以前の行は維持）。
-      if (!Number.isSafeInteger(next) || Math.abs(next) > PROJECTION_BALANCE_LIMIT) break;
+      // 黙って止めない——アプリ都合の端点として戻り値で名乗る。
+      if (!Number.isSafeInteger(next) || Math.abs(next) > PROJECTION_BALANCE_LIMIT) {
+        truncations.push({ accountId: account.id, month });
+        break;
+      }
       const amount = Math.abs(gain);
       out.push({
         id: projectionEntryId(account.id, month),
         date,
-        description: `投影: ${account.name}`,
+        description: t('projection.entryDescription', { name: account.name }),
         kind: 'normal',
         lines:
           gain > 0
@@ -136,7 +164,17 @@ export function investmentProjectionEntries(
       balance = next;
     }
   }
-  return out;
+  return { entries: out, truncations };
+}
+
+/** 行だけが要る呼び出し向けの薄い入口（打ち切りの有無は `investmentProjectionResult` で見る）。 */
+export function investmentProjectionEntries(
+  accounts: readonly Account[],
+  derivedEntries: readonly JournalEntry[],
+  asOf: string,
+  today: string,
+): JournalEntry[] {
+  return investmentProjectionResult(accounts, derivedEntries, asOf, today).entries;
 }
 
 /* ── 科目編集 UI の「年率 %」⇄ bp（整数）変換 ── */
