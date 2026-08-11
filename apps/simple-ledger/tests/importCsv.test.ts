@@ -159,6 +159,18 @@ describe('extractCsvTable', () => {
     }
   });
 
+  it('空文字ヘッダーが複数あっても重複扱いしない（Excel 由来の末尾カンマ）', () => {
+    // ヘッダー末尾のカンマ 2 個 = 空ヘッダー 2 列。名前付き列の参照は index で安全に
+    // 解決でき、空名の列は DSL schema（min(1)）が参照を許さないため曖昧さは生まれない。
+    const table = extractCsvTable(parseCsv('a,b,,\n1,2,3,4'), 0);
+    expect(table.header).toEqual(['a', 'b', '', '']);
+    expect(table.dataRecords[0]!.cells).toEqual(['1', '2', '3', '4']);
+    // 空白だけのヘッダーセルも trim 後は空文字 = 同様に除外。
+    expect(extractCsvTable(parseCsv('a, ,\t\n1,2,3'), 0).header).toEqual(['a', '', '']);
+    // 名前付き列の重複は引き続き拒否する（空文字の除外が判定を緩めない）。
+    expect(() => extractCsvTable(parseCsv('a,,a\n1,2,3'), 0)).toThrowError(CsvImportError);
+  });
+
   it('ヘッダー行が存在しない位置は fail-closed', () => {
     try {
       extractCsvTable(parseCsv('a,b'), 5);

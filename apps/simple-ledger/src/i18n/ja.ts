@@ -641,7 +641,7 @@ export const ja = {
   'csvImport.profileLabel': '取込プロファイル',
   'csvImport.profilePlaceholder': '選択してください',
   'csvImport.noProfiles':
-    '取込プロファイルがありません。組み込みプロファイルを削除した場合は、復元機能（今後の設定画面）から戻せます。',
+    '取込プロファイルがありません。プロファイルタブの「組み込みプロファイルを復元」で追加できます。',
   'csvImport.sourceLabel': '取込元',
   'csvImport.sourceAdd': '取込元を追加',
   'csvImport.sourceEdit': '編集',
@@ -698,6 +698,9 @@ export const ja = {
   'csvImport.reviewTitle': 'レビュー（残り {count} 件）',
   'csvImport.reviewComplete': '取込完了',
   'csvImport.reviewCompleteBody': 'このファイルの取込対象 {count} 件はすべて決定済みです。',
+  'csvImport.reviewErrorsRemain': '未処理のエラーがあります',
+  'csvImport.reviewErrorsRemainBody':
+    '取込対象 {decided} 件は決定済みですが、エラー {count} 件はこのままでは取り込まれません。「エラーの明細」を確認してください。',
   'csvImport.reviewNoRows': '取込対象の行がありません。',
   'csvImport.kindCount': '{count} 件',
   'csvImport.bulkApply': 'まとめて適用',
@@ -727,6 +730,10 @@ export const ja = {
   'csvImport.decisionsEmpty': '決定済みの行はまだありません。',
   'csvImport.decisionsProfileLabel': 'プロファイル',
   'csvImport.decisionsAllProfiles': 'すべて',
+  'csvImport.decisionsFileLabel': 'ファイル',
+  'csvImport.decisionsAllFiles': 'すべてのファイル',
+  'csvImport.decisionsFileOption': '{date} 取込・総 {total} 行（{hash}…）',
+  'csvImport.decisionsFileUnknown': 'ファイル {hash}…',
   'csvImport.statusAll': 'すべて',
   'csvImport.status.registered': '登録',
   'csvImport.status.linked': 'リンク',
@@ -814,6 +821,10 @@ export const ja = {
   'csvImport.builder.previewRows': '正規化行の先頭 {count} 件',
   'csvImport.builder.name': 'プロファイル名',
   'csvImport.builder.save': '保存して取込へ進む',
+  'csvImport.builder.saveErrorsTitle': 'エラー行が残っています',
+  'csvImport.builder.saveErrorsBody':
+    'エラー {count} 行はこのプロファイルでは取り込めません（保存後の取込でもエラーのまま残ります）。このまま保存しますか？',
+  'csvImport.builder.saveErrorsConfirm': '保存する',
 
   // CSV 取込 — DSL 検証エラーの日本語化（ui/importDslIssueText.ts が zod issue から引く）。
   // zod の既定 message は英語なので、code / path から日本語へ写す。未知 code は fallback。

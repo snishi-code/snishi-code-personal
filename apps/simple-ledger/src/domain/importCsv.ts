@@ -205,6 +205,9 @@ export interface CsvTable {
  * レコード列からヘッダー行を取り出す。
  *  - headerRowIndex はレコード配列の 0 始まり index（物理行番号ではない）。
  *  - 重複ヘッダー（trim 後同名）は列参照が曖昧になるため fail-closed に拒否する。
+ *    ただし**空文字のヘッダーは重複判定から除外**する（Excel 由来の末尾カンマ等で
+ *    空セルが複数並ぶのは普通のファイル。DSL は空名の列を参照できない = 曖昧さは
+ *    生まれないため、名前付き列だけを判定する）。
  */
 export function extractCsvTable(records: readonly CsvRecord[], headerRowIndex: number): CsvTable {
   const headerRecord = records[headerRowIndex];
@@ -217,6 +220,7 @@ export function extractCsvTable(records: readonly CsvRecord[], headerRowIndex: n
   const header = headerRecord.cells.map((c) => c.trim());
   const seen = new Set<string>();
   for (const name of header) {
+    if (name === '') continue;
     if (seen.has(name)) {
       throw new CsvImportError('csv-duplicate-header', { name, line: headerRecord.line });
     }

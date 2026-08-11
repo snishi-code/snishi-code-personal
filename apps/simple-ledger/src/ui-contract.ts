@@ -354,6 +354,7 @@ export const UI = {
     rowIgnore: 'csvImport.review.row.ignore',
     rowRelease: 'csvImport.review.row.release',
     complete: 'csvImport.review.complete',
+    completeErrors: 'csvImport.review.completeErrors',
     // 個別行の「編集して適用」はホームの仕訳入力シート（journal.entry.*）を再利用する
     // （監査 P1-2）。取込専用の apply.* シートは廃止。
     // 既存仕訳へのリンクシート（類似候補 + 検索）
@@ -364,6 +365,7 @@ export const UI = {
     // 決定済み一覧（§4-6）
     decisionsList: 'csvImport.decisions.list',
     decisionsProfile: 'csvImport.decisions.profile',
+    decisionsFile: 'csvImport.decisions.file',
     statusAll: 'csvImport.decisions.status.all',
     statusRegistered: 'csvImport.decisions.status.registered',
     statusLinked: 'csvImport.decisions.status.linked',
@@ -408,6 +410,7 @@ export const UI = {
     builderPreview: 'csvImport.builder.preview',
     builderName: 'csvImport.builder.name',
     builderSave: 'csvImport.builder.save',
+    builderSaveErrorsConfirm: 'csvImport.builder.saveErrorsConfirm',
   },
   settings: {
     view: 'settings.view',

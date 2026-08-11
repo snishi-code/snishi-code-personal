@@ -239,6 +239,67 @@ describe('resolveImportRows（層2: 類似候補は提示のみ）', () => {
     });
     expect(r[0]!.similarEntryIds).toEqual([]);
   });
+
+  // 索引化（項目8: 行ごとの全仕訳走査の除去）で判定・順序が変わらないことの固定。
+  it('候補の順序は 日付距離 → 日付 → 仕訳の並び順（索引化後も同一）', () => {
+    const mk = (id: string, date: string): JournalEntry => entry(id, date, 100);
+    const r = resolveImportRows({
+      rows: [dedupRow(externalRowKey(SRC, ['id-14', '支払い']), { date: '2026-08-10' })],
+      decisions: new Map(),
+      // 距離 2（08-08 / 08-12）・距離 1（08-09）・距離 0（08-10 が 2 件 = 入力順）を混在。
+      existingEntries: [
+        mk('d2-before', '2026-08-08'),
+        mk('d0-first', '2026-08-10'),
+        mk('d1', '2026-08-09'),
+        mk('d0-second', '2026-08-10'),
+        mk('d2-after', '2026-08-12'),
+      ],
+      ownAccountId: 'paypay',
+    });
+    expect(r[0]!.similarEntryIds).toEqual(['d0-first', 'd0-second', 'd1', 'd2-before', 'd2-after']);
+  });
+
+  it('同一仕訳内に同型の行が複数あっても候補は 1 回・別金額の行は別々に候補になる', () => {
+    // 自口座 credit 100 の行を 2 本 + credit 200 の行を持つ仕訳。
+    const multi: JournalEntry = {
+      id: 'multi',
+      date: '2026-08-01',
+      description: 'multi',
+      kind: 'normal',
+      lines: [
+        { accountId: 'food', side: 'debit', amount: 400 },
+        { accountId: 'paypay', side: 'credit', amount: 100 },
+        { accountId: 'paypay', side: 'credit', amount: 200 },
+        { accountId: 'paypay', side: 'credit', amount: 100 },
+      ],
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const input = { decisions: new Map<string, ImportDecisionSummary>(), ownAccountId: 'paypay' };
+    const r100 = resolveImportRows({
+      ...input,
+      rows: [dedupRow(externalRowKey(SRC, ['id-15', '支払い']), { amount: 100 })],
+      existingEntries: [multi],
+    });
+    expect(r100[0]!.similarEntryIds).toEqual(['multi']);
+    const r200 = resolveImportRows({
+      ...input,
+      rows: [dedupRow(externalRowKey(SRC, ['id-16', '支払い']), { amount: 200 })],
+      existingEntries: [multi],
+    });
+    expect(r200[0]!.similarEntryIds).toEqual(['multi']);
+  });
+
+  it('候補は上限（SIMILAR_CANDIDATE_LIMIT）件まで', () => {
+    const entries = Array.from({ length: 8 }, (_, i) => entry(`e${i}`, '2026-08-01', 100));
+    const r = resolveImportRows({
+      rows: [dedupRow(externalRowKey(SRC, ['id-17', '支払い']))],
+      decisions: new Map(),
+      existingEntries: entries,
+      ownAccountId: 'paypay',
+    });
+    expect(r[0]!.similarEntryIds).toEqual(['e0', 'e1', 'e2', 'e3', 'e4']);
+  });
 });
 
 describe('resolveImportRows（groupId 不参加）', () => {

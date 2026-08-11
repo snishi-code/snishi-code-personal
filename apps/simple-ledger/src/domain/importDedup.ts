@@ -90,23 +90,44 @@ export function resolveImportRows(input: ResolveImportRowsInput): ImportRowResol
   const windowDays = input.similarWindowDays ?? 3;
   const entryIds = new Set(input.existingEntries.map((e) => e.id));
 
+  // 類似候補の索引: 自口座の行の (側, 金額) → 仕訳（existingEntries の順を保つ）。
+  // 未決行があるときだけ 1 回構築し、行ごとの全仕訳走査（未決 M 行 × 全 N 仕訳）を
+  // M × バケット分に減らす。判定条件・順序は従来の全走査と完全に同一。
+  let similarIndex: Map<string, { id: string; date: string }[]> | undefined;
+  const buildSimilarIndex = (): Map<string, { id: string; date: string }[]> => {
+    const index = new Map<string, { id: string; date: string }[]>();
+    for (const entry of input.existingEntries) {
+      for (const line of entry.lines) {
+        if (line.accountId !== input.ownAccountId) continue;
+        const key = `${line.side}|${line.amount}`;
+        const bucket = index.get(key);
+        if (bucket === undefined) {
+          index.set(key, [{ id: entry.id, date: entry.date }]);
+        } else if (bucket[bucket.length - 1]!.id !== entry.id) {
+          // 同一仕訳内に同型の行が複数あっても候補は 1 回（従来の some() と同じ）。
+          bucket.push({ id: entry.id, date: entry.date });
+        }
+      }
+    }
+    return index;
+  };
+
   // 類似候補: 自口座 accountId が分かるときだけ、自口座の行（同じ側・同額）を持つ
   // 既存仕訳を日付±N日で拾う。提示のみ（§5-2 層2）。
   const findSimilar = (row: DedupRow): string[] => {
     if (input.ownAccountId === undefined) return [];
     const day = dayNumber(row.date);
     if (day === undefined) return [];
+    similarIndex ??= buildSimilarIndex();
+    const bucket = similarIndex.get(`${row.ownSide}|${row.amount}`);
+    if (bucket === undefined) return [];
     const hits: { id: string; distance: number; date: string }[] = [];
-    for (const entry of input.existingEntries) {
-      const entryDay = dayNumber(entry.date);
+    for (const candidate of bucket) {
+      const entryDay = dayNumber(candidate.date);
       if (entryDay === undefined) continue;
       const distance = Math.abs(entryDay - day);
       if (distance > windowDays) continue;
-      const matches = entry.lines.some(
-        (l) =>
-          l.accountId === input.ownAccountId && l.side === row.ownSide && l.amount === row.amount,
-      );
-      if (matches) hits.push({ id: entry.id, distance, date: entry.date });
+      hits.push({ id: candidate.id, distance, date: candidate.date });
     }
     hits.sort((a, b) => a.distance - b.distance || a.date.localeCompare(b.date));
     return hits.slice(0, SIMILAR_CANDIDATE_LIMIT).map((h) => h.id);

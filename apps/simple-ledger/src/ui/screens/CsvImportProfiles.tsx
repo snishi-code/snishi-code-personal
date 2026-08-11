@@ -436,6 +436,9 @@ function ProfileBuilderPanel({
   } | null>(null);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  // error 行が残る profile の保存前確認（項目2）。保存は許すが、error 行がこの profile
+  // では取り込まれない事実（fail-closed）を明示してから進める。
+  const [confirmErrorSave, setConfirmErrorSave] = useState(false);
 
   function onFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const picked = e.target.files?.[0];
@@ -660,7 +663,9 @@ function ProfileBuilderPanel({
           <p className="field__hint">
             {t('csvImport.builder.maskIntro', { count: sample.rows.length })}
           </p>
-          <ul className="list" data-ui={UI.csvImport.builderMaskList}>
+          {/* csv-import__mask-list: セレクトの width:100% が列名を幅 0 に潰す flex の
+              組み合わせを app.css で打ち消す（項目10）。 */}
+          <ul className="list csv-import__mask-list" data-ui={UI.csvImport.builderMaskList}>
             {sample.header.map((column, i) => (
               <li key={column} className="list__item">
                 <div className="list__main">
@@ -796,12 +801,33 @@ function ProfileBuilderPanel({
             type="button"
             className="btn btn--primary btn--block"
             disabled={name.trim() === '' || busy}
-            onClick={() => void save()}
+            onClick={() => {
+              // error 行が残っているときは黙って保存しない（項目2）。件数を明示した
+              // 確認を挟む（error 0 なら従来どおり直接保存）。
+              if (preview.evaluation.errors.length > 0) setConfirmErrorSave(true);
+              else void save();
+            }}
             data-ui={UI.csvImport.builderSave}
           >
             {t('csvImport.builder.save')}
           </button>
         </div>
+      ) : null}
+
+      {confirmErrorSave && preview !== null ? (
+        <ConfirmDialog
+          title={t('csvImport.builder.saveErrorsTitle')}
+          body={t('csvImport.builder.saveErrorsBody', {
+            count: preview.evaluation.errors.length,
+          })}
+          confirmLabel={t('csvImport.builder.saveErrorsConfirm')}
+          dataUi={UI.csvImport.builderSaveErrorsConfirm}
+          onCancel={() => setConfirmErrorSave(false)}
+          onConfirm={() => {
+            setConfirmErrorSave(false);
+            void save();
+          }}
+        />
       ) : null}
     </div>
   );

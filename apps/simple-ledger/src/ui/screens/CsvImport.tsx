@@ -54,6 +54,7 @@ import {
   profileDslDigest,
   sha256HexOfBytes,
   type NormalizedRow,
+  type RowKeyAttachment,
 } from '../../domain/importIdentity';
 import {
   findOccurrenceShortages,
@@ -187,6 +188,23 @@ interface ReviewState {
 }
 
 /**
+ * レビュー素材（CSV のデコード・評価・rowKey 付与・ハッシュ）のキャッシュ。
+ * これらはファイル・profile・取込元が同じ間は決定的に同一なので、1 件適用するたびに
+ * 作り直さない（12k 仕訳規模で適用 1 回ごとの体感遅延の主因だった）。キーは
+ * bytes の参照 + profile DSL digest + binding の sourceId（rowKey の名前空間）で、
+ * どれかが変われば全部作り直す。**意味論は変えない**: キャッシュが効いている間の
+ * 再構築は decision 照合と類似候補の提示だけをやり直す。
+ */
+interface ReviewSourceCache {
+  fileBytes: Uint8Array;
+  profileDigest: string;
+  sourceId: string;
+  fileHash: string;
+  evaluation: ProfileEvaluation;
+  attachment: RowKeyAttachment;
+}
+
+/**
  * レビューを組み立てる（§4 手順 1〜3）。**完全に読み取り専用** — decision の削除・変更は
  * 一切しない。dangling の解除はレビュー行のユーザー明示操作（store 経由）だけが行う（§1-2）。
  */
@@ -194,6 +212,7 @@ async function computeReview(
   file: { name: string; bytes: Uint8Array },
   profileId: string,
   bindingId: string,
+  sourceCache: { current: ReviewSourceCache | null },
 ): Promise<ReviewState> {
   const ledger = await loadLedgerSnapshot();
   const profile = ledger.importProfiles.find((p) => p.id === profileId);
@@ -201,12 +220,29 @@ async function computeReview(
   const binding = ledger.profileBindings.find((b) => b.id === bindingId);
   if (!binding) throw new Error(t('csvImport.setupNeeded'));
 
-  const text = decodeCsvBytes(file.bytes, profile.dsl.fileFormat.encoding);
-  const evaluation = evaluateProfileText(profile.dsl, text);
-  // 行キーの名前空間は不変の sourceId（表示名の改名・重複命名に影響されない・監査 P1-3）。
-  const attachment = await attachRowKeys(evaluation.normalized, binding.sourceId);
-  const fileHash = await sha256HexOfBytes(file.bytes);
   const profileDigest = await profileDslDigest(profile.dsl);
+  let source = sourceCache.current;
+  if (
+    source === null ||
+    source.fileBytes !== file.bytes ||
+    source.profileDigest !== profileDigest ||
+    source.sourceId !== binding.sourceId
+  ) {
+    const text = decodeCsvBytes(file.bytes, profile.dsl.fileFormat.encoding);
+    const evaluation = evaluateProfileText(profile.dsl, text);
+    // 行キーの名前空間は不変の sourceId（表示名の改名・重複命名に影響されない・監査 P1-3）。
+    const attachment = await attachRowKeys(evaluation.normalized, binding.sourceId);
+    const fileHash = await sha256HexOfBytes(file.bytes);
+    source = {
+      fileBytes: file.bytes,
+      profileDigest,
+      sourceId: binding.sourceId,
+      fileHash,
+      evaluation,
+      attachment,
+    };
+    sourceCache.current = source;
+  }
 
   // 決定は台帳スナップショットの**全件**を使う（仕訳と同一トランザクション読み）。
   // ファイル外の rowKey も含めるのは、同一 fingerprint の決定済み occurrence 数（k）を
@@ -218,25 +254,25 @@ async function computeReview(
     ]),
   );
   const resolutions = resolveImportRows({
-    rows: attachment.rows,
+    rows: source.attachment.rows,
     decisions,
     existingEntries: ledger.journalEntries,
     ownAccountId: binding.ownAccountId,
   });
   const occurrenceShortages = findOccurrenceShortages(
-    attachment.rows,
+    source.attachment.rows,
     ledger.importDecisions.map((d) => d.key),
   );
-  const fileRecord = (await getImportFileRecords())[fileHash];
+  const fileRecord = (await getImportFileRecords())[source.fileHash];
   return {
     file,
-    fileHash,
+    fileHash: source.fileHash,
     profileId,
     profileDigest,
     bindingId,
     ownAccountId: binding.ownAccountId,
-    evaluation,
-    rows: attachment.rows,
+    evaluation: source.evaluation,
+    rows: source.attachment.rows,
     resolutions,
     occurrenceShortages,
     ledgerVersion: { deviceId: ledger.meta.deviceId, revision: ledger.meta.revision },
@@ -356,6 +392,8 @@ function bulkShapeLines(
 export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => void }) {
   const { ledger, applyCsvImportBatch, removeCsvImportDecisions } = useLedger();
   const fileRef = useRef<HTMLInputElement>(null);
+  // レビュー素材（パース・評価・ハッシュ）のキャッシュ（項目8）。computeReview が所有する。
+  const reviewSourceCache = useRef<ReviewSourceCache | null>(null);
 
   const [tab, setTab] = useState<'flow' | 'decisions' | 'profiles'>('flow');
   const [fileData, setFileData] = useState<{ name: string; bytes: Uint8Array } | null>(null);
@@ -374,10 +412,13 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
   const [linkTarget, setLinkTarget] = useState<ReviewRow | null>(null);
   // 決定済み一覧のフィルター・解除確認
   const [decisionProfileFilter, setDecisionProfileFilter] = useState('');
+  const [decisionFileFilter, setDecisionFileFilter] = useState('');
   const [decisionStatusFilter, setDecisionStatusFilter] = useState<'all' | ImportDecisionStatus>(
     'all',
   );
   const [pendingRemove, setPendingRemove] = useState<ImportDecision | null>(null);
+  // ファイル絞り込みの表示材料（fileHash → 取込日・総行数）。決定済みタブでだけ読む。
+  const [fileRecords, setFileRecords] = useState<Record<string, ImportFileRecord>>({});
 
   const accounts = useMemo(() => ledger?.accounts ?? [], [ledger]);
   const accountsById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
@@ -400,12 +441,17 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
 
   // レビューの組み立て（ファイル・profile・binding が揃ったときだけ）。適用・解除の後は
   // rebuildTick で作り直す（decision と台帳世代の同期・§4 手順 4「残件表示を更新」）。
+  // busy の解除もここで行う（項目7）: 適用側は busy を立てたままにし、再構築が終わった
+  // 描画と同時に解く。旧実装（適用完了で即解除）は「古いレビューのままボタンだけ生きる」
+  // 窓を作り、次の適用が stale な ledgerVersion で全拒否されて無駄になっていた。
   useEffect(() => {
+    // 選択が崩れている間は何もしない（busy が立っていても、review = null で busy に
+    // 依存する操作は描画されない。選択が復帰すれば下の finally が必ず解除する）。
     if (!fileData || !profile || !binding || bindingBroken) return;
     let active = true;
     (async () => {
       try {
-        const next = await computeReview(fileData, profile.id, binding.id);
+        const next = await computeReview(fileData, profile.id, binding.id, reviewSourceCache);
         if (active) {
           setBuiltReview(next);
           setFileError(null);
@@ -415,6 +461,9 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
           setBuiltReview(null);
           setFileError(errorText(e));
         }
+      } finally {
+        // setBuiltReview と同一バッチで解除する = ボタン活性と新レビューが同時に出る。
+        if (active) setBusy(false);
       }
     })();
     return () => {
@@ -472,7 +521,8 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
         expectedLedgerVersion: review.ledgerVersion,
       });
     } finally {
-      setBusy(false);
+      // busy はここで解かない（項目7）: レビュー再構築（上の effect）が完了するまで
+      // 維持し、古い ledgerVersion のまま次の適用ができる stale 窓を作らない。
       setRebuildTick((n) => n + 1);
     }
   }
@@ -498,7 +548,7 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
     } catch {
       // store が toast 済み。作り直しで現状と同期する。
     } finally {
-      setBusy(false);
+      // busy の解除はレビュー再構築の完了時（effect 側・項目7）。
       setRebuildTick((n) => n + 1);
     }
   }
@@ -535,6 +585,20 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
   /* ── 決定済み一覧（§4-6） ── */
 
   const allDecisions = useMemo(() => ledger?.importDecisions ?? [], [ledger]);
+  // ファイル絞り込みの表示材料（項目3）。決定が変わり得るたび（ledger 更新）に読み直す。
+  // 読めなくても絞り込み自体は fileHash で機能する（表示がハッシュ表記になるだけ）。
+  useEffect(() => {
+    if (tab !== 'decisions') return;
+    let active = true;
+    getImportFileRecords()
+      .then((records) => {
+        if (active) setFileRecords(records);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [tab, ledger]);
   // 決定の取込元表示名は sourceId から現在の binding を引く（表示名は編集可能・監査 P1-3）。
   const sourceNameById = useMemo(
     () => new Map((ledger?.profileBindings ?? []).map((b) => [b.sourceId, b.sourceIdentity])),
@@ -547,13 +611,34 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
       label: profiles.find((p) => p.id === id)?.name ?? id,
     }));
   }, [allDecisions, profiles]);
+  // ファイル絞り込み（項目3）: キーは provenance.fileHash・表示はファイル記録の情報
+  // （取込日・総行数）+ ハッシュ先頭。記録が無い（読めない）ハッシュはハッシュ表記で出す。
+  const decisionFileOptions = useMemo(() => {
+    const hashes = new Set(allDecisions.map((d) => d.provenance.fileHash));
+    return [...hashes].map((hash) => {
+      const record = fileRecords[hash];
+      return {
+        value: hash,
+        label:
+          record !== undefined
+            ? t('csvImport.decisionsFileOption', {
+                date: record.importedAt.slice(0, 10),
+                total: record.totalRowCount,
+                hash: hash.slice(0, 8),
+              })
+            : t('csvImport.decisionsFileUnknown', { hash: hash.slice(0, 8) }),
+      };
+    });
+  }, [allDecisions, fileRecords]);
   const filteredDecisions = allDecisions
     .filter((d) => decisionProfileFilter === '' || d.provenance.profileId === decisionProfileFilter)
+    .filter((d) => decisionFileFilter === '' || d.provenance.fileHash === decisionFileFilter)
     .filter((d) => decisionStatusFilter === 'all' || d.status === decisionStatusFilter)
     .sort((a, b) => (a.decidedAt < b.decidedAt ? 1 : a.decidedAt > b.decidedAt ? -1 : 0));
 
   return (
-    <section aria-labelledby="csv-import-title" data-ui={UI.csvImport.view}>
+    /* csv-import クラスは app.css の Segmented 44px 上書き（項目4）のスコープ。 */
+    <section className="csv-import" aria-labelledby="csv-import-title" data-ui={UI.csvImport.view}>
       <h1 className="screen-title" id="csv-import-title">
         {t('csvImport.title')}
       </h1>
@@ -810,14 +895,30 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
             <div className="card card--pad empty">{t('csvImport.reviewNoRows')}</div>
           ) : null}
           {review && review.rows.length > 0 && remaining === 0 ? (
-            <div className="card card--pad" data-ui={UI.csvImport.complete}>
-              <p className="section-label">
-                <Icon name="check" size={16} /> {t('csvImport.reviewComplete')}
-              </p>
-              <p className="field__hint">
-                {t('csvImport.reviewCompleteBody', { count: review.rows.length })}
-              </p>
-            </div>
+            review.evaluation.errors.length === 0 ? (
+              <div className="card card--pad" data-ui={UI.csvImport.complete}>
+                <p className="section-label">
+                  <Icon name="check" size={16} /> {t('csvImport.reviewComplete')}
+                </p>
+                <p className="field__hint">
+                  {t('csvImport.reviewCompleteBody', { count: review.rows.length })}
+                </p>
+              </div>
+            ) : (
+              /* エラー行が残っている間は「取込完了」と言わない（項目1）。error 行は
+                 この profile では取り込まれない事実（fail-closed）をここでも可視化する。 */
+              <div className="card card--pad" role="status" data-ui={UI.csvImport.completeErrors}>
+                <p className="section-label" style={{ display: 'flex', gap: 6 }}>
+                  <Icon name="alert" size={16} /> {t('csvImport.reviewErrorsRemain')}
+                </p>
+                <p className="field__hint">
+                  {t('csvImport.reviewErrorsRemainBody', {
+                    decided: review.rows.length,
+                    count: review.evaluation.errors.length,
+                  })}
+                </p>
+              </div>
+            )
           ) : null}
           {review && remaining > 0 ? (
             <div data-ui={UI.csvImport.reviewList}>
@@ -988,6 +1089,22 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
               >
                 <option value="">{t('csvImport.decisionsAllProfiles')}</option>
                 {decisionProfileOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            {decisionFileOptions.length > 0 ? (
+              <select
+                className="select"
+                value={decisionFileFilter}
+                aria-label={t('csvImport.decisionsFileLabel')}
+                onChange={(e) => setDecisionFileFilter(e.target.value)}
+                data-ui={UI.csvImport.decisionsFile}
+              >
+                <option value="">{t('csvImport.decisionsAllFiles')}</option>
+                {decisionFileOptions.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
                   </option>

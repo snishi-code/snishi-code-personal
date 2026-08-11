@@ -8,6 +8,8 @@
  *  - ui-contract: data-ui キーの存在と、タップ要素が 44px 系クラスを持つこと
  */
 import { describe, it, expect, afterEach, beforeAll } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { render, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
@@ -660,6 +662,78 @@ describe('CSV 取込 — 個別行の決定（リンク・無視・解除）', (
   });
 });
 
+describe('CSV 取込 — 決定済み一覧のファイル絞り込み（項目3）', () => {
+  /** 1 つ目（SINGLE_PAYMENT_CSV = 総 1 行）と別内容・総 2 行のファイル。 */
+  const OTHER_FILE_CSV = [
+    CSV_HEADER,
+    '2026/08/05 10:00:00,700,-,支払い,店M,M001',
+    '2026/08/06 10:00:00,900,-,支払い,店N,M002',
+  ].join('\n');
+
+  it('ファイル（fileHash）で絞り込め、表示はファイル記録の情報で読める', async () => {
+    await loadLedger();
+    await seedBinding();
+    renderScreen();
+    await waitForProfileSelect();
+    selectProfile();
+
+    // ファイル A: 1 行を無視で決定。
+    selectFile(csvFile(SINGLE_PAYMENT_CSV, 'file-a.csv'));
+    await waitFor(() => {
+      expect(qa(UI.csvImport.row)).toHaveLength(1);
+    });
+    fireEvent.click(qa(UI.csvImport.rowIgnore)[0]!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.complete)).not.toBeNull();
+    });
+
+    // ファイル B（総 2 行）: 1 行だけ無視で決定。
+    selectFile(csvFile(OTHER_FILE_CSV, 'file-b.csv'));
+    await waitFor(() => {
+      expect(qa(UI.csvImport.row)).toHaveLength(2);
+    });
+    fireEvent.click(qa(UI.csvImport.rowIgnore)[0]!);
+    await waitFor(() => {
+      expect(qa(UI.csvImport.row)).toHaveLength(1);
+    });
+
+    // 決定済み一覧: 全 2 件 + ファイルの絞り込みセレクトが出る。
+    fireEvent.click(q(UI.csvImport.tabDecisions)!);
+    await waitFor(() => {
+      expect(qa(UI.csvImport.decisionRow)).toHaveLength(2);
+    });
+    const fileSelect = q(UI.csvImport.decisionsFile) as HTMLSelectElement;
+    expect(fileSelect).not.toBeNull();
+    // 選択肢の表示はファイル記録の情報（取込日・総行数 + ハッシュ先頭）。
+    const options = [...fileSelect.querySelectorAll('option')];
+    expect(options).toHaveLength(3); // すべて + 2 ファイル
+    const fileA = options.find((o) => o.textContent?.includes('総 1 行'));
+    const fileB = options.find((o) => o.textContent?.includes('総 2 行'));
+    expect(fileA).toBeDefined();
+    expect(fileB).toBeDefined();
+
+    // ファイル A で絞る → A 由来の L001 だけ。
+    fireEvent.change(fileSelect, { target: { value: fileA!.value } });
+    await waitFor(() => {
+      expect(qa(UI.csvImport.decisionRow)).toHaveLength(1);
+    });
+    expect(qa(UI.csvImport.decisionRow)[0]!.textContent).toContain('L001');
+
+    // ファイル B で絞る → B 由来の M001 だけ。
+    fireEvent.change(fileSelect, { target: { value: fileB!.value } });
+    await waitFor(() => {
+      expect(qa(UI.csvImport.decisionRow)).toHaveLength(1);
+    });
+    expect(qa(UI.csvImport.decisionRow)[0]!.textContent).toContain('M001');
+
+    // 「すべてのファイル」へ戻すと全件。
+    fireEvent.change(fileSelect, { target: { value: '' } });
+    await waitFor(() => {
+      expect(qa(UI.csvImport.decisionRow)).toHaveLength(2);
+    });
+  });
+});
+
 describe('CSV 取込 — エラー行の件数会計（§4-2 の保存則）', () => {
   it('blocking error は件数と明細に出て、レビュー（適用対象）には出ない', async () => {
     await loadLedger();
@@ -691,6 +765,75 @@ describe('CSV 取込 — エラー行の件数会計（§4-2 の保存則）', (
 
     // error 行はレビューに出ない（正常 1 行のみ）。
     expect(qa(UI.csvImport.row)).toHaveLength(1);
+  });
+
+  it('エラー行が残っている間は正常行を全部処理しても「取込完了」と言わない（項目1）', async () => {
+    await loadLedger();
+    await seedBinding();
+    renderScreen();
+    await waitForProfileSelect();
+    selectProfile();
+    selectFile(csvFile(ERROR_CSV));
+    await waitFor(() => {
+      expect(qa(UI.csvImport.row)).toHaveLength(1);
+    });
+
+    // 正常 1 行を無視で決定 → 残り 0 件。しかしエラー 3 件は未取込のまま。
+    fireEvent.click(qa(UI.csvImport.rowIgnore)[0]!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.completeErrors)).not.toBeNull();
+    });
+    expect(q(UI.csvImport.complete)).toBeNull();
+    const card = q(UI.csvImport.completeErrors)!;
+    expect(card.textContent).toContain('未処理のエラーがあります');
+    expect(card.textContent).toContain('エラー 3 件');
+    expect(card.textContent).toContain('取込対象 1 件は決定済み');
+
+    // エラーの無いファイルでは従来どおり「取込完了」（回帰確認）。
+    selectFile(csvFile(SINGLE_PAYMENT_CSV));
+    await waitFor(() => {
+      expect(qa(UI.csvImport.row)).toHaveLength(1);
+    });
+    fireEvent.click(qa(UI.csvImport.rowIgnore)[0]!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.complete)).not.toBeNull();
+    });
+    expect(q(UI.csvImport.completeErrors)).toBeNull();
+  });
+});
+
+describe('CSV 取込 — busy はレビュー再構築の完了まで維持（項目7）', () => {
+  it('適用ボタンが再活性化した時点でレビューは再構築済み（stale な旧レビューが残らない）', async () => {
+    await loadLedger();
+    await seedFpProfileAndBinding();
+    renderScreen();
+    await waitForProfileSelect();
+    selectProfile(FP_PROFILE_ID);
+    selectFile(csvFile(fpCsv(2), 'busy-window.csv'));
+    await waitFor(() => {
+      expect(qa(UI.csvImport.rowApply)).toHaveLength(2);
+    });
+
+    // 1 件適用。旧実装は保存完了 → busy 解除 → レビュー再構築、の順だったため、
+    // ボタンが生き返った瞬間に古い 2 行レビュー（stale な ledgerVersion）が見えて
+    // いた = そこで次を適用すると staleData で全拒否される無駄が起きる。現行は
+    // 再構築の完了と同一描画で解除する。
+    fireEvent.click(qa(UI.csvImport.rowApply)[0]!);
+    await waitFor(() => {
+      const applies = qa(UI.csvImport.rowApply) as HTMLButtonElement[];
+      expect(applies.length).toBeGreaterThan(0);
+      expect(applies.every((b) => !b.disabled)).toBe(true);
+    });
+    // busy が解けた時点で古い行は消えている（旧実装ではここが 2 件のままだった）。
+    expect(qa(UI.csvImport.row)).toHaveLength(1);
+
+    // そのまま残り 1 件も適用できる（新レビュー = 新しい ledgerVersion で成功する）。
+    fireEvent.click(qa(UI.csvImport.rowApply)[0]!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.complete)).not.toBeNull();
+    });
+    const ledger = await loadLedger();
+    expect(ledger.importDecisions).toHaveLength(2);
   });
 });
 
@@ -980,5 +1123,19 @@ describe('CSV 取込 — ui-contract（data-ui とタップ要素のクラス）
         `button without tap-size class: ${button.outerHTML.slice(0, 120)}`,
       ).toBe(true);
     }
+  });
+
+  it('Segmented の 44px 上書き（項目4）: 画面ルートのスコープクラスと app.css の規則が対応する', async () => {
+    // jsdom は外部 CSS を計算しないため、スコープクラスの付与と app.css の規則の存在を
+    // 構造として固定する（他画面の journal__sort 等と同じ min-height: var(--tap) 方式）。
+    await loadLedger();
+    renderScreen();
+    await waitForProfileSelect();
+    expect(q(UI.csvImport.view)!.classList.contains('csv-import')).toBe(true);
+    // vitest の root = apps/simple-ledger（package.json の test script）前提の相対パス。
+    const css = readFileSync(join(process.cwd(), 'src/ui/app.css'), 'utf-8');
+    expect(css).toMatch(/\.csv-import \.segmented__btn\s*\{\s*min-height: var\(--tap\);/);
+    // AI ビルダーのマスク列一覧の幅 0 対策（項目10）も app.css 側の規則で固定する。
+    expect(css).toMatch(/\.csv-import__mask-list \.select\s*\{/);
   });
 });

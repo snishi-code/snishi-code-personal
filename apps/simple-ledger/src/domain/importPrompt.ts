@@ -85,13 +85,18 @@ ${sampleCsv}
 
 /**
  * AI の返書テキストから DSL の JSON 部分を取り出す（§6-3・決定的）。
- *  - プロンプトは「\`\`\`json フェンス 1 個で出力」と指示しているので、最初のフェンス
- *    （\`\`\`json / 素の \`\`\` どちらも可）の中身を採る。
- *  - フェンスが無ければ全文を JSON とみなす（AI が生 JSON だけを返した場合）。
+ *  - プロンプトは「\`\`\`json フェンス 1 個で出力」と指示しているので、**\`\`\`json フェンスを
+ *    最優先**で探す。返書の先頭に \`\`\`csv など別言語のフェンス（サンプルの引用等）が
+ *    混ざっても、その閉じフェンスを開始と誤認しない。
+ *  - \`\`\`json が無ければ最初のフェンス（言語タグ任意）→ フェンス無しなら全文、の順
+ *    （AI が素の \`\`\` や生 JSON だけを返した場合）。
  *  - ここでは切り出しだけを行う。JSON.parse と DSL 検証（parseImportProfileDsl・
  *    fail-closed）は呼び出し側の管轄。
  */
 export function extractProfileBuilderReplyJson(text: string): string {
-  const fence = /```(?:json)?[^\S\n]*\n([\s\S]*?)```/i.exec(text);
-  return (fence !== null ? fence[1]! : text).trim();
+  const jsonFence = /```json[^\S\n]*\n([\s\S]*?)```/i.exec(text);
+  if (jsonFence !== null) return jsonFence[1]!.trim();
+  const anyFence = /```[^\n]*\n([\s\S]*?)```/.exec(text);
+  if (anyFence !== null) return anyFence[1]!.trim();
+  return text.trim();
 }

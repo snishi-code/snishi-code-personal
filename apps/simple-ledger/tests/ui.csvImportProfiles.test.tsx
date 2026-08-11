@@ -234,6 +234,8 @@ describe('AI プロファイルビルダー（§6）', () => {
     await waitFor(() => {
       expect(q(UI.csvImport.builderMaskList)).not.toBeNull();
     });
+    // 列名の幅 0 対策（項目10）: app.css の上書きが効くスコープクラスを持つ。
+    expect(q(UI.csvImport.builderMaskList)!.classList.contains('csv-import__mask-list')).toBe(true);
 
     // 送信内容の完全プレビュー（= 依頼文全文）: injection 対策文言 + 実値が入っている。
     expect(promptText()).toContain(PROMPT_INJECTION_GUARD);
@@ -299,9 +301,30 @@ describe('AI プロファイルビルダー（§6）', () => {
     // 正規化行の先頭数行も見える。
     expect(preview.textContent).toContain('買い物 スーパーA');
 
-    // 名前を付けて保存 → 取込フローへの導線（profile 選択済み・binding セットアップ gate）。
+    // 名前を付けて保存。error 1 行が残っているため黙って保存されず、件数を明示した
+    // 確認ダイアログが出る（項目2。fail-closed の意味 = error 行は取り込まれない、は不変）。
     fireEvent.change(q(UI.csvImport.builderName)!, { target: { value: '銀行CSV' } });
     fireEvent.click(q(UI.csvImport.builderSave)!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.builderSaveErrorsConfirm)).not.toBeNull();
+    });
+    const errorsConfirm = q(UI.csvImport.builderSaveErrorsConfirm)!;
+    expect(errorsConfirm.textContent).toContain('エラー 1 行はこのプロファイルでは取り込めません');
+    // キャンセルなら何も保存されない。
+    fireEvent.click(within(errorsConfirm).getByRole('button', { name: 'キャンセル' }));
+    await waitFor(() => {
+      expect(q(UI.csvImport.builderSaveErrorsConfirm)).toBeNull();
+    });
+    expect((await loadLedger()).importProfiles).toHaveLength(1);
+
+    // 確認して保存 → 取込フローへの導線（profile 選択済み・binding セットアップ gate）。
+    fireEvent.click(q(UI.csvImport.builderSave)!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.builderSaveErrorsConfirm)).not.toBeNull();
+    });
+    fireEvent.click(
+      within(q(UI.csvImport.builderSaveErrorsConfirm)!).getByRole('button', { name: '保存する' }),
+    );
     await waitFor(() => {
       expect(q(UI.csvImport.setupOpen)).not.toBeNull();
     });
@@ -320,5 +343,44 @@ describe('AI プロファイルビルダー（§6）', () => {
     await waitFor(() => {
       expect(qa(UI.csvImport.profileRow)).toHaveLength(2);
     });
+  });
+
+  it('エラー 0 件のプレビューなら確認ダイアログ無しで保存できる（項目2の回帰確認）', async () => {
+    // BUILDER_CSV から error 行（金額 x）を除いた版 = 全行が正規化 or skip される。
+    const cleanCsv = BUILDER_CSV.split('\n')
+      .filter((line) => !line.includes('壊れ'))
+      .join('\n');
+    await loadLedger();
+    renderScreen();
+    await openProfilesTab();
+
+    fireEvent.click(q(UI.csvImport.builderOpen)!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.builder)).not.toBeNull();
+    });
+    fireEvent.change(q(UI.csvImport.builderFileInput)!, {
+      target: { files: [csvFile(cleanCsv, 'clean-bank.csv')] },
+    });
+    await waitFor(() => {
+      expect(q(UI.csvImport.builderMaskList)).not.toBeNull();
+    });
+    fireEvent.change(q(UI.csvImport.builderReply)!, {
+      target: { value: JSON.stringify(GOOD_DSL) },
+    });
+    fireEvent.click(q(UI.csvImport.builderCheck)!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.builderPreview)).not.toBeNull();
+    });
+    expect(kvValue(q(UI.csvImport.builderPreview)!, 'エラー')).toBe('0');
+
+    fireEvent.change(q(UI.csvImport.builderName)!, { target: { value: 'クリーン銀行CSV' } });
+    fireEvent.click(q(UI.csvImport.builderSave)!);
+    // 確認ダイアログは出ず、そのまま取込フローへ進む。
+    await waitFor(() => {
+      expect(q(UI.csvImport.setupOpen)).not.toBeNull();
+    });
+    expect(q(UI.csvImport.builderSaveErrorsConfirm)).toBeNull();
+    const ledger = await loadLedger();
+    expect(ledger.importProfiles.find((p) => p.name === 'クリーン銀行CSV')).toBeDefined();
   });
 });

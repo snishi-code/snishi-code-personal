@@ -74,6 +74,25 @@ describe('extractProfileBuilderReplyJson（§6-3・返書からの JSON 切り�
     expect(extractProfileBuilderReplyJson(reply)).toBe(json);
   });
 
+  it('先頭に ```csv など別フェンスが混ざっても ```json フェンスを最優先で採る', () => {
+    // 旧実装は csv フェンスの**閉じ**フェンスを開始と誤認し、フェンス間の説明文を返していた。
+    const reply = [
+      '入力の CSV はこう読めます。',
+      '```csv',
+      '日付,金額',
+      '2026/08/01,100',
+      '```',
+      '設定はこちらです。',
+      '```json',
+      json,
+      '```',
+    ].join('\n');
+    expect(extractProfileBuilderReplyJson(reply)).toBe(json);
+    // json フェンスが無い返書は従来どおり最初のフェンスの中身（検証は下流が fail-closed）。
+    const csvOnly = '```csv\n日付,金額\n```';
+    expect(extractProfileBuilderReplyJson(csvOnly)).toBe('日付,金額');
+  });
+
   it('フェンスが無ければ全文をトリムして返す（生 JSON だけの返書）', () => {
     expect(extractProfileBuilderReplyJson(`  ${json}\n`)).toBe(json);
   });

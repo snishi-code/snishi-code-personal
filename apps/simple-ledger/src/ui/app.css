@@ -111,6 +111,21 @@
   min-height: var(--tap);
 }
 
+/* ── CSV 取込 ── */
+/* foundation の Segmented は既定 38px。CSV 取込画面（タブ切替・決定済みの状態絞り込み）
+   でも 44px のタップ領域を保証する。 */
+.csv-import .segmented__btn {
+  min-height: var(--tap);
+}
+/* AI ビルダーのマスク列一覧: foundation の .select は width:100% のため、flex 行
+   （.list__item）内で列名（.list__main = flex:1 / min-width:0）が幅 0 に潰れて
+   読めなくなる。セレクトを内容幅へ戻し、列名側に幅を返す。 */
+.csv-import__mask-list .select {
+  width: auto;
+  flex: 0 0 auto;
+  max-width: 45%;
+}
+
 /* ── 年間・全体マトリクス ── */
 .yearly-overview__intro {
   margin-bottom: var(--space-3);
