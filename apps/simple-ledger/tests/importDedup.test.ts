@@ -3,7 +3,6 @@ import './setup';
 import type { JournalEntry } from '../src/domain/types';
 import { externalRowKey, fingerprintRowKey } from '../src/domain/importIdentity';
 import {
-  findOccurrenceShortages,
   resolveImportRows,
   type DedupRow,
   type ImportDecisionSummary,
@@ -87,14 +86,31 @@ describe('resolveImportRows（層1: rowKey 決定的照合）', () => {
   });
 });
 
-describe('resolveImportRows（occurrence の単純化 = 部分適用が決定を壊さない）', () => {
+describe('resolveImportRows（fp キーの同一ファイル規則・作者決定 2026-08-11・P1-1）', () => {
   const fp = 'aa'.repeat(32);
+  const FILE_A = 'file-hash-a';
+  const FILE_B = 'file-hash-b';
 
-  it('部分適用の残り（n > k）: 決定済み occurrence は decided・残りは普通の未解決', () => {
+  it('同一ファイルの再取込（決定の fileHash = レビュー中の fileHash）= 黙って decided', () => {
+    const rows = [dedupRow(fingerprintRowKey(SRC, fp, 1)), dedupRow(fingerprintRowKey(SRC, fp, 2))];
+    const decisions = new Map<string, ImportDecisionSummary>([
+      [fingerprintRowKey(SRC, fp, 1), { status: 'registered', entryId: 'e1', fileHash: FILE_A }],
+      [fingerprintRowKey(SRC, fp, 2), { status: 'ignored', fileHash: FILE_A }],
+    ]);
+    const r = resolveImportRows({
+      rows,
+      decisions,
+      existingEntries: [entry('e1', '2026-08-01', 100)],
+      fileHash: FILE_A,
+    });
+    expect(r.map((x) => x.status)).toEqual(['decided', 'decided']);
+  });
+
+  it('部分適用の残り（同一ファイル）: 決定済み occurrence は decided・残りは普通の未解決', () => {
     // 同一生行 3 件のうち occurrence 1 だけ適用済み → 1 は decided / 2, 3 は unresolved。
     // 旧仕様はここを count-mismatch にして決定を削除させていた（P1 バグの根）。
     const decisions = new Map<string, ImportDecisionSummary>([
-      [fingerprintRowKey(SRC, fp, 1), { status: 'registered', entryId: 'e1' }],
+      [fingerprintRowKey(SRC, fp, 1), { status: 'registered', entryId: 'e1', fileHash: FILE_A }],
     ]);
     const rows = [
       dedupRow(fingerprintRowKey(SRC, fp, 1)),
@@ -105,86 +121,95 @@ describe('resolveImportRows（occurrence の単純化 = 部分適用が決定を
       rows,
       decisions,
       existingEntries: [entry('e1', '2026-08-01', 100)],
+      fileHash: FILE_A,
     });
     expect(r.map((x) => x.status)).toEqual(['decided', 'unresolved', 'unresolved']);
   });
 
-  it('出現数が一致すれば occurrence ごとに決定的照合される', () => {
-    const rows = [dedupRow(fingerprintRowKey(SRC, fp, 1)), dedupRow(fingerprintRowKey(SRC, fp, 2))];
+  it('別ファイルの同 fingerprint ヒット = unresolved-prior-decision（黙ってスキップしない）', () => {
+    // 部分エクスポート間の occurrence ずれで別の行が同じキーを名乗り得るため、
+    // アプリ側で決定せずレビューへ出す（既定の提案 = スキップ・確定はユーザー）。
     const decisions = new Map<string, ImportDecisionSummary>([
-      [fingerprintRowKey(SRC, fp, 1), { status: 'registered', entryId: 'e1' }],
-      [fingerprintRowKey(SRC, fp, 2), { status: 'ignored' }],
+      [fingerprintRowKey(SRC, fp, 1), { status: 'registered', entryId: 'e1', fileHash: FILE_A }],
+      [fingerprintRowKey(SRC, fp, 2), { status: 'ignored', fileHash: FILE_A }],
     ]);
-    const matched = resolveImportRows({
+    const rows = [dedupRow(fingerprintRowKey(SRC, fp, 1)), dedupRow(fingerprintRowKey(SRC, fp, 2))];
+    const r = resolveImportRows({
       rows,
       decisions,
       existingEntries: [entry('e1', '2026-08-01', 100)],
+      fileHash: FILE_B,
     });
-    expect(matched.map((x) => x.status)).toEqual(['decided', 'decided']);
+    expect(r.map((x) => x.status)).toEqual([
+      'unresolved-prior-decision',
+      'unresolved-prior-decision',
+    ]);
+    // ヒットした決定は提示用に添付される（この層は読み取り専用 = 削除を指示しない）。
+    expect(r[0]!.decision).toEqual({ status: 'registered', entryId: 'e1', fileHash: FILE_A });
+    expect(r[1]!.decision).toEqual({ status: 'ignored', fileHash: FILE_A });
   });
 
-  it('過去より行が少ないファイル（n < k）でも決定どおり decided（判定は変えない）', () => {
-    // 過去に occurrence 2 まで決定済み・今回のファイルは 1 行 → 1 は decided のまま。
-    // 警告は findOccurrenceShortages が別途返す（決定の削除はどの経路でも起きない）。
+  it('fileHash が欠けている（決定側 / レビュー側）は同一性を確認できない = fail-closed にレビューへ', () => {
+    const key = fingerprintRowKey(SRC, fp, 1);
+    // 決定側に fileHash 無し。
+    const withoutDecisionHash = resolveImportRows({
+      rows: [dedupRow(key)],
+      decisions: new Map<string, ImportDecisionSummary>([[key, { status: 'ignored' }]]),
+      existingEntries: [],
+      fileHash: FILE_A,
+    });
+    expect(withoutDecisionHash[0]!.status).toBe('unresolved-prior-decision');
+    // レビュー側（input.fileHash）無し。
+    const withoutInputHash = resolveImportRows({
+      rows: [dedupRow(key)],
+      decisions: new Map<string, ImportDecisionSummary>([
+        [key, { status: 'ignored', fileHash: FILE_A }],
+      ]),
+      existingEntries: [],
+    });
+    expect(withoutInputHash[0]!.status).toBe('unresolved-prior-decision');
+  });
+
+  it('externalId 型キーは別ファイルでも従来どおり decided（不変）', () => {
+    const key = externalRowKey(SRC, ['id-ext-1', '支払い']);
     const decisions = new Map<string, ImportDecisionSummary>([
-      [fingerprintRowKey(SRC, fp, 1), { status: 'registered', entryId: 'e1' }],
-      [fingerprintRowKey(SRC, fp, 2), { status: 'registered', entryId: 'e2' }],
+      [key, { status: 'registered', entryId: 'e1', fileHash: FILE_A }],
     ]);
     const r = resolveImportRows({
-      rows: [dedupRow(fingerprintRowKey(SRC, fp, 1))],
+      rows: [dedupRow(key)],
       decisions,
-      existingEntries: [entry('e1', '2026-08-01', 100), entry('e2', '2026-08-01', 100)],
+      existingEntries: [entry('e1', '2026-08-01', 100)],
+      fileHash: FILE_B,
     });
     expect(r[0]!.status).toBe('decided');
   });
 
+  it('dangling（参照先仕訳なし）は同一ファイル規則より優先してレビューへ出る', () => {
+    const key = fingerprintRowKey(SRC, fp, 1);
+    const decisions = new Map<string, ImportDecisionSummary>([
+      [key, { status: 'registered', entryId: 'gone', fileHash: FILE_A }],
+    ]);
+    const r = resolveImportRows({
+      rows: [dedupRow(key)],
+      decisions,
+      existingEntries: [],
+      fileHash: FILE_A,
+    });
+    expect(r[0]!.status).toBe('unresolved-dangling');
+  });
+
   it('sourceId が違えば同じ fingerprint でも別名前空間（照合されない)', () => {
     const decisions = new Map<string, ImportDecisionSummary>([
-      [fingerprintRowKey('別の口座', fp, 1), { status: 'ignored' }],
-      [fingerprintRowKey('別の口座', fp, 2), { status: 'ignored' }],
+      [fingerprintRowKey('別の口座', fp, 1), { status: 'ignored', fileHash: FILE_A }],
+      [fingerprintRowKey('別の口座', fp, 2), { status: 'ignored', fileHash: FILE_A }],
     ]);
     const r = resolveImportRows({
       rows: [dedupRow(fingerprintRowKey(SRC, fp, 1))],
       decisions,
       existingEntries: [],
+      fileHash: FILE_A,
     });
     expect(r[0]!.status).toBe('unresolved');
-  });
-});
-
-describe('findOccurrenceShortages（n < k の情報提示・決定は無傷）', () => {
-  const fp = 'aa'.repeat(32);
-  const fp2 = 'bb'.repeat(32);
-
-  it('ファイル内出現数が決定済み occurrence の最大値を下回るグループを返す', () => {
-    const rows = [dedupRow(fingerprintRowKey(SRC, fp, 1))];
-    const keys = [
-      fingerprintRowKey(SRC, fp, 1),
-      fingerprintRowKey(SRC, fp, 3), // 過去のファイルには 3 件あった
-    ];
-    expect(findOccurrenceShortages(rows, keys)).toEqual([
-      { fingerprint: fp, knownCount: 3, fileCount: 1 },
-    ]);
-  });
-
-  it('n ≥ k のグループ・ext キー・ファイル外の fingerprint は返さない', () => {
-    const rows = [
-      dedupRow(fingerprintRowKey(SRC, fp, 1)),
-      dedupRow(fingerprintRowKey(SRC, fp, 2)),
-      dedupRow(externalRowKey(SRC, ['id-1', '支払い'])),
-    ];
-    const keys = [
-      fingerprintRowKey(SRC, fp, 1), // k=1 ≤ n=2
-      fingerprintRowKey(SRC, fp2, 5), // ファイルに無い fingerprint は対象外
-      externalRowKey(SRC, ['id-1', '支払い']), // ext キーは occurrence を持たない
-    ];
-    expect(findOccurrenceShortages(rows, keys)).toEqual([]);
-  });
-
-  it('sourceId が違う決定は突き合わせない（別名前空間）', () => {
-    const rows = [dedupRow(fingerprintRowKey(SRC, fp, 1))];
-    const keys = [fingerprintRowKey('別の口座', fp, 4)];
-    expect(findOccurrenceShortages(rows, keys)).toEqual([]);
   });
 });
 

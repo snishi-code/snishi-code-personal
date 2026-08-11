@@ -200,6 +200,13 @@ export interface ImportProfile {
   name: string;
   /** 組み込み profile の識別（PayPay 同梱など）。固定値・削除後に自動復活しない。 */
   builtin?: { builtinId: string; builtinVersion: number };
+  /**
+   * アーカイブ済み（v9 で追加・既定 false = undefined）。profile の「編集」は上書きではなく
+   * 旧をアーカイブして新規作成する（作者決定 2026-08-11）。アーカイブ済みは取込の
+   * プロファイル選択に出さないが、decision の provenance からの参照は残る（過去との接続維持）。
+   * アーカイブ解除の操作は作らない（組み込みだけは「組み込みを復元」が原本で上書き = 解除になる）。
+   */
+  archived?: boolean;
   dsl: ImportProfileDsl;
   createdAt: string;
   updatedAt: string;
@@ -215,6 +222,7 @@ export const importProfileSchema = z.object({
   builtin: z
     .object({ builtinId: z.string().min(1).max(60), builtinVersion: z.number().int().min(1) })
     .optional(),
+  archived: z.boolean().optional(),
   dsl: importProfileDslSchema,
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),

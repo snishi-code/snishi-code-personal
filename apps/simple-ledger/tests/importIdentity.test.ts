@@ -105,21 +105,19 @@ describe('attachRowKeys（occurrence 採番）', () => {
     const dup1 = row({ rowIndex: 2, rawLine: 'same-line' });
     const dup2 = row({ rowIndex: 3, rawLine: 'same-line' });
     const solo = row({ rowIndex: 4, rawLine: 'other-line' });
-    const { rows, fingerprintCounts } = await attachRowKeys([dup1, dup2, solo], '銀行A');
+    const { rows } = await attachRowKeys([dup1, dup2, solo], '銀行A');
     const fp = await sha256Hex('same-line');
     expect(rows[0]!.rowKey).toBe(fingerprintRowKey('銀行A', fp, 1));
     expect(rows[1]!.rowKey).toBe(fingerprintRowKey('銀行A', fp, 2));
     expect(parseRowKey(rows[2]!.rowKey)?.body).toMatchObject({ type: 'fp', occurrence: 1 });
-    expect(fingerprintCounts.get(fp)).toBe(2);
     // 行キーは全行で一意。
     expect(new Set(rows.map((r) => r.rowKey)).size).toBe(3);
   });
 
-  it('externalId 行は ext キーになり fingerprintCounts に入らない', async () => {
+  it('externalId 行は ext キーになる（occurrence 採番に参加しない）', async () => {
     const r = row({ externalIdTuple: ['id-1', '支払い'] });
-    const { rows, fingerprintCounts } = await attachRowKeys([r], 'PayPay本体');
+    const { rows } = await attachRowKeys([r], 'PayPay本体');
     expect(parseRowKey(rows[0]!.rowKey)?.body.type).toBe('ext');
-    expect(fingerprintCounts.size).toBe(0);
   });
 
   it('トリム差だけの生行は同じ fingerprint 系列として採番される', async () => {

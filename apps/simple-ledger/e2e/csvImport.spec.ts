@@ -55,6 +55,24 @@ async function selectCsvFile(page: Page, dataUi: string, name: string, text: str
   });
 }
 
+/** binding セットアップ（名前・自口座・獲得の計上先サジェスト・チャージ源泉）→ 件数会計まで。 */
+async function setupBinding(page: Page) {
+  await page.locator(ui('csvImport.setup.open')).click();
+  await expect(page.locator(ui('csvImport.setup'))).toBeVisible();
+  await page.locator(ui('csvImport.setup.identity')).fill('E2E取込元');
+  await page
+    .locator(`${ui('csvImport.setup.own')} label.chip`)
+    .first()
+    .click();
+  await page.locator(ui('csvImport.setup.incomeSuggest')).click();
+  await page
+    .locator(`${ui('csvImport.setup.charge')} label.chip`)
+    .nth(1)
+    .click();
+  await page.locator(ui('csvImport.setup.save')).click();
+  await expect(page.locator(ui('csvImport.counts'))).toBeVisible();
+}
+
 test('CSV取込: 一括適用で仕訳が増え、reload 後に同じ CSV を読み直すと全行が決定的スキップされる', async ({
   page,
 }) => {
@@ -118,6 +136,104 @@ test('CSV取込: 一括適用で仕訳が増え、reload 後に同じ CSV を読
   await expect(page.locator(ui('csvImport.review.complete'))).toBeVisible();
   await expect(page.locator(ui('csvImport.review.row'))).toHaveCount(0);
   await expect(page.locator(ui('csvImport.fileRecord'))).toBeVisible();
+});
+
+test('CSV取込: 部分適用 → 閉じて同じファイルを読み直すと残りから再開できる', async ({ page }) => {
+  await boot(page);
+  await openCsvImport(page);
+  await selectBuiltinProfile(page);
+  await selectCsvFile(page, 'csvImport.file.input', 'paypay-resume.csv', PAYPAY_CSV);
+  await expect(page.locator(ui('csvImport.setup.open'))).toBeVisible();
+  await setupBinding(page);
+  await expect(page.locator(ui('csvImport.review.row'))).toHaveCount(2);
+
+  // 1 行だけワンタップ適用（既定計上先 = セットアップのサジェスト）→ 残り 1 行。
+  await page.locator(ui('csvImport.review.row.apply')).first().click();
+  await expect(page.locator(ui('csvImport.review.row'))).toHaveCount(1);
+
+  // 画面を閉じる（reload = セッション終了と同型）→ 同じファイルを読み直す。
+  await page.reload();
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+  await openCsvImport(page);
+  await selectBuiltinProfile(page);
+  await selectCsvFile(page, 'csvImport.file.input', 'paypay-resume.csv', PAYPAY_CSV);
+
+  // 決定済み 1 件は除外され、残り 1 行から再開できる（部分再開・§1-2 のファイル記録）。
+  await expect(page.locator(ui('csvImport.counts'))).toBeVisible();
+  await expect(page.locator(ui('csvImport.review.row'))).toHaveCount(1);
+  await page.locator(ui('csvImport.review.row.apply')).first().click();
+  await expect(page.locator(ui('csvImport.review.complete'))).toBeVisible();
+
+  // 最終形: 2 件とも登録済み。
+  await page.locator(ui('csvImport.tab.decisions')).click();
+  await expect(page.locator(ui('csvImport.decisions.row'))).toHaveCount(2);
+  await page.locator(ui('csvImport.decisions.status.registered')).click();
+  await expect(page.locator(ui('csvImport.decisions.row'))).toHaveCount(2);
+});
+
+test('CSV取込: 無視 → 決定済み一覧で解除 → 再取込で同じ行がレビューに再出現する', async ({
+  page,
+}) => {
+  await boot(page);
+  await openCsvImport(page);
+  await selectBuiltinProfile(page);
+  await selectCsvFile(page, 'csvImport.file.input', 'paypay-release.csv', PAYPAY_CSV);
+  await expect(page.locator(ui('csvImport.setup.open'))).toBeVisible();
+  await setupBinding(page);
+  await expect(page.locator(ui('csvImport.review.row'))).toHaveCount(2);
+
+  // 1 行を無視で決定 → 残り 1 行。
+  await page.locator(ui('csvImport.review.row.ignore')).first().click();
+  await expect(page.locator(ui('csvImport.review.row'))).toHaveCount(1);
+
+  // 決定済み一覧: 無視で絞って解除（確認 1 つ・decision だけが消える）。
+  await page.locator(ui('csvImport.tab.decisions')).click();
+  await expect(page.locator(ui('csvImport.decisions.row'))).toHaveCount(1);
+  await page.locator(ui('csvImport.decisions.status.ignored')).click();
+  await expect(page.locator(ui('csvImport.decisions.row'))).toHaveCount(1);
+  await page.locator(ui('csvImport.decisions.remove')).first().click();
+  const removeConfirm = page.locator(ui('csvImport.decisions.removeConfirm'));
+  await expect(removeConfirm).toBeVisible();
+  await removeConfirm.getByRole('button', { name: '解除' }).click();
+  await expect(page.locator(ui('csvImport.decisions.row'))).toHaveCount(0);
+
+  // 再取込（同じファイル）→ 解除した行が普通の未解決として再出現する（可逆・冪等）。
+  await page.locator(ui('csvImport.tab.flow')).click();
+  await selectCsvFile(page, 'csvImport.file.input', 'paypay-release.csv', PAYPAY_CSV);
+  await expect(page.locator(ui('csvImport.review.row'))).toHaveCount(2);
+});
+
+test('CSV取込: タップ要素の実寸が 44px 以上（クラス規約ではなく実測・項目4）', async ({ page }) => {
+  await boot(page);
+  await openCsvImport(page);
+  await selectBuiltinProfile(page);
+  await selectCsvFile(page, 'csvImport.file.input', 'paypay-tap.csv', PAYPAY_CSV);
+  await expect(page.locator(ui('csvImport.setup.open'))).toBeVisible();
+  await setupBinding(page);
+  await expect(page.locator(ui('csvImport.review.row'))).toHaveCount(2);
+
+  // レビュー表示中の画面内の全ボタン（タブ Segmented・ファイル選択・行の適用/リンク/無視・
+  // 一括適用など）を getBoundingClientRect で実測する。行全体でタップ領域を確保する流儀の
+  // ボタン（.list__main）は、その行（.list__item）の実寸で測る。
+  const undersized = await page.evaluate(() => {
+    const view = document.querySelector('[data-ui="csvImport.view"]');
+    if (!view) return [{ label: 'view-missing', height: 0 }];
+    const offenders: { label: string; height: number }[] = [];
+    for (const button of view.querySelectorAll('button')) {
+      const rect = button.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) continue; // 非表示は対象外
+      const row = button.classList.contains('list__main') ? button.closest('li.list__item') : null;
+      const height = Math.max(rect.height, row?.getBoundingClientRect().height ?? 0);
+      if (height < 43.5) {
+        offenders.push({
+          label: (button.getAttribute('data-ui') ?? button.className).slice(0, 80),
+          height,
+        });
+      }
+    }
+    return offenders;
+  });
+  expect(undersized).toEqual([]);
 });
 
 test('AI プロファイルビルダー: 送信内容の完全プレビューがマスク・除外の指定どおりに変わる', async ({

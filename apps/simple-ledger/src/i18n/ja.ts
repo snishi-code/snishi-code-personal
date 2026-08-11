@@ -592,6 +592,8 @@ export const ja = {
   'error.importProfile.builtinReserved':
     '組み込みプロファイルの印は付けられません（組み込みは「組み込みプロファイルを復元」だけが作ります）。',
   'error.importProfile.notFound': '取込プロファイルが見つかりません。',
+  'error.importProfile.idConflict':
+    '同じ ID の取込プロファイルが既にあります。上書きはできません（アーカイブして新規作成してください）。',
   'error.importBinding.invalidStructure': '取込の紐付け（プロファイル設定）の形式が不正です。',
   'error.importBinding.notFound':
     '取込元の紐付けが見つかりません。取込元をセットアップし直してください。',
@@ -709,8 +711,13 @@ export const ja = {
   'csvImport.bulkLearn': 'この計上先を「{kind}」の既定にする',
   'csvImport.bulkShapeLine': '借方 {debit} / 貸方 {credit} — {count} 件',
   'csvImport.rowFlagged': '要再確認',
-  'csvImport.occurrenceShortage':
-    '同一内容の行が過去の取込時より少ないファイルです（{count} 種類）。過去の決定はそのまま保持されます。',
+  // fingerprint 型キーが別ファイル由来の決定にヒットした行（作者決定 2026-08-11・P1-1）
+  'csvImport.priorTag': '以前の取込と同一の可能性',
+  'csvImport.priorNote':
+    '別のファイルで取込済み・無視済みの行と同一内容です。同じ取引ならスキップしてください（過去の決定はそのまま保持されます）。',
+  'csvImport.priorSkip': 'スキップ',
+  'csvImport.noIdNote':
+    'この取込元はID列が無いため、期間が重なる取込の重複は自動確定されません。レビューで確認してください。',
   'csvImport.danglingNote':
     '過去の決定が参照する仕訳が見つかりません。解除すると未決定に戻り、取り込み直せます。',
   'csvImport.danglingRelease': '決定を解除して取り込み直す',
@@ -767,19 +774,20 @@ export const ja = {
     '「{name}」を削除します。取込元の設定と決定済みの判定は残るため、同じプロファイルを入れ直せば続きから使えます。組み込みは「組み込みプロファイルを復元」で戻せます。',
   'csvImport.profiles.restoreBuiltin': '組み込みプロファイルを復元',
   'csvImport.profiles.restoredToast': '組み込みプロファイル {count} 件を原本の内容へ戻しました。',
+  'csvImport.profiles.archivedTag': 'アーカイブ済み',
   'csvImport.profiles.pasteOpen': 'JSON を貼り付けて追加',
   'csvImport.profiles.pasteTitle': 'プロファイルの追加（JSON 貼付）',
   'csvImport.profiles.pasteIntro':
-    '変換規則（DSL v1）の JSON を貼り付けて検証し、プロファイルとして保存します。検証に失敗した場合は何も保存しません。',
-  'csvImport.profiles.pasteTarget': '保存先',
+    '変換規則（DSL v1）の JSON を貼り付けて検証し、新しいプロファイルとして保存します。既存の作り直しを選ぶと、旧プロファイルをアーカイブして新規作成します（上書きはしません）。検証に失敗した場合は何も保存しません。',
+  'csvImport.profiles.pasteTarget': '保存方法',
   'csvImport.profiles.pasteTargetNew': '新規追加',
-  'csvImport.profiles.pasteTargetOverwrite': '上書き: {name}',
+  'csvImport.profiles.pasteTargetReplace': '作り直し: {name}（旧をアーカイブ）',
   'csvImport.profiles.pasteName': '名前',
   'csvImport.profiles.pasteJson': 'DSL JSON',
   'csvImport.profiles.pasteSave': '検証して保存',
   'csvImport.profiles.jsonTitle': 'プロファイルの JSON',
   'csvImport.profiles.jsonHint':
-    '編集はこの JSON をコピーし、「JSON を貼り付けて追加」から新規または上書きで保存してください。',
+    '編集はこの JSON をコピーし、「JSON を貼り付けて追加」から新規または作り直し（旧をアーカイブして新規作成）で保存してください。',
   'csvImport.profiles.copy': 'コピー',
   'csvImport.profiles.copied': 'コピーしました。',
   'csvImport.profiles.copyFailed': 'コピーできませんでした。手動で選択してコピーしてください。',

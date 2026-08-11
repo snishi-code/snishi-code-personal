@@ -111,9 +111,8 @@ describe('PayPay 同梱 profile', () => {
     const r = evaluateFixture();
     expect(r.normalized.every((n) => n.externalIdTuple !== undefined)).toBe(true);
     expect(r.normalized[0]!.externalIdTuple).toEqual(['90000000000000000001', '支払い']);
-    const { rows, fingerprintCounts } = await attachRowKeys(r.normalized, 'PayPay本体');
+    const { rows } = await attachRowKeys(r.normalized, 'PayPay本体');
     expect(new Set(rows.map((x) => x.rowKey)).size).toBe(ROWS.length);
     expect(rows.every((x) => parseRowKey(x.rowKey)?.body.type === 'ext')).toBe(true);
-    expect(fingerprintCounts.size).toBe(0);
   });
 });

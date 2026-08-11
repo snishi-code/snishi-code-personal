@@ -17,9 +17,9 @@ import { CsvImport } from '../src/ui/screens/CsvImport';
 import { LedgerProvider } from '../src/state/store';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import {
+  createImportProfile,
   loadLedger,
   upsertEntry,
-  upsertImportProfile,
   upsertProfileBinding,
 } from '../src/data/repository';
 import { putRecord, STORE } from '../src/data/db';
@@ -175,7 +175,7 @@ function fpCsv(sameRowCount: number): string {
 async function seedFpProfileAndBinding(): Promise<void> {
   const ledger = await loadLedger();
   const ts = new Date().toISOString();
-  await upsertImportProfile({
+  await createImportProfile({
     id: FP_PROFILE_ID,
     name: '指紋テスト',
     dsl: FP_DSL,
@@ -478,7 +478,7 @@ describe('CSV 取込 — 行種一括適用の一般化（監査 P1-4）', () =>
     const before = await loadLedger();
     // FP 系の DSL を別 profile として保存し、kindDestinations 無しの binding を用意する。
     const ts = new Date().toISOString();
-    await upsertImportProfile({
+    await createImportProfile({
       id: 'generic-bulk-ui',
       name: '一般プロファイル',
       dsl: FP_DSL,
@@ -704,9 +704,16 @@ describe('CSV 取込 — 決定済み一覧のファイル絞り込み（項目3
     });
     const fileSelect = q(UI.csvImport.decisionsFile) as HTMLSelectElement;
     expect(fileSelect).not.toBeNull();
-    // 選択肢の表示はファイル記録の情報（取込日・総行数 + ハッシュ先頭）。
+    // 選択肢の表示はファイル記録の情報（取込日・総行数 + ハッシュ先頭）。ファイル記録は
+    // タブ表示後に非同期で読まれ、読み込み前はハッシュ表記のフォールバックで出るため、
+    // ラベルが記録の情報へ置き換わるまで待つ（全体実行の負荷で顕在化する race・分離問題ではない）。
+    await waitFor(() => {
+      const options = [...fileSelect.querySelectorAll('option')];
+      expect(options).toHaveLength(3); // すべて + 2 ファイル
+      expect(options.some((o) => o.textContent?.includes('総 1 行'))).toBe(true);
+      expect(options.some((o) => o.textContent?.includes('総 2 行'))).toBe(true);
+    });
     const options = [...fileSelect.querySelectorAll('option')];
-    expect(options).toHaveLength(3); // すべて + 2 ファイル
     const fileA = options.find((o) => o.textContent?.includes('総 1 行'));
     const fileB = options.find((o) => o.textContent?.includes('総 2 行'));
     expect(fileA).toBeDefined();
@@ -899,9 +906,9 @@ describe('CSV 取込 — fingerprint 行の部分適用（P1 回帰: 決定の�
     expect(
       ledger.journalEntries.filter((e) => e.metadata?.importSource !== undefined),
     ).toHaveLength(1);
-    // 残り 2 行は警告バッジ無しの普通の未解決（mismatch 扱いしない）。
+    // 残り 2 行は警告バッジ無しの普通の未解決（mismatch 扱いしない・「同一の可能性」でもない）。
     expect(document.body.textContent).not.toContain('要再確認');
-    expect(q(UI.csvImport.occurrenceShortage)).toBeNull();
+    expect(document.body.textContent).not.toContain('以前の取込と同一の可能性');
 
     // 同じファイルを読み直しても決定は消えない・決定済み 1 件を除外して残り 2 件が出る。
     // （旧レビューと新レビューは同一表示になるため、いったん消えてから再表示されるのを待つ）
@@ -944,15 +951,19 @@ describe('CSV 取込 — fingerprint 行の部分適用（P1 回帰: 決定の�
   });
 });
 
-describe('CSV 取込 — 出現数が過去より少ないファイル（n < k は警告バナーのみ）', () => {
-  it('過去 2 件決定済み・今回 1 行のファイル → 警告を情報提示し決定は無傷', async () => {
+describe('CSV 取込 — fp キーの同一ファイル規則（作者決定 2026-08-11・P1-1）', () => {
+  it('同一内容の再取込は黙ってスキップ・別ファイルでは「同一の可能性」提案に出て決定は無傷', async () => {
     await loadLedger();
     await seedFpProfileAndBinding();
     renderScreen();
     await waitForProfileSelect();
     selectProfile(FP_PROFILE_ID);
+    // ID 列の無い profile を選ぶと注意 1 行が出る（重複が自動確定されない旨）。
+    await waitFor(() => {
+      expect(q(UI.csvImport.noIdNote)).not.toBeNull();
+    });
 
-    // 同一生行 2 件のファイルを全行適用（k = 2）。
+    // 同一生行 2 件のファイルを全行適用。
     selectFile(csvFile(fpCsv(2), 'fp2.csv'));
     await waitFor(() => {
       expect(qa(UI.csvImport.row)).toHaveLength(2);
@@ -966,19 +977,80 @@ describe('CSV 取込 — 出現数が過去より少ないファイル（n < k �
       expect(q(UI.csvImport.complete)).not.toBeNull();
     });
 
-    // 同一生行が 1 件しか無いファイル（n = 1 < k = 2）→ 警告バナー + 決定どおり除外。
+    // 同一バイト列（fileHash 一致）の再取込 = 従来どおり黙って決定的スキップ。
+    selectFile(csvFile(fpCsv(2), 'fp2-again.csv'));
+    await waitFor(() => {
+      expect(q(UI.csvImport.counts)).toBeNull();
+    });
+    await waitFor(() => {
+      expect(q(UI.csvImport.counts)!.textContent).toContain('決定済み 2 件を除外し');
+    });
+    expect(qa(UI.csvImport.row)).toHaveLength(0);
+    expect(document.body.textContent).not.toContain('以前の取込と同一の可能性');
+
+    // 内容の違うファイル（同一生行 1 件 = fileHash 不一致）→ 黙ってスキップせず
+    // 「以前の取込と同一の可能性」フラグ + 既定の提案 = スキップでレビューへ出す。
     selectFile(csvFile(fpCsv(1), 'fp1.csv'));
     await waitFor(() => {
-      expect(q(UI.csvImport.occurrenceShortage)).not.toBeNull();
+      expect(qa(UI.csvImport.rowPriorSkip)).toHaveLength(1);
     });
-    expect(q(UI.csvImport.occurrenceShortage)!.textContent).toContain(
-      '過去の取込時より少ないファイル',
-    );
-    expect(q(UI.csvImport.counts)!.textContent).toContain('決定済み 1 件を除外し');
+    const row = qa(UI.csvImport.row)[0]!;
+    expect(row.textContent).toContain('以前の取込と同一の可能性');
+    // 決定済みキーへの再決定は alreadyDecided になるため、適用・リンク・無視・一括は出ない。
+    expect(qa(UI.csvImport.rowApply)).toHaveLength(0);
+    expect(qa(UI.csvImport.rowLink)).toHaveLength(0);
+    expect(qa(UI.csvImport.rowIgnore)).toHaveLength(0);
+    expect(qa(UI.csvImport.kindBulk)).toHaveLength(0);
+    // レビューに出しただけでは決定は 1 件も消えていない（読み取り専用・決定の削除は起きない）。
+    expect((await loadLedger()).importDecisions).toHaveLength(2);
+
+    // スキップを確定（何も書き込まないセッション内の確認）→ 決定済み扱いで完了になる。
+    fireEvent.click(qa(UI.csvImport.rowPriorSkip)[0]!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.complete)).not.toBeNull();
+    });
     expect(qa(UI.csvImport.row)).toHaveLength(0);
-    // 決定は 1 件も消えていない（旧仕様はここで 2 件とも削除していた）。
-    const ledger = await loadLedger();
-    expect(ledger.importDecisions).toHaveLength(2);
+    expect(q(UI.csvImport.counts)!.textContent).toContain('決定済み 1 件を除外し');
+    expect((await loadLedger()).importDecisions).toHaveLength(2);
+  });
+});
+
+describe('CSV 取込 — ファイル切替のレースガード（P1-3）', () => {
+  it('A 読込中に B を選ぶと A の応答は捨てられ、B のレビューだけが出る', async () => {
+    await loadLedger();
+    await seedFpProfileAndBinding();
+    renderScreen();
+    await waitForProfileSelect();
+    selectProfile(FP_PROFILE_ID);
+
+    // A: arrayBuffer を手動 resolve できる「遅い」ファイル（3 行）。
+    const slowA = csvFile(fpCsv(3), 'slow-a.csv');
+    let resolveA: ((buffer: ArrayBuffer) => void) | undefined;
+    Object.defineProperty(slowA, 'arrayBuffer', {
+      value: () =>
+        new Promise<ArrayBuffer>((resolve) => {
+          resolveA = resolve;
+        }),
+    });
+    selectFile(slowA);
+    expect(resolveA).toBeDefined();
+
+    // A の読込が終わらないうちに B（1 行）を選ぶ → B のレビューが出る。
+    selectFile(csvFile(fpCsv(1), 'fast-b.csv'));
+    await waitFor(() => {
+      expect(qa(UI.csvImport.row)).toHaveLength(1);
+    });
+    expect(kvValue(q(UI.csvImport.counts)!, '総行数')).toBe('1');
+
+    // 遅れて A の読込が完了しても、古い応答は捨てられて B のレビューのまま
+    // （= B 選択直後に A を適用できる窓は無い）。
+    const encoded = new TextEncoder().encode(fpCsv(3));
+    const bufferA = new ArrayBuffer(encoded.byteLength);
+    new Uint8Array(bufferA).set(encoded);
+    resolveA!(bufferA);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(qa(UI.csvImport.row)).toHaveLength(1);
+    expect(kvValue(q(UI.csvImport.counts)!, '総行数')).toBe('1');
   });
 });
 

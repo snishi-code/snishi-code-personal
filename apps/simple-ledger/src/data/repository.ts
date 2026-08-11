@@ -3679,22 +3679,50 @@ function parseImportProfileSavable(profile: ImportProfile): ImportProfile {
 }
 
 /**
- * Import Profile の作成・編集。組み込み印（builtin）は seed / 復元だけが管理する:
- * 既存の組み込みを編集しても印は維持し、ユーザー入力からの印の持ち込みは fail-closed に拒否する
- * （偽の組み込みを作らせない。「組み込みを復元」の上書き対象は固定 ID の原本だけ）。
+ * Import Profile の新規作成（v9・作者決定 2026-08-11: **上書き保存の廃止**）。
+ * 既存 profile の「編集」は archiveProfileId で旧をアーカイブして新規を作る
+ * （勘定科目と同じアーカイブ+新規方式。組み込みの編集も同様で、新規側に組み込み印は付かない）。
+ *  - 既存 ID への保存は黙った上書きになるため fail-closed に拒否する。
+ *  - 組み込み印（builtin）は seed / 復元だけが管理する。ユーザー入力からの持ち込みは拒否
+ *    （偽の組み込みを作らせない。「組み込みを復元」の上書き対象は固定 ID の原本だけ）。
+ *  - archiveProfileId 指定時は同一 tx で旧 profile を archived にし、その binding を
+ *    新 profile へ付け替える（sourceId の連続性 = 過去の決定の照合を新 profile でも保つ。
+ *    アーカイブ済み profile は取込に使えないため、binding を残しても死蔵になるだけ）。
  */
-async function upsertImportProfileUnlocked(profile: ImportProfile): Promise<ImportProfile> {
+async function createImportProfileUnlocked(
+  profile: ImportProfile,
+  options: { archiveProfileId?: string } = {},
+): Promise<ImportProfile> {
   const parsed = parseImportProfileSavable(profile);
   const existing = await getAll<ImportProfile>(STORE.importProfiles);
-  const prev = existing.find((p) => p.id === parsed.id);
-  const saved: ImportProfile = { ...parsed };
-  if (prev?.builtin !== undefined) {
-    saved.builtin = prev.builtin;
-  } else if (saved.builtin !== undefined) {
+  if (existing.some((p) => p.id === parsed.id)) {
+    throw new LedgerError('error.importProfile.idConflict');
+  }
+  if (parsed.builtin !== undefined) {
     throw new LedgerError('error.importProfile.builtinReserved');
   }
-  await writeWithRevision([STORE.importProfiles], (t) => {
-    t.objectStore(STORE.importProfiles).put(saved);
+  // 新規は常に非アーカイブで生まれる（archived の持ち込みは正規化で落とす）。
+  const saved: ImportProfile = { ...parsed };
+  delete saved.archived;
+
+  const ts = nowIso();
+  let archiveTarget: ImportProfile | undefined;
+  let movedBindings: ProfileBinding[] = [];
+  if (options.archiveProfileId !== undefined) {
+    const target = existing.find((p) => p.id === options.archiveProfileId);
+    if (!target) throw new LedgerError('error.importProfile.notFound');
+    archiveTarget = { ...target, archived: true, updatedAt: ts };
+    const bindings = await getAll<ProfileBinding>(STORE.profileBindings);
+    movedBindings = bindings
+      .filter((b) => b.profileId === target.id)
+      .map((b) => ({ ...b, profileId: saved.id, updatedAt: ts }));
+  }
+  await writeWithRevision([STORE.importProfiles, STORE.profileBindings], (t) => {
+    const profiles = t.objectStore(STORE.importProfiles);
+    profiles.put(saved);
+    if (archiveTarget !== undefined) profiles.put(archiveTarget);
+    const bindingStore = t.objectStore(STORE.profileBindings);
+    for (const binding of movedBindings) bindingStore.put(binding);
   });
   return saved;
 }
@@ -3715,7 +3743,9 @@ async function deleteImportProfileUnlocked(id: string): Promise<void> {
 /**
  * 「組み込みプロファイルを復元」（§1-1・設定画面のボタンだけが呼ぶ）。
  * builtinId / builtinVersion / profile ID は固定値の原本へ戻す（冪等）。
- * 既存の同 ID（編集済みの組み込み）は原本で上書きされる。createdAt だけは既存を保つ。
+ * 既存の同 ID（アーカイブ済みを含む）は原本で上書きされる。createdAt だけは既存を保つ。
+ * 原本は archived を持たないため、アーカイブ済みの組み込みはここで有効へ戻る
+ * （= アーカイブ解除の唯一の経路・作者決定 2026-08-11）。
  */
 async function restoreBuiltinImportProfilesUnlocked(): Promise<ImportProfile[]> {
   const restored = builtinImportProfilesForSeed(nowIso());
@@ -3825,10 +3855,11 @@ export async function findProfileBinding(
 }
 
 /**
- * 適用時の binding 再検証（監査 P1-3・§4-4）。検証するのは「binding が存在し、指す科目が
- * 実在して role が binding の定義と整合していること」だけ（作者決定 8/11: 仕訳レベルの
- * 借貸同一科目・行種→role の新たな制限は足さない。仕訳日付での科目生存は既存の
- * assertEntrySavable の管轄なのでここで重複実装しない）。
+ * 適用時の binding 再検証（監査 P1-3 / P1-4・§4-4）。検証するのは「binding が存在し、指す科目が
+ * 実在して role が binding の定義と整合し、**archived でない**こと」= UI の broken 判定
+ * （bindingIsBroken）と同一条件（作者決定 8/11: 仕訳レベルの借貸同一科目・行種→role の
+ * 新たな制限は足さない。仕訳日付での科目生存は既存の assertEntrySavable の管轄なので
+ * ここで重複実装しない）。
  */
 function assertBindingUsableForImport(
   binding: ProfileBinding | undefined,
@@ -3839,18 +3870,18 @@ function assertBindingUsableForImport(
     throw new LedgerError('error.importBinding.notFound');
   }
   const own = accounts.get(binding.ownAccountId);
-  if (!own || own.role !== 'daily-asset') {
+  if (!own || own.role !== 'daily-asset' || own.archived) {
     throw new LedgerError('error.importBinding.ownAccountRole');
   }
   if (binding.chargeSourceAccountId !== undefined) {
     const source = accounts.get(binding.chargeSourceAccountId);
-    if (!source || source.role !== 'daily-asset') {
+    if (!source || source.role !== 'daily-asset' || source.archived) {
       throw new LedgerError('error.importBinding.chargeSourceRole');
     }
   }
   for (const accountId of Object.values(binding.kindDestinations)) {
     const account = accounts.get(accountId);
-    if (!account || !isRecurringPostableRole(account.role)) {
+    if (!account || !isRecurringPostableRole(account.role) || account.archived) {
       throw new LedgerError('error.importBinding.destinationRole');
     }
   }
@@ -4403,7 +4434,7 @@ export const archiveMonthlyCost = serializeMutation(archiveMonthlyCostUnlocked);
 export const deleteMonthlyCost = serializeMutation(deleteMonthlyCostUnlocked);
 export const replaceLedger = serializeMutation(replaceLedgerUnlocked);
 export const resetAll = serializeMutation(resetAllUnlocked);
-export const upsertImportProfile = serializeMutation(upsertImportProfileUnlocked);
+export const createImportProfile = serializeMutation(createImportProfileUnlocked);
 export const deleteImportProfile = serializeMutation(deleteImportProfileUnlocked);
 export const restoreBuiltinImportProfiles = serializeMutation(restoreBuiltinImportProfilesUnlocked);
 export const upsertProfileBinding = serializeMutation(upsertProfileBindingUnlocked);

@@ -9,8 +9,10 @@
  *    影響を受けない取込元 ID で名前空間を切る。
  *  - externalId 定義があれば ['ext', ...tuple]、無ければ
  *    ['fp', SHA-256(生行のトリム済み文字列), occurrence]。
- *  - occurrence = 同一 fingerprint のファイル内出現順（1 始まり）。生行に日付が含まれる
- *    ため、日付範囲スライスの export 同士でも同日の行集合は保たれ、番号は安定する。
+ *  - occurrence = 同一 fingerprint のファイル内出現順（1 始まり）。番号は**同一バイト列の
+ *    ファイル内でだけ**安定する。別ファイル（部分エクスポート）間ではずれ得るため、
+ *    fp キーの決定済みヒットを黙ってスキップしてよいのは同一ファイルの再取込だけ
+ *    （importDedup の同一ファイル規則・作者決定 2026-08-11）。
  *  - SHA-256 は WebCrypto（crypto.subtle）＝ async。外部通信なし。
  */
 import type { EvaluatedImportRow } from './importDsl';
@@ -169,16 +171,12 @@ export interface NormalizedRow extends EvaluatedImportRow {
 export interface RowKeyAttachment {
   /** 入力と同順の正規化行（rowKey 付き）。 */
   rows: NormalizedRow[];
-  /**
-   * fingerprint 値 → ファイル内出現数。§5-2 の「決定済みの既知 occurrence 数と
-   * ファイル内出現数の不一致」防御に使う（externalId のファイルでは空）。
-   */
-  fingerprintCounts: Map<string, number>;
 }
 
 /**
  * 評価済み行の列へ rowKey を付与する（ファイル内順で occurrence を採番）。
- * 同一 fingerprint の出現数もあわせて返す。
+ * occurrence は**ファイル内の全母集合**で採番する（部分集合で振ると番号がずれ、
+ * fingerprint キーの同一性が壊れる — 将来の取込開始日 cutoff もこの後段に入る）。
  */
 export async function attachRowKeys(
   rows: readonly EvaluatedImportRow[],
@@ -209,5 +207,5 @@ export async function attachRowKeys(
       rowKey: fingerprintRowKey(sourceId, fp, occurrence, identityVersion),
     });
   }
-  return { rows: keyed, fingerprintCounts };
+  return { rows: keyed };
 }

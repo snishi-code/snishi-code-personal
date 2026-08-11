@@ -120,8 +120,14 @@ interface LedgerContextValue {
   reorderAccounts: (ids: string[]) => Promise<void>;
   removeAccount: (id: string) => Promise<void>;
   saveSettings: (settings: Settings) => Promise<void>;
-  /** CSV 取込: profile の追加・上書き（JSON 貼付・AI ビルダーの保存・§1-1）。 */
-  saveImportProfile: (profile: ImportProfile) => Promise<ImportProfile>;
+  /**
+   * CSV 取込: profile の新規作成（JSON 貼付・AI ビルダーの保存・§1-1）。上書きは廃止
+   * （作者決定 2026-08-11）。archiveProfileId 指定で旧をアーカイブして作り直す。
+   */
+  saveImportProfile: (
+    profile: ImportProfile,
+    options?: { archiveProfileId?: string },
+  ) => Promise<ImportProfile>;
   /** CSV 取込: profile の削除（組み込みも可・binding / decision は残す・§1-1）。 */
   removeImportProfile: (id: string) => Promise<void>;
   /** CSV 取込: 組み込みプロファイルを原本へ復元（冪等・§1-1）。 */
@@ -576,9 +582,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   );
 
   const saveImportProfile = useCallback<LedgerContextValue['saveImportProfile']>(
-    async (profile) => {
+    async (profile, options) => {
       try {
-        const saved = await repo.upsertImportProfile(profile);
+        const saved = await repo.createImportProfile(profile, options);
         await refresh();
         toast.show(t('toast.saved'), 'success');
         return saved;

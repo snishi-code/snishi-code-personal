@@ -3,23 +3,42 @@
  * 後で照合アルゴリズムを差し替えられるよう、ストレージ・UI・profile に依存しない
  * 純関数だけを置く。呼び出し側（data / UI フェーズ）との契約は次のとおり。
  *
+ * 処理順の固定（取込開始日 cutoff の導入に備えた明文化・2026-08-11）:
+ *   ① 全 valid 行の正規化（importDsl.evaluateProfileText）
+ *   ② **全母集合**で rowKey / occurrence 付与（importIdentity.attachRowKeys。
+ *      occurrence はファイル内の全行で採番する — 部分集合で振ると番号がずれる）
+ *   ③ decision 照合（この層 = resolveImportRows）
+ *   ④ （将来の取込開始日 cutoff はここ = 照合の後・レビュー表示の前に評価段階の明示 skip として入る）
+ *   ⑤ invalid 行は隠さず error（件数会計の保存則: 全行 = normalized + skip + error）
+ *
  *  入力: rowKey 付きの正規化行の列（ファイル内順。rowKey はファイル内で一意 —
  *        ext キーのファイル内衝突は評価段階で error 行に倒してあり、fp キーは
  *        occurrence 採番で衝突しない）・既存 ImportDecision の Map（rowKey → 要約。
  *        ファイル外の rowKey を含む**全決定**を渡してよい。参照するのは行と同一キーのみ）・
- *        既存仕訳の列（dangling 判定と類似候補の提示用）。
+ *        既存仕訳の列（dangling 判定と類似候補の提示用）・レビュー中ファイルの fileHash。
  *  出力: 入力と同順の行別判定。
  *   - 'decided'             = 決定済み（黙って除外してよい行・件数だけ表示）
  *   - 'unresolved'          = 未決定（レビューへ）。同一 fingerprint の決定済み occurrence より
  *                             後の行（部分適用の残り・新しく増えた行）も**普通の未解決**として
- *                             ここに入る（不一致扱いにしない）。
+ *                             ここに入る。
+ *   - 'unresolved-prior-decision' = fingerprint 型キーが**別ファイル由来**の決定にヒットした行。
+ *                             黙ってスキップせず「以前の取込と同一の可能性」フラグ付きで
+ *                             レビューへ出す（既定の提案 = スキップ・確定はユーザー）。
  *   - 'unresolved-dangling' = 決定はあるが参照先仕訳が実在しない（§1-2）。レビューへ出すが、
  *                             決定の削除は**ユーザーの明示操作**（UI → store 経由）だけが行う。
  *
- *  規則:
+ *  規則（作者決定 2026-08-11・Codex P1-1 対応）:
  *   - この層は**読み取り専用**の判定器。decision の削除・変更をどの経路でも指示しない。
- *   - 同一 fingerprint の出現数が過去の決定より少ないファイル（n < k）は行の判定を変えず、
- *     findOccurrenceShortages が**情報提示用の警告**として別途返す（件数会計の近くに表示）。
+ *   - **externalId 型キー**は決定的照合（従来どおり decided）。金融口座内で一意な ID が
+ *     あるため、部分エクスポート間でも行の同一性が保証される。
+ *   - **fingerprint 型キー**の決定済みヒットは、**同一ファイル（決定の由来 fileHash =
+ *     レビュー中ファイルの fileHash）の再取込のときだけ**黙って決定的スキップする。
+ *     同一バイト列のファイルでは occurrence 採番が完全に一致するため安全。別ファイルでは
+ *     部分エクスポート間の occurrence ずれで別の行が同じキーを名乗り得るため、アプリ側で
+ *     決定せずレビューへ出す（'unresolved-prior-decision'）。fileHash がどちらか欠けている
+ *     場合も同一性を確認できないので fail-closed にレビューへ出す。
+ *     旧仕様の「決定済み occurrence 最大値からの既知件数推定（n < k 警告）」はこの単純な
+ *     規則に置き換えて撤去した。
  *   - **groupId はいかなる層のキーにも参加しない**（§5-2。入力型に groupId を持たせない）。
  *   - 類似候補（層2）は**提示のみ**。自動登録・自動除外は絶対にしない。
  *   - この関数は判定するだけで何も書き込まない（解決はリンク方式・呼び出し側の管轄）。
@@ -34,9 +53,19 @@ export interface ImportDecisionSummary {
   status: ImportDecisionStatus;
   /** registered / linked のとき必須・ignored のとき無し（schema はデータ層で強制）。 */
   entryId?: string;
+  /**
+   * 決定の由来ファイルの SHA-256（provenance.fileHash）。fingerprint 型キーの
+   * 「同一ファイルの再取込」判定に使う。欠けている場合は同一性を確認できないため、
+   * fp キーのヒットはレビューへ出す（fail-closed）。
+   */
+  fileHash?: string;
 }
 
-export type ImportRowResolutionStatus = 'decided' | 'unresolved' | 'unresolved-dangling';
+export type ImportRowResolutionStatus =
+  | 'decided'
+  | 'unresolved'
+  | 'unresolved-prior-decision'
+  | 'unresolved-dangling';
 
 /** 判定に必要な行の最小形（NormalizedRow の部分集合。groupId は受け取らない）。 */
 export interface DedupRow {
@@ -50,7 +79,7 @@ export interface DedupRow {
 export interface ImportRowResolution {
   rowKey: string;
   status: ImportRowResolutionStatus;
-  /** ヒットした決定（decided / dangling のとき）。 */
+  /** ヒットした決定（decided / prior-decision / dangling のとき）。 */
   decision?: ImportDecisionSummary;
   /** 類似候補の仕訳 ID（提示のみ・自動処理禁止）。日付の近い順。 */
   similarEntryIds: string[];
@@ -63,6 +92,12 @@ export interface ResolveImportRowsInput {
   decisions: ReadonlyMap<string, ImportDecisionSummary>;
   /** 既存仕訳（dangling 判定と類似候補に使う）。 */
   existingEntries: readonly JournalEntry[];
+  /**
+   * レビュー中ファイルの SHA-256。fingerprint 型キーの「同一ファイルの再取込」判定に使う。
+   * 未指定なら同一性を確認できないため、fp キーの決定済みヒットは黙ってスキップせず
+   * レビューへ出す（fail-closed）。
+   */
+  fileHash?: string;
   /**
    * 自口座の勘定科目 ID（binding 由来）。未指定なら類似候補は出さない
    * （「自口座一致」を満たせないため。判定そのものには影響しない）。
@@ -83,7 +118,7 @@ function dayNumber(isoDate: string): number | undefined {
 }
 
 /**
- * 行ごとの重複判定（層1: rowKey 決定的照合）と
+ * 行ごとの重複判定（層1: rowKey 決定的照合 + fp キーの同一ファイル規則）と
  * 類似候補（層2: 日付±N日・同額・自口座一致）を返す。入力と同順。
  */
 export function resolveImportRows(input: ResolveImportRowsInput): ImportRowResolution[] {
@@ -137,82 +172,37 @@ export function resolveImportRows(input: ResolveImportRowsInput): ImportRowResol
     const decision = input.decisions.get(row.rowKey);
 
     if (decision !== undefined) {
-      if (decision.status === 'ignored') {
-        return { rowKey: row.rowKey, status: 'decided', decision, similarEntryIds: [] };
+      // registered / linked で参照先仕訳が実在しなければ dangling（§1-2 の防御・最優先）。
+      if (decision.status !== 'ignored') {
+        if (decision.entryId === undefined || !entryIds.has(decision.entryId)) {
+          return {
+            rowKey: row.rowKey,
+            status: 'unresolved-dangling',
+            decision,
+            similarEntryIds: findSimilar(row),
+          };
+        }
       }
-      // registered / linked: 参照先仕訳が実在しなければ dangling（§1-2 の防御）。
-      if (decision.entryId !== undefined && entryIds.has(decision.entryId)) {
-        return { rowKey: row.rowKey, status: 'decided', decision, similarEntryIds: [] };
+      // fingerprint 型キー: 同一ファイルの再取込だけ黙ってスキップ（作者決定・P1-1）。
+      // 別ファイル（または fileHash 不明）では「以前の取込と同一の可能性」としてレビューへ。
+      const parsed = parseRowKey(row.rowKey);
+      if (parsed?.body.type === 'fp') {
+        const sameFile =
+          decision.fileHash !== undefined &&
+          input.fileHash !== undefined &&
+          decision.fileHash === input.fileHash;
+        if (!sameFile) {
+          return {
+            rowKey: row.rowKey,
+            status: 'unresolved-prior-decision',
+            decision,
+            similarEntryIds: [],
+          };
+        }
       }
-      return {
-        rowKey: row.rowKey,
-        status: 'unresolved-dangling',
-        decision,
-        similarEntryIds: findSimilar(row),
-      };
+      return { rowKey: row.rowKey, status: 'decided', decision, similarEntryIds: [] };
     }
 
     return { rowKey: row.rowKey, status: 'unresolved', similarEntryIds: findSimilar(row) };
   });
-}
-
-/* ── 出現数の情報提示（n < k の警告・行の判定には影響しない） ── */
-
-/** 同一 fingerprint の出現数が過去の決定より少ないファイルの警告材料。 */
-export interface FingerprintOccurrenceShortage {
-  /** 対象の fingerprint（16 進）。表示は先頭数桁で足りる。 */
-  fingerprint: string;
-  /** 過去の決定から分かる出現数の下限（決定済み occurrence の最大値 = k）。 */
-  knownCount: number;
-  /** 今回のファイル内の出現数（= n）。 */
-  fileCount: number;
-}
-
-/**
- * ファイル内の同一 fingerprint 出現数 n が、決定済み occurrence の最大値 k を下回る
- * グループを返す（n < k = 過去の取込より行が少ないファイル）。**情報提示のみ**:
- * 決定の削除も強制レビューもしない。decisionKeys にはファイル外の rowKey を含む
- * **全決定のキー**を渡すこと（ファイル内のキーだけでは occurrence k を見落とす）。
- * 名前空間（sourceId・identityVersion）が違う決定は突き合わせない。
- */
-export function findOccurrenceShortages(
-  rows: readonly Pick<DedupRow, 'rowKey'>[],
-  decisionKeys: Iterable<string>,
-): FingerprintOccurrenceShortage[] {
-  // ファイル内の出現数（(sourceId, version, fingerprint) グループ別・出現順を保つ）。
-  const fileCounts = new Map<string, { fingerprint: string; count: number }>();
-  for (const row of rows) {
-    const parsed = parseRowKey(row.rowKey);
-    if (parsed === undefined || parsed.body.type !== 'fp') continue;
-    const g = encodeGroup([parsed.sourceId, parsed.identityVersion, parsed.body.fingerprint]);
-    const current = fileCounts.get(g);
-    if (current !== undefined) current.count += 1;
-    else fileCounts.set(g, { fingerprint: parsed.body.fingerprint, count: 1 });
-  }
-  if (fileCounts.size === 0) return [];
-
-  // 既知の出現数 = 同一グループの決定済み occurrence の最大値。
-  const knownCounts = new Map<string, number>();
-  for (const key of decisionKeys) {
-    const parsed = parseRowKey(key);
-    if (parsed === undefined || parsed.body.type !== 'fp') continue;
-    const g = encodeGroup([parsed.sourceId, parsed.identityVersion, parsed.body.fingerprint]);
-    if (!fileCounts.has(g)) continue;
-    const prev = knownCounts.get(g) ?? 0;
-    if (parsed.body.occurrence > prev) knownCounts.set(g, parsed.body.occurrence);
-  }
-
-  const shortages: FingerprintOccurrenceShortage[] = [];
-  for (const [g, info] of fileCounts) {
-    const known = knownCounts.get(g) ?? 0;
-    if (known > info.count) {
-      shortages.push({ fingerprint: info.fingerprint, knownCount: known, fileCount: info.count });
-    }
-  }
-  return shortages;
-}
-
-/** グループキーの内部エンコード（JSON 配列 = canonical・衝突なし）。 */
-function encodeGroup(parts: readonly (string | number)[]): string {
-  return JSON.stringify(parts);
 }

@@ -2,11 +2,13 @@
  * CSV 取込 — プロファイル管理（指示書 §1-1）と AI プロファイルビルダー（§6）。
  *
  * プロファイル管理:
- *  - 一覧（組み込みバッジ・dslVersion / digest 短縮表示）・削除（組み込みも可。binding /
- *    decision は残る旨を確認ダイアログに明示）・「組み込みプロファイルを復元」（冪等・
+ *  - 一覧（組み込み / アーカイブ済みバッジ・dslVersion / digest 短縮表示）・削除（組み込みも可。
+ *    binding / decision は残る旨を確認ダイアログに明示）・「組み込みプロファイルを復元」（冪等・
  *    restoreBuiltinImportProfiles の配線・結果は toast）。
  *  - 追加は JSON 貼付（parseImportProfileDsl の strict 検証・fail-closed・部分保存なし）。
- *    編集は v1 では「JSON を表示してコピー → 貼付で新規 / 上書き」（フォームエディタは作らない）。
+ *    **上書きは廃止**（作者決定 2026-08-11・v9）: 編集は「JSON を表示してコピー → 貼付で
+ *    新規 or 作り直し（旧をアーカイブして新規作成）」。組み込みの編集も同様で、
+ *    作り直した側に組み込み印は付かない。
  *  - 検証失敗の表示は importDslIssueText（zod issue → 日本語）。英語の既定 message は出さない。
  *
  * AI ビルダー（アプリは AI に接続しない）:
@@ -174,6 +176,9 @@ export function CsvImportProfiles({
                 <div className="list__title">
                   {p.builtin !== undefined ? (
                     <span className="tag tag--teal">{t('csvImport.profiles.builtinTag')}</span>
+                  ) : null}
+                  {p.archived === true ? (
+                    <span className="tag tag--neutral">{t('csvImport.profiles.archivedTag')}</span>
                   ) : null}{' '}
                   {p.name}
                 </div>
@@ -275,7 +280,8 @@ function ProfileJsonSheet({ profile, onClose }: { profile: ImportProfile; onClos
   );
 }
 
-/* ── JSON 貼付での追加 / 上書き（strict 検証・fail-closed・部分保存なし・§1-1） ── */
+/* ── JSON 貼付での追加 / 作り直し（strict 検証・fail-closed・部分保存なし・§1-1）
+ * 上書きは廃止（作者決定 2026-08-11・v9）: 既存を選ぶと旧をアーカイブして新規作成する。 ── */
 
 function ProfilePasteSheet({
   profiles,
@@ -291,13 +297,16 @@ function ProfilePasteSheet({
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // 作り直し対象に選べるのは非アーカイブのみ（アーカイブ済みを再アーカイブしても無意味）。
+  const replaceTargets = profiles.filter((p) => p.archived !== true);
+
   const dirty = name.trim() !== '' || jsonText.trim() !== '';
   const { requestClose, discardConfirm } = useDirtyGuard(dirty, onClose);
 
   function onTargetChange(v: string) {
     setTargetId(v);
     const target = profiles.find((p) => p.id === v);
-    // 上書き対象を選んだら名前を引き継ぐ（別名にしたければ書き換えられる）。
+    // 作り直し対象を選んだら名前を引き継ぐ（別名にしたければ書き換えられる）。
     if (target !== undefined && name.trim() === '') setName(target.name);
   }
 
@@ -324,15 +333,12 @@ function ProfilePasteSheet({
     setSubmitting(true);
     try {
       const ts = nowIso();
-      const existing = profiles.find((p) => p.id === targetId);
-      // builtin 印はユーザー入力から持ち込ませない（repository が prev の印を維持する・§1-1）。
-      await saveImportProfile({
-        id: existing?.id ?? newId(),
-        name: name.trim(),
-        dsl,
-        createdAt: existing?.createdAt ?? ts,
-        updatedAt: ts,
-      });
+      // 常に新規 ID で作成（上書き廃止）。作り直し対象は同一 tx でアーカイブされ、
+      // 取込元の紐付けは新プロファイルへ付け替わる（builtin 印は新規側に付かない・repository）。
+      await saveImportProfile(
+        { id: newId(), name: name.trim(), dsl, createdAt: ts, updatedAt: ts },
+        targetId !== '' ? { archiveProfileId: targetId } : undefined,
+      );
       onClose();
     } catch {
       // store が toast 済み。開いたまま修正できるようにする。
@@ -369,9 +375,9 @@ function ProfilePasteSheet({
             onChange={onTargetChange}
             options={[
               { value: '', label: t('csvImport.profiles.pasteTargetNew') },
-              ...profiles.map((p) => ({
+              ...replaceTargets.map((p) => ({
                 value: p.id,
-                label: t('csvImport.profiles.pasteTargetOverwrite', { name: p.name }),
+                label: t('csvImport.profiles.pasteTargetReplace', { name: p.name }),
               })),
             ]}
             dataUi={UI.csvImport.pasteTarget}
@@ -420,9 +426,12 @@ function ProfileBuilderPanel({
   const { ledger, saveImportProfile } = useLedger();
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
+  // ファイル読込のレースガード（P1-3）: 新しい選択が始まったら古い非同期読込の結果を捨てる。
+  const fileReadToken = useRef(0);
   const currency = ledger?.settings.currency ?? 'JPY';
 
   const [file, setFile] = useState<{ name: string; bytes: Uint8Array } | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [encoding, setEncoding] = useState<CsvEncoding>('utf-8-sig');
   const [delimiter, setDelimiter] = useState(',');
   const [headerRowText, setHeaderRowText] = useState('0');
@@ -444,17 +453,24 @@ function ProfileBuilderPanel({
     const picked = e.target.files?.[0];
     e.target.value = '';
     if (!picked) return;
+    // レースガード（P1-3）: 選択の**開始時点**で旧ファイル前提の状態（マスク選択・返書・
+    // プレビュー）を無効化する。読込完了後に消すと、A 読込中に B を選んだとき古い応答が
+    // 新しい選択を上書きする。読込失敗時も旧状態には戻らない（明示エラーを表示する）。
+    const token = ++fileReadToken.current;
+    setFile(null);
+    setFileError(null);
+    setModes({});
+    setReply('');
+    setReplyError(null);
+    setPreview(null);
     void (async () => {
       try {
         const bytes = new Uint8Array(await picked.arrayBuffer());
+        if (fileReadToken.current !== token) return; // 新しい選択が始まっている = 古い応答を捨てる
         setFile({ name: picked.name, bytes });
-        // ファイルを替えたらマスク選択・返書・プレビューを作り直す（前のファイル前提を残さない）。
-        setModes({});
-        setReply('');
-        setReplyError(null);
-        setPreview(null);
       } catch {
-        setReplyError(t('csvImport.readFailed'));
+        if (fileReadToken.current !== token) return;
+        setFileError(t('csvImport.readFailed'));
       }
     })();
   }
@@ -648,6 +664,12 @@ function ProfileBuilderPanel({
           hint={t('csvImport.builder.noteHint')}
           dataUi={UI.csvImport.builderNote}
         />
+        {fileError !== null ? (
+          <p className="field__error" role="alert" style={{ display: 'flex', gap: 6 }}>
+            <Icon name="alert" size={16} />
+            {fileError}
+          </p>
+        ) : null}
         {sample !== null && sample.kind === 'error' ? (
           <p className="field__error" role="alert" style={{ display: 'flex', gap: 6 }}>
             <Icon name="alert" size={16} />

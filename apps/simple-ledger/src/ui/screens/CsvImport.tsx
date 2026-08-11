@@ -5,11 +5,15 @@
  * 変換（件数会計を常時表示・§4-2 の保存則）→ 決定的スキップ（ImportDecision 照合・§4 手順3）→
  * レビューキュー（画面内 state・保存しない）→ applyImportBatch（原子性は data 層・§4-4）。
  *
- *  - レビューの配線順序: loadLedger → evaluateProfileText → attachRowKeys(binding.sourceId) →
- *    resolveImportRows（決定は台帳スナップショットの全件・**読み取り専用**）。dangling は自動で
- *    削除せず「要再確認」行としてレビューへ出し、解除はユーザーの明示操作（store 経由）だけが
- *    行う（§1-2）。同一 fingerprint の出現数が過去の決定より少ないファイル（n < k）は決定を
- *    無傷のまま、件数会計の近くに警告バナーで情報提示する（§5-1）。
+ *  - レビューの配線順序（処理順の固定・importDedup.ts ヘッダーと対）:
+ *    ① 全 valid 行の正規化（evaluateProfileText）→ ② **全母集合**で rowKey / occurrence 付与
+ *    （attachRowKeys(binding.sourceId)）→ ③ decision 照合（resolveImportRows・台帳
+ *    スナップショットの全件・**読み取り専用**）→ ④（将来の取込開始日 cutoff はここに入る）→
+ *    ⑤ invalid 行は隠さず error（件数会計の保存則）。dangling は自動で削除せず「要再確認」行と
+ *    してレビューへ出し、解除はユーザーの明示操作（store 経由）だけが行う（§1-2）。
+ *    fingerprint 型キーの決定済みヒットは同一ファイル（fileHash 一致）の再取込だけ黙って
+ *    スキップし、別ファイルでは「以前の取込と同一の可能性」としてレビューへ出す
+ *    （既定の提案 = スキップ・確定はユーザー・作者決定 2026-08-11・P1-1）。
  *  - 適用は expectedLedgerVersion（レビュー時点の meta 世代）+ profileDigest で全拒否できる
  *    （stale なレビューで保存しない）。適用成功・失敗のどちらでもレビューを作り直して同期する。
  *  - 決定済み一覧（§4-6）: profile・status で絞り込み、無視・リンクの解除（確認 1 つ・冪等）と
@@ -57,9 +61,7 @@ import {
   type RowKeyAttachment,
 } from '../../domain/importIdentity';
 import {
-  findOccurrenceShortages,
   resolveImportRows,
-  type FingerprintOccurrenceShortage,
   type ImportDecisionStatus,
   type ImportDecisionSummary,
   type ImportRowResolution,
@@ -180,8 +182,6 @@ interface ReviewState {
   /** rowKey 付きの正規化行（入力順）。resolutions と同順。 */
   rows: NormalizedRow[];
   resolutions: ImportRowResolution[];
-  /** 同一 fingerprint の出現数が過去の決定より少ないグループ（警告バナーの材料・§5-1）。 */
-  occurrenceShortages: FingerprintOccurrenceShortage[];
   /** レビュー表示時点の台帳世代（適用の revision CAS に渡す・§4-4）。 */
   ledgerVersion: LedgerVersion;
   fileRecord?: ImportFileRecord;
@@ -194,6 +194,8 @@ interface ReviewState {
  * bytes の参照 + profile DSL digest + binding の sourceId（rowKey の名前空間）で、
  * どれかが変われば全部作り直す。**意味論は変えない**: キャッシュが効いている間の
  * 再構築は decision 照合と類似候補の提示だけをやり直す。
+ * 将来の取込開始日（binding.importFromDate）はこのキャッシュのキーにも入る前提
+ * （cutoff は rowKey 付与の後段 = 評価段階の明示 skip として実装される・実装は後続）。
  */
 interface ReviewSourceCache {
   fileBytes: Uint8Array;
@@ -245,24 +247,25 @@ async function computeReview(
   }
 
   // 決定は台帳スナップショットの**全件**を使う（仕訳と同一トランザクション読み）。
-  // ファイル外の rowKey も含めるのは、同一 fingerprint の決定済み occurrence 数（k）を
-  // ファイル内のキーだけでは見落とすため（n < k の警告材料・§5-1）。
+  // fileHash（決定の由来ファイル）も要約へ載せる: fingerprint 型キーの決定済みヒットを
+  // 黙ってスキップしてよいのは同一ファイルの再取込だけ（作者決定 2026-08-11・P1-1）。
   const decisions = new Map<string, ImportDecisionSummary>(
     ledger.importDecisions.map((d) => [
       d.key,
-      { status: d.status, ...(d.entryId !== undefined ? { entryId: d.entryId } : {}) },
+      {
+        status: d.status,
+        fileHash: d.provenance.fileHash,
+        ...(d.entryId !== undefined ? { entryId: d.entryId } : {}),
+      },
     ]),
   );
   const resolutions = resolveImportRows({
     rows: source.attachment.rows,
     decisions,
     existingEntries: ledger.journalEntries,
+    fileHash: source.fileHash,
     ownAccountId: binding.ownAccountId,
   });
-  const occurrenceShortages = findOccurrenceShortages(
-    source.attachment.rows,
-    ledger.importDecisions.map((d) => d.key),
-  );
   const fileRecord = (await getImportFileRecords())[source.fileHash];
   return {
     file,
@@ -274,7 +277,6 @@ async function computeReview(
     evaluation: source.evaluation,
     rows: source.attachment.rows,
     resolutions,
-    occurrenceShortages,
     ledgerVersion: { deviceId: ledger.meta.deviceId, revision: ledger.meta.revision },
     ...(fileRecord !== undefined ? { fileRecord } : {}),
   };
@@ -292,11 +294,17 @@ function unresolvedGroups(
   review: ReviewState,
   profile: ImportProfile,
   binding: ProfileBinding,
+  priorConfirmedKeys: ReadonlySet<string>,
 ): { kind: string; rows: ReviewRow[] }[] {
   const byKind = new Map<string, ReviewRow[]>();
   review.rows.forEach((row, i) => {
     const resolution = review.resolutions[i]!;
     if (resolution.status === 'decided') return;
+    // 「以前の取込と同一の可能性」行でユーザーがスキップを確定したものは決定済み扱いで除外
+    // （決定は既に保存されている = 何も書かない。確定はこの画面のセッション内でだけ有効）。
+    if (resolution.status === 'unresolved-prior-decision' && priorConfirmedKeys.has(row.rowKey)) {
+      return;
+    }
     const entry: ReviewRow = {
       row,
       resolution,
@@ -310,11 +318,11 @@ function unresolvedGroups(
 }
 
 /**
- * 一括適用の対象（dangling でない行・§1-2）。計上先はダイアログ内で選ぶため、
- * 既定計上先の有無では絞らない（監査 P1-4 の一般化）。
+ * 一括適用の対象 = 普通の未解決行のみ（§1-2・監査 P1-4 の一般化）。dangling と
+ * 「以前の取込と同一の可能性」行は決定済みキーのため適用できない（alreadyDecided になる）。
  */
 function bulkApplicableRows(rows: readonly ReviewRow[]): ReviewRow[] {
-  return rows.filter((r) => r.resolution.status !== 'unresolved-dangling');
+  return rows.filter((r) => r.resolution.status === 'unresolved');
 }
 
 /**
@@ -394,6 +402,8 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
   const fileRef = useRef<HTMLInputElement>(null);
   // レビュー素材（パース・評価・ハッシュ）のキャッシュ（項目8）。computeReview が所有する。
   const reviewSourceCache = useRef<ReviewSourceCache | null>(null);
+  // ファイル読込のレースガード（P1-3）: 新しい選択が始まったら古い非同期読込の結果を捨てる。
+  const fileReadToken = useRef(0);
 
   const [tab, setTab] = useState<'flow' | 'decisions' | 'profiles'>('flow');
   const [fileData, setFileData] = useState<{ name: string; bytes: Uint8Array } | null>(null);
@@ -407,6 +417,9 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
   const [showErrorDetail, setShowErrorDetail] = useState(false);
   // シート・ダイアログ
   const [setupState, setSetupState] = useState<{ existing: ProfileBinding | null } | null>(null);
+  // 「以前の取込と同一の可能性」行のうちユーザーがスキップを確定した rowKey（P1-1）。
+  // 決定は保存済みなので何も書かない = ファイルを替えたらリセットするセッション内の確認記録。
+  const [priorConfirmedKeys, setPriorConfirmedKeys] = useState<ReadonlySet<string>>(new Set());
   const [bulkKind, setBulkKind] = useState<string | null>(null);
   const [applyTarget, setApplyTarget] = useState<ReviewRow | null>(null);
   const [linkTarget, setLinkTarget] = useState<ReviewRow | null>(null);
@@ -428,7 +441,10 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
   );
   const currency = ledger?.settings.currency ?? 'JPY';
   const profiles = useMemo(() => ledger?.importProfiles ?? [], [ledger]);
-  const profile = profiles.find((p) => p.id === profileId);
+  // 取込に使えるのは非アーカイブのみ（アーカイブ済みは一覧の区別表示と decision の
+  // provenance 参照にだけ残る・作者決定 2026-08-11）。決定済み一覧のラベルは全件から引く。
+  const activeProfiles = useMemo(() => profiles.filter((p) => p.archived !== true), [profiles]);
+  const profile = activeProfiles.find((p) => p.id === profileId);
   const bindings = useMemo(
     () => (ledger?.profileBindings ?? []).filter((b) => b.profileId === profileId),
     [ledger, profileId],
@@ -489,13 +505,23 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    // レースガード（P1-3）: 選択の**開始時点**で旧レビューを無効化する。読込完了を待って
+    // から切り替えると、A 読込中に B を選んだとき古い応答が新しい選択を上書きしたり、
+    // 旧ファイルのレビューのまま適用できる窓が残る。読込失敗時も旧状態には戻らない
+    // （fileData = null のまま明示エラーを表示する）。
+    const token = ++fileReadToken.current;
+    setFileData(null);
+    setBuiltReview(null);
+    setFileError(null);
+    setShowSkipDetail(false);
+    setShowErrorDetail(false);
+    setPriorConfirmedKeys(new Set());
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
-      setShowSkipDetail(false);
-      setShowErrorDetail(false);
-      setFileError(null);
+      if (fileReadToken.current !== token) return; // 新しい選択が始まっている = 古い応答を捨てる
       setFileData({ name: file.name, bytes });
     } catch {
+      if (fileReadToken.current !== token) return;
       setFileError(t('csvImport.readFailed'));
     }
   }
@@ -568,9 +594,19 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
 
   /* ── 派生ビュー ── */
 
-  const groups = review && profile && binding ? unresolvedGroups(review, profile, binding) : [];
+  const groups =
+    review && profile && binding
+      ? unresolvedGroups(review, profile, binding, priorConfirmedKeys)
+      : [];
   const remaining = groups.reduce((sum, g) => sum + g.rows.length, 0);
-  const decidedCount = review ? review.resolutions.filter((r) => r.status === 'decided').length : 0;
+  // 決定済み = 決定的スキップ + このセッションでスキップを確定した「同一の可能性」行。
+  const decidedCount = review
+    ? review.resolutions.filter(
+        (r) =>
+          r.status === 'decided' ||
+          (r.status === 'unresolved-prior-decision' && priorConfirmedKeys.has(r.rowKey)),
+      ).length
+    : 0;
   const skipCounts = useMemo(() => {
     const map = new Map<ImportRowSkipCode, number>();
     for (const s of review?.evaluation.skipped ?? []) {
@@ -695,7 +731,7 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
                 data-ui={UI.csvImport.fileInput}
               />
             </div>
-            {profiles.length === 0 ? (
+            {activeProfiles.length === 0 ? (
               <p className="field__hint">{t('csvImport.noProfiles')}</p>
             ) : (
               <SelectInput
@@ -703,10 +739,16 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
                 value={profileId}
                 onChange={setProfileId}
                 placeholder={t('csvImport.profilePlaceholder')}
-                options={profiles.map((p) => ({ value: p.id, label: p.name }))}
+                options={activeProfiles.map((p) => ({ value: p.id, label: p.name }))}
                 dataUi={UI.csvImport.profile}
               />
             )}
+            {/* ID 列の無い profile の注意（P1-1）: fp キーの重複は自動確定されない。 */}
+            {profile && profile.dsl.externalId === undefined ? (
+              <p className="field__hint" data-ui={UI.csvImport.noIdNote}>
+                {t('csvImport.noIdNote')}
+              </p>
+            ) : null}
             {profile && bindings.length > 0 ? (
               <div>
                 <SelectInput
@@ -813,20 +855,6 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
                     decided: review.fileRecord.decidedCount,
                     total: review.fileRecord.totalRowCount,
                     date: review.fileRecord.importedAt.slice(0, 10),
-                  })}
-                </p>
-              ) : null}
-              {/* n < k の情報提示（§5-1）: 決定は無傷のまま・削除も強制レビューもしない。 */}
-              {review.occurrenceShortages.length > 0 ? (
-                <p
-                  className="field__hint"
-                  role="status"
-                  style={{ marginTop: 6, display: 'flex', gap: 6 }}
-                  data-ui={UI.csvImport.occurrenceShortage}
-                >
-                  <Icon name="alert" size={16} />
-                  {t('csvImport.occurrenceShortage', {
-                    count: review.occurrenceShortages.length,
                   })}
                 </p>
               ) : null}
@@ -952,7 +980,39 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
                     </div>
                     <ul className="list">
                       {group.rows.map((r) =>
-                        r.resolution.status === 'unresolved-dangling' ? (
+                        r.resolution.status === 'unresolved-prior-decision' ? (
+                          /* 別ファイル由来の決定にヒットした fp 行（P1-1）: 黙ってスキップせず
+                             提示し、既定の提案 = スキップをユーザーが確定する。決定は保存済みの
+                             ため何も書かない（適用/リンク/無視は alreadyDecided になるので出さない）。 */
+                          <li key={r.row.rowKey} className="list__item" data-ui={UI.csvImport.row}>
+                            <div className="list__main">
+                              <div className="list__title">
+                                <span className="tag tag--warning">{t('csvImport.priorTag')}</span>{' '}
+                                {r.row.description || r.row.kind}
+                              </div>
+                              <div className="list__sub">
+                                {r.row.date}・{t('csvImport.priorNote')}
+                              </div>
+                            </div>
+                            <span className="list__amount">
+                              <Money amount={r.row.amount} currency={currency} />
+                            </span>
+                            <button
+                              type="button"
+                              className="btn btn--ghost"
+                              disabled={busy}
+                              onClick={() =>
+                                setPriorConfirmedKeys((prev) => new Set([...prev, r.row.rowKey]))
+                              }
+                              aria-label={`${t('csvImport.priorSkip')}: ${
+                                r.row.description || r.row.kind
+                              }`}
+                              data-ui={UI.csvImport.rowPriorSkip}
+                            >
+                              {t('csvImport.priorSkip')}
+                            </button>
+                          </li>
+                        ) : r.resolution.status === 'unresolved-dangling' ? (
                           /* dangling（§1-2）: 参照先仕訳が無い決定。自動削除せず、明示解除
                              するまで適用・リンク・無視のどれもできない（fail-closed）。 */
                           <li key={r.row.rowKey} className="list__item" data-ui={UI.csvImport.row}>
@@ -1065,6 +1125,8 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
           onContinueToImport={(newProfileId, file) => {
             // ビルダー保存後の導線（§6-6）: 保存した profile と選択済みファイルで
             // 通常の取込フローへ（binding 未設定ならセットアップシートの gate が出る）。
+            // 進行中のファイル読込があれば無効化する（P1-3 のレースガードと同じ token）。
+            fileReadToken.current += 1;
             setTab('flow');
             setProfileId(newProfileId);
             setBindingChoice('');
@@ -1072,6 +1134,7 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
             setFileError(null);
             setShowSkipDetail(false);
             setShowErrorDetail(false);
+            setPriorConfirmedKeys(new Set());
             setFileData(file);
           }}
         />
@@ -1415,6 +1478,12 @@ function BindingSetupSheet({
       >
         <div className="stack">
           <p className="field__hint">{t('csvImport.setupIntro')}</p>
+          {/* ID 列の無い profile の注意（P1-1）: fp キーの重複は自動確定されない。 */}
+          {profile.dsl.externalId === undefined ? (
+            <p className="field__hint" data-ui={UI.csvImport.setupNoIdNote}>
+              {t('csvImport.noIdNote')}
+            </p>
+          ) : null}
           <TextInput
             label={t('csvImport.setupIdentity')}
             value={identity}

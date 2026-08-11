@@ -217,6 +217,91 @@ describe('プロファイル管理 — JSON 貼付での追加（fail-closed・�
   });
 });
 
+describe('プロファイル管理 — 作り直し（アーカイブ+新規・作者決定 2026-08-11・v9）', () => {
+  it('既存を選ぶと旧をアーカイブして新規作成し、アーカイブ済みは取込選択に出ない', async () => {
+    await loadLedger();
+    renderScreen();
+    await openProfilesTab();
+
+    fireEvent.click(q(UI.csvImport.profilesPasteOpen)!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.pasteSheet)).not.toBeNull();
+    });
+    // 保存方法: 「新規追加」のほか、既存の「作り直し（旧をアーカイブ）」が選べる（上書きは無い）。
+    // 作り直し対象は ledger（IndexedDB 由来・非同期読込）から出るため、シート表示とは別に
+    // 選択肢へ載るまで待つ（全体実行の負荷で顕在化する race・分離問題ではない）。
+    await waitFor(() => {
+      const target = q(UI.csvImport.pasteTarget) as HTMLSelectElement | null;
+      expect(target).not.toBeNull();
+      expect(
+        [...target!.querySelectorAll('option')].some((o) => o.textContent?.includes('作り直し')),
+      ).toBe(true);
+    });
+    const target = q(UI.csvImport.pasteTarget) as HTMLSelectElement;
+    const options = [...target.querySelectorAll('option')];
+    expect(options.some((o) => o.textContent?.includes('上書き'))).toBe(false);
+    const replaceOption = options.find((o) => o.textContent?.includes('作り直し'));
+    expect(replaceOption).toBeDefined();
+    fireEvent.change(target, { target: { value: replaceOption!.value } });
+    fireEvent.change(q(UI.csvImport.pasteName)!, { target: { value: 'PayPay 第2版' } });
+    fireEvent.change(q(UI.csvImport.pasteJson)!, {
+      target: { value: JSON.stringify(PAYPAY_DSL) },
+    });
+    fireEvent.click(q(UI.csvImport.pasteSave)!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.pasteSheet)).toBeNull();
+    });
+
+    // 一覧: 旧（組み込み印 + アーカイブ済みバッジ）と新規の 2 行で区別表示される。
+    await waitFor(() => {
+      expect(qa(UI.csvImport.profileRow)).toHaveLength(2);
+    });
+    const archivedRow = qa(UI.csvImport.profileRow).find((r) =>
+      r.textContent?.includes('アーカイブ済み'),
+    );
+    expect(archivedRow).toBeDefined();
+    expect(archivedRow!.textContent).toContain('組み込み'); // 印は原本の側に残る
+    const ledger = await loadLedger();
+    expect(ledger.importProfiles.find((p) => p.id === PAYPAY_PROFILE_ID)?.archived).toBe(true);
+    const next = ledger.importProfiles.find((p) => p.name === 'PayPay 第2版')!;
+    expect(next.builtin).toBeUndefined(); // 作り直し側に組み込み印は付かない
+    expect(next.archived).toBeUndefined();
+
+    // 取込タブの profile セレクトにアーカイブ済みは出ない（新規だけが選べる）。
+    fireEvent.click(q(UI.csvImport.tabFlow)!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.profile)).not.toBeNull();
+    });
+    const importSelect = q(UI.csvImport.profile) as HTMLSelectElement;
+    const selectable = [...importSelect.querySelectorAll('option')]
+      .map((o) => o.value)
+      .filter((v) => v !== '');
+    expect(selectable).toEqual([next.id]);
+
+    // 作り直し対象に選べるのも非アーカイブのみ（アーカイブ済みの再アーカイブは出ない）。
+    fireEvent.click(q(UI.csvImport.tabProfiles)!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.profilesPasteOpen)).not.toBeNull();
+    });
+    fireEvent.click(q(UI.csvImport.profilesPasteOpen)!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.pasteSheet)).not.toBeNull();
+    });
+    // 選択肢も ledger 由来のため、載るまで待ってから内訳を assert する（上と同じ race 対策）。
+    await waitFor(() => {
+      const reopened = q(UI.csvImport.pasteTarget) as HTMLSelectElement | null;
+      expect(reopened).not.toBeNull();
+      expect(
+        [...reopened!.querySelectorAll('option')].some((o) => o.textContent?.includes('作り直し')),
+      ).toBe(true);
+    });
+    const reopened = q(UI.csvImport.pasteTarget) as HTMLSelectElement;
+    const labels = [...reopened.querySelectorAll('option')].map((o) => o.textContent ?? '');
+    expect(labels.filter((l) => l.includes('作り直し'))).toHaveLength(1);
+    expect(labels.some((l) => l.includes('PayPay 第2版'))).toBe(true);
+  });
+});
+
 describe('AI プロファイルビルダー（§6）', () => {
   it('マスク開示 → 依頼文 → 返書検証（エラー→成功）→ 全行勘定プレビュー → 保存 → 取込導線', async () => {
     await loadLedger();
@@ -343,6 +428,47 @@ describe('AI プロファイルビルダー（§6）', () => {
     await waitFor(() => {
       expect(qa(UI.csvImport.profileRow)).toHaveLength(2);
     });
+  });
+
+  it('ファイル切替のレースガード: A 読込中に B を選ぶと A の応答は捨てられる（P1-3）', async () => {
+    await loadLedger();
+    renderScreen();
+    await openProfilesTab();
+    fireEvent.click(q(UI.csvImport.builderOpen)!);
+    await waitFor(() => {
+      expect(q(UI.csvImport.builder)).not.toBeNull();
+    });
+
+    // A: arrayBuffer を手動 resolve できる「遅い」ファイル（2 列ヘッダー）。
+    const slowText = 'h1,h2\nA1,A2';
+    const slowA = csvFile(slowText, 'slow-a.csv');
+    let resolveA: ((buffer: ArrayBuffer) => void) | undefined;
+    Object.defineProperty(slowA, 'arrayBuffer', {
+      value: () =>
+        new Promise<ArrayBuffer>((resolve) => {
+          resolveA = resolve;
+        }),
+    });
+    fireEvent.change(q(UI.csvImport.builderFileInput)!, { target: { files: [slowA] } });
+    expect(resolveA).toBeDefined();
+
+    // A の読込が終わらないうちに B（BUILDER_CSV・4 列）を選ぶ → B のマスク列一覧と依頼文。
+    fireEvent.change(q(UI.csvImport.builderFileInput)!, {
+      target: { files: [csvFile(BUILDER_CSV, 'fast-b.csv')] },
+    });
+    await waitFor(() => {
+      expect(q(UI.csvImport.builderMaskList)).not.toBeNull();
+    });
+    expect(promptText()).toContain('日付,内容,金額,取引先');
+
+    // 遅れて A の読込が完了しても、古い応答は捨てられて B の状態のまま（P1-3 の固定）。
+    const encoded = new TextEncoder().encode(slowText);
+    const bufferA = new ArrayBuffer(encoded.byteLength);
+    new Uint8Array(bufferA).set(encoded);
+    resolveA!(bufferA);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(promptText()).toContain('日付,内容,金額,取引先');
+    expect(promptText()).not.toContain('h1,h2');
   });
 
   it('エラー 0 件のプレビューなら確認ダイアログ無しで保存できる（項目2の回帰確認）', async () => {

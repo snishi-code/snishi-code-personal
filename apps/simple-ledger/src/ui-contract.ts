@@ -332,10 +332,12 @@ export const UI = {
     setupIncomeSuggest: 'csvImport.setup.incomeSuggest',
     setupCharge: 'csvImport.setup.charge',
     setupSave: 'csvImport.setup.save',
+    // ID 列の無い profile 使用時の注意（作者決定 2026-08-11・P1-1）
+    noIdNote: 'csvImport.noIdNote',
+    setupNoIdNote: 'csvImport.setup.noIdNote',
     // 件数会計（§4-2 保存則・常時表示）と明細
     counts: 'csvImport.counts',
     fileRecord: 'csvImport.fileRecord',
-    occurrenceShortage: 'csvImport.counts.occurrenceShortage',
     skipToggle: 'csvImport.skip.toggle',
     skipList: 'csvImport.skip.list',
     errorToggle: 'csvImport.error.toggle',
@@ -353,6 +355,8 @@ export const UI = {
     rowLink: 'csvImport.review.row.link',
     rowIgnore: 'csvImport.review.row.ignore',
     rowRelease: 'csvImport.review.row.release',
+    // fp キーが別ファイル由来の決定にヒットした行のスキップ確定（P1-1・提案の既定 = スキップ）
+    rowPriorSkip: 'csvImport.review.row.priorSkip',
     complete: 'csvImport.review.complete',
     completeErrors: 'csvImport.review.completeErrors',
     // 個別行の「編集して適用」はホームの仕訳入力シート（journal.entry.*）を再利用する

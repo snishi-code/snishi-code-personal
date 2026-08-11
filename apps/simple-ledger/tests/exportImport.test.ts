@@ -279,11 +279,11 @@ describe('export package 形状', () => {
     expect(pkg).toHaveProperty('settings');
   });
 
-  it('schemaVersion 8 で、廃止済みの cashflowSchedules フィールドを含まない', async () => {
+  it('schemaVersion 9 で、廃止済みの cashflowSchedules フィールドを含まない', async () => {
     const ledger = await seedWithEntry();
     const pkg = buildExportPackage(ledger);
     expect(pkg.schemaVersion).toBe(SCHEMA_VERSION);
-    expect(pkg.schemaVersion).toBe(8);
+    expect(pkg.schemaVersion).toBe(9);
     expect(pkg).not.toHaveProperty('cashflowSchedules');
     // 文字列化した export JSON にも痕跡が残らない。
     const parsed = JSON.parse(exportToJsonText(ledger)) as Record<string, unknown>;

@@ -11,6 +11,8 @@ import { describe, expect, it } from 'vitest';
 import './setup';
 import {
   applyImportBatch,
+  archiveAccount,
+  createImportProfile,
   deleteAccount,
   deleteEntry,
   deleteImportProfile,
@@ -22,7 +24,6 @@ import {
   resetAll,
   restoreBuiltinImportProfiles,
   upsertEntry,
-  upsertImportProfile,
   upsertProfileBinding,
   type ImportBatchAction,
   type ApplyImportBatchInput,
@@ -164,25 +165,80 @@ describe('組み込み profile の seed / 削除 / 復元（§1-1）', () => {
     expect((await loadLedger()).importProfiles).toHaveLength(1);
   });
 
-  it('組み込みの編集は builtin 印を維持し、「復元」で原本へ戻る', async () => {
+  it('組み込みの編集 = 複製→新規（旧をアーカイブ・新規に builtin 印は付かない）', async () => {
     const ledger = await loadLedger();
     const builtin = ledger.importProfiles.find((p) => p.id === PAYPAY_PROFILE_ID)!;
-    await upsertImportProfile({ ...builtin, name: '改名した組み込み' });
-    const edited = (await loadLedger()).importProfiles.find((p) => p.id === PAYPAY_PROFILE_ID)!;
-    expect(edited.name).toBe('改名した組み込み');
-    expect(edited.builtin?.builtinId).toBe(PAYPAY_BUILTIN_ID);
+    // 上書き保存は廃止（作者決定 2026-08-11）: 同一 ID への保存は fail-closed に拒否。
+    await expect(createImportProfile({ ...builtin, name: '改名した組み込み' })).rejects.toThrow();
+    // 編集 = archiveProfileId 指定で旧をアーカイブして新規作成。
+    const copy = await createImportProfile(
+      userProfile({ id: 'paypay-copy-1', name: '改名した組み込み', dsl: builtin.dsl }),
+      { archiveProfileId: PAYPAY_PROFILE_ID },
+    );
+    expect(copy.builtin).toBe(undefined);
+    const after = await loadLedger();
+    const archived = after.importProfiles.find((p) => p.id === PAYPAY_PROFILE_ID)!;
+    expect(archived.archived).toBe(true);
+    expect(archived.builtin?.builtinId).toBe(PAYPAY_BUILTIN_ID); // 印は原本に残る
+    const created = after.importProfiles.find((p) => p.id === 'paypay-copy-1')!;
+    expect(created.name).toBe('改名した組み込み');
+    expect(created.builtin).toBe(undefined); // 複製側に組み込み印は付かない
+    expect(created.archived).toBe(undefined); // 新規は常に非アーカイブ
 
+    // 「組み込みを復元」= 原本での上書き = アーカイブ済み組み込みが有効へ戻る唯一の経路。
     await restoreBuiltinImportProfiles();
     const restored = (await loadLedger()).importProfiles.find((p) => p.id === PAYPAY_PROFILE_ID)!;
     expect(restored.name).toBe(PAYPAY_PROFILE_NAME);
+    expect(restored.archived).toBe(undefined);
   });
 
   it('ユーザー入力からの builtin 印の持ち込みは拒否する（fail-closed）', async () => {
     await loadLedger();
     await expect(
-      upsertImportProfile(userProfile({ builtin: { builtinId: 'forged', builtinVersion: 1 } })),
+      createImportProfile(userProfile({ builtin: { builtinId: 'forged', builtinVersion: 1 } })),
     ).rejects.toMatchObject({ code: 'error.importProfile.builtinReserved' });
     expect((await loadLedger()).importProfiles.some((p) => p.id === 'user-profile-1')).toBe(false);
+  });
+
+  it('既存 ID への保存（黙った上書き）と存在しない archiveProfileId を拒否する', async () => {
+    await loadLedger();
+    await createImportProfile(userProfile());
+    await expect(
+      createImportProfile(userProfile({ name: '同じIDで上書き' })),
+    ).rejects.toMatchObject({ code: 'error.importProfile.idConflict' });
+    // 何も変わっていない（部分保存なし）。
+    const after = await loadLedger();
+    expect(after.importProfiles.find((p) => p.id === 'user-profile-1')?.name).toBe(
+      'ユーザー定義CSV',
+    );
+    await expect(
+      createImportProfile(userProfile({ id: 'user-profile-2' }), {
+        archiveProfileId: 'missing-profile',
+      }),
+    ).rejects.toMatchObject({ code: 'error.importProfile.notFound' });
+    expect((await loadLedger()).importProfiles.some((p) => p.id === 'user-profile-2')).toBe(false);
+  });
+
+  it('作り直し（アーカイブ+新規）で binding が新 profile へ付け替わる（sourceId 不変）', async () => {
+    const ledger = await loadLedger();
+    await createImportProfile(userProfile());
+    await upsertProfileBinding(
+      binding(ledger, {
+        id: 'binding-user',
+        profileId: 'user-profile-1',
+        sourceId: 'source-user-1',
+      }),
+    );
+    await createImportProfile(userProfile({ id: 'user-profile-2', name: '作り直し版' }), {
+      archiveProfileId: 'user-profile-1',
+    });
+    const after = await loadLedger();
+    expect(after.importProfiles.find((p) => p.id === 'user-profile-1')?.archived).toBe(true);
+    expect(after.importProfiles.find((p) => p.id === 'user-profile-2')?.archived).toBe(undefined);
+    // binding は同一 tx で新 profile へ移り、sourceId は不変 = 過去の決定の照合が保たれる。
+    const moved = after.profileBindings.find((b) => b.id === 'binding-user')!;
+    expect(moved.profileId).toBe('user-profile-2');
+    expect(moved.sourceId).toBe('source-user-1');
   });
 });
 
@@ -392,7 +448,7 @@ describe('applyImportBatch の一括適用（§4-4）', () => {
     const digest = await paypayDigest();
     const staleVersion = { deviceId: ledger.meta.deviceId, revision: ledger.meta.revision };
     // レビュー表示後に別の保存が入った（revision が進んだ）状況を作る。
-    await upsertImportProfile(userProfile());
+    await createImportProfile(userProfile());
     await expect(
       applyImportBatch(
         batchInput(digest, [{ kind: 'ignore', rowKey: rk('50') }], {
@@ -469,7 +525,7 @@ describe('applyImportBatch の一括適用（§4-4）', () => {
       ),
     ).rejects.toMatchObject({ code: 'error.importBinding.notFound' });
     // binding と profile の不整合（別 profile の binding）も拒否。
-    await upsertImportProfile(userProfile());
+    await createImportProfile(userProfile());
     await expect(
       applyImportBatch(
         batchInput(digest, [{ kind: 'ignore', rowKey: rk('110') }], {
@@ -494,10 +550,24 @@ describe('applyImportBatch の一括適用（§4-4）', () => {
     expect(await getImportFileRecords()).toEqual({});
   });
 
+  it('binding 再検証: 参照科目のアーカイブは全拒否（UI の broken 判定と同一条件・0 件更新）', async () => {
+    const ledger = await loadLedger();
+    await seedPaypayBinding();
+    const digest = await paypayDigest();
+    // 計上先（その他収入）をアーカイブ → 実在はするが archived = UI では broken 表示。
+    // 適用側（tx 内再検証）も同じ条件で全拒否する（判定のズレを作らない・P1 の穴埋め）。
+    await archiveAccount(account(ledger, 'その他収入').id);
+    await expect(
+      applyImportBatch(batchInput(digest, [{ kind: 'ignore', rowKey: rk('112') }])),
+    ).rejects.toMatchObject({ code: 'error.importBinding.destinationRole' });
+    expect((await loadLedger()).importDecisions).toHaveLength(0);
+    expect(await getImportFileRecords()).toEqual({});
+  });
+
   it('別 profile ×同名の取込元でも sourceId が違えば rowKey は衝突しない（監査 P1-3）', async () => {
     const ledger = await loadLedger();
     await seedPaypayBinding();
-    await upsertImportProfile(userProfile());
+    await createImportProfile(userProfile());
     // 別 profile に同じ表示名「PayPay本体」の取込元を作る（sourceId は別）。
     await upsertProfileBinding(
       binding(ledger, {
@@ -647,7 +717,7 @@ describe('完全往復（§7 チェックリスト・§9 復元）', () => {
   async function seedImportState() {
     const ledger = await loadLedger();
     const digest = await paypayDigest();
-    await upsertImportProfile(userProfile());
+    await createImportProfile(userProfile());
     await upsertProfileBinding(binding(await loadLedger()));
     const entry = paymentEntry(ledger, 2500);
     await applyImportBatch(
@@ -711,7 +781,36 @@ describe('完全往復（§7 チェックリスト・§9 復元）', () => {
     expect(await getImportFileRecords()).toEqual({});
   });
 
-  it('v8 の必須配列が欠けたパッケージは validation-error（fail-closed）', async () => {
+  it('archived が export → import(replace) / snapshot を往復し、reset で消える（v9）', async () => {
+    await loadLedger();
+    await createImportProfile(userProfile());
+    await createImportProfile(userProfile({ id: 'user-profile-2', name: '第2版' }), {
+      archiveProfileId: 'user-profile-1',
+    });
+    const seeded = await loadLedger();
+    expect(seeded.importProfiles.find((p) => p.id === 'user-profile-1')?.archived).toBe(true);
+
+    // export → import(replace)。
+    const outcome = await importFromJsonText(exportToJsonText(seeded));
+    expect(outcome.kind).toBe('ok');
+    const replaced = await loadLedger();
+    expect(replaced.importProfiles.find((p) => p.id === 'user-profile-1')?.archived).toBe(true);
+    expect(replaced.importProfiles.find((p) => p.id === 'user-profile-2')?.archived).toBe(
+      undefined,
+    );
+
+    // snapshot → 復元。
+    const snapshot = buildExportPackage(replaced);
+    await deleteImportProfile('user-profile-1');
+    const restored = await restoreFromSnapshot(snapshot);
+    expect(restored.importProfiles.find((p) => p.id === 'user-profile-1')?.archived).toBe(true);
+
+    // reset(全消去): アーカイブ済みも含めて消え、組み込みだけが seed し直される。
+    await resetAll();
+    expect((await loadLedger()).importProfiles.map((p) => p.id)).toEqual([PAYPAY_PROFILE_ID]);
+  });
+
+  it('v9 の必須配列が欠けたパッケージは validation-error（fail-closed）', async () => {
     const seeded = await seedImportState();
     const pkg = JSON.parse(exportToJsonText(seeded)) as Record<string, unknown>;
     delete pkg['importDecisions'];
