@@ -355,6 +355,7 @@ export const ja = {
   'yearlyOverview.horizonActual': '実績のみ',
   'yearlyOverview.horizonPlus30': '+{years}年',
   'yearlyOverview.horizonHardCap': '{year}年まで',
+  'yearlyOverview.projectionNote': '未来列は定期ルール・継続コスト・投資利回りの投影を含みます。',
   'yearlyOverview.previousYear': '{year}年へ戻る',
   'yearlyOverview.nextYear': '{year}年へ進む',
   'yearlyOverview.noPreviousYear': '前のデータ年はありません',
@@ -637,6 +638,18 @@ export const ja = {
   'error.account.repaymentOnlyLiability':
     '返済口座・返済日はカード・未払 / ローンの科目にのみ設定できます。',
   'error.account.repaymentDayInvalid': '返済日は 1〜31 で入力してください。',
+
+  // 投資の利回り投影（投資科目の編集シート・§D）
+  'accounts.annualReturn': '想定利回り（年率%）',
+  'accounts.annualReturnHint':
+    '空欄 = 投影なし。設定すると、未来の断面にだけ毎月「計上先 → この科目」の評価益（投影）が現れます。',
+  'accounts.projectionAccount': '投影の計上先',
+  'accounts.projectionAccountHint':
+    '評価益を計上する収入科目（例: 投資益）。利回りとセットで設定します。',
+  'error.account.returnOnlyInvestment': '想定利回りは投資の科目にのみ設定できます。',
+  'error.account.returnInvalid': '想定利回りは -99.99〜1000%（小数第2位まで）で入力してください。',
+  'error.account.projectionPair': '想定利回りと投影の計上先はセットで設定してください。',
+  'error.account.projectionAccountInvalid': '投影の計上先には既存の収入科目を選んでください。',
   'cashflow.repayAdd': '返済予定を追加',
   'cashflow.repayTitle': '返済予定を追加',
   'cashflow.repayIntro':

@@ -1,7 +1,7 @@
 /*
  * 支出（= ホームの「支出」）の集計。資産経由モデルの単一正本。
  *
- * 入力は **導出専用 entries（`reportEntriesForAsOf` = 実仕訳 + 継続コスト等の仮想仕訳）**。
+ * 入力は **導出専用 entries（`displayEntriesForAsOf` = 実仕訳 + 継続コスト等の仮想仕訳）**。
  * 継続コストは仮想月割り `借方 費用カテゴリ / 貸方 対象資産`
  * (`metadata.ccKind==='monthly-allocation'`) としてすでに PL の費用に含まれるため、
  * **formula を別途足さない**（二重計上しない）。
@@ -53,7 +53,7 @@ export function isNormalExpenseEntry(
 
 /**
  * 期間（range が undefined のときは全期間）の支出内訳を求める。
- * entries は **導出仕訳**（`reportEntriesForAsOf` = 実仕訳 + 継続コスト仮想仕訳）を渡すこと。
+ * entries は **導出仕訳**（`displayEntriesForAsOf` = 実仕訳 + 継続コスト仮想仕訳）を渡すこと。
  */
 export function livingCostBreakdownForRange(
   accounts: Account[],

@@ -14,7 +14,7 @@ import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../../domain/accounting';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
-import { reportEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesForAsOf } from '../../domain/reportEntries';
 import { todayLocal } from '../../util/time';
 import { buildSectionTrends, type SectionTrends } from './breakdownData';
 import { Money } from '../money';
@@ -152,8 +152,8 @@ export function Breakdown({
   const range = basis.flowRange;
   const asOf = basis.asOf;
   const reportEntries = useMemo(
-    () => (ledger ? reportEntriesForAsOf(ledger, asOf) : []),
-    [asOf, ledger],
+    () => (ledger ? displayEntriesForAsOf(ledger, asOf, today) : []),
+    [asOf, ledger, today],
   );
 
   const { rows, total, retained } = useMemo(() => {

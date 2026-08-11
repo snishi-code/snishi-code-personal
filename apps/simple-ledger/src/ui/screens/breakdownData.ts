@@ -16,7 +16,7 @@ import {
   trendBuckets,
   type ReportPeriod,
 } from '../../domain/reportPeriod';
-import { reportEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesForAsOf } from '../../domain/reportEntries';
 import type { Ledger } from '../../domain/types';
 import type { TrendPoint } from '../components/TrendChart';
 
@@ -49,7 +49,7 @@ export function buildSectionTrends(
   if (period.mode === 'date' || !ledger) return null;
   const accounts = ledger.accounts;
   const basis = reportBasis(period, today);
-  const basisEntries = reportEntriesForAsOf(ledger, basis.asOf);
+  const basisEntries = displayEntriesForAsOf(ledger, basis.asOf, today);
   const dataYears = dataYearsOf(
     basisEntries.filter((entry) => entry.date <= basis.asOf).map((entry) => entry.date),
   );
@@ -64,7 +64,7 @@ export function buildSectionTrends(
   const netAssets: TrendPoint[] = [];
 
   for (const b of buckets) {
-    const entries = reportEntriesForAsOf(ledger, b.asOf);
+    const entries = displayEntriesForAsOf(ledger, b.asOf, today);
     const pl = deriveProfitAndLoss(accounts, entries, b.range);
     const bs = deriveBalanceSheet(accounts, entries, b.asOf);
     const livingB = livingCostForRange(accounts, entries, b.range);

@@ -21,7 +21,7 @@ import {
   summarizeEntriesForAccount,
 } from '../src/domain/accounting';
 import { buildPeriodMatrix } from '../src/domain/periodMatrix';
-import { reportEntriesForAsOf } from '../src/domain/reportEntries';
+import { displayEntriesForAsOf } from '../src/domain/reportEntries';
 import {
   CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
   CONTINUOUS_COST_LEDGER_ACCOUNT_NAME,
@@ -91,6 +91,13 @@ function item(
 
 const cash = account('cash', '現金', 'asset', 'daily-asset');
 const bank = account('bank', '銀行', 'asset', 'daily-asset');
+// 投資 + 利回り投影（今日より未来の月初へ評価益の仮想仕訳が生まれる）。
+const invest: Account = {
+  ...account('invest', '投資', 'asset', 'investment-asset'),
+  annualReturnBp: 800,
+  projectionAccountId: 'gain',
+};
+const gain = account('gain', '投資益', 'revenue', 'income-category');
 const ledger = account(
   CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
   CONTINUOUS_COST_LEDGER_ACCOUNT_NAME,
@@ -104,12 +111,27 @@ const salary = account('salary', '給与', 'revenue', 'income-category');
 const food = account('food', '食費', 'expense', 'expense-category');
 const rent = account('rent', '住居費', 'expense', 'expense-category');
 const utility = account('utility', '光熱費', 'expense', 'expense-category');
-const accounts = [cash, bank, ledger, card, loan, capital, salary, food, rent, utility];
+const accounts = [
+  cash,
+  bank,
+  invest,
+  gain,
+  ledger,
+  card,
+  loan,
+  capital,
+  salary,
+  food,
+  rent,
+  utility,
+];
 
 /* ── 実データ規模の生成データ（seed 固定） ── */
 
 const FIXTURE_YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026] as const;
 const FIXTURE_AS_OF = '2026-12-31';
+/** 投影の起点（固定値・決定的）。2026-07-01〜12-01 に利回り投影行が生まれる。 */
+const FIXTURE_TODAY = '2026-06-15';
 
 /** seed 固定の擬似乱数（Park–Miller LCG）。再現性のため Math.random は使わない。 */
 function createRandom(seed: number): () => number {
@@ -136,6 +158,9 @@ function buildFixtureSource(): {
   const journalEntries: JournalEntry[] = [
     entry('opening-cash', '2019-12-31', 'cash', 'capital', 1_000_000, { kind: 'opening' }),
     entry('opening-bank', '2019-12-31', 'bank', 'capital', 3_000_000, { kind: 'opening' }),
+    // 投資: 過去の元本 + 今日より未来の積立（利回り投影が織り込む）。
+    entry('opening-invest', '2019-12-31', 'invest', 'capital', 2_000_000, { kind: 'opening' }),
+    entry('invest-deposit-future', '2026-09-10', 'invest', 'bank', 300_000),
   ];
   for (const year of FIXTURE_YEARS) {
     // equity の動き（追加出資・引き出し）= 収支に入らない純資産変動を毎年混ぜる。
@@ -226,15 +251,17 @@ function buildFixtureSource(): {
 }
 
 const fixtureSource = buildFixtureSource();
-const expandedEntries = reportEntriesForAsOf(fixtureSource, FIXTURE_AS_OF);
+// 表示用の導出込み仕訳 = 実仕訳 + 月割り + ルール投影 + 投資利回り投影（displayEntries）。
+const expandedEntries = displayEntriesForAsOf(fixtureSource, FIXTURE_AS_OF, FIXTURE_TODAY);
 
 describe('恒等式: Δ純資産 = 収支 + equity自然増減', () => {
-  it('生成データが実データ規模で、導出行（月割り・ルール投影）を含む', () => {
+  it('生成データが実データ規模で、導出行（月割り・ルール投影・利回り投影）を含む', () => {
     expect(fixtureSource.journalEntries.length).toBeGreaterThan(3_000);
     expect(expandedEntries.length).toBeGreaterThan(fixtureSource.journalEntries.length);
     expect(expandedEntries.some((e) => e.id.startsWith('cc-alloc-'))).toBe(true);
     expect(expandedEntries.some((e) => e.id.startsWith('cc-allocp-'))).toBe(true);
     expect(expandedEntries.some((e) => e.id.startsWith('rec-proj-'))).toBe(true);
+    expect(expandedEntries.some((e) => e.id.startsWith('inv-proj-'))).toBe(true);
     expect(expandedEntries.some((e) => e.kind === 'opening')).toBe(true);
   });
 

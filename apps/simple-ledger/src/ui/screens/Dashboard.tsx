@@ -8,7 +8,7 @@ import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../../domain/accounting';
 import { livingCostBreakdownForRange } from '../../domain/livingCost';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
-import { reportEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesForAsOf } from '../../domain/reportEntries';
 import { todayLocal } from '../../util/time';
 import { buildSectionTrends } from './breakdownData';
 import { Money } from '../money';
@@ -60,7 +60,8 @@ export function Dashboard({
 
   const { pl, bs, asOf, monthlyCost, normalExpense } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf) : [];
+    // 表示は投影込み（displayEntries）。ヘッダー日付を未来にすると資産・純資産が投影込みになる。
+    const entries = ledger ? displayEntriesForAsOf(ledger, basis.asOf, today) : [];
     const breakdown = livingCostBreakdownForRange(accounts, entries, range);
     return {
       pl: deriveProfitAndLoss(accounts, entries, range),
@@ -69,7 +70,7 @@ export function Dashboard({
       monthlyCost: breakdown.monthlyCost,
       normalExpense: breakdown.normalExpense,
     };
-  }, [basis.asOf, ledger, range]);
+  }, [basis.asOf, ledger, range, today]);
 
   const trend = useMemo(() => buildSectionTrends(period, ledger, today), [period, ledger, today]);
 

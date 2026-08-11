@@ -17,7 +17,7 @@ import {
   uniqueEntriesById,
 } from '../../domain/cashflow';
 import { reportBasis } from '../../domain/reportPeriod';
-import { reportEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesForAsOf } from '../../domain/reportEntries';
 import { addMonthsToDate } from '../../domain/allocation';
 import { sortAccounts } from '../../domain/accountOrder';
 import { todayLocal } from '../../util/time';
@@ -45,8 +45,8 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
   const today = todayLocal();
   const basis = useMemo(() => reportBasis({ mode: 'all' }, today), [today]);
   const reportEntries = useMemo(
-    () => (ledger ? reportEntriesForAsOf(ledger, basis.asOf) : []),
-    [basis.asOf, ledger],
+    () => (ledger ? displayEntriesForAsOf(ledger, basis.asOf, today) : []),
+    [basis.asOf, ledger, today],
   );
   const [untilDate, setUntilDate] = useState(() => addMonthsToDate(todayLocal(), 6));
   const [repayFor, setRepayFor] = useState<{ account: Account; balance: number } | null>(null);
@@ -64,8 +64,8 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
     const isFree = (id: string) => freeIds.has(id);
     const startFree = freeAssetTotal(bs.assets);
     const end = untilDate;
-    // 投影の入力 = 導出込み仕訳（reportEntriesForAsOf を表示終了日まで展開した結果）。
-    const futureEntries = ledger ? reportEntriesForAsOf(ledger, end) : [];
+    // 投影の入力 = 導出込み仕訳（displayEntriesForAsOf を表示終了日まで展開した結果）。
+    const futureEntries = ledger ? displayEntriesForAsOf(ledger, end, today) : [];
     const future = uniqueEntriesById(
       futureEntries.filter(
         (e) => e.date > today && e.date <= end && e.lines.some((l) => isFree(l.accountId)),

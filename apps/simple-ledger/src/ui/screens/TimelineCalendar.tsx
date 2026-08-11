@@ -9,7 +9,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProper
 import { Segmented } from '@snishi/foundation/ui/Segmented';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
-import { reportEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesForAsOf } from '../../domain/reportEntries';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
 import {
   buildTimelineCalendar,
@@ -1180,7 +1180,7 @@ export function TimelineCalendar({
     }));
     const calculated = buildTimelineCalendar({
       accounts: ledger.accounts,
-      entries: reportEntriesForAsOf(ledger, visibleRange.to),
+      entries: displayEntriesForAsOf(ledger, visibleRange.to, today),
       monthlyCostItems: ledger.monthlyCostItems,
       recurringRules: ledger.recurringRules,
       boxes,
@@ -1195,6 +1195,7 @@ export function TimelineCalendar({
     range.from,
     range.to,
     showEnded,
+    today,
     visibleRange.from,
     visibleRange.to,
     zoom,

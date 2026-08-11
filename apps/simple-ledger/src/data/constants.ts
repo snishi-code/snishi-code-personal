@@ -32,6 +32,10 @@ export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
  * 「ざっくり登録 + 残高補正」の使い方に明細単位の CSV 取込は合わない＝使わない死荷重として
  * 型・schema・store・UI・交換 JSON の 3 配列と EntryMetadata の取込由来メタデータを全撤去。
  * 設計は git 履歴に残る（将来要望が出たら再導入可能）。
+ * 同じ version 10 内の optional 追加（2026-08-11・投資の利回り投影 §D・版は上げない）:
+ * `Account.annualReturnBp`（想定利回り・年率 bp 整数・investment-asset のみ）と
+ * `Account.projectionAccountId`（投影の計上先・income-category・soft reference）。
+ * どちらも optional かつセットで持つ・明示値のみ検証（未設定の旧データはそのまま適法）。
  * version 9 = 取込プロファイルのアーカイブ（v10 で機能ごと撤去）。
  * version 8 = CSV 取込（Import Profile）の導入（v10 で機能ごと撤去）。
  * version 7 = 予定キャッシュフロー（CashflowSchedule）の全廃。「予定 = 未来日付の通常仕訳」へ

@@ -396,7 +396,8 @@ describe('YearlyOverview', () => {
   });
 
   it('表示単位ごとに仕訳の仮想展開を1回だけ行う', () => {
-    const expand = vi.spyOn(reportEntriesModule, 'reportEntriesForAsOf');
+    // 画面の展開入口は displayEntriesForAsOf（投影込みの表示 API）。
+    const expand = vi.spyOn(reportEntriesModule, 'displayEntriesForAsOf');
     render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
     expect(expand).toHaveBeenCalledTimes(1);
 

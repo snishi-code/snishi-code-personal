@@ -193,6 +193,9 @@ export const UI = {
     // 返済設定（負債の編集シートのみ）
     repaymentAccount: 'accounts.repaymentAccount',
     repaymentDay: 'accounts.repaymentDay',
+    // 投資の利回り投影（投資科目の編集シートのみ・年率% ⇄ bp + 計上先セレクタ）
+    annualReturn: 'accounts.annualReturn',
+    projectionAccount: 'accounts.projectionAccount',
     // 並び替えモード（箱内・上下ボタン式）
     reorderToggle: 'accounts.reorder.toggle',
     moveUp: 'accounts.reorder.up',

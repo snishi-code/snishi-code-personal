@@ -10,7 +10,7 @@ import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import { aggregateEntryTags } from '../../domain/tags';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
-import { reportEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesForAsOf } from '../../domain/reportEntries';
 import { nowIso, todayLocal } from '../../util/time';
 import { newId } from '../../domain/ids';
 import type { Tag } from '../../domain/types';
@@ -45,11 +45,11 @@ export function Tags() {
   }, [period, today, year]);
 
   const entryTotals = useMemo(() => {
-    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf) : [];
+    const entries = ledger ? displayEntriesForAsOf(ledger, basis.asOf, today) : [];
     return aggregateEntryTags(entries, ledger?.tags ?? [], basis.flowRange).filter(
       (x) => x.count > 0,
     );
-  }, [basis, ledger]);
+  }, [basis, ledger, today]);
 
   async function toggleArchive(tag: Tag) {
     await saveTag({ ...tag, archived: !tag.archived, updatedAt: nowIso() }).catch(() => undefined);

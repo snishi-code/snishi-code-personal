@@ -11,6 +11,10 @@ import { useLedger } from '../state/store';
 import { accountBalance, filterByDateRange } from '../domain/accounting';
 import { ADJUSTABLE_ACCOUNT_ROLES } from '../domain/accountRoles';
 import { isValidIsoDate } from '../domain/calendar';
+// 理論残高は意図的に reportEntriesForAsOf（投影なし）を使う: repository の保存側
+// （createAdjustment / updateAdjustment）と同じ算定でなければ expectedBalance がずれる。
+// 投資利回りの投影（displayEntriesForAsOf）は仮の数字であり、補正の基準（現実アンカー）に
+// 混ぜない（§D・Codex 指摘）。
 import { reportEntriesForAsOf } from '../domain/reportEntries';
 import { parseSignedAmountText, sanitizeSignedAmountText } from './amountText';
 import { groupedAccountsByRole } from './accountOptions';

@@ -1,7 +1,7 @@
 /*
  * 年間・全体マトリクスの集計。
  *
- * `reportEntriesForAsOf` で実仕訳と導出仕訳を一度だけ展開した配列を受け取り、
+ * `displayEntriesForAsOf` で実仕訳と導出仕訳を一度だけ展開した配列を受け取り、
  * 日付順の単一走査でフロー（PL）と列末のストック（BS）を同時に作る。
  * この関数内では導出仕訳を再展開しない。
  */
@@ -126,7 +126,7 @@ function addValue(values: PeriodMatrixValue[], index: number, amount: number): v
 /**
  * 展開済み仕訳から年間（月12列）または全体（年列）のマトリクスを作る。
  *
- * - entries は最大基準日まで `reportEntriesForAsOf` した結果を渡す。
+ * - entries は最大基準日まで `displayEntriesForAsOf` した結果を渡す。
  * - 入力配列は変更しない。
  * - 現在・未来を問わず、列末時点の投影値を数値で返す。
  * - PL、継続コスト、費用カテゴリ、BS のために仕訳を複数回走査しない。

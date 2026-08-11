@@ -1,7 +1,7 @@
 /*
  * 年間・全体ビュー。
  *
- * 表示対象の最大基準日まで reportEntriesForAsOf を一度だけ呼び、展開済み仕訳を
+ * 表示対象の最大基準日まで displayEntriesForAsOf を一度だけ呼び、展開済み仕訳を
  * periodMatrix の単一走査へ渡す。年送りはこの画面内だけで完結し、ヘッダー期間は変更しない。
  *
  * 全体ビューには表示地平セレクタ（実績のみ / +30年 / 2100年まで）を持つ。
@@ -22,7 +22,7 @@ import {
 } from '../../domain/accountLifetime';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
 import { dataYearsOf, type ReportPeriod } from '../../domain/reportPeriod';
-import { reportEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesForAsOf } from '../../domain/reportEntries';
 import { recurringPostingsDue } from '../../domain/recurring';
 import type { Ledger, MonthlyCostItem } from '../../domain/types';
 import { useLedger } from '../../state/store';
@@ -51,7 +51,7 @@ function yearOfPeriod(period: ReportPeriod, today: string): number {
 /**
  * 実仕訳に加え、複数年へまたがる継続コストと有限の定期ルールの存在期間も
  * 「データのある年」に含める。
- * reportEntriesForAsOf を年候補づくりで別途呼ばず、画面の仕訳展開を常に1回に保つ。
+ * displayEntriesForAsOf を年候補づくりで別途呼ばず、画面の仕訳展開を常に1回に保つ。
  */
 function matrixDataYears(ledger: Ledger, today: string): number[] {
   const dates = ledger.journalEntries.map((entry) => entry.date);
@@ -157,7 +157,7 @@ export function YearlyOverview({ period }: { period: ReportPeriod }) {
   );
   const matrix = useMemo(() => {
     if (!ledger || dataYears.length === 0) return null;
-    const entries = reportEntriesForAsOf(ledger, periodMatrixAsOf(scope, today));
+    const entries = displayEntriesForAsOf(ledger, periodMatrixAsOf(scope, today), today);
     return buildPeriodMatrix(ledger.accounts, entries, scope);
   }, [dataYears.length, ledger, scope, today]);
 
@@ -195,6 +195,7 @@ export function YearlyOverview({ period }: { period: ReportPeriod }) {
 
         {mode === 'all' && dataYears.length > 0 ? (
           <div className="yearly-overview__horizon">
+            {/* 仮の数字が本物の顔をしない: 未来列に何が混ざるかを地平セレクタの近くで明示する。 */}
             <Segmented
               value={horizon}
               items={[
@@ -218,6 +219,7 @@ export function YearlyOverview({ period }: { period: ReportPeriod }) {
                 setHorizon(value === 'plus30' || value === 'hardCap' ? value : 'actual')
               }
             />
+            <p className="field__hint">{t('yearlyOverview.projectionNote')}</p>
           </div>
         ) : null}
 

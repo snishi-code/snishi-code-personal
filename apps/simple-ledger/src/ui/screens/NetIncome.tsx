@@ -9,7 +9,7 @@ import { useLedger } from '../../state/store';
 import { deriveProfitAndLoss } from '../../domain/accounting';
 import { livingCostForRange } from '../../domain/livingCost';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
-import { reportEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesForAsOf } from '../../domain/reportEntries';
 import { todayLocal } from '../../util/time';
 import { buildSectionTrends } from './breakdownData';
 import { Money } from '../money';
@@ -35,12 +35,12 @@ export function NetIncome({
 
   const { revenue, living } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf) : [];
+    const entries = ledger ? displayEntriesForAsOf(ledger, basis.asOf, today) : [];
     return {
       revenue: deriveProfitAndLoss(accounts, entries, basis.flowRange).totalRevenue,
       living: livingCostForRange(accounts, entries, basis.flowRange),
     };
-  }, [basis, ledger]);
+  }, [basis, ledger, today]);
 
   const trends = useMemo(() => buildSectionTrends(period, ledger, today), [period, ledger, today]);
 

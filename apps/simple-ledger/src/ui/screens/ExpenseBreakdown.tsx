@@ -10,7 +10,7 @@ import {
   livingCostBreakdownForRange,
 } from '../../domain/livingCost';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
-import { reportEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesForAsOf } from '../../domain/reportEntries';
 import { todayLocal } from '../../util/time';
 import { buildSectionTrends } from './breakdownData';
 import { Money } from '../money';
@@ -42,12 +42,12 @@ export function ExpenseBreakdown({
 
   const { breakdown, categories } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf) : [];
+    const entries = ledger ? displayEntriesForAsOf(ledger, basis.asOf, today) : [];
     return {
       breakdown: livingCostBreakdownForRange(accounts, entries, range),
       categories: expenseCategoryBreakdownForRange(accounts, entries, range),
     };
-  }, [basis.asOf, ledger, range]);
+  }, [basis.asOf, ledger, range, today]);
 
   const trends = useMemo(() => buildSectionTrends(period, ledger, today), [period, ledger, today]);
 

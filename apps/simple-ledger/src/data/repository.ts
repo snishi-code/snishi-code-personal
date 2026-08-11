@@ -73,6 +73,7 @@ import { addMonthsToDate, monthlyAmounts, monthOf } from '../domain/allocation';
 import { compareMonthlyCostItems } from '../domain/monthlyCost';
 import { buildAdjustmentEntry, counterpartName, counterpartRole } from '../domain/adjustment';
 import { accountBalance, filterByDateRange } from '../domain/accounting';
+import { ANNUAL_RETURN_BP_MAX, ANNUAL_RETURN_BP_MIN } from '../domain/investmentProjection';
 import { reportEntriesForAsOf } from '../domain/reportEntries';
 import { isTagReferenced, tagAssignmentError } from '../domain/tags';
 import { nowIso, todayLocal } from '../util/time';
@@ -298,8 +299,9 @@ export async function loadLedger(): Promise<Ledger> {
   // 継続コスト資産は「終了が近い順」（endDate 昇順・未設定は最後・同着は名前）。
   monthlyCostItems.sort(compareMonthlyCostItems);
   recurringRules.sort((a, b) => cmp(a.createdAt, b.createdAt));
-  // 導出専用 entries は持たない。集計は各画面が reportEntriesForAsOf で
-  // 基準日ごとに必要範囲だけ仮想展開する（単一正本 = reportBasis + reportEntriesForAsOf）。
+  // 導出専用 entries は持たない。集計は各画面が displayEntriesForAsOf で
+  // 基準日ごとに必要範囲だけ仮想展開する（単一正本 = reportBasis + displayEntriesForAsOf）。
+  // repository 内の保存不変条件だけは reportEntriesForAsOf（投影を混ぜない）を使う。
   return {
     meta,
     settings,
@@ -681,6 +683,38 @@ async function upsertAccountUnlocked(input: Account, opts?: AccountSaveOptions):
       (account.role !== 'continuing-cost-asset' || account.type !== 'asset'))
   ) {
     throw new LedgerError('error.account.roleTypeMismatch');
+  }
+  // 投資の利回り投影（想定利回り + 計上先・§D）の保存境界（fail-closed）:
+  //  - investment-asset 以外には保存しない。片方だけの設定は拒否（セットで意味を持つ）。
+  //  - 計上先は自分自身不可。参照は soft reference（accountRefs の使用中判定に入れない）
+  //    なので、**値を設定/変更するときだけ**存在と role（income-category）を検証する。
+  //    参照先が後から消えても既存科目の編集（改名等）は保存できる（投影エンジンが
+  //    fail-closed に生成を止める＝§A の「暗黙値で編集不能」を繰り返さない）。
+  if ((account.annualReturnBp !== undefined) !== (account.projectionAccountId !== undefined)) {
+    throw new LedgerError('error.account.projectionPair');
+  }
+  if (account.annualReturnBp !== undefined) {
+    if (account.role !== 'investment-asset') {
+      throw new LedgerError('error.account.returnOnlyInvestment');
+    }
+    if (
+      !Number.isInteger(account.annualReturnBp) ||
+      account.annualReturnBp < ANNUAL_RETURN_BP_MIN ||
+      account.annualReturnBp > ANNUAL_RETURN_BP_MAX
+    ) {
+      throw new LedgerError('error.account.returnInvalid');
+    }
+  }
+  if (account.projectionAccountId !== undefined) {
+    if (account.projectionAccountId === account.id) {
+      throw new LedgerError('error.account.projectionAccountInvalid');
+    }
+    if (account.projectionAccountId !== prev?.projectionAccountId) {
+      const target = accounts.find((a) => a.id === account.projectionAccountId);
+      if (!target || target.role !== 'income-category') {
+        throw new LedgerError('error.account.projectionAccountInvalid');
+      }
+    }
   }
   // 端点の整合（明示 startDate > endDate の拒否）は accountSchema の superRefine が担う。
   // startDate 未設定は過去へ開いた線分なので、endDate 単独でも常に適法（§A 案1）。

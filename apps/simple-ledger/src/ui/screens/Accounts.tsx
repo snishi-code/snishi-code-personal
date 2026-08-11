@@ -22,7 +22,7 @@ import {
 } from '../../domain/accounting';
 import { isDebitNormal } from '../../domain/accounting';
 import { referencedAccountIds } from '../../domain/accountRefs';
-import { reportEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesForAsOf } from '../../domain/reportEntries';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
 import { buildSimpleEntry } from '../../domain/entry';
 import type { Account } from '../../domain/types';
@@ -56,12 +56,12 @@ export function Accounts({ period = { mode: 'all' } }: { period?: ReportPeriod }
   const basis = reportBasis(period, today);
   const asOf = basis.asOf;
   const entries = ledger
-    ? filterByDateRange(reportEntriesForAsOf(ledger, asOf), undefined, asOf)
+    ? filterByDateRange(displayEntriesForAsOf(ledger, asOf, today), undefined, asOf)
     : [];
   // 費用・収入の発生額はホームと同じ期間（flowRange）で数える（C-1。導出＝統一エンジン）。
   const flowEntries = filterByDateRange(entries, basis.flowRange.from, basis.flowRange.to);
   const todayEntries = ledger
-    ? filterByDateRange(reportEntriesForAsOf(ledger, today), undefined, today)
+    ? filterByDateRange(displayEntriesForAsOf(ledger, today, today), undefined, today)
     : [];
   const currency = ledger?.settings.currency ?? 'JPY';
 

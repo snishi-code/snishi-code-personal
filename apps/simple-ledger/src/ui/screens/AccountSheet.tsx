@@ -17,6 +17,11 @@ import { useLedger } from '../../state/store';
 import type { Account } from '../../domain/types';
 import { findAccountNameConflicts, planArchiveRenames } from '../../domain/accountNames';
 import { sortAccounts } from '../../domain/accountOrder';
+import {
+  annualReturnBpToPercentText,
+  INVESTMENT_PROJECTION_SUGGESTED_NAME,
+  parseAnnualReturnPercentText,
+} from '../../domain/investmentProjection';
 import { newId } from '../../domain/ids';
 import { nowIso, todayLocal } from '../../util/time';
 import { boxForRole, type AccountBox } from '../accountBoxes';
@@ -52,6 +57,15 @@ export function AccountSheet({
   const [repaymentDayText, setRepaymentDayText] = useState(
     existing?.repaymentDay !== undefined ? String(existing.repaymentDay) : '',
   );
+  // 想定利回り（年率% ⇄ bp・投資科目のみ）。空欄 = 投影なし。計上先とセットで保存する。
+  const [annualReturnText, setAnnualReturnText] = useState(
+    existing?.annualReturnBp !== undefined
+      ? annualReturnBpToPercentText(existing.annualReturnBp)
+      : '',
+  );
+  const [projectionAccountId, setProjectionAccountId] = useState(
+    existing?.projectionAccountId ?? '',
+  );
   // 開始日欄の契約（§A 案1・作者決定）: 空欄 = undefined = 過去側制限なし。未設定値を
   // createdAt で表示・再保存しない。明示値を空欄へ戻せば startDate を削除できる。
   const [startDate, setStartDate] = useState(existing?.startDate ?? '');
@@ -76,6 +90,23 @@ export function AccountSheet({
   // 返済設定は負債（カード・未払 / ローン）の編集時のみ（新規は作成後に編集で設定する）。
   const showRepayment =
     !!existing && (existing.role === 'payment-liability' || existing.role === 'other-liability');
+  // 想定利回りは投資科目の編集時のみ（返済設定と同じく、新規は作成後に編集で設定する）。
+  const showReturn = !!existing && existing.role === 'investment-asset';
+  // 計上先の候補 = 収入科目。名前「投資益」の科目があればサジェストとして先頭に出す
+  // （自動確定はしない＝既定は未設定のまま）。
+  const projectionOptions = [
+    { value: '', label: t('accounts.repaymentUnset') },
+    ...sortAccounts(accounts)
+      .filter((a) => a.role === 'income-category' && (!a.archived || a.id === projectionAccountId))
+      .sort(
+        (a, b) =>
+          Number(b.name === INVESTMENT_PROJECTION_SUGGESTED_NAME) -
+          Number(a.name === INVESTMENT_PROJECTION_SUGGESTED_NAME),
+      )
+      .map((a) => ({ value: a.id, label: a.name })),
+  ];
+  const annualReturnBp =
+    annualReturnText === '' ? null : parseAnnualReturnPercentText(annualReturnText);
   const repaymentOptions = [
     { value: '', label: t('accounts.repaymentUnset') },
     ...sortAccounts(accounts)
@@ -130,6 +161,10 @@ export function AccountSheet({
           ...(showMovable && !movable ? { movable: false } : {}),
           ...(showRepayment && repaymentAccountId !== '' ? { repaymentAccountId } : {}),
           ...(showRepayment && repaymentDay !== null ? { repaymentDay } : {}),
+          // 想定利回りと計上先は必ずセットで保存する（空欄 = 両方なし = 投影なし）。
+          ...(showReturn && annualReturnBp !== null && projectionAccountId !== ''
+            ? { annualReturnBp, projectionAccountId }
+            : {}),
           createdAt: existing?.createdAt ?? ts,
           updatedAt: ts,
         };
@@ -173,6 +208,16 @@ export function AccountSheet({
       setError(t('error.account.repaymentDayInvalid'));
       return;
     }
+    // 想定利回り: 解釈できない/範囲外の入力はエラー。片方だけの設定も保存前に拒否する
+    // （保存境界 error.account.projectionPair と同じ不変条件を入力時点で知らせる）。
+    if (showReturn && annualReturnText !== '' && annualReturnBp === null) {
+      setError(t('error.account.returnInvalid'));
+      return;
+    }
+    if (showReturn && (annualReturnText !== '') !== (projectionAccountId !== '')) {
+      setError(t('error.account.projectionPair'));
+      return;
+    }
     // 内訳名の重複を保存前に判定する（有効と衝突 → エラー、アーカイブと衝突 → 承認ダイアログ）。
     const conflicts = findAccountNameConflicts(accounts, trimmed, existing?.id);
     if (conflicts.active) {
@@ -195,6 +240,8 @@ export function AccountSheet({
     openingDate,
     repaymentAccountId,
     repaymentDayText,
+    annualReturnText,
+    projectionAccountId,
     startDate,
     endDate,
   });
@@ -306,6 +353,32 @@ export function AccountSheet({
               onChange={setRepaymentDayText}
               options={repaymentDayOptions}
               dataUi={UI.accounts.repaymentDay}
+            />
+          </>
+        ) : null}
+        {showReturn ? (
+          <>
+            {/* 小数と負号を入力するため inputMode は指定しない（foundation は numeric のみ対応）。 */}
+            <TextInput
+              label={t('accounts.annualReturn')}
+              value={annualReturnText}
+              onChange={(v) => {
+                setAnnualReturnText(v);
+                setError(undefined);
+              }}
+              hint={t('accounts.annualReturnHint')}
+              dataUi={UI.accounts.annualReturn}
+            />
+            <SelectInput
+              label={t('accounts.projectionAccount')}
+              value={projectionAccountId}
+              onChange={(v) => {
+                setProjectionAccountId(v);
+                setError(undefined);
+              }}
+              options={projectionOptions}
+              hint={t('accounts.projectionAccountHint')}
+              dataUi={UI.accounts.projectionAccount}
             />
           </>
         ) : null}

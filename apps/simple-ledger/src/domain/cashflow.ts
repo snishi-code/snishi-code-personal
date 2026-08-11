@@ -5,7 +5,7 @@
  *  - 投影の原資は**「自由に動かせるお金」1 値**（daily-asset かつ movable !== false で、
  *    基準日に存在する科目の残高合計）。総資金/自由資金という 2 段の概念は持たない。
  *    貸借対照表・資産内訳は従来どおり全資産を出す（資金繰りだけ絞る）。
- *  - 投影の入力は導出込み仕訳（reportEntriesForAsOf を表示終了日まで展開した結果）。
+ *  - 投影の入力は導出込み仕訳（displayEntriesForAsOf を表示終了日まで展開した結果）。
  *    未来日付の実仕訳・継続コストの導出行・定期ルールの投影が同じ列で扱われる。
  */
 import { addMonths, monthOf } from './allocation';
@@ -104,7 +104,7 @@ export function cashDeltaOfEntry(
 /**
  * 未来日付の導出込み仕訳を期日順に適用して将来残高を投影する。
  *
- * `entries` は reportEntriesForAsOf を表示終了日まで展開した結果を渡す（導出込み仕訳が
+ * `entries` は displayEntriesForAsOf を表示終了日まで展開した結果を渡す（導出込み仕訳が
  * 投影の唯一の入力）。startFree は today 時点の残高なので、today より後の仕訳だけを積む。
  * 同一 ID の重複（複数の投影経路から来た仮想仕訳）は 1 回だけ数え、
  * 「自由に動かせるお金」にふれない仕訳は点を作らない。
@@ -114,7 +114,7 @@ export function cashDeltaOfEntry(
 export function projectCashflow(params: {
   /** today 時点の「自由に動かせるお金」（freeAssetTotal の結果）。 */
   startFree: number;
-  /** 導出込み仕訳（reportEntriesForAsOf を表示終了日まで展開した結果）。 */
+  /** 導出込み仕訳（displayEntriesForAsOf を表示終了日まで展開した結果）。 */
   entries: JournalEntry[];
   today: string;
   /** 「自由に動かせるお金」に数える科目か（cashDeltaOfEntry と同じ判定を渡す）。 */

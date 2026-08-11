@@ -129,7 +129,7 @@ export interface TimelineCalendar {
 
 export interface BuildTimelineCalendarInput {
   accounts: readonly Account[];
-  /** reportEntriesForAsOf(range.end) の結果（実仕訳 + 全導出行）。 */
+  /** displayEntriesForAsOf(range.end) の結果（実仕訳 + 全導出行）。 */
   entries: readonly JournalEntry[];
   monthlyCostItems: readonly MonthlyCostItem[];
   recurringRules: readonly RecurringRule[];

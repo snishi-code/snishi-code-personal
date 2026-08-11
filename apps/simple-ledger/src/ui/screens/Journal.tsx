@@ -1,6 +1,7 @@
 /*
- * 仕訳一覧。保存される仕訳と計算で生まれる仕訳（継続コスト資産の費用行・定期ルールの投影）を
- * **区別せず全部**日付順で出す（reportEntriesForAsOf が単一の正本。export には混ぜない）。
+ * 仕訳一覧。保存される仕訳と計算で生まれる仕訳（継続コスト資産の費用行・定期ルール・
+ * 投資利回りの投影）を**区別せず全部**日付順で出す（displayEntriesForAsOf が単一の正本。
+ * export には混ぜない）。
  * 並び替え（日付/金額 × 昇/降・既定 = 日付降順）は表示専用。抽出結果には件数と合計を出し、
  * 合計の対象 = 表示している行の集合（科目タップ抽出 = 方向つき和 / それ以外 = 単純和）。
  * 展開範囲 = いま表示している範囲（to → 今日 or 保存仕訳の最も遠い日付。上限 2100-12-31）。
@@ -20,7 +21,7 @@ import { UI } from '../../ui-contract';
 import { todayLocal } from '../../util/time';
 import { entryHasTag } from '../../domain/tags';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
-import { reportEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesForAsOf } from '../../domain/reportEntries';
 import { periodRange, type ReportPeriod } from '../../domain/reportPeriod';
 import {
   entryAmount,
@@ -155,12 +156,12 @@ export function Journal({
   // 保存される仕訳 + 計算で生まれる仕訳（分けない）。混合後に必ずソートし直す。
   const source = useMemo(() => {
     if (!ledger) return [];
-    return reportEntriesForAsOf(ledger, expandTo).sort((a, b) => {
+    return displayEntriesForAsOf(ledger, expandTo, today).sort((a, b) => {
       if (a.date !== b.date) return a.date < b.date ? 1 : -1;
       if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
       return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
     });
-  }, [ledger, expandTo]);
+  }, [ledger, expandTo, today]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
