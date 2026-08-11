@@ -116,10 +116,10 @@ function selectProfile(profileId: string = PAYPAY_PROFILE_ID): void {
 const UI_SOURCE_ID = 'source-ui-paypay';
 
 /**
- * 科目の開始日を CSV の行日付より前へ寄せる。個別行の編集はホームの仕訳入力シートを
- * 再利用するため（監査 P1-2）、候補は既存規則どおり仕訳日付での存在（accountExistsAt）で
- * 絞られる。seed 科目の暗黙開始日（createdAt = 今日）は合成 CSV の 2026-08 より後になり
- * 得るので、テストデータ側を整合させる。
+ * 科目に明示 startDate を与えて存在期間の絞り込み（accountExistsAt）を固定する。
+ * §A 案1（2026-08-11）で暗黙開始日（createdAt 代用）は廃止され、開始日未設定の科目は
+ * どの日付でも候補に出るようになったため整合目的では不要になったが、明示 startDate の
+ * 経路（監査 P1-2 の仕訳入力シート再利用と候補絞り込み）を通すために残す。
  */
 async function backdateAccounts(names: string[], startDate = '2026-01-01'): Promise<void> {
   const ledger = await loadLedger();
@@ -253,8 +253,7 @@ describe('CSV 取込 — ハッピーパス（§4）', () => {
 
     // 支払い（最古の行）は行単位選択: 行タップ → 仕訳入力シート（EntrySheet 再利用・監査
     // P1-2）が支出モードで開き、計上先（変動費）を選んで保存。
-    // 日付昇順で適用する（暗黙開始日の科目は最初の参照で開始点が固定されるため、
-    // 新しい日付から適用すると後から古い行が期間外参照で拒否される既存仕様）。
+    // （§A 案1 で暗黙開始日が廃止され適用順序への依存は消えた。昇順は表示・監査の整形のみ。）
     fireEvent.click(within(kindGroupOf('支払い')).getByText('支払い コンビニ'));
     await waitFor(() => {
       expect(q(UI.journal.entry.save)).not.toBeNull();

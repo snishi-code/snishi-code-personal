@@ -9,6 +9,7 @@ import {
   upsertRecurringRule,
 } from '../src/data/repository';
 import { buildSimpleEntry } from '../src/domain/entry';
+import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import './setup';
 
 describe('勘定科目の存在期間（保存境界）', () => {
@@ -152,9 +153,11 @@ describe('勘定科目の存在期間（保存境界）', () => {
     });
 
     ledger = await loadLedger();
-    expect(ledger.accounts.find((account) => account.id === futureCash.id)?.startDate).toBe(
-      '2026-02-01',
-    );
+    // §A 案1（2026-08-11）: 開始日未設定の科目は過去へ開いた線分なので、参照による
+    // 暗黙開始日の明示化（旧 extendImplicitAccountStart）は行われず undefined のまま。
+    expect(
+      ledger.accounts.find((account) => account.id === futureCash.id)?.startDate,
+    ).toBeUndefined();
     expect(await catchUpRecurringRules('2026-12-31')).toBe(11);
     expect(await catchUpRecurringRules('2027-01-01')).toBe(1);
 
@@ -166,5 +169,108 @@ describe('勘定科目の存在期間（保存境界）', () => {
       futureCash.id,
     );
     expect(ledger.monthlyCostItems.some((item) => item.id === `ccr-${rule.id}-2027-01`)).toBe(true);
+  });
+
+  // ── §A 案1（2026-08-11）: 開始日未設定 = 過去へ開いた線分。暗黙開始日（createdAt 代用）の廃止 ──
+
+  it('開始日未設定の科目へ「新→古」の順で保存でき、startDate は書かれない', async () => {
+    // 旧仕様では最初の遡及保存が暗黙開始日を明示化するため、新しい日付を先に保存すると
+    // 古い行が期間外参照で拒否された（CSV 分割適用の順序依存の根）。新仕様では順序不問。
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((account) => account.name === '預金')!;
+    const fixed = ledger.accounts.find((account) => account.name === '固定費')!;
+    expect(cash.startDate).toBeUndefined();
+
+    for (const date of ['2026-07-15', '2019-01-05']) {
+      await upsertEntry(
+        buildSimpleEntry({
+          date,
+          description: `新→古 ${date}`,
+          debitAccountId: fixed.id,
+          creditAccountId: cash.id,
+          amount: 100,
+          kind: 'normal',
+        }),
+      );
+    }
+
+    const after = await loadLedger();
+    expect(
+      after.journalEntries.filter((entry) => entry.description.startsWith('新→古')),
+    ).toHaveLength(2);
+    expect(after.accounts.find((account) => account.id === cash.id)?.startDate).toBeUndefined();
+    expect(after.accounts.find((account) => account.id === fixed.id)?.startDate).toBeUndefined();
+  });
+
+  it('createdAt より古い仕訳を持つ開始日未設定科目の改名が保存できる（作者データ形状）', async () => {
+    // 旧仕様では改名保存の参照検証が暗黙開始日（createdAt）で下限を引くため、
+    // createdAt より古い仕訳（取込 JSON 由来）を持つ科目は編集不能だった。
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((account) => account.name === '預金')!;
+    const fixed = ledger.accounts.find((account) => account.name === '固定費')!;
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2019-11-01',
+        description: '過去の実データ',
+        debitAccountId: fixed.id,
+        creditAccountId: cash.id,
+        amount: 500,
+        kind: 'normal',
+      }),
+    );
+
+    await upsertAccount({ ...cash, name: '銀行口座', updatedAt: new Date().toISOString() });
+
+    const saved = (await loadLedger()).accounts.find((account) => account.id === cash.id)!;
+    expect(saved.name).toBe('銀行口座');
+    expect(saved.startDate).toBeUndefined();
+  });
+
+  it('明示 startDate を空欄へ戻すと削除される（`startDate: undefined` をキー付きで渡す導線）', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((account) => account.name === '預金')!;
+    await upsertAccount({ ...cash, startDate: '2026-01-01' });
+    expect((await loadLedger()).accounts.find((account) => account.id === cash.id)?.startDate).toBe(
+      '2026-01-01',
+    );
+
+    // AccountSheet の空欄保存と同じ形: キーを明示して undefined を渡す（キー省略は「据え置き」）。
+    const current = (await loadLedger()).accounts.find((account) => account.id === cash.id)!;
+    await upsertAccount({ ...current, startDate: undefined, updatedAt: new Date().toISOString() });
+
+    const cleared = (await loadLedger()).accounts.find((account) => account.id === cash.id)!;
+    expect(cleared.startDate).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(cleared, 'startDate')).toBe(false);
+  });
+
+  it('system 科目（継続コスト台帳）の開始点は必要な最古日まで自動延長される（不変）', async () => {
+    let ledger = await loadLedger();
+    const cash = ledger.accounts.find((account) => account.name === '預金')!;
+    const fixed = ledger.accounts.find((account) => account.name === '固定費')!;
+    await createContinuousCost({
+      name: '後から登録',
+      amount: 12_000,
+      startDate: '2026-05-01',
+      expenseAccountId: fixed.id,
+      creditAccountId: cash.id,
+    });
+    ledger = await loadLedger();
+    expect(
+      ledger.accounts.find((account) => account.id === CONTINUOUS_COST_LEDGER_ACCOUNT_ID)
+        ?.startDate,
+    ).toBe('2026-05-01');
+
+    await createContinuousCost({
+      name: '先に始まっていた',
+      amount: 24_000,
+      startDate: '2025-01-15',
+      expenseAccountId: fixed.id,
+      creditAccountId: cash.id,
+    });
+    ledger = await loadLedger();
+    expect(
+      ledger.accounts.find((account) => account.id === CONTINUOUS_COST_LEDGER_ACCOUNT_ID)
+        ?.startDate,
+    ).toBe('2025-01-15');
   });
 });

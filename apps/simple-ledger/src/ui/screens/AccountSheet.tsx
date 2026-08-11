@@ -19,7 +19,6 @@ import { findAccountNameConflicts, planArchiveRenames } from '../../domain/accou
 import { sortAccounts } from '../../domain/accountOrder';
 import { newId } from '../../domain/ids';
 import { nowIso, todayLocal } from '../../util/time';
-import { effectiveAccountStartDate } from '../../domain/accountLifetime';
 import { boxForRole, type AccountBox } from '../accountBoxes';
 import { errorText, t } from '../../i18n';
 import { UI } from '../../ui-contract';
@@ -53,9 +52,9 @@ export function AccountSheet({
   const [repaymentDayText, setRepaymentDayText] = useState(
     existing?.repaymentDay !== undefined ? String(existing.repaymentDay) : '',
   );
-  const [startDate, setStartDate] = useState(
-    existing ? (effectiveAccountStartDate(existing) ?? todayLocal()) : todayLocal(),
-  );
+  // 開始日欄の契約（§A 案1・作者決定）: 空欄 = undefined = 過去側制限なし。未設定値を
+  // createdAt で表示・再保存しない。明示値を空欄へ戻せば startDate を削除できる。
+  const [startDate, setStartDate] = useState(existing?.startDate ?? '');
   const [endDate, setEndDate] = useState(
     existing?.endDate ??
       (existing?.archived && /^\d{4}-\d{2}-\d{2}/.test(existing.updatedAt)
@@ -123,7 +122,9 @@ export function AccountSheet({
           type,
           role,
           archived: existing ? endDate !== '' : false,
-          ...(existing ? { startDate } : {}),
+          // 空欄 = undefined をキー付きで渡す（保存境界が「明示解除」として startDate を削除する。
+          // 新規は既定 = 空欄なのでキー自体を渡さない）。
+          ...(existing ? { startDate: startDate === '' ? undefined : startDate } : {}),
           ...(existing ? { endDate: endDate === '' ? undefined : endDate } : {}),
           ...(note.trim() !== '' ? { note: note.trim() } : {}),
           ...(showMovable && !movable ? { movable: false } : {}),
@@ -148,7 +149,8 @@ export function AccountSheet({
       return;
     }
     if (!existing && !createRole) return; // 追加できない箱（UI からは到達しない）
-    if (existing && (startDate === '' || (endDate !== '' && endDate < startDate))) {
+    // 開始日は空欄可（過去側制限なし・§A 案1）。両端があるときだけ前後関係を検証する。
+    if (existing && startDate !== '' && endDate !== '' && endDate < startDate) {
       setError(t('error.monthlyCost.endBeforeStart'));
       return;
     }
@@ -250,12 +252,12 @@ export function AccountSheet({
             <TextInput
               label={t('ccItem.startDate')}
               type="date"
-              required
               value={startDate}
               onChange={(value) => {
                 setStartDate(value);
                 setError(undefined);
               }}
+              hint={t('accounts.startDateHint')}
               dataUi={UI.accounts.startDate}
             />
             <TextInput

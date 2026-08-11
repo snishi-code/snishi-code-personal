@@ -304,6 +304,13 @@ export interface ProfileBinding {
   kindDestinations: Record<string, string>;
   /** チャージ源泉（role: daily-asset）。 */
   chargeSourceAccountId?: string;
+  /**
+   * 取込開始日（§B・任意・未設定 = 全期間）。「その人がどこまで手入力したか」という帳簿側の
+   * 状態なのでポータブルな DSL ではなく binding が持つ。意味論 = 評価後の明示 skip
+   * （理由コード「取込開始日より前」）で、**決定（ImportDecision）は作らない** — 後から
+   * 開始日を早めれば当該行は普通にレビューへ出る（可逆）。
+   */
+  importFromDate?: string;
   createdAt: string;
   updatedAt: string;
 }

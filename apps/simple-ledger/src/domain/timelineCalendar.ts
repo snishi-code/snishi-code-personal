@@ -5,7 +5,7 @@
  * ポッチの見た目へ持ち込まない。違いは「開く」先を解決する target だけに残す。
  */
 import { addMonths, monthOf } from './allocation';
-import { effectiveAccountStartDate, recurringRuleLastExistingDate } from './accountLifetime';
+import { recurringRuleLastExistingDate } from './accountLifetime';
 import { buildRuleItem, recurringExpenseAccountId, recurringPostingsDue } from './recurring';
 import { parseRuleItemId } from './recurringIds';
 import type { Account, JournalEntry, MonthlyCostItem, RecurringRule } from './types';
@@ -205,7 +205,9 @@ export function timelineSpanIntersects(span: TimelineSpan, range: TimelineDateRa
 }
 
 function accountSpan(account: Account): TimelineSpan {
-  return { startDate: effectiveAccountStartDate(account), endDate: account.endDate };
+  // startDate 未設定 = 過去へ開いた線分（§A 案1）。TimelineSpan の開区間表現へそのまま乗せ、
+  // 描画側が表示範囲の左端まで伸ばす（createdAt を代用しない）。
+  return { startDate: account.startDate, endDate: account.endDate };
 }
 
 function accountSpans(account: Account): TimelineSpan[] {

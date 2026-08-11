@@ -406,6 +406,8 @@ export const ja = {
   'accounts.boxLockedHint':
     '大分類は変更できません。分類を変えたい場合は、新しい内訳を作って古い内訳をアーカイブしてください。',
   'accounts.emptyBox': 'まだ内訳がありません。',
+  // 開始日欄（§A 案1）: 空欄 = 過去へ開いた線分。明示値を空欄へ戻せば開始日を削除できる。
+  'accounts.startDateHint': '空欄 = 過去の制限なし。空欄に戻すと開始日を削除します。',
   'accounts.openingAmount': '初期残高（任意）',
   'accounts.openingDate': '基準日',
   'accounts.openingHint':
@@ -460,6 +462,8 @@ export const ja = {
   'settings.import': 'JSON を読み込み',
   'settings.importDesc':
     'JSON ファイルを取り込みます。取り込み前に自動でスナップショットを作成します。',
+  // 取込の免責 1 行（§C・2026-08-11）。機構は足さない（fail-closed schema が既にゲート）。
+  'settings.importDisclaimer': 'このアプリが書き出した JSON 以外の取込は動作保証外です。',
   'settings.snapshots': 'スナップショット',
   'settings.snapshotsDesc': '取り込み・復元の前に自動保存された状態です。ここから復元できます。',
   'settings.resetAll': 'すべてのデータを削除',
@@ -670,6 +674,9 @@ export const ja = {
   'csvImport.setupCharge': 'チャージ源泉',
   'csvImport.setupChargeHint': 'チャージ（入金）の引き落とし元の科目（現預金の内訳）。',
   'csvImport.setupSameAccount': '自口座と同じ科目は選べません。',
+  'csvImport.setupImportFrom': 'この日以降を取り込む（任意）',
+  'csvImport.setupImportFromHint':
+    'この日より前の未決定行はスキップとして数えられ、レビューに出ません（空欄 = 全期間）。後から早めればその行はレビューに戻ります。',
   'csvImport.setupSave': '保存',
   // 件数会計（§4-2 の保存則: 総行数 = 取込対象 + スキップ + エラー）
   'csvImport.countsTitle': '変換結果',
@@ -686,6 +693,7 @@ export const ja = {
   'csvImport.rowLine': '{line} 行目',
   'csvImport.skipReason.blank-line': '空行',
   'csvImport.skipReason.before-header': 'ヘッダーより前の行',
+  'csvImport.skipReason.before-import-start': '取込開始日より前',
   'csvImport.skipReason.rule': '条件スキップ（{reason}）',
   'csvImport.rowError.column-count-mismatch': '列数がヘッダーと一致しません',
   'csvImport.rowError.date-parse-failed': '日付を読み取れません',

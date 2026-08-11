@@ -342,6 +342,8 @@ export const profileBindingSchema = z.object({
   ownAccountId: z.string().min(1),
   kindDestinations: z.record(z.string().min(1).max(120), z.string().min(1)),
   chargeSourceAccountId: z.string().min(1).optional(),
+  /** 取込開始日（§B・任意・未設定 = 全期間）。明示値のみ検証する。 */
+  importFromDate: isoDate.optional(),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
 });

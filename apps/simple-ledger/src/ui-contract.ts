@@ -331,6 +331,8 @@ export const UI = {
     setupIncome: 'csvImport.setup.income',
     setupIncomeSuggest: 'csvImport.setup.incomeSuggest',
     setupCharge: 'csvImport.setup.charge',
+    // 取込開始日（binding.importFromDate・§B・任意）
+    setupImportFrom: 'csvImport.setup.importFrom',
     setupSave: 'csvImport.setup.save',
     // ID 列の無い profile 使用時の注意（作者決定 2026-08-11・P1-1）
     noIdNote: 'csvImport.noIdNote',

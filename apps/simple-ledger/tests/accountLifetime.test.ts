@@ -3,7 +3,6 @@ import {
   accountExistsAt,
   accountLifetimeViolation,
   accountReferenceIntervals,
-  effectiveAccountStartDate,
   recurringRuleReferenceStartDate,
 } from '../src/domain/accountLifetime';
 import { groupedAccountsByRole } from '../src/ui/accountOptions';
@@ -40,13 +39,26 @@ function entry(date: string): JournalEntry {
 }
 
 describe('勘定科目の存在期間', () => {
-  it('開始日未設定はcreatedAtの日付を使い、両端を含めて存在判定する', () => {
+  it('開始日未設定は過去へ開いた線分（createdAt を暗黙開始日にしない・§A 案1）', () => {
+    // 旧仕様（createdAt を暗黙開始日として存在判定に使う）は 2026-08-11 に廃止。
+    // createdAt より古い日付でも存在し、endDate だけが線分を閉じる。
     const subject = account({ archived: true, endDate: '2026-01-31' });
-    expect(effectiveAccountStartDate(subject)).toBe('2026-01-10');
-    expect(accountExistsAt(subject, '2026-01-09')).toBe(false);
-    expect(accountExistsAt(subject, '2026-01-10')).toBe(true);
+    expect(accountExistsAt(subject, '2019-01-01')).toBe(true);
+    expect(accountExistsAt(subject, '2026-01-09')).toBe(true);
     expect(accountExistsAt(subject, '2026-01-31')).toBe(true);
     expect(accountExistsAt(subject, '2026-02-01')).toBe(false);
+  });
+
+  it('開始日未設定はどんな過去の参照も包含する（保存境界の下限は明示 startDate のみ・§A 案1）', () => {
+    const references = accountReferenceIntervals('cash', {
+      entries: [entry('2019-01-01')],
+      monthlyCostItems: [],
+      recurringRules: [],
+    });
+    expect(accountLifetimeViolation(account(), references)).toBeUndefined();
+    expect(accountLifetimeViolation(account({ startDate: '2020-01-01' }), references)?.edge).toBe(
+      'start',
+    );
   });
 
   it('仕訳・item・ruleの参照期間を集約し、線分を短くする変更を検出する', () => {

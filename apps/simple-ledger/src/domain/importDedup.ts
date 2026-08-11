@@ -3,12 +3,14 @@
  * 後で照合アルゴリズムを差し替えられるよう、ストレージ・UI・profile に依存しない
  * 純関数だけを置く。呼び出し側（data / UI フェーズ）との契約は次のとおり。
  *
- * 処理順の固定（取込開始日 cutoff の導入に備えた明文化・2026-08-11）:
+ * 処理順の固定（2026-08-11 明文化・§B で ④ を実装）:
  *   ① 全 valid 行の正規化（importDsl.evaluateProfileText）
  *   ② **全母集合**で rowKey / occurrence 付与（importIdentity.attachRowKeys。
  *      occurrence はファイル内の全行で採番する — 部分集合で振ると番号がずれる）
  *   ③ decision 照合（この層 = resolveImportRows）
- *   ④ （将来の取込開始日 cutoff はここ = 照合の後・レビュー表示の前に評価段階の明示 skip として入る）
+ *   ④ 取込開始日 cutoff（この層 = applyImportFromDateCutoff。**未決定かつ
+ *      date < importFromDate の行だけ**を理由コード 'before-import-start' の明示 skip へ移す。
+ *      決定は作らない = 開始日を早めれば当該行は普通にレビューへ戻る・可逆）
  *   ⑤ invalid 行は隠さず error（件数会計の保存則: 全行 = normalized + skip + error）
  *
  *  入力: rowKey 付きの正規化行の列（ファイル内順。rowKey はファイル内で一意 —
@@ -205,4 +207,50 @@ export function resolveImportRows(input: ResolveImportRowsInput): ImportRowResol
 
     return { rowKey: row.rowKey, status: 'unresolved', similarEntryIds: findSimilar(row) };
   });
+}
+
+/* ── 取込開始日 cutoff（処理順④・§B） ── */
+
+export interface ImportFromDateCutoffResult<R> {
+  /** cutoff 後もレビュー対象に残る行（入力順を保つ）。 */
+  rows: R[];
+  /** rows と同順の判定。 */
+  resolutions: ImportRowResolution[];
+  /** cutoff で明示 skip になった行（件数会計へ合流させる）。行順。 */
+  skipped: { rowIndex: number; reasonCode: 'before-import-start' }[];
+}
+
+/**
+ * 取込開始日（binding.importFromDate）の cutoff を decision 照合の**後**に適用する（処理順④）。
+ *
+ *  - skip するのは**未決定（status='unresolved'）かつ date < importFromDate** の行だけ。
+ *    決定済み（decided）は従来どおり決定的スキップが優先され、決定を持つ行
+ *    （prior-decision / dangling）は cutoff で隠さずレビューへ出す（fail-closed:
+ *    壊れた決定・要確認の行が開始日の陰に消えない）。
+ *  - **決定（ImportDecision）は作らない** — 開始日を過去へ動かせば当該行は普通の未解決として
+ *    レビューへ戻る（可逆）。
+ *  - occurrence 採番（②）と decision 照合（③）は全母集合で済んでいるため、この関数は
+ *    行の同一性に影響しない。
+ */
+export function applyImportFromDateCutoff<R extends { date: string; rowIndex: number }>(
+  rows: readonly R[],
+  resolutions: readonly ImportRowResolution[],
+  importFromDate: string | undefined,
+): ImportFromDateCutoffResult<R> {
+  if (importFromDate === undefined) {
+    return { rows: [...rows], resolutions: [...resolutions], skipped: [] };
+  }
+  const kept: R[] = [];
+  const keptResolutions: ImportRowResolution[] = [];
+  const skipped: ImportFromDateCutoffResult<R>['skipped'] = [];
+  rows.forEach((row, index) => {
+    const resolution = resolutions[index]!;
+    if (resolution.status === 'unresolved' && row.date < importFromDate) {
+      skipped.push({ rowIndex: row.rowIndex, reasonCode: 'before-import-start' });
+      return;
+    }
+    kept.push(row);
+    keptResolutions.push(resolution);
+  });
+  return { rows: kept, resolutions: keptResolutions, skipped };
 }

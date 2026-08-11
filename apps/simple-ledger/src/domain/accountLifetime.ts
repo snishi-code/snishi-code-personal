@@ -1,11 +1,13 @@
 /*
  * 勘定科目の存在期間（時間軸上の線分）の単一正本。
  *
- * start/end は両端を含む。startDate 未設定時は createdAt の日付部分を表示・新規保存の
- * 既定に使う。参照期間の収集は import schema と repository の保存境界で共有する。
+ * start/end は両端を含む。**startDate 未設定 = 過去へ開いた線分**（§A 案1・2026-08-11）。
+ * 旧仕様の「createdAt を暗黙開始日とみなす」は廃止した — 作者の実データ（createdAt より
+ * 古い仕訳を持つ開始日未設定科目）で科目編集が保存できず、CSV の分割適用に順序依存を
+ * 生んでいたため。明示 startDate の fail-closed 検証は不変。
+ * 参照期間の収集は import schema と repository の保存境界で共有する。
  */
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from './constants';
-import { isValidIsoDate } from './calendar';
 import type { Account, JournalEntry, MonthlyCostItem, RecurringRule } from './types';
 
 export interface AccountLifetimeCollections {
@@ -265,21 +267,13 @@ export function recurringLineageViolations(
   return violations;
 }
 
-function timestampDate(value: string): string | undefined {
-  const candidate = value.slice(0, 10);
-  return isValidIsoDate(candidate) ? candidate : undefined;
-}
-
-/** 明示開始日、なければ createdAt の日付部分。破損 timestamp は開区間として fail-soft。 */
-export function effectiveAccountStartDate(account: Account): string | undefined {
-  return account.startDate ?? timestampDate(account.createdAt);
-}
-
-/** 線分の両端だけで指定日を包含するか。保存境界で使う。 */
+/**
+ * 線分の両端だけで指定日を包含するか。保存境界で使う。
+ * startDate 未設定は過去へ開いた線分 = 過去側の制限なし（§A 案1）。
+ */
 export function accountCoversDate(account: Account, date: string): boolean {
-  const start = effectiveAccountStartDate(account);
   return (
-    (start === undefined || start <= date) &&
+    (account.startDate === undefined || account.startDate <= date) &&
     (account.endDate === undefined || date <= account.endDate)
   );
 }
@@ -348,15 +342,14 @@ export function accountReferenceIntervals(
 /**
  * 科目の線分が全参照を包含するか。
  *
- * import では optional 追加の受理拡大を守るため、未設定 startDate の下限は検証しない
- * (`useImplicitStart=false`)。アプリ内保存・表示では createdAt を既定開始点として扱う。
+ * 下限は**明示 startDate のみ**検証する（§A 案1: 未設定 = 過去へ開いた線分なので
+ * どんな過去の参照も包含する）。import 境界とアプリ内保存で同一の意味論。
  */
 export function accountLifetimeViolation(
   account: Account,
   references: readonly AccountReferenceInterval[],
-  options: { useImplicitStart?: boolean } = {},
 ): AccountLifetimeViolation | undefined {
-  const start = options.useImplicitStart ? effectiveAccountStartDate(account) : account.startDate;
+  const start = account.startDate;
   for (const reference of references) {
     if (start !== undefined && reference.from < start) {
       return { edge: 'start', reference };

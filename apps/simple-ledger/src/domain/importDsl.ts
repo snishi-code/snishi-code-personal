@@ -308,8 +308,16 @@ export type ImportRowErrorCode =
   | 'external-id-empty'
   | 'external-id-duplicate';
 
-/** 明示 skip の組み込み理由コード。profile 由来は `rule:<reason>` になる。 */
-export type ImportRowSkipCode = 'blank-line' | 'before-header' | `rule:${string}`;
+/**
+ * 明示 skip の組み込み理由コード。profile 由来は `rule:<reason>` になる。
+ * `before-import-start` は取込開始日（binding.importFromDate・§B）による評価後の明示 skip
+ * （評価器自身は binding を知らないため、付与は decision 照合の後段 = applyImportFromDateCutoff）。
+ */
+export type ImportRowSkipCode =
+  | 'blank-line'
+  | 'before-header'
+  | 'before-import-start'
+  | `rule:${string}`;
 
 export interface ProfileEvaluation {
   header: string[];

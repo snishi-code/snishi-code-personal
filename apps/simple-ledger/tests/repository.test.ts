@@ -1822,19 +1822,27 @@ describe('継続コスト資産のアーカイブ（archiveMonthlyCost = 終了�
 });
 
 describe('勘定科目のアーカイブ（archiveAccount = 残高 0 不変条件 + 振替導線）', () => {
-  it('暗黙開始点より前の終了点は参照がなくても保存しない', async () => {
+  it('開始日未設定なら createdAt より前の終了点も適法（過去へ開いた線分・§A 案1）', async () => {
+    // 旧仕様（createdAt を暗黙開始点として endDate < createdAt を periodInvalid で拒否）は
+    // 2026-08-11 に廃止。下限の検証は明示 startDate のみに一本化した。
     await loadLedger();
+    const id = newId();
+    await upsertAccount({
+      id,
+      name: '過去へ開いた線分',
+      type: 'expense',
+      role: 'expense-category',
+      archived: true,
+      endDate: '2098-12-31',
+      createdAt: '2099-01-01T00:00:00.000Z',
+      updatedAt: '2099-01-01T00:00:00.000Z',
+    });
+    const saved = (await loadLedger()).accounts.find((account) => account.id === id)!;
+    expect(saved.startDate).toBeUndefined();
+    expect(saved.endDate).toBe('2098-12-31');
+    // 明示 startDate > endDate は従来どおり fail-closed（schema の superRefine）。
     await expect(
-      upsertAccount({
-        id: newId(),
-        name: '空の線分',
-        type: 'expense',
-        role: 'expense-category',
-        archived: true,
-        endDate: '2098-12-31',
-        createdAt: '2099-01-01T00:00:00.000Z',
-        updatedAt: '2099-01-01T00:00:00.000Z',
-      }),
+      upsertAccount({ ...saved, startDate: '2099-01-01', updatedAt: '2099-01-02T00:00:00.000Z' }),
     ).rejects.toMatchObject({ code: 'error.account.periodInvalid' });
   });
 

@@ -8,7 +8,9 @@
  *  - レビューの配線順序（処理順の固定・importDedup.ts ヘッダーと対）:
  *    ① 全 valid 行の正規化（evaluateProfileText）→ ② **全母集合**で rowKey / occurrence 付与
  *    （attachRowKeys(binding.sourceId)）→ ③ decision 照合（resolveImportRows・台帳
- *    スナップショットの全件・**読み取り専用**）→ ④（将来の取込開始日 cutoff はここに入る）→
+ *    スナップショットの全件・**読み取り専用**）→ ④ 取込開始日 cutoff
+ *    （applyImportFromDateCutoff・§B: 未決定かつ binding.importFromDate より前の行だけを
+ *    明示 skip「取込開始日より前」へ移し件数会計に合流。決定は作らない = 可逆）→
  *    ⑤ invalid 行は隠さず error（件数会計の保存則）。dangling は自動で削除せず「要再確認」行と
  *    してレビューへ出し、解除はユーザーの明示操作（store 経由）だけが行う（§1-2）。
  *    fingerprint 型キーの決定済みヒットは同一ファイル（fileHash 一致）の再取込だけ黙って
@@ -61,6 +63,7 @@ import {
   type RowKeyAttachment,
 } from '../../domain/importIdentity';
 import {
+  applyImportFromDateCutoff,
   resolveImportRows,
   type ImportDecisionStatus,
   type ImportDecisionSummary,
@@ -106,6 +109,7 @@ function statusLabel(status: ImportDecisionStatus): string {
 function skipReasonLabel(code: ImportRowSkipCode): string {
   if (code === 'blank-line') return t('csvImport.skipReason.blank-line');
   if (code === 'before-header') return t('csvImport.skipReason.before-header');
+  if (code === 'before-import-start') return t('csvImport.skipReason.before-import-start');
   return t('csvImport.skipReason.rule', { reason: code.slice('rule:'.length) });
 }
 
@@ -191,16 +195,17 @@ interface ReviewState {
  * レビュー素材（CSV のデコード・評価・rowKey 付与・ハッシュ）のキャッシュ。
  * これらはファイル・profile・取込元が同じ間は決定的に同一なので、1 件適用するたびに
  * 作り直さない（12k 仕訳規模で適用 1 回ごとの体感遅延の主因だった）。キーは
- * bytes の参照 + profile DSL digest + binding の sourceId（rowKey の名前空間）で、
- * どれかが変われば全部作り直す。**意味論は変えない**: キャッシュが効いている間の
- * 再構築は decision 照合と類似候補の提示だけをやり直す。
- * 将来の取込開始日（binding.importFromDate）はこのキャッシュのキーにも入る前提
- * （cutoff は rowKey 付与の後段 = 評価段階の明示 skip として実装される・実装は後続）。
+ * bytes の参照 + profile DSL digest + binding の sourceId（rowKey の名前空間）+
+ * 取込開始日（binding.importFromDate・§B）で、どれかが変われば全部作り直す。
+ * **意味論は変えない**: キャッシュが効いている間の再構築は decision 照合・類似候補の提示・
+ * 取込開始日 cutoff（処理順④）だけをやり直す。キャッシュ内容は cutoff **前**の全母集合
+ * （occurrence 採番の安定に必要）。
  */
 interface ReviewSourceCache {
   fileBytes: Uint8Array;
   profileDigest: string;
   sourceId: string;
+  importFromDate: string | undefined;
   fileHash: string;
   evaluation: ProfileEvaluation;
   attachment: RowKeyAttachment;
@@ -228,17 +233,20 @@ async function computeReview(
     source === null ||
     source.fileBytes !== file.bytes ||
     source.profileDigest !== profileDigest ||
-    source.sourceId !== binding.sourceId
+    source.sourceId !== binding.sourceId ||
+    source.importFromDate !== binding.importFromDate
   ) {
     const text = decodeCsvBytes(file.bytes, profile.dsl.fileFormat.encoding);
     const evaluation = evaluateProfileText(profile.dsl, text);
     // 行キーの名前空間は不変の sourceId（表示名の改名・重複命名に影響されない・監査 P1-3）。
+    // rowKey / occurrence は取込開始日に関わらず**全母集合**で付与する（処理順②・§B）。
     const attachment = await attachRowKeys(evaluation.normalized, binding.sourceId);
     const fileHash = await sha256HexOfBytes(file.bytes);
     source = {
       fileBytes: file.bytes,
       profileDigest,
       sourceId: binding.sourceId,
+      importFromDate: binding.importFromDate,
       fileHash,
       evaluation,
       attachment,
@@ -266,6 +274,24 @@ async function computeReview(
     fileHash: source.fileHash,
     ownAccountId: binding.ownAccountId,
   });
+  // 取込開始日 cutoff（処理順④・§B）: 未決定かつ開始日より前の行だけを明示 skip
+  // 「取込開始日より前」として件数会計へ合流させる（保存則: 総行数 = 取込対象 + skip +
+  // error は不変）。決定は作らない = 開始日を早めれば当該行はレビューへ戻る（可逆）。
+  const cutoff = applyImportFromDateCutoff(
+    source.attachment.rows,
+    resolutions,
+    binding.importFromDate,
+  );
+  const evaluation: ProfileEvaluation =
+    cutoff.skipped.length === 0
+      ? source.evaluation
+      : {
+          ...source.evaluation,
+          normalized: cutoff.rows,
+          skipped: [...source.evaluation.skipped, ...cutoff.skipped].sort(
+            (a, b) => a.rowIndex - b.rowIndex,
+          ),
+        };
   const fileRecord = (await getImportFileRecords())[source.fileHash];
   return {
     file,
@@ -274,9 +300,9 @@ async function computeReview(
     profileDigest,
     bindingId,
     ownAccountId: binding.ownAccountId,
-    evaluation: source.evaluation,
-    rows: source.attachment.rows,
-    resolutions,
+    evaluation,
+    rows: cutoff.rows,
+    resolutions: cutoff.resolutions,
     ledgerVersion: { deviceId: ledger.meta.deviceId, revision: ledger.meta.revision },
     ...(fileRecord !== undefined ? { fileRecord } : {}),
   };
@@ -1294,8 +1320,8 @@ export function CsvImport({ onOpenEntry }: { onOpenEntry: (entryId: string) => v
                   updatedAt: nowIso(),
                 }
               : undefined;
-            // 日付昇順で適用する: 暗黙開始日の科目は最古の参照日まで線分が伸びる仕様のため、
-            // 新しい日付を先に保存すると同一バッチ内の古い行が期間外参照で全拒否される。
+            // 日付昇順で適用する（表示・監査のしやすさのための整形。§A で暗黙開始日が
+            // 廃止されたため順序依存はもう無い — どの順でも保存結果は同じ）。
             const ordered = [...rows].sort((a, b) => a.row.date.localeCompare(b.row.date));
             await runApply(
               ordered.map((r) => registerAction(r.row, counterAccountId)),
@@ -1405,13 +1431,16 @@ function BindingSetupSheet({
   const [ownAccountId, setOwnAccountId] = useState(existing?.ownAccountId ?? '');
   const [incomeAccountId, setIncomeAccountId] = useState(existingIncome);
   const [chargeAccountId, setChargeAccountId] = useState(existing?.chargeSourceAccountId ?? '');
+  // 取込開始日（§B・任意）。空欄 = 未設定 = 全期間。
+  const [importFromDate, setImportFromDate] = useState(existing?.importFromDate ?? '');
   const [submitting, setSubmitting] = useState(false);
 
   const dirty =
     identity !== (existing?.sourceIdentity ?? '') ||
     ownAccountId !== (existing?.ownAccountId ?? '') ||
     incomeAccountId !== existingIncome ||
-    chargeAccountId !== (existing?.chargeSourceAccountId ?? '');
+    chargeAccountId !== (existing?.chargeSourceAccountId ?? '') ||
+    importFromDate !== (existing?.importFromDate ?? '');
   const { requestClose, discardConfirm } = useDirtyGuard(dirty, onClose);
 
   const suggestAccount = accounts.find(
@@ -1446,6 +1475,8 @@ function BindingSetupSheet({
         ownAccountId,
         kindDestinations,
         ...(chargeAccountId !== '' ? { chargeSourceAccountId: chargeAccountId } : {}),
+        // 空欄 = 未設定（キーごと落とす = 全期間）。設定を消す導線もこの欄の空欄化。
+        ...(importFromDate !== '' ? { importFromDate } : {}),
         createdAt: existing?.createdAt ?? ts,
         updatedAt: ts,
       };
@@ -1543,6 +1574,16 @@ function BindingSetupSheet({
               />
             </>
           ) : null}
+          {/* 取込開始日（§B・任意）: 評価後の明示 skip。決定を作らないので後から早めれば
+              当該行はレビューへ戻る（可逆）。 */}
+          <TextInput
+            label={t('csvImport.setupImportFrom')}
+            type="date"
+            value={importFromDate}
+            onChange={setImportFromDate}
+            hint={t('csvImport.setupImportFromHint')}
+            dataUi={UI.csvImport.setupImportFrom}
+          />
         </div>
       </Modal>
       {discardConfirm}

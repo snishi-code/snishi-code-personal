@@ -22,7 +22,6 @@ import {
   accountExistsAt,
   accountLifetimeViolation,
   accountReferenceIntervals,
-  effectiveAccountStartDate,
   effectiveRecurringRuleStartDate,
   recurringLineageViolations,
   recurringRuleLastExistingDate,
@@ -568,42 +567,31 @@ function assertReferenceInsideAccount(
   reference: AccountReferenceInterval,
 ): void {
   if (!account) throw new LedgerError('error.entry.unknownAccount');
-  if (
-    accountLifetimeViolation(account, [reference], {
-      useImplicitStart: true,
-    })
-  ) {
+  if (accountLifetimeViolation(account, [reference])) {
     throw new LedgerError('error.account.referenceOutsidePeriod');
   }
 }
 
 /**
- * startDate 未設定（createdAt 既定）の科目へ、それ以前の事実を新規登録するときだけ開始点を
- * 自動で延ばす。ユーザーが明示した startDate は上書きせず、保存境界で拒否する。
+ * 利用者が直接管理しない内部科目（system 科目）は、必要な最古日まで開始点を常に延ばせる。
+ * startDate 未設定は過去へ開いた線分（§A 案1）なので延長不要 = 何も書かない
+ * （旧仕様の「createdAt を暗黙開始日として明示化する」延長は廃止済み）。
  */
-function extendImplicitAccountStart(account: Account, date: string, ts: string): Account {
-  const effectiveStart = effectiveAccountStartDate(account);
-  return account.startDate === undefined && effectiveStart !== undefined && date < effectiveStart
-    ? { ...account, startDate: date, updatedAt: ts }
-    : account;
-}
-
-/** 利用者が直接管理しない内部科目は、必要な最古日まで開始点を常に延ばせる。 */
 function extendSystemAccountStart(account: Account, date: string, ts: string): Account {
-  const effectiveStart = effectiveAccountStartDate(account);
-  return effectiveStart !== undefined && date < effectiveStart
+  return account.startDate !== undefined && date < account.startDate
     ? { ...account, startDate: date, updatedAt: ts }
     : account;
 }
 
 /**
- * 明示開始日を持たない科目へ過去の参照を新しく保存するとき、その参照日まで線分を延ばす。
- * 参照と科目更新は呼び出し側の同一 transaction で保存する。
+ * 参照が system 科目（内部集約・残高調整・初期残高）に触れるとき、その参照日まで線分を
+ * 無条件に延ばす。参照と科目更新は呼び出し側の同一 transaction で保存する。
  *
- * 明示 startDate はユーザーが決めた境界なので変更しない。後続の保存境界検証が期間外参照を
- * fail-closed に拒否する。
+ * 通常科目には何もしない（§A 案1: startDate 未設定 = 過去へ開いた線分なので延長という
+ * 概念が消えた。明示 startDate はユーザーが決めた境界なので変更せず、後続の保存境界検証が
+ * 期間外参照を fail-closed に拒否する）。
  */
-function extendImplicitStartsForReferences(
+function extendSystemStartsForReferences(
   ctx: SaveContext,
   references: Iterable<{ accountId: string; date: string }>,
   ts: string,
@@ -616,9 +604,8 @@ function extendImplicitStartsForReferences(
       current.role === 'continuing-cost-asset' ||
       current.role === 'system-adjustment' ||
       current.role === 'equity';
-    const extended = systemOwned
-      ? extendSystemAccountStart(current, reference.date, ts)
-      : extendImplicitAccountStart(current, reference.date, ts);
+    if (!systemOwned) continue;
+    const extended = extendSystemAccountStart(current, reference.date, ts);
     if (extended === current) continue;
     ctx.byId.set(extended.id, extended);
     updates.set(extended.id, extended);
@@ -708,11 +695,14 @@ async function upsertAccountUnlocked(input: Account, opts?: AccountSaveOptions):
   ]);
   const prev = accounts.find((candidate) => candidate.id === input.id);
   const account: Account = { ...input };
-  // 別操作が暗黙開始点を明示化した後でも、更新前に読んだオブジェクトによる名称変更等が
-  // その端点を消さない。端点の明示解除は `property: undefined` を渡して区別する。
+  // 別操作が開始点を書いた後でも、更新前に読んだオブジェクトによる名称変更等がその端点を
+  // 消さない。端点の明示解除（空欄へ戻す = startDate 削除・§A の導線）は
+  // `property: undefined` を渡して区別する。
   if (prev?.startDate !== undefined && !Object.prototype.hasOwnProperty.call(input, 'startDate')) {
     account.startDate = prev.startDate;
   }
+  // 明示解除は保存レコードからキーごと消す（undefined 値のキーを IndexedDB に残さない）。
+  if (account.startDate === undefined) delete account.startDate;
   if (
     prev?.endDate !== undefined &&
     input.archived === prev.archived &&
@@ -745,17 +735,11 @@ async function upsertAccountUnlocked(input: Account, opts?: AccountSaveOptions):
   ) {
     throw new LedgerError('error.account.roleTypeMismatch');
   }
+  // 端点の整合（明示 startDate > endDate の拒否）は accountSchema の superRefine が担う。
+  // startDate 未設定は過去へ開いた線分なので、endDate 単独でも常に適法（§A 案1）。
   const parsedAccount = accountSchema.safeParse(account);
   if (!parsedAccount.success) throw new LedgerError('error.account.periodInvalid');
   Object.assign(account, parsedAccount.data);
-  const effectiveStart = effectiveAccountStartDate(account);
-  if (
-    account.endDate !== undefined &&
-    effectiveStart !== undefined &&
-    account.endDate < effectiveStart
-  ) {
-    throw new LedgerError('error.account.periodInvalid');
-  }
   // 使用中（仕訳/継続コスト/定期ルールから参照中）の科目は区分(type)も役割(role)も変更できない。
   // role 変更は表示上の「大きな箱の移動」に相当するため fail-closed（新しい内訳を作って
   // アーカイブする運用に寄せる）。
@@ -770,11 +754,7 @@ async function upsertAccountUnlocked(input: Account, opts?: AccountSaveOptions):
     }
   }
   const references = accountReferenceIntervals(account.id, refs);
-  if (
-    accountLifetimeViolation(account, references, {
-      useImplicitStart: true,
-    })
-  ) {
+  if (accountLifetimeViolation(account, references)) {
     throw new LedgerError('error.account.referenceOutsidePeriod');
   }
   // 返済設定は負債（カード・未払 / ローン）のみ。返済口座は存在する日常資産、返済日は 1〜31。
@@ -921,11 +901,8 @@ async function archiveAccountUnlocked(id: string, transferEntry?: JournalEntry):
     ? [...entries.filter((e) => e.id !== savable!.id), savable]
     : entries;
   const candidate: Account = { ...target, archived: true, endDate, updatedAt: nowIso() };
-  const candidateStart = effectiveAccountStartDate(candidate);
-  if (
-    (candidateStart !== undefined && candidateStart > endDate) ||
-    !accountSchema.safeParse(candidate).success
-  ) {
+  // 明示 startDate > endDate は schema の superRefine が拒否する（未設定は過去へ開いた線分）。
+  if (!accountSchema.safeParse(candidate).success) {
     throw new LedgerError('error.account.periodInvalid');
   }
   const references = accountReferenceIntervals(id, {
@@ -933,11 +910,7 @@ async function archiveAccountUnlocked(id: string, transferEntry?: JournalEntry):
     monthlyCostItems,
     recurringRules,
   });
-  if (
-    accountLifetimeViolation(candidate, references, {
-      useImplicitStart: true,
-    })
-  ) {
+  if (accountLifetimeViolation(candidate, references)) {
     throw new LedgerError('error.account.referenceOutsidePeriod');
   }
   // 残高は画面と同じ導出仕訳（継続コストの費用行・定期ルールの投影込み）で判定する。
@@ -1104,7 +1077,7 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
       throw new LedgerError('error.entry.monthlyCost');
     }
     const ctx = await loadSaveContext();
-    const accountUpdates = extendImplicitStartsForReferences(
+    const accountUpdates = extendSystemStartsForReferences(
       ctx,
       entryAccountReferences(entry),
       nowIso(),
@@ -1156,14 +1129,14 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
       throw new LedgerError('error.monthlyCost.recoveryBeforeStart');
     }
   }
-  const accountUpdates = extendImplicitStartsForReferences(
+  const accountUpdates = extendSystemStartsForReferences(
     ctx,
     entryAccountReferences(candidate),
     nowIso(),
   );
   let mirroredItem: MonthlyCostItem | undefined;
   if (linkedItem && !existingRecovery) {
-    for (const [accountId, account] of extendImplicitStartsForReferences(
+    for (const [accountId, account] of extendSystemStartsForReferences(
       ctx,
       [{ accountId: linkedItem.expenseAccountId, date: candidate.date }],
       nowIso(),
@@ -1352,7 +1325,7 @@ async function createRepaymentEntriesUnlocked(input: RepaymentPlanInput): Promis
   const ctx = await loadSaveContext();
   const ts = nowIso();
   const lastDate = addMonthsToDate(input.firstDate, Math.max(0, input.count - 1));
-  const accountUpdates = extendImplicitStartsForReferences(
+  const accountUpdates = extendSystemStartsForReferences(
     ctx,
     [
       { accountId: input.liabilityAccountId, date: input.firstDate },
@@ -1630,21 +1603,13 @@ async function createRecurringRuleUnlocked(input: RecurringRuleInput): Promise<R
   const { account: ledgerAccount, writeNeeded: ledgerWriteNeeded } = spreadsExpense
     ? findOrCreateContinuousCostLedgerAccount(ctx, ts, referenceStart)
     : { account: undefined, writeNeeded: false };
+  // 参照科目の延長は不要（§A 案1: startDate 未設定 = 過去へ開いた線分。明示 startDate は
+  // 後続の assertRecurringRuleSavable が期間外参照として fail-closed に拒否する）。
+  // 台帳（system 科目）だけは findOrCreateContinuousCostLedgerAccount が無条件延長する。
   const validationCtx: SaveContext = { byId: new Map(ctx.byId) };
   if (ledgerAccount) validationCtx.byId.set(ledgerAccount.id, ledgerAccount);
   const accountsToPut = new Map<string, Account>();
   if (ledgerWriteNeeded && ledgerAccount) accountsToPut.set(ledgerAccount.id, ledgerAccount);
-  for (const accountId of new Set([
-    rule.debitAccountId,
-    rule.creditAccountId,
-    ...(rule.spreadExpenseAccountId !== undefined ? [rule.spreadExpenseAccountId] : []),
-  ])) {
-    const account = validationCtx.byId.get(accountId);
-    if (!account || referenceStart === undefined) continue;
-    const extended = extendImplicitAccountStart(account, referenceStart, ts);
-    validationCtx.byId.set(accountId, extended);
-    if (extended !== account) accountsToPut.set(accountId, extended);
-  }
   assertRecurringRuleSavable(rule, validationCtx);
   assertRecurringLineagesSavable([...recurringRules, rule]);
   assertEndedAssetLiabilityBalances({
@@ -1772,21 +1737,12 @@ function prepareRecurringRuleAccountsForSave(
   const { account: ledgerAccount, writeNeeded: ledgerWriteNeeded } = spreadsExpense
     ? findOrCreateContinuousCostLedgerAccount(ctx, ts, referenceStart)
     : { account: undefined, writeNeeded: false };
+  // 参照科目の延長は不要（§A 案1: startDate 未設定 = 過去へ開いた線分。明示 startDate は
+  // 呼び出し側の保存境界検証が期間外参照として fail-closed に拒否する）。
   const validationCtx: SaveContext = { byId: new Map(ctx.byId) };
   if (ledgerAccount) validationCtx.byId.set(ledgerAccount.id, ledgerAccount);
   const accountsToPut = new Map<string, Account>();
   if (ledgerWriteNeeded && ledgerAccount) accountsToPut.set(ledgerAccount.id, ledgerAccount);
-  for (const accountId of new Set([
-    rule.debitAccountId,
-    rule.creditAccountId,
-    ...(rule.spreadExpenseAccountId !== undefined ? [rule.spreadExpenseAccountId] : []),
-  ])) {
-    const account = validationCtx.byId.get(accountId);
-    if (!account || referenceStart === undefined) continue;
-    const extended = extendImplicitAccountStart(account, referenceStart, ts);
-    validationCtx.byId.set(accountId, extended);
-    if (extended !== account) accountsToPut.set(accountId, extended);
-  }
   return { validationCtx, accountsToPut };
 }
 
@@ -2432,33 +2388,19 @@ async function catchUpRecurringRulesUnlocked(
   const accountsToPut = new Map<string, Account>();
   for (const rule of rules) {
     // 1本の破損が他ルールを巻き添えにしないよう、計画・検証はルール単位で閉じる。
-    // 失敗した計画から生じた暗黙開始点の延長も durable state へ混ぜない。
+    // 失敗した計画から生じた科目更新（台帳の開始点延長）も durable state へ混ぜない。
     const ruleCtx: SaveContext = { byId: new Map(ctx.byId) };
     const ruleAccountsToPut = new Map<string, Account>();
     try {
       const postings = recurringPostingsDue(rule, today);
       const destinationAccountId = recurringDestinationAccountId(rule);
-      let destination = ruleCtx.byId.get(destinationAccountId);
-      let credit = ruleCtx.byId.get(rule.creditAccountId);
+      // 参照科目の延長は不要（§A 案1: startDate 未設定 = 過去へ開いた線分。明示 startDate は
+      // 下の accountExistsAt / assertRecurringRuleSavable が期間外参照として拒否する）。
+      const destination = ruleCtx.byId.get(destinationAccountId);
+      const credit = ruleCtx.byId.get(rule.creditAccountId);
       const expenseAccountId = recurringExpenseAccountId(rule, (id) => ruleCtx.byId.get(id)?.role);
       const spreadsExpense = expenseAccountId !== undefined;
       const referenceStart = recurringRuleReferenceStartDate(rule);
-      if (destination && referenceStart !== undefined) {
-        const extended = extendImplicitAccountStart(destination, referenceStart, ts);
-        if (extended !== destination) {
-          destination = extended;
-          ruleCtx.byId.set(extended.id, extended);
-          ruleAccountsToPut.set(extended.id, extended);
-        }
-      }
-      if (credit && referenceStart !== undefined) {
-        const extended = extendImplicitAccountStart(credit, referenceStart, ts);
-        if (extended !== credit) {
-          credit = extended;
-          ruleCtx.byId.set(extended.id, extended);
-          ruleAccountsToPut.set(extended.id, extended);
-        }
-      }
       if (
         !destination ||
         !credit ||
@@ -2763,7 +2705,7 @@ async function createAdjustmentUnlocked(input: AdjustmentSaveInput): Promise<Jou
   if (newCounter) validationCtx.byId.set(newCounter.id, newCounter);
   const accountsToPut = new Map<string, Account>();
   if (newCounter) accountsToPut.set(newCounter.id, newCounter);
-  for (const [accountId, account] of extendImplicitStartsForReferences(
+  for (const [accountId, account] of extendSystemStartsForReferences(
     validationCtx,
     entryAccountReferences(entry),
     nowIso(),
@@ -2834,7 +2776,7 @@ async function updateAdjustmentUnlocked(
   if (newCounter) validationCtx.byId.set(newCounter.id, newCounter);
   const accountsToPut = new Map<string, Account>();
   if (newCounter) accountsToPut.set(newCounter.id, newCounter);
-  for (const [accountId, account] of extendImplicitStartsForReferences(
+  for (const [accountId, account] of extendSystemStartsForReferences(
     validationCtx,
     entryAccountReferences(entry),
     nowIso(),
@@ -2955,20 +2897,10 @@ async function createOpeningsUnlocked(inputs: OpeningInput[]): Promise<JournalEn
       throw new LedgerError('error.common.amountInvalid');
     let target: Account | null;
     if (input.accountId) {
+      // 過去日の初期残高でも科目の開始点は動かさない（§A 案1: startDate 未設定 = 過去へ
+      // 開いた線分。明示 startDate との衝突は assertEntrySavable が期間外参照として拒否する）。
       target = workingAccounts.find((account) => account.id === input.accountId) ?? null;
       if (!target) throw new LedgerError('error.adjust.targetNotFound');
-      const effectiveStart = effectiveAccountStartDate(target);
-      if (
-        target.startDate === undefined &&
-        effectiveStart !== undefined &&
-        input.date < effectiveStart
-      ) {
-        target = { ...target, startDate: input.date, updatedAt: ts };
-        workingAccounts = workingAccounts.map((account) =>
-          account.id === target!.id ? target! : account,
-        );
-        accountsToPut.set(target.id, target);
-      }
     } else if (input.newAccount) {
       const { name, type, role, note } = input.newAccount;
       if (name.trim() === '') throw new LedgerError('error.common.nameRequired');
@@ -3258,14 +3190,14 @@ async function createContinuousCostUnlocked(input: ContinuousCostInput): Promise
   }
 
   const ctx = await loadSaveContext();
-  let expense = ctx.byId.get(input.expenseAccountId);
+  // 費用科目の延長は不要（§A 案1: startDate 未設定 = 過去へ開いた線分。明示 startDate は
+  // 後続の assertMonthlyCostItemSavable が期間外参照として拒否する）。
+  const expense = ctx.byId.get(input.expenseAccountId);
   if (!expense || !isRecurringPostableRole(expense.role))
     throw new LedgerError('error.monthlyCost.expenseCategory');
 
   const ts = nowIso();
   const accountsToPut = new Map<string, Account>();
-  expense = extendImplicitAccountStart(expense, input.startDate, ts);
-  if (expense !== ctx.byId.get(expense.id)) accountsToPut.set(expense.id, expense);
   // 残存価値は品目別ではなく単一の集約台帳口座へ寄せる（勘定科目を品目数ぶん増やさない）。
   const { account: ledgerAccount, writeNeeded: ledgerWriteNeeded } =
     findOrCreateContinuousCostLedgerAccount(ctx, ts, input.startDate);
@@ -3280,8 +3212,7 @@ async function createContinuousCostUnlocked(input: ContinuousCostInput): Promise
     if (!payment || !isRecurringPostableRole(payment.role)) {
       throw new LedgerError('error.monthlyCost.paymentSource');
     }
-    credit = extendImplicitAccountStart(payment, input.startDate, ts);
-    if (credit !== payment) accountsToPut.set(credit.id, credit);
+    credit = payment;
   } else {
     const equityResult = findOrCreateOpeningEquityAccount(ctx.byId.values(), ts, input.startDate);
     credit = equityResult.account;
@@ -3334,15 +3265,8 @@ async function createContinuousCostUnlocked(input: ContinuousCostInput): Promise
     input.repaymentCount >= 1 &&
     input.repaymentStartDate
   ) {
-    const repaymentAccount = validationCtx.byId.get(input.repaymentAccountId);
-    if (repaymentAccount) {
-      const extended = extendImplicitAccountStart(repaymentAccount, input.repaymentStartDate, ts);
-      validationCtx.byId.set(extended.id, extended);
-      if (extended !== repaymentAccount) accountsToPut.set(extended.id, extended);
-    }
-    const extendedCredit = extendImplicitAccountStart(credit, input.repaymentStartDate, ts);
-    validationCtx.byId.set(extendedCredit.id, extendedCredit);
-    if (extendedCredit !== credit) accountsToPut.set(extendedCredit.id, extendedCredit);
+    // 返済関連科目の延長も不要（§A 案1）。期間外の明示 startDate は buildRepaymentEntries 内の
+    // 保存境界検証（assertEntrySavable）が拒否する。
     repaymentEntries = buildRepaymentEntries(validationCtx, {
       liabilityAccountId: credit.id,
       fromAccountId: input.repaymentAccountId,
@@ -3427,16 +3351,12 @@ async function upsertMonthlyCostUnlocked(item: MonthlyCostItem): Promise<void> {
   }
   // 費用の行き先は内部集約・残高調整以外の勘定科目であること（定期ルールと同じ正本）。
   const ctx = await loadSaveContext();
-  let expense = ctx.byId.get(merged.expenseAccountId);
+  const expense = ctx.byId.get(merged.expenseAccountId);
   if (!expense || !isRecurringPostableRole(expense.role))
     throw new LedgerError('error.monthlyCost.expenseCategory');
   const accountUpdates = new Map<string, Account>();
-  const extendedExpense = extendImplicitAccountStart(expense, merged.startDate, merged.updatedAt);
-  if (extendedExpense !== expense) {
-    expense = extendedExpense;
-    ctx.byId.set(expense.id, expense);
-    accountUpdates.set(expense.id, expense);
-  }
+  // 費用科目の延長は不要（§A 案1）。明示 startDate との衝突は下の
+  // assertMonthlyCostItemSavable が期間外参照として拒否する。
   // 保存値は strip 済みを使う＝編集のたびに撤去済みフィールドの残骸が落ちて自己修復する。
   const saved: MonthlyCostItem = assertMonthlyCostItemSavable(merged, ctx);
 
@@ -4089,7 +4009,7 @@ async function applyImportBatchUnlocked(input: ApplyImportBatchInput): Promise<I
         importRowKey: action.rowKey,
       },
     };
-    for (const [accountId, account] of extendImplicitStartsForReferences(
+    for (const [accountId, account] of extendSystemStartsForReferences(
       ctx,
       entryAccountReferences(candidate),
       ts,

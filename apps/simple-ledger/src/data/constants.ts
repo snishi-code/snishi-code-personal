@@ -31,8 +31,9 @@ export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
  * （レガシー migration は持たない・仕様§16）。互換性のない変更ごとに +1 する。
  * version 9 = 取込プロファイルのアーカイブ（ImportProfile.archived・optional・既定 false）。
  * profile の上書き保存を廃止し「旧をアーカイブして新規作成」へ（作者決定 2026-08-11）。
- * 以降の v9 内フィールド追加（ProfileBinding.importFromDate / Account.annualReturnBp 予定）は
- * 後続の変更がこの版のまま行う。
+ * 以降の v9 内フィールド追加は後続の変更がこの版のまま行う:
+ *  - ProfileBinding.importFromDate（取込開始日・optional・明示値のみ検証・2026-08-11 追加済み）
+ *  - Account.annualReturnBp（予定）
  * version 8 = CSV 取込（Import Profile）。importProfiles / profileBindings /
  * importDecisions を交換 JSON の必須フィールドとして追加し、EntryMetadata に取込由来
  * （importSource ほか）を追加。

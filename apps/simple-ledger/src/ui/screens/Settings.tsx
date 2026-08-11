@@ -204,6 +204,8 @@ export function Settings({
           <p className="field__hint" style={{ marginTop: 6 }}>
             {t('settings.importDesc')}
           </p>
+          {/* 免責 1 行（§C）: 復旧面（ErrorBoundary が本画面を埋め込む）にも同時に出る。 */}
+          <p className="field__hint">{t('settings.importDisclaimer')}</p>
         </div>
         <div>
           <button
