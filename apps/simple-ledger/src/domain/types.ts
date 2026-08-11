@@ -9,8 +9,6 @@
  */
 
 import type { AccountRole } from './accountRoles';
-import type { ImportDecisionStatus } from './importDedup';
-import type { ImportProfile } from './importDsl';
 
 export type AccountType = 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
 
@@ -145,16 +143,6 @@ export interface EntryMetadata {
   recurringRuleId?: string;
   /** どの月ぶんの起票か 'YYYY-MM'。 */
   recurringMonth?: string;
-  /**
-   * CSV 取込の由来メタデータ（指示書 §1-3・**表示・検索用の複製**）。
-   * 取込済み判定の正本は importDecisions ストア（§1-2）であり、このフィールドは判定に使わない。
-   * importSource = 取込に使った profile の ID。
-   */
-  importSource?: string;
-  /** 取込元識別子（binding のユーザー命名。行キーの名前空間・§5-1）。 */
-  importSourceIdentity?: string;
-  /** 由来する行キー（canonical tuple 文字列）。 */
-  importRowKey?: string;
 }
 
 /**
@@ -273,91 +261,6 @@ export interface JournalEntry {
   updatedAt: string;
 }
 
-/* ── CSV 取込（Import Profile・指示書 §1） ── */
-
-/**
- * ProfileBinding（§1-1b）: ポータブルな ImportProfile と端末台帳の科目を繋ぐ紐付け。
- * 初期科目 ID は端末ごとに生成されるため、profile は科目を ID でも名前でも参照しない。
- *
- * **soft reference**: 参照先の科目・profile が削除/アーカイブされても binding は壊れてよい。
- * 適用時に検証し、欠けていれば再選択を促す（fail-closed・黙って別科目に落ちない）。
- * profile を削除しても binding は残す（sourceId の連続性を保ち、「組み込みを復元」で
- * 同じ紐付けへ再接続できるようにする）。
- */
-export interface ProfileBinding {
-  id: string;
-  /** 紐付ける ImportProfile の ID（soft reference）。 */
-  profileId: string;
-  /**
-   * 不変の取込元 ID（作成時に採番する UUID・以後変更不可）。行キーの名前空間（§5-1・監査 P1-3:
-   * ユーザー命名の表示名で名前空間を切ると、別 profile の同名取込元と決定が黙って混線する）。
-   */
-  sourceId: string;
-  /** ユーザー命名の取込元表示名（例:「PayPay本体」）。名前空間は sourceId が担うため編集できる。 */
-  sourceIdentity: string;
-  /** 自口座（role: daily-asset）。 */
-  ownAccountId: string;
-  /**
-   * 行種名 → 計上先 accountId の既定（例: 獲得・取消 → その他収入）。
-   * 行単位選択の行種（支払い等）は登録しない。role 制約は保存境界で検証する。
-   */
-  kindDestinations: Record<string, string>;
-  /** チャージ源泉（role: daily-asset）。 */
-  chargeSourceAccountId?: string;
-  /**
-   * 取込開始日（§B・任意・未設定 = 全期間）。「その人がどこまで手入力したか」という帳簿側の
-   * 状態なのでポータブルな DSL ではなく binding が持つ。意味論 = 評価後の明示 skip
-   * （理由コード「取込開始日より前」）で、**決定（ImportDecision）は作らない** — 後から
-   * 開始日を早めれば当該行は普通にレビューへ出る（可逆）。
-   */
-  importFromDate?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/** ImportDecision の由来（§1-2）。どの profile / ファイル由来の決定かを保持する。 */
-export interface ImportDecisionProvenance {
-  profileId: string;
-  /** 決定時点の profile DSL の digest（canonical JSON の SHA-256）。 */
-  profileDigest: string;
-  /** 由来ファイルの SHA-256。 */
-  fileHash: string;
-  /** 決定時の binding の不変な取込元 ID（行キーの名前空間・§5-1）。表示名は binding から引く。 */
-  sourceId: string;
-  /** 行キー生成アルゴリズムの版（§5-1）。 */
-  identityVersion: number;
-}
-
-/**
- * ImportDecision（§1-2）: 行キー → 取込決定。**取込済み判定の単一正本**。
- * 仕訳側の importSource 系メタデータは表示用の複製であって判定には使わない。
- *  - registered / linked は entryId 必須・ignored は entryId 禁止（schema で強制）。
- *  - decision → entry は多対一（チャージの裏表 2 行が同じ振替仕訳へリンクできる）。
- *  - 仕訳の削除では、その entryId を参照する decision を同一 tx で削除する（= 未解決へ戻す）。
- */
-export interface ImportDecision {
-  /** 行キー（canonical tuple 文字列・§5-1）。ストアの主キー。 */
-  key: string;
-  status: ImportDecisionStatus;
-  /** registered / linked のとき必須・ignored のとき禁止。 */
-  entryId?: string;
-  decidedAt: string;
-  provenance: ImportDecisionProvenance;
-}
-
-/**
- * 取込ファイル記録（§1-2）: fileHash → 取込の進み具合。**情報表示と再開用**であり、
- * ブロックには使わない。kv ストアの単一レコード（Record<fileHash, ImportFileRecord>）に置く。
- */
-export interface ImportFileRecord {
-  /** 最後にこのファイルへ適用した日時。 */
-  importedAt: string;
-  /** ヘッダー以外の全データ行数。 */
-  totalRowCount: number;
-  /** このファイル由来の決定済み行数（decision の増減に追随する）。 */
-  decidedCount: number;
-}
-
 export interface Settings {
   ledgerName: string;
   /** ISO 4217 風のコード。MVP は表示用途のみ（換算はしない）。 */
@@ -404,12 +307,6 @@ export interface LedgerExportPackage {
   monthlyCostItems: MonthlyCostItem[];
   /** 定期ルール。交換 JSON では必須（旧形式はリポジトリ外で一度だけ変換する）。 */
   recurringRules: RecurringRule[];
-  /** CSV 取込の変換規則（v8 で追加・必須。旧 JSON はリポジトリ外で一度だけ変換する）。 */
-  importProfiles: ImportProfile[];
-  /** profile と端末台帳の紐付け（v8 で追加・必須）。 */
-  profileBindings: ProfileBinding[];
-  /** 取込決定の単一正本（v8 で追加・必須）。 */
-  importDecisions: ImportDecision[];
   settings: Settings;
 }
 
@@ -460,7 +357,4 @@ export interface Ledger {
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   recurringRules: RecurringRule[];
-  importProfiles: ImportProfile[];
-  profileBindings: ProfileBinding[];
-  importDecisions: ImportDecision[];
 }

@@ -60,27 +60,11 @@ export interface TransferFixed {
   onSave: (input: SimpleEntryInput) => Promise<void>;
 }
 
-/**
- * CSV 取込の行編集（監査 P1-2）: ホームの仕訳入力シートをそのまま再利用するための
- * 取込コンテキスト。候補・検証・簿記編集への切り替えは通常入力と完全に同一で、
- * 保存だけを applyImportBatch の register（仕訳 + decision の同一トランザクション）へ
- * 委譲する。CSV 側の追加制限・追加緩和は作らない（作者決定 2026-08-11）。
- */
-export interface ImportEntryContext {
-  /** 行種から推定した初期入力モード（判定不能は 'manual' = 簿記編集）。 */
-  mode: FormMode;
-  /** CSV 行の値（日付・摘要・金額・自口座側・既定計上先）で組んだ初期値。 */
-  input: SimpleEntryInput;
-  /** 保存先。成功でシートが閉じ、失敗（store が toast 済み）は開いたまま。 */
-  onSave: (input: SimpleEntryInput) => Promise<void>;
-}
-
 export type EntryInit =
   | { kind: 'create'; mode: FormMode }
   | { kind: 'edit'; entry: JournalEntry }
   | { kind: 'reversal'; source: JournalEntry }
-  | { kind: 'transfer-fixed'; fixed: TransferFixed }
-  | { kind: 'import'; context: ImportEntryContext };
+  | { kind: 'transfer-fixed'; fixed: TransferFixed };
 
 function emptyInput(): SimpleEntryInput {
   return {
@@ -113,7 +97,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const tags = ledger?.tags ?? [];
 
   const fixed = init.kind === 'transfer-fixed' ? init.fixed : null;
-  const importCtx = init.kind === 'import' ? init.context : null;
   const [mode, setMode] = useState<FormMode>(
     init.kind === 'create'
       ? init.mode
@@ -121,9 +104,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         ? initialModeFor(init.entry)
         : init.kind === 'transfer-fixed'
           ? 'transfer'
-          : init.kind === 'import'
-            ? init.context.mode
-            : 'manual',
+          : 'manual',
   );
   const [form, setForm] = useState<SimpleEntryInput>(
     init.kind === 'edit'
@@ -140,9 +121,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               memo: '',
               kind: 'normal',
             }
-          : init.kind === 'import'
-            ? init.context.input
-            : emptyInput(),
+          : emptyInput(),
   );
   const [amountText, setAmountText] = useState<string>(
     init.kind === 'create' ? '' : String(form.amount || ''),
@@ -352,13 +331,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         ...toSave.metadata,
         inputMode: resolveInputMode(),
       };
-      if (importCtx) {
-        // CSV 取込の行編集: 検証は上の通常経路と同一。保存だけ取込バッチ（仕訳 + decision の
-        // 同一トランザクション）へ委譲する。失敗は store が toast 済み・シートは開いたまま。
-        await importCtx.onSave({ ...toSave, metadata });
-      } else {
-        await saveEntry({ ...toSave, metadata }, existing);
-      }
+      await saveEntry({ ...toSave, metadata }, existing);
       onClose();
     } catch {
       setSubmitting(false);
@@ -792,9 +765,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       </div>
     ) : null;
 
-  // 取込の行編集でも簿記編集へ切り替えられる（= 自由なペア入力に到達できる）。
   const manualSwitch =
-    (init.kind === 'create' || init.kind === 'import') && mode !== 'manual' && !ccMode ? (
+    init.kind === 'create' && mode !== 'manual' && !ccMode ? (
       <button
         type="button"
         className="collapse-toggle"

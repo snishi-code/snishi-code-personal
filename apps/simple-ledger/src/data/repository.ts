@@ -35,20 +35,10 @@ import { LedgerError } from '../domain/errors';
 import { isValidIsoDate } from '../domain/calendar';
 import {
   accountSchema,
-  importDecisionSchema,
   journalEntrySchema,
   monthlyCostItemSchema,
-  profileBindingSchema,
   recurringRuleSchema,
 } from '../domain/schema';
-import { importProfileSchema, type ImportProfile } from '../domain/importDsl';
-import { paypayBuiltinProfile } from '../domain/importProfilePresets';
-import {
-  canonicalJsonText,
-  IMPORT_IDENTITY_VERSION,
-  parseRowKey,
-  profileDslDigest,
-} from '../domain/importIdentity';
 import {
   buildRuleItem,
   clampDayToMonth,
@@ -68,16 +58,12 @@ import type {
   Account,
   AccountType,
   EntryMetadata,
-  ImportDecision,
-  ImportDecisionProvenance,
-  ImportFileRecord,
   InputMode,
   JournalEntry,
   JournalLine,
   Ledger,
   LedgerMeta,
   MonthlyCostItem,
-  ProfileBinding,
   RecurringRule,
   Settings,
   Snapshot,
@@ -98,8 +84,6 @@ async function tagMap(): Promise<Map<string, Tag>> {
 
 const KV_META = 'meta';
 const KV_SETTINGS = 'settings';
-/** 取込ファイル記録（fileHash → ImportFileRecord・§1-2。情報表示と再開用でブロックには使わない）。 */
-const KV_IMPORT_FILES = 'importFiles';
 const OPENING_EQUITY_NAME = '初期残高';
 
 async function getMeta(): Promise<LedgerMeta | undefined> {
@@ -178,15 +162,6 @@ function assertSchemaVersionCurrent(meta: LedgerMeta | undefined): void {
   }
 }
 
-/**
- * fresh DB / 全リセット時にだけ投入する組み込み Import Profile（§1-1）。
- * 削除後に自動復活しない（seed はこの 2 経路のみ）。戻すのは restoreBuiltinImportProfiles だけ。
- * PAYPAY_DSL は共有定数のため structuredClone で複製してから保存する。
- */
-function builtinImportProfilesForSeed(ts: string): ImportProfile[] {
-  return [structuredClone(paypayBuiltinProfile(ts))];
-}
-
 /** 初回だけ既定データを投入する。 */
 export async function ensureInitialized(): Promise<void> {
   const meta = await getMeta();
@@ -201,8 +176,7 @@ export async function ensureInitialized(): Promise<void> {
   const accounts = defaultAccounts();
   const settings = defaultSettings();
   const meta0 = newMeta();
-  const builtinProfiles = builtinImportProfilesForSeed(nowIso());
-  await runWrite([STORE.kv, STORE.accounts, STORE.importProfiles], (t) => {
+  await runWrite([STORE.kv, STORE.accounts], (t) => {
     // 並行初期化（StrictMode の二重 effect・複数タブの同時初回起動）で seed が二重投入されない
     // よう、同一トランザクション内で meta を再確認してから書く（IDB の同 store トランザクションは
     // 直列化されるため、負けた側はここで何もしない）。
@@ -214,8 +188,6 @@ export async function ensureInitialized(): Promise<void> {
       kv.put(settings, KV_SETTINGS);
       const store = t.objectStore(STORE.accounts);
       for (const a of accounts) store.put(a);
-      const profiles = t.objectStore(STORE.importProfiles);
-      for (const p of builtinProfiles) profiles.put(p);
     };
   });
 }
@@ -288,51 +260,33 @@ export async function loadLedger(): Promise<Ledger> {
     });
   // meta と各本体 store は同一 readonly transaction で読む。別タブの複数 store 書込みと
   // 読取りが交差して、存在しない中間状態を export / snapshot に残さない。
-  const [
-    meta,
-    settings,
-    accounts,
-    journalEntries,
-    tags,
-    monthlyCostItems,
-    recurringRules,
-    importProfiles,
-    profileBindings,
-    importDecisions,
-  ] = await runRead(
-    [
-      STORE.kv,
-      STORE.accounts,
-      STORE.journalEntries,
-      STORE.tags,
-      STORE.monthlyCostItems,
-      STORE.recurringRules,
-      STORE.importProfiles,
-      STORE.profileBindings,
-      STORE.importDecisions,
-    ],
-    (t) => {
-      const kv = t.objectStore(STORE.kv);
-      return Promise.all([
-        requestResult(kv.get(KV_META) as IDBRequest<LedgerMeta | undefined>),
-        requestResult(kv.get(KV_SETTINGS) as IDBRequest<Settings | undefined>),
-        requestResult(t.objectStore(STORE.accounts).getAll() as IDBRequest<Account[]>),
-        requestResult(t.objectStore(STORE.journalEntries).getAll() as IDBRequest<JournalEntry[]>),
-        requestResult(t.objectStore(STORE.tags).getAll() as IDBRequest<Tag[]>),
-        requestResult(
-          t.objectStore(STORE.monthlyCostItems).getAll() as IDBRequest<MonthlyCostItem[]>,
-        ),
-        requestResult(t.objectStore(STORE.recurringRules).getAll() as IDBRequest<RecurringRule[]>),
-        requestResult(t.objectStore(STORE.importProfiles).getAll() as IDBRequest<ImportProfile[]>),
-        requestResult(
-          t.objectStore(STORE.profileBindings).getAll() as IDBRequest<ProfileBinding[]>,
-        ),
-        requestResult(
-          t.objectStore(STORE.importDecisions).getAll() as IDBRequest<ImportDecision[]>,
-        ),
-      ]);
-    },
-  );
+  const [meta, settings, accounts, journalEntries, tags, monthlyCostItems, recurringRules] =
+    await runRead(
+      [
+        STORE.kv,
+        STORE.accounts,
+        STORE.journalEntries,
+        STORE.tags,
+        STORE.monthlyCostItems,
+        STORE.recurringRules,
+      ],
+      (t) => {
+        const kv = t.objectStore(STORE.kv);
+        return Promise.all([
+          requestResult(kv.get(KV_META) as IDBRequest<LedgerMeta | undefined>),
+          requestResult(kv.get(KV_SETTINGS) as IDBRequest<Settings | undefined>),
+          requestResult(t.objectStore(STORE.accounts).getAll() as IDBRequest<Account[]>),
+          requestResult(t.objectStore(STORE.journalEntries).getAll() as IDBRequest<JournalEntry[]>),
+          requestResult(t.objectStore(STORE.tags).getAll() as IDBRequest<Tag[]>),
+          requestResult(
+            t.objectStore(STORE.monthlyCostItems).getAll() as IDBRequest<MonthlyCostItem[]>,
+          ),
+          requestResult(
+            t.objectStore(STORE.recurringRules).getAll() as IDBRequest<RecurringRule[]>,
+          ),
+        ]);
+      },
+    );
   if (!meta || !settings) throw new Error('台帳の初期化に失敗しました');
   lastSeenVersion = ledgerVersion(meta);
   accounts.sort(compareAccountOrder);
@@ -344,10 +298,6 @@ export async function loadLedger(): Promise<Ledger> {
   // 継続コスト資産は「終了が近い順」（endDate 昇順・未設定は最後・同着は名前）。
   monthlyCostItems.sort(compareMonthlyCostItems);
   recurringRules.sort((a, b) => cmp(a.createdAt, b.createdAt));
-  importProfiles.sort((a, b) => cmp(a.createdAt, b.createdAt) || cmp(a.id, b.id));
-  profileBindings.sort((a, b) => cmp(a.createdAt, b.createdAt) || cmp(a.id, b.id));
-  // 取込決定は「新しい決定が先」（決定済み一覧の既定順）。
-  importDecisions.sort((a, b) => cmp(b.decidedAt, a.decidedAt) || cmp(a.key, b.key));
   // 導出専用 entries は持たない。集計は各画面が reportEntriesForAsOf で
   // 基準日ごとに必要範囲だけ仮想展開する（単一正本 = reportBasis + reportEntriesForAsOf）。
   return {
@@ -358,9 +308,6 @@ export async function loadLedger(): Promise<Ledger> {
     tags,
     monthlyCostItems,
     recurringRules,
-    importProfiles,
-    profileBindings,
-    importDecisions,
   };
 }
 
@@ -960,67 +907,6 @@ async function assertEntryTagsValid(entry: JournalEntry): Promise<void> {
   if (e1) throw new LedgerError(e1);
 }
 
-/**
- * 仕訳の削除・ID 付け替えに、その entryId を参照する ImportDecision（§1-2）を
- * **同一トランザクション**で追随させる。呼び出し側の tx には STORE.importDecisions と
- * STORE.kv が含まれていること（writeWithRevision は kv を常に含む）。
- *
- *  - 削除された entryId を参照する decision は削除する（= 行は未解決へ戻る。次回取込で
- *    再び候補に出る＝データが消えたのだから正しい）。ファイル記録の決定済み数も減らす。
- *  - ID 付け替え（定期ルールの分割・削除で起きる決定的 ID の再採番）では entryId を
- *    新 ID へ付け替える（データは消えていないため、決定を消して再レビューさせない）。
- */
-function syncImportDecisionsWithEntryChanges(
-  t: IDBTransaction,
-  options: {
-    deletedEntryIds?: ReadonlySet<string>;
-    entryIdRemap?: ReadonlyMap<string, string>;
-  },
-): void {
-  const store = t.objectStore(STORE.importDecisions);
-  const probe = store.getAll();
-  probe.onsuccess = () => {
-    const decisions = probe.result as ImportDecision[];
-    const removedByFile = new Map<string, number>();
-    for (const decision of decisions) {
-      if (decision.entryId === undefined) continue;
-      const remapped = options.entryIdRemap?.get(decision.entryId);
-      if (remapped !== undefined) {
-        store.put({ ...decision, entryId: remapped });
-        continue;
-      }
-      if (options.deletedEntryIds?.has(decision.entryId)) {
-        store.delete(decision.key);
-        removedByFile.set(
-          decision.provenance.fileHash,
-          (removedByFile.get(decision.provenance.fileHash) ?? 0) + 1,
-        );
-      }
-    }
-    if (removedByFile.size > 0) adjustImportFileDecidedCounts(t, removedByFile);
-  };
-}
-
-/** 取込ファイル記録（kv・§1-2）の決定済み数を同一 tx で減算する（0 未満にはしない）。 */
-function adjustImportFileDecidedCounts(
-  t: IDBTransaction,
-  removedByFile: Map<string, number>,
-): void {
-  const kv = t.objectStore(STORE.kv);
-  const probe = kv.get(KV_IMPORT_FILES);
-  probe.onsuccess = () => {
-    const records = (probe.result ?? {}) as Record<string, ImportFileRecord>;
-    let changed = false;
-    for (const [fileHash, removed] of removedByFile) {
-      const record = records[fileHash];
-      if (!record) continue;
-      records[fileHash] = { ...record, decidedCount: Math.max(0, record.decidedCount - removed) };
-      changed = true;
-    }
-    if (changed) kv.put(records, KV_IMPORT_FILES);
-  };
-}
-
 async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
   const entries = await getAll<JournalEntry>(STORE.journalEntries);
   const existing = entries.find((e) => e.id === entry.id);
@@ -1292,10 +1178,8 @@ async function deleteEntryUnlocked(id: string): Promise<void> {
           : new Set(target.lines.map((line) => line.accountId)),
     });
   }
-  await writeWithRevision([STORE.journalEntries, STORE.importDecisions], (t) => {
+  await writeWithRevision([STORE.journalEntries], (t) => {
     t.objectStore(STORE.journalEntries).delete(id);
-    // この仕訳を参照する取込決定を同時に解除する（§1-2・同一 tx）。
-    syncImportDecisionsWithEntryChanges(t, { deletedEntryIds: new Set([id]) });
   });
 }
 
@@ -1918,13 +1802,7 @@ async function splitRecurringRuleAtDate(args: {
   let missingRace = false;
   try {
     await writeWithRevision(
-      [
-        STORE.recurringRules,
-        STORE.accounts,
-        STORE.journalEntries,
-        STORE.monthlyCostItems,
-        STORE.importDecisions,
-      ],
+      [STORE.recurringRules, STORE.accounts, STORE.journalEntries, STORE.monthlyCostItems],
       (t) => {
         const ruleStore = t.objectStore(STORE.recurringRules);
         const probe = ruleStore.get(existing.id);
@@ -1944,8 +1822,6 @@ async function splitRecurringRuleAtDate(args: {
           const itemStore = t.objectStore(STORE.monthlyCostItems);
           for (const id of itemDeletes) itemStore.delete(id);
           for (const item of itemPuts.values()) itemStore.put(item);
-          // 決定的 ID の再採番は削除ではなく移動＝取込決定のリンク先を新 ID へ付け替える（§1-2）。
-          syncImportDecisionsWithEntryChanges(t, { entryIdRemap });
         };
       },
     );
@@ -2251,7 +2127,7 @@ async function deleteRecurringRuleUnlocked(id: string): Promise<void> {
   let missingRace = false;
   try {
     await writeWithRevision(
-      [STORE.recurringRules, STORE.journalEntries, STORE.monthlyCostItems, STORE.importDecisions],
+      [STORE.recurringRules, STORE.journalEntries, STORE.monthlyCostItems],
       (t) => {
         const ruleStore = t.objectStore(STORE.recurringRules);
         const eStore = t.objectStore(STORE.journalEntries);
@@ -2325,8 +2201,6 @@ async function deleteRecurringRuleUnlocked(id: string): Promise<void> {
 
           for (const rule of ruleUpdates.values()) ruleStore.put(rule);
           ruleStore.delete(id);
-          // ID の中立化は削除ではなく移動＝取込決定のリンク先を新 ID へ付け替える（§1-2）。
-          syncImportDecisionsWithEntryChanges(t, { entryIdRemap });
         };
         ruleProbe.onsuccess = applyWhenReady;
         entryProbe.onsuccess = applyWhenReady;
@@ -2762,9 +2636,8 @@ async function updateAdjustmentUnlocked(
       removeId: input.id,
       affectedAccountIds: new Set(existing.lines.map((line) => line.accountId)),
     });
-    await writeWithRevision([STORE.journalEntries, STORE.importDecisions], (t) => {
+    await writeWithRevision([STORE.journalEntries], (t) => {
       t.objectStore(STORE.journalEntries).delete(input.id);
-      syncImportDecisionsWithEntryChanges(t, { deletedEntryIds: new Set([input.id]) });
     });
     return null;
   }
@@ -2809,9 +2682,8 @@ async function deleteAdjustmentUnlocked(id: string): Promise<void> {
     removeId: id,
     affectedAccountIds: new Set(target.lines.map((line) => line.accountId)),
   });
-  await writeWithRevision([STORE.journalEntries, STORE.importDecisions], (t) => {
+  await writeWithRevision([STORE.journalEntries], (t) => {
     t.objectStore(STORE.journalEntries).delete(id);
-    syncImportDecisionsWithEntryChanges(t, { deletedEntryIds: new Set([id]) });
   });
 }
 
@@ -3084,9 +2956,8 @@ async function deleteOpeningUnlocked(id: string): Promise<void> {
     removeId: id,
     affectedAccountIds: new Set(target.lines.map((line) => line.accountId)),
   });
-  await writeWithRevision([STORE.journalEntries, STORE.importDecisions], (t) => {
+  await writeWithRevision([STORE.journalEntries], (t) => {
     t.objectStore(STORE.journalEntries).delete(id);
-    syncImportDecisionsWithEntryChanges(t, { deletedEntryIds: new Set([id]) });
   });
 }
 
@@ -3576,599 +3447,11 @@ async function deleteMonthlyCostUnlocked(id: string): Promise<void> {
     monthlyCostItems: candidateItems,
     recurringRules,
   });
-  await writeWithRevision(
-    [STORE.monthlyCostItems, STORE.journalEntries, STORE.importDecisions],
-    (t) => {
-      t.objectStore(STORE.monthlyCostItems).delete(id);
-      const eStore = t.objectStore(STORE.journalEntries);
-      for (const e of relatedEntries) eStore.delete(e.id);
-      // cascade で消える仕訳を参照する取込決定も同一 tx で解除する（§1-2）。
-      syncImportDecisionsWithEntryChanges(t, { deletedEntryIds: relatedEntryIds });
-    },
-  );
-}
-
-/* ── CSV 取込（Import Profile・指示書 §1 / §4-4 / §5-1） ── */
-
-/** 保存境界の検証（strip 込み・封筒は strip / DSL は未知キー拒否 = importProfileSchema の契約）。 */
-function parseImportProfileSavable(profile: ImportProfile): ImportProfile {
-  if (profile.name.trim() === '') throw new LedgerError('error.common.nameRequired');
-  const parsed = importProfileSchema.safeParse(profile);
-  if (!parsed.success) throw new LedgerError('error.importProfile.invalidStructure');
-  return parsed.data as ImportProfile;
-}
-
-/**
- * Import Profile の新規作成（v9・作者決定 2026-08-11: **上書き保存の廃止**）。
- * 既存 profile の「編集」は archiveProfileId で旧をアーカイブして新規を作る
- * （勘定科目と同じアーカイブ+新規方式。組み込みの編集も同様で、新規側に組み込み印は付かない）。
- *  - 既存 ID への保存は黙った上書きになるため fail-closed に拒否する。
- *  - 組み込み印（builtin）は seed / 復元だけが管理する。ユーザー入力からの持ち込みは拒否
- *    （偽の組み込みを作らせない。「組み込みを復元」の上書き対象は固定 ID の原本だけ）。
- *  - archiveProfileId 指定時は同一 tx で旧 profile を archived にし、その binding を
- *    新 profile へ付け替える（sourceId の連続性 = 過去の決定の照合を新 profile でも保つ。
- *    アーカイブ済み profile は取込に使えないため、binding を残しても死蔵になるだけ）。
- */
-async function createImportProfileUnlocked(
-  profile: ImportProfile,
-  options: { archiveProfileId?: string } = {},
-): Promise<ImportProfile> {
-  const parsed = parseImportProfileSavable(profile);
-  const existing = await getAll<ImportProfile>(STORE.importProfiles);
-  if (existing.some((p) => p.id === parsed.id)) {
-    throw new LedgerError('error.importProfile.idConflict');
-  }
-  if (parsed.builtin !== undefined) {
-    throw new LedgerError('error.importProfile.builtinReserved');
-  }
-  // 新規は常に非アーカイブで生まれる（archived の持ち込みは正規化で落とす）。
-  const saved: ImportProfile = { ...parsed };
-  delete saved.archived;
-
-  const ts = nowIso();
-  let archiveTarget: ImportProfile | undefined;
-  let movedBindings: ProfileBinding[] = [];
-  if (options.archiveProfileId !== undefined) {
-    const target = existing.find((p) => p.id === options.archiveProfileId);
-    if (!target) throw new LedgerError('error.importProfile.notFound');
-    archiveTarget = { ...target, archived: true, updatedAt: ts };
-    const bindings = await getAll<ProfileBinding>(STORE.profileBindings);
-    movedBindings = bindings
-      .filter((b) => b.profileId === target.id)
-      .map((b) => ({ ...b, profileId: saved.id, updatedAt: ts }));
-  }
-  await writeWithRevision([STORE.importProfiles, STORE.profileBindings], (t) => {
-    const profiles = t.objectStore(STORE.importProfiles);
-    profiles.put(saved);
-    if (archiveTarget !== undefined) profiles.put(archiveTarget);
-    const bindingStore = t.objectStore(STORE.profileBindings);
-    for (const binding of movedBindings) bindingStore.put(binding);
+  await writeWithRevision([STORE.monthlyCostItems, STORE.journalEntries], (t) => {
+    t.objectStore(STORE.monthlyCostItems).delete(id);
+    const eStore = t.objectStore(STORE.journalEntries);
+    for (const e of relatedEntries) eStore.delete(e.id);
   });
-  return saved;
-}
-
-/**
- * Import Profile の削除（組み込みも削除できる・削除後に自動復活しない・§1-1）。
- * binding / decision は残す（soft reference。sourceId の連続性を保ち、
- * 「組み込みを復元」で同じ紐付け・決定へ再接続できる）。冪等（無ければ何もしない）。
- */
-async function deleteImportProfileUnlocked(id: string): Promise<void> {
-  const existing = await getAll<ImportProfile>(STORE.importProfiles);
-  if (!existing.some((p) => p.id === id)) return;
-  await writeWithRevision([STORE.importProfiles], (t) => {
-    t.objectStore(STORE.importProfiles).delete(id);
-  });
-}
-
-/**
- * 「組み込みプロファイルを復元」（§1-1・設定画面のボタンだけが呼ぶ）。
- * builtinId / builtinVersion / profile ID は固定値の原本へ戻す（冪等）。
- * 既存の同 ID（アーカイブ済みを含む）は原本で上書きされる。createdAt だけは既存を保つ。
- * 原本は archived を持たないため、アーカイブ済みの組み込みはここで有効へ戻る
- * （= アーカイブ解除の唯一の経路・作者決定 2026-08-11）。
- */
-async function restoreBuiltinImportProfilesUnlocked(): Promise<ImportProfile[]> {
-  const restored = builtinImportProfilesForSeed(nowIso());
-  await writeWithRevision([STORE.importProfiles], (t) => {
-    const store = t.objectStore(STORE.importProfiles);
-    for (const profile of restored) {
-      const probe = store.get(profile.id);
-      probe.onsuccess = () => {
-        const prev = probe.result as ImportProfile | undefined;
-        store.put(prev ? { ...profile, createdAt: prev.createdAt } : profile);
-      };
-    }
-  });
-  return restored;
-}
-
-/**
- * ProfileBinding の保存境界検証（§1-1b・fail-closed）。
- *  - 紐付け先 profile は保存時点で存在すること（保存後の削除で壊れるのは soft reference として許す）。
- *  - sourceId（行キーの名前空間・監査 P1-3）は空白不可・全 binding で一意・既存 binding では
- *    変更不可（改名は表示名 sourceIdentity の編集で行う）。
- *  - 自口座・チャージ源泉は日常資産（daily-asset）。行種→計上先は起票可能 role
- *    （内部集約・残高調整は不可）。同一科目を借貸両側（自口座と相手方）に指定するのは拒否。
- *  - 同一 (profileId, sourceIdentity) の紐付けは 1 つ。
- */
-function assertProfileBindingSavable(
-  binding: ProfileBinding,
-  profiles: readonly ImportProfile[],
-  bindings: readonly ProfileBinding[],
-  accounts: Map<string, Account>,
-): ProfileBinding {
-  const parsed = profileBindingSchema.safeParse(binding);
-  if (!parsed.success) throw new LedgerError('error.importBinding.invalidStructure');
-  const saved = parsed.data as ProfileBinding;
-  const identity = saved.sourceIdentity.trim();
-  if (identity === '') throw new LedgerError('error.importBinding.invalidStructure');
-  if (saved.sourceId.trim() === '') throw new LedgerError('error.importBinding.invalidStructure');
-  if (!profiles.some((p) => p.id === saved.profileId)) {
-    throw new LedgerError('error.importProfile.notFound');
-  }
-  // sourceId は不変（rowKey / decision の名前空間。変えると過去の決定が照合できなくなる）。
-  const prev = bindings.find((b) => b.id === saved.id);
-  if (prev !== undefined && prev.sourceId !== saved.sourceId) {
-    throw new LedgerError('error.importBinding.sourceIdImmutable');
-  }
-  // sourceId は全 binding で一意（共有すると別取込元の決定が黙って混線する・監査 P1-3）。
-  if (bindings.some((b) => b.id !== saved.id && b.sourceId === saved.sourceId)) {
-    throw new LedgerError('error.importBinding.sourceIdDuplicate');
-  }
-  if (
-    bindings.some(
-      (b) =>
-        b.id !== saved.id &&
-        b.profileId === saved.profileId &&
-        b.sourceIdentity.trim() === identity,
-    )
-  ) {
-    throw new LedgerError('error.importBinding.duplicate');
-  }
-  const own = accounts.get(saved.ownAccountId);
-  if (!own || own.role !== 'daily-asset') {
-    throw new LedgerError('error.importBinding.ownAccountRole');
-  }
-  if (saved.chargeSourceAccountId !== undefined) {
-    if (saved.chargeSourceAccountId === saved.ownAccountId) {
-      throw new LedgerError('error.importBinding.sameAccount');
-    }
-    const source = accounts.get(saved.chargeSourceAccountId);
-    if (!source || source.role !== 'daily-asset') {
-      throw new LedgerError('error.importBinding.chargeSourceRole');
-    }
-  }
-  for (const accountId of Object.values(saved.kindDestinations)) {
-    if (accountId === saved.ownAccountId) {
-      throw new LedgerError('error.importBinding.sameAccount');
-    }
-    const account = accounts.get(accountId);
-    if (!account || !isRecurringPostableRole(account.role)) {
-      throw new LedgerError('error.importBinding.destinationRole');
-    }
-  }
-  return saved;
-}
-
-/** ProfileBinding の作成・更新（初回取込のセットアップシート・再選択・binding 学習の単発保存）。 */
-async function upsertProfileBindingUnlocked(binding: ProfileBinding): Promise<ProfileBinding> {
-  const [profiles, bindings, accounts] = await Promise.all([
-    getAll<ImportProfile>(STORE.importProfiles),
-    getAll<ProfileBinding>(STORE.profileBindings),
-    getAll<Account>(STORE.accounts),
-  ]);
-  const saved = assertProfileBindingSavable(binding, profiles, bindings, accountsById(accounts));
-  await writeWithRevision([STORE.profileBindings], (t) => {
-    t.objectStore(STORE.profileBindings).put(saved);
-  });
-  return saved;
-}
-
-/** binding の取得（profile × 取込元表示名で高々 1 件・§1-1b）。 */
-export async function findProfileBinding(
-  profileId: string,
-  sourceIdentity: string,
-): Promise<ProfileBinding | undefined> {
-  const bindings = await getAll<ProfileBinding>(STORE.profileBindings);
-  const identity = sourceIdentity.trim();
-  return bindings.find((b) => b.profileId === profileId && b.sourceIdentity.trim() === identity);
-}
-
-/**
- * 適用時の binding 再検証（監査 P1-3 / P1-4・§4-4）。検証するのは「binding が存在し、指す科目が
- * 実在して role が binding の定義と整合し、**archived でない**こと」= UI の broken 判定
- * （bindingIsBroken）と同一条件（作者決定 8/11: 仕訳レベルの借貸同一科目・行種→role の
- * 新たな制限は足さない。仕訳日付での科目生存は既存の assertEntrySavable の管轄なので
- * ここで重複実装しない）。
- */
-function assertBindingUsableForImport(
-  binding: ProfileBinding | undefined,
-  profileId: string,
-  accounts: Map<string, Account>,
-): ProfileBinding {
-  if (!binding || binding.profileId !== profileId) {
-    throw new LedgerError('error.importBinding.notFound');
-  }
-  const own = accounts.get(binding.ownAccountId);
-  if (!own || own.role !== 'daily-asset' || own.archived) {
-    throw new LedgerError('error.importBinding.ownAccountRole');
-  }
-  if (binding.chargeSourceAccountId !== undefined) {
-    const source = accounts.get(binding.chargeSourceAccountId);
-    if (!source || source.role !== 'daily-asset' || source.archived) {
-      throw new LedgerError('error.importBinding.chargeSourceRole');
-    }
-  }
-  for (const accountId of Object.values(binding.kindDestinations)) {
-    const account = accounts.get(accountId);
-    if (!account || !isRecurringPostableRole(account.role) || account.archived) {
-      throw new LedgerError('error.importBinding.destinationRole');
-    }
-  }
-  return binding;
-}
-
-/**
- * 取込決定の照合読み出し（rowKey 一括）。レビュー構築（§4 手順 3）はファイル外 occurrence の
- * 決定も要るため loadLedger の全件（importDecisions）を使う — こちらは部分読み出し用。
- */
-export async function getImportDecisions(
-  rowKeys: readonly string[],
-): Promise<Map<string, ImportDecision>> {
-  const keys = new Set(rowKeys);
-  const all = await getAll<ImportDecision>(STORE.importDecisions);
-  return new Map(all.filter((d) => keys.has(d.key)).map((d) => [d.key, d]));
-}
-
-/** 取込ファイル記録（fileHash → 進み具合）。情報表示と再開用・ブロックには使わない（§1-2）。 */
-export async function getImportFileRecords(): Promise<Record<string, ImportFileRecord>> {
-  return (await getKv<Record<string, ImportFileRecord>>(KV_IMPORT_FILES)) ?? {};
-}
-
-/**
- * 取込決定の解除（無視の解除・リンクの解除・dangling の掃除。§4 手順 6・§1-2）。
- * decision の削除 = その行は未解決へ戻り、次回取込で再び候補に出る。登録・リンク・無視の
- * どれも対称の 1 操作で解除できる。冪等: 存在しないキーは無視し、対象が 1 件も無ければ
- * 何も書かない（revision も進めない）。削除した件数を返す。
- */
-async function removeImportDecisionsUnlocked(rowKeys: readonly string[]): Promise<number> {
-  const keys = new Set(rowKeys);
-  const all = await getAll<ImportDecision>(STORE.importDecisions);
-  const targets = all.filter((d) => keys.has(d.key));
-  if (targets.length === 0) return 0;
-  const removedByFile = new Map<string, number>();
-  for (const d of targets) {
-    removedByFile.set(d.provenance.fileHash, (removedByFile.get(d.provenance.fileHash) ?? 0) + 1);
-  }
-  await writeWithRevision([STORE.importDecisions], (t) => {
-    const store = t.objectStore(STORE.importDecisions);
-    for (const d of targets) store.delete(d.key);
-    adjustImportFileDecidedCounts(t, removedByFile);
-  });
-  return targets.length;
-}
-
-/** 一括適用の行別アクション（§4-4）。register = 新規仕訳作成 / link = 既存仕訳へリンク / ignore = 無視。 */
-export type ImportBatchAction =
-  | { kind: 'register'; rowKey: string; entry: JournalEntry }
-  | { kind: 'link'; rowKey: string; entryId: string }
-  | { kind: 'ignore'; rowKey: string };
-
-export interface ApplyImportBatchInput {
-  profileId: string;
-  /** レビュー表示時点の profile digest（§5-1）。適用時に再計算値と照合し、不一致は全拒否。 */
-  profileDigest: string;
-  /**
-   * 適用に使う binding（取込元）の ID（監査 P1-3）。存在・profile 整合・参照科目の実在と
-   * role 整合を適用時（tx 内でも）再検証し、壊れていれば全件拒否する。行キーの名前空間は
-   * この binding の sourceId。
-   */
-  bindingId: string;
-  /** 行キー生成アルゴリズムの版。省略時は現行（IMPORT_IDENTITY_VERSION）。 */
-  identityVersion?: number;
-  /** 由来ファイルの SHA-256（provenance とファイル記録に載せる）。 */
-  fileHash: string;
-  /** ヘッダー以外の全データ行数（ファイル記録用・§4-2 の件数会計と同じ分母）。 */
-  fileTotalRowCount: number;
-  actions: readonly ImportBatchAction[];
-  /** binding 学習（この適用で確定した行種→計上先・チャージ源泉など）。適用と同一 tx で保存する。 */
-  bindingUpdate?: ProfileBinding;
-  /**
-   * レビュー表示時点の台帳世代。指定すると transaction 内で現在値と照合し、レビュー後に
-   * 台帳が変わっていれば全拒否する（stale なレビュー結果で保存しない・§4-4）。
-   * 省略時は通常の楽観的並行制御（このタブが最後に見た世代）で照合する。
-   */
-  expectedLedgerVersion?: LedgerVersion;
-}
-
-export interface ImportBatchResult {
-  /** 新規作成された仕訳（保存形・由来メタ付与済み）。 */
-  entries: JournalEntry[];
-  decisions: ImportDecision[];
-}
-
-/**
- * レビュー済みの選択行を**単一 IndexedDB transaction**で一括適用する（§4-4 の受け入れ条件）。
- *
- *  - entries + decisions + ファイル記録 + binding 学習 + meta revision を 1 tx で保存する。
- *  - 適用前（事前検証）に ledger 全体と profile digest を検証し、さらに tx 内で
- *    profile の同一性（canonical JSON 比較）・決定の不在・binding の存在と科目 role 整合
- *    （監査 P1-3）・台帳世代（revision CAS）を再検証する。
- *    どれかが変わっていれば **1 件も書かずに** abort する（全件不変）。
- *  - 二重タップは serializeMutation の直列化 + 決定済みキーの拒否で冪等に落ちる
- *    （同一バッチの再実行は error.import.alreadyDecided で全拒否）。
- */
-async function applyImportBatchUnlocked(input: ApplyImportBatchInput): Promise<ImportBatchResult> {
-  if (input.actions.length === 0) throw new LedgerError('error.import.emptyBatch');
-  if (!Number.isInteger(input.fileTotalRowCount) || input.fileTotalRowCount < 0) {
-    throw new LedgerError('error.import.invalidBatch');
-  }
-  if (input.bindingId === '' || input.fileHash === '' || input.profileDigest === '') {
-    throw new LedgerError('error.import.invalidBatch');
-  }
-  const identityVersion = input.identityVersion ?? IMPORT_IDENTITY_VERSION;
-
-  // 同一バッチ内の rowKey 重複は決定の黙った上書きになるため拒否する。
-  const rowKeys = new Set<string>();
-  for (const action of input.actions) {
-    if (rowKeys.has(action.rowKey)) throw new LedgerError('error.import.duplicateRowKey');
-    rowKeys.add(action.rowKey);
-  }
-
-  const [profiles, decisions, entries, accounts, monthlyCostItems, recurringRules, bindings, tags] =
-    await Promise.all([
-      getAll<ImportProfile>(STORE.importProfiles),
-      getAll<ImportDecision>(STORE.importDecisions),
-      getAll<JournalEntry>(STORE.journalEntries),
-      getAll<Account>(STORE.accounts),
-      getAll<MonthlyCostItem>(STORE.monthlyCostItems),
-      getAll<RecurringRule>(STORE.recurringRules),
-      getAll<ProfileBinding>(STORE.profileBindings),
-      tagMap(),
-    ]);
-
-  const ctx: SaveContext = { byId: accountsById(accounts) };
-
-  // binding の存在・profile 整合・参照科目の実在と role 整合（監査 P1-3。tx 内でも再検証する）。
-  const binding = assertBindingUsableForImport(
-    bindings.find((b) => b.id === input.bindingId),
-    input.profileId,
-    ctx.byId,
-  );
-  const sourceId = binding.sourceId;
-
-  // rowKey は自分の作った canonical tuple で、取込元 ID・版がバッチの binding と一致していること
-  // （別の取込元の決定を書き込む取り違えを塞ぐ）。
-  for (const key of rowKeys) {
-    const parsed = parseRowKey(key);
-    if (
-      parsed === undefined ||
-      parsed.sourceId !== sourceId ||
-      parsed.identityVersion !== identityVersion
-    ) {
-      throw new LedgerError('error.import.rowKeyMismatch');
-    }
-  }
-
-  // profile の存在と digest（§5-1: レビュー表示中の profile 変更 = 適用拒否・作り直し）。
-  const profile = profiles.find((p) => p.id === input.profileId);
-  if (!profile) throw new LedgerError('error.importProfile.notFound');
-  const canonicalDsl = canonicalJsonText(profile.dsl);
-  if ((await profileDslDigest(profile.dsl)) !== input.profileDigest) {
-    throw new LedgerError('error.import.profileChanged');
-  }
-
-  // 決定済みキーの再決定は拒否する（解除 API で未解決へ戻してから決め直す。二重適用も同じ道）。
-  const decidedKeys = new Set(decisions.map((d) => d.key));
-  for (const key of rowKeys) {
-    if (decidedKeys.has(key)) throw new LedgerError('error.import.alreadyDecided');
-  }
-
-  const ts = nowIso();
-  const existingEntryIds = new Set(entries.map((e) => e.id));
-  const newEntryIds = new Set<string>();
-  const accountUpdates = new Map<string, Account>();
-  const savableEntries: JournalEntry[] = [];
-  const newDecisions: ImportDecision[] = [];
-  const provenance: ImportDecisionProvenance = {
-    profileId: input.profileId,
-    profileDigest: input.profileDigest,
-    fileHash: input.fileHash,
-    sourceId,
-    identityVersion,
-  };
-
-  for (const action of input.actions) {
-    if (action.kind !== 'register') continue;
-    const entry = action.entry;
-    // 取込で作れるのは通常仕訳のみ。特殊メタ（補正・継続コスト・定期由来）は upsertEntry と
-    // 同じ理由で持ち込めない（それぞれ専用経路の管轄）。
-    if (entry.kind !== 'normal') throw new LedgerError('error.entry.invalidStructure');
-    if (entry.metadata?.adjustment) throw new LedgerError('error.entry.adjustment');
-    if (entry.metadata?.monthlyCostId !== undefined || entry.metadata?.monthlyCostRecovery) {
-      throw new LedgerError('error.entry.monthlyCost');
-    }
-    if (
-      entry.metadata?.recurringRuleId !== undefined ||
-      entry.metadata?.recurringMonth !== undefined
-    ) {
-      throw new LedgerError('error.recurring.invalidStructure');
-    }
-    // put は upsert のため、既存 ID の黙った上書きを fail-closed に塞ぐ。
-    if (existingEntryIds.has(entry.id) || newEntryIds.has(entry.id)) {
-      throw new LedgerError('error.import.entryIdConflict');
-    }
-    newEntryIds.add(entry.id);
-    // 由来メタ（§1-3・表示用の複製）は repository が正として付け直す（呼び出し側の値を信じない）。
-    const candidate: JournalEntry = {
-      ...entry,
-      metadata: {
-        ...entry.metadata,
-        importSource: input.profileId,
-        importSourceIdentity: binding.sourceIdentity.trim(),
-        importRowKey: action.rowKey,
-      },
-    };
-    for (const [accountId, account] of extendSystemStartsForReferences(
-      ctx,
-      entryAccountReferences(candidate),
-      ts,
-    )) {
-      accountUpdates.set(accountId, account);
-    }
-    const savable = assertEntrySavable(candidate, ctx);
-    const tagError = tagAssignmentError(savable.tagIds, tags);
-    if (tagError) throw new LedgerError(tagError);
-    savableEntries.push(savable);
-    newDecisions.push({
-      key: action.rowKey,
-      status: 'registered',
-      entryId: savable.id,
-      decidedAt: ts,
-      provenance,
-    });
-  }
-
-  for (const action of input.actions) {
-    if (action.kind === 'link') {
-      // decision → entry は多対一（チャージの裏表 2 行 → 同じ振替仕訳）。リンク先は
-      // 既存仕訳のほか、このバッチで register される新規仕訳でもよい。
-      if (!existingEntryIds.has(action.entryId) && !newEntryIds.has(action.entryId)) {
-        throw new LedgerError('error.import.linkTargetMissing');
-      }
-      newDecisions.push({
-        key: action.rowKey,
-        status: 'linked',
-        entryId: action.entryId,
-        decidedAt: ts,
-        provenance,
-      });
-    } else if (action.kind === 'ignore') {
-      newDecisions.push({ key: action.rowKey, status: 'ignored', decidedAt: ts, provenance });
-    }
-  }
-  // schema での最終検証（status↔entryId の相関を構築ミスからも守る・fail-closed）。
-  for (const decision of newDecisions) {
-    if (!importDecisionSchema.safeParse(decision).success) {
-      throw new LedgerError('error.import.invalidBatch');
-    }
-  }
-
-  // binding 学習（§4-4: 適用と同一 tx で保存）。バッチの binding / profile と一致すること
-  // （sourceId の不変は assertProfileBindingSavable が既存 binding との比較で守る）。
-  let savedBinding: ProfileBinding | undefined;
-  if (input.bindingUpdate !== undefined) {
-    if (
-      input.bindingUpdate.id !== input.bindingId ||
-      input.bindingUpdate.profileId !== input.profileId
-    ) {
-      throw new LedgerError('error.import.invalidBatch');
-    }
-    savedBinding = assertProfileBindingSavable(input.bindingUpdate, profiles, bindings, ctx.byId);
-  }
-
-  // 終了点残高の不変条件（他の仕訳保存経路と同じ検証を新規仕訳ぶん一括で行う）。
-  if (savableEntries.length > 0) {
-    assertEndedAssetLiabilityBalances(
-      {
-        accounts: [...ctx.byId.values()],
-        journalEntries: [...entries, ...savableEntries],
-        monthlyCostItems,
-        recurringRules,
-      },
-      new Set(savableEntries.flatMap((entry) => entry.lines.map((line) => line.accountId))),
-    );
-  }
-
-  // ファイル記録（§1-2: 情報表示と再開用）。このファイル由来の決定済み数を適用後の値にする。
-  const fileRecords = (await getKv<Record<string, ImportFileRecord>>(KV_IMPORT_FILES)) ?? {};
-  const nextFileRecords: Record<string, ImportFileRecord> = {
-    ...fileRecords,
-    [input.fileHash]: {
-      importedAt: ts,
-      totalRowCount: input.fileTotalRowCount,
-      decidedCount:
-        decisions.filter((d) => d.provenance.fileHash === input.fileHash).length +
-        newDecisions.length,
-    },
-  };
-
-  let digestRace = false;
-  let decidedRace = false;
-  let bindingRace: LedgerError | undefined;
-  try {
-    await writeWithRevision(
-      [
-        STORE.accounts,
-        STORE.journalEntries,
-        STORE.importDecisions,
-        STORE.profileBindings,
-        STORE.importProfiles,
-      ],
-      (t) => {
-        // tx 内の再検証: profile の同一性・決定の不在・binding の存在と科目 role 整合
-        // （監査 P1-3）。digest は async 計算のため、事前検証済みの canonical JSON との
-        // 同値比較で置き換える（一致 = digest も一致）。
-        const profileProbe = t.objectStore(STORE.importProfiles).get(input.profileId);
-        const decisionsProbe = t.objectStore(STORE.importDecisions).getAll();
-        const bindingProbe = t.objectStore(STORE.profileBindings).get(input.bindingId);
-        const accountsProbe = t.objectStore(STORE.accounts).getAll();
-        let completed = 0;
-        const applyWhenReady = () => {
-          completed += 1;
-          if (completed !== 4) return;
-          const currentProfile = profileProbe.result as ImportProfile | undefined;
-          if (!currentProfile || canonicalJsonText(currentProfile.dsl) !== canonicalDsl) {
-            digestRace = true;
-            t.abort();
-            return;
-          }
-          const currentDecisions = decisionsProbe.result as ImportDecision[];
-          if (currentDecisions.some((d) => rowKeys.has(d.key))) {
-            decidedRace = true;
-            t.abort();
-            return;
-          }
-          try {
-            const currentBinding = assertBindingUsableForImport(
-              bindingProbe.result as ProfileBinding | undefined,
-              input.profileId,
-              accountsById(accountsProbe.result as Account[]),
-            );
-            // sourceId は不変だが、binding の入れ替え（削除→別 ID 再作成の同 ID 再利用）まで
-            // 含めて rowKey の名前空間が事前検証時と同じことを確かめる。
-            if (currentBinding.sourceId !== sourceId) {
-              throw new LedgerError('error.import.rowKeyMismatch');
-            }
-          } catch (e) {
-            bindingRace =
-              e instanceof LedgerError ? e : new LedgerError('error.importBinding.notFound');
-            t.abort();
-            return;
-          }
-          const accountStore = t.objectStore(STORE.accounts);
-          for (const account of accountUpdates.values()) accountStore.put(account);
-          const entryStore = t.objectStore(STORE.journalEntries);
-          for (const entry of savableEntries) entryStore.put(entry);
-          const decisionStore = t.objectStore(STORE.importDecisions);
-          for (const decision of newDecisions) decisionStore.put(decision);
-          if (savedBinding) t.objectStore(STORE.profileBindings).put(savedBinding);
-          t.objectStore(STORE.kv).put(nextFileRecords, KV_IMPORT_FILES);
-        };
-        profileProbe.onsuccess = applyWhenReady;
-        decisionsProbe.onsuccess = applyWhenReady;
-        bindingProbe.onsuccess = applyWhenReady;
-        accountsProbe.onsuccess = applyWhenReady;
-      },
-      input.expectedLedgerVersion,
-    );
-  } catch (error) {
-    if (digestRace) throw new LedgerError('error.import.profileChanged');
-    if (decidedRace) throw new LedgerError('error.import.alreadyDecided');
-    if (bindingRace !== undefined) throw bindingRace;
-    throw error;
-  }
-  return { entries: savableEntries, decisions: newDecisions };
 }
 
 /* ── 一括置換（import / restore で使う原子的操作） ── */
@@ -4181,9 +3464,6 @@ export interface ReplacePayload {
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   recurringRules: RecurringRule[];
-  importProfiles: ImportProfile[];
-  profileBindings: ProfileBinding[];
-  importDecisions: ImportDecision[];
 }
 
 /**
@@ -4208,9 +3488,6 @@ async function replaceLedgerUnlocked(
         STORE.tags,
         STORE.monthlyCostItems,
         STORE.recurringRules,
-        STORE.importProfiles,
-        STORE.profileBindings,
-        STORE.importDecisions,
       ],
       (t) => {
         const kv = t.objectStore(STORE.kv);
@@ -4233,26 +3510,16 @@ async function replaceLedgerUnlocked(
           const tags = t.objectStore(STORE.tags);
           const monthlyCosts = t.objectStore(STORE.monthlyCostItems);
           const rules = t.objectStore(STORE.recurringRules);
-          const profiles = t.objectStore(STORE.importProfiles);
-          const bindings = t.objectStore(STORE.profileBindings);
-          const decisions = t.objectStore(STORE.importDecisions);
           accounts.clear();
           entries.clear();
           tags.clear();
           monthlyCosts.clear();
           rules.clear();
-          profiles.clear();
-          bindings.clear();
-          decisions.clear();
           for (const a of payload.accounts) accounts.put(a);
           for (const e of payload.journalEntries) entries.put(e);
           for (const tag of payload.tags) tags.put(tag);
           for (const mc of payload.monthlyCostItems) monthlyCosts.put(mc);
           for (const rule of payload.recurringRules) rules.put(rule);
-          // 全置換は seed を通らない＝削除済みの組み込み profile を勝手に復活させない（§1-1）。
-          for (const profile of payload.importProfiles) profiles.put(profile);
-          for (const binding of payload.profileBindings) bindings.put(binding);
-          for (const decision of payload.importDecisions) decisions.put(decision);
           nextMeta = {
             ...payload.meta,
             revision: revisionFloor + 1,
@@ -4260,9 +3527,6 @@ async function replaceLedgerUnlocked(
           };
           kv.put(nextMeta, KV_META);
           kv.put(payload.settings, KV_SETTINGS);
-          // 取込ファイル記録は端末ローカルの進み具合（export に含めない）。決定を丸ごと
-          // 置換した後は古い数字が事実と食い違うため、残さず消す（情報表示のみ・§1-2）。
-          kv.delete(KV_IMPORT_FILES);
         };
       },
     );
@@ -4285,7 +3549,6 @@ async function resetAllUnlocked(): Promise<void> {
   const accounts = defaultAccounts();
   const settings = defaultSettings();
   const meta = newMeta();
-  const builtinProfiles = builtinImportProfilesForSeed(nowIso());
   await runWrite(
     [
       STORE.kv,
@@ -4294,9 +3557,6 @@ async function resetAllUnlocked(): Promise<void> {
       STORE.tags,
       STORE.monthlyCostItems,
       STORE.recurringRules,
-      STORE.importProfiles,
-      STORE.profileBindings,
-      STORE.importDecisions,
       STORE.snapshots,
     ],
     (t) => {
@@ -4306,17 +3566,11 @@ async function resetAllUnlocked(): Promise<void> {
       t.objectStore(STORE.tags).clear();
       t.objectStore(STORE.monthlyCostItems).clear();
       t.objectStore(STORE.recurringRules).clear();
-      t.objectStore(STORE.importProfiles).clear();
-      t.objectStore(STORE.profileBindings).clear();
-      t.objectStore(STORE.importDecisions).clear();
       t.objectStore(STORE.snapshots).clear();
       t.objectStore(STORE.kv).put(meta, KV_META);
       t.objectStore(STORE.kv).put(settings, KV_SETTINGS);
       const store = t.objectStore(STORE.accounts);
       for (const a of accounts) store.put(a);
-      // 全リセットは fresh DB と同じ扱い＝組み込み profile を seed する（§1-1）。
-      const profiles = t.objectStore(STORE.importProfiles);
-      for (const p of builtinProfiles) profiles.put(p);
     },
   );
   lastSeenVersion = ledgerVersion(meta);
@@ -4354,12 +3608,6 @@ export const archiveMonthlyCost = serializeMutation(archiveMonthlyCostUnlocked);
 export const deleteMonthlyCost = serializeMutation(deleteMonthlyCostUnlocked);
 export const replaceLedger = serializeMutation(replaceLedgerUnlocked);
 export const resetAll = serializeMutation(resetAllUnlocked);
-export const createImportProfile = serializeMutation(createImportProfileUnlocked);
-export const deleteImportProfile = serializeMutation(deleteImportProfileUnlocked);
-export const restoreBuiltinImportProfiles = serializeMutation(restoreBuiltinImportProfilesUnlocked);
-export const upsertProfileBinding = serializeMutation(upsertProfileBindingUnlocked);
-export const removeImportDecisions = serializeMutation(removeImportDecisionsUnlocked);
-export const applyImportBatch = serializeMutation(applyImportBatchUnlocked);
 
 /** 新規スナップショットの ID/時刻を採番する補助。 */
 export function makeSnapshotId(): string {

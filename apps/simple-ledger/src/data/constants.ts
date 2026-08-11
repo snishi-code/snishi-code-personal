@@ -11,17 +11,16 @@
 export const DB_NAME = 'simple-ledger-v2' as const;
 
 /**
- * IndexedDB のバージョン。version 9 はストア構成の変更なし（SCHEMA_VERSION 9 =
- * ImportProfile.archived 追加と対で上げる。版の対応を 1:1 に保つため）。
- * version 8 で CSV 取込（Import Profile）の 3 ストア
- * （importProfiles / profileBindings / importDecisions）を追加した。
+ * IndexedDB のバージョン。version 10 で CSV 取込の 3 ストアを現行構成から外した
+ * （機能ごと全撤去・SCHEMA_VERSION 10 と対で上げる）。
+ * version 8〜9 は CSV 取込（Import Profile）の追加とその改版だった。
  * version 7 で予定キャッシュフロー（cashflowSchedules）ストアを
  * 現行構成から外した（機能ごと全廃 = 予定は未来日付の通常仕訳へ一本化）。
  * upgrade は不足ストアの作成だけを行い、**旧版のストアは削除しない**（旧版 DB は
  * schemaVersion 検査で復旧面へ送られ、復旧面の「DB 初期化」= DB 削除でのみ消える。
  * 黙って削除しない・監査 P1-1）。
  */
-export const DB_VERSION = 9 as const;
+export const DB_VERSION = 10 as const;
 
 /** エクスポート/import 照合用のアプリ ID（封筒 appId）。v1 とは別 ID。 */
 export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
@@ -29,14 +28,12 @@ export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
 /**
  * 現行スキーマ版。v2 は v1 の最終形（v16 相当の最新モデル）を **1** として開始した
  * （レガシー migration は持たない・仕様§16）。互換性のない変更ごとに +1 する。
- * version 9 = 取込プロファイルのアーカイブ（ImportProfile.archived・optional・既定 false）。
- * profile の上書き保存を廃止し「旧をアーカイブして新規作成」へ（作者決定 2026-08-11）。
- * 以降の v9 内フィールド追加は後続の変更がこの版のまま行う:
- *  - ProfileBinding.importFromDate（取込開始日・optional・明示値のみ検証・2026-08-11 追加済み）
- *  - Account.annualReturnBp（予定）
- * version 8 = CSV 取込（Import Profile）。importProfiles / profileBindings /
- * importDecisions を交換 JSON の必須フィールドとして追加し、EntryMetadata に取込由来
- * （importSource ほか）を追加。
+ * version 10 = CSV取込一式の撤去（実ユーズの結論・作者決定 2026-08-11）。
+ * 「ざっくり登録 + 残高補正」の使い方に明細単位の CSV 取込は合わない＝使わない死荷重として
+ * 型・schema・store・UI・交換 JSON の 3 配列と EntryMetadata の取込由来メタデータを全撤去。
+ * 設計は git 履歴に残る（将来要望が出たら再導入可能）。
+ * version 9 = 取込プロファイルのアーカイブ（v10 で機能ごと撤去）。
+ * version 8 = CSV 取込（Import Profile）の導入（v10 で機能ごと撤去）。
  * version 7 = 予定キャッシュフロー（CashflowSchedule）の全廃。「予定 = 未来日付の通常仕訳」へ
  * 一本化し、export からも cashflowSchedules フィールドを削除。
  * version 6 = 定期ルールを時間軸上の線分にし、RecurringRule.startDate を必須化。
@@ -45,7 +42,7 @@ export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
  * migration step は追加しない（作者決定＝後方互換を持たない）。旧版 JSON /
  * スナップショットは unsupported-version として fail-closed に拒否される。
  */
-export const SCHEMA_VERSION = 9 as const;
+export const SCHEMA_VERSION = 10 as const;
 
 /**
  * revision は JSON / IndexedDB の双方で安全な整数だけを扱う。

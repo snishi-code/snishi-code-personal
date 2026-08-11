@@ -16,7 +16,6 @@ export type Screen =
   | 'cashflow'
   | 'tags'
   | 'accounts'
-  | 'csvImport'
   | 'settings';
 
 export interface NavItem {
@@ -41,7 +40,4 @@ export const NAV_ITEMS: NavItem[] = [
 /**
  * 設定画面「管理」セクションから遷移する補助画面。
  */
-export const MANAGEMENT_ITEMS: NavItem[] = [
-  { screen: 'tags', labelKey: 'nav.tags', icon: 'tag' },
-  { screen: 'csvImport', labelKey: 'nav.csvImport', icon: 'upload' },
-];
+export const MANAGEMENT_ITEMS: NavItem[] = [{ screen: 'tags', labelKey: 'nav.tags', icon: 'tag' }];

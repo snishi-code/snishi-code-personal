@@ -28,7 +28,6 @@ import { Allocations, type AllocationsTarget } from './ui/screens/Allocations';
 import { Cashflow } from './ui/screens/Cashflow';
 import { Tags } from './ui/screens/Tags';
 import { Accounts } from './ui/screens/Accounts';
-import { CsvImport } from './ui/screens/CsvImport';
 import { Settings } from './ui/screens/Settings';
 import { Help } from './ui/screens/Help';
 import { EntrySheet, type EntryInit } from './ui/screens/EntrySheet';
@@ -320,7 +319,6 @@ export function App() {
         {screen === 'cashflow' ? <Cashflow onEditEntry={openEdit} /> : null}
         {screen === 'tags' ? <Tags /> : null}
         {screen === 'accounts' ? <Accounts period={period} /> : null}
-        {screen === 'csvImport' ? <CsvImport onOpenEntry={goJournalEntry} /> : null}
         {screen === 'settings' ? (
           <Settings onNavigate={go} onOpenOnboarding={() => setOnboardingManualOpen(true)} />
         ) : null}

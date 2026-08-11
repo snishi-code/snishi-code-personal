@@ -1,6 +1,6 @@
 {
   "appId": "snishi-code.simple-ledger-v2",
-  "schemaVersion": 9,
+  "schemaVersion": 10,
   "ledgerId": "sample-ledger",
   "exportedAt": "2026-04-01T00:00:00.000Z",
   "deviceId": "sample-device",
@@ -855,8 +855,5 @@
       "updatedAt": "2026-04-01T00:00:00.000Z"
     }
   ],
-  "recurringRules": [],
-  "importProfiles": [],
-  "profileBindings": [],
-  "importDecisions": []
+  "recurringRules": []
 }

@@ -95,9 +95,6 @@ function pkg(
     tags: [],
     monthlyCostItems,
     recurringRules: [rule],
-    importProfiles: [],
-    profileBindings: [],
-    importDecisions: [],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' as const },
   };
 }

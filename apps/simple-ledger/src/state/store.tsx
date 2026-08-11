@@ -8,14 +8,12 @@ import type {
   Account,
   Ledger,
   MonthlyCostItem,
-  ProfileBinding,
   RecurringRule,
   Settings,
   Snapshot,
   Tag,
 } from '../domain/types';
 import { buildSimpleEntry, type SimpleEntryInput } from '../domain/entry';
-import type { ImportProfile } from '../domain/importDsl';
 import * as repo from '../data/repository';
 import { isDefaultSeedAccounts, isDefaultSettings } from '../data/seed';
 import type { ContinuousCostInput, MonthlyCostArchiveInput } from '../data/repository';
@@ -53,11 +51,6 @@ export function isPristineSeedLedger(l: Ledger): boolean {
     l.journalEntries.length === 0 &&
     l.monthlyCostItems.length === 0 &&
     l.tags.length === 0 &&
-    // CSV 取込のユーザーデータ（紐付け・決定・ユーザー定義 profile）があれば初期状態ではない。
-    // 組み込み profile（builtin あり）は seed 由来なので数えない。
-    l.profileBindings.length === 0 &&
-    l.importDecisions.length === 0 &&
-    l.importProfiles.every((p) => p.builtin !== undefined) &&
     isDefaultSettings(l.settings) &&
     isDefaultSeedAccounts(l.accounts)
   );
@@ -120,24 +113,6 @@ interface LedgerContextValue {
   reorderAccounts: (ids: string[]) => Promise<void>;
   removeAccount: (id: string) => Promise<void>;
   saveSettings: (settings: Settings) => Promise<void>;
-  /**
-   * CSV 取込: profile の新規作成（JSON 貼付・AI ビルダーの保存・§1-1）。上書きは廃止
-   * （作者決定 2026-08-11）。archiveProfileId 指定で旧をアーカイブして作り直す。
-   */
-  saveImportProfile: (
-    profile: ImportProfile,
-    options?: { archiveProfileId?: string },
-  ) => Promise<ImportProfile>;
-  /** CSV 取込: profile の削除（組み込みも可・binding / decision は残す・§1-1）。 */
-  removeImportProfile: (id: string) => Promise<void>;
-  /** CSV 取込: 組み込みプロファイルを原本へ復元（冪等・§1-1）。 */
-  restoreBuiltinProfiles: () => Promise<ImportProfile[]>;
-  /** CSV 取込: binding（取込元の紐付け・§1-1b）の作成・編集。 */
-  saveProfileBinding: (binding: ProfileBinding) => Promise<ProfileBinding>;
-  /** CSV 取込: レビュー済み行の一括適用（原子性は repository が保証・§4-4）。 */
-  applyCsvImportBatch: (input: repo.ApplyImportBatchInput) => Promise<repo.ImportBatchResult>;
-  /** CSV 取込: 決定の解除（無視・リンクの解除 = 行を未解決へ戻す・§4-6）。 */
-  removeCsvImportDecisions: (rowKeys: string[]) => Promise<number>;
   exportJson: () => void;
   importJson: (text: string, force?: boolean) => Promise<ImportOutcome>;
   listSnapshots: () => Promise<Snapshot[]>;
@@ -581,94 +556,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [refresh, toast],
   );
 
-  const saveImportProfile = useCallback<LedgerContextValue['saveImportProfile']>(
-    async (profile, options) => {
-      try {
-        const saved = await repo.createImportProfile(profile, options);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-        return saved;
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const removeImportProfile = useCallback<LedgerContextValue['removeImportProfile']>(
-    async (id) => {
-      try {
-        await repo.deleteImportProfile(id);
-        await refresh();
-        toast.show(t('toast.deleted'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const restoreBuiltinProfiles = useCallback<
-    LedgerContextValue['restoreBuiltinProfiles']
-  >(async () => {
-    try {
-      const restored = await repo.restoreBuiltinImportProfiles();
-      await refresh();
-      toast.show(t('csvImport.profiles.restoredToast', { count: restored.length }), 'success');
-      return restored;
-    } catch (e) {
-      toast.show(errorText(e), 'error');
-      throw e;
-    }
-  }, [refresh, toast]);
-
-  const saveProfileBinding = useCallback<LedgerContextValue['saveProfileBinding']>(
-    async (binding) => {
-      try {
-        const saved = await repo.upsertProfileBinding(binding);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-        return saved;
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const applyCsvImportBatch = useCallback<LedgerContextValue['applyCsvImportBatch']>(
-    async (input) => {
-      try {
-        const result = await repo.applyImportBatch(input);
-        await refresh();
-        toast.show(t('csvImport.appliedToast', { count: input.actions.length }), 'success');
-        return result;
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const removeCsvImportDecisions = useCallback<LedgerContextValue['removeCsvImportDecisions']>(
-    async (rowKeys) => {
-      try {
-        const removed = await repo.removeImportDecisions(rowKeys);
-        await refresh();
-        if (removed > 0) toast.show(t('csvImport.removedToast'), 'success');
-        return removed;
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
   const exportJson = useCallback<LedgerContextValue['exportJson']>(() => {
     if (!ledger) return;
     try {
@@ -799,12 +686,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       reorderAccounts,
       removeAccount,
       saveSettings,
-      saveImportProfile,
-      removeImportProfile,
-      restoreBuiltinProfiles,
-      saveProfileBinding,
-      applyCsvImportBatch,
-      removeCsvImportDecisions,
       exportJson,
       importJson,
       listSnapshots,
@@ -842,12 +723,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       reorderAccounts,
       removeAccount,
       saveSettings,
-      saveImportProfile,
-      removeImportProfile,
-      restoreBuiltinProfiles,
-      saveProfileBinding,
-      applyCsvImportBatch,
-      removeCsvImportDecisions,
       exportJson,
       importJson,
       listSnapshots,

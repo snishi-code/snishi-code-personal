@@ -279,25 +279,22 @@ describe('export package 形状', () => {
     expect(pkg).toHaveProperty('settings');
   });
 
-  it('schemaVersion 9 で、廃止済みの cashflowSchedules フィールドを含まない', async () => {
+  it('schemaVersion 10 で、廃止済みフィールドを含まない', async () => {
     const ledger = await seedWithEntry();
     const pkg = buildExportPackage(ledger);
     expect(pkg.schemaVersion).toBe(SCHEMA_VERSION);
-    expect(pkg.schemaVersion).toBe(9);
+    expect(pkg.schemaVersion).toBe(10);
     expect(pkg).not.toHaveProperty('cashflowSchedules');
+    // v10 で撤去した CSV 取込の 3 配列も含まない。
+    expect(pkg).not.toHaveProperty('importProfiles');
+    expect(pkg).not.toHaveProperty('profileBindings');
+    expect(pkg).not.toHaveProperty('importDecisions');
     // 文字列化した export JSON にも痕跡が残らない。
     const parsed = JSON.parse(exportToJsonText(ledger)) as Record<string, unknown>;
     expect(Object.keys(parsed)).not.toContain('cashflowSchedules');
-  });
-
-  it('v8 の必須フィールド（importProfiles / profileBindings / importDecisions）を含む', async () => {
-    const ledger = await seedWithEntry();
-    const pkg = buildExportPackage(ledger);
-    expect(Array.isArray(pkg.importProfiles)).toBe(true);
-    expect(Array.isArray(pkg.profileBindings)).toBe(true);
-    expect(Array.isArray(pkg.importDecisions)).toBe(true);
-    // fresh DB には組み込み PayPay profile が seed されている（§1-1）。
-    expect(pkg.importProfiles.some((p) => p.builtin?.builtinId === 'paypay-csv')).toBe(true);
+    expect(Object.keys(parsed)).not.toContain('importProfiles');
+    expect(Object.keys(parsed)).not.toContain('profileBindings');
+    expect(Object.keys(parsed)).not.toContain('importDecisions');
   });
 });
 

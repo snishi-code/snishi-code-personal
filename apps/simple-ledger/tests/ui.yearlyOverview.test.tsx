@@ -73,9 +73,6 @@ function fixtureLedger(): Ledger {
     tags: [],
     monthlyCostItems: [],
     recurringRules: [],
-    importProfiles: [],
-    profileBindings: [],
-    importDecisions: [],
   };
 }
 
@@ -154,9 +151,6 @@ describe('YearlyOverview', () => {
           updatedAt: 'x',
         },
       ],
-      importProfiles: [],
-      profileBindings: [],
-      importDecisions: [],
     };
 
     render(<YearlyOverview period={{ mode: 'date', date: '2025-05-10' }} />);
@@ -187,9 +181,6 @@ describe('YearlyOverview', () => {
           updatedAt: 'x',
         },
       ],
-      importProfiles: [],
-      profileBindings: [],
-      importDecisions: [],
     };
 
     render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
@@ -326,9 +317,6 @@ describe('YearlyOverview', () => {
           updatedAt: 'x',
         },
       ],
-      importProfiles: [],
-      profileBindings: [],
-      importDecisions: [],
     };
 
     render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
@@ -374,9 +362,6 @@ describe('YearlyOverview', () => {
           updatedAt: 'x',
         },
       ],
-      importProfiles: [],
-      profileBindings: [],
-      importDecisions: [],
     };
 
     render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);

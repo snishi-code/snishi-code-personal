@@ -254,9 +254,6 @@ describe('buildPeriodMatrix（全体）', () => {
       tags: [],
       monthlyCostItems: [item],
       recurringRules: [],
-      importProfiles: [],
-      profileBindings: [],
-      importDecisions: [],
     };
 
     const annualEntries = reportEntriesForAsOf(ledger, '2025-12-31');

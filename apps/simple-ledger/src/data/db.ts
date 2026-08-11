@@ -13,15 +13,12 @@ import { createDatabase, txDone } from '@snishi/foundation/storage/idb';
 import { DB_NAME, DB_VERSION } from './constants';
 
 export const STORE = {
-  kv: 'kv', // meta / settings / 取込ファイル記録の単一レコード置き場（out-of-line key）
+  kv: 'kv', // meta / settings の単一レコード置き場（out-of-line key）
   accounts: 'accounts',
   journalEntries: 'journalEntries',
   tags: 'tags',
   monthlyCostItems: 'monthlyCostItems',
   recurringRules: 'recurringRules', // 定期ルール（v2 で追加）
-  importProfiles: 'importProfiles', // CSV 取込の変換規則（v8 で追加）
-  profileBindings: 'profileBindings', // profile と端末台帳の紐付け（v8 で追加）
-  importDecisions: 'importDecisions', // 行キー → 取込決定の単一正本（v8 で追加）
   snapshots: 'snapshots',
 } as const;
 
@@ -35,10 +32,11 @@ export const db = createDatabase({
   version: DB_VERSION,
   upgrade: (idb) => {
     // 現行 STORE に無い未知（レガシー）ストアは**温存する**（黙って削除しない）。
-    // v7 は後方互換を持たない＝旧版 DB は repository の assertSchemaVersionCurrent が
+    // 後方互換を持たない＝旧版 DB は repository の assertSchemaVersionCurrent が
     // 復旧面へ送り、旧版データは復旧面の「DB 初期化」（wipeDatabase = deleteDatabase）
     // でのみ消える。upgrade が先にストアを消すと、復旧面に着く前にデータが失われる
-    // （「黙って削除しない」原則違反・監査 P1-1）。
+    // （「黙って削除しない」原則違反・監査 P1-1）。v10 で撤去した CSV 取込の旧 3 ストアも
+    // 同じ方針で温存する。
     if (!idb.objectStoreNames.contains(STORE.kv)) idb.createObjectStore(STORE.kv);
     if (!idb.objectStoreNames.contains(STORE.accounts)) {
       idb.createObjectStore(STORE.accounts, { keyPath: 'id' });
@@ -55,16 +53,6 @@ export const db = createDatabase({
     }
     if (!idb.objectStoreNames.contains(STORE.recurringRules)) {
       idb.createObjectStore(STORE.recurringRules, { keyPath: 'id' });
-    }
-    if (!idb.objectStoreNames.contains(STORE.importProfiles)) {
-      idb.createObjectStore(STORE.importProfiles, { keyPath: 'id' });
-    }
-    if (!idb.objectStoreNames.contains(STORE.profileBindings)) {
-      idb.createObjectStore(STORE.profileBindings, { keyPath: 'id' });
-    }
-    if (!idb.objectStoreNames.contains(STORE.importDecisions)) {
-      // 行キー（canonical tuple 文字列）がそのまま主キー（§1-2: 取込済み判定の単一正本）。
-      idb.createObjectStore(STORE.importDecisions, { keyPath: 'key' });
     }
     if (!idb.objectStoreNames.contains(STORE.snapshots)) {
       idb.createObjectStore(STORE.snapshots, { keyPath: 'id' });

@@ -131,9 +131,6 @@ describe('ledgerExportPackageSchema', () => {
     tags: [],
     monthlyCostItems: [],
     recurringRules: [],
-    importProfiles: [],
-    profileBindings: [],
-    importDecisions: [],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
   };
 
@@ -234,9 +231,6 @@ describe('勘定科目の存在期間（schema/import）', () => {
     tags: [],
     monthlyCostItems: [],
     recurringRules: [],
-    importProfiles: [],
-    profileBindings: [],
-    importDecisions: [],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     ...overrides,
   });
@@ -549,9 +543,6 @@ describe('entry metadata', () => {
       tags: [],
       monthlyCostItems: [],
       recurringRules: [],
-      importProfiles: [],
-      profileBindings: [],
-      importDecisions: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
     const parsed = ledgerExportPackageSchema.safeParse(pkg);
@@ -619,9 +610,6 @@ describe('残高補正 metadata の package 整合性', () => {
     tags: [],
     monthlyCostItems: [],
     recurringRules: [],
-    importProfiles: [],
-    profileBindings: [],
-    importDecisions: [],
     settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
   });
 
@@ -734,9 +722,6 @@ describe('タグ(tags) の scope・参照検証（package）', () => {
       ],
       monthlyCostItems: [],
       recurringRules: [],
-      importProfiles: [],
-      profileBindings: [],
-      importDecisions: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
       ...over,
     };
@@ -845,9 +830,6 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
       tags: [],
       monthlyCostItems: items,
       recurringRules: [],
-      importProfiles: [],
-      profileBindings: [],
-      importDecisions: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
   }
@@ -1177,9 +1159,6 @@ describe('終了点がない旧アーカイブ形状の受理', () => {
       tags: [],
       monthlyCostItems: [],
       recurringRules: [],
-      importProfiles: [],
-      profileBindings: [],
-      importDecisions: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
   }
@@ -1275,9 +1254,6 @@ describe('accountSchema の movable（「自由に動かせる」フラグ）正
       tags: [],
       monthlyCostItems: [],
       recurringRules: [],
-      importProfiles: [],
-      profileBindings: [],
-      importDecisions: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
     const parsed = ledgerExportPackageSchema.safeParse(pkg);
@@ -1369,9 +1345,6 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
       tags: [],
       monthlyCostItems: [],
       recurringRules: [rule],
-      importProfiles: [],
-      profileBindings: [],
-      importDecisions: [],
       settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
     };
   }

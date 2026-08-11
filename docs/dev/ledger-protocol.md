@@ -21,7 +21,7 @@
 ```jsonc
 {
   "appId": "snishi-code.simple-ledger-v2",
-  "schemaVersion": 7,
+  "schemaVersion": 10,
   "ledgerId": "ledger",
   "exportedAt": "2026-07-29T00:00:00.000Z",
   "deviceId": "<uuid>",
@@ -75,6 +75,9 @@
 | **v4→v5**（2026-07-30・実ユーズレビュー第2弾） | **取り置きの機能ごと全廃**（`reserves` ストア・`ReserveItem`・`metadata.reserveId`・role `reserve-asset`・予定 CF の `source:'reserve'` を撤去。DB_VERSION 6）。**`Account.movable?`（「自由に動かせる」・現預金のみ・`false` だけ保存）を追加**（資金繰りの原資 =「自由に動かせるお金」1 値）。**支出ルールは周期にかかわらず常に台帳経由**（月割りするルールの条件 `everyMonths >= 2` を撤廃・`>= 1`。簿記編集ルールにも継続コスト化を開放し、購入の仕訳の貸方・ルールの源泉/費用の行き先は内部集約・残高調整以外の全 role = `RECURRING_POSTABLE_ROLES`）。過去に起票済みの支出形ルール由来の仕訳も変換で台帳経由へ揃えた。実データの変換 = `_workspace-management/scripts/convert-ledger-v4-to-v5.mjs`（単発・アプリ内 migration なし）。 |
 | **v5→v6**（2026-07-31・定期ルール線分化）      | `RecurringRule.startDate`（存在開始日・必須）と `endDate?`（排他的終了点）を追加。金額変更は全期間遡及または当日分割を明示選択し、ルール削除時も既起票事実を保持する。既存 v5 はアプリ内で読み替えず、リポジトリ外の単発変換で開始日と由来整合を確定してから取り込む。ストア構成は不変のため DB_VERSION 6 を据え置く。 |
 | **v6→v7**（2026-08-10・概念整理）              | **予定キャッシュフロー（`CashflowSchedule`）の全廃**（型・`cashflowSchedules` ストア・export フィールド・予定 CRUD/実績化 API を撤去。「予定」= 未来日付の通常仕訳へ一本化し、資金繰りは導出込み仕訳〔未来仕訳 + ルール投影〕から投影する。DB_VERSION 7）。**`MonthlyCostItem.allocationStartDate?`（費用化の開始日）を追加**（未設定 = 購入日。月割りの起点と配分月数上限の基準）。**差引形ルール（行き先 = 収入カテゴリ）も台帳経由の正規形へ**（`spreadExpenseAccountId` の許容 role に `income-category` を追加・`debitAccountId` = 継続コスト台帳）。`Account.repaymentAccountId` / `repaymentDay` は返済計画シートの既定として保持。実データの変換はリポジトリ外の単発変換（アプリ内 migration なし）。 |
+| **v7→v8**（2026-08-11・CSV 取込）              | **CSV 取込（Import Profile）を追加**。`importProfiles` / `profileBindings` / `importDecisions` の 3 ストア（DB_VERSION 8）と交換 JSON の 3 必須配列、`EntryMetadata` の取込由来（`importSource` ほか）。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| **v8→v9**（2026-08-11）                        | 取込プロファイルのアーカイブ（`ImportProfile.archived`）・上書き保存の廃止・`ProfileBinding.importFromDate`（取込開始日）。ストア構成は不変（DB_VERSION 9 は版対応を 1:1 に保つために上げた）。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **v9→v10**（2026-08-11・CSV 取込の全撤去）     | **CSV 取込一式を撤去**（実ユーズの結論・作者決定 2026-08-11。「ざっくり登録して差額は残高補正で吸収」の使い方に明細単位の CSV 取込は合わない＝使わない死荷重）。v8〜v9 の型・schema・store 参照・UI・交換 JSON の 3 配列・`EntryMetadata` の取込由来を削除（DB_VERSION 10。upgrade は旧 3 ストアを温存 = 黙って削除しない）。設計は git 履歴に残る（将来要望が出たら再導入可能）。                                                                                                                                                                                                                                                                                                                                                              |
 
 ### `MonthlyCostItem`（継続コスト資産）
 
@@ -265,7 +268,7 @@ step 4 で見た `deviceId + revision` は step 5 の保存 transaction でも�
 
 ## migration ポリシー（後方互換をコードで持たない）
 
-- `schemaVersion` を必ず持つ。現行は **`7`**（`SCHEMA_VERSION`・`src/data/constants.ts`）。
+- `schemaVersion` を必ず持つ。現行は **`10`**（`SCHEMA_VERSION`・`src/data/constants.ts`）。
 - **アプリ内に migration チェーンを持たない**（作者決定・単発変換方式）。版を上げたら:
   1. `SCHEMA_VERSION` を +1 する（旧版 JSON / スナップショットは fail-closed に拒否される）。
   2. 実データは書き出した JSON を**単発の変換スクリプト**（`_workspace-management/scripts/`）で
@@ -282,6 +285,9 @@ step 4 で見た `deviceId + revision` は step 5 の保存 transaction でも�
 - 2026-08-10 の概念整理（予定 CF 全廃・`allocationStartDate`・差引形 spread 正規形）は
   `SCHEMA_VERSION=7` / `DB_VERSION=7`。v6 以前の JSON は unsupported-version、v6 以前の DB は
   復旧面へ（in-app 変換なし）。
+- 2026-08-11 の CSV 取込の全撤去（v8〜v9 で足した機能ごと）は `SCHEMA_VERSION=10` /
+  `DB_VERSION=10`。v9 以前の JSON は unsupported-version、v9 以前の DB は復旧面へ
+  （in-app 変換なし。旧 3 ストアは upgrade で温存し、復旧面の「DB 初期化」でのみ消える）。
 
 ## 外部送信ゼロとの関係
 
