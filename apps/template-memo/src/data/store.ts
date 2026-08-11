@@ -39,10 +39,12 @@ import { resolveTemplate } from '../domain/resolveTemplate';
 import { buildDailyReportPreset, buildRoundPreset } from '../domain/presets';
 import type { TemplatePresetBundle } from '../domain/presets';
 import { makeDefaultPatient, normalizePatientArray } from '../domain/normalize';
+// ── 一時: ワークスペース移行専用。移行完了後に import ごと削除する ──
 import {
   prepareWorkspaceImportAppend,
   type WorkspaceImportPayload,
 } from '../domain/importWorkspace';
+// ── 一時ここまで (ワークスペース移行) ──
 import type { AppSettings, AppState, Patient, PlaceDef } from '../domain/types';
 
 // ── エラー文言定数 (正本) ──
@@ -132,6 +134,7 @@ export interface HrStore {
   };
   replaceAll(data: ReplaceAllData): Promise<void>;
   wipeAll(): Promise<void>;
+  /** 一時: ワークスペース移行専用。移行完了後に削除する。 */
   appendImported(data: WorkspaceImportPayload): Promise<void>;
   // ── 保存・通知 ──
   setDataChangeHandler(fn: ((ev: StoreChangeEvent) => void) | null): void;
@@ -706,7 +709,11 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
       rebuildLive();
       emit({ type: 'workspace', workspaceId: activeViewId() });
     },
+    // ── 一時: ワークスペース移行専用。移行完了後に import ごと削除する ──
     async appendImported(data) {
+      // 他の変更系 API と同じ不変条件: 追記の前に現ビューの未保存分を確定させる
+      // (debounce 中の編集が、この後の rebuildLive で捨てられないようにする)。
+      await this.persistActiveOrThrow();
       const prepared = prepareWorkspaceImportAppend(data, {
         places,
         patients: allPatients,
@@ -731,6 +738,7 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
       rebuildLive();
       emit({ type: 'workspace', workspaceId: activeViewId() });
     },
+    // ── 一時ここまで (ワークスペース移行) ──
     setDataChangeHandler(fn) {
       changeHandler = fn;
     },

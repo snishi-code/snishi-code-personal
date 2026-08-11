@@ -1,13 +1,35 @@
 /*
- * hospital-workspace の平文バックアップ → template-memo の単発・片道インポータ。
+ * hospital-workspace のバックアップ → template-memo の単発・片道インポータ。
  *
  * これは同期・互換レイヤではない。移行元の現行 DB schema v7 だけを理解し、
- * template-memo へ追記できる形へ一度だけ変換する。暗号化バックアップは対象外
- * （旧アプリで平文を書き出し直してもらう）。患者ごとの「今回分」
- * (status / sectionTexts / projectedValues / tags) は意味が異なるため意図的に移行しない。
- * 旧「患者ID」(code 概念) はこのアプリに無いので落とす。
+ * template-memo へ追記できる形へ一度だけ変換する。移行元は監査 H-3 で平文書き出しを
+ * 廃止しているため、暗号化封筒 (HOSPITAL_WORKSPACE_BACKUP_ENC v1) をパスフレーズで
+ * 復号してから読む経路を持つ（旧い平文封筒も引き続き受け付ける）。
+ * 患者ごとの「今回分」(status / sectionTexts / projectedValues / tags) は意味が異なるため
+ * 意図的に移行しない。旧「患者ID」(code 概念) はこのアプリに無いので落とす。
+ *
+ * ────────────────────────────────────────────────────────────────
+ * 削除手順マニフェスト（移行が済んだらこの順で丸ごと消せる。作法は medical の
+ * site/migrate-rounds と同じ。DB_VERSION / SCHEMA_VERSION には一切触れていないので、
+ * 削除しても既存データの読み書きには影響しない）
+ *
+ *   1. src/domain/importWorkspace.ts          （このファイル。丸ごと削除）
+ *   2. src/domain/importWorkspace.test.ts     （丸ごと削除）
+ *   3. src/domain/importWorkspaceStore.test.ts（丸ごと削除）
+ *   4. src/ui/settings/WorkspaceImportSection.tsx（丸ごと削除）
+ *   5. src/ui/settings/SettingsView.tsx        （import 1行 + JSX 1行 を削除。
+ *        どちらにも「一時:」マーカーのコメントが添えてあるので一緒に消す。
+ *        冒頭の説明文からも「ワークスペース移行」の記述を落とす）
+ *   6. 残りの参照を 3 ファイルから削除
+ *        - src/i18n/rounds.ts   : settings.workspaceImport ブロック
+ *        - src/ui-contract.ts   : UI.settings の workspaceImport* 5 件
+ *        - src/data/store.ts    : appendImported（先頭の import 行 /
+ *                                  HrStore interface の宣言 / 実装。import と実装は
+ *                                  「一時: ワークスペース移行専用」フェンスで囲ってある）
+ * ────────────────────────────────────────────────────────────────
  */
 
+import { isEncrypted, unpackPayload } from '@snishi/foundation/qr/crypto';
 import { newId } from '../data/constants';
 import { STATUS, type Patient, type PlaceDef } from './types';
 import { makeDefaultPatient } from './normalize';
@@ -29,16 +51,162 @@ const ROUNDS_CONFIG_KEY = 'roundsConfig';
 export const WORKSPACE_IMPORT_JSON_UNREADABLE_MSG = 'ワークスペースバックアップのJSONを読めません';
 const WORKSPACE_IMPORT_MALFORMED_MSG = 'ワークスペースバックアップの形式が不正です';
 export const WORKSPACE_IMPORT_ENCRYPTED_MSG =
-  '暗号化バックアップは移行できません。旧アプリで平文バックアップを書き出し直してください';
+  '暗号化バックアップです。パスフレーズを入力して復号してください';
 const WORKSPACE_IMPORT_WRONG_KIND_MSG =
   'これは hospital-workspace の平文バックアップではありません';
 const WORKSPACE_IMPORT_WRONG_VERSION_MSG = 'ワークスペースバックアップのバージョンが違います';
 const WORKSPACE_IMPORT_WRONG_APP_MSG = 'ワークスペースバックアップのアプリが違います';
 export const WORKSPACE_IMPORT_USER_NOT_FOUND_MSG = '移行するユーザーがバックアップに見つかりません';
+export const WORKSPACE_IMPORT_ID_COLLISION_MSG =
+  '移行データのIDが既存データと衝突しています（移行を中止しました）';
+export const WORKSPACE_IMPORT_PLACE_REF_INVALID_MSG =
+  '移行データのグループ参照が壊れています（移行を中止しました）';
 export const workspaceImportSchemaMismatchMsg = (schemaVersion: unknown) =>
   `ワークスペースバックアップのスキーマが v${typeof schemaVersion === 'number' ? schemaVersion : '?'} です（この移行ツールは v${WORKSPACE_SCHEMA_VERSION} 専用です）`;
 const workspaceImportStoreBrokenMsg = (name: string) =>
   `ワークスペースバックアップの ${name} が壊れています`;
+
+// ============================
+// 暗号化封筒 (HOSPITAL_WORKSPACE_BACKUP_ENC v1) の復号
+//
+// 移植元 = snishi-code-medical/apps/hospital-workspace/src/shared/backupCrypto.ts。
+// 鍵導出 (PBKDF2-SHA256 / 256bit) と base64url デコードをそのまま写し、本文の復号は
+// foundation qr/crypto の unpackPayload (AES-GCM + DEFLATE raw・E2/E1) を使う
+// (両 repo でバイト同一)。書き出し側は持たない = ここは読み取り専用。
+// fail-closed: 封筒は strict 検証し、復号失敗は種類を漏らさず 1 種類の文言へ丸める。
+// ============================
+
+const WORKSPACE_BACKUP_KDF_ALGO = 'PBKDF2-SHA256';
+/** 異常値による DoS を防ぐ復号側の上限 (移植元と同値)。 */
+const WORKSPACE_BACKUP_KDF_ITERATIONS_MAX = 10_000_000;
+/** base64url (RFC 4648 §5)。移植元の書き出しは padding なし。 */
+const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
+
+export const WORKSPACE_IMPORT_NOT_ENCRYPTED_MSG =
+  'これは暗号化ワークスペースバックアップではありません';
+export const WORKSPACE_IMPORT_ENC_PARAMS_INVALID_MSG = 'バックアップの暗号化パラメータが不正です';
+export const WORKSPACE_IMPORT_ENC_BODY_MISSING_MSG = 'バックアップの本文がありません';
+export const WORKSPACE_IMPORT_DECRYPT_FAILED_MSG =
+  'バックアップを復号できません。パスフレーズが違うか、ファイルが壊れています';
+export const WORKSPACE_IMPORT_PASSPHRASE_REQUIRED_MSG = 'パスフレーズを入力してください';
+
+function b64UrlToBytes(str: string): Uint8Array {
+  let s = String(str || '')
+    .replace(/-/g, '+')
+    .replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function deriveKeyBytes(
+  passphrase: string,
+  salt: Uint8Array,
+  iterations: number,
+): Promise<Uint8Array> {
+  const baseKey = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(passphrase),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    // WebCrypto は SharedArrayBuffer 背景の view を受けないためコピーで非共有を保証する。
+    { name: 'PBKDF2', hash: 'SHA-256', salt: new Uint8Array(salt), iterations },
+    baseKey,
+    256,
+  );
+  return new Uint8Array(bits);
+}
+
+interface EncryptedWorkspaceEnvelope {
+  iterations: number;
+  salt: string;
+  data: string;
+}
+
+/** 暗号化封筒の strict 検証 (復号はしない)。 */
+function validateEncryptedEnvelope(parsed: unknown): EncryptedWorkspaceEnvelope {
+  if (!isRecord(parsed)) throw new Error(WORKSPACE_IMPORT_MALFORMED_MSG);
+  if (parsed.kind !== WORKSPACE_BACKUP_ENCRYPTED_KIND) {
+    throw new Error(WORKSPACE_IMPORT_NOT_ENCRYPTED_MSG);
+  }
+  if (parsed.version !== WORKSPACE_BACKUP_VERSION) {
+    throw new Error(WORKSPACE_IMPORT_WRONG_VERSION_MSG);
+  }
+  if (parsed.appId !== WORKSPACE_BACKUP_APP_ID) {
+    throw new Error(WORKSPACE_IMPORT_WRONG_APP_MSG);
+  }
+  const kdf = parsed.kdf;
+  if (
+    !isRecord(kdf) ||
+    kdf.algo !== WORKSPACE_BACKUP_KDF_ALGO ||
+    typeof kdf.iterations !== 'number' ||
+    !Number.isInteger(kdf.iterations) ||
+    kdf.iterations <= 0 ||
+    kdf.iterations > WORKSPACE_BACKUP_KDF_ITERATIONS_MAX ||
+    typeof kdf.salt !== 'string' ||
+    !BASE64URL_RE.test(kdf.salt)
+  ) {
+    throw new Error(WORKSPACE_IMPORT_ENC_PARAMS_INVALID_MSG);
+  }
+  if (typeof parsed.data !== 'string' || !parsed.data) {
+    throw new Error(WORKSPACE_IMPORT_ENC_BODY_MISSING_MSG);
+  }
+  // unpackPayload は prefix の無い文字列を「平文」として素通しする。暗号文であることを
+  // ここで要求しないと、data を平文に差し替えた封筒がパスフレーズ無しで通ってしまう。
+  if (!isEncrypted(parsed.data)) {
+    throw new Error(WORKSPACE_IMPORT_ENC_PARAMS_INVALID_MSG);
+  }
+  return { iterations: kdf.iterations, salt: kdf.salt, data: parsed.data };
+}
+
+/**
+ * 読み込んだファイルの種別判定。暗号化封筒なら 'encrypted'、それ以外 (旧平文封筒を含む)
+ * は 'plain' を返し、中身の検証は既存の同期経路へ委ねる。JSON として読めなければ throw。
+ */
+export function detectWorkspaceBackupFile(json: string): 'encrypted' | 'plain' {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new Error(WORKSPACE_IMPORT_JSON_UNREADABLE_MSG);
+  }
+  return isRecord(parsed) && parsed.kind === WORKSPACE_BACKUP_ENCRYPTED_KIND
+    ? 'encrypted'
+    : 'plain';
+}
+
+/**
+ * 暗号化封筒をパスフレーズで復号し、中身の平文封筒 JSON 文字列を返す。
+ * 返り値はそのまま listImportCandidates / convertWorkspaceBackup へ渡せる
+ * (中身の検証はそちらの責務 = 二重に持たない)。
+ * パスフレーズ不一致・改ざん・鍵導出不能はすべて同じ 1 文言へ丸める (oracle を作らない)。
+ */
+export async function decryptWorkspaceBackupJson(
+  json: string,
+  passphrase: string,
+): Promise<string> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new Error(WORKSPACE_IMPORT_JSON_UNREADABLE_MSG);
+  }
+  const env = validateEncryptedEnvelope(parsed);
+  if (typeof passphrase !== 'string' || passphrase === '') {
+    throw new Error(WORKSPACE_IMPORT_PASSPHRASE_REQUIRED_MSG);
+  }
+  try {
+    const keyBytes = await deriveKeyBytes(passphrase, b64UrlToBytes(env.salt), env.iterations);
+    return await unpackPayload(env.data, { keyBytes });
+  } catch {
+    throw new Error(WORKSPACE_IMPORT_DECRYPT_FAILED_MSG);
+  }
+}
 
 export interface WorkspaceImportCandidate {
   id: string;
@@ -56,6 +224,11 @@ type WorkspaceImportNote = 'closingPresetSkipped';
 export interface WorkspaceImportData extends WorkspaceImportPayload {
   /** 移行しなかった設定など、確認画面に出せる非患者データの注記。 */
   notes: WorkspaceImportNote[];
+  /**
+   * 継続メモは per-user なので、選択しなかったユーザーのぶんは落ちる。
+   * 黙って捨てないよう、落ちる継続メモ (trim 非空) の件数を確認画面へ渡す。
+   */
+  otherUserStandingMemoCount: number;
 }
 
 interface WorkspaceBackup {
@@ -203,7 +376,7 @@ function convertPatients(
   userId: string,
   placeIdByOldId: ReadonlyMap<string, string>,
   nowMs: number,
-): Patient[] {
+): { patients: Patient[]; sourcePatientIds: Set<string> } {
   const states = selectedStates(backup, userId);
   const patients: Patient[] = [];
   const seenPatientIds = new Set<string>();
@@ -245,7 +418,28 @@ function convertPatients(
       updatedAt,
     });
   }
-  return patients;
+  return { patients, sourcePatientIds: seenPatientIds };
+}
+
+/**
+ * 選択ユーザー以外が持つ「継続メモ」の件数。移行対象になった患者 (sourcePatientIds) に
+ * 紐づく row だけを数え、同一 (userId, patientId) は 1 件に畳む。
+ */
+function countOtherUserStandingMemos(
+  backup: WorkspaceBackup,
+  userId: string,
+  sourcePatientIds: ReadonlySet<string>,
+): number {
+  const seenKeys = new Set<string>();
+  for (const raw of backup.stores[STORE_ROUNDS_USER_STATES] ?? []) {
+    if (!isRecord(raw)) continue;
+    if (typeof raw.userId !== 'string' || raw.userId === '' || raw.userId === userId) continue;
+    if (typeof raw.patientId !== 'string' || !sourcePatientIds.has(raw.patientId)) continue;
+    if (typeof raw.key !== 'string' || raw.key !== `${raw.userId}::${raw.patientId}`) continue;
+    if (typeof raw.standingMemo !== 'string' || raw.standingMemo.trim() === '') continue;
+    seenKeys.add(raw.key);
+  }
+  return seenKeys.size;
 }
 
 function importNotes(backup: WorkspaceBackup): WorkspaceImportNote[] {
@@ -273,10 +467,12 @@ export function convertWorkspaceBackup(
   }
   const nowMs = finiteNumber(options.nowMs) ?? Date.now();
   const { places, placeIdByOldId } = convertPlaces(backup);
+  const { patients, sourcePatientIds } = convertPatients(backup, userId, placeIdByOldId, nowMs);
   return {
     places,
-    patients: convertPatients(backup, userId, placeIdByOldId, nowMs),
+    patients,
     notes: importNotes(backup),
+    otherUserStandingMemoCount: countOtherUserStandingMemos(backup, userId, sourcePatientIds),
   };
 }
 
@@ -297,14 +493,14 @@ export function prepareWorkspaceImportAppend(
       ([ids, existing]) => new Set(ids).size !== ids.length || ids.some((id) => existing.has(id)),
     )
   ) {
-    throw new Error('import id collision');
+    throw new Error(WORKSPACE_IMPORT_ID_COLLISION_MSG);
   }
 
   const importedPlaceIds = new Set(incoming.places.map((place) => place.placeId));
   if (
     incoming.patients.some((patient) => patient.placeId && !importedPlaceIds.has(patient.placeId))
   ) {
-    throw new Error('import place reference is invalid');
+    throw new Error(WORKSPACE_IMPORT_PLACE_REF_INVALID_MSG);
   }
 
   return {

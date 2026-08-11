@@ -118,6 +118,12 @@ export const UI = {
     wardRename: 'settings.wards.rename',
     wardDelete: 'settings.wards.delete',
     wardAdd: 'settings.wards.add',
+    // 一時: 旧 hospital-workspace からの単発移行 (移行完了後に削除する)。
+    workspaceImportSection: 'settings.workspaceImport.section',
+    workspaceImportPick: 'settings.workspaceImport.pick',
+    workspaceImportDialog: 'settings.workspaceImport.dialog',
+    workspaceImportUser: 'settings.workspaceImport.user',
+    workspaceImportApply: 'settings.workspaceImport.apply',
   },
   picker: {
     wsDialog: 'picker.ws.dialog',

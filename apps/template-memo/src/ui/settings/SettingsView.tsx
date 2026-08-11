@@ -4,6 +4,9 @@
 //   場所の管理 / バックアップ (JSON 書出・復元) / ワークスペース移行 / 巻き戻し / 全削除 /
 //   操作ガイド (準備中プレースホルダ)
 //
+// ワークスペース移行は一時機能。実体は ./WorkspaceImportSection.tsx にあり、ここには
+// import 1 行 + JSX 1 行しか残さない (削除手順は domain/importWorkspace.ts 冒頭)。
+//
 // 剥離: ユーザー管理 / 共有タグ / 研究ログ / AI (回診設定 slot) / 同期。
 // 移設: テンプレQR送受信・JSONバックアップ/復元・ワークスペース移行・全削除 (旧 v1 SettingsView から)。
 
@@ -12,19 +15,12 @@ import { Button } from '@snishi/foundation/ui/Button';
 import { IconButton } from '@snishi/foundation/ui/IconButton';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { ConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
-import { Modal } from '@snishi/foundation/ui/Modal';
 import { useToast } from '@snishi/foundation/ui/toast';
 import type { RestorePoint } from '@snishi/foundation/snapshot/snapshots';
 import { fmtTimestamp } from '@snishi/foundation/format/timestamp';
 import { TAG_COLORS, type TagColor } from '../../domain/types';
 import { normalizePatientArray } from '../../domain/normalize';
 import { buildBackupJson, parseBackupJson } from '../../domain/backup';
-import {
-  convertWorkspaceBackup,
-  listImportCandidates,
-  type WorkspaceImportCandidate,
-  type WorkspaceImportData,
-} from '../../domain/importWorkspace';
 import type { Format, Frame, TemplateDef } from '../../domain/entities';
 import {
   buildTemplatePackage,
@@ -41,7 +37,7 @@ import { useRevision, type AppRuntime } from '../appRuntime';
 import { AddTagWidget } from '../TagPicker';
 import { BottomActionBar } from '../BottomActionBar';
 import { deleteTagAt, renameTagAt, setTagColor } from '../tags';
-import { OverlayBinding, useRegisterOverlay } from '../registries';
+import { OverlayBinding } from '../registries';
 import { downloadTextFile, pickTextFile } from '../files';
 import { ShareQrSendDialog } from '../ShareQrSendDialog';
 import { ShareQrReceiveDialog } from '../ShareQrReceiveDialog';
@@ -49,6 +45,8 @@ import { TemplateEditView } from '../TemplateEditView';
 import { FrameEditView } from '../FrameEditView';
 import { FormatEditView } from '../FormatEditView';
 import { TemplateBuilderPreview, TemplateBuilderSection } from '../TemplateBuilder';
+// 一時: 旧 hospital-workspace からの単発移行 (この import と JSX の <WorkspaceImportSection /> を消せば終わり)。
+import { WorkspaceImportSection } from './WorkspaceImportSection';
 import type { ParsedBuilderDraft } from '../builderDraft';
 import { errorText, s } from '../../i18n';
 import { UI } from '../../ui-contract';
@@ -1010,134 +1008,6 @@ function DataSection({ runtime }: { runtime: AppRuntime }) {
           danger
           onCancel={() => setWipeConfirm(false)}
           onConfirm={() => void runWipe()}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-// ============================
-// 旧 hospital-workspace からの単発移行 (追記のみ・置換しない)。
-// ============================
-
-function WorkspaceImportDialog({
-  json,
-  candidates,
-  runtime,
-  onClose,
-}: {
-  json: string;
-  candidates: WorkspaceImportCandidate[];
-  runtime: AppRuntime;
-  onClose: () => void;
-}) {
-  useRegisterOverlay(onClose);
-  const toast = useToast();
-  const { store } = runtime;
-  const [userId, setUserId] = useState(candidates[0]?.id ?? '');
-  const [busy, setBusy] = useState(false);
-
-  let data: WorkspaceImportData | null = null;
-  let convertError: string | null = null;
-  try {
-    data = userId ? convertWorkspaceBackup(json, userId) : null;
-  } catch (e) {
-    convertError = errorText(e);
-  }
-
-  async function apply(): Promise<void> {
-    if (!data || busy) return;
-    setBusy(true);
-    try {
-      const counts = { subjects: data.patients.length, groups: data.places.length };
-      await store.appendImported(data);
-      runtime.bump();
-      toast.show(s.settings.workspaceImport.imported(counts.subjects, counts.groups));
-      onClose();
-    } catch (e) {
-      console.error('workspace import failed:', e);
-      toast.show(s.settings.workspaceImport.failed(errorText(e)), 'error');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal
-      title={s.settings.workspaceImport.previewTitle}
-      onClose={onClose}
-      variant="dialog"
-      closeLabel={s.common.close}
-    >
-      <div className="settingsField">
-        <span className="section-label">{s.settings.workspaceImport.user}</span>
-        <select
-          className="input"
-          value={userId}
-          aria-label={s.settings.workspaceImport.user}
-          onChange={(e) => setUserId(e.target.value)}
-        >
-          {candidates.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      </div>
-      {convertError ? <p className="dangerText">{convertError}</p> : null}
-      {data ? (
-        <>
-          <p>{s.settings.workspaceImport.counts(data.patients.length, data.places.length)}</p>
-          <p className="muted">{s.settings.workspaceImport.appendOnly}</p>
-          {data.notes.includes('closingPresetSkipped') ? (
-            <p className="muted">{s.settings.workspaceImport.noteClosingPreset}</p>
-          ) : null}
-          <div className="settingsRowActions">
-            <Button variant="primary" disabled={busy} onClick={() => void apply()}>
-              {s.settings.workspaceImport.apply}
-            </Button>
-          </div>
-        </>
-      ) : null}
-    </Modal>
-  );
-}
-
-function WorkspaceImportSection({ runtime }: { runtime: AppRuntime }) {
-  const toast = useToast();
-  const [dialog, setDialog] = useState<{
-    json: string;
-    candidates: WorkspaceImportCandidate[];
-  } | null>(null);
-
-  async function pick(): Promise<void> {
-    try {
-      const picked = await pickTextFile('.json,application/json');
-      if (!picked) return;
-      const candidates = listImportCandidates(picked.text);
-      if (candidates.length === 0) {
-        toast.show(s.settings.workspaceImport.noUsers, 'error');
-        return;
-      }
-      setDialog({ json: picked.text, candidates });
-    } catch (e) {
-      console.error('workspace import pick failed:', e);
-      toast.show(s.settings.workspaceImport.failed(errorText(e)), 'error');
-    }
-  }
-
-  return (
-    <div className="card card--pad settingsSection">
-      <div className="section-label">{s.settings.workspaceImport.section}</div>
-      <div className="settingsRowActions">
-        <Button onClick={() => void pick()}>{s.settings.workspaceImport.pick}</Button>
-      </div>
-      {dialog ? (
-        <WorkspaceImportDialog
-          json={dialog.json}
-          candidates={dialog.candidates}
-          runtime={runtime}
-          onClose={() => setDialog(null)}
         />
       ) : null}
     </div>
