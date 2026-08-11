@@ -1,14 +1,11 @@
 // 設定画面 (コピー元: hospital-workspace/rounds/ui/settings/SettingsView.tsx)。
 //   タグ管理 / テンプレート (有効切替・編集・プリセット/空テンプレ追加・パッケージQR送受信・削除) /
 //   フレーム (一覧・編集・複製・QR送信・削除) / フォーマット (同) / QR出力 (改行) /
-//   場所の管理 / バックアップ (JSON 書出・復元) / ワークスペース移行 / 巻き戻し / 全削除 /
+//   場所の管理 / バックアップ (JSON 書出・復元) / 巻き戻し / 全削除 /
 //   操作ガイド (準備中プレースホルダ)
 //
-// ワークスペース移行は一時機能。実体は ./WorkspaceImportSection.tsx にあり、ここには
-// import 1 行 + JSX 1 行しか残さない (削除手順は domain/importWorkspace.ts 冒頭)。
-//
 // 剥離: ユーザー管理 / 共有タグ / 研究ログ / AI (回診設定 slot) / 同期。
-// 移設: テンプレQR送受信・JSONバックアップ/復元・ワークスペース移行・全削除 (旧 v1 SettingsView から)。
+// 移設: テンプレQR送受信・JSONバックアップ/復元・全削除 (旧 v1 SettingsView から)。
 
 import { useEffect, useState } from 'react';
 import { Button } from '@snishi/foundation/ui/Button';
@@ -45,8 +42,6 @@ import { TemplateEditView } from '../TemplateEditView';
 import { FrameEditView } from '../FrameEditView';
 import { FormatEditView } from '../FormatEditView';
 import { TemplateBuilderPreview, TemplateBuilderSection } from '../TemplateBuilder';
-// 一時: 旧 hospital-workspace からの単発移行 (この import と JSX の <WorkspaceImportSection /> を消せば終わり)。
-import { WorkspaceImportSection } from './WorkspaceImportSection';
 import type { ParsedBuilderDraft } from '../builderDraft';
 import { errorText, s } from '../../i18n';
 import { UI } from '../../ui-contract';
@@ -1219,7 +1214,6 @@ export function SettingsView({
       <QrOutputSection runtime={runtime} />
       <PlaceSection runtime={runtime} />
       <DataSection runtime={runtime} />
-      <WorkspaceImportSection runtime={runtime} />
       <RestoreSection runtime={runtime} />
       <div className="card card--pad settingsSection">
         <div className="section-label">{s.settings.guide.section}</div>

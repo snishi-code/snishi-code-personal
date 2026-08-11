@@ -556,30 +556,6 @@ export const s = {
       imported: '復元しました',
       importFailed: (reason: string) => `復元できませんでした: ${reason}`,
     },
-    // 設定: 旧 hospital-workspace からの単発移行 (追記のみ)
-    workspaceImport: {
-      section: 'ワークスペースから移行（旧アプリ）',
-      pick: 'バックアップJSONを選ぶ',
-      passphraseTitle: '暗号化バックアップを復号',
-      passphraseHint:
-        '旧アプリでバックアップを書き出したときのパスフレーズを入力してください。パスフレーズは保存しません。',
-      passphrase: 'パスフレーズ',
-      decrypt: '復号する',
-      previewTitle: '旧ワークスペースからの移行',
-      user: '移行するユーザー',
-      counts: (subjects: number, groups: number) => `対象 ${subjects} 件 / グループ ${groups} 件`,
-      appendOnly:
-        '現在のデータは残したまま、上記のデータを追加します。入力フォームの内容・状態・タグは移行しません。',
-      apply: '既存データへ追加',
-      imported: (subjects: number, groups: number) =>
-        `対象 ${subjects} 件・グループ ${groups} 件を追加しました`,
-      failed: (reason: string) => `移行できませんでした: ${reason}`,
-      noUsers: '移行できるユーザーが見つかりません',
-      noteClosingPreset:
-        '旧アプリの締め文は移行していません（テンプレートの正常文へ一般化されたため）。',
-      noteOtherUserMemos: (count: number) =>
-        `他のユーザーが持つ継続メモ ${count} 件は移行しません（そのユーザーを選ぶと、そちらが移行されます）。`,
-    },
     // 設定: 危険な操作 (全削除)
     danger: {
       section: '危険な操作',
