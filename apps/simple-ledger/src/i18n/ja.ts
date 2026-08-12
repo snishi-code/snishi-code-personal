@@ -730,6 +730,7 @@ export const ja = {
     '行き先が費用または収入（給与から差し引く形）なら自動で継続コストとして月割りし、資産・負債なら直接記帳します。',
   'recurring.everyMonthDay': '毎月{day}日',
   'recurring.everyNMonthsDay': '{n}か月ごと {day}日',
+  'recurring.firstPosting': '初回の起票',
   'recurring.end': '終了',
   'recurring.restart': '同じ設定で新しく始める',
   'recurring.deleteConfirmTitle': '定期ルールを削除',

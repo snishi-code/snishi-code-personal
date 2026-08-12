@@ -11,6 +11,7 @@ import { useDirtyGuard } from '../overlays';
 import { TextArea, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { AccountPicker } from '../AccountPicker';
+import { FlowField } from '../FlowField';
 import { TagPicker } from '../TagPicker';
 import { LiabilitySheet } from '../LiabilitySheet';
 import { groupedAccountsByRole, groupedMonthlyAllocationAccounts } from '../accountOptions';
@@ -484,24 +485,20 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         />
       );
       return (
-        <div className="field" data-ui={UI.journal.entry.flow}>
-          <span className="field__hint">{t(flowDef.flowLabelKey)}</span>
-          <div className="flow">
-            <div className="flow__side">
-              {fixed.side === 'credit'
-                ? readOnlyAccount('entry.transfer.from', fixed.accountId)
-                : counterpartPicker}
-            </div>
-            <div className="flow__arrow" aria-hidden="true">
-              →
-            </div>
-            <div className="flow__side">
-              {fixed.side === 'debit'
-                ? readOnlyAccount('entry.transfer.to', fixed.accountId)
-                : counterpartPicker}
-            </div>
-          </div>
-        </div>
+        <FlowField
+          hint={t(flowDef.flowLabelKey)}
+          dataUi={UI.journal.entry.flow}
+          source={
+            fixed.side === 'credit'
+              ? readOnlyAccount('entry.transfer.from', fixed.accountId)
+              : counterpartPicker
+          }
+          destination={
+            fixed.side === 'debit'
+              ? readOnlyAccount('entry.transfer.to', fixed.accountId)
+              : counterpartPicker
+          }
+        />
       );
     }
     const srcGroups = groupedAccountsByRole(
@@ -523,103 +520,95 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       form.date,
     );
     return (
-      <div className="field" data-ui={UI.journal.entry.flow}>
-        <span className="field__hint">{t(flowDef.flowLabelKey)}</span>
-        <div className="flow">
-          <div className="flow__side">
-            {canArrangeLoan && loanMode ? (
-              <>
-                <AccountPicker
-                  flat
-                  label={t('entry.loanArrangePick')}
-                  required
-                  value={form.creditAccountId}
-                  groups={loanGroups}
-                  onChange={(id) => setSide('credit', id)}
-                  emptyText={t('entry.loanArrangeEmpty')}
-                  error={errorText(errors, 'credit-required') ?? sameAccount}
-                  dataUi={UI.journal.entry.flowSource}
-                />
+      <FlowField
+        hint={t(flowDef.flowLabelKey)}
+        dataUi={UI.journal.entry.flow}
+        source={
+          canArrangeLoan && loanMode ? (
+            <>
+              <AccountPicker
+                flat
+                label={t('entry.loanArrangePick')}
+                required
+                value={form.creditAccountId}
+                groups={loanGroups}
+                onChange={(id) => setSide('credit', id)}
+                emptyText={t('entry.loanArrangeEmpty')}
+                error={errorText(errors, 'credit-required') ?? sameAccount}
+                dataUi={UI.journal.entry.flowSource}
+              />
+              <button
+                type="button"
+                className="collapse-toggle"
+                onClick={() => setLiabilitySheetOpen(true)}
+                data-ui={UI.journal.entry.liabilityCreate}
+              >
+                <Icon name="add" size={16} />
+                {t('entry.loanArrangeCreate')}
+              </button>
+              <button type="button" className="collapse-toggle" onClick={() => setLoanMode(false)}>
+                {t('entry.loanArrangeBack')}
+              </button>
+            </>
+          ) : (
+            <>
+              <AccountPicker
+                flat
+                label={t(flowDef.source.labelKey)}
+                required
+                value={form.creditAccountId}
+                groups={srcGroups}
+                onChange={(id) => setSide('credit', id)}
+                error={errorText(errors, 'credit-required') ?? sameAccount}
+                dataUi={UI.journal.entry.flowSource}
+              />
+              {canArrangeLoan ? (
                 <button
                   type="button"
                   className="collapse-toggle"
-                  onClick={() => setLiabilitySheetOpen(true)}
-                  data-ui={UI.journal.entry.liabilityCreate}
+                  onClick={() => setLoanMode(true)}
+                  data-ui={UI.journal.entry.loanArrange}
                 >
                   <Icon name="add" size={16} />
-                  {t('entry.loanArrangeCreate')}
+                  {t('entry.loanArrange')}
                 </button>
+              ) : null}
+            </>
+          )
+        }
+        destination={
+          canCreateContinuousCost && ccMode ? (
+            ccNameField
+          ) : lockedDebit ? (
+            // 購入の仕訳の借方 = 継続コスト台帳（固定）。日付・金額・貸方だけ編集できる。
+            readOnlyAccount(flowDef.destination.labelKey, form.debitAccountId)
+          ) : (
+            <>
+              <AccountPicker
+                flat
+                label={t(flowDef.destination.labelKey)}
+                required
+                value={form.debitAccountId}
+                groups={dstGroups}
+                onChange={(id) => setSide('debit', id)}
+                error={errorText(errors, 'debit-required')}
+                dataUi={UI.journal.entry.flowDestination}
+              />
+              {canCreateContinuousCost ? (
                 <button
                   type="button"
                   className="collapse-toggle"
-                  onClick={() => setLoanMode(false)}
+                  onClick={enableCcMode}
+                  data-ui={UI.journal.entry.ccToggle}
                 >
-                  {t('entry.loanArrangeBack')}
+                  <Icon name="add" size={16} />
+                  {t('entry.ccToggle')}
                 </button>
-              </>
-            ) : (
-              <>
-                <AccountPicker
-                  flat
-                  label={t(flowDef.source.labelKey)}
-                  required
-                  value={form.creditAccountId}
-                  groups={srcGroups}
-                  onChange={(id) => setSide('credit', id)}
-                  error={errorText(errors, 'credit-required') ?? sameAccount}
-                  dataUi={UI.journal.entry.flowSource}
-                />
-                {canArrangeLoan ? (
-                  <button
-                    type="button"
-                    className="collapse-toggle"
-                    onClick={() => setLoanMode(true)}
-                    data-ui={UI.journal.entry.loanArrange}
-                  >
-                    <Icon name="add" size={16} />
-                    {t('entry.loanArrange')}
-                  </button>
-                ) : null}
-              </>
-            )}
-          </div>
-          <div className="flow__arrow" aria-hidden="true">
-            →
-          </div>
-          <div className="flow__side">
-            {canCreateContinuousCost && ccMode ? (
-              ccNameField
-            ) : lockedDebit ? (
-              // 購入の仕訳の借方 = 継続コスト台帳（固定）。日付・金額・貸方だけ編集できる。
-              readOnlyAccount(flowDef.destination.labelKey, form.debitAccountId)
-            ) : (
-              <>
-                <AccountPicker
-                  flat
-                  label={t(flowDef.destination.labelKey)}
-                  required
-                  value={form.debitAccountId}
-                  groups={dstGroups}
-                  onChange={(id) => setSide('debit', id)}
-                  error={errorText(errors, 'debit-required')}
-                  dataUi={UI.journal.entry.flowDestination}
-                />
-                {canCreateContinuousCost ? (
-                  <button
-                    type="button"
-                    className="collapse-toggle"
-                    onClick={enableCcMode}
-                    data-ui={UI.journal.entry.ccToggle}
-                  >
-                    <Icon name="add" size={16} />
-                    {t('entry.ccToggle')}
-                  </button>
-                ) : null}
-              </>
-            )}
-          </div>
-        </div>
-      </div>
+              ) : null}
+            </>
+          )
+        }
+      />
     );
   };
 
@@ -640,45 +629,41 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       form.date,
     );
     return (
-      <div className="field" data-ui={UI.journal.entry.flow}>
-        <span className="field__hint">{t('entry.flow.manual')}</span>
-        <div className="flow">
-          <div className="flow__side">
+      <FlowField
+        hint={t('entry.flow.manual')}
+        dataUi={UI.journal.entry.flow}
+        source={
+          <AccountPicker
+            flat
+            label={t('entry.source.manual')}
+            required
+            value={form.creditAccountId}
+            groups={srcGroups}
+            onChange={(id) => setSide('credit', id)}
+            error={errorText(errors, 'credit-required') ?? sameAccount}
+            dataUi={UI.journal.entry.flowSource}
+          />
+        }
+        destination={
+          continuousCostActive ? (
+            // 継続コスト化中の借方 = 継続コスト資産の名前（実際の借方は台帳に固定される）。
+            ccNameField
+          ) : lockedDebit ? (
+            readOnlyAccount('entry.destination.manual', form.debitAccountId)
+          ) : (
             <AccountPicker
               flat
-              label={t('entry.source.manual')}
+              label={t('entry.destination.manual')}
               required
-              value={form.creditAccountId}
-              groups={srcGroups}
-              onChange={(id) => setSide('credit', id)}
-              error={errorText(errors, 'credit-required') ?? sameAccount}
-              dataUi={UI.journal.entry.flowSource}
+              value={form.debitAccountId}
+              groups={dstGroups}
+              onChange={(id) => setSide('debit', id)}
+              error={errorText(errors, 'debit-required')}
+              dataUi={UI.journal.entry.flowDestination}
             />
-          </div>
-          <div className="flow__arrow" aria-hidden="true">
-            →
-          </div>
-          <div className="flow__side">
-            {continuousCostActive ? (
-              // 継続コスト化中の借方 = 継続コスト資産の名前（実際の借方は台帳に固定される）。
-              ccNameField
-            ) : lockedDebit ? (
-              readOnlyAccount('entry.destination.manual', form.debitAccountId)
-            ) : (
-              <AccountPicker
-                flat
-                label={t('entry.destination.manual')}
-                required
-                value={form.debitAccountId}
-                groups={dstGroups}
-                onChange={(id) => setSide('debit', id)}
-                error={errorText(errors, 'debit-required')}
-                dataUi={UI.journal.entry.flowDestination}
-              />
-            )}
-          </div>
-        </div>
-      </div>
+          )
+        }
+      />
     );
   };
 

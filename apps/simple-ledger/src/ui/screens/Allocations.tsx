@@ -10,6 +10,7 @@ import { Modal } from '../overlays';
 import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { AccountPicker } from '../AccountPicker';
+import { FlowField } from '../FlowField';
 import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import {
@@ -38,6 +39,7 @@ import {
   CATCH_UP_HARD_CAP_MONTHS,
   RECURRING_POSTABLE_ROLES,
   clampDayToMonth,
+  firstRecurringPostingDate,
   isRecurringSpreadDestinationRole,
   recurringDestinationAccountId,
   recurringExpenseAccountId,
@@ -590,6 +592,22 @@ function sheetKindForRule(
 }
 
 /**
+ * 基準日入力から保存する dayOfMonth を決める（submit から移動・挙動は不変）。
+ * 日付欄は「元の dayOfMonth をその月へクランプした結果」を表示している。表示どおりのまま
+ * なら日を触っていない＝元の値を保つ（2 月のルールを開いて保存しただけで 31 → 28 に
+ * 落ち、以後の起票日がずれるのを防ぐ）。日を変えたときだけ入力値を採用する。
+ * 新規（existing なし）は入力値そのもの。保存とプレビューが同じ経路でこれを使う。
+ */
+function resolveRuleDayOfMonth(firstPostingDate: string, existing?: RecurringRule): number {
+  const day = Number.parseInt(firstPostingDate.slice(8, 10), 10);
+  return existing !== undefined &&
+    clampDayToMonth(monthOf(firstPostingDate), existing.dayOfMonth).slice(8, 10) ===
+      firstPostingDate.slice(8, 10)
+    ? existing.dayOfMonth
+    : day;
+}
+
+/**
  * 定期ルールの追加・編集シート。周期（everyMonths）付き。
  * 独自の種別 UI は持たず、簿記編集と同じく貸方・借方を直接指定する。
  * 行き先が費用・収入（差引形）科目なら保存境界が自動で継続コスト台帳経由へ正規化する。
@@ -667,6 +685,28 @@ function RecurringRuleSheet({
     (pendingAmountChange.rule.endDate === undefined ||
       pendingAmountChange.effectiveDate < pendingAmountChange.rule.endDate);
 
+  // 起票プレビュー: いまのフォーム値で最初に起票される実際の日付（保存はしない・読み取り専用）。
+  // 周期 >= 2 では基準日の年月が位相を決める（recurringPostingsDue が startMonth 基点で刻む）
+  // ため、周期テンプレ文言ではなく日付そのものを出す＝基準日を変えると位相が動くことが画面に
+  // 出る。保存値と同じ resolveRuleDayOfMonth / firstRecurringPostingDate を通す。
+  // どれかの入力が不正な間は行ごと出さない（fail-closed）。
+  const previewEvery = everyText === '' ? Number.NaN : Number.parseInt(everyText, 10);
+  const firstPosting =
+    Number.isInteger(previewEvery) &&
+    previewEvery >= 1 &&
+    previewEvery <= CATCH_UP_HARD_CAP_MONTHS &&
+    isValidIsoDate(firstPostingDate) &&
+    isValidIsoDate(startDate) &&
+    (endDate === '' || isValidIsoDate(endDate))
+      ? firstRecurringPostingDate({
+          startMonth: monthOf(firstPostingDate),
+          dayOfMonth: resolveRuleDayOfMonth(firstPostingDate, existing),
+          everyMonths: previewEvery,
+          startDate,
+          ...(endDate !== '' ? { endDate } : {}),
+        })
+      : null;
+
   async function persistExisting(
     rule: RecurringRule,
     options?: {
@@ -722,15 +762,8 @@ function RecurringRuleSheet({
       return;
     }
     const startMonth = monthOf(firstPostingDate);
-    // 日付欄は「元の dayOfMonth をその月へクランプした結果」を表示している。表示どおりのまま
-    // なら日を触っていない＝元の値を保つ（2 月のルールを開いて保存しただけで 31 → 28 に
-    // 落ち、以後の起票日がずれるのを防ぐ）。日を変えたときだけ入力値を採用する。
-    const dayOfMonth =
-      existing !== undefined &&
-      clampDayToMonth(startMonth, existing.dayOfMonth).slice(8, 10) ===
-        firstPostingDate.slice(8, 10)
-        ? existing.dayOfMonth
-        : day;
+    // 31日ルールの往復規則（resolveRuleDayOfMonth）。保存とプレビューで同じ関数を通す。
+    const dayOfMonth = resolveRuleDayOfMonth(firstPostingDate, existing);
     setError(undefined);
     try {
       if (existing) {
@@ -764,7 +797,7 @@ function RecurringRuleSheet({
         await createRecurringRule({
           name: name.trim(),
           amount,
-          dayOfMonth: day,
+          dayOfMonth,
           everyMonths,
           debitAccountId,
           creditAccountId,
@@ -822,7 +855,15 @@ function RecurringRuleSheet({
               {error}
             </div>
           ) : null}
-          <p className="field__hint">{t('recurring.manualHint')}</p>
+          <TextInput
+            label={t('recurring.firstPostingDate')}
+            type="date"
+            required
+            value={firstPostingDate}
+            onChange={setFirstPostingDate}
+            hint={t('recurring.firstPostingDateHint')}
+            dataUi={UI.allocations.recurringFirstPostingDate}
+          />
           <TextInput
             label={t('recurring.name')}
             required
@@ -830,32 +871,6 @@ function RecurringRuleSheet({
             onChange={setName}
             hint={t('recurring.nameHint')}
             dataUi={UI.allocations.recurringName}
-          />
-          <AccountPicker
-            label={t('recurring.from.manual')}
-            required
-            value={creditAccountId}
-            onChange={(id) => {
-              setCreditAccountId(id);
-              if (id === debitAccountId) setDebitAccountId('');
-            }}
-            groups={fromGroups}
-            dataUi={UI.allocations.recurringFrom}
-          />
-          <AccountPicker
-            label={
-              // 費用・収入（差引形）行きは台帳経由の月割りになるため「計上先」と表示する。
-              isRecurringSpreadDestinationRole(
-                accounts.find((account) => account.id === debitAccountId)?.role,
-              )
-                ? t('monthlyCost.expenseCategory')
-                : t('recurring.to.manual')
-            }
-            required
-            value={debitAccountId}
-            onChange={setDebitAccountId}
-            groups={toGroups}
-            dataUi={UI.allocations.recurringTo}
           />
           <TextInput
             label={t('recurring.amount')}
@@ -866,6 +881,45 @@ function RecurringRuleSheet({
             hint={t('recurring.amountHint')}
             dataUi={UI.allocations.recurringAmount}
           />
+          {/* ホームの簿記編集と同じ「貸方 → 借方」の外枠 + flat チップ（作者決定 2026-08-12:
+              グループ見出し・色分けは不要・ホームへ揃える）。候補構築は定期ルールの許可 role
+              （RECURRING_POSTABLE_ROLES）のまま変えない。 */}
+          <FlowField
+            dataUi={UI.allocations.recurringFlow}
+            source={
+              <AccountPicker
+                flat
+                label={t('recurring.from.manual')}
+                required
+                value={creditAccountId}
+                onChange={(id) => {
+                  setCreditAccountId(id);
+                  if (id === debitAccountId) setDebitAccountId('');
+                }}
+                groups={fromGroups}
+                dataUi={UI.allocations.recurringFrom}
+              />
+            }
+            destination={
+              <AccountPicker
+                flat
+                label={
+                  // 費用・収入（差引形）行きは台帳経由の月割りになるため「計上先」と表示する。
+                  isRecurringSpreadDestinationRole(
+                    accounts.find((account) => account.id === debitAccountId)?.role,
+                  )
+                    ? t('monthlyCost.expenseCategory')
+                    : t('recurring.to.manual')
+                }
+                required
+                value={debitAccountId}
+                onChange={setDebitAccountId}
+                groups={toGroups}
+                hint={t('recurring.manualHint')}
+                dataUi={UI.allocations.recurringTo}
+              />
+            }
+          />
           <TextInput
             label={t('recurring.intervalMonths')}
             required
@@ -874,15 +928,12 @@ function RecurringRuleSheet({
             onChange={(v) => setEveryText(v.replace(/[^\d]/g, ''))}
             dataUi={UI.allocations.recurringEvery}
           />
-          <TextInput
-            label={t('recurring.firstPostingDate')}
-            type="date"
-            required
-            value={firstPostingDate}
-            onChange={setFirstPostingDate}
-            hint={t('recurring.firstPostingDateHint')}
-            dataUi={UI.allocations.recurringFirstPostingDate}
-          />
+          {firstPosting !== null ? (
+            <div className="kv" data-ui={UI.allocations.recurringFirstPosting}>
+              <span className="muted">{t('recurring.firstPosting')}</span>
+              <span>{firstPosting}</span>
+            </div>
+          ) : null}
           <TextInput
             label={t('recurring.ruleStartDate')}
             type="date"

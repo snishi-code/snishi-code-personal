@@ -191,6 +191,34 @@ export function recurringPostingsDue(rule: RecurringRule, today: string): Recurr
   return out;
 }
 
+/**
+ * ルールの設定（基準日=startMonth+dayOfMonth・周期・存在期間）だけから、最初に起票される
+ * 日付を返す。編集シートのプレビュー用（DB・カーソル・today に依存しない）。
+ * 規則は recurringPostingsDue と同一: startMonth 基点の位相（i % everyMonths）・
+ * clampDayToMonth・存在期間は半開区間 [startDate, endDate)。期間内に起票日が無ければ null。
+ */
+export function firstRecurringPostingDate(rule: {
+  startMonth: string;
+  dayOfMonth: number;
+  everyMonths: number;
+  startDate: string;
+  endDate?: string;
+}): string | null {
+  const every = rule.everyMonths >= 1 ? rule.everyMonths : 1;
+  // startDate の月まで位相を保ったまま飛ぶ（1 月ずつ走査しない）。
+  const span = monthsBetween(rule.startMonth, monthOf(rule.startDate));
+  let i = span <= 0 ? 0 : Math.ceil(span / every) * every;
+  // 最初の候補月の起票日が startDate より前のとき、次の候補は必ず翌月以降
+  // = startDate の月より後なので、2 周期目で必ず確定する（無限走査しない）。
+  for (let step = 0; step < 2; step++, i += every) {
+    const date = clampDayToMonth(addMonths(rule.startMonth, i), rule.dayOfMonth);
+    // 起票日は単調増加なので、終了点を越えたら以後の候補も全て期間外。
+    if (rule.endDate !== undefined && date >= rule.endDate) return null;
+    if (date >= rule.startDate) return date;
+  }
+  return null;
+}
+
 /* ── 費用行きルールが自動生成する item ── */
 
 /**
