@@ -11,6 +11,8 @@ import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { AccountPicker } from '../AccountPicker';
 import { FlowField } from '../FlowField';
+import { SearchInput, SortControls } from '../ListSearchSort';
+import { applySort, matchesQuery } from '../listQuery';
 import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import {
@@ -22,6 +24,7 @@ import {
   representativeMonthlyAmount,
 } from '../../domain/monthlyCost';
 import { recoveredAmountsByItem } from '../../domain/continuousCost';
+import { parseRuleItemId } from '../../domain/recurringIds';
 import type { AccountRole } from '../../domain/accountRoles';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../../domain/constants';
 import { lastExpenseCategoryId, rememberExpenseCategoryId } from '../../data/localFlags';
@@ -67,6 +70,19 @@ export interface AllocationsTarget {
   ruleId?: string;
 }
 
+/** 並び替え state。軸は両セクション（定期ルール・継続コスト資産）に定義できるものだけ。 */
+interface ListSort {
+  key: 'default' | 'amount' | 'name';
+  direction: 'asc' | 'desc';
+}
+
+/** 軸ごとの既定方向（金額 = 大きい順・名称 = 五十音順）。軸を切り替えたらここへ戻す。 */
+const SORT_DEFAULT_DIRECTION: Record<ListSort['key'], ListSort['direction']> = {
+  default: 'desc',
+  amount: 'desc',
+  name: 'asc',
+};
+
 export function Allocations({
   period,
   onEditEntry,
@@ -82,6 +98,10 @@ export function Allocations({
   const { ledger, removeMonthlyCost, createRecurringRule, saveRecurringRule, removeRecurringRule } =
     useLedger();
   const [showEnded, setShowEnded] = useState(false);
+  const [query, setQuery] = useState('');
+  // 並び替え（表示専用・保存しない）。軸と方向を 1 つの state で持ち、軸を切り替えたら
+  // 方向を軸ごとの既定へ戻す（方向 Segmented 非表示中に古い方向が残らない）。
+  const [sort, setSort] = useState<ListSort>({ key: 'default', direction: 'desc' });
   const [pendingDelete, setPendingDelete] = useState<MonthlyCostItem | null>(null);
   const [itemSheet, setItemSheet] = useState<{ existing?: MonthlyCostItem } | null>(null);
   const [archiving, setArchiving] = useState<MonthlyCostItem | null>(null);
@@ -106,29 +126,77 @@ export function Allocations({
   // 回収の振替を差し引いた「割り振る総額」（負になってよい＝過去にわたる費用減）。
   // 導出パラメータは常に現在わかっている全実仕訳から求める。後日の回収も全期間へ
   // 遡及して再配分されるため、ヘッダーの断面を変えても同じ item の月額は変わらない。
-  const journalEntries = ledger?.journalEntries ?? [];
-  const recovered = recoveredAmountsByItem(journalEntries);
+  // 検索の毎打鍵で再レンダーが走るため、全仕訳走査は useMemo で 1 回にする。
+  const recovered = useMemo(() => recoveredAmountsByItem(ledger?.journalEntries ?? []), [ledger]);
   const spreadTotalOf = (m: MonthlyCostItem): number => m.amount - (recovered.get(m.id) ?? 0);
+  // 購入の仕訳（item と 1:1・最初に一致した 1 件 = 従来の find と同じ規則）。
+  const purchaseEntryByItem = useMemo(() => {
+    const map = new Map<string, JournalEntry>();
+    for (const e of ledger?.journalEntries ?? []) {
+      const id = e.metadata?.monthlyCostId;
+      if (id !== undefined && e.metadata?.monthlyCostRecovery !== true && !map.has(id)) {
+        map.set(id, e);
+      }
+    }
+    return map;
+  }, [ledger]);
   const purchaseEntryOf = (m: MonthlyCostItem): JournalEntry | undefined =>
-    (ledger?.journalEntries ?? []).find(
-      (e) => e.metadata?.monthlyCostId === m.id && e.metadata.monthlyCostRecovery !== true,
-    );
+    purchaseEntryByItem.get(m.id);
 
   const allItems = ledger?.monthlyCostItems ?? [];
   // 開始前の項目はその断面にはまだ存在しない。showEnded は終了済みだけを再表示し、
   // 未来開始の項目まで先取りしない。
   const startedItems = allItems.filter((m) => m.startDate <= asOf);
-  // loadLedger は終了が近い順で返すが、編集直後の state 由来でも順序が崩れないよう再ソートする。
-  const items = [...startedItems]
-    .filter((m) => showEnded || !isArchived(m, asOf))
-    .sort(compareMonthlyCostItems);
-
   const allRules = ledger?.recurringRules ?? [];
   const startedRules = allRules.filter((r) => effectiveRecurringRuleStartDate(r) <= asOf);
-  const rules = startedRules.filter((r) => showEnded || recurringRuleExistsAt(r, asOf));
+  // 「終了分も表示」の出現条件は検索前の全件で判定する（検索で 0 件になっても、
+  // 母集合を変える唯一のコントロールを消さない）。
   const hasEndedAtAsOf =
     startedRules.some((r) => !recurringRuleExistsAt(r, asOf)) ||
     startedItems.some((m) => isArchived(m, asOf));
+  const hasAnyStarted = startedRules.length > 0 || startedItems.length > 0;
+
+  // 検索: 1 つの検索欄が両セクションに効く（「終了分も表示」と同じ単一 state の型）。
+  // 対象 = 名前 + 関係する科目名（Journal と同じ範囲。金額・日付・種別タグは対象外）。
+  const dir = sort.direction === 'asc' ? 1 : -1;
+  const itemCompare =
+    sort.key === 'default'
+      ? null
+      : sort.key === 'amount'
+        ? (a: MonthlyCostItem, b: MonthlyCostItem) => (a.amount - b.amount) * dir
+        : (a: MonthlyCostItem, b: MonthlyCostItem) => a.name.localeCompare(b.name, 'ja') * dir;
+  const ruleCompare =
+    sort.key === 'default'
+      ? null
+      : sort.key === 'amount'
+        ? (a: RecurringRule, b: RecurringRule) => (a.amount - b.amount) * dir
+        : (a: RecurringRule, b: RecurringRule) => a.name.localeCompare(b.name, 'ja') * dir;
+  // loadLedger は終了が近い順で返すが、編集直後の state 由来でも順序が崩れないよう再ソートする。
+  // 並び替え「標準」は applySort が素通しする＝既定の並び（終了が近い順）を 1 行も変えない。
+  const items = applySort(
+    [...startedItems]
+      .filter((m) => showEnded || !isArchived(m, asOf))
+      .filter((m) => matchesQuery([m.name, accountsMap.get(m.expenseAccountId)?.name], query))
+      .sort(compareMonthlyCostItems),
+    itemCompare,
+  );
+  // 定期ルールの既定順 = loadLedger の createdAt 昇順（画面側では並べ替えない暗黙の既定。
+  // 「標準」はこれを素通しする）。
+  const rules = applySort(
+    startedRules
+      .filter((r) => showEnded || recurringRuleExistsAt(r, asOf))
+      .filter((r) =>
+        matchesQuery(
+          [
+            r.name,
+            accountsMap.get(r.creditAccountId)?.name,
+            accountsMap.get(recurringDestinationAccountId(r))?.name,
+          ],
+          query,
+        ),
+      ),
+    ruleCompare,
+  );
   // 参照科目が削除済み、または選択断面で存在期間外なら行で警告する。
   // catch-up も各起票日の科目存在期間を照合して fail-soft に起票を止める。
   const ruleRefBroken = (r: RecurringRule): boolean => {
@@ -199,6 +267,9 @@ export function Allocations({
   const [consumedTarget, setConsumedTarget] = useState<AllocationsTarget | null>(null);
   if (target != null && target !== consumedTarget && ledger) {
     setConsumedTarget(target);
+    // 検索語が残っていると、開いたシートを閉じた直後に対象が一覧に居ない状態になるため
+    // 消費と同時にクリアする（探索自体はフィルタ前の全件に対して行う）。
+    setQuery('');
     const targetItem =
       target.itemId !== undefined ? allItems.find((m) => m.id === target.itemId) : undefined;
     const targetRule =
@@ -244,10 +315,61 @@ export function Allocations({
         </label>
       ) : null}
 
-      {startedRules.length === 0 && startedItems.length === 0 ? (
+      {hasAnyStarted ? (
+        <>
+          <div className="toolbar" style={{ margin: 'var(--space-3) 0 0' }}>
+            <SearchInput
+              id="allocations-search"
+              label={t('common.search')}
+              value={query}
+              onChange={setQuery}
+              placeholder={t('monthly.searchPlaceholder')}
+              dataUi={UI.allocations.search}
+            />
+          </div>
+          <SortControls
+            ariaLabel={t('common.sort')}
+            axisItems={[
+              {
+                key: 'default',
+                label: t('monthly.sortDefault'),
+                dataUi: UI.allocations.sortDefault,
+              },
+              { key: 'amount', label: t('monthlyCost.amount'), dataUi: UI.allocations.sortByAmount },
+              { key: 'name', label: t('monthlyCost.name'), dataUi: UI.allocations.sortByName },
+            ]}
+            axisValue={sort.key}
+            onAxisChange={(key) => {
+              const next = key === 'amount' || key === 'name' ? key : 'default';
+              // 軸を変えたら方向は軸ごとの既定へ戻す（非表示中の方向が残らない）。
+              setSort({ key: next, direction: SORT_DEFAULT_DIRECTION[next] });
+            }}
+            directionItems={[
+              { key: 'desc', label: t('common.sortDesc'), dataUi: UI.allocations.sortDesc },
+              { key: 'asc', label: t('common.sortAsc'), dataUi: UI.allocations.sortAsc },
+            ]}
+            directionValue={sort.direction}
+            onDirectionChange={(key) =>
+              setSort((s) => ({ ...s, direction: key === 'asc' ? 'asc' : 'desc' }))
+            }
+            showDirection={sort.key !== 'default'}
+          />
+        </>
+      ) : null}
+
+      {!hasAnyStarted ? (
         <div className="card card--pad empty" style={{ margin: 'var(--space-3) 0 var(--space-4)' }}>
           <Icon name="calendar" size={28} />
           <p style={{ marginTop: 'var(--space-3)' }}>{t('monthly.empty')}</p>
+        </div>
+      ) : query !== '' && rules.length === 0 && items.length === 0 ? (
+        // 検索でヒット 0 件（データが無いのではなく絞り込みで消えた）。案内文とは排他。
+        <div
+          className="card card--pad empty"
+          style={{ margin: 'var(--space-3) 0 var(--space-4)' }}
+          data-ui={UI.allocations.searchEmpty}
+        >
+          {t('monthly.searchEmpty')}
         </div>
       ) : null}
 
@@ -379,7 +501,18 @@ export function Allocations({
                       justifyContent: 'space-between',
                     }}
                   >
-                    <span>{m.name}</span>
+                    <span>
+                      {m.name}
+                      {/* くり返し記帳が自動生成した item はルールと同名で並ぶ（buildRuleItem が
+                          name: rule.name）ため、検索で「登録した覚えのない項目」に見えないよう
+                          由来を名乗る。判定はルール由来 ID の単一正本 parseRuleItemId。 */}
+                      {parseRuleItemId(m.id) !== undefined ? (
+                        <>
+                          {' '}
+                          <span className="tag tag--teal">{t('monthlyCost.fromRule')}</span>
+                        </>
+                      ) : null}
+                    </span>
                     <span className="row-actions">
                       <button
                         type="button"

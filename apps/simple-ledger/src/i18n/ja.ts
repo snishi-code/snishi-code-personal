@@ -19,6 +19,9 @@ export const ja = {
   'common.delete': '削除',
   'common.edit': '編集',
   'common.search': '検索',
+  'common.sort': '並び替え',
+  'common.sortDesc': '降順',
+  'common.sortAsc': '昇順',
   'common.required': '必須',
   'common.menu': 'メニュー',
   'common.home': 'ホーム',
@@ -79,6 +82,7 @@ export const ja = {
   'monthlyCost.amount': '金額',
   'monthlyCost.monthly': '月あたり',
   'monthlyCost.thisMonth': '今月の計上額',
+  'monthlyCost.fromRule': 'くり返し記帳から',
   // 計上先 = 月割り（継続コスト）の費用/収入の行き先。income 行き（差引形）も通るため中立表記。
   'monthlyCost.expenseCategory': '計上先',
   'monthlyCost.editTitle': '継続コスト資産を編集',
@@ -220,11 +224,8 @@ export const ja = {
   'journal.deleteConfirmBody': '「{description}」を削除します。この操作は取り消せません。',
   'journal.count': '{count}件',
   'journal.total': '合計',
-  'journal.sort': '並び替え',
   'journal.sortDate': '日付',
   'journal.sortAmount': '金額',
-  'journal.sortDesc': '降順',
-  'journal.sortAsc': '昇順',
 
   'entry.editTitle': '仕訳を編集',
   'entry.date': '日付',
@@ -683,6 +684,9 @@ export const ja = {
     'まだ登録がありません。「追加」からサブスク・給与・積立・持ち物などを登録できます。',
   'monthly.pick.rule': 'くり返し記帳',
   'monthly.pick.asset': 'いま持っているものを登録',
+  'monthly.searchPlaceholder': '項目名・科目名で検索',
+  'monthly.searchEmpty': '該当する項目がありません。',
+  'monthly.sortDefault': '標準',
 
   'recurring.sectionTitle': 'くり返し記帳',
   'recurring.sectionIntro':

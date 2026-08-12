@@ -117,9 +117,10 @@
   color: var(--neg);
 }
 
-/* ── 仕訳一覧 ── */
-/* foundation の Segmented は既定 38px。ソート UI でも 44px のタップ領域を保証する（監査 P1-4）。 */
-.journal__sort .segmented__btn {
+/* ── 一覧の並び替えトグル（共通部品 SortControls が常に .list-sort を付ける） ── */
+/* foundation の Segmented は既定 38px。ソート UI でも 44px のタップ領域を保証する（監査 P1-4）。
+   仕訳一覧・毎月のもの共通。yearly-overview / timeline-calendar の同種上書きは別部品のため残す。 */
+.list-sort .segmented__btn {
   min-height: var(--tap);
 }
 

@@ -205,6 +205,13 @@ export const UI = {
   },
   allocations: {
     view: 'allocations.view',
+    search: 'allocations.search',
+    searchEmpty: 'allocations.searchEmpty',
+    sortDefault: 'allocations.sort.default',
+    sortByAmount: 'allocations.sort.amount',
+    sortByName: 'allocations.sort.name',
+    sortDesc: 'allocations.sort.desc',
+    sortAsc: 'allocations.sort.asc',
     list: 'allocations.list',
     // 継続コスト資産の 1 項目カード（data-ending="true" = 終了まで1ヶ月以内）
     item: 'allocations.item',

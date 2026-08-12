@@ -10,7 +10,7 @@
  */
 import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
-import { Segmented } from '@snishi/foundation/ui/Segmented';
+import { SearchInput, SortControls } from '../ListSearchSort';
 import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import { AdjustmentEditSheet } from '../AdjustmentSheet';
@@ -249,17 +249,13 @@ export function Journal({
       ) : null}
 
       <div className="toolbar">
-        <label className="sr-only" htmlFor="journal-search">
-          {t('common.search')}
-        </label>
-        <input
+        <SearchInput
           id="journal-search"
-          className="input"
-          type="search"
+          label={t('common.search')}
           value={query}
+          onChange={setQuery}
           placeholder={t('journal.searchPlaceholder')}
-          onChange={(e) => setQuery(e.target.value)}
-          data-ui={UI.journal.search}
+          dataUi={UI.journal.search}
         />
         {allTags.length > 0 ? (
           <>
@@ -326,24 +322,22 @@ export function Journal({
         ) : null}
       </div>
 
-      <div className="toolbar journal__sort" role="group" aria-label={t('journal.sort')}>
-        <Segmented
-          value={sortKey}
-          items={[
-            { key: 'date', label: t('journal.sortDate'), dataUi: UI.journal.sortByDate },
-            { key: 'amount', label: t('journal.sortAmount'), dataUi: UI.journal.sortByAmount },
-          ]}
-          onChange={(key) => setSortKey(key === 'amount' ? 'amount' : 'date')}
-        />
-        <Segmented
-          value={sortDirection}
-          items={[
-            { key: 'desc', label: t('journal.sortDesc'), dataUi: UI.journal.sortDesc },
-            { key: 'asc', label: t('journal.sortAsc'), dataUi: UI.journal.sortAsc },
-          ]}
-          onChange={(key) => setSortDirection(key === 'asc' ? 'asc' : 'desc')}
-        />
-      </div>
+      <SortControls
+        ariaLabel={t('common.sort')}
+        extraClassName="journal__sort"
+        axisItems={[
+          { key: 'date', label: t('journal.sortDate'), dataUi: UI.journal.sortByDate },
+          { key: 'amount', label: t('journal.sortAmount'), dataUi: UI.journal.sortByAmount },
+        ]}
+        axisValue={sortKey}
+        onAxisChange={(key) => setSortKey(key === 'amount' ? 'amount' : 'date')}
+        directionItems={[
+          { key: 'desc', label: t('common.sortDesc'), dataUi: UI.journal.sortDesc },
+          { key: 'asc', label: t('common.sortAsc'), dataUi: UI.journal.sortAsc },
+        ]}
+        directionValue={sortDirection}
+        onDirectionChange={(key) => setSortDirection(key === 'asc' ? 'asc' : 'desc')}
+      />
 
       <div
         style={{
