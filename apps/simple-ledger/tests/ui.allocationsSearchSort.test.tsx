@@ -40,13 +40,7 @@ function View({ period, target }: { period: ReportPeriod; target?: AllocationsTa
   );
 }
 
-function ReadyView({
-  period,
-  target,
-}: {
-  period: ReportPeriod;
-  target: AllocationsTarget | null;
-}) {
+function ReadyView({ period, target }: { period: ReportPeriod; target: AllocationsTarget | null }) {
   const { status } = useLedger();
   return status === 'ready' ? (
     <Allocations period={period} onEditEntry={() => undefined} target={target} />
