@@ -7,6 +7,7 @@
 // フィルタは個人タグの全タグ一致 (AND) 固定。
 
 import { type Patient, type AppSettings, type TagColor } from '../domain/types';
+import { DEFAULT_TAG_COLOR } from '../domain/tags';
 import type { HrStore } from '../data/store';
 
 // ============================
@@ -34,10 +35,15 @@ function patientFilterableTags(p: Patient): string[] {
 // ============================
 
 /**
- * 新規の個人タグ追加 (重複は false)。color は表示/分類のみで、クリア方針には影響しない。
+ * 新規の個人タグ追加 (重複は false)。color は「ラウンド開始で外れるか」を決める
+ * (domain/tags.ts)。既定は残る側 = 付け忘れたタグが黙って消えない安全側。
  * 色はあとから設定のタグ管理で変更できる。
  */
-export function addNewTag(store: HrStore, name: string, color: TagColor = 'gray'): boolean {
+export function addNewTag(
+  store: HrStore,
+  name: string,
+  color: TagColor = DEFAULT_TAG_COLOR,
+): boolean {
   const trimmed = String(name || '').trim();
   if (!trimmed) return false;
   const settings = store.getSettings();
@@ -81,7 +87,10 @@ export function deleteTagAt(store: HrStore, idx: number): void {
   store.scheduleSave();
 }
 
-/** idx のタグの color を変更する。色の変更は設定のタグ管理でのみ行う。 */
+/**
+ * idx のタグの color を変更する (= ラウンド開始で外れるかを切り替える)。
+ * 色の変更は設定のタグ管理でのみ行う。
+ */
 export function setTagColor(store: HrStore, idx: number, color: TagColor): void {
   const settings = store.getSettings();
   if (!Array.isArray(settings.tags) || idx < 0 || idx >= settings.tags.length) return;
@@ -91,14 +100,15 @@ export function setTagColor(store: HrStore, idx: number, color: TagColor): void 
 
 /**
  * タグ名から TagColor を解決する。settings.tags に登録されていれば color を返す。
- * 見つからない場合は 'gray' (ニュートラル) にフォールバック。
+ * 見つからない (孤児タグ名) 場合は既定色 = 残る側にフォールバックし、
+ * ラウンド開始でも外れない扱いと表示を一致させる。
  */
 export function tagColorOf(settings: AppSettings, name: string): TagColor {
   if (Array.isArray(settings.tags)) {
     const def = settings.tags.find((t) => t.name === name);
     if (def) return def.color;
   }
-  return 'gray';
+  return DEFAULT_TAG_COLOR;
 }
 
 // ============================

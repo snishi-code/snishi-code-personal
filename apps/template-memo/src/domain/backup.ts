@@ -28,6 +28,7 @@ import {
   type TemplateDef,
 } from './entities';
 import { normalizeProjectedValues, normalizeSectionTexts } from './normalize';
+import { DEFAULT_TAG_COLOR, isTagColor } from './tags';
 import {
   isPatientStatus,
   STATUS,
@@ -154,11 +155,15 @@ function normalizePatientRow(raw: unknown, places: readonly PlaceDef[]): Patient
   };
 }
 
-/** tag 定義 1 件の正規化（settings 内の配列）。name の型不正 row は捨てる。 */
+/**
+ * tag 定義 1 件の正規化（settings 内の配列）。name の型不正 row は捨てる。
+ * 未知の色（旧 'gray' を含む）は既定色 = 残る側へ倒す。色は「ラウンド開始で外れるか」の
+ * 意味を持つため、読めない色を外れる側へ倒さない（黙って消えるのを防ぐ fail-safe）。
+ */
 function normalizeTagRow(raw: unknown): TagDef | null {
   if (!isPlainObject(raw)) return null;
   if (typeof raw.name !== 'string' || raw.name.trim() === '') return null;
-  return { name: raw.name, color: raw.color === 'amber' ? 'amber' : 'gray' };
+  return { name: raw.name, color: isTagColor(raw.color) ? raw.color : DEFAULT_TAG_COLOR };
 }
 
 /**

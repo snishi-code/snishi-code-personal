@@ -45,11 +45,17 @@ export interface PlaceDef {
 }
 
 // ============================
-// タグ（名前参照・色は表示/分類のみ）
+// タグ（名前参照・色は「ラウンド開始で外れるか」の意味を持つ）
 // ============================
 
-/** 個人タグの色。表示/分類のためだけに使う（クリア方針ではない）。 */
-export const TAG_COLORS = Object.freeze(['gray', 'amber'] as const);
+/**
+ * 個人タグの色。見た目ではなく「ラウンド開始で外れるか」を表す:
+ *   blue  = 残る（継続の目印）
+ *   amber = ラウンド開始で対象から外れる（今回分の目印）
+ * 判定は色リテラルを散らさず domain/tags.ts の tagClearsOnRoundStart に集約する
+ * （blue 以外は外れる側 = あとから足した色は自動で外れる側に入る）。
+ */
+export const TAG_COLORS = Object.freeze(['blue', 'amber'] as const);
 export type TagColor = (typeof TAG_COLORS)[number];
 
 /** タグの定義オブジェクト（settings.tags が正本）。patient.tags は名前参照の string[]。 */
@@ -94,8 +100,8 @@ export type FormValues = Record<string, Record<string, unknown>>;
  * 1 レコード = 1 件のフラット構造（place は参照属性）。アーカイブは archivedAt のソフトデリート。
  *
  * 「今回分」(ラウンド開始・クリアで消えるもの) = status(青以外) / sectionTexts /
- * projectedValues。
- * 「継続」(消えないもの) = name / room / placeId / problems / standingMemo / tags。
+ * projectedValues / tags(青以外の色)。
+ * 「継続」(消えないもの) = name / room / placeId / problems / standingMemo / tags(青)。
  */
 export interface Patient {
   pid: string;
@@ -106,7 +112,7 @@ export interface Patient {
   room: string;
   /** 所属 place。'' = 未所属（通常は作成時に必ず割り当てる）。 */
   placeId: string;
-  /** 個人タグ（名前参照。定義は settings.tags）。 */
+  /** 個人タグ（名前参照。定義と色 = settings.tags）。 */
   tags: string[];
   /** プロブレムリスト。番号は保存せず、表示・合成時に配列順から自動付番する。 */
   problems: string[];
@@ -139,7 +145,7 @@ export interface AppSettings {
   key: 'app';
   /** 有効なテンプレート id（templates store のレコードを指す）。 */
   activeTemplateId: string;
-  /** 個人タグの定義（色は表示/分類のみ）。 */
+  /** 個人タグの定義（色 = ラウンド開始で外れるか。domain/tags.ts 参照）。 */
   tags: TagDef[];
   /** QR 出力の改行モード（既定 crlf）。 */
   newlineMode: NewlineMode;

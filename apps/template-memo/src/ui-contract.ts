@@ -25,6 +25,7 @@ export const UI = {
   },
   detail: {
     meta: 'detail.meta',
+    tags: 'detail.tags', // ヘッダー直下のタグ行 (表示 + その場で付け外し)
     home: 'detail.home',
     actionBar: 'detail.actionBar',
     // 画面内ボタン (患者固有 = 転記用QR)

@@ -62,7 +62,8 @@ function envPrefix(): string {
 }
 
 // ============================
-// タグ管理 (追加 / 改名 / 削除。初期化ボタンは置かない)
+// タグ管理 (追加 / 改名 / 色の切替 / 削除。初期化ボタンは置かない)。
+// 色は見た目ではなく「ラウンド開始で外れるか」(domain/tags.ts)。
 // ============================
 
 function TagManagerSection({ runtime }: { runtime: AppRuntime }) {
@@ -89,6 +90,8 @@ function TagManagerSection({ runtime }: { runtime: AppRuntime }) {
   return (
     <div className="card card--pad settingsSection">
       <div className="section-label">{s.settings.title.tags}</div>
+      {/* 色 = クリア方針 (青は残る / それ以外は外れる) なので、選ぶ前に意味が読めるようにする。 */}
+      <p className="muted settingsHint">{s.settings.tag.hint}</p>
       <div className="tagSettingList" data-ui={UI.settings.tagList}>
         {tags.map((tagDef, idx) => {
           const name = tagDef.name;
@@ -129,7 +132,8 @@ function TagManagerSection({ runtime }: { runtime: AppRuntime }) {
                   >
                     {name || s.settings.tagGroup.name.empty}
                   </button>
-                  {/* 色スウォッチ: TAG_COLORS 分の小丸ボタン。タップで setTagColor。選択中は枠強調 */}
+                  {/* 色スウォッチ: TAG_COLORS 分の小丸ボタン。タップで setTagColor
+                      (= ラウンド開始で外れるかの切替)。選択中は枠強調・aria-label に意味を出す。 */}
                   {(TAG_COLORS as readonly TagColor[]).map((color) => {
                     const isSelected = tagDef.color === color;
                     return (

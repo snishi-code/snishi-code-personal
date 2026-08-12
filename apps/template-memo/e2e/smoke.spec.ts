@@ -465,6 +465,52 @@ test('ラウンド開始で今回分をクリアし（問題・継続メモは�
   await expect(page.locator(ui(UI.memo.standing.input))).toHaveValue('継続メモ本文');
 });
 
+// ── 3b. タグ: 設定で作成 (既定色) → 詳細のタグ行で付け外し → ラウンド開始で色ごとの去就 ──
+
+test('タグは既定で青（残る）で作られ、オレンジにした分だけラウンド開始で外れる', async ({
+  page,
+}) => {
+  await addPatient(page, '404', 'タグ対象D');
+
+  // 設定でタグを 2 つ作る (新規タグの既定色 = 青 = ラウンド開始で残る)。
+  await openSettings(page);
+  for (const name of ['継続', '今回']) {
+    await page.locator(ui(UI.tags.addBtn)).click();
+    await page.getByLabel('新規タグ', { exact: true }).fill(name);
+    await page.getByLabel('新規タグ', { exact: true }).press('Enter');
+  }
+  const tagRows = page.locator(ui(UI.settings.tagRow));
+  await expect(tagRows).toHaveCount(2);
+
+  // 色スウォッチは TAG_COLORS の固定順 (0=青=残る / 1=オレンジ=外れる)。
+  const keepSwatch = (row: Locator) => row.locator(ui(UI.settings.tagColor)).nth(0);
+  const clearSwatch = (row: Locator) => row.locator(ui(UI.settings.tagColor)).nth(1);
+  // 既定は青 (色を付け忘れたタグが黙って消えない安全側)。
+  await expect(keepSwatch(tagRows.nth(0))).toHaveAttribute('aria-pressed', 'true');
+  await expect(keepSwatch(tagRows.nth(1))).toHaveAttribute('aria-pressed', 'true');
+  // 「今回」だけオレンジ (= ラウンド開始で外れる) にする。
+  await clearSwatch(tagRows.nth(1)).click();
+  await expect(clearSwatch(tagRows.nth(1))).toHaveAttribute('aria-pressed', 'true');
+
+  // 詳細のヘッダー直下のタグ行から、その場で 2 つとも付ける。
+  await page.locator(ui(UI.settings.homeBottom)).click();
+  await openDetail(page, '404 タグ対象D');
+  const detailTags = page.locator(ui(UI.detail.tags)).locator(ui(UI.tags.selectChip));
+  await expect(detailTags).toHaveCount(2);
+  await detailTags.nth(0).click();
+  await detailTags.nth(1).click();
+  await expect(detailTags.nth(0)).toHaveAttribute('aria-pressed', 'true');
+  await expect(detailTags.nth(1)).toHaveAttribute('aria-pressed', 'true');
+
+  // ラウンド開始: 青のタグは残り、オレンジのタグだけ外れる。
+  await page.locator(ui(UI.detail.home)).click();
+  await page.locator(ui(UI.home.start)).click();
+  await confirmDialog(page);
+  await openDetail(page, '404 タグ対象D');
+  await expect(detailTags.nth(0)).toHaveAttribute('aria-pressed', 'true');
+  await expect(detailTags.nth(1)).toHaveAttribute('aria-pressed', 'false');
+});
+
 // ── 4. 設定 → バックアップ書き出し → 全削除 → 復元 ──
 
 test('バックアップを書き出し、全削除後に同じデータを復元できる', async ({ page }) => {

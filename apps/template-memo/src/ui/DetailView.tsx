@@ -1,5 +1,6 @@
 // 詳細 (患者) ビュー:
 //   - 患者ヘッダ: メタボタン (ステータス形マーク + 部屋 + 氏名) → 患者情報ポップアップ
+//   - ヘッダー直下: タグ行 (色 = ラウンド開始で外れるか。タップでその場で付け外し)
 //   - プロブレムリスト → 継続メモ → 入力フォーム → 転記用QR ボタン → 患者管理
 //   - 下部固定バーは [ホーム] のみ (患者固有の操作は画面内の日本語ボタンへ)
 //   - 患者切替はホーム一覧経由のみ (画面内の切替操作は持たない。旧・横スワイプ切替は
@@ -21,6 +22,8 @@ import { StandingMemoCard } from './MemoCards';
 import { DetailQrDialog } from './DetailQrDialog';
 import { PatientEditPopup } from './PatientEditPopup';
 import { PatientLifecyclePanel } from './PatientLifecyclePanel';
+import { TagSelection } from './TagPicker';
+import { getAllTags } from './tags';
 import { s } from '../i18n';
 import { UI } from '../ui-contract';
 
@@ -76,6 +79,8 @@ export function DetailView({
   if (!patient) return null;
 
   const label = formatPatientLabel(patient, String(selectedNo));
+  // タグ行はタグ定義がある時だけ出す (未使用なら空行を作らない)。
+  const tagNames = getAllTags(store.getSettings());
 
   return (
     <section aria-label={s.patientSheet.title} className="detailView">
@@ -95,11 +100,38 @@ export function DetailView({
             </span>
           ) : null}
           <span className="detailMetaLabel">{label}</span>
-          {/* タグのチップはヘッダーに出さない (スマホで患者名が潰れるため)。最重要情報 = 部屋番号 +
-              患者名。タグ類は患者シート (このボタンで開く) に集約する。 */}
+          {/* タグのチップはこのボタンの中には入れない (ボタンの入れ子は不正・患者名も潰れる)。
+              タグはヘッダー直下の独立した行に置く (下記)。 */}
           <Icon name="edit" size={15} className="detailMetaEditIcon" />
         </button>
       </div>
+
+      {/* タグ (色 = ラウンド開始で外れるか)。表示だけでなくその場で付け外しできる。
+          新規タグの作成は対象シート / 設定に集約する (allowAdd=false)。
+          タグ定義が 1 つも無いときは行ごと出さない (使っていない人に空行を作らない)。 */}
+      {tagNames.length > 0 ? (
+        <div
+          className="detailTagsRow"
+          role="group"
+          aria-label={s.patientSheet.tags}
+          data-ui={UI.detail.tags}
+        >
+          <TagSelection
+            store={store}
+            selected={Array.isArray(patient.tags) ? patient.tags : []}
+            onChange={(next) => {
+              // 書き込み対象は描画時に読んだ患者ではなく、その時点の live を引き直す
+              // (write-through 保存。PatientEditPopup と同じ流儀)。
+              const target = store.getAppState().patients[selectedNo - 1];
+              if (!target) return;
+              target.tags = next;
+              store.markUpdated(selectedNo); // notify → bump (再描画) + updatedAt
+              store.scheduleSave();
+            }}
+            allowAdd={false}
+          />
+        </div>
+      ) : null}
 
       {/* プロブレムリスト (患者ごとの独立データ。転記用QR の先頭 = QR 順と一致) */}
       <ProblemListCard runtime={runtime} patient={patient} />

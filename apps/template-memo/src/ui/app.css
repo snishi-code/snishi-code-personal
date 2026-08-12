@@ -296,10 +296,6 @@
   cursor: pointer;
   flex-shrink: 0;
 }
-.tagColorSwatch--gray {
-  background: var(--surface, #fff);
-  border-color: var(--border, #e2e8f0);
-}
 .tagColorSwatch--amber {
   background: var(--tag-amber-bg);
   border-color: var(--tag-amber-bd);
@@ -532,8 +528,9 @@
   --swatch-on: #ffffff;
 
   /* ── 個人タグ色 palette ──
-     gray: 既存ニュートラル見た目 → 変数なし (既定クラスのまま)
-     amber: status-yellow より落ち着いたアンバー系。色は表示/分類のみで、クリア方針には影響しない。
+     色は「ラウンド開始で外れるか」の意味を持つ (domain/tags.ts):
+       blue  = 残る。ステータス青 (特記・持ち越し) と意味を揃える。値は先頭 :root で定義。
+       amber = ラウンド開始で外れる。status-yellow より落ち着いたアンバー系。
      ルール: ハードコード禁止。ここのみで値を定義し、全箇所を変数経由で参照する。 */
   --tag-amber-bg: #faeeda;
   --tag-amber-bd: #ba7517;
@@ -1005,6 +1002,12 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   align-items: center;
 }
 
+/* ヘッダー直下のタグ行。ヘッダーは単一の <button> なので、その中ではなくこの行に置く
+   (ボタンの入れ子は不正)。タグが多いときは折り返す (.tagSelection が flex-wrap)。 */
+.detailTagsRow {
+  margin-bottom: var(--space-2);
+}
+
 /* 共通の下部固定操作バー (患者詳細・設定)。
    片手操作で親指が届く下部に固定し、
    safe-area (ホームインジケータ) を避ける。dialog (top-layer) より下に出る。 */
@@ -1369,14 +1372,16 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   color: var(--on-primary);
   font-weight: 700;
 }
-/* ✓ は選択の冗長な非色キュー (gray/amber 共通)。控えめサイズで本文の邪魔をしない。 */
+/* ✓ は選択の冗長な非色キュー (全色共通)。控えめサイズで本文の邪魔をしない。 */
 .tagChip.on::before {
   content: '✓';
   margin-right: 5px;
   font-weight: 900;
 }
 
-/* タグ色 modifier (未選択時の見た目)。gray は既定の .tagChip 見た目 (変数不要)。 */
+/* タグ色 modifier (未選択時の見た目)。色 = 「ラウンド開始で外れるか」(domain/tags.ts) なので
+   全色に modifier を付ける (素の .tagChip は外枠だけを担う)。
+   この節は .tagChip 本体より後に置くこと (同一詳細度 = 後勝ち)。 */
 .tagChip--amber {
   background: var(--tag-amber-bg);
   border-color: var(--tag-amber-bd);
@@ -1387,6 +1392,20 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
 .tagChip--amber.on {
   background: var(--tag-amber-fg);
   border-color: var(--tag-amber-fg);
+  color: var(--on-primary);
+  font-weight: 700;
+}
+
+/* blue = ラウンド開始で残るタグ。 */
+.tagChip--blue {
+  background: var(--tag-blue-bg);
+  border-color: var(--tag-blue-bd);
+  color: var(--tag-blue-fg);
+}
+
+.tagChip--blue.on {
+  background: var(--tag-blue-fg);
+  border-color: var(--tag-blue-fg);
   color: var(--on-primary);
   font-weight: 700;
 }
@@ -1600,24 +1619,24 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   flex-shrink: 0;
 }
 
-.tagColorSwatch--gray {
-  background: var(--surface);
-  border-color: var(--border);
-}
-
 .tagColorSwatch--amber {
   background: var(--tag-amber-bg);
   border-color: var(--tag-amber-bd);
 }
 
+.tagColorSwatch--blue {
+  background: var(--tag-blue-bg);
+  border-color: var(--tag-blue-bd);
+}
+
 /* 選択中は外枠強調 */
-.tagColorSwatch--gray.selected {
-  outline: 2px solid var(--border);
+.tagColorSwatch--amber.selected {
+  outline: 2px solid var(--tag-amber-bd);
   outline-offset: 2px;
 }
 
-.tagColorSwatch--amber.selected {
-  outline: 2px solid var(--tag-amber-bd);
+.tagColorSwatch--blue.selected {
+  outline: 2px solid var(--tag-blue-bd);
   outline-offset: 2px;
 }
 

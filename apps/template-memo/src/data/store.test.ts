@@ -39,6 +39,13 @@ import type { Format, Frame, TemplateDef } from '../domain/entities';
 import type { TemplatePresetBundle } from '../domain/presets';
 import type { Patient } from '../domain/types';
 
+/**
+ * このファイルの対象はタグ以外のクリア（status / 自由本文 / フォーム値）と永続化。
+ * 「どのタグを外すか」（色 = ラウンド開始で外れるか）は domain/clearPolicy.test.ts と
+ * domain/tags.test.ts が受け持つので、ここでは空集合 = 外すタグ無しを渡す。
+ */
+const CLEAR_TAGS: ReadonlySet<string> = new Set<string>();
+
 // ── テスト用 DB（本番 db.ts と同じ store 構成。テストごとに一意な DB 名で分離） ──
 
 let dbSeq = 0;
@@ -673,7 +680,7 @@ describe('ラウンド開始クリア（HomeView.runClear と同じ固定ポリ�
     await store.persistActiveOrThrow();
 
     const now = Date.now();
-    for (const p of store.getAppState().patients) applyRoundStartClear(p, now);
+    for (const p of store.getAppState().patients) applyRoundStartClear(p, now, CLEAR_TAGS);
     await store.persistActiveOrThrow();
 
     expect(livePatient(store, yellow).status).toBe('none');
@@ -682,7 +689,7 @@ describe('ラウンド開始クリア（HomeView.runClear と同じ固定ポリ�
     expect(livePatient(store, blue).status).toBe('blue');
   });
 
-  it('自由本文/フォーム値をクリアし、問題/継続メモ/タグは維持する（永続化まで）', async () => {
+  it('自由本文/フォーム値をクリアし、問題/継続メモ/タグ（外す指定なし）は維持する（永続化まで）', async () => {
     const { db, store } = await setup();
     const pid = await store.createPatientInActivePlace('対象A');
     const p = livePatient(store, pid);
@@ -696,7 +703,7 @@ describe('ラウンド開始クリア（HomeView.runClear と同じ固定ポリ�
     await store.persistActiveOrThrow();
     const beforeUpdatedAt = p.updatedAt;
 
-    for (const q of store.getAppState().patients) applyRoundStartClear(q, Date.now());
+    for (const q of store.getAppState().patients) applyRoundStartClear(q, Date.now(), CLEAR_TAGS);
     await store.persistActiveOrThrow();
 
     // 再起動相当で読み直しても、クリア結果が正しく永続化されている。
@@ -706,7 +713,7 @@ describe('ラウンド開始クリア（HomeView.runClear と同じ固定ポリ�
     expect(after.status).toBe('none');
     expect(after.sectionTexts).toEqual({});
     expect(after.projectedValues).toEqual({});
-    // 維持される: 名前 / 位置 / タグ / 問題 / 継続メモ。
+    // 維持される: 名前 / 位置 / タグ（外す指定なし）/ 問題 / 継続メモ。
     expect(after.name).toBe('対象A');
     expect(after.room).toBe('101');
     expect(after.tags).toEqual(['要確認']);
@@ -795,7 +802,7 @@ describe('Undo（snapshot: クリア前へ巻き戻す）', () => {
       { title: state.title, patients: state.patients },
       String(countActivePatients(state.patients)),
     );
-    for (const q of state.patients) applyRoundStartClear(q, Date.now());
+    for (const q of state.patients) applyRoundStartClear(q, Date.now(), CLEAR_TAGS);
     await store.persistActiveOrThrow();
     expect(livePatient(store, pid).sectionTexts).toEqual({});
 

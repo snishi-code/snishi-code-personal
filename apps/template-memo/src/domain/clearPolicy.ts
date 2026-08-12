@@ -14,17 +14,30 @@ import { STATUS, type Patient } from './types';
  *   - status: 黄 / 緑 / 灰 → none
  *   - 場所ごとの自由本文 (sectionTexts)
  *   - 今回分のフォーム入力値 (projectedValues)
+ *   - clearTagNames に含まれる名前のタグ
  *
  * 残す:
  *   - status: 青 (持ち越し / 要注意)
  *   - 継続メモ (standingMemo)
- *   - タグ (tags)
+ *   - clearTagNames に無いタグ (青のタグ・定義に無い孤児タグ名)
  *   - プロブレムリスト (problems)
+ *
+ * @param clearTagNames 外すタグ名の集合。色 (= 意味) の解決はここでは行わず、呼び出し側が
+ *   settings.tags から domain/tags.ts の roundStartClearTagNames で作って渡す
+ *   (domain のクリア方針が settings の形に依存しないようにする)。
  */
-export function applyRoundStartClear(p: Patient, now: number): void {
+export function applyRoundStartClear(
+  p: Patient,
+  now: number,
+  clearTagNames: ReadonlySet<string>,
+): void {
   // status: 黄/緑/灰 は none に戻す。青は持ち越しとして残す。
   if (p.status === STATUS.YELLOW || p.status === STATUS.GREEN || p.status === STATUS.GRAY) {
     p.status = STATUS.NONE;
+  }
+  // タグ: 「外す」と指定された名前だけを落とす (集合に無い名前は残す = 安全側)。
+  if (clearTagNames.size > 0 && Array.isArray(p.tags)) {
+    p.tags = p.tags.filter((name) => !clearTagNames.has(name));
   }
   p.sectionTexts = {};
   // 今回分のフォーム入力値。継続メモのようには残さない (今回ラウンド分)。
