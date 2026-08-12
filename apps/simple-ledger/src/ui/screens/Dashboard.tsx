@@ -1,7 +1,7 @@
 /*
  * ホーム（初期表示）。日常入力の主導線（収入/支出/振替）、期間の収支・財政状態サマリー、推移。
  */
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import type { IconName } from '@snishi/foundation/ui/Icon';
 import { Button } from '@snishi/foundation/ui/Button';
@@ -16,7 +16,7 @@ import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
 import { displayEntriesForAsOf } from '../../domain/reportEntries';
 import { todayLocal } from '../../util/time';
 import { buildSectionTrends } from './breakdownData';
-import { Money } from '../money';
+import { Money, moneyText } from '../money';
 import { periodLabel } from '../periodLabel';
 import { EntryListItem } from '../EntryListItem';
 import { TrendChart } from '../components/TrendChart';
@@ -78,6 +78,21 @@ export function Dashboard({
   const visibleEntries = periodEntries.slice(0, shown.count);
   const remaining = periodEntries.length - visibleEntries.length;
   const label = periodLabel(period);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  // 「さらに表示」は末尾追記なので既存行は動かない（scrollTo を呼ばない）。ただし最終ページでは
+  // ボタン自身が消えてフォーカスが body へ落ちるため、最初に増えた行へ意図的に移す。
+  const showMore = () => {
+    const firstAdded = visibleEntries.length;
+    const willFinish = remaining <= HOME_ENTRY_PAGE;
+    setShown((s) => ({ ...s, count: s.count + HOME_ENTRY_PAGE }));
+    if (!willFinish) return;
+    // 追加行の描画後にフォーカスを移す（ボタンが消えるのは同じコミット）。
+    queueMicrotask(() => {
+      const rows = listRef.current?.querySelectorAll<HTMLElement>('button.list__item');
+      rows?.[firstAdded]?.focus();
+    });
+  };
 
   const { pl, bs, asOf, monthlyCost, normalExpense } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
@@ -111,54 +126,52 @@ export function Dashboard({
           <div className="stat-grid">
             <StatButton
               label={t('dashboard.revenue')}
+              amount={pl.totalRevenue}
+              currency={currency}
               onClick={() => onNavigate('incomeBreakdown')}
               dataUi={UI.dashboard.statRevenue}
-            >
-              <Money amount={pl.totalRevenue} currency={currency} />
-            </StatButton>
+            />
             <StatButton
               label={t('dashboard.expense')}
+              amount={normalExpense + monthlyCost}
+              currency={currency}
               onClick={() => onNavigate('expenseBreakdown')}
               dataUi={UI.dashboard.statExpense}
-            >
-              <Money amount={normalExpense + monthlyCost} currency={currency} />
-            </StatButton>
+            />
             <StatButton
               label={t('dashboard.netIncome')}
+              amount={pl.totalRevenue - (normalExpense + monthlyCost)}
+              currency={currency}
+              signed
               onClick={() => onNavigate('netIncome')}
               dataUi={UI.dashboard.statNetIncome}
-            >
-              <Money
-                amount={pl.totalRevenue - (normalExpense + monthlyCost)}
-                currency={currency}
-                signed
-              />
-            </StatButton>
+            />
           </div>
 
           <p className="section-label">{t('dashboard.positionAsOf', { date: asOf })}</p>
           <div className="stat-grid">
             <StatButton
               label={t('dashboard.assets')}
+              amount={bs.totalAssets}
+              currency={currency}
               onClick={() => onNavigate('assetsBreakdown')}
               dataUi={UI.dashboard.statAssets}
-            >
-              <Money amount={bs.totalAssets} currency={currency} />
-            </StatButton>
+            />
             <StatButton
               label={t('dashboard.liabilities')}
+              amount={bs.totalLiabilities}
+              currency={currency}
               onClick={() => onNavigate('liabilitiesBreakdown')}
               dataUi={UI.dashboard.statLiabilities}
-            >
-              <Money amount={bs.totalLiabilities} currency={currency} />
-            </StatButton>
+            />
             <StatButton
               label={t('dashboard.netAssets')}
+              amount={bs.netAssets}
+              currency={currency}
+              signed
               onClick={() => onNavigate('netAssets')}
               dataUi={UI.dashboard.statNetAssets}
-            >
-              <Money amount={bs.netAssets} currency={currency} signed />
-            </StatButton>
+            />
           </div>
         </div>
 
@@ -216,7 +229,11 @@ export function Dashboard({
           <div className="card card--pad muted">{t('dashboard.noMonthEntries')}</div>
         ) : (
           <>
-            <ul className="card list dashboard__entries" data-ui={UI.dashboard.journalPreview}>
+            <ul
+              ref={listRef}
+              className="card list dashboard__entries"
+              data-ui={UI.dashboard.journalPreview}
+            >
               {visibleEntries.map((entry) => {
                 const generated = !!entry.metadata?.monthlyCostId;
                 return (
@@ -230,14 +247,16 @@ export function Dashboard({
                 );
               })}
             </ul>
+            {/* 追加結果を読み上げる（ボタンが消える最終ページでは何も起きなかったように見えるため）。 */}
+            <p className="sr-only" role="status" data-ui={UI.dashboard.journalCount}>
+              {t('dashboard.shownCount', {
+                shown: visibleEntries.length,
+                total: periodEntries.length,
+              })}
+            </p>
             {remaining > 0 ? (
               // 末尾追記のみ（scrollTo を呼ばない = 既に表示中の行は動かない）。
-              <Button
-                variant="ghost"
-                block
-                dataUi={UI.dashboard.journalMore}
-                onClick={() => setShown((s) => ({ ...s, count: s.count + HOME_ENTRY_PAGE }))}
-              >
+              <Button variant="ghost" block dataUi={UI.dashboard.journalMore} onClick={showMore}>
                 {t('dashboard.moreEntries', { count: remaining })}
               </Button>
             ) : null}
@@ -273,29 +292,43 @@ export function Dashboard({
   );
 }
 
+/**
+ * ホームの 6 枠。aria-label は子の金額を上書きするので、**名称・金額・操作の 3 つを含める**
+ * （label だけだと読み上げから金額が消える。額縁として固定した主要情報なので必須）。
+ * 表示と読み上げが食い違わないよう、金額は Money と同じ moneyText から作る。
+ */
 function StatButton({
   label,
+  amount,
+  currency,
+  signed = false,
   onClick,
   dataUi,
-  children,
 }: {
   label: string;
+  amount: number;
+  currency: string;
+  signed?: boolean;
   onClick: () => void;
   dataUi?: string;
-  children: ReactNode;
 }) {
   return (
     <button
       type="button"
       className="stat stat--btn"
       onClick={onClick}
-      aria-label={t('dashboard.statDetail', { label })}
+      aria-label={t('dashboard.statDetail', {
+        label,
+        amount: moneyText(amount, currency, signed),
+      })}
       data-ui={dataUi}
     >
-      <span className="stat__label">
+      <span className="stat__label" aria-hidden="true">
         {label} <Icon name="chevronRight" size={12} />
       </span>
-      <span className="stat__value">{children}</span>
+      <span className="stat__value" aria-hidden="true">
+        <Money amount={amount} currency={currency} signed={signed} />
+      </span>
     </button>
   );
 }

@@ -958,11 +958,12 @@ button.stmt-row:hover {
   box-shadow: var(--shadow-pop);
   animation: scroll-top-in 120ms ease;
 }
-/* foundation の .icon-btn:hover（特異度 0,2,0）が .scroll-top（0,1,0）に勝ち、面が --bg に
-   落ちる。iOS Safari は :hover をタップ後も保持するため、押した直後から浮いて見えなくなる。
-   hover の面をここで明示して上書きする。 */
+/* foundation の .icon-btn:hover（特異度 0,2,0）が .scroll-top（0,1,0）に勝ち、面がページ背景
+   （--bg）に落ちて浮いて見えなくなる。iOS Safari は :hover をタップ後も保持するため、
+   押した直後からその状態が残る。**面は --surface のまま保ち**、hover の手掛かりは枠色で示す
+   （ここを --bg にすると上書きの意味が無くなる）。 */
 .scroll-top:hover {
-  background: var(--bg);
+  background: var(--surface);
   border-color: var(--primary-border);
 }
 /* 上向き矢印はアイコン正本（外部）に無いため、既存概念 expand（chevronDown）を回転して使う。 */

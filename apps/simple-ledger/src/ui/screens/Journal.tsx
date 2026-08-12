@@ -11,6 +11,7 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { SearchInput, SortControls } from '../ListSearchSort';
+import { applySort, matchesQuery } from '../listQuery';
 import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import { AdjustmentEditSheet } from '../AdjustmentSheet';
@@ -169,34 +170,32 @@ export function Journal({
   }, [ledger, expandTo, today]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
     return source.filter((e) => {
       if (accountFilterId && !e.lines.some((l) => l.accountId === accountFilterId)) return false;
       if (normalExpenseOnly && !isNormalExpenseEntry(e, map)) return false;
       if (tagFilter && !entryHasTag(e, tagFilter)) return false;
       if (from && e.date < from) return false;
       if (to && e.date > to) return false;
-      if (q) {
-        // 検索対象 = 摘要・メモ + 借方/貸方の勘定科目名（「食費」で検索 → 食費が絡む仕訳が出る）。
-        const accountNames = e.lines.map((l) => map.get(l.accountId)?.name ?? '').join(' ');
-        const hay = `${e.description} ${e.memo ?? ''} ${accountNames}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
+      // 検索対象 = 摘要・メモ + 借方/貸方の勘定科目名（「食費」で検索 → 食費が絡む仕訳が出る）。
+      // 正規化は listQuery.matchesQuery が唯一の正本（毎月のもの画面と同じ規則）。
+      const accountNames = e.lines.map((l) => map.get(l.accountId)?.name ?? '').join(' ');
+      return matchesQuery([e.description, e.memo, accountNames], query);
     });
   }, [source, query, from, to, accountFilterId, normalExpenseOnly, tagFilter, map]);
 
   // 表示専用の並び替え（C-4）。filtered は基準順（日付降順・同日は登録の新しい順・同時刻は
   // id 昇順）なので、安定ソートにより同値（同日・同額）の並びは必ず基準順を保つ。
+  // 既定（日付降順）は applySort が compare=null を素通しする＝基準順そのもの。
   const sorted = useMemo(() => {
-    if (sortKey === 'date' && sortDirection === 'desc') return filtered; // 既定 = 基準順そのもの
     const direction = sortDirection === 'asc' ? 1 : -1;
-    return [...filtered].sort((a, b) => {
-      if (sortKey === 'date') {
-        return a.date < b.date ? -direction : a.date > b.date ? direction : 0;
-      }
-      return (entryAmount(a) - entryAmount(b)) * direction;
-    });
+    const compare =
+      sortKey === 'date' && sortDirection === 'desc'
+        ? null
+        : sortKey === 'date'
+          ? (a: JournalEntry, b: JournalEntry) =>
+              a.date < b.date ? -direction : a.date > b.date ? direction : 0
+          : (a: JournalEntry, b: JournalEntry) => (entryAmount(a) - entryAmount(b)) * direction;
+    return applySort(filtered, compare);
   }, [filtered, sortKey, sortDirection]);
 
   // 抽出結果の件数と合計（C-3）。対象 = いま表示している行の集合そのもの（sorted は filtered の

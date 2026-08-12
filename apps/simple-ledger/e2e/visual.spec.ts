@@ -51,9 +51,9 @@ for (const vp of VIEWPORTS) {
       fullPage: true,
     });
 
-    // 額縁（収支 + 財政状態の 6 枠）が sticky で固定される（実ユーズ④）。
-    // fixture の高さに依存しない機械検証 = computed style。下端スクロール後の
-    // toBeInViewport は、スクロールできない高さでも成立する（黙って skip しない）。
+    // 額縁の宣言（スクロール量に依存しない検証）。実際に流して固定されることは
+    // 専用テスト「ホームの額縁は…」で確認する（この 3 ビューポートループは仕訳 1 件で
+    // スクロールしないため、ここで toBeInViewport を見ても常に真になる = 偽緑）。
     const frameStyle = await page.locator(ui('dashboard.frame')).evaluate((el) => {
       const cs = getComputedStyle(el);
       return { position: cs.position, top: cs.top };
@@ -62,10 +62,6 @@ for (const vp of VIEWPORTS) {
     expect(frameStyle.top, `dashboard frame top ${vp.name}`).toBe('57px');
     const viewAllBox = await page.locator(ui('dashboard.journal.openAll')).boundingBox();
     expect(viewAllBox?.height ?? 0, `すべて見る 44px ${vp.name}`).toBeGreaterThanOrEqual(44);
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await expect(page.locator(ui('dashboard.stat.revenue'))).toBeInViewport();
-    await expect(page.locator(ui('dashboard.stat.assets'))).toBeInViewport();
-    await page.evaluate(() => window.scrollTo(0, 0));
 
     // 仕訳一覧（ホームの「すべて表示」から）
     await page.locator(ui('dashboard.journal.openAll')).click();
@@ -181,4 +177,130 @@ test('タイムラインは 390px でページを横にはみ出さず、表示�
     path: 'test-results/screenshots/ledger-timeline-mobile-390x844.png',
     fullPage: true,
   });
+});
+
+/**
+ * 当日の支出を n 件登録する（ホームを実際にスクロールさせるため）。
+ * 保存トーストは画面下端の記帳バーに重なり次のクリックを遮るので、都度タップして閉じる。
+ */
+async function seedTodayExpenses(page: Page, n: number) {
+  const toast = page.locator(`${ui('toast')} .toast`);
+  for (let i = 0; i < n; i++) {
+    if (await toast.first().isVisible()) {
+      await toast.first().click();
+      await expect(toast).toHaveCount(0);
+    }
+    await page.locator(ui('dashboard.entry.expense')).click();
+    await page.locator(ui('journal.entry.item')).fill(`スクロール確認${i}`);
+    await page.locator(ui('journal.entry.amount')).fill(String(1000 + i));
+    await page
+      .locator(`${ui('journal.entry.flow.source')} label.chip`)
+      .first()
+      .click();
+    await page
+      .locator(`${ui('journal.entry.flow.destination')} label.chip`)
+      .first()
+      .click();
+    await page.locator(ui('journal.entry.save')).click();
+    await expect(page.locator(ui('journal.entry.save'))).toBeHidden();
+  }
+}
+
+test('ホームの額縁は 6 枠を sticky 固定し、仕訳だけがスクロールする (375x667)', async ({
+  page,
+}) => {
+  // 実機相当の狭い画面。ここで固定部が仕訳を潰さないことまで見る。
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
+  await page.goto('./?fixture=sample');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+
+  await seedTodayExpenses(page, 10);
+
+  const frame = page.locator(ui('dashboard.frame'));
+  const STATS = [
+    'dashboard.stat.revenue',
+    'dashboard.stat.expense',
+    'dashboard.stat.netIncome',
+    'dashboard.stat.assets',
+    'dashboard.stat.liabilities',
+    'dashboard.stat.netAssets',
+  ] as const;
+
+  // スクロール前は「自然位置」（sticky はしきい値に達するまで貼り付かない）。
+  // app-main の padding ぶんヘッダーより下にあるので 57px ちょうどではなく、57px 以上。
+  const topBefore = await frame.evaluate((el) => Math.round(el.getBoundingClientRect().top));
+  expect(topBefore, 'スクロール前の額縁上端はヘッダー下').toBeGreaterThanOrEqual(57);
+
+  // **実際にスクロールしたことを必ず確認する**（ここを省くと以降の assert が偽緑になる）。
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  const scrollY = await page.evaluate(() => window.scrollY);
+  expect(
+    scrollY,
+    '仕訳を 10 件入れてもホームがスクロールしない = 検証が成立しない',
+  ).toBeGreaterThan(0);
+
+  // スクロール後は 57px（= ヘッダー実高）へ貼り付き、6 枠すべてが見えている。
+  const topAfter = await frame.evaluate((el) => Math.round(el.getBoundingClientRect().top));
+  expect(topAfter, 'スクロール後の額縁上端 = ヘッダー実高に貼り付く').toBe(57);
+  expect(topAfter, '自然位置から貼り付き位置へ動いた（= sticky が効いた）').toBeLessThan(topBefore);
+  for (const stat of STATS) {
+    await expect(page.locator(ui(stat)), `${stat} がスクロール後も見えている`).toBeInViewport();
+  }
+
+  // 仕訳の方は流れている（先頭行が額縁の下へ隠れる）。
+  const firstRowTop = await page
+    .locator(`${ui('dashboard.journal.preview')} button.list__item`)
+    .first()
+    .evaluate((el) => el.getBoundingClientRect().top);
+  expect(firstRowTop, '仕訳の先頭行はスクロールで上へ流れる').toBeLessThan(57);
+
+  await page.screenshot({
+    path: 'test-results/screenshots/ledger-dashboard-sticky-375x667.png',
+  });
+});
+
+test('一番上へ移動ボタンは実ブラウザで出現し、押すと先頭へ戻る (375x667)', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
+  await page.goto('./?fixture=sample');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+
+  // 縦に長い画面（勘定科目）へ移動する。
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.accounts')).click();
+  await expect(page.locator(ui('accounts.view'))).toBeVisible();
+
+  const button = page.getByRole('button', { name: '一番上へ移動' });
+  await expect(button, 'しきい値以下では存在しない').toHaveCount(0);
+
+  await page.evaluate(() => window.scrollTo(0, 401));
+  expect(await page.evaluate(() => window.scrollY), '401px スクロールできる高さがある').toBe(401);
+  await expect(button, '401px 超で出現する').toBeVisible();
+
+  // hover しても面がページ背景へ落ちない（iOS は hover をタップ後も保持する）。
+  const surface = await page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue('--surface').trim(),
+  );
+  await button.hover();
+  const hovered = await button.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const surfaceRgb = await page.evaluate((c) => {
+    const probe = document.createElement('span');
+    probe.style.color = c;
+    document.body.appendChild(probe);
+    const v = getComputedStyle(probe).color;
+    probe.remove();
+    return v;
+  }, surface);
+  expect(hovered, 'hover 時も --surface のまま').toBe(surfaceRgb);
+
+  await button.click();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+
+  // 画面を切り替えたらスクロール位置は先頭へ戻る（③④の共通前提）。
+  await page.evaluate(() => window.scrollTo(0, 401));
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.cashflow')).click();
+  await expect(page.locator(ui('cashflow.view'))).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
 });

@@ -359,6 +359,12 @@ export function Allocations({
             }
             showDirection={sort.key !== 'default'}
           />
+          {/* 絞り込み結果を読み上げる（検索は視覚的にしか結果が分からないため）。 */}
+          <p className="sr-only" role="status" data-ui={UI.allocations.searchCount}>
+            {query === ''
+              ? ''
+              : t('monthly.searchCount', { rules: rules.length, items: items.length })}
+          </p>
         </>
       ) : null}
 
@@ -1067,12 +1073,15 @@ function RecurringRuleSheet({
             onChange={(v) => setEveryText(v.replace(/[^\d]/g, ''))}
             dataUi={UI.allocations.recurringEvery}
           />
-          {firstPosting !== null ? (
-            <div className="kv" data-ui={UI.allocations.recurringFirstPosting}>
-              <span className="muted">{t('recurring.firstPosting')}</span>
-              <span>{firstPosting}</span>
-            </div>
-          ) : null}
+          {/* 基準日・周期・開始日を変えると値が変わるので、出現と変更を読み上げる（polite）。 */}
+          <div className="kv" role="status" data-ui={UI.allocations.recurringFirstPosting}>
+            {firstPosting !== null ? (
+              <>
+                <span className="muted">{t('recurring.firstPosting')}</span>
+                <span>{firstPosting}</span>
+              </>
+            ) : null}
+          </div>
           <TextInput
             label={t('recurring.ruleStartDate')}
             type="date"

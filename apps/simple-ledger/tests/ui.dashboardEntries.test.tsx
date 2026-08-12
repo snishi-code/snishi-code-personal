@@ -158,3 +158,48 @@ describe('ホームの仕訳一覧', () => {
     }
   });
 });
+
+describe('ホームのアクセシビリティ（Codex 監査 2026-08-12 対応）', () => {
+  it('6 枠の accessible name に金額が含まれる（aria-label が子の金額を上書きしない）', async () => {
+    await seedEntries(1);
+    render(dashboard(MARCH));
+    await waitFor(() => expect(rowCount()).toBe(1));
+    const revenue = document.querySelector(`[data-ui="${UI.dashboard.statRevenue}"]`)!;
+    const label = revenue.getAttribute('aria-label') ?? '';
+    // 名称・金額・操作の 3 つが読み上げられる。
+    expect(label).toContain('収入');
+    expect(label).toContain('内訳を開く');
+    expect(label).toMatch(/\d/);
+    // 表示と読み上げが食い違わない（Money と同じ文字列）。
+    expect(label).toContain((revenue.querySelector('.stat__value')?.textContent ?? '').trim());
+  });
+
+  it('「さらに表示」の最終ページでフォーカスが body へ落ちず、最初の追加行へ移る', async () => {
+    await seedEntries(51);
+    render(dashboard(MARCH));
+    await waitFor(() => expect(rowCount()).toBe(50));
+    fireEvent.click(moreButton()!);
+    await waitFor(() => expect(rowCount()).toBe(51));
+    expect(moreButton()).toBeNull();
+    await waitFor(() => {
+      const rows = document.querySelectorAll(
+        `[data-ui="${UI.dashboard.journalPreview}"] button.list__item`,
+      );
+      // 51 件目（index 50）= 最初に増えた行。
+      expect(document.activeElement).toBe(rows[50]);
+    });
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('表示件数が polite status で読み上げられる', async () => {
+    await seedEntries(51);
+    render(dashboard(MARCH));
+    await waitFor(() => expect(rowCount()).toBe(50));
+    const status = document.querySelector(`[data-ui="${UI.dashboard.journalCount}"]`)!;
+    expect(status).toHaveAttribute('role', 'status');
+    expect(status.textContent).toContain('50');
+    expect(status.textContent).toContain('51');
+    fireEvent.click(moreButton()!);
+    await waitFor(() => expect(status.textContent).toContain('51 件中 51 件'));
+  });
+});

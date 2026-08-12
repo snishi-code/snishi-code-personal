@@ -57,9 +57,15 @@ function setValue(dataUi: string, value: string) {
   fireEvent.change(document.querySelector(`[data-ui="${dataUi}"]`)!, { target: { value } });
 }
 
-function previewText(): string | null {
+/**
+ * 「初回の起票」の中身。行の器（role="status" の live region）は**常に DOM に居る**
+ * （live region は内容が変わる前から存在していないと読み上げられない）。
+ * 「出ていない」= 中身が空、で判定する。
+ */
+function previewText(): string {
   const row = document.querySelector(`[data-ui="${UI.allocations.recurringFirstPosting}"]`);
-  return row ? (row.textContent ?? '') : null;
+  expect(row, 'プレビューの live region は常設であること').not.toBeNull();
+  return (row?.textContent ?? '').trim();
 }
 
 describe('定期ルールシートのレイアウト', () => {
@@ -112,15 +118,15 @@ describe('定期ルールシートのレイアウト', () => {
     setValue(UI.allocations.recurringStartDate, '2026-06-01');
     expect(previewText()).toContain('2026-07-10');
 
-    // 終了点が初回起票より前なら「起票されない」＝行ごと消える（fail-closed）。
+    // 終了点が初回起票より前なら「起票されない」＝中身が消える（fail-closed）。
     setValue(UI.allocations.recurringEndDate, '2026-07-01');
-    expect(previewText()).toBeNull();
+    expect(previewText()).toBe('');
   });
 
-  it('周期が空の間はプレビュー行を描画しない', async () => {
+  it('周期が空の間はプレビューの中身を出さない', async () => {
     await openRuleSheet();
-    expect(previewText()).not.toBeNull();
+    expect(previewText()).not.toBe('');
     setValue(UI.allocations.recurringEvery, '');
-    expect(previewText()).toBeNull();
+    expect(previewText()).toBe('');
   });
 });

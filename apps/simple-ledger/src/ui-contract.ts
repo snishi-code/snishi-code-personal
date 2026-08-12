@@ -39,6 +39,7 @@ export const UI = {
     journalPreview: 'dashboard.journal.preview',
     journalOpenAll: 'dashboard.journal.openAll',
     journalMore: 'dashboard.journal.more',
+    journalCount: 'dashboard.journal.count',
   },
   // 収入の内訳
   incomeBreakdown: {
@@ -209,6 +210,7 @@ export const UI = {
     view: 'allocations.view',
     search: 'allocations.search',
     searchEmpty: 'allocations.searchEmpty',
+    searchCount: 'allocations.searchCount',
     sortDefault: 'allocations.sort.default',
     sortByAmount: 'allocations.sort.amount',
     sortByName: 'allocations.sort.name',

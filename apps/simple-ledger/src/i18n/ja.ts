@@ -56,7 +56,8 @@ export const ja = {
   'dashboard.netAssets': '純資産',
   'dashboard.viewAll': 'すべて見る',
   'dashboard.moreEntries': 'さらに表示（残り {count} 件）',
-  'dashboard.statDetail': '{label}の内訳を開く',
+  'dashboard.shownCount': '{total} 件中 {shown} 件を表示中',
+  'dashboard.statDetail': '{label} {amount}、内訳を開く',
   'dashboard.noMonthEntries': '仕訳はまだありません。',
   'dashboard.entriesOf': '仕訳',
   'dashboard.flowOf': '収支',
@@ -688,6 +689,7 @@ export const ja = {
   'monthly.pick.asset': 'いま持っているものを登録',
   'monthly.searchPlaceholder': '項目名・科目名で検索',
   'monthly.searchEmpty': '該当する項目がありません。',
+  'monthly.searchCount': 'くり返し記帳 {rules} 件・継続コスト資産 {items} 件',
   'monthly.sortDefault': '標準',
 
   'recurring.sectionTitle': 'くり返し記帳',
