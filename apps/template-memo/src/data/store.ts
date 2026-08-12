@@ -129,6 +129,15 @@ export interface HrStore {
   };
   replaceAll(data: ReplaceAllData): Promise<void>;
   wipeAll(): Promise<void>;
+  /**
+   * タグ名の改名 / 削除を**全対象**（アクティブビュー外・アーカイブ済みを含む）へ適用する。
+   * newName が null なら削除。settings と patients を 1 トランザクションで書く。
+   *
+   * 定義 (settings.tags) 側の更新は呼び出し側が済ませてから呼ぶ（重複判定を持つため）。
+   * saveActive はアクティブビューの対象しか書かないので、この経路を通さないと他グループの
+   * 対象に旧名が残り、定義に無い「孤児タグ」になる。
+   */
+  rewriteTagAcrossPatients(oldName: string, newName: string | null): Promise<void>;
   // ── 保存・通知 ──
   setDataChangeHandler(fn: ((ev: StoreChangeEvent) => void) | null): void;
   scheduleSave(): void;
@@ -716,6 +725,30 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
       await seedDefaults();
       const view = activeViewId();
       if (view) pointers.set(PK_ACTIVE_PLACE, view);
+      rebuildLive();
+      emit({ type: 'workspace', workspaceId: activeViewId() });
+    },
+    async rewriteTagAcrossPatients(oldName, newName) {
+      // 他の変更系 API と同じ不変条件: 構造を変える前に現ビューの未保存分を確定させる。
+      await this.persistActiveOrThrow();
+      const touched: Patient[] = [];
+      for (const p of allPatients) {
+        if (!Array.isArray(p.tags) || !p.tags.includes(oldName)) continue;
+        const next =
+          newName === null
+            ? p.tags.filter((tg) => tg !== oldName)
+            : p.tags.map((tg) => (tg === oldName ? newName : tg));
+        // 改名先が既に付いている対象では重複するので畳む。
+        p.tags = [...new Set(next)];
+        touched.push(p);
+      }
+      settings.updatedAt = now();
+      // 定義 (settings) と対象 (patients) を 1 tx で書く。片方だけ残ると孤児タグが生まれる。
+      await db.runWrite([STORE_PATIENTS, STORE_SETTINGS], (tx) => {
+        const os = tx.objectStore(STORE_PATIENTS);
+        for (const p of touched) os.put(p);
+        tx.objectStore(STORE_SETTINGS).put(settings);
+      });
       rebuildLive();
       emit({ type: 'workspace', workspaceId: activeViewId() });
     },

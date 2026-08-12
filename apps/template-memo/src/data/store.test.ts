@@ -34,6 +34,7 @@ import {
 } from './store';
 import { countActivePatients, createHrSnapshots, REASON } from './snapshots';
 import { applyRoundStartClear } from '../domain/clearPolicy';
+import { deleteTagAt, renameTagAt } from '../ui/tags';
 import { isPatientEmpty, makeDefaultPatient, normalizePatientArray } from '../domain/normalize';
 import type { Format, Frame, TemplateDef } from '../domain/entities';
 import type { TemplatePresetBundle } from '../domain/presets';
@@ -910,6 +911,76 @@ describe('place（グループ）CRUD', () => {
 // ============================
 // normalizePatientArray（store 読み出しの whitelist）
 // ============================
+
+describe('タグの改名・削除は全対象へ波及する', () => {
+  /** 別グループとアーカイブ済みにも同じタグを付けた状態を作る。 */
+  async function withTaggedPatientsEverywhere(store: HrStore) {
+    const home = store.listPlaces()[0]!;
+    const other = await store.addPlace('グループ2');
+
+    const here = await store.createPatientInActivePlace('現ビュー');
+    livePatient(store, here).tags = ['対象タグ', '別タグ'];
+
+    await store.switchPlace(other.placeId);
+    const away = await store.createPatientInActivePlace('別グループ');
+    livePatient(store, away).tags = ['対象タグ'];
+
+    const archived = await store.createPatientInActivePlace('アーカイブ予定');
+    livePatient(store, archived).tags = ['対象タグ'];
+    await store.persistActiveOrThrow();
+    await store.archivePatient(archived);
+
+    await store.switchPlace(home.placeId);
+    return { home, here, away, archived };
+  }
+
+  function tagsOf(store: HrStore, pid: string): string[] {
+    return store.listAllPatients().find((p) => p.pid === pid)?.tags ?? [];
+  }
+
+  it('改名は他グループ・アーカイブ済みの対象にも及び、再起動後も残る', async () => {
+    const { db, store } = await setup();
+    const { here, away, archived } = await withTaggedPatientsEverywhere(store);
+    store.getSettings().tags = [{ name: '対象タグ', color: 'blue' }];
+
+    expect(await renameTagAt(store, 0, '改名後')).toBe(true);
+
+    const store2 = await reopen(db);
+    expect(tagsOf(store2, here).sort()).toEqual(['別タグ', '改名後']);
+    expect(tagsOf(store2, away)).toEqual(['改名後']); // アクティブビュー外
+    expect(tagsOf(store2, archived)).toEqual(['改名後']); // アーカイブ済み
+    expect(store2.getSettings().tags.map((t) => t.name)).toEqual(['改名後']);
+  });
+
+  it('削除は他グループ・アーカイブ済みの対象からも外れ、再起動後も残る', async () => {
+    const { db, store } = await setup();
+    const { here, away, archived } = await withTaggedPatientsEverywhere(store);
+    store.getSettings().tags = [{ name: '対象タグ', color: 'amber' }];
+
+    await deleteTagAt(store, 0);
+
+    const store2 = await reopen(db);
+    expect(tagsOf(store2, here)).toEqual(['別タグ']);
+    expect(tagsOf(store2, away)).toEqual([]);
+    expect(tagsOf(store2, archived)).toEqual([]);
+    expect(store2.getSettings().tags).toEqual([]);
+  });
+
+  it('改名先が既に付いている対象では重複しない', async () => {
+    const { db, store } = await setup();
+    const pid = await store.createPatientInActivePlace('両方持ち');
+    livePatient(store, pid).tags = ['旧', '新'];
+    store.getSettings().tags = [
+      { name: '旧', color: 'blue' },
+      { name: '別', color: 'blue' },
+    ];
+
+    await store.rewriteTagAcrossPatients('旧', '新');
+
+    const store2 = await reopen(db);
+    expect(tagsOf(store2, pid)).toEqual(['新']);
+  });
+});
 
 describe('normalizePatientArray の sectionTexts 正規化', () => {
   it('string 値のエントリだけを残す（非文字列・配列・入れ子は捨てる）', () => {

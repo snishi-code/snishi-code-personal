@@ -76,12 +76,18 @@ function TagManagerSection({ runtime }: { runtime: AppRuntime }) {
 
   const tags = Array.isArray(settings.tags) ? settings.tags : [];
 
-  function commitRename(idx: number): void {
+  // 改名・削除は全対象（他グループ・アーカイブ済みを含む）へ波及させるため await する。
+  async function commitRename(idx: number): Promise<void> {
     const next = renameDraft.trim();
     setRenamingIdx(null);
     if (!next || next === tags[idx]?.name) return;
-    if (!renameTagAt(store, idx, next)) {
-      toast.show(s.settings.tag.name.duplicate, 'error');
+    try {
+      if (!(await renameTagAt(store, idx, next))) {
+        toast.show(s.settings.tag.name.duplicate, 'error');
+        return;
+      }
+    } catch (e) {
+      toast.show(errorText(e, s.toast.saveFailed), 'error');
       return;
     }
     runtime.bump();
@@ -108,11 +114,11 @@ function TagManagerSection({ runtime }: { runtime: AppRuntime }) {
                   // 明示的な編集タップ後の単一入力 (中央ルールの明示経路)
                   autoFocus
                   onChange={(e) => setRenameDraft(e.target.value)}
-                  onBlur={() => commitRename(idx)}
+                  onBlur={() => void commitRename(idx)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      commitRename(idx);
+                      void commitRename(idx);
                     } else if (e.key === 'Escape') {
                       e.preventDefault();
                       setRenamingIdx(null);
@@ -182,8 +188,9 @@ function TagManagerSection({ runtime }: { runtime: AppRuntime }) {
           onConfirm={() => {
             const idx = deleteIdx;
             setDeleteIdx(null);
-            deleteTagAt(store, idx);
-            runtime.bump();
+            void deleteTagAt(store, idx)
+              .then(() => runtime.bump())
+              .catch((e: unknown) => toast.show(errorText(e, s.toast.saveFailed), 'error'));
           }}
         />
       ) : null}
