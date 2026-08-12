@@ -55,6 +55,7 @@ export const ja = {
   'dashboard.liabilities': '負債',
   'dashboard.netAssets': '純資産',
   'dashboard.viewAll': 'すべて見る',
+  'dashboard.moreEntries': 'さらに表示（残り {count} 件）',
   'dashboard.statDetail': '{label}の内訳を開く',
   'dashboard.noMonthEntries': '仕訳はまだありません。',
   'dashboard.entriesOf': '仕訳',

@@ -51,6 +51,22 @@ for (const vp of VIEWPORTS) {
       fullPage: true,
     });
 
+    // 額縁（収支 + 財政状態の 6 枠）が sticky で固定される（実ユーズ④）。
+    // fixture の高さに依存しない機械検証 = computed style。下端スクロール後の
+    // toBeInViewport は、スクロールできない高さでも成立する（黙って skip しない）。
+    const frameStyle = await page.locator(ui('dashboard.frame')).evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { position: cs.position, top: cs.top };
+    });
+    expect(frameStyle.position, `dashboard frame sticky ${vp.name}`).toBe('sticky');
+    expect(frameStyle.top, `dashboard frame top ${vp.name}`).toBe('57px');
+    const viewAllBox = await page.locator(ui('dashboard.journal.openAll')).boundingBox();
+    expect(viewAllBox?.height ?? 0, `すべて見る 44px ${vp.name}`).toBeGreaterThanOrEqual(44);
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await expect(page.locator(ui('dashboard.stat.revenue'))).toBeInViewport();
+    await expect(page.locator(ui('dashboard.stat.assets'))).toBeInViewport();
+    await page.evaluate(() => window.scrollTo(0, 0));
+
     // 仕訳一覧（ホームの「すべて表示」から）
     await page.locator(ui('dashboard.journal.openAll')).click();
     await expect(page.locator(ui('journal.view'))).toBeVisible();
@@ -115,6 +131,20 @@ for (const vp of VIEWPORTS) {
       path: `test-results/screenshots/ledger-yearly-overview-${vp.name}.png`,
       fullPage: true,
     });
+
+    // 毎月のもの → くり返し記帳シート: flat 2 列でもシート内に横スクロールが出ない（実ユーズ②）。
+    await page.locator(ui('nav.menu.button')).click();
+    await page.locator(ui('nav.allocations')).click();
+    await expect(page.locator(ui('allocations.view'))).toBeVisible();
+    await page.locator(ui('allocations.add')).click();
+    await page.locator(ui('allocations.add.chooser.rule')).click();
+    await expect(page.locator(ui('allocations.recurring.sheet'))).toBeVisible();
+    const sheetOverflow = await page
+      .locator(ui('allocations.recurring.sheet'))
+      .evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(sheetOverflow, `くり返し記帳シート横スクロール ${vp.name}`).toBeLessThanOrEqual(1);
+    await page.keyboard.press('Escape');
+    await expect(page.locator(ui('allocations.recurring.sheet'))).toBeHidden();
 
     // 設定
     await page.locator(ui('nav.menu.button')).click();

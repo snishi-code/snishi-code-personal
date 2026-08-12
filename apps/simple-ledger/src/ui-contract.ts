@@ -35,8 +35,10 @@ export const UI = {
     statLiabilities: 'dashboard.stat.liabilities',
     statNetAssets: 'dashboard.stat.netAssets',
     // 当月の仕訳プレビュー
+    frame: 'dashboard.frame',
     journalPreview: 'dashboard.journal.preview',
     journalOpenAll: 'dashboard.journal.openAll',
+    journalMore: 'dashboard.journal.more',
   },
   // 収入の内訳
   incomeBreakdown: {

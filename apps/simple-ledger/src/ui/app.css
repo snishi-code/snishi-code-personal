@@ -893,6 +893,26 @@ button.stmt-row:hover {
 }
 .dashboard {
   padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+  /* 額縁の目安高（375px 幅・金額 1 行時）。.stat__value は clamp + word-break: break-all
+     （上の .stat__value）なので桁数の多い金額が折り返すと 1 行ぶん高くなり、この値は不足する。
+     ズレの影響はキーボードでフォーカスした仕訳行のスクロール位置だけ。 */
+  --home-frame-h: 240px;
+}
+/* ホームの額縁: 収支 + 財政状態の 6 枠を sticky 固定し、下の仕訳だけが流れる（実ユーズ④）。
+   z は同一スクロール内の前後関係のみ（yearly-overview__label と同じ生数値運用）。
+   border-bottom は app-main の左右 padding ぶん全幅より狭い（ヘッダー境界線と幅が違う）が、
+   額縁とその下の行の区切りとして意図的に引く。 */
+.dashboard__frame {
+  position: sticky;
+  top: var(--sticky-top);
+  z-index: 1;
+  background: var(--bg);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+/* キーボードフォーカスで仕訳行が額縁の下に隠れないよう逃がす。 */
+.dashboard__entries .list__item {
+  scroll-margin-top: calc(var(--sticky-top) + var(--home-frame-h));
 }
 .entry-type-btn {
   display: flex;

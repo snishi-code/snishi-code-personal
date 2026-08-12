@@ -1,11 +1,16 @@
 /*
  * ホーム（初期表示）。日常入力の主導線（収入/支出/振替）、期間の収支・財政状態サマリー、推移。
  */
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import type { IconName } from '@snishi/foundation/ui/Icon';
+import { Button } from '@snishi/foundation/ui/Button';
 import { useLedger } from '../../state/store';
-import { deriveBalanceSheet, deriveProfitAndLoss } from '../../domain/accounting';
+import {
+  deriveBalanceSheet,
+  deriveProfitAndLoss,
+  filterByDateRange,
+} from '../../domain/accounting';
 import { livingCostBreakdownForRange } from '../../domain/livingCost';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
 import { displayEntriesForAsOf } from '../../domain/reportEntries';
@@ -21,6 +26,9 @@ import type { JournalEntry } from '../../domain/types';
 import type { Screen } from '../navigation';
 import type { FormMode } from '../entryModes';
 import type { MessageKey } from '../../i18n';
+
+/** ホームの仕訳一覧の 1 ページぶん（「さらに表示」で足す刻み）。 */
+const HOME_ENTRY_PAGE = 50;
 
 const ENTRY_TYPES: { mode: FormMode; labelKey: MessageKey; icon: IconName; ui: string }[] = [
   { mode: 'income', labelKey: 'entry.type.income', icon: 'income', ui: UI.dashboard.income },
@@ -54,8 +62,20 @@ export function Dashboard({
   const range = basis.flowRange;
   // Journal へは全期間のときクランプ済み range を渡さない（「未来も表示」トグルを殺さないため）。
   const journalFilter = period.mode === 'all' ? {} : range;
-  const inRange = (e: JournalEntry) => (!range.from || e.date >= range.from) && e.date <= range.to;
-  const periodEntries = (ledger?.journalEntries ?? []).filter(inRange).slice(0, 5);
+  // 期間内の保存される仕訳（導出行は混ぜない = 自分が付けた記録が埋もれない）。
+  // 並び順は loadLedger の既定（日付降順 → createdAt 降順）に乗る。件数上限は撤廃し、
+  // 「さらに表示」で HOME_ENTRY_PAGE 件ずつ開く（実ユーズ④・作者決定 2026-08-12:
+  // 月内ぶんをその場でスクロールして読めればよく、月をまたぐ遡りは「すべて見る」のまま）。
+  const periodEntries = useMemo(
+    () => filterByDateRange(ledger?.journalEntries ?? [], range.from, range.to),
+    [ledger, range],
+  );
+  // 表示日（期間）を変えたら表示件数を初期化する（effect を使わない render 中の派生調整）。
+  const rangeKey = `${range.from ?? ''}..${range.to}`;
+  const [shown, setShown] = useState({ key: rangeKey, count: HOME_ENTRY_PAGE });
+  if (shown.key !== rangeKey) setShown({ key: rangeKey, count: HOME_ENTRY_PAGE });
+  const visibleEntries = periodEntries.slice(0, shown.count);
+  const remaining = periodEntries.length - visibleEntries.length;
   const label = periodLabel(period);
 
   const { pl, bs, asOf, monthlyCost, normalExpense } = useMemo(() => {
@@ -83,58 +103,62 @@ export function Dashboard({
           {t('dashboard.title')}
         </h1>
 
-        <p className="section-label">{t('dashboard.flowOf', { label })}</p>
-        <div className="stat-grid">
-          <StatButton
-            label={t('dashboard.revenue')}
-            onClick={() => onNavigate('incomeBreakdown')}
-            dataUi={UI.dashboard.statRevenue}
-          >
-            <Money amount={pl.totalRevenue} currency={currency} />
-          </StatButton>
-          <StatButton
-            label={t('dashboard.expense')}
-            onClick={() => onNavigate('expenseBreakdown')}
-            dataUi={UI.dashboard.statExpense}
-          >
-            <Money amount={normalExpense + monthlyCost} currency={currency} />
-          </StatButton>
-          <StatButton
-            label={t('dashboard.netIncome')}
-            onClick={() => onNavigate('netIncome')}
-            dataUi={UI.dashboard.statNetIncome}
-          >
-            <Money
-              amount={pl.totalRevenue - (normalExpense + monthlyCost)}
-              currency={currency}
-              signed
-            />
-          </StatButton>
-        </div>
+        {/* 額縁: 収支 + 財政状態の 6 枠を sticky 固定し、下の仕訳だけが流れる
+            （実ユーズ④・作者決定 2026-08-12「6枠を固定」）。 */}
+        <div className="dashboard__frame" data-ui={UI.dashboard.frame}>
+          <p className="section-label">{t('dashboard.flowOf', { label })}</p>
+          <div className="stat-grid">
+            <StatButton
+              label={t('dashboard.revenue')}
+              onClick={() => onNavigate('incomeBreakdown')}
+              dataUi={UI.dashboard.statRevenue}
+            >
+              <Money amount={pl.totalRevenue} currency={currency} />
+            </StatButton>
+            <StatButton
+              label={t('dashboard.expense')}
+              onClick={() => onNavigate('expenseBreakdown')}
+              dataUi={UI.dashboard.statExpense}
+            >
+              <Money amount={normalExpense + monthlyCost} currency={currency} />
+            </StatButton>
+            <StatButton
+              label={t('dashboard.netIncome')}
+              onClick={() => onNavigate('netIncome')}
+              dataUi={UI.dashboard.statNetIncome}
+            >
+              <Money
+                amount={pl.totalRevenue - (normalExpense + monthlyCost)}
+                currency={currency}
+                signed
+              />
+            </StatButton>
+          </div>
 
-        <p className="section-label">{t('dashboard.positionAsOf', { date: asOf })}</p>
-        <div className="stat-grid">
-          <StatButton
-            label={t('dashboard.assets')}
-            onClick={() => onNavigate('assetsBreakdown')}
-            dataUi={UI.dashboard.statAssets}
-          >
-            <Money amount={bs.totalAssets} currency={currency} />
-          </StatButton>
-          <StatButton
-            label={t('dashboard.liabilities')}
-            onClick={() => onNavigate('liabilitiesBreakdown')}
-            dataUi={UI.dashboard.statLiabilities}
-          >
-            <Money amount={bs.totalLiabilities} currency={currency} />
-          </StatButton>
-          <StatButton
-            label={t('dashboard.netAssets')}
-            onClick={() => onNavigate('netAssets')}
-            dataUi={UI.dashboard.statNetAssets}
-          >
-            <Money amount={bs.netAssets} currency={currency} signed />
-          </StatButton>
+          <p className="section-label">{t('dashboard.positionAsOf', { date: asOf })}</p>
+          <div className="stat-grid">
+            <StatButton
+              label={t('dashboard.assets')}
+              onClick={() => onNavigate('assetsBreakdown')}
+              dataUi={UI.dashboard.statAssets}
+            >
+              <Money amount={bs.totalAssets} currency={currency} />
+            </StatButton>
+            <StatButton
+              label={t('dashboard.liabilities')}
+              onClick={() => onNavigate('liabilitiesBreakdown')}
+              dataUi={UI.dashboard.statLiabilities}
+            >
+              <Money amount={bs.totalLiabilities} currency={currency} />
+            </StatButton>
+            <StatButton
+              label={t('dashboard.netAssets')}
+              onClick={() => onNavigate('netAssets')}
+              dataUi={UI.dashboard.statNetAssets}
+            >
+              <Money amount={bs.netAssets} currency={currency} signed />
+            </StatButton>
+          </div>
         </div>
 
         {trend ? (
@@ -179,7 +203,6 @@ export function Dashboard({
             <button
               type="button"
               className="btn btn--ghost"
-              style={{ minHeight: 32 }}
               onClick={() => onOpenJournal(journalFilter)}
               data-ui={UI.dashboard.journalOpenAll}
             >
@@ -191,20 +214,33 @@ export function Dashboard({
         {periodEntries.length === 0 ? (
           <div className="card card--pad muted">{t('dashboard.noMonthEntries')}</div>
         ) : (
-          <ul className="card list" data-ui={UI.dashboard.journalPreview}>
-            {periodEntries.map((entry) => {
-              const generated = !!entry.metadata?.monthlyCostId;
-              return (
-                <EntryListItem
-                  key={entry.id}
-                  entry={entry}
-                  accounts={ledger?.accounts ?? []}
-                  currency={currency}
-                  onClick={() => (generated ? onOpenJournal(journalFilter) : onEditEntry(entry))}
-                />
-              );
-            })}
-          </ul>
+          <>
+            <ul className="card list dashboard__entries" data-ui={UI.dashboard.journalPreview}>
+              {visibleEntries.map((entry) => {
+                const generated = !!entry.metadata?.monthlyCostId;
+                return (
+                  <EntryListItem
+                    key={entry.id}
+                    entry={entry}
+                    accounts={ledger?.accounts ?? []}
+                    currency={currency}
+                    onClick={() => (generated ? onOpenJournal(journalFilter) : onEditEntry(entry))}
+                  />
+                );
+              })}
+            </ul>
+            {remaining > 0 ? (
+              // 末尾追記のみ（scrollTo を呼ばない = 既に表示中の行は動かない）。
+              <Button
+                variant="ghost"
+                block
+                dataUi={UI.dashboard.journalMore}
+                onClick={() => setShown((s) => ({ ...s, count: s.count + HOME_ENTRY_PAGE }))}
+              >
+                {t('dashboard.moreEntries', { count: remaining })}
+              </Button>
+            ) : null}
+          </>
         )}
       </section>
 
