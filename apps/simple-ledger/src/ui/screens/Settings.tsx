@@ -20,6 +20,7 @@ import { APP_ID } from '../../domain/constants';
 import { MANAGEMENT_ITEMS, type Screen } from '../navigation';
 import type { ImportOutcome } from '../../data/exportImport';
 import type { Settings as LedgerSettings, Snapshot } from '../../domain/types';
+import { ScrollTopButton } from '../ScrollTopButton';
 
 const APP_VERSION = '0.1.0';
 
@@ -379,6 +380,7 @@ export function Settings({
           }}
         />
       ) : null}
+      <ScrollTopButton />
     </section>
   );
 }

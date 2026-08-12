@@ -25,6 +25,7 @@ import { UI } from '../../ui-contract';
 import { TIMELINE_ACCOUNT_BOXES, timelineBoxForAccount, type AccountAccent } from '../accountBoxes';
 import type { Account, MonthlyCostItem, RecurringRule } from '../../domain/types';
 import type { ReportPeriod } from '../../domain/reportPeriod';
+import { ScrollTopButton } from '../ScrollTopButton';
 
 export type { TimelineZoom } from '../../domain/timelineCalendar';
 
@@ -1254,6 +1255,7 @@ export function TimelineCalendar({
         onVisibleRangeChange={updateVisibleRange}
         focusDate={center}
       />
+      <ScrollTopButton />
     </section>
   );
 }

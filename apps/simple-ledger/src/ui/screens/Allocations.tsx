@@ -63,6 +63,7 @@ import { errorText, t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
 import { UI } from '../../ui-contract';
 import type { JournalEntry, MonthlyCostItem, RecurringRule } from '../../domain/types';
+import { ScrollTopButton } from '../ScrollTopButton';
 
 /** 仕訳一覧から「この行はどこから来たか」で遷移してくるときの対象。 */
 export interface AllocationsTarget {
@@ -335,7 +336,11 @@ export function Allocations({
                 label: t('monthly.sortDefault'),
                 dataUi: UI.allocations.sortDefault,
               },
-              { key: 'amount', label: t('monthlyCost.amount'), dataUi: UI.allocations.sortByAmount },
+              {
+                key: 'amount',
+                label: t('monthlyCost.amount'),
+                dataUi: UI.allocations.sortByAmount,
+              },
               { key: 'name', label: t('monthlyCost.name'), dataUi: UI.allocations.sortByName },
             ]}
             axisValue={sort.key}
@@ -660,6 +665,7 @@ export function Allocations({
           }}
         />
       ) : null}
+      <ScrollTopButton />
     </section>
   );
 }

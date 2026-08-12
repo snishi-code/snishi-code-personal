@@ -17,6 +17,7 @@ import type { Tag } from '../../domain/types';
 import { Money } from '../money';
 import { errorText, t } from '../../i18n';
 import { UI } from '../../ui-contract';
+import { ScrollTopButton } from '../ScrollTopButton';
 
 type Period = 'month' | 'year' | 'all';
 
@@ -193,6 +194,7 @@ export function Tags() {
           }}
         />
       ) : null}
+      <ScrollTopButton />
     </section>
   );
 }

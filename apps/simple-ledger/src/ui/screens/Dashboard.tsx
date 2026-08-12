@@ -26,6 +26,7 @@ import type { JournalEntry } from '../../domain/types';
 import type { Screen } from '../navigation';
 import type { FormMode } from '../entryModes';
 import type { MessageKey } from '../../i18n';
+import { ScrollTopButton } from '../ScrollTopButton';
 
 /** ホームの仕訳一覧の 1 ページぶん（「さらに表示」で足す刻み）。 */
 const HOME_ENTRY_PAGE = 50;
@@ -242,6 +243,7 @@ export function Dashboard({
             ) : null}
           </>
         )}
+        <ScrollTopButton />
       </section>
 
       <div

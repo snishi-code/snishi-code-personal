@@ -31,6 +31,7 @@ import { t } from '../../i18n';
 import { todayLocal } from '../../util/time';
 import { UI } from '../../ui-contract';
 import { Money } from '../money';
+import { ScrollTopButton } from '../ScrollTopButton';
 
 type OverviewMode = 'year' | 'all';
 
@@ -376,6 +377,7 @@ export function YearlyOverview({ period }: { period: ReportPeriod }) {
       ) : (
         <p className="muted yearly-overview__empty">{t('yearlyOverview.noData')}</p>
       )}
+      <ScrollTopButton />
     </section>
   );
 }

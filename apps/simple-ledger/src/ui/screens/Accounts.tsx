@@ -38,6 +38,7 @@ import { periodLabel } from '../periodLabel';
 import { nowIso, todayLocal } from '../../util/time';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
+import { ScrollTopButton } from '../ScrollTopButton';
 
 export function Accounts({
   period = { mode: 'all' },
@@ -409,6 +410,7 @@ export function Accounts({
           />
         )
       ) : null}
+      <ScrollTopButton />
     </section>
   );
 }

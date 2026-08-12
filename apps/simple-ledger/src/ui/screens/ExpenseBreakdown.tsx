@@ -20,6 +20,7 @@ import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import type { Screen } from '../navigation';
 import type { JournalFilter } from './Journal';
+import { ScrollTopButton } from '../ScrollTopButton';
 
 export function ExpenseBreakdown({
   period,
@@ -147,6 +148,7 @@ export function ExpenseBreakdown({
           />
         </div>
       ) : null}
+      <ScrollTopButton />
     </section>
   );
 }

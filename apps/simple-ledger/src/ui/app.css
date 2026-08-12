@@ -946,6 +946,48 @@ button.stmt-row:hover {
   color: var(--primary-strong);
 }
 
+/* ── 一番上へ移動する浮動ボタン（ScrollTopButton） ── */
+.scroll-top {
+  position: fixed;
+  right: calc(var(--space-3) + env(safe-area-inset-right, 0px));
+  bottom: var(--scroll-top-bottom, calc(var(--space-3) + env(safe-area-inset-bottom, 0px)));
+  z-index: var(--z-float);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-pop);
+  animation: scroll-top-in 120ms ease;
+}
+/* foundation の .icon-btn:hover（特異度 0,2,0）が .scroll-top（0,1,0）に勝ち、面が --bg に
+   落ちる。iOS Safari は :hover をタップ後も保持するため、押した直後から浮いて見えなくなる。
+   hover の面をここで明示して上書きする。 */
+.scroll-top:hover {
+  background: var(--bg);
+  border-color: var(--primary-border);
+}
+/* 上向き矢印はアイコン正本（外部）に無いため、既存概念 expand（chevronDown）を回転して使う。 */
+.scroll-top__icon {
+  display: inline-flex;
+  transform: rotate(180deg);
+}
+@keyframes scroll-top-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scroll-top {
+    animation: none;
+  }
+}
+/* ホームは下部に記帳バー（.entry-bar 73px + safe-area）があるため、その上へ逃がす。 */
+.dashboard {
+  --scroll-top-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+}
+
 /* ── Badge / tag (app 固有色クラス) ── */
 .tag--teal {
   color: var(--primary-strong);

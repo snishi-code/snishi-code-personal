@@ -18,6 +18,7 @@ import { TrendChart } from '../components/TrendChart';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import type { Screen } from '../navigation';
+import { ScrollTopButton } from '../ScrollTopButton';
 
 export function NetIncome({
   period,
@@ -107,6 +108,7 @@ export function NetIncome({
           />
         </div>
       ) : null}
+      <ScrollTopButton />
     </section>
   );
 }

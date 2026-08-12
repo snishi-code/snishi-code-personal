@@ -26,6 +26,7 @@ import { Money } from '../money';
 import { TrendChart, type TrendPoint } from '../components/TrendChart';
 import { errorText, t } from '../../i18n';
 import { UI } from '../../ui-contract';
+import { ScrollTopButton } from '../ScrollTopButton';
 
 function shortDateLabel(date: string): string {
   const [, month, day] = date.split('-');
@@ -317,6 +318,7 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
           onClose={() => setRepayFor(null)}
         />
       ) : null}
+      <ScrollTopButton />
     </section>
   );
 }

@@ -27,6 +27,7 @@ import type { MessageKey } from '../../i18n';
 import type { Screen } from '../navigation';
 import type { JournalFilter } from './Journal';
 import { ACCOUNT_ACCENTS, boxByKey, type AccountAccent } from '../accountBoxes';
+import { ScrollTopButton } from '../ScrollTopButton';
 
 export type BreakdownSection = 'revenue' | 'asset' | 'liability' | 'equity';
 
@@ -363,6 +364,7 @@ export function Breakdown({
           <Icon name="chevronRight" size={16} />
         </button>
       ) : null}
+      <ScrollTopButton />
     </section>
   );
 }

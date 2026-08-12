@@ -38,6 +38,7 @@ import { tagNames } from '../tagOptions';
 import type { AllocationsTarget } from './Allocations';
 import type { Account, JournalEntry } from '../../domain/types';
 import { formatMoney } from '../../util/format';
+import { ScrollTopButton } from '../ScrollTopButton';
 
 export interface JournalFilter {
   accountId?: string;
@@ -578,6 +579,7 @@ export function Journal({
           }}
         />
       ) : null}
+      <ScrollTopButton />
     </section>
   );
 }
