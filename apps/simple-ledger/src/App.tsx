@@ -7,7 +7,7 @@
  *   requestClose 経由）→ 画面履歴 → dashboard の終了確認、の順。
  * 個別画面は Back 対応を持たない（overlay は ui/overlays.tsx のラッパーが自動登録）。
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AppHeader } from '@snishi/foundation/ui/AppHeader';
 import { ConfirmDialog as ExitConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
 import { Icon } from '@snishi/foundation/ui/Icon';
@@ -71,6 +71,14 @@ export function App() {
     isExitConfirmOpen: () => exitConfirm,
   });
   const screen = view as Screen;
+
+  // 画面を切り替えたら document スクロールを先頭へ戻す（オーバーレイの開閉では動かさない）。
+  // document スクロールは画面差し替えをまたいで残るため、長い画面（ホームの仕訳・一覧）から
+  // 遷移すると次の画面が途中位置で開いてしまうのを防ぐ。
+  useEffect(() => {
+    if (typeof window.scrollTo === 'function') window.scrollTo(0, 0);
+  }, [screen]);
+
   const go = (s: Screen) => {
     setJournalFilter(null);
     setJournalTargetEntryId(null);

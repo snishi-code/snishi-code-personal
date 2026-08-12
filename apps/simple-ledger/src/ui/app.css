@@ -5,6 +5,18 @@
  * 色値は tokens.css / app-theme.css の変数のみを参照し、ハードコードしない。
  */
 
+:root {
+  /* 画面に常駐する浮遊要素（一番上へ移動ボタン等）のレイヤ。foundation の z スケール
+     （--z-header 20 < --z-overlay 40 < --z-popup 50 < --z-toast 60）の header と overlay の
+     間に置く。foundation は他 repo が正本のためここで定義する（.entry-bar の 30 と同値だが、
+     下端全幅バーと浮遊ボタンは別レイヤなので寄せない）。 */
+  --z-float: 30;
+  /* sticky 要素の上端 = app-header の実高。--header-h(56px) は .app-header__inner の
+     min-height で、*{box-sizing:border-box}（foundation.css）により padding を含む。
+     これに border-bottom 1px を足した 57px が実高（65px と誤認しやすいので注意）。 */
+  --sticky-top: calc(var(--header-h) + 1px);
+}
+
 /* ── Summary card (tappable: ホームの損益/資産負債サマリー) ── */
 .summary-card {
   display: block;
