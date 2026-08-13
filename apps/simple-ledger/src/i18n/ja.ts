@@ -739,6 +739,8 @@ export const ja = {
   'recurring.everyMonthDay': '毎月{day}日',
   'recurring.everyNMonthsDay': '{n}か月ごと {day}日',
   'recurring.firstPosting': '初回の起票',
+  'recurring.firstPostingStatus': '初回の起票は {date} です',
+  'recurring.firstPostingNone': '初回の起票はありません',
   'recurring.end': '終了',
   'recurring.restart': '同じ設定で新しく始める',
   'recurring.deleteConfirmTitle': '定期ルールを削除',

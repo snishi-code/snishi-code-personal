@@ -58,14 +58,22 @@ function setValue(dataUi: string, value: string) {
 }
 
 /**
- * 「初回の起票」の中身。行の器（role="status" の live region）は**常に DOM に居る**
- * （live region は内容が変わる前から存在していないと読み上げられない）。
- * 「出ていない」= 中身が空、で判定する。
+ * 「初回の起票」の視覚行の中身。視覚行は値があるときだけ描画される（空の枠を残さない）。
+ * 読み上げは別の常設 sr-only status（recurringFirstPostingStatus）が担う。
  */
 function previewText(): string {
   const row = document.querySelector(`[data-ui="${UI.allocations.recurringFirstPosting}"]`);
-  expect(row, 'プレビューの live region は常設であること').not.toBeNull();
-  return (row?.textContent ?? '').trim();
+  return row ? (row.textContent ?? '').trim() : '';
+}
+
+/** 常設 sr-only status の中身（live region はマウント後に effect が流し込む）。 */
+function statusText(): string {
+  const status = document.querySelector(
+    `[data-ui="${UI.allocations.recurringFirstPostingStatus}"]`,
+  );
+  expect(status, '読み上げ用 status は常設であること').not.toBeNull();
+  expect(status).toHaveAttribute('role', 'status');
+  return (status?.textContent ?? '').trim();
 }
 
 describe('定期ルールシートのレイアウト', () => {
@@ -83,6 +91,7 @@ describe('定期ルールシートのレイアウト', () => {
       UI.allocations.recurringTo,
       UI.allocations.recurringEvery,
       UI.allocations.recurringFirstPosting,
+      UI.allocations.recurringFirstPostingStatus,
       UI.allocations.recurringStartDate,
       UI.allocations.recurringEndDate,
       UI.allocations.recurringSave,
@@ -118,15 +127,26 @@ describe('定期ルールシートのレイアウト', () => {
     setValue(UI.allocations.recurringStartDate, '2026-06-01');
     expect(previewText()).toContain('2026-07-10');
 
-    // 終了点が初回起票より前なら「起票されない」＝中身が消える（fail-closed）。
+    // 終了点が初回起票より前なら「起票されない」＝視覚行が消え、消えたことも通知される。
     setValue(UI.allocations.recurringEndDate, '2026-07-01');
     expect(previewText()).toBe('');
+    expect(statusText()).toBe(t('recurring.firstPostingNone'));
   });
 
-  it('周期が空の間はプレビューの中身を出さない', async () => {
+  it('周期が空の間は視覚行を出さず、status は「ありません」を通知する', async () => {
     await openRuleSheet();
     expect(previewText()).not.toBe('');
     setValue(UI.allocations.recurringEvery, '');
     expect(previewText()).toBe('');
+    expect(statusText()).toBe(t('recurring.firstPostingNone'));
+  });
+
+  it('開いた直後の status も値を通知する（マウント後に effect が流し込む = 変化として読まれる）', async () => {
+    await openRuleSheet();
+    // 既定値（基準日 = 開始日 = 今日・周期 1）では初回の起票が定まっている。
+    const visual = previewText();
+    expect(visual).not.toBe('');
+    const date = visual.replace(t('recurring.firstPosting'), '').trim();
+    expect(statusText()).toBe(t('recurring.firstPostingStatus', { date }));
   });
 });

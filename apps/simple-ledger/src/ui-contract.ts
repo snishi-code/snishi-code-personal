@@ -234,6 +234,7 @@ export const UI = {
     recurringFirstPostingDate: 'allocations.recurring.firstPostingDate',
     recurringFlow: 'allocations.recurring.flow',
     recurringFirstPosting: 'allocations.recurring.firstPosting',
+    recurringFirstPostingStatus: 'allocations.recurring.firstPostingStatus',
     recurringStartDate: 'allocations.recurring.startDate',
     recurringEndDate: 'allocations.recurring.endDate',
     recurringFrom: 'allocations.recurring.from',

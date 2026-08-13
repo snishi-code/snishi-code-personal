@@ -5,7 +5,7 @@
  *  - 継続コスト資産: 項目名・金額・開始日・終了日の4項目。終了日までの月割りは導出で、
  *    終了日を過ぎたら一覧から消える（アーカイブ = 終了日の設定）。
  */
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from '../overlays';
 import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
@@ -852,6 +852,17 @@ function RecurringRuleSheet({
         })
       : null;
 
+  // 起票プレビューの読み上げ文。マウント時は '' で、effect が最初の値を入れることで
+  // 「変化」として通知される（live region の制約）。値が無くなったときも明示的に伝える。
+  const [firstPostingAnnounce, setFirstPostingAnnounce] = useState('');
+  useEffect(() => {
+    setFirstPostingAnnounce(
+      firstPosting !== null
+        ? t('recurring.firstPostingStatus', { date: firstPosting })
+        : t('recurring.firstPostingNone'),
+    );
+  }, [firstPosting]);
+
   async function persistExisting(
     rule: RecurringRule,
     options?: {
@@ -1073,15 +1084,19 @@ function RecurringRuleSheet({
             onChange={(v) => setEveryText(v.replace(/[^\d]/g, ''))}
             dataUi={UI.allocations.recurringEvery}
           />
-          {/* 基準日・周期・開始日を変えると値が変わるので、出現と変更を読み上げる（polite）。 */}
-          <div className="kv" role="status" data-ui={UI.allocations.recurringFirstPosting}>
-            {firstPosting !== null ? (
-              <>
-                <span className="muted">{t('recurring.firstPosting')}</span>
-                <span>{firstPosting}</span>
-              </>
-            ) : null}
-          </div>
+          {/* 視覚行は値があるときだけ（空の枠を残さない）。読み上げは下の常設 status が担う。 */}
+          {firstPosting !== null ? (
+            <div className="kv" data-ui={UI.allocations.recurringFirstPosting}>
+              <span className="muted">{t('recurring.firstPosting')}</span>
+              <span>{firstPosting}</span>
+            </div>
+          ) : null}
+          {/* live region は「内容が変わる前から存在」して初めて読み上げられるため、
+              空でマウントし effect で流し込む（初期値も 1 回の変化として通知される）。
+              値が消えたときも「ありません」を明示的に通知する。 */}
+          <p className="sr-only" role="status" data-ui={UI.allocations.recurringFirstPostingStatus}>
+            {firstPostingAnnounce}
+          </p>
           <TextInput
             label={t('recurring.ruleStartDate')}
             type="date"
