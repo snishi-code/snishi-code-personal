@@ -111,7 +111,7 @@ function generatedBundle(readingsName = '測定結果'): TemplatePresetBundle {
     labelSep: ' ',
     titleWrap: '',
     items: [
-      { id: newId('itm'), label: '温度', kind: 'number', unit: '℃' },
+      { id: newId('itm'), label: '温度', kind: 'text', unit: '℃' },
       { id: newId('itm'), label: '運転モード', kind: 'select', options: ['自動', '手動'] },
     ],
   };

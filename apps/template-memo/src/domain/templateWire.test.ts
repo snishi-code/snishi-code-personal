@@ -44,8 +44,8 @@ function fixture(): {
       labelSep: ' ',
       titleWrap: '',
       items: [
-        { id: 'itm_bp', label: 'BP', kind: 'fraction', unit: 'mmHg' },
-        { id: 'itm_hr', label: 'HR', kind: 'number' },
+        { id: 'itm_bp', label: 'BP', kind: 'text', unit: 'mmHg' },
+        { id: 'itm_hr', label: 'HR', kind: 'text' },
         { id: 'itm_lung', label: '肺音', kind: 'text', normal: '明らかなラ音なし' },
         {
           id: 'itm_course',
@@ -144,6 +144,25 @@ describe('share wire roundtrip', () => {
     await expect(decodeShareWirePages([...pages.slice().reverse(), pages[0]!])).resolves.toEqual(
       source.payload,
     );
+  });
+
+  it('showName:false と旧 kind の項目が共有QRの往復で保たれる', async () => {
+    // 入力カードの見出し設定と、旧 number/fraction の引き取りが wire を跨いでも落ちないこと。
+    // ここが落ちると「渡した先だけ見出しが戻る」「単位が消える」という気付きにくい欠けになる。
+    const source = fixture();
+    const formats = [{ ...source.formats[0]!, showName: false }, ...source.formats.slice(1)];
+    const payload: ShareWirePayload = {
+      kind: TEMPLATE_WIRE_KIND,
+      package: { v: 3, template: source.template, frame: source.frame, formats },
+    };
+    const restored = await decodeShareWirePages(
+      await encodeShareWirePages(payload, { batchId: 'showname' }),
+    );
+    if (restored.kind !== TEMPLATE_WIRE_KIND) throw new Error('kind が TPL ではない');
+    expect(restored.package.formats[0]?.showName).toBe(false);
+    expect(restored.package.formats[0]?.items[0]).toMatchObject({ kind: 'text', unit: 'mmHg' });
+    // 設定していないフォーマットは undefined = 見出しを出す、のまま。
+    expect(restored.package.formats[1]?.showName).toBeUndefined();
   });
 
   // 完了走査の唯一の例外: 「memoSectionId 入り v3 fixture テスト」。

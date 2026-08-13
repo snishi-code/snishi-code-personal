@@ -106,8 +106,8 @@ function goldenTemplate(): Template {
             labelSep: ' ',
             titleWrap: '',
             items: [
-              item({ id: 'itm-bp', label: 'BP', kind: 'fraction', unit: 'mmHg' }),
-              item({ id: 'itm-hr', label: 'HR', kind: 'number' }),
+              item({ id: 'itm-bp', label: 'BP', kind: 'text', unit: 'mmHg' }),
+              item({ id: 'itm-hr', label: 'HR', kind: 'text' }),
             ],
           }),
           placedFormat({
@@ -118,9 +118,9 @@ function goldenTemplate(): Template {
             labelSep: ' ',
             titleWrap: '',
             items: [
-              item({ id: 'itm-glu1', label: 'Glu', kind: 'number' }),
-              item({ id: 'itm-glu2', label: '', kind: 'number' }),
-              item({ id: 'itm-glu3', label: '', kind: 'number' }),
+              item({ id: 'itm-glu1', label: 'Glu', kind: 'text' }),
+              item({ id: 'itm-glu2', label: '', kind: 'text' }),
+              item({ id: 'itm-glu3', label: '', kind: 'text' }),
             ],
           }),
           placedFormat({
@@ -222,30 +222,38 @@ describe('composePresetClean golden（作者の実運用例文）', () => {
 describe('composeItem', () => {
   const sep = ' ';
 
-  it('number: 値なしで注記だけなら出力しない', () => {
-    const it_ = item({ id: 'i', label: 'SpO2', kind: 'number', unit: '%' });
-    expect(composeItem(it_, { value: '', note: 'O2 2L' }, sep)).toBe('');
+  it('単位は値の直後に付く', () => {
+    const it_ = item({ id: 'i', label: 'SpO2', kind: 'text', unit: '%' });
+    expect(composeItem(it_, { value: '96', source: 'manual' }, sep)).toBe('SpO2 96%');
   });
 
-  it('number: 値+単位の直後に注記が付く', () => {
-    const it_ = item({ id: 'i', label: 'SpO2', kind: 'number', unit: '%' });
-    expect(composeItem(it_, { value: '96', note: 'O2 2L' }, sep)).toBe('SpO2 96% O2 2L');
-  });
-
-  it("fraction: '' や '/' だけはスキップ", () => {
-    const it_ = item({ id: 'i', label: 'BP', kind: 'fraction', unit: 'mmHg' });
+  it('旧 number/fraction の保存形（source なし）をそのまま読む', () => {
+    // 種類を text へ畳んだ後も、端末内の既存値・取り込み JSON の値が消えない。
+    const it_ = item({ id: 'i', label: 'BP', kind: 'text', unit: 'mmHg' });
     expect(composeItem(it_, { value: '' }, sep)).toBe('');
-    expect(composeItem(it_, { value: '/' }, sep)).toBe('');
     expect(composeItem(it_, { value: '120/98' }, sep)).toBe('BP 120/98mmHg');
   });
 
+  it('旧 note は値+単位の後ろに残る・値なし注記だけは出力しない', () => {
+    const it_ = item({ id: 'i', label: 'SpO2', kind: 'text', unit: '%' });
+    expect(composeItem(it_, { value: '', note: 'O2 2L' }, sep)).toBe('');
+    expect(composeItem(it_, { value: '96', note: 'O2 2L' }, sep)).toBe('SpO2 96% O2 2L');
+  });
+
+  it('select は単位も注記も出さない（選択値そのものが答えなので）', () => {
+    const it_ = item({ id: 'i', label: '方針', kind: 'select', options: ['精査'], unit: '%' });
+    expect(composeItem(it_, { value: '精査', source: 'manual', note: 'x' }, '：')).toBe(
+      '方針：精査',
+    );
+  });
+
   it('showLabel=false ならラベルを省略して値だけを出す', () => {
-    const it_ = item({ id: 'i', label: 'Glu', kind: 'number', showLabel: false });
+    const it_ = item({ id: 'i', label: 'Glu', kind: 'text', showLabel: false });
     expect(composeItem(it_, { value: '108' }, sep)).toBe('108');
   });
 
   it('label が空文字ならラベル部そのものが付かない（labelSep も出ない）', () => {
-    const it_ = item({ id: 'i', label: '', kind: 'number' });
+    const it_ = item({ id: 'i', label: '', kind: 'text' });
     expect(composeItem(it_, { value: '222' }, sep)).toBe('222');
   });
 
@@ -281,13 +289,13 @@ describe('composePlacedFormat', () => {
     joiner: ', ',
     labelSep: ' ',
     items: [
-      item({ id: 'a', label: 'BP', kind: 'fraction' }),
-      item({ id: 'b', label: 'HR', kind: 'number' }),
+      item({ id: 'a', label: 'BP', kind: 'text' }),
+      item({ id: 'b', label: 'HR', kind: 'text' }),
     ],
   });
 
   it('全項目が空ならタイトル行ごと消える（hasValue=false）', () => {
-    expect(composePlacedFormat(format, { a: { value: '/' }, b: '' })).toEqual({
+    expect(composePlacedFormat(format, { a: { value: '' }, b: '' })).toEqual({
       text: '',
       hasValue: false,
     });
@@ -333,7 +341,7 @@ describe('composeSection', () => {
       name: 'バイタル',
       joiner: ', ',
       labelSep: ' ',
-      items: [item({ id: 'a', label: 'HR', kind: 'number' })],
+      items: [item({ id: 'a', label: 'HR', kind: 'text' })],
     }),
     placedFormat({
       id: 'g2',
@@ -341,7 +349,7 @@ describe('composeSection', () => {
       display: 'oncall',
       joiner: '-',
       labelSep: ' ',
-      items: [item({ id: 'b', label: 'Glu', kind: 'number' })],
+      items: [item({ id: 'b', label: 'Glu', kind: 'text' })],
     }),
   ];
 
@@ -457,14 +465,20 @@ describe('composePresetClean', () => {
 // ============================
 
 describe('normalizeItem', () => {
-  it('text で label も normal も無い壊れ row は捨てる', () => {
-    expect(normalizeItem({ kind: 'text', label: '' })).toBeNull();
+  it('ラベル無しの text も生かす（血糖 2 つ目以降・追加直後の空項目の形）', () => {
+    expect(normalizeItem({ kind: 'text', label: '' })).toMatchObject({ kind: 'text', label: '' });
   });
 
-  it('number/fraction はラベル無しでも生かす（血糖 2 つ目以降の形）', () => {
-    expect(normalizeItem({ kind: 'number', label: '' })).toMatchObject({
-      kind: 'number',
-      label: '',
+  it('旧 kind（number/fraction）は text へ引き取り、単位も持ち越す', () => {
+    expect(normalizeItem({ kind: 'number', label: 'SpO2', unit: '%' })).toMatchObject({
+      kind: 'text',
+      label: 'SpO2',
+      unit: '%',
+    });
+    expect(normalizeItem({ kind: 'fraction', label: 'BP', unit: 'mmHg' })).toMatchObject({
+      kind: 'text',
+      label: 'BP',
+      unit: 'mmHg',
     });
   });
 
@@ -486,7 +500,7 @@ describe('normalizeItem', () => {
   });
 
   it('id 欠落は itm_ prefix で採番して救う', () => {
-    const r = normalizeItem({ kind: 'number', label: 'HR' });
+    const r = normalizeItem({ kind: 'text', label: 'HR' });
     expect(r?.id).toMatch(/^itm_/);
   });
 
@@ -495,8 +509,8 @@ describe('normalizeItem', () => {
   });
 
   it('showLabel は false のときだけ持つ・空 unit/normal は持たない', () => {
-    const r = normalizeItem({ kind: 'number', label: 'HR', showLabel: true, unit: '', normal: '' });
-    expect(r).toEqual({ id: r?.id, label: 'HR', kind: 'number' });
+    const r = normalizeItem({ kind: 'text', label: 'HR', showLabel: true, unit: '', normal: '' });
+    expect(r).toEqual({ id: r?.id, label: 'HR', kind: 'text' });
   });
 
   it('object でないものは null', () => {

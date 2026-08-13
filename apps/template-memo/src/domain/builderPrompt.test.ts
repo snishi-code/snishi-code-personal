@@ -52,8 +52,8 @@ describe('buildBuilderPrompt', () => {
       'req_golden',
     );
     expect({ length: prompt.length, fingerprint: fingerprint(prompt) }).toEqual({
-      length: 4861,
-      fingerprint: 'ec494623',
+      length: 4890,
+      fingerprint: '0cc67529',
     });
   });
 });

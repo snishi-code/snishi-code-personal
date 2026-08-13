@@ -130,7 +130,6 @@ export const s = {
     },
     // テンプレートの群 (ProjectionFormCard) 用。
     noteInput: '入力',
-    fractionPlaceholder: '120/80',
     normalCheck: {
       aria: '正常',
       input: (value: string) => `長押しで正常文を入力: ${value}`,
@@ -251,6 +250,7 @@ export const s = {
     placementDisplayAlways: '展開',
     placementDisplayOncall: '呼び出し',
     placementDisplayMenu: 'メニュー',
+    formatShowName: '入力カードの見出しにフォーマット名を出す',
     formatJoiner: '項目間の区切り',
     formatLabelSep: 'ラベルと値の区切り',
     // 区切りは自由入力 (改行・空白も有効文字)。見えない文字が入ることを明示する。
@@ -259,11 +259,9 @@ export const s = {
     itemAdd: '項目を追加',
     itemLabel: 'ラベル（例 肺音）',
     itemKind: '種類',
-    itemKindText: '文章（正常文）',
-    itemKindNumber: '数値',
-    itemKindFraction: '分数（120/80 型）',
+    itemKindText: '入力',
     itemKindSelect: '選択',
-    itemUnit: '単位（例 mmHg）',
+    itemUnit: '単位（例 mmHg・℃）',
     itemNormal: '正常文（例 明らかなラ音なし）',
     itemOptions: '選択肢',
     itemOptionDefault: '選択肢',

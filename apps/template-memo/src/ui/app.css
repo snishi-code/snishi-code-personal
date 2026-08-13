@@ -1200,6 +1200,14 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   grid-template-columns: fit-content(min(8rem, 30vw)) var(--hr-cell-h) minmax(0, 1fr);
 }
 
+/* 見出しを消した配置は、直前の配置との境界が余白だけになる (行間 4px / 配置間 8px)。
+   列幅は配置ごとに決まるので行頭も揃わない。「前に配置があり、かつ自分に見出しが無い」
+   ときだけ細い罫線で境界を戻す。 */
+.projectionRows + .projectionRows.noHead {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-2);
+}
+
 .projectionField {
   display: contents;
 }

@@ -15,7 +15,7 @@ import { TemplateBuilderPreview } from './TemplateBuilder';
 afterEach(cleanup);
 
 const readingsItems = [
-  { label: '温度', kind: 'number' as const, unit: '℃' },
+  { label: '温度', kind: 'text' as const, unit: '℃' },
   { label: '運転モード', kind: 'select' as const, options: ['自動', '手動'] },
 ];
 
@@ -61,7 +61,7 @@ function existingReadings(name: string): Format {
     labelSep: ' ',
     titleWrap: '',
     items: [
-      { id: 'existing-itm-1', label: '温度', kind: 'number', unit: '℃' },
+      { id: 'existing-itm-1', label: '温度', kind: 'text', unit: '℃' },
       { id: 'existing-itm-2', label: '運転モード', kind: 'select', options: ['自動', '手動'] },
     ],
   };

@@ -58,7 +58,7 @@ describe('parseBuilderResponse', () => {
     expect(parsed.candidate.frame.sections).toHaveLength(2);
     expect(
       parsed.candidate.formats.flatMap((format) => format.items).map((item) => item.kind),
-    ).toEqual(['number', 'fraction', 'select', 'text']);
+    ).toEqual(['text', 'text', 'select', 'text']);
   });
 
   it.each<[string, string, BuilderParseErrorCode]>([

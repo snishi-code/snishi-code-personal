@@ -8,13 +8,11 @@ describe('morphItemKind', () => {
       id: 'item',
       label: '項目',
       kind: 'text',
+      unit: 'mmHg',
       normal: '正常',
     };
 
-    morphItemKind(item, 'number');
-    expect(item).toEqual({ id: 'item', label: '項目', kind: 'number' });
-    item.unit = 'mmHg';
-
+    // text → select: 単位も正常文も select では意味を持たないので捨てる。
     morphItemKind(item, 'select');
     expect(item).toEqual({
       id: 'item',
@@ -23,22 +21,19 @@ describe('morphItemKind', () => {
       options: ['選択肢'],
     });
 
+    // select → text: 選択肢を捨てる。
     morphItemKind(item, 'text');
     expect(item).toEqual({ id: 'item', label: '項目', kind: 'text' });
   });
 
-  it('number↔fraction の切替は単位を引き継ぐ', () => {
-    const item: TemplateItem = { id: 'item', label: 'BP', kind: 'number', unit: 'mmHg' };
+  it('廃止した kind（number/fraction）は受け付けない（fail-closed）', () => {
+    const item: TemplateItem = { id: 'item', label: 'BP', kind: 'text', unit: 'mmHg' };
 
-    morphItemKind(item, 'fraction');
-    expect(item).toEqual({ id: 'item', label: 'BP', kind: 'fraction', unit: 'mmHg' });
+    morphItemKind(item, 'number' as never);
+    expect(item).toEqual({ id: 'item', label: 'BP', kind: 'text', unit: 'mmHg' });
 
-    morphItemKind(item, 'number');
-    expect(item).toEqual({ id: 'item', label: 'BP', kind: 'number', unit: 'mmHg' });
-
-    // 数値系以外へ抜けるときは単位ごと捨てる。
-    morphItemKind(item, 'text');
-    expect(item).toEqual({ id: 'item', label: 'BP', kind: 'text' });
+    morphItemKind(item, 'fraction' as never);
+    expect(item).toEqual({ id: 'item', label: 'BP', kind: 'text', unit: 'mmHg' });
   });
 
   it('未知の kind は無変更 (DOM 由来値の fail-closed)', () => {

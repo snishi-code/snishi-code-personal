@@ -16,19 +16,22 @@
  */
 
 import { newId } from '../data/constants';
-import {
-  readPlacementValues,
-  readNumericEntry,
-  readSelectValue,
-  readTextValue,
-} from './formValues';
+import { readEntryNote, readPlacementValues, readSelectValue, readTextValue } from './formValues';
 import type { FormValues, Patient } from './types';
 
 // ============================
 // 型
 // ============================
 
-export type ItemKind = 'text' | 'number' | 'fraction' | 'select';
+/**
+ * 小項目の種類。入力の形は 2 つだけに畳んである:
+ *   text   = 自分で書く。正常文 (normal) を登録すれば長押しチェックのワンタップでも入る。
+ *   select = 用意した選択肢から選ぶ。
+ * 文字種の制約（旧 number / fraction の数字限定キーボード）は持たない。端末のキーボードを
+ * 狭めても打てない文字が生まれるだけで（iOS の数字キーパッドには "." も "/" も無い）、
+ * 入力を助けないため撤去した。旧 number / fraction は normalizeItem が text へ引き取る。
+ */
+export type ItemKind = 'text' | 'select';
 
 /** 配置方法。always = 展開 / oncall = 呼び出し / menu = メニュー。値はいずれも保存する。 */
 export type PlacementDisplay = 'always' | 'oncall' | 'menu';
@@ -38,7 +41,7 @@ export interface TemplateItem {
   id: string;
   label: string;
   kind: ItemKind;
-  /** number/fraction の単位（例 mmHg, %）。値の直後に付く。 */
+  /** text の単位（例 mmHg, %, ℃）。合成では値の直後に付く。 */
   unit?: string;
   /** text の正常文（長押しチェック入力の対象）。 */
   normal?: string;
@@ -62,6 +65,14 @@ export interface PlacedFormat {
    * 空 = タイトル行なし。
    */
   titleWrap: string;
+  /**
+   * 入力カードにフォーマット名の見出し行を出すか。未定義 = 出す。false のときだけ保存する
+   * （TemplateItem.showLabel と同型）。正本は Format 側（entities.ts）で、
+   * titleWrap（合成出力のタイトル行）とは別制御。こちらは画面の縦を詰めるためだけのもの。
+   * 呼び出しチップ・メニュー項目・入力シートのタイトルに出る名前は、押すまで中身が
+   * 分からないので、この設定に関わらず残す。
+   */
+  showName?: boolean;
   items: TemplateItem[];
 }
 
@@ -101,27 +112,16 @@ export function normalizeComposedText(text: string): string {
 /** 項目 1 つの合成。空値は '' を返す（呼び出し側の filter で枝ごと落ちる）。 */
 export function composeItem(item: TemplateItem, rawValue: unknown, labelSep: string): string {
   const labelPart = item.showLabel !== false && item.label !== '' ? item.label + labelSep : '';
-  if (item.kind === 'number') {
-    const { value, note } = readNumericEntry(rawValue);
-    const v = value.trim();
-    if (v === '') return ''; // 値なし注記だけは出力しない（文脈不明になるため）
-    const base = `${labelPart}${v}${item.unit ?? ''}`;
-    return note.trim() === '' ? base : `${base} ${note.trim()}`;
+  if (item.kind === 'select') {
+    const value = readSelectValue(rawValue, item.options ?? []).trim();
+    return value === '' ? '' : `${labelPart}${value}`;
   }
-  if (item.kind === 'fraction') {
-    const { value, note } = readNumericEntry(rawValue);
-    const v = value.trim();
-    // "a/b" 両側空（"" or "/"）はスキップ
-    if (v === '' || /^\/*$/.test(v)) return '';
-    const base = `${labelPart}${v}${item.unit ?? ''}`;
-    return note.trim() === '' ? base : `${base} ${note.trim()}`;
-  }
-  const value =
-    item.kind === 'select'
-      ? readSelectValue(rawValue, item.options ?? []).trim()
-      : readTextValue(rawValue).trim();
+  const value = readTextValue(rawValue).trim();
+  // 値なしで注記だけは出力しない（文脈不明になるため。旧 number と同じ判断）。
   if (value === '') return '';
-  return `${labelPart}${value}`;
+  const base = `${labelPart}${value}${item.unit ?? ''}`;
+  const note = readEntryNote(rawValue).trim();
+  return note === '' ? base : `${base} ${note}`;
 }
 
 /** 配置フォーマット 1 つの合成。全項目が空ならタイトル行も出さない。 */
@@ -243,17 +243,18 @@ function str(v: unknown, fallback = ''): string {
 export function normalizeItem(raw: unknown): TemplateItem | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
-  const kind: ItemKind =
-    r.kind === 'number' || r.kind === 'fraction' || r.kind === 'select' ? r.kind : 'text';
+  // 旧 kind（number / fraction）は text へ引き取り、単位も持ち越す（read-side 移行）。
+  // これにより既存フォーマット・受信済み共有QR・取り込み JSON の項目が消えず、
+  // 保存値 { value, note? } も formValues.readTextValue がそのまま読む。
+  const kind: ItemKind = r.kind === 'select' ? 'select' : 'text';
   const item: TemplateItem = {
     id: str(r.id) || newId('itm'),
     label: str(r.label),
     kind,
   };
-  if (kind === 'number' || kind === 'fraction') {
+  if (kind === 'text') {
     const unit = str(r.unit);
     if (unit !== '') item.unit = unit;
-  } else if (kind === 'text') {
     const normal = str(r.normal);
     if (normal !== '') item.normal = normal;
   } else {
@@ -265,8 +266,7 @@ export function normalizeItem(raw: unknown): TemplateItem | null {
     item.options = options;
   }
   if (r.showLabel === false) item.showLabel = false;
-  // text はラベルも正常文も無いと入力欄の意味が立たないので捨てる。
-  // number/fraction/select はラベル無しが正当。
-  if (item.kind === 'text' && item.label === '' && item.normal === undefined) return null;
+  // ラベル無しの text は正当に扱う（血糖の 2 つ目以降のように、ラベルを出さず値だけ
+  // 並べる項目が実在する）。選ぶものが無い select だけは項目ごと落とす。
   return item;
 }

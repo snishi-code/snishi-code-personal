@@ -28,6 +28,11 @@ export interface Format {
   joiner: string;
   labelSep: string;
   titleWrap: string;
+  /**
+   * 入力カードにフォーマット名の見出し行を出すか。未定義 = 出す。false のときだけ保存する
+   * （TemplateItem.showLabel と同型）。titleWrap（合成出力のタイトル行）とは別制御。
+   */
+  showName?: boolean;
   items: TemplateItem[];
 }
 
@@ -95,7 +100,7 @@ export function normalizeFormat(raw: unknown): Format | null {
     .map(normalizeItem)
     .filter((item): item is TemplateItem => item !== null);
   if (items.length === 0) return null;
-  return {
+  const format: Format = {
     id: str(row.id) || newId('fmt'),
     // 空名は許容する（旧 normalize と同じ）。titleWrap 付き無名フォーマットで
     // 存在しなかったタイトル行が合成に混入しないよう、ここで代替名を注入しない。
@@ -105,6 +110,11 @@ export function normalizeFormat(raw: unknown): Format | null {
     titleWrap: str(row.titleWrap),
     items,
   };
+  // 見出しを消す指定は false のときだけ持つ（真偽値以外は「出す」へ倒す fail-safe）。
+  // ここへ足し忘れると、起動ロード・編集保存・共有QR・backup 復元のすべてが
+  // この whitelist で落とすため「設定できるのに再起動で戻る」挙動になる。
+  if (row.showName === false) format.showName = false;
+  return format;
 }
 
 function normalizePlacement(raw: unknown): FormatPlacement | null {

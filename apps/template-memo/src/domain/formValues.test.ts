@@ -10,10 +10,9 @@ import {
   decidePresetToggle,
   placementHasInput,
   manualTextEntry,
+  readEntryNote,
   normalizeTextEntry,
-  numericEntry,
   readPlacementValues,
-  readNumericEntry,
   readSelectValue,
   readTextValue,
 } from './formValues';
@@ -31,17 +30,13 @@ describe('readTextValue', () => {
     expect(readTextValue(undefined)).toBe('');
     expect(readTextValue(null)).toBe('');
   });
-
-  it('source の無い数値形は kind 変更の残骸として落とす', () => {
-    expect(readTextValue({ value: '96' })).toBe('');
-  });
 });
 
 describe('readSelectValue', () => {
   it('現在の選択肢にある TextEntry だけを読む', () => {
     expect(readSelectValue({ value: '精査', source: 'manual' }, ['経過観察', '精査'])).toBe('精査');
     expect(readSelectValue({ value: '旧自由文', source: 'manual' }, ['経過観察', '精査'])).toBe('');
-    expect(readSelectValue({ value: '96' }, ['96'])).toBe('');
+    expect(readSelectValue({ value: '精査', source: 'manual' }, [])).toBe('');
   });
 });
 
@@ -125,43 +120,43 @@ describe('manualTextEntry', () => {
 });
 
 // ============================
-// readNumericEntry / numericEntry
+// 旧 number / fraction の保存形の引き取り
 // ============================
 
-describe('readNumericEntry', () => {
-  it('object は value と note を読む・欠落フィールドは空文字', () => {
-    expect(readNumericEntry({ value: '96', note: 'O2 2L' })).toEqual({
-      value: '96',
-      note: 'O2 2L',
-    });
-    expect(readNumericEntry({ value: '96' })).toEqual({ value: '96', note: '' });
+describe('readTextValue（旧保存形の引き取り）', () => {
+  it('source を持たない object（旧 number/fraction）も手入力値として引き取る', () => {
+    // 種類を text へ畳んだ後に、端末内の既存値が黙って消えないための引き取り。
+    expect(readTextValue({ value: '96' })).toBe('96');
+    expect(readTextValue({ value: '120/80', note: 'O2 2L' })).toBe('120/80');
   });
 
-  it('object 以外（未入力の空文字 / undefined）は未入力として読む', () => {
-    expect(readNumericEntry('')).toEqual({ value: '', note: '' });
-    expect(readNumericEntry(undefined)).toEqual({ value: '', note: '' });
-  });
-
-  it('source 付き text/select 形は kind 変更の残骸として落とす', () => {
-    expect(readNumericEntry({ value: '精査', source: 'manual' })).toEqual({
-      value: '',
-      note: '',
-    });
+  it('object 以外（未入力の空文字 / undefined / 配列）は未入力として読む', () => {
+    expect(readTextValue('')).toBe('');
+    expect(readTextValue(undefined)).toBe('');
+    expect(readTextValue(['96'])).toBe('');
   });
 });
 
-describe('numericEntry', () => {
-  it('両方空なら空文字（未入力）', () => {
-    expect(numericEntry('', '')).toBe('');
+describe('readEntryNote', () => {
+  it('旧 note を読む・無ければ空文字', () => {
+    expect(readEntryNote({ value: '96', note: 'O2 2L' })).toBe('O2 2L');
+    expect(readEntryNote({ value: '96' })).toBe('');
+    expect(readEntryNote('')).toBe('');
+  });
+});
+
+describe('manualTextEntry（note の持ち越し）', () => {
+  it('note を渡すと保存形に残る（入力 UI は無いが編集で捨てない）', () => {
+    expect(manualTextEntry('98', 'O2 2L')).toEqual({
+      value: '98',
+      source: 'manual',
+      note: 'O2 2L',
+    });
   });
 
-  it('note 無しは { value } のみ・note ありは両方持つ', () => {
-    expect(numericEntry('96', '')).toEqual({ value: '96' });
-    expect(numericEntry('96', 'O2 2L')).toEqual({ value: '96', note: 'O2 2L' });
-  });
-
-  it('値なし注記だけでも保存形は作る（出力抑制は composeItem 側の責務）', () => {
-    expect(numericEntry('', 'O2 2L')).toEqual({ value: '', note: 'O2 2L' });
+  it('値を消しても note だけは残る・両方空なら未入力', () => {
+    expect(manualTextEntry('', 'O2 2L')).toEqual({ value: '', source: 'manual', note: 'O2 2L' });
+    expect(manualTextEntry('', '')).toBe('');
   });
 });
 

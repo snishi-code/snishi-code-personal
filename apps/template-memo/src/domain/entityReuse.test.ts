@@ -25,7 +25,7 @@ const format: Format = {
   labelSep: ' ',
   titleWrap: '',
   items: [
-    { id: 'item-bp', label: 'BP', kind: 'fraction', unit: 'mmHg' },
+    { id: 'item-bp', label: 'BP', kind: 'text', unit: 'mmHg' },
     { id: 'item-mode', label: '運転モード', kind: 'select', options: ['自動', '手動'] },
   ],
 };

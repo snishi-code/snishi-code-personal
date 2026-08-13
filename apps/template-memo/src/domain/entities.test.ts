@@ -23,7 +23,7 @@ const format: Format = {
   joiner: ', ',
   labelSep: ' ',
   titleWrap: '',
-  items: [{ id: 'item-bp', label: 'BP', kind: 'fraction', unit: 'mmHg' }],
+  items: [{ id: 'item-bp', label: 'BP', kind: 'text', unit: 'mmHg' }],
 };
 
 describe('永続化エンティティの正規化', () => {
@@ -111,6 +111,33 @@ describe('永続化エンティティの正規化', () => {
       { frames: [frame], formats: [format] },
     );
     expect(normalized?.placements.map((placement) => placement.sectionId)).toEqual(['section-s']);
+  });
+
+  it('showName は false のときだけ持つ（真偽値以外は「見出しを出す」へ倒す）', () => {
+    // 入力カードの見出しを消す設定。ここで落とすと「設定できるのに再起動で戻る」挙動になる。
+    const of = (showName: unknown) => normalizeFormat({ ...format, showName })?.showName;
+    expect(of(false)).toBe(false);
+    expect(of(true)).toBeUndefined();
+    expect(of(undefined)).toBeUndefined();
+    expect(of('false')).toBeUndefined();
+    expect(of(0)).toBeUndefined();
+  });
+
+  it('旧 kind（number/fraction）の項目を text へ引き取り、単位も残す', () => {
+    // 種類を畳んだ後も、既存フォーマット・受信済み共有QR・取り込み JSON の項目が消えない。
+    const restored = normalizeFormat({
+      ...format,
+      items: [
+        { id: 'i1', label: 'BP', kind: 'fraction', unit: 'mmHg' },
+        { id: 'i2', label: 'SpO2', kind: 'number', unit: '%' },
+        { id: 'i3', label: '', kind: 'number' },
+      ],
+    });
+    expect(restored?.items).toEqual([
+      { id: 'i1', label: 'BP', kind: 'text', unit: 'mmHg' },
+      { id: 'i2', label: 'SpO2', kind: 'text', unit: '%' },
+      { id: 'i3', label: '', kind: 'text' },
+    ]);
   });
 
   it('プリセットは正規化の恒等（seed が normalize で欠けない）', () => {

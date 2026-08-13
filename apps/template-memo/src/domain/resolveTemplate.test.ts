@@ -20,7 +20,7 @@ const format: Format = {
   joiner: ', ',
   labelSep: ' ',
   titleWrap: '',
-  items: [{ id: 'item-bp', label: 'BP', kind: 'fraction', unit: 'mmHg' }],
+  items: [{ id: 'item-bp', label: 'BP', kind: 'text', unit: 'mmHg' }],
 };
 
 function definition(overrides: Partial<TemplateDef> = {}): TemplateDef {

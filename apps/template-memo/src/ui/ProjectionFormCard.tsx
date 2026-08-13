@@ -5,6 +5,8 @@
 //   - 現在テンプレートの全場所を表示する（フォーマットが無い場所も見出しを残す）。
 //   - 展開 (always) 配置: 行ごとの入力を patient.projectedValues へ write-through 保存。
 //     text 項目は項目名の右に正常文チェックを置く。手入力は openEditor で守る。
+//   - フォーマット名の見出しは Format.showName === false で配置ごとに消せる (縦を詰めるため)。
+//     入力シートの中では Modal title が名前を出すので、見出しは常に描かない (二重表示の解消)。
 //   - 呼び出し (oncall) / メニュー (menu) 配置: シートの値を同じ projectedValues へ保存。
 //   - oncall/menu 配置は値が入ると展開カードへ昇格し、全消去で入口へ戻る。
 //   - freeText の場所には自由入力欄 (textarea) を出し、patient.sectionTexts[場所id] へ
@@ -17,15 +19,14 @@ import { useRef, useState, type RefObject } from 'react';
 import { Button } from '@snishi/foundation/ui/Button';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { Modal } from '@snishi/foundation/ui/Modal';
-import type { FormValues, Patient, NumericEntry, TextEntry } from '../domain/types';
+import type { FormValues, Patient, TextEntry } from '../domain/types';
 import {
   decidePresetToggle,
   placementHasInput,
   manualTextEntry,
   normalizeTextEntry,
-  numericEntry,
+  readEntryNote,
   readPlacementValues,
-  readNumericEntry,
   readSelectValue,
   readTextValue,
 } from '../domain/formValues';
@@ -60,8 +61,13 @@ function labelWithUnit(label: string, unit?: string): string {
 }
 
 /**
- * 項目 1 行 (text / number / fraction / select)。rawValue は保存形そのまま
- * (TextEntry/NumericEntry/legacy 文字列/undefined)。書き込みは onWrite (write-through)。
+ * 項目 1 行 (text / select)。rawValue は保存形そのまま
+ * (TextEntry / 旧 number・fraction の { value, note? } / legacy 文字列 / undefined)。
+ * 書き込みは onWrite (write-through)。
+ *
+ * text の入力欄には inputMode を与えない。文字種を狭めても打てない文字が生まれるだけで
+ * (iOS の数字キーパッドには "." も "/" も無く、36.5 や 120/80 が入力不能になる)、
+ * 端末の通常キーボードなら数字も記号も同じ場所から打てるため。
  */
 export function ItemRow({
   item,
@@ -76,7 +82,7 @@ export function ItemRow({
   hasLabelCol: boolean;
   hasNormalCol: boolean;
   freshTapRef: RefObject<boolean>;
-  onWrite: (stored: TextEntry | NumericEntry | '') => void;
+  onWrite: (stored: TextEntry | '') => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const label = labelWithUnit(item.label, item.unit);
@@ -117,95 +123,85 @@ export function ItemRow({
     );
   }
 
-  if (item.kind === 'text') {
-    const value = readTextValue(rawValue);
-    const source =
-      item.normal !== undefined ? normalizeTextEntry(rawValue, item.normal).source : 'empty';
-    const isPreset = source === 'preset';
-    return (
-      <div className="projectionField">
-        {labelCell}
-        {item.normal !== undefined ? (
-          <NormalCheckButton
-            on={isPreset}
-            title={
-              source === 'empty'
-                ? s.detail.normalCheck.input(item.normal)
-                : isPreset
-                  ? s.detail.normalCheck.clear
-                  : s.detail.normalCheck.edit
-            }
-            ariaLabel={s.detail.normalCheck.aria}
-            ariaPressed={isPreset}
-            onTrigger={() => {
-              // detail 入場直後や対象切替直後のゴーストタップでは書き込まない。
-              if (!freshTapRef.current) return;
-              const d = decidePresetToggle(rawValue, item.normal);
-              if (d.action === 'openEditor') {
-                // 手入力を守る: 上書きせず編集へ委ねる。
-                inputRef.current?.focus();
-                return;
-              }
-              onWrite(d.action === 'write' ? d.value : '');
-              hapticTick();
-            }}
-          />
-        ) : (
-          normalSpacer
-        )}
-        <input
-          ref={inputRef}
-          className="input"
-          type="text"
-          value={value}
-          aria-label={item.label || item.normal || s.detail.noteInput}
-          data-ui={UI.projection.field}
-          onChange={(e) => onWrite(manualTextEntry(e.target.value))}
-        />
-      </div>
-    );
-  }
-
-  // number / fraction: 値のみの 1 入力 (医療値は `/` や注記が入りうるため type=number にしない)。
-  const entry = readNumericEntry(rawValue);
+  const value = readTextValue(rawValue);
+  // 旧 number/fraction 由来の注記は入力 UI が無い。編集で黙って捨てないよう書き戻す。
+  const note = readEntryNote(rawValue);
+  const source =
+    item.normal !== undefined ? normalizeTextEntry(rawValue, item.normal).source : 'empty';
+  const isPreset = source === 'preset';
   return (
     <div className="projectionField">
       {labelCell}
-      {normalSpacer}
+      {item.normal !== undefined ? (
+        <NormalCheckButton
+          on={isPreset}
+          title={
+            source === 'empty'
+              ? s.detail.normalCheck.input(item.normal)
+              : isPreset
+                ? s.detail.normalCheck.clear
+                : s.detail.normalCheck.edit
+          }
+          ariaLabel={s.detail.normalCheck.aria}
+          ariaPressed={isPreset}
+          onTrigger={() => {
+            // detail 入場直後や対象切替直後のゴーストタップでは書き込まない。
+            if (!freshTapRef.current) return;
+            const d = decidePresetToggle(rawValue, item.normal);
+            if (d.action === 'openEditor') {
+              // 手入力を守る: 上書きせず編集へ委ねる。
+              inputRef.current?.focus();
+              return;
+            }
+            onWrite(d.action === 'write' ? d.value : '');
+            hapticTick();
+          }}
+        />
+      ) : (
+        normalSpacer
+      )}
       <input
+        ref={inputRef}
         className="input"
         type="text"
-        inputMode="numeric"
-        value={entry.value}
-        placeholder={item.kind === 'fraction' ? s.detail.fractionPlaceholder : undefined}
-        aria-label={item.label || s.detail.noteInput}
+        value={value}
+        aria-label={label || item.normal || s.detail.noteInput}
         data-ui={UI.projection.field}
-        onChange={(e) => onWrite(numericEntry(e.target.value, entry.note))}
+        onChange={(e) => onWrite(manualTextEntry(e.target.value, note))}
       />
     </div>
   );
 }
 
 /** 配置 1 つ分の行列 (見出し + 項目行)。値の読み書きは values/onWrite に委ねる。 */
-function PlacementRows({
+export function PlacementRows({
   placement,
   values,
   freshTapRef,
+  showHead = true,
   onWrite,
 }: {
   placement: PlacedFormat;
   values: Record<string, unknown>;
   freshTapRef: RefObject<boolean>;
-  onWrite: (itemId: string, stored: TextEntry | NumericEntry | '') => void;
+  showHead?: boolean;
+  onWrite: (itemId: string, stored: TextEntry | '') => void;
 }) {
   const hasLabelCol = placement.items.some((item) => item.label.trim() !== '');
   const hasNormalCol = placement.items.some(
     (item) => item.kind === 'text' && item.normal !== undefined,
   );
+  // 見出しを出す条件:
+  //   showHead    シートの中では常に false (Modal title が名前を出すので二重になる)
+  //   showName    フォーマット側の設定 (false = 出さない)
+  //   hasLabelCol ラベル列を持たない配置では showName に関わらず出す。項目ラベルも
+  //               フォーマット名も無いと、匿名の入力枠が並ぶだけで特定できなくなるため。
+  const headVisible =
+    showHead && placement.name !== '' && (placement.showName !== false || !hasLabelCol);
 
   return (
     <>
-      {placement.name !== '' ? (
+      {headVisible ? (
         <div className="panelCardHead projectionPlacementHead" data-ui={UI.projection.placement}>
           <div className="panelLabel">{placement.name}</div>
         </div>
@@ -213,7 +209,7 @@ function PlacementRows({
       <div
         className={`projectionRows${hasLabelCol ? ' hasLabel' : ''}${
           hasNormalCol ? ' hasNormal' : ''
-        }`}
+        }${headVisible ? '' : ' noHead'}`}
       >
         {placement.items.map((item) => (
           <ItemRow
@@ -272,6 +268,7 @@ function OncallPlacementSheet({
         placement={placement}
         values={values}
         freshTapRef={freshTapRef}
+        showHead={false}
         onWrite={(itemId, stored) => setValues((prev) => ({ ...prev, [itemId]: stored }))}
       />
     </Modal>
@@ -335,11 +332,7 @@ export function ProjectionFormCard({
 
   if (sections.length === 0) return null; // テンプレート未選択または場所が無ければ出さない
 
-  function writeValue(
-    placementId: string,
-    itemId: string,
-    stored: TextEntry | NumericEntry | '',
-  ): void {
+  function writeValue(placementId: string, itemId: string, stored: TextEntry | ''): void {
     const p = live();
     if (!p) return;
     const pv = p.projectedValues && typeof p.projectedValues === 'object' ? p.projectedValues : {};

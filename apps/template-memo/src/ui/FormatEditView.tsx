@@ -1,5 +1,6 @@
 /*
- * フォーマット編集。項目 (ラベル/種類/単位/正常文/選択肢) と合成方法 (joiner/labelSep/titleWrap)
+ * フォーマット編集。項目 (ラベル/種類/単位/正常文/選択肢) と合成方法 (joiner/labelSep/titleWrap)、
+ * 入力カードに見出しを出すか (showName)
  * を編集する。draft は deep copy し、保存時に normalizeFormat を通す (null なら fail-closed 通知)。
  * 変更は参照する全テンプレートへ即時反映されるため、ヘッダに使用数を表示する。
  */
@@ -15,17 +16,15 @@ import type { AppRuntime } from './appRuntime';
 import { CheckRow, clone, Field, moveInArray, RowTools } from './EntityEditParts';
 import { useRegisterEditor } from './registries';
 
-const ITEM_KINDS: readonly ItemKind[] = ['text', 'number', 'fraction', 'select'];
+const ITEM_KINDS: readonly ItemKind[] = ['text', 'select'];
 
+/** 種類を切り替える。種類ごとの専用フィールド (単位/正常文 と 選択肢) は排他的に初期化する。 */
 export function morphItemKind(item: TemplateItem, kind: ItemKind): void {
   if (!ITEM_KINDS.includes(kind)) return;
-  const numeric = (candidate: ItemKind) => candidate === 'number' || candidate === 'fraction';
-  const keepUnit = numeric(item.kind) && numeric(kind) ? item.unit : undefined;
   item.kind = kind;
   delete item.unit;
   delete item.normal;
   delete item.options;
-  if (keepUnit !== undefined) item.unit = keepUnit;
   if (kind === 'select') item.options = [s.tpl.itemOptionDefault];
 }
 
@@ -139,6 +138,17 @@ export function FormatEditView({
             onChange={(event) => mutate((next) => (next.name = event.target.value))}
           />
         </Field>
+        {/* 入力カードの見出しだけを消す。チップ・メニュー・入力シートの名前は残る。 */}
+        <CheckRow
+          label={s.tpl.formatShowName}
+          checked={draft.showName !== false}
+          onChange={(checked) =>
+            mutate((next) => {
+              if (checked) delete next.showName;
+              else next.showName = false;
+            })
+          }
+        />
         {/*
           区切りは候補から選ばせず、入れたい文字をそのまま入力させる (改行も入れられるよう textarea)。
           trim すると既定 ', ' の末尾スペースが消え、空文字 (= ラベル区切り「なし」) も作れなくなるため、
@@ -206,22 +216,10 @@ export function FormatEditView({
                 }
               >
                 <option value="text">{s.tpl.itemKindText}</option>
-                <option value="number">{s.tpl.itemKindNumber}</option>
-                <option value="fraction">{s.tpl.itemKindFraction}</option>
                 <option value="select">{s.tpl.itemKindSelect}</option>
               </select>
             </Field>
             {item.kind === 'text' ? (
-              <Field label={s.tpl.itemNormal}>
-                <input
-                  className="input"
-                  value={item.normal ?? ''}
-                  onChange={(event) =>
-                    mutateItem(item.id, (next) => (next.normal = event.target.value))
-                  }
-                />
-              </Field>
-            ) : item.kind === 'select' ? null : (
               <Field label={s.tpl.itemUnit}>
                 <input
                   className="input"
@@ -231,8 +229,20 @@ export function FormatEditView({
                   }
                 />
               </Field>
-            )}
+            ) : null}
           </div>
+          {/* 正常文は 1 行が長いので種類の行には並べず、全幅で置く。 */}
+          {item.kind === 'text' ? (
+            <Field label={s.tpl.itemNormal}>
+              <input
+                className="input"
+                value={item.normal ?? ''}
+                onChange={(event) =>
+                  mutateItem(item.id, (next) => (next.normal = event.target.value))
+                }
+              />
+            </Field>
+          ) : null}
           {item.kind === 'select' ? renderOptions(item) : null}
           <CheckRow
             label={s.tpl.itemShowLabel}

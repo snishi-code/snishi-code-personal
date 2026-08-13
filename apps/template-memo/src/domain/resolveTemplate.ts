@@ -31,6 +31,7 @@ export function resolveTemplate(
       titleWrap: format.titleWrap,
       items: format.items,
     };
+    if (format.showName === false) placed.showName = false;
     const current = placedBySection.get(placement.sectionId) ?? [];
     current.push(placed);
     placedBySection.set(placement.sectionId, current);

@@ -151,7 +151,7 @@ test('場所ごとの自由入力と固定フォームから完成文を合成�
 
   // 固定フォーム (ラウンド入力カード): バイタルの BP と、肺音の正常チェックを入力。
   // (BP/肺音/正常文はプリセットテンプレート『回診メモ』のデータであり UI 文言ではない)
-  await page.getByLabel('BP', { exact: true }).fill('120/80');
+  await page.getByLabel('BP（mmHg）', { exact: true }).fill('120/80');
   const lungRow = page.locator('.projectionField', {
     has: page.getByLabel('肺音', { exact: true }),
   });
@@ -218,7 +218,7 @@ test('フォーマット編集で選択項目を作り、チップで単一選�
   const formatRow = formatSection.locator('.formatListRow', { hasText: 'バイタル' });
   await formatRow.getByRole('button', { name: '編集', exact: true }).click();
 
-  // 「種類」と kind 別フィールドが同じ行に並ぶ (先頭項目は BP = 分数なので「種類」+「単位」)。
+  // 「種類」と kind 別フィールドが同じ行に並ぶ (先頭項目は BP = 入力なので「種類」+「単位」)。
   const firstKindRow = page.locator('.templateEditKindRow').first();
   await expect(firstKindRow.locator('.field')).toHaveCount(2);
   await expect
@@ -431,7 +431,7 @@ test('ラウンド開始で今回分をクリアし（問題・継続メモは�
   const freeTexts = page.locator(ui(UI.projection.card)).locator(ui(UI.projection.freeText));
   await freeTexts.nth(0).fill('Sの自由本文');
   await freeTexts.nth(1).fill('Oの自由本文');
-  await page.getByLabel('BP', { exact: true }).fill('120/80');
+  await page.getByLabel('BP（mmHg）', { exact: true }).fill('120/80');
   await page.locator(ui(UI.detail.home)).click();
 
   // ラウンド開始 (= 記録クリア)。確認ダイアログを経由する。
@@ -444,7 +444,7 @@ test('ラウンド開始で今回分をクリアし（問題・継続メモは�
   await openDetail(page, '303 検証対象C');
   await expect(freeTexts.nth(0)).toHaveValue('');
   await expect(freeTexts.nth(1)).toHaveValue('');
-  await expect(page.getByLabel('BP', { exact: true })).toHaveValue('');
+  await expect(page.getByLabel('BP（mmHg）', { exact: true })).toHaveValue('');
   await expect(page.locator(ui(UI.problem.input)).first()).toHaveValue('誤嚥性肺炎');
   await expect(page.locator(ui(UI.memo.standing.input))).toHaveValue('継続メモ本文');
   await page.locator(ui(UI.detail.home)).click();

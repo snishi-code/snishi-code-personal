@@ -98,12 +98,11 @@ export function buildBuilderPrompt(sources: readonly string[], requestId: string
   blocks.push(
     [
       '## 種類 (kind) の見分け方',
-      '- number: 単独の数値。単位は値から分離して unit に入れること。',
-      '- fraction: 120/80 のようにスラッシュで区切られた数値。',
       '- select: 複数の見本を通じ、決まった短い語が入れ替わるもの。options は実際に見本へ現れた語だけを 2 個以上入れること。',
-      '- text: 上記以外のすべて。迷ったら text にすること。',
+      '- text: 上記以外のすべて。数値も日付も 120/80 のような値も text にすること。迷ったら text。',
       '- 見本が 2 件以下なら select は使わず text にすること。',
-      '- unit は number/fraction だけ、normal は text だけ、options は select だけに書くこと。',
+      '- 数値に単位が付くもの (36.5℃・96%・120/80mmHg) は kind を text にし、単位は値から分離して unit に入れること。',
+      '- options は select だけに書くこと。unit と normal は text に書けるが、両方を同時に使うのは単位付きの定型値だけにすること。',
     ].join('\n'),
   );
 

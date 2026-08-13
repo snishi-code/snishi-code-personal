@@ -35,10 +35,10 @@ export function buildRoundPreset(nowMs: number): TemplatePresetBundle {
     labelSep: ' ',
     titleWrap: '',
     items: [
-      { id: newId('itm'), label: 'BP', kind: 'fraction', unit: 'mmHg' },
-      { id: newId('itm'), label: 'HR', kind: 'number' },
-      { id: newId('itm'), label: 'SpO2', kind: 'number', unit: '%' },
-      { id: newId('itm'), label: 'BT', kind: 'number', unit: '℃' },
+      { id: newId('itm'), label: 'BP', kind: 'text', unit: 'mmHg' },
+      { id: newId('itm'), label: 'HR', kind: 'text' },
+      { id: newId('itm'), label: 'SpO2', kind: 'text', unit: '%' },
+      { id: newId('itm'), label: 'BT', kind: 'text', unit: '℃' },
     ],
   };
   const physical: Format = {
@@ -61,9 +61,9 @@ export function buildRoundPreset(nowMs: number): TemplatePresetBundle {
     labelSep: ' ',
     titleWrap: '',
     items: [
-      { id: newId('itm'), label: 'Glu', kind: 'number' },
-      { id: newId('itm'), label: '', kind: 'number' },
-      { id: newId('itm'), label: '', kind: 'number' },
+      { id: newId('itm'), label: 'Glu', kind: 'text' },
+      { id: newId('itm'), label: '', kind: 'text' },
+      { id: newId('itm'), label: '', kind: 'text' },
     ],
   };
   const labs: Format = {

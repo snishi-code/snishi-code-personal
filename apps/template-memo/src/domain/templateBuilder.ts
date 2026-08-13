@@ -116,8 +116,8 @@ export const BUILDER_EXPECTED_JSON = `{
       "joiner": ", ",
       "labelSep": " ",
       "items": [
-        { "label": "温度", "kind": "number", "unit": "℃" },
-        { "label": "混合比", "kind": "fraction" },
+        { "label": "温度", "kind": "text", "unit": "℃" },
+        { "label": "混合比", "kind": "text" },
         { "label": "運転モード", "kind": "select", "options": ["自動", "手動"] }
       ]
     },
@@ -208,7 +208,7 @@ export function extractJsonText(text: string): string {
 
 const JOINERS = new Set(['\n', ', ', '、', '-', ' ']);
 const LABEL_SEPARATORS = new Set(['：', ' ', '']);
-const ITEM_KINDS = new Set<ItemKind>(['text', 'number', 'fraction', 'select']);
+const ITEM_KINDS = new Set<ItemKind>(['text', 'select']);
 
 function recordOf(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -262,13 +262,10 @@ function parseItem(
   }
   const label = limited(stringOf(row.label), 20, '項目名', warnings);
   const requestedKind = stringOf(row.kind) as ItemKind;
+  // 廃止した number / fraction も text として受ける (AI 返答や手書き JSON が旧語彙で
+  // 来ても項目ごと落とさない)。単位はそのまま text の unit へ載る。
   let kind: ItemKind = ITEM_KINDS.has(requestedKind) ? requestedKind : 'text';
-  // normal は text でしか使わない。捨てる値の字数超過を警告しても利用者には意味が取れないため、
-  // text になり得る場合だけ検証する (select は options 不足で text へ降格することがある)。
-  const normal =
-    kind === 'text' || kind === 'select'
-      ? limited(stringOf(row.normal), 40, `「${label || formatName}」の正常文`, warnings)
-      : '';
+  const normal = limited(stringOf(row.normal), 40, `「${label || formatName}」の正常文`, warnings);
 
   if (kind === 'select') {
     const seen = new Set<string>();
@@ -298,10 +295,8 @@ function parseItem(
     return { label, kind, options };
   }
 
-  if (kind === 'number' || kind === 'fraction') {
-    const unit = limited(stringOf(row.unit), 20, `「${label || formatName}」の単位`, warnings);
-    return unit ? { label, kind, unit } : { label, kind };
-  }
+  const unit = limited(stringOf(row.unit), 20, `「${label || formatName}」の単位`, warnings);
+  if (unit) return normal ? { label, kind, unit, normal } : { label, kind, unit };
   if (!label && !normal) {
     warnings.push({
       code: 'invalid-item',
@@ -498,10 +493,12 @@ function itemFromCandidate(candidate: BuilderItemCandidate): TemplateItem {
     label: candidate.label,
     kind: candidate.kind,
   };
-  if (candidate.kind === 'number' || candidate.kind === 'fraction') {
+  if (candidate.kind === 'select') {
+    item.options = [...(candidate.options ?? [])];
+  } else {
     if (candidate.unit) item.unit = candidate.unit;
-  } else if (candidate.kind === 'select') item.options = [...(candidate.options ?? [])];
-  else if (candidate.normal) item.normal = candidate.normal;
+    if (candidate.normal) item.normal = candidate.normal;
+  }
   return item;
 }
 

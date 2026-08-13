@@ -69,26 +69,28 @@ export interface TagDef {
 // ============================
 
 /**
- * text 項目の保存値。正常文由来 (preset) か手入力由来 (manual) かを区別し、
+ * 項目の保存値。正常文由来 (preset) か手入力由来 (manual) かを区別し、
  * ワンタップ正常チェックが手入力を誤って上書き/消去しないようにする
  * （回診 formatValues の provenance 設計を継承）。
+ *
+ * note は旧 number / fraction 項目に付いていた短い注記（例: SpO2 の酸素投与量）。
+ * 入力 UI は当初から存在せず、新規に作られることはない。既存データ・取り込み JSON の
+ * 出力を落とさないためだけに読み書きを通す（合成では値+単位の後ろに付く）。
  */
 export interface TextEntry {
   value: string;
   source: 'preset' | 'manual';
-}
-
-/** number / fraction 項目の保存値。note は短い注記（例: SpO2 の酸素投与量）。 */
-export interface NumericEntry {
-  value: string;
   note?: string;
 }
 
 /**
  * フォーム値: formValues[placementId][itemId] = 保存値。
  * キーは配列 index ではなく安定 id（テンプレート編集で並びが変わっても値が迷子にならない）。
- * 保存形は TextEntry / NumericEntry（未入力は ''）。読み出しは domain/formValues.ts の
+ * 保存形は TextEntry（未入力は ''）。読み出しは domain/formValues.ts の
  * 正規化ヘルパを必ず通す（object 以外は未入力へ倒す fail-safe）。
+ *
+ * 旧 number / fraction の保存形 { value, note? }（source なし）も、そのまま
+ * 手入力値として読み取る（種類を畳んだときに値が消えないため。formValues.ts 参照）。
  */
 export type FormValues = Record<string, Record<string, unknown>>;
 
