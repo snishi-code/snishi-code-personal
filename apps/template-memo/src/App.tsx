@@ -3,8 +3,11 @@
 //   - ヘッダー: 中央 = place 名 (タップで WsPicker) / 右 = 設定。
 //   - 履歴: useAppHistory を 1 つだけ所有し、registries (overlay/編集) を配線する。
 //   - view 切替は home / detail / settings の状態機械。
+//   - 縦スクロールは document 1 本なので、画面を差し替えても位置が残る。ホームだけは
+//     離れる直前の位置を覚えて戻す (対象を上から順に開いていく使い方で、1 件ごとに
+//     一覧の先頭へ飛ばされないため)。ホーム以外へ入るときは先頭から見せる。
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AppHeader } from '@snishi/foundation/ui/AppHeader';
 import { IconButton } from '@snishi/foundation/ui/IconButton';
 import { Icon } from '@snishi/foundation/ui/Icon';
@@ -87,14 +90,30 @@ export function App() {
     return () => runtime.setSaveErrorHandler(null);
   }, [runtime, toast]);
 
+  // ホームの縦位置。ホームを離れる直前に控え、戻ったときに復元する。
+  const homeScrollRef = useRef(0);
+  const leaveHome = useCallback(() => {
+    homeScrollRef.current = window.scrollY;
+  }, []);
+
   const openPatient = useCallback(
     (no: number) => {
       setSelectedNo(no);
-      window.scrollTo(0, 0);
+      leaveHome();
       navigate('detail');
     },
-    [navigate],
+    [leaveHome, navigate],
   );
+
+  // 画面が変わったら縦位置を決める。ホームへ戻るときだけ復元し、他は先頭から見せる。
+  // 端末 Back で戻る経路も view の変化を通るのでここ 1 箇所で足りる。
+  // paint 前に確定させたいので layout effect (一瞬先頭が見えてから飛ぶのを防ぐ)。
+  useLayoutEffect(() => {
+    if (!booted) return;
+    if (typeof window.scrollTo !== 'function') return;
+    // 対象が減っていて控えた位置に届かない場合はブラウザが最下端へ丸める (それでよい)。
+    window.scrollTo(0, page === 'home' ? homeScrollRef.current : 0);
+  }, [page, booted]);
 
   if (bootError) {
     return (
@@ -122,13 +141,20 @@ export function App() {
           </div>
         }
         right={
-          <IconButton label={s.shell.settingsLabel} onClick={() => navigate('settings')}>
+          <IconButton
+            label={s.shell.settingsLabel}
+            onClick={() => {
+              if (page === 'home') leaveHome();
+              navigate('settings');
+            }}
+          >
             <Icon name="settings" size={18} />
           </IconButton>
         }
       />
 
-      <main className="appMain">
+      {/* id は ScrollTopButton がフォーカスを戻す先 (本文の起点)。 */}
+      <main className="appMain" id="main">
         {!booted ? (
           <p className="muted appBoot">{s.boot.loading}</p>
         ) : page === 'settings' ? (

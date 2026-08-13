@@ -48,6 +48,11 @@ export const s = {
   },
 
   // 共通
+  // 画面に文字を出さない操作の読み上げ名。
+  a11y: {
+    scrollTop: '一番上へ移動',
+  },
+
   common: {
     cancel: 'キャンセル',
     close: '閉じる',

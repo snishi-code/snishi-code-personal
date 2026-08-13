@@ -19,6 +19,7 @@ import { StatusPickerPopup } from './StatusPicker';
 import { TagFilterPicker } from './TagPicker';
 import { patientMatchesTagFilter } from './tags';
 import { OverlayBinding } from './registries';
+import { ScrollTopButton } from './ScrollTopButton';
 import { s } from '../i18n';
 import { UI } from '../ui-contract';
 
@@ -258,6 +259,7 @@ export function HomeView({
             );
           })()
         : null}
+      <ScrollTopButton />
     </section>
   );
 }

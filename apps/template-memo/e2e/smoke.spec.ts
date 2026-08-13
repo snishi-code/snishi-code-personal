@@ -43,7 +43,8 @@ async function addPatient(page: Page, room: string, name: string): Promise<void>
   await popup.locator(ui(UI.patient.name)).fill(name);
   await popup.getByRole('button', { name: '閉じる' }).click();
   await expect(popup).toBeHidden();
-  await expect(page.locator(ui(UI.patient.card))).toContainText(`${room} ${name}`);
+  // 追加した行そのものを見る（複数件あると非スコープの locator は strict mode に触れる）。
+  await expect(page.locator(ui(UI.patient.card), { hasText: `${room} ${name}` })).toBeVisible();
 }
 
 /** ホーム行タップで対象詳細を開く。 */
@@ -197,6 +198,40 @@ test('freeText を外した場所には自由入力欄が出ない', async ({ pa
 
   const projectionCard = page.locator(ui(UI.projection.card));
   await expect(projectionCard.locator(ui(UI.projection.freeText))).toHaveCount(3);
+});
+
+test('ホームの縦位置は詳細から戻っても保たれ、一番上へ戻るボタンで先頭へ返れる', async ({
+  page,
+}) => {
+  // 一覧を実際にスクロールできる高さにする（位置順に並ぶので 3 桁で連番）。
+  await page.setViewportSize({ width: 375, height: 640 });
+  for (let n = 0; n < 12; n += 1) {
+    await addPatient(page, `${101 + n}`, `対象${n}`);
+  }
+
+  // 下の方の対象までスクロールして開く。
+  const target = page.locator(ui(UI.patient.card), { hasText: '112 対象11' });
+  await target.scrollIntoViewIfNeeded();
+  const before = await page.evaluate(() => window.scrollY);
+  expect(before).toBeGreaterThan(0);
+
+  await target.click();
+  await expect(page.locator(ui(UI.detail.meta))).toBeVisible();
+  // 詳細は先頭から見せる（前の画面の位置を持ち込まない）。
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+
+  // ホームへ戻ると、さっきまで見ていた位置に戻る（1 件ごとに先頭へ飛ばされない）。
+  await page.locator(ui(UI.detail.home)).click();
+  await expect(page.locator(ui(UI.home.addPatient))).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
+
+  // 深い位置では「一番上へ移動」が出て、押すと先頭へ返る。
+  const scrollTop = page.locator(ui(UI.home.scrollTop));
+  await expect(scrollTop).toBeVisible();
+  await scrollTop.click();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  // 先頭では要素ごと消える（タブ順・支援技術に出さない）。
+  await expect(scrollTop).toHaveCount(0);
 });
 
 test('呼び出しフォーマットを保存すると入力カードへ昇格する', async ({ page }) => {

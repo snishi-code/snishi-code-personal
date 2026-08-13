@@ -13,6 +13,7 @@ export const UI = {
     statusZone: 'home.statusZone', // ホーム患者行の左端ステータスボタン
     actionBar: 'home.actionBar', // 下部固定バー (詳細/設定と共通の枠)
     homeBottom: 'home.home.bottom', // 下部中央: ホーム (現在地のため disabled)
+    scrollTop: 'home.scrollTop', // 一番上へ戻る浮動ボタン (しきい値未満では要素ごと無い)
   },
   patient: {
     card: 'patient.card',

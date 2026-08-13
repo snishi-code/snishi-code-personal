@@ -17,6 +17,13 @@
   --tag-green-fg: #166534;
 }
 
+/* 浮動ボタン (一番上へ移動) の層。foundation の重なり順
+   (--z-header 20 < --z-overlay 40 < --z-popup 50 < --z-toast 60) の header と overlay の
+   あいだに置く。下部固定バー (.bottomActionBar, z-index 20) より前面、ダイアログより背面。 */
+:root {
+  --z-float: 30;
+}
+
 /* ── レイアウト ── */
 .appMain {
   width: 100%;
@@ -380,6 +387,53 @@
 .bottomActionBar .icon-btn {
   min-width: 48px;
   min-height: 48px;
+}
+
+/* 一番上へ移動する浮動ボタン。
+   逃がす相手は 2 つあり、高いほうがトースト。
+     下部固定バー: 1px + 6px + 48px + 6px + safe = 61px + safe (z-index 20 < --z-float 30)
+     トースト:     .toast-region は bottom = --space-5(24px) + safe、.toast は縦 padding 12px×2 +
+                   14px 文字。375px 幅では保存失敗の文言が 2 行に折り返し、高さ約 69px =
+                   上端は下から約 93px。--z-toast 60 > --z-float 30 なのでトーストが前面を取り、
+                   さらにトースト自身がタップで閉じる領域なので、重なった部分を狙うと
+                   スクロールせずトーストが消えるだけになる。
+   そのため下から (トーストの下端 + 2 行ぶんの高さ) まで上げる。3 行以上に折り返す文言では
+   依然重なるが、その間はトーストを前面に保つ (一時通知を隠さないことを優先する)。 */
+.scroll-top {
+  position: fixed;
+  right: calc(var(--space-3, 12px) + env(safe-area-inset-right, 0px));
+  bottom: calc(var(--space-5, 24px) + 72px + env(safe-area-inset-bottom, 0px));
+  z-index: var(--z-float);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-pop);
+  animation: scroll-top-in 120ms ease;
+}
+/* foundation の .icon-btn:hover (特異度 0,2,0) が .scroll-top (0,1,0) に勝ち、面が
+   ページ背景へ落ちて浮いて見えなくなる。iOS Safari は :hover をタップ後も保持するため、
+   押した直後からその状態が残る。面は --surface のまま保ち、手掛かりは枠色で示す。 */
+.scroll-top:hover {
+  background: var(--surface, #fff);
+  border-color: var(--primary-border, var(--border, #e2e8f0));
+}
+/* 上向き矢印はアイコン正本に無いため、既存概念 expand (chevronDown) を回転して使う。 */
+.scroll-top__icon {
+  display: inline-flex;
+  transform: rotate(180deg);
+}
+@keyframes scroll-top-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scroll-top {
+    animation: none;
+  }
 }
 
 /* 上/下並び替え。hospital-rounds の .problemRowMove / .problemMoveBtn を流用 (縦積みの細い列)。 */
