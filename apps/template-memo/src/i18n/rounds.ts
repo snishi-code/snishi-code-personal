@@ -48,6 +48,11 @@ export const s = {
   },
 
   // 共通
+  // 画面に文字を出さない操作の読み上げ名。
+  a11y: {
+    scrollTop: '一番上へ移動',
+  },
+
   common: {
     cancel: 'キャンセル',
     close: '閉じる',
@@ -509,7 +514,7 @@ export const s = {
       section: 'テンプレート',
       // ＋ボタンの読み上げ名 (押すとプリセット選択メニューが開く)。
       add: 'テンプレートを作る',
-      addRound: '回診メモを追加',
+      addRound: '回診を追加',
       addDaily: '日報を追加',
       addEmpty: '空のテンプレートを作る',
       active: '使用中',

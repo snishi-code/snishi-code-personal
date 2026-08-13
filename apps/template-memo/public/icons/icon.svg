@@ -1,10 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- template-memo アイコン: teal 円盤 + 循環矢印 2 本 + パルス波形（白背景・非透過） -->
-  <rect width="512" height="512" fill="#ffffff" />
-  <circle cx="256" cy="256" r="174" fill="#14b8a6" />
+  <!-- template-memo アイコン: teal 全面 + 循環矢印 2 本（ラウンド）+ 記録の線 3 本（非透過）。
+       矢印の座標は旧アイコン（白背景 + 円盤時代）から流用。maskable 安全圏 (中心 r≈205) 内に収まる。 -->
+  <rect width="512" height="512" fill="#14b8a6" />
   <path d="M 142.88 210.3 A 122 122 0 0 1 363.72 198.72" fill="none" stroke="#ffffff" stroke-width="45" stroke-linecap="butt" />
   <polygon points="390.95,249.94 318.96,215.73 402.84,171.13" fill="#ffffff" />
   <path d="M 369.12 301.7 A 122 122 0 0 1 148.28 313.28" fill="none" stroke="#ffffff" stroke-width="45" stroke-linecap="butt" />
   <polygon points="121.05,262.06 193.04,296.27 109.16,340.87" fill="#ffffff" />
-  <polyline points="196,254 222,254 244,196 272,308 288,254 318,254" fill="none" stroke="#ffffff" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" />
+  <line x1="211" y1="218" x2="301" y2="218" stroke="#ffffff" stroke-width="22" stroke-linecap="round" />
+  <line x1="211" y1="256" x2="301" y2="256" stroke="#ffffff" stroke-width="22" stroke-linecap="round" />
+  <line x1="211" y1="294" x2="265" y2="294" stroke="#ffffff" stroke-width="22" stroke-linecap="round" />
 </svg>

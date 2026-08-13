@@ -312,7 +312,7 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
         db.getAll<unknown>(STORE_TEMPLATES),
       ]);
     if (!settingsRec) {
-      // 初回起動: プリセット 2 種 + place 1 つを seed し、回診メモを有効にする。
+      // 初回起動: プリセット 2 種 + place 1 つを seed し、回診を有効にする。
       await seedDefaults();
     } else {
       settings = settingsRec;

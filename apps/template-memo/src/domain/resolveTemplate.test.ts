@@ -104,13 +104,10 @@ describe('resolveTemplate', () => {
     const resolved = resolveTemplate(preset.template, [preset.frame], preset.formats)!;
     const placed = (name: string) =>
       resolved.sections.flatMap((section) => section.formats).find((entry) => entry.name === name)!;
-    const itemId = (formatName: string, label: string, offset = 0) => {
-      const matches = placed(formatName).items.filter((item) => item.label === label);
-      return matches[offset]!.id;
-    };
+    const itemId = (formatName: string, label: string) =>
+      placed(formatName).items.find((item) => item.label === label)!.id;
     const vitals = placed('バイタル');
     const physical = placed('身体所見');
-    const glucose = placed('血糖');
     const patient: Patient = {
       pid: 'patient-golden',
       name: '',
@@ -118,18 +115,14 @@ describe('resolveTemplate', () => {
       placeId: '',
       status: 'none',
       tags: [],
-      problems: ['HF', 'DM', '誤嚥性肺炎\n　7/20- TAZ/PIPC 9g/2'],
+      problems: ['HF', 'DM', '誤嚥性肺炎\n\u30007/20- TAZ/PIPC 9g/2'],
       sectionTexts: {},
       standingMemo: '週明けLabo\n家族IC希望あり',
       projectedValues: {
         [vitals.id]: {
           [itemId('バイタル', 'BP')]: { value: '120/98' },
           [itemId('バイタル', 'HR')]: { value: '63' },
-        },
-        [glucose.id]: {
-          [itemId('血糖', 'Glu')]: { value: '108' },
-          [itemId('血糖', '', 0)]: { value: '222' },
-          [itemId('血糖', '', 1)]: { value: '100' },
+          [itemId('バイタル', 'Glu')]: { value: '108' },
         },
         [physical.id]: Object.fromEntries(
           physical.items.map((item) => [item.id, { value: item.normal, source: 'preset' }]),
@@ -138,14 +131,16 @@ describe('resolveTemplate', () => {
       updatedAt: 0,
       archivedAt: null,
     };
+    // 埋めた項目だけが項目順に並び、単位は値の直後に付く。空項目は区切りごと落ちる。
     const expected =
-      '#1 HF\n#2 DM\n#3 誤嚥性肺炎\n　7/20- TAZ/PIPC 9g/2\n\n週明けLabo\n家族IC希望あり\n\n(S)\n変わりない\n\n(O)\nBP 120/98mmHg, HR 63\n\n肺音：明らかなラ音なし\n腸音：正常\n腹部：平坦軟、圧痛なし\n下腿浮腫：なし\n\nGlu 108-222-100\n\n(A)\n著変なし\n\n(P)\n現行加療継続';
+      '#1 HF\n#2 DM\n#3 誤嚥性肺炎\n\u30007/20- TAZ/PIPC 9g/2\n\n週明けLabo\n家族IC希望あり\n\n(S)\n変わりない\n\n(O)\nBP 120/98mmHg, HR 63, Glu 108mg/dL\n\n肺音：明らかなラ音なし\n腸音：正常\n腹部：平坦軟、圧痛なし\n下腿浮腫：なし\n\n(A)\n著変なし\n\n(P)\n現行加療継続';
     expect(composePresetClean(patient, resolved)).toBe(expected);
   });
 
-  it('seed の配置 display を固定する（合成テストでは検知できない回帰網）', () => {
+  it('seed の配置と見出し設定を固定する（合成テストでは検知できない回帰網）', () => {
     const preset = buildRoundPreset(100);
     const nameOf = new Map(preset.formats.map((format) => [format.id, format.name]));
+    // 回診に置くのはバイタルと身体所見だけ。検査所見は部品として seed するが未配置。
     expect(
       preset.template.placements.map((placement) => [
         nameOf.get(placement.formatId),
@@ -154,8 +149,11 @@ describe('resolveTemplate', () => {
     ).toEqual([
       ['バイタル', 'always'],
       ['身体所見', 'always'],
-      ['血糖', 'oncall'],
-      ['検査所見', 'oncall'],
+    ]);
+    expect(preset.formats.map((format) => [format.name, format.showName])).toEqual([
+      ['バイタル', false],
+      ['身体所見', false],
+      ['検査所見', undefined],
     ]);
   });
 });

@@ -43,7 +43,8 @@ async function addPatient(page: Page, room: string, name: string): Promise<void>
   await popup.locator(ui(UI.patient.name)).fill(name);
   await popup.getByRole('button', { name: '閉じる' }).click();
   await expect(popup).toBeHidden();
-  await expect(page.locator(ui(UI.patient.card))).toContainText(`${room} ${name}`);
+  // 追加した行そのものを見る（複数件あると非スコープの locator は strict mode に触れる）。
+  await expect(page.locator(ui(UI.patient.card), { hasText: `${room} ${name}` })).toBeVisible();
 }
 
 /** ホーム行タップで対象詳細を開く。 */
@@ -150,7 +151,7 @@ test('場所ごとの自由入力と固定フォームから完成文を合成�
   await freeTexts.nth(1).fill('右下肺に湿性ラ音');
 
   // 固定フォーム (ラウンド入力カード): バイタルの BP と、肺音の正常チェックを入力。
-  // (BP/肺音/正常文はプリセットテンプレート『回診メモ』のデータであり UI 文言ではない)
+  // (BP/肺音/正常文はプリセットテンプレート『回診』のデータであり UI 文言ではない)
   await page.getByLabel('BP（mmHg）', { exact: true }).fill('120/80');
   const lungRow = page.locator('.projectionField', {
     has: page.getByLabel('肺音', { exact: true }),
@@ -199,16 +200,64 @@ test('freeText を外した場所には自由入力欄が出ない', async ({ pa
   await expect(projectionCard.locator(ui(UI.projection.freeText))).toHaveCount(3);
 });
 
+test('ホームの縦位置は詳細から戻っても保たれ、一番上へ戻るボタンで先頭へ返れる', async ({
+  page,
+}) => {
+  // 一覧を実際にスクロールできる高さにする（位置順に並ぶので 3 桁で連番）。
+  await page.setViewportSize({ width: 375, height: 640 });
+  for (let n = 0; n < 12; n += 1) {
+    await addPatient(page, `${101 + n}`, `対象${n}`);
+  }
+
+  // 下の方の対象までスクロールして開く。
+  const target = page.locator(ui(UI.patient.card), { hasText: '112 対象11' });
+  await target.scrollIntoViewIfNeeded();
+  const before = await page.evaluate(() => window.scrollY);
+  expect(before).toBeGreaterThan(0);
+
+  await target.click();
+  await expect(page.locator(ui(UI.detail.meta))).toBeVisible();
+  // 詳細は先頭から見せる（前の画面の位置を持ち込まない）。
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+
+  // ホームへ戻ると、さっきまで見ていた位置に戻る（1 件ごとに先頭へ飛ばされない）。
+  await page.locator(ui(UI.detail.home)).click();
+  await expect(page.locator(ui(UI.home.addPatient))).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
+
+  // 深い位置では「一番上へ移動」が出て、押すと先頭へ返る。
+  const scrollTop = page.locator(ui(UI.home.scrollTop));
+  await expect(scrollTop).toBeVisible();
+  await scrollTop.click();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  // 先頭では要素ごと消える（タブ順・支援技術に出さない）。
+  await expect(scrollTop).toHaveCount(0);
+});
+
 test('呼び出しフォーマットを保存すると入力カードへ昇格する', async ({ page }) => {
   await addPatient(page, '205', '呼び出し確認');
-  await openDetail(page, '205 呼び出し確認');
+  // 既定の回診は 2 配置とも「展開」なので、身体所見を「呼び出し」へ変えてから確かめる。
+  await openSettings(page);
+  await page
+    .locator('.formatListRow', { hasText: '回診' })
+    .first()
+    .getByRole('button', { name: '編集', exact: true })
+    .click();
+  await page
+    .locator(ui(UI.templateEdit.placement), { hasText: '身体所見' })
+    .first()
+    .locator(ui(UI.templateEdit.display))
+    .selectOption('oncall');
+  await page.locator(ui(UI.templateEdit.save)).click();
+  await page.locator(ui(UI.settings.homeBottom)).click();
 
-  await page.getByRole('button', { name: '血糖', exact: true }).click();
-  await page.getByLabel('Glu', { exact: true }).fill('108');
+  await openDetail(page, '205 呼び出し確認');
+  await page.getByRole('button', { name: '身体所見', exact: true }).click();
+  await page.getByLabel('肺音', { exact: true }).fill('湿性ラ音あり');
   await page.locator(ui(UI.projection.sheetSave)).click();
 
-  await expect(page.getByLabel('Glu', { exact: true })).toHaveValue('108');
-  await expect(page.getByRole('button', { name: '血糖', exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('肺音', { exact: true })).toHaveValue('湿性ラ音あり');
+  await expect(page.getByRole('button', { name: '身体所見', exact: true })).toHaveCount(0);
 });
 
 test('フォーマット編集で選択項目を作り、チップで単一選択できる', async ({ page }) => {
@@ -218,7 +267,7 @@ test('フォーマット編集で選択項目を作り、チップで単一選�
   const formatRow = formatSection.locator('.formatListRow', { hasText: 'バイタル' });
   await formatRow.getByRole('button', { name: '編集', exact: true }).click();
 
-  // 「種類」と kind 別フィールドが同じ行に並ぶ (先頭項目は BP = 入力なので「種類」+「単位」)。
+  // 「種類」と kind 別フィールドが同じ行に並ぶ (先頭項目は SpO2 = 入力なので「種類」+「単位」)。
   const firstKindRow = page.locator('.templateEditKindRow').first();
   await expect(firstKindRow.locator('.field')).toHaveCount(2);
   await expect
@@ -262,20 +311,20 @@ test('フォーマット編集で選択項目を作り、チップで単一選�
 test('メニュー配置からフォーマットを開いて保存できる', async ({ page }) => {
   await addPatient(page, '207', 'メニュー確認');
   await openSettings(page);
-  const templateRow = page.locator('.formatListRow', { hasText: '回診メモ' }).first();
+  const templateRow = page.locator('.formatListRow', { hasText: '回診' }).first();
   await templateRow.getByRole('button', { name: '編集', exact: true }).click();
 
-  const labPlacement = page.locator(ui(UI.templateEdit.placement), { hasText: '検査所見' }).first();
-  await labPlacement.locator(ui(UI.templateEdit.display)).selectOption('menu');
+  const placement = page.locator(ui(UI.templateEdit.placement), { hasText: '身体所見' }).first();
+  await placement.locator(ui(UI.templateEdit.display)).selectOption('menu');
   await page.locator(ui(UI.templateEdit.save)).click();
   await page.locator(ui(UI.settings.homeBottom)).click();
   await openDetail(page, '207 メニュー確認');
 
   await page.locator(ui(UI.projection.menu)).click();
-  await page.getByRole('button', { name: '検査所見', exact: true }).click();
-  await page.getByLabel('採血', { exact: true }).fill('異常なし');
+  await page.getByRole('button', { name: '身体所見', exact: true }).click();
+  await page.getByLabel('肺音', { exact: true }).fill('異常なし');
   await page.locator(ui(UI.projection.sheetSave)).click();
-  await expect(page.getByLabel('採血', { exact: true })).toHaveValue('異常なし');
+  await expect(page.getByLabel('肺音', { exact: true })).toHaveValue('異常なし');
 });
 
 test('フォーマット単独QRを受け取り、同じIDはコピーとして保存する', async ({ page }) => {
@@ -341,7 +390,7 @@ test('使用中フォーマットは参照テンプレート名を示して削�
   await row.getByRole('button', { name: '削除', exact: true }).click();
   await confirmDialog(page);
   await expect(
-    page.getByText('このフォーマットはテンプレート「回診メモ」で使用中のため削除できません'),
+    page.getByText('このフォーマットはテンプレート「回診」で使用中のため削除できません'),
   ).toBeVisible();
   await expect(row).toBeVisible();
 });
@@ -358,7 +407,7 @@ test('複製してから編集すれば、元のフォーマットを使うテ�
   const copyRow = formatSection.locator('.formatListRow', { hasText: '身体所見のコピー' });
   await expect(copyRow).toBeVisible();
 
-  // コピー側の先頭項目 (肺音) を書き換えて保存しても、回診メモは元の身体所見を参照したまま。
+  // コピー側の先頭項目 (肺音) を書き換えて保存しても、回診は元の身体所見を参照したまま。
   await copyRow.getByRole('button', { name: '編集', exact: true }).click();
   await page.getByLabel('ラベル（例 肺音）').first().fill('肺音改');
   await page.locator(ui(UI.formatEdit.save)).click();
