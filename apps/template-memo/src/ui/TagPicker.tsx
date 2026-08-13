@@ -12,6 +12,7 @@ import { Icon } from '@snishi/foundation/ui/Icon';
 import { useToast } from '@snishi/foundation/ui/toast';
 import type { HrStore } from '../data/store';
 import type { TagColor } from '../domain/types';
+import { DEFAULT_TAG_COLOR } from '../domain/tags';
 import { addNewTag, getAllTags, getHomeTagFilter, setHomeTagFilter, tagColorOf } from './tags';
 import { useRegisterOverlay } from './registries';
 import { s } from '../i18n';
@@ -19,12 +20,13 @@ import { UI } from '../ui-contract';
 
 /**
  * 「+ 新規タグ」ウィジェット (タップで入力欄に展開 → Enter/blur で確定)。
- * newTagColor で追加タグの表示色を決める (色はクリア方針には影響しない)。
+ * newTagColor で追加タグの色 = ラウンド開始で外れるかを決める。既定は残る側
+ * (domain/tags.ts の DEFAULT_TAG_COLOR)。あとから設定のタグ管理で変更できる。
  */
 export function AddTagWidget({
   store,
   onAdded,
-  newTagColor = 'gray',
+  newTagColor = DEFAULT_TAG_COLOR,
 }: {
   store: HrStore;
   onAdded: () => void;
@@ -95,13 +97,13 @@ export function TagSelection({
   selected,
   onChange,
   allowAdd = true,
-  newTagColor = 'gray',
+  newTagColor = DEFAULT_TAG_COLOR,
 }: {
   store: HrStore;
   selected: string[];
   onChange: (next: string[]) => void;
   allowAdd?: boolean;
-  /** 新規追加タグの表示色。 */
+  /** 新規追加タグの色 (= ラウンド開始で外れるか)。 */
   newTagColor?: TagColor;
 }) {
   const [, setTick] = useState(0); // タグ追加後の一覧更新
@@ -113,7 +115,8 @@ export function TagSelection({
       {all.map((name) => {
         const on = set.has(name);
         const color = tagColorOf(settings, name);
-        const colorMod = color !== 'gray' ? ` tagChip--${color}` : '';
+        // 色は全色に modifier を付ける (素の .tagChip は未選択の外枠だけを担う)。
+        const colorMod = ` tagChip--${color}`;
         return (
           <button
             key={name}
@@ -210,7 +213,7 @@ function TagFilterSheet({
           {tags.map((name) => {
             const on = selected.includes(name);
             const color = tagColorOf(settings, name);
-            const colorMod = color !== 'gray' ? ` tagChip--${color}` : '';
+            const colorMod = ` tagChip--${color}`;
             return (
               <button
                 key={name}

@@ -10,7 +10,7 @@ import { Icon } from '@snishi/foundation/ui/Icon';
 import { ConfirmDialog } from './overlays';
 import { Settings } from './screens/Settings';
 import { wipeDatabase } from '../data/db';
-import { t } from '../i18n';
+import { errorText, t } from '../i18n';
 import { UI } from '../ui-contract';
 
 /**
@@ -107,7 +107,9 @@ export class ErrorBoundary extends Component<Props, State> {
   state: State = { failed: false };
 
   static getDerivedStateFromError(error: unknown): State {
-    return { failed: true, message: error instanceof Error ? error.message : undefined };
+    // LedgerError の message は i18n キーそのもの（errors.ts が super(code) するため）。
+    // 生のキーをバナーへ出さず、他の全経路（toast）と同じ errorText で文言化する。
+    return { failed: true, message: error instanceof Error ? errorText(error) : undefined };
   }
 
   componentDidCatch(error: unknown, info: ErrorInfo): void {

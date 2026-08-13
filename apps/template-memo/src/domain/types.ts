@@ -45,11 +45,17 @@ export interface PlaceDef {
 }
 
 // ============================
-// タグ（名前参照・色は表示/分類のみ）
+// タグ（名前参照・色は「ラウンド開始で外れるか」の意味を持つ）
 // ============================
 
-/** 個人タグの色。表示/分類のためだけに使う（クリア方針ではない）。 */
-export const TAG_COLORS = Object.freeze(['gray', 'amber'] as const);
+/**
+ * 個人タグの色。見た目ではなく「ラウンド開始で外れるか」を表す:
+ *   blue  = 残る（継続の目印）
+ *   amber = ラウンド開始で対象から外れる（今回分の目印）
+ * 判定は色リテラルを散らさず domain/tags.ts の tagClearsOnRoundStart に集約する
+ * （blue 以外は外れる側 = あとから足した色は自動で外れる側に入る）。
+ */
+export const TAG_COLORS = Object.freeze(['blue', 'amber'] as const);
 export type TagColor = (typeof TAG_COLORS)[number];
 
 /** タグの定義オブジェクト（settings.tags が正本）。patient.tags は名前参照の string[]。 */
@@ -59,30 +65,32 @@ export interface TagDef {
 }
 
 // ============================
-// フォーム値（テンプレート group/item への入力値）
+// フォーム値（テンプレートの配置/item への入力値）
 // ============================
 
 /**
- * text 項目の保存値。正常文由来 (preset) か手入力由来 (manual) かを区別し、
+ * 項目の保存値。正常文由来 (preset) か手入力由来 (manual) かを区別し、
  * ワンタップ正常チェックが手入力を誤って上書き/消去しないようにする
  * （回診 formatValues の provenance 設計を継承）。
+ *
+ * note は旧 number / fraction 項目に付いていた短い注記（例: SpO2 の酸素投与量）。
+ * 入力 UI は当初から存在せず、新規に作られることはない。既存データ・取り込み JSON の
+ * 出力を落とさないためだけに読み書きを通す（合成では値+単位の後ろに付く）。
  */
 export interface TextEntry {
   value: string;
   source: 'preset' | 'manual';
-}
-
-/** number / fraction 項目の保存値。note は短い注記（例: SpO2 の酸素投与量）。 */
-export interface NumericEntry {
-  value: string;
   note?: string;
 }
 
 /**
- * フォーム値: formValues[groupId][itemId] = 保存値。
+ * フォーム値: formValues[placementId][itemId] = 保存値。
  * キーは配列 index ではなく安定 id（テンプレート編集で並びが変わっても値が迷子にならない）。
- * 保存形は TextEntry / NumericEntry（未入力は ''）。読み出しは domain/formValues.ts の
+ * 保存形は TextEntry（未入力は ''）。読み出しは domain/formValues.ts の
  * 正規化ヘルパを必ず通す（object 以外は未入力へ倒す fail-safe）。
+ *
+ * 旧 number / fraction の保存形 { value, note? }（source なし）も、そのまま
+ * 手入力値として読み取る（種類を畳んだときに値が消えないため。formValues.ts 参照）。
  */
 export type FormValues = Record<string, Record<string, unknown>>;
 
@@ -93,9 +101,9 @@ export type FormValues = Record<string, Record<string, unknown>>;
 /**
  * 1 レコード = 1 件のフラット構造（place は参照属性）。アーカイブは archivedAt のソフトデリート。
  *
- * 「今回分」(ラウンド開始・クリアで消えるもの) = status(青以外) / visitMemo /
- * projectedValues。
- * 「継続」(消えないもの) = name / room / placeId / problems / standingMemo / tags。
+ * 「今回分」(ラウンド開始・クリアで消えるもの) = status(青以外) / sectionTexts /
+ * projectedValues / tags(青以外の色)。
+ * 「継続」(消えないもの) = name / room / placeId / problems / standingMemo / tags(青)。
  */
 export interface Patient {
   pid: string;
@@ -106,17 +114,20 @@ export interface Patient {
   room: string;
   /** 所属 place。'' = 未所属（通常は作成時に必ず割り当てる）。 */
   placeId: string;
-  /** 個人タグ（名前参照。定義は settings.tags）。 */
+  /** 個人タグ（名前参照。定義と色 = settings.tags）。 */
   tags: string[];
   /** プロブレムリスト。番号は保存せず、表示・合成時に配列順から自動付番する。 */
   problems: string[];
-  /** 今回メモ。ラウンド開始で常にクリアする。合成・QR の本文候補。 */
-  visitMemo: string;
-  /** 継続メモ（申し送り）。ラウンド開始でクリアしない。 */
+  /**
+   * 場所ごとの自由本文（今回分）。key = フレームの場所 id・値 = その場所に書いた本文。
+   * ラウンド開始で常にクリアする。合成では freeText の場所だけがこの本文を拾う。
+   */
+  sectionTexts: Record<string, string>;
+  /** 継続メモ。ラウンド開始でクリアしない。 */
   standingMemo: string;
   /**
    * テンプレートのフォーム入力値（今回分）。名前はコピー元 UI に合わせて projectedValues の
-   * まま、型は合成エンジンの FormValues（formValues[groupId][itemId]・provenance 付き）。
+   * まま、型は合成エンジンの FormValues（formValues[placementId][itemId]・provenance 付き）。
    * 読み書きは domain/formValues.ts のヘルパ経由。
    */
   projectedValues: FormValues;
@@ -136,7 +147,7 @@ export interface AppSettings {
   key: 'app';
   /** 有効なテンプレート id（templates store のレコードを指す）。 */
   activeTemplateId: string;
-  /** 個人タグの定義（色は表示/分類のみ）。 */
+  /** 個人タグの定義（色 = ラウンド開始で外れるか。domain/tags.ts 参照）。 */
   tags: TagDef[];
   /** QR 出力の改行モード（既定 crlf）。 */
   newlineMode: NewlineMode;

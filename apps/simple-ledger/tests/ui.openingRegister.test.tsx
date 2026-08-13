@@ -46,7 +46,7 @@ describe('補正導線の初期残高分岐', () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((account) => account.name === '現金')!;
     const liability = ledger.accounts.find((account) => account.role === 'payment-liability')!;
-    await createOpening({ accountId: cash.id, amount: 100000, date: '2000-01-01' });
+    await createOpening({ accountId: cash.id, amount: 10000000, date: '2000-01-01' });
     await createRepaymentEntries({
       liabilityAccountId: liability.id,
       fromAccountId: cash.id,
@@ -83,7 +83,7 @@ describe('補正導線の初期残高分岐', () => {
     const openings = ledger.journalEntries.filter((e) => e.kind === 'opening');
     expect(openings.length).toBe(1);
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    expect(openings[0]!.lines.some((l) => l.accountId === cash.id && l.amount === 50000)).toBe(
+    expect(openings[0]!.lines.some((l) => l.accountId === cash.id && l.amount === 5000000)).toBe(
       true,
     );
     // 補正仕訳（adjustment metadata）は作られていない。

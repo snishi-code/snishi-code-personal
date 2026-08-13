@@ -296,10 +296,6 @@
   cursor: pointer;
   flex-shrink: 0;
 }
-.tagColorSwatch--gray {
-  background: var(--surface, #fff);
-  border-color: var(--border, #e2e8f0);
-}
 .tagColorSwatch--amber {
   background: var(--tag-amber-bg);
   border-color: var(--tag-amber-bd);
@@ -532,8 +528,9 @@
   --swatch-on: #ffffff;
 
   /* ── 個人タグ色 palette ──
-     gray: 既存ニュートラル見た目 → 変数なし (既定クラスのまま)
-     amber: status-yellow より落ち着いたアンバー系。色は表示/分類のみで、クリア方針には影響しない。
+     色は「ラウンド開始で外れるか」の意味を持つ (domain/tags.ts):
+       blue  = 残る。ステータス青 (特記・持ち越し) と意味を揃える。値は先頭 :root で定義。
+       amber = ラウンド開始で外れる。status-yellow より落ち着いたアンバー系。
      ルール: ハードコード禁止。ここのみで値を定義し、全箇所を変数経由で参照する。 */
   --tag-amber-bg: #faeeda;
   --tag-amber-bd: #ba7517;
@@ -1005,6 +1002,12 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   align-items: center;
 }
 
+/* ヘッダー直下のタグ行。ヘッダーは単一の <button> なので、その中ではなくこの行に置く
+   (ボタンの入れ子は不正)。タグが多いときは折り返す (.tagSelection が flex-wrap)。 */
+.detailTagsRow {
+  margin-bottom: var(--space-2);
+}
+
 /* 共通の下部固定操作バー (患者詳細・設定)。
    片手操作で親指が届く下部に固定し、
    safe-area (ホームインジケータ) を避ける。dialog (top-layer) より下に出る。 */
@@ -1162,7 +1165,7 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   cursor: pointer;
 }
 
-/* ── 今回メモ / 継続メモ (患者ごとの独立 textarea) ── */
+/* ── 継続メモ / 場所ごとの自由入力欄 (独立 textarea) ── */
 .memoInput {
   width: 100%;
   min-width: 0;
@@ -1197,6 +1200,14 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   grid-template-columns: fit-content(min(8rem, 30vw)) var(--hr-cell-h) minmax(0, 1fr);
 }
 
+/* 見出しを消した配置は、直前の配置との境界が余白だけになる (行間 4px / 配置間 8px)。
+   列幅は配置ごとに決まるので行頭も揃わない。「前に配置があり、かつ自分に見出しが無い」
+   ときだけ細い罫線で境界を戻す。 */
+.projectionRows + .projectionRows.noHead {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-2);
+}
+
 .projectionField {
   display: contents;
 }
@@ -1213,6 +1224,11 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
 .projectionRows .input,
 .projectionRows .tagSelection {
   min-width: 0;
+}
+
+/* 場所ごとの自由入力欄 (freeText の場所の末尾)。次の場所と間隔を空ける。 */
+.projectionFreeText {
+  margin-bottom: var(--space-2);
 }
 
 /* 正常チェック (44px・緑枠・押下済みは緑塗り)。
@@ -1364,14 +1380,16 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   color: var(--on-primary);
   font-weight: 700;
 }
-/* ✓ は選択の冗長な非色キュー (gray/amber 共通)。控えめサイズで本文の邪魔をしない。 */
+/* ✓ は選択の冗長な非色キュー (全色共通)。控えめサイズで本文の邪魔をしない。 */
 .tagChip.on::before {
   content: '✓';
   margin-right: 5px;
   font-weight: 900;
 }
 
-/* タグ色 modifier (未選択時の見た目)。gray は既定の .tagChip 見た目 (変数不要)。 */
+/* タグ色 modifier (未選択時の見た目)。色 = 「ラウンド開始で外れるか」(domain/tags.ts) なので
+   全色に modifier を付ける (素の .tagChip は外枠だけを担う)。
+   この節は .tagChip 本体より後に置くこと (同一詳細度 = 後勝ち)。 */
 .tagChip--amber {
   background: var(--tag-amber-bg);
   border-color: var(--tag-amber-bd);
@@ -1382,6 +1400,20 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
 .tagChip--amber.on {
   background: var(--tag-amber-fg);
   border-color: var(--tag-amber-fg);
+  color: var(--on-primary);
+  font-weight: 700;
+}
+
+/* blue = ラウンド開始で残るタグ。 */
+.tagChip--blue {
+  background: var(--tag-blue-bg);
+  border-color: var(--tag-blue-bd);
+  color: var(--tag-blue-fg);
+}
+
+.tagChip--blue.on {
+  background: var(--tag-blue-fg);
+  border-color: var(--tag-blue-fg);
   color: var(--on-primary);
   font-weight: 700;
 }
@@ -1513,6 +1545,16 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   margin: 0 0 var(--space-2);
 }
 
+/* 節の見出し行 (右端に節のボタン = QRで受け取る)。下余白は行が持ち、見出し自体は持たない
+   (見出しの margin が残ると flex 中央揃えでボタンだけ上へずれる)。 */
+.settingsSectionHead {
+  margin-bottom: var(--space-2);
+}
+
+.settingsSection .settingsSectionHead .section-label {
+  margin-bottom: 0;
+}
+
 .settingsHint {
   font-size: 12px;
   margin: var(--space-1) 0 var(--space-2);
@@ -1585,24 +1627,24 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   flex-shrink: 0;
 }
 
-.tagColorSwatch--gray {
-  background: var(--surface);
-  border-color: var(--border);
-}
-
 .tagColorSwatch--amber {
   background: var(--tag-amber-bg);
   border-color: var(--tag-amber-bd);
 }
 
+.tagColorSwatch--blue {
+  background: var(--tag-blue-bg);
+  border-color: var(--tag-blue-bd);
+}
+
 /* 選択中は外枠強調 */
-.tagColorSwatch--gray.selected {
-  outline: 2px solid var(--border);
+.tagColorSwatch--amber.selected {
+  outline: 2px solid var(--tag-amber-bd);
   outline-offset: 2px;
 }
 
-.tagColorSwatch--amber.selected {
-  outline: 2px solid var(--tag-amber-bd);
+.tagColorSwatch--blue.selected {
+  outline: 2px solid var(--tag-blue-bd);
   outline-offset: 2px;
 }
 
@@ -1688,20 +1730,20 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
 
 /* ============================================================================
    template-memo 固有の追記 (コピー移植後も残す最小限)。
-   - tm-*: 温存ファイル (TemplateQrSendDialog / TemplateQrReceiveDialog) が使う 3 クラス。
+   - tm-*: QR 共有ダイアログが使う 3 クラス。
    - settingsRadioRow: 設定「QR出力」の改行モードラジオ行。
    ============================================================================ */
 
 .templateEditView,
 .templateEditSection,
-.templateEditGroup,
+.templateEditPlacement,
 .templateEditItem {
   display: grid;
   gap: var(--space-2);
 }
 
 .templateEditSection,
-.templateEditGroup,
+.templateEditPlacement,
 .templateEditItem {
   padding: var(--space-3);
 }
@@ -1715,14 +1757,14 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   background: var(--primary-light);
 }
 
-.templateEditGroup {
+.templateEditPlacement {
   margin-left: var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
 }
 
-.templateEditGroup > .formatListRow:first-child {
+.templateEditPlacement > .formatListRow:first-child {
   padding: var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -1748,6 +1790,20 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   /* 7rem × 2 + gap が 375px 端末の実効内容幅 (約 257px) に収まり、スマホでも 1 行に並ぶ */
   flex: 1 1 7rem;
   min-width: 0;
+}
+
+/* 区切りの自由入力 (入力欄 + 見えない文字の注意書き)。
+   注意書きは入力欄のすぐ下に付け、余白は塊の外側だけに持たせる (次の項目の説明に見えないように)。 */
+.formatSepBlock {
+  margin-bottom: var(--space-4);
+}
+
+.formatSepBlock .field {
+  margin-bottom: 0;
+}
+
+.formatSepBlock .settingsHint {
+  margin-bottom: 0;
 }
 
 /* select の選択肢編集 (見出し + 選択肢行 + 追加ボタンの縦積み。行内は settingsField の横並び) */

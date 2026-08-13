@@ -96,11 +96,6 @@ export function App() {
     [navigate],
   );
 
-  const selectNo = useCallback((no: number) => {
-    setSelectedNo(no);
-    window.scrollTo(0, 0);
-  }, []);
-
   if (bootError) {
     return (
       <div className="appBoot">
@@ -142,7 +137,6 @@ export function App() {
           <DetailView
             runtime={runtime}
             selectedNo={selectedNo}
-            onSelectNo={selectNo}
             onNavigateHome={() => navigate('home')}
           />
         ) : (

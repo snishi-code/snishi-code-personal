@@ -38,6 +38,8 @@ CSS variables による design tokens。共通正本は `packages/foundation/src
 | `--tap` | `44px` | 最小タップ領域 |
 | `--maxw` / `--header-h` | `720px` / `56px` | レイアウト |
 | `--font` | system stack | 書体 |
+| `--z-header` / `--z-float` / `--z-overlay` / `--z-popup` / `--z-toast` | `20 / 30 / 40 / 50 / 60` | 重なり順（float はアプリ側 app.css で定義: 浮遊ボタン等。native dialog は top-layer のため overlay/popup は参考値） |
+| `--sticky-top` | `calc(--header-h + 1px)` | sticky 要素の上端（app.css 定義。header 実高 57px = min-height 56 + border 1） |
 
 ## コントラストの方針
 

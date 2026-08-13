@@ -16,8 +16,8 @@ export function t(key: MessageKey, vars?: Record<string, string | number>): stri
 
 /**
  * 例外をユーザー表示文言にする。
- * LedgerError は code + params を i18n で表示し、それ以外の Error はメッセージをそのまま、
- * 不明な値は fallback キー（既定はエラー文言）にフォールバックする。
+ * LedgerError は code + params を i18n で表示し、
+ * それ以外の Error はメッセージをそのまま、不明な値は fallback キーにフォールバックする。
  */
 export function errorText(e: unknown, fallback: MessageKey = 'toast.error'): string {
   if (e instanceof LedgerError) return t(e.code, e.params);

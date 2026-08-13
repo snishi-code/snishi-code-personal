@@ -32,7 +32,9 @@ function View() {
 
 function ReadyView() {
   const { status } = useLedger();
-  return status === 'ready' ? <Allocations onEditEntry={() => undefined} /> : null;
+  return status === 'ready' ? (
+    <Allocations period={{ mode: 'date', date: '2031-02-28' }} onEditEntry={() => undefined} />
+  ) : null;
 }
 
 describe('定期ルールの初回起票日', () => {
@@ -54,7 +56,11 @@ describe('定期ルールの初回起票日', () => {
     const firstDate = document.querySelector(
       `[data-ui="${UI.allocations.recurringFirstPostingDate}"]`,
     ) as HTMLInputElement;
+    const ruleStartDate = document.querySelector(
+      `[data-ui="${UI.allocations.recurringStartDate}"]`,
+    ) as HTMLInputElement;
     expect(firstDate.type).toBe('date');
+    expect(ruleStartDate).toHaveValue(todayLocal());
 
     fireEvent.change(name, { target: { value: '未来の定期支出' } });
     fireEvent.change(amount, { target: { value: '1500' } });
@@ -77,7 +83,11 @@ describe('定期ルールの初回起票日', () => {
     const saved = (await loadLedger()).recurringRules.find(
       (rule) => rule.name === '未来の定期支出',
     );
-    expect(saved).toMatchObject({ startMonth: '2031-03', dayOfMonth: 31 });
+    expect(saved).toMatchObject({
+      startMonth: '2031-03',
+      dayOfMonth: 31,
+      startDate: todayLocal(),
+    });
   });
 
   it('編集時は存在しない日をその月の最終日へ丸めて日付欄へ戻す', async () => {
@@ -86,7 +96,7 @@ describe('定期ルールの初回起票日', () => {
     const expense = ledger.accounts.find((account) => account.role === 'expense-category')!;
     await createRecurringRule({
       name: '月末ルール',
-      amount: 1000,
+      amount: 100000,
       dayOfMonth: 31,
       debitAccountId: expense.id,
       creditAccountId: cash.id,
@@ -108,7 +118,7 @@ describe('定期ルールの初回起票日', () => {
     const expense = ledger.accounts.find((account) => account.role === 'expense-category')!;
     await createRecurringRule({
       name: '月末ルール（据え置き）',
-      amount: 1000,
+      amount: 100000,
       dayOfMonth: 31,
       debitAccountId: expense.id,
       creditAccountId: cash.id,
@@ -120,11 +130,18 @@ describe('定期ルールの初回起票日', () => {
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)!);
     // 日付欄は 2031-02-28（31 を 2 月へクランプした表示）。日付は触らず金額だけ変えて保存する
     // （金額の変化で「保存が実際に走った」ことを確かめる＝空振りで通らないようにする）。
-    fireEvent.change(
-      document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!,
-      { target: { value: '2000' } },
-    );
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!, {
+      target: { value: '2000' },
+    });
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
+    await waitFor(() => {
+      expect(
+        document.querySelector(`[data-ui="${UI.allocations.recurringAmountChangeDialog}"]`),
+      ).toBeInTheDocument();
+    });
+    fireEvent.click(
+      document.querySelector(`[data-ui="${UI.allocations.recurringAmountChangeAll}"]`)!,
+    );
 
     await waitFor(
       () => {
@@ -138,7 +155,7 @@ describe('定期ルールの初回起票日', () => {
     const saved = (await loadLedger()).recurringRules.find(
       (rule) => rule.name === '月末ルール（据え置き）',
     );
-    expect(saved).toMatchObject({ startMonth: '2031-02', dayOfMonth: 31, amount: 2000 });
+    expect(saved).toMatchObject({ startMonth: '2031-02', dayOfMonth: 31, amount: 200000 });
   });
 
   it('日付欄の日を変えたときは新しい dayOfMonth を保存する', async () => {
@@ -147,7 +164,7 @@ describe('定期ルールの初回起票日', () => {
     const expense = ledger.accounts.find((account) => account.role === 'expense-category')!;
     await createRecurringRule({
       name: '月末ルール（変更）',
-      amount: 1000,
+      amount: 100000,
       dayOfMonth: 31,
       debitAccountId: expense.id,
       creditAccountId: cash.id,
@@ -179,8 +196,8 @@ describe('定期ルールの初回起票日', () => {
   });
 });
 
-describe('月割りするルール', () => {
-  it('周期 12 でも月割り ON なら spreadExpenseAccountId を持ち、借方が台帳に固定される', async () => {
+describe('費用行きルール', () => {
+  it('周期 12 でも費用を選ぶだけで spreadExpenseAccountId を持ち、借方が台帳に固定される', async () => {
     render(<View />);
     await waitFor(() => {
       expect(document.querySelector(`[data-ui="${UI.allocations.view}"]`)).toBeInTheDocument();
@@ -204,9 +221,7 @@ describe('月割りするルール', () => {
         { name: '固定費' },
       ),
     );
-    fireEvent.click(
-      document.querySelector(`[data-ui="${UI.allocations.recurringManualSpread}"]`)!,
-    );
+    expect(document.querySelector('[data-ui="allocations.recurring.manualSpread"]')).toBeNull();
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
 
     await waitFor(
@@ -223,21 +238,19 @@ describe('月割りするルール', () => {
     const ledgerAccount = ledger.accounts.find(
       (account) => account.role === 'continuing-cost-asset',
     )!;
-    const spread = ledger.accounts.find(
-      (account) => account.id === saved!.spreadExpenseAccountId,
-    );
+    const spread = ledger.accounts.find((account) => account.id === saved!.spreadExpenseAccountId);
     expect(saved).toMatchObject({ everyMonths: 12, debitAccountId: ledgerAccount.id });
     expect(spread?.role).toBe('expense-category');
     // 起票済みぶんの item（継続コスト資産）が決定的 ID で生まれている。
     const item = ledger.monthlyCostItems.find((m) => m.id.startsWith(`ccr-${saved!.id}-`));
     expect(item).toMatchObject({
       name: '年払い保険',
-      amount: 60000,
+      amount: 6000000,
       expenseAccountId: saved!.spreadExpenseAccountId,
     });
   });
 
-  it('周期 1 でも月割り ON なら起票日開始・当月末終了の item が生まれる', async () => {
+  it('周期 1 でも費用を選ぶだけで起票日開始・当月末終了の item が生まれる', async () => {
     render(<View />);
     await waitFor(() => {
       expect(document.querySelector(`[data-ui="${UI.allocations.view}"]`)).toBeInTheDocument();
@@ -257,9 +270,7 @@ describe('月割りするルール', () => {
         { name: '固定費' },
       ),
     );
-    fireEvent.click(
-      document.querySelector(`[data-ui="${UI.allocations.recurringManualSpread}"]`)!,
-    );
+    expect(document.querySelector('[data-ui="allocations.recurring.manualSpread"]')).toBeNull();
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
 
     await waitFor(
@@ -276,17 +287,15 @@ describe('月割りするルール', () => {
     const ledgerAccount = ledger.accounts.find(
       (account) => account.role === 'continuing-cost-asset',
     )!;
-    const spread = ledger.accounts.find(
-      (account) => account.id === saved!.spreadExpenseAccountId,
-    );
+    const spread = ledger.accounts.find((account) => account.id === saved!.spreadExpenseAccountId);
     expect(saved!.everyMonths).toBe(1);
-    // 月割り ON なので台帳経由（借方 = 台帳・費用の行き先 = 支出カテゴリ）。
+    // 費用行きなので台帳経由（借方 = 台帳・費用の行き先 = 支出カテゴリ）。
     expect(saved).toMatchObject({ debitAccountId: ledgerAccount.id });
     expect(spread?.role).toBe('expense-category');
     // 起票済みぶんの item は起票日開始・当月末終了で毎月生まれて消える。
     const today = todayLocal();
     const item = ledger.monthlyCostItems.find((m) => m.id.startsWith(`ccr-${saved!.id}-`));
-    expect(item).toMatchObject({ name: '毎月サブスク', amount: 1000, startDate: today });
+    expect(item).toMatchObject({ name: '毎月サブスク', amount: 100000, startDate: today });
     expect(item!.endDate).toBe(clampDayToMonth(today.slice(0, 7), 31));
   });
 });

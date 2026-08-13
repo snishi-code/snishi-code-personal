@@ -1,26 +1,20 @@
 /*
- * カード・ローンの返済設定（Account.repaymentAccountId / repaymentDay）と返済予定。
+ * カード・ローンの返済設定（Account.repaymentAccountId / repaymentDay）。
  *  - 負債科目にのみ設定でき、返済口座は存在する日常資産。
  *  - 返済口座の削除で設定ポインタが剥がれる（fail-soft）。
- *  - 返済予定（outflow・counter=負債）の実績化は 借方 負債 / 貸方 返済口座。
  *  - nextRepaymentDate は「毎月 day 日」を月末クランプで返す。
  */
 import { describe, expect, it } from 'vitest';
 import './setup';
-import {
-  deleteAccount,
-  loadLedger,
-  postSchedule,
-  upsertAccount,
-  upsertSchedule,
-} from '../src/data/repository';
+import { deleteAccount, loadLedger, upsertAccount } from '../src/data/repository';
 import { nextRepaymentDate } from '../src/domain/cashflow';
+import { MONTHLY_AMOUNTS_HARD_CAP } from '../src/domain/allocation';
 import { ledgerExportPackageSchema } from '../src/domain/schema';
 import { buildExportPackage } from '../src/data/exportImport';
 import { LedgerError } from '../src/domain/errors';
 import { newId } from '../src/domain/ids';
 import { nowIso } from '../src/util/time';
-import type { Account, CashflowSchedule } from '../src/domain/types';
+import type { Account } from '../src/domain/types';
 
 async function accountByRole(role: string): Promise<Account> {
   const ledger = await loadLedger();
@@ -52,18 +46,18 @@ describe('返済設定（勘定科目）', () => {
     const cash = await accountByRole('daily-asset');
     const card = await accountByRole('payment-liability');
     const expense = (await loadLedger()).accounts.find((a) => a.role === 'expense-category');
-    await expect(
-      upsertAccount({ ...cash, repaymentDay: 27, updatedAt: nowIso() }),
-    ).rejects.toThrow(LedgerError);
+    await expect(upsertAccount({ ...cash, repaymentDay: 27, updatedAt: nowIso() })).rejects.toThrow(
+      LedgerError,
+    );
     await expect(
       upsertAccount({ ...card, repaymentAccountId: expense!.id, updatedAt: nowIso() }),
     ).rejects.toThrow(LedgerError);
-    await expect(
-      upsertAccount({ ...card, repaymentDay: 0, updatedAt: nowIso() }),
-    ).rejects.toThrow(LedgerError);
-    await expect(
-      upsertAccount({ ...card, repaymentDay: 32, updatedAt: nowIso() }),
-    ).rejects.toThrow(LedgerError);
+    await expect(upsertAccount({ ...card, repaymentDay: 0, updatedAt: nowIso() })).rejects.toThrow(
+      LedgerError,
+    );
+    await expect(upsertAccount({ ...card, repaymentDay: 32, updatedAt: nowIso() })).rejects.toThrow(
+      LedgerError,
+    );
   });
 
   it('返済口座を削除すると、負債側の設定ポインタが剥がれる', async () => {
@@ -86,36 +80,6 @@ describe('返済設定（勘定科目）', () => {
   });
 });
 
-describe('返済予定の実績化', () => {
-  it('outflow（返済口座 → 負債）の実績化は 借方 負債 / 貸方 返済口座', async () => {
-    const card = await accountByRole('payment-liability');
-    const bank = await accountByRole('daily-asset');
-    const ts = nowIso();
-    const schedule: CashflowSchedule = {
-      id: newId(),
-      title: `${card.name}の返済`,
-      dueDate: '2026-08-27',
-      amount: 45000,
-      direction: 'outflow',
-      accountId: bank.id,
-      counterAccountId: card.id,
-      source: 'credit-card',
-      status: 'planned',
-      createdAt: ts,
-      updatedAt: ts,
-    };
-    await upsertSchedule(schedule);
-    const entry = await postSchedule(schedule.id);
-    expect(entry.lines).toEqual([
-      { accountId: card.id, side: 'debit', amount: 45000 },
-      { accountId: bank.id, side: 'credit', amount: 45000 },
-    ]);
-    const saved = (await loadLedger()).cashflowSchedules.find((s) => s.id === schedule.id);
-    expect(saved?.status).toBe('posted');
-    expect(saved?.linkedEntryId).toBe(entry.id);
-  });
-});
-
 describe('nextRepaymentDate', () => {
   it('当月にまだ来ていなければ当月、過ぎていれば翌月', () => {
     expect(nextRepaymentDate('2026-07-10', 27)).toBe('2026-07-27');
@@ -127,5 +91,63 @@ describe('nextRepaymentDate', () => {
     expect(nextRepaymentDate('2026-02-10', 31)).toBe('2026-02-28');
     expect(nextRepaymentDate('2026-04-05', 31)).toBe('2026-04-30');
     expect(nextRepaymentDate('2024-02-10', 30)).toBe('2024-02-29');
+  });
+});
+
+describe('返済分割の 0 金額ガード（R-1・v10 の既存不具合の修正）', () => {
+  it('総額 < 回数 は明確な理由コードで拒否する（monthlyAmounts が 0 の回を作るため）', async () => {
+    const { createRepaymentEntries } = await import('../src/data/repository');
+    const card = await accountByRole('payment-liability');
+    const bank = await accountByRole('daily-asset');
+    await expect(
+      createRepaymentEntries({
+        liabilityAccountId: card.id,
+        fromAccountId: bank.id,
+        firstDate: '2026-09-27',
+        total: 1,
+        count: 2,
+        title: 'ガード確認',
+      }),
+    ).rejects.toMatchObject({ code: 'error.repay.totalTooSmall' });
+  });
+
+  it('総額 === 回数 は各回 1 で通る（境界）', async () => {
+    const { createRepaymentEntries, loadLedger: load } = await import('../src/data/repository');
+    const card = await accountByRole('payment-liability');
+    const bank = await accountByRole('daily-asset');
+    const entries = await createRepaymentEntries({
+      liabilityAccountId: card.id,
+      fromAccountId: bank.id,
+      firstDate: '2026-09-27',
+      total: 2,
+      count: 2,
+      title: '境界確認',
+    });
+    expect(entries).toHaveLength(2);
+    const saved = (await load()).journalEntries.filter((e) => e.description.startsWith('境界確認'));
+    expect(saved).toHaveLength(2);
+    expect(saved.every((e) => e.lines.every((l) => l.amount === 1))).toBe(true);
+  });
+
+  it('hard cap を超える回数は配列確保・書込み前に明確な理由コードで拒否する', async () => {
+    const { createRepaymentEntries, loadLedger: load } = await import('../src/data/repository');
+    const card = await accountByRole('payment-liability');
+    const bank = await accountByRole('daily-asset');
+    await expect(
+      createRepaymentEntries({
+        liabilityAccountId: card.id,
+        fromAccountId: bank.id,
+        firstDate: '2026-09-27',
+        total: MONTHLY_AMOUNTS_HARD_CAP + 1,
+        count: MONTHLY_AMOUNTS_HARD_CAP + 1,
+        title: '上限確認',
+      }),
+    ).rejects.toMatchObject({
+      code: 'error.repay.countInvalid',
+      params: { max: MONTHLY_AMOUNTS_HARD_CAP },
+    });
+    expect(
+      (await load()).journalEntries.some((entry) => entry.description.includes('上限確認')),
+    ).toBe(false);
   });
 });

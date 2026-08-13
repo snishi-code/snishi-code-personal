@@ -3,11 +3,25 @@
  * v2 の key 変更を確認: conflict 表示には importRevision を使う。
  * また storage-error の importErrorMessage マッピングを確認する。
  */
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeAll, describe, it, expect, vi } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { ToastProvider } from '@snishi/foundation/ui/toast';
+import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import './setup';
 import type { ImportOutcome } from '../src/data/exportImport';
 import { t } from '../src/i18n';
-import { importErrorMessage } from '../src/ui/screens/Settings';
+import { importErrorMessage, Settings } from '../src/ui/screens/Settings';
+import { LedgerProvider } from '../src/state/store';
+import * as repo from '../src/data/repository';
+
+beforeAll(() => {
+  patchDialogIfNeeded();
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe('Settings — importErrorMessage カバレッジ確認', () => {
   it('ImportOutcome の全 kind が型として定義されている', () => {
@@ -59,5 +73,26 @@ describe('Settings — importErrorMessage カバレッジ確認', () => {
     expect(importErrorMessage({ kind: 'storage-error', detail: 'IndexedDB error' })).toBe(
       'IndexedDB error',
     );
+  });
+});
+
+describe('Settings — スナップショット失敗', () => {
+  it('読込失敗を空一覧扱いにせず、実際の描画で alert と案内を出す', async () => {
+    // 文言ラッパの戻り値ではなく、listSnapshots の reject → Settings の描画まで通す
+    //（ラッパだけの検査では「空一覧に偽装しない」という挙動を何も守れない）。
+    vi.spyOn(repo, 'listSnapshots').mockRejectedValue(new Error('IDB broken'));
+    render(
+      <ToastProvider>
+        <LedgerProvider>
+          <Settings onNavigate={() => undefined} onOpenOnboarding={() => undefined} />
+        </LedgerProvider>
+      </ToastProvider>,
+    );
+    const alert = await screen.findByText(t('snapshot.loadError'));
+    expect(alert).toBeInTheDocument();
+    // 「スナップショットなし」の空カードに偽装していない。
+    await waitFor(() => {
+      expect(screen.queryByText(t('snapshot.empty'))).not.toBeInTheDocument();
+    });
   });
 });

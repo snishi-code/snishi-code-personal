@@ -9,12 +9,15 @@
 //   - 追加 API はテンプレート/設定/バックアップ (旧 v1 store の機能を HrStore へ集約)。
 
 import { createPointerStore, type PointerStore } from '@snishi/foundation/storage/pointers';
+import { uniqueName } from '@snishi/foundation/qr/protocol';
 import { nextGroupRevision } from '@snishi/foundation/sync/revision';
 import {
   ALL_STORES,
   APP_SETTINGS_KEY,
   LOCAL_PREFIX,
   newId,
+  STORE_FORMATS,
+  STORE_FRAMES,
   STORE_PATIENTS,
   STORE_PLACES,
   STORE_SETTINGS,
@@ -22,17 +25,20 @@ import {
 } from './constants';
 import { db as defaultDb } from './db';
 import type { DatabaseHandle } from '@snishi/foundation/storage/idb';
+import type { Template } from '../domain/template';
 import {
-  buildDailyReportPreset,
-  buildRoundPreset,
-  normalizeTemplate,
-  type Template,
-} from '../domain/template';
+  normalizeFormat,
+  normalizeFrame,
+  normalizeTemplateDef,
+  type Format,
+  type Frame,
+  type TemplateDef,
+} from '../domain/entities';
+import { planBundleReuse } from '../domain/entityReuse';
+import { resolveTemplate } from '../domain/resolveTemplate';
+import { buildDailyReportPreset, buildRoundPreset } from '../domain/presets';
+import type { TemplatePresetBundle } from '../domain/presets';
 import { makeDefaultPatient, normalizePatientArray } from '../domain/normalize';
-import {
-  prepareWorkspaceImportAppend,
-  type WorkspaceImportPayload,
-} from '../domain/importWorkspace';
 import type { AppSettings, AppState, Patient, PlaceDef } from '../domain/types';
 
 // ── エラー文言定数 (正本) ──
@@ -41,7 +47,11 @@ import type { AppSettings, AppState, Patient, PlaceDef } from '../domain/types';
 export const PLACE_ID_REQUIRED_MSG = '場所が指定されていません';
 export const PATIENT_NOT_FOUND_MSG = '患者が見つかりません';
 export const PLACE_HAS_PATIENTS_MSG = '患者がいる場所は削除できません';
-const LAST_TEMPLATE_UNDELETABLE_MSG = '最後のテンプレートは削除できません';
+export const LAST_TEMPLATE_UNDELETABLE_MSG = '最後のテンプレートは削除できません';
+export const frameInUseMsg = (names: readonly string[]) =>
+  `このフレームはテンプレート「${names.join('」「')}」で使用中のため削除できません`;
+export const formatInUseMsg = (names: readonly string[]) =>
+  `このフォーマットはテンプレート「${names.join('」「')}」で使用中のため削除できません`;
 
 /** アーカイブ一覧の特別ビュー ID (place ではない。復帰/完全削除の入口)。 */
 export const ARCHIVE_VIEW_ID = '__archive__';
@@ -59,7 +69,9 @@ export interface ReplaceAllData {
   settings: AppSettings;
   places: PlaceDef[];
   patients: Patient[];
-  templates: Template[];
+  frames: Frame[];
+  formats: Format[];
+  templates: TemplateDef[];
 }
 
 interface HrStorage {
@@ -90,22 +102,42 @@ export interface HrStore {
   archivePatient(patientId: string): Promise<void>;
   restorePatient(patientId: string, placeId?: string): Promise<void>;
   deletePatientPermanently(patientId: string): Promise<void>;
-  // ── テンプレート ──
-  getTemplates(): Template[];
+  // ── テンプレート部品 ──
+  getFrames(): Frame[];
+  saveFrame(frame: Frame): Promise<void>;
+  deleteFrame(frameId: string): Promise<void>;
+  duplicateFrame(frameId: string): Promise<Frame>;
+  getFormats(): Format[];
+  saveFormat(format: Format): Promise<void>;
+  deleteFormat(formatId: string): Promise<void>;
+  duplicateFormat(formatId: string): Promise<Format>;
+  getTemplateDefs(): TemplateDef[];
+  saveTemplateDef(template: TemplateDef): Promise<void>;
+  duplicateTemplateDef(templateId: string): Promise<TemplateDef>;
+  saveGeneratedBundle(bundle: TemplatePresetBundle): Promise<void>;
+  deleteTemplateDef(templateId: string): Promise<void>;
   getActiveTemplate(): Template | null;
   setActiveTemplate(templateId: string): Promise<void>;
-  saveTemplate(template: Template): Promise<void>;
-  deleteTemplate(templateId: string): Promise<void>;
   // ── バックアップ / 移行 ──
   exportData(): {
     settings: AppSettings;
     places: PlaceDef[];
     patients: Patient[];
-    templates: Template[];
+    frames: Frame[];
+    formats: Format[];
+    templates: TemplateDef[];
   };
   replaceAll(data: ReplaceAllData): Promise<void>;
   wipeAll(): Promise<void>;
-  appendImported(data: WorkspaceImportPayload): Promise<void>;
+  /**
+   * タグ名の改名 / 削除を**全対象**（アクティブビュー外・アーカイブ済みを含む）へ適用する。
+   * newName が null なら削除。settings と patients を 1 トランザクションで書く。
+   *
+   * 定義 (settings.tags) 側の更新は呼び出し側が済ませてから呼ぶ（重複判定を持つため）。
+   * saveActive はアクティブビューの対象しか書かないので、この経路を通さないと他グループの
+   * 対象に旧名が残り、定義に無い「孤児タグ」になる。
+   */
+  rewriteTagAcrossPatients(oldName: string, newName: string | null): Promise<void>;
   // ── 保存・通知 ──
   setDataChangeHandler(fn: ((ev: StoreChangeEvent) => void) | null): void;
   scheduleSave(): void;
@@ -156,7 +188,9 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
 
   let settings: AppSettings = defaultSettings(0, '');
   let places: PlaceDef[] = [];
-  let templates: Template[] = [];
+  let frames: Frame[] = [];
+  let formats: Format[] = [];
+  let templateDefs: TemplateDef[] = [];
   /** 全患者マスタ (in-memory)。live (appState.patients) は同じ object を共有する。 */
   let allPatients: Patient[] = [];
   let appState: AppState = { title: defaultTitle, patients: [] };
@@ -238,16 +272,25 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
     const ts = now();
     const round = buildRoundPreset(ts);
     const daily = buildDailyReportPreset(ts);
-    const seededSettings = defaultSettings(ts, round.id);
+    const seededSettings = defaultSettings(ts, round.template.id);
     const seededPlace: PlaceDef = { placeId: newId('plc'), name: DEFAULT_PLACE_NAME };
-    await db.runWrite([STORE_SETTINGS, STORE_TEMPLATES, STORE_PLACES], (tx) => {
-      tx.objectStore(STORE_TEMPLATES).put(round);
-      tx.objectStore(STORE_TEMPLATES).put(daily);
-      tx.objectStore(STORE_PLACES).put(seededPlace);
-      tx.objectStore(STORE_SETTINGS).put(seededSettings);
-    });
+    await db.runWrite(
+      [STORE_SETTINGS, STORE_TEMPLATES, STORE_FRAMES, STORE_FORMATS, STORE_PLACES],
+      (tx) => {
+        tx.objectStore(STORE_TEMPLATES).put(round.template);
+        tx.objectStore(STORE_TEMPLATES).put(daily.template);
+        tx.objectStore(STORE_FRAMES).put(round.frame);
+        tx.objectStore(STORE_FRAMES).put(daily.frame);
+        for (const format of round.formats) tx.objectStore(STORE_FORMATS).put(format);
+        for (const format of daily.formats) tx.objectStore(STORE_FORMATS).put(format);
+        tx.objectStore(STORE_PLACES).put(seededPlace);
+        tx.objectStore(STORE_SETTINGS).put(seededSettings);
+      },
+    );
     settings = seededSettings;
-    templates = [round, daily];
+    frames = [round.frame, daily.frame];
+    formats = [...round.formats, ...daily.formats];
+    templateDefs = [round.template, daily.template];
     places = [seededPlace];
   }
 
@@ -259,19 +302,28 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
   // 初期化は単発 (memoize)。StrictMode の二重 effect / 二重呼び出しで seed を重複させない。
   let initPromise: Promise<void> | null = null;
   async function doInit(): Promise<void> {
-    const [settingsRec, placeRows, patientRows, templateRows] = await Promise.all([
-      db.get<AppSettings>(STORE_SETTINGS, APP_SETTINGS_KEY),
-      db.getAll<unknown>(STORE_PLACES),
-      db.getAll<unknown>(STORE_PATIENTS),
-      db.getAll<unknown>(STORE_TEMPLATES),
-    ]);
+    const [settingsRec, placeRows, patientRows, frameRows, formatRows, templateRows] =
+      await Promise.all([
+        db.get<AppSettings>(STORE_SETTINGS, APP_SETTINGS_KEY),
+        db.getAll<unknown>(STORE_PLACES),
+        db.getAll<unknown>(STORE_PATIENTS),
+        db.getAll<unknown>(STORE_FRAMES),
+        db.getAll<unknown>(STORE_FORMATS),
+        db.getAll<unknown>(STORE_TEMPLATES),
+      ]);
     if (!settingsRec) {
       // 初回起動: プリセット 2 種 + place 1 つを seed し、回診メモを有効にする。
       await seedDefaults();
     } else {
       settings = settingsRec;
       places = normalizePlaceRows(placeRows);
-      templates = templateRows.map(normalizeTemplate).filter((t): t is Template => t !== null);
+      frames = frameRows.map(normalizeFrame).filter((frame): frame is Frame => frame !== null);
+      formats = formatRows
+        .map(normalizeFormat)
+        .filter((format): format is Format => format !== null);
+      templateDefs = templateRows
+        .map((row) => normalizeTemplateDef(row, { frames, formats }))
+        .filter((template): template is TemplateDef => template !== null);
     }
     allPatients = normalizePatientArray(patientRows);
     const view = activeViewId();
@@ -386,31 +438,228 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
       rebuildLive();
       emit({ type: 'workspace', workspaceId: activeViewId() });
     },
-    getTemplates: () => templates,
-    getActiveTemplate() {
-      return templates.find((t) => t.id === settings.activeTemplateId) ?? null;
+    getFrames: () => frames,
+    async saveFrame(frame) {
+      const normalized = normalizeFrame(frame);
+      if (!normalized) throw new Error('フレームの形式が不正です');
+      await db.put(STORE_FRAMES, normalized);
+      frames = frames.some((candidate) => candidate.id === normalized.id)
+        ? frames.map((candidate) => (candidate.id === normalized.id ? normalized : candidate))
+        : [...frames, normalized];
+      emit({ type: 'workspace', workspaceId: activeViewId() });
     },
-    async setActiveTemplate(templateId) {
-      if (!templates.some((t) => t.id === templateId)) {
-        throw new Error(`template not found: ${templateId}`);
+    async deleteFrame(frameId) {
+      const usedBy = templateDefs
+        .filter((template) => template.frameId === frameId)
+        .map((template) => template.name);
+      if (usedBy.length > 0) throw new Error(frameInUseMsg(usedBy));
+      await db.deleteRecord(STORE_FRAMES, frameId);
+      frames = frames.filter((frame) => frame.id !== frameId);
+      emit({ type: 'workspace', workspaceId: activeViewId() });
+    },
+    async duplicateFrame(frameId) {
+      const source = frames.find((frame) => frame.id === frameId);
+      if (!source) throw new Error('フレームが見つかりません');
+      const duplicate: Frame = {
+        ...source,
+        id: newId('frm'),
+        name: `${source.name}のコピー`,
+        sections: source.sections.map((section) => ({ ...section, id: newId('sec') })),
+      };
+      await this.saveFrame(duplicate);
+      return duplicate;
+    },
+    getFormats: () => formats,
+    async saveFormat(format) {
+      const normalized = normalizeFormat(format);
+      if (!normalized) throw new Error('フォーマットの形式が不正です');
+      await db.put(STORE_FORMATS, normalized);
+      formats = formats.some((candidate) => candidate.id === normalized.id)
+        ? formats.map((candidate) => (candidate.id === normalized.id ? normalized : candidate))
+        : [...formats, normalized];
+      emit({ type: 'workspace', workspaceId: activeViewId() });
+    },
+    async deleteFormat(formatId) {
+      const usedBy = templateDefs
+        .filter((template) =>
+          template.placements.some((placement) => placement.formatId === formatId),
+        )
+        .map((template) => template.name);
+      if (usedBy.length > 0) throw new Error(formatInUseMsg(usedBy));
+      await db.deleteRecord(STORE_FORMATS, formatId);
+      formats = formats.filter((format) => format.id !== formatId);
+      emit({ type: 'workspace', workspaceId: activeViewId() });
+    },
+    async duplicateFormat(formatId) {
+      const source = formats.find((format) => format.id === formatId);
+      if (!source) throw new Error('フォーマットが見つかりません');
+      const duplicate: Format = {
+        ...source,
+        id: newId('fmt'),
+        name: `${source.name}のコピー`,
+        items: source.items.map((item) => ({ ...item, id: newId('itm') })),
+      };
+      await this.saveFormat(duplicate);
+      return duplicate;
+    },
+    getTemplateDefs: () => templateDefs,
+    async saveTemplateDef(template) {
+      const normalized = normalizeTemplateDef(template, { frames, formats });
+      if (!normalized) throw new Error('テンプレートの形式が不正です');
+      await db.put(STORE_TEMPLATES, normalized);
+      templateDefs = templateDefs.some((candidate) => candidate.id === normalized.id)
+        ? templateDefs.map((candidate) => (candidate.id === normalized.id ? normalized : candidate))
+        : [...templateDefs, normalized];
+      emit({ type: 'workspace', workspaceId: activeViewId() });
+    },
+    async duplicateTemplateDef(templateId) {
+      const source = templateDefs.find((template) => template.id === templateId);
+      if (!source) throw new Error('テンプレートが見つかりません');
+      const duplicate: TemplateDef = {
+        ...source,
+        id: newId('tpl'),
+        name: `${source.name}のコピー`,
+        // 配置 ID は対象ごとの入力値 (projectedValues) のキー。使い回すと複製元と複製先が
+        // 同じ入力値を共有してしまうため、必ず採番し直す。
+        placements: source.placements.map((placement) => ({ ...placement, id: newId('plm') })),
+        // フレームは独立した再利用部品なので共有する (複製時にフレームまで増やさない)。
+        updatedAt: now(),
+      };
+      await this.saveTemplateDef(duplicate);
+      // active は変えない (複製は「使用中」を奪わない)。
+      return duplicate;
+    },
+    async saveGeneratedBundle(bundle) {
+      // 受け取った ID は信用せず、参照関係を保ったまま採番し直す。
+      // これにより、呼び出し側の不具合や細工された入力があっても既存行を upsert しない。
+      // ただし構造が一致する既存部品は「新規レコードを作らず既存 ID を指す」形で再利用し、
+      // 同じ内容の部品が登録のたびに増えるのを防ぐ（再利用側は 1 バイトも書かない）。
+      const sourceFrame = normalizeFrame(bundle.frame);
+      const sourceFormats = bundle.formats.map(normalizeFormat);
+      if (!sourceFrame || sourceFormats.some((format) => !format)) {
+        throw new Error('生成されたテンプレート一式の形式が不正です');
       }
-      settings.activeTemplateId = templateId;
-      await this.saveSettings();
+      const validSourceFormats = sourceFormats as Format[];
+      const sourceTemplate = normalizeTemplateDef(bundle.template, {
+        frames: [sourceFrame],
+        formats: validSourceFormats,
+      });
+      if (
+        !sourceTemplate ||
+        sourceTemplate.placements.length !== bundle.template.placements.length ||
+        new Set(sourceFrame.sections.map((section) => section.id)).size !==
+          sourceFrame.sections.length ||
+        new Set(validSourceFormats.map((format) => format.id)).size !== validSourceFormats.length
+      ) {
+        throw new Error('生成されたテンプレート一式の参照が不正です');
+      }
+
+      // 確認画面（TemplateBuilder）と同じ関数で計画を立てる（見せた内容と登録結果をずらさない）。
+      const plan = planBundleReuse(
+        { frame: sourceFrame, formats: validSourceFormats, template: sourceTemplate },
+        frames,
+        formats,
+      );
+
+      // ── フレーム: 再利用なら既存の場所 ID へ読み替え、新規なら全採番 ──
+      const reusedFrame = plan.frame.existing;
+      const sectionIdMap = new Map<string, string>(plan.frame.sectionIdMap);
+      let generatedFrame: Frame | null = null;
+      if (!reusedFrame) {
+        for (const section of sourceFrame.sections) sectionIdMap.set(section.id, newId('sec'));
+        generatedFrame = {
+          ...sourceFrame,
+          id: newId('frm'),
+          name: uniqueName(
+            sourceFrame.name,
+            frames.map((candidate) => candidate.name),
+          ),
+          sections: sourceFrame.sections.map((section) => ({
+            ...section,
+            id: sectionIdMap.get(section.id)!,
+          })),
+        };
+      }
+
+      // ── フォーマット: 統合後の代表ごとに「既存を指す」か「新規採番」かを決める ──
+      const usedFormatNames = new Set(formats.map((candidate) => candidate.name));
+      const formatIdMap = new Map<string, string>();
+      const generatedFormats: Format[] = [];
+      for (const entry of plan.formats) {
+        let targetId: string;
+        if (entry.existing) {
+          targetId = entry.existing.id;
+        } else {
+          targetId = newId('fmt');
+          const name = uniqueName(entry.candidate.name, usedFormatNames);
+          usedFormatNames.add(name);
+          generatedFormats.push({
+            ...entry.candidate,
+            id: targetId,
+            name,
+            items: entry.candidate.items.map((item) => ({ ...item, id: newId('itm') })),
+          });
+        }
+        for (const sourceId of entry.mergedIds) formatIdMap.set(sourceId, targetId);
+      }
+
+      // テンプレートは常に新規（既存テンプレートを置き換えない）。
+      const generatedTemplate: TemplateDef = {
+        ...sourceTemplate,
+        id: newId('tpl'),
+        name: uniqueName(
+          sourceTemplate.name,
+          templateDefs.map((candidate) => candidate.name),
+        ),
+        frameId: reusedFrame ? reusedFrame.id : generatedFrame!.id,
+        placements: sourceTemplate.placements.map((placement) => ({
+          ...placement,
+          id: newId('plm'),
+          // 読み替えに失敗した参照は '' になり、直後の正規化で件数が合わず保存を止める。
+          sectionId: sectionIdMap.get(placement.sectionId) ?? '',
+          formatId: formatIdMap.get(placement.formatId) ?? '',
+        })),
+      };
+
+      // 永続化直前にも正規化する。ここで要素が落ちる状態はビルダー側の不具合なので保存しない。
+      const normalizedFrame = generatedFrame ? normalizeFrame(generatedFrame) : null;
+      const normalizedFormats = generatedFormats.map(normalizeFormat);
+      if ((generatedFrame && !normalizedFrame) || normalizedFormats.some((format) => !format)) {
+        throw new Error('生成されたテンプレート一式を正規化できませんでした');
+      }
+      const validFormats = normalizedFormats as Format[];
+      const refFrame = normalizedFrame ?? reusedFrame;
+      const normalizedTemplate = refFrame
+        ? normalizeTemplateDef(generatedTemplate, {
+            frames: [refFrame],
+            // 再利用したフォーマットは既存側にしかないため、参照検証には両方を渡す。
+            formats: [...formats, ...validFormats],
+          })
+        : null;
+      if (
+        !normalizedTemplate ||
+        normalizedTemplate.placements.length !== generatedTemplate.placements.length
+      ) {
+        throw new Error('生成されたテンプレート一式を正規化できませんでした');
+      }
+
+      await db.runWrite([STORE_FRAMES, STORE_FORMATS, STORE_TEMPLATES], (tx) => {
+        // 再利用した既存レコードは put しない（名前も内容も変えない）。
+        if (normalizedFrame) tx.objectStore(STORE_FRAMES).put(normalizedFrame);
+        for (const format of validFormats) tx.objectStore(STORE_FORMATS).put(format);
+        tx.objectStore(STORE_TEMPLATES).put(normalizedTemplate);
+      });
+
+      // メモリ上の表示もトランザクション完了後だけ更新する。settings と active は変更しない。
+      if (normalizedFrame) frames = [...frames, normalizedFrame];
+      formats = [...formats, ...validFormats];
+      templateDefs = [...templateDefs, normalizedTemplate];
       emit({ type: 'workspace', workspaceId: activeViewId() });
     },
-    async saveTemplate(template) {
-      await db.put(STORE_TEMPLATES, template);
-      const exists = templates.some((t) => t.id === template.id);
-      templates = exists
-        ? templates.map((t) => (t.id === template.id ? template : t))
-        : [...templates, template];
-      emit({ type: 'workspace', workspaceId: activeViewId() });
-    },
-    async deleteTemplate(templateId) {
-      const rest = templates.filter((t) => t.id !== templateId);
+    async deleteTemplateDef(templateId) {
+      const rest = templateDefs.filter((template) => template.id !== templateId);
       const fallback = rest[0];
       if (!fallback) throw new Error(LAST_TEMPLATE_UNDELETABLE_MSG);
-      // active を消す時は残りの先頭へ付け替える (active 不在の状態を作らない)。
       if (settings.activeTemplateId === templateId) {
         settings.activeTemplateId = fallback.id;
         settings.updatedAt = now();
@@ -421,7 +670,20 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
       } else {
         await db.deleteRecord(STORE_TEMPLATES, templateId);
       }
-      templates = rest;
+      templateDefs = rest;
+      emit({ type: 'workspace', workspaceId: activeViewId() });
+    },
+    getActiveTemplate() {
+      const definition =
+        templateDefs.find((template) => template.id === settings.activeTemplateId) ?? null;
+      return definition ? resolveTemplate(definition, frames, formats) : null;
+    },
+    async setActiveTemplate(templateId) {
+      if (!templateDefs.some((template) => template.id === templateId)) {
+        throw new Error(`template not found: ${templateId}`);
+      }
+      settings.activeTemplateId = templateId;
+      await this.saveSettings();
       emit({ type: 'workspace', workspaceId: activeViewId() });
     },
     exportData() {
@@ -429,7 +691,9 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
         settings,
         places,
         patients: allPatients,
-        templates,
+        frames,
+        formats,
+        templates: templateDefs,
       };
     },
     async replaceAll(data) {
@@ -437,12 +701,16 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
         for (const name of ALL_STORES) tx.objectStore(name).clear();
         tx.objectStore(STORE_SETTINGS).put(data.settings);
         for (const p of data.patients) tx.objectStore(STORE_PATIENTS).put(p);
-        for (const g of data.places) tx.objectStore(STORE_PLACES).put(g);
+        for (const place of data.places) tx.objectStore(STORE_PLACES).put(place);
+        for (const frame of data.frames) tx.objectStore(STORE_FRAMES).put(frame);
+        for (const format of data.formats) tx.objectStore(STORE_FORMATS).put(format);
         for (const t of data.templates) tx.objectStore(STORE_TEMPLATES).put(t);
       });
       settings = data.settings;
       places = data.places;
-      templates = data.templates;
+      frames = data.frames;
+      formats = data.formats;
+      templateDefs = data.templates;
       allPatients = data.patients;
       const view = activeViewId();
       if (view) pointers.set(PK_ACTIVE_PLACE, view);
@@ -460,28 +728,27 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
       rebuildLive();
       emit({ type: 'workspace', workspaceId: activeViewId() });
     },
-    async appendImported(data) {
-      const prepared = prepareWorkspaceImportAppend(data, {
-        places,
-        patients: allPatients,
-      });
-      // place 未解決 ('') の患者は先頭 place へ倒す (未所属で不可視にしない)。
-      const fallbackPlace = prepared.places[0]?.placeId ?? places[0]?.placeId ?? '';
-      const patients = prepared.patients.map((p) =>
-        p.placeId &&
-        (places.some((x) => x.placeId === p.placeId) ||
-          prepared.places.some((x) => x.placeId === p.placeId))
-          ? p
-          : { ...p, placeId: fallbackPlace },
-      );
+    async rewriteTagAcrossPatients(oldName, newName) {
+      // 他の変更系 API と同じ不変条件: 構造を変える前に現ビューの未保存分を確定させる。
+      await this.persistActiveOrThrow();
+      const touched: Patient[] = [];
+      for (const p of allPatients) {
+        if (!Array.isArray(p.tags) || !p.tags.includes(oldName)) continue;
+        const next =
+          newName === null
+            ? p.tags.filter((tg) => tg !== oldName)
+            : p.tags.map((tg) => (tg === oldName ? newName : tg));
+        // 改名先が既に付いている対象では重複するので畳む。
+        p.tags = [...new Set(next)];
+        touched.push(p);
+      }
       settings.updatedAt = now();
-      await db.runWrite([STORE_PLACES, STORE_PATIENTS, STORE_SETTINGS], (tx) => {
-        for (const g of prepared.places) tx.objectStore(STORE_PLACES).put(g);
-        for (const p of patients) tx.objectStore(STORE_PATIENTS).put(p);
+      // 定義 (settings) と対象 (patients) を 1 tx で書く。片方だけ残ると孤児タグが生まれる。
+      await db.runWrite([STORE_PATIENTS, STORE_SETTINGS], (tx) => {
+        const os = tx.objectStore(STORE_PATIENTS);
+        for (const p of touched) os.put(p);
         tx.objectStore(STORE_SETTINGS).put(settings);
       });
-      places = [...places, ...prepared.places];
-      allPatients = [...allPatients, ...patients];
       rebuildLive();
       emit({ type: 'workspace', workspaceId: activeViewId() });
     },

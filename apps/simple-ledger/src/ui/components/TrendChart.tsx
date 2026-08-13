@@ -16,9 +16,17 @@ const PAD_X = 10;
 const PLOT_TOP = 12;
 const PLOT_BOTTOM = 116;
 
-function fmtSigned(v: number): string {
-  return `${v < 0 ? '−' : ''}${Math.abs(v).toLocaleString('ja-JP')}`;
-}
+import { formatAmount, formatMoney } from '../../util/format';
+import { useMoneyDigits } from '../money';
+
+/*
+ * 整形は format.ts の formatAmount / formatMoney に一本化する。
+ * 以前は `${v < 0 ? '−' : ''}${formatAmount(Math.abs(v), digits)}` と自前で符号を付けていたが、
+ *  - 絶対値を先に取るため formatAmount の「表示桁で 0 に丸まる負値の符号を消す」処理を素通りし、
+ *    表示桁 0 で -0.49 が '−0' と読み上げられた
+ *  - 負号が U+2212 で、同じ図の最新値（<Money>）の ASCII '-' と食い違っていた
+ * の 2 つが同時に起きていた。符号の生成箇所を増やさない。
+ */
 
 export function TrendChart({
   title,
@@ -39,6 +47,7 @@ export function TrendChart({
   dataUi?: string;
   pointDataUi?: string;
 }) {
+  const digits = useMoneyDigits();
   if (data.length === 0) {
     return (
       <figure data-ui={dataUi} style={{ margin: 0 }}>
@@ -60,7 +69,9 @@ export function TrendChart({
   const y = (v: number) => zeroY - v * scale;
   const barW = Math.min(step * 0.6, 26);
 
-  const summary = `${title}: ${data.map((d) => `${d.label} ${fmtSigned(d.value)}`).join('、')}`;
+  const summary = `${title}: ${data
+    .map((d) => `${d.label} ${formatMoney(d.value, currency, digits)}`)
+    .join('、')}`;
 
   return (
     <figure data-ui={dataUi} style={{ margin: 0 }}>
@@ -73,7 +84,7 @@ export function TrendChart({
           focusable="false"
         >
           <text className="trend-svg__tick" x={2} y={PLOT_TOP + 3}>
-            {fmtSigned(max)}
+            {formatAmount(max, digits)}
           </text>
           <line className="trend-svg__zero" x1={PAD_X} x2={VB_W - PAD_X} y1={zeroY} y2={zeroY} />
           <text className="trend-svg__tick" x={2} y={zeroY + 3}>
@@ -81,7 +92,7 @@ export function TrendChart({
           </text>
           {hasNeg ? (
             <text className="trend-svg__tick" x={2} y={PLOT_BOTTOM + 3}>
-              {fmtSigned(-max)}
+              {formatAmount(-max, digits)}
             </text>
           ) : null}
 
@@ -117,7 +128,7 @@ export function TrendChart({
 
         <div className="trend-x">
           {data.map((d) => {
-            const aria = `${d.label} ${title} ${fmtSigned(d.value)}`;
+            const aria = `${d.label} ${title} ${formatMoney(d.value, currency, digits)}`;
             return onSelect ? (
               <button
                 key={d.key}

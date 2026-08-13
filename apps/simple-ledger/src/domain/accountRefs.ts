@@ -1,13 +1,12 @@
 /*
- * 勘定科目の「使用中」判定。仕訳・予定CF・継続コスト・定期ルールのいずれかから
+ * 勘定科目の「使用中」判定。仕訳・継続コスト・定期ルールのいずれかから
  * 参照されていれば使用中。UI（科目一覧・編集シート）と repository（区分変更/削除の fail-closed）で
  * 同じ判定を使う。
  */
-import type { CashflowSchedule, JournalEntry, MonthlyCostItem, RecurringRule } from './types';
+import type { JournalEntry, MonthlyCostItem, RecurringRule } from './types';
 
 export interface AccountRefCollections {
   entries: JournalEntry[];
-  schedules: CashflowSchedule[];
   monthlyCostItems: MonthlyCostItem[];
   recurringRules: RecurringRule[];
 }
@@ -27,7 +26,6 @@ function recurringRuleRefs(r: RecurringRule): (string | undefined)[] {
 export function isAccountReferenced(id: string, c: AccountRefCollections): boolean {
   return (
     c.entries.some((e) => e.lines.some((l) => l.accountId === id)) ||
-    c.schedules.some((s) => s.accountId === id || s.counterAccountId === id) ||
     c.monthlyCostItems.some((m) => monthlyCostRefs(m).includes(id)) ||
     c.recurringRules.some((r) => recurringRuleRefs(r).includes(id))
   );
@@ -37,10 +35,6 @@ export function isAccountReferenced(id: string, c: AccountRefCollections): boole
 export function referencedAccountIds(c: AccountRefCollections): Set<string> {
   const set = new Set<string>();
   for (const e of c.entries) for (const l of e.lines) set.add(l.accountId);
-  for (const s of c.schedules) {
-    set.add(s.accountId);
-    if (s.counterAccountId) set.add(s.counterAccountId);
-  }
   for (const m of c.monthlyCostItems) {
     for (const ref of monthlyCostRefs(m)) if (ref) set.add(ref);
   }

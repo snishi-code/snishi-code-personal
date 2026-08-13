@@ -25,6 +25,7 @@ export const UI = {
   },
   detail: {
     meta: 'detail.meta',
+    tags: 'detail.tags', // ヘッダー直下のタグ行 (表示 + その場で付け外し)
     home: 'detail.home',
     actionBar: 'detail.actionBar',
     // 画面内ボタン (患者固有 = 転記用QR)
@@ -41,17 +42,17 @@ export const UI = {
     moveUp: 'problem.moveUp',
     moveDown: 'problem.moveDown',
   },
-  // 今回メモ / 継続メモ (患者ごとの独立 textarea)
+  // 継続メモ (患者ごとの独立 textarea)
   memo: {
-    visit: { card: 'memo.visit.card', input: 'memo.visit.input' },
     standing: { card: 'memo.standing.card', input: 'memo.standing.input' },
   },
   // テンプレート投影の入力欄 (患者ごとに projectedValues へ保存)
   projection: {
     card: 'projection.card',
     section: 'projection.section',
-    group: 'projection.group',
+    placement: 'projection.placement',
     field: 'projection.field', // 各入力要素・選択チップ
+    freeText: 'projection.freeText', // freeText の場所に出る自由入力 textarea
     normalBtn: 'projection.normalBtn',
     oncall: 'projection.oncall',
     menu: 'projection.menu',
@@ -62,14 +63,26 @@ export const UI = {
   templateEdit: {
     view: 'templateEdit.view',
     section: 'templateEdit.section',
-    group: 'templateEdit.group',
-    item: 'templateEdit.item',
-    field: 'templateEdit.field',
-    kind: 'templateEdit.kind',
-    option: 'templateEdit.option',
+    placement: 'templateEdit.placement',
+    frame: 'templateEdit.frame',
+    placementFormat: 'templateEdit.placement.format',
+    addFormat: 'templateEdit.placement.add',
     display: 'templateEdit.display',
-    memoSection: 'templateEdit.memoSection',
     save: 'templateEdit.save',
+  },
+  frameEdit: {
+    view: 'frameEdit.view',
+    section: 'frameEdit.section',
+    field: 'frameEdit.field',
+    save: 'frameEdit.save',
+  },
+  formatEdit: {
+    view: 'formatEdit.view',
+    item: 'formatEdit.item',
+    field: 'formatEdit.field',
+    kind: 'formatEdit.kind',
+    option: 'formatEdit.option',
+    save: 'formatEdit.save',
   },
   qr: {
     canvas: 'qr.canvas',
@@ -80,6 +93,17 @@ export const UI = {
   },
   settings: {
     view: 'settings.view',
+    builderSection: 'settings.builder.section',
+    builderSources: 'settings.builder.sources',
+    builderPrompt: 'settings.builder.prompt',
+    builderResponse: 'settings.builder.response',
+    builderPreviewOpen: 'settings.builder.preview.open',
+    builderPreview: 'settings.builder.preview',
+    builderReuse: 'settings.builder.reuse', // 候補確認画面の「既存を再利用/統合」注記
+    builderApply: 'settings.builder.apply',
+    templateSection: 'settings.templates.section',
+    frameSection: 'settings.frames.section',
+    formatSection: 'settings.formats.section',
     homeBottom: 'settings.home.bottom',
     actionBar: 'settings.actionBar', // 下部固定バー (詳細/ホームと共通の枠)
     tagList: 'settings.tags.list',
@@ -95,6 +119,7 @@ export const UI = {
     wardRename: 'settings.wards.rename',
     wardDelete: 'settings.wards.delete',
     wardAdd: 'settings.wards.add',
+    // 一時: 旧 hospital-workspace からの単発移行 (移行完了後に削除する)。
   },
   picker: {
     wsDialog: 'picker.ws.dialog',

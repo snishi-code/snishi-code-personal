@@ -15,6 +15,7 @@ import {
   createContinuousCost,
   createRecurringRule,
   loadLedger,
+  upsertAccount,
   upsertEntry,
 } from '../src/data/repository';
 import { CONTINUOUS_COST_HARD_CAP } from '../src/domain/continuousCost';
@@ -22,8 +23,9 @@ import { addMonths, addMonthsToDate, monthOf } from '../src/domain/allocation';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { todayLocal } from '../src/util/time';
+import { formatMoney } from '../src/util/format';
 import type { AllocationsTarget } from '../src/ui/screens/Allocations';
-import type { JournalEntry } from '../src/domain/types';
+import type { Account, JournalEntry } from '../src/domain/types';
 import './setup';
 
 beforeAll(() => {
@@ -38,11 +40,13 @@ afterEach(() => {
 function View({
   onEditEntry = () => undefined,
   onOpenAllocations = () => undefined,
+  onOpenAccount = () => undefined,
   onClearFilter = () => undefined,
   filter = null,
 }: {
   onEditEntry?: (entry: JournalEntry) => void;
   onOpenAllocations?: (target: AllocationsTarget) => void;
+  onOpenAccount?: (accountId: string) => void;
   onClearFilter?: () => void;
   filter?: JournalFilter | null;
 }) {
@@ -52,6 +56,7 @@ function View({
         <ReadyView
           onEditEntry={onEditEntry}
           onOpenAllocations={onOpenAllocations}
+          onOpenAccount={onOpenAccount}
           onClearFilter={onClearFilter}
           filter={filter}
         />
@@ -63,11 +68,13 @@ function View({
 function ReadyView({
   onEditEntry,
   onOpenAllocations,
+  onOpenAccount,
   onClearFilter,
   filter,
 }: {
   onEditEntry: (entry: JournalEntry) => void;
   onOpenAllocations: (target: AllocationsTarget) => void;
+  onOpenAccount: (accountId: string) => void;
   onClearFilter: () => void;
   filter: JournalFilter | null;
 }) {
@@ -78,11 +85,58 @@ function ReadyView({
       onEditEntry={onEditEntry}
       onReverse={() => undefined}
       onOpenAllocations={onOpenAllocations}
+      onOpenAccount={onOpenAccount}
       filter={filter}
       period={{ mode: 'all' }}
       onClearFilter={onClearFilter}
     />
   );
+}
+
+async function createBalanceChangeFixtures(): Promise<{
+  asset: Account;
+  revenue: Account;
+  increaseAmount: number;
+  decreaseAmount: number;
+}> {
+  const ledger = await loadLedger();
+  const asset = ledger.accounts.find((account) => account.role === 'daily-asset')!;
+  const revenue = ledger.accounts.find((account) => account.role === 'income-category')!;
+  const today = todayLocal();
+  const timestamp = `${today}T00:00:00.000Z`;
+  const increaseAmount = 5000;
+  const decreaseAmount = 1200;
+
+  // 資産は借方、収入は貸方にあると自然な残高が増える。
+  await upsertEntry({
+    id: 'balance-change-increase',
+    date: today,
+    description: '残高が増える仕訳',
+    kind: 'normal',
+    lines: [
+      { accountId: asset.id, side: 'debit', amount: increaseAmount },
+      { accountId: revenue.id, side: 'credit', amount: increaseAmount },
+    ],
+    metadata: { inputMode: 'income' },
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+  // 逆側に置けば、両科目とも自然な残高が減る。
+  await upsertEntry({
+    id: 'balance-change-decrease',
+    date: today,
+    description: '残高が減る仕訳',
+    kind: 'normal',
+    lines: [
+      { accountId: revenue.id, side: 'debit', amount: decreaseAmount },
+      { accountId: asset.id, side: 'credit', amount: decreaseAmount },
+    ],
+    metadata: { inputMode: 'reversal' },
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+
+  return { asset, revenue, increaseAmount, decreaseAmount };
 }
 
 describe('仕訳一覧の混合表示', () => {
@@ -150,9 +204,52 @@ describe('仕訳一覧の混合表示', () => {
     expect(fromInput.max).toBe(CONTINUOUS_COST_HARD_CAP);
     fireEvent.change(toInput, { target: { value: `${addMonths(futureMonth, 1)}-01` } });
 
-    const row = await screen.findByText('未来の定期支出');
-    fireEvent.click(row.closest('button')!);
+    const rows = await screen.findAllByText('未来の定期支出');
+    fireEvent.click(rows[0]!.closest('button')!);
     expect(onOpenAllocations).toHaveBeenCalledWith({ ruleId: rule.id });
+  });
+
+  it('投資利回りの投影行はタップで、利回りを宣言した投資科目へ遷移する（誤遷移の回帰）', async () => {
+    // 旧実装は未知の virtual を itemId: '' で「毎月のもの」へ握り潰していた（監査 2026-08-12）。
+    const ledger = await loadLedger();
+    const invest = ledger.accounts.find((a) => a.role === 'investment-asset')!;
+    const income = ledger.accounts.find((a) => a.role === 'income-category')!;
+    const today = todayLocal();
+    const timestamp = `${today}T00:00:00.000Z`;
+    await upsertEntry({
+      id: 'invest-balance',
+      date: today,
+      description: '投資残高',
+      kind: 'normal',
+      lines: [
+        { accountId: invest.id, side: 'debit', amount: 100_000 },
+        { accountId: income.id, side: 'credit', amount: 100_000 },
+      ],
+      metadata: { inputMode: 'income' },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    await upsertAccount({
+      ...(await loadLedger()).accounts.find((a) => a.id === invest.id)!,
+      annualReturnBp: 1200,
+      projectionAccountId: income.id,
+      updatedAt: timestamp,
+    });
+
+    const onOpenAccount = vi.fn();
+    const onOpenAllocations = vi.fn();
+    render(<View onOpenAccount={onOpenAccount} onOpenAllocations={onOpenAllocations} />);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.journal.view}"]`)).toBeInTheDocument();
+    });
+
+    const toInput = document.querySelector('#journal-to') as HTMLInputElement;
+    fireEvent.change(toInput, { target: { value: `${addMonths(monthOf(today), 1)}-15` } });
+
+    const rows = await screen.findAllByText(`投影: ${invest.name}`);
+    fireEvent.click(rows[0]!.closest('button')!);
+    expect(onOpenAccount).toHaveBeenCalledWith(invest.id);
+    expect(onOpenAllocations).not.toHaveBeenCalled();
   });
 
   it('購入の仕訳はタップで編集でき、削除ボタンは出ない', async () => {
@@ -239,6 +336,13 @@ describe('仕訳一覧の混合表示', () => {
     expect(screen.queryByText('通常支出ではない収入')).not.toBeInTheDocument();
     expect(screen.queryByText('通常支出ではない継続コスト')).not.toBeInTheDocument();
     expect(screen.getByText('通常支出のみ')).toBeInTheDocument();
+    const normalExpenseAmount = screen
+      .getByText('通常支出フィルタ対象')
+      .closest('li')!
+      .querySelector('.list__amount')!;
+    expect(normalExpenseAmount).not.toHaveClass('amount--pos');
+    expect(normalExpenseAmount).not.toHaveClass('amount--neg');
+    expect(normalExpenseAmount).not.toHaveAttribute('aria-label');
 
     fireEvent.click(
       document.querySelector(
@@ -246,5 +350,51 @@ describe('仕訳一覧の混合表示', () => {
       ) as HTMLButtonElement,
     );
     expect(onClearFilter).toHaveBeenCalledTimes(1);
+  });
+
+  it('給与（収入科目）フィルタでは貸方を増加色、借方を減少色にし、増減を読み上げる', async () => {
+    const { revenue, increaseAmount, decreaseAmount } = await createBalanceChangeFixtures();
+
+    render(<View filter={{ accountId: revenue.id, from: todayLocal(), to: todayLocal() }} />);
+
+    const increase = await screen.findByLabelText(
+      `${revenue.name}の残高が増える金額: ${formatMoney(increaseAmount, '円', 0)}`,
+    );
+    const decrease = screen.getByLabelText(
+      `${revenue.name}の残高が減る金額: ${formatMoney(decreaseAmount, '円', 0)}`,
+    );
+    expect(increase).toHaveClass('amount--pos');
+    expect(decrease).toHaveClass('amount--neg');
+    expect(increase).toHaveTextContent(formatMoney(increaseAmount, '円', 0));
+    expect(decrease).toHaveTextContent(formatMoney(decreaseAmount, '円', 0));
+    expect(increase).not.toHaveTextContent('+');
+  });
+
+  it('資産科目フィルタでは借方を増加色、貸方を減少色にする', async () => {
+    const { asset, increaseAmount, decreaseAmount } = await createBalanceChangeFixtures();
+
+    render(<View filter={{ accountId: asset.id, from: todayLocal(), to: todayLocal() }} />);
+
+    expect(
+      await screen.findByLabelText(
+        `${asset.name}の残高が増える金額: ${formatMoney(increaseAmount, '円', 0)}`,
+      ),
+    ).toHaveClass('amount--pos');
+    expect(
+      screen.getByLabelText(
+        `${asset.name}の残高が減る金額: ${formatMoney(decreaseAmount, '円', 0)}`,
+      ),
+    ).toHaveClass('amount--neg');
+  });
+
+  it('科目フィルタなしでは金額を増減色にしない', async () => {
+    await createBalanceChangeFixtures();
+
+    render(<View />);
+    const rowTitle = await screen.findByText('残高が増える仕訳');
+    const amount = rowTitle.closest('li')!.querySelector('.list__amount')!;
+    expect(amount).not.toHaveClass('amount--pos');
+    expect(amount).not.toHaveClass('amount--neg');
+    expect(amount).not.toHaveAttribute('aria-label');
   });
 });

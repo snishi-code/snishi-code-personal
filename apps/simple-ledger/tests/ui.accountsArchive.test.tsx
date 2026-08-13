@@ -11,8 +11,10 @@ import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { Accounts } from '../src/ui/screens/Accounts';
-import { createOpenings, loadLedger, upsertAccount } from '../src/data/repository';
+import { createOpenings, loadLedger, upsertAccount, upsertEntry } from '../src/data/repository';
 import { accountBalance } from '../src/domain/accounting';
+import { buildSimpleEntry } from '../src/domain/entry';
+import { todayLocal } from '../src/util/time';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import './setup';
@@ -64,7 +66,7 @@ describe('勘定科目のアーカイブ', () => {
   it('残高が残る資産は振替シートを経由し、振替 + アーカイブが 1 回で終わる', async () => {
     const ledger = await loadLedger();
     const charge = ledger.accounts.find((a) => a.name === 'チャージ残高')!;
-    await createOpenings([{ accountId: charge.id, amount: 5000, date: '2020-01-01' }]);
+    await createOpenings([{ accountId: charge.id, amount: 500000, date: '2020-01-01' }]);
 
     await renderReady();
     fireEvent.click(await screen.findByRole('button', { name: 'アーカイブ: チャージ残高' }));
@@ -84,10 +86,8 @@ describe('勘定科目のアーカイブ', () => {
     const destination = document.querySelector(
       `[data-ui="${UI.journal.entry.flowDestination}"]`,
     ) as HTMLElement;
-    // 科目アーカイブは従来どおり資産・負債だけ。月額回収で広げた費用科目は候補にしない。
-    expect(
-      within(destination).queryByRole('radio', { name: '変動費' }),
-    ).not.toBeInTheDocument();
+    // 資産の必須振替では同区分だけを候補にする。費用科目は候補にしない。
+    expect(within(destination).queryByRole('radio', { name: '変動費' })).not.toBeInTheDocument();
     fireEvent.click(within(destination).getByRole('radio', { name: '現金' }));
     fireEvent.click(document.querySelector(`[data-ui="${UI.journal.entry.save}"]`)!);
 
@@ -110,7 +110,7 @@ describe('勘定科目のアーカイブ', () => {
   it('振替シートをキャンセルするとアーカイブされない', async () => {
     const ledger = await loadLedger();
     const charge = ledger.accounts.find((a) => a.name === 'チャージ残高')!;
-    await createOpenings([{ accountId: charge.id, amount: 5000, date: '2020-01-01' }]);
+    await createOpenings([{ accountId: charge.id, amount: 500000, date: '2020-01-01' }]);
 
     await renderReady();
     fireEvent.click(await screen.findByRole('button', { name: 'アーカイブ: チャージ残高' }));
@@ -125,6 +125,78 @@ describe('勘定科目のアーカイブ', () => {
       const after = await loadLedger();
       expect(after.accounts.find((a) => a.name === 'チャージ残高')?.archived).toBe(false);
       expect(after.journalEntries.filter((e) => e.kind !== 'opening')).toHaveLength(0);
+    });
+  });
+
+  it('費用カテゴリは累計を残したまま直接アーカイブできる', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((account) => account.name === '預金')!;
+    const fixed = ledger.accounts.find((account) => account.name === '固定費')!;
+    const today = todayLocal();
+    await upsertEntry(
+      buildSimpleEntry({
+        date: today,
+        description: '一時費用',
+        debitAccountId: fixed.id,
+        creditAccountId: cash.id,
+        amount: 100_000,
+        kind: 'normal',
+      }),
+    );
+
+    await renderReady();
+    fireEvent.click(await screen.findByRole('button', { name: `アーカイブ: ${fixed.name}` }));
+
+    await waitFor(async () => {
+      const after = await loadLedger();
+      const archived = after.accounts.find((account) => account.id === fixed.id)!;
+      expect(archived).toMatchObject({ archived: true, endDate: today });
+      expect(accountBalance(fixed.id, 'expense', after.journalEntries)).toBe(100_000); // UI 入力 1000 = 100,000 minor
+    });
+    expect(document.querySelector(`[data-ui="${UI.journal.entry.save}"]`)).toBeNull();
+  });
+
+  it('費用カテゴリも同区分へ振り替えて累計0にしてから終了点を記録する', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((account) => account.name === '預金')!;
+    const fixed = ledger.accounts.find((account) => account.name === '固定費')!;
+    const variable = ledger.accounts.find((account) => account.name === '変動費')!;
+    const today = todayLocal();
+    await upsertEntry(
+      buildSimpleEntry({
+        date: today,
+        description: '固定費の累計',
+        debitAccountId: fixed.id,
+        creditAccountId: cash.id,
+        amount: 100_000,
+        kind: 'normal',
+      }),
+    );
+
+    await renderReady();
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: `累計を振り替えてアーカイブ: ${fixed.name}`,
+      }),
+    );
+    const destination = await waitFor(() => {
+      const found = document.querySelector(
+        `[data-ui="${UI.journal.entry.flowDestination}"]`,
+      ) as HTMLElement | null;
+      expect(found).toBeInTheDocument();
+      return found!;
+    });
+    expect(within(destination).queryByRole('radio', { name: cash.name })).not.toBeInTheDocument();
+    expect(within(destination).queryByRole('radio', { name: fixed.name })).not.toBeInTheDocument();
+    fireEvent.click(within(destination).getByRole('radio', { name: variable.name }));
+    fireEvent.click(document.querySelector(`[data-ui="${UI.journal.entry.save}"]`)!);
+
+    await waitFor(async () => {
+      const after = await loadLedger();
+      const archived = after.accounts.find((account) => account.id === fixed.id)!;
+      expect(archived).toMatchObject({ archived: true, endDate: today });
+      expect(accountBalance(fixed.id, 'expense', after.journalEntries)).toBe(0);
+      expect(accountBalance(variable.id, 'expense', after.journalEntries)).toBe(100_000); // UI 入力 1000 = 100,000 minor
     });
   });
 });

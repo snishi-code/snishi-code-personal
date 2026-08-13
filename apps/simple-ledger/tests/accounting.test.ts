@@ -9,6 +9,8 @@ import {
   monthRange,
 } from '../src/domain/accounting';
 import { defaultRoleForType } from '../src/domain/accountRoles';
+import { LedgerError } from '../src/domain/errors';
+import { MAX_AMOUNT_MINOR } from '../src/domain/schema';
 import type { Account, JournalEntry } from '../src/domain/types';
 
 function acc(id: string, name: string, type: Account['type']): Account {
@@ -43,6 +45,24 @@ function entry(
     createdAt: date,
     updatedAt: date,
   };
+}
+
+/** schema 上限内の仕訳だけで、指定した合計を組み立てる。 */
+function entriesForTotal(
+  prefix: string,
+  date: string,
+  debit: string,
+  credit: string,
+  total: number,
+): JournalEntry[] {
+  const result: JournalEntry[] = [];
+  let remaining = total;
+  for (let index = 0; remaining > 0; index += 1) {
+    const amount = Math.min(remaining, MAX_AMOUNT_MINOR);
+    result.push(entry(`${prefix}-${index}`, date, debit, credit, amount));
+    remaining -= amount;
+  }
+  return result;
 }
 
 const cash = acc('cash', '現金', 'asset');
@@ -100,6 +120,14 @@ describe('deriveProfitAndLoss', () => {
     expect(pl.totalRevenue).toBe(0);
     expect(pl.netIncome).toBe(0);
   });
+  it('個別集計が安全域内でも、最終差引が安全域を出れば fail-closed', () => {
+    const overflowEntries = [
+      ...entriesForTotal('max-revenue', '2026-06-01', 'cash', 'salary', Number.MAX_SAFE_INTEGER),
+      // expense の貸方は自然残高 -2。MAX_SAFE - (-2) は表現不能。
+      entry('contra-expense', '2026-06-02', 'cash', 'food', 2),
+    ];
+    expect(() => deriveProfitAndLoss(accounts, overflowEntries)).toThrow(LedgerError);
+  });
 });
 
 describe('deriveBalanceSheet', () => {
@@ -122,6 +150,15 @@ describe('deriveBalanceSheet', () => {
     const second = { ...cash, id: 'second', name: '後', sortIndex: 2 };
     const bs = deriveBalanceSheet([second, first], []);
     expect(bs.assets.map((row) => row.account.id)).toEqual(['first', 'second']);
+  });
+  it('資産と負債が個別に安全域内でも、純資産の最終差引が安全域を出れば fail-closed', () => {
+    const focusedAccounts = [cash, card];
+    const overflowEntries = [
+      ...entriesForTotal('max-asset', '2026-06-01', 'cash', 'ignored', Number.MAX_SAFE_INTEGER),
+      // liability の借方は自然残高 -2。MAX_SAFE - (-2) は表現不能。
+      entry('contra-liability', '2026-06-02', 'card', 'ignored', 2),
+    ];
+    expect(() => deriveBalanceSheet(focusedAccounts, overflowEntries)).toThrow(LedgerError);
   });
 });
 

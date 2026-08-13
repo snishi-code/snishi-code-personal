@@ -6,15 +6,7 @@
  *  - 変更のたびに meta.revision を +1 する（端末ローカルの編集追跡）。
  *  - 削除/全消去/復元は fail-closed（呼び出し側で確認 UI を出す）。
  */
-import {
-  STORE,
-  deleteRecord,
-  getAll,
-  getKv,
-  runRead,
-  runWrite,
-  type StoreName,
-} from './db';
+import { STORE, deleteRecord, getAll, getKv, runRead, runWrite, type StoreName } from './db';
 import { defaultAccounts, defaultSettings, newMeta } from './seed';
 import { newId } from '../domain/ids';
 import {
@@ -26,28 +18,47 @@ import {
 import { isInternalRole, roleAllowsType, type AccountRole } from '../domain/accountRoles';
 import { compareAccountOrder } from '../domain/accountOrder';
 import { isAccountReferenced, type AccountRefCollections } from '../domain/accountRefs';
+import {
+  accountExistsAt,
+  accountLifetimeViolation,
+  accountReferenceIntervals,
+  effectiveRecurringRuleStartDate,
+  recurringLineageViolations,
+  recurringRuleLastExistingDate,
+  recurringRuleReferenceEndDate,
+  recurringRuleReferenceStartDate,
+  type AccountReferenceInterval,
+} from '../domain/accountLifetime';
+import { accountEndingBalanceViolations } from '../domain/accountEnding';
 import { findAccountNameConflicts, planArchiveRenames } from '../domain/accountNames';
 import { LedgerError } from '../domain/errors';
 import { isValidIsoDate } from '../domain/calendar';
 import {
-  cashflowScheduleSchema,
+  accountSchema,
   journalEntrySchema,
   monthlyCostItemSchema,
   recurringRuleSchema,
+  settingsSchema,
+  tagSchema,
 } from '../domain/schema';
 import {
   buildRuleItem,
+  clampDayToMonth,
   isRecurringPostableRole,
+  isRecurringSpreadDestinationRole,
+  ruleEntryId,
+  parseRuleItemId,
   recurringCursorAfter,
+  recurringDestinationAccountId,
+  recurringExpenseAccountId,
   recurringKindOf,
   recurringPostingsDue,
-  ruleItemCoverageThrough,
+  recurringRuleExistsAt,
   ruleItemId,
 } from '../domain/recurring';
 import type {
   Account,
   AccountType,
-  CashflowSchedule,
   EntryMetadata,
   InputMode,
   JournalEntry,
@@ -60,11 +71,16 @@ import type {
   Snapshot,
   Tag,
 } from '../domain/types';
-import { addMonths, addMonthsToDate, monthlyAmounts, monthOf } from '../domain/allocation';
-import { buildScheduleEntry } from '../domain/cashflow';
+import {
+  addMonthsToDate,
+  MONTHLY_AMOUNTS_HARD_CAP,
+  monthlyAmounts,
+  monthOf,
+} from '../domain/allocation';
 import { compareMonthlyCostItems } from '../domain/monthlyCost';
 import { buildAdjustmentEntry, counterpartName, counterpartRole } from '../domain/adjustment';
 import { accountBalance, filterByDateRange } from '../domain/accounting';
+import { ANNUAL_RETURN_BP_MAX, ANNUAL_RETURN_BP_MIN } from '../domain/investmentProjection';
 import { reportEntriesForAsOf } from '../domain/reportEntries';
 import { isTagReferenced, tagAssignmentError } from '../domain/tags';
 import { nowIso, todayLocal } from '../util/time';
@@ -161,8 +177,9 @@ export async function ensureInitialized(): Promise<void> {
     // 後方互換をコードで持たない（作者決定）ため、起動時の schemaVersion 追従
     // （恒等移行等）はここには無い。版不一致は fail-closed に止めて復旧面へ送る。
     assertSchemaVersionCurrent(meta);
-    // 初期残高科目は role を正本に同じ transaction で現行名へ揃える。
-    await normalizeOpeningEquityName();
+    // 初期残高科目の同定は role（equity）が正本で、名前は表示データにすぎない
+    // （指示書v3 §B-4）。旧実装の「毎起動の現行名への強制改名」は、ユーザーが付けた名前や
+    // 将来の言語別 seed 名を黙って上書きするため廃止した。
     return;
   }
   const accounts = defaultAccounts();
@@ -180,46 +197,6 @@ export async function ensureInitialized(): Promise<void> {
       kv.put(settings, KV_SETTINGS);
       const store = t.objectStore(STORE.accounts);
       for (const a of accounts) store.put(a);
-    };
-  });
-}
-
-/**
- * hidden な equity 科目の名称を role 基準で一度だけ現行表記へ揃える。
- *
- * 改名が安全でないとき（equity が複数 / 改名先を別の科目が使用中）は **何もせず起動を続ける**。
- * ここは loadLedger の冒頭なので、throw すると「初期残高」という名前の費用カテゴリを 1 つ作った
- * だけでアプリが二度と開かなくなる。表示名の現行化は起動をブロックしてよい種類の不変条件ではない。
- */
-async function normalizeOpeningEquityName(): Promise<void> {
-  await runWrite([STORE.accounts, STORE.kv], (t) => {
-    const accounts = t.objectStore(STORE.accounts);
-    const probe = accounts.getAll();
-    probe.onsuccess = () => {
-      const all = probe.result as Account[];
-      const equities = all.filter((account) => account.role === 'equity' && !account.archived);
-      // 改名対象を一意に決められないので触らない。
-      if (equities.length !== 1) return;
-      const equity = equities[0];
-      if (!equity || equity.name === OPENING_EQUITY_NAME) return;
-      const nameConflict = all.some(
-        (account) =>
-          account.id !== equity.id &&
-          !account.archived &&
-          account.name.trim() === OPENING_EQUITY_NAME,
-      );
-      // 改名すると重複名を作ってしまうので触らない（起動は続ける）。
-      if (nameConflict) return;
-      const ts = nowIso();
-      const kv = t.objectStore(STORE.kv);
-      const metaProbe = kv.get(KV_META);
-      metaProbe.onsuccess = () => {
-        const current = metaProbe.result as LedgerMeta | undefined;
-        // 表示名の正規化は補助処理。revision を安全に進められないなら本体も変更しない。
-        if (!current || current.revision >= MAX_LEDGER_REVISION) return;
-        accounts.put({ ...equity, name: OPENING_EQUITY_NAME, updatedAt: ts });
-        kv.put({ ...current, revision: current.revision + 1, updatedAt: ts }, KV_META);
-      };
     };
   });
 }
@@ -252,43 +229,33 @@ export async function loadLedger(): Promise<Ledger> {
     });
   // meta と各本体 store は同一 readonly transaction で読む。別タブの複数 store 書込みと
   // 読取りが交差して、存在しない中間状態を export / snapshot に残さない。
-  const [
-    meta,
-    settings,
-    accounts,
-    journalEntries,
-    cashflowSchedules,
-    tags,
-    monthlyCostItems,
-    recurringRules,
-  ] = await runRead(
-    [
-      STORE.kv,
-      STORE.accounts,
-      STORE.journalEntries,
-      STORE.cashflowSchedules,
-      STORE.tags,
-      STORE.monthlyCostItems,
-      STORE.recurringRules,
-    ],
-    (t) => {
-      const kv = t.objectStore(STORE.kv);
-      return Promise.all([
-        requestResult(kv.get(KV_META) as IDBRequest<LedgerMeta | undefined>),
-        requestResult(kv.get(KV_SETTINGS) as IDBRequest<Settings | undefined>),
-        requestResult(t.objectStore(STORE.accounts).getAll() as IDBRequest<Account[]>),
-        requestResult(t.objectStore(STORE.journalEntries).getAll() as IDBRequest<JournalEntry[]>),
-        requestResult(
-          t.objectStore(STORE.cashflowSchedules).getAll() as IDBRequest<CashflowSchedule[]>,
-        ),
-        requestResult(t.objectStore(STORE.tags).getAll() as IDBRequest<Tag[]>),
-        requestResult(
-          t.objectStore(STORE.monthlyCostItems).getAll() as IDBRequest<MonthlyCostItem[]>,
-        ),
-        requestResult(t.objectStore(STORE.recurringRules).getAll() as IDBRequest<RecurringRule[]>),
-      ]);
-    },
-  );
+  const [meta, settings, accounts, journalEntries, tags, monthlyCostItems, recurringRules] =
+    await runRead(
+      [
+        STORE.kv,
+        STORE.accounts,
+        STORE.journalEntries,
+        STORE.tags,
+        STORE.monthlyCostItems,
+        STORE.recurringRules,
+      ],
+      (t) => {
+        const kv = t.objectStore(STORE.kv);
+        return Promise.all([
+          requestResult(kv.get(KV_META) as IDBRequest<LedgerMeta | undefined>),
+          requestResult(kv.get(KV_SETTINGS) as IDBRequest<Settings | undefined>),
+          requestResult(t.objectStore(STORE.accounts).getAll() as IDBRequest<Account[]>),
+          requestResult(t.objectStore(STORE.journalEntries).getAll() as IDBRequest<JournalEntry[]>),
+          requestResult(t.objectStore(STORE.tags).getAll() as IDBRequest<Tag[]>),
+          requestResult(
+            t.objectStore(STORE.monthlyCostItems).getAll() as IDBRequest<MonthlyCostItem[]>,
+          ),
+          requestResult(
+            t.objectStore(STORE.recurringRules).getAll() as IDBRequest<RecurringRule[]>,
+          ),
+        ]);
+      },
+    );
   if (!meta || !settings) throw new Error('台帳の初期化に失敗しました');
   lastSeenVersion = ledgerVersion(meta);
   accounts.sort(compareAccountOrder);
@@ -296,20 +263,18 @@ export async function loadLedger(): Promise<Ledger> {
   journalEntries.sort((a, b) =>
     a.date === b.date ? cmp(b.createdAt, a.createdAt) : cmp(b.date, a.date),
   );
-  // 予定 CF は期日昇順。
-  cashflowSchedules.sort((a, b) => cmp(a.dueDate, b.dueDate));
   tags.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
   // 継続コスト資産は「終了が近い順」（endDate 昇順・未設定は最後・同着は名前）。
   monthlyCostItems.sort(compareMonthlyCostItems);
   recurringRules.sort((a, b) => cmp(a.createdAt, b.createdAt));
-  // 導出専用 entries は持たない。集計は各画面が reportEntriesForAsOf で
-  // 基準日ごとに必要範囲だけ仮想展開する（単一正本 = reportBasis + reportEntriesForAsOf）。
+  // 導出専用 entries は持たない。集計は各画面が displayEntriesForAsOf で
+  // 基準日ごとに必要範囲だけ仮想展開する（単一正本 = reportBasis + displayEntriesForAsOf）。
+  // repository 内の保存不変条件だけは reportEntriesForAsOf（投影を混ぜない）を使う。
   return {
     meta,
     settings,
     accounts,
     journalEntries,
-    cashflowSchedules,
     tags,
     monthlyCostItems,
     recurringRules,
@@ -419,6 +384,9 @@ function assertEntrySavable(entry: JournalEntry, ctx: SaveContext): JournalEntry
     if (!roleAllowsType(account.role, account.type)) {
       throw new LedgerError('error.entry.accountRoleMismatch');
     }
+    if (!accountExistsAt(account, parsed.data.date)) {
+      throw new LedgerError('error.account.referenceOutsidePeriod');
+    }
   }
   // 継続コスト台帳の不変条件（import schema の⑧⑨と同値をアプリ内保存でも守る）:
   //  - 台帳を借方/貸方に持つ保存仕訳は必ず monthlyCostId を持つ
@@ -459,21 +427,49 @@ function assertEntrySavable(entry: JournalEntry, ctx: SaveContext): JournalEntry
   return parsed.data;
 }
 
-/**
- * 予定 CF を保存する前の構造・参照検証（fail-closed）。
- *  - cashflowScheduleSchema（正の整数金額・ISO 期日・direction/source/status の enum 等）を満たすこと。
- *  - accountId・counterAccountId（あれば）が既存 Account を参照していること。
- */
-function assertSchedulesSavable(schedules: CashflowSchedule[], ctx: SaveContext): void {
-  for (const s of schedules) {
-    if (!cashflowScheduleSchema.safeParse(s).success) {
-      throw new LedgerError('error.schedule.invalidStructure');
-    }
-    if (!ctx.byId.has(s.accountId)) throw new LedgerError('error.schedule.unknownAccount');
-    if (s.counterAccountId !== undefined && !ctx.byId.has(s.counterAccountId)) {
-      throw new LedgerError('error.schedule.unknownAccount');
-    }
+function assertEndedAssetLiabilityBalances(
+  source: {
+    accounts: Account[];
+    journalEntries: JournalEntry[];
+    monthlyCostItems: MonthlyCostItem[];
+    recurringRules: RecurringRule[];
+  },
+  accountIds?: ReadonlySet<string>,
+): void {
+  if (accountEndingBalanceViolations(source, accountIds).length > 0) {
+    throw new LedgerError('error.account.archiveBalance');
   }
+}
+
+async function assertEndedBalancesAfterEntryChange(
+  ctx: SaveContext,
+  currentEntries: JournalEntry[],
+  options: {
+    replacement?: JournalEntry;
+    removeId?: string;
+    affectedAccountIds: Set<string>;
+    monthlyCostItems?: MonthlyCostItem[];
+    recurringRules?: RecurringRule[];
+  },
+): Promise<void> {
+  const [storedMonthlyCostItems, storedRecurringRules] = await Promise.all([
+    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
+    getAll<RecurringRule>(STORE.recurringRules),
+  ]);
+  const monthlyCostItems = options.monthlyCostItems ?? storedMonthlyCostItems;
+  const recurringRules = options.recurringRules ?? storedRecurringRules;
+  const removedId = options.removeId ?? options.replacement?.id;
+  const journalEntries = currentEntries.filter((entry) => entry.id !== removedId);
+  if (options.replacement) journalEntries.push(options.replacement);
+  assertEndedAssetLiabilityBalances(
+    {
+      accounts: [...ctx.byId.values()],
+      journalEntries,
+      monthlyCostItems,
+      recurringRules,
+    },
+    options.affectedAccountIds,
+  );
 }
 
 /**
@@ -483,10 +479,74 @@ function assertSchedulesSavable(schedules: CashflowSchedule[], ctx: SaveContext)
  * 残骸を持つ既存レコード（IndexedDB の生レコードを spread した保存値）が編集のたびに
  * 自己修復的に掃除される。
  */
-function assertMonthlyCostItemSavable(item: MonthlyCostItem): MonthlyCostItem {
+function assertReferenceInsideAccount(
+  account: Account | undefined,
+  reference: AccountReferenceInterval,
+): void {
+  if (!account) throw new LedgerError('error.entry.unknownAccount');
+  if (accountLifetimeViolation(account, [reference])) {
+    throw new LedgerError('error.account.referenceOutsidePeriod');
+  }
+}
+
+/**
+ * 利用者が直接管理しない内部科目（system 科目）は、必要な最古日まで開始点を常に延ばせる。
+ * startDate 未設定は過去へ開いた線分（§A 案1）なので延長不要 = 何も書かない
+ * （旧仕様の「createdAt を暗黙開始日として明示化する」延長は廃止済み）。
+ */
+function extendSystemAccountStart(account: Account, date: string, ts: string): Account {
+  return account.startDate !== undefined && date < account.startDate
+    ? { ...account, startDate: date, updatedAt: ts }
+    : account;
+}
+
+/**
+ * 参照が system 科目（内部集約・残高調整・初期残高）に触れるとき、その参照日まで線分を
+ * 無条件に延ばす。参照と科目更新は呼び出し側の同一 transaction で保存する。
+ *
+ * 通常科目には何もしない（§A 案1: startDate 未設定 = 過去へ開いた線分なので延長という
+ * 概念が消えた。明示 startDate はユーザーが決めた境界なので変更せず、後続の保存境界検証が
+ * 期間外参照を fail-closed に拒否する）。
+ */
+function extendSystemStartsForReferences(
+  ctx: SaveContext,
+  references: Iterable<{ accountId: string; date: string }>,
+  ts: string,
+): Map<string, Account> {
+  const updates = new Map<string, Account>();
+  for (const reference of references) {
+    const current = ctx.byId.get(reference.accountId);
+    if (!current) continue;
+    const systemOwned =
+      current.role === 'continuing-cost-asset' ||
+      current.role === 'system-adjustment' ||
+      current.role === 'equity';
+    if (!systemOwned) continue;
+    const extended = extendSystemAccountStart(current, reference.date, ts);
+    if (extended === current) continue;
+    ctx.byId.set(extended.id, extended);
+    updates.set(extended.id, extended);
+  }
+  return updates;
+}
+
+function entryAccountReferences(entry: JournalEntry): { accountId: string; date: string }[] {
+  return entry.lines.map((line) => ({ accountId: line.accountId, date: entry.date }));
+}
+
+function assertMonthlyCostItemSavable(item: MonthlyCostItem, ctx?: SaveContext): MonthlyCostItem {
   const parsed = monthlyCostItemSchema.safeParse(item);
   if (!parsed.success) {
     throw new LedgerError('error.monthlyCost.invalidStructure');
+  }
+  if (ctx) {
+    const reference: AccountReferenceInterval = {
+      kind: 'monthlyCost',
+      from: parsed.data.startDate,
+      ...(parsed.data.endDate !== undefined ? { to: parsed.data.endDate } : {}),
+    };
+    assertReferenceInsideAccount(ctx.byId.get(parsed.data.expenseAccountId), reference);
+    assertReferenceInsideAccount(ctx.byId.get(CONTINUOUS_COST_LEDGER_ACCOUNT_ID), reference);
   }
   return parsed.data;
 }
@@ -500,13 +560,12 @@ function stripMonthlyCostItem(item: MonthlyCostItem): MonthlyCostItem {
 /* ── 勘定科目 ── */
 
 async function loadReferencingCollections(): Promise<AccountRefCollections> {
-  const [entries, schedules, monthlyCostItems, recurringRules] = await Promise.all([
+  const [entries, monthlyCostItems, recurringRules] = await Promise.all([
     getAll<JournalEntry>(STORE.journalEntries),
-    getAll<CashflowSchedule>(STORE.cashflowSchedules),
     getAll<MonthlyCostItem>(STORE.monthlyCostItems),
     getAll<RecurringRule>(STORE.recurringRules),
   ]);
-  return { entries, schedules, monthlyCostItems, recurringRules };
+  return { entries, monthlyCostItems, recurringRules };
 }
 
 export interface AccountSaveOptions {
@@ -547,7 +606,36 @@ async function upsertAccountUnlocked(input: Account, opts?: AccountSaveOptions):
   //  - true は undefined へ（既定 ON なのでレコードを最小に保つ）。
   //  - daily-asset 以外に付いていたら剥がす（拒否せず自己修復）。
   // false かつ daily-asset のときだけ保存される（= 自由に動かせない印）。
+  const [accounts, refs] = await Promise.all([
+    getAll<Account>(STORE.accounts),
+    loadReferencingCollections(),
+  ]);
+  const prev = accounts.find((candidate) => candidate.id === input.id);
   const account: Account = { ...input };
+  // 別操作が開始点を書いた後でも、更新前に読んだオブジェクトによる名称変更等がその端点を
+  // 消さない。端点の明示解除（空欄へ戻す = startDate 削除・§A の導線）は
+  // `property: undefined` を渡して区別する。
+  if (prev?.startDate !== undefined && !Object.prototype.hasOwnProperty.call(input, 'startDate')) {
+    account.startDate = prev.startDate;
+  }
+  // 明示解除は保存レコードからキーごと消す（undefined 値のキーを IndexedDB に残さない）。
+  if (account.startDate === undefined) delete account.startDate;
+  if (
+    prev?.endDate !== undefined &&
+    input.archived === prev.archived &&
+    !Object.prototype.hasOwnProperty.call(input, 'endDate')
+  ) {
+    account.endDate = prev.endDate;
+  }
+  // 終了点と archived は同じ状態を表す。解除では終了点を消し、終了点を保存する操作は
+  // アーカイブとして扱う。旧 archived レコードの編集では終了点を今日として補う。
+  if (account.endDate !== undefined) {
+    account.archived = true;
+  } else if (account.archived) {
+    account.endDate = todayLocal();
+  } else {
+    delete account.endDate;
+  }
   if (!(account.movable === false && account.role === 'daily-asset')) {
     delete account.movable;
   }
@@ -556,14 +644,54 @@ async function upsertAccountUnlocked(input: Account, opts?: AccountSaveOptions):
   if (!roleAllowsType(account.role, account.type)) {
     throw new LedgerError('error.account.roleTypeMismatch');
   }
-  // 使用中（仕訳/予定CF/継続コストから参照中）の科目は区分(type)も役割(role)も変更できない。
+  if (
+    (account.role === 'continuing-cost-asset' &&
+      account.id !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID) ||
+    (account.id === CONTINUOUS_COST_LEDGER_ACCOUNT_ID &&
+      (account.role !== 'continuing-cost-asset' || account.type !== 'asset'))
+  ) {
+    throw new LedgerError('error.account.roleTypeMismatch');
+  }
+  // 投資の利回り投影（想定利回り + 計上先・§D）の保存境界（fail-closed）:
+  //  - investment-asset 以外には保存しない。片方だけの設定は拒否（セットで意味を持つ）。
+  //  - 計上先は自分自身不可。参照は soft reference（accountRefs の使用中判定に入れない）
+  //    なので、**値を設定/変更するときだけ**存在と role（income-category）を検証する。
+  //    参照先が後から消えても既存科目の編集（改名等）は保存できる（投影エンジンが
+  //    fail-closed に生成を止める＝§A の「暗黙値で編集不能」を繰り返さない）。
+  if ((account.annualReturnBp !== undefined) !== (account.projectionAccountId !== undefined)) {
+    throw new LedgerError('error.account.projectionPair');
+  }
+  if (account.annualReturnBp !== undefined) {
+    if (account.role !== 'investment-asset') {
+      throw new LedgerError('error.account.returnOnlyInvestment');
+    }
+    if (
+      !Number.isInteger(account.annualReturnBp) ||
+      account.annualReturnBp < ANNUAL_RETURN_BP_MIN ||
+      account.annualReturnBp > ANNUAL_RETURN_BP_MAX
+    ) {
+      throw new LedgerError('error.account.returnInvalid');
+    }
+  }
+  if (account.projectionAccountId !== undefined) {
+    if (account.projectionAccountId === account.id) {
+      throw new LedgerError('error.account.projectionAccountInvalid');
+    }
+    if (account.projectionAccountId !== prev?.projectionAccountId) {
+      const target = accounts.find((a) => a.id === account.projectionAccountId);
+      if (!target || target.role !== 'income-category') {
+        throw new LedgerError('error.account.projectionAccountInvalid');
+      }
+    }
+  }
+  // 端点の整合（明示 startDate > endDate の拒否）は accountSchema の superRefine が担う。
+  // startDate 未設定は過去へ開いた線分なので、endDate 単独でも常に適法（§A 案1）。
+  const parsedAccount = accountSchema.safeParse(account);
+  if (!parsedAccount.success) throw new LedgerError('error.account.periodInvalid');
+  Object.assign(account, parsedAccount.data);
+  // 使用中（仕訳/継続コスト/定期ルールから参照中）の科目は区分(type)も役割(role)も変更できない。
   // role 変更は表示上の「大きな箱の移動」に相当するため fail-closed（新しい内訳を作って
   // アーカイブする運用に寄せる）。
-  const [accounts, refs] = await Promise.all([
-    getAll<Account>(STORE.accounts),
-    loadReferencingCollections(),
-  ]);
-  const prev = accounts.find((a) => a.id === account.id);
   if (prev && prev.type !== account.type) {
     if (isAccountReferenced(account.id, refs)) {
       throw new LedgerError('error.account.typeLocked');
@@ -573,6 +701,10 @@ async function upsertAccountUnlocked(input: Account, opts?: AccountSaveOptions):
     if (isAccountReferenced(account.id, refs)) {
       throw new LedgerError('error.account.roleLocked');
     }
+  }
+  const references = accountReferenceIntervals(account.id, refs);
+  if (accountLifetimeViolation(account, references)) {
+    throw new LedgerError('error.account.referenceOutsidePeriod');
   }
   // 返済設定は負債（カード・未払 / ローン）のみ。返済口座は存在する日常資産、返済日は 1〜31。
   const isLiabilityRole =
@@ -592,17 +724,17 @@ async function upsertAccountUnlocked(input: Account, opts?: AccountSaveOptions):
     )
       throw new LedgerError('error.account.repaymentDayInvalid');
   }
-  // 不変条件: アーカイブ済み = 今日時点の残高 0（資産・負債のみ）。UI を通らない経路も塞ぐ。
+  // 不変条件: 資産・負債だけは終了点の残高 0。UI を通らない経路も塞ぐ。
   // 残高は画面と同じ導出仕訳（継続コストの費用行・定期ルールの投影込み）で判定する
   // （保存仕訳だけで判定すると、月割りの行き先科目など「画面では残高がある」科目を
   // アーカイブできてしまう・監査 P1-2）。残高があるなら先に振替（archiveAccount の振替導線）。
   // アーカイブ解除はチェック不要。
   if (
     account.archived &&
-    !prev?.archived &&
+    (!prev?.archived || prev.endDate !== account.endDate) &&
     (account.type === 'asset' || account.type === 'liability')
   ) {
-    const today = todayLocal();
+    const asOf = account.endDate ?? todayLocal();
     const derived = reportEntriesForAsOf(
       {
         accounts,
@@ -610,12 +742,12 @@ async function upsertAccountUnlocked(input: Account, opts?: AccountSaveOptions):
         monthlyCostItems: refs.monthlyCostItems,
         recurringRules: refs.recurringRules,
       },
-      today,
+      asOf,
     );
     const balance = accountBalance(
       account.id,
       account.type,
-      filterByDateRange(derived, undefined, today),
+      filterByDateRange(derived, undefined, asOf),
     );
     if (balance !== 0) throw new LedgerError('error.account.archiveBalance');
   }
@@ -649,14 +781,14 @@ async function reorderAccountsUnlocked(ids: string[]): Promise<void> {
   });
 }
 
-/** 使用中（仕訳/予定CF/継続コストから参照中）の科目は削除できない（アーカイブを使う）。fail-closed。 */
+/** 使用中（仕訳/継続コスト/定期ルールから参照中）の科目は削除できない（アーカイブを使う）。fail-closed。 */
 async function deleteAccountUnlocked(id: string): Promise<void> {
   const refs = await loadReferencingCollections();
   if (isAccountReferenced(id, refs)) {
     throw new LedgerError('error.account.deleteInUse');
   }
   // この科目を返済口座として設定している負債から、設定ポインタを同一トランザクションで剥がす
-  // （設定は予定 CF の既定値にすぎないため、削除を塞がず fail-soft に外す）。
+  // （設定は返済計画シートの既定値にすぎないため、削除を塞がず fail-soft に外す）。
   const accounts = await getAll<Account>(STORE.accounts);
   // 継続コスト台帳は定数参照（item が recognitionCreditAccountId を持たない）ため参照カウントに
   // 乗らない。role で削除を fail-closed に拒否する（消すと費用行の導出先が消える）。
@@ -681,9 +813,9 @@ async function deleteAccountUnlocked(id: string): Promise<void> {
 /**
  * 勘定科目をアーカイブする。残高が残っている資産・負債は、振替仕訳（UI = ホームの振替と
  * 同じシート）を同一トランザクションで保存して残高を 0 にしてからアーカイブする。
- * 不変条件「アーカイブ済み = 今日時点の残高 0」を保存境界で fail-closed に守る
+ * 資産・負債の不変条件「終了点の残高 = 0」を保存境界で fail-closed に守る
  * （振替後も 0 にならない金額・日付なら全体を拒否 = 残高が宙に浮く状態を作らない）。
- * 残高 0（または収入/支出/純資産/調整の科目）は transferEntry なしで即アーカイブできる。
+ * 資産・負債の残高 0 と、累計を保持できる費用・収入は transferEntry なしで終了できる。
  */
 async function archiveAccountUnlocked(id: string, transferEntry?: JournalEntry): Promise<void> {
   const [accounts, entries, monthlyCostItems, recurringRules] = await Promise.all([
@@ -695,6 +827,10 @@ async function archiveAccountUnlocked(id: string, transferEntry?: JournalEntry):
   const target = accounts.find((a) => a.id === id);
   if (!target) throw new LedgerError('error.adjust.targetNotFound');
   const ctx: SaveContext = { byId: accountsById(accounts) };
+  const endDate = todayLocal();
+  if (!accountExistsAt(target, endDate)) {
+    throw new LedgerError('error.account.periodInvalid');
+  }
   let savable: JournalEntry | undefined;
   if (transferEntry) {
     if (transferEntry.metadata?.monthlyCostId) throw new LedgerError('error.entry.monthlyCost');
@@ -702,25 +838,51 @@ async function archiveAccountUnlocked(id: string, transferEntry?: JournalEntry):
     if (!savable.lines.some((l) => l.accountId === id)) {
       throw new LedgerError('error.entry.unknownAccount');
     }
+    if (savable.date !== endDate) throw new LedgerError('error.account.archiveDate');
+    const counterpartLine = savable.lines.find((line) => line.accountId !== id);
+    const counterpart = counterpartLine ? ctx.byId.get(counterpartLine.accountId) : undefined;
+    if (!counterpart || counterpart.type !== target.type) {
+      throw new LedgerError('error.account.archiveCounterpartType');
+    }
     await assertEntryTagsValid(savable);
   }
-  if (target.type === 'asset' || target.type === 'liability') {
-    // 残高は画面と同じ導出仕訳（継続コストの費用行・定期ルールの投影込み）で判定する（監査 P1-2）。
-    const withTransfer = savable
-      ? [...entries.filter((e) => e.id !== savable!.id), savable]
-      : entries;
-    const today = todayLocal();
-    const derived = reportEntriesForAsOf(
-      { accounts, journalEntries: withTransfer, monthlyCostItems, recurringRules },
-      today,
-    );
-    const balance = accountBalance(id, target.type, filterByDateRange(derived, undefined, today));
-    if (balance !== 0) throw new LedgerError('error.account.archiveBalance');
+  const withTransfer = savable
+    ? [...entries.filter((e) => e.id !== savable!.id), savable]
+    : entries;
+  const candidate: Account = { ...target, archived: true, endDate, updatedAt: nowIso() };
+  // 明示 startDate > endDate は schema の superRefine が拒否する（未設定は過去へ開いた線分）。
+  if (!accountSchema.safeParse(candidate).success) {
+    throw new LedgerError('error.account.periodInvalid');
   }
-  const ts = nowIso();
+  const references = accountReferenceIntervals(id, {
+    entries: withTransfer,
+    monthlyCostItems,
+    recurringRules,
+  });
+  if (accountLifetimeViolation(candidate, references)) {
+    throw new LedgerError('error.account.referenceOutsidePeriod');
+  }
+  // 残高は画面と同じ導出仕訳（継続コストの費用行・定期ルールの投影込み）で判定する。
+  const derived = reportEntriesForAsOf(
+    { accounts, journalEntries: withTransfer, monthlyCostItems, recurringRules },
+    endDate,
+  );
+  const balance = accountBalance(id, target.type, filterByDateRange(derived, undefined, endDate));
+  if ((target.type === 'asset' || target.type === 'liability') && balance !== 0) {
+    throw new LedgerError('error.account.archiveBalance');
+  }
+  assertEndedAssetLiabilityBalances(
+    {
+      accounts: accounts.map((account) => (account.id === candidate.id ? candidate : account)),
+      journalEntries: withTransfer,
+      monthlyCostItems,
+      recurringRules,
+    },
+    new Set([candidate.id, ...(savable?.lines.map((line) => line.accountId) ?? [])]),
+  );
   await writeWithRevision([STORE.accounts, STORE.journalEntries], (t) => {
     if (savable) t.objectStore(STORE.journalEntries).put(savable);
-    t.objectStore(STORE.accounts).put({ ...target, archived: true, updatedAt: ts });
+    t.objectStore(STORE.accounts).put(candidate);
   });
 }
 
@@ -740,14 +902,6 @@ function assertEntryDeletable(target: JournalEntry | undefined): void {
   if (target?.metadata?.adjustment) throw new LedgerError('error.entry.adjustment');
 }
 
-/** 実績化済み予定の linkedEntry は通常の編集・削除では壊せない。fail-closed。 */
-async function assertNotScheduleLinked(id: string): Promise<void> {
-  const schedules = await getAll<CashflowSchedule>(STORE.cashflowSchedules);
-  if (schedules.some((s) => s.linkedEntryId === id)) {
-    throw new LedgerError('error.entry.scheduleLinked');
-  }
-}
-
 /** 仕訳のタグ代入を import 検証と同じ不変条件で確認する（保存時 fail-closed）。タグは仕訳全体のみ。 */
 async function assertEntryTagsValid(entry: JournalEntry): Promise<void> {
   const tags = await tagMap();
@@ -758,7 +912,47 @@ async function assertEntryTagsValid(entry: JournalEntry): Promise<void> {
 async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
   const entries = await getAll<JournalEntry>(STORE.journalEntries);
   const existing = entries.find((e) => e.id === entry.id);
-  await assertNotScheduleLinked(entry.id);
+
+  // 定期ルールが作った実仕訳は、個別月の金額・摘要などは編集できる一方、由来する
+  // ルール/月は保存境界で固定する。月をまたぐ日付変更を許すと recurringMonth と
+  // item の決定的 ID が食い違い、次の catch-up/import で同じ月を二重計上し得る。
+  const existingRuleId = existing?.metadata?.recurringRuleId;
+  const existingRuleMonth = existing?.metadata?.recurringMonth;
+  if (existingRuleId === undefined) {
+    if (
+      entry.metadata?.recurringRuleId !== undefined ||
+      entry.metadata?.recurringMonth !== undefined
+    ) {
+      throw new LedgerError('error.recurring.invalidStructure');
+    }
+  } else {
+    if (
+      existingRuleMonth === undefined ||
+      (entry.metadata?.recurringRuleId !== undefined &&
+        entry.metadata.recurringRuleId !== existingRuleId) ||
+      (entry.metadata?.recurringMonth !== undefined &&
+        entry.metadata.recurringMonth !== existingRuleMonth)
+    ) {
+      throw new LedgerError('error.recurring.invalidStructure');
+    }
+    const rules = await getAll<RecurringRule>(STORE.recurringRules);
+    const sourceRule = rules.find((rule) => rule.id === existingRuleId);
+    if (
+      sourceRule === undefined ||
+      monthOf(entry.date) !== existingRuleMonth ||
+      !recurringRuleExistsAt(sourceRule, entry.date)
+    ) {
+      throw new LedgerError('error.recurring.periodInvalid');
+    }
+    entry = {
+      ...entry,
+      metadata: {
+        ...entry.metadata,
+        recurringRuleId: existingRuleId,
+        recurringMonth: existingRuleMonth,
+      },
+    };
+  }
   // 補正仕訳は専用画面でだけ管理する（現実アンカーを保つ）。ユーザー入力からも作れない。
   if (existing?.metadata?.adjustment || entry.metadata?.adjustment) {
     throw new LedgerError('error.entry.adjustment');
@@ -771,9 +965,22 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
       throw new LedgerError('error.entry.monthlyCost');
     }
     const ctx = await loadSaveContext();
+    const accountUpdates = extendSystemStartsForReferences(
+      ctx,
+      entryAccountReferences(entry),
+      nowIso(),
+    );
     const savable = assertEntrySavable(entry, ctx);
     await assertEntryTagsValid(savable);
-    await writeWithRevision([STORE.journalEntries], (t) => {
+    await assertEndedBalancesAfterEntryChange(ctx, entries, {
+      replacement: savable,
+      affectedAccountIds: new Set(
+        [...(existing?.lines ?? []), ...savable.lines].map((line) => line.accountId),
+      ),
+    });
+    await writeWithRevision([STORE.accounts, STORE.journalEntries], (t) => {
+      const accountStore = t.objectStore(STORE.accounts);
+      for (const account of accountUpdates.values()) accountStore.put(account);
       t.objectStore(STORE.journalEntries).put(savable);
     });
     return;
@@ -802,20 +1009,83 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
         : 'normal',
     metadata,
   };
-  // 借方=台帳の固定・貸方 role・回収の形は assertEntrySavable が検証する。
-  const savable = assertEntrySavable(candidate, ctx);
-  await assertEntryTagsValid(savable);
-
+  const items = await getAll<MonthlyCostItem>(STORE.monthlyCostItems);
+  const linkedItem = items.find((item) => item.id === existingMcId);
   if (existingRecovery) {
-    // 回収の振替: 日付は開始日（購入の仕訳の日付）以降のみ。購入前の期間に台帳が
-    // 負になる断面を作らない（監査 P1-1。import schema と同じ不変条件）。
-    const items = await getAll<MonthlyCostItem>(STORE.monthlyCostItems);
-    const recoveryItem = items.find((m) => m.id === existingMcId);
-    if (recoveryItem && savable.date < recoveryItem.startDate) {
+    // 専用不変条件を科目の存在期間より先に判定し、購入前回収のエラー契約を保つ。
+    if (linkedItem && candidate.date < linkedItem.startDate) {
       throw new LedgerError('error.monthlyCost.recoveryBeforeStart');
     }
+  }
+  const accountUpdates = extendSystemStartsForReferences(
+    ctx,
+    entryAccountReferences(candidate),
+    nowIso(),
+  );
+  let mirroredItem: MonthlyCostItem | undefined;
+  if (linkedItem && !existingRecovery) {
+    for (const [accountId, account] of extendSystemStartsForReferences(
+      ctx,
+      [{ accountId: linkedItem.expenseAccountId, date: candidate.date }],
+      nowIso(),
+    )) {
+      accountUpdates.set(accountId, account);
+    }
+  }
+  // 借方=台帳の固定・貸方 role・回収の形は assertEntrySavable が検証する。
+  const savable = assertEntrySavable(candidate, ctx);
+  if (linkedItem && !existingRecovery) {
+    if (
+      entries.some(
+        (entry) =>
+          entry.metadata?.monthlyCostId === existingMcId &&
+          entry.metadata.monthlyCostRecovery === true &&
+          entry.date < savable.date,
+      )
+    ) {
+      throw new LedgerError('error.monthlyCost.recoveryBeforeStart');
+    }
+    if (linkedItem.endDate !== undefined && savable.date > linkedItem.endDate) {
+      throw new LedgerError('error.monthlyCost.purchaseAfterEnd');
+    }
+    // 購入日の変更で startDate > allocationStartDate になる編集は拒否（黙って clamp しない。
+    // 先に item 側の費用化の開始日を直してもらう・§D 端点）。
+    if (
+      linkedItem.allocationStartDate !== undefined &&
+      savable.date > linkedItem.allocationStartDate
+    ) {
+      throw new LedgerError('error.monthlyCost.purchaseAfterAllocation');
+    }
+    mirroredItem = assertMonthlyCostItemSavable(
+      {
+        ...linkedItem,
+        amount: savable.lines.find((line) => line.side === 'debit')?.amount ?? linkedItem.amount,
+        startDate: savable.date,
+        updatedAt: savable.updatedAt,
+      },
+      ctx,
+    );
+  }
+  await assertEntryTagsValid(savable);
+  await assertEndedBalancesAfterEntryChange(ctx, entries, {
+    replacement: savable,
+    // 回収額・購入額・購入日は item の月割り額を全期間へ遡及させるため、明細上の
+    // 科目だけでなく終了点を持つ全資産・負債を再検証する。
+    affectedAccountIds: new Set(ctx.byId.keys()),
+    ...(mirroredItem
+      ? {
+          monthlyCostItems: items.map((item) =>
+            item.id === mirroredItem!.id ? mirroredItem! : item,
+          ),
+        }
+      : {}),
+  });
+
+  if (existingRecovery) {
     // 普通の振替として保存（割り振る総額は導出側が再計算する）。
-    await writeWithRevision([STORE.journalEntries], (t) => {
+    await writeWithRevision([STORE.accounts, STORE.journalEntries], (t) => {
+      const accountStore = t.objectStore(STORE.accounts);
+      for (const account of accountUpdates.values()) accountStore.put(account);
       t.objectStore(STORE.journalEntries).put(savable);
     });
     return;
@@ -851,8 +1121,11 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
   const debitAmount = savable.lines.find((l) => l.side === 'debit')?.amount ?? 0;
   let missingRace = false;
   let afterEndRace = false;
+  let afterAllocRace = false;
   try {
-    await writeWithRevision([STORE.journalEntries, STORE.monthlyCostItems], (t) => {
+    await writeWithRevision([STORE.accounts, STORE.journalEntries, STORE.monthlyCostItems], (t) => {
+      const accountStore = t.objectStore(STORE.accounts);
+      for (const account of accountUpdates.values()) accountStore.put(account);
       const iStore = t.objectStore(STORE.monthlyCostItems);
       const probe = iStore.get(existingMcId);
       probe.onsuccess = () => {
@@ -865,6 +1138,12 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
         // 日付を終了日より後ろへ動かすのは拒否（不変条件: endDate >= startDate）。
         if (item.endDate !== undefined && savable.date > item.endDate) {
           afterEndRace = true;
+          t.abort();
+          return;
+        }
+        // 日付を費用化の開始日より後ろへ動かすのも拒否（不変条件: allocationStartDate >= startDate）。
+        if (item.allocationStartDate !== undefined && savable.date > item.allocationStartDate) {
+          afterAllocRace = true;
           t.abort();
           return;
         }
@@ -882,41 +1161,27 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
   } catch (error) {
     if (missingRace) throw new LedgerError('error.monthlyCost.notFound');
     if (afterEndRace) throw new LedgerError('error.monthlyCost.purchaseAfterEnd');
+    if (afterAllocRace) throw new LedgerError('error.monthlyCost.purchaseAfterAllocation');
     throw error;
   }
 }
 
 async function deleteEntryUnlocked(id: string): Promise<void> {
   const entries = await getAll<JournalEntry>(STORE.journalEntries);
-  assertEntryDeletable(entries.find((e) => e.id === id));
-  await assertNotScheduleLinked(id);
+  const target = entries.find((entry) => entry.id === id);
+  assertEntryDeletable(target);
+  if (target) {
+    const ctx = await loadSaveContext();
+    await assertEndedBalancesAfterEntryChange(ctx, entries, {
+      removeId: id,
+      affectedAccountIds:
+        target.metadata?.monthlyCostRecovery === true
+          ? new Set(ctx.byId.keys())
+          : new Set(target.lines.map((line) => line.accountId)),
+    });
+  }
   await writeWithRevision([STORE.journalEntries], (t) => {
     t.objectStore(STORE.journalEntries).delete(id);
-  });
-}
-
-/**
- * 仕訳 + 予定 CF（分割返済など）を 1 トランザクションで保存する。
- * 借入実行の振替（負債→資金）と、その返済予定をまとめて保存する用途。
- * 仕訳だけ成功して予定が残らない中途半端な状態を避ける（fail-closed）。
- */
-async function saveEntryWithSchedulesUnlocked(
-  entry: JournalEntry,
-  schedules: CashflowSchedule[],
-): Promise<void> {
-  const entries = await getAll<JournalEntry>(STORE.journalEntries);
-  assertEntryDeletable(entries.find((e) => e.id === entry.id));
-  await assertNotScheduleLinked(entry.id);
-  if (entry.metadata?.monthlyCostId) throw new LedgerError('error.entry.monthlyCost');
-  const ctx = await loadSaveContext();
-  const savable = assertEntrySavable(entry, ctx);
-  assertSchedulesSavable(schedules, ctx);
-  await assertEntryTagsValid(savable);
-  await assertScheduleTagsValid(schedules);
-  await writeWithRevision([STORE.journalEntries, STORE.cashflowSchedules], (t) => {
-    t.objectStore(STORE.journalEntries).put(savable);
-    const sStore = t.objectStore(STORE.cashflowSchedules);
-    for (const s of schedules) sStore.put(s);
   });
 }
 
@@ -944,6 +1209,18 @@ export interface RepaymentPlanInput {
 async function createRepaymentEntriesUnlocked(input: RepaymentPlanInput): Promise<JournalEntry[]> {
   if (input.title.trim() === '') throw new LedgerError('error.common.nameRequired');
   const ctx = await loadSaveContext();
+  const ts = nowIso();
+  const lastDate = addMonthsToDate(input.firstDate, Math.max(0, input.count - 1));
+  const accountUpdates = extendSystemStartsForReferences(
+    ctx,
+    [
+      { accountId: input.liabilityAccountId, date: input.firstDate },
+      { accountId: input.fromAccountId, date: input.firstDate },
+      { accountId: input.liabilityAccountId, date: lastDate },
+      { accountId: input.fromAccountId, date: lastDate },
+    ],
+    ts,
+  );
   const entries = buildRepaymentEntries(ctx, {
     liabilityAccountId: input.liabilityAccountId,
     fromAccountId: input.fromAccountId,
@@ -951,9 +1228,25 @@ async function createRepaymentEntriesUnlocked(input: RepaymentPlanInput): Promis
     total: input.total,
     count: input.count,
     title: input.title.trim(),
-    ts: nowIso(),
+    ts,
   });
-  await writeWithRevision([STORE.journalEntries], (t) => {
+  const [currentEntries, monthlyCostItems, recurringRules] = await Promise.all([
+    getAll<JournalEntry>(STORE.journalEntries),
+    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
+    getAll<RecurringRule>(STORE.recurringRules),
+  ]);
+  assertEndedAssetLiabilityBalances(
+    {
+      accounts: [...ctx.byId.values()],
+      journalEntries: [...currentEntries, ...entries],
+      monthlyCostItems,
+      recurringRules,
+    },
+    new Set(entries.flatMap((entry) => entry.lines.map((line) => line.accountId))),
+  );
+  await writeWithRevision([STORE.accounts, STORE.journalEntries], (t) => {
+    const accountStore = t.objectStore(STORE.accounts);
+    for (const account of accountUpdates.values()) accountStore.put(account);
     const store = t.objectStore(STORE.journalEntries);
     for (const e of entries) store.put(e);
   });
@@ -961,7 +1254,7 @@ async function createRepaymentEntriesUnlocked(input: RepaymentPlanInput): Promis
 }
 
 /**
- * 負債払いの分割返済を「未来日付の振替実仕訳 N 本」として組み立てる（予定 CF は作らない）。
+ * 負債払いの分割返済を「未来日付の振替実仕訳 N 本」として組み立てる。
  * createRepaymentEntries と同じ形: 借方 負債 / 貸方 返済元(daily-asset)。金額は monthlyAmounts で
  * 配分し合計は必ず total に一致、日付は初回引落日(firstDate)から毎月同日。呼び出し側の
  * 1 トランザクションに同梱して保存する（購入だけ成功して返済が残らない中途半端を作らない）。
@@ -988,8 +1281,16 @@ function buildRepaymentEntries(
 ): JournalEntry[] {
   if (!Number.isInteger(params.total) || params.total < 1)
     throw new LedgerError('error.common.amountInvalid');
-  if (!Number.isInteger(params.count) || params.count < 1)
-    throw new LedgerError('error.repay.countInvalid');
+  if (
+    !Number.isInteger(params.count) ||
+    params.count < 1 ||
+    params.count > MONTHLY_AMOUNTS_HARD_CAP
+  )
+    throw new LedgerError('error.repay.countInvalid', { max: MONTHLY_AMOUNTS_HARD_CAP });
+  // 分割の全要素 > 0 を保証する。total < count だと monthlyAmounts が 0 の回を作り、
+  // 0 金額は amountSchema（.positive）が拒否して保存全体が失敗する（v10 からの既存不具合）。
+  // 「0 の回を省く」案は採らない: 摘要の i/count が回数を約束しているため本数を黙って減らせない。
+  if (params.total < params.count) throw new LedgerError('error.repay.totalTooSmall');
   if (!isValidIsoDate(params.firstDate)) throw new LedgerError('error.monthlyCost.dateRequired');
   const liability = ctx.byId.get(params.liabilityAccountId);
   if (
@@ -1021,14 +1322,29 @@ function buildRepaymentEntries(
 /* ── 設定 ── */
 
 async function updateSettingsUnlocked(settings: Settings): Promise<void> {
+  // 保存境界で schema を通す（UI だけの制限では、他経路や将来の呼び出しで
+  // 「保存はできるが export だけ後で失敗する」状態を作ってしまう）。
+  // 前後空白は他の name フィールドと同じく保存境界で落とす（' 円 ' を焼き付けない）。
+  const validated = settingsSchema.safeParse({
+    ...settings,
+    ledgerName: settings.ledgerName.trim(),
+    currency: settings.currency.trim(),
+  });
+  if (!validated.success) throw new LedgerError('error.settings.invalid');
   await writeWithRevision([STORE.kv], (t) => {
-    t.objectStore(STORE.kv).put(settings, KV_SETTINGS);
+    t.objectStore(STORE.kv).put(validated.data, KV_SETTINGS);
   });
 }
 
 /* ── スナップショット ── */
 
 export async function listSnapshots(): Promise<Snapshot[]> {
+  // reason の検査は**書き込み側だけ**（saveSnapshot）。読み出しで throw すると、
+  // IDB 直接編集などで壊れた 1 件が一覧全体を落とし、正常な復元ポイントも
+  // 壊れた 1 件を消す削除ボタンも画面から消える（残る出口が「すべてのデータを削除」
+  // だけになる）。未知の reason は snapshotReasonLabel が生文字列のまま出す
+  // （fail-visible）。復元の安全は reason ではなく schemaVersion の剪定と
+  // import パイプラインの検証が担う。
   const all = await getAll<Snapshot>(STORE.snapshots);
   all.sort((a, b) => cmp(b.createdAt, a.createdAt));
   return all;
@@ -1045,6 +1361,9 @@ export async function saveSnapshot(
   snapshot: Snapshot,
   expectedVersion: LedgerVersion,
 ): Promise<void> {
+  if (snapshot.reason !== 'import' && snapshot.reason !== 'restore') {
+    throw new LedgerError('error.snapshot.invalid');
+  }
   let stale = false;
   try {
     await runWrite([STORE.snapshots, STORE.kv], (t) => {
@@ -1069,61 +1388,6 @@ export async function deleteSnapshot(id: string): Promise<void> {
   await deleteRecord(STORE.snapshots, id);
 }
 
-/* ── 予定キャッシュフロー ── */
-
-/** 予定 CF のタグ代入を import 検証と同じ不変条件で確認する。タグは仕訳全体のみ。 */
-async function assertScheduleTagsValid(schedules: CashflowSchedule[]): Promise<void> {
-  const tags = await tagMap();
-  for (const s of schedules) {
-    const e1 = tagAssignmentError(s.entryTagIds, tags);
-    if (e1) throw new LedgerError(e1);
-  }
-}
-
-async function upsertScheduleUnlocked(schedule: CashflowSchedule): Promise<void> {
-  await upsertSchedulesUnlocked([schedule]);
-}
-
-/** 複数の予定（分割払い等）を 1 トランザクションで保存する。 */
-async function upsertSchedulesUnlocked(schedules: CashflowSchedule[]): Promise<void> {
-  const ctx = await loadSaveContext();
-  assertSchedulesSavable(schedules, ctx);
-  await assertScheduleTagsValid(schedules);
-  await writeWithRevision([STORE.cashflowSchedules], (t) => {
-    const store = t.objectStore(STORE.cashflowSchedules);
-    for (const s of schedules) store.put(s);
-  });
-}
-
-async function deleteScheduleUnlocked(id: string): Promise<void> {
-  await writeWithRevision([STORE.cashflowSchedules], (t) => {
-    t.objectStore(STORE.cashflowSchedules).delete(id);
-  });
-}
-
-/** 予定を実績化: 仕訳を作り、schedule を posted にする（単一トランザクション）。 */
-async function postScheduleUnlocked(id: string): Promise<JournalEntry> {
-  const schedules = await getAll<CashflowSchedule>(STORE.cashflowSchedules);
-  const schedule = schedules.find((s) => s.id === id);
-  if (!schedule) throw new LedgerError('error.schedule.notFound');
-  if (schedule.status !== 'planned') throw new LedgerError('error.schedule.alreadyProcessed');
-  const entry = buildScheduleEntry(schedule); // counter 未設定なら LedgerError
-  // 生成した実績仕訳も通常仕訳と同じ保存境界を通す（fail-closed）。
-  const ctx = await loadSaveContext();
-  const savable = assertEntrySavable(entry, ctx);
-  const updated: CashflowSchedule = {
-    ...schedule,
-    status: 'posted',
-    linkedEntryId: savable.id,
-    updatedAt: nowIso(),
-  };
-  await writeWithRevision([STORE.journalEntries, STORE.cashflowSchedules], (t) => {
-    t.objectStore(STORE.journalEntries).put(savable);
-    t.objectStore(STORE.cashflowSchedules).put(updated);
-  });
-  return savable;
-}
-
 /* ── 定期ルール（くり返し記帳 = 実仕訳の自動起票） ── */
 
 export interface RecurringRuleInput {
@@ -1133,14 +1397,28 @@ export interface RecurringRuleInput {
   /** 何か月ごとに起票するか。未指定は 1（毎月）。 */
   everyMonths?: number;
   /**
-   * 費用の行き先（あれば月割りするルール = 継続コスト化）。指定時は debitAccountId を無視して
-   * 借方を継続コスト台帳に固定する（ユーザーは台帳という科目を一度も見ない）。
+   * 正規化済みの計上先。呼び出し側は通常 debitAccountId に利用者が選んだ行き先を渡す。
+   * 旧 API から明示された場合も、行き先 role が費用または収入（差引形）なら継続コスト化し、
+   * それ以外なら直接フローへ正規化する。
    */
   spreadExpenseAccountId?: string;
   debitAccountId: string;
   creditAccountId: string;
   /** 起票開始月。未指定は今日の月。 */
   startMonth?: string;
+  /** ルール自体が存在し始める日。未指定は周期上の最初の起票日。起票周期の基準日とは独立。 */
+  startDate?: string;
+  /** この日からルールは存在しない（排他的終了点）。 */
+  endDate?: string;
+}
+
+export type RecurringRuleAmountChangeMode = 'retroactive' | 'split';
+
+export interface RecurringRuleSaveOptions {
+  /** 金額変更時は必須。変更しない保存では指定しない。 */
+  amountChangeMode?: RecurringRuleAmountChangeMode;
+  /** split の境界日。旧ルールはこの日より前、新ルールはこの日以降を担当する。 */
+  effectiveDate?: string;
 }
 
 /** 保存境界の検証（作成・編集で共通・fail-closed）。 */
@@ -1152,152 +1430,652 @@ function assertRecurringRuleSavable(rule: RecurringRule, ctx: SaveContext): void
   const credit = ctx.byId.get(rule.creditAccountId);
   if (!debit || !credit || rule.debitAccountId === rule.creditAccountId)
     throw new LedgerError('error.recurring.flowInvalid');
+  const spreadsExpense =
+    recurringExpenseAccountId(rule, (id) => ctx.byId.get(id)?.role) !== undefined;
+  const referenceStart = recurringRuleReferenceStartDate(rule);
+  if (referenceStart !== undefined) {
+    const referenceEnd = recurringRuleReferenceEndDate(rule, spreadsExpense);
+    const reference: AccountReferenceInterval = {
+      kind: 'recurringRule',
+      from: referenceStart,
+      ...(referenceEnd !== undefined ? { to: referenceEnd } : {}),
+    };
+    for (const accountId of new Set([
+      rule.debitAccountId,
+      rule.creditAccountId,
+      ...(rule.spreadExpenseAccountId !== undefined ? [rule.spreadExpenseAccountId] : []),
+    ])) {
+      assertReferenceInsideAccount(ctx.byId.get(accountId), reference);
+    }
+  }
   if (rule.spreadExpenseAccountId !== undefined) {
-    // 月割りするルール: 借方 = 継続コスト台帳（schema が id を固定。everyMonths >= 1 で周期に
-    // かかわらず常に台帳経由）。費用の行き先・源泉（支払い元 = 購入の仕訳の貸方）はどちらも
-    // 種別によらず起票可能な全 role（内部集約・残高調整のみ除外。起票時の assertEntrySavable と
-    // 同じ制約を前倒しで守る）。
+    // 正規化済みの月割りルール: 借方 = 継続コスト台帳、spread = 費用または収入（差引形）科目。
     const spreadAccount = ctx.byId.get(rule.spreadExpenseAccountId);
-    if (!spreadAccount || !isRecurringPostableRole(spreadAccount.role))
+    if (
+      !spreadAccount ||
+      !isRecurringSpreadDestinationRole(spreadAccount.role) ||
+      spreadAccount.id === credit.id
+    )
       throw new LedgerError('error.monthlyCost.expenseCategory');
     if (!isRecurringPostableRole(credit.role)) throw new LedgerError('error.recurring.flowInvalid');
     return;
   }
   // 支出/収入/振替の定型に加え、簿記編集（任意の科目ペア）を許容する。ただし内部集約・
   // 調整科目は自動起票の対象外（RECURRING_POSTABLE_ROLES が正本・fail-closed）。
-  if (!isRecurringPostableRole(debit.role) || !isRecurringPostableRole(credit.role))
+  // 費用・収入（差引形）行きは spread+内部台帳の正規形だけを保存し、借方直接の
+  // 旧形式を v7 内で読み替えない。
+  if (
+    isRecurringSpreadDestinationRole(debit.role) ||
+    !isRecurringPostableRole(debit.role) ||
+    !isRecurringPostableRole(credit.role)
+  )
     throw new LedgerError('error.recurring.flowInvalid');
 }
 
+/** 保存後候補の全ルールに、import と同じ系譜内非重複を適用する。 */
+function assertRecurringLineagesSavable(rules: readonly RecurringRule[]): void {
+  if (recurringLineageViolations(rules).length > 0) {
+    throw new LedgerError('error.recurring.periodInvalid');
+  }
+}
+
 async function createRecurringRuleUnlocked(input: RecurringRuleInput): Promise<RecurringRule> {
-  const ctx = await loadSaveContext();
+  const [ctx, journalEntries, monthlyCostItems, recurringRules] = await Promise.all([
+    loadSaveContext(),
+    getAll<JournalEntry>(STORE.journalEntries),
+    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
+    getAll<RecurringRule>(STORE.recurringRules),
+  ]);
   const ts = nowIso();
-  const spread = input.spreadExpenseAccountId !== undefined;
-  // 月割りするルールの借方は継続コスト台帳（無ければこの tx で作る）。
-  const { account: ledgerAccount, created: ledgerCreated } = spread
-    ? findOrCreateContinuousCostLedgerAccount(ctx, ts)
-    : { account: undefined, created: false };
+  const destinationAccountId = recurringDestinationAccountId(input);
+  // 行き先 role（費用/収入=差引形）から継続コスト化を判定する（domain の正本と同じ判定）。
+  const expenseAccountId = recurringExpenseAccountId(input, (id) => ctx.byId.get(id)?.role);
+  const spreadsExpense = expenseAccountId !== undefined;
+  const startMonth = input.startMonth ?? monthOf(todayLocal());
+  // UI は登録日を明示して渡す。内部 API で省略された場合も保存データには必ず開始点を持たせ、
+  // 呼び出し側が指定した周期 anchor 上の最初の起票日を安全な既定にする。
+  const startDate = input.startDate ?? clampDayToMonth(startMonth, input.dayOfMonth);
   const rule: RecurringRule = {
     id: newId(),
     name: input.name.trim(),
     amount: input.amount,
     dayOfMonth: input.dayOfMonth,
     everyMonths: input.everyMonths ?? 1,
-    ...(spread ? { spreadExpenseAccountId: input.spreadExpenseAccountId } : {}),
-    debitAccountId: spread ? CONTINUOUS_COST_LEDGER_ACCOUNT_ID : input.debitAccountId,
+    ...(expenseAccountId !== undefined ? { spreadExpenseAccountId: expenseAccountId } : {}),
+    debitAccountId: spreadsExpense ? CONTINUOUS_COST_LEDGER_ACCOUNT_ID : destinationAccountId,
     creditAccountId: input.creditAccountId,
-    startMonth: input.startMonth ?? monthOf(todayLocal()),
+    startMonth,
+    startDate,
+    ...(input.endDate !== undefined ? { endDate: input.endDate } : {}),
     createdAt: ts,
     updatedAt: ts,
   };
+  const referenceStart = recurringRuleReferenceStartDate(rule);
+  // 月割りルール（費用/差引形）の借方は継続コスト台帳（無ければこの tx で作る）。
+  const { account: ledgerAccount, writeNeeded: ledgerWriteNeeded } = spreadsExpense
+    ? findOrCreateContinuousCostLedgerAccount(ctx, ts, referenceStart)
+    : { account: undefined, writeNeeded: false };
+  // 参照科目の延長は不要（§A 案1: startDate 未設定 = 過去へ開いた線分。明示 startDate は
+  // 後続の assertRecurringRuleSavable が期間外参照として fail-closed に拒否する）。
+  // 台帳（system 科目）だけは findOrCreateContinuousCostLedgerAccount が無条件延長する。
   const validationCtx: SaveContext = { byId: new Map(ctx.byId) };
   if (ledgerAccount) validationCtx.byId.set(ledgerAccount.id, ledgerAccount);
+  const accountsToPut = new Map<string, Account>();
+  if (ledgerWriteNeeded && ledgerAccount) accountsToPut.set(ledgerAccount.id, ledgerAccount);
   assertRecurringRuleSavable(rule, validationCtx);
+  assertRecurringLineagesSavable([...recurringRules, rule]);
+  assertEndedAssetLiabilityBalances({
+    accounts: [...validationCtx.byId.values()],
+    journalEntries,
+    monthlyCostItems,
+    recurringRules: [...recurringRules, rule],
+  });
   await writeWithRevision([STORE.recurringRules, STORE.accounts], (t) => {
-    if (ledgerCreated && ledgerAccount) t.objectStore(STORE.accounts).put(ledgerAccount);
+    const accountStore = t.objectStore(STORE.accounts);
+    for (const account of accountsToPut.values()) accountStore.put(account);
     t.objectStore(STORE.recurringRules).put(rule);
   });
   return rule;
 }
 
+function recurringRuleItemMonth(ruleId: string, itemId: string): string | undefined {
+  const origin = parseRuleItemId(itemId);
+  return origin?.ruleId === ruleId ? origin.month : undefined;
+}
+
 /**
- * 編集。id / createdAt / postedThroughMonth は既存を保持する（カーソルは起票側が管理）。
- * 金額・周期・費用の行き先の変更は**過去の生成物（item・保存済み仕訳）に遡及しない**
- * （次回起票から新値。ルールは起票の道具・正本は生成物、という既存ドクトリン）。
- * 停止/再開は setRecurringRulePaused を使う（再開時の位相保持のため）。
+ * ルール由来の購入仕訳と継続コスト資産が1対1で対応していることを、変更前に確認する。
+ * 同一 schema 版のDBでも、過去の不具合や直接操作で片側だけ欠けた状態はあり得る。
+ * そのまま分割・遡及・削除すると破損を温存した新 revision を成功扱いするため fail-closed。
  */
-async function upsertRecurringRuleUnlocked(rule: RecurringRule): Promise<void> {
-  const [ctx, rules] = await Promise.all([
+function assertRecurringRuleGeneratedDependencies(
+  rule: RecurringRule,
+  entries: readonly JournalEntry[],
+  items: readonly MonthlyCostItem[],
+): void {
+  const itemById = new Map(items.map((item) => [item.id, item] as const));
+  const purchasesByItemId = new Map<string, JournalEntry[]>();
+  const expectedMonthByItemId = new Map<string, string>();
+  for (const entry of entries) {
+    const itemId = entry.metadata?.monthlyCostId;
+    const isRecovery = entry.metadata?.monthlyCostRecovery === true;
+    if (!isRecovery && itemId !== undefined) {
+      const purchases = purchasesByItemId.get(itemId) ?? [];
+      purchases.push(entry);
+      purchasesByItemId.set(itemId, purchases);
+    }
+
+    if (entry.metadata?.recurringRuleId === rule.id && !isRecovery) {
+      const month = entry.metadata.recurringMonth;
+      if (month === undefined || entry.id !== ruleEntryId(rule.id, month)) {
+        throw new LedgerError('error.recurring.generatedDependency');
+      }
+      // direct→expense の分割では、境界当日に既に存在した直接フロー（itemなし）を
+      // 後継へ移すことがある。現在のrule形から過去のfact形を決めつけず、item参照が
+      // ある事実だけを1対1で検証する。
+      if (itemId !== undefined) {
+        if (!itemById.has(itemId)) {
+          throw new LedgerError('error.recurring.generatedDependency');
+        }
+        const itemOrigin = parseRuleItemId(itemId);
+        if (
+          itemOrigin !== undefined &&
+          (itemOrigin.ruleId !== rule.id || itemOrigin.month !== month)
+        ) {
+          throw new LedgerError('error.recurring.generatedDependency');
+        }
+        if (rule.spreadExpenseAccountId !== undefined && itemId !== ruleItemId(rule.id, month)) {
+          throw new LedgerError('error.recurring.generatedDependency');
+        }
+        const previousMonth = expectedMonthByItemId.get(itemId);
+        if (previousMonth !== undefined && previousMonth !== month) {
+          throw new LedgerError('error.recurring.generatedDependency');
+        }
+        expectedMonthByItemId.set(itemId, month);
+      }
+    }
+  }
+
+  for (const item of items) {
+    const month = recurringRuleItemMonth(rule.id, item.id);
+    if (month === undefined) continue;
+    const previousMonth = expectedMonthByItemId.get(item.id);
+    if (previousMonth !== undefined && previousMonth !== month) {
+      throw new LedgerError('error.recurring.generatedDependency');
+    }
+    expectedMonthByItemId.set(item.id, month);
+  }
+
+  for (const [itemId, month] of expectedMonthByItemId) {
+    const item = itemById.get(itemId);
+    if (!item) throw new LedgerError('error.recurring.generatedDependency');
+    const purchases = purchasesByItemId.get(itemId) ?? [];
+    if (purchases.length !== 1) {
+      throw new LedgerError('error.recurring.generatedDependency');
+    }
+    const purchase = purchases[0]!;
+    const debitAmount = purchase.lines.find((line) => line.side === 'debit')?.amount;
+    if (
+      purchase.id !== ruleEntryId(rule.id, month) ||
+      purchase.metadata?.recurringRuleId !== rule.id ||
+      purchase.metadata.recurringMonth !== month ||
+      purchase.date !== item.startDate ||
+      debitAmount !== item.amount
+    ) {
+      throw new LedgerError('error.recurring.generatedDependency');
+    }
+  }
+}
+
+function assertGeneratedEntriesInsideRule(
+  rule: RecurringRule,
+  entries: readonly JournalEntry[],
+): void {
+  for (const entry of entries) {
+    if (entry.metadata?.recurringRuleId !== rule.id) continue;
+    if (!recurringRuleExistsAt(rule, entry.date)) {
+      throw new LedgerError('error.recurring.periodInvalid');
+    }
+  }
+}
+
+function prepareRecurringRuleAccountsForSave(
+  rule: RecurringRule,
+  ctx: SaveContext,
+  ts: string,
+): { validationCtx: SaveContext; accountsToPut: Map<string, Account> } {
+  const spreadsExpense = rule.spreadExpenseAccountId !== undefined;
+  const referenceStart = recurringRuleReferenceStartDate(rule);
+  const { account: ledgerAccount, writeNeeded: ledgerWriteNeeded } = spreadsExpense
+    ? findOrCreateContinuousCostLedgerAccount(ctx, ts, referenceStart)
+    : { account: undefined, writeNeeded: false };
+  // 参照科目の延長は不要（§A 案1: startDate 未設定 = 過去へ開いた線分。明示 startDate は
+  // 呼び出し側の保存境界検証が期間外参照として fail-closed に拒否する）。
+  const validationCtx: SaveContext = { byId: new Map(ctx.byId) };
+  if (ledgerAccount) validationCtx.byId.set(ledgerAccount.id, ledgerAccount);
+  const accountsToPut = new Map<string, Account>();
+  if (ledgerWriteNeeded && ledgerAccount) accountsToPut.set(ledgerAccount.id, ledgerAccount);
+  return { validationCtx, accountsToPut };
+}
+
+async function splitRecurringRuleAtDate(args: {
+  existing: RecurringRule;
+  proposed: RecurringRule;
+  effectiveDate: string;
+  ctx: SaveContext;
+  rules: RecurringRule[];
+  entries: JournalEntry[];
+  items: MonthlyCostItem[];
+  ts: string;
+}): Promise<void> {
+  const { existing, proposed, effectiveDate, ctx, rules, entries, items, ts } = args;
+  const predecessor: RecurringRule = {
+    ...existing,
+    endDate: effectiveDate,
+    updatedAt: ts,
+  };
+  const predecessorLastDate = recurringRuleLastExistingDate(predecessor)!;
+  // 境界より前に旧 segment がまだ起票し得る月だけを、後継の処理済み範囲へ渡す。
+  // 単に effectiveDate の月まで進めると、年払い→月払いのように旧位相では発火しない
+  // 境界月まで新ルールが誤って飛ばしてしまう。
+  const predecessorPending = recurringPostingsDue(predecessor, predecessorLastDate);
+  const predecessorPendingCursor = predecessorPending[predecessorPending.length - 1]?.month;
+  const successorCursor =
+    existing.postedThroughMonth !== undefined &&
+    (predecessorPendingCursor === undefined ||
+      existing.postedThroughMonth > predecessorPendingCursor)
+      ? existing.postedThroughMonth
+      : predecessorPendingCursor;
+  const successor: RecurringRule = {
+    ...proposed,
+    id: newId(),
+    // 入力欄の「起票周期の基準日」を同時に変えていても、分割は元線分の
+    // 位相 anchor を継承する。day/every の新設定は次の未起票回からこの anchor 上で効く。
+    startMonth: existing.startMonth,
+    startDate: effectiveDate,
+    splitFromRuleId: existing.id,
+    postedThroughMonth: successorCursor,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+  if (successorCursor === undefined) delete successor.postedThroughMonth;
+  if (successor.endDate !== undefined && successor.endDate <= effectiveDate) {
+    throw new LedgerError('error.recurring.periodInvalid');
+  }
+  const moved = entries.filter(
+    (entry) => entry.metadata?.recurringRuleId === existing.id && entry.date >= effectiveDate,
+  );
+  const { validationCtx, accountsToPut } = prepareRecurringRuleAccountsForSave(successor, ctx, ts);
+  const successorSpreadsExpense =
+    recurringExpenseAccountId(successor, (id) => validationCtx.byId.get(id)?.role) !== undefined;
+
+  const entryDeletes = new Set<string>();
+  const itemDeletes = new Set<string>();
+  const entryIdRemap = new Map<string, string>();
+  const itemIdRemap = new Map<string, string>();
+  const entryPuts = new Map<string, JournalEntry>();
+  const itemPuts = new Map<string, MonthlyCostItem>();
+
+  for (const oldEntry of moved) {
+    const month = oldEntry.metadata?.recurringMonth;
+    if (month === undefined || monthOf(oldEntry.date) !== month) {
+      throw new LedgerError('error.recurring.invalidStructure');
+    }
+    const newEntryId = ruleEntryId(successor.id, month);
+    entryDeletes.add(oldEntry.id);
+    entryIdRemap.set(oldEntry.id, newEntryId);
+
+    const oldItemId = oldEntry.metadata?.monthlyCostId;
+    let newItemId: string | undefined;
+    if (oldItemId !== undefined) {
+      const oldItem = items.find((item) => item.id === oldItemId);
+      if (!oldItem) throw new LedgerError('error.recurring.splitDependency');
+      const oldItemOrigin = parseRuleItemId(oldItem.id);
+      if (
+        oldItemOrigin !== undefined &&
+        (oldItemOrigin.ruleId !== existing.id || oldItemOrigin.month !== month)
+      ) {
+        throw new LedgerError('error.recurring.invalidStructure');
+      }
+      if (oldItemOrigin !== undefined || successorSpreadsExpense) {
+        itemDeletes.add(oldItemId);
+        // 後継が費用ルールなら決定的 ID を後継へ付け替える。非費用へ変わった場合は
+        // 通常 ID に切り離し、既起票の item を独立した事実として保持する。
+        newItemId = successorSpreadsExpense ? ruleItemId(successor.id, month) : newId();
+        itemIdRemap.set(oldItemId, newItemId);
+      } else {
+        // 通常 ID の item はルール由来を ID に持たないため、同じ ID のまま事実を移管する。
+        newItemId = oldItemId;
+      }
+      // item はルールとは独立した既起票事実。ID/由来と、今回明示された金額だけを変え、
+      // 利用者が個別編集した名称・期間・費用の行き先・作成時刻はそのまま移管する。
+      const savableItem = assertMonthlyCostItemSavable(
+        { ...oldItem, id: newItemId, amount: successor.amount, updatedAt: ts },
+        validationCtx,
+      );
+      itemPuts.set(savableItem.id, savableItem);
+    }
+
+    const metadata: EntryMetadata = {
+      ...oldEntry.metadata,
+      recurringRuleId: successor.id,
+      recurringMonth: month,
+    };
+    if (newItemId !== undefined) metadata.monthlyCostId = newItemId;
+    else delete metadata.monthlyCostId;
+    const nextEntry = assertEntrySavable(
+      {
+        ...oldEntry,
+        id: newEntryId,
+        // 既起票事実の個別編集は保持し、今回選択された金額だけを後継価格へ揃える。
+        lines: oldEntry.lines.map((line) => ({ ...line, amount: successor.amount })),
+        metadata,
+        updatedAt: ts,
+      },
+      validationCtx,
+    );
+    entryPuts.set(nextEntry.id, nextEntry);
+  }
+
+  const candidateEntries: JournalEntry[] = [];
+  for (const entry of entries) {
+    if (entryDeletes.has(entry.id)) continue;
+    let next = entry;
+    const remappedReversal =
+      entry.metadata?.reversalOfEntryId !== undefined
+        ? entryIdRemap.get(entry.metadata.reversalOfEntryId)
+        : undefined;
+    const remappedItem =
+      entry.metadata?.monthlyCostId !== undefined
+        ? itemIdRemap.get(entry.metadata.monthlyCostId)
+        : undefined;
+    if (remappedReversal !== undefined || remappedItem !== undefined) {
+      const metadata: EntryMetadata = { ...entry.metadata };
+      if (remappedReversal !== undefined) metadata.reversalOfEntryId = remappedReversal;
+      if (remappedItem !== undefined) metadata.monthlyCostId = remappedItem;
+      next = assertEntrySavable({ ...entry, metadata, updatedAt: ts }, validationCtx);
+      entryPuts.set(next.id, next);
+    }
+    candidateEntries.push(next);
+  }
+  const existingEntryIds = new Set(entries.map((entry) => entry.id));
+  for (const entry of entryPuts.values()) {
+    if (!existingEntryIds.has(entry.id)) candidateEntries.push(entry);
+  }
+
+  const existingItemIds = new Set(items.map((item) => item.id));
+  const candidateItems = items
+    .filter((item) => !itemDeletes.has(item.id))
+    .map((item) => itemPuts.get(item.id) ?? item);
+  for (const item of itemPuts.values()) {
+    if (!existingItemIds.has(item.id)) candidateItems.push(item);
+  }
+  const candidateRules = [
+    ...rules.filter((rule) => rule.id !== existing.id),
+    predecessor,
+    successor,
+  ];
+  assertRecurringRuleSavable(predecessor, validationCtx);
+  assertRecurringRuleSavable(successor, validationCtx);
+  assertRecurringLineagesSavable(candidateRules);
+  assertGeneratedEntriesInsideRule(predecessor, candidateEntries);
+  assertGeneratedEntriesInsideRule(successor, candidateEntries);
+  assertEndedAssetLiabilityBalances({
+    accounts: [...validationCtx.byId.values()],
+    journalEntries: candidateEntries,
+    monthlyCostItems: candidateItems,
+    recurringRules: candidateRules,
+  });
+
+  let missingRace = false;
+  try {
+    await writeWithRevision(
+      [STORE.recurringRules, STORE.accounts, STORE.journalEntries, STORE.monthlyCostItems],
+      (t) => {
+        const ruleStore = t.objectStore(STORE.recurringRules);
+        const probe = ruleStore.get(existing.id);
+        probe.onsuccess = () => {
+          if (!probe.result) {
+            missingRace = true;
+            t.abort();
+            return;
+          }
+          ruleStore.put(predecessor);
+          ruleStore.put(successor);
+          const accountStore = t.objectStore(STORE.accounts);
+          for (const account of accountsToPut.values()) accountStore.put(account);
+          const entryStore = t.objectStore(STORE.journalEntries);
+          for (const id of entryDeletes) entryStore.delete(id);
+          for (const entry of entryPuts.values()) entryStore.put(entry);
+          const itemStore = t.objectStore(STORE.monthlyCostItems);
+          for (const id of itemDeletes) itemStore.delete(id);
+          for (const item of itemPuts.values()) itemStore.put(item);
+        };
+      },
+    );
+  } catch (error) {
+    if (missingRace) throw new LedgerError('error.recurring.notFound');
+    throw error;
+  }
+}
+
+/**
+ * 編集。金額が変わる場合は、呼び出し側が影響範囲を必ず選ぶ。
+ *  - retroactive: 同じ線分の自動生成仕訳・item の金額をすべて同一 tx で変更する。
+ *  - split: effectiveDate を排他的な旧終了点/新開始点として後継ルールを作る。
+ * 金額以外の通常編集は従来どおり同じルールへ保存し、起票済み事実には遡及しない。
+ */
+async function upsertRecurringRuleUnlocked(
+  rule: RecurringRule,
+  options: RecurringRuleSaveOptions = {},
+): Promise<void> {
+  const [ctx, rules, existingItems, entries] = await Promise.all([
     loadSaveContext(),
     getAll<RecurringRule>(STORE.recurringRules),
+    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
+    getAll<JournalEntry>(STORE.journalEntries),
   ]);
   const existing = rules.find((r) => r.id === rule.id);
   if (!existing) throw new LedgerError('error.recurring.notFound');
-  const spread = rule.spreadExpenseAccountId !== undefined;
+  assertRecurringRuleGeneratedDependencies(existing, entries, existingItems);
+  const destinationAccountId = recurringDestinationAccountId(rule);
+  // 行き先 role（費用/収入=差引形）から継続コスト化を判定する（domain の正本と同じ判定）。
+  const expenseAccountId = recurringExpenseAccountId(rule, (id) => ctx.byId.get(id)?.role);
+  const spreadsExpense = expenseAccountId !== undefined;
   const ts = nowIso();
-  const { account: ledgerAccount, created: ledgerCreated } = spread
-    ? findOrCreateContinuousCostLedgerAccount(ctx, ts)
-    : { account: undefined, created: false };
   const saved: RecurringRule = {
     ...rule,
     id: existing.id,
-    // 月割りするルールの借方は台帳に固定（UI が誤った値を送っても保存境界で固定する）。
-    ...(spread ? { debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID } : {}),
+    // 行き先 role から保存形を決める。費用・収入（差引形）は台帳+spread、それ以外は直接借方。
+    debitAccountId: spreadsExpense ? CONTINUOUS_COST_LEDGER_ACCOUNT_ID : destinationAccountId,
+    ...(expenseAccountId !== undefined ? { spreadExpenseAccountId: expenseAccountId } : {}),
     createdAt: existing.createdAt,
     ...(existing.postedThroughMonth !== undefined
       ? { postedThroughMonth: existing.postedThroughMonth }
       : {}),
     updatedAt: ts,
   };
+  if (existing.splitFromRuleId !== undefined) saved.splitFromRuleId = existing.splitFromRuleId;
+  else delete saved.splitFromRuleId;
+  if (saved.endDate === undefined) delete saved.endDate;
+  if (!spreadsExpense) delete saved.spreadExpenseAccountId;
   if (existing.postedThroughMonth === undefined) delete saved.postedThroughMonth;
-  const validationCtx: SaveContext = { byId: new Map(ctx.byId) };
-  if (ledgerAccount) validationCtx.byId.set(ledgerAccount.id, ledgerAccount);
+
+  const amountChanged = saved.amount !== existing.amount;
+  if (
+    amountChanged &&
+    options.amountChangeMode !== 'retroactive' &&
+    options.amountChangeMode !== 'split'
+  ) {
+    throw new LedgerError('error.recurring.amountChangeModeRequired');
+  }
+  if (amountChanged && options.amountChangeMode === 'split') {
+    const effectiveDate = options.effectiveDate ?? todayLocal();
+    if (!isValidIsoDate(effectiveDate)) throw new LedgerError('error.recurring.periodInvalid');
+    const existingStart = effectiveRecurringRuleStartDate(existing);
+    if (existing.endDate !== undefined && effectiveDate >= existing.endDate) {
+      throw new LedgerError('error.recurring.periodInvalid');
+    }
+    // まだ旧線分が一日も存在していない境界を split として黙って遡及変更へ
+    // 読み替えない。UI はこの選択を隠すが、保存境界も同じ規則で fail-closed にする。
+    if (effectiveDate <= existingStart) {
+      throw new LedgerError('error.recurring.periodInvalid');
+    }
+    await splitRecurringRuleAtDate({
+      existing,
+      proposed: saved,
+      effectiveDate,
+      ctx,
+      rules,
+      entries,
+      items: existingItems,
+      ts,
+    });
+    return;
+  }
+
+  // 過去の split で通常 ID へ切り離した item がある後継ルールを、再び費用行きへ
+  // 変更する場合がある。購入実績との由来整合を保つため、回収の参照と
+  // 一緒に決定的 ID へ戻す。既起票事実の内容は変えない。
+  const itemById = new Map(existingItems.map((item) => [item.id, item] as const));
+  const itemIdRemap = new Map<string, string>();
+  const reservedItemIds = new Set(existingItems.map((item) => item.id));
+  if (spreadsExpense) {
+    for (const entry of entries) {
+      if (
+        entry.metadata?.recurringRuleId !== existing.id ||
+        entry.metadata.recurringMonth === undefined ||
+        entry.metadata.monthlyCostId === undefined ||
+        entry.metadata.monthlyCostRecovery === true
+      ) {
+        continue;
+      }
+      const oldItemId = entry.metadata.monthlyCostId;
+      const item = itemById.get(oldItemId);
+      if (!item) throw new LedgerError('error.recurring.splitDependency');
+      const expectedItemId = ruleItemId(existing.id, entry.metadata.recurringMonth);
+      if (oldItemId === expectedItemId) continue;
+      // 別ルール/別月の ccr ID を横取りしない。通常 ID だけが再接続の対象。
+      if (parseRuleItemId(oldItemId) !== undefined || reservedItemIds.has(expectedItemId)) {
+        throw new LedgerError('error.recurring.invalidStructure');
+      }
+      itemIdRemap.set(oldItemId, expectedItemId);
+      reservedItemIds.add(expectedItemId);
+    }
+  }
+  const { validationCtx, accountsToPut } = prepareRecurringRuleAccountsForSave(saved, ctx, ts);
   assertRecurringRuleSavable(saved, validationCtx);
+
+  const entryUpdates = new Map<string, JournalEntry>();
+  const itemUpdates = new Map<string, MonthlyCostItem>();
+  const itemDeletes = new Set<string>();
+  const linkedGeneratedItemIds = new Set(
+    entries.flatMap((entry) =>
+      entry.metadata?.recurringRuleId === existing.id &&
+      entry.metadata.monthlyCostId !== undefined &&
+      entry.metadata.monthlyCostRecovery !== true
+        ? [entry.metadata.monthlyCostId]
+        : [],
+    ),
+  );
+  const amountItemIds = new Set<string>();
+  for (const item of existingItems) {
+    const changesAmount =
+      amountChanged &&
+      (recurringRuleItemMonth(existing.id, item.id) !== undefined ||
+        linkedGeneratedItemIds.has(item.id));
+    const remappedId = itemIdRemap.get(item.id);
+    if (!changesAmount && remappedId === undefined) continue;
+    if (changesAmount) amountItemIds.add(item.id);
+    if (remappedId !== undefined) itemDeletes.add(item.id);
+    const next = assertMonthlyCostItemSavable(
+      {
+        ...item,
+        id: remappedId ?? item.id,
+        ...(changesAmount ? { amount: saved.amount } : {}),
+        updatedAt: ts,
+      },
+      validationCtx,
+    );
+    itemUpdates.set(next.id, next);
+  }
+  for (const entry of entries) {
+    const oldItemId = entry.metadata?.monthlyCostId;
+    const remappedItemId = oldItemId !== undefined ? itemIdRemap.get(oldItemId) : undefined;
+    const generatedByRule =
+      entry.metadata?.recurringRuleId === existing.id &&
+      entry.metadata.monthlyCostRecovery !== true;
+    const generatedPurchase =
+      oldItemId !== undefined &&
+      amountItemIds.has(oldItemId) &&
+      entry.metadata?.monthlyCostRecovery !== true;
+    const changesAmount = amountChanged && (generatedByRule || generatedPurchase);
+    if (!changesAmount && remappedItemId === undefined) continue;
+    const metadata: EntryMetadata = { ...entry.metadata };
+    if (remappedItemId !== undefined) metadata.monthlyCostId = remappedItemId;
+    const next = assertEntrySavable(
+      {
+        ...entry,
+        ...(changesAmount
+          ? { lines: entry.lines.map((line) => ({ ...line, amount: saved.amount })) }
+          : {}),
+        metadata,
+        updatedAt: ts,
+      },
+      validationCtx,
+    );
+    entryUpdates.set(next.id, next);
+  }
+  const candidateEntries = entries.map((entry) => entryUpdates.get(entry.id) ?? entry);
+  const candidateItems = existingItems.map((item) => {
+    const candidateId = itemIdRemap.get(item.id) ?? item.id;
+    return itemUpdates.get(candidateId) ?? item;
+  });
+  const candidateRules = rules.map((candidate) => (candidate.id === saved.id ? saved : candidate));
+  assertRecurringLineagesSavable(candidateRules);
+  assertGeneratedEntriesInsideRule(saved, candidateEntries);
+  assertEndedAssetLiabilityBalances({
+    accounts: [...validationCtx.byId.values()],
+    journalEntries: candidateEntries,
+    monthlyCostItems: candidateItems,
+    recurringRules: candidateRules,
+  });
   // 事前読みは別トランザクション。書き込みトランザクション内で現在値を再読し、
   // (a) 削除済みルールを put で復活させない (b) 並行 catchUp が進めたカーソルを
   // 古い値で巻き戻さない（巻き戻すと同じ月が二重起票される）。
   let missingRace = false;
   try {
-    await writeWithRevision([STORE.recurringRules, STORE.accounts], (t) => {
-      if (ledgerCreated && ledgerAccount) t.objectStore(STORE.accounts).put(ledgerAccount);
-      const store = t.objectStore(STORE.recurringRules);
-      const probe = store.get(saved.id);
-      probe.onsuccess = () => {
-        const current = probe.result as RecurringRule | undefined;
-        if (!current) {
-          missingRace = true;
-          t.abort();
-          return;
-        }
-        const next: RecurringRule = { ...saved };
-        if (current.postedThroughMonth !== undefined)
-          next.postedThroughMonth = current.postedThroughMonth;
-        else delete next.postedThroughMonth;
-        store.put(next);
-      };
-    });
-  } catch (error) {
-    if (missingRace) throw new LedgerError('error.recurring.notFound');
-    throw error;
-  }
-}
-
-/**
- * 定期ルールの停止/再開。再開時は startMonth を書き換えず（everyMonths の位相を保つ）、
- * カーソルを前月まで進めて停止中の月を遡って起票しない（既にカーソルが先なら維持する）。
- * ※ 旧実装（startMonth を現在月へ書き換え）は everyMonths > 1 で周期の位相を飛ばすため廃止。
- */
-async function setRecurringRulePausedUnlocked(
-  id: string,
-  paused: boolean,
-  today: string = todayLocal(),
-): Promise<void> {
-  const ts = nowIso();
-  let missingRace = false;
-  try {
-    await writeWithRevision([STORE.recurringRules], (t) => {
-      const store = t.objectStore(STORE.recurringRules);
-      const probe = store.get(id);
-      probe.onsuccess = () => {
-        const current = probe.result as RecurringRule | undefined;
-        if (!current) {
-          missingRace = true;
-          t.abort();
-          return;
-        }
-        const next: RecurringRule = { ...current, paused, updatedAt: ts };
-        if (!paused) {
-          const resumeCursor = addMonths(monthOf(today), -1);
-          if (
-            current.postedThroughMonth === undefined ||
-            current.postedThroughMonth < resumeCursor
-          ) {
-            next.postedThroughMonth = resumeCursor;
+    await writeWithRevision(
+      [STORE.recurringRules, STORE.accounts, STORE.journalEntries, STORE.monthlyCostItems],
+      (t) => {
+        const accountStore = t.objectStore(STORE.accounts);
+        for (const account of accountsToPut.values()) accountStore.put(account);
+        const store = t.objectStore(STORE.recurringRules);
+        const probe = store.get(saved.id);
+        probe.onsuccess = () => {
+          const current = probe.result as RecurringRule | undefined;
+          if (!current) {
+            missingRace = true;
+            t.abort();
+            return;
           }
-        }
-        store.put(next);
-      };
-    });
+          const next: RecurringRule = { ...saved };
+          if (
+            current.postedThroughMonth !== undefined &&
+            (next.postedThroughMonth === undefined ||
+              current.postedThroughMonth > next.postedThroughMonth)
+          ) {
+            next.postedThroughMonth = current.postedThroughMonth;
+          }
+          store.put(next);
+          const entryStore = t.objectStore(STORE.journalEntries);
+          for (const entry of entryUpdates.values()) entryStore.put(entry);
+          const itemStore = t.objectStore(STORE.monthlyCostItems);
+          for (const id of itemDeletes) itemStore.delete(id);
+          for (const item of itemUpdates.values()) itemStore.put(item);
+        };
+      },
+    );
   } catch (error) {
     if (missingRace) throw new LedgerError('error.recurring.notFound');
     throw error;
@@ -1305,30 +2083,162 @@ async function setRecurringRulePausedUnlocked(
 }
 
 /**
- * 定期ルールを削除する。起票済みの仕訳は事実として残し、由来メタデータ
- * （recurringRuleId / recurringMonth）を剥がして通常の仕訳へ戻す（同一トランザクション）。
+ * 定期ルールを削除する。起票済みの仕訳・item は事実として残し、由来メタデータと
+ * `rec-{ruleId}-...` / `ccr-{ruleId}-...` の決定的 ID を剥がし、参照も付け替えて
+ * 独立した通常事実へ戻す（同一トランザクション）。
  */
 async function deleteRecurringRuleUnlocked(id: string): Promise<void> {
-  // 仕訳の読みも同一トランザクション内で行う（別読みだと、読みと書きの間に
-  // catchUp が起票した仕訳のメタデータが剥がれず、削除済みルールを参照して残る）。
+  // 関連データの読みも同一トランザクション内で行う（別読みだと、読みと書きの間に
+  // catchUp が起票した仕訳/item の由来が剥がれず、削除済みルールを参照して残る）。
   const ts = nowIso();
-  await writeWithRevision([STORE.recurringRules, STORE.journalEntries], (t) => {
-    const eStore = t.objectStore(STORE.journalEntries);
-    const probe = eStore.getAll();
-    probe.onsuccess = () => {
-      for (const e of probe.result as JournalEntry[]) {
-        if (e.metadata?.recurringRuleId !== id) continue;
-        const metadata = { ...e.metadata };
-        delete metadata.recurringRuleId;
-        delete metadata.recurringMonth;
-        const next: JournalEntry = { ...e, updatedAt: ts };
-        if (Object.keys(metadata).length > 0) next.metadata = metadata;
-        else delete next.metadata;
-        eStore.put(next);
+  const [ctx, entries, items, rules] = await Promise.all([
+    loadSaveContext(),
+    getAll<JournalEntry>(STORE.journalEntries),
+    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
+    getAll<RecurringRule>(STORE.recurringRules),
+  ]);
+  const existing = rules.find((rule) => rule.id === id);
+  if (!existing) {
+    throw new LedgerError('error.recurring.notFound');
+  }
+  assertRecurringRuleGeneratedDependencies(existing, entries, items);
+  // 後継を削除して生成済み事実を通常仕訳へ戻しても、親を再び開いたときに同じ月を
+  // 起票し直さない。後継が走査した月（削除済み月を含む）を親の skip 履歴へ継承する。
+  let inheritedCursor = existing.postedThroughMonth;
+  for (const entry of entries) {
+    if (
+      entry.metadata?.recurringRuleId !== existing.id ||
+      entry.metadata.recurringMonth === undefined
+    ) {
+      continue;
+    }
+    if (inheritedCursor === undefined || entry.metadata.recurringMonth > inheritedCursor) {
+      inheritedCursor = entry.metadata.recurringMonth;
+    }
+  }
+  // 既起票の仕訳・item は削除後も同じ金額・日付で残るため、終了点残高に影響する差分は
+  // 将来投影を担う rule の除去だけ。ID の中立化前に同値な候補状態を検証する。
+  const ruleUpdates = new Map<string, RecurringRule>();
+  const remainingRules = rules
+    .filter((rule) => rule.id !== id)
+    .map((rule) => {
+      let next = rule;
+      if (rule.splitFromRuleId === id) {
+        next = { ...next, updatedAt: ts };
+        // 参照を捨てるのではなく祖父へ付け替える。捨てると系譜が 2 つの連結成分へ割れ、
+        // 「同一系譜は存在期間が重ならない」不変条件が前後の segment の間で効かなくなる
+        // ＝前 segment の終了日を外して同じ月を二重起票できてしまう（監査 P2-2）。
+        // 削除対象が系譜の根のときだけ、付け替え先が無いので切る。
+        if (existing.splitFromRuleId !== undefined) {
+          next.splitFromRuleId = existing.splitFromRuleId;
+        } else {
+          delete next.splitFromRuleId;
+        }
       }
-      t.objectStore(STORE.recurringRules).delete(id);
-    };
+      if (
+        rule.id === existing.splitFromRuleId &&
+        inheritedCursor !== undefined &&
+        (next.postedThroughMonth === undefined || next.postedThroughMonth < inheritedCursor)
+      ) {
+        next = { ...next, postedThroughMonth: inheritedCursor, updatedAt: ts };
+      }
+      if (next !== rule) ruleUpdates.set(next.id, next);
+      return next;
+    });
+  assertRecurringLineagesSavable(remainingRules);
+  assertEndedAssetLiabilityBalances({
+    accounts: [...ctx.byId.values()],
+    journalEntries: entries,
+    monthlyCostItems: items,
+    recurringRules: remainingRules,
   });
+  let missingRace = false;
+  try {
+    await writeWithRevision(
+      [STORE.recurringRules, STORE.journalEntries, STORE.monthlyCostItems],
+      (t) => {
+        const ruleStore = t.objectStore(STORE.recurringRules);
+        const eStore = t.objectStore(STORE.journalEntries);
+        const itemStore = t.objectStore(STORE.monthlyCostItems);
+        const ruleProbe = ruleStore.get(id);
+        const entryProbe = eStore.getAll();
+        const itemProbe = itemStore.getAll();
+        let completed = 0;
+
+        const applyWhenReady = () => {
+          completed += 1;
+          if (completed !== 3) return;
+          if (!ruleProbe.result) {
+            missingRace = true;
+            t.abort();
+            return;
+          }
+
+          const itemIdRemap = new Map<string, string>();
+          for (const item of itemProbe.result as MonthlyCostItem[]) {
+            if (recurringRuleItemMonth(id, item.id) === undefined) continue;
+            const next = { ...item, id: newId(), updatedAt: ts };
+            itemIdRemap.set(item.id, next.id);
+            itemStore.delete(item.id);
+            itemStore.put(next);
+          }
+
+          const storedEntries = entryProbe.result as JournalEntry[];
+          const entryIdRemap = new Map<string, string>();
+          for (const entry of storedEntries) {
+            if (entry.metadata?.recurringRuleId === id) entryIdRemap.set(entry.id, newId());
+          }
+
+          for (const entry of storedEntries) {
+            const metadata = { ...entry.metadata };
+            let changed = false;
+            if (metadata.recurringRuleId === id) {
+              delete metadata.recurringRuleId;
+              delete metadata.recurringMonth;
+              changed = true;
+            }
+            const remappedItemId =
+              metadata.monthlyCostId !== undefined
+                ? itemIdRemap.get(metadata.monthlyCostId)
+                : undefined;
+            if (remappedItemId !== undefined) {
+              metadata.monthlyCostId = remappedItemId;
+              changed = true;
+            }
+            const remappedReversalId =
+              metadata.reversalOfEntryId !== undefined
+                ? entryIdRemap.get(metadata.reversalOfEntryId)
+                : undefined;
+            if (remappedReversalId !== undefined) {
+              metadata.reversalOfEntryId = remappedReversalId;
+              changed = true;
+            }
+            const remappedEntryId = entryIdRemap.get(entry.id);
+            if (remappedEntryId !== undefined) changed = true;
+            if (!changed) continue;
+            const next: JournalEntry = {
+              ...entry,
+              ...(remappedEntryId !== undefined ? { id: remappedEntryId } : {}),
+              updatedAt: ts,
+            };
+            if (Object.keys(metadata).length > 0) next.metadata = metadata;
+            else delete next.metadata;
+            if (remappedEntryId !== undefined) eStore.delete(entry.id);
+            eStore.put(next);
+          }
+
+          for (const rule of ruleUpdates.values()) ruleStore.put(rule);
+          ruleStore.delete(id);
+        };
+        ruleProbe.onsuccess = applyWhenReady;
+        entryProbe.onsuccess = applyWhenReady;
+        itemProbe.onsuccess = applyWhenReady;
+      },
+    );
+  } catch (error) {
+    if (missingRace) throw new LedgerError('error.recurring.notFound');
+    throw error;
+  }
 }
 
 /**
@@ -1337,12 +2247,21 @@ async function deleteRecurringRuleUnlocked(id: string): Promise<void> {
  *    （仕訳 `rec-{ruleId}-{month}` / item `ccr-{ruleId}-{month}`） ③item は tx 内で
  *    get → undefined のときだけ put（ユーザー編集を上書きしない）。
  *    起票済み仕訳をユーザーが削除しても再起票しない（「今月はスキップ」の尊重）。
- *  - 月割りするルール（spreadExpenseAccountId あり）は 1 起票 = 2 レコード・1 トランザクション:
+ *  - 行き先が費用/収入科目（差引形）のルールは 1 起票 = 2 レコード・1 トランザクション:
  *    保存される仕訳（借方 台帳 / 貸方 源泉・monthlyCostId 付き）+ item（endDate = 周期末）。
+ *    v7 では spread=計上先 + 借方=台帳の正規形だけを対象にする。
  *  - 起票された仕訳は通常の実仕訳（metadata に由来のみ）。金額が違う月は起票後に編集する。
  * 戻り値 = 起票した仕訳の件数。
  */
-async function catchUpRecurringRulesUnlocked(today: string): Promise<number> {
+export interface RecurringCatchUpFailure {
+  ruleId: string;
+  error: unknown;
+}
+
+async function catchUpRecurringRulesUnlocked(
+  today: string,
+  onRuleError?: (failure: RecurringCatchUpFailure) => void,
+): Promise<number> {
   // 旧版 DB へ起票（書込み）しない。正規の全体検証（loadLedger）より先に呼ばれるため、
   // ここでも版を fail-closed に確認する（監査 P1-4）。
   const meta = await getMeta();
@@ -1351,10 +2270,9 @@ async function catchUpRecurringRulesUnlocked(today: string): Promise<number> {
   // （再監査 P1-2 対応: これが無いとトラッカ未設定で照合を素通りし、事前読みと書込みの間の
   // 別タブの変更を検出できない）。
   if (meta) lastSeenVersion = ledgerVersion(meta);
-  const [ctx, rules, existingItems] = await Promise.all([
+  const [ctx, rules] = await Promise.all([
     loadSaveContext(),
     getAll<RecurringRule>(STORE.recurringRules),
-    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
   ]);
   interface PostingPlan {
     month: string;
@@ -1367,92 +2285,145 @@ async function catchUpRecurringRulesUnlocked(today: string): Promise<number> {
     cursor: string | undefined;
   }
   const plans: RulePlan[] = [];
+  const failures: RecurringCatchUpFailure[] = [];
   const ts = nowIso();
+  const accountsToPut = new Map<string, Account>();
   for (const rule of rules) {
-    let postings = recurringPostingsDue(rule, today);
-    const spread = rule.spreadExpenseAccountId !== undefined;
-    const debit = ctx.byId.get(rule.debitAccountId);
-    const credit = ctx.byId.get(rule.creditAccountId);
-    // 参照が壊れている/アーカイブ済み/自動起票の対象外の科目のルールは起票しない
-    // （fail-soft: 起動を止めない。アーカイブ済み科目へ起票すると「アーカイブ済み = 残高 0」
-    // が壊れる・監査 P1-7。一覧 UI が参照切れの警告を出す）。
-    if (!debit || !credit || credit.archived) continue;
-    if (spread) {
-      if (rule.debitAccountId !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID) continue;
-      if (!isRecurringPostableRole(credit.role)) continue;
-      const spreadAccount = rule.spreadExpenseAccountId
-        ? ctx.byId.get(rule.spreadExpenseAccountId)
-        : undefined;
-      if (!spreadAccount || spreadAccount.archived || !isRecurringPostableRole(spreadAccount.role))
-        continue;
-      // 既存のルール由来 item が覆う月は起票しない（周期短縮後の重複 = 二重費用を防ぐ・監査 P1-10）。
-      const coveredThrough = ruleItemCoverageThrough(rule.id, existingItems);
-      if (coveredThrough !== undefined) {
-        postings = postings.filter((p) => p.month > coveredThrough);
+    // 1本の破損が他ルールを巻き添えにしないよう、計画・検証はルール単位で閉じる。
+    // 失敗した計画から生じた科目更新（台帳の開始点延長）も durable state へ混ぜない。
+    const ruleCtx: SaveContext = { byId: new Map(ctx.byId) };
+    const ruleAccountsToPut = new Map<string, Account>();
+    try {
+      const postings = recurringPostingsDue(rule, today);
+      const destinationAccountId = recurringDestinationAccountId(rule);
+      // 参照科目の延長は不要（§A 案1: startDate 未設定 = 過去へ開いた線分。明示 startDate は
+      // 下の accountExistsAt / assertRecurringRuleSavable が期間外参照として拒否する）。
+      const destination = ruleCtx.byId.get(destinationAccountId);
+      const credit = ruleCtx.byId.get(rule.creditAccountId);
+      const expenseAccountId = recurringExpenseAccountId(rule, (id) => ruleCtx.byId.get(id)?.role);
+      const spreadsExpense = expenseAccountId !== undefined;
+      const referenceStart = recurringRuleReferenceStartDate(rule);
+      if (
+        !destination ||
+        !credit ||
+        destinationAccountId === rule.creditAccountId ||
+        !isRecurringPostableRole(destination.role) ||
+        !isRecurringPostableRole(credit.role)
+      ) {
+        throw new LedgerError('error.recurring.flowInvalid');
       }
-    } else if (
-      debit.archived ||
-      !isRecurringPostableRole(debit.role) ||
-      !isRecurringPostableRole(credit.role)
-    ) {
-      continue;
-    }
-    // 定型（支出/収入/振替）は導出した種別を、非定型（簿記編集）は 'manual' を記録する。
-    // 月割りルールは recurringKindOf(台帳, …) が null を返すため 'expense' 直指定。
-    const inputMode: InputMode = spread
-      ? 'expense'
-      : (recurringKindOf(debit.role, credit.role) ?? 'manual');
-    const rulePostings: PostingPlan[] = postings.map((p) => ({
-      month: p.month,
-      entry: {
-        id: `rec-${rule.id}-${p.month}`,
-        date: p.date,
-        description: rule.name,
-        kind: 'normal' as const,
-        lines: [
-          { accountId: rule.debitAccountId, side: 'debit' as const, amount: rule.amount },
-          { accountId: rule.creditAccountId, side: 'credit' as const, amount: rule.amount },
-        ],
-        metadata: {
-          inputMode,
-          recurringRuleId: rule.id,
-          recurringMonth: p.month,
-          // 月割りルールの起票 = 購入の仕訳。item と同じ tx で対にする。
-          ...(spread ? { monthlyCostId: ruleItemId(rule.id, p.month) } : {}),
+
+      let debitAccountId = destinationAccountId;
+      if (spreadsExpense) {
+        // 月割りルール（費用/差引形）は継続コスト台帳を経由する。台帳がまだ無ければ
+        // future-only のルールでもここで作り、未来投影が同じモデルを使えるようにする。
+        const ledger = findOrCreateContinuousCostLedgerAccount(ruleCtx, ts, referenceStart);
+        if (
+          ledger.account.role !== 'continuing-cost-asset' ||
+          (referenceStart !== undefined && !accountExistsAt(ledger.account, referenceStart))
+        ) {
+          throw new LedgerError('error.account.referenceOutsidePeriod');
+        }
+        debitAccountId = ledger.account.id;
+        if (ledger.writeNeeded) {
+          ruleAccountsToPut.set(ledger.account.id, ledger.account);
+          ruleCtx.byId.set(ledger.account.id, ledger.account);
+        }
+      }
+      // rule 自体の構造・参照区間もルール単位で検証する。破損した1本は警告対象へ
+      // 隔離し、ほかの正常なルールの起票とカーソル更新は続行する。
+      assertRecurringRuleSavable(rule, ruleCtx);
+      const debit = ruleCtx.byId.get(debitAccountId);
+      if (
+        !debit ||
+        postings.some(
+          (posting) =>
+            !accountExistsAt(destination, posting.date) ||
+            !accountExistsAt(credit, posting.date) ||
+            !accountExistsAt(debit, posting.date),
+        )
+      ) {
+        throw new LedgerError('error.account.referenceOutsidePeriod');
+      }
+      // 定型（支出/収入/振替）は導出した種別を、非定型（簿記編集）は 'manual' を記録する。
+      // 月割りルールは実際の借方が台帳（起票形 = 費用ルールと同一）のため 'expense' 直指定。
+      const inputMode: InputMode = spreadsExpense
+        ? 'expense'
+        : (recurringKindOf(destination.role, credit.role) ?? 'manual');
+      const rulePostings: PostingPlan[] = postings.map((p) => ({
+        month: p.month,
+        entry: {
+          id: ruleEntryId(rule.id, p.month),
+          date: p.date,
+          description: rule.name,
+          kind: 'normal' as const,
+          lines: [
+            { accountId: debitAccountId, side: 'debit' as const, amount: rule.amount },
+            { accountId: rule.creditAccountId, side: 'credit' as const, amount: rule.amount },
+          ],
+          metadata: {
+            inputMode,
+            recurringRuleId: rule.id,
+            recurringMonth: p.month,
+            ...(spreadsExpense ? { monthlyCostId: ruleItemId(rule.id, p.month) } : {}),
+          },
+          createdAt: ts,
+          updatedAt: ts,
         },
-        createdAt: ts,
-        updatedAt: ts,
-      },
-      item: buildRuleItem(rule, p, { createdAt: ts, updatedAt: ts }),
-    }));
-    const cursor = recurringCursorAfter(rule, today);
-    if (rulePostings.length > 0 || cursor !== rule.postedThroughMonth) {
-      plans.push({ ruleId: rule.id, postings: rulePostings, cursor });
+        item:
+          expenseAccountId !== undefined
+            ? buildRuleItem(rule, p, expenseAccountId, { createdAt: ts, updatedAt: ts })
+            : null,
+      }));
+      for (const posting of rulePostings) {
+        posting.entry = assertEntrySavable(posting.entry, ruleCtx);
+        if (posting.item) posting.item = assertMonthlyCostItemSavable(posting.item, ruleCtx);
+      }
+      const cursor = recurringCursorAfter(rule, today);
+      if (rulePostings.length > 0 || cursor !== rule.postedThroughMonth) {
+        plans.push({ ruleId: rule.id, postings: rulePostings, cursor });
+      }
+      for (const account of ruleAccountsToPut.values()) {
+        ctx.byId.set(account.id, account);
+        accountsToPut.set(account.id, account);
+      }
+    } catch (error) {
+      failures.push({ ruleId: rule.id, error });
     }
   }
-  if (plans.length === 0) return 0;
-  for (const plan of plans) {
-    for (const p of plan.postings) {
-      p.entry = assertEntrySavable(p.entry, ctx);
-      if (p.item) p.item = assertMonthlyCostItemSavable(p.item);
+  const notifyFailures = () => {
+    if (!onRuleError) return;
+    for (const failure of failures) {
+      // 警告表示側の例外で、成功済みの起票を失敗扱いにしない。
+      try {
+        onRuleError(failure);
+      } catch {
+        // 警告の受け手は best-effort。ここから durable state を巻き戻さない。
+      }
     }
+  };
+  if (plans.length === 0 && accountsToPut.size === 0) {
+    notifyFailures();
+    return 0;
   }
   // 事前読みは別トランザクション。書き込みトランザクション内でルールごとに現在値を
   // 再読し、(a) 削除済みルールぶんを起票しない（削除済みルール参照の仕訳を作らない）
-  // (b) 停止されたルールを起票しない (c) 並行 catchUp が進めたカーソルを巻き戻さず、
+  // (b) 並行 catchUp が進めたカーソルを巻き戻さず、
   // 起票済み月（ユーザーが消した月を含む）を再起票しない。
   let posted = 0;
   await writeWithRevision(
-    [STORE.journalEntries, STORE.recurringRules, STORE.monthlyCostItems],
+    [STORE.journalEntries, STORE.recurringRules, STORE.monthlyCostItems, STORE.accounts],
     (t) => {
       const eStore = t.objectStore(STORE.journalEntries);
       const rStore = t.objectStore(STORE.recurringRules);
       const iStore = t.objectStore(STORE.monthlyCostItems);
+      const accountStore = t.objectStore(STORE.accounts);
+      for (const account of accountsToPut.values()) accountStore.put(account);
       for (const plan of plans) {
         const probe = rStore.get(plan.ruleId);
         probe.onsuccess = () => {
           const current = probe.result as RecurringRule | undefined;
-          if (!current || current.paused) return;
+          if (!current) return;
           const postedThrough = current.postedThroughMonth ?? '';
           for (const p of plan.postings) {
             if (p.month <= postedThrough) continue;
@@ -1486,6 +2457,7 @@ async function catchUpRecurringRulesUnlocked(today: string): Promise<number> {
     },
     meta ? ledgerVersion(meta) : undefined,
   );
+  notifyFailures();
   return posted;
 }
 
@@ -1501,18 +2473,18 @@ async function upsertTagUnlocked(tag: Tag): Promise<void> {
 
   // タグは仕訳全体のみ。scope は常に 'entry' に固定する。
   const normalized: Tag = { ...tag, scope: 'entry' };
+  // 設定と同じく保存境界で schema を通す（「保存はできるが export だけ後で失敗する」を作らない）。
+  const validated = tagSchema.safeParse(normalized);
+  if (!validated.success) throw new LedgerError('error.tag.invalid');
   await writeWithRevision([STORE.tags], (t) => {
-    t.objectStore(STORE.tags).put(normalized);
+    t.objectStore(STORE.tags).put(validated.data);
   });
 }
 
 /** 使用中のタグは物理削除できない（アーカイブを使う）。fail-closed。 */
 async function deleteTagUnlocked(id: string): Promise<void> {
-  const [entries, schedules] = await Promise.all([
-    getAll<JournalEntry>(STORE.journalEntries),
-    getAll<CashflowSchedule>(STORE.cashflowSchedules),
-  ]);
-  if (isTagReferenced(id, entries, schedules)) {
+  const entries = await getAll<JournalEntry>(STORE.journalEntries);
+  if (isTagReferenced(id, entries)) {
     throw new LedgerError('error.tag.deleteInUse');
   }
   await writeWithRevision([STORE.tags], (t) => {
@@ -1567,17 +2539,19 @@ function buildAdjustmentForSave(args: {
 
   const role = counterpartRole(target.type, delta);
   const ctype: 'expense' | 'revenue' = role;
-  const name = counterpartName(role);
-  const named = accounts.find((account) => account.name.trim() === name && !account.archived);
-  if (
-    named &&
-    (named.name !== name || named.type !== ctype || named.role !== 'system-adjustment')
-  ) {
-    throw new LedgerError('error.account.nameConflict');
-  }
-  let counter = named;
+  // 同定は role + type（name 非依存・指示書v3 §B-4）。名前は生成時の表示データにすぎず、
+  // 「非アーカイブの system-adjustment は type ごとに最大 1 件」は schema の不変条件が守る。
+  let counter = accounts.find(
+    (account) =>
+      account.role === 'system-adjustment' && account.type === ctype && !account.archived,
+  );
   let newCounter: Account | null = null;
   if (!counter) {
+    const name = counterpartName(role);
+    // 新規作成時のみ: 既存の別科目と同名になる場合は拒否（重複名を作らない既存不変条件）。
+    if (accounts.some((account) => !account.archived && account.name.trim() === name)) {
+      throw new LedgerError('error.account.nameConflict');
+    }
     const ts = nowIso();
     newCounter = {
       id: newId(),
@@ -1585,10 +2559,17 @@ function buildAdjustmentForSave(args: {
       type: ctype,
       role: 'system-adjustment',
       archived: false,
+      startDate: input.date,
       createdAt: ts,
       updatedAt: ts,
     };
     counter = newCounter;
+  } else {
+    const extended = extendSystemAccountStart(counter, input.date, nowIso());
+    if (extended !== counter) {
+      newCounter = extended;
+      counter = newCounter;
+    }
   }
 
   const entry = buildAdjustmentEntry({
@@ -1629,9 +2610,23 @@ async function createAdjustmentUnlocked(input: AdjustmentSaveInput): Promise<Jou
     byId: new Map(ctx.byId),
   };
   if (newCounter) validationCtx.byId.set(newCounter.id, newCounter);
+  const accountsToPut = new Map<string, Account>();
+  if (newCounter) accountsToPut.set(newCounter.id, newCounter);
+  for (const [accountId, account] of extendSystemStartsForReferences(
+    validationCtx,
+    entryAccountReferences(entry),
+    nowIso(),
+  )) {
+    accountsToPut.set(accountId, account);
+  }
   const savable = assertEntrySavable(entry, validationCtx);
+  await assertEndedBalancesAfterEntryChange(validationCtx, entries, {
+    replacement: savable,
+    affectedAccountIds: new Set(savable.lines.map((line) => line.accountId)),
+  });
   await writeWithRevision([STORE.accounts, STORE.journalEntries], (t) => {
-    if (newCounter) t.objectStore(STORE.accounts).put(newCounter);
+    const accountStore = t.objectStore(STORE.accounts);
+    for (const account of accountsToPut.values()) accountStore.put(account);
     t.objectStore(STORE.journalEntries).put(savable);
   });
   return savable;
@@ -1670,6 +2665,10 @@ async function updateAdjustmentUnlocked(
   });
 
   if (!entry) {
+    await assertEndedBalancesAfterEntryChange(ctx, entries, {
+      removeId: input.id,
+      affectedAccountIds: new Set(existing.lines.map((line) => line.accountId)),
+    });
     await writeWithRevision([STORE.journalEntries], (t) => {
       t.objectStore(STORE.journalEntries).delete(input.id);
     });
@@ -1681,9 +2680,25 @@ async function updateAdjustmentUnlocked(
     byId: new Map(ctx.byId),
   };
   if (newCounter) validationCtx.byId.set(newCounter.id, newCounter);
+  const accountsToPut = new Map<string, Account>();
+  if (newCounter) accountsToPut.set(newCounter.id, newCounter);
+  for (const [accountId, account] of extendSystemStartsForReferences(
+    validationCtx,
+    entryAccountReferences(entry),
+    nowIso(),
+  )) {
+    accountsToPut.set(accountId, account);
+  }
   const savable = assertEntrySavable(entry, validationCtx);
+  await assertEndedBalancesAfterEntryChange(validationCtx, entries, {
+    replacement: savable,
+    affectedAccountIds: new Set(
+      [...existing.lines, ...savable.lines].map((line) => line.accountId),
+    ),
+  });
   await writeWithRevision([STORE.accounts, STORE.journalEntries], (t) => {
-    if (newCounter) t.objectStore(STORE.accounts).put(newCounter);
+    const accountStore = t.objectStore(STORE.accounts);
+    for (const account of accountsToPut.values()) accountStore.put(account);
     t.objectStore(STORE.journalEntries).put(savable);
   });
   return savable;
@@ -1695,6 +2710,11 @@ async function deleteAdjustmentUnlocked(id: string): Promise<void> {
   const target = entries.find((e) => e.id === id);
   if (!target) throw new LedgerError('error.adjust.notFound');
   if (!target.metadata?.adjustment) throw new LedgerError('error.adjust.notAdjustment');
+  const ctx = await loadSaveContext();
+  await assertEndedBalancesAfterEntryChange(ctx, entries, {
+    removeId: id,
+    affectedAccountIds: new Set(target.lines.map((line) => line.accountId)),
+  });
   await writeWithRevision([STORE.journalEntries], (t) => {
     t.objectStore(STORE.journalEntries).delete(id);
   });
@@ -1709,9 +2729,25 @@ async function deleteAdjustmentUnlocked(id: string): Promise<void> {
 function findOrCreateOpeningEquityAccount(
   accounts: Iterable<Account>,
   ts: string,
-): { account: Account; created: boolean } {
+  requiredStart?: string,
+): { account: Account; created: boolean; writeNeeded: boolean } {
   for (const a of accounts) {
-    if (a.role === 'equity' && !a.archived) return { account: a, created: false };
+    if (a.role !== 'equity') continue;
+    if (requiredStart !== undefined && a.endDate !== undefined && a.endDate < requiredStart) {
+      continue;
+    }
+    if (a.archived && a.endDate === undefined) continue;
+    if (requiredStart !== undefined) {
+      const extended = extendSystemAccountStart(a, requiredStart, ts);
+      if (extended !== a) {
+        return {
+          account: extended,
+          created: false,
+          writeNeeded: true,
+        };
+      }
+    }
+    return { account: a, created: false, writeNeeded: false };
   }
   return {
     account: {
@@ -1720,10 +2756,12 @@ function findOrCreateOpeningEquityAccount(
       type: 'equity',
       role: 'equity',
       archived: false,
+      ...(requiredStart !== undefined ? { startDate: requiredStart } : {}),
       createdAt: ts,
       updatedAt: ts,
     },
     created: true,
+    writeNeeded: true,
   };
 }
 
@@ -1764,6 +2802,8 @@ async function createOpeningsUnlocked(inputs: OpeningInput[]): Promise<JournalEn
       throw new LedgerError('error.common.amountInvalid');
     let target: Account | null;
     if (input.accountId) {
+      // 過去日の初期残高でも科目の開始点は動かさない（§A 案1: startDate 未設定 = 過去へ
+      // 開いた線分。明示 startDate との衝突は assertEntrySavable が期間外参照として拒否する）。
       target = workingAccounts.find((account) => account.id === input.accountId) ?? null;
       if (!target) throw new LedgerError('error.adjust.targetNotFound');
     } else if (input.newAccount) {
@@ -1780,6 +2820,9 @@ async function createOpeningsUnlocked(inputs: OpeningInput[]): Promise<JournalEn
         workingAccounts = workingAccounts.map((account) => renamedById.get(account.id) ?? account);
         for (const renamed of renamedArchived) accountsToPut.set(renamed.id, renamed);
       }
+      // 初期残高の日付は「起票された事実」であって、科目の線分の端点（性質の宣言）ではない。
+      // 開始日は既定で空欄 = 過去へ開いた線分のまま作る（§A 案1・作者決定3）。この導線には
+      // 開始日の入力欄が無い＝作者が宣言していない端点をアプリが作らない。
       target = {
         id: newId(),
         name: name.trim(),
@@ -1803,12 +2846,20 @@ async function createOpeningsUnlocked(inputs: OpeningInput[]): Promise<JournalEn
   }
 
   // 初期残高(equity) はバッチ全体で 1 科目だけ確保する。
-  const equityResult = findOrCreateOpeningEquityAccount(workingAccounts, ts);
+  const earliestOpeningDate = inputs.reduce(
+    (earliest, input) => (input.date < earliest ? input.date : earliest),
+    inputs[0]!.date,
+  );
+  const equityResult = findOrCreateOpeningEquityAccount(workingAccounts, ts, earliestOpeningDate);
   const equity = equityResult.account;
   if (equityResult.created) {
     workingAccounts.push(equity);
-    accountsToPut.set(equity.id, equity);
+  } else if (equityResult.writeNeeded) {
+    workingAccounts = workingAccounts.map((account) =>
+      account.id === equity.id ? equity : account,
+    );
   }
+  if (equityResult.writeNeeded) accountsToPut.set(equity.id, equity);
 
   const entries = planned.map(({ input, target }): JournalEntry => {
     const magnitude = Math.abs(input.amount);
@@ -1839,6 +2890,20 @@ async function createOpeningsUnlocked(inputs: OpeningInput[]): Promise<JournalEn
     byId: accountsById(workingAccounts),
   };
   const savable = entries.map((entry) => assertEntrySavable(entry, validationCtx));
+  const [currentEntries, monthlyCostItems, recurringRules] = await Promise.all([
+    getAll<JournalEntry>(STORE.journalEntries),
+    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
+    getAll<RecurringRule>(STORE.recurringRules),
+  ]);
+  assertEndedAssetLiabilityBalances(
+    {
+      accounts: workingAccounts,
+      journalEntries: [...currentEntries, ...savable],
+      monthlyCostItems,
+      recurringRules,
+    },
+    new Set(savable.flatMap((entry) => entry.lines.map((line) => line.accountId))),
+  );
 
   await writeWithRevision([STORE.accounts, STORE.journalEntries], (t) => {
     const aStore = t.objectStore(STORE.accounts);
@@ -1901,6 +2966,12 @@ async function updateOpeningUnlocked(input: {
     updatedAt: nowIso(),
   };
   const savable = assertEntrySavable(entry, ctx);
+  await assertEndedBalancesAfterEntryChange(ctx, entries, {
+    replacement: savable,
+    affectedAccountIds: new Set(
+      [...existing.lines, ...savable.lines].map((line) => line.accountId),
+    ),
+  });
   await writeWithRevision([STORE.journalEntries], (t) => {
     t.objectStore(STORE.journalEntries).put(savable);
   });
@@ -1915,6 +2986,11 @@ async function deleteOpeningUnlocked(id: string): Promise<void> {
   if (target.kind !== 'opening') throw new LedgerError('error.opening.notOpening');
   // 持ち込み登録の購入の仕訳は削除不可（item 削除で cascade）。
   if (target.metadata?.monthlyCostId) throw new LedgerError('error.entry.monthlyCost');
+  const ctx = await loadSaveContext();
+  await assertEndedBalancesAfterEntryChange(ctx, entries, {
+    removeId: id,
+    affectedAccountIds: new Set(target.lines.map((line) => line.accountId)),
+  });
   await writeWithRevision([STORE.journalEntries], (t) => {
     t.objectStore(STORE.journalEntries).delete(id);
   });
@@ -1931,6 +3007,8 @@ export interface ContinuousCostInput {
   startDate: string;
   /** 終了日（任意）。未設定 = まだ費用にしない（資産として持っているだけ）。 */
   endDate?: string;
+  /** 費用化の開始日（任意）。未設定 = 購入日から月割り。startDate 以降・endDate 以前。 */
+  allocationStartDate?: string;
   /** 費用の行き先（費用カテゴリ等）。 */
   expenseAccountId: string;
   /**
@@ -1955,9 +3033,25 @@ export interface ContinuousCostInput {
 function findOrCreateContinuousCostLedgerAccount(
   ctx: SaveContext,
   ts: string,
-): { account: Account; created: boolean } {
+  requiredStart?: string,
+): { account: Account; created: boolean; writeNeeded: boolean } {
   const existing = ctx.byId.get(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
-  if (existing) return { account: existing, created: false };
+  if (existing) {
+    if (existing.role !== 'continuing-cost-asset' || existing.type !== 'asset') {
+      throw new LedgerError('error.monthlyCost.invalidStructure');
+    }
+    if (requiredStart !== undefined) {
+      const extended = extendSystemAccountStart(existing, requiredStart, ts);
+      if (extended !== existing) {
+        return {
+          account: extended,
+          created: false,
+          writeNeeded: true,
+        };
+      }
+    }
+    return { account: existing, created: false, writeNeeded: false };
+  }
   return {
     account: {
       id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
@@ -1965,10 +3059,12 @@ function findOrCreateContinuousCostLedgerAccount(
       type: 'asset',
       role: 'continuing-cost-asset',
       archived: false,
+      ...(requiredStart !== undefined ? { startDate: requiredStart } : {}),
       createdAt: ts,
       updatedAt: ts,
     },
     created: true,
+    writeNeeded: true,
   };
 }
 
@@ -1978,7 +3074,7 @@ function findOrCreateContinuousCostLedgerAccount(
  *     `metadata.monthlyCostId` 付き。支払い元未指定なら貸方 = 初期残高(equity)・`kind:'opening'`
  *     （持ち込み登録。PL を通らない）。
  *  2. **item**: 項目名・金額・開始日・終了日（任意）・費用の行き先。
- * 費用の行（recognition）は保存しない——`continuousCost.ts` が必要範囲だけ計算で展開する。
+ * 月割りの行（monthly-allocation）は保存しない——`continuousCost.ts` が必要範囲だけ計算で展開する。
  * 負債資金 + 返済情報があれば、返済実仕訳（未来日付の振替 N 本）も同じ tx で作る（★6）。
  * 返済は実予定なので monthlyCostId は付けない＝item 削除でも残す・編集/削除自由。
  */
@@ -1989,22 +3085,34 @@ async function createContinuousCostUnlocked(input: ContinuousCostInput): Promise
   if (!isValidIsoDate(input.startDate)) throw new LedgerError('error.monthlyCost.dateRequired');
   if (input.endDate !== undefined && input.endDate < input.startDate)
     throw new LedgerError('error.monthlyCost.endBeforeStart');
+  // 費用化の開始日は明示値のみ検証: 購入日以降・（終了日があれば）終了日以前（§D 端点）。
+  if (input.allocationStartDate !== undefined) {
+    if (!isValidIsoDate(input.allocationStartDate))
+      throw new LedgerError('error.monthlyCost.dateRequired');
+    if (input.allocationStartDate < input.startDate)
+      throw new LedgerError('error.monthlyCost.allocationBeforeStart');
+    if (input.endDate !== undefined && input.allocationStartDate > input.endDate)
+      throw new LedgerError('error.monthlyCost.allocationAfterEnd');
+  }
 
   const ctx = await loadSaveContext();
+  // 費用科目の延長は不要（§A 案1: startDate 未設定 = 過去へ開いた線分。明示 startDate は
+  // 後続の assertMonthlyCostItemSavable が期間外参照として拒否する）。
   const expense = ctx.byId.get(input.expenseAccountId);
   if (!expense || !isRecurringPostableRole(expense.role))
     throw new LedgerError('error.monthlyCost.expenseCategory');
 
   const ts = nowIso();
+  const accountsToPut = new Map<string, Account>();
   // 残存価値は品目別ではなく単一の集約台帳口座へ寄せる（勘定科目を品目数ぶん増やさない）。
-  const { account: ledgerAccount, created: ledgerCreated } =
-    findOrCreateContinuousCostLedgerAccount(ctx, ts);
+  const { account: ledgerAccount, writeNeeded: ledgerWriteNeeded } =
+    findOrCreateContinuousCostLedgerAccount(ctx, ts, input.startDate);
+  if (ledgerWriteNeeded) accountsToPut.set(ledgerAccount.id, ledgerAccount);
 
   // 購入の仕訳の貸方 = 支払い元。起票可能な全 role を許可（内部集約・残高調整のみ除外。
   // ローンで買う = 貸方が負債、健康保険 = 貸方が給与(income-category) など、種別の制限はしない）。
   // 未指定は持ち込み = 初期残高(equity)。
   let credit: Account;
-  let creditCreated = false;
   if (input.creditAccountId !== undefined) {
     const payment = ctx.byId.get(input.creditAccountId);
     if (!payment || !isRecurringPostableRole(payment.role)) {
@@ -2012,22 +3120,31 @@ async function createContinuousCostUnlocked(input: ContinuousCostInput): Promise
     }
     credit = payment;
   } else {
-    const equityResult = findOrCreateOpeningEquityAccount(ctx.byId.values(), ts);
+    const equityResult = findOrCreateOpeningEquityAccount(ctx.byId.values(), ts, input.startDate);
     credit = equityResult.account;
-    creditCreated = equityResult.created;
+    if (equityResult.writeNeeded) accountsToPut.set(credit.id, credit);
   }
   const opening = credit.role === 'equity';
 
-  const item: MonthlyCostItem = assertMonthlyCostItemSavable({
+  const candidateItem: MonthlyCostItem = {
     id: newId(),
     name: input.name.trim(),
     amount: input.amount,
     startDate: input.startDate,
     ...(input.endDate !== undefined ? { endDate: input.endDate } : {}),
+    ...(input.allocationStartDate !== undefined
+      ? { allocationStartDate: input.allocationStartDate }
+      : {}),
     expenseAccountId: input.expenseAccountId,
     createdAt: ts,
     updatedAt: ts,
-  });
+  };
+  // 生成予定の内部科目を加えた文脈で item の参照期間も検証する。
+  const validationCtx: SaveContext = { byId: new Map(ctx.byId) };
+  validationCtx.byId.set(expense.id, expense);
+  validationCtx.byId.set(ledgerAccount.id, ledgerAccount);
+  validationCtx.byId.set(credit.id, credit);
+  const item = assertMonthlyCostItemSavable(candidateItem, validationCtx);
 
   // 購入の仕訳（保存される仕訳）。日付 = item.startDate（日レベル完全一致の不変条件）。
   const purchaseEntry: JournalEntry = {
@@ -2054,7 +3171,9 @@ async function createContinuousCostUnlocked(input: ContinuousCostInput): Promise
     input.repaymentCount >= 1 &&
     input.repaymentStartDate
   ) {
-    repaymentEntries = buildRepaymentEntries(ctx, {
+    // 返済関連科目の延長も不要（§A 案1）。期間外の明示 startDate は buildRepaymentEntries 内の
+    // 保存境界検証（assertEntrySavable）が拒否する。
+    repaymentEntries = buildRepaymentEntries(validationCtx, {
       liabilityAccountId: credit.id,
       fromAccountId: input.repaymentAccountId,
       firstDate: input.repaymentStartDate,
@@ -2066,16 +3185,23 @@ async function createContinuousCostUnlocked(input: ContinuousCostInput): Promise
   }
 
   // 生成した購入の仕訳も保存境界の検証を通す（fail-closed。台帳・equity は作成予定を ctx に足す）。
-  const validationCtx: SaveContext = { byId: new Map(ctx.byId) };
-  validationCtx.byId.set(ledgerAccount.id, ledgerAccount);
-  validationCtx.byId.set(credit.id, credit);
   const savablePurchase = assertEntrySavable(purchaseEntry, validationCtx);
+  const [currentEntries, currentItems, recurringRules] = await Promise.all([
+    getAll<JournalEntry>(STORE.journalEntries),
+    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
+    getAll<RecurringRule>(STORE.recurringRules),
+  ]);
+  assertEndedAssetLiabilityBalances({
+    accounts: [...validationCtx.byId.values()],
+    journalEntries: [...currentEntries, savablePurchase, ...repaymentEntries],
+    monthlyCostItems: [...currentItems, item],
+    recurringRules,
+  });
 
   await writeWithRevision([STORE.accounts, STORE.monthlyCostItems, STORE.journalEntries], (t) => {
     // 集約台帳口座・初期残高は新規作成された時だけ put。
     const aStore = t.objectStore(STORE.accounts);
-    if (ledgerCreated) aStore.put(ledgerAccount);
-    if (creditCreated) aStore.put(credit);
+    for (const account of accountsToPut.values()) aStore.put(account);
     t.objectStore(STORE.monthlyCostItems).put(item);
     const eStore = t.objectStore(STORE.journalEntries);
     eStore.put(savablePurchase);
@@ -2089,13 +3215,13 @@ async function createContinuousCostUnlocked(input: ContinuousCostInput): Promise
  * 同じトランザクションで整合させる。
  *
  * 設計上の不変条件:
- *  - 編集できるのは 項目名・金額・終了日（設定/解除/変更）・費用の行き先。
- *    **開始日は購入の仕訳の日付のミラー**なのでここでは変更できない（仕訳側で変える =
- *    upsertEntry の購入の仕訳経路が item.startDate へ書き戻す）。
+ *  - 編集できるのは 項目名・金額・終了日（設定/解除/変更）・費用化の開始日（設定/解除/変更）・
+ *    費用の行き先。**開始日は購入の仕訳の日付のミラー**なのでここでは変更できない（仕訳側で
+ *    変える = upsertEntry の購入の仕訳経路が item.startDate へ書き戻す）。
  *  - **金額の変更**は購入の仕訳（monthlyCostId・回収フラグなし）の両側金額へミラーする。
  *    回収の振替はミラー対象にしない（書き換えるとアーカイブ時の会計が壊れる）。
  *  - **費用の行き先の変更は仕訳に一切触れない**（購入の仕訳の借方は台帳固定。
- *    旧実装の「借方を認識先へ書き換える」は新モデルでは資産化を破壊するため撤去済み）。
+ *    旧実装の「借方を月割り先へ書き換える」は新モデルでは資産化を破壊するため撤去済み）。
  *  - 終了日の変更は保存されるデータをこれ以上動かさない——費用の行は導出なので、
  *    次の描画で全期間が新しい月数で再計算される（遡及処理は存在しない）。
  */
@@ -2117,18 +3243,28 @@ async function upsertMonthlyCostUnlocked(item: MonthlyCostItem): Promise<void> {
     updatedAt: nowIso(),
   };
   if (merged.endDate === undefined) delete merged.endDate;
+  if (merged.allocationStartDate === undefined) delete merged.allocationStartDate;
 
   // 専用エラー契約を保つため、期間不変条件は構造 schema より先に判定する。
   if (merged.endDate !== undefined && merged.endDate < merged.startDate)
     throw new LedgerError('error.monthlyCost.endBeforeStart');
-  // 保存値は strip 済みを使う＝編集のたびに撤去済みフィールドの残骸が落ちて自己修復する。
-  const saved: MonthlyCostItem = assertMonthlyCostItemSavable(merged);
-
+  // 費用化の開始日（明示値のみ）: 購入日以降・（終了日があれば）終了日以前（§D 端点）。
+  if (merged.allocationStartDate !== undefined) {
+    if (merged.allocationStartDate < merged.startDate)
+      throw new LedgerError('error.monthlyCost.allocationBeforeStart');
+    if (merged.endDate !== undefined && merged.allocationStartDate > merged.endDate)
+      throw new LedgerError('error.monthlyCost.allocationAfterEnd');
+  }
   // 費用の行き先は内部集約・残高調整以外の勘定科目であること（定期ルールと同じ正本）。
   const ctx = await loadSaveContext();
-  const expense = ctx.byId.get(saved.expenseAccountId);
+  const expense = ctx.byId.get(merged.expenseAccountId);
   if (!expense || !isRecurringPostableRole(expense.role))
     throw new LedgerError('error.monthlyCost.expenseCategory');
+  const accountUpdates = new Map<string, Account>();
+  // 費用科目の延長は不要（§A 案1）。明示 startDate との衝突は下の
+  // assertMonthlyCostItemSavable が期間外参照として拒否する。
+  // 保存値は strip 済みを使う＝編集のたびに撤去済みフィールドの残骸が落ちて自己修復する。
+  const saved: MonthlyCostItem = assertMonthlyCostItemSavable(merged, ctx);
 
   // 金額のミラー: 購入の仕訳（回収フラグなし）だけ。日付は仕訳側が正本なので触らない。
   const updatedEntries: JournalEntry[] = [];
@@ -2149,17 +3285,39 @@ async function upsertMonthlyCostUnlocked(item: MonthlyCostItem): Promise<void> {
     // 終了日を過去に縮めても購入日以降であることは上の endBeforeStart が保証する。
   }
 
+  const updatedEntryById = new Map(updatedEntries.map((entry) => [entry.id, entry]));
+  const recurringRules = await getAll<RecurringRule>(STORE.recurringRules);
+  const candidateItems = items.map((candidate) => (candidate.id === saved.id ? saved : candidate));
+  assertEndedAssetLiabilityBalances({
+    accounts: [...ctx.byId.values()],
+    journalEntries: entries.map((entry) => updatedEntryById.get(entry.id) ?? entry),
+    monthlyCostItems: candidateItems,
+    recurringRules,
+  });
+
   // 最終 readwrite transaction 内で item を再読し、削除済みを put で復活させない。
   // startDate は tx 内の現在値を正とする（並行して購入の仕訳の日付が動いた場合に巻き戻さない）。
   let missingRace = false;
+  let allocRace = false;
   try {
-    await writeWithRevision([STORE.monthlyCostItems, STORE.journalEntries], (t) => {
+    await writeWithRevision([STORE.accounts, STORE.monthlyCostItems, STORE.journalEntries], (t) => {
+      const accountStore = t.objectStore(STORE.accounts);
+      for (const account of accountUpdates.values()) accountStore.put(account);
       const iStore = t.objectStore(STORE.monthlyCostItems);
       const probe = iStore.get(saved.id);
       probe.onsuccess = () => {
         const current = probe.result as MonthlyCostItem | undefined;
         if (!current) {
           missingRace = true;
+          t.abort();
+          return;
+        }
+        // 並行して購入の仕訳の日付が費用化の開始日より後ろへ動いていたら保存しない（fail-closed）。
+        if (
+          saved.allocationStartDate !== undefined &&
+          current.startDate > saved.allocationStartDate
+        ) {
+          allocRace = true;
           t.abort();
           return;
         }
@@ -2170,6 +3328,7 @@ async function upsertMonthlyCostUnlocked(item: MonthlyCostItem): Promise<void> {
     });
   } catch (error) {
     if (missingRace) throw new LedgerError('error.monthlyCost.notFound');
+    if (allocRace) throw new LedgerError('error.monthlyCost.allocationBeforeStart');
     throw error;
   }
 }
@@ -2199,19 +3358,25 @@ async function archiveMonthlyCostUnlocked(input: MonthlyCostArchiveInput): Promi
   const existing = items.find((m) => m.id === input.id);
   if (!existing) throw new LedgerError('error.monthlyCost.notFound');
   if (input.endDate < existing.startDate) throw new LedgerError('error.monthlyCost.endBeforeStart');
+  // 費用化開始前にやめたい場合は、先に費用化の開始日を戻してから終了日を設定する（§D 端点）。
+  if (existing.allocationStartDate !== undefined && input.endDate < existing.allocationStartDate)
+    throw new LedgerError('error.monthlyCost.allocationAfterEnd');
 
   const ts = nowIso();
-  const saved = assertMonthlyCostItemSavable({
-    ...existing,
-    endDate: input.endDate,
-    updatedAt: ts,
-  });
+  const ctx = await loadSaveContext();
+  const saved = assertMonthlyCostItemSavable(
+    {
+      ...existing,
+      endDate: input.endDate,
+      updatedAt: ts,
+    },
+    ctx,
+  );
 
   let recoveryEntry: JournalEntry | undefined;
   if (input.recovery) {
     if (!Number.isInteger(input.recovery.amount) || input.recovery.amount <= 0)
       throw new LedgerError('error.common.amountInvalid');
-    const ctx = await loadSaveContext();
     const destination = ctx.byId.get(input.recovery.destinationAccountId);
     if (!destination || !isRecurringPostableRole(destination.role)) {
       throw new LedgerError('error.monthlyCost.recoveryDestination');
@@ -2238,7 +3403,20 @@ async function archiveMonthlyCostUnlocked(input: MonthlyCostArchiveInput): Promi
     );
   }
 
+  const [entries, recurringRules] = await Promise.all([
+    getAll<JournalEntry>(STORE.journalEntries),
+    getAll<RecurringRule>(STORE.recurringRules),
+  ]);
+  const candidateItems = items.map((item) => (item.id === saved.id ? saved : item));
+  assertEndedAssetLiabilityBalances({
+    accounts: [...ctx.byId.values()],
+    journalEntries: recoveryEntry ? [...entries, recoveryEntry] : entries,
+    monthlyCostItems: candidateItems,
+    recurringRules,
+  });
+
   let missingRace = false;
+  let allocRace = false;
   try {
     await writeWithRevision([STORE.monthlyCostItems, STORE.journalEntries], (t) => {
       const iStore = t.objectStore(STORE.monthlyCostItems);
@@ -2250,12 +3428,23 @@ async function archiveMonthlyCostUnlocked(input: MonthlyCostArchiveInput): Promi
           t.abort();
           return;
         }
+        // 並行して費用化の開始日が終了日より後ろへ動いていたら保存しない（fail-closed）。
+        if (
+          current.allocationStartDate !== undefined &&
+          saved.endDate !== undefined &&
+          saved.endDate < current.allocationStartDate
+        ) {
+          allocRace = true;
+          t.abort();
+          return;
+        }
         iStore.put(stripMonthlyCostItem({ ...current, endDate: saved.endDate, updatedAt: ts }));
         if (recoveryEntry) t.objectStore(STORE.journalEntries).put(recoveryEntry);
       };
     });
   } catch (error) {
     if (missingRace) throw new LedgerError('error.monthlyCost.notFound');
+    if (allocRace) throw new LedgerError('error.monthlyCost.allocationAfterEnd');
     throw error;
   }
 }
@@ -2267,14 +3456,13 @@ async function archiveMonthlyCostUnlocked(input: MonthlyCostArchiveInput): Promi
  *  - **負債（カード・ローン）で買った item は削除禁止**（★6・fail-closed）: 返済仕訳には意図的に
  *    monthlyCostId を付けないため、item を消すと購入の仕訳だけ消えて返済が残り、負債残高が
  *    マイナスになる。アーカイブ（終了日の設定）で終わらせる。
- *  - レガシー予定 CF が posted を含む場合も削除禁止（現金/負債が動いている）。未実績の
- *    関連予定 CF は一緒に消す（dangling monthlyCostId を残さない）。
  */
 async function deleteMonthlyCostUnlocked(id: string): Promise<void> {
-  const [entries, schedules, accounts] = await Promise.all([
+  const [entries, accounts, monthlyCostItems, recurringRules] = await Promise.all([
     getAll<JournalEntry>(STORE.journalEntries),
-    getAll<CashflowSchedule>(STORE.cashflowSchedules),
     getAll<Account>(STORE.accounts),
+    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
+    getAll<RecurringRule>(STORE.recurringRules),
   ]);
   const relatedEntries = entries.filter((e) => e.metadata?.monthlyCostId === id);
   const purchase = relatedEntries.find((e) => e.metadata?.monthlyCostRecovery !== true);
@@ -2285,20 +3473,20 @@ async function deleteMonthlyCostUnlocked(id: string): Promise<void> {
       throw new LedgerError('error.monthlyCost.deleteLiability');
     }
   }
-  const relatedSchedules = schedules.filter((s) => s.monthlyCostId === id);
-  if (relatedSchedules.some((s) => s.status === 'posted')) {
-    throw new LedgerError('error.monthlyCost.deletePosted');
-  }
-  await writeWithRevision(
-    [STORE.monthlyCostItems, STORE.journalEntries, STORE.cashflowSchedules],
-    (t) => {
-      t.objectStore(STORE.monthlyCostItems).delete(id);
-      const eStore = t.objectStore(STORE.journalEntries);
-      for (const e of relatedEntries) eStore.delete(e.id);
-      const sStore = t.objectStore(STORE.cashflowSchedules);
-      for (const s of relatedSchedules) sStore.delete(s.id);
-    },
-  );
+  const relatedEntryIds = new Set(relatedEntries.map((entry) => entry.id));
+  const candidateEntries = entries.filter((entry) => !relatedEntryIds.has(entry.id));
+  const candidateItems = monthlyCostItems.filter((item) => item.id !== id);
+  assertEndedAssetLiabilityBalances({
+    accounts,
+    journalEntries: candidateEntries,
+    monthlyCostItems: candidateItems,
+    recurringRules,
+  });
+  await writeWithRevision([STORE.monthlyCostItems, STORE.journalEntries], (t) => {
+    t.objectStore(STORE.monthlyCostItems).delete(id);
+    const eStore = t.objectStore(STORE.journalEntries);
+    for (const e of relatedEntries) eStore.delete(e.id);
+  });
 }
 
 /* ── 一括置換（import / restore で使う原子的操作） ── */
@@ -2308,7 +3496,6 @@ export interface ReplacePayload {
   settings: Settings;
   accounts: Account[];
   journalEntries: JournalEntry[];
-  cashflowSchedules: CashflowSchedule[];
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   recurringRules: RecurringRule[];
@@ -2333,7 +3520,6 @@ async function replaceLedgerUnlocked(
         STORE.kv,
         STORE.accounts,
         STORE.journalEntries,
-        STORE.cashflowSchedules,
         STORE.tags,
         STORE.monthlyCostItems,
         STORE.recurringRules,
@@ -2356,19 +3542,16 @@ async function replaceLedgerUnlocked(
           }
           const accounts = t.objectStore(STORE.accounts);
           const entries = t.objectStore(STORE.journalEntries);
-          const schedules = t.objectStore(STORE.cashflowSchedules);
           const tags = t.objectStore(STORE.tags);
           const monthlyCosts = t.objectStore(STORE.monthlyCostItems);
           const rules = t.objectStore(STORE.recurringRules);
           accounts.clear();
           entries.clear();
-          schedules.clear();
           tags.clear();
           monthlyCosts.clear();
           rules.clear();
           for (const a of payload.accounts) accounts.put(a);
           for (const e of payload.journalEntries) entries.put(e);
-          for (const s of payload.cashflowSchedules) schedules.put(s);
           for (const tag of payload.tags) tags.put(tag);
           for (const mc of payload.monthlyCostItems) monthlyCosts.put(mc);
           for (const rule of payload.recurringRules) rules.put(rule);
@@ -2406,7 +3589,6 @@ async function resetAllUnlocked(): Promise<void> {
       STORE.kv,
       STORE.accounts,
       STORE.journalEntries,
-      STORE.cashflowSchedules,
       STORE.tags,
       STORE.monthlyCostItems,
       STORE.recurringRules,
@@ -2416,7 +3598,6 @@ async function resetAllUnlocked(): Promise<void> {
       t.objectStore(STORE.kv).clear();
       t.objectStore(STORE.accounts).clear();
       t.objectStore(STORE.journalEntries).clear();
-      t.objectStore(STORE.cashflowSchedules).clear();
       t.objectStore(STORE.tags).clear();
       t.objectStore(STORE.monthlyCostItems).clear();
       t.objectStore(STORE.recurringRules).clear();
@@ -2441,16 +3622,10 @@ export const deleteAccount = serializeMutation(deleteAccountUnlocked);
 export const archiveAccount = serializeMutation(archiveAccountUnlocked);
 export const upsertEntry = serializeMutation(upsertEntryUnlocked);
 export const deleteEntry = serializeMutation(deleteEntryUnlocked);
-export const saveEntryWithSchedules = serializeMutation(saveEntryWithSchedulesUnlocked);
 export const createRepaymentEntries = serializeMutation(createRepaymentEntriesUnlocked);
 export const updateSettings = serializeMutation(updateSettingsUnlocked);
-export const upsertSchedule = serializeMutation(upsertScheduleUnlocked);
-export const upsertSchedules = serializeMutation(upsertSchedulesUnlocked);
-export const deleteSchedule = serializeMutation(deleteScheduleUnlocked);
-export const postSchedule = serializeMutation(postScheduleUnlocked);
 export const createRecurringRule = serializeMutation(createRecurringRuleUnlocked);
 export const upsertRecurringRule = serializeMutation(upsertRecurringRuleUnlocked);
-export const setRecurringRulePaused = serializeMutation(setRecurringRulePausedUnlocked);
 export const deleteRecurringRule = serializeMutation(deleteRecurringRuleUnlocked);
 export const catchUpRecurringRules = serializeMutation(catchUpRecurringRulesUnlocked);
 export const upsertTag = serializeMutation(upsertTagUnlocked);

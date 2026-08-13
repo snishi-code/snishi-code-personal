@@ -89,13 +89,13 @@ describe('初期残高の一括登録（オンボーディング）', () => {
     const openings = ledger.journalEntries.filter((e) => e.kind === 'opening');
     expect(openings.length).toBe(1);
     const amounts = openings[0]!.lines.map((l) => l.amount);
-    expect(amounts).toEqual([12345, 12345]);
+    expect(amounts).toEqual([1234500, 1234500]); // '12345' 入力 = 12,345 単位 = 1,234,500 minor
   });
 
   it('登録済み科目は再表示時に登録済みと明示され、再入力できない', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((account) => account.name === '現金')!;
-    await createOpening({ accountId: cash.id, amount: 12345, date: '2026-07-27' });
+    await createOpening({ accountId: cash.id, amount: 1234500, date: '2026-07-27' });
 
     render(
       <ToastProvider>

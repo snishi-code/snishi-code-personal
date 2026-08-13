@@ -5,7 +5,7 @@
 import { useMemo, useState } from 'react';
 import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
-import { ConfirmDialog, Modal } from '../overlays';
+import { Modal } from '../overlays';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet } from '../../domain/accounting';
 import {
@@ -17,15 +17,26 @@ import {
   uniqueEntriesById,
 } from '../../domain/cashflow';
 import { reportBasis } from '../../domain/reportPeriod';
-import { reportEntriesForAsOf } from '../../domain/reportEntries';
-import { addMonthsToDate } from '../../domain/allocation';
+import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
+import { addMonthsToDate, MONTHLY_AMOUNTS_HARD_CAP, monthlyAmounts } from '../../domain/allocation';
 import { sortAccounts } from '../../domain/accountOrder';
 import { todayLocal } from '../../util/time';
-import type { Account, CashflowSchedule, JournalEntry } from '../../domain/types';
+import type { Account, JournalEntry } from '../../domain/types';
 import { Money } from '../money';
 import { TrendChart, type TrendPoint } from '../components/TrendChart';
 import { errorText, t } from '../../i18n';
+import {
+  exactDigitsFor,
+  formatMinorForInput,
+  parseAmountToMinor,
+  sanitizeAmountText,
+} from '../amountText';
+import { useMoneyDigits } from '../money';
+import { formatMoney } from '../../util/format';
 import { UI } from '../../ui-contract';
+import { ScrollTopButton } from '../ScrollTopButton';
+import { sumAmounts } from '../../domain/safeSum';
+import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 
 function shortDateLabel(date: string): string {
   const [, month, day] = date.split('-');
@@ -35,38 +46,41 @@ function shortDateLabel(date: string): string {
 
 /** 仕訳がこの負債（借方）へ返す金額（返済仕訳の表示額）。 */
 function repaymentAmountOf(entry: JournalEntry, liabilityId: string): number {
-  return entry.lines
-    .filter((l) => l.side === 'debit' && l.accountId === liabilityId)
-    .reduce((s, l) => s + l.amount, 0);
+  return sumAmounts(
+    entry.lines
+      .filter((l) => l.side === 'debit' && l.accountId === liabilityId)
+      .map((l) => l.amount),
+  );
 }
 
 export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) => void }) {
-  const { ledger, postSchedule, removeSchedule } = useLedger();
+  const { ledger } = useLedger();
   const today = todayLocal();
   const basis = useMemo(() => reportBasis({ mode: 'all' }, today), [today]);
-  const reportEntries = useMemo(
-    () => (ledger ? reportEntriesForAsOf(ledger, basis.asOf) : []),
-    [basis.asOf, ledger],
+  const reportDisplay = useMemo(
+    () => (ledger ? displayEntriesResultForAsOf(ledger, basis.asOf, today) : null),
+    [basis.asOf, ledger, today],
   );
+  const reportEntries = useMemo(() => reportDisplay?.entries ?? [], [reportDisplay]);
   const [untilDate, setUntilDate] = useState(() => addMonthsToDate(todayLocal(), 6));
-  const [pendingSchedule, setPendingSchedule] = useState<CashflowSchedule | null>(null);
   const [repayFor, setRepayFor] = useState<{ account: Account; balance: number } | null>(null);
   // 負債行の展開（登録済みの返済リスト）。行タップ = 新規返済シートとは独立に開閉する。
   const [openRepayments, setOpenRepayments] = useState<ReadonlySet<string>>(new Set());
 
-  const currency = ledger?.settings.currency ?? 'JPY';
+  const currency = ledger?.settings.currency ?? '';
 
-  const { projection, liabBalById, futureRows } = useMemo(() => {
+  const { projection, liabBalById, futureRows, investmentProjectionTruncations } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     const entries = reportEntries;
-    const schedules = ledger?.cashflowSchedules ?? [];
     const bs = deriveBalanceSheet(accounts, entries, today);
     const liabById = new Map(bs.liabilities.map((l) => [l.account.id, l.balance] as const));
     const freeIds = new Set(accounts.filter((a) => isFreeAsset(a)).map((a) => a.id));
     const isFree = (id: string) => freeIds.has(id);
     const startFree = freeAssetTotal(bs.assets);
     const end = untilDate;
-    const futureEntries = ledger ? reportEntriesForAsOf(ledger, end) : [];
+    // 投影の入力 = 導出込み仕訳（displayEntriesForAsOf を表示終了日まで展開した結果）。
+    const futureDisplay = ledger ? displayEntriesResultForAsOf(ledger, end, today) : null;
+    const futureEntries = futureDisplay?.entries ?? [];
     const future = uniqueEntriesById(
       futureEntries.filter(
         (e) => e.date > today && e.date <= end && e.lines.some((l) => isFree(l.accountId)),
@@ -77,7 +91,7 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
         date: e.date,
         title: e.description,
         delta: cashDeltaOfEntry(e, isFree),
-        amount: e.lines.filter((l) => l.side === 'debit').reduce((s, l) => s + l.amount, 0),
+        amount: sumAmounts(e.lines.filter((l) => l.side === 'debit').map((l) => l.amount)),
       }))
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     return {
@@ -85,13 +99,12 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
       futureRows: future,
       projection: projectCashflow({
         startFree,
-        schedules,
+        entries: futureEntries,
         today,
-        // 予定 CF も未来仕訳（cashDeltaOfEntry）と同じ free 判定で増減を出す（監査 P2-4）。
         isFree,
         untilDate: end,
-        futureEvents: future.map((f) => ({ date: f.date, amount: f.delta })),
       }),
+      investmentProjectionTruncations: futureDisplay?.investmentProjectionTruncations ?? [],
     };
   }, [ledger, reportEntries, untilDate, today]);
 
@@ -105,28 +118,20 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
 
   const liabilitySummary = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const schedules = ledger?.cashflowSchedules ?? [];
     const entries = ledger?.journalEntries ?? [];
     return sortAccounts(accounts)
       .filter((a) => a.role === 'payment-liability' || a.role === 'other-liability')
       .map((a) => {
-        // 返済予定 = 未実績の予定 CF（旧版レガシー）+ 未来日付の返済実仕訳（借方がこの負債）。
-        const planned = schedules.filter(
-          (s) => s.counterAccountId === a.id && s.status === 'planned',
-        );
+        // 返済予定 = 未来日付の返済実仕訳（借方がこの負債）。
         const repayments = entries
           .filter(
             (e) =>
-              e.date > today &&
-              e.lines.some((l) => l.side === 'debit' && l.accountId === a.id),
+              e.date > today && e.lines.some((l) => l.side === 'debit' && l.accountId === a.id),
           )
           .sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
-        const remaining =
-          planned.reduce((sum, s) => sum + s.amount, 0) +
-          repayments.reduce((sum, e) => sum + repaymentAmountOf(e, a.id), 0);
-        const count = planned.length + repayments.length;
-        const nextDue = [...planned.map((s) => s.dueDate), ...repayments.map((e) => e.date)]
-          .sort()[0];
+        const remaining = sumAmounts(repayments.map((e) => repaymentAmountOf(e, a.id)));
+        const count = repayments.length;
+        const nextDue = repayments.map((e) => e.date).sort()[0];
         return {
           id: a.id,
           account: a,
@@ -157,6 +162,11 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
       <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
         {t('cashflow.intro')}
       </p>
+
+      <InvestmentProjectionTruncationNotice
+        truncations={investmentProjectionTruncations}
+        accounts={ledger?.accounts ?? []}
+      />
 
       <TextInput
         label={t('cashflow.until')}
@@ -321,62 +331,6 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
         </ul>
       )}
 
-      {/* 旧バージョンで作られた予定 CF（分割返済など）のレガシー表示。新規には作られない
-          （返済は未来日付の実仕訳として登録される）ため、残っている時だけセクションごと表示する。 */}
-      {projection.schedules.length === 0 ? null : (
-        <>
-          <p className="section-label">{t('cashflow.scheduleSecondaryTitle')}</p>
-          <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
-            {t('cashflow.scheduleSecondaryHint')}
-          </p>
-          <ul className="card list" data-ui={UI.cashflow.list}>
-            {projection.schedules.map((s) => (
-              <li key={s.id} className="list__item">
-                <div className="list__main">
-                  <div className="list__title">{s.title}</div>
-                  <div className="list__sub">
-                    {s.dueDate}・{accountName(s.accountId)}
-                    {s.counterAccountId ? ` ↔ ${accountName(s.counterAccountId)}` : ''}
-                  </div>
-                </div>
-                <span
-                  className={`list__amount ${
-                    s.direction === 'inflow'
-                      ? 'amount--pos'
-                      : s.direction === 'transfer'
-                        ? 'muted'
-                        : 'amount--neg'
-                  }`}
-                >
-                  {s.direction === 'inflow' ? '+' : s.direction === 'transfer' ? '→ ' : '−'}
-                  <Money amount={s.amount} currency={currency} />
-                </span>
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  style={{ minHeight: 36 }}
-                  disabled={!s.counterAccountId}
-                  title={s.counterAccountId ? undefined : t('cashflow.postNeedsCounter')}
-                  onClick={() => postSchedule(s.id).catch(() => undefined)}
-                  data-ui={UI.cashflow.schedulePost}
-                >
-                  <Icon name="check" size={16} />
-                  {t('cashflow.post')}
-                </button>
-                <button
-                  type="button"
-                  className="icon-btn"
-                  onClick={() => setPendingSchedule(s)}
-                  aria-label={`${t('cashflow.deleteSchedule')}: ${s.title}`}
-                >
-                  <Icon name="delete" size={18} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-
       {repayFor ? (
         <RepaymentScheduleSheet
           account={repayFor.account}
@@ -384,21 +338,7 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
           onClose={() => setRepayFor(null)}
         />
       ) : null}
-
-      {pendingSchedule ? (
-        <ConfirmDialog
-          title={t('cashflow.deleteSchedule')}
-          body={pendingSchedule.title}
-          confirmLabel={t('common.delete')}
-          danger
-          onCancel={() => setPendingSchedule(null)}
-          onConfirm={async () => {
-            const s = pendingSchedule;
-            setPendingSchedule(null);
-            await removeSchedule(s.id).catch(() => undefined);
-          }}
-        />
-      ) : null}
+      <ScrollTopButton />
     </section>
   );
 }
@@ -408,7 +348,7 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
  * 勘定科目の返済設定（返済口座・毎月の返済日）が既定値になる。金額の既定はいまの残高（全額）。
  *  - 回数 1（既定）: カードの次回引落など、支払日の振替仕訳（借方 負債 / 貸方 返済口座）を 1 本。
  *  - 回数 N: 毎月同額のローン。総額を N 回に配分した未来の振替仕訳を一括登録（合計は総額に一致）。
- * どちらも予定 CF は経由しない。未来日付の実仕訳として仕訳一覧・資金繰りの投影に乗る。
+ * どちらも未来日付の実仕訳として仕訳一覧・資金繰りの投影に乗る。
  */
 function RepaymentScheduleSheet({
   account,
@@ -421,6 +361,7 @@ function RepaymentScheduleSheet({
 }) {
   const { ledger, createRepaymentEntries } = useLedger();
   const accounts = ledger?.accounts ?? [];
+  const currency = ledger?.settings.currency ?? '';
   const today = todayLocal();
 
   const fromOptions = sortAccounts(accounts)
@@ -432,18 +373,39 @@ function RepaymentScheduleSheet({
   const [date, setDate] = useState(
     account.repaymentDay !== undefined ? nextRepaymentDate(today, account.repaymentDay) : today,
   );
-  const [amountText, setAmountText] = useState(balance > 0 ? String(balance) : '');
+  const digits = useMoneyDigits();
+  // 既定は「残高全額」なので、表示桁が粗くても端数を落とさず全額を見せる。
+  const amountDigits =
+    balance > 0 ? (Math.max(digits, exactDigitsFor(balance)) as typeof digits) : digits;
+  const [amountText, setAmountText] = useState(
+    balance > 0 ? formatMinorForInput(balance, amountDigits) : '',
+  );
   const [countText, setCountText] = useState('1');
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  const amount = amountText === '' ? 0 : Number.parseInt(amountText, 10);
+  const amount = parseAmountToMinor(amountText) ?? 0;
   const count = countText === '' ? 0 : Number.parseInt(countText, 10);
-  const perMonth = count >= 2 && amount >= count ? Math.round(amount / count) : null;
+  // プレビューは保存側と同じ monthlyAmounts の先頭額（独自の丸めを持たない・指示書v3 §A-2）。
+  // 表示条件 = 最終回 > 0（プレビューが出た = 保存できる、が成立。§R-1 と同条件）。
+  const repayParts =
+    count >= 2 && count <= MONTHLY_AMOUNTS_HARD_CAP && amount >= count
+      ? monthlyAmounts(amount, count)
+      : null;
+  const perMonth = repayParts !== null && repayParts.at(-1)! > 0 ? repayParts[0]! : null;
 
   async function submit() {
     if (submitting) return;
-    if (!Number.isInteger(amount) || amount < 1 || count < 1 || fromAccountId === '') return;
+    if (!Number.isInteger(amount) || amount < 1 || fromAccountId === '') return;
+    if (!Number.isInteger(count) || count < 1 || count > MONTHLY_AMOUNTS_HARD_CAP) {
+      setError(t('error.repay.countInvalid', { max: MONTHLY_AMOUNTS_HARD_CAP }));
+      return;
+    }
+    // 保存境界（buildRepaymentEntries）と同じ条件を先に検証して理由を示す（0 金額の回の防止）。
+    if (amount < count) {
+      setError(t('error.repay.totalTooSmall'));
+      return;
+    }
     setSubmitting(true);
     setError(undefined);
     try {
@@ -514,9 +476,9 @@ function RepaymentScheduleSheet({
         <TextInput
           label={t('cashflow.repayAmount')}
           required
-          inputMode="numeric"
+          inputMode={amountDigits === 0 ? 'numeric' : 'decimal'}
           value={amountText}
-          onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
+          onChange={(v) => setAmountText(sanitizeAmountText(v, amountDigits, amountText))}
           hint={t('cashflow.repayAmountHint')}
           dataUi={UI.cashflow.repayAmount}
         />
@@ -526,13 +488,13 @@ function RepaymentScheduleSheet({
           inputMode="numeric"
           value={countText}
           onChange={(v) => setCountText(v.replace(/[^\d]/g, ''))}
-          hint={t('cashflow.repayCountHint')}
+          hint={t('cashflow.repayCountHint', { max: MONTHLY_AMOUNTS_HARD_CAP })}
           dataUi={UI.cashflow.repayCount}
         />
         {perMonth !== null ? (
           <p className="field__hint" data-ui={UI.cashflow.repayPerMonth}>
             {t('cashflow.repayPerMonth', {
-              amount: `¥${perMonth.toLocaleString('ja-JP')}`,
+              amount: formatMoney(perMonth, currency, digits),
               count: String(count),
             })}
           </p>

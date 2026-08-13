@@ -4,7 +4,7 @@ dist-site/
 docs/
 
 # 旧ローカル作業フォルダ（公開アプリのソースではない）は整形対象外
-simple-ledger/
-simple-ledger-src/
+/simple-ledger/
+/simple-ledger-src/
 package-lock.json
 packages/foundation/src/qr/vendor/

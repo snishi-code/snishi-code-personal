@@ -1,14 +1,14 @@
 {
   "appId": "snishi-code.simple-ledger-v2",
-  "schemaVersion": 5,
+  "schemaVersion": 11,
   "ledgerId": "sample-ledger",
   "exportedAt": "2026-04-01T00:00:00.000Z",
   "deviceId": "sample-device",
   "revision": 1,
   "settings": {
     "ledgerName": "サンプル家計簿",
-    "currency": "JPY",
-    "locale": "ja"
+    "currency": "円",
+    "displayFractionDigits": 0
   },
   "accounts": [
     {
@@ -176,12 +176,12 @@
         {
           "accountId": "acc-bank",
           "side": "debit",
-          "amount": 500000
+          "amount": 50000000
         },
         {
           "accountId": "acc-open",
           "side": "credit",
-          "amount": 500000
+          "amount": 50000000
         }
       ],
       "metadata": {
@@ -199,12 +199,12 @@
         {
           "accountId": "acc-cash",
           "side": "debit",
-          "amount": 30000
+          "amount": 3000000
         },
         {
           "accountId": "acc-open",
           "side": "credit",
-          "amount": 30000
+          "amount": 3000000
         }
       ],
       "metadata": {
@@ -222,12 +222,12 @@
         {
           "accountId": "acc-fixed",
           "side": "debit",
-          "amount": 80000
+          "amount": 8000000
         },
         {
           "accountId": "acc-bank",
           "side": "credit",
-          "amount": 80000
+          "amount": 8000000
         }
       ],
       "metadata": {
@@ -245,12 +245,12 @@
         {
           "accountId": "acc-fixed",
           "side": "debit",
-          "amount": 15000
+          "amount": 1500000
         },
         {
           "accountId": "acc-bank",
           "side": "credit",
-          "amount": 15000
+          "amount": 1500000
         }
       ],
       "metadata": {
@@ -268,12 +268,12 @@
         {
           "accountId": "acc-health",
           "side": "debit",
-          "amount": 7000
+          "amount": 700000
         },
         {
           "accountId": "acc-bank",
           "side": "credit",
-          "amount": 7000
+          "amount": 700000
         }
       ],
       "metadata": {
@@ -291,12 +291,12 @@
         {
           "accountId": "acc-fun",
           "side": "debit",
-          "amount": 1500
+          "amount": 150000
         },
         {
           "accountId": "acc-card",
           "side": "credit",
-          "amount": 1500
+          "amount": 150000
         }
       ],
       "metadata": {
@@ -314,12 +314,12 @@
         {
           "accountId": "acc-charge",
           "side": "debit",
-          "amount": 20000
+          "amount": 2000000
         },
         {
           "accountId": "acc-bank",
           "side": "credit",
-          "amount": 20000
+          "amount": 2000000
         }
       ],
       "metadata": {
@@ -337,12 +337,12 @@
         {
           "accountId": "acc-variable",
           "side": "debit",
-          "amount": 3500
+          "amount": 350000
         },
         {
           "accountId": "acc-charge",
           "side": "credit",
-          "amount": 3500
+          "amount": 350000
         }
       ],
       "metadata": {
@@ -360,12 +360,12 @@
         {
           "accountId": "acc-fun",
           "side": "debit",
-          "amount": 2000
+          "amount": 200000
         },
         {
           "accountId": "acc-charge",
           "side": "credit",
-          "amount": 2000
+          "amount": 200000
         }
       ],
       "metadata": {
@@ -383,12 +383,12 @@
         {
           "accountId": "acc-social",
           "side": "debit",
-          "amount": 5000
+          "amount": 500000
         },
         {
           "accountId": "acc-cash",
           "side": "credit",
-          "amount": 5000
+          "amount": 500000
         }
       ],
       "metadata": {
@@ -406,12 +406,12 @@
         {
           "accountId": "acc-invest",
           "side": "debit",
-          "amount": 50000
+          "amount": 5000000
         },
         {
           "accountId": "acc-bank",
           "side": "credit",
-          "amount": 50000
+          "amount": 5000000
         }
       ],
       "metadata": {
@@ -429,12 +429,12 @@
         {
           "accountId": "acc-variable",
           "side": "debit",
-          "amount": 8000
+          "amount": 800000
         },
         {
           "accountId": "acc-card",
           "side": "credit",
-          "amount": 8000
+          "amount": 800000
         }
       ],
       "metadata": {
@@ -452,12 +452,12 @@
         {
           "accountId": "acc-bank",
           "side": "debit",
-          "amount": 280000
+          "amount": 28000000
         },
         {
           "accountId": "acc-salary",
           "side": "credit",
-          "amount": 280000
+          "amount": 28000000
         }
       ],
       "metadata": {
@@ -475,12 +475,12 @@
         {
           "accountId": "acc-work",
           "side": "debit",
-          "amount": 4000
+          "amount": 400000
         },
         {
           "accountId": "acc-bank",
           "side": "credit",
-          "amount": 4000
+          "amount": 400000
         }
       ],
       "metadata": {
@@ -499,12 +499,12 @@
         {
           "accountId": "acc-other-expense",
           "side": "debit",
-          "amount": 1500
+          "amount": 150000
         },
         {
           "accountId": "acc-cash",
           "side": "credit",
-          "amount": 1500
+          "amount": 150000
         }
       ],
       "metadata": {
@@ -522,12 +522,12 @@
         {
           "accountId": "acc-variable",
           "side": "debit",
-          "amount": 12000
+          "amount": 1200000
         },
         {
           "accountId": "acc-bank",
           "side": "credit",
-          "amount": 12000
+          "amount": 1200000
         }
       ],
       "metadata": {
@@ -545,12 +545,12 @@
         {
           "accountId": "acc-card",
           "side": "debit",
-          "amount": 9500
+          "amount": 950000
         },
         {
           "accountId": "acc-bank",
           "side": "credit",
-          "amount": 9500
+          "amount": 950000
         }
       ],
       "metadata": {
@@ -568,12 +568,12 @@
         {
           "accountId": "acc-health",
           "side": "debit",
-          "amount": 3000
+          "amount": 300000
         },
         {
           "accountId": "acc-cash",
           "side": "credit",
-          "amount": 3000
+          "amount": 300000
         }
       ],
       "metadata": {
@@ -591,12 +591,12 @@
         {
           "accountId": "acc-bank",
           "side": "debit",
-          "amount": 15000
+          "amount": 1500000
         },
         {
           "accountId": "acc-other-income",
           "side": "credit",
-          "amount": 15000
+          "amount": 1500000
         }
       ],
       "metadata": {
@@ -614,12 +614,12 @@
         {
           "accountId": "acc-bank",
           "side": "debit",
-          "amount": 280000
+          "amount": 28000000
         },
         {
           "accountId": "acc-salary",
           "side": "credit",
-          "amount": 280000
+          "amount": 28000000
         }
       ],
       "metadata": {
@@ -637,12 +637,12 @@
         {
           "accountId": "acc-tax",
           "side": "debit",
-          "amount": 12000
+          "amount": 1200000
         },
         {
           "accountId": "acc-bank",
           "side": "credit",
-          "amount": 12000
+          "amount": 1200000
         }
       ],
       "metadata": {
@@ -660,12 +660,12 @@
         {
           "accountId": "acc-fun",
           "side": "debit",
-          "amount": 6000
+          "amount": 600000
         },
         {
           "accountId": "acc-card",
           "side": "credit",
-          "amount": 6000
+          "amount": 600000
         }
       ],
       "metadata": {
@@ -684,12 +684,12 @@
         {
           "accountId": "acc-social",
           "side": "debit",
-          "amount": 8000
+          "amount": 800000
         },
         {
           "accountId": "acc-bank",
           "side": "credit",
-          "amount": 8000
+          "amount": 800000
         }
       ],
       "metadata": {
@@ -707,12 +707,12 @@
         {
           "accountId": "acc-bank",
           "side": "debit",
-          "amount": 280000
+          "amount": 28000000
         },
         {
           "accountId": "acc-salary",
           "side": "credit",
-          "amount": 280000
+          "amount": 28000000
         }
       ],
       "metadata": {
@@ -730,12 +730,12 @@
         {
           "accountId": "continuing-cost-ledger",
           "side": "debit",
-          "amount": 12000
+          "amount": 1200000
         },
         {
           "accountId": "acc-bank",
           "side": "credit",
-          "amount": 12000
+          "amount": 1200000
         }
       ],
       "metadata": {
@@ -754,12 +754,12 @@
         {
           "accountId": "continuing-cost-ledger",
           "side": "debit",
-          "amount": 240000
+          "amount": 24000000
         },
         {
           "accountId": "acc-open",
           "side": "credit",
-          "amount": 240000
+          "amount": 24000000
         }
       ],
       "metadata": {
@@ -768,32 +768,50 @@
       },
       "createdAt": "2026-04-01T00:00:00.000Z",
       "updatedAt": "2026-04-01T00:00:00.000Z"
-    }
-  ],
-  "cashflowSchedules": [
+    },
     {
-      "id": "sch-card",
-      "title": "カード引き落とし（3月分）",
-      "dueDate": "2026-04-10",
-      "amount": 6000,
-      "direction": "outflow",
-      "accountId": "acc-bank",
-      "counterAccountId": "acc-card",
-      "source": "credit-card",
-      "status": "planned",
+      "id": "e-future-card",
+      "date": "2026-04-10",
+      "description": "カード引き落とし（3月分）",
+      "kind": "normal",
+      "lines": [
+        {
+          "accountId": "acc-card",
+          "side": "debit",
+          "amount": 600000
+        },
+        {
+          "accountId": "acc-bank",
+          "side": "credit",
+          "amount": 600000
+        }
+      ],
+      "metadata": {
+        "inputMode": "transfer"
+      },
       "createdAt": "2026-03-19T00:00:00.000Z",
       "updatedAt": "2026-03-19T00:00:00.000Z"
     },
     {
-      "id": "sch-tax",
-      "title": "住民税",
-      "dueDate": "2026-06-30",
-      "amount": 20000,
-      "direction": "outflow",
-      "accountId": "acc-bank",
-      "counterAccountId": "acc-tax",
-      "source": "manual",
-      "status": "planned",
+      "id": "e-future-tax",
+      "date": "2026-06-30",
+      "description": "住民税",
+      "kind": "normal",
+      "lines": [
+        {
+          "accountId": "acc-tax",
+          "side": "debit",
+          "amount": 2000000
+        },
+        {
+          "accountId": "acc-bank",
+          "side": "credit",
+          "amount": 2000000
+        }
+      ],
+      "metadata": {
+        "inputMode": "expense"
+      },
       "createdAt": "2026-03-01T00:00:00.000Z",
       "updatedAt": "2026-03-01T00:00:00.000Z"
     }
@@ -820,7 +838,7 @@
     {
       "id": "mc-annual",
       "name": "年払いクラウド",
-      "amount": 12000,
+      "amount": 1200000,
       "startDate": "2026-01-15",
       "endDate": "2026-12-31",
       "expenseAccountId": "acc-fixed",
@@ -830,7 +848,7 @@
     {
       "id": "mc-washer",
       "name": "洗濯機",
-      "amount": 240000,
+      "amount": 24000000,
       "startDate": "2024-06-01",
       "expenseAccountId": "acc-fixed",
       "createdAt": "2026-04-01T00:00:00.000Z",

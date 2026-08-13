@@ -9,27 +9,34 @@
  *  - **月割り**（日割りしない）。startDate/endDate の「日」は配分に使わない。
  *  - **終了日が未設定なら費用の割り振りをしない**（n が決まらないので配分できないだけ。
  *    特別扱いの分岐を作らない）。残存価値 = 全額。
- *  - 初月の認識日は startDate、2ヶ月目以降は月初（recognitionDate）。購入の仕訳より前に
- *    費用行が立って台帳がマイナスになる断面を構造的に防ぐ。
+ *  - 月割りの起点は **費用化の開始日（allocationStartDate ?? startDate）**。初月の月割り日は
+ *    起点日、2ヶ月目以降は月初（monthlyAllocationDate）。起点は購入日以降（保存境界が保証）
+ *    なので、購入の仕訳より前に費用行が立って台帳がマイナスになる断面を構造的に防ぐ。
  *  - 端数は monthlyAmounts（合計が必ず配分総額に一致）。
  *  - spreadTotal は既定 item.amount。アーカイブ時の回収の振替があるときだけ
  *    `amount − 回収額` が渡る（負になってよい＝過去にわたる費用減）。item.amount は
  *    絶対に書き換えない（購入の仕訳とのミラーが壊れる）。
  */
 import { addMonths, addMonthsToDate, monthlyAmounts, monthOf, monthsBetween } from './allocation';
+import { assertSafeAmount } from './safeSum';
 import type { MonthlyCostItem } from './types';
 
-/** 月バケット。終了日が無ければ null（= 配分しない）。 */
-export function recognitionSpan(item: MonthlyCostItem): { from: string; n: number } | null {
+/** 月割りの起点日（費用化の開始日）。未設定 = 購入日（startDate）。 */
+export function allocationStartOf(item: MonthlyCostItem): string {
+  return item.allocationStartDate ?? item.startDate;
+}
+
+/** 月バケット（費用化開始月〜終了月）。終了日が無ければ null（= 配分しない）。 */
+export function monthlyAllocationSpan(item: MonthlyCostItem): { from: string; n: number } | null {
   if (item.endDate === undefined) return null;
-  const from = monthOf(item.startDate);
+  const from = monthOf(allocationStartOf(item));
   const n = monthsBetween(from, monthOf(item.endDate)) + 1; // n >= 1 は保存境界が保証
   return { from, n };
 }
 
-/** k 番目に費用になる日。初月だけ startDate、2ヶ月目以降は月初。 */
-export function recognitionDate(item: MonthlyCostItem, from: string, k: number): string {
-  return k === 0 ? item.startDate : `${addMonths(from, k)}-01`;
+/** k 番目に費用になる日。初月だけ費用化の開始日、2ヶ月目以降は月初。 */
+export function monthlyAllocationDate(item: MonthlyCostItem, from: string, k: number): string {
+  return k === 0 ? allocationStartOf(item) : `${addMonths(from, k)}-01`;
 }
 
 /** その月に費用として割り振られる額。寄与しない月・終了日なしは 0。 */
@@ -38,7 +45,7 @@ export function monthlyCostForMonth(
   ym: string,
   spreadTotal: number = item.amount,
 ): number {
-  const span = recognitionSpan(item);
+  const span = monthlyAllocationSpan(item);
   if (!span) return 0;
   const i = monthsBetween(span.from, ym);
   if (i < 0 || i >= span.n) return 0;
@@ -50,30 +57,32 @@ export function representativeMonthlyAmount(
   item: MonthlyCostItem,
   spreadTotal: number = item.amount,
 ): number {
-  const span = recognitionSpan(item);
+  const span = monthlyAllocationSpan(item);
   if (!span) return 0;
   return monthlyAmounts(spreadTotal, span.n)[0] ?? 0;
 }
 
 /**
  * asOf 時点でまだ費用になっていない額（= 残存価値）。
- * 単一正本 = `割り振る総額（購入額 − 回収額 = spreadTotal） − asOf までの認識額`。
+ * 単一正本 = `割り振る総額（購入額 − 回収額 = spreadTotal） − asOf までの月割り額`。
  * 台帳残高のこの item ぶんと一致する（回収額を二重に引かない・引き忘れない。監査 P2-1）。
- * 終了日なしは認識 0 なので spreadTotal がそのまま残る。
+ * 終了日なしは月割り 0 なので spreadTotal がそのまま残る。
  */
 export function remainingValue(
   item: MonthlyCostItem,
   asOf: string,
   spreadTotal: number = item.amount,
 ): number {
-  const span = recognitionSpan(item);
+  const span = monthlyAllocationSpan(item);
   if (!span) return spreadTotal;
   const amounts = monthlyAmounts(spreadTotal, span.n);
   let done = 0;
   for (let k = 0; k < span.n; k++) {
-    if (recognitionDate(item, span.from, k) <= asOf) done += amounts[k] ?? 0;
+    if (monthlyAllocationDate(item, span.from, k) <= asOf) {
+      done = assertSafeAmount(done + (amounts[k] ?? 0));
+    }
   }
-  return spreadTotal - done;
+  return assertSafeAmount(spreadTotal - done);
 }
 
 /* ── アーカイブの導出規則（status フィールドは持たない・猶予なし） ── */

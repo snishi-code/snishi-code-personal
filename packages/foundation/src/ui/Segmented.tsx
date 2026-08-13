@@ -1,8 +1,8 @@
 /*
  * セグメントコントロール（タブ切り替え）。
- * 選択状態は aria-selected で示す（色だけに依存しない）。
+ * 選択状態は button に適用できる aria-pressed で示す（色だけに依存しない）。
  * role="tablist" / "tab" は複雑すぎるため使わず、
- * button + aria-selected のシンプル実装にする。
+ * button + aria-pressed のシンプル実装にする。
  */
 import type { ReactNode } from 'react';
 
@@ -31,7 +31,7 @@ export function Segmented({
           key={item.key}
           type="button"
           className="segmented__btn"
-          aria-selected={item.key === value}
+          aria-pressed={item.key === value}
           data-ui={item.dataUi}
           onClick={() => onChange(item.key)}
         >

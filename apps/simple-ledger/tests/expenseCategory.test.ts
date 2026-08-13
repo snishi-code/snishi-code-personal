@@ -1,7 +1,7 @@
 /*
  * 費用カテゴリ別内訳（支出の内訳ページの主表示）の不変条件。
  *  - 費用カテゴリ別合計は livingCostBreakdownForRange().total（= ホーム「支出」）と一致する。
- *  - 継続コストの月割り認識（ccKind='recognition'）は、認識先の費用カテゴリへ合算される。
+ *  - 継続コストの月割り（ccKind='monthly-allocation'）は、月割り先の費用カテゴリへ合算される。
  *  - system-adjustment も通常支出として内訳へ含める。
  */
 import { describe, expect, it } from 'vitest';
@@ -51,8 +51,10 @@ describe('expenseCategoryBreakdownForRange（費用カテゴリ別内訳）', ()
   const entries: JournalEntry[] = [
     entry('e1', '2031-07-03', 'food', 'cash', 1000), // 通常支出 → food
     entry('e2', '2031-07-04', 'fixed', 'cash', 2000), // 通常支出 → fixed
-    // 継続コストの月割り認識（仮想）: 対象資産 → fixed カテゴリへ 5,000。
-    entry('rec', '2031-07-31', 'fixed', 'ccAsset', 5000, { ccKind: 'recognition' }),
+    // 継続コストの月割り（仮想）: 対象資産 → fixed カテゴリへ 5,000。
+    entry('allocation', '2031-07-31', 'fixed', 'ccAsset', 5000, {
+      ccKind: 'monthly-allocation',
+    }),
     entry('adj', '2031-07-20', 'adjustment', 'cash', 800),
   ];
 
@@ -82,7 +84,45 @@ describe('expenseCategoryBreakdownForRange（費用カテゴリ別内訳）', ()
   });
 });
 
-describe('継続コスト認識の生活コスト分類', () => {
+describe('内訳合計と収支の一致（残高調整を通常の収入・費用として含む・C-7）', () => {
+  const accounts: Account[] = [
+    acc('cash', 'daily-asset', 'asset'),
+    acc('salary', 'income-category', 'revenue'),
+    acc('food', 'expense-category', 'expense'),
+    acc('adjExpense', 'system-adjustment', 'expense'),
+    acc('adjRevenue', 'system-adjustment', 'revenue'),
+  ];
+  const month = { from: '2031-07-01', to: '2031-07-31' };
+  const entries: JournalEntry[] = [
+    entry('income', '2031-07-01', 'cash', 'salary', 10000),
+    entry('food', '2031-07-05', 'food', 'cash', 3000),
+    entry('adj-expense', '2031-07-10', 'adjExpense', 'cash', 800),
+    entry('adj-revenue', '2031-07-15', 'cash', 'adjRevenue', 500),
+  ];
+
+  it('収入内訳に残高調整収入が含まれ、内訳合計 = 収入合計', () => {
+    const pl = deriveProfitAndLoss(accounts, entries, month);
+    expect(pl.revenues.find((b) => b.account.id === 'adjRevenue')?.balance).toBe(500);
+    expect(pl.revenues.reduce((s, b) => s + b.balance, 0)).toBe(pl.totalRevenue);
+    expect(pl.totalRevenue).toBe(10500);
+  });
+
+  it('収入内訳合計 − 支出内訳合計 = 収支（ホームの収支と同じ導出）', () => {
+    const pl = deriveProfitAndLoss(accounts, entries, month);
+    const incomeSum = pl.revenues.reduce((s, b) => s + b.balance, 0);
+    const cats = expenseCategoryBreakdownForRange(accounts, entries, month);
+    const expenseSum = cats.reduce((s, c) => s + c.amount, 0);
+    const living = livingCostBreakdownForRange(accounts, entries, month);
+    // 支出内訳合計 = ホーム「支出」（残高調整費 800 込み）。
+    expect(cats.find((c) => c.account.id === 'adjExpense')?.amount).toBe(800);
+    expect(expenseSum).toBe(living.total);
+    // 内訳の合計 = 収支合計（収入 10,500 − 支出 3,800 = 6,700）。
+    expect(incomeSum - expenseSum).toBe(pl.totalRevenue - living.total);
+    expect(incomeSum - expenseSum).toBe(6700);
+  });
+});
+
+describe('継続コスト月割りの生活コスト分類', () => {
   const accounts: Account[] = [
     acc('source', 'daily-asset', 'asset'),
     acc('expense', 'expense-category', 'expense'),
@@ -91,18 +131,18 @@ describe('継続コスト認識の生活コスト分類', () => {
     acc('liability', 'other-liability', 'liability'),
     acc('equity', 'equity', 'equity'),
   ];
-  const recognition = (id: string, debit: string, amount: number) =>
-    entry(id, '2031-07-01', debit, 'source', amount, { ccKind: 'recognition' });
+  const monthlyAllocation = (id: string, debit: string, amount: number) =>
+    entry(id, '2031-07-01', debit, 'source', amount, { ccKind: 'monthly-allocation' });
 
-  it('借方の会計 type が expense の認識だけを継続コストへ含める', () => {
+  it('借方の会計 type が expense の月割りだけを継続コストへ含める', () => {
     const result = livingCostBreakdownForRange(
       accounts,
       [
-        recognition('expense-recognition', 'expense', 100),
-        recognition('revenue-recognition', 'revenue', 200),
-        recognition('asset-recognition', 'asset', 300),
-        recognition('liability-recognition', 'liability', 400),
-        recognition('equity-recognition', 'equity', 500),
+        monthlyAllocation('expense-allocation', 'expense', 100),
+        monthlyAllocation('revenue-allocation', 'revenue', 200),
+        monthlyAllocation('asset-allocation', 'asset', 300),
+        monthlyAllocation('liability-allocation', 'liability', 400),
+        monthlyAllocation('equity-allocation', 'equity', 500),
       ],
       { from: '2031-07-01', to: '2031-07-31' },
     );
@@ -110,8 +150,8 @@ describe('継続コスト認識の生活コスト分類', () => {
     expect(result).toEqual({ normalExpense: 0, monthlyCost: 100, total: 100 });
   });
 
-  it('revenue への認識は収入減として PL に反映する', () => {
-    const entries = [recognition('revenue-recognition', 'revenue', 200)];
+  it('revenue への月割りは収入減として PL に反映する', () => {
+    const entries = [monthlyAllocation('revenue-allocation', 'revenue', 200)];
     const range = { from: '2031-07-01', to: '2031-07-31' };
 
     expect(deriveProfitAndLoss(accounts, entries, range)).toMatchObject({
@@ -124,8 +164,8 @@ describe('継続コスト認識の生活コスト分類', () => {
   it.each([
     ['asset', 300],
     ['liability', 400],
-  ] as const)('%s への認識は BS 内の振替となり純資産を変えない', (debit, amount) => {
-    const entries = [recognition(`${debit}-recognition`, debit, amount)];
+  ] as const)('%s への月割りは BS 内の振替となり純資産を変えない', (debit, amount) => {
+    const entries = [monthlyAllocation(`${debit}-allocation`, debit, amount)];
     const range = { from: '2031-07-01', to: '2031-07-31' };
 
     expect(deriveProfitAndLoss(accounts, entries, range)).toMatchObject({

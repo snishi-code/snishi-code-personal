@@ -8,7 +8,8 @@
  *  4. 検証・置換が成功するまで既存 DB を壊さない（置換は単一トランザクションで原子的）。
  *  5. revision 不一致は自動上書きせず、呼び出し側の確認（force）を求める。MVP は自動マージしない。
  *
- * v2 の封筒は APP_ID('snishi-code.simple-ledger-v2') + SCHEMA_VERSION（現行 5）。
+ * v2 の封筒は APP_ID('snishi-code.simple-ledger-v2') + SCHEMA_VERSION（現行値は
+ * src/domain/constants.ts が正本）。
  * migration チェーンは**空**（後方互換をコードで持たない作者決定。旧版が読みたければ
  * 単発変換で対応する）。現行版以外（版 1・v1 の 16・未来版）は unsupported-version で
  * fail-closed に拒否される。
@@ -48,7 +49,6 @@ export function buildExportPackage(ledger: Ledger): LedgerExportPackage {
     revision: ledger.meta.revision,
     accounts: ledger.accounts,
     journalEntries: ledger.journalEntries,
-    cashflowSchedules: ledger.cashflowSchedules,
     tags: ledger.tags,
     monthlyCostItems: ledger.monthlyCostItems,
     recurringRules: ledger.recurringRules,
@@ -101,7 +101,10 @@ function validatePackage(
   if (!validated.success) {
     const first = validated.error.issues[0];
     const where = first?.path.join('.') ?? '';
-    return { ok: false, detail: `${where ? where + ': ' : ''}${first?.message ?? '形式が不正です。'}` };
+    return {
+      ok: false,
+      detail: `${where ? where + ': ' : ''}${first?.message ?? '形式が不正です。'}`,
+    };
   }
   return { ok: true, pkg: validated.data };
 }
@@ -142,7 +145,6 @@ async function replaceWithPackage(
       settings: pkg.settings,
       accounts: pkg.accounts,
       journalEntries: pkg.journalEntries,
-      cashflowSchedules: pkg.cashflowSchedules,
       tags: pkg.tags,
       monthlyCostItems: pkg.monthlyCostItems,
       recurringRules: pkg.recurringRules,
@@ -169,7 +171,8 @@ export async function importFromJsonText(
   const pipeline = createImportPipeline<LedgerExportPackage>({
     appId: APP_ID,
     currentSchemaVersion: SCHEMA_VERSION,
-    migrate: (data, fromVersion) => migrationChain.migrateToVersion(data, fromVersion, SCHEMA_VERSION),
+    migrate: (data, fromVersion) =>
+      migrationChain.migrateToVersion(data, fromVersion, SCHEMA_VERSION),
     validate: validatePackage,
     getCurrentRevision: async () => {
       const checked = await loadLedger();
@@ -192,7 +195,8 @@ export async function importFromJsonText(
         {
           id: snapshotId,
           createdAt: nowIso(),
-          reason: 'import前',
+          // 理由コード（表示は i18n が訳す）。生文言を保存しない（v11・指示書v3 §A-5）。
+          reason: 'import',
           data: buildExportPackage(current),
         },
         snapshotVersion,
@@ -254,7 +258,7 @@ export async function restoreFromSnapshot(snapshotData: LedgerExportPackage): Pr
     {
       id: makeSnapshotId(),
       createdAt: nowIso(),
-      reason: '復元前',
+      reason: 'restore',
       data: buildExportPackage(current),
     },
     versionOf(current),
@@ -271,7 +275,6 @@ export async function restoreFromSnapshot(snapshotData: LedgerExportPackage): Pr
       settings: pkg.settings,
       accounts: pkg.accounts,
       journalEntries: pkg.journalEntries,
-      cashflowSchedules: pkg.cashflowSchedules,
       tags: pkg.tags,
       monthlyCostItems: pkg.monthlyCostItems,
       recurringRules: pkg.recurringRules,

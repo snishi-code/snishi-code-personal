@@ -109,26 +109,44 @@ describe('生活コストの二重計上防止（PL 費用の構成）', () => {
     expect(categories.reduce((sum, row) => sum + row.amount, 0)).toBe(pl.totalExpense);
   });
 
-  it('通常支出フィルタは費用借方の実仕訳・補正だけを残し、継続コスト認識・収入・振替を除く', () => {
+  it('通常支出フィルタは費用借方の実仕訳・補正だけを残し、仮想の継続コスト月割り・収入・振替を除く', () => {
     const accountById = new Map(accounts.map((account) => [account.id, account] as const));
     const normal = entry('normal', '2031-07-03', 'food', 'cash', 1000);
     const adjustment = entry('adjustment', '2031-07-04', 'adjustExpense', 'cash', 24);
-    const recognition: JournalEntry = {
-      ...entry('recognition', '2031-07-05', 'food', 'continuing', 500),
+    const monthlyAllocation: JournalEntry = {
+      ...entry('monthly-allocation', '2031-07-05', 'food', 'continuing', 500),
       metadata: {
         virtual: true,
         continuousCostId: 'cc-1',
-        ccKind: 'recognition',
+        ccKind: 'monthly-allocation',
       },
     };
     const income = entry('income', '2031-07-06', 'cash', 'income', 3000);
     const transfer = entry('transfer', '2031-07-07', 'res', 'cash', 2000);
 
     expect(
-      [normal, adjustment, recognition, income, transfer]
+      [normal, adjustment, monthlyAllocation, income, transfer]
         .filter((candidate) => isNormalExpenseEntry(candidate, accountById))
         .map((candidate) => candidate.id),
     ).toEqual(['normal', 'adjustment']);
+  });
+
+  it('仮想月割りの貸方は継続コストを減額し、通常支出へ混ぜない', () => {
+    const monthlyAllocation: JournalEntry = {
+      ...entry('monthly-allocation', '2031-07-05', 'food', 'continuing', 600),
+      metadata: { virtual: true, continuousCostId: 'cc-1', ccKind: 'monthly-allocation' },
+    };
+    const reversal: JournalEntry = {
+      ...entry('monthly-allocation-reversal', '2031-07-06', 'continuing', 'food', 200),
+      metadata: { virtual: true, continuousCostId: 'cc-1', ccKind: 'monthly-allocation' },
+    };
+    const living = livingCostBreakdownForRange(
+      accounts,
+      [entry('normal', '2031-07-03', 'food', 'cash', 1000), monthlyAllocation, reversal],
+      month,
+    );
+
+    expect(living).toEqual({ normalExpense: 1000, monthlyCost: 400, total: 1400 });
   });
 
   it('残高調整収入を通常収入へ含め、収入合計と内訳が PL と一致する', () => {

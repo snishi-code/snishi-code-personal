@@ -7,6 +7,7 @@
 // フィルタは個人タグの全タグ一致 (AND) 固定。
 
 import { type Patient, type AppSettings, type TagColor } from '../domain/types';
+import { DEFAULT_TAG_COLOR } from '../domain/tags';
 import type { HrStore } from '../data/store';
 
 // ============================
@@ -34,10 +35,15 @@ function patientFilterableTags(p: Patient): string[] {
 // ============================
 
 /**
- * 新規の個人タグ追加 (重複は false)。color は表示/分類のみで、クリア方針には影響しない。
+ * 新規の個人タグ追加 (重複は false)。color は「ラウンド開始で外れるか」を決める
+ * (domain/tags.ts)。既定は残る側 = 付け忘れたタグが黙って消えない安全側。
  * 色はあとから設定のタグ管理で変更できる。
  */
-export function addNewTag(store: HrStore, name: string, color: TagColor = 'gray'): boolean {
+export function addNewTag(
+  store: HrStore,
+  name: string,
+  color: TagColor = DEFAULT_TAG_COLOR,
+): boolean {
   const trimmed = String(name || '').trim();
   if (!trimmed) return false;
   const settings = store.getSettings();
@@ -48,8 +54,15 @@ export function addNewTag(store: HrStore, name: string, color: TagColor = 'gray'
   return true;
 }
 
-/** idx のタグを改名し、アクティブビューの患者タグも同名置換する。重複は false。 */
-export function renameTagAt(store: HrStore, idx: number, newName: string): boolean {
+/**
+ * idx のタグを改名し、**全対象**（アクティブビュー外・アーカイブ済みを含む）の患者タグも
+ * 同名置換する。重複は false。
+ *
+ * 置換と永続化は store.rewriteTagAcrossPatients に委ねる。ここでアクティブビューだけを
+ * 回すと、他グループの対象に旧名が残って定義に無い「孤児タグ」になる（＝ラウンド開始でも
+ * 外れず、ピッカーにも出ないので UI から外せなくなる）。
+ */
+export async function renameTagAt(store: HrStore, idx: number, newName: string): Promise<boolean> {
   const settings = store.getSettings();
   if (!Array.isArray(settings.tags) || idx < 0 || idx >= settings.tags.length) return false;
   const oldName = settings.tags[idx]!.name;
@@ -58,30 +71,23 @@ export function renameTagAt(store: HrStore, idx: number, newName: string): boole
   if (oldName === next) return true;
   if (settings.tags.some((t) => t.name === next)) return false;
   settings.tags[idx]!.name = next;
-  for (const p of store.getAppState().patients) {
-    if (Array.isArray(p.tags)) p.tags = p.tags.map((tg) => (tg === oldName ? next : tg));
-  }
-  void store.saveSettings();
-  store.scheduleSave();
+  await store.rewriteTagAcrossPatients(oldName, next);
   return true;
 }
 
-/** idx のタグを削除し、アクティブビューの患者からも外す。 */
-export function deleteTagAt(store: HrStore, idx: number): void {
+/** idx のタグを削除し、**全対象**（アクティブビュー外・アーカイブ済みを含む）からも外す。 */
+export async function deleteTagAt(store: HrStore, idx: number): Promise<void> {
   const settings = store.getSettings();
   if (!Array.isArray(settings.tags) || idx < 0 || idx >= settings.tags.length) return;
   const name = settings.tags[idx]!.name;
   settings.tags.splice(idx, 1);
-  for (const p of store.getAppState().patients) {
-    if (Array.isArray(p.tags) && p.tags.includes(name)) {
-      p.tags = p.tags.filter((tg) => tg !== name);
-    }
-  }
-  void store.saveSettings();
-  store.scheduleSave();
+  await store.rewriteTagAcrossPatients(name, null);
 }
 
-/** idx のタグの color を変更する。色の変更は設定のタグ管理でのみ行う。 */
+/**
+ * idx のタグの color を変更する (= ラウンド開始で外れるかを切り替える)。
+ * 色の変更は設定のタグ管理でのみ行う。
+ */
 export function setTagColor(store: HrStore, idx: number, color: TagColor): void {
   const settings = store.getSettings();
   if (!Array.isArray(settings.tags) || idx < 0 || idx >= settings.tags.length) return;
@@ -91,14 +97,15 @@ export function setTagColor(store: HrStore, idx: number, color: TagColor): void 
 
 /**
  * タグ名から TagColor を解決する。settings.tags に登録されていれば color を返す。
- * 見つからない場合は 'gray' (ニュートラル) にフォールバック。
+ * 見つからない (孤児タグ名) 場合は既定色 = 残る側にフォールバックし、
+ * ラウンド開始でも外れない扱いと表示を一致させる。
  */
 export function tagColorOf(settings: AppSettings, name: string): TagColor {
   if (Array.isArray(settings.tags)) {
     const def = settings.tags.find((t) => t.name === name);
     if (def) return def.color;
   }
-  return 'gray';
+  return DEFAULT_TAG_COLOR;
 }
 
 // ============================

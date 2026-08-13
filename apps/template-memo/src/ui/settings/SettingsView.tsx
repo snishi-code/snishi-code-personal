@@ -1,30 +1,34 @@
 // 設定画面 (コピー元: hospital-workspace/rounds/ui/settings/SettingsView.tsx)。
-//   タグ管理 / テンプレート (有効切替・編集・プリセット/空テンプレ追加・QR送受信・削除) / QR出力 (改行) /
-//   場所の管理 / バックアップ (JSON 書出・復元) / ワークスペース移行 / 巻き戻し / 全削除 /
+//   タグ管理 / テンプレート (有効切替・編集・プリセット/空テンプレ追加・パッケージQR送受信・削除) /
+//   フレーム (一覧・編集・複製・QR送信・削除) / フォーマット (同) / QR出力 (改行) /
+//   場所の管理 / バックアップ (JSON 書出・復元) / 巻き戻し / 全削除 /
 //   操作ガイド (準備中プレースホルダ)
 //
 // 剥離: ユーザー管理 / 共有タグ / 研究ログ / AI (回診設定 slot) / 同期。
-// 移設: テンプレQR送受信・JSONバックアップ/復元・ワークスペース移行・全削除 (旧 v1 SettingsView から)。
+// 移設: テンプレQR送受信・JSONバックアップ/復元・全削除 (旧 v1 SettingsView から)。
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Button } from '@snishi/foundation/ui/Button';
 import { IconButton } from '@snishi/foundation/ui/IconButton';
 import { Icon } from '@snishi/foundation/ui/Icon';
-import { ConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
 import { Modal } from '@snishi/foundation/ui/Modal';
+import { ConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
 import { useToast } from '@snishi/foundation/ui/toast';
 import type { RestorePoint } from '@snishi/foundation/snapshot/snapshots';
 import { fmtTimestamp } from '@snishi/foundation/format/timestamp';
 import { TAG_COLORS, type TagColor } from '../../domain/types';
 import { normalizePatientArray } from '../../domain/normalize';
 import { buildBackupJson, parseBackupJson } from '../../domain/backup';
+import type { Format, Frame, TemplateDef } from '../../domain/entities';
 import {
-  convertWorkspaceBackup,
-  listImportCandidates,
-  type WorkspaceImportCandidate,
-  type WorkspaceImportData,
-} from '../../domain/importWorkspace';
-import { buildDailyReportPreset, buildRoundPreset, type Template } from '../../domain/template';
+  buildTemplatePackage,
+  FORMAT_WIRE_KIND,
+  FRAME_WIRE_KIND,
+  sharePayloadName,
+  TEMPLATE_WIRE_KIND,
+  type ShareWirePayload,
+} from '../../domain/templateWire';
+import { buildDailyReportPreset, buildRoundPreset } from '../../domain/presets';
 import { newId } from '../../data/constants';
 import { REASON } from '../../data/snapshots';
 import { useRevision, type AppRuntime } from '../appRuntime';
@@ -33,9 +37,13 @@ import { BottomActionBar } from '../BottomActionBar';
 import { deleteTagAt, renameTagAt, setTagColor } from '../tags';
 import { OverlayBinding, useRegisterOverlay } from '../registries';
 import { downloadTextFile, pickTextFile } from '../files';
-import { TemplateQrSendDialog } from '../TemplateQrSendDialog';
-import { TemplateQrReceiveDialog } from '../TemplateQrReceiveDialog';
+import { ShareQrSendDialog } from '../ShareQrSendDialog';
+import { ShareQrReceiveDialog } from '../ShareQrReceiveDialog';
 import { TemplateEditView } from '../TemplateEditView';
+import { FrameEditView } from '../FrameEditView';
+import { FormatEditView } from '../FormatEditView';
+import { TemplateBuilderPreview, TemplateBuilderSection } from '../TemplateBuilder';
+import type { ParsedBuilderDraft } from '../builderDraft';
 import { errorText, s } from '../../i18n';
 import { UI } from '../../ui-contract';
 
@@ -54,7 +62,8 @@ function envPrefix(): string {
 }
 
 // ============================
-// タグ管理 (追加 / 改名 / 削除。初期化ボタンは置かない)
+// タグ管理 (追加 / 改名 / 色の切替 / 削除。初期化ボタンは置かない)。
+// 色は見た目ではなく「ラウンド開始で外れるか」(domain/tags.ts)。
 // ============================
 
 function TagManagerSection({ runtime }: { runtime: AppRuntime }) {
@@ -67,12 +76,18 @@ function TagManagerSection({ runtime }: { runtime: AppRuntime }) {
 
   const tags = Array.isArray(settings.tags) ? settings.tags : [];
 
-  function commitRename(idx: number): void {
+  // 改名・削除は全対象（他グループ・アーカイブ済みを含む）へ波及させるため await する。
+  async function commitRename(idx: number): Promise<void> {
     const next = renameDraft.trim();
     setRenamingIdx(null);
     if (!next || next === tags[idx]?.name) return;
-    if (!renameTagAt(store, idx, next)) {
-      toast.show(s.settings.tag.name.duplicate, 'error');
+    try {
+      if (!(await renameTagAt(store, idx, next))) {
+        toast.show(s.settings.tag.name.duplicate, 'error');
+        return;
+      }
+    } catch (e) {
+      toast.show(errorText(e, s.toast.saveFailed), 'error');
       return;
     }
     runtime.bump();
@@ -81,6 +96,8 @@ function TagManagerSection({ runtime }: { runtime: AppRuntime }) {
   return (
     <div className="card card--pad settingsSection">
       <div className="section-label">{s.settings.title.tags}</div>
+      {/* 色 = クリア方針 (青は残る / それ以外は外れる) なので、選ぶ前に意味が読めるようにする。 */}
+      <p className="muted settingsHint">{s.settings.tag.hint}</p>
       <div className="tagSettingList" data-ui={UI.settings.tagList}>
         {tags.map((tagDef, idx) => {
           const name = tagDef.name;
@@ -97,11 +114,11 @@ function TagManagerSection({ runtime }: { runtime: AppRuntime }) {
                   // 明示的な編集タップ後の単一入力 (中央ルールの明示経路)
                   autoFocus
                   onChange={(e) => setRenameDraft(e.target.value)}
-                  onBlur={() => commitRename(idx)}
+                  onBlur={() => void commitRename(idx)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      commitRename(idx);
+                      void commitRename(idx);
                     } else if (e.key === 'Escape') {
                       e.preventDefault();
                       setRenamingIdx(null);
@@ -121,7 +138,8 @@ function TagManagerSection({ runtime }: { runtime: AppRuntime }) {
                   >
                     {name || s.settings.tagGroup.name.empty}
                   </button>
-                  {/* 色スウォッチ: TAG_COLORS 分の小丸ボタン。タップで setTagColor。選択中は枠強調 */}
+                  {/* 色スウォッチ: TAG_COLORS 分の小丸ボタン。タップで setTagColor
+                      (= ラウンド開始で外れるかの切替)。選択中は枠強調・aria-label に意味を出す。 */}
                   {(TAG_COLORS as readonly TagColor[]).map((color) => {
                     const isSelected = tagDef.color === color;
                     return (
@@ -170,8 +188,9 @@ function TagManagerSection({ runtime }: { runtime: AppRuntime }) {
           onConfirm={() => {
             const idx = deleteIdx;
             setDeleteIdx(null);
-            deleteTagAt(store, idx);
-            runtime.bump();
+            void deleteTagAt(store, idx)
+              .then(() => runtime.bump())
+              .catch((e: unknown) => toast.show(errorText(e, s.toast.saveFailed), 'error'));
           }}
         />
       ) : null}
@@ -180,25 +199,135 @@ function TagManagerSection({ runtime }: { runtime: AppRuntime }) {
 }
 
 // ============================
-// テンプレート (有効切替 / 編集 / プリセット・空テンプレ追加 / QR送受信 / 削除)。
-// 編集は TemplateEditView (設定画面のローカル state で切替・ルートは増やさない)。
+// 「QRで受け取る」(テンプレート / フレーム / フォーマットの 3 節の見出し右上に置く)。
+// 受信ダイアログは TPL/FRM/FMT の 3 種すべてを受理するため、状態と保存の分岐はこの 1 箇所だけに置き、
+// 各節はこのボタンを置くだけにする (節ごとに分岐を書き写さない)。
 // ============================
+
+function ShareQrReceiveButton({ runtime }: { runtime: AppRuntime }) {
+  const toast = useToast();
+  const { store } = runtime;
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      {/* 見出し右上。アイコンのみだと「受け取る」意図が伝わらないので文字ラベルを出す。 */}
+      <Button onClick={() => setOpen(true)}>
+        <Icon name="scan" size={16} />
+        {s.settings.template.qrReceive}
+      </Button>
+
+      {open ? <OverlayBinding onClose={() => setOpen(false)} /> : null}
+      {open ? (
+        <ShareQrReceiveDialog
+          existing={{
+            templates: store.getTemplateDefs(),
+            frames: store.getFrames(),
+            formats: store.getFormats(),
+          }}
+          onSave={async (payload) => {
+            if (payload.kind === FRAME_WIRE_KIND) {
+              await store.saveFrame(payload.frame);
+              return;
+            }
+            if (payload.kind === FORMAT_WIRE_KIND) {
+              await store.saveFormat(payload.format);
+              return;
+            }
+            await store.saveFrame(payload.package.frame);
+            for (const format of payload.package.formats) {
+              await store.saveFormat(format);
+            }
+            await store.saveTemplateDef(payload.package.template);
+          }}
+          onClose={() => setOpen(false)}
+          onSaved={(payload) => {
+            const kindLabel =
+              payload.kind === FRAME_WIRE_KIND
+                ? s.templateQr.frame
+                : payload.kind === FORMAT_WIRE_KIND
+                  ? s.templateQr.format
+                  : s.templateQr.templatePackage;
+            toast.show(
+              s.templateQr.imported(kindLabel, sharePayloadName(payload) || s.common.untitled),
+            );
+            runtime.bump();
+          }}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/** 節の見出し行 (左=見出し / 右端=節のボタン)。DetailQrDialog と同じ qrCardHead パターン。 */
+function SectionHead({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="qrCardHead settingsSectionHead">
+      <div className="section-label">{title}</div>
+      <span className="qrCardHeadSpacer" />
+      {children}
+    </div>
+  );
+}
+
+// ============================
+// テンプレート (有効切替 / 編集 / 複製 / プリセット・空テンプレ追加 / QR送受信 / 削除)。
+// 編集は TemplateEditView (設定画面のローカル state で切替・ルートは増やさない)。
+// 追加は ＋ 1 個に集約し、プリセット (回診メモ / 日報) と空テンプレはメニューで選ばせる。
+// ============================
+
+/** ＋ から開く追加メニュー (プリセット 2 種 + 空テンプレ)。ProjectionFormCard の配置メニューと同じ形。 */
+function TemplateAddMenuDialog({
+  onSelect,
+  onClose,
+}: {
+  onSelect: (kind: 'round' | 'daily' | 'empty') => void;
+  onClose: () => void;
+}) {
+  useRegisterOverlay(onClose);
+  const items: { kind: 'round' | 'daily' | 'empty'; label: string }[] = [
+    { kind: 'round', label: s.settings.template.addRound },
+    { kind: 'daily', label: s.settings.template.addDaily },
+    { kind: 'empty', label: s.settings.template.addEmpty },
+  ];
+  return (
+    <Modal
+      title={s.settings.template.add}
+      onClose={onClose}
+      variant="dialog"
+      closeLabel={s.common.close}
+    >
+      <div className="menu-list">
+        {items.map((item) => (
+          <button
+            key={item.kind}
+            type="button"
+            className="menu-item"
+            onClick={() => onSelect(item.kind)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+    </Modal>
+  );
+}
 
 function TemplateSection({
   runtime,
   onEdit,
 }: {
   runtime: AppRuntime;
-  onEdit: (template: Template) => void;
+  onEdit: (template: TemplateDef) => void;
 }) {
   const toast = useToast();
   useRevision(runtime);
   const { store } = runtime;
-  const templates = store.getTemplates();
+  const templates = store.getTemplateDefs();
   const activeId = store.getSettings().activeTemplateId;
-  const [sendTarget, setSendTarget] = useState<Template | null>(null);
-  const [receiveOpen, setReceiveOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<Template | null>(null);
+  const [sendTarget, setSendTarget] = useState<ShareWirePayload | null>(null);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<TemplateDef | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function activate(templateId: string): Promise<void> {
@@ -215,11 +344,11 @@ function TemplateSection({
     }
   }
 
-  async function runDelete(target: Template): Promise<void> {
+  async function runDelete(target: TemplateDef): Promise<void> {
     if (busy) return;
     setBusy(true);
     try {
-      await store.deleteTemplate(target.id);
+      await store.deleteTemplateDef(target.id);
       runtime.bump();
     } catch (e) {
       console.error('template delete failed:', e);
@@ -230,13 +359,28 @@ function TemplateSection({
     }
   }
 
+  async function duplicate(templateId: string): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await store.duplicateTemplateDef(templateId);
+      runtime.bump();
+    } catch (error) {
+      toast.show(errorText(error, s.toast.saveFailed), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function addPreset(kind: 'round' | 'daily'): Promise<void> {
     if (busy) return;
     setBusy(true);
     try {
-      const template =
+      const preset =
         kind === 'round' ? buildRoundPreset(Date.now()) : buildDailyReportPreset(Date.now());
-      await store.saveTemplate(template);
+      await store.saveFrame(preset.frame);
+      for (const format of preset.formats) await store.saveFormat(format);
+      await store.saveTemplateDef(preset.template);
       runtime.bump();
     } catch (error) {
       toast.show(errorText(error, s.toast.saveFailed), 'error');
@@ -246,28 +390,29 @@ function TemplateSection({
   }
 
   function addEmpty(): void {
-    const sectionId = newId('sec');
+    // 何も永続化せず編集画面だけを開く (キャンセルで孤児フレームを残さない)。
+    // フレームは既存の先頭を既定にする (テンプレートが常に 1 個以上ある = その参照フレームも必ず在る)。
+    const frame = store.getFrames()[0];
+    if (!frame) {
+      toast.show(s.toast.saveFailed, 'error');
+      return;
+    }
     onEdit({
       id: newId('tpl'),
       name: '',
+      frameId: frame.id,
       includeProblems: false,
       includeHandover: false,
-      memoSectionId: sectionId,
-      sections: [
-        {
-          id: sectionId,
-          title: '',
-          freeText: true,
-          groups: [],
-        },
-      ],
+      placements: [],
       updatedAt: Date.now(),
     });
   }
 
   return (
-    <div className="card card--pad settingsSection">
-      <div className="section-label">{s.settings.template.section}</div>
+    <div className="card card--pad settingsSection" data-ui={UI.settings.templateSection}>
+      <SectionHead title={s.settings.template.section}>
+        <ShareQrReceiveButton runtime={runtime} />
+      </SectionHead>
       <div>
         {templates.map((tpl) => {
           const isActive = tpl.id === activeId;
@@ -279,7 +424,7 @@ function TemplateSection({
                 disabled={busy || isActive}
                 onClick={() => void activate(tpl.id)}
               >
-                <span className="pickerRowLabel">{tpl.name}</span>
+                <span className="pickerRowLabel">{tpl.name || s.common.untitled}</span>
                 <span className="pickerRowMeta">
                   {isActive ? s.settings.template.active : s.settings.template.use}
                 </span>
@@ -288,7 +433,22 @@ function TemplateSection({
                 <IconButton label={s.common.edit} onClick={() => onEdit(tpl)}>
                   <Icon name="edit" size={16} />
                 </IconButton>
-                <IconButton label={s.settings.template.qrSend} onClick={() => setSendTarget(tpl)}>
+                <IconButton
+                  label={s.common.duplicate}
+                  disabled={busy}
+                  onClick={() => void duplicate(tpl.id)}
+                >
+                  <Icon name="copy" size={18} />
+                </IconButton>
+                <IconButton
+                  label={s.settings.template.qrSend}
+                  onClick={() =>
+                    setSendTarget({
+                      kind: TEMPLATE_WIRE_KIND,
+                      package: buildTemplatePackage(tpl, store.getFrames(), store.getFormats()),
+                    })
+                  }
+                >
                   <Icon name="qr" size={16} />
                 </IconButton>
                 {templates.length > 1 ? (
@@ -302,33 +462,28 @@ function TemplateSection({
         })}
       </div>
       <div className="settingsRowActions">
-        <Button onClick={() => setReceiveOpen(true)}>{s.settings.template.qrReceive}</Button>
-        <Button disabled={busy} onClick={() => void addPreset('round')}>
-          {s.settings.template.addRound}
-        </Button>
-        <Button disabled={busy} onClick={() => void addPreset('daily')}>
-          {s.settings.template.addDaily}
-        </Button>
-        <Button disabled={busy} onClick={addEmpty}>
-          {s.settings.template.addEmpty}
-        </Button>
+        <IconButton
+          label={s.settings.template.add}
+          disabled={busy}
+          onClick={() => setAddMenuOpen(true)}
+        >
+          <Icon name="add" size={16} />
+        </IconButton>
       </div>
 
       {sendTarget ? <OverlayBinding onClose={() => setSendTarget(null)} /> : null}
       {sendTarget ? (
-        <TemplateQrSendDialog template={sendTarget} onClose={() => setSendTarget(null)} />
+        <ShareQrSendDialog payload={sendTarget} onClose={() => setSendTarget(null)} />
       ) : null}
 
-      {receiveOpen ? <OverlayBinding onClose={() => setReceiveOpen(false)} /> : null}
-      {receiveOpen ? (
-        <TemplateQrReceiveDialog
-          templates={templates}
-          onSave={(tpl) => store.saveTemplate(tpl)}
-          onClose={() => setReceiveOpen(false)}
-          onSaved={(tpl) => {
-            toast.show(s.settings.template.imported(tpl.name));
-            runtime.bump();
+      {addMenuOpen ? (
+        <TemplateAddMenuDialog
+          onSelect={(kind) => {
+            setAddMenuOpen(false);
+            if (kind === 'empty') addEmpty();
+            else void addPreset(kind);
           }}
+          onClose={() => setAddMenuOpen(false)}
         />
       ) : null}
 
@@ -346,6 +501,250 @@ function TemplateSection({
             setDeleteTarget(null);
             if (target) void runDelete(target);
           }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function FrameSettingsSection({
+  runtime,
+  onEdit,
+}: {
+  runtime: AppRuntime;
+  onEdit: (frame: Frame) => void;
+}) {
+  const toast = useToast();
+  useRevision(runtime);
+  const { store } = runtime;
+  const frames = store.getFrames();
+  const templates = store.getTemplateDefs();
+  const [deleteTarget, setDeleteTarget] = useState<Frame | null>(null);
+  // payload を state に保持する (毎レンダー新オブジェクトだと送信中の再エンコードで batchId が割れる)。
+  const [sendPayload, setSendPayload] = useState<ShareWirePayload | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  function addFrame(): void {
+    onEdit({
+      id: newId('frm'),
+      name: '',
+      sections: [{ id: newId('sec'), title: '', freeText: true }],
+    });
+  }
+
+  async function duplicate(frameId: string): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await store.duplicateFrame(frameId);
+      runtime.bump();
+    } catch (error) {
+      toast.show(errorText(error, s.toast.saveFailed), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runDelete(frame: Frame): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await store.deleteFrame(frame.id);
+      runtime.bump();
+    } catch (error) {
+      toast.show(errorText(error, s.toast.saveFailed), 'error');
+    } finally {
+      setBusy(false);
+      setDeleteTarget(null);
+    }
+  }
+
+  return (
+    <div className="card card--pad settingsSection" data-ui={UI.settings.frameSection}>
+      <SectionHead title={s.settings.frame.section}>
+        <ShareQrReceiveButton runtime={runtime} />
+      </SectionHead>
+      {frames.map((frame) => {
+        const usageCount = templates.filter((template) => template.frameId === frame.id).length;
+        return (
+          <div key={frame.id} className="formatListRow">
+            <span className="pickerRowMain">
+              <span className="pickerRowLabel">{frame.name || s.common.untitled}</span>
+              <span className="pickerRowMeta">{s.settings.frame.usage(usageCount)}</span>
+            </span>
+            <span className="formatListActions">
+              <IconButton label={s.common.edit} onClick={() => onEdit(frame)}>
+                <Icon name="edit" size={16} />
+              </IconButton>
+              <IconButton
+                label={s.common.duplicate}
+                disabled={busy}
+                onClick={() => void duplicate(frame.id)}
+              >
+                <Icon name="copy" size={18} />
+              </IconButton>
+              <IconButton
+                label={s.settings.template.qrSend}
+                onClick={() => setSendPayload({ kind: FRAME_WIRE_KIND, frame })}
+              >
+                <Icon name="qr" size={16} />
+              </IconButton>
+              <IconButton
+                label={s.common.delete}
+                disabled={busy}
+                onClick={() => setDeleteTarget(frame)}
+              >
+                <Icon name="delete" size={16} />
+              </IconButton>
+            </span>
+          </div>
+        );
+      })}
+      <div className="settingsRowActions">
+        <IconButton label={s.settings.frame.add} disabled={busy} onClick={addFrame}>
+          <Icon name="add" size={16} />
+        </IconButton>
+      </div>
+
+      {sendPayload ? <OverlayBinding onClose={() => setSendPayload(null)} /> : null}
+      {sendPayload ? (
+        <ShareQrSendDialog payload={sendPayload} onClose={() => setSendPayload(null)} />
+      ) : null}
+
+      {deleteTarget ? <OverlayBinding onClose={() => setDeleteTarget(null)} /> : null}
+      {deleteTarget ? (
+        <ConfirmDialog
+          title={s.settings.frame.deleteConfirmTitle}
+          body={s.settings.frame.deleteConfirmBody(deleteTarget.name)}
+          confirmLabel={s.common.delete}
+          cancelLabel={s.common.cancel}
+          danger
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => void runDelete(deleteTarget)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function FormatSettingsSection({
+  runtime,
+  onEdit,
+}: {
+  runtime: AppRuntime;
+  onEdit: (format: Format) => void;
+}) {
+  const toast = useToast();
+  useRevision(runtime);
+  const { store } = runtime;
+  const formats = store.getFormats();
+  const templates = store.getTemplateDefs();
+  const [deleteTarget, setDeleteTarget] = useState<Format | null>(null);
+  const [sendPayload, setSendPayload] = useState<ShareWirePayload | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  function addFormat(): void {
+    onEdit({
+      id: newId('fmt'),
+      name: '',
+      joiner: '\n',
+      labelSep: '：',
+      titleWrap: '',
+      items: [{ id: newId('itm'), label: s.tpl.items, kind: 'text' }],
+    });
+  }
+
+  async function duplicate(formatId: string): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await store.duplicateFormat(formatId);
+      runtime.bump();
+    } catch (error) {
+      toast.show(errorText(error, s.toast.saveFailed), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runDelete(format: Format): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await store.deleteFormat(format.id);
+      runtime.bump();
+    } catch (error) {
+      toast.show(errorText(error, s.toast.saveFailed), 'error');
+    } finally {
+      setBusy(false);
+      setDeleteTarget(null);
+    }
+  }
+
+  return (
+    <div className="card card--pad settingsSection" data-ui={UI.settings.formatSection}>
+      <SectionHead title={s.settings.format.section}>
+        <ShareQrReceiveButton runtime={runtime} />
+      </SectionHead>
+      {formats.map((format) => {
+        const usageCount = templates.filter((template) =>
+          template.placements.some((placement) => placement.formatId === format.id),
+        ).length;
+        return (
+          <div key={format.id} className="formatListRow">
+            <span className="pickerRowMain">
+              <span className="pickerRowLabel">{format.name || s.common.untitled}</span>
+              <span className="pickerRowMeta">{s.settings.format.usage(usageCount)}</span>
+            </span>
+            <span className="formatListActions">
+              <IconButton label={s.common.edit} onClick={() => onEdit(format)}>
+                <Icon name="edit" size={16} />
+              </IconButton>
+              <IconButton
+                label={s.common.duplicate}
+                disabled={busy}
+                onClick={() => void duplicate(format.id)}
+              >
+                <Icon name="copy" size={18} />
+              </IconButton>
+              <IconButton
+                label={s.settings.template.qrSend}
+                onClick={() => setSendPayload({ kind: FORMAT_WIRE_KIND, format })}
+              >
+                <Icon name="qr" size={16} />
+              </IconButton>
+              <IconButton
+                label={s.common.delete}
+                disabled={busy}
+                onClick={() => setDeleteTarget(format)}
+              >
+                <Icon name="delete" size={16} />
+              </IconButton>
+            </span>
+          </div>
+        );
+      })}
+      <div className="settingsRowActions">
+        <IconButton label={s.settings.format.add} disabled={busy} onClick={addFormat}>
+          <Icon name="add" size={16} />
+        </IconButton>
+      </div>
+
+      {sendPayload ? <OverlayBinding onClose={() => setSendPayload(null)} /> : null}
+      {sendPayload ? (
+        <ShareQrSendDialog payload={sendPayload} onClose={() => setSendPayload(null)} />
+      ) : null}
+
+      {deleteTarget ? <OverlayBinding onClose={() => setDeleteTarget(null)} /> : null}
+      {deleteTarget ? (
+        <ConfirmDialog
+          title={s.settings.format.deleteConfirmTitle}
+          body={s.settings.format.deleteConfirmBody(deleteTarget.name)}
+          confirmLabel={s.common.delete}
+          cancelLabel={s.common.cancel}
+          danger
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => void runDelete(deleteTarget)}
         />
       ) : null}
     </div>
@@ -728,134 +1127,6 @@ function DataSection({ runtime }: { runtime: AppRuntime }) {
 }
 
 // ============================
-// 旧 hospital-workspace からの単発移行 (追記のみ・置換しない)。
-// ============================
-
-function WorkspaceImportDialog({
-  json,
-  candidates,
-  runtime,
-  onClose,
-}: {
-  json: string;
-  candidates: WorkspaceImportCandidate[];
-  runtime: AppRuntime;
-  onClose: () => void;
-}) {
-  useRegisterOverlay(onClose);
-  const toast = useToast();
-  const { store } = runtime;
-  const [userId, setUserId] = useState(candidates[0]?.id ?? '');
-  const [busy, setBusy] = useState(false);
-
-  let data: WorkspaceImportData | null = null;
-  let convertError: string | null = null;
-  try {
-    data = userId ? convertWorkspaceBackup(json, userId) : null;
-  } catch (e) {
-    convertError = errorText(e);
-  }
-
-  async function apply(): Promise<void> {
-    if (!data || busy) return;
-    setBusy(true);
-    try {
-      const counts = { subjects: data.patients.length, groups: data.places.length };
-      await store.appendImported(data);
-      runtime.bump();
-      toast.show(s.settings.workspaceImport.imported(counts.subjects, counts.groups));
-      onClose();
-    } catch (e) {
-      console.error('workspace import failed:', e);
-      toast.show(s.settings.workspaceImport.failed(errorText(e)), 'error');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal
-      title={s.settings.workspaceImport.previewTitle}
-      onClose={onClose}
-      variant="dialog"
-      closeLabel={s.common.close}
-    >
-      <div className="settingsField">
-        <span className="section-label">{s.settings.workspaceImport.user}</span>
-        <select
-          className="input"
-          value={userId}
-          aria-label={s.settings.workspaceImport.user}
-          onChange={(e) => setUserId(e.target.value)}
-        >
-          {candidates.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      </div>
-      {convertError ? <p className="dangerText">{convertError}</p> : null}
-      {data ? (
-        <>
-          <p>{s.settings.workspaceImport.counts(data.patients.length, data.places.length)}</p>
-          <p className="muted">{s.settings.workspaceImport.appendOnly}</p>
-          {data.notes.includes('closingPresetSkipped') ? (
-            <p className="muted">{s.settings.workspaceImport.noteClosingPreset}</p>
-          ) : null}
-          <div className="settingsRowActions">
-            <Button variant="primary" disabled={busy} onClick={() => void apply()}>
-              {s.settings.workspaceImport.apply}
-            </Button>
-          </div>
-        </>
-      ) : null}
-    </Modal>
-  );
-}
-
-function WorkspaceImportSection({ runtime }: { runtime: AppRuntime }) {
-  const toast = useToast();
-  const [dialog, setDialog] = useState<{
-    json: string;
-    candidates: WorkspaceImportCandidate[];
-  } | null>(null);
-
-  async function pick(): Promise<void> {
-    try {
-      const picked = await pickTextFile('.json,application/json');
-      if (!picked) return;
-      const candidates = listImportCandidates(picked.text);
-      if (candidates.length === 0) {
-        toast.show(s.settings.workspaceImport.noUsers, 'error');
-        return;
-      }
-      setDialog({ json: picked.text, candidates });
-    } catch (e) {
-      console.error('workspace import pick failed:', e);
-      toast.show(s.settings.workspaceImport.failed(errorText(e)), 'error');
-    }
-  }
-
-  return (
-    <div className="card card--pad settingsSection">
-      <div className="section-label">{s.settings.workspaceImport.section}</div>
-      <div className="settingsRowActions">
-        <Button onClick={() => void pick()}>{s.settings.workspaceImport.pick}</Button>
-      </div>
-      {dialog ? (
-        <WorkspaceImportDialog
-          json={dialog.json}
-          candidates={dialog.candidates}
-          runtime={runtime}
-          onClose={() => setDialog(null)}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-// ============================
 // 巻き戻し (スナップショット復元)
 // ============================
 
@@ -1004,21 +1275,62 @@ export function SettingsView({
   onNavigateHome?: () => void;
 }) {
   useRevision(runtime);
-  const [editing, setEditing] = useState<Template | null>(null);
+  const [editing, setEditing] = useState<
+    | { kind: 'template'; value: TemplateDef }
+    | { kind: 'frame'; value: Frame }
+    | { kind: 'format'; value: Format }
+    | { kind: 'builder'; value: ParsedBuilderDraft }
+    | null
+  >(null);
   if (editing) {
+    if (editing.kind === 'template') {
+      return (
+        <TemplateEditView
+          runtime={runtime}
+          template={editing.value}
+          onDone={() => setEditing(null)}
+        />
+      );
+    }
+    if (editing.kind === 'frame') {
+      return (
+        <FrameEditView runtime={runtime} frame={editing.value} onDone={() => setEditing(null)} />
+      );
+    }
+    if (editing.kind === 'builder') {
+      return (
+        <TemplateBuilderPreview
+          runtime={runtime}
+          candidate={editing.value.candidate}
+          warnings={editing.value.warnings}
+          onDone={() => setEditing(null)}
+        />
+      );
+    }
     return (
-      <TemplateEditView runtime={runtime} template={editing} onDone={() => setEditing(null)} />
+      <FormatEditView runtime={runtime} format={editing.value} onDone={() => setEditing(null)} />
     );
   }
   // 設定入口はヘッダー右上の 1 つだけ。画面タイトルの見出しは出さない (内容を見れば分かる)。
   return (
     <section aria-label={s.header.settings} className="settingsView" data-ui={UI.settings.view}>
       <TagManagerSection runtime={runtime} />
-      <TemplateSection runtime={runtime} onEdit={setEditing} />
+      <TemplateBuilderSection onPreview={(value) => setEditing({ kind: 'builder', value })} />
+      <TemplateSection
+        runtime={runtime}
+        onEdit={(value) => setEditing({ kind: 'template', value })}
+      />
+      <FrameSettingsSection
+        runtime={runtime}
+        onEdit={(value) => setEditing({ kind: 'frame', value })}
+      />
+      <FormatSettingsSection
+        runtime={runtime}
+        onEdit={(value) => setEditing({ kind: 'format', value })}
+      />
       <QrOutputSection runtime={runtime} />
       <PlaceSection runtime={runtime} />
       <DataSection runtime={runtime} />
-      <WorkspaceImportSection runtime={runtime} />
       <RestoreSection runtime={runtime} />
       <div className="card card--pad settingsSection">
         <div className="section-label">{s.settings.guide.section}</div>

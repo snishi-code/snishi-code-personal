@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { TemplateSection } from '../domain/template';
-import { partitionSectionGroups } from './ProjectionFormCard';
+import { partitionSectionPlacements } from './ProjectionFormCard';
 
 const section: TemplateSection = {
   id: 'sec',
   title: '場所',
   freeText: false,
-  groups: [
+  formats: [
     {
       id: 'always',
       name: '展開',
@@ -37,20 +37,20 @@ const section: TemplateSection = {
   ],
 };
 
-describe('partitionSectionGroups', () => {
+describe('partitionSectionPlacements', () => {
   it('未入力の呼び出し/メニューは入口に置く', () => {
-    const result = partitionSectionGroups(section, {});
-    expect(result.shown.map((group) => group.id)).toEqual(['always']);
-    expect(result.oncall.map((group) => group.id)).toEqual(['oncall']);
-    expect(result.menu.map((group) => group.id)).toEqual(['menu']);
+    const result = partitionSectionPlacements(section, {});
+    expect(result.shown.map((placement) => placement.id)).toEqual(['always']);
+    expect(result.oncall.map((placement) => placement.id)).toEqual(['oncall']);
+    expect(result.menu.map((placement) => placement.id)).toEqual(['menu']);
   });
 
   it('値が入った呼び出し/メニューはカードへ昇格し、消すと入口へ戻る', () => {
-    const result = partitionSectionGroups(section, {
+    const result = partitionSectionPlacements(section, {
       oncall: { b: { value: '入力', source: 'manual' } },
       menu: { c: { value: '入力', source: 'manual' } },
     });
-    expect(result.shown.map((group) => group.id)).toEqual(['always', 'oncall', 'menu']);
+    expect(result.shown.map((placement) => placement.id)).toEqual(['always', 'oncall', 'menu']);
     expect(result.oncall).toEqual([]);
     expect(result.menu).toEqual([]);
   });

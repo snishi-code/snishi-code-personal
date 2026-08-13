@@ -5,30 +5,60 @@
  * - ユーザーは箱の中の内訳だけを追加・名前変更・アーカイブできる（削除は出さない）。
  * - 資産・負債の内訳行には残高補正の導線を置く（補正は対象科目が決まってから行う操作のため）。
  * - 登録済みの初期残高・補正の履歴はこの画面に置かず、仕訳一覧に委ねる。
- * - 初期残高(equity)・調整用(system-adjustment)・内部集約 role は聖域として表示しない。
+ * - 初期残高(equity)・内部集約 role は聖域として表示しない。残高調整(system-adjustment)は
+ *   収入・費用の内訳として表示だけする（「自動」バッジ付き・管理操作は出さない）。
+ * - 費用・収入の内訳はヘッダー期間（ホームと同じ選択期間）の発生額、資産・負債は
+ *   スライス時点の残高を表示する。期間途中で終了した費用・収入も、期間内の発生額が
+ *   あれば一覧に出す（期間末の一点で絞らない・監査 P1-3）。
  */
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
-import { accountBalance, accountHasEntries, filterByDateRange } from '../../domain/accounting';
+import {
+  accountBalance,
+  accountHasEntries,
+  filterByDateRange,
+  summarizeEntriesForAccount,
+} from '../../domain/accounting';
+import { isDebitNormal } from '../../domain/accounting';
 import { referencedAccountIds } from '../../domain/accountRefs';
-import { reportEntriesForAsOf } from '../../domain/reportEntries';
-import { reportBasis } from '../../domain/reportPeriod';
+import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
+import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
 import { buildSimpleEntry } from '../../domain/entry';
 import type { Account } from '../../domain/types';
+import { accountExistsAt } from '../../domain/accountLifetime';
+import { isRecurringPostableRole } from '../../domain/recurring';
 import { groupAccountsByBox, type AccountBox } from '../accountBoxes';
 import { AccountSheet } from './AccountSheet';
 import { AdjustmentCreateSheet } from '../AdjustmentSheet';
 import { OpeningRegisterSheet } from '../OpeningSheet';
 import { EntrySheet } from './EntrySheet';
 import { Money } from '../money';
+import { periodLabel } from '../periodLabel';
 import { nowIso, todayLocal } from '../../util/time';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
+import { ScrollTopButton } from '../ScrollTopButton';
+import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 
-export function Accounts() {
+export function Accounts({
+  period = { mode: 'all' },
+  target,
+}: {
+  period?: ReportPeriod;
+  /** 投影行タップからの遷移対象（開く編集シート。同一オブジェクトは 1 回だけ消費）。 */
+  target?: { accountId: string } | null;
+}) {
   const { ledger, saveAccount, archiveAccount, reorderAccounts } = useLedger();
   const [editing, setEditing] = useState<Account | null>(null);
+  // 仕訳一覧・タイムラインの投影行タップからの遷移: 対象科目の編集シートを開く。
+  // effect ではなく「render 中の派生調整」パターン（Allocations と同じ・1 回だけ消費）。
+  const [consumedTarget, setConsumedTarget] = useState<{ accountId: string } | null>(null);
+  if (target != null && target !== consumedTarget && ledger) {
+    setConsumedTarget(target);
+    const targetAccount = ledger.accounts.find((account) => account.id === target.accountId);
+    if (targetAccount) setEditing(targetAccount);
+  }
   const [creatingIn, setCreatingIn] = useState<AccountBox | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [reordering, setReordering] = useState(false);
@@ -40,47 +70,57 @@ export function Accounts() {
   } | null>(null);
 
   const today = todayLocal();
-  const entries = useMemo(() => {
-    if (!ledger) return [];
-    const asOf = reportBasis({ mode: 'all' }, today).asOf;
-    return filterByDateRange(reportEntriesForAsOf(ledger, asOf), undefined, asOf);
-  }, [ledger, today]);
-  const currency = ledger?.settings.currency ?? 'JPY';
+  const basis = reportBasis(period, today);
+  const asOf = basis.asOf;
+  const display = ledger ? displayEntriesResultForAsOf(ledger, asOf, today) : null;
+  const entries = filterByDateRange(display?.entries ?? [], undefined, asOf);
+  // 費用・収入の発生額はホームと同じ期間（flowRange）で数える（C-1。導出＝統一エンジン）。
+  const flowEntries = filterByDateRange(entries, basis.flowRange.from, basis.flowRange.to);
+  const todayDisplay = ledger ? displayEntriesResultForAsOf(ledger, today, today) : null;
+  const todayEntries = filterByDateRange(todayDisplay?.entries ?? [], undefined, today);
+  const currency = ledger?.settings.currency ?? '';
 
-  const usedIds = useMemo(
-    () =>
-      referencedAccountIds({
-        entries: ledger?.journalEntries ?? [],
-        schedules: ledger?.cashflowSchedules ?? [],
-        monthlyCostItems: ledger?.monthlyCostItems ?? [],
-        recurringRules: ledger?.recurringRules ?? [],
-      }),
-    [ledger],
+  const usedIds = referencedAccountIds({
+    entries: ledger?.journalEntries ?? [],
+    monthlyCostItems: ledger?.monthlyCostItems ?? [],
+    recurringRules: ledger?.recurringRules ?? [],
+  });
+
+  // 費用・収入は期間途中で終了しても、期間内の発生額 ≠ 0 なら一覧に出す（監査 P1-3）。
+  const groups = groupAccountsByBox(
+    ledger?.accounts ?? [],
+    showArchived,
+    asOf,
+    (account) => summarizeEntriesForAccount(account, flowEntries, () => true).total !== 0,
   );
 
-  const groups = useMemo(
-    () => groupAccountsByBox(ledger?.accounts ?? [], showArchived),
-    [ledger, showArchived],
-  );
+  function beginArchiveTransfer(account: Account): void {
+    const balance = accountBalance(account.id, account.type, todayEntries);
+    const debitBalance = isDebitNormal(account.type) ? balance : -balance;
+    setArchiveTransfer({ account, debitBalance });
+  }
 
   async function toggleArchive(account: Account) {
     try {
       if (account.archived) {
-        // アーカイブ解除は残高チェック不要（残高 0 の状態から戻すだけ）。
-        await saveAccount({ ...account, archived: false, updatedAt: nowIso() });
+        // アーカイブ解除は終了点も同時に消し、未来へ再び延ばす。
+        const restored: Account = {
+          ...account,
+          archived: false,
+          endDate: undefined,
+          updatedAt: nowIso(),
+        };
+        await saveAccount(restored);
         return;
       }
-      // 不変条件「アーカイブ済み = 今日時点の残高 0」。残高が残る資産・負債は振替を先に聞く。
+      // 資産・負債だけは「終了点の残高 = 0」。費用・収入の累計は過去の記録なので
+      // 残したまま終了でき、必要な場合だけ別ボタンから任意振替する。
       // 判定は保存境界（archiveAccount）と同じ「導出仕訳（継続コストの費用行・定期ルールの
       // 投影込み）の今日時点残高」で行う（画面に見えている残高と一致させる・監査 P1-2）。
-      if (account.type === 'asset' || account.type === 'liability') {
-        const balance = accountBalance(account.id, account.type, entries);
-        if (balance !== 0) {
-          // 自然符号 → 借方残高へ正規化: 借方残高が残る側なら貸方（振替元）を対象に固定する。
-          const debitBalance = account.type === 'asset' ? balance : -balance;
-          setArchiveTransfer({ account, debitBalance });
-          return;
-        }
+      const balance = accountBalance(account.id, account.type, todayEntries);
+      if ((account.type === 'asset' || account.type === 'liability') && balance !== 0) {
+        beginArchiveTransfer(account);
+        return;
       }
       await archiveAccount(account.id);
     } catch {
@@ -108,6 +148,11 @@ export function Accounts() {
       <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
         {t('accounts.intro')}
       </p>
+
+      <InvestmentProjectionTruncationNotice
+        truncations={display?.investmentProjectionTruncations ?? []}
+        accounts={ledger?.accounts ?? []}
+      />
 
       <div
         style={{
@@ -142,6 +187,7 @@ export function Accounts() {
       <div className="stack" data-ui={UI.accounts.list}>
         {groups.map(({ box, accounts }) => {
           const canAdjust = box.type === 'asset' || box.type === 'liability';
+          const isFlowBox = box.type === 'revenue' || box.type === 'expense';
           return (
             <div key={box.key}>
               <div
@@ -175,13 +221,23 @@ export function Accounts() {
               ) : (
                 <ul className="card list">
                   {accounts.map((account) => {
-                    const orderable = accounts.filter((a) => !a.archived);
+                    const existsAtSlice = accountExistsAt(account, asOf);
+                    // 残高調整科目は表示だけ（管理操作・並び替えの対象にしない）。
+                    const isSystemManaged = account.role === 'system-adjustment';
+                    const orderable = accounts.filter(
+                      (a) => accountExistsAt(a, asOf) && a.role !== 'system-adjustment',
+                    );
                     const orderIndex = orderable.findIndex((a) => a.id === account.id);
                     return (
                       <li key={account.id} className="list__item">
                         <div className="list__main">
                           <div className="list__title account-list__title">
                             <span>{account.name}</span>
+                            {isSystemManaged ? (
+                              <span className="tag tag--neutral" data-ui={UI.accounts.systemBadge}>
+                                {t('accounts.autoBadge')}
+                              </span>
+                            ) : null}
                             {account.role === 'daily-asset' && account.movable === false ? (
                               <span
                                 className="tag tag--asset-muted"
@@ -193,19 +249,34 @@ export function Accounts() {
                             {usedIds.has(account.id) ? (
                               <span className="tag tag--teal">{t('accounts.inUse')}</span>
                             ) : null}
-                            {account.archived ? (
-                              <span className="tag tag--neutral">{t('accounts.archived')}</span>
+                            {!existsAtSlice ? (
+                              <span className="tag tag--neutral">{t('accounts.outsideSlice')}</span>
                             ) : null}
                           </div>
                           <div className="list__sub">
-                            {t('accounts.balance')}:{' '}
-                            <Money
-                              amount={accountBalance(account.id, account.type, entries)}
-                              currency={currency}
-                            />
+                            {isFlowBox ? (
+                              <>
+                                {t('accounts.periodAmount', { period: periodLabel(period) })}:{' '}
+                                <Money
+                                  amount={
+                                    summarizeEntriesForAccount(account, flowEntries, () => true)
+                                      .total
+                                  }
+                                  currency={currency}
+                                />
+                              </>
+                            ) : (
+                              <>
+                                {t('accounts.balance')}:{' '}
+                                <Money
+                                  amount={accountBalance(account.id, account.type, entries)}
+                                  currency={currency}
+                                />
+                              </>
+                            )}
                           </div>
                         </div>
-                        {reordering ? (
+                        {isSystemManaged ? null : reordering ? (
                           orderIndex >= 0 ? (
                             <div className="row-actions">
                               <button
@@ -257,6 +328,18 @@ export function Accounts() {
                             >
                               <Icon name="edit" size={18} />
                             </button>
+                            {accountExistsAt(account, today) &&
+                            (account.type === 'expense' || account.type === 'revenue') &&
+                            accountBalance(account.id, account.type, todayEntries) !== 0 ? (
+                              <button
+                                type="button"
+                                className="icon-btn"
+                                onClick={() => beginArchiveTransfer(account)}
+                                aria-label={`${t('accounts.archiveWithTransfer')}: ${account.name}`}
+                              >
+                                <Icon name="transfer" size={18} />
+                              </button>
+                            ) : null}
                             <button
                               type="button"
                               className="icon-btn"
@@ -289,6 +372,21 @@ export function Accounts() {
               side: archiveTransfer.debitBalance > 0 ? 'credit' : 'debit',
               accountId: archiveTransfer.account.id,
               amount: Math.abs(archiveTransfer.debitBalance),
+              date: today,
+              lockDate: true,
+              counterpartRoles: Array.from(
+                new Set(
+                  (ledger?.accounts ?? [])
+                    .filter(
+                      (account) =>
+                        account.id !== archiveTransfer.account.id &&
+                        account.type === archiveTransfer.account.type &&
+                        accountExistsAt(account, today) &&
+                        isRecurringPostableRole(account.role),
+                    )
+                    .map((account) => account.role),
+                ),
+              ),
               onSave: async (input) => {
                 // 振替仕訳の保存 + archived=true を 1 トランザクションで（キャンセルなら何もしない）。
                 await archiveAccount(archiveTransfer.account.id, buildSimpleEntry(input));
@@ -316,6 +414,7 @@ export function Accounts() {
           />
         )
       ) : null}
+      <ScrollTopButton />
     </section>
   );
 }

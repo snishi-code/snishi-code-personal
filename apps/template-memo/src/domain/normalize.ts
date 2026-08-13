@@ -21,7 +21,7 @@ export function makeDefaultPatient(): Patient {
     placeId: '',
     tags: [],
     problems: [],
-    visitMemo: '',
+    sectionTexts: {},
     standingMemo: '',
     projectedValues: {},
     updatedAt: 0,
@@ -40,8 +40,27 @@ export function normalizeProjectedValues(raw: unknown): FormValues {
 }
 
 /**
+ * 場所ごとの自由本文（sectionTexts）の正規化。plain object の string 値エントリだけを残す
+ * （非文字列・配列・入れ子は捨てる）。projectedValues と同じ薄い whitelist。
+ */
+export function normalizeSectionTexts(raw: unknown): Record<string, string> {
+  if (!isRecord(raw) || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof v === 'string') out[k] = v;
+  }
+  return out;
+}
+
+/** sectionTexts に trim 非空の本文が 1 つでもあるか。 */
+function hasSectionText(raw: unknown): boolean {
+  if (!isRecord(raw)) return false;
+  return Object.values(raw).some((v) => typeof v === 'string' && v.trim() !== '');
+}
+
+/**
  * 「空患者」= 追加した直後の未入力スロット相当: ステータスが NONE (白) で、かつ name/room/
- * tags/problems/今回メモ/継続メモ/フォーム値 がすべて初期値 (pid と updatedAt は無視)。
+ * tags/problems/場所ごとの自由本文/継続メモ/フォーム値 がすべて初期値 (pid と updatedAt は無視)。
  * YELLOW/GREEN/BLUE/GRAY はユーザーが明示的にステータスを付けた状態なので削除対象外。
  */
 export function isPatientEmpty(p: Patient | null | undefined): boolean {
@@ -51,7 +70,7 @@ export function isPatientEmpty(p: Patient | null | undefined): boolean {
   if (p.room) return false;
   if (Array.isArray(p.tags) && p.tags.length > 0) return false;
   if (problemsHaveInput(p.problems)) return false;
-  if (typeof p.visitMemo === 'string' && p.visitMemo.trim() !== '') return false;
+  if (hasSectionText(p.sectionTexts)) return false;
   if (typeof p.standingMemo === 'string' && p.standingMemo.trim() !== '') return false;
   if (p.projectedValues && Object.keys(p.projectedValues).length > 0) return false;
   return true;
@@ -80,9 +99,9 @@ export function normalizePatientArray(arr: readonly unknown[] | null | undefined
         r && Array.isArray(r.problems)
           ? r.problems.filter((x): x is string => typeof x === 'string')
           : [],
-      visitMemo: r && typeof r.visitMemo === 'string' ? r.visitMemo : '',
       standingMemo: r && typeof r.standingMemo === 'string' ? r.standingMemo : '',
       // ※ ここに追加しないと whitelist で reload 時に黙って消える。
+      sectionTexts: normalizeSectionTexts(r ? r.sectionTexts : undefined),
       projectedValues: normalizeProjectedValues(r ? r.projectedValues : undefined),
       updatedAt: r && typeof r.updatedAt === 'number' ? r.updatedAt : 0,
       archivedAt: r && typeof r.archivedAt === 'number' ? r.archivedAt : null,

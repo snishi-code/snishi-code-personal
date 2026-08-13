@@ -73,5 +73,32 @@ describe('未来開始の定期ルールへの期間ナビゲーション', () =
 
     expect(document.querySelector('[data-ui="period.year.trigger"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-ui="period.date.picker"]')).not.toBeInTheDocument();
+
+    // 「毎月のもの」も同じヘッダー断面を受け取る。未来開始ルールは未来の断面では見えるが、
+    // 日付を動かしただけでは実仕訳の catch-up は走らない。
+    fireEvent.click(document.querySelector(`[data-ui="${UI.nav.menuButton}"]`)!);
+    fireEvent.click(
+      await waitFor(() => {
+        const item = document.querySelector('[data-ui="nav.allocations"]');
+        expect(item).toBeInTheDocument();
+        return item!;
+      }),
+    );
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.allocations.view}"]`)).toBeInTheDocument();
+    });
+    expect(document.body).toHaveTextContent('未来開始の定期支出');
+    expect(
+      (await loadLedger()).journalEntries.filter(
+        (entry) => entry.metadata?.recurringRuleId !== undefined,
+      ),
+    ).toHaveLength(0);
+
+    fireEvent.change(document.querySelector(`[data-ui="${UI.period.dateInput}"]`)!, {
+      target: { value: todayLocal() },
+    });
+    await waitFor(() => {
+      expect(document.body).not.toHaveTextContent('未来開始の定期支出');
+    });
   });
 });

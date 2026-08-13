@@ -68,11 +68,10 @@ export function PatientEditPopup({
       <div className="patientSheetInfoRow">
         <label className="patientSheetInfoCell patientSheetRoomCell">
           <span className="patientSheetInfoLabel">{s.patientSheet.room}</span>
+          {/* 数字限定にはしない (A012 等の位置表記を通す)。sanitizeRoomInput は改行・制御文字だけ落とす。 */}
           <input
             className="input"
             type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
             maxLength={6}
             autoComplete="off"
             defaultValue={p.room}

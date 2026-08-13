@@ -2,17 +2,19 @@
  * 勘定科目（内訳）名の重複ルール。
  *
  * 内訳名は大きな箱をまたいでも重複不可（別箱の同名は混乱の元）。
- *  - 有効（非アーカイブ）な同名がある → 保存不可（fail-closed）。
- *  - アーカイブ済みの同名がある → ユーザー承認のうえで、アーカイブ側の末尾に
+ *  - 今日まだ終了していない同名がある → 保存不可（未来の終了点も有効・fail-closed）。
+ *  - 今日より前に終了済みの同名がある → ユーザー承認のうえで、終了済み側の末尾に
  *    `（アーカイブ）` / `（アーカイブ2）` … を付けて退避してから保存できる。
  * UI の事前判定と repository の保存境界の両方からこの正本を使う。
  */
+import { todayLocal } from '../util/time';
+import { accountIsRetiredAt } from './accountLifetime';
 import type { Account } from './types';
 
 export interface AccountNameConflicts {
-  /** 有効（非アーカイブ）な同名科目。存在すれば保存不可。 */
+  /** 基準日にまだ終了していない同名科目。存在すれば保存不可。 */
   active: Account | null;
-  /** アーカイブ済みの同名科目（退避リネームの対象）。 */
+  /** 基準日より前に終了済みの同名科目（退避リネームの対象）。 */
   archived: Account[];
 }
 
@@ -25,12 +27,13 @@ export function findAccountNameConflicts(
   accounts: Account[],
   name: string,
   excludeId?: string,
+  atDate: string = todayLocal(),
 ): AccountNameConflicts {
   const trimmed = name.trim();
   const same = accounts.filter((a) => a.id !== excludeId && a.name.trim() === trimmed);
   return {
-    active: same.find((a) => !a.archived) ?? null,
-    archived: same.filter((a) => a.archived),
+    active: same.find((a) => !accountIsRetiredAt(a, atDate)) ?? null,
+    archived: same.filter((a) => accountIsRetiredAt(a, atDate)),
   };
 }
 
@@ -52,8 +55,9 @@ export function planArchiveRenames(
   accounts: Account[],
   name: string,
   excludeId?: string,
+  atDate: string = todayLocal(),
 ): ArchiveRename[] {
-  const { archived } = findAccountNameConflicts(accounts, name, excludeId);
+  const { archived } = findAccountNameConflicts(accounts, name, excludeId, atDate);
   if (archived.length === 0) return [];
   const used = new Set(accounts.map((a) => a.name));
   const plans: ArchiveRename[] = [];

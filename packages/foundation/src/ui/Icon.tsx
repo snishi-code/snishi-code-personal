@@ -101,6 +101,13 @@ const PATHS: Record<string, JSX.Element> = {
       <line x1="14" y1="11" x2="14" y2="17" />
     </>
   ),
+  // 二重の紙（複製 / コピー）
+  copy: (
+    <>
+      <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+    </>
+  ),
   // プラス（追加）
   plus: (
     <>
@@ -337,6 +344,7 @@ export function Icon({
     favorite: 'star',
     favoriteFilled: 'starFilled',
     expand: 'chevronDown',
+    copy: 'copy',
     alert: 'alert',
     check: 'check',
     sprout: 'sprout',

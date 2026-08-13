@@ -10,13 +10,14 @@ import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import { aggregateEntryTags } from '../../domain/tags';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
-import { reportEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesForAsOf } from '../../domain/reportEntries';
 import { nowIso, todayLocal } from '../../util/time';
 import { newId } from '../../domain/ids';
 import type { Tag } from '../../domain/types';
 import { Money } from '../money';
 import { errorText, t } from '../../i18n';
 import { UI } from '../../ui-contract';
+import { ScrollTopButton } from '../ScrollTopButton';
 
 type Period = 'month' | 'year' | 'all';
 
@@ -28,7 +29,7 @@ export function Tags() {
   const [showArchived, setShowArchived] = useState(false);
   const [period, setPeriod] = useState<Period>('month');
 
-  const currency = ledger?.settings.currency ?? 'JPY';
+  const currency = ledger?.settings.currency ?? '';
   const tags = ledger?.tags ?? [];
   const visible = tags.filter((tg) => showArchived || !tg.archived);
 
@@ -45,11 +46,11 @@ export function Tags() {
   }, [period, today, year]);
 
   const entryTotals = useMemo(() => {
-    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf) : [];
+    const entries = ledger ? displayEntriesForAsOf(ledger, basis.asOf, today) : [];
     return aggregateEntryTags(entries, ledger?.tags ?? [], basis.flowRange).filter(
       (x) => x.count > 0,
     );
-  }, [basis, ledger]);
+  }, [basis, ledger, today]);
 
   async function toggleArchive(tag: Tag) {
     await saveTag({ ...tag, archived: !tag.archived, updatedAt: nowIso() }).catch(() => undefined);
@@ -193,6 +194,7 @@ export function Tags() {
           }}
         />
       ) : null}
+      <ScrollTopButton />
     </section>
   );
 }

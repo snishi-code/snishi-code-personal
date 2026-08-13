@@ -6,7 +6,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from 'react';
 import type {
   Account,
-  CashflowSchedule,
   Ledger,
   MonthlyCostItem,
   RecurringRule,
@@ -50,7 +49,6 @@ function sampleFixtureRequested(): boolean {
 export function isPristineSeedLedger(l: Ledger): boolean {
   return (
     l.journalEntries.length === 0 &&
-    l.cashflowSchedules.length === 0 &&
     l.monthlyCostItems.length === 0 &&
     l.tags.length === 0 &&
     isDefaultSettings(l.settings) &&
@@ -77,14 +75,12 @@ interface LedgerContextValue {
   removeMonthlyCost: (id: string) => Promise<void>;
   /** アーカイブ = 終了日の設定（+ 残存価値の回収の振替を同一 tx で任意に）。 */
   archiveMonthlyCost: (input: MonthlyCostArchiveInput) => Promise<void>;
-  saveSchedules: (schedules: CashflowSchedule[]) => Promise<void>;
-  postSchedule: (id: string) => Promise<void>;
-  removeSchedule: (id: string) => Promise<void>;
   /** 定期ルール（作成/変更後は経過分を即キャッチアップ起票する）。 */
   createRecurringRule: (input: repo.RecurringRuleInput) => Promise<void>;
-  saveRecurringRule: (rule: RecurringRule) => Promise<void>;
-  /** 停止/再開（再開は位相を保ち、停止中の月を遡って起票しない）。 */
-  setRecurringRulePaused: (id: string, paused: boolean) => Promise<void>;
+  saveRecurringRule: (
+    rule: RecurringRule,
+    options?: repo.RecurringRuleSaveOptions,
+  ) => Promise<void>;
   removeRecurringRule: (id: string) => Promise<void>;
   saveTag: (tag: Tag) => Promise<void>;
   removeTag: (id: string) => Promise<void>;
@@ -109,7 +105,10 @@ interface LedgerContextValue {
   deleteOpening: (id: string) => Promise<void>;
   saveAccount: (account: Account, opts?: repo.AccountSaveOptions) => Promise<void>;
   /** アーカイブ（残高が残る資産・負債は振替仕訳を同一 tx で保存して 0 にしてから）。 */
-  archiveAccount: (id: string, transferEntry?: Parameters<typeof repo.archiveAccount>[1]) => Promise<void>;
+  archiveAccount: (
+    id: string,
+    transferEntry?: Parameters<typeof repo.archiveAccount>[1],
+  ) => Promise<void>;
   /** 科目の表示順を保存（並び替え。toast は出さない＝連続操作を妨げない）。 */
   reorderAccounts: (ids: string[]) => Promise<void>;
   removeAccount: (id: string) => Promise<void>;
@@ -123,6 +122,15 @@ interface LedgerContextValue {
 }
 
 const LedgerContext = createContext<LedgerContextValue | null>(null);
+
+/** 一部ルールだけを飛ばした場合は true。個別データを通知文へ含めない。 */
+async function catchUpRecurringRulesToday(): Promise<boolean> {
+  let skipped = false;
+  await repo.catchUpRecurringRules(todayLocal(), () => {
+    skipped = true;
+  });
+  return skipped;
+}
 
 export function LedgerProvider({ children }: { children: ReactNode }) {
   const toast = useToast();
@@ -154,10 +162,12 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       try {
         // 定期ルールの経過分をキャッチアップ起票してから読み込む（GnuCash の Since-Last-Run 同型）。
         // 起票に失敗してもアプリは開く（fail-soft）。
+        let catchUpFailed: boolean;
         try {
-          await repo.catchUpRecurringRules(todayLocal());
+          catchUpFailed = await catchUpRecurringRulesToday();
         } catch {
           // 破損ルール等。台帳表示は続行する。
+          catchUpFailed = true;
         }
         let next = await repo.loadLedger();
         if (sampleFixtureRequested() && isPristineSeedLedger(next)) {
@@ -166,6 +176,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         if (active) {
           setLedger(next);
           setStatus('ready');
+          if (catchUpFailed) {
+            toast.show(t('toast.recurringCatchUpPartialFailed'), 'error');
+          }
         }
       } catch (e) {
         if (active) {
@@ -179,7 +192,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [toast]);
 
   const saveEntry = useCallback<LedgerContextValue['saveEntry']>(
     async (input, existing) => {
@@ -280,93 +293,55 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [refresh, toast],
   );
 
-  const saveSchedules = useCallback<LedgerContextValue['saveSchedules']>(
-    async (schedules) => {
-      try {
-        await repo.upsertSchedules(schedules);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const postSchedule = useCallback<LedgerContextValue['postSchedule']>(
-    async (id) => {
-      try {
-        await repo.postSchedule(id);
-        await refresh();
-        toast.show(t('toast.posted'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const removeSchedule = useCallback<LedgerContextValue['removeSchedule']>(
-    async (id) => {
-      try {
-        await repo.deleteSchedule(id);
-        await refresh();
-        toast.show(t('toast.deleted'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
+  const finishRecurringMutation = useCallback(async () => {
+    // ルール本体の保存後に起票または再読込だけが失敗しても、再送可能な
+    // 「未保存」扱いに戻さない。新規では別 ID の同一ルール、分割では
+    // 追加 segment を重複保存し得るため、durable 境界の後は警告だけで完了する。
+    let followupError: unknown;
+    let catchUpSkipped = false;
+    try {
+      catchUpSkipped = await catchUpRecurringRulesToday();
+    } catch (e) {
+      followupError = e;
+    }
+    try {
+      await refresh();
+    } catch (e) {
+      followupError ??= e;
+    }
+    if (followupError !== undefined) {
+      toast.show(t('toast.recurringSavedFollowupFailed'), 'error');
+    } else if (catchUpSkipped) {
+      toast.show(t('toast.recurringCatchUpPartialFailed'), 'error');
+    } else {
+      toast.show(t('toast.saved'), 'success');
+    }
+  }, [refresh, toast]);
 
   const createRecurringRule = useCallback<LedgerContextValue['createRecurringRule']>(
     async (input) => {
       try {
         await repo.createRecurringRule(input);
-        // 開始月が過去〜当月なら、その場で経過分を起票する（登録直後に仕訳が見える）。
-        await repo.catchUpRecurringRules(todayLocal());
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
       } catch (e) {
         toast.show(errorText(e), 'error');
         throw e;
       }
+      await finishRecurringMutation();
     },
-    [refresh, toast],
+    [finishRecurringMutation, toast],
   );
 
   const saveRecurringRule = useCallback<LedgerContextValue['saveRecurringRule']>(
-    async (rule) => {
+    async (rule, options) => {
       try {
-        await repo.upsertRecurringRule(rule);
-        await repo.catchUpRecurringRules(todayLocal());
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
+        await repo.upsertRecurringRule(rule, options);
       } catch (e) {
         toast.show(errorText(e), 'error');
         throw e;
       }
+      await finishRecurringMutation();
     },
-    [refresh, toast],
-  );
-
-  const setRecurringRulePaused = useCallback<LedgerContextValue['setRecurringRulePaused']>(
-    async (id, paused) => {
-      try {
-        await repo.setRecurringRulePaused(id, paused);
-        // 再開直後の当月分を経過起票する（停止は起票を止めるだけなので catchUp は無害）。
-        await repo.catchUpRecurringRules(todayLocal());
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
+    [finishRecurringMutation, toast],
   );
 
   const removeRecurringRule = useCallback<LedgerContextValue['removeRecurringRule']>(
@@ -574,7 +549,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
-        toast.show(t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -608,11 +583,13 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       if (outcome.kind === 'ok') {
         // 取り込んだ定期ルールの経過分を起票してから表示する（失敗しても import は成立）。
         let latest = outcome.ledger;
+        let catchUpFailed: boolean;
         try {
-          await repo.catchUpRecurringRules(todayLocal());
+          catchUpFailed = await catchUpRecurringRulesToday();
           latest = await repo.loadLedger();
         } catch {
           // fail-soft
+          catchUpFailed = true;
         }
         applyRecoveredLedger(latest);
         toast.show(
@@ -622,6 +599,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           }),
           'success',
         );
+        if (catchUpFailed) {
+          toast.show(t('toast.recurringCatchUpPartialFailed'), 'error');
+        }
       }
       return outcome;
     },
@@ -637,16 +617,21 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       try {
         let next = await restoreFromSnapshot(snapshot.data);
         // 復元した定期ルールの経過分を起票（失敗しても復元は成立）。
+        let catchUpFailed: boolean;
         try {
-          await repo.catchUpRecurringRules(todayLocal());
+          catchUpFailed = await catchUpRecurringRulesToday();
           next = await repo.loadLedger();
         } catch {
           // fail-soft
+          catchUpFailed = true;
         }
         applyRecoveredLedger(next);
         toast.show(t('toast.restored'), 'success');
+        if (catchUpFailed) {
+          toast.show(t('toast.recurringCatchUpPartialFailed'), 'error');
+        }
       } catch (e) {
-        toast.show(t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -665,7 +650,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       await refresh();
       toast.show(t('toast.reset'), 'success');
     } catch (e) {
-      toast.show(t('toast.error'), 'error');
+      toast.show(errorText(e), 'error');
       throw e;
     }
   }, [refresh, toast]);
@@ -684,12 +669,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveMonthlyCost,
       removeMonthlyCost,
       archiveMonthlyCost,
-      saveSchedules,
-      postSchedule,
-      removeSchedule,
       createRecurringRule,
       saveRecurringRule,
-      setRecurringRulePaused,
       removeRecurringRule,
       saveTag,
       removeTag,
@@ -725,12 +706,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveMonthlyCost,
       removeMonthlyCost,
       archiveMonthlyCost,
-      saveSchedules,
-      postSchedule,
-      removeSchedule,
       createRecurringRule,
       saveRecurringRule,
-      setRecurringRulePaused,
       removeRecurringRule,
       saveTag,
       removeTag,
@@ -762,4 +739,12 @@ export function useLedger(): LedgerContextValue {
   const ctx = useContext(LedgerContext);
   if (!ctx) throw new Error('useLedger must be used within LedgerProvider');
   return ctx;
+}
+
+/**
+ * Provider 外では null を返す読み取り専用版（テストが表示部品を直接描画する場合用）。
+ * 実アプリの画面は常に LedgerProvider 配下で描画される。
+ */
+export function useOptionalLedger(): LedgerContextValue | null {
+  return useContext(LedgerContext);
 }

@@ -50,7 +50,7 @@ describe('createContinuousCost（持ち込み = 初期残高払い）', () => {
       { accountId: equity!.id, side: 'credit', amount: 12000 },
     ]);
 
-    // BS: 6月末断面 → 台帳 = 12000 − 認識6ヶ月ぶん 6000。equity = 12000。
+    // BS: 6月末断面 → 台帳 = 12000 − 月割り6ヶ月ぶん 6000。equity = 12000。
     const derived = reportEntriesForAsOf(ledger, '2026-06-30');
     const bs = deriveBalanceSheet(ledger.accounts, derived, '2026-06-30');
     const ccLedger = bs.assets.find((a) => a.account.id === CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
@@ -79,9 +79,9 @@ describe('createContinuousCost（持ち込み = 初期残高払い）', () => {
     const derived = reportEntriesForAsOf(ledger, '2026-07-30');
     expect(derived.filter((e) => e.metadata?.continuousCostId === item.id)).toHaveLength(0);
     const bs = deriveBalanceSheet(ledger.accounts, derived, '2026-07-30');
-    expect(
-      bs.assets.find((a) => a.account.id === CONTINUOUS_COST_LEDGER_ACCOUNT_ID)?.balance,
-    ).toBe(240000);
+    expect(bs.assets.find((a) => a.account.id === CONTINUOUS_COST_LEDGER_ACCOUNT_ID)?.balance).toBe(
+      240000,
+    );
   });
 
   it('export → schema 検証が通る（equity 貸方・不変条件⑥⑦を満たす）', async () => {
@@ -110,9 +110,9 @@ describe('createContinuousCost（持ち込み = 初期残高払い）', () => {
     await expect(createContinuousCost({ ...base, startDate: '2026/01/15' })).rejects.toThrow(
       LedgerError,
     );
-    await expect(
-      createContinuousCost({ ...base, endDate: '2026-01-14' }),
-    ).rejects.toMatchObject({ code: 'error.monthlyCost.endBeforeStart' });
+    await expect(createContinuousCost({ ...base, endDate: '2026-01-14' })).rejects.toMatchObject({
+      code: 'error.monthlyCost.endBeforeStart',
+    });
     await expect(
       createContinuousCost({ ...base, expenseAccountId: 'no-such-account' }),
     ).rejects.toMatchObject({ code: 'error.monthlyCost.expenseCategory' });

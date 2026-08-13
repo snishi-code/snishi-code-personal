@@ -5,16 +5,13 @@ import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider } from '../src/state/store';
 import { EntrySheet } from '../src/ui/screens/EntrySheet';
 import { Allocations } from '../src/ui/screens/Allocations';
+import { createContinuousCost, loadLedger, upsertAccount } from '../src/data/repository';
 import {
-  createContinuousCost,
-  loadLedger,
-  upsertAccount,
-} from '../src/data/repository';
-import {
-  groupedRecognitionAccounts,
-  recognitionAccountOptions,
+  groupedMonthlyAllocationAccounts,
+  monthlyAllocationAccountOptions,
 } from '../src/ui/accountOptions';
 import { ACCOUNT_ROLES, type AccountRole } from '../src/domain/accountRoles';
+import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import type { Account, AccountType } from '../src/domain/types';
@@ -60,39 +57,32 @@ function account(
 async function addCandidateFixtures() {
   await loadLedger();
   const fixtures = {
-    investment: account(
-      'recognition-investment',
-      '行き先・投資資産',
-      'asset',
-      'investment-asset',
-    ),
+    investment: account('allocation-investment', '行き先・投資資産', 'asset', 'investment-asset'),
     liability: account(
-      'recognition-liability',
+      'allocation-liability',
       '行き先・その他負債',
       'liability',
       'other-liability',
     ),
-    archived: account(
-      'recognition-archived',
-      '行き先・アーカイブ済み',
-      'asset',
-      'daily-asset',
-      true,
-    ),
+    archived: {
+      ...account('allocation-archived', '行き先・アーカイブ済み', 'asset', 'daily-asset', true),
+      startDate: '2026-07-27',
+      endDate: '2026-07-30',
+    },
     currentArchived: account(
-      'recognition-current-archived',
+      'allocation-current-archived',
       '行き先・編集中のアーカイブ',
       'revenue',
       'income-category',
     ),
     internal: account(
-      'recognition-internal',
+      CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
       '行き先・内部台帳',
       'asset',
       'continuing-cost-asset',
     ),
     adjustment: account(
-      'recognition-adjustment',
+      'allocation-adjustment',
       '行き先・残高調整',
       'expense',
       'system-adjustment',
@@ -144,7 +134,9 @@ describe('継続コスト資産の費用の行き先候補', () => {
       'income-category',
       true,
     );
-    const ids = recognitionAccountOptions([...accounts, archived]).map((option) => option.value);
+    const ids = monthlyAllocationAccountOptions([...accounts, archived]).map(
+      (option) => option.value,
+    );
 
     expect(ids).toEqual(
       expect.arrayContaining([
@@ -158,24 +150,20 @@ describe('継続コスト資産の費用の行き先候補', () => {
       ]),
     );
     expect(ids).not.toEqual(
-      expect.arrayContaining([
-        'role-continuing-cost-asset',
-        'role-system-adjustment',
-        archived.id,
-      ]),
+      expect.arrayContaining(['role-continuing-cost-asset', 'role-system-adjustment', archived.id]),
     );
     expect(
-      recognitionAccountOptions([...accounts, archived], archived.id).map(
+      monthlyAllocationAccountOptions([...accounts, archived], archived.id).map(
         (option) => option.value,
       ),
     ).toContain(archived.id);
     expect(
-      recognitionAccountOptions(accounts, 'role-system-adjustment').map(
+      monthlyAllocationAccountOptions(accounts, 'role-system-adjustment').map(
         (option) => option.value,
       ),
     ).not.toContain('role-system-adjustment');
     expect(
-      groupedRecognitionAccounts([...accounts, archived])
+      groupedMonthlyAllocationAccounts([...accounts, archived])
         .flatMap((group) => group.accounts)
         .map((candidate) => candidate.id),
     ).toEqual(expect.arrayContaining(ids));
@@ -211,7 +199,8 @@ describe('継続コスト資産の費用の行き先候補', () => {
       expect(found).toBeInTheDocument();
       return found!;
     });
-    expect(within(picker).getByText('費用の行き先')).toBeInTheDocument();
+    // 計上先 = 中立表記（income 行きの差引形も通るため「費用の行き先」とは表示しない）。
+    expect(within(picker).getByText('計上先')).toBeInTheDocument();
     await waitFor(() => {
       for (const name of [
         '現金',
@@ -263,7 +252,7 @@ describe('継続コスト資産の費用の行き先候補', () => {
     await addCandidateFixtures();
     render(
       <Providers>
-        <Allocations onEditEntry={() => undefined} />
+        <Allocations period={{ mode: 'all' }} onEditEntry={() => undefined} />
       </Providers>,
     );
     fireEvent.click(
@@ -274,7 +263,7 @@ describe('継続コスト資産の費用の行き先候補', () => {
       }),
     );
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.addChooser}.asset"]`)!);
-    const select = await screen.findByLabelText('費用の行き先');
+    const select = await screen.findByLabelText('計上先');
     await expectBroadCandidates(select, [
       '行き先・アーカイブ済み',
       '行き先・内部台帳',
@@ -282,7 +271,7 @@ describe('継続コスト資産の費用の行き先候補', () => {
     ]);
   });
 
-  it('既存項目の編集では現在値だけアーカイブ済みでも残し、他のアーカイブは除外する', async () => {
+  it('itemが参照中の行き先科目はitem期間より前に終了できない', async () => {
     const fixtures = await addCandidateFixtures();
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((candidate) => candidate.name === '現金')!;
@@ -294,37 +283,9 @@ describe('継続コスト資産の費用の行き先候補', () => {
       expenseAccountId: fixtures.currentArchived.id,
       creditAccountId: cash.id,
     });
-    await upsertAccount({ ...fixtures.currentArchived, archived: true });
-
-    render(
-      <Providers>
-        <Allocations onEditEntry={() => undefined} />
-      </Providers>,
-    );
-    fireEvent.click(
-      await screen.findByRole('button', { name: `編集: ${item.name}` }),
-    );
-
-    const select = await waitFor(() => {
-      const found = document.querySelector(
-        `[data-ui="${UI.allocations.editExpense}"]`,
-      ) as HTMLSelectElement | null;
-      expect(found).toBeInTheDocument();
-      return found!;
-    });
-    expect(select).toHaveAccessibleName('費用の行き先');
-    expect(select).toHaveValue(fixtures.currentArchived.id);
-    expect(within(select).getByRole('option', { name: fixtures.currentArchived.name })).toBeInTheDocument();
-    expect(
-      within(select).queryByRole('option', { name: fixtures.archived.name }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(select).queryByRole('option', { name: fixtures.internal.name }),
-    ).not.toBeInTheDocument();
-    await expectBroadCandidates(select, [
-      fixtures.archived.name,
-      fixtures.internal.name,
-      fixtures.adjustment.name,
-    ]);
+    await expect(
+      upsertAccount({ ...fixtures.currentArchived, archived: true }),
+    ).rejects.toMatchObject({ code: 'error.account.referenceOutsidePeriod' });
+    expect(item.expenseAccountId).toBe(fixtures.currentArchived.id);
   });
 });

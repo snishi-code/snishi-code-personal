@@ -73,9 +73,10 @@ export function validateSimpleEntry(input: Partial<SimpleEntryInput>): EntryVali
 
 function cleanMetadata(meta: EntryMetadata | undefined): EntryMetadata | undefined {
   if (!meta) return undefined;
-  const has =
-    meta.inputMode !== undefined ||
-    meta.reversalOfEntryId !== undefined;
+  // 値の入ったキーが 1 つでもあれば「意味のある metadata」として丸ごと保持する
+  // （既知キーの列挙で判定すると、列挙に無い由来メタしか持たない仕訳の編集で
+  // metadata ごと落ちる。一般形の堅牢化・Codex 指摘）。
+  const has = Object.values(meta).some((value) => value !== undefined);
   return has ? meta : undefined;
 }
 

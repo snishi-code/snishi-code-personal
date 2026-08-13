@@ -1,26 +1,35 @@
-/*
- * テンプレート QR 受信ダイアログ。
- *
- * TPL ページを順不同で収集し、全ページの C1/JSON/Template 検証が終わるまで
- * store へは一切書かない。完成後も必ず内容をプレビューし、同一 id がある時は
- * 上書きか新 id での追加を人間が選んでから saveTemplate() する。
- */
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { uniqueName } from '@snishi/foundation/qr/protocol';
 import { isScannerSupported, scanQrStream, type ScanSession } from '@snishi/foundation/qr/scan';
 import { Button } from '@snishi/foundation/ui/Button';
 import { Modal } from '@snishi/foundation/ui/Modal';
-import { newId } from '../data/constants';
-import type { Template } from '../domain/template';
 import {
-  createTemplateWireCollector,
-  summarizeTemplate,
+  createShareWireCollector,
+  FORMAT_WIRE_KIND,
+  FRAME_WIRE_KIND,
+  prepareShareImport,
   TemplateWireError,
-  type TemplateWireReceiveResult,
+  type ExistingShareEntities,
+  type ShareWirePayload,
+  type ShareWireReceiveResult,
 } from '../domain/templateWire';
 import { s } from '../i18n';
+
+const errorStyle: CSSProperties = { color: 'var(--danger)' };
+const videoStyle: CSSProperties = {
+  display: 'block',
+  width: '100%',
+  maxHeight: '40dvh',
+  borderRadius: 8,
+  background: '#000000',
+  objectFit: 'cover',
+};
+const previewGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'minmax(8rem, auto) 1fr',
+  gap: '8px 12px',
+  margin: '12px 0',
+};
 
 function decodeErrorMessage(error: unknown): string {
   if (!(error instanceof TemplateWireError)) return s.templateQr.errorDecode;
@@ -33,7 +42,9 @@ function decodeErrorMessage(error: unknown): string {
     case 'wrong-version':
       return s.templateQr.errorVersion;
     case 'invalid-template':
-      return s.templateQr.errorTemplate;
+    case 'invalid-frame':
+    case 'invalid-format':
+      return s.templateQr.errorEntity;
     case 'incomplete-pages':
     case 'mixed-batch':
       return s.templateQr.errorIncomplete;
@@ -45,59 +56,73 @@ function decodeErrorMessage(error: unknown): string {
   }
 }
 
-const errorStyle: CSSProperties = { color: 'var(--danger)' };
-const videoStyle: CSSProperties = {
-  display: 'block',
-  width: '100%',
-  maxHeight: '40dvh',
-  borderRadius: 8,
-  background: '#000000',
-  objectFit: 'cover',
-};
-const radioRowStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  minHeight: 44,
-};
-const previewGridStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'minmax(8rem, auto) 1fr',
-  gap: '8px 12px',
-  margin: '12px 0',
-};
-
-type SaveMode = 'overwrite' | 'copy';
-
-export interface TemplateQrReceiveDialogProps {
-  /** 既存テンプレート一覧 (id 衝突判定・重複名回避に使う)。 */
-  templates: Template[];
-  /** 保存 (store.saveTemplate へ委譲)。 */
-  onSave: (template: Template) => Promise<void>;
-  onClose: () => void;
-  /** 保存成功時だけ呼ぶ。toast 等は統合側が担う。 */
-  onSaved?: (template: Template) => void;
+function Preview({ payload }: { payload: ShareWirePayload }) {
+  if (payload.kind === FRAME_WIRE_KIND) {
+    return (
+      <dl style={previewGridStyle}>
+        <dt>{s.templateQr.kind}</dt>
+        <dd>{s.templateQr.frame}</dd>
+        <dt>{s.frameEdit.name}</dt>
+        <dd>{payload.frame.name}</dd>
+        <dt>{s.tpl.sections}</dt>
+        <dd>{payload.frame.sections.length}</dd>
+      </dl>
+    );
+  }
+  if (payload.kind === FORMAT_WIRE_KIND) {
+    return (
+      <dl style={previewGridStyle}>
+        <dt>{s.templateQr.kind}</dt>
+        <dd>{s.templateQr.format}</dd>
+        <dt>{s.formatEdit.name}</dt>
+        <dd>{payload.format.name}</dd>
+        <dt>{s.tpl.items}</dt>
+        <dd>{payload.format.items.length}</dd>
+      </dl>
+    );
+  }
+  return (
+    <dl style={previewGridStyle}>
+      <dt>{s.templateQr.kind}</dt>
+      <dd>{s.templateQr.templatePackage}</dd>
+      <dt>{s.tpl.name}</dt>
+      <dd>{payload.package.template.name}</dd>
+      <dt>{s.templateQr.frame}</dt>
+      <dd>
+        {payload.package.frame.name}（{payload.package.frame.sections.length}場所）
+      </dd>
+      <dt>{s.templateQr.formats}</dt>
+      <dd>
+        {payload.package.formats.length > 0
+          ? payload.package.formats.map((format) => format.name).join('、')
+          : s.templateQr.none}
+      </dd>
+    </dl>
+  );
 }
 
-export function TemplateQrReceiveDialog({
-  templates,
+export function ShareQrReceiveDialog({
+  existing,
   onSave,
   onClose,
   onSaved,
-}: TemplateQrReceiveDialogProps) {
-  const collectorRef = useRef(createTemplateWireCollector());
+}: {
+  existing: ExistingShareEntities;
+  onSave: (payload: ShareWirePayload) => Promise<void>;
+  onClose: () => void;
+  onSaved?: (payload: ShareWirePayload) => void;
+}) {
+  const collectorRef = useRef(createShareWireCollector());
   const videoRef = useRef<HTMLVideoElement>(null);
   const scanSessionRef = useRef<ScanSession | null>(null);
   const scanProcessingRef = useRef(false);
-
   const [cameraSupported] = useState(() => isScannerSupported());
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [pastedPage, setPastedPage] = useState('');
   const [receiveStatus, setReceiveStatus] = useState<string | null>(null);
   const [receiveError, setReceiveError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<Template | null>(null);
-  const [saveMode, setSaveMode] = useState<SaveMode>('copy');
+  const [preview, setPreview] = useState<ShareWirePayload | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -106,11 +131,10 @@ export function TemplateQrReceiveDialog({
     scanSessionRef.current = null;
     setCameraActive(false);
   }, []);
-
   useEffect(() => () => scanSessionRef.current?.stop(), []);
 
   const applyReceiveResult = useCallback(
-    (result: TemplateWireReceiveResult) => {
+    (result: ShareWireReceiveResult) => {
       if (result.status === 'rejected') {
         setReceiveError(
           result.reason === 'wrong-kind'
@@ -119,7 +143,6 @@ export function TemplateQrReceiveDialog({
         );
         return;
       }
-
       setReceiveError(null);
       if (result.status === 'duplicate') {
         setReceiveStatus(s.templateQr.duplicate(result.got, result.total));
@@ -129,11 +152,9 @@ export function TemplateQrReceiveDialog({
         setReceiveStatus(s.templateQr.progress(result.got, result.total));
         return;
       }
-      if (!('template' in result)) return;
-
+      if (!('payload' in result)) return;
       setReceiveStatus(s.templateQr.progress(result.got, result.total));
-      setPreview(result.template);
-      setSaveMode('copy');
+      setPreview(result.payload);
       setSaveError(null);
       stopCamera();
     },
@@ -145,7 +166,6 @@ export function TemplateQrReceiveDialog({
       try {
         const result = await collectorRef.current.receivePage(text);
         applyReceiveResult(result);
-        // fail-closed: 形式/kind 不一致や decode throw では貼り付け欄を残す。
         if (source === 'paste' && result.consumed) setPastedPage('');
       } catch (error) {
         setReceiveError(decodeErrorMessage(error));
@@ -158,7 +178,6 @@ export function TemplateQrReceiveDialog({
     if (!cameraSupported || scanSessionRef.current) return;
     const video = videoRef.current;
     if (!video) return;
-
     setCameraError(null);
     setCameraActive(true);
     scanSessionRef.current = scanQrStream(
@@ -188,41 +207,25 @@ export function TemplateQrReceiveDialog({
     setReceiveStatus(null);
     setReceiveError(null);
     setPreview(null);
-    setSaveMode('copy');
     setSaveError(null);
   }, [stopCamera]);
 
-  const collision = preview ? templates.some((template) => template.id === preview.id) : false;
-  const summary = preview ? summarizeTemplate(preview) : null;
-
-  const applyTemplate = useCallback(async () => {
+  const applyPayload = useCallback(async () => {
     if (!preview || saving) return;
     setSaving(true);
     setSaveError(null);
     try {
-      let toSave = preview;
-      const idExists = templates.some((template) => template.id === preview.id);
-      if (idExists && saveMode === 'copy') {
-        toSave = {
-          ...preview,
-          id: newId('tpl'),
-          name: uniqueName(
-            preview.name,
-            templates.map((template) => template.name),
-          ),
-          updatedAt: Date.now(),
-        };
-      }
-      await onSave(toSave);
-      onSaved?.(toSave);
+      const imported = prepareShareImport(preview, existing);
+      await onSave(imported);
+      onSaved?.(imported);
       onClose();
     } catch (error) {
-      console.error('template qr save failed', error);
+      console.error('share qr save failed', error);
       setSaveError(s.templateQr.saveFailed);
     } finally {
       setSaving(false);
     }
-  }, [onClose, onSave, onSaved, preview, saveMode, saving, templates]);
+  }, [existing, onClose, onSave, onSaved, preview, saving]);
 
   return (
     <Modal
@@ -233,7 +236,6 @@ export function TemplateQrReceiveDialog({
       dismissMode={saving ? 'never' : 'always'}
     >
       <p className="muted">{s.templateQr.receiveIntro}</p>
-
       {preview === null ? (
         <>
           {cameraSupported ? (
@@ -261,7 +263,6 @@ export function TemplateQrReceiveDialog({
           ) : (
             <p className="muted">{s.templateQr.cameraUnavailable}</p>
           )}
-
           <section className="tm-card">
             <label>
               <span>{s.templateQr.pasteLabel}</span>
@@ -281,7 +282,6 @@ export function TemplateQrReceiveDialog({
               {s.templateQr.readPage}
             </Button>
           </section>
-
           <div aria-live="polite">
             {receiveStatus !== null ? <p>{receiveStatus}</p> : null}
             {receiveError !== null ? (
@@ -298,47 +298,11 @@ export function TemplateQrReceiveDialog({
         </>
       ) : null}
 
-      {preview !== null && summary !== null ? (
+      {preview !== null ? (
         <>
           <h3>{s.templateQr.previewTitle}</h3>
-          <dl style={previewGridStyle}>
-            <dt>{s.tpl.name}</dt>
-            <dd>{preview.name}</dd>
-            <dt>{s.tpl.sections}</dt>
-            <dd>{s.templateQr.counts(summary.sections, summary.groups, summary.items)}</dd>
-            <dt>{s.tpl.includeProblems}</dt>
-            <dd>{preview.includeProblems ? s.templateQr.included : s.templateQr.excluded}</dd>
-            <dt>{s.tpl.includeHandover}</dt>
-            <dd>{preview.includeHandover ? s.templateQr.included : s.templateQr.excluded}</dd>
-          </dl>
-
-          {collision ? (
-            <fieldset className="tm-card">
-              <legend>{s.templateQr.conflictTitle}</legend>
-              <p className="muted">{s.templateQr.conflictBody}</p>
-              <label style={radioRowStyle}>
-                <input
-                  type="radio"
-                  name="template-qr-save-mode"
-                  value="overwrite"
-                  checked={saveMode === 'overwrite'}
-                  onChange={() => setSaveMode('overwrite')}
-                />
-                {s.templateQr.overwrite}
-              </label>
-              <label style={radioRowStyle}>
-                <input
-                  type="radio"
-                  name="template-qr-save-mode"
-                  value="copy"
-                  checked={saveMode === 'copy'}
-                  onChange={() => setSaveMode('copy')}
-                />
-                {s.templateQr.addCopy}
-              </label>
-            </fieldset>
-          ) : null}
-
+          <Preview payload={preview} />
+          <p className="muted">{s.templateQr.collisionSafety}</p>
           {saveError !== null ? (
             <p role="alert" style={errorStyle}>
               {saveError}
@@ -348,7 +312,7 @@ export function TemplateQrReceiveDialog({
             <Button variant="ghost" onClick={resetReceive} disabled={saving}>
               {s.templateQr.reset}
             </Button>
-            <Button variant="primary" onClick={() => void applyTemplate()} disabled={saving}>
+            <Button variant="primary" onClick={() => void applyPayload()} disabled={saving}>
               {saving ? s.common.loading : s.common.save}
             </Button>
           </div>

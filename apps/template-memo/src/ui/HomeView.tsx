@@ -9,6 +9,7 @@ import { BottomActionBar } from './BottomActionBar';
 import { useToast } from '@snishi/foundation/ui/toast';
 import { clone } from '../domain/types';
 import { applyRoundStartClear } from '../domain/clearPolicy';
+import { roundStartClearTagNames } from '../domain/tags';
 import { REASON, countActivePatients } from '../data/snapshots';
 import { useRevision, type AppRuntime } from './appRuntime';
 import { ensurePatientOrder, formatPatientLabel, statusClass, STATUS_MARK } from './patientDisplay';
@@ -50,10 +51,9 @@ export function HomeView({
   const archive = store.isArchiveViewActive();
 
   // ラウンド開始 (= 記録クリア)。クリア対象はユーザー選択式にせず、コード固定ポリシー (design.md「クリア方針」)。
-  //   クリアする: status 黄/緑/灰 → none / 今回メモ (visitMemo) /
-  //               inputHash (visitMemo から都度算出するので visitMemo クリアで自動失効) /
-  //               今回セッション用入力値 (projectedValues)。
-  //   残す: status 青 (持ち越し/要注意) / 継続メモ (standingMemo) / タグ / プロブレムリスト。
+  //   クリアする: status 黄/緑/灰 → none / 場所ごとの自由本文 (sectionTexts) /
+  //               今回セッション用入力値 (projectedValues) / 青以外の色のタグ。
+  //   残す: status 青 (持ち越し/要注意) / 継続メモ (standingMemo) / 青のタグ / プロブレムリスト。
   // fail-closed: 保存できなければ live を戻して中断。
   async function runClear(): Promise<void> {
     setClearConfirm(false);
@@ -66,8 +66,12 @@ export function HomeView({
     );
     const now = Date.now();
     const backup = state.patients.map((p) => clone(p));
+    // タグの色 = 「ラウンド開始で外れるか」。色の解決 (settings.tags) はこの呼び出し側で行い、
+    // domain のクリア方針には「外すタグ名の集合」だけを渡す。定義に無い孤児タグ名は集合に
+    // 入らない = 残る (安全側)。
+    const clearTagNames = roundStartClearTagNames(store.getSettings().tags);
     // クリアは固定ポリシー (clearPolicy.applyRoundStartClear)。1 箇所に集約し UI は必ずこれを通す。
-    for (const p of state.patients) applyRoundStartClear(p, now);
+    for (const p of state.patients) applyRoundStartClear(p, now, clearTagNames);
     try {
       await store.persistActiveOrThrow();
     } catch (e) {
@@ -84,7 +88,7 @@ export function HomeView({
   return (
     <section aria-label={s.header.home} className="homeView">
       <div className="viewToolbar">
-        {/* ラウンド開始。テンプレート未選択でも開始できる (status/今回メモ等のクリアはテンプレートに依存しない)。 */}
+        {/* ラウンド開始。テンプレート未選択でも開始できる (status 等のクリアはテンプレートに依存しない)。 */}
         <Button
           onClick={() => setClearConfirm(true)}
           title={s.home.start.tooltip}

@@ -18,7 +18,9 @@ import {
   restoreFromSnapshot,
 } from '../src/data/exportImport';
 import { buildSimpleEntry } from '../src/domain/entry';
-import { APP_ID } from '../src/domain/constants';
+import { APP_ID, SCHEMA_VERSION } from '../src/domain/constants';
+
+const removedLegacyMonthlyCostKey = ['monthly', 'Cost', 'Recognition'].join('');
 
 async function seedWithEntry() {
   const ledger = await loadLedger(); // 既定科目を投入
@@ -53,7 +55,22 @@ describe('export/import round trip', () => {
     await importFromJsonText(text);
     const snaps = await listSnapshots();
     expect(snaps.length).toBeGreaterThan(0);
-    expect(snaps[0]?.reason).toBe('import前');
+    expect(snaps[0]?.reason).toBe('import'); // v11: reason は理由コード
+  });
+
+  it('廃止済みの分類印を未知キーとして strip し、旧 JSON の取り込みは受理する', async () => {
+    const ledger = await seedWithEntry();
+    const exported = JSON.parse(exportToJsonText(ledger)) as {
+      journalEntries: Array<{ metadata?: Record<string, unknown> }>;
+    };
+    const first = exported.journalEntries[0]!;
+    first.metadata = { ...first.metadata, [removedLegacyMonthlyCostKey]: true };
+
+    const outcome = await importFromJsonText(JSON.stringify(exported));
+    expect(outcome.kind).toBe('ok');
+    expect((await loadLedger()).journalEntries[0]?.metadata).not.toHaveProperty(
+      removedLegacyMonthlyCostKey,
+    );
   });
 });
 
@@ -100,6 +117,16 @@ describe('fail-closed', () => {
       JSON.stringify({ ...pkg, schemaVersion: pkg.schemaVersion + 1 }),
     );
     expect(outcome.kind).toBe('unsupported-version');
+  });
+
+  it('v7 パッケージ（schemaVersion 7）は unsupported-version で拒否される（後方互換なし）', async () => {
+    const before = await seedWithEntry();
+    const pkg = buildExportPackage(before);
+    const outcome = await importFromJsonText(JSON.stringify({ ...pkg, schemaVersion: 7 }));
+    expect(outcome.kind).toBe('unsupported-version');
+    // 既存データは変更されない。
+    const after = await loadLedger();
+    expect(after.journalEntries.length).toBe(before.journalEntries.length);
   });
 
   it('v1 アプリのファイル（appId=snishi-code.simple-ledger）は not-our-file（識別子分離・仕様§7）', async () => {
@@ -171,6 +198,27 @@ describe('継続コスト資産の export/import', () => {
       ),
     ).toBe(true);
   });
+
+  it('費用化の開始日（allocationStartDate）は export/import で round-trip 保持される（§D）', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '変動費')!;
+    await createContinuousCost({
+      name: '前払い保険',
+      amount: 60000,
+      startDate: '2026-06-15',
+      allocationStartDate: '2026-12-01',
+      endDate: '2027-05-31',
+      expenseAccountId: food.id,
+      creditAccountId: cash.id,
+    });
+    const seeded = await loadLedger();
+    expect(seeded.monthlyCostItems[0]?.allocationStartDate).toBe('2026-12-01');
+    const outcome = await importFromJsonText(exportToJsonText(seeded));
+    expect(outcome.kind).toBe('ok');
+    const reloaded = await loadLedger();
+    expect(reloaded.monthlyCostItems[0]?.allocationStartDate).toBe('2026-12-01');
+  });
 });
 
 describe('restoreFromSnapshot（fail-closed）', () => {
@@ -229,6 +277,24 @@ describe('export package 形状', () => {
     expect(pkg).toHaveProperty('deviceId');
     expect(pkg).toHaveProperty('revision');
     expect(pkg).toHaveProperty('settings');
+  });
+
+  it('schemaVersion 11 で、廃止済みフィールドを含まない', async () => {
+    const ledger = await seedWithEntry();
+    const pkg = buildExportPackage(ledger);
+    expect(pkg.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(pkg.schemaVersion).toBe(11);
+    expect(pkg).not.toHaveProperty('cashflowSchedules');
+    // v10 で撤去した CSV 取込の 3 配列も含まない。
+    expect(pkg).not.toHaveProperty('importProfiles');
+    expect(pkg).not.toHaveProperty('profileBindings');
+    expect(pkg).not.toHaveProperty('importDecisions');
+    // 文字列化した export JSON にも痕跡が残らない。
+    const parsed = JSON.parse(exportToJsonText(ledger)) as Record<string, unknown>;
+    expect(Object.keys(parsed)).not.toContain('cashflowSchedules');
+    expect(Object.keys(parsed)).not.toContain('importProfiles');
+    expect(Object.keys(parsed)).not.toContain('profileBindings');
+    expect(Object.keys(parsed)).not.toContain('importDecisions');
   });
 });
 

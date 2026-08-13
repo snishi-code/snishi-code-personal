@@ -52,16 +52,16 @@ describe('資産の内訳 4 枠', () => {
     // チャージ残高を「自由に動かせない」印に（例外側だけ movable=false を持つ）。
     await upsertAccount({ ...charge, movable: false });
     await createOpenings([
-      { accountId: cash.id, amount: 300000, date: '2000-01-01' },
-      { accountId: bank.id, amount: 200000, date: '2000-01-01' },
-      { accountId: charge.id, amount: 5000, date: '2000-01-01' },
-      { accountId: invest.id, amount: 50000, date: '2000-01-01' },
+      { accountId: cash.id, amount: 30000000, date: '2000-01-01' },
+      { accountId: bank.id, amount: 20000000, date: '2000-01-01' },
+      { accountId: charge.id, amount: 500000, date: '2000-01-01' },
+      { accountId: invest.id, amount: 5000000, date: '2000-01-01' },
     ]);
     // 終了日なし = 費用の割り振りなし → 台帳の残存価値は全額 120,000 のまま。
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
     await createContinuousCost({
       name: '洗濯機',
-      amount: 120000,
+      amount: 12000000,
       startDate: todayLocal(),
       expenseAccountId: expense.id,
       creditAccountId: cash.id,
@@ -110,7 +110,7 @@ describe('資産の内訳 4 枠', () => {
   it('自由に動かせないお金・台帳が無ければ、その枠ごと出さない', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    await createOpenings([{ accountId: cash.id, amount: 10000, date: '2000-01-01' }]);
+    await createOpenings([{ accountId: cash.id, amount: 1000000, date: '2000-01-01' }]);
 
     render(
       <Providers>
@@ -136,9 +136,9 @@ describe('資産の内訳 4 枠', () => {
 
 describe('負債の内訳 2 枠', () => {
   it.each([
-    { name: 'カードのみ', card: true, loan: false, total: 30000 },
-    { name: 'ローンのみ', card: false, loan: true, total: 200000 },
-    { name: 'カードとローン', card: true, loan: true, total: 230000 },
+    { name: 'カードのみ', card: true, loan: false, total: 3000000 },
+    { name: 'ローンのみ', card: false, loan: true, total: 20000000 },
+    { name: 'カードとローン', card: true, loan: true, total: 23000000 },
     { name: '負債なし', card: false, loan: false, total: 0 },
   ])('$name', async ({ card: showCard, loan: showLoan, total }) => {
     const ledger = await loadLedger();
@@ -158,8 +158,8 @@ describe('負債の内訳 2 枠', () => {
     if (showLoan) await upsertAccount(loan);
 
     const openings = [
-      ...(showCard ? [{ accountId: card.id, amount: 30000, date: '2000-01-01' }] : []),
-      ...(showLoan ? [{ accountId: loan.id, amount: 200000, date: '2000-01-01' }] : []),
+      ...(showCard ? [{ accountId: card.id, amount: 3000000, date: '2000-01-01' }] : []),
+      ...(showLoan ? [{ accountId: loan.id, amount: 20000000, date: '2000-01-01' }] : []),
     ];
     if (openings.length > 0) await createOpenings(openings);
 
@@ -176,8 +176,9 @@ describe('負債の内訳 2 枠', () => {
     );
 
     await waitFor(() => {
+      // total は minor。表示は表示単位（÷100・digits=0）で出る。
       expect(ui(UI.liabilitiesBreakdown.total)).toHaveTextContent(
-        new Intl.NumberFormat('ja-JP').format(total),
+        new Intl.NumberFormat('ja-JP').format(total / 100),
       );
     });
     expect(Boolean(ui(UI.liabilitiesBreakdown.shortTermSubtotal))).toBe(showCard);
@@ -191,9 +192,9 @@ describe('負債の内訳 2 枠', () => {
     if (showCard && showLoan) {
       const shortTerm = ui(UI.liabilitiesBreakdown.shortTermSubtotal)!;
       const longTerm = ui(UI.liabilitiesBreakdown.longTermSubtotal)!;
-      expect(shortTerm.compareDocumentPosition(longTerm) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
-        0,
-      );
+      expect(
+        shortTerm.compareDocumentPosition(longTerm) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).not.toBe(0);
     }
   });
 });

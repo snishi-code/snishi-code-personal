@@ -6,12 +6,9 @@ describe('isValidIsoMonth', () => {
     expect(isValidIsoMonth(month)).toBe(true);
   });
 
-  it.each(['2026-00', '2026-13', '2026-99', '2026-1', '2026/01'])(
-    '%s を拒否する',
-    (month) => {
-      expect(isValidIsoMonth(month)).toBe(false);
-    },
-  );
+  it.each(['2026-00', '2026-13', '2026-99', '2026-1', '2026/01'])('%s を拒否する', (month) => {
+    expect(isValidIsoMonth(month)).toBe(false);
+  });
 });
 
 describe('isValidIsoDate', () => {

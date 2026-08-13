@@ -7,7 +7,7 @@
  *   requestClose 経由）→ 画面履歴 → dashboard の終了確認、の順。
  * 個別画面は Back 対応を持たない（overlay は ui/overlays.tsx のラッパーが自動登録）。
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AppHeader } from '@snishi/foundation/ui/AppHeader';
 import { ConfirmDialog as ExitConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
 import { Icon } from '@snishi/foundation/ui/Icon';
@@ -22,6 +22,8 @@ import { Breakdown } from './ui/screens/Breakdown';
 import { ExpenseBreakdown } from './ui/screens/ExpenseBreakdown';
 import { NetIncome } from './ui/screens/NetIncome';
 import { Journal, type JournalFilter } from './ui/screens/Journal';
+import { YearlyOverview } from './ui/screens/YearlyOverview';
+import { TimelineCalendar } from './ui/screens/TimelineCalendar';
 import { Allocations, type AllocationsTarget } from './ui/screens/Allocations';
 import { Cashflow } from './ui/screens/Cashflow';
 import { Tags } from './ui/screens/Tags';
@@ -46,8 +48,11 @@ export function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [entryInit, setEntryInit] = useState<EntryInit | null>(null);
   const [journalFilter, setJournalFilter] = useState<JournalFilter | null>(null);
+  const [journalTargetEntryId, setJournalTargetEntryId] = useState<string | null>(null);
   // 仕訳一覧の計算で生まれた行タップ → 「毎月のもの」で開くシートの対象（1 回で消費）。
   const [allocationsTarget, setAllocationsTarget] = useState<AllocationsTarget | null>(null);
+  // 投資利回りの投影行タップ → 勘定科目で開く編集シートの対象（1 回で消費）。
+  const [accountsTarget, setAccountsTarget] = useState<{ accountId: string } | null>(null);
   const [exitConfirm, setExitConfirm] = useState(false);
   // オンボーディングは「初回状態からの派生 + ユーザー操作の上書き」で開閉する
   // （effect での setState を避ける。render 中の派生調整パターン）。
@@ -66,9 +71,19 @@ export function App() {
     isExitConfirmOpen: () => exitConfirm,
   });
   const screen = view as Screen;
+
+  // 画面を切り替えたら document スクロールを先頭へ戻す（オーバーレイの開閉では動かさない）。
+  // document スクロールは画面差し替えをまたいで残るため、長い画面（ホームの仕訳・一覧）から
+  // 遷移すると次の画面が途中位置で開いてしまうのを防ぐ。
+  useEffect(() => {
+    if (typeof window.scrollTo === 'function') window.scrollTo(0, 0);
+  }, [screen]);
+
   const go = (s: Screen) => {
     setJournalFilter(null);
+    setJournalTargetEntryId(null);
     setAllocationsTarget(null);
+    setAccountsTarget(null);
     navigate(s);
   };
   // ヘッダーの日付を変えたら明示フィルターより日付を優先する（フィルターが居座らない）。
@@ -120,6 +135,7 @@ export function App() {
   // 日付だけの絞り込み（解除チップが出ない）が居座らない。
   const goJournalFiltered = (filter: JournalFilter) => {
     navigate('journal');
+    setJournalTargetEntryId(null);
     setJournalFilter(filter);
   };
 
@@ -127,6 +143,30 @@ export function App() {
   const goAllocationsFor = (target: AllocationsTarget) => {
     navigate('allocations');
     setAllocationsTarget(target);
+  };
+
+  // 仕訳一覧・タイムライン → 勘定科目（投資利回りの投影行の由来 = 利回りを宣言した科目を開く）。
+  const goAccountFor = (accountId: string) => {
+    navigate('accounts');
+    setAccountsTarget({ accountId });
+  };
+
+  // タイムラインは保存仕訳の種類を再解釈せず、仕訳一覧の既存 resolver へ ID を渡す。
+  // これにより通常仕訳だけでなく、初期残高・残高補正も各専用シートで開く。
+  const goJournalEntry = (entryId: string) => {
+    const entry = ledger.journalEntries.find((candidate) => candidate.id === entryId);
+    if (!entry) return;
+    const isPurchase =
+      entry.metadata?.monthlyCostId !== undefined && entry.metadata.monthlyCostRecovery !== true;
+    const needsJournalResolver =
+      !!entry.metadata?.adjustment || (entry.kind === 'opening' && !isPurchase);
+    navigate('journal');
+    setJournalFilter(null);
+    if (needsJournalResolver) setJournalTargetEntryId(entryId);
+    else {
+      setJournalTargetEntryId(null);
+      openEdit(entry);
+    }
   };
 
   const today = todayLocal();
@@ -276,17 +316,28 @@ export function App() {
             onEditEntry={openEdit}
             onReverse={openReversal}
             onOpenAllocations={goAllocationsFor}
+            onOpenAccount={goAccountFor}
             filter={journalFilter}
             period={period}
+            targetEntryId={journalTargetEntryId}
             onClearFilter={() => setJournalFilter(null)}
           />
         ) : null}
+        {screen === 'timeline' ? (
+          <TimelineCalendar
+            period={period}
+            onOpenEntry={goJournalEntry}
+            onOpenAllocations={goAllocationsFor}
+            onOpenAccount={goAccountFor}
+          />
+        ) : null}
+        {screen === 'yearlyOverview' ? <YearlyOverview period={period} /> : null}
         {screen === 'allocations' ? (
-          <Allocations onEditEntry={openEdit} target={allocationsTarget} />
+          <Allocations period={period} onEditEntry={openEdit} target={allocationsTarget} />
         ) : null}
         {screen === 'cashflow' ? <Cashflow onEditEntry={openEdit} /> : null}
         {screen === 'tags' ? <Tags /> : null}
-        {screen === 'accounts' ? <Accounts /> : null}
+        {screen === 'accounts' ? <Accounts period={period} target={accountsTarget} /> : null}
         {screen === 'settings' ? (
           <Settings onNavigate={go} onOpenOnboarding={() => setOnboardingManualOpen(true)} />
         ) : null}

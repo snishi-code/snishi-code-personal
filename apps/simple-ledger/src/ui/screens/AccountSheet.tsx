@@ -17,10 +17,16 @@ import { useLedger } from '../../state/store';
 import type { Account } from '../../domain/types';
 import { findAccountNameConflicts, planArchiveRenames } from '../../domain/accountNames';
 import { sortAccounts } from '../../domain/accountOrder';
+import {
+  annualReturnBpToPercentText,
+  parseAnnualReturnPercentText,
+} from '../../domain/investmentProjection';
 import { newId } from '../../domain/ids';
 import { nowIso, todayLocal } from '../../util/time';
 import { boxForRole, type AccountBox } from '../accountBoxes';
 import { errorText, t } from '../../i18n';
+import { parseAmountToMinor, sanitizeAmountText } from '../amountText';
+import { useMoneyDigits } from '../money';
 import { UI } from '../../ui-contract';
 
 export function AccountSheet({
@@ -46,11 +52,32 @@ export function AccountSheet({
   // 「自由に動かせる」は現預金の箱のみ・既定 ON。OFF のときだけ movable=false を保存する
   // （Suica・チャージ残高など、資金繰りの原資に数えない例外側に印を付ける）。
   const [movable, setMovable] = useState(existing ? existing.movable !== false : true);
+  const digits = useMoneyDigits();
   const [openingAmountText, setOpeningAmountText] = useState('');
   const [openingDate, setOpeningDate] = useState(todayLocal());
   const [repaymentAccountId, setRepaymentAccountId] = useState(existing?.repaymentAccountId ?? '');
   const [repaymentDayText, setRepaymentDayText] = useState(
     existing?.repaymentDay !== undefined ? String(existing.repaymentDay) : '',
+  );
+  // 想定利回り（年率% ⇄ bp・投資科目のみ）。空欄 = 投影なし。計上先とセットで保存する。
+  const [annualReturnText, setAnnualReturnText] = useState(
+    existing?.annualReturnBp !== undefined
+      ? annualReturnBpToPercentText(existing.annualReturnBp)
+      : '',
+  );
+  const [projectionAccountId, setProjectionAccountId] = useState(
+    existing?.projectionAccountId ?? '',
+  );
+  // 開始日欄の契約（§A 案1・作者決定）: 空欄 = undefined = 過去側制限なし。未設定値を
+  // createdAt で表示・再保存しない。明示値を空欄へ戻せば startDate を削除できる。
+  const [startDate, setStartDate] = useState(existing?.startDate ?? '');
+  const [endDate, setEndDate] = useState(
+    existing?.endDate ??
+      (existing?.archived && /^\d{4}-\d{2}-\d{2}/.test(existing.updatedAt)
+        ? existing.updatedAt.slice(0, 10)
+        : existing?.archived
+          ? todayLocal()
+          : ''),
   );
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
@@ -65,6 +92,27 @@ export function AccountSheet({
   // 返済設定は負債（カード・未払 / ローン）の編集時のみ（新規は作成後に編集で設定する）。
   const showRepayment =
     !!existing && (existing.role === 'payment-liability' || existing.role === 'other-liability');
+  // 想定利回りは投資科目の編集時のみ（返済設定と同じく、新規は作成後に編集で設定する）。
+  const showReturn = !!existing && existing.role === 'investment-asset';
+  // 計上先の候補 = 収入科目。サジェスト名（i18n 正本・既定「投資益」）の科目があれば
+  // 選択肢の先頭に出す（自動確定はしない＝既定は未設定のまま）。
+  const suggestedProjectionName = t('projection.suggestedAccountName');
+  const projectionOptions = [
+    { value: '', label: t('accounts.repaymentUnset') },
+    ...sortAccounts(accounts)
+      .filter((a) => a.role === 'income-category' && (!a.archived || a.id === projectionAccountId))
+      .sort(
+        (a, b) =>
+          Number(b.name === suggestedProjectionName) - Number(a.name === suggestedProjectionName),
+      )
+      .map((a) => ({ value: a.id, label: a.name })),
+  ];
+  // 計上先がアーカイブ済みだと投影は生成されない（fail-closed）。設定済みに見えるまま
+  // 黙って消えないよう、選択中の計上先の状態をここで名乗る。
+  const projectionAccountArchived =
+    projectionAccountId !== '' && accounts.some((a) => a.id === projectionAccountId && a.archived);
+  const annualReturnBp =
+    annualReturnText === '' ? null : parseAnnualReturnPercentText(annualReturnText);
   const repaymentOptions = [
     { value: '', label: t('accounts.repaymentUnset') },
     ...sortAccounts(accounts)
@@ -79,10 +127,7 @@ export function AccountSheet({
     }),
   ];
   const repaymentDay = repaymentDayText === '' ? null : Number.parseInt(repaymentDayText, 10);
-  const openingAmount =
-    openingAmountText === ''
-      ? null
-      : Number.parseInt(openingAmountText.replace(/[^\d]/g, ''), 10);
+  const openingAmount = openingAmountText === '' ? null : parseAmountToMinor(openingAmountText);
 
   async function doSave(renameArchivedConflicts: boolean) {
     const trimmed = name.trim();
@@ -112,11 +157,19 @@ export function AccountSheet({
           name: trimmed,
           type,
           role,
-          archived: existing?.archived ?? false,
+          archived: existing ? endDate !== '' : false,
+          // 空欄 = undefined をキー付きで渡す（保存境界が「明示解除」として startDate を削除する。
+          // 新規は既定 = 空欄なのでキー自体を渡さない）。
+          ...(existing ? { startDate: startDate === '' ? undefined : startDate } : {}),
+          ...(existing ? { endDate: endDate === '' ? undefined : endDate } : {}),
           ...(note.trim() !== '' ? { note: note.trim() } : {}),
           ...(showMovable && !movable ? { movable: false } : {}),
           ...(showRepayment && repaymentAccountId !== '' ? { repaymentAccountId } : {}),
           ...(showRepayment && repaymentDay !== null ? { repaymentDay } : {}),
+          // 想定利回りと計上先は必ずセットで保存する（空欄 = 両方なし = 投影なし）。
+          ...(showReturn && annualReturnBp !== null && projectionAccountId !== ''
+            ? { annualReturnBp, projectionAccountId }
+            : {}),
           createdAt: existing?.createdAt ?? ts,
           updatedAt: ts,
         };
@@ -136,6 +189,11 @@ export function AccountSheet({
       return;
     }
     if (!existing && !createRole) return; // 追加できない箱（UI からは到達しない）
+    // 開始日は空欄可（過去側制限なし・§A 案1）。両端があるときだけ前後関係を検証する。
+    if (existing && startDate !== '' && endDate !== '' && endDate < startDate) {
+      setError(t('error.monthlyCost.endBeforeStart'));
+      return;
+    }
     if (
       showOpening &&
       openingAmountText !== '' &&
@@ -147,9 +205,22 @@ export function AccountSheet({
     if (
       showRepayment &&
       repaymentDayText !== '' &&
-      (repaymentDay === null || !Number.isInteger(repaymentDay) || repaymentDay < 1 || repaymentDay > 31)
+      (repaymentDay === null ||
+        !Number.isInteger(repaymentDay) ||
+        repaymentDay < 1 ||
+        repaymentDay > 31)
     ) {
       setError(t('error.account.repaymentDayInvalid'));
+      return;
+    }
+    // 想定利回り: 解釈できない/範囲外の入力はエラー。片方だけの設定も保存前に拒否する
+    // （保存境界 error.account.projectionPair と同じ不変条件を入力時点で知らせる）。
+    if (showReturn && annualReturnText !== '' && annualReturnBp === null) {
+      setError(t('error.account.returnInvalid'));
+      return;
+    }
+    if (showReturn && (annualReturnText !== '') !== (projectionAccountId !== '')) {
+      setError(t('error.account.projectionPair'));
       return;
     }
     // 内訳名の重複を保存前に判定する（有効と衝突 → エラー、アーカイブと衝突 → 承認ダイアログ）。
@@ -174,6 +245,10 @@ export function AccountSheet({
     openingDate,
     repaymentAccountId,
     repaymentDayText,
+    annualReturnText,
+    projectionAccountId,
+    startDate,
+    endDate,
   });
   const [initialSnapshot] = useState(snapshot);
   const dirty = snapshot !== initialSnapshot;
@@ -224,6 +299,31 @@ export function AccountSheet({
           error={error}
         />
         {/* メモ欄は UI から撤去（2026-07-23 作者指示）。既存メモは note state 経由で保持される。 */}
+        {existing ? (
+          <div className="form-grid form-grid--2">
+            <TextInput
+              label={t('ccItem.startDate')}
+              type="date"
+              value={startDate}
+              onChange={(value) => {
+                setStartDate(value);
+                setError(undefined);
+              }}
+              hint={t('accounts.startDateHint')}
+              dataUi={UI.accounts.startDate}
+            />
+            <TextInput
+              label={t('ccItem.endDate')}
+              type="date"
+              value={endDate}
+              onChange={(value) => {
+                setEndDate(value);
+                setError(undefined);
+              }}
+              dataUi={UI.accounts.endDate}
+            />
+          </div>
+        ) : null}
         {showMovable ? (
           <label
             style={{
@@ -261,13 +361,46 @@ export function AccountSheet({
             />
           </>
         ) : null}
+        {showReturn ? (
+          <>
+            {/* 小数と負号を入力するため inputMode は指定しない
+                （numeric / decimal のソフトキーボードに '-' キーが無い）。符号付きの金額欄も同じ扱い。 */}
+            <TextInput
+              label={t('accounts.annualReturn')}
+              value={annualReturnText}
+              onChange={(v) => {
+                setAnnualReturnText(v);
+                setError(undefined);
+              }}
+              hint={t('accounts.annualReturnHint')}
+              dataUi={UI.accounts.annualReturn}
+            />
+            <SelectInput
+              label={t('accounts.projectionAccount')}
+              value={projectionAccountId}
+              onChange={(v) => {
+                setProjectionAccountId(v);
+                setError(undefined);
+              }}
+              options={projectionOptions}
+              hint={
+                projectionAccountArchived
+                  ? t('accounts.projectionAccountArchivedHint')
+                  : t('accounts.projectionAccountHint')
+              }
+              dataUi={UI.accounts.projectionAccount}
+            />
+          </>
+        ) : null}
         {showOpening ? (
           <>
             <TextInput
               label={t('accounts.openingAmount')}
-              inputMode="numeric"
+              inputMode={digits === 0 ? 'numeric' : 'decimal'}
               value={openingAmountText}
-              onChange={(v) => setOpeningAmountText(v.replace(/[^\d]/g, ''))}
+              onChange={(v) =>
+                setOpeningAmountText(sanitizeAmountText(v, digits, openingAmountText))
+              }
               hint={t('accounts.openingHint')}
               dataUi={UI.accounts.openingAmount}
             />

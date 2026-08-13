@@ -8,11 +8,13 @@
 import { describe, expect, it } from 'vitest';
 import './setup';
 import {
+  allocationStartOf,
   compareMonthlyCostItems,
   isArchived,
   isEndingSoon,
+  monthlyAllocationDate,
   monthlyCostForMonth,
-  recognitionSpan,
+  monthlyAllocationSpan,
   remainingValue,
   representativeMonthlyAmount,
 } from '../src/domain/monthlyCost';
@@ -40,16 +42,18 @@ function withoutEnd(base: MonthlyCostItem): MonthlyCostItem {
   return next;
 }
 
-describe('recognitionSpan', () => {
+describe('monthlyAllocationSpan', () => {
   it('開始日〜終了日の月バケット（日は配分に使わない）', () => {
-    expect(recognitionSpan(item({}))).toEqual({ from: '2026-01', n: 12 });
-    expect(recognitionSpan(item({ startDate: '2026-07-20', endDate: '2026-07-25' }))).toEqual({
-      from: '2026-07',
-      n: 1,
-    });
+    expect(monthlyAllocationSpan(item({}))).toEqual({ from: '2026-01', n: 12 });
+    expect(monthlyAllocationSpan(item({ startDate: '2026-07-20', endDate: '2026-07-25' }))).toEqual(
+      {
+        from: '2026-07',
+        n: 1,
+      },
+    );
   });
   it('終了日なしは null（配分しない）', () => {
-    expect(recognitionSpan(withoutEnd(item({})))).toBeNull();
+    expect(monthlyAllocationSpan(withoutEnd(item({})))).toBeNull();
   });
 });
 
@@ -110,7 +114,7 @@ describe('monthlyCostForMonth', () => {
 });
 
 describe('remainingValue', () => {
-  it('初月の認識日は startDate（それより前の asOf では減らない）', () => {
+  it('初月の月割り日は startDate（それより前の asOf では減らない）', () => {
     const yr = item({});
     expect(remainingValue(yr, '2026-01-14')).toBe(12000);
     expect(remainingValue(yr, '2026-01-15')).toBe(11000);
@@ -123,19 +127,61 @@ describe('remainingValue', () => {
     expect(remainingValue(yr, '2030-01-01')).toBe(0);
   });
   it('回収があるとき: 配り切ると残存価値 0（回収の振替は台帳から持ち出し済み・監査 P2-1）', () => {
-    // 240,000・2024-06〜2026-06 = 25ヶ月・回収 30,000 → 費用 210,000・認識完了後の残りは 0
-    // （台帳残高 = 購入 240,000 − 回収 30,000 − 認識 210,000 = 0 と一致する単一正本）。
+    // 240,000・2024-06〜2026-06 = 25ヶ月・回収 30,000 → 費用 210,000・月割り完了後の残りは 0
+    // （台帳残高 = 購入 240,000 − 回収 30,000 − 月割り 210,000 = 0 と一致する単一正本）。
     const sold = item({ amount: 240000, startDate: '2024-06-01', endDate: '2026-06-15' });
     expect(remainingValue(sold, '2026-06-15', 210000)).toBe(0);
-    // 認識途中: 認識済み 8,400 × 24 = 201,600 → 残り 210,000 − 201,600 = 8,400。
+    // 月割り途中: 月割り済み 8,400 × 24 = 201,600 → 残り 210,000 − 201,600 = 8,400。
     expect(remainingValue(sold, '2026-05-31', 210000)).toBe(8400);
     // 月あたりは 210,000 / 25 = 8,400（§6-1 の検算）
     expect(representativeMonthlyAmount(sold, 210000)).toBe(8400);
   });
-  it('終了日なし + 回収あり: 残存価値 = spreadTotal（認識 0 のまま回収分だけ減る）', () => {
+  it('終了日なし + 回収あり: 残存価値 = spreadTotal（月割り 0 のまま回収分だけ減る）', () => {
     const held = withoutEnd(item({ amount: 12000 }));
     expect(remainingValue(held, '2026-06-15', 9000)).toBe(9000);
     expect(remainingValue(held, '2026-06-15')).toBe(12000);
+  });
+});
+
+describe('費用化の開始日（allocationStartDate・購入日との分離 §D）', () => {
+  it('未設定 = 購入日（既定挙動は不変）', () => {
+    expect(allocationStartOf(item({}))).toBe('2026-01-15');
+    expect(monthlyAllocationSpan(item({}))).toEqual({ from: '2026-01', n: 12 });
+  });
+  it('月バケットの起点と等分の月数は費用化開始月〜終了月で数える', () => {
+    const deferred = item({ allocationStartDate: '2026-07-10' });
+    expect(allocationStartOf(deferred)).toBe('2026-07-10');
+    // 2026-07〜2026-12 = 6ヶ月（購入月 2026-01 からではない）。
+    expect(monthlyAllocationSpan(deferred)).toEqual({ from: '2026-07', n: 6 });
+    expect(monthlyCostForMonth(deferred, '2026-06')).toBe(0);
+    expect(monthlyCostForMonth(deferred, '2026-07')).toBe(2000);
+    expect(monthlyCostForMonth(deferred, '2026-12')).toBe(2000);
+  });
+  it('初月の月割り日は費用化の開始日・2ヶ月目以降は月初', () => {
+    const deferred = item({ allocationStartDate: '2026-07-10' });
+    const span = monthlyAllocationSpan(deferred)!;
+    expect(monthlyAllocationDate(deferred, span.from, 0)).toBe('2026-07-10');
+    expect(monthlyAllocationDate(deferred, span.from, 1)).toBe('2026-08-01');
+  });
+  it('残存価値は費用化開始日の前日まで全額のまま（購入月からは減らない）', () => {
+    const deferred = item({ allocationStartDate: '2026-07-10' });
+    expect(remainingValue(deferred, '2026-01-15')).toBe(12000);
+    expect(remainingValue(deferred, '2026-07-09')).toBe(12000);
+    expect(remainingValue(deferred, '2026-07-10')).toBe(10000);
+    expect(remainingValue(deferred, '2026-12-31')).toBe(0);
+  });
+  it('終了日なし + 費用化の開始日あり: 配分は従来どおり一切発生しない（特別な分岐なし）', () => {
+    const open = withoutEnd(item({ allocationStartDate: '2026-07-10' }));
+    expect(monthlyAllocationSpan(open)).toBeNull();
+    expect(monthlyCostForMonth(open, '2026-07')).toBe(0);
+    expect(remainingValue(open, '2100-12-31')).toBe(12000);
+  });
+  it('回収があるときも spreadTotal は費用化期間で再配分される', () => {
+    // 60,000・費用化 2026-07〜2026-12（6ヶ月）・回収 30,000 → 5,000/月。
+    const deferred = item({ amount: 60000, allocationStartDate: '2026-07-01' });
+    expect(monthlyCostForMonth(deferred, '2026-07', 30000)).toBe(5000);
+    expect(monthlyCostForMonth(deferred, '2026-06', 30000)).toBe(0);
+    expect(remainingValue(deferred, '2026-12-31', 30000)).toBe(0);
   });
 });
 

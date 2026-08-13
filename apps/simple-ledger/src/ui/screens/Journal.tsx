@@ -1,12 +1,17 @@
 /*
- * 仕訳一覧。保存される仕訳と計算で生まれる仕訳（継続コスト資産の費用行・定期ルールの投影）を
- * **区別せず全部**日付順で出す（reportEntriesForAsOf が単一の正本。export には混ぜない）。
+ * 仕訳一覧。保存される仕訳と計算で生まれる仕訳（継続コスト資産の費用行・定期ルール・
+ * 投資利回りの投影）を**区別せず全部**日付順で出す（displayEntriesForAsOf が単一の正本。
+ * export には混ぜない）。
+ * 並び替え（日付/金額 × 昇/降・既定 = 日付降順）は表示専用。抽出結果には件数と合計を出し、
+ * 合計の対象 = 表示している行の集合（科目タップ抽出 = 方向つき和 / それ以外 = 単純和）。
  * 展開範囲 = いま表示している範囲（to → 今日 or 保存仕訳の最も遠い日付。上限 2100-12-31）。
  * 行タップ: 通常 = 編集 / 初期残高・補正 = 専用シート / 購入の仕訳 = 編集（借方は台帳固定）/
- * 計算で生まれた行 = 「毎月のもの」の元の項目・ルールのシートへ遷移。
+ * 計算で生まれた行 = 起票元（項目・ルール・投資科目。derivedEntryOrigin が単一正本）へ遷移。
  */
 import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
+import { SearchInput, SortControls } from '../ListSearchSort';
+import { applySort, matchesQuery } from '../listQuery';
 import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import { AdjustmentEditSheet } from '../AdjustmentSheet';
@@ -17,12 +22,27 @@ import { UI } from '../../ui-contract';
 import { todayLocal } from '../../util/time';
 import { entryHasTag } from '../../domain/tags';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
-import { reportEntriesForAsOf } from '../../domain/reportEntries';
+import { derivedEntryOrigin } from '../../domain/derivedOrigin';
+import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { periodRange, type ReportPeriod } from '../../domain/reportPeriod';
-import { isNormalExpenseEntry } from '../../domain/livingCost';
+import {
+  entryAmount,
+  isDebitNormal,
+  summarizeEntries,
+  summarizeEntriesForAccount,
+} from '../../domain/accounting';
+import {
+  isContinuousCostMonthlyAllocationEntry,
+  isNormalExpenseEntry,
+} from '../../domain/livingCost';
 import { tagNames } from '../tagOptions';
 import type { AllocationsTarget } from './Allocations';
 import type { Account, JournalEntry } from '../../domain/types';
+import { formatMoney } from '../../util/format';
+import { useMoneyDigits } from '../money';
+import { ScrollTopButton } from '../ScrollTopButton';
+import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
+import { assertSafeAmount } from '../../domain/safeSum';
 
 export interface JournalFilter {
   accountId?: string;
@@ -38,20 +58,41 @@ function flowText(map: Map<string, Account>, entry: JournalEntry): string {
   return `${name(credit?.accountId)} → ${name(debit?.accountId)}`;
 }
 
+type AccountBalanceChange = 'increase' | 'decrease' | null;
+
+/**
+ * 科目の自然な残高符号で、この仕訳が対象科目を増やすか減らすかを返す。
+ * 複合仕訳で同じ科目が両側にある場合も、借貸の純額で判定する。
+ */
+function accountBalanceChange(entry: JournalEntry, account: Account): AccountBalanceChange {
+  const increaseSide = isDebitNormal(account.type) ? 'debit' : 'credit';
+  const delta = entry.lines.reduce((sum, line) => {
+    if (line.accountId !== account.id) return sum;
+    return assertSafeAmount(sum + (line.side === increaseSide ? line.amount : -line.amount));
+  }, 0);
+  return delta > 0 ? 'increase' : delta < 0 ? 'decrease' : null;
+}
+
 export function Journal({
   onEditEntry,
   onReverse,
   onOpenAllocations,
+  onOpenAccount,
   filter,
   period,
+  targetEntryId,
   onClearFilter,
 }: {
   onEditEntry: (entry: JournalEntry) => void;
   onReverse: (entry: JournalEntry) => void;
   /** 計算で生まれた行のタップ: 「毎月のもの」へ遷移し、元の項目/ルールのシートを開く。 */
   onOpenAllocations: (target: AllocationsTarget) => void;
+  /** 投資利回りの投影行のタップ: 勘定科目へ遷移し、その投資科目の編集シートを開く。 */
+  onOpenAccount: (accountId: string) => void;
   filter: JournalFilter | null;
   period: ReportPeriod;
+  /** タイムラインなど外部画面から開く保存仕訳。種類ごとの既存編集シートへ解決する。 */
+  targetEntryId?: string | null;
   onClearFilter: () => void;
 }) {
   const { ledger, removeEntry, deleteOpening, deleteAdjustment } = useLedger();
@@ -66,13 +107,21 @@ export function Journal({
   );
   const [showFuture, setShowFuture] = useState(false);
   const [tagFilter, setTagFilter] = useState('');
+  // 表示専用の並び替え（既定 = 日付降順・従来の並びそのもの）。データ・保存には影響しない。
+  const [sortKey, setSortKey] = useState<'date' | 'amount'>('date');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [pendingDelete, setPendingDelete] = useState<JournalEntry | null>(null);
-  const [editingOpening, setEditingOpening] = useState<JournalEntry | null>(null);
-  const [pendingOpeningDelete, setPendingOpeningDelete] = useState<JournalEntry | null>(null);
-  const [editingAdjustment, setEditingAdjustment] = useState<JournalEntry | null>(null);
-  const [pendingAdjustmentDelete, setPendingAdjustmentDelete] = useState<JournalEntry | null>(
-    null,
+  const initialTarget = targetEntryId
+    ? (ledger?.journalEntries.find((entry) => entry.id === targetEntryId) ?? null)
+    : null;
+  const [editingOpening, setEditingOpening] = useState<JournalEntry | null>(() =>
+    initialTarget?.kind === 'opening' ? initialTarget : null,
   );
+  const [pendingOpeningDelete, setPendingOpeningDelete] = useState<JournalEntry | null>(null);
+  const [editingAdjustment, setEditingAdjustment] = useState<JournalEntry | null>(() =>
+    initialTarget?.metadata?.adjustment ? initialTarget : null,
+  );
+  const [pendingAdjustmentDelete, setPendingAdjustmentDelete] = useState<JournalEntry | null>(null);
 
   useEffect(() => {
     if (!filter) return;
@@ -96,7 +145,8 @@ export function Journal({
   const accountFilterId = filter?.accountId;
   const normalExpenseOnly = filter?.expenseKind === 'normal';
   const map = useMemo(() => new Map((ledger?.accounts ?? []).map((a) => [a.id, a])), [ledger]);
-  const currency = ledger?.settings.currency ?? 'JPY';
+  const currency = ledger?.settings.currency ?? '';
+  const digits = useMoneyDigits();
   const filterAccount = accountFilterId ? map.get(accountFilterId) : undefined;
 
   const allTags = ledger?.tags ?? [];
@@ -114,34 +164,59 @@ export function Journal({
   }, [ledger, to, showFuture, today]);
 
   // 保存される仕訳 + 計算で生まれる仕訳（分けない）。混合後に必ずソートし直す。
-  const source = useMemo(() => {
-    if (!ledger) return [];
-    return reportEntriesForAsOf(ledger, expandTo).sort((a, b) => {
-      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
-      if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
-      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-    });
-  }, [ledger, expandTo]);
+  const sourceDisplay = useMemo(() => {
+    if (!ledger) return null;
+    const display = displayEntriesResultForAsOf(ledger, expandTo, today);
+    return {
+      ...display,
+      entries: display.entries.sort((a, b) => {
+        if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+        if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      }),
+    };
+  }, [ledger, expandTo, today]);
+  const source = useMemo(() => sourceDisplay?.entries ?? [], [sourceDisplay]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
     return source.filter((e) => {
       if (accountFilterId && !e.lines.some((l) => l.accountId === accountFilterId)) return false;
       if (normalExpenseOnly && !isNormalExpenseEntry(e, map)) return false;
       if (tagFilter && !entryHasTag(e, tagFilter)) return false;
       if (from && e.date < from) return false;
       if (to && e.date > to) return false;
-      if (q) {
-        // 検索対象 = 摘要・メモ + 借方/貸方の勘定科目名（「食費」で検索 → 食費が絡む仕訳が出る）。
-        const accountNames = e.lines
-          .map((l) => map.get(l.accountId)?.name ?? '')
-          .join(' ');
-        const hay = `${e.description} ${e.memo ?? ''} ${accountNames}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
+      // 検索対象 = 摘要・メモ + 借方/貸方の勘定科目名（「食費」で検索 → 食費が絡む仕訳が出る）。
+      // 正規化は listQuery.matchesQuery が唯一の正本（毎月のもの画面と同じ規則）。
+      const accountNames = e.lines.map((l) => map.get(l.accountId)?.name ?? '').join(' ');
+      return matchesQuery([e.description, e.memo, accountNames], query);
     });
   }, [source, query, from, to, accountFilterId, normalExpenseOnly, tagFilter, map]);
+
+  // 表示専用の並び替え（C-4）。filtered は基準順（日付降順・同日は登録の新しい順・同時刻は
+  // id 昇順）なので、安定ソートにより同値（同日・同額）の並びは必ず基準順を保つ。
+  // 既定（日付降順）は applySort が compare=null を素通しする＝基準順そのもの。
+  const sorted = useMemo(() => {
+    const direction = sortDirection === 'asc' ? 1 : -1;
+    const compare =
+      sortKey === 'date' && sortDirection === 'desc'
+        ? null
+        : sortKey === 'date'
+          ? (a: JournalEntry, b: JournalEntry) =>
+              a.date < b.date ? -direction : a.date > b.date ? direction : 0
+          : (a: JournalEntry, b: JournalEntry) => (entryAmount(a) - entryAmount(b)) * direction;
+    return applySort(filtered, compare);
+  }, [filtered, sortKey, sortDirection]);
+
+  // 抽出結果の件数と合計（C-3）。対象 = いま表示している行の集合そのもの（sorted は filtered の
+  // 並び替えなので集合は同じ）＝ユーザーが数えたら必ず合う。科目タップ抽出中はその科目視点の
+  // 方向つき和（増減の純額）、それ以外は単純和（仕訳ごとに金額 1 回・二重計上なし）。
+  const summary = useMemo(
+    () =>
+      filterAccount
+        ? summarizeEntriesForAccount(filterAccount, filtered, () => true)
+        : summarizeEntries(filtered, () => true),
+    [filterAccount, filtered],
+  );
 
   const hasDateOrQuery = query !== '' || from !== '' || to !== '';
 
@@ -150,6 +225,11 @@ export function Journal({
       <h1 className="screen-title" id="journal-title">
         {t('journal.title')}
       </h1>
+
+      <InvestmentProjectionTruncationNotice
+        truncations={sourceDisplay?.investmentProjectionTruncations ?? []}
+        accounts={ledger?.accounts ?? []}
+      />
 
       {filterAccount || normalExpenseOnly ? (
         <div className="toolbar">
@@ -183,17 +263,13 @@ export function Journal({
       ) : null}
 
       <div className="toolbar">
-        <label className="sr-only" htmlFor="journal-search">
-          {t('common.search')}
-        </label>
-        <input
+        <SearchInput
           id="journal-search"
-          className="input"
-          type="search"
+          label={t('common.search')}
           value={query}
+          onChange={setQuery}
           placeholder={t('journal.searchPlaceholder')}
-          onChange={(e) => setQuery(e.target.value)}
-          data-ui={UI.journal.search}
+          dataUi={UI.journal.search}
         />
         {allTags.length > 0 ? (
           <>
@@ -260,6 +336,23 @@ export function Journal({
         ) : null}
       </div>
 
+      <SortControls
+        ariaLabel={t('common.sort')}
+        extraClassName="journal__sort"
+        axisItems={[
+          { key: 'date', label: t('journal.sortDate'), dataUi: UI.journal.sortByDate },
+          { key: 'amount', label: t('journal.sortAmount'), dataUi: UI.journal.sortByAmount },
+        ]}
+        axisValue={sortKey}
+        onAxisChange={(key) => setSortKey(key === 'amount' ? 'amount' : 'date')}
+        directionItems={[
+          { key: 'desc', label: t('common.sortDesc'), dataUi: UI.journal.sortDesc },
+          { key: 'asc', label: t('common.sortAsc'), dataUi: UI.journal.sortAsc },
+        ]}
+        directionValue={sortDirection}
+        onDirectionChange={(key) => setSortDirection(key === 'asc' ? 'asc' : 'desc')}
+      />
+
       <div
         style={{
           display: 'flex',
@@ -269,8 +362,9 @@ export function Journal({
           margin: 'var(--space-2) 0',
         }}
       >
-        <span className="muted" style={{ fontSize: 13 }}>
-          {t('journal.count', { count: filtered.length })}
+        <span className="muted" style={{ fontSize: 13 }} data-ui={UI.journal.summary}>
+          {t('journal.count', { count: summary.count })}・{t('journal.total')}{' '}
+          <Money amount={summary.total} currency={currency} signed={filterAccount !== undefined} />
         </span>
         <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
           <input
@@ -287,25 +381,53 @@ export function Journal({
         <div className="card card--pad empty">{t('journal.empty')}</div>
       ) : (
         <ul className="card list" data-ui={UI.journal.list}>
-          {filtered.map((entry) => {
+          {sorted.map((entry) => {
             const md = entry.metadata;
             const isVirtual = md?.virtual === true;
             const isRecovery = md?.monthlyCostRecovery === true;
             // 購入の仕訳（継続コスト資産と 1:1）: 編集シートを開ける（借方は台帳固定・削除不可）。
             const isPurchase = !isVirtual && md?.monthlyCostId !== undefined && !isRecovery;
-            const isMonthlyCost = md?.monthlyCostId !== undefined || md?.continuousCostId !== undefined;
+            const isMonthlyCost =
+              md?.monthlyCostId !== undefined ||
+              md?.continuousCostId !== undefined ||
+              isContinuousCostMonthlyAllocationEntry(entry);
             const isAdjustment = !!md?.adjustment;
+            const displayedAmount = entry.lines.find((line) => line.side === 'debit')?.amount ?? 0;
+            // 科目ドリル中だけ、その科目の自然な残高符号で増減を示す。金額自体には符号を付けない。
+            const balanceChange = filterAccount ? accountBalanceChange(entry, filterAccount) : null;
+            const balanceChangeClass =
+              balanceChange === 'increase'
+                ? 'amount--pos'
+                : balanceChange === 'decrease'
+                  ? 'amount--neg'
+                  : '';
+            const balanceChangeLabel =
+              balanceChange === 'increase'
+                ? t('journal.accountBalanceIncrease', {
+                    name: filterAccount?.name ?? '',
+                    amount: formatMoney(displayedAmount, currency, digits),
+                  })
+                : balanceChange === 'decrease'
+                  ? t('journal.accountBalanceDecrease', {
+                      name: filterAccount?.name ?? '',
+                      amount: formatMoney(displayedAmount, currency, digits),
+                    })
+                  : undefined;
             // 持ち込みの購入の仕訳は kind='opening' だが、専用シートではなく購入の仕訳として編集する。
             const isOpening = entry.kind === 'opening' && !isPurchase;
-            // タップ: 計算で生まれた行は「毎月のもの」の元のルール/項目へ。opening / adjustment は
-            // 専用シート。それ以外（購入の仕訳・回収の振替を含む）は編集シート。
+            // タップ: 計算で生まれた行は起票元（derivedEntryOrigin が単一正本）へ —
+            // ルール投影 = そのルール / 月割り = その項目 / 投資利回りの投影 = その投資科目。
+            // 由来を名乗らない導出行はタップ不可（既定の遷移先へ流さない＝誤遷移させない）。
+            // opening / adjustment は専用シート。それ以外（購入・回収の振替を含む）は編集シート。
+            const origin = derivedEntryOrigin(entry);
             const onRowTap = isVirtual
-              ? () =>
-                  onOpenAllocations(
-                    md?.recurringRuleId !== undefined
-                      ? { ruleId: md.recurringRuleId }
-                      : { itemId: md?.continuousCostId ?? '' },
-                  )
+              ? origin === undefined
+                ? undefined
+                : origin.kind === 'recurringRule'
+                  ? () => onOpenAllocations({ ruleId: origin.recurringRuleId })
+                  : origin.kind === 'monthlyCost'
+                    ? () => onOpenAllocations({ itemId: origin.monthlyCostId })
+                    : () => onOpenAccount(origin.accountId)
               : isAdjustment
                 ? () => setEditingAdjustment(entry)
                 : isOpening
@@ -345,20 +467,27 @@ export function Journal({
             );
             return (
               <li key={entry.id} className="list__item">
-                <button
-                  type="button"
-                  className="list__main"
-                  onClick={onRowTap}
-                  style={{ background: 'transparent', border: 'none', textAlign: 'left' }}
-                  aria-label={`${t('common.edit')}: ${entry.description}`}
+                {onRowTap === undefined ? (
+                  // 開く先の無い導出行: ボタンにしない（押せるのに何も起きない/誤遷移する UI を作らない）。
+                  <div className="list__main" style={{ textAlign: 'left' }}>
+                    {title}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="list__main"
+                    onClick={onRowTap}
+                    style={{ background: 'transparent', border: 'none', textAlign: 'left' }}
+                    aria-label={`${t('common.edit')}: ${entry.description}`}
+                  >
+                    {title}
+                  </button>
+                )}
+                <span
+                  className={`list__amount ${balanceChangeClass}`.trim()}
+                  aria-label={balanceChangeLabel}
                 >
-                  {title}
-                </button>
-                <span className="list__amount">
-                  <Money
-                    amount={entry.lines.find((l) => l.side === 'debit')?.amount ?? 0}
-                    currency={currency}
-                  />
+                  <Money amount={displayedAmount} currency={currency} />
                 </span>
                 {isVirtual || isPurchase ? null : isAdjustment ? (
                   <button
@@ -446,10 +575,7 @@ export function Journal({
       ) : null}
 
       {editingAdjustment ? (
-        <AdjustmentEditSheet
-          entry={editingAdjustment}
-          onClose={() => setEditingAdjustment(null)}
-        />
+        <AdjustmentEditSheet entry={editingAdjustment} onClose={() => setEditingAdjustment(null)} />
       ) : null}
       {pendingAdjustmentDelete ? (
         <ConfirmDialog
@@ -466,6 +592,7 @@ export function Journal({
           }}
         />
       ) : null}
+      <ScrollTopButton />
     </section>
   );
 }

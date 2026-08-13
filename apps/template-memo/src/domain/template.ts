@@ -1,9 +1,9 @@
 /*
- * テンプレート（入力と出力の構造定義）と本文合成エンジン。
+ * 解決済みテンプレートと本文合成エンジン。
  *
- * モデルは 3 階層の木:
- *   Template（文書）→ TemplateSection（大項目 例 "(S)"）→ TemplateGroup（群 例 バイタル/身体所見）
- *   → TemplateItem（小項目 例 肺音/BP）
+ * 永続化の正本は entities.ts の TemplateDef / Frame / Format。ここで定義する Template は
+ * resolveTemplate が入力 UI と合成処理へ渡す読み取り用の形で、PlacedFormat.id には
+ * FormatPlacement.id が入る。
  *
  * 合成は「空の枝を落としながら join する」再帰 1 本（空伝播）。空項目で区切りが
  * 二重になる・空行だけ残る問題を原理的に起こさない。テンプレートに条件分岐や式は
@@ -16,24 +16,32 @@
  */
 
 import { newId } from '../data/constants';
-import { readGroupValues, readNumericEntry, readSelectValue, readTextValue } from './formValues';
+import { readEntryNote, readPlacementValues, readSelectValue, readTextValue } from './formValues';
 import type { FormValues, Patient } from './types';
 
 // ============================
 // 型
 // ============================
 
-export type ItemKind = 'text' | 'number' | 'fraction' | 'select';
+/**
+ * 小項目の種類。入力の形は 2 つだけに畳んである:
+ *   text   = 自分で書く。正常文 (normal) を登録すれば長押しチェックのワンタップでも入る。
+ *   select = 用意した選択肢から選ぶ。
+ * 文字種の制約（旧 number / fraction の数字限定キーボード）は持たない。端末のキーボードを
+ * 狭めても打てない文字が生まれるだけで（iOS の数字キーパッドには "." も "/" も無い）、
+ * 入力を助けないため撤去した。旧 number / fraction は normalizeItem が text へ引き取る。
+ */
+export type ItemKind = 'text' | 'select';
 
-/** 群の配置。always = 展開 / oncall = 呼び出し / menu = メニュー。値はいずれも保存する。 */
-export type GroupDisplay = 'always' | 'oncall' | 'menu';
+/** 配置方法。always = 展開 / oncall = 呼び出し / menu = メニュー。値はいずれも保存する。 */
+export type PlacementDisplay = 'always' | 'oncall' | 'menu';
 
-/** 小項目。text は正常文ワンタップ（normal）対応。 */
+/** フォーマットの小項目。text は正常文チェック（normal）対応。 */
 export interface TemplateItem {
   id: string;
   label: string;
   kind: ItemKind;
-  /** number/fraction の単位（例 mmHg, %）。値の直後に付く。 */
+  /** text の単位（例 mmHg, %, ℃）。合成では値の直後に付く。 */
   unit?: string;
   /** text の正常文（長押しチェック入力の対象）。 */
   normal?: string;
@@ -43,11 +51,11 @@ export interface TemplateItem {
   showLabel?: boolean;
 }
 
-/** 群（旧 Format 相当）。合成の区切り文字はここが持つ。 */
-export interface TemplateGroup {
+/** 解決済みの配置フォーマット。id は配置 ID。 */
+export interface PlacedFormat {
   id: string;
   name: string;
-  display: GroupDisplay;
+  display: PlacementDisplay;
   /** 項目間の区切り（例 ", " / "\n" / "-"）。 */
   joiner: string;
   /** ラベルと値の区切り（例 "：" / " "）。 */
@@ -57,10 +65,18 @@ export interface TemplateGroup {
    * 空 = タイトル行なし。
    */
   titleWrap: string;
+  /**
+   * 入力カードにフォーマット名の見出し行を出すか。未定義 = 出す。false のときだけ保存する
+   * （TemplateItem.showLabel と同型）。正本は Format 側（entities.ts）で、
+   * titleWrap（合成出力のタイトル行）とは別制御。こちらは画面の縦を詰めるためだけのもの。
+   * 呼び出しチップ・メニュー項目・入力シートのタイトルに出る名前は、押すまで中身が
+   * 分からないので、この設定に関わらず残す。
+   */
+  showName?: boolean;
   items: TemplateItem[];
 }
 
-/** 大項目（セクション）。自由本文欄 + 群の入れ物。 */
+/** フレーム内の場所。自由本文欄 + 解決済み配置の入れ物。 */
 export interface TemplateSection {
   id: string;
   /** 見出し（例 "(S)" / "今日やったこと"）。空 = 見出し行なし。 */
@@ -69,22 +85,17 @@ export interface TemplateSection {
   freeText: boolean;
   /** 自由本文の正常文（完成文の空欄をこれで補う。例 "著変なし"）。 */
   normal?: string;
-  groups: TemplateGroup[];
+  formats: PlacedFormat[];
 }
 
-/** テンプレート（文書の構造定義）。 */
+/** 入力 UI・合成処理向けの解決済みテンプレート。永続化しない。 */
 export interface Template {
   id: string;
   name: string;
   /** 合成に問題リストブロックを含めるか（日報などでは false）。 */
   includeProblems: boolean;
-  /** 合成に申し送り（継続メモ）ブロックを含めるか。 */
+  /** 合成に継続メモブロックを含めるか。 */
   includeHandover: boolean;
-  /**
-   * 「今回メモ」(patient.visitMemo) を自由本文として注入するセクションの id。
-   * null = どのセクションにも注入しない。回診メモプリセットは (O) を memoSection にする。
-   */
-  memoSectionId: string | null;
   sections: TemplateSection[];
   updatedAt: number;
 }
@@ -101,51 +112,40 @@ export function normalizeComposedText(text: string): string {
 /** 項目 1 つの合成。空値は '' を返す（呼び出し側の filter で枝ごと落ちる）。 */
 export function composeItem(item: TemplateItem, rawValue: unknown, labelSep: string): string {
   const labelPart = item.showLabel !== false && item.label !== '' ? item.label + labelSep : '';
-  if (item.kind === 'number') {
-    const { value, note } = readNumericEntry(rawValue);
-    const v = value.trim();
-    if (v === '') return ''; // 値なし注記だけは出力しない（文脈不明になるため）
-    const base = `${labelPart}${v}${item.unit ?? ''}`;
-    return note.trim() === '' ? base : `${base} ${note.trim()}`;
+  if (item.kind === 'select') {
+    const value = readSelectValue(rawValue, item.options ?? []).trim();
+    return value === '' ? '' : `${labelPart}${value}`;
   }
-  if (item.kind === 'fraction') {
-    const { value, note } = readNumericEntry(rawValue);
-    const v = value.trim();
-    // "a/b" 両側空（"" or "/"）はスキップ
-    if (v === '' || /^\/*$/.test(v)) return '';
-    const base = `${labelPart}${v}${item.unit ?? ''}`;
-    return note.trim() === '' ? base : `${base} ${note.trim()}`;
-  }
-  const value =
-    item.kind === 'select'
-      ? readSelectValue(rawValue, item.options ?? []).trim()
-      : readTextValue(rawValue).trim();
+  const value = readTextValue(rawValue).trim();
+  // 値なしで注記だけは出力しない（文脈不明になるため。旧 number と同じ判断）。
   if (value === '') return '';
-  return `${labelPart}${value}`;
+  const base = `${labelPart}${value}${item.unit ?? ''}`;
+  const note = readEntryNote(rawValue).trim();
+  return note === '' ? base : `${base} ${note}`;
 }
 
-/** 群 1 つの合成。全項目が空なら text='' / hasValue=false（タイトル行も出さない）。 */
-export function composeGroup(
-  group: TemplateGroup,
+/** 配置フォーマット 1 つの合成。全項目が空ならタイトル行も出さない。 */
+export function composePlacedFormat(
+  placedFormat: PlacedFormat,
   values: Record<string, unknown>,
 ): { text: string; hasValue: boolean } {
-  const parts = group.items
-    .map((item) => composeItem(item, values[item.id], group.labelSep))
+  const parts = placedFormat.items
+    .map((item) => composeItem(item, values[item.id], placedFormat.labelSep))
     .filter((s) => s !== '');
   if (parts.length === 0) return { text: '', hasValue: false };
-  const body = parts.join(group.joiner);
-  const wrap = group.titleWrap;
-  if (wrap.length >= 2 && group.name !== '') {
+  const body = parts.join(placedFormat.joiner);
+  const wrap = placedFormat.titleWrap;
+  if (wrap.length >= 2 && placedFormat.name !== '') {
     const open = wrap.slice(0, Math.floor(wrap.length / 2));
     const close = wrap.slice(Math.floor(wrap.length / 2));
-    return { text: `${open}${group.name}${close}\n${body}`, hasValue: true };
+    return { text: `${open}${placedFormat.name}${close}\n${body}`, hasValue: true };
   }
   return { text: body, hasValue: true };
 }
 
 /**
- * セクション 1 つの合成。全群 → 自由本文の順。
- * 自由本文は呼び出し側が渡す（memoSection には patient.visitMemo が入る）。
+ * 場所 1 つの合成。全配置 → 自由本文の順。
+ * 自由本文は呼び出し側が渡す（その場所の patient.sectionTexts[section.id]）。
  * 空でも見出しは常に残す（不要な場所はテンプレートから場所自体を削除する）。
  */
 export function composeSection(
@@ -154,8 +154,11 @@ export function composeSection(
   formValues: FormValues,
 ): string {
   const pieces: string[] = [];
-  for (const group of section.groups) {
-    const { text, hasValue } = composeGroup(group, readGroupValues(formValues, group.id));
+  for (const placedFormat of section.formats) {
+    const { text, hasValue } = composePlacedFormat(
+      placedFormat,
+      readPlacementValues(formValues, placedFormat.id),
+    );
     if (hasValue) pieces.push(text);
   }
   const free = section.freeText ? String(freeTextRaw ?? '').trim() : '';
@@ -183,9 +186,9 @@ export function composeProblems(problems: readonly string[]): string {
   return rows.join('\n');
 }
 
-/** セクションの自由本文（memoSection なら patient.visitMemo・それ以外は空）。 */
-function memoFreeTextOf(patient: Patient, template: Template, section: TemplateSection): string {
-  return section.id === template.memoSectionId ? String(patient.visitMemo ?? '') : '';
+/** その場所へ書かれた自由本文（sectionTexts は場所 id をキーに持つ）。 */
+function sectionFreeTextOf(patient: Patient, section: TemplateSection): string {
+  return String(patient.sectionTexts?.[section.id] ?? '');
 }
 
 /** ブロック合成の共通部（自由本文の決め方だけ差し替える）。 */
@@ -212,20 +215,18 @@ function composeDocumentWith(
 
 /** 文書全体の合成。ブロック間は空行 1 つ。 */
 export function composeDocument(patient: Patient, template: Template): string {
-  return composeDocumentWith(patient, template, (section) =>
-    memoFreeTextOf(patient, template, section),
-  );
+  return composeDocumentWith(patient, template, (section) => sectionFreeTextOf(patient, section));
 }
 
 /**
  * 正常文補完つき完成文: 空の自由本文セクションを normal で埋めて合成する。
  * 保存はせず、転記用 QR を開くたびに現在値から生成する。
- * memoSection には今回メモ (visitMemo) が入り、空なら normal へ倒れる。
+ * 各場所の自由本文が空なら、その場所の normal へ倒れる。
  */
 export function composePresetClean(patient: Patient, template: Template): string {
   return composeDocumentWith(patient, template, (section) => {
-    const memo = memoFreeTextOf(patient, template, section);
-    if (memo.trim() !== '') return memo;
+    const free = sectionFreeTextOf(patient, section);
+    if (free.trim() !== '') return free;
     return String(section.normal ?? '');
   });
 }
@@ -242,17 +243,18 @@ function str(v: unknown, fallback = ''): string {
 export function normalizeItem(raw: unknown): TemplateItem | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
-  const kind: ItemKind =
-    r.kind === 'number' || r.kind === 'fraction' || r.kind === 'select' ? r.kind : 'text';
+  // 旧 kind（number / fraction）は text へ引き取り、単位も持ち越す（read-side 移行）。
+  // これにより既存フォーマット・受信済み共有QR・取り込み JSON の項目が消えず、
+  // 保存値 { value, note? } も formValues.readTextValue がそのまま読む。
+  const kind: ItemKind = r.kind === 'select' ? 'select' : 'text';
   const item: TemplateItem = {
     id: str(r.id) || newId('itm'),
     label: str(r.label),
     kind,
   };
-  if (kind === 'number' || kind === 'fraction') {
+  if (kind === 'text') {
     const unit = str(r.unit);
     if (unit !== '') item.unit = unit;
-  } else if (kind === 'text') {
     const normal = str(r.normal);
     if (normal !== '') item.normal = normal;
   } else {
@@ -264,207 +266,7 @@ export function normalizeItem(raw: unknown): TemplateItem | null {
     item.options = options;
   }
   if (r.showLabel === false) item.showLabel = false;
-  // text はラベルも正常文も無いと入力欄の意味が立たないので捨てる。
-  // number/fraction/select はラベル無しが正当。
-  if (item.kind === 'text' && item.label === '' && item.normal === undefined) return null;
+  // ラベル無しの text は正当に扱う（血糖の 2 つ目以降のように、ラベルを出さず値だけ
+  // 並べる項目が実在する）。選ぶものが無い select だけは項目ごと落とす。
   return item;
-}
-
-/** group 1 件の正規化。items が空になった group は捨てる。 */
-export function normalizeGroup(raw: unknown): TemplateGroup | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const r = raw as Record<string, unknown>;
-  const items = (Array.isArray(r.items) ? r.items : [])
-    .map(normalizeItem)
-    .filter((i): i is TemplateItem => i !== null);
-  if (items.length === 0) return null;
-  return {
-    id: str(r.id) || newId('grp'),
-    name: str(r.name),
-    display: r.display === 'oncall' || r.display === 'menu' ? r.display : 'always',
-    joiner: typeof r.joiner === 'string' ? r.joiner : '\n',
-    labelSep: typeof r.labelSep === 'string' ? r.labelSep : '：',
-    titleWrap: str(r.titleWrap),
-    items,
-  };
-}
-
-/** section 1 件の正規化。title も freeText も groups も無い空 section は捨てる。 */
-export function normalizeSection(raw: unknown): TemplateSection | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const r = raw as Record<string, unknown>;
-  const groups = (Array.isArray(r.groups) ? r.groups : [])
-    .map(normalizeGroup)
-    .filter((g): g is TemplateGroup => g !== null);
-  const section: TemplateSection = {
-    id: str(r.id) || newId('sec'),
-    title: str(r.title),
-    freeText: r.freeText !== false,
-    groups,
-  };
-  const normal = str(r.normal);
-  if (normal !== '') section.normal = normal;
-  if (section.title === '' && !section.freeText && groups.length === 0) return null;
-  return section;
-}
-
-/** テンプレート 1 件の正規化。sections が全滅した壊れテンプレは null。 */
-export function normalizeTemplate(raw: unknown): Template | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const r = raw as Record<string, unknown>;
-  const sections = (Array.isArray(r.sections) ? r.sections : [])
-    .map(normalizeSection)
-    .filter((s): s is TemplateSection => s !== null);
-  if (sections.length === 0) return null;
-  // memoSectionId は実在するセクションだけを許す（迷子参照は null = 注入なし）。
-  const memoSectionId =
-    typeof r.memoSectionId === 'string' && sections.some((s) => s.id === r.memoSectionId)
-      ? r.memoSectionId
-      : null;
-  return {
-    id: str(r.id) || newId('tpl'),
-    name: str(r.name) || '(無題テンプレート)',
-    includeProblems: r.includeProblems === true,
-    includeHandover: r.includeHandover === true,
-    memoSectionId,
-    sections,
-    updatedAt: typeof r.updatedAt === 'number' ? r.updatedAt : 0,
-  };
-}
-
-// ============================
-// プリセット（初回 seed・「プリセットから追加」用）
-// ============================
-
-/** 回診メモプリセット（作者の実運用形。id は呼び出しごとに採番 = 端末間衝突なし）。 */
-export function buildRoundPreset(nowMs: number): Template {
-  // (O) を memoSection にする（今回メモ = 所見の自由本文）。
-  const memoSectionId = newId('sec');
-  return {
-    id: newId('tpl'),
-    name: '回診メモ',
-    includeProblems: true,
-    includeHandover: true,
-    memoSectionId,
-    updatedAt: nowMs,
-    sections: [
-      {
-        id: newId('sec'),
-        title: '(S)',
-        freeText: true,
-        normal: '変わりない',
-        groups: [],
-      },
-      {
-        id: memoSectionId,
-        title: '(O)',
-        freeText: true,
-        groups: [
-          {
-            id: newId('grp'),
-            name: 'バイタル',
-            display: 'always',
-            joiner: ', ',
-            labelSep: ' ',
-            titleWrap: '',
-            items: [
-              { id: newId('itm'), label: 'BP', kind: 'fraction', unit: 'mmHg' },
-              { id: newId('itm'), label: 'HR', kind: 'number' },
-              { id: newId('itm'), label: 'SpO2', kind: 'number', unit: '%' },
-              { id: newId('itm'), label: 'BT', kind: 'number', unit: '℃' },
-            ],
-          },
-          {
-            id: newId('grp'),
-            name: '身体所見',
-            display: 'always',
-            joiner: '\n',
-            labelSep: '：',
-            titleWrap: '',
-            items: [
-              { id: newId('itm'), label: '肺音', kind: 'text', normal: '明らかなラ音なし' },
-              { id: newId('itm'), label: '腸音', kind: 'text', normal: '正常' },
-              { id: newId('itm'), label: '腹部', kind: 'text', normal: '平坦軟、圧痛なし' },
-              { id: newId('itm'), label: '下腿浮腫', kind: 'text', normal: 'なし' },
-            ],
-          },
-          {
-            id: newId('grp'),
-            name: '血糖',
-            display: 'oncall',
-            joiner: '-',
-            labelSep: ' ',
-            titleWrap: '',
-            items: [
-              { id: newId('itm'), label: 'Glu', kind: 'number' },
-              { id: newId('itm'), label: '', kind: 'number' },
-              { id: newId('itm'), label: '', kind: 'number' },
-            ],
-          },
-          {
-            id: newId('grp'),
-            name: '検査所見',
-            display: 'oncall',
-            joiner: '\n',
-            labelSep: '：',
-            titleWrap: '',
-            items: [
-              { id: newId('itm'), label: '採血', kind: 'text' },
-              { id: newId('itm'), label: '胸部Xp', kind: 'text' },
-              { id: newId('itm'), label: 'CT', kind: 'text' },
-            ],
-          },
-        ],
-      },
-      {
-        id: newId('sec'),
-        title: '(A)',
-        freeText: true,
-        normal: '著変なし',
-        groups: [],
-      },
-      {
-        id: newId('sec'),
-        title: '(P)',
-        freeText: true,
-        normal: '現行加療継続',
-        groups: [],
-      },
-    ],
-  };
-}
-
-/** 日報プリセット（非医療の汎用例）。 */
-export function buildDailyReportPreset(nowMs: number): Template {
-  // 今回メモは先頭セクション（今日やったこと）へ注入する。
-  const memoSectionId = newId('sec');
-  return {
-    id: newId('tpl'),
-    name: '日報',
-    includeProblems: false,
-    includeHandover: false,
-    memoSectionId,
-    updatedAt: nowMs,
-    sections: [
-      {
-        id: memoSectionId,
-        title: '【今日やったこと】',
-        freeText: true,
-        groups: [],
-      },
-      {
-        id: newId('sec'),
-        title: '【課題・気づき】',
-        freeText: true,
-        normal: '特になし',
-        groups: [],
-      },
-      {
-        id: newId('sec'),
-        title: '【明日の予定】',
-        freeText: true,
-        groups: [],
-      },
-    ],
-  };
 }

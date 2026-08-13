@@ -4,8 +4,8 @@
  * 旧 GAS の source/dest や +/- 表現は使わない。すべて複式簿記の
  * 借方(debit) / 貸方(credit) で表現する。
  *
- * 金額は最小単位の整数で持つ（JPY なら「円」。小数は扱わない）。
- * これにより浮動小数の誤差を避ける。通貨は settings.currency。
+ * 金額は表示単位の 1/100 を最小単位とする整数（minor）で持つ。
+ * これにより保存・合算で浮動小数を使わない。表示単位は settings.currency。
  */
 
 import type { AccountRole } from './accountRoles';
@@ -32,7 +32,18 @@ export interface Account {
    * type と整合する必要がある（src/domain/accountRoles.ts の roleAllowsType）。
    */
   role: AccountRole;
-  /** アーカイブ済みの科目は新規仕訳の選択肢から外すが、過去仕訳の集計には残る。 */
+  /**
+   * 科目が存在する最初の日（両端を含む）。**未設定 = 過去へ開いた線分**（過去側制限なし・
+   * §A 案1 2026-08-11。旧「createdAt を暗黙開始日とみなす」は廃止）。新規作成の既定も空欄で、
+   * アプリが端点を書かない。作者が科目編集で明示したときだけ保存される。
+   */
+  startDate?: string;
+  /** 科目が存在する最後の日（両端を含む）。アーカイブ操作で記録し、解除時に削除する。 */
+  endDate?: string;
+  /**
+   * 終了点を持つ（または旧形式で終了済みの）科目。候補表示の現在性はこの値だけで決めず、
+   * 仕訳日と startDate/endDate の線分から導出する。
+   */
   archived: boolean;
   note?: string;
   /**
@@ -45,12 +56,26 @@ export interface Account {
   movable?: boolean;
   /**
    * 返済設定（負債科目のみ: payment-liability / other-liability）。
-   * 毎月の返済元となる資金口座（role: daily-asset）。資金繰り画面の返済予定作成で既定値になる。
-   * 予定の自動生成はしない（予定 CF は明示登録・実績化のまま）。
+   * 毎月の返済元となる資金口座（role: daily-asset）。資金繰り画面の返済計画
+   * （未来日付の実仕訳の一括起票）で既定値になる。予定の自動生成はしない。
    */
   repaymentAccountId?: string;
   /** 毎月の返済日（1〜31）。31 など月に無い日はその月の月末として扱う。 */
   repaymentDay?: number;
+  /**
+   * 想定利回り（投資科目のみ: investment-asset）。年率のベーシスポイント整数
+   * （300 = 3.00%・範囲 -9999〜100000）。浮動小数は保存しない。
+   * 未設定 or 0 = 投影なし。projectionAccountId と必ずセットで設定する（片方だけは保存拒否）。
+   * 表示専用の導出（domain/investmentProjection.ts）にだけ使い、保存判断には影響しない。
+   */
+  annualReturnBp?: number;
+  /**
+   * 利回り投影の計上先（income-category の科目・soft reference）。毎月
+   * 「計上先 → この科目」の評価益が仮想仕訳として生まれる（継続コストの月割りと対の掛け算）。
+   * soft reference = accountRefs の「使用中」判定に入れない。参照先が消えたら
+   * 投影エンジンが fail-closed に生成を止める（保存は壊さない）。
+   */
+  projectionAccountId?: string;
   /** 箱内での表示順（並び替え機能）。未設定は名前順で末尾。 */
   sortIndex?: number;
   createdAt: string;
@@ -123,8 +148,14 @@ export interface EntryMetadata {
   virtual?: true;
   /** 仮想仕訳が属する MonthlyCostItem(継続コスト)の ID。 */
   continuousCostId?: string;
-  /** 仮想仕訳の種別。funding=資産化(支払元→対象資産) / recognition=認識(対象資産→認識先)。 */
-  ccKind?: 'funding' | 'recognition';
+  /** 仮想仕訳の種別。funding=資産化（支払元→対象資産）/ monthly-allocation=月割り（対象資産→月割り先）。 */
+  ccKind?: 'funding' | 'monthly-allocation';
+  /**
+   * 投資利回り投影の仮想仕訳の印（対象の投資科目 ID）。保存されない導出専用で、
+   * `displayEntriesForAsOf` の結果にのみ現れる（保存不変条件用の `reportEntriesForAsOf`
+   * には決して合流しない）。実仕訳・保存系・export には入れない。
+   */
+  investmentProjectionOf?: string;
   /**
    * 定期ルールから自動起票された仕訳の由来（recurringMonth とペア）。
    * 起票後は通常の仕訳として編集・削除できる。ルール削除時はこのメタデータを剥がして
@@ -171,7 +202,16 @@ export interface MonthlyCostItem {
   startDate: string;
   /** 終了日 'YYYY-MM-DD'。任意。未設定 = まだ費用にしない。 */
   endDate?: string;
-  /** 費用の行き先（費用カテゴリ等。内部集約・残高調整は不可）。 */
+  /**
+   * 費用化の開始日 'YYYY-MM-DD'。任意。**未設定 = 購入日（startDate）から月割り**。
+   * 設定すると月割りの起点（初月の月割り日・等分の月数）だけがこの日基準になり、
+   * 購入日〜費用化開始日の間は台帳（保管庫）に価値が置かれたままになる。
+   *  - 不変条件: `startDate ≤ allocationStartDate`（endDate 設定時は `≤ endDate`）。
+   *  - 科目線分への要求範囲は従来どおり startDate〜endDate（配分は必ずその内側）。
+   *  - ルール由来 item（`ccr-`）には設定しない（周期どおり配分する）。
+   */
+  allocationStartDate?: string;
+  /** 計上先（費用カテゴリのほか、給与など収入カテゴリも可。内部集約・残高調整は不可）。 */
   expenseAccountId: string;
   createdAt: string;
   updatedAt: string;
@@ -181,7 +221,8 @@ export interface MonthlyCostItem {
  * 定期ルール（毎月の支出・収入・振替）。
  * 「実仕訳の自動起票」方式: ルールは起票の道具で、正本は起票された実仕訳
  * （金額が揺れる月は起票後にその月の仕訳を編集する）。展開は domain/recurring.ts。
- * 継続コスト（費用の月割り認識 = 導出）とは別概念（こちらは実際の資金移動）。
+ * 行き先が費用または収入（差引形 = 給与から差し引く形）なら起票時に継続コスト item を作り、
+ * ルール自体は費用/収入減を直接作らない。それ以外（収入・振替・積立）は行き先へ直接起票する。
  */
 export interface RecurringRule {
   id: string;
@@ -194,58 +235,32 @@ export interface RecurringRule {
   /** 何か月ごとに起票するか（必須。1 = 毎月）。位相の基点は startMonth。 */
   everyMonths: number;
   /**
-   * 費用の行き先（任意）。**これがあれば月割りするルール**（継続コスト化）:
+   * 正規化済みの計上先（任意）。行き先 role が費用または収入（差引形）なら必ず継続コスト化し、
    * 起票のたびに item（id = `ccr-{ruleId}-{month}`・endDate = 周期末）を同一 tx で自動生成し、
-   * 購入の仕訳の借方は継続コスト台帳に固定される。boolean フラグは持たない
-   * （「true なのに行き先が空」という不整合を構造的に不可能にする）。
+   * 購入の仕訳の借方は継続コスト台帳に固定される。v7 の費用・差引形ルールはこの
+   * 正規形だけを保存する。
    */
   spreadExpenseAccountId?: string;
-  /** 行き先（費用カテゴリ / 資金 / 投資。月割りルールでは継続コスト台帳に固定）。 */
+  /** 保存上の借方（月割りルールでは継続コスト台帳、それ以外では論理的な行き先）。 */
   debitAccountId: string;
   /** 源泉（資金 / カード / 収入カテゴリ）。 */
   creditAccountId: string;
-  /** 位相の基点 'YYYY-MM'（再開時も書き換えない＝周期の位相を保つ）。 */
+  /** 位相の基点 'YYYY-MM'。 */
   startMonth: string;
+  /** ルールの存在開始日（含む）。起票周期の位相とは独立する。 */
+  startDate: string;
+  /** 金額変更の分割で生まれた後継 segment が参照する直前のルール。 */
+  splitFromRuleId?: string;
+  /**
+   * ルールの存在終了日（含まない）。未設定 = 将来へ継続する。
+   * 指定日の起票を旧ルールに含めず、同日開始の後継ルールへ一意に渡せるよう半開区間にする。
+   */
+  endDate?: string;
   /**
    * 起票済みカーソル（この月まで処理済み）。キャッチアップが管理する。
    * 起票済み仕訳をユーザーが削除しても再起票しない（スキップの尊重）。
    */
   postedThroughMonth?: string;
-  /** 停止中は起票しない。 */
-  paused?: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
- * 予定キャッシュフロー（将来の現金の出入り）。
- * 「いつ費用認識するか」とは別概念で、「いつ現金が動くか」を保持する。
- * 予定は通常仕訳一覧へ大量生成せず、ここに置く。実績化で 1 件の仕訳を作る。
- */
-export type CashflowDirection = 'inflow' | 'outflow' | 'transfer';
-export type CashflowSource = 'manual' | 'credit-card' | 'installment';
-export type CashflowStatus = 'planned' | 'posted' | 'cancelled';
-
-export interface CashflowSchedule {
-  id: string;
-  title: string;
-  /** ISO 日付 (YYYY-MM-DD)。 */
-  dueDate: string;
-  /** 正の整数（最小通貨単位）。 */
-  amount: number;
-  direction: CashflowDirection;
-  /** 現金が出入りする口座（asset）。 */
-  accountId: string;
-  /** 相手科目。負債返済なら liability、収入予定なら revenue 等。実績化に必要。 */
-  counterAccountId?: string;
-  source: CashflowSource;
-  status: CashflowStatus;
-  /** posted のとき、作成された仕訳の ID。 */
-  linkedEntryId?: string;
-  /** 実績化時に仕訳へコピーする仕訳全体タグ。 */
-  entryTagIds?: string[];
-  /** 月額化コスト（負債払い）の返済予定として生成されたとき、紐づく MonthlyCostItem の ID。 */
-  monthlyCostId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -269,9 +284,13 @@ export interface JournalEntry {
 
 export interface Settings {
   ledgerName: string;
-  /** ISO 4217 風のコード。MVP は表示用途のみ（換算はしない）。 */
+  /**
+   * 金額の表示単位。ISO 4217 の列挙・換算はせず、後置表示する 1〜8 文字の
+   * ユーザー入力文字列。空白だけは保存しない。
+   */
   currency: string;
-  locale: 'ja';
+  /** 表示する小数桁数（0|1|2・既定 0）。入力欄の刻みも連動する。保存値は常に 1/100 単位。 */
+  displayFractionDigits: 0 | 1 | 2;
 }
 
 export interface LedgerMeta {
@@ -285,10 +304,13 @@ export interface LedgerMeta {
 }
 
 /** import 前などに作るスナップショット（復元用）。 */
+export type SnapshotReason = 'import' | 'restore';
+
 export interface Snapshot {
   id: string;
   createdAt: string;
-  reason: string;
+  /** 永続化する理由コード。表示文言は i18n で解決する。 */
+  reason: SnapshotReason;
   /** 取得時点の完全なエクスポートパッケージ。 */
   data: LedgerExportPackage;
 }
@@ -309,7 +331,6 @@ export interface LedgerExportPackage {
   revision: number;
   accounts: Account[];
   journalEntries: JournalEntry[];
-  cashflowSchedules: CashflowSchedule[];
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   /** 定期ルール。交換 JSON では必須（旧形式はリポジトリ外で一度だけ変換する）。 */
@@ -361,7 +382,6 @@ export interface Ledger {
   accounts: Account[];
   /** 実仕訳（保存される正本）。保存系・export・残高チェックはこれだけを見る。 */
   journalEntries: JournalEntry[];
-  cashflowSchedules: CashflowSchedule[];
   tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   recurringRules: RecurringRule[];

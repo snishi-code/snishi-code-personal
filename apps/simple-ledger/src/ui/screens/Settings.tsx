@@ -12,6 +12,7 @@ import { startTransition, useEffect, useRef, useState } from 'react';
 import { useToast } from '@snishi/foundation/ui/toast';
 import { ConfirmDialog } from '../overlays';
 import { TextInput } from '@snishi/foundation/ui/Field';
+import { Segmented } from '@snishi/foundation/ui/Segmented';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
 import { t } from '../../i18n';
@@ -20,6 +21,7 @@ import { APP_ID } from '../../domain/constants';
 import { MANAGEMENT_ITEMS, type Screen } from '../navigation';
 import type { ImportOutcome } from '../../data/exportImport';
 import type { Settings as LedgerSettings, Snapshot } from '../../domain/types';
+import { ScrollTopButton } from '../ScrollTopButton';
 
 const APP_VERSION = '0.1.0';
 
@@ -49,6 +51,38 @@ export function importErrorMessage(
   }
 }
 
+/**
+ * 入力上限の切り詰め（UTF-16 code unit 基準 = zod の string.max と同じ数え方）。
+ * slice がサロゲートペアの途中で切れると孤立サロゲートが保存される（絵文字の単位等）ため、
+ * 末尾が high surrogate ならそれごと落とす。
+ */
+function clampCodeUnits(v: string, max: number): string {
+  let out = v.slice(0, max);
+  const last = out.charCodeAt(out.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) out = out.slice(0, -1);
+  return out;
+}
+
+/** スナップショット読込失敗を空一覧へ偽装せず、復旧データを触らないよう明示する。 */
+export function snapshotListErrorMessage(): string {
+  return t('snapshot.loadError');
+}
+
+/**
+ * スナップショット理由コード → 表示文言。未知コードはそのまま出す（fail-visible）。
+ * v11 から reason は理由コード（'import'/'restore'）を保存する（生文言を保存しない）。
+ */
+function snapshotReasonLabel(reason: string): string {
+  switch (reason) {
+    case 'import':
+      return t('snapshot.reason.import');
+    case 'restore':
+      return t('snapshot.reason.restore');
+    default:
+      return reason;
+  }
+}
+
 export function Settings({
   onNavigate,
   onOpenOnboarding,
@@ -71,6 +105,7 @@ export function Settings({
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [snapshotError, setSnapshotError] = useState<string | undefined>(undefined);
   const [pendingImportText, setPendingImportText] = useState<string | null>(null);
   // v2: importRevision（v1 の baseRevision を廃止）
   const [conflict, setConflict] = useState<{ local: number; import: number } | null>(null);
@@ -79,12 +114,22 @@ export function Settings({
   const [confirmReset, setConfirmReset] = useState(false);
 
   const [ledgerName, setLedgerName] = useState(ledger?.settings.ledgerName ?? '');
-  const [currency, setCurrency] = useState(ledger?.settings.currency ?? 'JPY');
+  const [currency, setCurrency] = useState(ledger?.settings.currency ?? '');
+  const [fractionDigits, setFractionDigits] = useState<0 | 1 | 2>(
+    ledger?.settings.displayFractionDigits ?? 0,
+  );
+  const [settingsErrors, setSettingsErrors] = useState<{
+    ledgerName?: string;
+    currency?: string;
+  }>({});
 
   const refreshSnapshots = () => {
     listSnapshots()
-      .then(setSnapshots)
-      .catch(() => undefined);
+      .then((next) => {
+        setSnapshotError(undefined);
+        setSnapshots(next);
+      })
+      .catch(() => setSnapshotError(snapshotListErrorMessage()));
   };
 
   useEffect(() => {
@@ -97,6 +142,9 @@ export function Settings({
       startTransition(() => {
         setLedgerName(ledger.settings.ledgerName);
         setCurrency(ledger.settings.currency);
+        // 初期化（:95-96）と同じく既定 0 で受ける。設定が欠けた台帳でも undefined を state に入れない。
+        setFractionDigits(ledger.settings.displayFractionDigits ?? 0);
+        setSettingsErrors({});
       });
     }
   }, [ledger]);
@@ -129,10 +177,22 @@ export function Settings({
   }
 
   function saveLedgerSettings() {
+    const normalizedLedgerName = ledgerName.trim();
+    const normalizedCurrency = currency.trim();
+    const errors = {
+      ledgerName: normalizedLedgerName ? undefined : t('settings.ledgerNameRequired'),
+      currency: normalizedCurrency ? undefined : t('settings.currencyRequired'),
+    };
+    if (errors.ledgerName || errors.currency) {
+      setSettingsErrors(errors);
+      return;
+    }
+    setSettingsErrors({});
     const next: LedgerSettings = {
-      ledgerName: ledgerName.trim() || '家計簿',
-      currency: currency.trim() || 'JPY',
-      locale: 'ja',
+      // 空欄を既定値や旧値へ黙って差し替えない。上の検証で明示的に止める。
+      ledgerName: normalizedLedgerName,
+      currency: normalizedCurrency,
+      displayFractionDigits: fractionDigits,
     };
     saveSettings(next).catch(() => undefined);
   }
@@ -204,6 +264,8 @@ export function Settings({
           <p className="field__hint" style={{ marginTop: 6 }}>
             {t('settings.importDesc')}
           </p>
+          {/* 免責 1 行（§C）: 復旧面（ErrorBoundary が本画面を埋め込む）にも同時に出る。 */}
+          <p className="field__hint">{t('settings.importDisclaimer')}</p>
         </div>
         <div>
           <button
@@ -226,14 +288,19 @@ export function Settings({
       <p className="field__hint" style={{ marginBottom: 8 }}>
         {t('settings.snapshotsDesc')}
       </p>
-      {snapshots.length === 0 ? (
+      {snapshotError ? (
+        <div className="field__error" role="alert">
+          <Icon name="alert" size={14} />
+          {snapshotError}
+        </div>
+      ) : snapshots.length === 0 ? (
         <div className="card card--pad muted">{t('snapshot.empty')}</div>
       ) : (
         <ul className="card list">
           {snapshots.map((snap) => (
             <li key={snap.id} className="list__item">
               <div className="list__main">
-                <div className="list__title">{snap.reason}</div>
+                <div className="list__title">{snapshotReasonLabel(snap.reason)}</div>
                 <div className="list__sub">
                   {new Date(snap.createdAt).toLocaleString('ja-JP')}・
                   {t('snapshot.entries', { count: snap.data.journalEntries.length })}
@@ -252,7 +319,7 @@ export function Settings({
                   type="button"
                   className="icon-btn"
                   onClick={() => setPendingDeleteSnap(snap)}
-                  aria-label={`${t('snapshot.delete')}: ${snap.reason}`}
+                  aria-label={`${t('snapshot.delete')}: ${snapshotReasonLabel(snap.reason)}`}
                 >
                   <Icon name="delete" size={18} />
                 </button>
@@ -265,8 +332,44 @@ export function Settings({
       {/* 台帳設定 */}
       <p className="section-label">{t('settings.about')}</p>
       <div className="card card--pad">
-        <TextInput label={t('settings.ledgerName')} value={ledgerName} onChange={setLedgerName} />
-        <TextInput label={t('settings.currency')} value={currency} onChange={setCurrency} />
+        {/* どちらも空は保存できない（settingsSchema は min(1)）。UI 側でも required を出す。 */}
+        <TextInput
+          label={t('settings.ledgerName')}
+          required
+          value={ledgerName}
+          onChange={(v) => {
+            setLedgerName(clampCodeUnits(v, 120));
+            setSettingsErrors((current) => ({ ...current, ledgerName: undefined }));
+          }}
+          error={settingsErrors.ledgerName}
+        />
+        <TextInput
+          label={t('settings.currency')}
+          required
+          value={currency}
+          onChange={(v) => {
+            setCurrency(clampCodeUnits(v, 8));
+            setSettingsErrors((current) => ({ ...current, currency: undefined }));
+          }}
+          hint={t('settings.currencyHint')}
+          error={settingsErrors.currency}
+        />
+        {/* 表示桁数（0|1|2・入力の刻みも連動）。保存・計算は常に 1/100 固定でこの設定では変わらない。 */}
+        <div className="field" data-ui={UI.settings.fractionDigits}>
+          <span className="field__label">{t('settings.fractionDigits')}</span>
+          <span className="field__hint">{t('settings.fractionDigitsHint')}</span>
+          <div className="list-sort toolbar" role="group" aria-label={t('settings.fractionDigits')}>
+            <Segmented
+              value={String(fractionDigits)}
+              items={[
+                { key: '0', label: '0' },
+                { key: '1', label: '1' },
+                { key: '2', label: '2' },
+              ]}
+              onChange={(key) => setFractionDigits(key === '1' ? 1 : key === '2' ? 2 : 0)}
+            />
+          </div>
+        </div>
         <button type="button" className="btn" onClick={saveLedgerSettings}>
           {t('common.save')}
         </button>
@@ -349,7 +452,7 @@ export function Settings({
       {pendingDeleteSnap ? (
         <ConfirmDialog
           title={t('snapshot.delete')}
-          body={pendingDeleteSnap.reason}
+          body={snapshotReasonLabel(pendingDeleteSnap.reason)}
           confirmLabel={t('common.delete')}
           danger
           onCancel={() => setPendingDeleteSnap(null)}
@@ -377,6 +480,7 @@ export function Settings({
           }}
         />
       ) : null}
+      <ScrollTopButton />
     </section>
   );
 }

@@ -39,11 +39,8 @@ export const s = {
   },
 
   memo: {
-    // 今回メモ / 継続メモ (対象ごとの独立メモ。今回=ラウンド開始でクリア / 継続=残す)
-    visit: {
-      label: '今回メモ',
-      placeholder: '今回のラウンドのメモ。音声入力した内容や転記先へ渡したい内容。',
-    },
+    // 継続メモ (対象ごとの独立メモ。ラウンド開始でも残す)。
+    // 今回分の自由本文は入力フォームの各場所（freeText）が持つ。
     standing: {
       label: '継続メモ',
       placeholder: '次回以降も残したい個人メモ。',
@@ -55,9 +52,12 @@ export const s = {
     cancel: 'キャンセル',
     close: '閉じる',
     delete: '削除',
+    duplicate: '複製',
     edit: '編集',
     save: '保存',
     loading: '読み込み中…',
+    // 空名の部品の一覧表示用（データには代替名を保存しない）。
+    untitled: '(無題)',
   },
   save: {
     failed: '保存に失敗しました。端末の空き容量をご確認ください',
@@ -80,7 +80,7 @@ export const s = {
       btn: 'ラウンド開始',
       tooltip: '新しいラウンドを開始（記録をクリア）',
       confirm:
-        '新しいラウンドを開始します。前回の記録をクリアしてよろしいですか？\n（ステータス（青以外）・今回メモ・フォーム値をクリアします。問題リスト・継続メモ・タグは残ります）',
+        '新しいラウンドを開始します。前回の記録をクリアしてよろしいですか？\n（ステータス（青以外）・入力フォームの内容をクリアし、青以外の色のタグを外します。問題リスト・継続メモ・青のタグは残ります）',
     },
     patientQr: {
       title: 'この対象の転記用QRを表示',
@@ -120,7 +120,7 @@ export const s = {
   },
 
   detail: {
-    // detail.nav.prev / detail.nav.next は廃止 (前/次ボタン撤去・対象切替は横スワイプ)。
+    // detail.nav.prev / detail.nav.next は廃止 (前/次ボタン撤去・対象切替はホーム一覧経由のみ)。
     home: { aria: 'ホームへ戻る' },
     // 対象画面 QR (転記用・平文)。対象詳細内の日本語ボタンで開く。
     emrQr: { btn: '転記用QRを表示' },
@@ -130,7 +130,6 @@ export const s = {
     },
     // テンプレートの群 (ProjectionFormCard) 用。
     noteInput: '入力',
-    fractionPlaceholder: '120/80',
     normalCheck: {
       aria: '正常',
       input: (value: string) => `長押しで正常文を入力: ${value}`,
@@ -211,39 +210,58 @@ export const s = {
   // 対象画面のラウンド入力カード (テンプレートの常設フォーム)。
   projection: {
     title: 'ラウンド入力',
+    // 見出しの無い場所に出る自由入力欄の aria-label (見出しがあれば見出しを使う)。
+    freeTextAria: (n: number) => `場所 ${n} の自由入力`,
   },
 
-  // テンプレート定義のフィールド名 (QR 受信プレビューの見出し)。
+  componentUsage: (n: number) => `${n}個のテンプレートで使用中（変更はすべてに反映されます）`,
+  frameEdit: {
+    title: 'フレームを編集',
+    name: 'フレーム名',
+    saved: 'フレームを保存しました',
+  },
+  formatEdit: {
+    title: 'フォーマットを編集',
+    name: 'フォーマット名',
+    saved: 'フォーマットを保存しました',
+  },
+  templateEdit: {
+    title: 'テンプレートを編集',
+    frame: '使用するフレーム',
+    frameChangeHint: 'フレームを変えると配置はリセットされます',
+    addFormat: (section: string) => `${section || 'この場所'}へ配置するフォーマット`,
+    removePlacement: '外す',
+    saved: 'テンプレートを保存しました',
+  },
+
+  // フレーム・フォーマット・テンプレート定義のフィールド名。
   tpl: {
     name: 'テンプレート名',
     // 作者語彙は「場所」(セクションはコード識別子のみ)。
     sections: '場所',
     includeProblems: '合成に問題リストを含める',
-    includeHandover: '合成に申し送りを含める',
-    memoSection: '今回メモを入れる場所',
-    memoSectionNone: '入れない',
+    includeHandover: '合成に継続メモを含める',
     sectionAdd: '場所を追加',
     sectionTitle: '場所の見出し（例 (S)・【今日やったこと】）',
     sectionNormal: '正常文（空欄を補う文。例 著変なし）',
     sectionFreeText: '自由本文欄を持つ',
-    groups: 'フォーマット',
-    groupAdd: 'フォーマットを追加',
-    groupName: 'フォーマット名（例 バイタル）',
-    groupDisplay: '配置',
-    groupDisplayAlways: '展開',
-    groupDisplayOncall: '呼び出し',
-    groupDisplayMenu: 'メニュー',
-    groupJoiner: '項目間の区切り',
-    groupLabelSep: 'ラベルと値の区切り',
+    formatAdd: '＋フォーマットを配置',
+    placementDisplay: '表示方法',
+    placementDisplayAlways: '展開',
+    placementDisplayOncall: '呼び出し',
+    placementDisplayMenu: 'メニュー',
+    formatShowName: '入力カードの見出しにフォーマット名を出す',
+    formatJoiner: '項目間の区切り',
+    formatLabelSep: 'ラベルと値の区切り',
+    // 区切りは自由入力 (改行・空白も有効文字)。見えない文字が入ることを明示する。
+    formatSepHint: '改行や空白もそのまま使えます。空行は1つまで（改行2つ）入ります。',
     items: '項目',
     itemAdd: '項目を追加',
     itemLabel: 'ラベル（例 肺音）',
     itemKind: '種類',
-    itemKindText: '文章（正常文）',
-    itemKindNumber: '数値',
-    itemKindFraction: '分数（120/80 型）',
+    itemKindText: '入力',
     itemKindSelect: '選択',
-    itemUnit: '単位（例 mmHg）',
+    itemUnit: '単位（例 mmHg・℃）',
     itemNormal: '正常文（例 明らかなラ音なし）',
     itemOptions: '選択肢',
     itemOptionDefault: '選択肢',
@@ -252,58 +270,122 @@ export const s = {
     itemShowLabel: '合成時にラベルを出す',
     moveUp: '上へ',
     moveDown: '下へ',
-    saved: 'テンプレートを保存しました',
-    joinerNewline: '改行',
-    joinerCommaSpace: 'カンマ + 空白',
-    joinerToten: '読点（、）',
-    joinerHyphen: 'ハイフン（-）',
-    joinerSpace: '空白',
-    labelSepColon: 'コロン（：）',
-    labelSepSpace: '空白',
-    labelSepNone: 'なし',
   },
 
-  // テンプレート QR の受け渡し (送信 / 受信ダイアログ)。
+  // テンプレートパッケージ / フレーム / フォーマットの QR 受け渡し。
   templateQr: {
-    sendTitle: 'テンプレートをQRで送る',
-    sendHint: 'テンプレート定義だけを送ります。対象・メモ・設定などのデータは含まれません。',
+    sendTitle: '部品をQRで送る',
+    sendHint:
+      'フレーム・フォーマット・テンプレート部品だけを送ります。グループ・対象・入力値は含まれません。',
     errorCompression: 'この環境ではQR用の圧縮を利用できません。',
-    errorTemplate: 'テンプレートの形式が不正なためQRを作成できません。',
-    errorEncode: 'テンプレートのQRを作成できませんでした。',
+    errorEntity: '部品の形式が不正なためQRを作成できません。',
+    errorEncode: '共有QRを作成できませんでした。',
     errorDraw: 'QRを描画できませんでした。',
     previousPage: '前のページ',
     nextPage: '次のページ',
-    receiveTitle: 'テンプレートをQRで受け取る',
-    receiveIntro: '送信側のQRを順不同で読み取れます。全ページが揃うまで保存されません。',
+    receiveTitle: '部品をQRで受け取る',
+    receiveIntro:
+      'テンプレート・フレーム・フォーマットのQRを順不同で読み取れます。全ページが揃うまで保存されません。',
     cameraUnavailable:
       'この環境ではカメラを利用できません。下の入力欄へQRの文字列を貼り付けてください。',
     cameraStart: 'カメラで読み取る',
     cameraStop: 'カメラを停止',
-    cameraLabel: 'テンプレートQR読み取り用カメラ',
+    cameraLabel: '部品QR読み取り用カメラ',
     cameraFailed: 'カメラを開始できませんでした。権限を確認してください。',
     pasteLabel: 'QR文字列を貼り付け',
-    pastePlaceholder: 'RND_TPL で始まる1ページ分を貼り付けます',
+    pastePlaceholder: 'RND_TPL / RND_FRM / RND_FMT で始まる1ページ分を貼り付けます',
     readPage: 'このページを読み取る',
-    invalidPage: 'テンプレートQRとして読めないページです。',
+    invalidPage: '部品QRとして読めないページです。',
     wrongKind: (kind: string) => `別の種類のQRです（${kind}）。入力はそのまま残しています。`,
     duplicate: (got: number, total: number) => `このページは読み取り済みです（${got}/${total}）。`,
     progress: (got: number, total: number) => `${got}/${total} ページを読み取りました。`,
     errorTransport: '圧縮データが壊れているため読み取れません。',
-    errorJson: 'テンプレートのJSONが壊れているため読み取れません。',
-    errorVersion: '対応していないバージョンのテンプレートQRです。',
+    errorJson: '共有データのJSONが壊れているため読み取れません。',
+    errorVersion: '対応していないバージョンの共有QRです。',
     errorIncomplete: 'ページの組み合わせが不正です。最初から読み直してください。',
-    errorDecode: 'テンプレートQRを読み取れませんでした。',
+    errorDecode: '共有QRを読み取れませんでした。',
     reset: '読み取りをやり直す',
     previewTitle: '保存前の確認',
-    counts: (sections: number, groups: number, items: number) =>
-      `セクション ${sections} / 群 ${groups} / 項目 ${items}`,
-    included: '含める',
-    excluded: '含めない',
-    conflictTitle: '同じIDのテンプレートがあります',
-    conflictBody: '既存テンプレートを上書きするか、別テンプレートとして追加します。',
-    overwrite: '既存テンプレートを上書き',
-    addCopy: '別テンプレートとして追加',
-    saveFailed: 'テンプレートを保存できませんでした。',
+    kind: '種類',
+    templatePackage: 'テンプレート一式',
+    frame: 'フレーム',
+    format: 'フォーマット',
+    formats: 'フォーマット',
+    none: 'なし',
+    collisionSafety: '同じIDがある場合は既存データを上書きせず、コピーとして保存します。',
+    imported: (kindLabel: string, name: string) => `${kindLabel}を読み込みました: ${name}`,
+    saveFailed: '部品を保存できませんでした。',
+  },
+
+  builder: {
+    sourcesTitle: '文章の例',
+    sourcesIntro: '作りたい完成文章を複数貼り付けると、共通する骨組みを見つけやすくなります。',
+    memoryOnly: '入力内容はこの端末のメモリだけに保持され、読み込み直すと消えます。',
+    sourceLabel: (n: number) => `文章の例 ${n}`,
+    sourcePlaceholder: '作りたい完成文章の例を貼り付けます',
+    sourceAdd: '文章の例を追加',
+    sourceDelete: (n: number) => `文章の例 ${n} を削除`,
+    sourcesSave: '文章の例を保存',
+    sourcesClear: 'すべてクリア',
+    promptTitle: 'AIへの依頼文',
+    promptLabel: 'コピーして利用者自身のAIアプリへ貼り付ける文章',
+    promptWarning:
+      'この文章に氏名・管理ID・住所などが含まれていないか確認してください。\n貼り付け先の AI サービスのデータ取り扱いは、このアプリの管理外です。',
+    promptCopy: '依頼文をコピー',
+    promptRenew: '依頼文を再作成',
+    copied: '依頼文をコピーしました',
+    copyFailed: '文章を選んで手動でコピーしてください',
+    responseTitle: 'AIの返答',
+    responseLabel: 'AIアプリから返されたJSON',
+    responsePlaceholder: 'AIの返答をそのまま貼り付けます',
+    responseAnalyze: '返答を解析',
+    responseStale:
+      '文章の例が変わったため、この返答は古くなりました。依頼文を作り直してから貼り直してください。',
+    responseClear: '返答をクリア',
+    responseReady: '候補を解析しました',
+    parseError: {
+      empty: '返答を貼り付けてください',
+      invalidJson: 'JSONとして読み取れませんでした',
+      notObject: '返答のJSONがオブジェクトではありません',
+      wrongKind: 'テンプレート作成アシストの返答ではありません',
+      wrongVersion: '対応していない版の返答です',
+      requestMismatch: '別の依頼への返答です',
+      truncated: '返答が途中で切れている可能性があります',
+      noSections: '場所が1つも見つかりませんでした',
+      tooLarge: (actual: number, max: number) =>
+        `返書が長すぎます（${actual.toLocaleString()} / ${max.toLocaleString()} 字）`,
+    },
+    previewTitle: '登録前の候補確認',
+    previewIntro:
+      '内容を確認し、不要なフォーマットを外してください。項目の編集や並び替えは登録後にできます。',
+    frame: 'フレーム',
+    sections: '場所',
+    sectionFreeText: '自由本文欄あり',
+    sectionNoFreeText: '自由本文欄なし',
+    formats: 'フォーマット',
+    formatItems: (n: number) => `項目 ${n}件`,
+    // 構造が一致する既存部品は新しく作らず再利用する。名前が違っても内容が同じなら再利用対象。
+    reuseExisting: (name: string) => `既存『${name}』を再利用`,
+    reuseMerged: (n: number) => `同じ内容の候補 ${n} 件を統合`,
+    reuseMergedInto: (name: string) => `『${name}』と同じ内容のため統合`,
+    placements: '配置',
+    placement: (section: string, display: string) => `${section}へ${display}で配置`,
+    noPlacement: '配置なし',
+    displayAlways: '展開',
+    displayOncall: '呼び出し',
+    normals: '正常文を持つ項目',
+    normalWarning: '正常文は必ず内容を確認してください。',
+    normalItem: (format: string, label: string, normal: string) =>
+      `${format} / ${label || 'ラベルなし'}: ${normal}`,
+    noNormals: '正常文を持つ項目はありません',
+    dropped: (n: number) => `取り込めなかったもの ${n}件`,
+    noDropped: '取り込めなかったものはありません',
+    aiWarnings: 'AIからの注意',
+    noAiWarnings: 'AIからの注意はありません',
+    apply: '登録する',
+    cancel: 'やめる',
+    applied: 'テンプレート一式を登録しました',
+    applyFailed: 'テンプレート一式を登録できませんでした',
   },
 
   io: {
@@ -364,17 +446,20 @@ export const s = {
     },
     tag: {
       placeholder: 'タグ名',
+      // タグ色の意味 (設定のタグ管理の説明行)。色は見た目ではなくクリア方針そのもの。
+      hint: 'タグの色は「ラウンド開始で外れるか」を決めます。青＝残る（継続の目印）／オレンジ＝ラウンド開始で外れる（今回分の目印）。新しいタグは青（残る）で作られます。',
       name: { duplicate: '同じ名前のタグが既にあります' },
       delete: {
         confirm: (name: string) =>
           `タグ「${name}」を削除します。よろしいですか？\n（このタグが付いている対象のタグも一緒に外れます）`,
         aria: (name: string) => `タグ「${name}」を削除`,
       },
-      // 色名 → 文言の Record。domain/types の TagColor ('gray' | 'amber') と keyof を一致させ、
+      // 色名 → 文言の Record。domain/types の TagColor ('blue' | 'amber') と keyof を一致させ、
       // s.settings.tag.color[color] の型安全な index アクセスで引く (as キャスト不要)。
+      // 色名だけでは意味が伝わらないので、挙動 (ラウンド開始で残る/外れる) を併記する。
       color: {
-        gray: 'グレー',
-        amber: 'アンバー',
+        blue: '青（ラウンド開始で残る）',
+        amber: 'オレンジ（ラウンド開始で外れる）',
       },
     },
     tagGroup: { name: { empty: '(無名)' } },
@@ -403,10 +488,27 @@ export const s = {
       current: '現在のグループ',
       patientCount: (n: number) => `対象 ${n}件`,
     },
+    // 設定: 完成文章からフレーム・フォーマット・テンプレート候補を作る補助。
+    builder: {
+      section: 'テンプレート作成アシスト',
+      hint: '文章の例から依頼文を作り、利用者自身のAIアプリで得た返答を確認して登録します。このアプリはAIへ通信しません。入力内容は読み込み直すと消えます。文章の例がないと依頼文は作れません。',
+      sources: '1 文章の例',
+      sourceCount: (n: number) => (n > 0 ? `${n}件` : '未入力'),
+      prompt: '2 AIへの依頼文',
+      promptReady: '作成済み',
+      promptStale: '要再作成',
+      promptUnavailable: '—',
+      response: '3 AIの返答',
+      responseReady: '解析済み',
+      responseStale: '古い返答',
+      responseEmpty: '未貼付',
+      preview: '候補を確認する',
+    },
     // 設定: テンプレート (有効切替 / QR送受信 / 削除)
     template: {
       section: 'テンプレート',
-      editTitle: 'テンプレートを編集',
+      // ＋ボタンの読み上げ名 (押すとプリセット選択メニューが開く)。
+      add: 'テンプレートを作る',
       addRound: '回診メモを追加',
       addDaily: '日報を追加',
       addEmpty: '空のテンプレートを作る',
@@ -414,9 +516,22 @@ export const s = {
       use: '使用する',
       qrSend: 'QR送信',
       qrReceive: 'QRで受け取る',
-      imported: (name: string) => `テンプレートを読み込みました: ${name}`,
       deleteConfirmTitle: 'テンプレートを削除しますか？',
       deleteConfirmBody: (name: string) => `「${name}」を削除します。対象の入力値は消えません。`,
+    },
+    frame: {
+      section: 'フレーム',
+      add: 'フレームを作る',
+      usage: (n: number) => `テンプレート ${n}件で使用`,
+      deleteConfirmTitle: 'フレームを削除しますか？',
+      deleteConfirmBody: (name: string) => `「${name}」を削除します。`,
+    },
+    format: {
+      section: 'フォーマット',
+      add: 'フォーマットを作る',
+      usage: (n: number) => `テンプレート ${n}件で使用`,
+      deleteConfirmTitle: 'フォーマットを削除しますか？',
+      deleteConfirmBody: (name: string) => `「${name}」を削除します。`,
     },
     // 設定: QR 出力 (改行モード)
     qrOutput: {
@@ -435,23 +550,6 @@ export const s = {
         '現在の全データ（対象・グループ・テンプレート・設定）をファイルの内容で置き換えます。この操作は取り消せません。',
       imported: '復元しました',
       importFailed: (reason: string) => `復元できませんでした: ${reason}`,
-    },
-    // 設定: 旧 hospital-workspace からの単発移行 (追記のみ)
-    workspaceImport: {
-      section: 'ワークスペースから移行（旧アプリ）',
-      pick: 'バックアップJSONを選ぶ',
-      previewTitle: '旧ワークスペースからの移行',
-      user: '移行するユーザー',
-      counts: (subjects: number, groups: number) => `対象 ${subjects} 件 / グループ ${groups} 件`,
-      appendOnly:
-        '現在のデータは残したまま、上記のデータを追加します。今回メモ・状態・タグ・フォーム値は移行しません。',
-      apply: '既存データへ追加',
-      imported: (subjects: number, groups: number) =>
-        `対象 ${subjects} 件・グループ ${groups} 件を追加しました`,
-      failed: (reason: string) => `移行できませんでした: ${reason}`,
-      noUsers: '移行できるユーザーが見つかりません',
-      noteClosingPreset:
-        '旧アプリの締め文は移行していません（テンプレートの正常文へ一般化されたため）。',
     },
     // 設定: 危険な操作 (全削除)
     danger: {

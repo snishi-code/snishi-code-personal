@@ -22,10 +22,11 @@ describe('初期設定 JSON（seed.json）', () => {
     expect(ids.size).toBe(accounts.length);
   });
 
-  it('既定設定は locale=ja / 通貨 JPY', () => {
+  it('既定設定は 通貨=円 / 表示桁数 0（locale は v11 で撤去済み）', () => {
     const s = defaultSettings();
-    expect(s.locale).toBe('ja');
-    expect(s.currency).toBe('JPY');
+    expect(s.currency).toBe('円');
+    expect(s.displayFractionDigits).toBe(0);
+    expect('locale' in s).toBe(false);
     expect(s.ledgerName.length).toBeGreaterThan(0);
   });
 });
@@ -66,10 +67,9 @@ describe('テスト用 JSON（sample.json）', () => {
     expect(result.success).toBe(true);
   });
 
-  it('手動テストに十分な量のデータを含む（仕訳・月額化・予定CF・タグ）', () => {
+  it('手動テストに十分な量のデータを含む（仕訳・月額化・タグ）', () => {
     expect(sample.journalEntries.length).toBeGreaterThanOrEqual(15);
     expect(sample.monthlyCostItems.length).toBeGreaterThanOrEqual(1);
-    expect(sample.cashflowSchedules.length).toBeGreaterThanOrEqual(1);
     expect(sample.tags.length).toBeGreaterThanOrEqual(1);
     // 全仕訳は MVP 仕様どおり 1 借方・1 貸方の 2 行。
     for (const e of sample.journalEntries) {

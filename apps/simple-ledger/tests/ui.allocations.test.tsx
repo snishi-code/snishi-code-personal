@@ -11,9 +11,10 @@ import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { Allocations } from '../src/ui/screens/Allocations';
-import { createContinuousCost, loadLedger } from '../src/data/repository';
+import { archiveMonthlyCost, createContinuousCost, loadLedger } from '../src/data/repository';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import { addMonthsToDate } from '../src/domain/allocation';
+import type { ReportPeriod } from '../src/domain/reportPeriod';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { todayLocal } from '../src/util/time';
@@ -28,26 +29,27 @@ afterEach(() => {
   _resetOverlaysForTests();
 });
 
-function View() {
+function View({ period }: { period: ReportPeriod }) {
   return (
     <ToastProvider>
       <LedgerProvider>
-        <ReadyView />
+        <ReadyView period={period} />
       </LedgerProvider>
     </ToastProvider>
   );
 }
 
-function ReadyView() {
+function ReadyView({ period }: { period: ReportPeriod }) {
   const { status } = useLedger();
-  return status === 'ready' ? <Allocations onEditEntry={() => undefined} /> : null;
+  return status === 'ready' ? <Allocations period={period} onEditEntry={() => undefined} /> : null;
 }
 
-async function renderReady() {
-  render(<View />);
+async function renderReady(period: ReportPeriod = { mode: 'all' }) {
+  const view = render(<View period={period} />);
   await waitFor(() => {
     expect(document.querySelector(`[data-ui="${UI.allocations.view}"]`)).toBeInTheDocument();
   });
+  return view;
 }
 
 describe('追加チューザー', () => {
@@ -78,11 +80,7 @@ describe('定期ルールの継続コスト化（月割り）', () => {
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.addChooser}.rule"]`)!);
 
     expect(screen.queryByText('種別')).not.toBeInTheDocument();
-    const spreadToggle = document.querySelector(
-      `[data-ui="${UI.allocations.recurringManualSpread}"]`,
-    ) as HTMLInputElement;
-    expect(spreadToggle).toBeInTheDocument();
-    expect(spreadToggle.checked).toBe(false);
+    expect(document.querySelector('[data-ui="allocations.recurring.manualSpread"]')).toBeNull();
     const every = document.querySelector(
       `[data-ui="${UI.allocations.recurringEvery}"]`,
     ) as HTMLInputElement;
@@ -150,25 +148,19 @@ describe('定期ルールの継続コスト化（月割り）', () => {
     });
   });
 
-  it('「継続コストとして扱う」で台帳経由にでき、借方欄は費用の行き先になる', async () => {
+  it('行き先に費用科目を選ぶだけで自動的に台帳経由になる', async () => {
     const ledger = await loadLedger();
     const bank = ledger.accounts.find((a) => a.name === '預金')!;
-    const salary = ledger.accounts.find((a) => a.name === '給与')!;
+    const fixed = ledger.accounts.find((a) => a.name === '固定費')!;
 
     await renderReady();
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.unifiedAdd}"]`)!);
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.addChooser}.rule"]`)!);
 
-    // チェックは既定 OFF。ON にすると借方欄のラベルが「費用の行き先」になる。
-    const spreadToggle = document.querySelector(
-      `[data-ui="${UI.allocations.recurringManualSpread}"]`,
-    ) as HTMLInputElement;
-    expect(spreadToggle.checked).toBe(false);
-    fireEvent.click(spreadToggle);
     const toPicker = document.querySelector(
       `[data-ui="${UI.allocations.recurringTo}"]`,
     ) as HTMLElement;
-    expect(toPicker).toHaveTextContent('費用の行き先');
+    expect(document.querySelector('[data-ui="allocations.recurring.manualSpread"]')).toBeNull();
 
     fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringName}"]`)!, {
       target: { value: '健康保険' },
@@ -182,8 +174,7 @@ describe('定期ルールの継続コスト化（月割り）', () => {
         { name: bank.name },
       ),
     );
-    // 例: 健康保険 = 貸方 銀行口座・費用の行き先 給与（収入カテゴリも行き先にできる）。
-    fireEvent.click(within(toPicker).getByRole('radio', { name: salary.name }));
+    fireEvent.click(within(toPicker).getByRole('radio', { name: fixed.name }));
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
     await waitFor(
       () => {
@@ -196,11 +187,11 @@ describe('定期ルールの継続コスト化（月割り）', () => {
 
     const rule = (await loadLedger()).recurringRules.find((r) => r.name === '健康保険');
     expect(rule).toBeDefined();
-    expect(rule!.spreadExpenseAccountId).toBe(salary.id);
+    expect(rule!.spreadExpenseAccountId).toBe(fixed.id);
     expect(rule!.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
     expect(rule!.creditAccountId).toBe(bank.id);
 
-    // 再編集でもチェック ON と選択中の科目を保持する。
+    // 再編集でもチェックは存在せず、論理的な行き先だけを保持する。
     const editButton = await waitFor(
       () => {
         const found = document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`);
@@ -210,24 +201,67 @@ describe('定期ルールの継続コスト化（月割り）', () => {
       { timeout: 3000 },
     );
     fireEvent.click(editButton);
-    await waitFor(() => {
-      expect(
-        document.querySelector(`[data-ui="${UI.allocations.recurringManualSpread}"]`),
-      ).toBeInTheDocument();
-    });
-    expect(
-      (
-        document.querySelector(
-          `[data-ui="${UI.allocations.recurringManualSpread}"]`,
-        ) as HTMLInputElement
-      ).checked,
-    ).toBe(true);
+    expect(document.querySelector('[data-ui="allocations.recurring.manualSpread"]')).toBeNull();
     expect(
       within(document.querySelector(`[data-ui="${UI.allocations.recurringTo}"]`)!).getByRole(
         'radio',
-        { name: salary.name },
+        { name: fixed.name },
       ),
     ).toBeChecked();
+  });
+
+  it('行き先に収入科目（差引形）を選んでも台帳経由になり、種別が「収入」と表示されない', async () => {
+    const ledger = await loadLedger();
+    const bank = ledger.accounts.find((a) => a.name === '預金')!;
+    const salary = ledger.accounts.find((a) => a.name === '給与')!;
+
+    await renderReady();
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.unifiedAdd}"]`)!);
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.addChooser}.rule"]`)!);
+
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringName}"]`)!, {
+      target: { value: '医師賠償責任保険' },
+    });
+    fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!, {
+      target: { value: '60000' },
+    });
+    fireEvent.click(
+      within(document.querySelector(`[data-ui="${UI.allocations.recurringFrom}"]`)!).getByRole(
+        'radio',
+        { name: bank.name },
+      ),
+    );
+    const toPicker = document.querySelector(
+      `[data-ui="${UI.allocations.recurringTo}"]`,
+    ) as HTMLElement;
+    fireEvent.click(within(toPicker).getByRole('radio', { name: salary.name }));
+    // 収入行き（差引形）でもラベルは中立の「計上先」になる（費用行きと同じ扱い）。
+    expect(within(toPicker).getByText(/計上先/)).toBeInTheDocument();
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
+    await waitFor(
+      () => {
+        expect(
+          document.querySelector(`[data-ui="${UI.allocations.recurringSheet}"]`),
+        ).not.toBeInTheDocument();
+      },
+      { timeout: 3000 },
+    );
+
+    // 保存正規形は費用ルールと同一（借方 = 台帳・spread = 元の収入科目）。
+    const rule = (await loadLedger()).recurringRules.find((r) => r.name === '医師賠償責任保険');
+    expect(rule).toBeDefined();
+    expect(rule!.spreadExpenseAccountId).toBe(salary.id);
+    expect(rule!.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+    expect(rule!.creditAccountId).toBe(bank.id);
+
+    // 一覧の種別タグが「収入（給与など）」と誤読されない（差引形は簿記編集扱い）。
+    const list = await waitFor(() => {
+      const found = document.querySelector(`[data-ui="${UI.allocations.recurringList}"]`);
+      expect(found).toBeInTheDocument();
+      return found as HTMLElement;
+    });
+    expect(within(list).getByText('簿記編集（科目を直接指定）')).toBeInTheDocument();
+    expect(within(list).queryByText('収入（給与など）')).not.toBeInTheDocument();
   });
 });
 
@@ -255,7 +289,7 @@ describe('持ち込み登録（継続コスト資産シート）', () => {
     await waitFor(async () => {
       const ledger = await loadLedger();
       const item = ledger.monthlyCostItems.find((m) => m.name === '過去の洗濯機');
-      expect(item).toMatchObject({ amount: 240000, startDate: '2023-04-15' });
+      expect(item).toMatchObject({ amount: 24000000, startDate: '2023-04-15' });
       expect(item!.endDate).toBeUndefined();
       const purchase = ledger.journalEntries.find(
         (e) => e.metadata?.monthlyCostId === item!.id && e.metadata.monthlyCostRecovery !== true,
@@ -276,7 +310,7 @@ describe('持ち込み登録（継続コスト資産シート）', () => {
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
     const item = await createContinuousCost({
       name: '編集対象',
-      amount: 12000,
+      amount: 1200000,
       startDate: '2026-01-10',
       expenseAccountId: expense.id,
     });
@@ -293,6 +327,69 @@ describe('持ち込み登録（継続コスト資産シート）', () => {
   });
 });
 
+describe('費用化の開始日の表示と期間クイックボタン（P2-1 / P2-3）', () => {
+  it('期間クイックボタンの起点は費用化の開始日（未設定なら購入日）', async () => {
+    const ledger = await loadLedger();
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    const item = await createContinuousCost({
+      name: '前払いの保守',
+      amount: 6000000,
+      startDate: '2026-01-10',
+      allocationStartDate: '2027-02-01',
+      expenseAccountId: expense.id,
+    });
+
+    await renderReady();
+    fireEvent.click(await screen.findByRole('button', { name: `編集: ${item.name}` }));
+    const quickSpan = document.querySelector(
+      `[data-ui="${UI.allocations.editQuickSpan}"]`,
+    ) as HTMLElement;
+    const endInput = document.querySelector(
+      `[data-ui="${UI.allocations.editEndDate}"]`,
+    ) as HTMLInputElement;
+
+    // 起点 = 費用化の開始日（2027-02）から 1 年（購入日起点なら 2026-12-31 になってしまう）。
+    fireEvent.click(within(quickSpan).getByRole('button', { name: '1年' }));
+    expect(endInput.value).toBe('2028-01-31');
+
+    // 費用化の開始日を空にすると従来どおり購入日起点。
+    fireEvent.change(
+      document.querySelector(`[data-ui="${UI.allocations.editAllocationStartDate}"]`)!,
+      { target: { value: '' } },
+    );
+    fireEvent.click(within(quickSpan).getByRole('button', { name: '1年' }));
+    expect(endInput.value).toBe('2026-12-31');
+  });
+
+  it('一覧の期間表示は費用化の開始日を設定した項目だけ追加表示する', async () => {
+    const ledger = await loadLedger();
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    await createContinuousCost({
+      name: '前払いの保守',
+      amount: 6000000,
+      startDate: '2026-01-10',
+      allocationStartDate: '2027-02-01',
+      expenseAccountId: expense.id,
+    });
+    await createContinuousCost({
+      name: '普通の年払い',
+      amount: 1200000,
+      startDate: '2026-01-10',
+      expenseAccountId: expense.id,
+    });
+
+    await renderReady();
+    const deferredCard = (await screen.findByText('前払いの保守')).closest(
+      `[data-ui="${UI.allocations.item}"]`,
+    ) as HTMLElement;
+    expect(deferredCard.textContent).toContain('費用化 2027-02-01〜');
+    const plainCard = screen
+      .getByText('普通の年払い')
+      .closest(`[data-ui="${UI.allocations.item}"]`) as HTMLElement;
+    expect(plainCard.textContent).not.toContain('費用化');
+  });
+});
+
 describe('終了まで1ヶ月以内のマーカー', () => {
   it('1ヶ月以内の項目だけ data-ending が付き、並びは終了が近い順', async () => {
     const ledger = await loadLedger();
@@ -300,21 +397,21 @@ describe('終了まで1ヶ月以内のマーカー', () => {
     const today = todayLocal();
     await createContinuousCost({
       name: 'もうすぐ終了',
-      amount: 12000,
+      amount: 1200000,
       startDate: '2026-01-01',
       endDate: addMonthsToDate(today, 1),
       expenseAccountId: expense.id,
     });
     await createContinuousCost({
       name: 'まだ先',
-      amount: 12000,
+      amount: 1200000,
       startDate: '2026-01-01',
       endDate: addMonthsToDate(today, 12),
       expenseAccountId: expense.id,
     });
     await createContinuousCost({
       name: '終了日なし',
-      amount: 12000,
+      amount: 1200000,
       startDate: '2026-01-01',
       expenseAccountId: expense.id,
     });
@@ -335,13 +432,113 @@ describe('終了まで1ヶ月以内のマーカー', () => {
   });
 });
 
+describe('ヘッダー日付に追従する一覧と金額', () => {
+  it('選択日より後の項目を隠し、回収は全知識としてどの断面にも同じ配分で表示する', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+
+    const historical = await createContinuousCost({
+      name: '当時の年払い',
+      amount: 1200000,
+      startDate: '2024-01-01',
+      expenseAccountId: expense.id,
+      creditAccountId: cash.id,
+    });
+    // 回収日は 6 月末だが、現在の全知識としてすべての月割り対象月へ遡及して再配分する。
+    await archiveMonthlyCost({
+      id: historical.id,
+      endDate: '2024-06-30',
+      recovery: { destinationAccountId: cash.id, amount: 600000 },
+    });
+    await createContinuousCost({
+      name: '未来開始の項目',
+      amount: 600000,
+      startDate: '2026-07-01',
+      endDate: '2026-12-31',
+      expenseAccountId: expense.id,
+      creditAccountId: cash.id,
+    });
+
+    const view = await renderReady({ mode: 'date', date: '2023-12-31' });
+    expect(screen.queryByText(historical.name)).not.toBeInTheDocument();
+    expect(screen.queryByText('未来開始の項目')).not.toBeInTheDocument();
+    expect(screen.getByText(/まだ登録がありません/)).toBeInTheDocument();
+
+    view.rerender(<View period={{ mode: 'date', date: '2024-05-31' }} />);
+    const historicalCard = (await screen.findByText(historical.name)).closest(
+      `[data-ui="${UI.allocations.item}"]`,
+    ) as HTMLElement;
+    expect(historicalCard).not.toBeNull();
+    expect(screen.queryByText('未来開始の項目')).not.toBeInTheDocument();
+    // 実際の今日は終了済みでも、選択日にはまだ有効。終了まで1ヶ月なのでマーカーも D 基準。
+    expect(historicalCard.dataset['ending']).toBe('true');
+    // どの断面でも 6,000 / 6ヶ月 = 月1,000。5月末の残りは1,000。
+    expect(within(historicalCard).getByText('残存価値').closest('.kv')).toHaveTextContent('1,000');
+    expect(within(historicalCard).getByText('今月の計上額').closest('.kv')).toHaveTextContent(
+      '1,000',
+    );
+
+    view.rerender(<View period={{ mode: 'date', date: '2024-06-30' }} />);
+    const recoveredCard = (await screen.findByText(historical.name)).closest(
+      `[data-ui="${UI.allocations.item}"]`,
+    ) as HTMLElement;
+    // 回収後は割り振る総額 6,000 / 6ヶ月 = 月1,000、終了日時点の残りは0。
+    expect(within(recoveredCard).getByText('月あたり').closest('.kv')).toHaveTextContent('1,000');
+    expect(within(recoveredCard).getByText('残存価値').closest('.kv')).toHaveTextContent('0');
+    expect(within(recoveredCard).getByText('今月の計上額').closest('.kv')).toHaveTextContent(
+      '1,000',
+    );
+  });
+
+  it('過去断面のカードとアーカイブ操作が同じ全知識の回収額を使う', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    const item = await createContinuousCost({
+      name: '回収済みの過去項目',
+      amount: 1200000,
+      startDate: '2024-01-01',
+      expenseAccountId: expense.id,
+      creditAccountId: cash.id,
+    });
+    await archiveMonthlyCost({
+      id: item.id,
+      endDate: '2024-06-30',
+      recovery: { destinationAccountId: cash.id, amount: 600000 },
+    });
+
+    await renderReady({ mode: 'date', date: '2024-05-31' });
+    const card = (await screen.findByText(item.name)).closest(
+      `[data-ui="${UI.allocations.item}"]`,
+    ) as HTMLElement;
+    // 後日の回収を全知識として反映するため、過去断面でも残存価値は1,000。
+    expect(within(card).getByText('残存価値').closest('.kv')).toHaveTextContent('1,000');
+
+    fireEvent.click(screen.getByRole('button', { name: `アーカイブ: ${item.name}` }));
+    const dialog = document.querySelector(
+      `[data-ui="${UI.allocations.archiveDialog}"]`,
+    ) as HTMLElement;
+    // 配分最終日では回収額にかかわらず残存0になるため、途中日へ変えて差を固定する。
+    fireEvent.change(
+      document.querySelector(`[data-ui="${UI.allocations.archiveDate}"]`) as HTMLInputElement,
+      { target: { value: '2024-05-31' } },
+    );
+    // 表示と操作の両方が同じ全知識を使うため、値は変わらない。
+    expect(within(dialog).getByText('残存価値').closest('.kv')).toHaveTextContent('1,000');
+    expect(
+      document.querySelector(`[data-ui="${UI.allocations.archiveTransfer}"]`),
+    ).toBeInTheDocument();
+  });
+});
+
 describe('アーカイブ動線', () => {
   it('振替せずアーカイブ = 終了日だけ設定される（既定 = 今日）', async () => {
     const ledger = await loadLedger();
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
     const item = await createContinuousCost({
       name: '捨てる項目',
-      amount: 60000,
+      amount: 6000000,
       startDate: '2026-01-01',
       endDate: '2027-12-31',
       expenseAccountId: expense.id,
@@ -374,7 +571,7 @@ describe('アーカイブ動線', () => {
     // 終了日なし = 残存価値は全額（60,000）。
     const item = await createContinuousCost({
       name: '売る項目',
-      amount: 60000,
+      amount: 6000000,
       startDate: '2026-01-01',
       expenseAccountId: expense.id,
     });
@@ -384,9 +581,7 @@ describe('アーカイブ動線', () => {
 
     const dialog = document.querySelector(`[data-ui="${UI.allocations.archiveDialog}"]`)!;
     expect(dialog).toHaveTextContent('残存価値');
-    const transferButton = document.querySelector(
-      `[data-ui="${UI.allocations.archiveTransfer}"]`,
-    )!;
+    const transferButton = document.querySelector(`[data-ui="${UI.allocations.archiveTransfer}"]`)!;
     expect(transferButton).toBeInTheDocument();
     fireEvent.click(transferButton);
 
@@ -423,9 +618,9 @@ describe('アーカイブ動線', () => {
       const credit = recovery!.lines.find((l) => l.side === 'credit')!;
       expect(debit.accountId).toBe(expense.id);
       expect(credit.accountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
-      expect(credit.amount).toBe(30000);
+      expect(credit.amount).toBe(3000000);
       // 金額は絶対に変更しない（購入の仕訳とのミラー維持）。
-      expect(saved?.amount).toBe(60000);
+      expect(saved?.amount).toBe(6000000);
     });
   });
 });

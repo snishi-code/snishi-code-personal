@@ -67,8 +67,8 @@ describe('追補監査の画面回帰', () => {
       description: '残高補正',
       kind: 'normal',
       lines: [
-        { accountId: cash.id, side: 'debit', amount: 100 },
-        { accountId: expense.id, side: 'credit', amount: 100 },
+        { accountId: cash.id, side: 'debit', amount: 10000 },
+        { accountId: expense.id, side: 'credit', amount: 10000 },
       ],
       metadata: {
         adjustment: {
@@ -89,8 +89,8 @@ describe('追補監査の画面回帰', () => {
       description: '初期残高',
       kind: 'opening',
       lines: [
-        { accountId: cash.id, side: 'debit', amount: 100 },
-        { accountId: equity.id, side: 'credit', amount: 100 },
+        { accountId: cash.id, side: 'debit', amount: 10000 },
+        { accountId: equity.id, side: 'credit', amount: 10000 },
       ],
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -142,15 +142,15 @@ describe('追補監査の画面回帰', () => {
     const cash = ledger.accounts.find((account) => account.name === '現金')!;
     const liability = ledger.accounts.find((account) => account.role === 'payment-liability')!;
     await createOpenings([
-      { accountId: cash.id, amount: 600000, date: '2000-01-01' },
-      { accountId: liability.id, amount: 600000, date: '2000-01-01' },
+      { accountId: cash.id, amount: 60000000, date: '2000-01-01' },
+      { accountId: liability.id, amount: 60000000, date: '2000-01-01' },
     ]);
     const futureYear = Number(todayLocal().slice(0, 4)) + 2;
     await createRepaymentEntries({
       liabilityAccountId: liability.id,
       fromAccountId: cash.id,
       firstDate: `${futureYear}-01-15`,
-      total: 50000,
+      total: 5000000,
       count: 1,
       title: '未来返済',
     });
@@ -197,10 +197,10 @@ describe('追補監査の画面回帰', () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((account) => account.name === '現金')!;
     const expense = ledger.accounts.find((account) => account.name === '固定費')!;
-    await createOpenings([{ accountId: cash.id, amount: 500000, date: '2000-01-01' }]);
+    await createOpenings([{ accountId: cash.id, amount: 50000000, date: '2000-01-01' }]);
     await createContinuousCost({
       name: '年払いサービス',
-      amount: 120000,
+      amount: 12000000,
       startDate: todayLocal(),
       endDate: addMonthsToDate(todayLocal(), 11),
       expenseAccountId: expense.id,
@@ -242,7 +242,7 @@ describe('追補監査の画面回帰', () => {
     // 終了日が過去 = アーカイブ済み（導出）。
     const ended = await createContinuousCost({
       name: '終了済み項目',
-      amount: 12000,
+      amount: 1200000,
       startDate: '2026-01-01',
       endDate: addMonthsToDate(today, -1),
       expenseAccountId: expense.id,
@@ -251,7 +251,7 @@ describe('追補監査の画面回帰', () => {
     // 終了日 = 今日はまだ消えない（< 今日 で判定）。
     const endingToday = await createContinuousCost({
       name: '今日終了の項目',
-      amount: 24000,
+      amount: 2400000,
       startDate: '2026-01-01',
       endDate: today,
       expenseAccountId: expense.id,
@@ -260,7 +260,7 @@ describe('追補監査の画面回帰', () => {
     // 終了日なしは永久にアーカイブされない。
     const openEnded = await createContinuousCost({
       name: '終了日なしの項目',
-      amount: 48000,
+      amount: 4800000,
       startDate: '2026-01-01',
       expenseAccountId: expense.id,
       creditAccountId: cash.id,
@@ -268,7 +268,7 @@ describe('追補監査の画面回帰', () => {
 
     render(
       <Providers>
-        <Allocations onEditEntry={() => undefined} />
+        <Allocations period={{ mode: 'all' }} onEditEntry={() => undefined} />
       </Providers>,
     );
     await waitFor(() => {

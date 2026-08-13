@@ -39,7 +39,7 @@ export const ROLE_TYPES: Record<AccountRole, AccountType[]> = {
   'daily-asset': ['asset'],
   'investment-asset': ['asset'],
   // 継続コストの集約台帳口座（『継続コスト台帳』・内部集約・自動・ユーザー選択不可）。
-  // 品目ごとに作らず単一口座へ残存価値を寄せる。支払いを資産化し、認識で費消する。
+  // 品目ごとに作らず単一口座へ残存価値を寄せる。支払いを資産化し、月割りで費消する。
   // 通常入力候補・勘定科目管理 UI に出さない・CF 総資金に含めない。
   'continuing-cost-asset': ['asset'],
   'payment-liability': ['liability'],
@@ -59,9 +59,7 @@ export function roleAllowsType(role: AccountRole, type: AccountType): boolean {
  * 勘定科目管理一覧・ロール選択肢から除外する（BS / 資産内訳・CF には残高として現れてよい）。
  *  - continuing-cost-asset: 継続コストの集約台帳口座。
  */
-export const INTERNAL_ACCOUNT_ROLES: readonly AccountRole[] = [
-  'continuing-cost-asset',
-];
+export const INTERNAL_ACCOUNT_ROLES: readonly AccountRole[] = ['continuing-cost-asset'];
 
 export function isInternalRole(role: AccountRole): boolean {
   return INTERNAL_ACCOUNT_ROLES.includes(role);
@@ -74,8 +72,7 @@ export function isInternalRole(role: AccountRole): boolean {
  * UI の補正対象ピッカーと repository の保存境界の双方がこの正本を使う。
  */
 export const ADJUSTABLE_ACCOUNT_ROLES: readonly AccountRole[] = ACCOUNT_ROLES.filter(
-  (r) =>
-    (roleAllowsType(r, 'asset') || roleAllowsType(r, 'liability')) && !isInternalRole(r),
+  (r) => (roleAllowsType(r, 'asset') || roleAllowsType(r, 'liability')) && !isInternalRole(r),
 );
 
 /** type に対する既定 role（type 変更時のリセット先・migration の既定）。 */

@@ -11,9 +11,9 @@ export const DB_NAME = 'template-memo' as const;
 
 /**
  * IndexedDB のバージョン。store 構成を変える時だけ上げる。
- * v3 = select/menu・清書廃止を含む新テンプレート形。旧版は捨てて作り直す（移行なし）。
+ * v4 = Frame / Format / TemplateDef を独立 store へ分離。旧版は捨てて作り直す（移行なし）。
  */
-export const DB_VERSION = 3 as const;
+export const DB_VERSION = 4 as const;
 
 /** エクスポート/import 照合用のアプリ ID（封筒 appId）。 */
 export const APP_ID = 'snishi-code.template-memo' as const;
@@ -21,9 +21,10 @@ export const APP_ID = 'snishi-code.template-memo' as const;
 /**
  * 現行スキーマ版。互換性のない変更ごとに +1 する。migration step は持たない
  * （simple-ledger と同じ単発変換方式。旧版 JSON は fail-closed に拒否し、
- * 必要なら変換ツールを別途用意する）。v3 = select/menu・清書/定型文廃止。
+ * 必要なら変換ツールを別途用意する）。v4 = テンプレート部品の正規化。
+ * v5 = 自由本文の場所化（旧・単一メモ欄と注入先設定を廃止し sectionTexts を追加）。
  */
-export const SCHEMA_VERSION = 3 as const;
+export const SCHEMA_VERSION = 5 as const;
 
 /** バックアップ JSON の kind 識別子。 */
 export const BACKUP_KIND = 'TEMPLATE_MEMO_BACKUP' as const;
@@ -36,6 +37,8 @@ export const STORE_SETTINGS = 'settings';
 export const STORE_PATIENTS = 'patients';
 export const STORE_PLACES = 'places';
 export const STORE_TEMPLATES = 'templates';
+export const STORE_FRAMES = 'frames';
+export const STORE_FORMATS = 'formats';
 /** 予備の kv store（現在は未使用。巻き戻しは snapshots 専用 DB が担う）。 */
 export const STORE_SNAPSHOTS = 'snapshots';
 export const ALL_STORES = [
@@ -43,6 +46,8 @@ export const ALL_STORES = [
   STORE_PATIENTS,
   STORE_PLACES,
   STORE_TEMPLATES,
+  STORE_FRAMES,
+  STORE_FORMATS,
   STORE_SNAPSHOTS,
 ] as const;
 
@@ -51,11 +56,14 @@ export const APP_SETTINGS_KEY = 'app';
 
 /**
  * 巻き戻しスナップショット（foundation createSnapshotStore）の専用 DB 名。
- * v3 で Patient 形が変わった（清書廃止ほか）ため DB 名ごと切り替え、旧形の巻き戻しを封じる。
+ * v4 で保存スキーマを切り替えたため DB 名ごと切り替え、旧形の巻き戻しを封じる。
  */
-export const SNAPSHOT_DB_NAME = 'template-memo-snapshots-v3' as const;
-/** v2 以前のスナップショット DB 名（接続時に削除するためだけに残す）。 */
-export const LEGACY_SNAPSHOT_DB_NAME = 'template-memo-snapshots' as const;
+export const SNAPSHOT_DB_NAME = 'template-memo-snapshots-v4' as const;
+/** 旧スナップショット DB 名（接続時に削除するためだけに残す）。 */
+export const LEGACY_SNAPSHOT_DB_NAMES = [
+  'template-memo-snapshots',
+  'template-memo-snapshots-v3',
+] as const;
 
 /**
  * QR 1 ページの最大バイト数（UTF-8）。旧回診と同じ 600B

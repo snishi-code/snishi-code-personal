@@ -4,10 +4,10 @@
  * 封筒は kind / appId / schemaVersion で照合し、合わない JSON は fail-closed に拒否する
  * （medical 側 hospital-workspace/shared/workspaceBackup.ts の流儀を踏襲。zod は使わず手書き検証）。
  * schemaVersion は現行一致のみ受け付ける（migration step は持たない = constants の単発変換方式。
- * v1 の封筒は fail-closed に拒否する）。
+ * v3 以前の封筒は fail-closed に拒否する）。
  *
  * 中身の検証は 2 段構え:
- *   - templates: normalizeTemplate（domain/template.ts が正本）で正規化し、壊れは捨てる。
+ *   - frames / formats / templates: entities.ts の正規化を通し、壊れ参照は捨てる。
  *     全滅したら復元先が成立しないので throw（active テンプレート不在の状態を作らない）。
  *   - patients / places / settings: 1 件ずつ防御的に正規化する。id/name の型不正 row だけを
  *     捨てて生き残りを救い、row 内の配列/オブジェクト欄は型不正なら空に落とす。
@@ -19,8 +19,16 @@
 
 import { APP_ID, BACKUP_KIND, SCHEMA_VERSION } from '../data/constants';
 import type { ReplaceAllData } from '../data/store';
-import { normalizeTemplate, type Template } from './template';
-import { normalizeProjectedValues } from './normalize';
+import {
+  normalizeFormat,
+  normalizeFrame,
+  normalizeTemplateDef,
+  type Format,
+  type Frame,
+  type TemplateDef,
+} from './entities';
+import { normalizeProjectedValues, normalizeSectionTexts } from './normalize';
+import { DEFAULT_TAG_COLOR, isTagColor } from './tags';
 import {
   isPatientStatus,
   STATUS,
@@ -44,7 +52,9 @@ interface BackupBundle {
   settings: AppSettings;
   places: PlaceDef[];
   patients: Patient[];
-  templates: Template[];
+  frames: Frame[];
+  formats: Format[];
+  templates: TemplateDef[];
 }
 
 // ── エラー文言定数（正本） ──
@@ -66,10 +76,7 @@ export const backupFieldBrokenMsg = (name: string) => `バックアップの ${n
 // ============================
 
 /** 全データを封筒に包んで JSON 文字列にする（人が中を確認できるよう整形出力）。 */
-export function buildBackupJson(
-  data: { settings: AppSettings; places: PlaceDef[]; patients: Patient[]; templates: Template[] },
-  nowMs = Date.now(),
-): string {
+export function buildBackupJson(data: ReplaceAllData, nowMs = Date.now()): string {
   const bundle: BackupBundle = {
     kind: BACKUP_KIND,
     appId: APP_ID,
@@ -78,6 +85,8 @@ export function buildBackupJson(
     settings: data.settings,
     places: data.places,
     patients: data.patients,
+    frames: data.frames,
+    formats: data.formats,
     templates: data.templates,
   };
   return JSON.stringify(bundle, null, 2);
@@ -134,9 +143,10 @@ function normalizePatientRow(raw: unknown, places: readonly PlaceDef[]): Patient
     status: isPatientStatus(raw.status) ? raw.status : STATUS.NONE,
     tags: stringArray(raw.tags),
     problems: stringArray(raw.problems),
-    visitMemo: str(raw.visitMemo),
     standingMemo: str(raw.standingMemo),
-    // projectedValues の外側 2 層（groupId → itemId → 値）だけを検証する。値そのものは
+    // 場所ごとの自由本文は string 値のエントリだけを残す（store 経路と同じ whitelist）。
+    sectionTexts: normalizeSectionTexts(raw.sectionTexts),
+    // projectedValues の外側 2 層（placementId → itemId → 値）だけを検証する。値そのものは
     // 読み出し側の domain/formValues.ts の正規化ヘルパに委ねる（ここで形を断定せず、
     // 壊れ値は読み出し時に未入力へ倒れる）。
     projectedValues: normalizeProjectedValues(raw.projectedValues),
@@ -145,11 +155,15 @@ function normalizePatientRow(raw: unknown, places: readonly PlaceDef[]): Patient
   };
 }
 
-/** tag 定義 1 件の正規化（settings 内の配列）。name の型不正 row は捨てる。 */
+/**
+ * tag 定義 1 件の正規化（settings 内の配列）。name の型不正 row は捨てる。
+ * 未知の色（旧 'gray' を含む）は既定色 = 残る側へ倒す。色は「ラウンド開始で外れるか」の
+ * 意味を持つため、読めない色を外れる側へ倒さない（黙って消えるのを防ぐ fail-safe）。
+ */
 function normalizeTagRow(raw: unknown): TagDef | null {
   if (!isPlainObject(raw)) return null;
   if (typeof raw.name !== 'string' || raw.name.trim() === '') return null;
-  return { name: raw.name, color: raw.color === 'amber' ? 'amber' : 'gray' };
+  return { name: raw.name, color: isTagColor(raw.color) ? raw.color : DEFAULT_TAG_COLOR };
 }
 
 /**
@@ -157,7 +171,7 @@ function normalizeTagRow(raw: unknown): TagDef | null {
  * activeTemplateId は検証済み templates に実在するものだけを許し、
  * 無ければ先頭 template へ付け替える（active 不在の状態を作らない）。
  */
-function normalizeSettings(raw: unknown, templates: readonly Template[]): AppSettings {
+function normalizeSettings(raw: unknown, templates: readonly TemplateDef[]): AppSettings {
   const fallback = templates[0];
   if (!fallback) throw new Error(BACKUP_NO_TEMPLATES_MSG); // 呼び出し側で保証済みの防御
   const r = isPlainObject(raw) ? raw : {};
@@ -195,11 +209,21 @@ export function parseBackupJson(text: string): ReplaceAllData {
     throw new Error(backupSchemaMismatchMsg(parsed.schemaVersion));
   }
 
+  if (!Array.isArray(parsed.frames)) throw new Error(backupFieldBrokenMsg('frames'));
+  const frames = parsed.frames
+    .map(normalizeFrame)
+    .filter((frame): frame is Frame => frame !== null);
+
+  if (!Array.isArray(parsed.formats)) throw new Error(backupFieldBrokenMsg('formats'));
+  const formats = parsed.formats
+    .map(normalizeFormat)
+    .filter((format): format is Format => format !== null);
+
   // templates が全滅すると active テンプレート不在になるため、復元自体を中止する。
   if (!Array.isArray(parsed.templates)) throw new Error(backupFieldBrokenMsg('templates'));
   const templates = parsed.templates
-    .map(normalizeTemplate)
-    .filter((t): t is Template => t !== null);
+    .map((row) => normalizeTemplateDef(row, { frames, formats }))
+    .filter((template): template is TemplateDef => template !== null);
   if (templates.length === 0) throw new Error(BACKUP_NO_TEMPLATES_MSG);
 
   if (!Array.isArray(parsed.places)) throw new Error(backupFieldBrokenMsg('places'));
@@ -211,5 +235,5 @@ export function parseBackupJson(text: string): ReplaceAllData {
     .filter((s): s is Patient => s !== null);
 
   const settings = normalizeSettings(parsed.settings, templates);
-  return { settings, patients, places, templates };
+  return { settings, patients, places, frames, formats, templates };
 }

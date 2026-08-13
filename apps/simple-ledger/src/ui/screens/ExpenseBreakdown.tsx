@@ -10,7 +10,7 @@ import {
   livingCostBreakdownForRange,
 } from '../../domain/livingCost';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
-import { reportEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { todayLocal } from '../../util/time';
 import { buildSectionTrends } from './breakdownData';
 import { Money } from '../money';
@@ -20,6 +20,8 @@ import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import type { Screen } from '../navigation';
 import type { JournalFilter } from './Journal';
+import { ScrollTopButton } from '../ScrollTopButton';
+import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 
 export function ExpenseBreakdown({
   period,
@@ -34,25 +36,26 @@ export function ExpenseBreakdown({
   onNavigate: (screen: Screen) => void;
 }) {
   const { ledger } = useLedger();
-  const currency = ledger?.settings.currency ?? 'JPY';
+  const currency = ledger?.settings.currency ?? '';
   const label = periodLabel(period);
   const today = todayLocal();
   const basis = useMemo(() => reportBasis(period, today), [period, today]);
   const range = basis.flowRange;
 
-  const { breakdown, categories } = useMemo(() => {
+  const { breakdown, categories, investmentProjectionTruncations } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger ? reportEntriesForAsOf(ledger, basis.asOf) : [];
+    const display = ledger ? displayEntriesResultForAsOf(ledger, basis.asOf, today) : null;
+    const entries = display?.entries ?? [];
     return {
       breakdown: livingCostBreakdownForRange(accounts, entries, range),
       categories: expenseCategoryBreakdownForRange(accounts, entries, range),
+      investmentProjectionTruncations: display?.investmentProjectionTruncations ?? [],
     };
-  }, [basis.asOf, ledger, range]);
+  }, [basis.asOf, ledger, range, today]);
 
-  const trends = useMemo(
-    () => buildSectionTrends(period, ledger, today),
-    [period, ledger, today],
-  );
+  const trends = useMemo(() => buildSectionTrends(period, ledger, today), [period, ledger, today]);
+  const visibleProjectionTruncations =
+    trends?.investmentProjectionTruncations ?? investmentProjectionTruncations;
 
   return (
     <section aria-labelledby="expense-breakdown-title" data-ui={UI.expenseBreakdown.view}>
@@ -62,6 +65,11 @@ export function ExpenseBreakdown({
       <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
         {t('expenseBreakdown.intro')}
       </p>
+
+      <InvestmentProjectionTruncationNotice
+        truncations={visibleProjectionTruncations}
+        accounts={ledger?.accounts ?? []}
+      />
 
       <p className="section-label">{t('expenseBreakdown.byCategory')}</p>
       <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
@@ -150,6 +158,7 @@ export function ExpenseBreakdown({
           />
         </div>
       ) : null}
+      <ScrollTopButton />
     </section>
   );
 }
