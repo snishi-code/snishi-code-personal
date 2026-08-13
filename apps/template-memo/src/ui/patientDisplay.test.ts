@@ -20,6 +20,7 @@ function patient(pid: string, room: string): Patient {
     problems: [],
     sectionTexts: {},
     standingMemo: '',
+    templateId: '',
     projectedValues: {},
     updatedAt: 0,
     archivedAt: null,

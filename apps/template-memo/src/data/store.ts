@@ -116,8 +116,15 @@ export interface HrStore {
   duplicateTemplateDef(templateId: string): Promise<TemplateDef>;
   saveGeneratedBundle(bundle: TemplatePresetBundle): Promise<void>;
   deleteTemplateDef(templateId: string): Promise<void>;
-  getActiveTemplate(): Template | null;
-  setActiveTemplate(templateId: string): Promise<void>;
+  /**
+   * ページ (対象) が使うテンプレートの解決。patient.templateId → 所属グループの
+   * templateId → アプリの defaultTemplateId の順に倒す (参照先が消えていた場合の fail-safe)。
+   */
+  getTemplateForPatient(patient: Patient): Template | null;
+  /** アプリ全体のデフォルトを変える (設定画面のテンプレート一覧タップ)。 */
+  setDefaultTemplate(templateId: string): Promise<void>;
+  /** グループのデフォルトを変える (設定画面のグループ一覧のトグル)。 */
+  setPlaceTemplate(placeId: string, templateId: string): Promise<void>;
   // ── バックアップ / 移行 ──
   exportData(): {
     settings: AppSettings;
@@ -156,10 +163,10 @@ interface CreateHrStoreDeps {
   now?: () => number;
 }
 
-function defaultSettings(nowMs: number, activeTemplateId: string): AppSettings {
+function defaultSettings(nowMs: number, defaultTemplateId: string): AppSettings {
   return {
     key: 'app',
-    activeTemplateId,
+    defaultTemplateId,
     tags: [],
     newlineMode: 'crlf',
     updatedAt: nowMs,
@@ -175,7 +182,11 @@ function normalizePlaceRows(rows: readonly unknown[]): PlaceDef[] {
     if (!raw || typeof raw !== 'object') continue;
     const r = raw as Record<string, unknown>;
     if (typeof r.placeId !== 'string' || r.placeId === '') continue;
-    out.push({ placeId: r.placeId, name: typeof r.name === 'string' ? r.name : '' });
+    out.push({
+      placeId: r.placeId,
+      name: typeof r.name === 'string' ? r.name : '',
+      templateId: typeof r.templateId === 'string' ? r.templateId : '',
+    });
   }
   return out;
 }
@@ -273,7 +284,11 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
     const round = buildRoundPreset(ts);
     const daily = buildDailyReportPreset(ts);
     const seededSettings = defaultSettings(ts, round.template.id);
-    const seededPlace: PlaceDef = { placeId: newId('plc'), name: DEFAULT_PLACE_NAME };
+    const seededPlace: PlaceDef = {
+      placeId: newId('plc'),
+      name: DEFAULT_PLACE_NAME,
+      templateId: round.template.id,
+    };
     await db.runWrite(
       [STORE_SETTINGS, STORE_TEMPLATES, STORE_FRAMES, STORE_FORMATS, STORE_PLACES],
       (tx) => {
@@ -324,6 +339,17 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
       templateDefs = templateRows
         .map((row) => normalizeTemplateDef(row, { frames, formats }))
         .filter((template): template is TemplateDef => template !== null);
+      // 参照修復 (fail-safe)。デフォルトの解決が空振りしない状態を起動時に作っておく:
+      //   settings.defaultTemplateId が実在しなければ先頭テンプレートへ、
+      //   place.templateId が実在しなければアプリのデフォルトへ倒す。
+      const validId = (id: unknown) =>
+        typeof id === 'string' && templateDefs.some((t) => t.id === id);
+      if (!validId(settings.defaultTemplateId)) {
+        settings = { ...settings, defaultTemplateId: templateDefs[0]?.id ?? '' };
+      }
+      places = places.map((p) =>
+        validId(p.templateId) ? p : { ...p, templateId: settings.defaultTemplateId },
+      );
     }
     allPatients = normalizePatientArray(patientRows);
     const view = activeViewId();
@@ -357,7 +383,12 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
     getActivePlace: () => activePlace(),
     isArchiveViewActive: () => isArchiveView(),
     async addPlace(name) {
-      const place: PlaceDef = { placeId: newId('plc'), name: String(name ?? '').trim() };
+      // グループを作った時のデフォルトはアプリ全体のデフォルト (作成時に写す)。
+      const place: PlaceDef = {
+        placeId: newId('plc'),
+        name: String(name ?? '').trim(),
+        templateId: settings.defaultTemplateId,
+      };
       await db.put(STORE_PLACES, place);
       places = [...places, place];
       emit({ type: 'workspace', workspaceId: activeViewId() });
@@ -387,10 +418,13 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
       await this.persistActiveOrThrow();
       const placeId = isArchiveView() ? places[0]?.placeId : activeViewId();
       if (!placeId) throw new Error(PLACE_ID_REQUIRED_MSG);
+      // ページを増やした時のデフォルトはそのグループのデフォルト (作成時に写す)。
+      const place = places.find((p) => p.placeId === placeId);
       const patient: Patient = {
         ...makeDefaultPatient(),
         name: String(name ?? ''),
         placeId,
+        templateId: place?.templateId ?? settings.defaultTemplateId,
         updatedAt: now(),
       };
       await putPatient(patient);
@@ -660,30 +694,58 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
       const rest = templateDefs.filter((template) => template.id !== templateId);
       const fallback = rest[0];
       if (!fallback) throw new Error(LAST_TEMPLATE_UNDELETABLE_MSG);
-      if (settings.activeTemplateId === templateId) {
-        settings.activeTemplateId = fallback.id;
-        settings.updatedAt = now();
-        await db.runWrite([STORE_TEMPLATES, STORE_SETTINGS], (tx) => {
-          tx.objectStore(STORE_TEMPLATES).delete(templateId);
-          tx.objectStore(STORE_SETTINGS).put(settings);
-        });
-      } else {
-        await db.deleteRecord(STORE_TEMPLATES, templateId);
-      }
+      // 消したテンプレートを指すデフォルト/ページを全部つなぎ替える (dangling 参照を残さない)。
+      // アプリのデフォルトが消える場合は残りの先頭へ、グループ/ページはアプリのデフォルトへ倒す。
+      const nextDefault =
+        settings.defaultTemplateId === templateId ? fallback.id : settings.defaultTemplateId;
+      const rewritePlaces = places.filter((p) => p.templateId === templateId);
+      const rewritePatients = allPatients.filter((p) => p.templateId === templateId);
+      settings = { ...settings, defaultTemplateId: nextDefault, updatedAt: now() };
+      const nextPlaces = places.map((p) =>
+        p.templateId === templateId ? { ...p, templateId: nextDefault } : p,
+      );
+      for (const p of rewritePatients) p.templateId = nextDefault; // live と共有する master を直接書く
+      await db.runWrite([STORE_TEMPLATES, STORE_SETTINGS, STORE_PLACES, STORE_PATIENTS], (tx) => {
+        tx.objectStore(STORE_TEMPLATES).delete(templateId);
+        tx.objectStore(STORE_SETTINGS).put(settings);
+        for (const p of nextPlaces) {
+          if (rewritePlaces.some((old) => old.placeId === p.placeId)) {
+            tx.objectStore(STORE_PLACES).put(p);
+          }
+        }
+        for (const p of rewritePatients) tx.objectStore(STORE_PATIENTS).put(p);
+      });
+      places = nextPlaces;
       templateDefs = rest;
       emit({ type: 'workspace', workspaceId: activeViewId() });
     },
-    getActiveTemplate() {
+    getTemplateForPatient(patient) {
+      // ページ → グループ → アプリ の順 (作成時に写しているので通常は 1 発で当たる。
+      // 以降は削除やデータ取り込みで参照が欠けた場合の fail-safe)。
+      const byId = (id: string | undefined) =>
+        id ? (templateDefs.find((template) => template.id === id) ?? null) : null;
+      const place = places.find((p) => p.placeId === patient.placeId);
       const definition =
-        templateDefs.find((template) => template.id === settings.activeTemplateId) ?? null;
+        byId(patient.templateId) ?? byId(place?.templateId) ?? byId(settings.defaultTemplateId);
       return definition ? resolveTemplate(definition, frames, formats) : null;
     },
-    async setActiveTemplate(templateId) {
+    async setDefaultTemplate(templateId) {
       if (!templateDefs.some((template) => template.id === templateId)) {
         throw new Error(`template not found: ${templateId}`);
       }
-      settings.activeTemplateId = templateId;
+      settings.defaultTemplateId = templateId;
       await this.saveSettings();
+      emit({ type: 'workspace', workspaceId: activeViewId() });
+    },
+    async setPlaceTemplate(placeId, templateId) {
+      const cur = places.find((p) => p.placeId === placeId);
+      if (!cur) throw new Error(PLACE_ID_REQUIRED_MSG);
+      if (!templateDefs.some((template) => template.id === templateId)) {
+        throw new Error(`template not found: ${templateId}`);
+      }
+      const next = { ...cur, templateId };
+      await db.put(STORE_PLACES, next);
+      places = places.map((p) => (p.placeId === placeId ? next : p));
       emit({ type: 'workspace', workspaceId: activeViewId() });
     },
     exportData() {

@@ -106,32 +106,50 @@ export function DetailView({
         </button>
       </div>
 
-      {/* タグ (色 = ラウンド開始で外れるか)。表示だけでなくその場で付け外しできる。
-          新規タグの作成は対象シート / 設定に集約する (allowAdd=false)。
-          タグ定義が 1 つも無いときは行ごと出さない (使っていない人に空行を作らない)。 */}
-      {tagNames.length > 0 ? (
-        <div
-          className="detailTagsRow"
-          role="group"
-          aria-label={s.patientSheet.tags}
-          data-ui={UI.detail.tags}
+      {/* タグ (色 = ラウンド開始で外れるか) と、右端にこのページで使うテンプレートの切替。
+          タグはその場で付け外しできる (新規タグの作成は対象シート / 設定に集約 allowAdd=false)。
+          タグ定義が 1 つも無いときはタグ部分だけ出さない (テンプレート切替は常に出す)。 */}
+      <div className="detailTagsRow" data-ui={UI.detail.tags}>
+        {tagNames.length > 0 ? (
+          <div role="group" aria-label={s.patientSheet.tags} className="detailTagsGroup">
+            <TagSelection
+              store={store}
+              selected={Array.isArray(patient.tags) ? patient.tags : []}
+              onChange={(next) => {
+                // 書き込み対象は描画時に読んだ患者ではなく、その時点の live を引き直す
+                // (write-through 保存。PatientEditPopup と同じ流儀)。
+                const target = store.getAppState().patients[selectedNo - 1];
+                if (!target) return;
+                target.tags = next;
+                store.markUpdated(selectedNo); // notify → bump (再描画) + updatedAt
+                store.scheduleSave();
+              }}
+              allowAdd={false}
+            />
+          </div>
+        ) : null}
+        {/* ページで使うテンプレート。作成時にグループのデフォルトが写っており、ここで個別に変える。
+            値の保存キーは配置 id なので、切り替えても入力済みの値は消えない (戻せば再表示される)。 */}
+        <select
+          className="select detailTemplateSelect"
+          value={store.getTemplateForPatient(patient)?.id ?? patient.templateId}
+          aria-label={s.detail.templateAria}
+          data-ui={UI.detail.template}
+          onChange={(e) => {
+            const target = store.getAppState().patients[selectedNo - 1];
+            if (!target) return;
+            target.templateId = e.target.value;
+            store.markUpdated(selectedNo);
+            store.scheduleSave();
+          }}
         >
-          <TagSelection
-            store={store}
-            selected={Array.isArray(patient.tags) ? patient.tags : []}
-            onChange={(next) => {
-              // 書き込み対象は描画時に読んだ患者ではなく、その時点の live を引き直す
-              // (write-through 保存。PatientEditPopup と同じ流儀)。
-              const target = store.getAppState().patients[selectedNo - 1];
-              if (!target) return;
-              target.tags = next;
-              store.markUpdated(selectedNo); // notify → bump (再描画) + updatedAt
-              store.scheduleSave();
-            }}
-            allowAdd={false}
-          />
-        </div>
-      ) : null}
+          {store.getTemplateDefs().map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name || s.common.untitled}
+            </option>
+          ))}
+        </select>
+      </div>
 
       {/* プロブレムリスト (患者ごとの独立データ。転記用QR の先頭 = QR 順と一致) */}
       <ProblemListCard runtime={runtime} patient={patient} />
@@ -180,7 +198,7 @@ export function DetailView({
       {qrOpen ? (
         <DetailQrDialog
           patient={patient}
-          template={store.getActiveTemplate()}
+          template={store.getTemplateForPatient(patient)}
           settings={store.getSettings()}
           onClose={() => setQrOpen(false)}
         />

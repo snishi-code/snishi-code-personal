@@ -12,7 +12,8 @@
  *   - patients / places / settings: 1 件ずつ防御的に正規化する。id/name の型不正 row だけを
  *     捨てて生き残りを救い、row 内の配列/オブジェクト欄は型不正なら空に落とす。
  *
- * 参照整合はここで閉じる: settings.activeTemplateId が templates に無ければ先頭へ付け替え、
+ * 参照整合はここで閉じる: settings.defaultTemplateId が templates に無ければ先頭へ付け替え、
+ * place/patient の templateId も実在するものへ倒し、
  * Patient.placeId が places に無ければ先頭 place へ倒す。返り値はそのまま
  * store.replaceAll へ渡せる検証済みデータ（ReplaceAllData）。
  */
@@ -113,20 +114,32 @@ function stringArray(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
 }
 
-/** place 1 件の正規化。placeId/name の型不正 row は捨てる。 */
-function normalizePlaceRow(raw: unknown): PlaceDef | null {
+/**
+ * place 1 件の正規化。placeId/name の型不正 row は捨てる。
+ * templateId (グループのデフォルト) は実在する template だけを許し、迷子参照は先頭へ倒す。
+ */
+function normalizePlaceRow(raw: unknown, templates: readonly TemplateDef[]): PlaceDef | null {
   if (!isPlainObject(raw)) return null;
   if (typeof raw.placeId !== 'string' || raw.placeId === '') return null;
   if (typeof raw.name !== 'string') return null;
-  return { placeId: raw.placeId, name: raw.name };
+  const templateId =
+    typeof raw.templateId === 'string' && templates.some((t) => t.id === raw.templateId)
+      ? raw.templateId
+      : (templates[0]?.id ?? '');
+  return { placeId: raw.placeId, name: raw.name, templateId };
 }
 
 /**
  * patient 1 件の正規化。pid/name の型不正 row は捨て、それ以外の欄は型不正でも
  * 既定値へ倒して row を救う（status は isPatientStatus で検証し不正は「未」へ）。
  * placeId は存在する place だけを許し、迷子参照は先頭 place へ倒す。
+ * templateId (ページで使うテンプレート) も同様に、迷子参照は所属グループのデフォルトへ倒す。
  */
-function normalizePatientRow(raw: unknown, places: readonly PlaceDef[]): Patient | null {
+function normalizePatientRow(
+  raw: unknown,
+  places: readonly PlaceDef[],
+  templates: readonly TemplateDef[],
+): Patient | null {
   if (!isPlainObject(raw)) return null;
   if (typeof raw.pid !== 'string' || raw.pid === '') return null;
   if (typeof raw.name !== 'string') return null;
@@ -135,11 +148,16 @@ function normalizePatientRow(raw: unknown, places: readonly PlaceDef[]): Patient
     typeof raw.placeId === 'string' && places.some((p) => p.placeId === raw.placeId)
       ? raw.placeId
       : (places[0]?.placeId ?? '');
+  const templateId =
+    typeof raw.templateId === 'string' && templates.some((t) => t.id === raw.templateId)
+      ? raw.templateId
+      : (places.find((p) => p.placeId === placeId)?.templateId ?? templates[0]?.id ?? '');
   return {
     pid: raw.pid,
     name: raw.name,
     room: str(raw.room),
     placeId,
+    templateId,
     status: isPatientStatus(raw.status) ? raw.status : STATUS.NONE,
     tags: stringArray(raw.tags),
     problems: stringArray(raw.problems),
@@ -168,20 +186,20 @@ function normalizeTagRow(raw: unknown): TagDef | null {
 
 /**
  * settings の正規化: 既定値の上に、型が合う欄だけを上書きマージする。
- * activeTemplateId は検証済み templates に実在するものだけを許し、
- * 無ければ先頭 template へ付け替える（active 不在の状態を作らない）。
+ * defaultTemplateId は検証済み templates に実在するものだけを許し、
+ * 無ければ先頭 template へ付け替える（デフォルト不在の状態を作らない）。
  */
 function normalizeSettings(raw: unknown, templates: readonly TemplateDef[]): AppSettings {
   const fallback = templates[0];
   if (!fallback) throw new Error(BACKUP_NO_TEMPLATES_MSG); // 呼び出し側で保証済みの防御
   const r = isPlainObject(raw) ? raw : {};
-  const activeTemplateId =
-    typeof r.activeTemplateId === 'string' && templates.some((t) => t.id === r.activeTemplateId)
-      ? r.activeTemplateId
+  const defaultTemplateId =
+    typeof r.defaultTemplateId === 'string' && templates.some((t) => t.id === r.defaultTemplateId)
+      ? r.defaultTemplateId
       : fallback.id;
   return {
     key: 'app',
-    activeTemplateId,
+    defaultTemplateId,
     tags: (Array.isArray(r.tags) ? r.tags : [])
       .map(normalizeTagRow)
       .filter((t): t is TagDef => t !== null),
@@ -227,11 +245,13 @@ export function parseBackupJson(text: string): ReplaceAllData {
   if (templates.length === 0) throw new Error(BACKUP_NO_TEMPLATES_MSG);
 
   if (!Array.isArray(parsed.places)) throw new Error(backupFieldBrokenMsg('places'));
-  const places = parsed.places.map(normalizePlaceRow).filter((g): g is PlaceDef => g !== null);
+  const places = parsed.places
+    .map((row) => normalizePlaceRow(row, templates))
+    .filter((g): g is PlaceDef => g !== null);
 
   if (!Array.isArray(parsed.patients)) throw new Error(backupFieldBrokenMsg('patients'));
   const patients = parsed.patients
-    .map((row) => normalizePatientRow(row, places))
+    .map((row) => normalizePatientRow(row, places, templates))
     .filter((s): s is Patient => s !== null);
 
   const settings = normalizeSettings(parsed.settings, templates);

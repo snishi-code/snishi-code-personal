@@ -23,6 +23,7 @@ export function makeDefaultPatient(): Patient {
     problems: [],
     sectionTexts: {},
     standingMemo: '',
+    templateId: '',
     projectedValues: {},
     updatedAt: 0,
     archivedAt: null,
@@ -100,6 +101,7 @@ export function normalizePatientArray(arr: readonly unknown[] | null | undefined
           ? r.problems.filter((x): x is string => typeof x === 'string')
           : [],
       standingMemo: r && typeof r.standingMemo === 'string' ? r.standingMemo : '',
+      templateId: r && typeof r.templateId === 'string' ? r.templateId : '',
       // ※ ここに追加しないと whitelist で reload 時に黙って消える。
       sectionTexts: normalizeSectionTexts(r ? r.sectionTexts : undefined),
       projectedValues: normalizeProjectedValues(r ? r.projectedValues : undefined),

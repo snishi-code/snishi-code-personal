@@ -383,6 +383,71 @@ test('フォーマット単独QRを受け取り、同じIDはコピーとして�
   await page.getByRole('dialog').getByRole('button', { name: '閉じる' }).click();
 });
 
+test('テンプレートはグループとページで切り替えられる（作成時にデフォルトを写す）', async ({
+  page,
+}) => {
+  // グループのデフォルトを日報へ変える (設定のグループ一覧・鉛筆の左のプルダウン)。
+  await openSettings(page);
+  const wardRow = page.locator(ui(UI.settings.wardRow)).first();
+  await wardRow.locator(ui(UI.settings.wardTemplate)).selectOption({ label: '日報' });
+  await page.locator(ui(UI.settings.homeBottom)).click();
+
+  // 以後このグループに増やすページは日報になる。
+  await addPatient(page, '501', '日報ページ');
+  await openDetail(page, '501 日報ページ');
+  const projection = page.locator(ui(UI.projection.card));
+  await expect(projection).toContainText('【今日やったこと】');
+  await expect(projection).not.toContainText('(S)');
+
+  // ページ単位の切替 (タグ行の右端)。回診へ切り替えると入力カードも追従する。
+  await page.locator(ui(UI.detail.template)).selectOption({ label: '回診' });
+  await expect(projection).toContainText('(S)');
+  await expect(page.getByLabel('BP（mmHg）', { exact: true })).toBeVisible();
+
+  // 転記用 QR もページのテンプレートで合成される。
+  await page.getByLabel('BP（mmHg）', { exact: true }).fill('120/80');
+  await page.locator(ui(UI.detail.emrQr)).click();
+  const qrDialog = page.locator(ui(UI.detail.qrDialog));
+  await qrDialog.getByText('本文を確認', { exact: true }).click();
+  await expect(qrDialog).toContainText('BP 120/80mmHg');
+  await qrDialog.getByRole('button', { name: '閉じる' }).click();
+
+  // 書き込みはデバウンス保存 (180ms)。テストは人間より速く、リロードまでに保存の
+  // 隙間が生まれないことがあるため、IDB へ着地してからリロードする (実利用では
+  // 操作間隔が常にデバウンスより長い)。永続化そのものの検証も兼ねる。
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          new Promise((res) => {
+            const req = indexedDB.open('template-memo');
+            req.onsuccess = () => {
+              const db = req.result;
+              db.transaction('patients').objectStore('patients').getAll().onsuccess = (e) => {
+                const rows = (e.target as IDBRequest).result as { name?: string }[];
+                res(rows[0]?.name ?? '');
+                db.close();
+              };
+            };
+          }),
+      ),
+    )
+    .toBe('日報ページ');
+
+  // 再読み込みしてもページの選択は残る (templateId の永続化)。
+  await page.reload();
+  await openDetail(page, '501 日報ページ');
+  await expect(page.locator(ui(UI.projection.card))).toContainText('(S)');
+
+  // アプリのデフォルト (設定のテンプレート一覧タップ) は表示が「デフォルト」に変わる。
+  await page.locator(ui(UI.detail.home)).click();
+  await openSettings(page);
+  const dailyRow = page.locator('.formatListRow', { hasText: '日報' }).first();
+  await dailyRow.getByRole('button', { name: /デフォルトにする/ }).click();
+  // 「デフォルトにする」も『デフォルト』を含むので、メタ表記の完全一致で確かめる。
+  await expect(dailyRow.locator('.pickerRowMeta')).toHaveText('デフォルト');
+});
+
 test('使用中フォーマットは参照テンプレート名を示して削除を拒否する', async ({ page }) => {
   await openSettings(page);
   const formatSection = page.locator(ui(UI.settings.formatSection));

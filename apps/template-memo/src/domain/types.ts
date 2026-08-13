@@ -39,9 +39,20 @@ export function clone<T>(obj: T): T {
 // place（旧 v1 の Group 相当。UI 上の呼称はグループ）
 // ============================
 
+/*
+ * テンプレートの適用範囲の用語（実ユーズレビュー 2026-08-14）:
+ *   アプリ   = AppSettings.defaultTemplateId（アプリ全体のデフォルト）
+ *   グループ = PlaceDef.templateId（グループ作成時にアプリのデフォルトを写す）
+ *   ページ   = Patient.templateId（対象の詳細入力画面。作成時にグループのデフォルトを写す）
+ * デフォルトは「作成時に写す」方式で、後からアプリ/グループの設定を変えても
+ * 既存のグループ/ページには波及しない（それぞれの設定で個別に変える）。
+ */
+
 export interface PlaceDef {
   placeId: string;
   name: string;
+  /** このグループで新しく作るページに写すテンプレート id。 */
+  templateId: string;
 }
 
 // ============================
@@ -126,6 +137,12 @@ export interface Patient {
   /** 継続メモ。ラウンド開始でクリアしない。 */
   standingMemo: string;
   /**
+   * このページで使うテンプレート id。作成時に所属グループの templateId を写す。
+   * ラウンド開始でもクリアしない（継続）。参照先が消えた場合の解決は
+   * store.getTemplateForPatient が グループ → アプリ の順に倒す。
+   */
+  templateId: string;
+  /**
    * テンプレートのフォーム入力値（今回分）。名前はコピー元 UI に合わせて projectedValues の
    * まま、型は合成エンジンの FormValues（formValues[placementId][itemId]・provenance 付き）。
    * 読み書きは domain/formValues.ts のヘルパ経由。
@@ -145,8 +162,8 @@ export type NewlineMode = 'crlf' | 'lf';
 
 export interface AppSettings {
   key: 'app';
-  /** 有効なテンプレート id（templates store のレコードを指す）。 */
-  activeTemplateId: string;
+  /** アプリ全体のデフォルトテンプレート id（新しいグループ作成時に写す）。 */
+  defaultTemplateId: string;
   /** 個人タグの定義（色 = ラウンド開始で外れるか。domain/tags.ts 参照）。 */
   tags: TagDef[];
   /** QR 出力の改行モード（既定 crlf）。 */

@@ -323,7 +323,7 @@ export function ProjectionFormCard({
   const { store } = runtime;
   const [oncallOpen, setOncallOpen] = useState<PlacedFormat | null>(null);
   const [menuOpen, setMenuOpen] = useState<TemplateSection | null>(null);
-  const template: Template | null = store.getActiveTemplate();
+  const template: Template | null = store.getTemplateForPatient(patient);
   const sections = template?.sections ?? [];
   const pid = patient.pid;
   const live = () => store.getAppState().patients.find((x) => x.pid === pid) ?? null;

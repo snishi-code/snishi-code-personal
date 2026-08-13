@@ -68,6 +68,7 @@ function patient(partial: Partial<Patient>): Patient {
     tags: [],
     problems: [],
     sectionTexts: {},
+    templateId: '',
     standingMemo: '',
     projectedValues: {},
     updatedAt: 0,

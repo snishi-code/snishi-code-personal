@@ -117,6 +117,7 @@ describe('resolveTemplate', () => {
       tags: [],
       problems: ['HF', 'DM', '誤嚥性肺炎\n\u30007/20- TAZ/PIPC 9g/2'],
       sectionTexts: {},
+      templateId: '',
       standingMemo: '週明けLabo\n家族IC希望あり',
       projectedValues: {
         [vitals.id]: {
