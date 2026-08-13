@@ -170,8 +170,9 @@ export async function ensureInitialized(): Promise<void> {
     // 後方互換をコードで持たない（作者決定）ため、起動時の schemaVersion 追従
     // （恒等移行等）はここには無い。版不一致は fail-closed に止めて復旧面へ送る。
     assertSchemaVersionCurrent(meta);
-    // 初期残高科目は role を正本に同じ transaction で現行名へ揃える。
-    await normalizeOpeningEquityName();
+    // 初期残高科目の同定は role（equity）が正本で、名前は表示データにすぎない
+    // （指示書v3 §B-4）。旧実装の「毎起動の現行名への強制改名」は、ユーザーが付けた名前や
+    // 将来の言語別 seed 名を黙って上書きするため廃止した。
     return;
   }
   const accounts = defaultAccounts();
@@ -189,46 +190,6 @@ export async function ensureInitialized(): Promise<void> {
       kv.put(settings, KV_SETTINGS);
       const store = t.objectStore(STORE.accounts);
       for (const a of accounts) store.put(a);
-    };
-  });
-}
-
-/**
- * hidden な equity 科目の名称を role 基準で一度だけ現行表記へ揃える。
- *
- * 改名が安全でないとき（equity が複数 / 改名先を別の科目が使用中）は **何もせず起動を続ける**。
- * ここは loadLedger の冒頭なので、throw すると「初期残高」という名前の費用カテゴリを 1 つ作った
- * だけでアプリが二度と開かなくなる。表示名の現行化は起動をブロックしてよい種類の不変条件ではない。
- */
-async function normalizeOpeningEquityName(): Promise<void> {
-  await runWrite([STORE.accounts, STORE.kv], (t) => {
-    const accounts = t.objectStore(STORE.accounts);
-    const probe = accounts.getAll();
-    probe.onsuccess = () => {
-      const all = probe.result as Account[];
-      const equities = all.filter((account) => account.role === 'equity' && !account.archived);
-      // 改名対象を一意に決められないので触らない。
-      if (equities.length !== 1) return;
-      const equity = equities[0];
-      if (!equity || equity.name === OPENING_EQUITY_NAME) return;
-      const nameConflict = all.some(
-        (account) =>
-          account.id !== equity.id &&
-          !account.archived &&
-          account.name.trim() === OPENING_EQUITY_NAME,
-      );
-      // 改名すると重複名を作ってしまうので触らない（起動は続ける）。
-      if (nameConflict) return;
-      const ts = nowIso();
-      const kv = t.objectStore(STORE.kv);
-      const metaProbe = kv.get(KV_META);
-      metaProbe.onsuccess = () => {
-        const current = metaProbe.result as LedgerMeta | undefined;
-        // 表示名の正規化は補助処理。revision を安全に進められないなら本体も変更しない。
-        if (!current || current.revision >= MAX_LEDGER_REVISION) return;
-        accounts.put({ ...equity, name: OPENING_EQUITY_NAME, updatedAt: ts });
-        kv.put({ ...current, revision: current.revision + 1, updatedAt: ts }, KV_META);
-      };
     };
   });
 }
@@ -2546,17 +2507,19 @@ function buildAdjustmentForSave(args: {
 
   const role = counterpartRole(target.type, delta);
   const ctype: 'expense' | 'revenue' = role;
-  const name = counterpartName(role);
-  const named = accounts.find((account) => account.name.trim() === name && !account.archived);
-  if (
-    named &&
-    (named.name !== name || named.type !== ctype || named.role !== 'system-adjustment')
-  ) {
-    throw new LedgerError('error.account.nameConflict');
-  }
-  let counter = named;
+  // 同定は role + type（name 非依存・指示書v3 §B-4）。名前は生成時の表示データにすぎず、
+  // 「非アーカイブの system-adjustment は type ごとに最大 1 件」は schema の不変条件が守る。
+  let counter = accounts.find(
+    (account) =>
+      account.role === 'system-adjustment' && account.type === ctype && !account.archived,
+  );
   let newCounter: Account | null = null;
   if (!counter) {
+    const name = counterpartName(role);
+    // 新規作成時のみ: 既存の別科目と同名になる場合は拒否（重複名を作らない既存不変条件）。
+    if (accounts.some((account) => !account.archived && account.name.trim() === name)) {
+      throw new LedgerError('error.account.nameConflict');
+    }
     const ts = nowIso();
     newCounter = {
       id: newId(),

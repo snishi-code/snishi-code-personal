@@ -99,3 +99,26 @@ describe('buildAdjustmentEntry', () => {
     expect(e.updatedAt).not.toBe(e.createdAt);
   });
 });
+
+describe('残高調整科目の同定は role + type（name 非依存・指示書v3 §B-4）', () => {
+  it('改名済みの残高調整科目でも二重生成せず再利用する', async () => {
+    const { createAdjustment, loadLedger, upsertAccount } = await import('../src/data/repository');
+    const { nowIso } = await import('../src/util/time');
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    // 1 回目の補正で残高調整科目（expense 側）が生まれる。
+    await createAdjustment({ accountId: cash.id, date: '2026-03-01', actualBalance: -100 });
+    let accounts = (await loadLedger()).accounts.filter(
+      (a) => a.role === 'system-adjustment' && a.type === 'expense',
+    );
+    expect(accounts).toHaveLength(1);
+    // 名前を変えても（= name 同定なら見つからなくなる状況でも）同じ科目が再利用される。
+    await upsertAccount({ ...accounts[0]!, name: '調整（改名済み）', updatedAt: nowIso() });
+    await createAdjustment({ accountId: cash.id, date: '2026-03-02', actualBalance: -200 });
+    accounts = (await loadLedger()).accounts.filter(
+      (a) => a.role === 'system-adjustment' && a.type === 'expense',
+    );
+    expect(accounts).toHaveLength(1);
+    expect(accounts[0]!.name).toBe('調整（改名済み）');
+  });
+});

@@ -374,17 +374,18 @@ describe('起動時の現行化', () => {
     expect(persisted?.revision).toBe(7);
   });
 
-  it('equity 科目を role と id で引き当て、同じ起動時処理で「初期残高」へ改名する', async () => {
+  it('equity 科目の名前は起動時に書き換えない（同定は role が正本・指示書v3 §B-4 で強制改名を廃止）', async () => {
     const initial = await loadLedger();
     const equity = initial.accounts.find((account) => account.role === 'equity')!;
     await putRecord(STORE.accounts, { ...equity, name: '旧表記', updatedAt: 'old' });
     await putKv<LedgerMeta>('meta', { ...initial.meta, revision: 7 });
 
+    // 名前は表示データ。起動が黙って書き換えない（revision も進まない）。
     const reloaded = await loadLedger();
-    const renamed = reloaded.accounts.find((account) => account.role === 'equity')!;
-    expect(renamed.id).toBe(equity.id);
-    expect(renamed.name).toBe('初期残高');
-    expect(reloaded.meta.revision).toBe(8);
+    const kept = reloaded.accounts.find((account) => account.role === 'equity')!;
+    expect(kept.id).toBe(equity.id);
+    expect(kept.name).toBe('旧表記');
+    expect(reloaded.meta.revision).toBe(7);
   });
 
   it('改名先を通常科目が使用中なら重複名を作らず、改名せずに起動は成功する', async () => {

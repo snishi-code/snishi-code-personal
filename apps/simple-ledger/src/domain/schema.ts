@@ -14,7 +14,7 @@ import {
   MAX_LEDGER_REVISION,
   SCHEMA_VERSION,
 } from './constants';
-import { counterpartName, counterpartRole } from './adjustment';
+import { counterpartRole } from './adjustment';
 import { monthOf, monthsBetween } from './allocation';
 import {
   ACCOUNT_ROLES,
@@ -385,6 +385,7 @@ export const ledgerExportPackageSchema = z
     const accountRole = new Map<string, string>();
     const accountById = new Map<string, (typeof pkg.accounts)[number]>();
     const activeAccountNames = new Set<string>();
+    const activeAdjustmentTypes = new Set<string>();
     const exportedDate = pkg.exportedAt.slice(0, 10);
     const nameBasisDate = isValidIsoDate(exportedDate) ? exportedDate : undefined;
     pkg.accounts.forEach((a, i) => {
@@ -400,6 +401,17 @@ export const ledgerExportPackageSchema = z
         if (activeAccountNames.has(trimmedName))
           issue(`同名の有効な勘定科目が重複しています(${trimmedName})`, ['accounts', i, 'name']);
         activeAccountNames.add(trimmedName);
+      }
+      // 残高調整科目は「非アーカイブは type ごとに最大 1 件」（指示書v3 §B-4）。
+      // 同定が role + type になったため、複数あると補正の相手が非決定になる。
+      if (a.role === 'system-adjustment' && !a.archived) {
+        if (activeAdjustmentTypes.has(a.type))
+          issue(`非アーカイブの残高調整科目(type=${a.type})が複数あります`, [
+            'accounts',
+            i,
+            'role',
+          ]);
+        activeAdjustmentTypes.add(a.type);
       }
       // 集約モデルの不変条件（聖域化）: 内部集約ロールは唯一の集約口座 id のみ許す。
       // これがないと import で品目別の continuing-cost-asset 科目を再導入できてしまう。
@@ -497,13 +509,11 @@ export const ledgerExportPackageSchema = z
 
         if ((targetType === 'asset' || targetType === 'liability') && adj.delta !== 0 && counter) {
           const expectedCounterType = counterpartRole(targetType, adj.delta);
-          if (
-            counter.type !== expectedCounterType ||
-            counter.role !== 'system-adjustment' ||
-            counter.name !== counterpartName(expectedCounterType)
-          ) {
+          // 同定は role + type のみ（name 非依存・指示書v3 §B-4）。name を要求すると
+          // 生成時の言語（将来の en seed 等）が違う台帳を import で丸ごと拒否してしまう。
+          if (counter.type !== expectedCounterType || counter.role !== 'system-adjustment') {
             issue(
-              '補正の相手科目は対応する残高調整費または残高調整収入である必要があります',
+              '補正の相手科目は対応する type の残高調整科目(system-adjustment)である必要があります',
               ap('counterpartAccountId'),
             );
           }
