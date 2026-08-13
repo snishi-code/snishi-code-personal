@@ -4,13 +4,13 @@
  *
  * キャッシュ prefix: template-memo- (旧世代掃除用の名前空間。src/data/constants.ts の
  *   CACHE_NAME_PREFIX と値を合わせること。sw.js は単体配信ファイルなので import はしない)
- * キャッシュ名: template-memo-1 (PREFIX + 世代番号。キャッシュを捨てたい時に版数を上げ、
- *   下の activate が旧世代を掃除する)
+ * キャッシュ名: template-memo-2 (PREFIX + 世代番号。キャッシュを捨てたい時に版数を上げ、
+ *   下の activate が旧世代を掃除する。v2 = アイコン刷新で旧 precache を破棄)
  * 正本テンプレート: packages/foundation/src/pwa/sw.template.js
  */
 
 const CACHE_PREFIX = 'template-memo-';
-const CACHE = 'template-memo-1';
+const CACHE = 'template-memo-2';
 
 const PRECACHE_PATHS = ['./icons/icon-192.png', './icons/icon-512.png', './icons/icon.svg'];
 
