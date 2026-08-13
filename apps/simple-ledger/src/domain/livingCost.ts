@@ -15,6 +15,7 @@
 import { deriveProfitAndLoss } from './accounting';
 import type { ReportFlowRange } from './reportPeriod';
 import type { Account, JournalEntry } from './types';
+import { assertSafeAmount } from './safeSum';
 
 export interface LivingCostBreakdown {
   /** 通常支出（費用 − 継続コスト月割り）。 */
@@ -71,13 +72,19 @@ export function livingCostBreakdownForRange(
       // 純増減だけ（借方 + / 貸方 -）。
       for (const line of e.lines) {
         if (accountById.get(line.accountId)?.type !== 'expense') continue;
-        continuing += line.side === 'debit' ? line.amount : -line.amount;
+        continuing = assertSafeAmount(
+          continuing + (line.side === 'debit' ? line.amount : -line.amount),
+        );
       }
     }
   }
   const pl = deriveProfitAndLoss(accounts, entries, range);
   const normalExpense = pl.totalExpense - continuing;
-  return { normalExpense, monthlyCost: continuing, total: normalExpense + continuing };
+  return {
+    normalExpense,
+    monthlyCost: continuing,
+    total: assertSafeAmount(normalExpense + continuing),
+  };
 }
 
 /** 支出合計（= 通常支出 + 継続コスト）。推移グラフ用。entries は導出仕訳。 */

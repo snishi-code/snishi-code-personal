@@ -112,7 +112,8 @@ export function Settings({
       startTransition(() => {
         setLedgerName(ledger.settings.ledgerName);
         setCurrency(ledger.settings.currency);
-        setFractionDigits(ledger.settings.displayFractionDigits);
+        // 初期化（:95-96）と同じく既定 0 で受ける。設定が欠けた台帳でも undefined を state に入れない。
+        setFractionDigits(ledger.settings.displayFractionDigits ?? 0);
       });
     }
   }, [ledger]);
@@ -285,8 +286,20 @@ export function Settings({
       {/* 台帳設定 */}
       <p className="section-label">{t('settings.about')}</p>
       <div className="card card--pad">
-        <TextInput label={t('settings.ledgerName')} value={ledgerName} onChange={setLedgerName} />
-        <TextInput label={t('settings.currency')} value={currency} onChange={setCurrency} />
+        {/* どちらも空は保存できない（settingsSchema は min(1)）。UI 側でも required を出す。 */}
+        <TextInput
+          label={t('settings.ledgerName')}
+          required
+          value={ledgerName}
+          onChange={(v) => setLedgerName(v.slice(0, 120))}
+        />
+        <TextInput
+          label={t('settings.currency')}
+          required
+          value={currency}
+          onChange={(v) => setCurrency(v.slice(0, 8))}
+          hint={t('settings.currencyHint')}
+        />
         {/* 表示桁数（0|1|2・入力の刻みも連動）。保存・計算は常に 1/100 固定でこの設定では変わらない。 */}
         <div className="field" data-ui={UI.settings.fractionDigits}>
           <span className="field__label">{t('settings.fractionDigits')}</span>

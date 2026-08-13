@@ -11,6 +11,7 @@ import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { Dashboard } from '../src/ui/screens/Dashboard';
 import { EntrySheet } from '../src/ui/screens/EntrySheet';
+import { OnboardingSheet } from '../src/ui/OnboardingSheet';
 import { loadLedger, updateSettings } from '../src/data/repository';
 import { exportToJsonText, importFromJsonText } from '../src/data/exportImport';
 import type { ReportPeriod } from '../src/domain/reportPeriod';
@@ -55,6 +56,11 @@ function DashboardWhenReady({ period }: { period: ReportPeriod }) {
       onOpenJournal={() => undefined}
     />
   ) : null;
+}
+
+function OnboardingWhenReady() {
+  const { status } = useLedger();
+  return status === 'ready' ? <OnboardingSheet onClose={() => undefined} /> : null;
 }
 
 async function setDigits(digits: 0 | 1 | 2) {
@@ -172,6 +178,122 @@ describe('表示桁数の設定', () => {
     )!;
     expect(amount.getAttribute('inputmode')).toBe('numeric');
     fireEvent.change(amount, { target: { value: '12.34' } });
-    expect(amount.value).toBe('1234'); // 小数点は捨てられ、結果が欄に見える（controlled input）
+    // 小数点**以降**が捨てられる（'1234' にすると 100 倍の 1,234 になる）。
+    expect(amount.value).toBe('12');
+  });
+});
+
+/*
+ * 初期残高の一括登録（オンボーディング）の入力欄。
+ * ここは onChange で sanitizeAmountText を通した直後に、state 更新側でもう一度
+ * [^\d] を落としており、表示桁 2 でも小数点が必ず消えていた（= 小数が入力できない）。
+ * 整形の正本は sanitizeAmountText 一つ、が原則（amountText.ts）。
+ */
+describe('オンボーディングの金額欄も表示桁に従う', () => {
+  it('digits=2: 小数が入力でき、minor で保存される', async () => {
+    await setDigits(2);
+    render(
+      <Providers>
+        <OnboardingWhenReady />
+      </Providers>,
+    );
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.onboarding.view}"]`)).toBeInTheDocument();
+    });
+    const amount = document.querySelector<HTMLInputElement>(
+      `input[data-ui="${UI.onboarding.amount}"]`,
+    )!;
+    expect(amount.getAttribute('inputmode')).toBe('decimal');
+    fireEvent.change(amount, { target: { value: '1234.56' } });
+    expect(amount.value).toBe('1234.56');
+
+    fireEvent.click(document.querySelector(`[data-ui="${UI.onboarding.save}"]`)!);
+    await waitFor(async () => {
+      const after = await loadLedger();
+      const opening = after.journalEntries.find((e) => e.kind === 'opening');
+      expect(opening?.lines[0]?.amount).toBe(123456);
+    });
+  });
+
+  it('digits=0: 小数点は落ちる（既定の挙動は変わらない）', async () => {
+    await setDigits(0);
+    render(
+      <Providers>
+        <OnboardingWhenReady />
+      </Providers>,
+    );
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.onboarding.view}"]`)).toBeInTheDocument();
+    });
+    const amount = document.querySelector<HTMLInputElement>(
+      `input[data-ui="${UI.onboarding.amount}"]`,
+    )!;
+    expect(amount.getAttribute('inputmode')).toBe('numeric');
+    fireEvent.change(amount, { target: { value: '1234.56' } });
+    // 小数点以降を捨てる。'123456'（= 100 倍）にしてはいけない。
+    expect(amount.value).toBe('1234');
+  });
+});
+
+/*
+ * 全額移動（口座の終了・継続コスト台帳の引き上げ）の金額欄。
+ * 保存側は「残高ちょうど」でなければ弾く（error.account.archiveBalance）ため、
+ * 表示桁を 0 にしていても端数を削って見せてはいけない。
+ * 削ると、画面上は正しく見えるのに保存できない行き止まりになる。
+ */
+describe('全額移動の固定金額は表示桁より優先して端数まで見せる', () => {
+  function FixedTransferWhenReady({ amount }: { amount: number }) {
+    const { status, ledger } = useLedger();
+    const account = ledger?.accounts.find((a) => a.role === 'daily-asset');
+    return status === 'ready' && account ? (
+      <EntrySheet
+        init={{
+          kind: 'transfer-fixed',
+          fixed: {
+            side: 'credit',
+            accountId: account.id,
+            amount,
+            date: todayLocal(),
+            onSave: async () => undefined,
+          },
+        }}
+        onClose={() => undefined}
+      />
+    ) : null;
+  }
+
+  it('digits=0 でも端数のある残高は 1234.56 のまま出す（保存値と一致させる）', async () => {
+    await setDigits(0);
+    render(
+      <Providers>
+        <FixedTransferWhenReady amount={123456} />
+      </Providers>,
+    );
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.journal.entry.amount}"]`)).toBeInTheDocument();
+    });
+    const amount = document.querySelector<HTMLInputElement>(
+      `[data-ui="${UI.journal.entry.amount}"]`,
+    )!;
+    expect(amount.value).toBe('1234.56');
+    // 端数を打ち直せるよう inputMode も decimal へ寄せる。
+    expect(amount.getAttribute('inputmode')).toBe('decimal');
+  });
+
+  it('端数の無い残高は表示桁のまま（digits=0 なら整数表示）', async () => {
+    await setDigits(0);
+    render(
+      <Providers>
+        <FixedTransferWhenReady amount={123400} />
+      </Providers>,
+    );
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.journal.entry.amount}"]`)).toBeInTheDocument();
+    });
+    const amount = document.querySelector<HTMLInputElement>(
+      `[data-ui="${UI.journal.entry.amount}"]`,
+    )!;
+    expect(amount.value).toBe('1234');
+    expect(amount.getAttribute('inputmode')).toBe('numeric');
   });
 });

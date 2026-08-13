@@ -120,6 +120,9 @@ export function AdjustmentCreateSheet({
           label={t('adjust.actual')}
           required
           value={actualText}
+          // 符号付きの欄は inputMode を指定しない: numeric / decimal のソフトキーボードには
+          // '-' キーが無く、hint（マイナスは先頭に -）どおりの入力ができなくなる。
+          // 「表示桁が inputMode を決める」規約の明示的な例外（AccountSheet の想定利回り欄と同じ趣旨）。
           onChange={(v) => setActualText(sanitizeSignedAmountText(v, digits))}
           hint={t('common.signedAmountHint')}
           dataUi={UI.adjustments.actual}
@@ -246,6 +249,9 @@ export function AdjustmentEditSheet({
           label={t('adjust.actual')}
           required
           value={actualText}
+          // 符号付きの欄は inputMode を指定しない: numeric / decimal のソフトキーボードには
+          // '-' キーが無く、hint（マイナスは先頭に -）どおりの入力ができなくなる。
+          // 「表示桁が inputMode を決める」規約の明示的な例外（AccountSheet の想定利回り欄と同じ趣旨）。
           onChange={(v) => setActualText(sanitizeSignedAmountText(v, digits))}
           hint={t('common.signedAmountHint')}
           dataUi={UI.adjustments.editActual}

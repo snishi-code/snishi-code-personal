@@ -9,7 +9,8 @@
  *    未来の月初日にだけ生まれる＝過去断面は today に依存しない（構造で保証）。
  *  - 元本 = 渡された導出込み仕訳から算定した today 時点の残高。各月の間にある
  *    その科目の仕訳（未来の積立・引出・ルール投影）を残高へ織り込みながら複利で進める。
- *  - 評価益は各月円へ丸め（Math.round・決定的）。0 円の月・残高 0 以下の月は行を生成しない。
+ *  - 評価益は各月 1 minor（= 1/100 単位）へ丸め（Math.round・決定的）。
+ *    0 の月・残高 0 以下の月は行を生成しない。
  *    負利回り（元本減）は逆向き（借方 計上先 / 貸方 投資）。
  *  - 上限: 要求 asOf と CONTINUOUS_COST_HARD_CAP（2100）で打ち切り。どちらも作者へ宣言済みの
  *    端点（地平セレクタ・date input の max）なので、黙って止まっても嘘にならない。
@@ -30,6 +31,7 @@ import { accountExistsAt } from './accountLifetime';
 import { CONTINUOUS_COST_HARD_CAP } from './continuousCost';
 import { t } from '../i18n';
 import type { Account, JournalEntry } from './types';
+import { assertSafeAmount } from './safeSum';
 
 /** 想定利回り（年率 bp）の範囲。schema / 保存境界 / UI 変換が同じ正本を参照する。 */
 export const ANNUAL_RETURN_BP_MIN = -9999;
@@ -116,7 +118,8 @@ export function investmentProjectionResult(
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     let balance = 0;
     for (const entry of derivedEntries) {
-      if (entry.date <= today) balance += balanceDelta(entry, account.id);
+      if (entry.date <= today)
+        balance = assertSafeAmount(balance + balanceDelta(entry, account.id));
     }
 
     let cursor = 0;

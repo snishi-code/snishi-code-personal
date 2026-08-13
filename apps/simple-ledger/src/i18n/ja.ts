@@ -200,7 +200,7 @@ export const ja = {
   'opening.deleteConfirmTitle': '初期残高を削除しますか？',
   'opening.deleteConfirmBody':
     'この初期残高を削除します。対象科目の初期残高はなくなり、資産・負債の残高の意味が変わります。',
-  'opening.error.amount': '初期残高は 1 以上の整数で入力してください。',
+  'opening.error.amount': '初期残高を入力してください（0 は不可）。',
 
   'journal.adjustmentTag': '補正',
   'tags.summary': 'タグ集計',
@@ -242,7 +242,7 @@ export const ja = {
   'entry.error.debit-required': '借方の科目を選んでください。',
   'entry.error.credit-required': '貸方の科目を選んでください。',
   'entry.error.same-account': '借方と貸方に同じ科目は選べません。',
-  'entry.error.amount-invalid': '金額は 1 以上の整数で入力してください。',
+  'entry.error.amount-invalid': '金額を入力してください（0 は不可）。',
   'entry.error.invalid-transfer':
     'この振替の組み合わせは登録できません。資金どうしの移動、資金からの返済、借入の実行のいずれかにしてください。',
 
@@ -476,10 +476,11 @@ export const ja = {
   'settings.resetAllDesc': '台帳・科目・仕訳・スナップショットをすべて削除し、初期状態に戻します。',
   'settings.about': 'アプリ情報',
   'settings.ledgerName': '台帳名',
+  'settings.currencyHint': '表示に使う単位の文字列です（8 文字まで）。換算はしません。',
   'settings.fractionDigits': '小数の表示桁数',
   'settings.fractionDigitsHint':
     '入力できる小数の桁もこの設定に従います。保存されている金額は変わりません。',
-  'settings.currency': '通貨コード',
+  'settings.currency': '金額の単位',
   'settings.version': 'バージョン',
   'settings.schemaVersion': 'スキーマ版',
   'settings.revision': 'リビジョン',
@@ -567,7 +568,7 @@ export const ja = {
   'error.opening.assetLiabilityOnly': '初期残高を登録できるのは資産・負債の科目です。',
   'error.opening.notOpening': 'この仕訳は初期残高ではありません。',
   'error.common.nameRequired': '名称を入力してください。',
-  'error.common.amountInvalid': '金額は 1 以上の整数で入力してください。',
+  'error.common.amountInvalid': '金額を入力してください（0 は不可）。',
   'error.monthlyCost.dateRequired': '開始日（購入の仕訳の日付）を入力してください。',
   'error.monthlyCost.expenseCategory': '計上先の勘定科目を選んでください。',
   'error.monthlyCost.paymentSource':
@@ -684,6 +685,9 @@ export const ja = {
     '1 = カードの次回引落などの単発。毎月同額のローンは回数を入れると、毎月の振替仕訳をまとめて登録します（合計は返済額に一致）。',
   'cashflow.repayPerMonth': '月あたり約 {amount} × {count} 回',
   'error.repay.countInvalid': '返済回数は 1 以上の整数で入力してください。',
+  'error.tag.invalid': 'タグを保存できませんでした（名前は 1〜60 文字で入力してください）。',
+  'error.settings.invalid':
+    '台帳の設定を保存できませんでした（名前は 1〜120 文字・単位は 1〜8 文字で入力してください）。',
   'error.amount.overflow': '金額の合計が扱える範囲を超えました。',
   'error.repay.totalTooSmall': '返済総額が回数より少なく、金額 0 の回ができるため登録できません。',
   'error.repay.liabilityRequired': '返済先はカード・未払 / ローンの負債科目を選んでください。',

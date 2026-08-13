@@ -2602,3 +2602,65 @@ describe('継続コスト購入の支払い元の緩和（RECURRING_POSTABLE_ROL
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(after)).success).toBe(true);
   });
 });
+
+describe('設定の保存境界（Codex 指摘・schema と保存の不整合）', () => {
+  it('9 文字以上の通貨は保存境界で拒否する（保存できるのに export だけ後で失敗する状態を作らない）', async () => {
+    const { updateSettings } = await import('../src/data/repository');
+    const ledger = await loadLedger();
+    await expect(
+      updateSettings({ ...ledger.settings, currency: '123456789' }),
+    ).rejects.toMatchObject({ code: 'error.settings.invalid' });
+    // 8 文字ちょうどは通る（境界）。
+    await updateSettings({ ...ledger.settings, currency: '12345678' });
+    expect((await loadLedger()).settings.currency).toBe('12345678');
+  });
+
+  it('空の台帳名・空の単位も保存境界で拒否する（schema は min(1)）', async () => {
+    const { updateSettings } = await import('../src/data/repository');
+    const ledger = await loadLedger();
+    await expect(updateSettings({ ...ledger.settings, currency: '' })).rejects.toMatchObject({
+      code: 'error.settings.invalid',
+    });
+    await expect(updateSettings({ ...ledger.settings, ledgerName: '' })).rejects.toMatchObject({
+      code: 'error.settings.invalid',
+    });
+  });
+
+  it('タグも保存境界で schema を通す（61 文字の名前は拒否）', async () => {
+    const { upsertTag } = await import('../src/data/repository');
+    await expect(
+      upsertTag({
+        id: 'too-long-tag',
+        name: 'あ'.repeat(61),
+        scope: 'entry',
+        archived: false,
+        createdAt: '2026-08-13T00:00:00.000Z',
+        updatedAt: '2026-08-13T00:00:00.000Z',
+      }),
+    ).rejects.toMatchObject({ code: 'error.tag.invalid' });
+    expect((await loadLedger()).tags.some((x) => x.id === 'too-long-tag')).toBe(false);
+  });
+
+  it('不正な表示桁数も保存境界で拒否する', async () => {
+    const { updateSettings } = await import('../src/data/repository');
+    const ledger = await loadLedger();
+    await expect(
+      updateSettings({
+        ...ledger.settings,
+        displayFractionDigits: 3 as unknown as 0 | 1 | 2,
+      }),
+    ).rejects.toMatchObject({ code: 'error.settings.invalid' });
+  });
+
+  it('保存境界を通した設定は export の schema 検証も必ず通る', async () => {
+    const { updateSettings } = await import('../src/data/repository');
+    const { exportToJsonText } = await import('../src/data/exportImport');
+    const before = await loadLedger();
+    await updateSettings({ ...before.settings, currency: 'USD', displayFractionDigits: 2 });
+    const after = await loadLedger();
+    expect(after.settings.currency).toBe('USD');
+    expect(after.settings.displayFractionDigits).toBe(2);
+    // export は現行 schema を通す（保存できたのに書き出せない、が起きない）。
+    expect(() => exportToJsonText(after)).not.toThrow();
+  });
+});

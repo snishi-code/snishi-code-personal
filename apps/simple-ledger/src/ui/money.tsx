@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import { useOptionalLedger } from '../state/store';
-import { formatMoney, signOf, type FractionDigits } from '../util/format';
+import { displayRoundsToZero, formatMoney, signOf, type FractionDigits } from '../util/format';
 
 /** 台帳設定の表示桁数（Provider 外では使わない。全画面は LedgerProvider 配下で描画される）。 */
 export function useMoneyDigits(): FractionDigits {
@@ -18,7 +18,9 @@ export function moneyText(
   digits: FractionDigits,
   signed = false,
 ): string {
-  const prefix = signed && signOf(amount) === 'pos' ? '+' : '';
+  // 丸めた結果が 0 なら符号を付けない（'+0' / '-0' を出さない）。
+  const prefix =
+    signed && signOf(amount) === 'pos' && !displayRoundsToZero(amount, digits) ? '+' : '';
   return `${prefix}${formatMoney(amount, currency, digits)}`;
 }
 
@@ -33,7 +35,8 @@ export function Money({
   signed?: boolean;
 }): JSX.Element {
   const digits = useMoneyDigits();
-  const sign = signOf(amount);
+  // 表示が 0 に丸まる額は色も中立にする（見た目と文字列を一致させる）。
+  const sign = displayRoundsToZero(amount, digits) ? 'zero' : signOf(amount);
   const cls = signed ? (sign === 'pos' ? 'amount--pos' : sign === 'neg' ? 'amount--neg' : '') : '';
   return <span className={cls}>{moneyText(amount, currency, digits, signed)}</span>;
 }

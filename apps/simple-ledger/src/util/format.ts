@@ -14,11 +14,12 @@ export type FractionDigits = 0 | 1 | 2;
  * （`Math.trunc(-50 / 100) === -0` → Intl が "-0" を返すため）。
  */
 export function formatAmount(minorAmount: number, fractionDigits: FractionDigits): string {
-  const sign = minorAmount < 0 ? '-' : '';
   const abs = Math.abs(minorAmount);
   // 表示桁への丸め（half away from zero）。x.5 は二進で正確に表現されるため誤丸めしない。
   const scale = 10 ** (2 - fractionDigits);
   const scaled = Math.round(abs / scale);
+  // 丸めた結果が 0 なら符号を出さない（-0.49 を表示桁 0 で '-0' と出さない）。
+  const sign = minorAmount < 0 && scaled !== 0 ? '-' : '';
   const base = 10 ** fractionDigits;
   const major = Math.floor(scaled / base);
   const frac = scaled - major * base;
@@ -35,6 +36,11 @@ export function formatMoney(
 ): string {
   const num = formatAmount(minorAmount, fractionDigits);
   return currency === '' ? num : `${num} ${currency}`;
+}
+
+/** 表示桁で丸めた結果が 0 になるか（符号の抑制に使う）。 */
+export function displayRoundsToZero(minorAmount: number, fractionDigits: FractionDigits): boolean {
+  return Math.round(Math.abs(minorAmount) / 10 ** (2 - fractionDigits)) === 0;
 }
 
 /** 符号付きの色分け用: 正なら '+'、負なら '-'（0 は中立）。 */

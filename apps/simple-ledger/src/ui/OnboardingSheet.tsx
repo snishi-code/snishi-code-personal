@@ -63,8 +63,9 @@ export function OnboardingSheet({ onClose }: { onClose: () => void }) {
     }
   }
 
-  const setAmount = (id: string, v: string) =>
-    setAmounts((prev) => ({ ...prev, [id]: v.replace(/[^\d]/g, '') }));
+  // 整形は呼び出し側の sanitizeAmountText（表示桁連動）が唯一の正本。
+  // ここで再度 [^\d] を落とすと小数点が必ず消える（= 小数が入力できない）。
+  const setAmount = (id: string, v: string) => setAmounts((prev) => ({ ...prev, [id]: v }));
 
   const renderRows = (rows: Account[]) =>
     rows.map((a) =>

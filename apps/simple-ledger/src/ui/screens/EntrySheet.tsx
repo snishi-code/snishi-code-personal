@@ -24,7 +24,12 @@ import {
   type FormMode,
 } from '../entryModes';
 import { quickSpanEndDate } from '../ccQuickSpan';
-import { formatMinorForInput, parseAmountToMinor, sanitizeAmountText } from '../amountText';
+import {
+  exactDigitsFor,
+  formatMinorForInput,
+  parseAmountToMinor,
+  sanitizeAmountText,
+} from '../amountText';
 import { useMoneyDigits } from '../money';
 import { useLedger } from '../../state/store';
 import {
@@ -99,8 +104,23 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const accounts = ledger?.accounts ?? [];
   const tags = ledger?.tags ?? [];
 
-  const fractionDigits = useMoneyDigits();
   const fixed = init.kind === 'transfer-fixed' ? init.fixed : null;
+  /*
+   * 「ぴったり相殺する額」は表示桁で丸めない。丸めると相殺しきれず端数が残る:
+   *  - 固定額の振替（科目の終了・継続コスト台帳の引き上げ）は残高／残存価値をちょうど 0 にする額。
+   *    丸めると科目の終了が error.account.archiveBalance で保存できなくなり、
+   *    回収では残存価値を超える仕訳が保存されうる。
+   *  - 逆仕訳は元の仕訳と 1 minor まで同額でなければ打ち消しにならない。
+   * どちらも form.amount は丸めず、**欄の表示側をその額が表せる桁まで上げて**
+   * 「見えている値 = 保存される値」を保つ（編集・新規は従来どおり表示桁で丸める）。
+   */
+  const exactAmount =
+    init.kind === 'reversal' ? reversalInput(init.source).amount : (fixed?.amount ?? undefined);
+  const displayDigits = useMoneyDigits();
+  const fractionDigits =
+    exactAmount === undefined
+      ? displayDigits
+      : (Math.max(displayDigits, exactDigitsFor(exactAmount)) as typeof displayDigits);
   const [mode, setMode] = useState<FormMode>(
     init.kind === 'create'
       ? init.mode
@@ -125,7 +145,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     init.kind === 'edit'
       ? roundToDisplay(toSimpleInput(init.entry))
       : init.kind === 'reversal'
-        ? roundToDisplay(reversalInput(init.source))
+        ? reversalInput(init.source) // 丸めない（打ち消しの定義）。
         : init.kind === 'transfer-fixed'
           ? {
               date: init.fixed.date ?? todayLocal(),

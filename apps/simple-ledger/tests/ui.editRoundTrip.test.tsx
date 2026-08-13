@@ -33,7 +33,8 @@ import {
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { todayLocal } from '../src/util/time';
-import type { JournalEntry } from '../src/domain/types';
+import { accountBalance } from '../src/domain/accounting';
+import type { JournalEntry, SimpleEntryInput } from '../src/domain/types';
 import './setup';
 
 beforeAll(() => {
@@ -287,5 +288,101 @@ describe('保存値 → 表示 → 保存 が恒等になる金額（表示桁 2
     });
     cleanup();
     _resetOverlaysForTests();
+  });
+});
+
+/*
+ * **「ぴったり相殺する額」は表示桁で丸めない**（編集の丸めとは別の族）。
+ *
+ * 逆仕訳・固定額の振替は、元の仕訳／残高を 1 minor まで打ち消すことが定義そのもの。
+ * ここを編集フォームと同じ「表示桁で丸めてから保存」に乗せると、既定の表示桁 0 で
+ * 100 の倍数でない金額（補正の delta・分割返済の端数・継続コストの月割り残）を扱うたびに
+ * 端数が残り、科目の終了は error.account.archiveBalance で保存できなくなる。
+ */
+describe('打ち消しの額は表示桁 0 でも丸めない', () => {
+  /** 100 の倍数でない minor（= 表示桁 0 では丸めて見える額）。 */
+  const ODD = 12345; // 123.45
+
+  it('逆仕訳: 表示桁 0 でも元と同額で、残高がちょうど元へ戻る', async () => {
+    await setDigits(0);
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    const source: JournalEntry = {
+      id: 'reversal-source',
+      date: todayLocal(),
+      description: '端数のある支出',
+      kind: 'normal',
+      lines: [
+        { accountId: expense.id, side: 'debit', amount: ODD },
+        { accountId: cash.id, side: 'credit', amount: ODD },
+      ],
+      metadata: { inputMode: 'expense' },
+      createdAt: '2026-08-13T00:00:00.000Z',
+      updatedAt: '2026-08-13T00:00:00.000Z',
+    };
+    await upsertEntry(source);
+    const before = accountBalance(cash.id, 'asset', (await loadLedger()).journalEntries);
+
+    render(
+      <Providers>
+        <Ready>
+          <EntrySheet init={{ kind: 'reversal', source }} onClose={() => undefined} />
+        </Ready>
+      </Providers>,
+    );
+    await waitFor(() => expect(q(UI.journal.entry.amount)).toBeInTheDocument());
+    // 欄には丸めた '123' ではなく、打ち消せる額そのものが出る。
+    expect((q(UI.journal.entry.amount) as HTMLInputElement).value).toBe('123.45');
+
+    fireEvent.click(q(UI.journal.entry.save)!);
+    await waitFor(async () => {
+      const after = (await loadLedger()).journalEntries.find(
+        (e) => e.metadata?.reversalOfEntryId === source.id,
+      );
+      expect(after?.lines[0]?.amount).toBe(ODD);
+    });
+    const restored = accountBalance(cash.id, 'asset', (await loadLedger()).journalEntries);
+    expect(restored).toBe(before + ODD); // 支出の取消なので現金が元に戻る
+  });
+
+  it('固定額の振替: 表示桁 0 でも残高ちょうどが入り、科目を終了できる', async () => {
+    await setDigits(0);
+    const ledger = await loadLedger();
+    const from = ledger.accounts.find((a) => a.name === 'チャージ残高')!;
+    await createOpening({ accountId: from.id, amount: ODD, date: '2026-01-01' });
+
+    let saved: SimpleEntryInput | null = null;
+    render(
+      <Providers>
+        <Ready>
+          <EntrySheet
+            init={{
+              kind: 'transfer-fixed',
+              fixed: {
+                side: 'credit',
+                accountId: from.id,
+                amount: ODD,
+                date: todayLocal(),
+                onSave: async (input) => {
+                  saved = input;
+                },
+              },
+            }}
+            onClose={() => undefined}
+          />
+        </Ready>
+      </Providers>,
+    );
+    await waitFor(() => expect(q(UI.journal.entry.amount)).toBeInTheDocument());
+    expect((q(UI.journal.entry.amount) as HTMLInputElement).value).toBe('123.45');
+
+    // 相手側（振替先）を 1 つ選ぶ。
+    const flowDest = document.querySelector(`[data-ui="${UI.journal.entry.flowDestination}"]`)!;
+    fireEvent.click(flowDest.querySelector('label.chip input')!);
+    fireEvent.click(q(UI.journal.entry.save)!);
+    await waitFor(() => expect(saved).not.toBeNull());
+    // 残高ちょうど。丸めると科目の終了が保存側（残高 0 の要求）で弾かれる。
+    expect(saved!.amount).toBe(ODD);
   });
 });

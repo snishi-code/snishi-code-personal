@@ -121,7 +121,8 @@ function blankValues(columns: PeriodMatrixColumn[]): PeriodMatrixValue[] {
 
 function addValue(values: PeriodMatrixValue[], index: number, amount: number): void {
   const current = values[index];
-  if (current !== undefined) values[index] = current + amount;
+  // 収入・費用セルの累積も checked（1 行の上限は schema が守るが、合算は守らないため）。
+  if (current !== undefined) values[index] = assertSafeAmount(current + amount);
 }
 
 /**
@@ -166,7 +167,7 @@ export function buildPeriodMatrix(
       const boundary = activeBoundaries[boundaryIndex];
       if (!boundary || (beforeDate !== undefined && boundary.asOf >= beforeDate)) break;
       totalAssets[boundary.index] = assetsBalance;
-      netAssets[boundary.index] = assetsBalance - liabilitiesBalance;
+      netAssets[boundary.index] = assertSafeAmount(assetsBalance - liabilitiesBalance);
       boundaryIndex += 1;
     }
   };

@@ -72,13 +72,13 @@ describe('負の実残高の補正', () => {
 });
 
 describe('amountText（符号付き金額テキスト・v11 = minor 変換）', () => {
-  it('sanitize: 先頭の - を 1 つだけ許す（digits=0 は小数点も捨てる）', () => {
+  it('sanitize: 先頭の - を 1 つだけ許す（digits=0 は小数点以降を捨てる）', () => {
     expect(sanitizeSignedAmountText('-3000', 0)).toBe('-3000');
     expect(sanitizeSignedAmountText('3-000', 0)).toBe('3000');
     expect(sanitizeSignedAmountText('--12a', 0)).toBe('-12');
     expect(sanitizeSignedAmountText('abc', 0)).toBe('');
     expect(sanitizeSignedAmountText('-12.34', 2)).toBe('-12.34');
-    expect(sanitizeSignedAmountText('-12.34', 0)).toBe('-1234');
+    expect(sanitizeSignedAmountText('-12.34', 0)).toBe('-12');
   });
 
   it('parse: 空と "-" のみは null（テキスト → minor・float 経由なし）', () => {

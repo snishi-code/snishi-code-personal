@@ -549,7 +549,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
-        toast.show(t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -631,7 +631,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           toast.show(t('toast.recurringCatchUpPartialFailed'), 'error');
         }
       } catch (e) {
-        toast.show(t('toast.error'), 'error');
+        toast.show(errorText(e), 'error');
         throw e;
       }
     },
@@ -650,7 +650,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       await refresh();
       toast.show(t('toast.reset'), 'success');
     } catch (e) {
-      toast.show(t('toast.error'), 'error');
+      toast.show(errorText(e), 'error');
       throw e;
     }
   }, [refresh, toast]);

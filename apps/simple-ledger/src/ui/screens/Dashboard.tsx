@@ -27,6 +27,7 @@ import type { Screen } from '../navigation';
 import type { FormMode } from '../entryModes';
 import type { MessageKey } from '../../i18n';
 import { ScrollTopButton } from '../ScrollTopButton';
+import { assertSafeAmount } from '../../domain/safeSum';
 
 /** ホームの仕訳一覧の 1 ページぶん（「さらに表示」で足す刻み）。 */
 const HOME_ENTRY_PAGE = 50;
@@ -94,7 +95,7 @@ export function Dashboard({
     });
   };
 
-  const { pl, bs, asOf, monthlyCost, normalExpense } = useMemo(() => {
+  const { pl, bs, asOf, livingTotal } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     // 表示は投影込み（displayEntries）。ヘッダー日付を未来にすると資産・純資産が投影込みになる。
     const entries = ledger ? displayEntriesForAsOf(ledger, basis.asOf, today) : [];
@@ -103,8 +104,8 @@ export function Dashboard({
       pl: deriveProfitAndLoss(accounts, entries, range),
       bs: deriveBalanceSheet(accounts, entries, basis.asOf),
       asOf: basis.asOf,
-      monthlyCost: breakdown.monthlyCost,
-      normalExpense: breakdown.normalExpense,
+      // 支出合計・純益は domain の値をそのまま使う（UI で式を再実装しない）。
+      livingTotal: breakdown.total,
     };
   }, [basis.asOf, ledger, range, today]);
 
@@ -133,14 +134,14 @@ export function Dashboard({
             />
             <StatButton
               label={t('dashboard.expense')}
-              amount={normalExpense + monthlyCost}
+              amount={livingTotal}
               currency={currency}
               onClick={() => onNavigate('expenseBreakdown')}
               dataUi={UI.dashboard.statExpense}
             />
             <StatButton
               label={t('dashboard.netIncome')}
-              amount={pl.totalRevenue - (normalExpense + monthlyCost)}
+              amount={assertSafeAmount(pl.totalRevenue - livingTotal)}
               currency={currency}
               signed
               onClick={() => onNavigate('netIncome')}

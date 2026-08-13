@@ -21,7 +21,7 @@
 ```jsonc
 {
   "appId": "snishi-code.simple-ledger-v2",
-  "schemaVersion": 10,
+  "schemaVersion": 11,
   "ledgerId": "ledger",
   "exportedAt": "2026-07-29T00:00:00.000Z",
   "deviceId": "<uuid>",
@@ -41,7 +41,9 @@
   "recurringRules": [
     /* RecurringRule[]（定期ルール） */
   ],
-  "settings": { "ledgerName": "家計簿", "currency": "JPY", "locale": "ja" },
+  // currency は表示に後置する単位文字列（1〜8 文字・通貨コードではない・換算しない）。
+  // displayFractionDigits は表示と入力の刻みだけを決める（保存・計算は常に 1/100 固定）。
+  "settings": { "ledgerName": "家計簿", "currency": "円", "displayFractionDigits": 0 },
 }
 ```
 
@@ -273,7 +275,7 @@ step 4 で見た `deviceId + revision` は step 5 の保存 transaction でも�
 
 ## migration ポリシー（後方互換をコードで持たない）
 
-- `schemaVersion` を必ず持つ。現行は **`10`**（`SCHEMA_VERSION`・`src/data/constants.ts`）。
+- `schemaVersion` を必ず持つ。現行は **`11`**（`SCHEMA_VERSION`・`src/data/constants.ts`）。
 - **アプリ内に migration チェーンを持たない**（作者決定・単発変換方式）。版を上げたら:
   1. `SCHEMA_VERSION` を +1 する（旧版 JSON / スナップショットは fail-closed に拒否される）。
   2. 実データは書き出した JSON を**単発の変換スクリプト**（`_workspace-management/scripts/`）で
@@ -301,7 +303,12 @@ step 4 で見た `deviceId + revision` は step 5 の保存 transaction でも�
   スナップショット `reason` の理由コード化（`'import'`/`'restore'`）。
   v10 以前の JSON は unsupported-version、v10 以前の DB は復旧面へ（in-app 変換なし。
   実データの v10→v11 変換 = `_workspace-management/scripts/convert-ledger-v10-to-v11.mjs`・
-  **順序固定**: v10 ビルドのまま export → 変換 → v11 更新 → DB 初期化 → import）。
+  **順序固定**: v10 ビルドのまま export → 変換 → **変換結果を実 schema と実 import で検証**
+  （`apps/simple-ledger/tests/convertedLedger.verify.test.ts` に `CONVERTED_LEDGER_JSON=<path>` を渡す）
+  → v11 更新 → DB 初期化 → import）。
+  **版を上げると旧版のスナップショットは復元できなくなる**（`schemaVersion` 不一致は
+  復元不可・起動時に自動削除）。保険は「変換前の v10 JSON を手元に残すこと」であって
+  アプリ内スナップショットではない。
 
 ## 外部送信ゼロとの関係
 

@@ -28,6 +28,7 @@ import type { Screen } from '../navigation';
 import type { JournalFilter } from './Journal';
 import { ACCOUNT_ACCENTS, boxByKey, type AccountAccent } from '../accountBoxes';
 import { ScrollTopButton } from '../ScrollTopButton';
+import { sumAmounts } from '../../domain/safeSum';
 
 export type BreakdownSection = 'revenue' | 'asset' | 'liability' | 'equity';
 
@@ -277,7 +278,7 @@ export function Breakdown({
                       <span>{t('assets.frame.ledger')}</span>
                       <span className="stmt-row__num">
                         <Money
-                          amount={frame.rows.reduce((s, b) => s + b.balance, 0)}
+                          amount={sumAmounts(frame.rows.map((b) => b.balance))}
                           currency={currency}
                         />
                       </span>

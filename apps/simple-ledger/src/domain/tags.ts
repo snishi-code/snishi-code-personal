@@ -5,6 +5,7 @@
 import type { JournalEntry, Tag } from './types';
 import type { MessageKey } from '../i18n';
 import { filterByDateRange } from './accounting';
+import { sumAmounts } from './safeSum';
 
 /* ── 使用状況・代入検証（UI と repository で共通の不変条件を使う） ── */
 
@@ -69,7 +70,7 @@ export function aggregateEntryTags(
       tag,
       count: tagged.length,
       // 取消/返金は負で集計（旅行費などから返金が差し引かれる）。
-      total: tagged.reduce((s, e) => s + signedEntryAmount(e), 0),
+      total: sumAmounts(tagged.map((e) => signedEntryAmount(e))),
     };
   });
 }

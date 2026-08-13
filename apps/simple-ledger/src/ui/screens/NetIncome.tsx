@@ -12,13 +12,14 @@ import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
 import { displayEntriesForAsOf } from '../../domain/reportEntries';
 import { todayLocal } from '../../util/time';
 import { buildSectionTrends } from './breakdownData';
-import { Money } from '../money';
+import { Money, moneyText, useMoneyDigits } from '../money';
 import { periodLabel } from '../periodLabel';
 import { TrendChart } from '../components/TrendChart';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import type { Screen } from '../navigation';
 import { ScrollTopButton } from '../ScrollTopButton';
+import { assertSafeAmount } from '../../domain/safeSum';
 
 export function NetIncome({
   period,
@@ -31,6 +32,7 @@ export function NetIncome({
 }) {
   const { ledger } = useLedger();
   const currency = ledger?.settings.currency ?? '';
+  const digits = useMoneyDigits();
   const today = todayLocal();
   const basis = useMemo(() => reportBasis(period, today), [period, today]);
 
@@ -59,13 +61,16 @@ export function NetIncome({
           type="button"
           className="stat stat--btn"
           onClick={() => onNavigate('incomeBreakdown')}
-          aria-label={t('dashboard.statDetail', { label: t('netIncome.revenue') })}
+          aria-label={t('dashboard.statDetail', {
+            label: t('netIncome.revenue'),
+            amount: moneyText(revenue, currency, digits),
+          })}
           data-ui={UI.netIncome.revenue}
         >
-          <span className="stat__label">
+          <span className="stat__label" aria-hidden="true">
             {t('netIncome.revenue')} <Icon name="chevronRight" size={12} />
           </span>
-          <span className="stat__value">
+          <span className="stat__value" aria-hidden="true">
             <Money amount={revenue} currency={currency} />
           </span>
         </button>
@@ -73,20 +78,23 @@ export function NetIncome({
           type="button"
           className="stat stat--btn"
           onClick={() => onNavigate('expenseBreakdown')}
-          aria-label={t('dashboard.statDetail', { label: t('netIncome.expense') })}
+          aria-label={t('dashboard.statDetail', {
+            label: t('netIncome.expense'),
+            amount: moneyText(living, currency, digits),
+          })}
           data-ui={UI.netIncome.expense}
         >
-          <span className="stat__label">
+          <span className="stat__label" aria-hidden="true">
             {t('netIncome.expense')} <Icon name="chevronRight" size={12} />
           </span>
-          <span className="stat__value">
+          <span className="stat__value" aria-hidden="true">
             <Money amount={living} currency={currency} />
           </span>
         </button>
         <div className="stat" data-ui={UI.netIncome.result}>
           <span className="stat__label">{t('netIncome.result')}</span>
           <span className="stat__value">
-            <Money amount={revenue - living} currency={currency} signed />
+            <Money amount={assertSafeAmount(revenue - living)} currency={currency} signed />
           </span>
         </div>
       </div>

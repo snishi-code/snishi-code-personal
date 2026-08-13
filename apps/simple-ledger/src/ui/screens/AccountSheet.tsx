@@ -363,7 +363,8 @@ export function AccountSheet({
         ) : null}
         {showReturn ? (
           <>
-            {/* 小数と負号を入力するため inputMode は指定しない（foundation は numeric のみ対応）。 */}
+            {/* 小数と負号を入力するため inputMode は指定しない
+                （numeric / decimal のソフトキーボードに '-' キーが無い）。符号付きの金額欄も同じ扱い。 */}
             <TextInput
               label={t('accounts.annualReturn')}
               value={annualReturnText}

@@ -18,6 +18,7 @@ import { addMonths, monthlyAmounts } from './allocation';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from './constants';
 import { monthlyAllocationDate, monthlyAllocationSpan } from './monthlyCost';
 import type { JournalEntry, MonthlyCostItem } from './types';
+import { assertSafeAmount } from './safeSum';
 
 /** 仮想展開の上限（無限ループ防止・極端な未来クエリの安全弁）。 */
 export const CONTINUOUS_COST_HARD_CAP = '2100-12-31';
@@ -71,9 +72,20 @@ export function recoveredAmountsByItem(entries: JournalEntry[]): Map<string, num
     const id = e.metadata.monthlyCostId;
     if (id === undefined) continue;
     const credit = e.lines.find((l) => l.side === 'credit');
-    recovered.set(id, (recovered.get(id) ?? 0) + (credit?.amount ?? 0));
+    recovered.set(id, assertSafeAmount((recovered.get(id) ?? 0) + (credit?.amount ?? 0)));
   }
   return recovered;
+}
+
+/**
+ * 割り振る総額 = 取得額 − 回収済み額（負でよい = 過去にわたる費用減）。
+ * 導出（continuousCostEntries）と画面（毎月のもの）で同じ式を使うための単一正本。
+ */
+export function spreadTotalOf(
+  item: MonthlyCostItem,
+  recovered: ReadonlyMap<string, number>,
+): number {
+  return assertSafeAmount(item.amount - (recovered.get(item.id) ?? 0));
 }
 
 /** 全 item の費用行を upTo まで展開して連結する（回収の振替は real から集計）。 */
@@ -84,7 +96,7 @@ export function continuousCostEntries(
 ): JournalEntry[] {
   const recovered = recoveredAmountsByItem(real);
   return items.flatMap((it) =>
-    continuousCostEntriesForItem(it, upTo, it.amount - (recovered.get(it.id) ?? 0)),
+    continuousCostEntriesForItem(it, upTo, spreadTotalOf(it, recovered)),
   );
 }
 

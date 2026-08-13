@@ -1,9 +1,23 @@
 /* 月単位の計算で共有する純粋関数。 */
+import { LedgerError } from './errors';
+import { assertSafeAmount } from './safeSum';
 
-/** total を months で割り、端数を先頭月から 1 ずつ配って合計を total に一致させる。 */
+/**
+ * total を months で割り、端数を先頭月から 1 ずつ配って合計を total に一致させる。
+ *
+ * 不変条件は「戻り値の合計が total に厳密一致する」こと。
+ * base * months が安全整数域を出ると剰余の計算が浮動小数で狂い、この不変条件が
+ * 静かに壊れる（例: total = -(2^53-1), months = 3）。実際の金額は 1 仕訳の上限
+ * （10^12 minor）で守られるが、壊れた配分を黙って返すより止める（fail-closed）。
+ */
 export function monthlyAmounts(total: number, months: number): number[] {
+  assertSafeAmount(total);
   const base = Math.floor(total / months);
-  const remainder = total - base * months;
+  const product = assertSafeAmount(base * months); // months <= 0 もここで弾かれる（Infinity/NaN）。
+  const remainder = total - product;
+  if (!Number.isInteger(remainder) || remainder < 0 || remainder >= months) {
+    throw new LedgerError('error.amount.overflow');
+  }
   return Array.from({ length: months }, (_, i) => base + (i < remainder ? 1 : 0));
 }
 

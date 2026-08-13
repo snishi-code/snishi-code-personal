@@ -10,6 +10,7 @@
  */
 import { addMonths, monthOf } from './allocation';
 import type { Account, AccountBalance, JournalEntry } from './types';
+import { assertSafeAmount, sumAmounts } from './safeSum';
 
 /**
  * 「自由に動かせるお金」に数える科目か（資金繰りの原資の単一正本）。
@@ -31,7 +32,7 @@ export function isFreeAsset(
 
 /** 資金繰りの原資 = 「自由に動かせるお金」の残高合計。 */
 export function freeAssetTotal(assets: AccountBalance[]): number {
-  return assets.filter((a) => isFreeAsset(a.account)).reduce((s, a) => s + a.balance, 0);
+  return sumAmounts(assets.filter((a) => isFreeAsset(a.account)).map((a) => a.balance));
 }
 
 export interface CashflowPoint {
@@ -139,7 +140,7 @@ export function projectCashflow(params: {
   const points: CashflowPoint[] = [{ date: today, free: startFree }];
   let free = startFree;
   for (const e of events) {
-    free += e.amount;
+    free = assertSafeAmount(free + e.amount);
     points.push({ date: e.date, free });
   }
 

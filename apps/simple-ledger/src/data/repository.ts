@@ -38,6 +38,8 @@ import {
   journalEntrySchema,
   monthlyCostItemSchema,
   recurringRuleSchema,
+  settingsSchema,
+  tagSchema,
 } from '../domain/schema';
 import {
   buildRuleItem,
@@ -1311,8 +1313,12 @@ function buildRepaymentEntries(
 /* ── 設定 ── */
 
 async function updateSettingsUnlocked(settings: Settings): Promise<void> {
+  // 保存境界で schema を通す（UI だけの制限では、他経路や将来の呼び出しで
+  // 「保存はできるが export だけ後で失敗する」状態を作ってしまう）。
+  const validated = settingsSchema.safeParse(settings);
+  if (!validated.success) throw new LedgerError('error.settings.invalid');
   await writeWithRevision([STORE.kv], (t) => {
-    t.objectStore(STORE.kv).put(settings, KV_SETTINGS);
+    t.objectStore(STORE.kv).put(validated.data, KV_SETTINGS);
   });
 }
 
@@ -2444,8 +2450,11 @@ async function upsertTagUnlocked(tag: Tag): Promise<void> {
 
   // タグは仕訳全体のみ。scope は常に 'entry' に固定する。
   const normalized: Tag = { ...tag, scope: 'entry' };
+  // 設定と同じく保存境界で schema を通す（「保存はできるが export だけ後で失敗する」を作らない）。
+  const validated = tagSchema.safeParse(normalized);
+  if (!validated.success) throw new LedgerError('error.tag.invalid');
   await writeWithRevision([STORE.tags], (t) => {
-    t.objectStore(STORE.tags).put(normalized);
+    t.objectStore(STORE.tags).put(validated.data);
   });
 }
 

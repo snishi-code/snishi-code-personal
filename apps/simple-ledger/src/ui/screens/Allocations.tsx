@@ -23,7 +23,10 @@ import {
   remainingValue,
   representativeMonthlyAmount,
 } from '../../domain/monthlyCost';
-import { recoveredAmountsByItem } from '../../domain/continuousCost';
+import {
+  recoveredAmountsByItem,
+  spreadTotalOf as computeSpreadTotal,
+} from '../../domain/continuousCost';
 import { parseRuleItemId } from '../../domain/recurringIds';
 import type { AccountRole } from '../../domain/accountRoles';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../../domain/constants';
@@ -131,7 +134,8 @@ export function Allocations({
   // 遡及して再配分されるため、ヘッダーの断面を変えても同じ item の月額は変わらない。
   // 検索の毎打鍵で再レンダーが走るため、全仕訳走査は useMemo で 1 回にする。
   const recovered = useMemo(() => recoveredAmountsByItem(ledger?.journalEntries ?? []), [ledger]);
-  const spreadTotalOf = (m: MonthlyCostItem): number => m.amount - (recovered.get(m.id) ?? 0);
+  // 式は domain の単一正本（continuousCost.spreadTotalOf）に委譲する。
+  const spreadTotalOf = (m: MonthlyCostItem): number => computeSpreadTotal(m, recovered);
   // 購入の仕訳（item と 1:1・最初に一致した 1 件 = 従来の find と同じ規則）。
   const purchaseEntryByItem = useMemo(() => {
     const map = new Map<string, JournalEntry>();

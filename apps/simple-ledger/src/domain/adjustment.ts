@@ -5,6 +5,7 @@
 import { newId } from './ids';
 import { nowIso } from '../util/time';
 import type { AdjustmentMeta, JournalEntry } from './types';
+import { assertSafeAmount } from './safeSum';
 
 /** 補正の相手科目の既定名（初回利用時に作成/再利用）。 */
 export const ADJUSTMENT_ACCOUNTS = {
@@ -50,7 +51,7 @@ export interface AdjustmentInput {
  *  - liability 増: 借方 費 / 貸方 負債          liability 減: 借方 負債 / 貸方 収入
  */
 export function buildAdjustmentEntry(input: AdjustmentInput): JournalEntry | null {
-  const delta = input.actualBalance - input.expectedBalance;
+  const delta = assertSafeAmount(input.actualBalance - input.expectedBalance);
   if (delta === 0) return null;
   const ts = nowIso();
   const amount = Math.abs(delta);

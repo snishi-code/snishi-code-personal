@@ -31,6 +31,7 @@ import { formatMoney } from '../../util/format';
 import { monthlyAmounts } from '../../domain/allocation';
 import { UI } from '../../ui-contract';
 import { ScrollTopButton } from '../ScrollTopButton';
+import { sumAmounts } from '../../domain/safeSum';
 
 function shortDateLabel(date: string): string {
   const [, month, day] = date.split('-');
@@ -118,7 +119,7 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
               e.date > today && e.lines.some((l) => l.side === 'debit' && l.accountId === a.id),
           )
           .sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
-        const remaining = repayments.reduce((sum, e) => sum + repaymentAmountOf(e, a.id), 0);
+        const remaining = sumAmounts(repayments.map((e) => repaymentAmountOf(e, a.id)));
         const count = repayments.length;
         const nextDue = repayments.map((e) => e.date).sort()[0];
         return {

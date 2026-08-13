@@ -10,6 +10,7 @@ import { derivedEntryOrigin, type DerivedEntryOrigin } from './derivedOrigin';
 import { buildRuleItem, recurringExpenseAccountId, recurringPostingsDue } from './recurring';
 import { parseRuleItemId } from './recurringIds';
 import type { Account, JournalEntry, MonthlyCostItem, RecurringRule } from './types';
+import { assertSafeAmount } from './safeSum';
 
 export type TimelineZoom = 'day' | 'month' | 'year';
 
@@ -285,7 +286,7 @@ type DotMap = Map<string, DotAccumulator>;
 
 function addFlow(map: DotMap, bucketKey: string, delta: number, flow: TimelineFlow): void {
   const current = map.get(bucketKey) ?? { netChange: 0, flows: new Map() };
-  current.netChange += delta;
+  current.netChange = assertSafeAmount(current.netChange + delta);
   current.flows.set(flow.id, flow);
   map.set(bucketKey, current);
 }

@@ -7,13 +7,16 @@
  *  - parse は整数部・小数部を文字列のまま分解する（`Number(text) * 100` の float 経由は禁止:
  *    19.99 * 100 === 1998.9999…）。
  */
-import type { FractionDigits } from '../util/format';
+import { displayRoundsToZero, type FractionDigits } from '../util/format';
 
 /** 入力文字列を「数字 + 小数点 1 個 + 設定桁までの小数」へ整形する（符号なし）。 */
 export function sanitizeAmountText(v: string, digits: FractionDigits): string {
   const cleaned = v.replace(/[^\d.]/g, '');
-  if (digits === 0) return cleaned.replace(/\./g, '');
   const dot = cleaned.indexOf('.');
+  // 小数点は**削除ではなく切り捨て**。削除すると小数部が整数部に連結して 100 倍になる
+  // （'1,234.56' を貼り付けると 123456 = 1,234.56 のつもりが 123,456）。
+  // digits=1|2 の分岐（下）と挙動をそろえる。
+  if (digits === 0) return dot === -1 ? cleaned : cleaned.slice(0, dot);
   if (dot === -1) return cleaned;
   const intPart = cleaned.slice(0, dot);
   const fracPart = cleaned
@@ -56,7 +59,8 @@ export function parseAmountToMinor(v: string): number | null {
  * （作者決定 2026-08-13:「途中で表示桁を変えたら消えるが、ユーザー責任・補正で吸収できる」）。
  */
 export function formatMinorForInput(minor: number, digits: FractionDigits): string {
-  const sign = minor < 0 ? '-' : '';
+  // 符号は**丸めた後**で決める（表示桁 0 で -0.49 を開くと '-0' という入力不能な値が欄に載る）。
+  const sign = minor < 0 && !displayRoundsToZero(minor, digits) ? '-' : '';
   const abs = Math.abs(minor);
   const scale = 10 ** (2 - digits);
   const scaled = Math.round(abs / scale);
@@ -65,4 +69,19 @@ export function formatMinorForInput(minor: number, digits: FractionDigits): stri
   const frac = scaled - major * base;
   if (digits === 0 || frac === 0) return `${sign}${major}`;
   return `${sign}${major}.${String(frac).padStart(digits, '0').replace(/0+$/, '')}`;
+}
+
+/**
+ * minor を「1 の位まで削らずに」表せる最小の桁数（0 / 1 / 2）。
+ *
+ * 使い所は**残高ちょうどでなければ保存側が弾く金額**（口座の終了・継続コスト台帳の引き上げ）。
+ * 表示桁を 0 にしていても、その欄だけはこの桁で見せて「見えている値 = 保存される値」を保つ。
+ * 粗い桁のまま丸めて見せると、保存で error.account.archiveBalance に当たって
+ * 画面上は正しく見えるのに保存できない、という行き止まりになる。
+ */
+export function exactDigitsFor(minor: number): FractionDigits {
+  const abs = Math.abs(minor);
+  if (abs % 100 === 0) return 0;
+  if (abs % 10 === 0) return 1;
+  return 2;
 }
