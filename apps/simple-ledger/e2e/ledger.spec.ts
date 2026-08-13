@@ -176,3 +176,47 @@ test('表示桁数 2 で小数を入力すると、表示・保存とも 1/100 �
   await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(ui('dashboard.journal.preview'))).toContainText('12.34');
 });
+
+test('表示桁数 0 で小数点を打っても 100 倍にならない (v11・貼り付け相当)', async ({ page }) => {
+  // 既定の表示桁は 0。ここで小数点を「削除」して整数部へ連結すると 100 倍になる
+  // （'12.34' → '1234'）。切り捨て = '12' が正。金額欄は全画面で同じ正本を通る。
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
+  await page.goto('./');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+
+  await page.locator(ui('dashboard.entry.expense')).click();
+  await page.locator(ui('journal.entry.item')).fill('整数桁E2E');
+  const amount = page.locator(ui('journal.entry.amount'));
+  await expect(amount).toHaveAttribute('inputmode', 'numeric');
+  await amount.fill('12.34');
+  await expect(amount).toHaveValue('12');
+  await page
+    .locator(`${ui('journal.entry.flow.source')} label.chip`)
+    .first()
+    .click();
+  await page
+    .locator(`${ui('journal.entry.flow.destination')} label.chip`)
+    .first()
+    .click();
+  await page.locator(ui('journal.entry.save')).click();
+  await expect(page.locator(ui('journal.entry.save'))).toBeHidden();
+
+  const storedAmount = await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open('simple-ledger-v2');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    const entries = await new Promise<{ description: string; lines: { amount: number }[] }[]>(
+      (resolve, reject) => {
+        const tx = db.transaction('journalEntries', 'readonly');
+        const req = tx.objectStore('journalEntries').getAll();
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      },
+    );
+    db.close();
+    return entries.find((e) => e.description === '整数桁E2E')?.lines[0]?.amount ?? null;
+  });
+  expect(storedAmount, '12.34 を表示桁 0 で打つと 12（=1200 minor）。1234 ではない').toBe(1200);
+});
