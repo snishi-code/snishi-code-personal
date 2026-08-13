@@ -16,7 +16,7 @@ import { isValidIsoDate } from '../domain/calendar';
 // 投資利回りの投影（displayEntriesForAsOf）は仮の数字であり、補正の基準（現実アンカー）に
 // 混ぜない（§D・Codex 指摘）。
 import { reportEntriesForAsOf } from '../domain/reportEntries';
-import { parseAmountToMinor, sanitizeSignedAmountText } from './amountText';
+import { formatMinorForInput, parseAmountToMinor, sanitizeSignedAmountText } from './amountText';
 import { useMoneyDigits } from './money';
 import { groupedAccountsByRole } from './accountOptions';
 import { AccountPicker } from './AccountPicker';
@@ -154,9 +154,12 @@ export function AdjustmentEditSheet({
   const currency = ledger?.settings.currency ?? '';
   const adj = entry.metadata!.adjustment!;
 
+  const digits = useMoneyDigits();
   const [accountId, setAccountId] = useState(adj.accountId);
   const [date, setDate] = useState(entry.date);
-  const [actualText, setActualText] = useState(String(adj.actualBalance));
+  // 保存値は minor。テキスト欄には**必ず表示桁で整形して**入れる
+  // （生の minor を入れると、無変更で保存し直しただけで 100 倍になる）。
+  const [actualText, setActualText] = useState(formatMinorForInput(adj.actualBalance, digits));
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
@@ -170,7 +173,6 @@ export function AdjustmentEditSheet({
     return accountBalance(accountId, target.type, filterByDateRange(entries, undefined, date));
   }, [accountId, target, adjustable, ledger, date, entry.id]);
 
-  const digits = useMoneyDigits();
   const actual = parseAmountToMinor(actualText);
   const delta = actual === null ? 0 : actual - expected;
   // 補正対象は内部集約口座（継続コスト台帳）を除いた資産・負債のみ（聖域化）。
