@@ -20,6 +20,7 @@ import { LedgerProvider, useLedger } from '../src/state/store';
 import { AdjustmentEditSheet } from '../src/ui/AdjustmentSheet';
 import { OpeningEditSheet } from '../src/ui/OpeningSheet';
 import { EntrySheet } from '../src/ui/screens/EntrySheet';
+import { AccountSheet } from '../src/ui/screens/AccountSheet';
 import { Allocations } from '../src/ui/screens/Allocations';
 import {
   createAdjustment,
@@ -28,13 +29,16 @@ import {
   createRecurringRule,
   loadLedger,
   updateSettings,
+  upsertAccount,
   upsertEntry,
+  upsertTag,
 } from '../src/data/repository';
+import { exportToJsonText } from '../src/data/exportImport';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { todayLocal } from '../src/util/time';
 import { accountBalance } from '../src/domain/accounting';
-import type { JournalEntry, SimpleEntryInput } from '../src/domain/types';
+import type { Account, JournalEntry, SimpleEntryInput } from '../src/domain/types';
 import './setup';
 
 beforeAll(() => {
@@ -384,5 +388,107 @@ describe('打ち消しの額は表示桁 0 でも丸めない', () => {
     await waitFor(() => expect(saved).not.toBeNull());
     // 残高ちょうど。丸めると科目の終了が保存側（残高 0 の要求）で弾かれる。
     expect(saved!.amount).toBe(ODD);
+  });
+});
+
+/*
+ * **金額以外のフィールドも「開いて無変更で保存」で 1 バイトも変わらない。**
+ *
+ * 金額の往復だけを見ていると、state を持たない引き継ぎフィールド（note）や、
+ * 開いた瞬間に既定値を作る欄（archived な科目の endDate）が、無変更保存で
+ * 生えたり消えたりするのを取り逃がす。updatedAt / revision を除いた全体を比べる。
+ */
+describe('金額以外のフィールドの open→save 往復', () => {
+  const ignoreVolatile = (o: Record<string, unknown>) =>
+    JSON.stringify(Object.fromEntries(Object.entries(o).filter(([k]) => k !== 'updatedAt')));
+
+  it('勘定科目: 利回り・返済日・note・開始日を持つ科目が無変更保存で変わらない', async () => {
+    const ledger = await loadLedger();
+    const invest = ledger.accounts.find((a) => a.role === 'investment-asset')!;
+    const income = ledger.accounts.find((a) => a.role === 'income-category')!;
+    const seeded: Account = {
+      ...invest,
+      note: '引き継ぐだけのメモ',
+      annualReturnBp: 350,
+      projectionAccountId: income.id,
+      startDate: '2026-01-01',
+    };
+    await upsertAccount(seeded);
+    const before = (await loadLedger()).accounts.find((a) => a.id === invest.id)!;
+
+    render(
+      <Providers>
+        <Ready>
+          <AccountSheet existing={before} onClose={() => undefined} />
+        </Ready>
+      </Providers>,
+    );
+    await waitFor(() => expect(q(UI.accounts.save)).toBeInTheDocument());
+    fireEvent.click(q(UI.accounts.save)!);
+
+    await waitFor(async () => {
+      const after = (await loadLedger()).accounts.find((a) => a.id === invest.id)!;
+      expect(ignoreVolatile(after)).toBe(ignoreVolatile(before));
+    });
+  });
+
+  it('アーカイブ済みの科目: 無変更保存で終了日が今日へ寄らない', async () => {
+    // archived ⇔ endDate は同じ状態を表す不変条件（repository の保存境界が守る）。
+    // 編集シートは endDate 欄の既定値を updatedAt / today から作るため、
+    // 「開いて保存し直しただけで終了日が今日へ動く」= 期間の判定が静かに変わる、が事故の形。
+    const ledger = await loadLedger();
+    const source = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    await upsertAccount({
+      ...source,
+      id: 'archived-with-end',
+      name: '終了日つきのアーカイブ',
+      archived: true,
+      endDate: '2026-03-01',
+    });
+    const before = (await loadLedger()).accounts.find((a) => a.id === 'archived-with-end')!;
+    expect(before.endDate).toBe('2026-03-01');
+
+    render(
+      <Providers>
+        <Ready>
+          <AccountSheet existing={before} onClose={() => undefined} />
+        </Ready>
+      </Providers>,
+    );
+    await waitFor(() => expect(q(UI.accounts.save)).toBeInTheDocument());
+    fireEvent.click(q(UI.accounts.save)!);
+
+    await waitFor(async () => {
+      const after = (await loadLedger()).accounts.find((a) => a.id === 'archived-with-end')!;
+      expect(after.endDate).toBe('2026-03-01');
+      expect(ignoreVolatile(after)).toBe(ignoreVolatile(before));
+    });
+  });
+
+  it('タグ: 無変更保存で色・作成日時まで変わらない', async () => {
+    await upsertTag({
+      id: 'round-trip-tag',
+      name: '往復タグ',
+      scope: 'entry',
+      color: '#123456',
+      archived: false,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const before = (await loadLedger()).tags.find((x) => x.id === 'round-trip-tag')!;
+    expect(before.color).toBe('#123456');
+    // シートを通さない経路（保存境界そのもの）でも同値であること。
+    await upsertTag(before);
+    const after = (await loadLedger()).tags.find((x) => x.id === 'round-trip-tag')!;
+    expect(ignoreVolatile(after)).toBe(ignoreVolatile(before));
+  });
+
+  it('台帳設定: 名前・単位・桁数を読み込んで保存し直しても export が通る', async () => {
+    const before = (await loadLedger()).settings;
+    await updateSettings({ ...before });
+    const after = (await loadLedger()).settings;
+    expect(JSON.stringify(after)).toBe(JSON.stringify(before));
+    // 「保存はできるのに export だけ落ちる」を 1 行で拾う。
+    expect(exportToJsonText(await loadLedger())).toContain('"schemaVersion": 11');
   });
 });
