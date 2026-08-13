@@ -509,7 +509,7 @@ export const s = {
       section: 'テンプレート',
       // ＋ボタンの読み上げ名 (押すとプリセット選択メニューが開く)。
       add: 'テンプレートを作る',
-      addRound: '回診メモを追加',
+      addRound: '回診を追加',
       addDaily: '日報を追加',
       addEmpty: '空のテンプレートを作る',
       active: '使用中',

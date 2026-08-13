@@ -175,22 +175,22 @@ beforeEach(() => {
 // ============================
 
 describe('initStore の初回 seed', () => {
-  it('プリセット 2 種 + place『グループ1』を seed し、回診メモが active になる', async () => {
+  it('プリセット 2 種 + place『グループ1』を seed し、回診が active になる', async () => {
     const { store } = await setup();
 
     expect(store.listPlaces().map((p) => p.name)).toEqual(['グループ1']);
     expect(store.getActivePlace()?.name).toBe('グループ1');
     expect(store.isArchiveViewActive()).toBe(false);
 
-    expect(store.getTemplateDefs().map((t) => t.name)).toEqual(['回診メモ', '日報']);
+    expect(store.getTemplateDefs().map((t) => t.name)).toEqual(['回診', '日報']);
     expect(store.getFrames().map((frame) => frame.name)).toEqual(['SOAP', '日報']);
     expect(store.getFormats().map((format) => format.name)).toEqual([
       'バイタル',
       '身体所見',
-      '血糖',
+      // 検査所見は seed するが回診には配置しない（必要な場所へ利用者が置く）。
       '検査所見',
     ]);
-    expect(store.getActiveTemplate()?.name).toBe('回診メモ');
+    expect(store.getActiveTemplate()?.name).toBe('回診');
     expect(store.getSettings().newlineMode).toBe('crlf');
     expect(store.getAppState().patients).toEqual([]);
   });
@@ -207,7 +207,7 @@ describe('initStore の初回 seed', () => {
     expect(await db.getAll(STORE_PLACES)).toHaveLength(1);
     expect(await db.getAll(STORE_TEMPLATES)).toHaveLength(2);
     expect(await db.getAll(STORE_FRAMES)).toHaveLength(2);
-    expect(await db.getAll(STORE_FORMATS)).toHaveLength(4);
+    expect(await db.getAll(STORE_FORMATS)).toHaveLength(3);
   });
 });
 
@@ -218,7 +218,7 @@ describe('initStore の初回 seed', () => {
 describe('正規化テンプレート部品 CRUD', () => {
   it('active テンプレートは配置 ID を持つ解決済み形で返す', async () => {
     const { store } = await setup();
-    const definition = store.getTemplateDefs().find((template) => template.name === '回診メモ')!;
+    const definition = store.getTemplateDefs().find((template) => template.name === '回診')!;
     const resolved = store.getActiveTemplate();
     const placementIds = definition.placements.map((placement) => placement.id);
     expect(
@@ -228,13 +228,11 @@ describe('正規化テンプレート部品 CRUD', () => {
 
   it('使用中のフレームとフォーマットは参照テンプレート名を示して削除拒否する', async () => {
     const { store } = await setup();
-    const definition = store.getTemplateDefs().find((template) => template.name === '回診メモ')!;
+    const definition = store.getTemplateDefs().find((template) => template.name === '回診')!;
     const formatId = definition.placements[0]!.formatId;
 
-    await expect(store.deleteFrame(definition.frameId)).rejects.toThrow(
-      frameInUseMsg(['回診メモ']),
-    );
-    await expect(store.deleteFormat(formatId)).rejects.toThrow(formatInUseMsg(['回診メモ']));
+    await expect(store.deleteFrame(definition.frameId)).rejects.toThrow(frameInUseMsg(['回診']));
+    await expect(store.deleteFormat(formatId)).rejects.toThrow(formatInUseMsg(['回診']));
   });
 
   it('フレームとフォーマットの複製は子 ID も新しくし、再起動後も残る', async () => {
@@ -268,7 +266,7 @@ describe('正規化テンプレート部品 CRUD', () => {
 
   it('テンプレートの複製は配置 ID を採番し直し、フレーム共有・元テンプレート・active は変えない', async () => {
     const { db, store } = await setup();
-    const source = store.getTemplateDefs().find((template) => template.name === '回診メモ')!;
+    const source = store.getTemplateDefs().find((template) => template.name === '回診')!;
     const before = structuredClone(source);
     const beforeActive = store.getSettings().activeTemplateId;
     const beforeFrames = store.getFrames().length;

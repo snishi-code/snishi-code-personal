@@ -28,17 +28,23 @@ export function buildRoundPreset(nowMs: number): TemplatePresetBundle {
     ],
   };
 
+  // 実運用で固まった形。1 行に並ぶ順（測って書く順）に項目を置き、単位は項目側が持つ。
+  // 見出しは出さない: ラベル列があるので何の値かは行を見れば分かり、縦を詰められる。
   const vitals: Format = {
     id: newId('fmt'),
     name: 'バイタル',
     joiner: ', ',
     labelSep: ' ',
     titleWrap: '',
+    showName: false,
     items: [
-      { id: newId('itm'), label: 'BP', kind: 'text', unit: 'mmHg' },
-      { id: newId('itm'), label: 'HR', kind: 'text' },
       { id: newId('itm'), label: 'SpO2', kind: 'text', unit: '%' },
       { id: newId('itm'), label: 'BT', kind: 'text', unit: '℃' },
+      { id: newId('itm'), label: 'BP', kind: 'text', unit: 'mmHg' },
+      { id: newId('itm'), label: 'HR', kind: 'text' },
+      { id: newId('itm'), label: '食事', kind: 'text', normal: '問題なし' },
+      { id: newId('itm'), label: '尿', kind: 'text', unit: 'mL' },
+      { id: newId('itm'), label: 'Glu', kind: 'text', unit: 'mg/dL' },
     ],
   };
   const physical: Format = {
@@ -47,6 +53,7 @@ export function buildRoundPreset(nowMs: number): TemplatePresetBundle {
     joiner: '\n',
     labelSep: '：',
     titleWrap: '',
+    showName: false,
     items: [
       { id: newId('itm'), label: '肺音', kind: 'text', normal: '明らかなラ音なし' },
       { id: newId('itm'), label: '腸音', kind: 'text', normal: '正常' },
@@ -54,18 +61,7 @@ export function buildRoundPreset(nowMs: number): TemplatePresetBundle {
       { id: newId('itm'), label: '下腿浮腫', kind: 'text', normal: 'なし' },
     ],
   };
-  const glucose: Format = {
-    id: newId('fmt'),
-    name: '血糖',
-    joiner: '-',
-    labelSep: ' ',
-    titleWrap: '',
-    items: [
-      { id: newId('itm'), label: 'Glu', kind: 'text' },
-      { id: newId('itm'), label: '', kind: 'text' },
-      { id: newId('itm'), label: '', kind: 'text' },
-    ],
-  };
+  // 配置は持たせない再利用部品。必要になった場所へ利用者が置く。
   const labs: Format = {
     id: newId('fmt'),
     name: '検査所見',
@@ -78,19 +74,20 @@ export function buildRoundPreset(nowMs: number): TemplatePresetBundle {
       { id: newId('itm'), label: 'CT', kind: 'text' },
     ],
   };
-  const formats = [vitals, physical, glucose, labs];
+  const formats = [vitals, physical, labs];
 
   const template: TemplateDef = {
     id: newId('tpl'),
-    name: '回診メモ',
+    name: '回診',
     frameId: frame.id,
     includeProblems: true,
     includeHandover: true,
-    placements: formats.map((format, index) => ({
+    // (O) にバイタルと身体所見だけを展開で置く。検査所見は未配置で残す。
+    placements: [vitals, physical].map((format) => ({
       id: newId('plm'),
       sectionId: sectionO,
       formatId: format.id,
-      display: index < 2 ? 'always' : 'oncall',
+      display: 'always' as const,
     })),
     updatedAt: nowMs,
   };
