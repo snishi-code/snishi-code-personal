@@ -18,6 +18,7 @@
  *    絶対に書き換えない（購入の仕訳とのミラーが壊れる）。
  */
 import { addMonths, addMonthsToDate, monthlyAmounts, monthOf, monthsBetween } from './allocation';
+import { assertSafeAmount } from './safeSum';
 import type { MonthlyCostItem } from './types';
 
 /** 月割りの起点日（費用化の開始日）。未設定 = 購入日（startDate）。 */
@@ -77,9 +78,11 @@ export function remainingValue(
   const amounts = monthlyAmounts(spreadTotal, span.n);
   let done = 0;
   for (let k = 0; k < span.n; k++) {
-    if (monthlyAllocationDate(item, span.from, k) <= asOf) done += amounts[k] ?? 0;
+    if (monthlyAllocationDate(item, span.from, k) <= asOf) {
+      done = assertSafeAmount(done + (amounts[k] ?? 0));
+    }
   }
-  return spreadTotal - done;
+  return assertSafeAmount(spreadTotal - done);
 }
 
 /* ── アーカイブの導出規則（status フィールドは持たない・猶予なし） ── */

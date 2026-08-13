@@ -9,7 +9,7 @@ import { useLedger } from '../../state/store';
 import { deriveProfitAndLoss } from '../../domain/accounting';
 import { livingCostForRange } from '../../domain/livingCost';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
-import { displayEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { todayLocal } from '../../util/time';
 import { buildSectionTrends } from './breakdownData';
 import { Money, moneyText, useMoneyDigits } from '../money';
@@ -20,6 +20,7 @@ import { UI } from '../../ui-contract';
 import type { Screen } from '../navigation';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { assertSafeAmount } from '../../domain/safeSum';
+import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 
 export function NetIncome({
   period,
@@ -36,16 +37,20 @@ export function NetIncome({
   const today = todayLocal();
   const basis = useMemo(() => reportBasis(period, today), [period, today]);
 
-  const { revenue, living } = useMemo(() => {
+  const { revenue, living, investmentProjectionTruncations } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger ? displayEntriesForAsOf(ledger, basis.asOf, today) : [];
+    const display = ledger ? displayEntriesResultForAsOf(ledger, basis.asOf, today) : null;
+    const entries = display?.entries ?? [];
     return {
       revenue: deriveProfitAndLoss(accounts, entries, basis.flowRange).totalRevenue,
       living: livingCostForRange(accounts, entries, basis.flowRange),
+      investmentProjectionTruncations: display?.investmentProjectionTruncations ?? [],
     };
   }, [basis, ledger, today]);
 
   const trends = useMemo(() => buildSectionTrends(period, ledger, today), [period, ledger, today]);
+  const visibleProjectionTruncations =
+    trends?.investmentProjectionTruncations ?? investmentProjectionTruncations;
 
   return (
     <section aria-labelledby="net-income-title" data-ui={UI.netIncome.view}>
@@ -55,6 +60,10 @@ export function NetIncome({
       <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
         {t('netIncome.intro')}
       </p>
+      <InvestmentProjectionTruncationNotice
+        truncations={visibleProjectionTruncations}
+        accounts={ledger?.accounts ?? []}
+      />
       <p className="section-label">{periodLabel(period)}</p>
       <div className="stat-grid">
         <button

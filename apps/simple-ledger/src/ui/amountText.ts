@@ -10,13 +10,35 @@
 import { displayRoundsToZero, type FractionDigits } from '../util/format';
 
 /** 入力文字列を「数字 + 小数点 1 個 + 設定桁までの小数」へ整形する（符号なし）。 */
-export function sanitizeAmountText(v: string, digits: FractionDigits): string {
+export function sanitizeAmountText(v: string, digits: FractionDigits, previous = ''): string {
   const cleaned = v.replace(/[^\d.]/g, '');
   const dot = cleaned.indexOf('.');
   // 小数点は**削除ではなく切り捨て**。削除すると小数部が整数部に連結して 100 倍になる
   // （'1,234.56' を貼り付けると 123456 = 1,234.56 のつもりが 123,456）。
   // digits=1|2 の分岐（下）と挙動をそろえる。
-  if (digits === 0) return dot === -1 ? cleaned : cleaned.slice(0, dot);
+  if (digits === 0) {
+    if (dot === -1) return cleaned;
+    const intPart = cleaned.slice(0, dot);
+
+    /*
+     * controlled input で '.' を即座に消すと、逐次入力の次のキーが整数部へ連結される:
+     *   12 → 12. → 123 → 1234
+     * 貼り付け（previous が末尾 '.' でない複数文字列）は従来どおり整数部だけへ
+     * 切り捨てる一方、利用者がいま打った末尾 '.' だけは state に保持する。その後の
+     * 小数キーは末尾 '.' のまま無視するため、12.34 が 1234 になる経路を閉じる。
+     */
+    // 守るべき整数部が無いなら保持もしない。空欄で '.' を打った state を「.」に固定すると、
+    // 下の保持分岐が以後の数字キーを全部吸い、欄が入力不能になる（Backspace 以外に回復手段なし）。
+    if (intPart === '') return '';
+    const previousBody = previous.startsWith('-') ? previous.slice(1) : previous;
+    if (previousBody.endsWith('.') && cleaned.startsWith(previousBody)) return previousBody;
+    if (cleaned.replace(/\./g, '') === previousBody) {
+      // 末尾への逐次入力だけは '.' を保持する。途中への挿入は、既存の整数を
+      // 切り落とさず入力した '.' だけを無視する。
+      return dot === cleaned.length - 1 ? `${intPart}.` : previousBody;
+    }
+    return intPart;
+  }
   if (dot === -1) return cleaned;
   const intPart = cleaned.slice(0, dot);
   const fracPart = cleaned
@@ -27,9 +49,10 @@ export function sanitizeAmountText(v: string, digits: FractionDigits): string {
 }
 
 /** 符号付き variant（先頭に 1 つだけ '-' を許す）。初期残高・補正の実残高用。 */
-export function sanitizeSignedAmountText(v: string, digits: FractionDigits): string {
+export function sanitizeSignedAmountText(v: string, digits: FractionDigits, previous = ''): string {
   const negative = v.trimStart().startsWith('-');
-  const body = sanitizeAmountText(v.replace(/-/g, ''), digits);
+  const previousBody = previous.startsWith('-') ? previous.slice(1) : previous;
+  const body = sanitizeAmountText(v.replace(/-/g, ''), digits, previousBody);
   return negative ? `-${body}` : body;
 }
 
@@ -55,8 +78,8 @@ export function parseAmountToMinor(v: string): number | null {
 
 /**
  * minor → 編集フォームの初期値文字列（設定桁で丸めた「画面で見えているもの」と同じ値）。
- * 保存精度より粗い設定で開いて保存し直すと、その明示操作で丸めた値が保存される
- * （作者決定 2026-08-13:「途中で表示桁を変えたら消えるが、ユーザー責任・補正で吸収できる」）。
+ * 編集フォームは、この文字列とは別に元の minor を保持し、金額欄が変更された場合だけ
+ * parse 結果を保存する。日付・摘要など別の欄だけを直して端数を失ってはいけない。
  */
 export function formatMinorForInput(minor: number, digits: FractionDigits): string {
   // 符号は**丸めた後**で決める（表示桁 0 で -0.49 を開くと '-0' という入力不能な値が欄に載る）。

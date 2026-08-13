@@ -52,13 +52,35 @@ export function importErrorMessage(
 }
 
 /**
+ * 入力上限の切り詰め（UTF-16 code unit 基準 = zod の string.max と同じ数え方）。
+ * slice がサロゲートペアの途中で切れると孤立サロゲートが保存される（絵文字の単位等）ため、
+ * 末尾が high surrogate ならそれごと落とす。
+ */
+function clampCodeUnits(v: string, max: number): string {
+  let out = v.slice(0, max);
+  const last = out.charCodeAt(out.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) out = out.slice(0, -1);
+  return out;
+}
+
+/** スナップショット読込失敗を空一覧へ偽装せず、復旧データを触らないよう明示する。 */
+export function snapshotListErrorMessage(): string {
+  return t('snapshot.loadError');
+}
+
+/**
  * スナップショット理由コード → 表示文言。未知コードはそのまま出す（fail-visible）。
  * v11 から reason は理由コード（'import'/'restore'）を保存する（生文言を保存しない）。
  */
 function snapshotReasonLabel(reason: string): string {
-  if (reason === 'import') return t('snapshot.reason.import');
-  if (reason === 'restore') return t('snapshot.reason.restore');
-  return reason;
+  switch (reason) {
+    case 'import':
+      return t('snapshot.reason.import');
+    case 'restore':
+      return t('snapshot.reason.restore');
+    default:
+      return reason;
+  }
 }
 
 export function Settings({
@@ -83,6 +105,7 @@ export function Settings({
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [snapshotError, setSnapshotError] = useState<string | undefined>(undefined);
   const [pendingImportText, setPendingImportText] = useState<string | null>(null);
   // v2: importRevision（v1 の baseRevision を廃止）
   const [conflict, setConflict] = useState<{ local: number; import: number } | null>(null);
@@ -95,11 +118,18 @@ export function Settings({
   const [fractionDigits, setFractionDigits] = useState<0 | 1 | 2>(
     ledger?.settings.displayFractionDigits ?? 0,
   );
+  const [settingsErrors, setSettingsErrors] = useState<{
+    ledgerName?: string;
+    currency?: string;
+  }>({});
 
   const refreshSnapshots = () => {
     listSnapshots()
-      .then(setSnapshots)
-      .catch(() => undefined);
+      .then((next) => {
+        setSnapshotError(undefined);
+        setSnapshots(next);
+      })
+      .catch(() => setSnapshotError(snapshotListErrorMessage()));
   };
 
   useEffect(() => {
@@ -114,6 +144,7 @@ export function Settings({
         setCurrency(ledger.settings.currency);
         // 初期化（:95-96）と同じく既定 0 で受ける。設定が欠けた台帳でも undefined を state に入れない。
         setFractionDigits(ledger.settings.displayFractionDigits ?? 0);
+        setSettingsErrors({});
       });
     }
   }, [ledger]);
@@ -146,11 +177,21 @@ export function Settings({
   }
 
   function saveLedgerSettings() {
+    const normalizedLedgerName = ledgerName.trim();
+    const normalizedCurrency = currency.trim();
+    const errors = {
+      ledgerName: normalizedLedgerName ? undefined : t('settings.ledgerNameRequired'),
+      currency: normalizedCurrency ? undefined : t('settings.currencyRequired'),
+    };
+    if (errors.ledgerName || errors.currency) {
+      setSettingsErrors(errors);
+      return;
+    }
+    setSettingsErrors({});
     const next: LedgerSettings = {
-      ledgerName: ledgerName.trim() || '家計簿',
-      // 空の単位はデータへ焼き付けない（schema も min(1)）。空なら現在値を維持する。
-      // 旧実装の既定 'JPY' 差し替えは廃止 = アプリは通貨を用意しない（作者決定）。
-      currency: currency.trim() || (ledger?.settings.currency ?? '円'),
+      // 空欄を既定値や旧値へ黙って差し替えない。上の検証で明示的に止める。
+      ledgerName: normalizedLedgerName,
+      currency: normalizedCurrency,
       displayFractionDigits: fractionDigits,
     };
     saveSettings(next).catch(() => undefined);
@@ -247,7 +288,12 @@ export function Settings({
       <p className="field__hint" style={{ marginBottom: 8 }}>
         {t('settings.snapshotsDesc')}
       </p>
-      {snapshots.length === 0 ? (
+      {snapshotError ? (
+        <div className="field__error" role="alert">
+          <Icon name="alert" size={14} />
+          {snapshotError}
+        </div>
+      ) : snapshots.length === 0 ? (
         <div className="card card--pad muted">{t('snapshot.empty')}</div>
       ) : (
         <ul className="card list">
@@ -291,14 +337,22 @@ export function Settings({
           label={t('settings.ledgerName')}
           required
           value={ledgerName}
-          onChange={(v) => setLedgerName(v.slice(0, 120))}
+          onChange={(v) => {
+            setLedgerName(clampCodeUnits(v, 120));
+            setSettingsErrors((current) => ({ ...current, ledgerName: undefined }));
+          }}
+          error={settingsErrors.ledgerName}
         />
         <TextInput
           label={t('settings.currency')}
           required
           value={currency}
-          onChange={(v) => setCurrency(v.slice(0, 8))}
+          onChange={(v) => {
+            setCurrency(clampCodeUnits(v, 8));
+            setSettingsErrors((current) => ({ ...current, currency: undefined }));
+          }}
           hint={t('settings.currencyHint')}
+          error={settingsErrors.currency}
         />
         {/* 表示桁数（0|1|2・入力の刻みも連動）。保存・計算は常に 1/100 固定でこの設定では変わらない。 */}
         <div className="field" data-ui={UI.settings.fractionDigits}>
@@ -398,7 +452,7 @@ export function Settings({
       {pendingDeleteSnap ? (
         <ConfirmDialog
           title={t('snapshot.delete')}
-          body={pendingDeleteSnap.reason}
+          body={snapshotReasonLabel(pendingDeleteSnap.reason)}
           confirmLabel={t('common.delete')}
           danger
           onCancel={() => setPendingDeleteSnap(null)}

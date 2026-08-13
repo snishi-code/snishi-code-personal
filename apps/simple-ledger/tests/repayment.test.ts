@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import './setup';
 import { deleteAccount, loadLedger, upsertAccount } from '../src/data/repository';
 import { nextRepaymentDate } from '../src/domain/cashflow';
+import { MONTHLY_AMOUNTS_HARD_CAP } from '../src/domain/allocation';
 import { ledgerExportPackageSchema } from '../src/domain/schema';
 import { buildExportPackage } from '../src/data/exportImport';
 import { LedgerError } from '../src/domain/errors';
@@ -126,5 +127,27 @@ describe('返済分割の 0 金額ガード（R-1・v10 の既存不具合の修
     const saved = (await load()).journalEntries.filter((e) => e.description.startsWith('境界確認'));
     expect(saved).toHaveLength(2);
     expect(saved.every((e) => e.lines.every((l) => l.amount === 1))).toBe(true);
+  });
+
+  it('hard cap を超える回数は配列確保・書込み前に明確な理由コードで拒否する', async () => {
+    const { createRepaymentEntries, loadLedger: load } = await import('../src/data/repository');
+    const card = await accountByRole('payment-liability');
+    const bank = await accountByRole('daily-asset');
+    await expect(
+      createRepaymentEntries({
+        liabilityAccountId: card.id,
+        fromAccountId: bank.id,
+        firstDate: '2026-09-27',
+        total: MONTHLY_AMOUNTS_HARD_CAP + 1,
+        count: MONTHLY_AMOUNTS_HARD_CAP + 1,
+        title: '上限確認',
+      }),
+    ).rejects.toMatchObject({
+      code: 'error.repay.countInvalid',
+      params: { max: MONTHLY_AMOUNTS_HARD_CAP },
+    });
+    expect(
+      (await load()).journalEntries.some((entry) => entry.description.includes('上限確認')),
+    ).toBe(false);
   });
 });

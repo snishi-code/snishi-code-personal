@@ -219,7 +219,7 @@ describe('resetAll', () => {
       {
         id: makeSnapshotId(),
         createdAt: '2026-06-01T00:00:00.000Z',
-        reason: 'test',
+        reason: 'import',
         data: buildExportPackage(snapshotSource),
       },
       {
@@ -254,7 +254,7 @@ describe('resetAll', () => {
     const snapshot = {
       id: makeSnapshotId(),
       createdAt: '2026-06-01T00:00:00.000Z',
-      reason: 'reset競合',
+      reason: 'import' as const,
       data: buildExportPackage(before),
     };
 
@@ -2458,7 +2458,7 @@ describe('スナップショットの剪定（版上げ時・復旧面）', () =
       {
         id: makeSnapshotId(),
         createdAt: '2026-06-01T00:00:00.000Z',
-        reason: 'current',
+        reason: 'restore',
         data: current,
       },
       expectedVersion,
@@ -2467,7 +2467,7 @@ describe('スナップショットの剪定（版上げ時・復旧面）', () =
       {
         id: makeSnapshotId(),
         createdAt: '2026-05-01T00:00:00.000Z',
-        reason: 'stale',
+        reason: 'import',
         data: { ...current, schemaVersion: (SCHEMA_VERSION - 1) as typeof SCHEMA_VERSION },
       },
       expectedVersion,
@@ -2476,7 +2476,7 @@ describe('スナップショットの剪定（版上げ時・復旧面）', () =
     expect(pruned).toBe(1);
     const remaining = await listSnapshots();
     expect(remaining).toHaveLength(1);
-    expect(remaining[0]?.reason).toBe('current');
+    expect(remaining[0]?.reason).toBe('restore');
   });
 });
 
@@ -2615,13 +2615,19 @@ describe('設定の保存境界（Codex 指摘・schema と保存の不整合）
     expect((await loadLedger()).settings.currency).toBe('12345678');
   });
 
-  it('空の台帳名・空の単位も保存境界で拒否する（schema は min(1)）', async () => {
+  it('空または空白だけの台帳名・単位を保存境界で拒否する', async () => {
     const { updateSettings } = await import('../src/data/repository');
     const ledger = await loadLedger();
     await expect(updateSettings({ ...ledger.settings, currency: '' })).rejects.toMatchObject({
       code: 'error.settings.invalid',
     });
     await expect(updateSettings({ ...ledger.settings, ledgerName: '' })).rejects.toMatchObject({
+      code: 'error.settings.invalid',
+    });
+    await expect(updateSettings({ ...ledger.settings, currency: '   ' })).rejects.toMatchObject({
+      code: 'error.settings.invalid',
+    });
+    await expect(updateSettings({ ...ledger.settings, ledgerName: '   ' })).rejects.toMatchObject({
       code: 'error.settings.invalid',
     });
   });
@@ -2662,5 +2668,34 @@ describe('設定の保存境界（Codex 指摘・schema と保存の不整合）
     expect(after.settings.displayFractionDigits).toBe(2);
     // export は現行 schema を通す（保存できたのに書き出せない、が起きない）。
     expect(() => exportToJsonText(after)).not.toThrow();
+  });
+});
+
+describe('スナップショット reason の実行時境界', () => {
+  it('未知の理由コードは保存と読み出しの両方で fail-closed', async () => {
+    const { buildExportPackage } = await import('../src/data/exportImport');
+    const { listSnapshots, makeSnapshotId, saveSnapshot } = await import('../src/data/repository');
+    const ledger = await loadLedger();
+    const invalid = {
+      id: makeSnapshotId(),
+      createdAt: '2026-08-13T00:00:00.000Z',
+      reason: 'import前',
+      data: buildExportPackage(ledger),
+    };
+
+    await expect(
+      saveSnapshot(invalid as never, {
+        deviceId: ledger.meta.deviceId,
+        revision: ledger.meta.revision,
+      }),
+    ).rejects.toMatchObject({ code: 'error.snapshot.invalid' });
+
+    // IDB 直接編集の壊れたレコードは**一覧を落とさない**（落とすと正常な復元ポイントも
+    // 壊れた 1 件を消す削除ボタンも消え、残る出口が全消しだけになる）。
+    // 表示は snapshotReasonLabel が生文字列のまま出す（fail-visible）。
+    await putRecord(STORE.snapshots, invalid);
+    const listed = await listSnapshots();
+    expect(listed.some((s) => (s.reason as string) === 'import前')).toBe(true);
+    expect(await getKv('meta')).toBeDefined();
   });
 });

@@ -4,7 +4,7 @@
  * `%` 不使用のため負値でも保存される。表示の丸めは表示層の責務（ここでは扱わない）。
  */
 import { describe, expect, it } from 'vitest';
-import { monthlyAmounts } from '../src/domain/allocation';
+import { MONTHLY_AMOUNTS_HARD_CAP, monthlyAmounts } from '../src/domain/allocation';
 import { formatAmount, formatMoney } from '../src/util/format';
 import { assertSafeAmount, sumAmounts } from '../src/domain/safeSum';
 import { LedgerError } from '../src/domain/errors';
@@ -88,7 +88,7 @@ describe('amountText（テキスト ⇄ minor・表示桁数連動）', () => {
     expect(parseAmountToMinor('.5')).toBe(50);
   });
   it('カンマは桁区切り・全角は削除、小数点は表示桁で切り捨て（削除ではない）', async () => {
-    const { sanitizeAmountText } = await import('../src/ui/amountText');
+    const { sanitizeAmountText, sanitizeSignedAmountText } = await import('../src/ui/amountText');
     expect(sanitizeAmountText('1,234', 0)).toBe('1234');
     expect(sanitizeAmountText('12,34', 0)).toBe('1234');
     expect(sanitizeAmountText('１２３', 0)).toBe('');
@@ -96,8 +96,33 @@ describe('amountText（テキスト ⇄ minor・表示桁数連動）', () => {
     // digits=0 は小数点**以降**を捨てる。削除して連結すると 100 倍になる。
     expect(sanitizeAmountText('12.34', 0)).toBe('12');
     expect(sanitizeAmountText('1,234.56', 0)).toBe('1234');
+    // 逐次入力（controlled input・previous = 現在の欄）では末尾の '.' だけ保持し、
+    // 以後の小数キーを整数部へ連結させない（12.34 と打っても 1234 にならない）。
+    expect(sanitizeAmountText('12.', 0, '12')).toBe('12.');
+    expect(sanitizeAmountText('12.3', 0, '12.')).toBe('12.');
+    // **空欄で '.' を打っても欄がロックしない**（守る整数部が無いときは保持もしない）。
+    // 以前は state が '.' に固定され、以後どの数字も受け付けなくなった。
+    expect(sanitizeAmountText('.', 0, '')).toBe('');
+    expect(sanitizeAmountText('5', 0, '')).toBe('5');
+    expect(sanitizeAmountText('.5', 0, '')).toBe('');
+    // controlled input の逐次キー入力では末尾の '.' を保持し、小数部を整数へ連結しない。
+    let sequential = '';
+    for (const key of '12.34') sequential = sanitizeAmountText(sequential + key, 0, sequential);
+    expect(sequential).toBe('12.');
+    expect(parseAmountToMinor(sequential)).toBe(1200);
+    let signedSequential = '';
+    for (const key of '-12.34') {
+      signedSequential = sanitizeSignedAmountText(signedSequential + key, 0, signedSequential);
+    }
+    expect(signedSequential).toBe('-12.');
+    expect(parseAmountToMinor(signedSequential)).toBe(-1200);
+    // backspace で入力途中の '.' を普通に消せる。
+    expect(sanitizeAmountText('12', 0, '12.')).toBe('12');
+    // カーソルを整数の途中へ移して '.' を打っても、後ろの数字を失わない。
+    expect(sanitizeAmountText('1.2', 0, '12')).toBe('12');
+    expect(sanitizeSignedAmountText('-1.2', 0, '-12')).toBe('-12');
   });
-  it('編集フォームの初期値は設定桁で丸めた文字列（保存し直すとその値になる・作者決定 2026-08-13）', () => {
+  it('編集フォームの表示初期値は設定桁で丸めた文字列', () => {
     expect(formatMinorForInput(1234, 0)).toBe('12'); // 12.34 を digits=0 で開くと '12'
     expect(formatMinorForInput(1234, 2)).toBe('12.34');
     expect(formatMinorForInput(1230, 2)).toBe('12.3');
@@ -147,6 +172,13 @@ describe('monthlyAmounts の極値（合計一致の不変条件を壊さない�
         expect(parts).toHaveLength(months);
         expect(parts.reduce((s, v) => s + v, 0)).toBe(total);
       }
+    }
+  });
+
+  it('months は 1〜hard cap の整数だけを受理し、巨大配列を確保しない', () => {
+    expect(monthlyAmounts(1_200, MONTHLY_AMOUNTS_HARD_CAP)).toHaveLength(MONTHLY_AMOUNTS_HARD_CAP);
+    for (const invalid of [0, -1, 1.5, Number.NaN, MONTHLY_AMOUNTS_HARD_CAP + 1]) {
+      expect(() => monthlyAmounts(1_200, invalid)).toThrow(LedgerError);
     }
   });
 });

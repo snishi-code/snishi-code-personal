@@ -450,7 +450,7 @@ export function buildTimelineCalendar(input: BuildTimelineCalendarInput): Timeli
       const ledgerDelta = entry?.lines.reduce((sum, line) => {
         const account = accountById.get(line.accountId);
         if (account?.role !== 'continuing-cost-asset') return sum;
-        return sum + (line.side === 'debit' ? line.amount : -line.amount);
+        return assertSafeAmount(sum + (line.side === 'debit' ? line.amount : -line.amount));
       }, 0);
       addFlow(map, bucketKey, ledgerDelta ?? 0, flow);
       itemDots.set(itemId, map);

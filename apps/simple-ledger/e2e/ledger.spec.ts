@@ -177,7 +177,7 @@ test('表示桁数 2 で小数を入力すると、表示・保存とも 1/100 �
   await expect(page.locator(ui('dashboard.journal.preview'))).toContainText('12.34');
 });
 
-test('表示桁数 0 で小数点を打っても 100 倍にならない (v11・貼り付け相当)', async ({ page }) => {
+test('表示桁数 0 で小数点を貼り付けても逐次入力しても 100 倍にならない', async ({ page }) => {
   // 既定の表示桁は 0。ここで小数点を「削除」して整数部へ連結すると 100 倍になる
   // （'12.34' → '1234'）。切り捨て = '12' が正。金額欄は全画面で同じ正本を通る。
   await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
@@ -190,6 +190,10 @@ test('表示桁数 0 で小数点を打っても 100 倍にならない (v11・�
   await expect(amount).toHaveAttribute('inputmode', 'numeric');
   await amount.fill('12.34');
   await expect(amount).toHaveValue('12');
+  await amount.clear();
+  await amount.pressSequentially('12.34');
+  // 入力途中の '.' を保持して後続の小数キーを無視する。即座に消すと 1234 へ連結される。
+  await expect(amount).toHaveValue('12.');
   await page
     .locator(`${ui('journal.entry.flow.source')} label.chip`)
     .first()

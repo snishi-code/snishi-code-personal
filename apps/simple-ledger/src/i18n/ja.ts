@@ -281,7 +281,7 @@ export const ja = {
     'ローン（その他負債）は通常の支出の支払い元にできません。継続コスト化するか、借入として振替で実行してください。',
   // 返済を資金繰りに入れるトグル ON 時の必須検証（口座・回数が無いと CF が作られないため fail closed）。
   'entry.error.repayAccount': '返済元の口座を選んでください。',
-  'entry.error.repayCount': '返済回数は 1 以上で入力してください。',
+  'entry.error.repayCount': '返済回数は 1〜{max} の整数で入力してください。',
   'entry.source.manual': '左側（貸方）',
   'entry.destination.manual': '右側（借方）',
   'entry.detailToggle': '詳細（メモ・タグ）',
@@ -296,6 +296,7 @@ export const ja = {
     '支払い元が負債のため、返済を未来日付の振替仕訳としてまとめて登録できます（仕訳一覧・資金繰りに反映）。',
   'entry.monthlyizeRepayAccount': '引落口座',
   'entry.monthlyizeRepayCount': '返済回数',
+  'entry.monthlyizeRepayCountHint': '一度に登録できる上限は {max} 回です。',
   'entry.monthlyizeRepayStart': '初回引落日',
   'entry.monthlyizeRepayStartHint': '購入日とは別に、最初に現金が引き落とされる日を入れます。',
   'entry.error.category-required': '計上先を選んでください。',
@@ -360,8 +361,8 @@ export const ja = {
   'yearlyOverview.horizonHardCap': '{year}年まで',
   'yearlyOverview.projectionNote': '未来列は定期ルール・継続コスト・投資利回りの投影を含みます。',
   // 桁あふれで投影を打ち切った科目の注記（アプリ都合の端点を名乗る・仮の数字が本物の顔をしない）。
-  'yearlyOverview.projectionTruncatedNote':
-    '「{name}」の投影は金額が計算上限を超えるため {month} で打ち切りました。それ以降の列にこの科目の投影は含まれません。',
+  'projection.truncatedNotice':
+    '「{name}」の投影は金額が計算上限を超えるため {month} で打ち切りました。それ以降の投影は表示に含まれません。',
   'yearlyOverview.previousYear': '{year}年へ戻る',
   'yearlyOverview.nextYear': '{year}年へ進む',
   'yearlyOverview.noPreviousYear': '前のデータ年はありません',
@@ -476,11 +477,13 @@ export const ja = {
   'settings.resetAllDesc': '台帳・科目・仕訳・スナップショットをすべて削除し、初期状態に戻します。',
   'settings.about': 'アプリ情報',
   'settings.ledgerName': '台帳名',
+  'settings.ledgerNameRequired': '台帳名を入力してください。',
   'settings.currencyHint': '表示に使う単位の文字列です（8 文字まで）。換算はしません。',
   'settings.fractionDigits': '小数の表示桁数',
   'settings.fractionDigitsHint':
     '入力できる小数の桁もこの設定に従います。保存されている金額は変わりません。',
   'settings.currency': '金額の単位',
+  'settings.currencyRequired': '金額の単位を入力してください。',
   'settings.version': 'バージョン',
   'settings.schemaVersion': 'スキーマ版',
   'settings.revision': 'リビジョン',
@@ -682,12 +685,15 @@ export const ja = {
   'cashflow.repayScheduleTitle': '{name}の返済',
   'cashflow.repayCount': '返済回数',
   'cashflow.repayCountHint':
-    '1 = カードの次回引落などの単発。毎月同額のローンは回数を入れると、毎月の振替仕訳をまとめて登録します（合計は返済額に一致）。',
+    '1 = カードの次回引落などの単発。毎月同額のローンは {max} 回までまとめて登録できます（合計は返済額に一致）。',
   'cashflow.repayPerMonth': '月あたり約 {amount} × {count} 回',
-  'error.repay.countInvalid': '返済回数は 1 以上の整数で入力してください。',
+  'error.repay.countInvalid': '返済回数は 1〜{max} の整数で入力してください。',
   'error.tag.invalid': 'タグを保存できませんでした（名前は 1〜60 文字で入力してください）。',
   'error.settings.invalid':
     '台帳の設定を保存できませんでした（名前は 1〜120 文字・単位は 1〜8 文字で入力してください）。',
+  'error.snapshot.invalid': 'スナップショットの形式が不正です。',
+  'snapshot.loadError':
+    'スナップショットを読み込めません。データを削除せず、JSON バックアップを確認してください。',
   'error.amount.overflow': '金額の合計が扱える範囲を超えました。',
   'error.repay.totalTooSmall': '返済総額が回数より少なく、金額 0 の回ができるため登録できません。',
   'error.repay.liabilityRequired': '返済先はカード・未払 / ローンの負債科目を選んでください。',

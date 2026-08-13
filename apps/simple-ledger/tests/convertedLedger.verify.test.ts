@@ -8,11 +8,13 @@
  *  - dbUpgrade の移行テストは converter の出力ではなく手書きオブジェクトを使っていた
  *
  * 対策はスキーマの複製ではなく**実物どうしを突き合わせる**こと:
- *  1) 合成 v10 fixture を実 converter（.mjs）へ通し、出力を実 schema + 実 import で検証する（常時実行）
+ *  1) 合成 v10 fixture を実 converter（.mjs）へ通し、出力を実 schema + 実 import で検証する
+ *     （converter を持つローカル環境で実行。repo 単体の CI では skip されうる）
  *  2) 作者の実データも、DB を初期化する前に同じ経路で検証できるようにする（env var で任意実行）
  *     CONVERTED_LEDGER_JSON=<変換済み.json> npx vitest run tests/convertedLedger.verify.test.ts
  */
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -46,6 +48,24 @@ function findConverter(): string | null {
 }
 
 const CONVERTER = findConverter();
+
+/**
+ * converter の sidecar が指す v10 原本が今も存在し、記録 SHA-256 と一致することを検証。
+ * 2 ファイルの公開は単一 FS トランザクションではないため、この最終ゲートが
+ * 中断時の片方だけの成果物も fail-closed で止める。
+ */
+function verifySourceSidecar(outputPath: string): void {
+  const sidecarPath = `${outputPath}.source.sha256`;
+  if (!existsSync(sidecarPath)) throw new Error(`source.sha256 が見つかりません: ${sidecarPath}`);
+  const sidecar = readFileSync(sidecarPath, 'utf8');
+  const match = /^([a-f0-9]{64}) {2}(.+)\n$/.exec(sidecar);
+  if (!match) throw new Error('source.sha256 の形式が不正です');
+  const expectedHash = match[1]!;
+  const sourcePath = match[2]!;
+  if (!existsSync(sourcePath)) throw new Error(`v10 原本が見つかりません: ${sourcePath}`);
+  const actualHash = createHash('sha256').update(readFileSync(sourcePath)).digest('hex');
+  if (actualHash !== expectedHash) throw new Error('v10 原本の SHA-256 が sidecar と一致しません');
+}
 
 /** v10 の交換パッケージ（実 converter の入力形）。金額は「単位」そのままの整数。 */
 function v10Package() {
@@ -159,6 +179,8 @@ function runConverter(pkg: unknown, extraArgs: string[] = []): Record<string, un
   const dst = join(dir, 'v11.json');
   writeFileSync(src, JSON.stringify(pkg));
   execFileSync('node', [CONVERTER!, src, dst, ...extraArgs], { encoding: 'utf8' });
+  // 成功は JSON 単体でなく、原本ハッシュの sidecar と対になって初めて成立する。
+  verifySourceSidecar(dst);
   return JSON.parse(readFileSync(dst, 'utf8')) as Record<string, unknown>;
 }
 
@@ -205,8 +227,15 @@ describe.skipIf(!CONVERTER)('実 converter の出力をアプリ本体の schema
     // 単位は「通貨リスト」ではなく長さだけ（schema の min(1).max(8) と同じ境界）を見る。
     expect(() => runConverter(v10Package(), ['--currency=123456789'])).toThrow();
     expect(() => runConverter(v10Package(), ['--currency=12345678'])).not.toThrow();
+    // Zod string.max は UTF-16 code unit 数。絵文字 5 個は 10 code units なので拒否する。
+    expect(() => runConverter(v10Package(), ['--currency=😀😀😀😀😀'])).toThrow();
     // タイプミスを黙って無視しない。
     expect(() => runConverter(v10Package(), ['--currncy=円'])).toThrow();
+    expect(() => runConverter(v10Package(), ['--currency'])).toThrow();
+    expect(() => runConverter(v10Package(), ['--currency=円', '--currency=USD'])).toThrow();
+    // 値中の `=` は split で黙って切り捨てず、単位文字列の一部として保持する。
+    const withEquals = runConverter(v10Package(), ['--currency=US=D']);
+    expect((withEquals['settings'] as { currency: string }).currency).toBe('US=D');
     // 素の TypeError ではなく 'NG: …' で止まる。
     const broken = v10Package();
     (broken.journalEntries as unknown[])[0] = null;
@@ -230,15 +259,30 @@ describe.skipIf(!CONVERTER)('実 converter の出力をアプリ本体の schema
     ).find((e) => e.id === 'adjust')!;
     expect(out.metadata?.adjustment?.['expectedBalance']).toBe(2_000_000_000_000);
   });
+
+  it('sidecar が既にあるときは上書きせず、JSON だけを残す部分成功にもならない', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ledger-convert-sidecar-'));
+    const src = join(dir, 'v10.json');
+    const dst = join(dir, 'v11.json');
+    const sidecar = `${dst}.source.sha256`;
+    writeFileSync(src, JSON.stringify(v10Package()));
+    writeFileSync(sidecar, '既存の検証記録\n');
+
+    expect(() => execFileSync('node', [CONVERTER!, src, dst], { encoding: 'utf8' })).toThrow();
+    expect(existsSync(dst)).toBe(false);
+    expect(readFileSync(sidecar, 'utf8')).toBe('既存の検証記録\n');
+  });
 });
 
 /**
  * 作者の実データ検証（DB 初期化の前に走らせる）。
- * CONVERTED_LEDGER_JSON が無いときは skip する。
+ * CONVERTED_LEDGER_JSON が無い通常 CI では意図的に skip する。この skip は移行確認の成功を
+ * 意味しない。実機の DB を初期化する前に対象ファイルを明示して別途 green にする手動ゲート。
  */
 const targetPath = process.env['CONVERTED_LEDGER_JSON'];
-describe.skipIf(!targetPath)('変換済みの実データを検証する', () => {
+describe.skipIf(!targetPath)('実データ移行の手動ゲート（CONVERTED_LEDGER_JSON 必須）', () => {
   it('実 schema と import パイプラインを通る', async () => {
+    verifySourceSidecar(targetPath!);
     const text = readFileSync(targetPath!, 'utf8');
     const parsed = ledgerExportPackageSchema.safeParse(JSON.parse(text));
     expect(

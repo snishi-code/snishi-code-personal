@@ -80,7 +80,7 @@ export function OnboardingSheet({ onClose }: { onClose: () => void }) {
           label={a.name}
           inputMode={digits === 0 ? 'numeric' : 'decimal'}
           value={amounts[a.id] ?? ''}
-          onChange={(v) => setAmount(a.id, sanitizeAmountText(v, digits))}
+          onChange={(v) => setAmount(a.id, sanitizeAmountText(v, digits, amounts[a.id] ?? ''))}
           placeholder={t('onboarding.amountPlaceholder')}
           dataUi={UI.onboarding.amount}
         />

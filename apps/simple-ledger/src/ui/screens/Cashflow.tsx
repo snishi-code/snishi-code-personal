@@ -17,21 +17,26 @@ import {
   uniqueEntriesById,
 } from '../../domain/cashflow';
 import { reportBasis } from '../../domain/reportPeriod';
-import { displayEntriesForAsOf } from '../../domain/reportEntries';
-import { addMonthsToDate } from '../../domain/allocation';
+import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
+import { addMonthsToDate, MONTHLY_AMOUNTS_HARD_CAP, monthlyAmounts } from '../../domain/allocation';
 import { sortAccounts } from '../../domain/accountOrder';
 import { todayLocal } from '../../util/time';
 import type { Account, JournalEntry } from '../../domain/types';
 import { Money } from '../money';
 import { TrendChart, type TrendPoint } from '../components/TrendChart';
 import { errorText, t } from '../../i18n';
-import { formatMinorForInput, parseAmountToMinor, sanitizeAmountText } from '../amountText';
+import {
+  exactDigitsFor,
+  formatMinorForInput,
+  parseAmountToMinor,
+  sanitizeAmountText,
+} from '../amountText';
 import { useMoneyDigits } from '../money';
 import { formatMoney } from '../../util/format';
-import { monthlyAmounts } from '../../domain/allocation';
 import { UI } from '../../ui-contract';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { sumAmounts } from '../../domain/safeSum';
+import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 
 function shortDateLabel(date: string): string {
   const [, month, day] = date.split('-');
@@ -41,19 +46,22 @@ function shortDateLabel(date: string): string {
 
 /** 仕訳がこの負債（借方）へ返す金額（返済仕訳の表示額）。 */
 function repaymentAmountOf(entry: JournalEntry, liabilityId: string): number {
-  return entry.lines
-    .filter((l) => l.side === 'debit' && l.accountId === liabilityId)
-    .reduce((s, l) => s + l.amount, 0);
+  return sumAmounts(
+    entry.lines
+      .filter((l) => l.side === 'debit' && l.accountId === liabilityId)
+      .map((l) => l.amount),
+  );
 }
 
 export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) => void }) {
   const { ledger } = useLedger();
   const today = todayLocal();
   const basis = useMemo(() => reportBasis({ mode: 'all' }, today), [today]);
-  const reportEntries = useMemo(
-    () => (ledger ? displayEntriesForAsOf(ledger, basis.asOf, today) : []),
+  const reportDisplay = useMemo(
+    () => (ledger ? displayEntriesResultForAsOf(ledger, basis.asOf, today) : null),
     [basis.asOf, ledger, today],
   );
+  const reportEntries = useMemo(() => reportDisplay?.entries ?? [], [reportDisplay]);
   const [untilDate, setUntilDate] = useState(() => addMonthsToDate(todayLocal(), 6));
   const [repayFor, setRepayFor] = useState<{ account: Account; balance: number } | null>(null);
   // 負債行の展開（登録済みの返済リスト）。行タップ = 新規返済シートとは独立に開閉する。
@@ -61,7 +69,7 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
 
   const currency = ledger?.settings.currency ?? '';
 
-  const { projection, liabBalById, futureRows } = useMemo(() => {
+  const { projection, liabBalById, futureRows, investmentProjectionTruncations } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     const entries = reportEntries;
     const bs = deriveBalanceSheet(accounts, entries, today);
@@ -71,7 +79,8 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
     const startFree = freeAssetTotal(bs.assets);
     const end = untilDate;
     // 投影の入力 = 導出込み仕訳（displayEntriesForAsOf を表示終了日まで展開した結果）。
-    const futureEntries = ledger ? displayEntriesForAsOf(ledger, end, today) : [];
+    const futureDisplay = ledger ? displayEntriesResultForAsOf(ledger, end, today) : null;
+    const futureEntries = futureDisplay?.entries ?? [];
     const future = uniqueEntriesById(
       futureEntries.filter(
         (e) => e.date > today && e.date <= end && e.lines.some((l) => isFree(l.accountId)),
@@ -82,7 +91,7 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
         date: e.date,
         title: e.description,
         delta: cashDeltaOfEntry(e, isFree),
-        amount: e.lines.filter((l) => l.side === 'debit').reduce((s, l) => s + l.amount, 0),
+        amount: sumAmounts(e.lines.filter((l) => l.side === 'debit').map((l) => l.amount)),
       }))
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     return {
@@ -95,6 +104,7 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
         isFree,
         untilDate: end,
       }),
+      investmentProjectionTruncations: futureDisplay?.investmentProjectionTruncations ?? [],
     };
   }, [ledger, reportEntries, untilDate, today]);
 
@@ -152,6 +162,11 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
       <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
         {t('cashflow.intro')}
       </p>
+
+      <InvestmentProjectionTruncationNotice
+        truncations={investmentProjectionTruncations}
+        accounts={ledger?.accounts ?? []}
+      />
 
       <TextInput
         label={t('cashflow.until')}
@@ -359,8 +374,11 @@ function RepaymentScheduleSheet({
     account.repaymentDay !== undefined ? nextRepaymentDate(today, account.repaymentDay) : today,
   );
   const digits = useMoneyDigits();
+  // 既定は「残高全額」なので、表示桁が粗くても端数を落とさず全額を見せる。
+  const amountDigits =
+    balance > 0 ? (Math.max(digits, exactDigitsFor(balance)) as typeof digits) : digits;
   const [amountText, setAmountText] = useState(
-    balance > 0 ? formatMinorForInput(balance, digits) : '',
+    balance > 0 ? formatMinorForInput(balance, amountDigits) : '',
   );
   const [countText, setCountText] = useState('1');
   const [error, setError] = useState<string | undefined>(undefined);
@@ -370,12 +388,19 @@ function RepaymentScheduleSheet({
   const count = countText === '' ? 0 : Number.parseInt(countText, 10);
   // プレビューは保存側と同じ monthlyAmounts の先頭額（独自の丸めを持たない・指示書v3 §A-2）。
   // 表示条件 = 最終回 > 0（プレビューが出た = 保存できる、が成立。§R-1 と同条件）。
-  const repayParts = count >= 2 && amount >= count ? monthlyAmounts(amount, count) : null;
+  const repayParts =
+    count >= 2 && count <= MONTHLY_AMOUNTS_HARD_CAP && amount >= count
+      ? monthlyAmounts(amount, count)
+      : null;
   const perMonth = repayParts !== null && repayParts.at(-1)! > 0 ? repayParts[0]! : null;
 
   async function submit() {
     if (submitting) return;
-    if (!Number.isInteger(amount) || amount < 1 || count < 1 || fromAccountId === '') return;
+    if (!Number.isInteger(amount) || amount < 1 || fromAccountId === '') return;
+    if (!Number.isInteger(count) || count < 1 || count > MONTHLY_AMOUNTS_HARD_CAP) {
+      setError(t('error.repay.countInvalid', { max: MONTHLY_AMOUNTS_HARD_CAP }));
+      return;
+    }
     // 保存境界（buildRepaymentEntries）と同じ条件を先に検証して理由を示す（0 金額の回の防止）。
     if (amount < count) {
       setError(t('error.repay.totalTooSmall'));
@@ -451,9 +476,9 @@ function RepaymentScheduleSheet({
         <TextInput
           label={t('cashflow.repayAmount')}
           required
-          inputMode={digits === 0 ? 'numeric' : 'decimal'}
+          inputMode={amountDigits === 0 ? 'numeric' : 'decimal'}
           value={amountText}
-          onChange={(v) => setAmountText(sanitizeAmountText(v, digits))}
+          onChange={(v) => setAmountText(sanitizeAmountText(v, amountDigits, amountText))}
           hint={t('cashflow.repayAmountHint')}
           dataUi={UI.cashflow.repayAmount}
         />
@@ -463,7 +488,7 @@ function RepaymentScheduleSheet({
           inputMode="numeric"
           value={countText}
           onChange={(v) => setCountText(v.replace(/[^\d]/g, ''))}
-          hint={t('cashflow.repayCountHint')}
+          hint={t('cashflow.repayCountHint', { max: MONTHLY_AMOUNTS_HARD_CAP })}
           dataUi={UI.cashflow.repayCount}
         />
         {perMonth !== null ? (

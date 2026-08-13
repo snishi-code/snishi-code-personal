@@ -14,7 +14,7 @@ import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../../domain/accounting';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
-import { displayEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { todayLocal } from '../../util/time';
 import { buildSectionTrends, type SectionTrends } from './breakdownData';
 import { Money } from '../money';
@@ -29,6 +29,7 @@ import type { JournalFilter } from './Journal';
 import { ACCOUNT_ACCENTS, boxByKey, type AccountAccent } from '../accountBoxes';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { sumAmounts } from '../../domain/safeSum';
+import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 
 export type BreakdownSection = 'revenue' | 'asset' | 'liability' | 'equity';
 
@@ -42,7 +43,7 @@ interface SectionConfig {
   totalLabelKey: MessageKey;
   trendKey: MessageKey;
   trendVariant: 'bar' | 'line';
-  series: keyof Omit<SectionTrends, 'drillable'>;
+  series: keyof Omit<SectionTrends, 'drillable' | 'investmentProjectionTruncations'>;
 }
 
 interface BreakdownFrame {
@@ -153,10 +154,11 @@ export function Breakdown({
   const basis = useMemo(() => reportBasis(period, today), [period, today]);
   const range = basis.flowRange;
   const asOf = basis.asOf;
-  const reportEntries = useMemo(
-    () => (ledger ? displayEntriesForAsOf(ledger, asOf, today) : []),
+  const reportDisplay = useMemo(
+    () => (ledger ? displayEntriesResultForAsOf(ledger, asOf, today) : null),
     [asOf, ledger, today],
   );
+  const reportEntries = useMemo(() => reportDisplay?.entries ?? [], [reportDisplay]);
 
   const { rows, total, retained } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
@@ -173,6 +175,8 @@ export function Breakdown({
 
   const trends = useMemo(() => buildSectionTrends(period, ledger, today), [period, ledger, today]);
   const trendData = trends ? trends[cfg.series] : null;
+  const visibleProjectionTruncations =
+    trends?.investmentProjectionTruncations ?? reportDisplay?.investmentProjectionTruncations ?? [];
 
   const drill = (accountId: string) =>
     cfg.kind === 'flow'
@@ -245,6 +249,11 @@ export function Breakdown({
         {t(cfg.introKey)}
       </p>
 
+      <InvestmentProjectionTruncationNotice
+        truncations={visibleProjectionTruncations}
+        accounts={ledger?.accounts ?? []}
+      />
+
       {cfg.kind === 'flow' ? (
         <p className="section-label">{periodLabel(period)}</p>
       ) : (
@@ -298,7 +307,7 @@ export function Breakdown({
                     <span>{t('breakdown.subtotal')}</span>
                     <span className="stmt-row__num">
                       <Money
-                        amount={frame.rows.reduce((s, b) => s + b.balance, 0)}
+                        amount={sumAmounts(frame.rows.map((b) => b.balance))}
                         currency={currency}
                       />
                     </span>

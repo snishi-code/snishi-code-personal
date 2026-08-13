@@ -4,8 +4,8 @@
  * 旧 GAS の source/dest や +/- 表現は使わない。すべて複式簿記の
  * 借方(debit) / 貸方(credit) で表現する。
  *
- * 金額は最小単位の整数で持つ（JPY なら「円」。小数は扱わない）。
- * これにより浮動小数の誤差を避ける。通貨は settings.currency。
+ * 金額は表示単位の 1/100 を最小単位とする整数（minor）で持つ。
+ * これにより保存・合算で浮動小数を使わない。表示単位は settings.currency。
  */
 
 import type { AccountRole } from './accountRoles';
@@ -284,7 +284,10 @@ export interface JournalEntry {
 
 export interface Settings {
   ledgerName: string;
-  /** 通貨 = ただの単位文字列（自由入力・後置表示・換算/検証はしない。ISO 4217 に依存しない）。 */
+  /**
+   * 金額の表示単位。ISO 4217 の列挙・換算はせず、後置表示する 1〜8 文字の
+   * ユーザー入力文字列。空白だけは保存しない。
+   */
   currency: string;
   /** 表示する小数桁数（0|1|2・既定 0）。入力欄の刻みも連動する。保存値は常に 1/100 単位。 */
   displayFractionDigits: 0 | 1 | 2;
@@ -301,10 +304,13 @@ export interface LedgerMeta {
 }
 
 /** import 前などに作るスナップショット（復元用）。 */
+export type SnapshotReason = 'import' | 'restore';
+
 export interface Snapshot {
   id: string;
   createdAt: string;
-  reason: string;
+  /** 永続化する理由コード。表示文言は i18n で解決する。 */
+  reason: SnapshotReason;
   /** 取得時点の完全なエクスポートパッケージ。 */
   data: LedgerExportPackage;
 }

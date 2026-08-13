@@ -22,7 +22,7 @@ import {
 } from '../../domain/accounting';
 import { isDebitNormal } from '../../domain/accounting';
 import { referencedAccountIds } from '../../domain/accountRefs';
-import { displayEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
 import { buildSimpleEntry } from '../../domain/entry';
 import type { Account } from '../../domain/types';
@@ -39,6 +39,7 @@ import { nowIso, todayLocal } from '../../util/time';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import { ScrollTopButton } from '../ScrollTopButton';
+import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 
 export function Accounts({
   period = { mode: 'all' },
@@ -71,14 +72,12 @@ export function Accounts({
   const today = todayLocal();
   const basis = reportBasis(period, today);
   const asOf = basis.asOf;
-  const entries = ledger
-    ? filterByDateRange(displayEntriesForAsOf(ledger, asOf, today), undefined, asOf)
-    : [];
+  const display = ledger ? displayEntriesResultForAsOf(ledger, asOf, today) : null;
+  const entries = filterByDateRange(display?.entries ?? [], undefined, asOf);
   // 費用・収入の発生額はホームと同じ期間（flowRange）で数える（C-1。導出＝統一エンジン）。
   const flowEntries = filterByDateRange(entries, basis.flowRange.from, basis.flowRange.to);
-  const todayEntries = ledger
-    ? filterByDateRange(displayEntriesForAsOf(ledger, today, today), undefined, today)
-    : [];
+  const todayDisplay = ledger ? displayEntriesResultForAsOf(ledger, today, today) : null;
+  const todayEntries = filterByDateRange(todayDisplay?.entries ?? [], undefined, today);
   const currency = ledger?.settings.currency ?? '';
 
   const usedIds = referencedAccountIds({
@@ -149,6 +148,11 @@ export function Accounts({
       <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
         {t('accounts.intro')}
       </p>
+
+      <InvestmentProjectionTruncationNotice
+        truncations={display?.investmentProjectionTruncations ?? []}
+        accounts={ledger?.accounts ?? []}
+      />
 
       <div
         style={{

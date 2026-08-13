@@ -9,7 +9,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProper
 import { Segmented } from '@snishi/foundation/ui/Segmented';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
-import { displayEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
 import {
   buildTimelineCalendar,
@@ -27,6 +27,7 @@ import { TIMELINE_ACCOUNT_BOXES, timelineBoxForAccount, type AccountAccent } fro
 import type { Account, MonthlyCostItem, RecurringRule } from '../../domain/types';
 import type { ReportPeriod } from '../../domain/reportPeriod';
 import { ScrollTopButton } from '../ScrollTopButton';
+import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 
 export type { TimelineZoom } from '../../domain/timelineCalendar';
 
@@ -1183,6 +1184,11 @@ export function TimelineCalendar({
     [range.from, range.to, zoom],
   );
 
+  const display = useMemo(
+    () => (ledger ? displayEntriesResultForAsOf(ledger, visibleRange.to, today) : null),
+    [ledger, today, visibleRange.to],
+  );
+
   const model = useMemo<TimelineCalendarViewModel>(() => {
     if (!ledger) return { buckets: [], boxes: [] };
     const boxes = TIMELINE_ACCOUNT_BOXES.map((box) => ({
@@ -1192,7 +1198,7 @@ export function TimelineCalendar({
     }));
     const calculated = buildTimelineCalendar({
       accounts: ledger.accounts,
-      entries: displayEntriesForAsOf(ledger, visibleRange.to, today),
+      entries: display?.entries ?? [],
       monthlyCostItems: ledger.monthlyCostItems,
       recurringRules: ledger.recurringRules,
       boxes,
@@ -1203,11 +1209,11 @@ export function TimelineCalendar({
     return timelineViewModel(calculated, { start: range.from, end: range.to }, displayBuckets);
   }, [
     displayBuckets,
+    display,
     ledger,
     range.from,
     range.to,
     showEnded,
-    today,
     visibleRange.from,
     visibleRange.to,
     zoom,
@@ -1244,6 +1250,10 @@ export function TimelineCalendar({
       <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
         {t('timeline.intro')}
       </p>
+      <InvestmentProjectionTruncationNotice
+        truncations={display?.investmentProjectionTruncations ?? []}
+        accounts={ledger?.accounts ?? []}
+      />
       <TimelineCalendarView
         model={model}
         zoom={zoom}

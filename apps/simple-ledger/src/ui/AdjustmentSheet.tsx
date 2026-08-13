@@ -52,7 +52,11 @@ export function AdjustmentCreateSheet({
   }, [account.id, type, ledger, date]);
   const digits = useMoneyDigits();
   const actual = parseAmountToMinor(actualText);
-  const delta = actual === null ? 0 : actual - expected;
+  // 表示専用の差分。入力途中の異常値（17 桁など）で render から throw するとアプリ全体が
+  // 復旧画面へ落ちるため、ここでは投げない。fail-closed は保存境界
+  // （buildAdjustmentEntry の checked 減算）が担う。
+  const rawDelta = actual === null ? 0 : actual - expected;
+  const delta = Number.isSafeInteger(rawDelta) ? rawDelta : 0;
 
   async function submit() {
     if (date.trim() === '') {
@@ -123,7 +127,7 @@ export function AdjustmentCreateSheet({
           // 符号付きの欄は inputMode を指定しない: numeric / decimal のソフトキーボードには
           // '-' キーが無く、hint（マイナスは先頭に -）どおりの入力ができなくなる。
           // 「表示桁が inputMode を決める」規約の明示的な例外（AccountSheet の想定利回り欄と同じ趣旨）。
-          onChange={(v) => setActualText(sanitizeSignedAmountText(v, digits))}
+          onChange={(v) => setActualText(sanitizeSignedAmountText(v, digits, actualText))}
           hint={t('common.signedAmountHint')}
           dataUi={UI.adjustments.actual}
         />
@@ -162,7 +166,11 @@ export function AdjustmentEditSheet({
   const [date, setDate] = useState(entry.date);
   // 保存値は minor。テキスト欄には**必ず表示桁で整形して**入れる
   // （生の minor を入れると、無変更で保存し直しただけで 100 倍になる）。
-  const [actualText, setActualText] = useState(formatMinorForInput(adj.actualBalance, digits));
+  const initialActualText = formatMinorForInput(adj.actualBalance, digits);
+  const [actualText, setActualText] = useState(initialActualText);
+  // 変更判定はフラグではなく値で行う: 1 文字打って戻した・除去される文字だけ打った、は
+  // 無変更（onChange の発火をもって「変更」とすると、その保存で隠れた端数が丸められる）。
+  const actualDirty = actualText !== initialActualText;
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
@@ -176,8 +184,11 @@ export function AdjustmentEditSheet({
     return accountBalance(accountId, target.type, filterByDateRange(entries, undefined, date));
   }, [accountId, target, adjustable, ledger, date, entry.id]);
 
-  const actual = parseAmountToMinor(actualText);
-  const delta = actual === null ? 0 : actual - expected;
+  // 金額欄を触っていない保存では、粗い表示桁で隠れた minor を失わない。
+  const actual = actualDirty ? parseAmountToMinor(actualText) : adj.actualBalance;
+  // 表示専用の差分（作成シートと同じ理由で render からは投げない）。
+  const rawDelta = actual === null ? 0 : actual - expected;
+  const delta = Number.isSafeInteger(rawDelta) ? rawDelta : 0;
   // 補正対象は内部集約口座（継続コスト台帳）を除いた資産・負債のみ（聖域化）。
   const groups = groupedAccountsByRole(accounts, [...ADJUSTABLE_ACCOUNT_ROLES], accountId);
 
@@ -252,7 +263,9 @@ export function AdjustmentEditSheet({
           // 符号付きの欄は inputMode を指定しない: numeric / decimal のソフトキーボードには
           // '-' キーが無く、hint（マイナスは先頭に -）どおりの入力ができなくなる。
           // 「表示桁が inputMode を決める」規約の明示的な例外（AccountSheet の想定利回り欄と同じ趣旨）。
-          onChange={(v) => setActualText(sanitizeSignedAmountText(v, digits))}
+          onChange={(v) => {
+            setActualText(sanitizeSignedAmountText(v, digits, actualText));
+          }}
           hint={t('common.signedAmountHint')}
           dataUi={UI.adjustments.editActual}
         />

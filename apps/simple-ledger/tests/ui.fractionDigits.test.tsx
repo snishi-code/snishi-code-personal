@@ -164,7 +164,7 @@ describe('表示桁数の設定', () => {
     );
   });
 
-  it('digits=0（既定）: 小数点は入力できず inputMode は numeric のまま', async () => {
+  it('digits=0（既定）: 貼り付けは整数部へ切り捨て、逐次入力の小数部は連結しない', async () => {
     render(
       <Providers>
         <SheetWhenReady onClose={() => undefined} />
@@ -180,6 +180,13 @@ describe('表示桁数の設定', () => {
     fireEvent.change(amount, { target: { value: '12.34' } });
     // 小数点**以降**が捨てられる（'1234' にすると 100 倍の 1,234 になる）。
     expect(amount.value).toBe('12');
+
+    fireEvent.change(amount, { target: { value: '' } });
+    for (const value of ['1', '12', '12.', '12.3', '12.4']) {
+      fireEvent.change(amount, { target: { value } });
+    }
+    // 12. の state を維持して小数キーを無視する。12.34 → 1234 へ連結しない。
+    expect(amount.value).toBe('12.');
   });
 });
 

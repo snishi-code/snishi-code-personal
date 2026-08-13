@@ -808,9 +808,11 @@ function RecurringRuleSheet({
 
   const [name, setName] = useState(existing?.name ?? '');
   const fractionDigits = useMoneyDigits();
-  const [amountText, setAmountText] = useState(
-    existing !== undefined ? formatMinorForInput(existing.amount, fractionDigits) : '',
-  );
+  const initialAmountText =
+    existing !== undefined ? formatMinorForInput(existing.amount, fractionDigits) : '';
+  const [amountText, setAmountText] = useState(initialAmountText);
+  // 変更判定はフラグではなく値（初期表示と同じ文字列に戻れば無変更 = 保存済み minor を保持）。
+  const amountDirty = amountText !== initialAmountText;
   const [everyText, setEveryText] = useState(
     existing !== undefined ? String(existing.everyMonths) : '1',
   );
@@ -900,7 +902,10 @@ function RecurringRuleSheet({
 
   async function submit() {
     if (submittingRef.current) return;
-    const amount = parseAmountToMinor(amountText) ?? 0;
+    const amount =
+      existing !== undefined && !amountDirty
+        ? existing.amount
+        : (parseAmountToMinor(amountText) ?? 0);
     if (!Number.isInteger(amount) || amount < 1) {
       setError(t('error.common.amountInvalid'));
       return;
@@ -1044,7 +1049,9 @@ function RecurringRuleSheet({
             required
             inputMode={fractionDigits === 0 ? 'numeric' : 'decimal'}
             value={amountText}
-            onChange={(v) => setAmountText(sanitizeAmountText(v, fractionDigits))}
+            onChange={(v) => {
+              setAmountText(sanitizeAmountText(v, fractionDigits, amountText));
+            }}
             hint={t('recurring.amountHint')}
             dataUi={UI.allocations.recurringAmount}
           />
@@ -1254,9 +1261,11 @@ function ContinuousCostItemSheet({
 
   const [name, setName] = useState(existing?.name ?? '');
   const fractionDigits = useMoneyDigits();
-  const [amountText, setAmountText] = useState(
-    existing !== undefined ? formatMinorForInput(existing.amount, fractionDigits) : '',
-  );
+  const initialAmountText =
+    existing !== undefined ? formatMinorForInput(existing.amount, fractionDigits) : '';
+  const [amountText, setAmountText] = useState(initialAmountText);
+  // 変更判定はフラグではなく値（初期表示と同じ文字列に戻れば無変更 = 保存済み minor を保持）。
+  const amountDirty = amountText !== initialAmountText;
   const [startDate, setStartDate] = useState(existing?.startDate ?? todayLocal());
   const [endDate, setEndDate] = useState(existing?.endDate ?? '');
   // 費用化の開始日（任意）。空 = 購入日から月割り（既定挙動）。
@@ -1278,16 +1287,20 @@ function ContinuousCostItemSheet({
   const quickSpanFrom = allocationStartDate.trim() !== '' ? allocationStartDate.trim() : startDate;
 
   // 過去から再計算される項目の変更予告（破壊的操作の予告なので削らない）。
+  const effectiveAmount =
+    existing !== undefined && !amountDirty
+      ? existing.amount
+      : (parseAmountToMinor(amountText) ?? 0);
   const pastFieldsChanged =
     existing !== undefined &&
-    (parseAmountToMinor(amountText) !== existing.amount ||
+    (effectiveAmount !== existing.amount ||
       endDate !== (existing.endDate ?? '') ||
       allocationStartDate !== (existing.allocationStartDate ?? '') ||
       expenseAccountId !== existing.expenseAccountId);
 
   async function submit() {
     if (submitting) return;
-    const amount = parseAmountToMinor(amountText) ?? 0;
+    const amount = effectiveAmount;
     if (!Number.isInteger(amount) || amount < 1) {
       setError(t('error.common.amountInvalid'));
       return;
@@ -1376,7 +1389,9 @@ function ContinuousCostItemSheet({
           required
           inputMode={fractionDigits === 0 ? 'numeric' : 'decimal'}
           value={amountText}
-          onChange={(v) => setAmountText(sanitizeAmountText(v, fractionDigits))}
+          onChange={(v) => {
+            setAmountText(sanitizeAmountText(v, fractionDigits, amountText));
+          }}
           dataUi={UI.allocations.editAmount}
         />
         {existing ? (

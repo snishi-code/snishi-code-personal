@@ -15,6 +15,8 @@ import type {
   MonthlyCostItem,
 } from '../src/domain/types';
 import './setup';
+import { LedgerError } from '../src/domain/errors';
+import { MAX_AMOUNT_MINOR } from '../src/domain/schema';
 
 function account(
   id: string,
@@ -55,6 +57,24 @@ function entry(
     createdAt: 'x',
     updatedAt: 'x',
   };
+}
+
+/** schema 上限内の仕訳だけで、指定した合計を組み立てる。 */
+function entriesForTotal(
+  prefix: string,
+  date: string,
+  debitAccountId: string,
+  creditAccountId: string,
+  total: number,
+): JournalEntry[] {
+  const result: JournalEntry[] = [];
+  let remaining = total;
+  for (let index = 0; remaining > 0; index += 1) {
+    const amount = Math.min(remaining, MAX_AMOUNT_MINOR);
+    result.push(entry(`${prefix}-${index}`, date, debitAccountId, creditAccountId, amount));
+    remaining -= amount;
+  }
+  return result;
 }
 
 const accounts: Account[] = [
@@ -186,6 +206,17 @@ describe('buildPeriodMatrix（年間）', () => {
     expect(matrix.rows.net[0]).toBe(pl.netIncome);
     expect(matrix.rows.totalAssets[0]).toBe(bs.totalAssets);
     expect(matrix.rows.netAssets[0]).toBe(bs.netAssets);
+  });
+
+  it('収入・費用が個別に安全域内でも、純額の最終差引が安全域を出れば fail-closed', () => {
+    const overflowEntries = [
+      ...entriesForTotal('max-revenue', '2026-01-01', 'ignored', 'salary', Number.MAX_SAFE_INTEGER),
+      // expense の貸方は自然増減 -2。MAX_SAFE - (-2) は表現不能。
+      entry('contra-expense', '2026-01-02', 'ignored', 'food', 2),
+    ];
+    expect(() =>
+      buildPeriodMatrix(accounts, overflowEntries, { mode: 'year', year: 2026 }),
+    ).toThrow(LedgerError);
   });
 });
 

@@ -71,7 +71,7 @@ function balanceDelta(entry: JournalEntry, accountId: string): number {
   let delta = 0;
   for (const line of entry.lines) {
     if (line.accountId !== accountId) continue;
-    delta += line.side === 'debit' ? line.amount : -line.amount;
+    delta = assertSafeAmount(delta + (line.side === 'debit' ? line.amount : -line.amount));
   }
   return delta;
 }
@@ -117,10 +117,19 @@ export function investmentProjectionResult(
       .filter((entry) => entry.date > today && entry.lines.some((l) => l.accountId === account.id))
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     let balance = 0;
+    let pastOverflow = false;
     for (const entry of derivedEntries) {
-      if (entry.date <= today)
-        balance = assertSafeAmount(balance + balanceDelta(entry, account.id));
+      if (entry.date <= today) {
+        try {
+          balance = assertSafeAmount(balance + balanceDelta(entry, account.id));
+        } catch {
+          truncations.push({ accountId: account.id, month: monthOf(today) });
+          pastOverflow = true;
+          break;
+        }
+      }
     }
+    if (pastOverflow) continue;
 
     let cursor = 0;
     // 翌月初から月次で適用する。
@@ -128,19 +137,35 @@ export function investmentProjectionResult(
       const date = `${month}-01`;
       if (date > cap) break;
       // その月初より前の仕訳（未来の積立・引出・ルール投影）を残高へ織り込む。
+      let futureOverflow = false;
       while (cursor < future.length && future[cursor]!.date < date) {
-        balance += balanceDelta(future[cursor]!, account.id);
+        try {
+          balance = assertSafeAmount(balance + balanceDelta(future[cursor]!, account.id));
+        } catch {
+          // 後続の逆向き仕訳で安全域へ戻っても、一度失った整数精度は回復しない。
+          // 最初に表現不能になった月から投影を止め、既存の診断経路で明示する。
+          truncations.push({ accountId: account.id, month });
+          futureOverflow = true;
+          break;
+        }
         cursor += 1;
       }
+      if (futureOverflow) break;
       // 存在期間外（未来開始・計上先の期間外）の断面には行を立てない。
       if (!accountExistsAt(account, date) || !accountExistsAt(projectionAccount, date)) continue;
       if (balance <= 0) continue; // 残高 0 以下には適用しない（生成なし・複利も進めない）
       const gain = Math.round(balance * rate);
       if (gain === 0) continue;
-      const next = balance + gain;
+      let next: number;
+      try {
+        next = assertSafeAmount(balance + gain);
+      } catch {
+        truncations.push({ accountId: account.id, month });
+        break;
+      }
       // 桁あふれガード: 超える月からはこの科目の生成を停止する（それ以前の行は維持）。
       // 黙って止めない——アプリ都合の端点として戻り値で名乗る。
-      if (!Number.isSafeInteger(next) || Math.abs(next) > PROJECTION_BALANCE_LIMIT) {
+      if (Math.abs(next) > PROJECTION_BALANCE_LIMIT) {
         truncations.push({ accountId: account.id, month });
         break;
       }

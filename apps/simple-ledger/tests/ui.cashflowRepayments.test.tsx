@@ -17,6 +17,7 @@ import {
   upsertAccount,
 } from '../src/data/repository';
 import { addMonthsToDate } from '../src/domain/allocation';
+import { MONTHLY_AMOUNTS_HARD_CAP } from '../src/domain/allocation';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { todayLocal } from '../src/util/time';
@@ -125,5 +126,35 @@ describe('資金繰り', () => {
         (l) => l.side === 'debit' && l.accountId === card.id && l.amount === 1000000,
       ),
     ).toBe(true);
+  });
+
+  it('返済回数が hard cap を超えたら、巨大配列を作らず画面上で理由を示す', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const card = ledger.accounts.find((a) => a.role === 'payment-liability')!;
+    await createOpenings([
+      { accountId: cash.id, amount: 1_000_000, date: '2000-01-01' },
+      {
+        accountId: card.id,
+        amount: MONTHLY_AMOUNTS_HARD_CAP + 1,
+        date: '2000-01-01',
+      },
+    ]);
+    render(view(() => undefined));
+
+    const liabilityRow = await waitFor(() => {
+      const found = ui(UI.cashflow.liabilityRow);
+      expect(found).toBeInTheDocument();
+      return found!;
+    });
+    fireEvent.click(liabilityRow);
+    fireEvent.change(ui(UI.cashflow.repayCount)!, {
+      target: { value: String(MONTHLY_AMOUNTS_HARD_CAP + 1) },
+    });
+    fireEvent.click(ui(UI.cashflow.repaySave)!);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      `返済回数は 1〜${MONTHLY_AMOUNTS_HARD_CAP} の整数で入力してください。`,
+    );
   });
 });

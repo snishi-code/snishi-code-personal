@@ -24,6 +24,7 @@ import {
   type FormMode,
 } from '../entryModes';
 import { quickSpanEndDate } from '../ccQuickSpan';
+import { MONTHLY_AMOUNTS_HARD_CAP } from '../../domain/allocation';
 import {
   exactDigitsFor,
   formatMinorForInput,
@@ -112,7 +113,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
    *    回収では残存価値を超える仕訳が保存されうる。
    *  - 逆仕訳は元の仕訳と 1 minor まで同額でなければ打ち消しにならない。
    * どちらも form.amount は丸めず、**欄の表示側をその額が表せる桁まで上げて**
-   * 「見えている値 = 保存される値」を保つ（編集・新規は従来どおり表示桁で丸める）。
+   * 「見えている値 = 保存される値」を保つ。新規入力と、利用者が金額欄を実際に変更した
+   * 編集だけが表示桁へ丸められる。金額欄に触れない編集は保存済み minor を保持する。
    */
   const exactAmount =
     init.kind === 'reversal' ? reversalInput(init.source).amount : (fixed?.amount ?? undefined);
@@ -130,20 +132,11 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           ? 'transfer'
           : 'manual',
   );
-  // 編集フォームは「画面で見えているもの」を編集する = 設定桁で丸めた金額が初期値。
-  // 粗い設定で開いて保存し直すと、その明示操作で丸めた値が保存される（作者決定 2026-08-13:
-  // 「途中で表示桁を変えたら消えるが、ユーザー責任・補正で吸収できる」）。
-  const roundToDisplay = (input: SimpleEntryInput): SimpleEntryInput =>
-    input.amount === 0
-      ? input
-      : {
-          ...input,
-          amount:
-            parseAmountToMinor(formatMinorForInput(input.amount, fractionDigits)) ?? input.amount,
-        };
+  // 編集時の form.amount は保存済み raw minor のまま保持する。amountText は表示桁で丸めて
+  // 見せるだけで、利用者が金額欄を変更した onAmountChange のときに初めて form.amount を更新する。
   const [form, setForm] = useState<SimpleEntryInput>(
     init.kind === 'edit'
-      ? roundToDisplay(toSimpleInput(init.entry))
+      ? toSimpleInput(init.entry)
       : init.kind === 'reversal'
         ? reversalInput(init.source) // 丸めない（打ち消しの定義）。
         : init.kind === 'transfer-fixed'
@@ -158,11 +151,16 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             }
           : emptyInput(),
   );
-  const [amountText, setAmountText] = useState<string>(
-    init.kind === 'create' || form.amount === 0
-      ? ''
-      : formatMinorForInput(form.amount, fractionDigits),
-  );
+  // 変更判定の基準（mount 時の form.amount とその表示文字列）。編集で欄が初期表示と同じ
+  // 文字列の間は保存済み minor を保持する = onChange の発火をもって「変更」としない。
+  const [initialAmount] = useState(() => ({
+    amount: form.amount,
+    text:
+      init.kind === 'create' || form.amount === 0
+        ? ''
+        : formatMinorForInput(form.amount, fractionDigits),
+  }));
+  const [amountText, setAmountText] = useState<string>(initialAmount.text);
   const [errors, setErrors] = useState<EntryValidationError[]>([]);
   const [flowError, setFlowError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
@@ -238,9 +236,13 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     setForm((f) => ({ ...f, [side === 'debit' ? 'debitAccountId' : 'creditAccountId']: id }));
 
   const onAmountChange = (v: string) => {
-    const text = sanitizeAmountText(v, fractionDigits);
+    const text = sanitizeAmountText(v, fractionDigits, amountText);
     setAmountText(text);
-    setForm((f) => ({ ...f, amount: parseAmountToMinor(text) ?? 0 }));
+    // 初期表示へ戻った（1 文字打って消した等）ら保存済み minor を復元する。
+    setForm((f) => ({
+      ...f,
+      amount: text === initialAmount.text ? initialAmount.amount : (parseAmountToMinor(text) ?? 0),
+    }));
   };
 
   function resolveInputMode(): InputMode {
@@ -265,7 +267,10 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     // 回数 > 金額は 0 の回を作る（保存境界 buildRepaymentEntries と同じ条件で先に弾く）。
     const countBad =
       active &&
-      (!Number.isInteger(count) || count < 1 || (form.amount >= 1 && count > form.amount));
+      (!Number.isInteger(count) ||
+        count < 1 ||
+        count > MONTHLY_AMOUNTS_HARD_CAP ||
+        (form.amount >= 1 && count > form.amount));
     setRepayAccountError(accBad);
     setRepayCountError(countBad);
     return { accBad, countBad };
@@ -773,7 +778,14 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               inputMode="numeric"
               value={repayCountText}
               onChange={(v) => setRepayCountText(v.replace(/[^\d]/g, ''))}
-              error={repayCountError ? t('entry.error.repayCount') : undefined}
+              hint={t('entry.monthlyizeRepayCountHint', {
+                max: MONTHLY_AMOUNTS_HARD_CAP,
+              })}
+              error={
+                repayCountError
+                  ? t('entry.error.repayCount', { max: MONTHLY_AMOUNTS_HARD_CAP })
+                  : undefined
+              }
               dataUi={UI.journal.entry.monthlyizeRepayCount}
             />
             <TextInput

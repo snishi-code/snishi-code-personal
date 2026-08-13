@@ -3,6 +3,16 @@ import { LedgerError } from './errors';
 import { assertSafeAmount } from './safeSum';
 
 /**
+ * 月割りで一度に生成できる最大月数。
+ *
+ * monthlyAmounts は months 長の配列を同期的に確保するため、呼び出し側の入力検証だけに
+ * 頼ると巨大な回数で UI 停止/OOM を起こせる。返済計画・継続コスト・定期ルールが
+ * すべて recurring.ts の同じ正本を参照し、上限変更時に一方だけがずれないようにする。
+ */
+export { CATCH_UP_HARD_CAP_MONTHS as MONTHLY_AMOUNTS_HARD_CAP } from './recurringLimits';
+import { CATCH_UP_HARD_CAP_MONTHS as MONTHLY_AMOUNTS_HARD_CAP } from './recurringLimits';
+
+/**
  * total を months で割り、端数を先頭月から 1 ずつ配って合計を total に一致させる。
  *
  * 不変条件は「戻り値の合計が total に厳密一致する」こと。
@@ -12,13 +22,16 @@ import { assertSafeAmount } from './safeSum';
  */
 export function monthlyAmounts(total: number, months: number): number[] {
   assertSafeAmount(total);
+  if (!Number.isInteger(months) || months < 1 || months > MONTHLY_AMOUNTS_HARD_CAP) {
+    throw new LedgerError('error.amount.overflow');
+  }
   const base = Math.floor(total / months);
-  const product = assertSafeAmount(base * months); // months <= 0 もここで弾かれる（Infinity/NaN）。
-  const remainder = total - product;
+  const product = assertSafeAmount(base * months);
+  const remainder = assertSafeAmount(total - product);
   if (!Number.isInteger(remainder) || remainder < 0 || remainder >= months) {
     throw new LedgerError('error.amount.overflow');
   }
-  return Array.from({ length: months }, (_, i) => base + (i < remainder ? 1 : 0));
+  return Array.from({ length: months }, (_, i) => assertSafeAmount(base + (i < remainder ? 1 : 0)));
 }
 
 /** ISO 日付 'YYYY-MM-DD' → 'YYYY-MM'。 */

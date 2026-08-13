@@ -10,6 +10,7 @@ import {
 } from '../src/domain/cashflow';
 import type { Account, AccountBalance, JournalEntry } from '../src/domain/types';
 import type { AccountRole } from '../src/domain/accountRoles';
+import { LedgerError } from '../src/domain/errors';
 
 function acc(
   id: string,
@@ -153,6 +154,16 @@ describe('cashDeltaOfEntry（未来仕訳の現金デルタ）', () => {
       ],
     });
     expect(cashDeltaOfEntry(charge, isFree)).toBe(-5000);
+  });
+
+  it('同一仕訳内の自由資金デルタが安全整数域を出れば fail-closed', () => {
+    const overflow = entry({
+      lines: [
+        { accountId: 'cash', side: 'debit', amount: Number.MAX_SAFE_INTEGER },
+        { accountId: 'cash', side: 'debit', amount: 1 },
+      ],
+    });
+    expect(() => cashDeltaOfEntry(overflow, isFree)).toThrow(LedgerError);
   });
 });
 

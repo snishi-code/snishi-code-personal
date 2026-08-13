@@ -205,7 +205,7 @@ export function buildPeriodMatrix(
 
   const net = revenue.map((value, index) => {
     const expenseValue = expense[index];
-    return value - (expenseValue ?? 0);
+    return assertSafeAmount(value - (expenseValue ?? 0));
   });
   const expenseCategories = accounts
     .filter((account) => account.type === 'expense')

@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import './setup';
 import {
   annualReturnBpToPercentText,
+  investmentProjectionResult,
   monthlyReturnRate,
   parseAnnualReturnPercentText,
 } from '../src/domain/investmentProjection';
@@ -28,7 +29,7 @@ import {
   deriveProfitAndLoss,
   equityNaturalDelta,
 } from '../src/domain/accounting';
-import { accountSchema, ledgerExportPackageSchema } from '../src/domain/schema';
+import { accountSchema, ledgerExportPackageSchema, MAX_AMOUNT_MINOR } from '../src/domain/schema';
 import { APP_ID, SCHEMA_VERSION } from '../src/domain/constants';
 import {
   createAdjustment,
@@ -80,6 +81,25 @@ function entry(
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   };
+}
+
+/** schema 上限内の仕訳だけで、指定した合計を組み立てる。 */
+function entriesForTotal(
+  prefix: string,
+  date: string,
+  debitAccountId: string,
+  creditAccountId: string,
+  total: number,
+  kind: JournalEntry['kind'] = 'normal',
+): JournalEntry[] {
+  const result: JournalEntry[] = [];
+  let remaining = total;
+  for (let index = 0; remaining > 0; index += 1) {
+    const amount = Math.min(remaining, MAX_AMOUNT_MINOR);
+    result.push(entry(`${prefix}-${index}`, date, debitAccountId, creditAccountId, amount, kind));
+    remaining -= amount;
+  }
+  return result;
 }
 
 const invest = account('invest', '投資', 'asset', 'investment-asset', {
@@ -289,6 +309,26 @@ describe('investmentProjectionEntries: 上限', () => {
     expect(
       displayEntriesResultForAsOf(source({}), '2150-12-31', TODAY).investmentProjectionTruncations,
     ).toEqual([]);
+  });
+
+  it('未来仕訳の加算が一度でも安全整数域を出たら、後続の引出で戻ってもその月で打ち切る', () => {
+    const initial = 4_000_000_000_000_000;
+    const movement = 6_000_000_000_000_001;
+    const src = source({
+      journalEntries: [
+        ...entriesForTotal('opening', '2026-01-01', 'invest', 'capital', initial, 'opening'),
+        ...entriesForTotal('overflow-deposit', '2026-01-20', 'invest', 'cash', movement),
+        ...entriesForTotal('restore-withdrawal', '2026-01-21', 'cash', 'invest', movement),
+      ],
+    });
+    const result = investmentProjectionResult(
+      src.accounts,
+      src.journalEntries,
+      '2026-03-31',
+      TODAY,
+    );
+    expect(result.entries).toEqual([]);
+    expect(result.truncations).toEqual([{ accountId: 'invest', month: '2026-02' }]);
   });
 });
 

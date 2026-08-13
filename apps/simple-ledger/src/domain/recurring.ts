@@ -19,6 +19,7 @@ import { ACCOUNT_ROLES, isInternalRole, type AccountRole } from './accountRoles'
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from './constants';
 import { continuousCostEntriesForItem } from './continuousCost';
 import { ruleItemId } from './recurringIds';
+import { CATCH_UP_HARD_CAP_MONTHS } from './recurringLimits';
 import {
   accountExistsAt,
   recurringRuleItemEndDate,
@@ -140,7 +141,7 @@ export function recurringCursorThroughDate(rule: RecurringRule, date: string): s
 }
 
 /** 暴走防止の上限（1 回の catch-up で走査する月数。超過分は次回の catch-up が続きを処理する）。 */
-export const CATCH_UP_HARD_CAP_MONTHS = 1200;
+export { CATCH_UP_HARD_CAP_MONTHS } from './recurringLimits';
 
 export interface RecurringPosting {
   month: string; // 'YYYY-MM'

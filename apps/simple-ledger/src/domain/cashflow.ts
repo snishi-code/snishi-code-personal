@@ -97,7 +97,7 @@ export function cashDeltaOfEntry(
   let delta = 0;
   for (const line of entry.lines) {
     if (!isFree(line.accountId)) continue;
-    delta += line.side === 'debit' ? line.amount : -line.amount;
+    delta = assertSafeAmount(delta + (line.side === 'debit' ? line.amount : -line.amount));
   }
   return delta;
 }
@@ -137,14 +137,15 @@ export function projectCashflow(params: {
     .map((entry) => ({ date: entry.date, amount: cashDeltaOfEntry(entry, isFree) }))
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
-  const points: CashflowPoint[] = [{ date: today, free: startFree }];
-  let free = startFree;
+  const checkedStartFree = assertSafeAmount(startFree);
+  const points: CashflowPoint[] = [{ date: today, free: checkedStartFree }];
+  let free = checkedStartFree;
   for (const e of events) {
     free = assertSafeAmount(free + e.amount);
     points.push({ date: e.date, free });
   }
 
-  const minFree = points.reduce((m, p) => Math.min(m, p.free), startFree);
+  const minFree = points.reduce((m, p) => Math.min(m, p.free), checkedStartFree);
 
-  return { startFree, points, minFree };
+  return { startFree: checkedStartFree, points, minFree };
 }

@@ -13,7 +13,7 @@ import {
 } from '../../domain/accounting';
 import { livingCostBreakdownForRange } from '../../domain/livingCost';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
-import { displayEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { todayLocal } from '../../util/time';
 import { buildSectionTrends } from './breakdownData';
 import { Money, moneyText, useMoneyDigits } from '../money';
@@ -28,6 +28,7 @@ import type { FormMode } from '../entryModes';
 import type { MessageKey } from '../../i18n';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { assertSafeAmount } from '../../domain/safeSum';
+import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 
 /** ホームの仕訳一覧の 1 ページぶん（「さらに表示」で足す刻み）。 */
 const HOME_ENTRY_PAGE = 50;
@@ -95,10 +96,11 @@ export function Dashboard({
     });
   };
 
-  const { pl, bs, asOf, livingTotal } = useMemo(() => {
+  const { pl, bs, asOf, livingTotal, investmentProjectionTruncations } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     // 表示は投影込み（displayEntries）。ヘッダー日付を未来にすると資産・純資産が投影込みになる。
-    const entries = ledger ? displayEntriesForAsOf(ledger, basis.asOf, today) : [];
+    const display = ledger ? displayEntriesResultForAsOf(ledger, basis.asOf, today) : null;
+    const entries = display?.entries ?? [];
     const breakdown = livingCostBreakdownForRange(accounts, entries, range);
     return {
       pl: deriveProfitAndLoss(accounts, entries, range),
@@ -106,10 +108,13 @@ export function Dashboard({
       asOf: basis.asOf,
       // 支出合計・純益は domain の値をそのまま使う（UI で式を再実装しない）。
       livingTotal: breakdown.total,
+      investmentProjectionTruncations: display?.investmentProjectionTruncations ?? [],
     };
   }, [basis.asOf, ledger, range, today]);
 
   const trend = useMemo(() => buildSectionTrends(period, ledger, today), [period, ledger, today]);
+  const visibleProjectionTruncations =
+    trend?.investmentProjectionTruncations ?? investmentProjectionTruncations;
 
   const currency = ledger?.settings.currency ?? '';
 
@@ -119,6 +124,11 @@ export function Dashboard({
         <h1 className="sr-only" id="dashboard-title">
           {t('dashboard.title')}
         </h1>
+
+        <InvestmentProjectionTruncationNotice
+          truncations={visibleProjectionTruncations}
+          accounts={ledger?.accounts ?? []}
+        />
 
         {/* 額縁: 収支 + 財政状態の 6 枠を sticky 固定し、下の仕訳だけが流れる
             （実ユーズ④・作者決定 2026-08-12「6枠を固定」）。 */}

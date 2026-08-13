@@ -355,8 +355,14 @@ export const journalEntrySchema = z
   });
 
 export const settingsSchema = z.object({
-  ledgerName: z.string().min(1).max(120),
-  currency: z.string().min(1).max(8),
+  ledgerName: z
+    .string()
+    .max(120)
+    .refine((value) => value.trim().length > 0),
+  currency: z
+    .string()
+    .max(8)
+    .refine((value) => value.trim().length > 0),
   // 表示桁数（0|1|2・入力の刻みも連動）。保存・計算は常に 1/100 固定でこの設定では変わらない。
   // 言語（旧 locale）は台帳でなく端末の属性なので v11 で台帳データから撤去した。
   displayFractionDigits: z.union([z.literal(0), z.literal(1), z.literal(2)]),

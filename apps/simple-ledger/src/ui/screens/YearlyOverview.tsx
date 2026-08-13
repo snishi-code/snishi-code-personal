@@ -32,6 +32,7 @@ import { todayLocal } from '../../util/time';
 import { UI } from '../../ui-contract';
 import { Money } from '../money';
 import { ScrollTopButton } from '../ScrollTopButton';
+import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 
 type OverviewMode = 'year' | 'all';
 
@@ -164,10 +165,7 @@ export function YearlyOverview({ period }: { period: ReportPeriod }) {
     return {
       matrix: buildPeriodMatrix(ledger.accounts, display.entries, scope),
       // 桁あふれで投影を打ち切った科目（アプリ都合の端点）。注記として名乗る。
-      truncations: display.investmentProjectionTruncations.map((truncation) => ({
-        ...truncation,
-        name: ledger.accounts.find((account) => account.id === truncation.accountId)?.name ?? '—',
-      })),
+      truncations: display.investmentProjectionTruncations,
     };
   }, [dataYears.length, ledger, matrixAsOf, scope, today]);
   const matrix = matrixResult?.matrix ?? null;
@@ -287,19 +285,11 @@ export function YearlyOverview({ period }: { period: ReportPeriod }) {
         ) : null}
 
         {/* 桁あふれで投影を打ち切った科目: アプリ都合の端点を名乗る（黙って横ばいの顔をしない）。 */}
-        {truncations.map((truncation) => (
-          <p
-            className="field__hint"
-            role="note"
-            key={truncation.accountId}
-            data-ui={UI.yearlyOverview.projectionTruncatedNote}
-          >
-            {t('yearlyOverview.projectionTruncatedNote', {
-              name: truncation.name,
-              month: truncation.month,
-            })}
-          </p>
-        ))}
+        <InvestmentProjectionTruncationNotice
+          truncations={truncations}
+          accounts={ledger?.accounts ?? []}
+          dataUi={UI.yearlyOverview.projectionTruncatedNote}
+        />
       </div>
 
       {matrix ? (

@@ -398,7 +398,9 @@ export function AccountSheet({
               label={t('accounts.openingAmount')}
               inputMode={digits === 0 ? 'numeric' : 'decimal'}
               value={openingAmountText}
-              onChange={(v) => setOpeningAmountText(sanitizeAmountText(v, digits))}
+              onChange={(v) =>
+                setOpeningAmountText(sanitizeAmountText(v, digits, openingAmountText))
+              }
               hint={t('accounts.openingHint')}
               dataUi={UI.accounts.openingAmount}
             />

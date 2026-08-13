@@ -79,7 +79,7 @@ export function livingCostBreakdownForRange(
     }
   }
   const pl = deriveProfitAndLoss(accounts, entries, range);
-  const normalExpense = pl.totalExpense - continuing;
+  const normalExpense = assertSafeAmount(pl.totalExpense - continuing);
   return {
     normalExpense,
     monthlyCost: continuing,

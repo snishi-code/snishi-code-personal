@@ -48,7 +48,7 @@ export function accountBalance(
       else credit = assertSafeAmount(credit + line.amount);
     }
   }
-  return isDebitNormal(type) ? debit - credit : credit - debit;
+  return assertSafeAmount(isDebitNormal(type) ? debit - credit : credit - debit);
 }
 
 /** [from, to] の両端を含むフィルタ。未指定の端は無制限。 */
@@ -110,7 +110,7 @@ export function deriveProfitAndLoss(
     expenses,
     totalRevenue,
     totalExpense,
-    netIncome: totalRevenue - totalExpense,
+    netIncome: assertSafeAmount(totalRevenue - totalExpense),
   };
 }
 
@@ -141,10 +141,11 @@ export function deriveBalanceSheet(
   const totalExpense = accounts
     .filter((a) => a.type === 'expense')
     .reduce((s, a) => assertSafeAmount(s + accountBalance(a.id, 'expense', entries)), 0);
-  const retainedEarnings = totalRevenue - totalExpense;
+  const retainedEarnings = assertSafeAmount(totalRevenue - totalExpense);
 
-  const netAssets = totalAssets - totalLiabilities;
-  const balanced = netAssets === totalEquityAccounts + retainedEarnings;
+  const netAssets = assertSafeAmount(totalAssets - totalLiabilities);
+  const totalEquity = assertSafeAmount(totalEquityAccounts + retainedEarnings);
+  const balanced = netAssets === totalEquity;
 
   return {
     ...(asOf !== undefined ? { asOf } : {}),

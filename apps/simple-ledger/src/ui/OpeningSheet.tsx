@@ -92,7 +92,7 @@ export function OpeningRegisterSheet({
           // 符号付きの欄は inputMode を指定しない: numeric / decimal のソフトキーボードには
           // '-' キーが無く、hint（マイナスは先頭に -）どおりの入力ができなくなる。
           // 「表示桁が inputMode を決める」規約の明示的な例外（AccountSheet の想定利回り欄と同じ趣旨）。
-          onChange={(v) => setAmountText(sanitizeSignedAmountText(v, digits))}
+          onChange={(v) => setAmountText(sanitizeSignedAmountText(v, digits, amountText))}
           hint={t('common.signedAmountHint')}
           dataUi={UI.adjustments.openingRegisterAmount}
         />
@@ -125,9 +125,14 @@ export function OpeningEditSheet({ entry, onClose }: { entry: JournalEntry; onCl
       : formatMinorForInput(targetLine?.side === naturalSide ? tgt.amount : -tgt.amount, digits);
 
   const [amountText, setAmountText] = useState(signedInitial);
+  // 変更判定はフラグではなく値（初期表示と同じ文字列に戻れば無変更 = 保存済み minor を保持）。
+  const amountDirty = amountText !== signedInitial;
   const [date, setDate] = useState(entry.date);
   const [submitting, setSubmitting] = useState(false);
-  const amount = parseAmountToMinor(amountText);
+  const originalAmount =
+    targetLine?.side === naturalSide ? (tgt?.amount ?? 0) : -(tgt?.amount ?? 0);
+  // 日付だけを直す保存では、表示桁で隠れた minor を保持する。
+  const amount = amountDirty ? parseAmountToMinor(amountText) : originalAmount;
 
   async function submit() {
     if (amount === null || amount === 0 || date.trim() === '' || submitting) return;
@@ -174,7 +179,9 @@ export function OpeningEditSheet({ entry, onClose }: { entry: JournalEntry; onCl
           // 符号付きの欄は inputMode を指定しない: numeric / decimal のソフトキーボードには
           // '-' キーが無く、hint（マイナスは先頭に -）どおりの入力ができなくなる。
           // 「表示桁が inputMode を決める」規約の明示的な例外（AccountSheet の想定利回り欄と同じ趣旨）。
-          onChange={(v) => setAmountText(sanitizeSignedAmountText(v, digits))}
+          onChange={(v) => {
+            setAmountText(sanitizeSignedAmountText(v, digits, amountText));
+          }}
           hint={t('common.signedAmountHint')}
           dataUi={UI.adjustments.openingEditAmount}
         />

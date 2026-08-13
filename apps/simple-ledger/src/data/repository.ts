@@ -71,7 +71,12 @@ import type {
   Snapshot,
   Tag,
 } from '../domain/types';
-import { addMonthsToDate, monthlyAmounts, monthOf } from '../domain/allocation';
+import {
+  addMonthsToDate,
+  MONTHLY_AMOUNTS_HARD_CAP,
+  monthlyAmounts,
+  monthOf,
+} from '../domain/allocation';
 import { compareMonthlyCostItems } from '../domain/monthlyCost';
 import { buildAdjustmentEntry, counterpartName, counterpartRole } from '../domain/adjustment';
 import { accountBalance, filterByDateRange } from '../domain/accounting';
@@ -1276,8 +1281,12 @@ function buildRepaymentEntries(
 ): JournalEntry[] {
   if (!Number.isInteger(params.total) || params.total < 1)
     throw new LedgerError('error.common.amountInvalid');
-  if (!Number.isInteger(params.count) || params.count < 1)
-    throw new LedgerError('error.repay.countInvalid');
+  if (
+    !Number.isInteger(params.count) ||
+    params.count < 1 ||
+    params.count > MONTHLY_AMOUNTS_HARD_CAP
+  )
+    throw new LedgerError('error.repay.countInvalid', { max: MONTHLY_AMOUNTS_HARD_CAP });
   // 分割の全要素 > 0 を保証する。total < count だと monthlyAmounts が 0 の回を作り、
   // 0 金額は amountSchema（.positive）が拒否して保存全体が失敗する（v10 からの既存不具合）。
   // 「0 の回を省く」案は採らない: 摘要の i/count が回数を約束しているため本数を黙って減らせない。
@@ -1315,7 +1324,12 @@ function buildRepaymentEntries(
 async function updateSettingsUnlocked(settings: Settings): Promise<void> {
   // 保存境界で schema を通す（UI だけの制限では、他経路や将来の呼び出しで
   // 「保存はできるが export だけ後で失敗する」状態を作ってしまう）。
-  const validated = settingsSchema.safeParse(settings);
+  // 前後空白は他の name フィールドと同じく保存境界で落とす（' 円 ' を焼き付けない）。
+  const validated = settingsSchema.safeParse({
+    ...settings,
+    ledgerName: settings.ledgerName.trim(),
+    currency: settings.currency.trim(),
+  });
   if (!validated.success) throw new LedgerError('error.settings.invalid');
   await writeWithRevision([STORE.kv], (t) => {
     t.objectStore(STORE.kv).put(validated.data, KV_SETTINGS);
@@ -1325,6 +1339,12 @@ async function updateSettingsUnlocked(settings: Settings): Promise<void> {
 /* ── スナップショット ── */
 
 export async function listSnapshots(): Promise<Snapshot[]> {
+  // reason の検査は**書き込み側だけ**（saveSnapshot）。読み出しで throw すると、
+  // IDB 直接編集などで壊れた 1 件が一覧全体を落とし、正常な復元ポイントも
+  // 壊れた 1 件を消す削除ボタンも画面から消える（残る出口が「すべてのデータを削除」
+  // だけになる）。未知の reason は snapshotReasonLabel が生文字列のまま出す
+  // （fail-visible）。復元の安全は reason ではなく schemaVersion の剪定と
+  // import パイプラインの検証が担う。
   const all = await getAll<Snapshot>(STORE.snapshots);
   all.sort((a, b) => cmp(b.createdAt, a.createdAt));
   return all;
@@ -1341,6 +1361,9 @@ export async function saveSnapshot(
   snapshot: Snapshot,
   expectedVersion: LedgerVersion,
 ): Promise<void> {
+  if (snapshot.reason !== 'import' && snapshot.reason !== 'restore') {
+    throw new LedgerError('error.snapshot.invalid');
+  }
   let stale = false;
   try {
     await runWrite([STORE.snapshots, STORE.kv], (t) => {

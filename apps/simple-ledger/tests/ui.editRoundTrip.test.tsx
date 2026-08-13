@@ -9,8 +9,8 @@
  * そのまま保存する**という経路を全シートで踏むのがこのファイルの役割で、
  * 同型の欠陥（保存 → 表示 → 保存の往復で値が変わる）を将来にわたって塞ぐ。
  *
- * 表示桁数（0 と 2）の両方で回すことも要点: 桁数設定は表示専用であり、
- * どちらでも保存値は変わってはいけない（作者決定 2026-08-13）。
+ * 表示桁数（0 と 2）の両方で回すことも要点: 粗い表示は保存値を書き換えない。
+ * 金額欄を実際に変更したときだけ、その入力値を保存する。
  */
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
@@ -22,6 +22,7 @@ import { OpeningEditSheet } from '../src/ui/OpeningSheet';
 import { EntrySheet } from '../src/ui/screens/EntrySheet';
 import { AccountSheet } from '../src/ui/screens/AccountSheet';
 import { Allocations } from '../src/ui/screens/Allocations';
+import { Cashflow } from '../src/ui/screens/Cashflow';
 import {
   createAdjustment,
   createContinuousCost,
@@ -97,10 +98,7 @@ describe.each([0, 2] as const)('編集シートの open→save 往復（表示�
     fireEvent.click(q(UI.adjustments.editSave)!);
     await waitFor(async () => {
       const after = (await loadLedger()).journalEntries.find((e) => e.metadata?.adjustment)!;
-      // digits=0 では表示に合わせて 1,235 へ丸められる（画面で見えている値をそのまま保存する
-      // = 明示操作なので仕様どおり）。
-      // どちらの桁でも「100 倍」にはならない、が本テストの主眼。
-      expect(after.metadata!.adjustment!.actualBalance).toBe(digits === 0 ? 123500 : AMOUNT);
+      expect(after.metadata!.adjustment!.actualBalance).toBe(AMOUNT);
     });
   });
 
@@ -125,7 +123,7 @@ describe.each([0, 2] as const)('編集シートの open→save 往復（表示�
     fireEvent.click(q(UI.adjustments.openingEditSave)!);
     await waitFor(async () => {
       const after = (await loadLedger()).journalEntries.find((e) => e.kind === 'opening')!;
-      expect(after.lines[0]!.amount).toBe(digits === 0 ? 123500 : AMOUNT);
+      expect(after.lines[0]!.amount).toBe(AMOUNT);
     });
   });
 
@@ -163,7 +161,7 @@ describe.each([0, 2] as const)('編集シートの open→save 往復（表示�
     fireEvent.click(q(UI.journal.entry.save)!);
     await waitFor(async () => {
       const after = (await loadLedger()).journalEntries.find((e) => e.id === entry.id)!;
-      expect(after.lines[0]!.amount).toBe(digits === 0 ? 123500 : AMOUNT);
+      expect(after.lines[0]!.amount).toBe(AMOUNT);
     });
   });
 
@@ -197,7 +195,7 @@ describe.each([0, 2] as const)('編集シートの open→save 往復（表示�
     fireEvent.click(q(UI.allocations.editSave)!);
     await waitFor(async () => {
       const after = (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)!;
-      expect(after.amount).toBe(digits === 0 ? 123500 : AMOUNT);
+      expect(after.amount).toBe(AMOUNT);
     });
   });
 
@@ -235,24 +233,12 @@ describe.each([0, 2] as const)('編集シートの open→save 往復（表示�
 
     fireEvent.click(q(UI.allocations.recurringSave)!);
 
-    if (digits === 2) {
-      // 値が変わらないのでそのまま保存され、確認シートも出ない。
-      await waitFor(async () => {
-        const after = (await loadLedger()).recurringRules.find((r) => r.id === rule.id)!;
-        expect(after.amount).toBe(AMOUNT);
-      });
-      expect(q(UI.allocations.recurringAmountChangeDialog)).toBeNull();
-      return;
-    }
-
-    // digits=0 では表示の丸め（1,234.56 → 1,235）で金額が変わるため、
-    // **黙って保存せず「金額の変更方法」の確認シートを挟む**（定期ルールは過去へ遡及するため）。
-    // 確認を出すまでルールは 1 バイトも変わらない = 意図しない遡及変更が起きない。
-    await waitFor(() => {
-      expect(q(UI.allocations.recurringAmountChangeDialog)).toBeInTheDocument();
+    // 金額欄を触っていないため、どの表示桁でも確認シートなしで raw minor を保持する。
+    await waitFor(async () => {
+      const after = (await loadLedger()).recurringRules.find((r) => r.id === rule.id)!;
+      expect(after.amount).toBe(AMOUNT);
     });
-    const after = (await loadLedger()).recurringRules.find((r) => r.id === rule.id)!;
-    expect(after.amount).toBe(AMOUNT);
+    expect(q(UI.allocations.recurringAmountChangeDialog)).toBeNull();
   });
 });
 
@@ -389,6 +375,28 @@ describe('打ち消しの額は表示桁 0 でも丸めない', () => {
     // 残高ちょうど。丸めると科目の終了が保存側（残高 0 の要求）で弾かれる。
     expect(saved!.amount).toBe(ODD);
   });
+
+  it('返済計画の「全額」既定: 表示桁 0 でも負債残高の端数を落とさない', async () => {
+    await setDigits(0);
+    const ledger = await loadLedger();
+    const liability = ledger.accounts.find((a) => a.role === 'payment-liability')!;
+    await createOpening({ accountId: liability.id, amount: ODD, date: '2026-01-01' });
+
+    render(
+      <Providers>
+        <Ready>
+          <Cashflow onEditEntry={() => undefined} />
+        </Ready>
+      </Providers>,
+    );
+    await waitFor(() => expect(q(UI.cashflow.liabilityRow)).toBeInTheDocument());
+    fireEvent.click(q(UI.cashflow.liabilityRow)!);
+    await waitFor(() => expect(q(UI.cashflow.repaySheet)).toBeInTheDocument());
+
+    const amount = q(UI.cashflow.repayAmount) as HTMLInputElement;
+    expect(amount.value).toBe('123.45');
+    expect(amount.inputMode).toBe('decimal');
+  });
 });
 
 /*
@@ -466,6 +474,9 @@ describe('金額以外のフィールドの open→save 往復', () => {
   });
 
   it('タグ: 無変更保存で色・作成日時まで変わらない', async () => {
+    // このファイルは複数の LedgerProvider を開閉する。全suite並列時にも、直前Providerの
+    // teardownより後の現DB世代をCAS基準へ同期してから保存境界を直接呼ぶ。
+    await loadLedger();
     await upsertTag({
       id: 'round-trip-tag',
       name: '往復タグ',
@@ -490,5 +501,119 @@ describe('金額以外のフィールドの open→save 往復', () => {
     expect(JSON.stringify(after)).toBe(JSON.stringify(before));
     // 「保存はできるのに export だけ落ちる」を 1 行で拾う。
     expect(exportToJsonText(await loadLedger())).toContain('"schemaVersion": 11');
+  });
+});
+
+/*
+ * **変更判定は「onChange が発火したか」ではなく値で行う。**
+ *
+ * 「金額欄に触れない編集は保存済み minor を保持する」（Codex の仕様変更）の判定が
+ * フラグ式だと、1 文字打って消した・除去される文字を打った、だけで「変更あり」になり、
+ * 画面上は何も変わっていないのに隠れた端数が表示桁へ丸められて保存される。
+ */
+describe('金額欄を触っても値を戻せば無変更（表示桁 0）', () => {
+  const AMT = 123456; // 表示桁 0 では '1235' と見える（保存値には端数がある）
+
+  it('簿記編集: 1 文字打って消してから保存しても端数が保持される', async () => {
+    await setDigits(0);
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    const entry: JournalEntry = {
+      id: 'touch-revert-entry',
+      date: todayLocal(),
+      description: '触って戻す',
+      kind: 'normal',
+      lines: [
+        { accountId: expense.id, side: 'debit', amount: AMT },
+        { accountId: cash.id, side: 'credit', amount: AMT },
+      ],
+      metadata: { inputMode: 'expense' },
+      createdAt: '2026-08-13T00:00:00.000Z',
+      updatedAt: '2026-08-13T00:00:00.000Z',
+    };
+    await upsertEntry(entry);
+
+    render(
+      <Providers>
+        <Ready>
+          <EntrySheet init={{ kind: 'edit', entry }} onClose={() => undefined} />
+        </Ready>
+      </Providers>,
+    );
+    await waitFor(() => expect(q(UI.journal.entry.amount)).toBeInTheDocument());
+    const input = q(UI.journal.entry.amount) as HTMLInputElement;
+    expect(input.value).toBe('1235');
+    // 触る → 戻す（欄の見た目は初期表示と同一に戻る）。
+    fireEvent.change(input, { target: { value: '12355' } });
+    fireEvent.change(input, { target: { value: '1235' } });
+    fireEvent.click(q(UI.journal.entry.save)!);
+    await waitFor(async () => {
+      const after = (await loadLedger()).journalEntries.find((e) => e.id === entry.id)!;
+      expect(after.lines[0]!.amount).toBe(AMT); // 123500 に丸められない
+    });
+  });
+
+  it('残高補正の編集: 同様に端数が保持される', async () => {
+    await setDigits(0);
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    await createAdjustment({ accountId: cash.id, date: '2026-03-01', actualBalance: AMT });
+    const before = (await loadLedger()).journalEntries.find((e) => e.metadata?.adjustment)!;
+
+    render(
+      <Providers>
+        <Ready>
+          <AdjustmentEditSheet entry={before} onClose={() => undefined} />
+        </Ready>
+      </Providers>,
+    );
+    await waitFor(() => expect(q(UI.adjustments.editDialog)).toBeInTheDocument());
+    const input = q(UI.adjustments.editActual) as HTMLInputElement;
+    expect(input.value).toBe('1235');
+    fireEvent.change(input, { target: { value: '1235a' } }); // 除去される文字だけ
+    fireEvent.change(input, { target: { value: '12351' } });
+    fireEvent.change(input, { target: { value: '1235' } });
+    fireEvent.click(q(UI.adjustments.editSave)!);
+    await waitFor(async () => {
+      const after = (await loadLedger()).journalEntries.find((e) => e.metadata?.adjustment)!;
+      expect(after.metadata!.adjustment!.actualBalance).toBe(AMT);
+    });
+  });
+
+  it('実際に変更したときは入力値が保存される（保持が過剰に効かない）', async () => {
+    await setDigits(0);
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    const entry: JournalEntry = {
+      id: 'touch-change-entry',
+      date: todayLocal(),
+      description: '本当に変える',
+      kind: 'normal',
+      lines: [
+        { accountId: expense.id, side: 'debit', amount: AMT },
+        { accountId: cash.id, side: 'credit', amount: AMT },
+      ],
+      metadata: { inputMode: 'expense' },
+      createdAt: '2026-08-13T00:00:00.000Z',
+      updatedAt: '2026-08-13T00:00:00.000Z',
+    };
+    await upsertEntry(entry);
+
+    render(
+      <Providers>
+        <Ready>
+          <EntrySheet init={{ kind: 'edit', entry }} onClose={() => undefined} />
+        </Ready>
+      </Providers>,
+    );
+    await waitFor(() => expect(q(UI.journal.entry.amount)).toBeInTheDocument());
+    fireEvent.change(q(UI.journal.entry.amount)!, { target: { value: '2000' } });
+    fireEvent.click(q(UI.journal.entry.save)!);
+    await waitFor(async () => {
+      const after = (await loadLedger()).journalEntries.find((e) => e.id === entry.id)!;
+      expect(after.lines[0]!.amount).toBe(200000);
+    });
   });
 });

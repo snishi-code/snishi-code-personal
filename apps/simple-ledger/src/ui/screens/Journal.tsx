@@ -23,7 +23,7 @@ import { todayLocal } from '../../util/time';
 import { entryHasTag } from '../../domain/tags';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
 import { derivedEntryOrigin } from '../../domain/derivedOrigin';
-import { displayEntriesForAsOf } from '../../domain/reportEntries';
+import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { periodRange, type ReportPeriod } from '../../domain/reportPeriod';
 import {
   entryAmount,
@@ -41,6 +41,8 @@ import type { Account, JournalEntry } from '../../domain/types';
 import { formatMoney } from '../../util/format';
 import { useMoneyDigits } from '../money';
 import { ScrollTopButton } from '../ScrollTopButton';
+import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
+import { assertSafeAmount } from '../../domain/safeSum';
 
 export interface JournalFilter {
   accountId?: string;
@@ -66,7 +68,7 @@ function accountBalanceChange(entry: JournalEntry, account: Account): AccountBal
   const increaseSide = isDebitNormal(account.type) ? 'debit' : 'credit';
   const delta = entry.lines.reduce((sum, line) => {
     if (line.accountId !== account.id) return sum;
-    return sum + (line.side === increaseSide ? line.amount : -line.amount);
+    return assertSafeAmount(sum + (line.side === increaseSide ? line.amount : -line.amount));
   }, 0);
   return delta > 0 ? 'increase' : delta < 0 ? 'decrease' : null;
 }
@@ -162,14 +164,19 @@ export function Journal({
   }, [ledger, to, showFuture, today]);
 
   // 保存される仕訳 + 計算で生まれる仕訳（分けない）。混合後に必ずソートし直す。
-  const source = useMemo(() => {
-    if (!ledger) return [];
-    return displayEntriesForAsOf(ledger, expandTo, today).sort((a, b) => {
-      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
-      if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
-      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-    });
+  const sourceDisplay = useMemo(() => {
+    if (!ledger) return null;
+    const display = displayEntriesResultForAsOf(ledger, expandTo, today);
+    return {
+      ...display,
+      entries: display.entries.sort((a, b) => {
+        if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+        if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      }),
+    };
   }, [ledger, expandTo, today]);
+  const source = useMemo(() => sourceDisplay?.entries ?? [], [sourceDisplay]);
 
   const filtered = useMemo(() => {
     return source.filter((e) => {
@@ -218,6 +225,11 @@ export function Journal({
       <h1 className="screen-title" id="journal-title">
         {t('journal.title')}
       </h1>
+
+      <InvestmentProjectionTruncationNotice
+        truncations={sourceDisplay?.investmentProjectionTruncations ?? []}
+        accounts={ledger?.accounts ?? []}
+      />
 
       {filterAccount || normalExpenseOnly ? (
         <div className="toolbar">
