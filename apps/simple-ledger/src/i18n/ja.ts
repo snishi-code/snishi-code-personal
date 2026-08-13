@@ -476,12 +476,18 @@ export const ja = {
   'settings.resetAllDesc': '台帳・科目・仕訳・スナップショットをすべて削除し、初期状態に戻します。',
   'settings.about': 'アプリ情報',
   'settings.ledgerName': '台帳名',
+  'settings.fractionDigits': '小数の表示桁数',
+  'settings.fractionDigitsHint':
+    '入力できる小数の桁もこの設定に従います。保存されている金額は変わりません。',
   'settings.currency': '通貨コード',
   'settings.version': 'バージョン',
   'settings.schemaVersion': 'スキーマ版',
   'settings.revision': 'リビジョン',
   'settings.offlineNote': 'データは端末内にのみ保存され、外部へ送信されません。',
 
+  // スナップショット理由コード（保存は 'import' / 'restore'・表示はここで訳す）。
+  'snapshot.reason.import': 'import前',
+  'snapshot.reason.restore': '復元前',
   'snapshot.restore': '復元',
   'snapshot.delete': '削除',
   'snapshot.empty': 'スナップショットはありません。',
@@ -678,6 +684,7 @@ export const ja = {
     '1 = カードの次回引落などの単発。毎月同額のローンは回数を入れると、毎月の振替仕訳をまとめて登録します（合計は返済額に一致）。',
   'cashflow.repayPerMonth': '月あたり約 {amount} × {count} 回',
   'error.repay.countInvalid': '返済回数は 1 以上の整数で入力してください。',
+  'error.amount.overflow': '金額の合計が扱える範囲を超えました。',
   'error.repay.totalTooSmall': '返済総額が回数より少なく、金額 0 の回ができるため登録できません。',
   'error.repay.liabilityRequired': '返済先はカード・未払 / ローンの負債科目を選んでください。',
 

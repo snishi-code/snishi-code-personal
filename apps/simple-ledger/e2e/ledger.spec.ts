@@ -113,3 +113,66 @@ test('import: 他アプリ/v1 の JSON は not-our-file で拒否され、既存
     'このアプリの書き出しファイルではありません',
   );
 });
+
+test('表示桁数 2 で小数を入力すると、表示・保存とも 1/100 単位で一致する (v11)', async ({
+  page,
+}) => {
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
+  await page.goto('./');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+
+  // 設定で表示桁数を 2 へ。
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.settings')).click();
+  await expect(page.locator(ui('settings.view'))).toBeVisible();
+  await page.locator(`${ui('settings.fractionDigits')} button`, { hasText: '2' }).click();
+  await page
+    .locator(ui('settings.view'))
+    .getByRole('button', { name: '保存', exact: true })
+    .click();
+
+  // 小数で支出を登録。
+  await page.locator(ui('nav.home')).click();
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible();
+  await page.locator(ui('dashboard.entry.expense')).click();
+  await page.locator(ui('journal.entry.item')).fill('小数E2E');
+  const amount = page.locator(ui('journal.entry.amount'));
+  await expect(amount).toHaveAttribute('inputmode', 'decimal');
+  await amount.fill('12.34');
+  await page
+    .locator(`${ui('journal.entry.flow.source')} label.chip`)
+    .first()
+    .click();
+  await page
+    .locator(`${ui('journal.entry.flow.destination')} label.chip`)
+    .first()
+    .click();
+  await page.locator(ui('journal.entry.save')).click();
+  await expect(page.locator(ui('journal.entry.save'))).toBeHidden();
+
+  // 表示 = '12.34 円'（digits=2）・保存 = 1234 minor（IndexedDB を直接確認 = 100 倍バグ検出）。
+  await expect(page.locator(ui('dashboard.journal.preview'))).toContainText('12.34');
+  const storedAmount = await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open('simple-ledger-v2');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    const entries = await new Promise<{ description: string; lines: { amount: number }[] }[]>(
+      (resolve, reject) => {
+        const tx = db.transaction('journalEntries', 'readonly');
+        const req = tx.objectStore('journalEntries').getAll();
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      },
+    );
+    db.close();
+    return entries.find((e) => e.description === '小数E2E')?.lines[0]?.amount ?? null;
+  });
+  expect(storedAmount, '保存は 1/100 単位の整数（12.34 → 1234）').toBe(1234);
+
+  // 再読込後も同じ表示（永続化の確認）。
+  await page.reload();
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(ui('dashboard.journal.preview'))).toContainText('12.34');
+});

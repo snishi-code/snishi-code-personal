@@ -55,7 +55,7 @@ describe('export/import round trip', () => {
     await importFromJsonText(text);
     const snaps = await listSnapshots();
     expect(snaps.length).toBeGreaterThan(0);
-    expect(snaps[0]?.reason).toBe('import前');
+    expect(snaps[0]?.reason).toBe('import'); // v11: reason は理由コード
   });
 
   it('廃止済みの分類印を未知キーとして strip し、旧 JSON の取り込みは受理する', async () => {
@@ -279,11 +279,11 @@ describe('export package 形状', () => {
     expect(pkg).toHaveProperty('settings');
   });
 
-  it('schemaVersion 10 で、廃止済みフィールドを含まない', async () => {
+  it('schemaVersion 11 で、廃止済みフィールドを含まない', async () => {
     const ledger = await seedWithEntry();
     const pkg = buildExportPackage(ledger);
     expect(pkg.schemaVersion).toBe(SCHEMA_VERSION);
-    expect(pkg.schemaVersion).toBe(10);
+    expect(pkg.schemaVersion).toBe(11);
     expect(pkg).not.toHaveProperty('cashflowSchedules');
     // v10 で撤去した CSV 取込の 3 配列も含まない。
     expect(pkg).not.toHaveProperty('importProfiles');

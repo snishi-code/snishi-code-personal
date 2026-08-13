@@ -12,6 +12,8 @@ import { sortAccounts } from '../domain/accountOrder';
 import { useLedger } from '../state/store';
 import { todayLocal } from '../util/time';
 import { t } from '../i18n';
+import { parseAmountToMinor, sanitizeAmountText } from './amountText';
+import { useMoneyDigits } from './money';
 import { UI } from '../ui-contract';
 import type { Account } from '../domain/types';
 import type { OpeningInput } from '../data/repository';
@@ -32,13 +34,14 @@ export function OnboardingSheet({ onClose }: { onClose: () => void }) {
       .flatMap((entry) => entry.lines.map((line) => line.accountId)),
   );
 
+  const digits = useMoneyDigits();
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [date, setDate] = useState(todayLocal());
   const [submitting, setSubmitting] = useState(false);
 
   const filled = Object.entries(amounts).filter(
     ([accountId, v]) =>
-      !registeredAccountIds.has(accountId) && v !== '' && Number.parseInt(v, 10) > 0,
+      !registeredAccountIds.has(accountId) && v !== '' && (parseAmountToMinor(v) ?? 0) > 0,
   );
   // 何か入力してあれば閉じる前に確認する（'0' だけの入力も含めて保護する）。
   const dirty = Object.values(amounts).some((v) => v !== '');
@@ -50,7 +53,7 @@ export function OnboardingSheet({ onClose }: { onClose: () => void }) {
     try {
       const inputs: OpeningInput[] = filled.map(([accountId, v]) => ({
         accountId,
-        amount: Number.parseInt(v, 10),
+        amount: parseAmountToMinor(v) ?? 0,
         date,
       }));
       await createOpenings(inputs);
@@ -74,9 +77,9 @@ export function OnboardingSheet({ onClose }: { onClose: () => void }) {
         <TextInput
           key={a.id}
           label={a.name}
-          inputMode="numeric"
+          inputMode={digits === 0 ? 'numeric' : 'decimal'}
           value={amounts[a.id] ?? ''}
-          onChange={(v) => setAmount(a.id, v)}
+          onChange={(v) => setAmount(a.id, sanitizeAmountText(v, digits))}
           placeholder={t('onboarding.amountPlaceholder')}
           dataUi={UI.onboarding.amount}
         />

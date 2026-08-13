@@ -96,7 +96,7 @@ describe('定期ルールの初回起票日', () => {
     const expense = ledger.accounts.find((account) => account.role === 'expense-category')!;
     await createRecurringRule({
       name: '月末ルール',
-      amount: 1000,
+      amount: 100000,
       dayOfMonth: 31,
       debitAccountId: expense.id,
       creditAccountId: cash.id,
@@ -118,7 +118,7 @@ describe('定期ルールの初回起票日', () => {
     const expense = ledger.accounts.find((account) => account.role === 'expense-category')!;
     await createRecurringRule({
       name: '月末ルール（据え置き）',
-      amount: 1000,
+      amount: 100000,
       dayOfMonth: 31,
       debitAccountId: expense.id,
       creditAccountId: cash.id,
@@ -155,7 +155,7 @@ describe('定期ルールの初回起票日', () => {
     const saved = (await loadLedger()).recurringRules.find(
       (rule) => rule.name === '月末ルール（据え置き）',
     );
-    expect(saved).toMatchObject({ startMonth: '2031-02', dayOfMonth: 31, amount: 2000 });
+    expect(saved).toMatchObject({ startMonth: '2031-02', dayOfMonth: 31, amount: 200000 });
   });
 
   it('日付欄の日を変えたときは新しい dayOfMonth を保存する', async () => {
@@ -164,7 +164,7 @@ describe('定期ルールの初回起票日', () => {
     const expense = ledger.accounts.find((account) => account.role === 'expense-category')!;
     await createRecurringRule({
       name: '月末ルール（変更）',
-      amount: 1000,
+      amount: 100000,
       dayOfMonth: 31,
       debitAccountId: expense.id,
       creditAccountId: cash.id,
@@ -245,7 +245,7 @@ describe('費用行きルール', () => {
     const item = ledger.monthlyCostItems.find((m) => m.id.startsWith(`ccr-${saved!.id}-`));
     expect(item).toMatchObject({
       name: '年払い保険',
-      amount: 60000,
+      amount: 6000000,
       expenseAccountId: saved!.spreadExpenseAccountId,
     });
   });
@@ -295,7 +295,7 @@ describe('費用行きルール', () => {
     // 起票済みぶんの item は起票日開始・当月末終了で毎月生まれて消える。
     const today = todayLocal();
     const item = ledger.monthlyCostItems.find((m) => m.id.startsWith(`ccr-${saved!.id}-`));
-    expect(item).toMatchObject({ name: '毎月サブスク', amount: 1000, startDate: today });
+    expect(item).toMatchObject({ name: '毎月サブスク', amount: 100000, startDate: today });
     expect(item!.endDate).toBe(clampDayToMonth(today.slice(0, 7), 31));
   });
 });

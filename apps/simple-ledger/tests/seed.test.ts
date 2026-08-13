@@ -22,10 +22,11 @@ describe('初期設定 JSON（seed.json）', () => {
     expect(ids.size).toBe(accounts.length);
   });
 
-  it('既定設定は locale=ja / 通貨 JPY', () => {
+  it('既定設定は 通貨=円 / 表示桁数 0（locale は v11 で撤去済み）', () => {
     const s = defaultSettings();
-    expect(s.locale).toBe('ja');
-    expect(s.currency).toBe('JPY');
+    expect(s.currency).toBe('円');
+    expect(s.displayFractionDigits).toBe(0);
+    expect('locale' in s).toBe(false);
     expect(s.ledgerName.length).toBeGreaterThan(0);
   });
 });

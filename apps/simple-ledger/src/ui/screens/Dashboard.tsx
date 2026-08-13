@@ -16,7 +16,7 @@ import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
 import { displayEntriesForAsOf } from '../../domain/reportEntries';
 import { todayLocal } from '../../util/time';
 import { buildSectionTrends } from './breakdownData';
-import { Money, moneyText } from '../money';
+import { Money, moneyText, useMoneyDigits } from '../money';
 import { periodLabel } from '../periodLabel';
 import { EntryListItem } from '../EntryListItem';
 import { TrendChart } from '../components/TrendChart';
@@ -110,7 +110,7 @@ export function Dashboard({
 
   const trend = useMemo(() => buildSectionTrends(period, ledger, today), [period, ledger, today]);
 
-  const currency = ledger?.settings.currency ?? 'JPY';
+  const currency = ledger?.settings.currency ?? '';
 
   return (
     <>
@@ -312,6 +312,7 @@ function StatButton({
   onClick: () => void;
   dataUi?: string;
 }) {
+  const digits = useMoneyDigits();
   return (
     <button
       type="button"
@@ -319,7 +320,7 @@ function StatButton({
       onClick={onClick}
       aria-label={t('dashboard.statDetail', {
         label,
-        amount: moneyText(amount, currency, signed),
+        amount: moneyText(amount, currency, digits, signed),
       })}
       data-ui={dataUi}
     >

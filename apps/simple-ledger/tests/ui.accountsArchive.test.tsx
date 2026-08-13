@@ -66,7 +66,7 @@ describe('勘定科目のアーカイブ', () => {
   it('残高が残る資産は振替シートを経由し、振替 + アーカイブが 1 回で終わる', async () => {
     const ledger = await loadLedger();
     const charge = ledger.accounts.find((a) => a.name === 'チャージ残高')!;
-    await createOpenings([{ accountId: charge.id, amount: 5000, date: '2020-01-01' }]);
+    await createOpenings([{ accountId: charge.id, amount: 500000, date: '2020-01-01' }]);
 
     await renderReady();
     fireEvent.click(await screen.findByRole('button', { name: 'アーカイブ: チャージ残高' }));
@@ -110,7 +110,7 @@ describe('勘定科目のアーカイブ', () => {
   it('振替シートをキャンセルするとアーカイブされない', async () => {
     const ledger = await loadLedger();
     const charge = ledger.accounts.find((a) => a.name === 'チャージ残高')!;
-    await createOpenings([{ accountId: charge.id, amount: 5000, date: '2020-01-01' }]);
+    await createOpenings([{ accountId: charge.id, amount: 500000, date: '2020-01-01' }]);
 
     await renderReady();
     fireEvent.click(await screen.findByRole('button', { name: 'アーカイブ: チャージ残高' }));
@@ -139,7 +139,7 @@ describe('勘定科目のアーカイブ', () => {
         description: '一時費用',
         debitAccountId: fixed.id,
         creditAccountId: cash.id,
-        amount: 1_000,
+        amount: 100_000,
         kind: 'normal',
       }),
     );
@@ -151,7 +151,7 @@ describe('勘定科目のアーカイブ', () => {
       const after = await loadLedger();
       const archived = after.accounts.find((account) => account.id === fixed.id)!;
       expect(archived).toMatchObject({ archived: true, endDate: today });
-      expect(accountBalance(fixed.id, 'expense', after.journalEntries)).toBe(1_000);
+      expect(accountBalance(fixed.id, 'expense', after.journalEntries)).toBe(100_000); // UI 入力 1000 = 100,000 minor
     });
     expect(document.querySelector(`[data-ui="${UI.journal.entry.save}"]`)).toBeNull();
   });
@@ -168,7 +168,7 @@ describe('勘定科目のアーカイブ', () => {
         description: '固定費の累計',
         debitAccountId: fixed.id,
         creditAccountId: cash.id,
-        amount: 1_000,
+        amount: 100_000,
         kind: 'normal',
       }),
     );
@@ -196,7 +196,7 @@ describe('勘定科目のアーカイブ', () => {
       const archived = after.accounts.find((account) => account.id === fixed.id)!;
       expect(archived).toMatchObject({ archived: true, endDate: today });
       expect(accountBalance(fixed.id, 'expense', after.journalEntries)).toBe(0);
-      expect(accountBalance(variable.id, 'expense', after.journalEntries)).toBe(1_000);
+      expect(accountBalance(variable.id, 'expense', after.journalEntries)).toBe(100_000); // UI 入力 1000 = 100,000 minor
     });
   });
 });

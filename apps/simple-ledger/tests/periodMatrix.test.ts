@@ -239,7 +239,7 @@ describe('buildPeriodMatrix（全体）', () => {
         createdAt: 'x',
         updatedAt: 'x',
       },
-      settings: { ledgerName: 'test', currency: 'JPY', locale: 'ja' },
+      settings: { ledgerName: 'test', currency: 'JPY', displayFractionDigits: 0 },
       accounts,
       journalEntries: [
         entry('opening', '2025-01-01', 'cash', 'equity', 500_000),

@@ -9,6 +9,7 @@ import { compareAccountOrder } from './accountOrder';
 import { naturalDelta } from './accounting';
 import { isContinuousCostMonthlyAllocationEntry } from './livingCost';
 import type { Account, JournalEntry } from './types';
+import { assertSafeAmount } from './safeSum';
 
 export type PeriodMatrixScope =
   | { mode: 'year'; year: number }
@@ -184,8 +185,9 @@ export function buildPeriodMatrix(
         if (!account) continue;
         const delta = naturalDelta(account, line.side, line.amount);
 
-        if (account.type === 'asset') assetsBalance += delta;
-        if (account.type === 'liability') liabilitiesBalance += delta;
+        if (account.type === 'asset') assetsBalance = assertSafeAmount(assetsBalance + delta);
+        if (account.type === 'liability')
+          liabilitiesBalance = assertSafeAmount(liabilitiesBalance + delta);
         if (flowColumnIndex === undefined) continue;
 
         if (account.type === 'revenue') addValue(revenue, flowColumnIndex, delta);

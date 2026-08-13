@@ -70,7 +70,7 @@ function ledgerOf(journalEntries: JournalEntry[]): Ledger {
       createdAt: ts,
       updatedAt: ts,
     },
-    settings: { ledgerName: 'test', currency: 'JPY', locale: 'ja' },
+    settings: { ledgerName: 'test', currency: 'JPY', displayFractionDigits: 0 },
     accounts,
     journalEntries,
     tags: [],

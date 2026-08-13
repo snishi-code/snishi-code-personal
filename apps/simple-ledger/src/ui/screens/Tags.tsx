@@ -29,7 +29,7 @@ export function Tags() {
   const [showArchived, setShowArchived] = useState(false);
   const [period, setPeriod] = useState<Period>('month');
 
-  const currency = ledger?.settings.currency ?? 'JPY';
+  const currency = ledger?.settings.currency ?? '';
   const tags = ledger?.tags ?? [];
   const visible = tags.filter((tg) => showArchived || !tg.archived);
 

@@ -46,7 +46,7 @@ function ReadyView({ date }: { date: string }) {
   ) : null;
 }
 
-async function seedRule(amount = 1_000): Promise<RecurringRule> {
+async function seedRule(amount = 100_000): Promise<RecurringRule> {
   const ledger = await loadLedger();
   const bank = ledger.accounts.find((account) => account.role === 'daily-asset')!;
   const expense = ledger.accounts.find((account) => account.role === 'expense-category')!;
@@ -188,7 +188,7 @@ describe('定期ルールの金額変更範囲', () => {
 
     expect(
       (await loadLedger()).recurringRules.find((rule) => rule.id === original.id)?.amount,
-    ).toBe(1_000);
+    ).toBe(100_000);
     fireEvent.click(
       document.querySelector(`[data-ui="${UI.allocations.recurringAmountChangeCancel}"]`)!,
     );
@@ -201,13 +201,13 @@ describe('定期ルールの金額変更範囲', () => {
     );
     expect(
       (await loadLedger()).recurringRules.find((rule) => rule.id === original.id)?.amount,
-    ).toBe(1_000);
+    ).toBe(100_000);
   });
 
   it('金額変更で分けたルールも、系譜と重ならなければ期間と位相を編集できる', async () => {
     const original = await seedRule();
     await repository.upsertRecurringRule(
-      { ...original, amount: 1500 },
+      { ...original, amount: 150000 },
       { amountChangeMode: 'split', effectiveDate: '2026-04-18' },
     );
     render(<View />);
@@ -272,7 +272,7 @@ describe('定期ルールの金額変更範囲', () => {
     });
     expect(
       (await loadLedger()).recurringRules.find((rule) => rule.id === original.id)?.amount,
-    ).toBe(1_000);
+    ).toBe(100_000);
   });
 
   it('保存本体の後の自動起票だけが失敗しても、保存済みとして判断画面を閉じる', async () => {
@@ -292,11 +292,11 @@ describe('定期ルールの金額変更範囲', () => {
     });
     const ledger = await loadLedger();
     expect(ledger.recurringRules.find((rule) => rule.id === original.id)).toMatchObject({
-      amount: 1_000,
+      amount: 100000,
       endDate: '2026-04-18',
     });
     expect(ledger.recurringRules.find((rule) => rule.id !== original.id)).toMatchObject({
-      amount: 1_500,
+      amount: 150000,
       startDate: '2026-04-18',
     });
   });
@@ -372,14 +372,14 @@ describe('定期ルールの金額変更範囲', () => {
 
     const ledger = await loadLedger();
     expect(ledger.recurringRules).toHaveLength(1);
-    expect(ledger.recurringRules[0]).toMatchObject({ id: original.id, amount: 1_500 });
+    expect(ledger.recurringRules[0]).toMatchObject({ id: original.id, amount: 150_000 });
     expect(
       ledger.monthlyCostItems.find((item) => item.id === `ccr-${original.id}-2026-04`),
-    ).toMatchObject({ amount: 1_500 });
+    ).toMatchObject({ amount: 150_000 });
     expect(
       ledger.journalEntries
         .find((entry) => entry.metadata?.recurringRuleId === original.id)
-        ?.lines.every((line) => line.amount === 1_500),
+        ?.lines.every((line) => line.amount === 150_000),
     ).toBe(true);
   });
 
@@ -407,8 +407,8 @@ describe('定期ルールの金額変更範囲', () => {
     let ledger = await loadLedger();
     const previous = ledger.recurringRules.find((rule) => rule.id === original.id)!;
     const successor = ledger.recurringRules.find((rule) => rule.id !== original.id)!;
-    expect(previous).toMatchObject({ amount: 1_000, endDate: '2026-04-18' });
-    expect(successor).toMatchObject({ amount: 1_500, startDate: '2026-04-18' });
+    expect(previous).toMatchObject({ amount: 100000, endDate: '2026-04-18' });
+    expect(successor).toMatchObject({ amount: 150000, startDate: '2026-04-18' });
     expect(successor.startMonth).toBe(original.startMonth);
     expect(successor.dayOfMonth).toBe(original.dayOfMonth);
     expect(ledger.monthlyCostItems).toHaveLength(0);
@@ -420,7 +420,7 @@ describe('定期ルールの金額変更範囲', () => {
     );
     expect(
       ledger.monthlyCostItems.find((item) => item.id === `ccr-${successor.id}-2026-04`),
-    ).toMatchObject({ amount: 1_500, startDate: '2026-04-20' });
+    ).toMatchObject({ amount: 150000, startDate: '2026-04-20' });
   });
 
   it('4/22の分岐では旧ルールの4/20分を残し、新ルールは翌月から起票する', async () => {
@@ -441,12 +441,12 @@ describe('定期ルールの金額変更範囲', () => {
     let ledger = await loadLedger();
     const successor = ledger.recurringRules.find((rule) => rule.id !== original.id)!;
     expect(ledger.recurringRules.find((rule) => rule.id === original.id)).toMatchObject({
-      amount: 1_000,
+      amount: 100000,
       endDate: '2026-04-22',
     });
     expect(
       ledger.monthlyCostItems.find((item) => item.id === `ccr-${original.id}-2026-04`),
-    ).toMatchObject({ amount: 1_000, startDate: '2026-04-20' });
+    ).toMatchObject({ amount: 100000, startDate: '2026-04-20' });
     expect(
       ledger.monthlyCostItems.find((item) => item.id === `ccr-${successor.id}-2026-04`),
     ).toBeUndefined();
@@ -455,6 +455,6 @@ describe('定期ルールの金額変更範囲', () => {
     ledger = await loadLedger();
     expect(
       ledger.monthlyCostItems.find((item) => item.id === `ccr-${successor.id}-2026-05`),
-    ).toMatchObject({ amount: 1_500, startDate: '2026-05-20' });
+    ).toMatchObject({ amount: 150000, startDate: '2026-05-20' });
   });
 });

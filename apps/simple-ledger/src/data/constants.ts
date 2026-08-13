@@ -11,7 +11,9 @@
 export const DB_NAME = 'simple-ledger-v2' as const;
 
 /**
- * IndexedDB のバージョン。version 10 で CSV 取込の 3 ストアを現行構成から外した
+ * IndexedDB のバージョン。version 11 は SCHEMA_VERSION 11（金額の 1/100 単位化）と対で上げた
+ * （store 構成は不変だが保存値の意味 = スケールが変わるため、版対応 1:1 の方針で両方上げる）。
+ * version 10 で CSV 取込の 3 ストアを現行構成から外した
  * （機能ごと全撤去・SCHEMA_VERSION 10 と対で上げる）。
  * version 8〜9 は CSV 取込（Import Profile）の追加とその改版だった。
  * version 7 で予定キャッシュフロー（cashflowSchedules）ストアを
@@ -20,7 +22,7 @@ export const DB_NAME = 'simple-ledger-v2' as const;
  * schemaVersion 検査で復旧面へ送られ、復旧面の「DB 初期化」= DB 削除でのみ消える。
  * 黙って削除しない・監査 P1-1）。
  */
-export const DB_VERSION = 10 as const;
+export const DB_VERSION = 11 as const;
 
 /** エクスポート/import 照合用のアプリ ID（封筒 appId）。v1 とは別 ID。 */
 export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
@@ -28,6 +30,12 @@ export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
 /**
  * 現行スキーマ版。v2 は v1 の最終形（v16 相当の最新モデル）を **1** として開始した
  * （レガシー migration は持たない・仕様§16）。互換性のない変更ごとに +1 する。
+ * version 11 = 金額の 1/100 単位化（作者決定 2026-08-12/13・指示書 v3）。全金額フィールドを
+ * 「1/100 単位の整数」（minor）として解釈する（例: 1,234.56 → 123456・100円 → 10000）。
+ * あわせて settings.locale を撤去（言語は端末設定・Part B で使用）、
+ * settings.displayFractionDigits（表示桁数 0|1|2・既定 0・入力の刻みも連動）を新設、
+ * スナップショット reason を理由コード（'import' / 'restore'）へ変更。
+ * 旧 v10 実データは _workspace-management/scripts/convert-ledger-v10-to-v11.mjs で単発変換する。
  * version 10 = CSV取込一式の撤去（実ユーズの結論・作者決定 2026-08-11）。
  * 「ざっくり登録 + 残高補正」の使い方に明細単位の CSV 取込は合わない＝使わない死荷重として
  * 型・schema・store・UI・交換 JSON の 3 配列と EntryMetadata の取込由来メタデータを全撤去。
@@ -46,7 +54,7 @@ export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
  * migration step は追加しない（作者決定＝後方互換を持たない）。旧版 JSON /
  * スナップショットは unsupported-version として fail-closed に拒否される。
  */
-export const SCHEMA_VERSION = 10 as const;
+export const SCHEMA_VERSION = 11 as const;
 
 /**
  * revision は JSON / IndexedDB の双方で安全な整数だけを扱う。

@@ -24,6 +24,8 @@ import {
   type FormMode,
 } from '../entryModes';
 import { quickSpanEndDate } from '../ccQuickSpan';
+import { formatMinorForInput, parseAmountToMinor, sanitizeAmountText } from '../amountText';
+import { useMoneyDigits } from '../money';
 import { useLedger } from '../../state/store';
 import {
   reversalInput,
@@ -97,6 +99,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const accounts = ledger?.accounts ?? [];
   const tags = ledger?.tags ?? [];
 
+  const fractionDigits = useMoneyDigits();
   const fixed = init.kind === 'transfer-fixed' ? init.fixed : null;
   const [mode, setMode] = useState<FormMode>(
     init.kind === 'create'
@@ -107,11 +110,22 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           ? 'transfer'
           : 'manual',
   );
+  // 編集フォームは「画面で見えているもの」を編集する = 設定桁で丸めた金額が初期値。
+  // 粗い設定で開いて保存し直すと、その明示操作で丸めた値が保存される（作者決定 2026-08-13:
+  // 「途中で表示桁を変えたら消えるが、ユーザー責任・補正で吸収できる」）。
+  const roundToDisplay = (input: SimpleEntryInput): SimpleEntryInput =>
+    input.amount === 0
+      ? input
+      : {
+          ...input,
+          amount:
+            parseAmountToMinor(formatMinorForInput(input.amount, fractionDigits)) ?? input.amount,
+        };
   const [form, setForm] = useState<SimpleEntryInput>(
     init.kind === 'edit'
-      ? toSimpleInput(init.entry)
+      ? roundToDisplay(toSimpleInput(init.entry))
       : init.kind === 'reversal'
-        ? reversalInput(init.source)
+        ? roundToDisplay(reversalInput(init.source))
         : init.kind === 'transfer-fixed'
           ? {
               date: init.fixed.date ?? todayLocal(),
@@ -125,7 +139,9 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           : emptyInput(),
   );
   const [amountText, setAmountText] = useState<string>(
-    init.kind === 'create' ? '' : String(form.amount || ''),
+    init.kind === 'create' || form.amount === 0
+      ? ''
+      : formatMinorForInput(form.amount, fractionDigits),
   );
   const [errors, setErrors] = useState<EntryValidationError[]>([]);
   const [flowError, setFlowError] = useState<string | undefined>(undefined);
@@ -202,9 +218,9 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     setForm((f) => ({ ...f, [side === 'debit' ? 'debitAccountId' : 'creditAccountId']: id }));
 
   const onAmountChange = (v: string) => {
-    const digits = v.replace(/[^\d]/g, '');
-    setAmountText(digits);
-    setForm((f) => ({ ...f, amount: digits === '' ? 0 : Number.parseInt(digits, 10) }));
+    const text = sanitizeAmountText(v, fractionDigits);
+    setAmountText(text);
+    setForm((f) => ({ ...f, amount: parseAmountToMinor(text) ?? 0 }));
   };
 
   function resolveInputMode(): InputMode {
@@ -228,7 +244,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     const accBad = active && repayAccountId === '';
     // 回数 > 金額は 0 の回を作る（保存境界 buildRepaymentEntries と同じ条件で先に弾く）。
     const countBad =
-      active && (!Number.isInteger(count) || count < 1 || (form.amount >= 1 && count > form.amount));
+      active &&
+      (!Number.isInteger(count) || count < 1 || (form.amount >= 1 && count > form.amount));
     setRepayAccountError(accBad);
     setRepayCountError(countBad);
     return { accBad, countBad };
@@ -402,7 +419,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     <TextInput
       label={t('entry.amount')}
       required
-      inputMode="numeric"
+      inputMode={fractionDigits === 0 ? 'numeric' : 'decimal'}
       value={amountText}
       onChange={onAmountChange}
       error={errorText(errors, 'amount-invalid')}

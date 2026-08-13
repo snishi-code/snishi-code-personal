@@ -25,6 +25,8 @@ import { newId } from '../../domain/ids';
 import { nowIso, todayLocal } from '../../util/time';
 import { boxForRole, type AccountBox } from '../accountBoxes';
 import { errorText, t } from '../../i18n';
+import { parseAmountToMinor, sanitizeAmountText } from '../amountText';
+import { useMoneyDigits } from '../money';
 import { UI } from '../../ui-contract';
 
 export function AccountSheet({
@@ -50,6 +52,7 @@ export function AccountSheet({
   // 「自由に動かせる」は現預金の箱のみ・既定 ON。OFF のときだけ movable=false を保存する
   // （Suica・チャージ残高など、資金繰りの原資に数えない例外側に印を付ける）。
   const [movable, setMovable] = useState(existing ? existing.movable !== false : true);
+  const digits = useMoneyDigits();
   const [openingAmountText, setOpeningAmountText] = useState('');
   const [openingDate, setOpeningDate] = useState(todayLocal());
   const [repaymentAccountId, setRepaymentAccountId] = useState(existing?.repaymentAccountId ?? '');
@@ -124,8 +127,7 @@ export function AccountSheet({
     }),
   ];
   const repaymentDay = repaymentDayText === '' ? null : Number.parseInt(repaymentDayText, 10);
-  const openingAmount =
-    openingAmountText === '' ? null : Number.parseInt(openingAmountText.replace(/[^\d]/g, ''), 10);
+  const openingAmount = openingAmountText === '' ? null : parseAmountToMinor(openingAmountText);
 
   async function doSave(renameArchivedConflicts: boolean) {
     const trimmed = name.trim();
@@ -393,9 +395,9 @@ export function AccountSheet({
           <>
             <TextInput
               label={t('accounts.openingAmount')}
-              inputMode="numeric"
+              inputMode={digits === 0 ? 'numeric' : 'decimal'}
               value={openingAmountText}
-              onChange={(v) => setOpeningAmountText(v.replace(/[^\d]/g, ''))}
+              onChange={(v) => setOpeningAmountText(sanitizeAmountText(v, digits))}
               hint={t('accounts.openingHint')}
               dataUi={UI.accounts.openingAmount}
             />

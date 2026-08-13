@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import './setup';
 import { createAdjustment, createOpening, loadLedger, updateOpening } from '../src/data/repository';
 import { accountBalance } from '../src/domain/accounting';
-import { parseSignedAmountText, sanitizeSignedAmountText } from '../src/ui/amountText';
+import { parseAmountToMinor, sanitizeSignedAmountText } from '../src/ui/amountText';
 import { LedgerError } from '../src/domain/errors';
 
 async function cashAccount() {
@@ -71,18 +71,24 @@ describe('負の実残高の補正', () => {
   });
 });
 
-describe('amountText（符号付き金額テキスト）', () => {
-  it('sanitize: 先頭の - を 1 つだけ許す', () => {
-    expect(sanitizeSignedAmountText('-3000')).toBe('-3000');
-    expect(sanitizeSignedAmountText('3-000')).toBe('3000');
-    expect(sanitizeSignedAmountText('--12a')).toBe('-12');
-    expect(sanitizeSignedAmountText('abc')).toBe('');
+describe('amountText（符号付き金額テキスト・v11 = minor 変換）', () => {
+  it('sanitize: 先頭の - を 1 つだけ許す（digits=0 は小数点も捨てる）', () => {
+    expect(sanitizeSignedAmountText('-3000', 0)).toBe('-3000');
+    expect(sanitizeSignedAmountText('3-000', 0)).toBe('3000');
+    expect(sanitizeSignedAmountText('--12a', 0)).toBe('-12');
+    expect(sanitizeSignedAmountText('abc', 0)).toBe('');
+    expect(sanitizeSignedAmountText('-12.34', 2)).toBe('-12.34');
+    expect(sanitizeSignedAmountText('-12.34', 0)).toBe('-1234');
   });
 
-  it('parse: 空と "-" のみは null', () => {
-    expect(parseSignedAmountText('')).toBeNull();
-    expect(parseSignedAmountText('-')).toBeNull();
-    expect(parseSignedAmountText('-3000')).toBe(-3000);
-    expect(parseSignedAmountText('42')).toBe(42);
+  it('parse: 空と "-" のみは null（テキスト → minor・float 経由なし）', () => {
+    expect(parseAmountToMinor('')).toBeNull();
+    expect(parseAmountToMinor('-')).toBeNull();
+    expect(parseAmountToMinor('-3000')).toBe(-300000);
+    expect(parseAmountToMinor('42')).toBe(4200);
+    expect(parseAmountToMinor('19.99')).toBe(1999);
+    expect(parseAmountToMinor('12.')).toBe(1200);
+    expect(parseAmountToMinor('.5')).toBe(50);
+    expect(parseAmountToMinor('-0.5')).toBe(-50);
   });
 });

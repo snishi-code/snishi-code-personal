@@ -284,9 +284,10 @@ export interface JournalEntry {
 
 export interface Settings {
   ledgerName: string;
-  /** ISO 4217 風のコード。MVP は表示用途のみ（換算はしない）。 */
+  /** 通貨 = ただの単位文字列（自由入力・後置表示・換算/検証はしない。ISO 4217 に依存しない）。 */
   currency: string;
-  locale: 'ja';
+  /** 表示する小数桁数（0|1|2・既定 0）。入力欄の刻みも連動する。保存値は常に 1/100 単位。 */
+  displayFractionDigits: 0 | 1 | 2;
 }
 
 export interface LedgerMeta {

@@ -25,6 +25,10 @@ import type { Account, JournalEntry } from '../../domain/types';
 import { Money } from '../money';
 import { TrendChart, type TrendPoint } from '../components/TrendChart';
 import { errorText, t } from '../../i18n';
+import { formatMinorForInput, parseAmountToMinor, sanitizeAmountText } from '../amountText';
+import { useMoneyDigits } from '../money';
+import { formatMoney } from '../../util/format';
+import { monthlyAmounts } from '../../domain/allocation';
 import { UI } from '../../ui-contract';
 import { ScrollTopButton } from '../ScrollTopButton';
 
@@ -54,7 +58,7 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
   // 負債行の展開（登録済みの返済リスト）。行タップ = 新規返済シートとは独立に開閉する。
   const [openRepayments, setOpenRepayments] = useState<ReadonlySet<string>>(new Set());
 
-  const currency = ledger?.settings.currency ?? 'JPY';
+  const currency = ledger?.settings.currency ?? '';
 
   const { projection, liabBalById, futureRows } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
@@ -341,6 +345,7 @@ function RepaymentScheduleSheet({
 }) {
   const { ledger, createRepaymentEntries } = useLedger();
   const accounts = ledger?.accounts ?? [];
+  const currency = ledger?.settings.currency ?? '';
   const today = todayLocal();
 
   const fromOptions = sortAccounts(accounts)
@@ -352,14 +357,20 @@ function RepaymentScheduleSheet({
   const [date, setDate] = useState(
     account.repaymentDay !== undefined ? nextRepaymentDate(today, account.repaymentDay) : today,
   );
-  const [amountText, setAmountText] = useState(balance > 0 ? String(balance) : '');
+  const digits = useMoneyDigits();
+  const [amountText, setAmountText] = useState(
+    balance > 0 ? formatMinorForInput(balance, digits) : '',
+  );
   const [countText, setCountText] = useState('1');
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  const amount = amountText === '' ? 0 : Number.parseInt(amountText, 10);
+  const amount = parseAmountToMinor(amountText) ?? 0;
   const count = countText === '' ? 0 : Number.parseInt(countText, 10);
-  const perMonth = count >= 2 && amount >= count ? Math.round(amount / count) : null;
+  // プレビューは保存側と同じ monthlyAmounts の先頭額（独自の丸めを持たない・指示書v3 §A-2）。
+  // 表示条件 = 最終回 > 0（プレビューが出た = 保存できる、が成立。§R-1 と同条件）。
+  const repayParts = count >= 2 && amount >= count ? monthlyAmounts(amount, count) : null;
+  const perMonth = repayParts !== null && repayParts.at(-1)! > 0 ? repayParts[0]! : null;
 
   async function submit() {
     if (submitting) return;
@@ -439,9 +450,9 @@ function RepaymentScheduleSheet({
         <TextInput
           label={t('cashflow.repayAmount')}
           required
-          inputMode="numeric"
+          inputMode={digits === 0 ? 'numeric' : 'decimal'}
           value={amountText}
-          onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
+          onChange={(v) => setAmountText(sanitizeAmountText(v, digits))}
           hint={t('cashflow.repayAmountHint')}
           dataUi={UI.cashflow.repayAmount}
         />
@@ -457,7 +468,7 @@ function RepaymentScheduleSheet({
         {perMonth !== null ? (
           <p className="field__hint" data-ui={UI.cashflow.repayPerMonth}>
             {t('cashflow.repayPerMonth', {
-              amount: `¥${perMonth.toLocaleString('ja-JP')}`,
+              amount: formatMoney(perMonth, currency, digits),
               count: String(count),
             })}
           </p>

@@ -20,6 +20,7 @@ import {
 } from '../../domain/timelineCalendar';
 import { todayLocal } from '../../util/time';
 import { formatMoney } from '../../util/format';
+import { useMoneyDigits } from '../money';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import { TIMELINE_ACCOUNT_BOXES, timelineBoxForAccount, type AccountAccent } from '../accountBoxes';
@@ -837,6 +838,7 @@ function TimelineRow({
   onSelect: (selection: Selection | null) => void;
   onOpenTarget: (target: TimelineOpenTarget) => void;
 }) {
+  const digits = useMoneyDigits();
   const rowClass = [
     'timeline-calendar__row',
     row.kind === 'box' ? '' : 'timeline-calendar__row--detail',
@@ -909,6 +911,7 @@ function TimelineRow({
               aria-label={`${dot.date} ${t('timeline.flowCount', { count: dot.flows.length })}: ${formatMoney(
                 dot.netChange,
                 currency,
+                digits,
               )}`}
               aria-expanded={selected}
               data-ui={UI.timeline.flowDot}
@@ -1018,6 +1021,7 @@ function TimelineFlowPopover({
   onSelectFlow: (flow: TimelineFlowView) => void;
   onOpenTarget: (target: TimelineOpenTarget) => void;
 }) {
+  const digits = useMoneyDigits();
   const name = (id: string) => accountById.get(id)?.name ?? '—';
   return (
     <div
@@ -1031,7 +1035,7 @@ function TimelineFlowPopover({
         <span
           className={dot.netChange > 0 ? 'amount--pos' : dot.netChange < 0 ? 'amount--neg' : ''}
         >
-          {formatMoney(dot.netChange, currency)}
+          {formatMoney(dot.netChange, currency, digits)}
         </span>
       </p>
       <ul className="list timeline-calendar__flow-list" data-ui={UI.timeline.flowList}>
@@ -1054,7 +1058,7 @@ function TimelineFlowPopover({
                   ・{flow.date}
                 </span>
               </span>
-              <span>{formatMoney(flow.amount, currency)}</span>
+              <span>{formatMoney(flow.amount, currency, digits)}</span>
             </button>
           </li>
         ))}
@@ -1092,6 +1096,7 @@ function TimelineGenerationPopover({
   onSelectItem: (itemId: string) => void;
   onOpenTarget: (target: TimelineOpenTarget) => void;
 }) {
+  const digits = useMoneyDigits();
   const selectedItem = dot.items.find((item) => item.id === selectedItemId);
   return (
     <div
@@ -1113,7 +1118,9 @@ function TimelineGenerationPopover({
               onClick={() => onSelectItem(item.id)}
             >
               <span className="timeline-calendar__flow-name">{item.name}</span>
-              {item.amount !== undefined ? <span>{formatMoney(item.amount, currency)}</span> : null}
+              {item.amount !== undefined ? (
+                <span>{formatMoney(item.amount, currency, digits)}</span>
+              ) : null}
             </button>
           </li>
         ))}
@@ -1250,7 +1257,7 @@ export function TimelineCalendar({
         onShowEndedChange={setShowEnded}
         today={today}
         accounts={ledger?.accounts ?? []}
-        currency={ledger?.settings.currency ?? 'JPY'}
+        currency={ledger?.settings.currency ?? ''}
         onOpenTarget={openTarget}
         onVisibleRangeChange={updateVisibleRange}
         focusDate={center}

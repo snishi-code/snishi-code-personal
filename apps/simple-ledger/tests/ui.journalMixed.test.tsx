@@ -358,15 +358,15 @@ describe('仕訳一覧の混合表示', () => {
     render(<View filter={{ accountId: revenue.id, from: todayLocal(), to: todayLocal() }} />);
 
     const increase = await screen.findByLabelText(
-      `${revenue.name}の残高が増える金額: ${formatMoney(increaseAmount)}`,
+      `${revenue.name}の残高が増える金額: ${formatMoney(increaseAmount, '円', 0)}`,
     );
     const decrease = screen.getByLabelText(
-      `${revenue.name}の残高が減る金額: ${formatMoney(decreaseAmount)}`,
+      `${revenue.name}の残高が減る金額: ${formatMoney(decreaseAmount, '円', 0)}`,
     );
     expect(increase).toHaveClass('amount--pos');
     expect(decrease).toHaveClass('amount--neg');
-    expect(increase).toHaveTextContent(formatMoney(increaseAmount));
-    expect(decrease).toHaveTextContent(formatMoney(decreaseAmount));
+    expect(increase).toHaveTextContent(formatMoney(increaseAmount, '円', 0));
+    expect(decrease).toHaveTextContent(formatMoney(decreaseAmount, '円', 0));
     expect(increase).not.toHaveTextContent('+');
   });
 
@@ -377,11 +377,13 @@ describe('仕訳一覧の混合表示', () => {
 
     expect(
       await screen.findByLabelText(
-        `${asset.name}の残高が増える金額: ${formatMoney(increaseAmount)}`,
+        `${asset.name}の残高が増える金額: ${formatMoney(increaseAmount, '円', 0)}`,
       ),
     ).toHaveClass('amount--pos');
     expect(
-      screen.getByLabelText(`${asset.name}の残高が減る金額: ${formatMoney(decreaseAmount)}`),
+      screen.getByLabelText(
+        `${asset.name}の残高が減る金額: ${formatMoney(decreaseAmount, '円', 0)}`,
+      ),
     ).toHaveClass('amount--neg');
   });
 

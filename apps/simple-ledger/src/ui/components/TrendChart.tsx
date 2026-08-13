@@ -16,8 +16,12 @@ const PAD_X = 10;
 const PLOT_TOP = 12;
 const PLOT_BOTTOM = 116;
 
-function fmtSigned(v: number): string {
-  return `${v < 0 ? '−' : ''}${Math.abs(v).toLocaleString('ja-JP')}`;
+import { formatAmount, type FractionDigits } from '../../util/format';
+import { useMoneyDigits } from '../money';
+
+/** minor → 符号付き数値文字列（単位なし・表示桁は台帳設定に従う）。 */
+function fmtSigned(v: number, digits: FractionDigits): string {
+  return `${v < 0 ? '−' : ''}${formatAmount(Math.abs(v), digits)}`;
 }
 
 export function TrendChart({
@@ -39,6 +43,7 @@ export function TrendChart({
   dataUi?: string;
   pointDataUi?: string;
 }) {
+  const digits = useMoneyDigits();
   if (data.length === 0) {
     return (
       <figure data-ui={dataUi} style={{ margin: 0 }}>
@@ -60,7 +65,7 @@ export function TrendChart({
   const y = (v: number) => zeroY - v * scale;
   const barW = Math.min(step * 0.6, 26);
 
-  const summary = `${title}: ${data.map((d) => `${d.label} ${fmtSigned(d.value)}`).join('、')}`;
+  const summary = `${title}: ${data.map((d) => `${d.label} ${fmtSigned(d.value, digits)}`).join('、')}`;
 
   return (
     <figure data-ui={dataUi} style={{ margin: 0 }}>
@@ -73,7 +78,7 @@ export function TrendChart({
           focusable="false"
         >
           <text className="trend-svg__tick" x={2} y={PLOT_TOP + 3}>
-            {fmtSigned(max)}
+            {fmtSigned(max, digits)}
           </text>
           <line className="trend-svg__zero" x1={PAD_X} x2={VB_W - PAD_X} y1={zeroY} y2={zeroY} />
           <text className="trend-svg__tick" x={2} y={zeroY + 3}>
@@ -81,7 +86,7 @@ export function TrendChart({
           </text>
           {hasNeg ? (
             <text className="trend-svg__tick" x={2} y={PLOT_BOTTOM + 3}>
-              {fmtSigned(-max)}
+              {fmtSigned(-max, digits)}
             </text>
           ) : null}
 
@@ -117,7 +122,7 @@ export function TrendChart({
 
         <div className="trend-x">
           {data.map((d) => {
-            const aria = `${d.label} ${title} ${fmtSigned(d.value)}`;
+            const aria = `${d.label} ${title} ${fmtSigned(d.value, digits)}`;
             return onSelect ? (
               <button
                 key={d.key}

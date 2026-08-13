@@ -95,7 +95,7 @@ function pkg(
     tags: [],
     monthlyCostItems,
     recurringRules: [rule],
-    settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' as const },
+    settings: { ledgerName: '家計簿', currency: 'JPY', displayFractionDigits: 0 },
   };
 }
 

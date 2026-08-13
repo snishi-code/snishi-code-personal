@@ -16,7 +16,8 @@ import { isValidIsoDate } from '../domain/calendar';
 // 投資利回りの投影（displayEntriesForAsOf）は仮の数字であり、補正の基準（現実アンカー）に
 // 混ぜない（§D・Codex 指摘）。
 import { reportEntriesForAsOf } from '../domain/reportEntries';
-import { parseSignedAmountText, sanitizeSignedAmountText } from './amountText';
+import { parseAmountToMinor, sanitizeSignedAmountText } from './amountText';
+import { useMoneyDigits } from './money';
 import { groupedAccountsByRole } from './accountOptions';
 import { AccountPicker } from './AccountPicker';
 import { Money } from './money';
@@ -33,7 +34,7 @@ export function AdjustmentCreateSheet({
   onClose: () => void;
 }) {
   const { ledger, createAdjustment } = useLedger();
-  const currency = ledger?.settings.currency ?? 'JPY';
+  const currency = ledger?.settings.currency ?? '';
 
   const [date, setDate] = useState(todayLocal());
   const [actualText, setActualText] = useState('');
@@ -49,7 +50,8 @@ export function AdjustmentCreateSheet({
       filterByDateRange(reportEntriesForAsOf(ledger, date), undefined, date),
     );
   }, [account.id, type, ledger, date]);
-  const actual = parseSignedAmountText(actualText);
+  const digits = useMoneyDigits();
+  const actual = parseAmountToMinor(actualText);
   const delta = actual === null ? 0 : actual - expected;
 
   async function submit() {
@@ -118,7 +120,7 @@ export function AdjustmentCreateSheet({
           label={t('adjust.actual')}
           required
           value={actualText}
-          onChange={(v) => setActualText(sanitizeSignedAmountText(v))}
+          onChange={(v) => setActualText(sanitizeSignedAmountText(v, digits))}
           hint={t('common.signedAmountHint')}
           dataUi={UI.adjustments.actual}
         />
@@ -149,7 +151,7 @@ export function AdjustmentEditSheet({
 }) {
   const { ledger, updateAdjustment } = useLedger();
   const accounts = ledger?.accounts ?? [];
-  const currency = ledger?.settings.currency ?? 'JPY';
+  const currency = ledger?.settings.currency ?? '';
   const adj = entry.metadata!.adjustment!;
 
   const [accountId, setAccountId] = useState(adj.accountId);
@@ -168,7 +170,8 @@ export function AdjustmentEditSheet({
     return accountBalance(accountId, target.type, filterByDateRange(entries, undefined, date));
   }, [accountId, target, adjustable, ledger, date, entry.id]);
 
-  const actual = parseSignedAmountText(actualText);
+  const digits = useMoneyDigits();
+  const actual = parseAmountToMinor(actualText);
   const delta = actual === null ? 0 : actual - expected;
   // 補正対象は内部集約口座（継続コスト台帳）を除いた資産・負債のみ（聖域化）。
   const groups = groupedAccountsByRole(accounts, [...ADJUSTABLE_ACCOUNT_ROLES], accountId);
@@ -241,7 +244,7 @@ export function AdjustmentEditSheet({
           label={t('adjust.actual')}
           required
           value={actualText}
-          onChange={(v) => setActualText(sanitizeSignedAmountText(v))}
+          onChange={(v) => setActualText(sanitizeSignedAmountText(v, digits))}
           hint={t('common.signedAmountHint')}
           dataUi={UI.adjustments.editActual}
         />

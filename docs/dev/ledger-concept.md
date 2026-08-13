@@ -55,7 +55,7 @@
 - **`JournalEntry`（仕訳）**: `date` / `description` / `lines[]` / `kind` / `memo`。
   `lines` は「1 借方・1 貸方・同額」の 2 行のみ（型は複数行を許し将来拡張可能）。
   `kind` は `normal` / `opening`（初期残高）。
-- **`JournalLine`**: `accountId` / `side`（`debit`/`credit`）/ `amount`（正の整数・最小通貨単位）。
+- **`JournalLine`**: `accountId` / `side`（`debit`/`credit`）/ `amount`（正の整数・1/100 単位（minor・v11〜））。
 
 ### 複式の符号ルール（`domain/accounting.ts`）
 

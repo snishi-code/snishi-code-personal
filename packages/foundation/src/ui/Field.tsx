@@ -75,7 +75,7 @@ export function TextInput({
   onChange: (v: string) => void;
   type?: 'text' | 'date' | 'number' | 'time';
   placeholder?: string;
-  inputMode?: 'numeric';
+  inputMode?: 'numeric' | 'decimal';
   disabled?: boolean;
 }) {
   const id = useId();

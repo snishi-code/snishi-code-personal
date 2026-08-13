@@ -438,7 +438,7 @@ describe('schema: annualReturnBp / projectionAccountId', () => {
       tags: [],
       monthlyCostItems: [],
       recurringRules: [],
-      settings: { ledgerName: '家計簿', currency: 'JPY', locale: 'ja' },
+      settings: { ledgerName: '家計簿', currency: 'JPY', displayFractionDigits: 0 },
     };
     expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(true);
   });

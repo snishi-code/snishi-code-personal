@@ -10,7 +10,8 @@ import { useState } from 'react';
 import { Modal } from './overlays';
 import { TextInput } from '@snishi/foundation/ui/Field';
 import { useLedger } from '../state/store';
-import { parseSignedAmountText, sanitizeSignedAmountText } from './amountText';
+import { formatMinorForInput, parseAmountToMinor, sanitizeSignedAmountText } from './amountText';
+import { useMoneyDigits } from './money';
 import { todayLocal } from '../util/time';
 import type { Account, JournalEntry } from '../domain/types';
 import { t } from '../i18n';
@@ -37,11 +38,12 @@ export function OpeningRegisterSheet({
   onClose: () => void;
 }) {
   const { createOpening } = useLedger();
+  const digits = useMoneyDigits();
   const [amountText, setAmountText] = useState('');
   const [date, setDate] = useState(todayLocal());
   const [submitting, setSubmitting] = useState(false);
 
-  const amount = parseSignedAmountText(amountText);
+  const amount = parseAmountToMinor(amountText);
 
   async function submit() {
     if (amount === null || amount === 0 || date.trim() === '' || submitting) return;
@@ -87,7 +89,7 @@ export function OpeningRegisterSheet({
           label={t('opening.amount')}
           required
           value={amountText}
-          onChange={(v) => setAmountText(sanitizeSignedAmountText(v))}
+          onChange={(v) => setAmountText(sanitizeSignedAmountText(v, digits))}
           hint={t('common.signedAmountHint')}
           dataUi={UI.adjustments.openingRegisterAmount}
         />
@@ -113,13 +115,16 @@ export function OpeningEditSheet({ entry, onClose }: { entry: JournalEntry; onCl
   // 表示は符号付き: 自然向き（資産=科目が借方 / 負債=科目が貸方）なら正、反転（マイナス残高）なら負。
   const targetLine = tgt ? entry.lines.find((l) => l.accountId === tgt.account.id) : undefined;
   const naturalSide = tgt?.account.type === 'asset' ? 'debit' : 'credit';
+  const digits = useMoneyDigits();
   const signedInitial =
-    tgt === null ? '' : String(targetLine?.side === naturalSide ? tgt.amount : -tgt.amount);
+    tgt === null
+      ? ''
+      : formatMinorForInput(targetLine?.side === naturalSide ? tgt.amount : -tgt.amount, digits);
 
   const [amountText, setAmountText] = useState(signedInitial);
   const [date, setDate] = useState(entry.date);
   const [submitting, setSubmitting] = useState(false);
-  const amount = parseSignedAmountText(amountText);
+  const amount = parseAmountToMinor(amountText);
 
   async function submit() {
     if (amount === null || amount === 0 || date.trim() === '' || submitting) return;
@@ -163,7 +168,7 @@ export function OpeningEditSheet({ entry, onClose }: { entry: JournalEntry; onCl
           label={t('opening.amount')}
           required
           value={amountText}
-          onChange={(v) => setAmountText(sanitizeSignedAmountText(v))}
+          onChange={(v) => setAmountText(sanitizeSignedAmountText(v, digits))}
           hint={t('common.signedAmountHint')}
           dataUi={UI.adjustments.openingEditAmount}
         />

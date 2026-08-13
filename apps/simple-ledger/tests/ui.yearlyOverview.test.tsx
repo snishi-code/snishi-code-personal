@@ -11,6 +11,7 @@ const ledgerState = vi.hoisted(() => ({ ledger: null as Ledger | null }));
 
 vi.mock('../src/state/store', () => ({
   useLedger: () => ({ ledger: ledgerState.ledger }),
+  useOptionalLedger: () => ({ ledger: ledgerState.ledger }),
 }));
 
 function account(id: string, name: string, type: Account['type'], role: Account['role']): Account {
@@ -62,13 +63,13 @@ function fixtureLedger(): Ledger {
       createdAt: 'x',
       updatedAt: 'x',
     },
-    settings: { ledgerName: 'test', currency: 'JPY', locale: 'ja' },
+    settings: { ledgerName: 'test', currency: 'JPY', displayFractionDigits: 0 },
     accounts,
     journalEntries: [
-      entry('opening', '2024-01-01', 'cash', 'equity', 1000),
-      entry('past-expense', '2024-03-31', 'food', 'cash', 100),
-      entry('current-income', '2026-06-30', 'cash', 'salary', 500),
-      entry('future-income', '2027-01-01', 'cash', 'salary', 800),
+      entry('opening', '2024-01-01', 'cash', 'equity', 100000),
+      entry('past-expense', '2024-03-31', 'food', 'cash', 10000),
+      entry('current-income', '2026-06-30', 'cash', 'salary', 50000),
+      entry('future-income', '2027-01-01', 'cash', 'salary', 80000),
     ],
     tags: [],
     monthlyCostItems: [],
@@ -140,7 +141,7 @@ describe('YearlyOverview', () => {
         {
           id: 'rule',
           name: '定期支出',
-          amount: 100,
+          amount: 10000,
           dayOfMonth: 1,
           everyMonths: 1,
           debitAccountId: 'food',
@@ -168,7 +169,7 @@ describe('YearlyOverview', () => {
         {
           id: 'future-rule-span',
           name: '未来までの定期収入',
-          amount: 100,
+          amount: 10000,
           dayOfMonth: 1,
           everyMonths: 1,
           debitAccountId: 'cash',
@@ -270,7 +271,7 @@ describe('YearlyOverview', () => {
     ledgerState.ledger = {
       ...base,
       journalEntries: [
-        entry('ancient', '1880-01-01', 'cash', 'equity', 1000),
+        entry('ancient', '1880-01-01', 'cash', 'equity', 100000),
         ...base.journalEntries,
       ],
     };
@@ -304,7 +305,7 @@ describe('YearlyOverview', () => {
         {
           id: 'long-rule',
           name: '長期の定期収入',
-          amount: 100,
+          amount: 10000,
           dayOfMonth: 1,
           everyMonths: 1,
           debitAccountId: 'cash',
@@ -349,7 +350,7 @@ describe('YearlyOverview', () => {
         {
           id: 'endless-rule',
           name: '終了日なしの保険',
-          amount: 100,
+          amount: 10000,
           dayOfMonth: 1,
           everyMonths: 1,
           debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,

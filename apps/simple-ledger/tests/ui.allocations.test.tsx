@@ -289,7 +289,7 @@ describe('持ち込み登録（継続コスト資産シート）', () => {
     await waitFor(async () => {
       const ledger = await loadLedger();
       const item = ledger.monthlyCostItems.find((m) => m.name === '過去の洗濯機');
-      expect(item).toMatchObject({ amount: 240000, startDate: '2023-04-15' });
+      expect(item).toMatchObject({ amount: 24000000, startDate: '2023-04-15' });
       expect(item!.endDate).toBeUndefined();
       const purchase = ledger.journalEntries.find(
         (e) => e.metadata?.monthlyCostId === item!.id && e.metadata.monthlyCostRecovery !== true,
@@ -310,7 +310,7 @@ describe('持ち込み登録（継続コスト資産シート）', () => {
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
     const item = await createContinuousCost({
       name: '編集対象',
-      amount: 12000,
+      amount: 1200000,
       startDate: '2026-01-10',
       expenseAccountId: expense.id,
     });
@@ -333,7 +333,7 @@ describe('費用化の開始日の表示と期間クイックボタン（P2-1 / 
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
     const item = await createContinuousCost({
       name: '前払いの保守',
-      amount: 60000,
+      amount: 6000000,
       startDate: '2026-01-10',
       allocationStartDate: '2027-02-01',
       expenseAccountId: expense.id,
@@ -366,14 +366,14 @@ describe('費用化の開始日の表示と期間クイックボタン（P2-1 / 
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
     await createContinuousCost({
       name: '前払いの保守',
-      amount: 60000,
+      amount: 6000000,
       startDate: '2026-01-10',
       allocationStartDate: '2027-02-01',
       expenseAccountId: expense.id,
     });
     await createContinuousCost({
       name: '普通の年払い',
-      amount: 12000,
+      amount: 1200000,
       startDate: '2026-01-10',
       expenseAccountId: expense.id,
     });
@@ -397,21 +397,21 @@ describe('終了まで1ヶ月以内のマーカー', () => {
     const today = todayLocal();
     await createContinuousCost({
       name: 'もうすぐ終了',
-      amount: 12000,
+      amount: 1200000,
       startDate: '2026-01-01',
       endDate: addMonthsToDate(today, 1),
       expenseAccountId: expense.id,
     });
     await createContinuousCost({
       name: 'まだ先',
-      amount: 12000,
+      amount: 1200000,
       startDate: '2026-01-01',
       endDate: addMonthsToDate(today, 12),
       expenseAccountId: expense.id,
     });
     await createContinuousCost({
       name: '終了日なし',
-      amount: 12000,
+      amount: 1200000,
       startDate: '2026-01-01',
       expenseAccountId: expense.id,
     });
@@ -440,7 +440,7 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
 
     const historical = await createContinuousCost({
       name: '当時の年払い',
-      amount: 12000,
+      amount: 1200000,
       startDate: '2024-01-01',
       expenseAccountId: expense.id,
       creditAccountId: cash.id,
@@ -449,11 +449,11 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
     await archiveMonthlyCost({
       id: historical.id,
       endDate: '2024-06-30',
-      recovery: { destinationAccountId: cash.id, amount: 6000 },
+      recovery: { destinationAccountId: cash.id, amount: 600000 },
     });
     await createContinuousCost({
       name: '未来開始の項目',
-      amount: 6000,
+      amount: 600000,
       startDate: '2026-07-01',
       endDate: '2026-12-31',
       expenseAccountId: expense.id,
@@ -497,7 +497,7 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
     const item = await createContinuousCost({
       name: '回収済みの過去項目',
-      amount: 12000,
+      amount: 1200000,
       startDate: '2024-01-01',
       expenseAccountId: expense.id,
       creditAccountId: cash.id,
@@ -505,7 +505,7 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
     await archiveMonthlyCost({
       id: item.id,
       endDate: '2024-06-30',
-      recovery: { destinationAccountId: cash.id, amount: 6000 },
+      recovery: { destinationAccountId: cash.id, amount: 600000 },
     });
 
     await renderReady({ mode: 'date', date: '2024-05-31' });
@@ -538,7 +538,7 @@ describe('アーカイブ動線', () => {
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
     const item = await createContinuousCost({
       name: '捨てる項目',
-      amount: 60000,
+      amount: 6000000,
       startDate: '2026-01-01',
       endDate: '2027-12-31',
       expenseAccountId: expense.id,
@@ -571,7 +571,7 @@ describe('アーカイブ動線', () => {
     // 終了日なし = 残存価値は全額（60,000）。
     const item = await createContinuousCost({
       name: '売る項目',
-      amount: 60000,
+      amount: 6000000,
       startDate: '2026-01-01',
       expenseAccountId: expense.id,
     });
@@ -618,9 +618,9 @@ describe('アーカイブ動線', () => {
       const credit = recovery!.lines.find((l) => l.side === 'credit')!;
       expect(debit.accountId).toBe(expense.id);
       expect(credit.accountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
-      expect(credit.amount).toBe(30000);
+      expect(credit.amount).toBe(3000000);
       // 金額は絶対に変更しない（購入の仕訳とのミラー維持）。
-      expect(saved?.amount).toBe(60000);
+      expect(saved?.amount).toBe(6000000);
     });
   });
 });

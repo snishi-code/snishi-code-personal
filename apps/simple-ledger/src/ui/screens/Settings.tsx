@@ -12,6 +12,7 @@ import { startTransition, useEffect, useRef, useState } from 'react';
 import { useToast } from '@snishi/foundation/ui/toast';
 import { ConfirmDialog } from '../overlays';
 import { TextInput } from '@snishi/foundation/ui/Field';
+import { Segmented } from '@snishi/foundation/ui/Segmented';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
 import { t } from '../../i18n';
@@ -50,6 +51,16 @@ export function importErrorMessage(
   }
 }
 
+/**
+ * スナップショット理由コード → 表示文言。未知コードはそのまま出す（fail-visible）。
+ * v11 から reason は理由コード（'import'/'restore'）を保存する（生文言を保存しない）。
+ */
+function snapshotReasonLabel(reason: string): string {
+  if (reason === 'import') return t('snapshot.reason.import');
+  if (reason === 'restore') return t('snapshot.reason.restore');
+  return reason;
+}
+
 export function Settings({
   onNavigate,
   onOpenOnboarding,
@@ -80,7 +91,10 @@ export function Settings({
   const [confirmReset, setConfirmReset] = useState(false);
 
   const [ledgerName, setLedgerName] = useState(ledger?.settings.ledgerName ?? '');
-  const [currency, setCurrency] = useState(ledger?.settings.currency ?? 'JPY');
+  const [currency, setCurrency] = useState(ledger?.settings.currency ?? '');
+  const [fractionDigits, setFractionDigits] = useState<0 | 1 | 2>(
+    ledger?.settings.displayFractionDigits ?? 0,
+  );
 
   const refreshSnapshots = () => {
     listSnapshots()
@@ -98,6 +112,7 @@ export function Settings({
       startTransition(() => {
         setLedgerName(ledger.settings.ledgerName);
         setCurrency(ledger.settings.currency);
+        setFractionDigits(ledger.settings.displayFractionDigits);
       });
     }
   }, [ledger]);
@@ -132,8 +147,10 @@ export function Settings({
   function saveLedgerSettings() {
     const next: LedgerSettings = {
       ledgerName: ledgerName.trim() || '家計簿',
-      currency: currency.trim() || 'JPY',
-      locale: 'ja',
+      // 空の単位はデータへ焼き付けない（schema も min(1)）。空なら現在値を維持する。
+      // 旧実装の既定 'JPY' 差し替えは廃止 = アプリは通貨を用意しない（作者決定）。
+      currency: currency.trim() || (ledger?.settings.currency ?? '円'),
+      displayFractionDigits: fractionDigits,
     };
     saveSettings(next).catch(() => undefined);
   }
@@ -236,7 +253,7 @@ export function Settings({
           {snapshots.map((snap) => (
             <li key={snap.id} className="list__item">
               <div className="list__main">
-                <div className="list__title">{snap.reason}</div>
+                <div className="list__title">{snapshotReasonLabel(snap.reason)}</div>
                 <div className="list__sub">
                   {new Date(snap.createdAt).toLocaleString('ja-JP')}・
                   {t('snapshot.entries', { count: snap.data.journalEntries.length })}
@@ -255,7 +272,7 @@ export function Settings({
                   type="button"
                   className="icon-btn"
                   onClick={() => setPendingDeleteSnap(snap)}
-                  aria-label={`${t('snapshot.delete')}: ${snap.reason}`}
+                  aria-label={`${t('snapshot.delete')}: ${snapshotReasonLabel(snap.reason)}`}
                 >
                   <Icon name="delete" size={18} />
                 </button>
@@ -270,6 +287,22 @@ export function Settings({
       <div className="card card--pad">
         <TextInput label={t('settings.ledgerName')} value={ledgerName} onChange={setLedgerName} />
         <TextInput label={t('settings.currency')} value={currency} onChange={setCurrency} />
+        {/* 表示桁数（0|1|2・入力の刻みも連動）。保存・計算は常に 1/100 固定でこの設定では変わらない。 */}
+        <div className="field" data-ui={UI.settings.fractionDigits}>
+          <span className="field__label">{t('settings.fractionDigits')}</span>
+          <span className="field__hint">{t('settings.fractionDigitsHint')}</span>
+          <div className="list-sort toolbar" role="group" aria-label={t('settings.fractionDigits')}>
+            <Segmented
+              value={String(fractionDigits)}
+              items={[
+                { key: '0', label: '0' },
+                { key: '1', label: '1' },
+                { key: '2', label: '2' },
+              ]}
+              onChange={(key) => setFractionDigits(key === '1' ? 1 : key === '2' ? 2 : 0)}
+            />
+          </div>
+        </div>
         <button type="button" className="btn" onClick={saveLedgerSettings}>
           {t('common.save')}
         </button>

@@ -740,3 +740,11 @@ export function useLedger(): LedgerContextValue {
   if (!ctx) throw new Error('useLedger must be used within LedgerProvider');
   return ctx;
 }
+
+/**
+ * Provider 外では null を返す読み取り専用版（テストが表示部品を直接描画する場合用）。
+ * 実アプリの画面は常に LedgerProvider 配下で描画される。
+ */
+export function useOptionalLedger(): LedgerContextValue | null {
+  return useContext(LedgerContext);
+}

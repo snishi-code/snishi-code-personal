@@ -60,7 +60,9 @@
   アーカイブ操作は今日を `endDate` に記録し、アーカイブ解除は `endDate` を消す。
   schema / DB の版は変えず、端点のない JSON も受理する。
 - `revision`: 端末ローカルの編集追跡。保存のたびに +1。
-- 金額（`JournalLine.amount`）は **正の整数・最小通貨単位**（JPY なら円）。
+- 金額（`JournalLine.amount`）は **正の整数・1/100 単位（minor）**（v11〜。例: 1,234.56 → 123456・
+  100円 → 10000）。通貨はただの単位文字列で、表示の小数桁は `settings.displayFractionDigits`
+  （0|1|2・既定 0）が決める（保存・計算は常に 1/100 固定）。
 
 ### schemaVersion の変遷（simple-ledger-v2。appId `snishi-code.simple-ledger-v2`）
 
@@ -80,6 +82,7 @@
 | **v7→v8**（2026-08-11・CSV 取込）              | **CSV 取込（Import Profile）を追加**。`importProfiles` / `profileBindings` / `importDecisions` の 3 ストア（DB_VERSION 8）と交換 JSON の 3 必須配列、`EntryMetadata` の取込由来（`importSource` ほか）。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | **v8→v9**（2026-08-11）                        | 取込プロファイルのアーカイブ（`ImportProfile.archived`）・上書き保存の廃止・`ProfileBinding.importFromDate`（取込開始日）。ストア構成は不変（DB_VERSION 9 は版対応を 1:1 に保つために上げた）。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | **v9→v10**（2026-08-11・CSV 取込の全撤去）     | **CSV 取込一式を撤去**（実ユーズの結論・作者決定 2026-08-11。「ざっくり登録して差額は残高補正で吸収」の使い方に明細単位の CSV 取込は合わない＝使わない死荷重）。v8〜v9 の型・schema・store 参照・UI・交換 JSON の 3 配列・`EntryMetadata` の取込由来を削除（DB_VERSION 10。upgrade は旧 3 ストアを温存 = 黙って削除しない）。設計は git 履歴に残る（将来要望が出たら再導入可能）。                                                                                                                                                                                                                                                                                                                                                              |
+| **v10→v11**（2026-08-13・金額の 1/100 単位化） | **全金額 ×100（minor 単位）**・`settings.locale` 撤去・`settings.displayFractionDigits`（表示桁数 0\|1\|2・入力の刻み連動）新設・snapshot `reason` の理由コード化・`amountSchema` に上限 10^12 追加（集計 overflow ガード = `domain/safeSum` と対）。導出（月割り・投影・返済分割）は minor をそのまま扱い 1 単位へ丸め直さない（表示の丸めは表示層のみ）。実データは単発変換（DB_VERSION 11）。 |
 
 ### `MonthlyCostItem`（継続コスト資産）
 
@@ -290,6 +293,15 @@ step 4 で見た `deviceId + revision` は step 5 の保存 transaction でも�
 - 2026-08-11 の CSV 取込の全撤去（v8〜v9 で足した機能ごと）は `SCHEMA_VERSION=10` /
   `DB_VERSION=10`。v9 以前の JSON は unsupported-version、v9 以前の DB は復旧面へ
   （in-app 変換なし。旧 3 ストアは upgrade で温存し、復旧面の「DB 初期化」でのみ消える）。
+- 2026-08-13 の金額 1/100 単位化（指示書 v3）は `SCHEMA_VERSION=11` / `DB_VERSION=11`。
+  **全金額フィールド ×100**（`journalLine.amount`・`recurringRule.amount`・
+  `monthlyCostItem.amount`・adjustment の `expectedBalance`/`actualBalance`/`delta`。
+  除外 = `annualReturnBp`・`repaymentDay`・`dayOfMonth`・`everyMonths`・`sortIndex`・回数・日付・
+  `revision`）+ `settings.locale` 撤去 + `settings.displayFractionDigits`（0|1|2）新設 +
+  スナップショット `reason` の理由コード化（`'import'`/`'restore'`）。
+  v10 以前の JSON は unsupported-version、v10 以前の DB は復旧面へ（in-app 変換なし。
+  実データの v10→v11 変換 = `_workspace-management/scripts/convert-ledger-v10-to-v11.mjs`・
+  **順序固定**: v10 ビルドのまま export → 変換 → v11 更新 → DB 初期化 → import）。
 
 ## 外部送信ゼロとの関係
 

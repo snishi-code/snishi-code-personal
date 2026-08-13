@@ -39,6 +39,7 @@ import { tagNames } from '../tagOptions';
 import type { AllocationsTarget } from './Allocations';
 import type { Account, JournalEntry } from '../../domain/types';
 import { formatMoney } from '../../util/format';
+import { useMoneyDigits } from '../money';
 import { ScrollTopButton } from '../ScrollTopButton';
 
 export interface JournalFilter {
@@ -142,7 +143,8 @@ export function Journal({
   const accountFilterId = filter?.accountId;
   const normalExpenseOnly = filter?.expenseKind === 'normal';
   const map = useMemo(() => new Map((ledger?.accounts ?? []).map((a) => [a.id, a])), [ledger]);
-  const currency = ledger?.settings.currency ?? 'JPY';
+  const currency = ledger?.settings.currency ?? '';
+  const digits = useMoneyDigits();
   const filterAccount = accountFilterId ? map.get(accountFilterId) : undefined;
 
   const allTags = ledger?.tags ?? [];
@@ -391,12 +393,12 @@ export function Journal({
               balanceChange === 'increase'
                 ? t('journal.accountBalanceIncrease', {
                     name: filterAccount?.name ?? '',
-                    amount: formatMoney(displayedAmount, currency),
+                    amount: formatMoney(displayedAmount, currency, digits),
                   })
                 : balanceChange === 'decrease'
                   ? t('journal.accountBalanceDecrease', {
                       name: filterAccount?.name ?? '',
-                      amount: formatMoney(displayedAmount, currency),
+                      amount: formatMoney(displayedAmount, currency, digits),
                     })
                   : undefined;
             // 持ち込みの購入の仕訳は kind='opening' だが、専用シートではなく購入の仕訳として編集する。

@@ -56,11 +56,17 @@ export const accountTypeSchema = z.enum(['asset', 'liability', 'equity', 'revenu
 
 export const sideSchema = z.enum(['debit', 'credit']);
 
-/** 金額: 正の整数（最小通貨単位）。 */
+/**
+ * 金額: 正の整数（1/100 単位 = minor。例: 1,234.56 → 123456）。
+ * 上限は通貨ガードではなく数値精度ガード（集計が Number の安全整数域を出ないための
+ * 1 行あたり上限。10^12 minor = 100 億単位/行）。合算側は domain/safeSum が最終防衛線。
+ */
+export const MAX_AMOUNT_MINOR = 10 ** 12;
 const amountSchema = z
   .number()
   .int('金額は整数で入力してください')
   .positive('金額は 1 以上で入力してください')
+  .max(MAX_AMOUNT_MINOR, '金額が大きすぎます')
   .finite();
 
 export const accountRoleSchema = z.enum(
@@ -351,7 +357,9 @@ export const journalEntrySchema = z
 export const settingsSchema = z.object({
   ledgerName: z.string().min(1).max(120),
   currency: z.string().min(1).max(8),
-  locale: z.literal('ja'),
+  // 表示桁数（0|1|2・入力の刻みも連動）。保存・計算は常に 1/100 固定でこの設定では変わらない。
+  // 言語（旧 locale）は台帳でなく端末の属性なので v11 で台帳データから撤去した。
+  displayFractionDigits: z.union([z.literal(0), z.literal(1), z.literal(2)]),
 });
 
 /**

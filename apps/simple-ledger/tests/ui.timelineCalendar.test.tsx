@@ -33,7 +33,7 @@ const flow = {
   id: 'entry-1',
   date: '2026-02-10',
   description: '昼のラーメン',
-  amount: 1200,
+  amount: 120000,
   sourceAccountId: cash.id,
   destinationAccountId: food.id,
   target: { kind: 'entry' as const, entryId: 'entry-1' },
@@ -163,7 +163,7 @@ describe('TimelineCalendarView', () => {
     const recurringRule = {
       id: 'rule-1',
       name: '動画サービス',
-      amount: 1200,
+      amount: 120000,
       dayOfMonth: 10,
       everyMonths: 1,
       debitAccountId: 'ledger',
@@ -196,7 +196,7 @@ describe('TimelineCalendarView', () => {
                       {
                         id: 'item-1',
                         name: '動画サービス 2月分',
-                        amount: 1200,
+                        amount: 120000,
                         target: { kind: 'recurringRule' as const, recurringRuleId: 'rule-1' },
                       },
                     ],

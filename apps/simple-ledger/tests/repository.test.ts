@@ -63,7 +63,8 @@ describe('repository 初期化', () => {
     const ledger = await loadLedger();
     expect(ledger.accounts.length).toBeGreaterThan(0);
     expect(ledger.meta.revision).toBe(0);
-    expect(ledger.settings.currency).toBe('JPY');
+    expect(ledger.settings.currency).toBe('円');
+    expect(ledger.settings.displayFractionDigits).toBe(0);
   });
 });
 

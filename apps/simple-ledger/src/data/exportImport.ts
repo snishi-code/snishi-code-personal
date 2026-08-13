@@ -195,7 +195,8 @@ export async function importFromJsonText(
         {
           id: snapshotId,
           createdAt: nowIso(),
-          reason: 'import前',
+          // 理由コード（表示は i18n が訳す）。生文言を保存しない（v11・指示書v3 §A-5）。
+          reason: 'import',
           data: buildExportPackage(current),
         },
         snapshotVersion,
@@ -257,7 +258,7 @@ export async function restoreFromSnapshot(snapshotData: LedgerExportPackage): Pr
     {
       id: makeSnapshotId(),
       createdAt: nowIso(),
-      reason: '復元前',
+      reason: 'restore',
       data: buildExportPackage(current),
     },
     versionOf(current),

@@ -139,14 +139,14 @@ describe('抽出結果の件数と合計', () => {
 
     // 絞り込みなし（期間内全行）: 4 件・単純和 300+100+100+200。
     expect(summaryText()).toContain('4件');
-    expect(summaryText()).toContain(formatMoney(700));
+    expect(summaryText()).toContain(formatMoney(700, '円', 0));
 
     fireEvent.change(document.querySelector(`[data-ui="${UI.journal.search}"]`)!, {
       target: { value: 'ソートB' },
     });
     expect(rowTitles()).toEqual(['ソートB']);
     expect(summaryText()).toContain('1件');
-    expect(summaryText()).toContain(formatMoney(100));
+    expect(summaryText()).toContain(formatMoney(100, '円', 0));
   });
 
   it('科目タップの抽出は方向つき和（増減の純額）を符号つきで出す', async () => {
@@ -187,11 +187,11 @@ describe('抽出結果の件数と合計', () => {
 
     // 給与視点の方向つき和 = +5000 − 1200 = +3800（単純和 6200 ではない）。
     expect(summaryText()).toContain('2件');
-    expect(summaryText()).toContain(`+${formatMoney(3800)}`);
-    expect(summaryText()).not.toContain(formatMoney(6200));
+    expect(summaryText()).toContain(`+${formatMoney(3800, '円', 0)}`);
+    expect(summaryText()).not.toContain(formatMoney(6200, '円', 0));
     expect(
       document.querySelector(`[data-ui="${UI.journal.summary}"] .amount--pos`),
-    ).toHaveTextContent(formatMoney(3800));
+    ).toHaveTextContent(formatMoney(3800, '円', 0));
   });
 
   it('月割りの導出行も対象に含み、合計・件数が表示行と一致する', async () => {
@@ -221,6 +221,7 @@ describe('抽出結果の件数と合計', () => {
     expect(amounts.length).toBeGreaterThanOrEqual(2);
     const total = amounts.reduce((sum, value) => sum + value, 0);
     expect(summaryText()).toContain(`${amounts.length}件`);
-    expect(summaryText()).toContain(formatMoney(total));
+    // 表示テキストから拾った数値は「表示単位」なので minor（×100）へ戻して比較する。
+    expect(summaryText()).toContain(formatMoney(total * 100, '円', 0));
   });
 });

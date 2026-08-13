@@ -87,7 +87,7 @@ describe('残高調整科目の一覧表示（C-7・表示だけ普通に）', (
     expect(row.querySelector(`[data-ui="${UI.accounts.systemBadge}"]`)).toHaveTextContent('自動');
     // 発生額（全期間・ヘッダー期間の既定）も通常の費用として表示される。
     expect(row.textContent).toContain('全期間の発生額');
-    expect(row.textContent).toContain(formatMoney(2_000, 'JPY'));
+    expect(row.textContent).toContain(formatMoney(2_000, '円', 0));
 
     // 管理操作は一切出さない（編集・アーカイブ・振替導線）。
     expect(screen.queryByRole('button', { name: '編集: 残高調整費' })).toBeNull();
@@ -160,19 +160,19 @@ describe('科目一覧の費用・収入表示（C-1・ヘッダー期間の発�
     await renderReady({ mode: 'year', year: 2026 });
     const row2026 = rowOf('固定費');
     expect(row2026.textContent).toContain('2026年の発生額');
-    expect(row2026.textContent).toContain(formatMoney(1_000, 'JPY'));
+    expect(row2026.textContent).toContain(formatMoney(1_000, '円', 0));
 
     cleanup();
     await renderReady({ mode: 'year', year: 2025 });
     const row2025 = rowOf('固定費');
     expect(row2025.textContent).toContain('2025年の発生額');
-    expect(row2025.textContent).toContain(formatMoney(500, 'JPY'));
+    expect(row2025.textContent).toContain(formatMoney(500, '円', 0));
 
     cleanup();
     await renderReady();
     const rowAll = rowOf('固定費');
     expect(rowAll.textContent).toContain('全期間の発生額');
-    expect(rowAll.textContent).toContain(formatMoney(1_500, 'JPY'));
+    expect(rowAll.textContent).toContain(formatMoney(1_500, '円', 0));
   });
 
   it('期間途中で終了した費用科目も、期間内の発生額があれば一覧に出る（P1-3）', async () => {
@@ -208,7 +208,7 @@ describe('科目一覧の費用・収入表示（C-1・ヘッダー期間の発�
     await renderReady({ mode: 'year', year: 2026 });
     const row = rowOf('春の講座');
     expect(row.textContent).toContain('2026年の発生額');
-    expect(row.textContent).toContain(formatMoney(500, 'JPY'));
+    expect(row.textContent).toContain(formatMoney(500, '円', 0));
 
     // 発生の無い年は従来どおり出ない。
     cleanup();
@@ -224,11 +224,11 @@ describe('科目一覧の費用・収入表示（C-1・ヘッダー期間の発�
     // 2025-12-31 断面: 10,000 − 500。発生額ラベルにしない。
     expect(bank2025.textContent).toContain('残高');
     expect(bank2025.textContent).not.toContain('発生額');
-    expect(bank2025.textContent).toContain(formatMoney(9_500, 'JPY'));
+    expect(bank2025.textContent).toContain(formatMoney(9_500, '円', 0));
 
     cleanup();
     await renderReady();
     const bankAll = rowOf('預金');
-    expect(bankAll.textContent).toContain(formatMoney(8_500, 'JPY'));
+    expect(bankAll.textContent).toContain(formatMoney(8_500, '円', 0));
   });
 });

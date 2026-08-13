@@ -144,7 +144,7 @@ export function YearlyOverview({ period }: { period: ReportPeriod }) {
   const [selectedYear, setSelectedYear] = useState(preferredYear);
   const previousYear = previousDataYear(dataYears, selectedYear);
   const nextYear = dataYears.find((year) => year > selectedYear);
-  const currency = ledger?.settings.currency ?? 'JPY';
+  const currency = ledger?.settings.currency ?? '';
 
   const overviewYears = useMemo(
     () => horizonYears(dataYears, horizon, today),

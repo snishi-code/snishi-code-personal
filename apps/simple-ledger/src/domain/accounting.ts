@@ -14,6 +14,7 @@ import type {
   Side,
 } from './types';
 import { compareAccountOrder } from './accountOrder';
+import { assertSafeAmount } from './safeSum';
 
 /** asset / expense は借方が正。liability / equity / revenue は貸方が正。 */
 export function isDebitNormal(type: AccountType): boolean {
@@ -43,8 +44,8 @@ export function accountBalance(
   for (const entry of entries) {
     for (const line of entry.lines) {
       if (line.accountId !== accountId) continue;
-      if (line.side === 'debit') debit += line.amount;
-      else credit += line.amount;
+      if (line.side === 'debit') debit = assertSafeAmount(debit + line.amount);
+      else credit = assertSafeAmount(credit + line.amount);
     }
   }
   return isDebitNormal(type) ? debit - credit : credit - debit;
@@ -88,7 +89,7 @@ function balancesFor(
 }
 
 function sum(items: AccountBalance[]): number {
-  return items.reduce((s, b) => s + b.balance, 0);
+  return assertSafeAmount(items.reduce((s, b) => assertSafeAmount(s + b.balance), 0));
 }
 
 /** 損益計算書（revenue / expense から導出）。 */
@@ -136,10 +137,10 @@ export function deriveBalanceSheet(
 
   const totalRevenue = accounts
     .filter((a) => a.type === 'revenue')
-    .reduce((s, a) => s + accountBalance(a.id, 'revenue', entries), 0);
+    .reduce((s, a) => assertSafeAmount(s + accountBalance(a.id, 'revenue', entries)), 0);
   const totalExpense = accounts
     .filter((a) => a.type === 'expense')
-    .reduce((s, a) => s + accountBalance(a.id, 'expense', entries), 0);
+    .reduce((s, a) => assertSafeAmount(s + accountBalance(a.id, 'expense', entries)), 0);
   const retainedEarnings = totalRevenue - totalExpense;
 
   const netAssets = totalAssets - totalLiabilities;
@@ -192,7 +193,7 @@ export interface EntrySummary {
 export function entryAmount(entry: JournalEntry): number {
   let total = 0;
   for (const line of entry.lines) {
-    if (line.side === 'debit') total += line.amount;
+    if (line.side === 'debit') total = assertSafeAmount(total + line.amount);
   }
   return total;
 }
@@ -207,7 +208,7 @@ export function summarizeEntries(
   for (const entry of entries) {
     if (!predicate(entry)) continue;
     count += 1;
-    total += entryAmount(entry);
+    total = assertSafeAmount(total + entryAmount(entry));
   }
   return { count, total };
 }
@@ -230,7 +231,7 @@ export function summarizeEntriesForAccount(
     for (const line of entry.lines) {
       if (line.accountId !== account.id) continue;
       matched = true;
-      total += naturalDelta(account, line.side, line.amount);
+      total = assertSafeAmount(total + naturalDelta(account, line.side, line.amount));
     }
     if (matched) count += 1;
   }
@@ -259,7 +260,7 @@ export function equityNaturalDelta(
   for (const entry of filterByDateRange(allEntries, range?.from, range?.to)) {
     for (const line of entry.lines) {
       const account = equityById.get(line.accountId);
-      if (account) total += naturalDelta(account, line.side, line.amount);
+      if (account) total = assertSafeAmount(total + naturalDelta(account, line.side, line.amount));
     }
   }
   return total;

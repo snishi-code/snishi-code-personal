@@ -147,7 +147,7 @@ export function Breakdown({
 }) {
   const cfg = CONFIG[section];
   const { ledger } = useLedger();
-  const currency = ledger?.settings.currency ?? 'JPY';
+  const currency = ledger?.settings.currency ?? '';
   const today = todayLocal();
   const basis = useMemo(() => reportBasis(period, today), [period, today]);
   const range = basis.flowRange;

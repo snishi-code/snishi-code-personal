@@ -57,6 +57,8 @@ import {
   ruleExistsAt as recurringRuleExistsAt,
 } from '../../domain/accountLifetime';
 import { quickSpanEndDate } from '../ccQuickSpan';
+import { formatMinorForInput, parseAmountToMinor, sanitizeAmountText } from '../amountText';
+import { useMoneyDigits } from '../money';
 import { Money } from '../money';
 import { EntrySheet } from './EntrySheet';
 import { errorText, t } from '../../i18n';
@@ -116,7 +118,7 @@ export function Allocations({
   const today = todayLocal();
   const asOf = reportBasis(period, today).asOf;
   const currentYm = monthOf(asOf);
-  const currency = ledger?.settings.currency ?? 'JPY';
+  const currency = ledger?.settings.currency ?? '';
 
   const accountsMap = useMemo(
     () => new Map((ledger?.accounts ?? []).map((a) => [a.id, a] as const)),
@@ -766,7 +768,7 @@ function RecurringRuleSheet({
 }) {
   const { ledger, createRecurringRule, saveRecurringRule } = useLedger();
   const accounts = sortAccounts(ledger?.accounts ?? []);
-  const currency = ledger?.settings.currency ?? 'JPY';
+  const currency = ledger?.settings.currency ?? '';
 
   const initialFromGroups = groupedAccountsByRole(
     accounts,
@@ -801,8 +803,9 @@ function RecurringRuleSheet({
     .filter((group) => group.accounts.length > 0);
 
   const [name, setName] = useState(existing?.name ?? '');
+  const fractionDigits = useMoneyDigits();
   const [amountText, setAmountText] = useState(
-    existing !== undefined ? String(existing.amount) : '',
+    existing !== undefined ? formatMinorForInput(existing.amount, fractionDigits) : '',
   );
   const [everyText, setEveryText] = useState(
     existing !== undefined ? String(existing.everyMonths) : '1',
@@ -856,6 +859,10 @@ function RecurringRuleSheet({
   // 「変化」として通知される（live region の制約）。値が無くなったときも明示的に伝える。
   const [firstPostingAnnounce, setFirstPostingAnnounce] = useState('');
   useEffect(() => {
+    // live region は「マウント後の変化」だけが読み上げられるため、意図的に effect で
+    // setState する（初期値を JSX に直接書くと初回が通知されない）。1 値の更新のみで
+    // 連鎖レンダーは起きない。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFirstPostingAnnounce(
       firstPosting !== null
         ? t('recurring.firstPostingStatus', { date: firstPosting })
@@ -889,7 +896,7 @@ function RecurringRuleSheet({
 
   async function submit() {
     if (submittingRef.current) return;
-    const amount = amountText === '' ? 0 : Number.parseInt(amountText, 10);
+    const amount = parseAmountToMinor(amountText) ?? 0;
     if (!Number.isInteger(amount) || amount < 1) {
       setError(t('error.common.amountInvalid'));
       return;
@@ -1031,9 +1038,9 @@ function RecurringRuleSheet({
           <TextInput
             label={t('recurring.amount')}
             required
-            inputMode="numeric"
+            inputMode={fractionDigits === 0 ? 'numeric' : 'decimal'}
             value={amountText}
-            onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
+            onChange={(v) => setAmountText(sanitizeAmountText(v, fractionDigits))}
             hint={t('recurring.amountHint')}
             dataUi={UI.allocations.recurringAmount}
           />
@@ -1242,8 +1249,9 @@ function ContinuousCostItemSheet({
   );
 
   const [name, setName] = useState(existing?.name ?? '');
+  const fractionDigits = useMoneyDigits();
   const [amountText, setAmountText] = useState(
-    existing !== undefined ? String(existing.amount) : '',
+    existing !== undefined ? formatMinorForInput(existing.amount, fractionDigits) : '',
   );
   const [startDate, setStartDate] = useState(existing?.startDate ?? todayLocal());
   const [endDate, setEndDate] = useState(existing?.endDate ?? '');
@@ -1268,14 +1276,14 @@ function ContinuousCostItemSheet({
   // 過去から再計算される項目の変更予告（破壊的操作の予告なので削らない）。
   const pastFieldsChanged =
     existing !== undefined &&
-    (amountText !== String(existing.amount) ||
+    (parseAmountToMinor(amountText) !== existing.amount ||
       endDate !== (existing.endDate ?? '') ||
       allocationStartDate !== (existing.allocationStartDate ?? '') ||
       expenseAccountId !== existing.expenseAccountId);
 
   async function submit() {
     if (submitting) return;
-    const amount = amountText === '' ? 0 : Number.parseInt(amountText, 10);
+    const amount = parseAmountToMinor(amountText) ?? 0;
     if (!Number.isInteger(amount) || amount < 1) {
       setError(t('error.common.amountInvalid'));
       return;
@@ -1362,9 +1370,9 @@ function ContinuousCostItemSheet({
         <TextInput
           label={t('monthlyCost.amount')}
           required
-          inputMode="numeric"
+          inputMode={fractionDigits === 0 ? 'numeric' : 'decimal'}
           value={amountText}
-          onChange={(v) => setAmountText(v.replace(/[^\d]/g, ''))}
+          onChange={(v) => setAmountText(sanitizeAmountText(v, fractionDigits))}
           dataUi={UI.allocations.editAmount}
         />
         {existing ? (
@@ -1456,7 +1464,7 @@ function MonthlyCostArchiveDialog({
   onClose: () => void;
 }) {
   const { ledger, archiveMonthlyCost } = useLedger();
-  const currency = ledger?.settings.currency ?? 'JPY';
+  const currency = ledger?.settings.currency ?? '';
   // 既定 = 今日。終了済みの行だけ現在の endDate（先へ動かせば一覧へ戻る = 復元も同じ 1 操作）。
   const [endDate, setEndDate] = useState(() =>
     isArchived(item, todayLocal()) && item.endDate !== undefined ? item.endDate : todayLocal(),

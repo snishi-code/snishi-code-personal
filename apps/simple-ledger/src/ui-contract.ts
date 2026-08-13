@@ -332,6 +332,7 @@ export const UI = {
   },
   settings: {
     view: 'settings.view',
+    fractionDigits: 'settings.fractionDigits',
     manageList: 'settings.manage.list',
     exportJson: 'settings.exportJson',
     importJson: 'settings.importJson',

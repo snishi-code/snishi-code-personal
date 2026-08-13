@@ -79,7 +79,7 @@ export function Accounts({
   const todayEntries = ledger
     ? filterByDateRange(displayEntriesForAsOf(ledger, today, today), undefined, today)
     : [];
-  const currency = ledger?.settings.currency ?? 'JPY';
+  const currency = ledger?.settings.currency ?? '';
 
   const usedIds = referencedAccountIds({
     entries: ledger?.journalEntries ?? [],

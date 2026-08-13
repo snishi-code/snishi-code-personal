@@ -30,7 +30,7 @@ export function NetIncome({
   onNavigate: (screen: Screen) => void;
 }) {
   const { ledger } = useLedger();
-  const currency = ledger?.settings.currency ?? 'JPY';
+  const currency = ledger?.settings.currency ?? '';
   const today = todayLocal();
   const basis = useMemo(() => reportBasis(period, today), [period, today]);
 
