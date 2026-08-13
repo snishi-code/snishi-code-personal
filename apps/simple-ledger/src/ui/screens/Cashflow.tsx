@@ -364,6 +364,11 @@ function RepaymentScheduleSheet({
   async function submit() {
     if (submitting) return;
     if (!Number.isInteger(amount) || amount < 1 || count < 1 || fromAccountId === '') return;
+    // 保存境界（buildRepaymentEntries）と同じ条件を先に検証して理由を示す（0 金額の回の防止）。
+    if (amount < count) {
+      setError(t('error.repay.totalTooSmall'));
+      return;
+    }
     setSubmitting(true);
     setError(undefined);
     try {

@@ -226,7 +226,9 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     const active = blockActive && repayToggle;
     const count = repayCountText === '' ? 0 : Number.parseInt(repayCountText, 10);
     const accBad = active && repayAccountId === '';
-    const countBad = active && (!Number.isInteger(count) || count < 1);
+    // 回数 > 金額は 0 の回を作る（保存境界 buildRepaymentEntries と同じ条件で先に弾く）。
+    const countBad =
+      active && (!Number.isInteger(count) || count < 1 || (form.amount >= 1 && count > form.amount));
     setRepayAccountError(accBad);
     setRepayCountError(countBad);
     return { accBad, countBad };

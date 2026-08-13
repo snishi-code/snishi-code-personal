@@ -1315,6 +1315,10 @@ function buildRepaymentEntries(
     throw new LedgerError('error.common.amountInvalid');
   if (!Number.isInteger(params.count) || params.count < 1)
     throw new LedgerError('error.repay.countInvalid');
+  // 分割の全要素 > 0 を保証する。total < count だと monthlyAmounts が 0 の回を作り、
+  // 0 金額は amountSchema（.positive）が拒否して保存全体が失敗する（v10 からの既存不具合）。
+  // 「0 の回を省く」案は採らない: 摘要の i/count が回数を約束しているため本数を黙って減らせない。
+  if (params.total < params.count) throw new LedgerError('error.repay.totalTooSmall');
   if (!isValidIsoDate(params.firstDate)) throw new LedgerError('error.monthlyCost.dateRequired');
   const liability = ctx.byId.get(params.liabilityAccountId);
   if (

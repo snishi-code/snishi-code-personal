@@ -678,6 +678,7 @@ export const ja = {
     '1 = カードの次回引落などの単発。毎月同額のローンは回数を入れると、毎月の振替仕訳をまとめて登録します（合計は返済額に一致）。',
   'cashflow.repayPerMonth': '月あたり約 {amount} × {count} 回',
   'error.repay.countInvalid': '返済回数は 1 以上の整数で入力してください。',
+  'error.repay.totalTooSmall': '返済総額が回数より少なく、金額 0 の回ができるため登録できません。',
   'error.repay.liabilityRequired': '返済先はカード・未払 / ローンの負債科目を選んでください。',
 
   // 毎月のもの（くり返し記帳 = 実仕訳の自動起票 / 継続コスト資産 = 月割りの導出）

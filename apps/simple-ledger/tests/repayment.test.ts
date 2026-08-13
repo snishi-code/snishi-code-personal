@@ -92,3 +92,39 @@ describe('nextRepaymentDate', () => {
     expect(nextRepaymentDate('2024-02-10', 30)).toBe('2024-02-29');
   });
 });
+
+describe('返済分割の 0 金額ガード（R-1・v10 の既存不具合の修正）', () => {
+  it('総額 < 回数 は明確な理由コードで拒否する（monthlyAmounts が 0 の回を作るため）', async () => {
+    const { createRepaymentEntries } = await import('../src/data/repository');
+    const card = await accountByRole('payment-liability');
+    const bank = await accountByRole('daily-asset');
+    await expect(
+      createRepaymentEntries({
+        liabilityAccountId: card.id,
+        fromAccountId: bank.id,
+        firstDate: '2026-09-27',
+        total: 1,
+        count: 2,
+        title: 'ガード確認',
+      }),
+    ).rejects.toMatchObject({ code: 'error.repay.totalTooSmall' });
+  });
+
+  it('総額 === 回数 は各回 1 で通る（境界）', async () => {
+    const { createRepaymentEntries, loadLedger: load } = await import('../src/data/repository');
+    const card = await accountByRole('payment-liability');
+    const bank = await accountByRole('daily-asset');
+    const entries = await createRepaymentEntries({
+      liabilityAccountId: card.id,
+      fromAccountId: bank.id,
+      firstDate: '2026-09-27',
+      total: 2,
+      count: 2,
+      title: '境界確認',
+    });
+    expect(entries).toHaveLength(2);
+    const saved = (await load()).journalEntries.filter((e) => e.description.startsWith('境界確認'));
+    expect(saved).toHaveLength(2);
+    expect(saved.every((e) => e.lines.every((l) => l.amount === 1))).toBe(true);
+  });
+});
