@@ -133,6 +133,21 @@ describe('定期ルールシートのレイアウト', () => {
     expect(statusText()).toBe(t('recurring.firstPostingNone'));
   });
 
+  it('終了日を「解除」ボタンで空へ戻せる（iOS の date input は空に戻せないため）', async () => {
+    await openRuleSheet();
+    const q = (dataUi: string) => document.querySelector(`[data-ui="${dataUi}"]`);
+    // 値が無い間は解除ボタン自体を出さない。
+    expect(q(UI.allocations.recurringEndDateClear)).toBeNull();
+
+    setValue(UI.allocations.recurringEndDate, '2027-01-31');
+    const clear = q(UI.allocations.recurringEndDateClear);
+    expect(clear).not.toBeNull();
+
+    fireEvent.click(clear!);
+    expect((q(UI.allocations.recurringEndDate) as HTMLInputElement).value).toBe('');
+    expect(q(UI.allocations.recurringEndDateClear)).toBeNull();
+  });
+
   it('周期が空の間は視覚行を出さず、status は「ありません」を通知する', async () => {
     await openRuleSheet();
     expect(previewText()).not.toBe('');

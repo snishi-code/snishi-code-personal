@@ -1132,6 +1132,20 @@ function RecurringRuleSheet({
             hint={t('recurring.ruleEndDateHint')}
             dataUi={UI.allocations.recurringEndDate}
           />
+          {/* iOS の date input には値を空へ戻す手段が無い（継続コスト編集シートと同じ理由の明示ボタン）。 */}
+          {endDate !== '' ? (
+            <div className="row-actions">
+              <button
+                type="button"
+                className="btn btn--ghost"
+                style={{ minHeight: 'var(--tap)' }}
+                onClick={() => setEndDate('')}
+                data-ui={UI.allocations.recurringEndDateClear}
+              >
+                {t('ccItem.endDateClear')}
+              </button>
+            </div>
+          ) : null}
         </div>
       </Modal>
       {pendingAmountChange && existing ? (

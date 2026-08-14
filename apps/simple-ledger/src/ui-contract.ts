@@ -243,6 +243,8 @@ export const UI = {
     recurringFirstPostingStatus: 'allocations.recurring.firstPostingStatus',
     recurringStartDate: 'allocations.recurring.startDate',
     recurringEndDate: 'allocations.recurring.endDate',
+    // ルールの終了日の解除（iOS date input にクリア手段が無いための明示ボタン）
+    recurringEndDateClear: 'allocations.recurring.endDateClear',
     recurringFrom: 'allocations.recurring.from',
     recurringTo: 'allocations.recurring.to',
     recurringSave: 'allocations.recurring.save',
