@@ -21,7 +21,7 @@
 ```jsonc
 {
   "appId": "snishi-code.simple-ledger-v2",
-  "schemaVersion": 11,
+  "schemaVersion": 12,
   "ledgerId": "ledger",
   "exportedAt": "2026-07-29T00:00:00.000Z",
   "deviceId": "<uuid>",
@@ -61,6 +61,9 @@
   作者が科目編集で明示したときだけ保存される。
   アーカイブ操作は今日を `endDate` に記録し、アーカイブ解除は `endDate` を消す。
   schema / DB の版は変えず、端点のない JSON も受理する。
+- `JournalEntry.groupId?`: 諸口（複数フロー行の束・グループ ID 方式）の**予約フィールド**（v12。
+  検証は形式のみ〔1〜64 文字〕で、UI・集計は未実装。同 groupId の件数など相互参照の不変条件は
+  持たせない）。
 - `revision`: 端末ローカルの編集追跡。保存のたびに +1。
 - 金額（`JournalLine.amount`）は **正の整数・1/100 単位（minor）**（v11〜。例: 1,234.56 → 123456・
   100円 → 10000）。通貨はただの単位文字列で、表示の小数桁は `settings.displayFractionDigits`
@@ -85,14 +88,13 @@
 | **v8→v9**（2026-08-11）                        | 取込プロファイルのアーカイブ（`ImportProfile.archived`）・上書き保存の廃止・`ProfileBinding.importFromDate`（取込開始日）。ストア構成は不変（DB_VERSION 9 は版対応を 1:1 に保つために上げた）。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | **v9→v10**（2026-08-11・CSV 取込の全撤去）     | **CSV 取込一式を撤去**（実ユーズの結論・作者決定 2026-08-11。「ざっくり登録して差額は残高補正で吸収」の使い方に明細単位の CSV 取込は合わない＝使わない死荷重）。v8〜v9 の型・schema・store 参照・UI・交換 JSON の 3 配列・`EntryMetadata` の取込由来を削除（DB_VERSION 10。upgrade は旧 3 ストアを温存 = 黙って削除しない）。設計は git 履歴に残る（将来要望が出たら再導入可能）。                                                                                                                                                                                                                                                                                                                                                              |
 | **v10→v11**（2026-08-13・金額の 1/100 単位化） | **全金額 ×100（minor 単位）**・`settings.locale` 撤去・`settings.displayFractionDigits`（表示桁数 0\|1\|2・入力の刻み連動）新設・snapshot `reason` の理由コード化・`amountSchema` に上限 10^12 追加（集計 overflow ガード = `domain/safeSum` と対）。導出（月割り・投影・返済分割）は minor をそのまま扱い 1 単位へ丸め直さない（表示の丸めは表示層のみ）。実データは単発変換（DB_VERSION 11）。 |
+| **v11→v12**（2026-08-15・継続コスト同日刻み）  | **費用化を同日刻みへ**（支払いが買った期間を同日刻みで n 等分し、各刻みの終端の日に費用化する。`allocationSchedule` が正本）。ルール由来 item（`ccr-{ruleId}-{YYYY-MM}`）の `endDate` の意味を「周期末の月末」から**「次回起票日と同日」**へ変更（単発変換で書き換える）。**`MonthlyCostItem.allocationStartDate` を撤去**（機能ごと廃止）。**残高補正を全科目へ開放**（`asset`/`liability` に加え `expense`/`revenue`。向きは借方正規/貸方正規の 2 分岐へ一般化）。**ルールの台帳経由を登録時の明示トグル化**（role で動作を決めない。`spreadExpenseAccountId` の許容先を起票できる全 role = `RECURRING_POSTABLE_ROLES` へ拡大）。**`JournalEntry.groupId?` を予約**（諸口・形式検証のみ・UI 未実装）。実データの変換 = `_workspace-management/scripts/convert-ledger-v11-to-v12.mjs`（単発・アプリ内 migration なし。DB_VERSION 12）。 |
 
 ### `MonthlyCostItem`（継続コスト資産）
 
 `id` / `name` / `amount`（購入額・正の整数）/ `startDate`('YYYY-MM-DD'・**購入の仕訳の日付と
-完全一致**) / `endDate?`（任意。未設定 = 費用の割り振りをしない）/
-`allocationStartDate?`（費用化の開始日・任意。未設定 = 購入日。月割りの起点で、不変条件は
-`startDate ≤ allocationStartDate`〔endDate 設定時は `≤ endDate`〕。購入日〜費用化開始の間は
-台帳に価値が置かれたままになる）/ `expenseAccountId`（計上先）/ `createdAt` / `updatedAt`。
+完全一致**) / `endDate?`（任意。未設定 = 費用の割り振りをしない）/ `expenseAccountId`（計上先）/
+`createdAt` / `updatedAt`。
 
 - **購入の仕訳**（保存される仕訳・item と 1:1）: `借方 継続コスト台帳(continuing-cost-ledger) /
 貸方 支払い元`。印は `metadata.monthlyCostId` のみ。持ち込み登録（貸方 = 初期残高 equity）は
@@ -102,13 +104,13 @@
   編集・削除可。
 - 費用の行は保存されない（`continuousCostEntriesForItem` が展開する）。
 - ルール生成 item の id は決定的（`ccr-{ruleId}-{YYYY-MM}`）。ルール起票の保存仕訳は
-  `rec-{ruleId}-{month}`。
+  `rec-{ruleId}-{month}`。生成 item の `endDate` は必ず埋まり、**次回起票日と同日**（v12）。
 
 ### `RecurringRule`（定期ルール）
 
 `id` / `name` / `amount` / `dayOfMonth` / `everyMonths`（必須。1 = 毎月）/
-`spreadExpenseAccountId?`（正規化済みの費用の行き先）/
-`debitAccountId`（費用ルールでは継続コスト台帳、費用以外では行き先）/ `creditAccountId` / `startMonth`
+`spreadExpenseAccountId?`（台帳経由トグルの保存表現。値 = 月割りの計上先）/
+`debitAccountId`（台帳経由なら継続コスト台帳、直接起票なら行き先）/ `creditAccountId` / `startMonth`
 （周期の位相 anchor）/ `startDate`（存在開始日・含む・必須）/ `splitFromRuleId?`（金額分割の直前 segment）/
 `endDate?`（存在終了日・含まない）/
 `postedThroughMonth?`（起票カーソル）。
@@ -139,11 +141,13 @@
 - 「今日から」の分割は、旧ルールが今日より前に少なくとも1日存在し、今日も存在期間内にある場合だけ
   選択できる。開始前・開始当日・終了後は空の旧 segment を作らず、全期間変更だけを許可する。
 
-schema v7 の月割りするルール（費用ルールと**差引形**ルール = 行き先の role が
-`expense-category` / `income-category`）は `spreadExpenseAccountId` = 計上先、
+月割りする（継続コスト台帳を経由する）ルールは `spreadExpenseAccountId` = 計上先、
 `debitAccountId` = 継続コスト台帳の正規形だけを受理する。spread なし・debit が計上先の
 旧形式はアプリ内で読み替えず、リポジトリ外の単発変換で正規化してから取り込む。
-通常の収入ルール（行き先 = 借方が資金側）・振替/積立ルールは従来どおり直接起票する。
+台帳を経由するかは**登録時の明示トグル**で決まり、role では決まらない（v12。既定を ON にする
+行き先 role は `expense-category` / `income-category` だが、計上先には起票できる全 role
+〔`RECURRING_POSTABLE_ROLES`〕を置ける）。トグル OFF のルールは行き先へ直接起票する。
+保存形はこの二形だけ。
 
 ### `Tag`（分析タグ）
 
@@ -164,7 +168,7 @@ schema v7 の月割りするルール（費用ルールと**差引形**ルール
   "reversalOfEntryId": "<元仕訳 ID（reversal のとき）>",
   // 残高補正（現実アンカー。「締め」は作らない）。編集・削除は補正画面のみ（Journal は読み取り専用）。
   "adjustment": {
-    "accountId": "<asset|liability>",
+    "accountId": "<asset|liability|expense|revenue>",
     "expectedBalance": 10000,
     "actualBalance": 8000,
     "delta": -2000,            // actual − expected
@@ -207,17 +211,17 @@ import では strip される）。
     （回収額の上限は設けない＝割り振る総額が負になってよい）。
     導出時の回収額は基準日までではなく、現在保存されている全実仕訳から集計する。表示する実仕訳と
     仮想月割り行の日付は `asOf` までに切るため、後日の回収は月割りへ遡及するが回収仕訳自体は過去へ現れない。
-  - `endDate?` は `>= startDate`・配分月数（費用化開始月〔`allocationStartDate ?? startDate`〕〜
-    終了月）≤ 1200 ヶ月。`allocationStartDate?` は `startDate` 以上・（endDate 設定時）`endDate`
-    以下。`expenseAccountId` は内部集約・残高調整以外（`isRecurringPostableRole`）。
+  - `endDate?` は `>= startDate`・配分月数（購入月〜終了月）≤ 1200 ヶ月。
+    `expenseAccountId` は内部集約・残高調整以外（`isRecurringPostableRole`）。
   - ルール由来 item の配分期間は、後から周期を変更して生まれた item と重なってよい。同じルール・
     同じ起票月の二重生成は、決定的 ID と起票カーソルで防ぐ。
 - `endDate` を持つ**資産・負債**は、その終了点で導出仕訳込みの残高が 0 でなければならない。
   保存境界と import schema の双方で検証する。費用・収入の累計は「過去に起きたこと」の記録なので
   残高 0 を要求せず、そのまま終了できる。
-- 定期ルール: `everyMonths` は 1〜1200（配分月数の上限と同じ）。論理的な行き先が費用なら
-  **周期にかかわらず**借方 = 継続コスト台帳として item と対で起票する。費用以外は行き先へ
-  直接起票する。定期ルール由来の仕訳は `recurringRuleId`/`recurringMonth`
+- 定期ルール: `everyMonths` は 1〜1200（配分月数の上限と同じ）。`spreadExpenseAccountId` を持つ
+  ルール（= 台帳経由トグル ON）は**周期にかかわらず**借方 = 継続コスト台帳として item と対で
+  起票し、持たないルールは行き先へ直接起票する（role では決まらない）。定期ルール由来の仕訳は
+  `recurringRuleId`/`recurringMonth`
   をペアで持ち、ルールが存在し、同ルール・同月の重複が無い。`startDate` は必須で、`endDate` は
   開始日より後の exclusive endpoint であることを検証する。起票月の日付がルールの半開存在期間に含まれ、
   参照科目の存在期間にも含まれることを保存境界・import の双方で確認する。
@@ -275,7 +279,7 @@ step 4 で見た `deviceId + revision` は step 5 の保存 transaction でも�
 
 ## migration ポリシー（後方互換をコードで持たない）
 
-- `schemaVersion` を必ず持つ。現行は **`11`**（`SCHEMA_VERSION`・`src/data/constants.ts`）。
+- `schemaVersion` を必ず持つ。現行は **`12`**（`SCHEMA_VERSION`・`src/data/constants.ts`）。
 - **アプリ内に migration チェーンを持たない**（作者決定・単発変換方式）。版を上げたら:
   1. `SCHEMA_VERSION` を +1 する（旧版 JSON / スナップショットは fail-closed に拒否される）。
   2. 実データは書き出した JSON を**単発の変換スクリプト**（`_workspace-management/scripts/`）で
@@ -309,6 +313,16 @@ step 4 で見た `deviceId + revision` は step 5 の保存 transaction でも�
   **版を上げると旧版のスナップショットは復元できなくなる**（`schemaVersion` 不一致は
   復元不可・起動時に自動削除）。保険は「変換前の v10 JSON を手元に残すこと」であって
   アプリ内スナップショットではない。
+- 2026-08-15 の継続コストの同日刻み化は `SCHEMA_VERSION=12` / `DB_VERSION=12`（store 構成は
+  不変だが版対応 1:1）。**ルール由来 item（`ccr-…`）の `endDate` の意味変更**（周期末の月末 →
+  次回起票日と同日）+ **`allocationStartDate` 撤去** + **補正の全科目化** + **ルールの台帳経由を
+  明示トグル化**（spread 先 = 起票できる全 role へ拡大）+ **`JournalEntry.groupId` の予約**。
+  v11 以前の JSON は unsupported-version、v11 以前の DB は復旧面へ（in-app 変換なし。
+  実データの v11→v12 変換 = `_workspace-management/scripts/convert-ledger-v11-to-v12.mjs`・
+  **順序固定**: v11 ビルドのまま export → 変換 → **変換結果を実 schema と実 import で検証**
+  （`apps/simple-ledger/tests/convertedLedger.verify.test.ts` に `CONVERTED_LEDGER_JSON=<path>` を渡す）
+  → v12 更新 → DB 初期化 → import）。ここでも**旧版スナップショットは復元不可**なので、
+  保険は変換前の v11 JSON を手元に残すこと。
 
 ## 外部送信ゼロとの関係
 
