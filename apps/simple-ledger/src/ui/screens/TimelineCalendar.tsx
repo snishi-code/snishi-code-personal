@@ -627,7 +627,11 @@ export function TimelineCalendarView({
       : selection?.kind === 'generation'
         ? bucketIndex(model.buckets, selection.dot.bucketKey)
         : -1;
-  const connectorX = (selectedBucketIndex + 0.5) * bucketWidth;
+  // 接続線・ポップオーバーはポッチと同じ x（日付比例）に置く。バケット中央だとポッチと分離する。
+  const connectorX =
+    selection !== null
+      ? positionForDate(model.buckets, selection.dot.date, bucketWidth)
+      : (selectedBucketIndex + 0.5) * bucketWidth;
   const todayX =
     model.buckets[0] &&
     model.buckets.at(-1) &&
@@ -904,6 +908,10 @@ function TimelineRow({
         {row.dots.map((dot) => {
           const index = bucketIndex(buckets, dot.bucketKey);
           if (index < 0) return null;
+          // ポッチの x は帯と同じ「日付比例」で置く。バケット中央固定にすると、帯の端が
+          // バケット途中にあるとき（月の後半に始まる項目など）ポッチが帯の外へ浮いて見える
+          // ＝同じ軸に 2 つの座標規則を持たない（実ユーズ指摘 2026-08-14）。
+          const dotX = positionForDate(buckets, dot.date, bucketWidth);
           const selected = selection?.kind === 'flow' && selection.dot === dot;
           return (
             <button
@@ -915,7 +923,7 @@ function TimelineRow({
                     ? 'timeline-calendar__dot--negative'
                     : ''
               }`}
-              style={{ left: (index + 0.5) * bucketWidth }}
+              style={{ left: dotX }}
               aria-label={`${dot.date} ${t('timeline.flowCount', { count: dot.flows.length })}: ${formatMoney(
                 dot.netChange,
                 currency,
@@ -948,7 +956,7 @@ function TimelineRow({
             <button
               type="button"
               className="timeline-calendar__dot timeline-calendar__dot--generation"
-              style={{ left: (index + 0.5) * bucketWidth }}
+              style={{ left: positionForDate(buckets, dot.date, bucketWidth) }}
               aria-label={`${t('timeline.generation')}: ${dot.date}`}
               aria-expanded={selected}
               data-ui={UI.timeline.generationDot}
@@ -999,15 +1007,16 @@ function TimelineRow({
 }
 
 function popoverStyle(
-  bucketKey: string,
+  dot: { bucketKey: string; date: string },
   buckets: TimelineBucketView[],
   bucketWidth: number,
   above = false,
 ): CSSProperties {
-  const index = bucketIndex(buckets, bucketKey);
+  const index = bucketIndex(buckets, dot.bucketKey);
   const ratio = buckets.length <= 1 ? 0.5 : index / (buckets.length - 1);
   return {
-    left: (index + 0.5) * bucketWidth,
+    // x はポッチ・接続線と同じ「日付比例」（水平の張り出し方向だけバケット位置比で決める）。
+    left: positionForDate(buckets, dot.date, bucketWidth),
     // 既定は行の下（CSS の top）。接続線が下へ伸びる選択では行の上へ反転し、
     // 縦線（ポッチと同じ x）へポップオーバーが重なって線が見えなくなる問題を避ける。
     ...(above ? { top: 'auto', bottom: 'calc(50% + 18px)' } : {}),
@@ -1041,7 +1050,7 @@ function TimelineFlowPopover({
   return (
     <div
       className="timeline-calendar__popover"
-      style={popoverStyle(dot.bucketKey, buckets, bucketWidth, above)}
+      style={popoverStyle(dot, buckets, bucketWidth, above)}
       data-ui={UI.timeline.popover}
       onClick={(event) => event.stopPropagation()}
     >
@@ -1116,7 +1125,7 @@ function TimelineGenerationPopover({
   return (
     <div
       className="timeline-calendar__popover"
-      style={popoverStyle(dot.bucketKey, buckets, bucketWidth)}
+      style={popoverStyle(dot, buckets, bucketWidth)}
       data-ui={UI.timeline.popover}
       onClick={(event) => event.stopPropagation()}
     >
