@@ -155,6 +155,10 @@ export const UI = {
       cancel: 'journal.entry.cancel',
       delete: 'journal.entry.delete',
       reverse: 'journal.entry.reverse',
+      // 反対仕訳シートの「取消済み / 残り」行（取消が 0 件なら出ない）と、
+      // 入力額が残りを超えたときの注意（警告のみ・保存は止めない）
+      reversalSummary: 'journal.entry.reversal.summary',
+      reversalOverWarning: 'journal.entry.reversal.overWarning',
       detailToggle: 'journal.entry.detailToggle',
       manualSwitch: 'journal.entry.manualSwitch',
       tags: 'journal.entry.tags',

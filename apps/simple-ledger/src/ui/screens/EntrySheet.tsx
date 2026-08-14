@@ -31,8 +31,9 @@ import {
   parseAmountToMinor,
   sanitizeAmountText,
 } from '../amountText';
-import { useMoneyDigits } from '../money';
+import { moneyText, useMoneyDigits } from '../money';
 import { useLedger } from '../../state/store';
+import { entryAmount } from '../../domain/tags';
 import {
   reversalInput,
   toSimpleInput,
@@ -109,6 +110,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const { ledger, saveEntry, createContinuousCost, saveAccount } = useLedger();
   const accounts = ledger?.accounts ?? [];
   const tags = ledger?.tags ?? [];
+  const currency = ledger?.settings.currency ?? '';
 
   const fixed = init.kind === 'transfer-fixed' ? init.fixed : null;
   /*
@@ -467,6 +469,63 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       dataUi={UI.journal.entry.amount}
     />
   );
+
+  /*
+   * 反対仕訳（取消/返金）の「この仕訳への取消済み合計 / 残り」。
+   * 元仕訳を指す既存の反対仕訳（metadata.reversalOfEntryId）だけを数える。
+   * 集計に domain の checked sum（assertSafeAmount）は使わない: render で投げると
+   * root の ErrorBoundary がアプリ全体を復旧画面へ落とす。fail-closed は保存境界の役目。
+   */
+  const reversalStatus = (() => {
+    if (init.kind !== 'reversal') return null;
+    const sourceId = init.source.id;
+    const done = (ledger?.journalEntries ?? []).filter(
+      (e) => e.metadata?.reversalOfEntryId === sourceId,
+    );
+    const reversed = done.reduce((sum, e) => sum + entryAmount(e), 0);
+    // 残りは負になり得る（過剰返金・元仕訳の後からの減額編集）。負のまま見せる。
+    return { count: done.length, reversed, remaining: entryAmount(init.source) - reversed };
+  })();
+  /*
+   * 入力額が残りを超えたときの注意。**警告だけで保存はブロックしない**（作者合意 2026-08-15）。
+   * ハードブロックは過去編集モデルと両立しない: 元仕訳を後から減額編集すると保存済みの取消が
+   * 超過側へ回るため、保存境界に入れると編集のたびに壊れる台帳になる。
+   * 現実にも過剰返金・補償はありうるので、記録は止めず気づかせるだけにする。
+   */
+  const reversalOverRemaining = reversalStatus !== null && form.amount > reversalStatus.remaining;
+  /*
+   * 表示桁は金額欄と同じ（fractionDigits）。ただし取消済み・残りがその桁で表せないときだけ
+   * 桁を上げる: 丸めた「残り」と、丸めない値どうしで判定する上の警告が食い違って見えるのを防ぐ。
+   */
+  const summaryDigits = (
+    reversalStatus === null
+      ? fractionDigits
+      : Math.max(
+          fractionDigits,
+          exactDigitsFor(reversalStatus.reversed),
+          exactDigitsFor(reversalStatus.remaining),
+        )
+  ) as typeof displayDigits;
+  // 取消済みが 0 件のときは行ごと出さない（初回の取消で画面を汚さない）。
+  const reversalSummary =
+    reversalStatus !== null && reversalStatus.count > 0 ? (
+      <p
+        className="field__hint"
+        style={{ marginBottom: 'var(--space-4)' }}
+        data-ui={UI.journal.entry.reversalSummary}
+      >
+        {t('entry.reversal.reversedSoFar', {
+          reversed: moneyText(reversalStatus.reversed, currency, summaryDigits),
+          remaining: moneyText(reversalStatus.remaining, currency, summaryDigits),
+        })}
+      </p>
+    ) : null;
+  const reversalOverWarning = reversalOverRemaining ? (
+    <div className="field__warning" role="status" data-ui={UI.journal.entry.reversalOverWarning}>
+      <Icon name="alert" size={14} />
+      {t('entry.reversal.overWarning')}
+    </div>
+  ) : null;
 
   const entryTagsField = continuousCostActive ? null : (
     <TagPicker
@@ -867,6 +926,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             {t('entry.reversalNote')}
           </div>
         ) : null}
+        {reversalSummary}
 
         {flowError ? (
           <div
@@ -885,6 +945,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             {dateField}
             {canCreateContinuousCost && ccMode ? null : descriptionField}
             {amountField}
+            {reversalOverWarning}
             {renderManualFlow()}
             {/* 簿記編集でも、貸方が資金/負債なら継続コスト化できる（支出フローと同じパネル）。 */}
             {canCreateContinuousCost && !ccMode ? (
@@ -925,6 +986,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             {dateField}
             {mode === 'transfer' || (canCreateContinuousCost && ccMode) ? null : itemField}
             {amountField}
+            {/* 反対仕訳は常に簿記編集（上の分岐）だが、日常入力側にも同じ位置で置いておく。 */}
+            {reversalOverWarning}
             {renderFlow()}
             {ccDetailField}
             {repaymentField}

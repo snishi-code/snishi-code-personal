@@ -289,6 +289,10 @@ export const ja = {
   'entry.reversalTitle': '取消/返金を記録',
   'entry.reversalNote':
     '元の仕訳は削除せず、反対の仕訳を作成します。金額を変えれば部分返金も記録できます。',
+  // 2 回目以降の取消で「この仕訳をいくら取り消し済みか」を常時見せる（0 件のときは出さない）。
+  'entry.reversal.reversedSoFar': '取消済み: {reversed} / 残り: {remaining}',
+  // 残りを超えても保存はできる（過剰返金・補償はありうる）。止めずに気づかせるだけ。
+  'entry.reversal.overWarning': '取消済みと合わせて元の金額を超えます（このまま保存できます）。',
   'entry.monthlyizeRepayToggle': '分割・後日引落を資金繰りに入れる',
   'entry.monthlyizeRepayNote':
     '支払い元が負債のため、返済を未来日付の振替仕訳としてまとめて登録できます（仕訳一覧・資金繰りに反映）。',
