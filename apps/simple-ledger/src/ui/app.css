@@ -1013,10 +1013,11 @@ button.stmt-row:hover {
 .dashboard {
   /* 記帳バーぶんだけ。フッター + safe-area は .app-main の --bottom-inset が数える。 */
   padding-bottom: var(--entry-bar-h);
-  /* 額縁の目安高（375px 幅・金額 1 行時）。.stat__value は clamp + word-break: break-all
-     （上の .stat__value）なので桁数の多い金額が折り返すと 1 行ぶん高くなり、この値は不足する。
-     ズレの影響はキーボードでフォーカスした仕訳行のスクロール位置だけ。 */
-  --home-frame-h: 269px;
+  /* 額縁の目安高（375px 幅・金額 1 行時・実測 214.3px @2026-08-14 見出し撤去後）。
+     .stat__value は clamp + word-break: break-all なので桁数の多い金額が折り返すと
+     1 行ぶん高くなり、この値は不足する。ズレの影響はキーボードでフォーカスした
+     仕訳行のスクロール位置だけ。 */
+  --home-frame-h: 215px;
 }
 /* ホームの額縁: 収支 + 財政状態の 6 枠を sticky 固定し、下の仕訳だけが流れる（実ユーズ④）。
    z は同一スクロール内の前後関係のみ（yearly-overview__label と同じ生数値運用）。

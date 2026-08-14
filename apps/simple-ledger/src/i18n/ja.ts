@@ -57,8 +57,6 @@ export const ja = {
   'dashboard.statDetail': '{label} {amount}、内訳を開く',
   'dashboard.noMonthEntries': '仕訳はまだありません。',
   'dashboard.entriesOf': '仕訳',
-  'dashboard.flowOf': '収支',
-  'dashboard.positionAsOf': '財政状態（{date} 時点）',
   // 支出の内訳（ホーム「支出」のタップ先）
   'expenseBreakdown.title': '支出の内訳',
   'expenseBreakdown.intro':

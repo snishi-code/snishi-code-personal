@@ -169,18 +169,16 @@ describe('追補監査の画面回帰', () => {
         );
       });
     };
-    // 未来月・未来年は選択期間の末日までを投影するため、1月15日の未来返済を含む。
+    // 未来月・未来年は選択期間の末日までを投影するため、1月15日の未来返済を含む
+    // （基準日の検証は残高値そのもので行う。「財政状態（〜時点）」見出しは 2026-08-14 に撤去）。
     await expectDashboardBalances('550,000');
-    expect(screen.getByText(`財政状態（${futureYear}-01-31 時点）`)).toBeInTheDocument();
 
     view.rerender(dashboard({ mode: 'year', year: futureYear }));
     await expectDashboardBalances('550,000');
-    expect(screen.getByText(`財政状態（${futureYear}-12-31 時点）`)).toBeInTheDocument();
 
     // 全期間は「未来を無制限に含む」のではなく today が基準。
     view.rerender(dashboard({ mode: 'all' }));
     await expectDashboardBalances('600,000');
-    expect(screen.getByText(`財政状態（${todayLocal()} 時点）`)).toBeInTheDocument();
     view.unmount();
 
     render(

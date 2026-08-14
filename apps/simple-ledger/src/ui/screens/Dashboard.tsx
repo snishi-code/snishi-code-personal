@@ -105,7 +105,7 @@ export function Dashboard({
     });
   };
 
-  const { pl, bs, asOf, livingTotal, investmentProjectionTruncations } = useMemo(() => {
+  const { pl, bs, livingTotal, investmentProjectionTruncations } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     // 表示は投影込み（displayEntries）。ヘッダー日付を未来にすると資産・純資産が投影込みになる。
     const display = ledger ? displayEntriesResultForAsOf(ledger, basis.asOf, today) : null;
@@ -114,7 +114,6 @@ export function Dashboard({
     return {
       pl: deriveProfitAndLoss(accounts, entries, range),
       bs: deriveBalanceSheet(accounts, entries, basis.asOf),
-      asOf: basis.asOf,
       // 支出合計・純益は domain の値をそのまま使う（UI で式を再実装しない）。
       livingTotal: breakdown.total,
       investmentProjectionTruncations: display?.investmentProjectionTruncations ?? [],
@@ -142,7 +141,8 @@ export function Dashboard({
         {/* 額縁: 収支 + 財政状態の 6 枠を sticky 固定し、下の仕訳だけが流れる
             （実ユーズ④・作者決定 2026-08-12「6枠を固定」）。 */}
         <div className="dashboard__frame" data-ui={UI.dashboard.frame}>
-          <p className="section-label">{t('dashboard.flowOf', { label })}</p>
+          {/* 「収支」「財政状態」の見出しは撤去（見れば明らか・作者決定 2026-08-14）。
+              縮めたぶん仕訳の可視領域を広げる。読み上げは各枠の aria-label（金額込み）が担う。 */}
           <div className="stat-grid">
             <StatButton
               label={t('dashboard.revenue')}
@@ -168,8 +168,7 @@ export function Dashboard({
             />
           </div>
 
-          <p className="section-label">{t('dashboard.positionAsOf', { date: asOf })}</p>
-          <div className="stat-grid">
+          <div className="stat-grid" style={{ marginTop: 'var(--space-2)' }}>
             <StatButton
               label={t('dashboard.assets')}
               amount={bs.totalAssets}
