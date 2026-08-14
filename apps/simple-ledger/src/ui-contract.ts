@@ -346,9 +346,18 @@ export const UI = {
     onboardingOpen: 'settings.onboardingOpen',
   },
   nav: {
+    // ヘッダー左のホーム（当面フッター中央と併存＝作者決定の重複容認）。
     home: 'nav.home',
+    // ハンバーガー。ヘッダー右からフッター右へ**移設**（値は据え置き＝既存テストの経路を壊さない）。
     menuButton: 'nav.menu.button',
     menu: 'nav.menu',
+    // ヘッダー右（旧ハンバーガーの位置）。メニュー項目の 'nav.settings' とは別キーにする
+    // ＝メニューを開いた瞬間に同名 2 要素になり Playwright の strict mode に触れるため。
+    settingsButton: 'nav.settings.button',
+    // 画面下端の固定ナビ（座標検証で上端を取るために nav 要素自体にも付ける）。
+    footer: 'nav.footer',
+    footerBack: 'nav.footer.back',
+    footerHome: 'nav.footer.home',
   },
   dialog: {
     confirm: 'dialog.confirm',

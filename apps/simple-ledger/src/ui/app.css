@@ -11,10 +11,29 @@
      間に置く。foundation は他 repo が正本のためここで定義する（.entry-bar の 30 と同値だが、
      下端全幅バーと浮遊ボタンは別レイヤなので寄せない）。 */
   --z-float: 30;
+  /* 下端の全幅バー（記帳バー・フッターナビ）。両者は帯が重ならない（.entry-bar の bottom は
+     --bottom-inset ぶん上げる）ので同レイヤでよい。--z-header(20) < ここ < --z-overlay(40)。
+     シート類は native <dialog> の top-layer なので常にこの上（重なりの心配は無い）。 */
+  --z-bottom-bar: 30;
+  /* タイムラインのポップオーバー。親（.timeline-calendar__canvas）は stacking context を
+     作らないため、この値はルート階層で --z-bottom-bar と直接競合する。フッターより上へ。 */
+  --z-timeline-popover: 35;
   /* sticky 要素の上端 = app-header の実高。--header-h(56px) は .app-header__inner の
      min-height で、*{box-sizing:border-box}（foundation.css）により padding を含む。
      これに border-bottom 1px を足した 57px が実高（65px と誤認しやすいので注意）。 */
   --sticky-top: calc(var(--header-h) + 1px);
+
+  /* ── 下端の furniture（フッターナビ・記帳バー）の高さの正本 ──
+     env(safe-area-inset-bottom) の**登場を --bottom-inset の 1 本に集約する**。
+     以前は .app-main（foundation）と .dashboard の両方が env を足しており、iPhone では
+     safe-area が二重に積まれていた（実測 sab=34 で最終行下が 120 + 34×2）。
+     フッターで 3 個目を足すと死に領域になるため、ここで数え方を 1 つにする。 */
+  --footer-h: calc(var(--tap) + var(--space-1) * 2 + 1px); /* 44 + 4 + 1 = 53px */
+  --entry-bar-h: 88px; /* .entry-bar の実測 87.8px（padding 8 + ボタン 70.8 + 8 + border 1）*/
+  --bottom-inset: calc(var(--footer-h) + env(safe-area-inset-bottom, 0px));
+  /* 一番上へ移動ボタンの下端。全画面共通でフッターを避ける（.scroll-top は position:fixed でも
+     カスタムプロパティを DOM 祖先から継承するため、:root 定義が全画面へ効く）。 */
+  --scroll-top-bottom: calc(var(--bottom-inset) + var(--space-3));
 }
 
 /* ── Summary card (tappable: ホームの損益/資産負債サマリー) ── */
@@ -464,7 +483,7 @@ button.timeline-calendar__row-label {
 .timeline-calendar__popover {
   position: absolute;
   top: calc(50% + 18px);
-  z-index: 12;
+  z-index: var(--z-timeline-popover);
   width: min(300px, calc(100vw - var(--space-6)));
   padding: var(--space-3);
   transform: translateX(var(--timeline-popover-shift, -50%));
@@ -890,12 +909,13 @@ button.stmt-row:hover {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 0;
-  z-index: 30;
+  /* フッターナビの上へ積む（下端に接しなくなるので safe-area はここでは数えない）。 */
+  bottom: var(--bottom-inset);
+  z-index: var(--z-bottom-bar);
   background: var(--surface);
   border-top: 1px solid var(--border);
   box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.08);
-  padding: var(--space-2) var(--space-3) calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+  padding: var(--space-2) var(--space-3);
 }
 .entry-bar__inner {
   max-width: var(--maxw);
@@ -904,12 +924,44 @@ button.stmt-row:hover {
   grid-template-columns: repeat(3, 1fr);
   gap: var(--space-2);
 }
+
+/* ── 画面下端の固定ナビ（戻る / ホーム / メニュー） ──
+   高さ = --tap(44) + padding 上下 4 + border 1 = 53px（--footer-h）。--tap を割らない最小。
+   env(safe-area-inset-bottom) を足すのは**この padding だけ**（数え方の正本は --bottom-inset）。
+   影は付けない（.entry-bar の box-shadow は色のハードコードで既存の逸脱。増やさない）。 */
+.app-footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-bottom-bar);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: var(--space-1) var(--space-3) calc(var(--space-1) + env(safe-area-inset-bottom, 0px));
+}
+.app-footer__inner {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  justify-items: center;
+}
+/* 左向きのアイコンは foundation に無い（新概念を足さない方針）。chevronRight を鏡像にする。 */
+.app-footer__back-icon {
+  display: inline-flex;
+  transform: scaleX(-1);
+}
+/* 現在地（ホーム）の手掛かり。色だけに頼らず aria-current も付けている（App.tsx）。 */
+.app-footer .icon-btn[aria-current='page'] {
+  color: var(--primary-strong);
+}
 .dashboard {
-  padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+  /* 記帳バーぶんだけ。フッター + safe-area は .app-main の --bottom-inset が数える。 */
+  padding-bottom: var(--entry-bar-h);
   /* 額縁の目安高（375px 幅・金額 1 行時）。.stat__value は clamp + word-break: break-all
      （上の .stat__value）なので桁数の多い金額が折り返すと 1 行ぶん高くなり、この値は不足する。
      ズレの影響はキーボードでフォーカスした仕訳行のスクロール位置だけ。 */
-  --home-frame-h: 240px;
+  --home-frame-h: 269px;
 }
 /* ホームの額縁: 収支 + 財政状態の 6 枠を sticky 固定し、下の仕訳だけが流れる（実ユーズ④）。
    z は同一スクロール内の前後関係のみ（yearly-overview__label と同じ生数値運用）。
@@ -979,6 +1031,8 @@ button.stmt-row:hover {
 .scroll-top {
   position: fixed;
   right: calc(var(--space-3) + env(safe-area-inset-right, 0px));
+  /* --scroll-top-bottom の正本は :root（全画面でフッターを避ける）。ホームは記帳バーぶん
+     さらに上へ。第 2 引数のフォールバックは :root 定義により到達しない。 */
   bottom: var(--scroll-top-bottom, calc(var(--space-3) + env(safe-area-inset-bottom, 0px)));
   z-index: var(--z-float);
   background: var(--surface);
@@ -1013,9 +1067,9 @@ button.stmt-row:hover {
     animation: none;
   }
 }
-/* ホームは下部に記帳バー（.entry-bar 73px + safe-area）があるため、その上へ逃がす。 */
+/* ホームはフッターに加えて記帳バー（実測 87.8px = --entry-bar-h）があるため、その上へ逃がす。 */
 .dashboard {
-  --scroll-top-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+  --scroll-top-bottom: calc(var(--bottom-inset) + var(--entry-bar-h));
 }
 
 /* ── Badge / tag (app 固有色クラス) ── */
@@ -1049,4 +1103,28 @@ button.stmt-row:hover {
   background: #fdf3d8;
   border-color: var(--warning-border);
   border-left: 3px solid var(--warning);
+}
+
+/* ── foundation の下端指定をフッターぶん押し上げる ──
+   どちらも src/main.tsx の import 順（foundation → app-theme → app.css）で app.css が最後、
+   セレクタの特異度も同値なので後勝ちする。foundation は medical からの一方向ミラーで
+   編集しないため、上書きはここに置く。 */
+/* .app-main は foundation 側が padding ショートハンドで env を足している。ロングハンドで
+   上書きして env の登場を --bottom-inset の 1 回に戻す（safe-area の二重計上を消す）。 */
+.app-main {
+  padding-bottom: calc(var(--space-6) + var(--bottom-inset));
+}
+/* トーストは --z-toast(60) でフッターより前面に出るため、常設ナビを覆わないよう上へ逃がす
+   （ホームで記帳バーと重なるのは従来どおり＝一時通知を隠さない既存の判断を維持）。 */
+.toast-region {
+  bottom: calc(var(--bottom-inset) + var(--space-3));
+}
+
+/* 低背ビューポート（横向き・スプリットビュー）ではホームの額縁を貼り付けない。
+   貼ると仕訳が 1 行も見えない（667x375 は フッター以前から本文が負・フッターは 53px 悪化させる）。
+   既存 E2E の高さは 844 / 1180 / 800 / 667 で全て 500 超なので sticky 検証には影響しない。 */
+@media (max-height: 500px) {
+  .dashboard__frame {
+    position: static;
+  }
 }

@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { AppHeader } from '@snishi/foundation/ui/AppHeader';
 import { ConfirmDialog as ExitConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
 import { Icon } from '@snishi/foundation/ui/Icon';
+import { IconButton } from '@snishi/foundation/ui/IconButton';
 import { EnvBadge } from '@snishi/foundation/pwa/EnvBadge';
 import { useAppHistory } from '@snishi/foundation/history/useAppHistory';
 import { Menu, closeTopOverlay, type MenuItem } from './ui/overlays';
@@ -239,16 +240,14 @@ export function App() {
         right={
           <>
             <EnvBadge />
-            <button
-              type="button"
-              className="icon-btn"
-              onClick={() => setMenuOpen(true)}
-              aria-label={t('a11y.openMenu')}
-              aria-haspopup="menu"
-              data-ui={UI.nav.menuButton}
+            {/* ハンバーガーはフッター右へ移設。ここは設定への直行導線（作者決定 2026-08-14）。 */}
+            <IconButton
+              label={t('nav.settings')}
+              onClick={() => go('settings')}
+              dataUi={UI.nav.settingsButton}
             >
-              <Icon name="menu" />
-            </button>
+              <Icon name="settings" />
+            </IconButton>
           </>
         }
       />
@@ -344,6 +343,53 @@ export function App() {
           <Settings onNavigate={go} onOpenOnboarding={() => setOnboardingManualOpen(true)} />
         ) : null}
       </main>
+
+      {/*
+       * 画面下端の固定ナビ（左 = 戻る / 中央 = ホーム / 右 = メニュー）。
+       * iOS の PWA は戻るジェスチャが効いたり効かなかったりするため、見えるボタンで補う
+       * （ジェスチャは残す・作者決定 2026-08-14）。
+       *
+       * 戻るは window.history.back() を呼ぶだけにする。overlay を閉じる → dirty guard →
+       * 画面履歴 → 終了確認、の順序は useAppHistory が中央制御しており、ジェスチャと
+       * 同じ popstate を起こす＝**意味が 1 箇所に留まる**（app 側に分岐を複製しない）。
+       * ホームで押すと終了確認が出るのは端末ジェスチャと同じ帰結なので、disabled にしない。
+       *
+       * overlay 表示中は native <dialog> が top-layer に乗り、フッターは inert で押せない
+       * （シート上の Back は端末ジェスチャ経由になる＝既存の .entry-bar と同じ状態）。
+       * loading / RecoveryScreen の早期 return には出さない（台帳が読めない状態で
+       * 各画面へ入れないため・fail-closed）。
+       */}
+      <nav className="app-footer" aria-label={t('a11y.footerNav')} data-ui={UI.nav.footer}>
+        <div className="app-footer__inner">
+          <IconButton
+            label={t('a11y.back')}
+            onClick={() => window.history.back()}
+            dataUi={UI.nav.footerBack}
+          >
+            {/* 左向きアイコンは foundation に無い。新概念を足さず chevronRight の鏡像で作る
+                （前例: .scroll-top__icon）。 */}
+            <span className="app-footer__back-icon">
+              <Icon name="chevronRight" />
+            </span>
+          </IconButton>
+          <IconButton
+            label={t('a11y.home')}
+            onClick={() => go('dashboard')}
+            {...(screen === 'dashboard' ? { 'aria-current': 'page' as const } : {})}
+            dataUi={UI.nav.footerHome}
+          >
+            <Icon name="home" />
+          </IconButton>
+          <IconButton
+            label={t('a11y.openMenu')}
+            onClick={() => setMenuOpen(true)}
+            aria-haspopup="menu"
+            dataUi={UI.nav.menuButton}
+          >
+            <Icon name="menu" />
+          </IconButton>
+        </div>
+      </nav>
 
       {menuOpen ? (
         <Menu

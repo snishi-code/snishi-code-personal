@@ -309,3 +309,48 @@ test('一番上へ移動ボタンは実ブラウザで出現し、押すと先�
   await expect(page.locator(ui('cashflow.view'))).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
 });
+
+test('フッターナビは全画面に常設され、下端のコンテンツを隠さない (375x667)', async ({ page }) => {
+  // 実機相当の狭い画面。フッター（fixed）は本文の上に重なるため、
+  // **toBeInViewport では検証にならない**（隠れた要素も viewport 内と判定される）。
+  // 実座標でフッター上端より上にあることを見る。
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
+  await page.goto('./?fixture=sample');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+
+  const footer = page.locator(ui('nav.footer'));
+  await expect(footer).toBeVisible();
+  const footerBox = (await footer.boundingBox())!;
+  // 画面下端にぴったり接している（safe-area は padding 側で吸収）。
+  expect(Math.round(footerBox.y + footerBox.height), 'フッターは画面下端に接する').toBe(667);
+
+  // 3 ボタンとも 44px のタップ領域を保つ。
+  for (const name of ['nav.footer.back', 'nav.footer.home', 'nav.menu.button']) {
+    const box = (await page.locator(ui(name)).boundingBox())!;
+    expect(box.height, `${name} のタップ領域が 44px 未満`).toBeGreaterThanOrEqual(44);
+  }
+
+  // ホーム: 記帳バーはフッターの上に積まれ、重ならない。
+  const entryBarBox = (await page.locator(ui('dashboard.entryBar')).boundingBox())!;
+  expect(
+    Math.round(entryBarBox.y + entryBarBox.height),
+    '記帳バーの下端がフッター上端と一致（重なりも隙間も無い）',
+  ).toBe(Math.round(footerBox.y));
+
+  // 設定画面: 最下端の破壊的ボタンがフッターに隠れないこと（一番シビアな面）。
+  await page.locator(ui('nav.settings.button')).click();
+  await expect(page.locator(ui('settings.view'))).toBeVisible();
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  const resetBox = (await page.locator(ui('settings.resetAll')).boundingBox())!;
+  const footerTopAfter = (await footer.boundingBox())!.y;
+  expect(
+    resetBox.y + resetBox.height,
+    '「すべてのデータを削除」の下端がフッターに潜っている',
+  ).toBeLessThanOrEqual(footerTopAfter);
+
+  // フッターは画面が変わっても出続ける（常設ナビ）。
+  await expect(footer).toBeVisible();
+
+  await page.screenshot({ path: 'test-results/screenshots/ledger-footer-nav-375x667.png' });
+});
