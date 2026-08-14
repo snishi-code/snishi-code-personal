@@ -352,8 +352,12 @@
   min-height: var(--timeline-row-height);
   transition: opacity 120ms ease;
 }
+/* 行の区切り線は**レイアウトに影響しない**書き方にする（border-top だと 1 行あたり 1px
+   背が高くなり、接続線が仮定する --timeline-row-height と 1px/行ずつずれていく＝
+   下の行ほど線が合わなくなる）。行の実高 = --timeline-row-height である不変則は
+   tests/ui.timelineCalendar.test.tsx が固定している。 */
 .timeline-calendar__row + .timeline-calendar__row {
-  border-top: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 var(--border);
 }
 .timeline-calendar__row--detail {
   background: color-mix(in srgb, var(--timeline-accent) 4%, var(--surface));

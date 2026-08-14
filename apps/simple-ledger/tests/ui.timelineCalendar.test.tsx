@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { useState } from 'react';
@@ -150,6 +152,31 @@ describe('TimelineCalendarView', () => {
 
     fireEvent.click(document.querySelector(`[data-ui="${UI.timeline.open}"]`)!);
     expect(onOpenTarget).toHaveBeenCalledWith({ kind: 'entry', entryId: 'entry-1' });
+  });
+
+  it('行の実高は接続線が仮定する ROW_HEIGHT と一致する（1px/行のズレを作らない）', () => {
+    render(<Harness />);
+    // 接続線は y を `index * ROW_HEIGHT + ROW_HEIGHT / 2` で置く。行がそれより 1px でも高いと
+    // ズレが行数ぶん累積し、下の行ほど線が繋がらなくなる（border-top で実際に起きた）。
+    // jsdom は実レイアウトを持たないので、**レイアウトに影響する指定が無いこと**を CSS 側で守る:
+    // 区切り線は box-shadow（レイアウト非影響）で描き、高さの正本は --timeline-row-height 1 つ。
+    // import.meta.url は vite が /@fs/... へ書き換えるため cwd 起点で読む（vitest の cwd = app root）。
+    const css = readFileSync(join(process.cwd(), 'src/ui/app.css'), 'utf8');
+    const separator = css.slice(
+      css.indexOf('.timeline-calendar__row + .timeline-calendar__row'),
+      css.indexOf('.timeline-calendar__row--detail'),
+    );
+    expect(separator).toContain('box-shadow');
+    // 色トークン var(--border) は使ってよい。禁止するのは**高さを増やす border プロパティ**。
+    expect(separator, '行の区切りに border を使うと 1px/行ずつ接続線がずれる').not.toMatch(
+      /^\s*border(-top|-bottom|-width)?\s*:/m,
+    );
+    // 高さの指定は --timeline-row-height だけ（生値を持ち込まない）。
+    const rowRule = css.slice(
+      css.indexOf('.timeline-calendar__row {\n  position: relative;'),
+      css.indexOf('.timeline-calendar__row + .timeline-calendar__row'),
+    );
+    expect(rowRule).toContain('min-height: var(--timeline-row-height)');
   });
 
   it('接続線が下の行へ伸びるときはポップオーバーを行の上へ反転する（線を隠さない）', () => {
