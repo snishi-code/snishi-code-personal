@@ -265,6 +265,133 @@ test('ホームの額縁は 6 枠を sticky 固定し、仕訳だけがスクロ
   });
 });
 
+test('仕訳一覧と毎月のものは検索・並び替えを sticky 固定し、カードだけが流れる (375x667)', async ({
+  page,
+}) => {
+  // ホームの額縁と同型（作者合意 2026-08-15）。実機相当の狭い画面で、固定部が一覧を潰さず、
+  // カードだけが額縁の下を流れることまで見る。
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
+  await page.goto('./?fixture=sample');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+
+  // 下端 furniture（フッター）の対になる上端側。ヘッダーは全画面 sticky top:0 なので
+  // スクロールポートの上端は常にヘッダー実高ぶん内側にある。
+  const scrollPaddingTop = await page.evaluate(
+    () => getComputedStyle(document.documentElement).scrollPaddingTop,
+  );
+  expect(scrollPaddingTop, ':root の scroll-padding-top がヘッダー実高ぶん入っている').toBe('57px');
+
+  await seedTodayExpenses(page, 10);
+
+  // ── 仕訳一覧 ──
+  await page.locator(ui('dashboard.journal.openAll')).click();
+  await expect(page.locator(ui('journal.view'))).toBeVisible();
+
+  const journalFrame = page.locator(ui('journal.filterFrame'));
+  const jTopBefore = await journalFrame.evaluate((el) =>
+    Math.round(el.getBoundingClientRect().top),
+  );
+  expect(jTopBefore, 'スクロール前の額縁上端はヘッダー下').toBeGreaterThanOrEqual(57);
+
+  // **実際にスクロールしたことを必ず確認する**（ここを省くと以降の assert が偽緑になる）。
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  expect(
+    await page.evaluate(() => window.scrollY),
+    '仕訳一覧がスクロールしない = 検証が成立しない',
+  ).toBeGreaterThan(0);
+
+  const jTopAfter = await journalFrame.evaluate((el) => Math.round(el.getBoundingClientRect().top));
+  expect(jTopAfter, 'スクロール後の額縁上端 = ヘッダー実高に貼り付く').toBe(57);
+  expect(jTopAfter, '自然位置から貼り付き位置へ動いた（= sticky が効いた）').toBeLessThan(
+    jTopBefore,
+  );
+
+  // 検索欄はスクロール後も画面内（座標で見る。sticky は覆われないので上端 = 額縁の中）。
+  const searchBox = (await page.locator(ui('journal.search')).boundingBox())!;
+  expect(searchBox.y, '検索欄がヘッダーの裏に入っている').toBeGreaterThanOrEqual(57);
+  expect(searchBox.y + searchBox.height, '検索欄が画面外へ出ている').toBeLessThanOrEqual(667);
+  // 並び替えも一緒に残り、44px のタップ領域を保つ。
+  for (const name of ['journal.sort.date', 'journal.sort.desc']) {
+    const box = (await page.locator(ui(name)).boundingBox())!;
+    expect(box.y, `${name} が画面外`).toBeGreaterThanOrEqual(57);
+    expect(box.height, `${name} のタップ領域が 44px 未満`).toBeGreaterThanOrEqual(44);
+  }
+
+  // 仕訳カードの方は流れている（先頭行が額縁の下へ隠れる）。
+  const jFirstRowTop = await page
+    .locator(`${ui('journal.entry.list')} li.list__item`)
+    .first()
+    .evaluate((el) => el.getBoundingClientRect().top);
+  expect(jFirstRowTop, '仕訳の先頭行はスクロールで上へ流れる').toBeLessThan(57);
+
+  // **Shift+Tab のフォーカスが額縁の裏へ潜らない**（scroll-padding-top と、額縁ぶんを足す
+  // scroll-margin-top の対）。フッターの下端版と同じ理由で、座標で見ないと検出できない。
+  for (let i = 0; i < 20; i++) {
+    await page.keyboard.press('Shift+Tab');
+    const hidden = await page.evaluate(() => {
+      const el = document.activeElement as HTMLElement | null;
+      const frame = document.querySelector('.list-filter-frame');
+      if (!el || !frame || el === document.body) return null;
+      // 額縁自身の中・ヘッダー・フッターは固定側なので対象外。
+      if (el.closest('.list-filter-frame, .app-header, .app-footer')) return null;
+      // 額縁より前（h1 など）は裏に入りようがない。
+      if (!(frame.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) return null;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) return null;
+      const bottom = frame.getBoundingClientRect().bottom;
+      return r.top < bottom ? `${el.getAttribute('data-ui') ?? el.tagName} top=${r.top}` : null;
+    });
+    expect(hidden, `Shift+Tab ${i + 1} 回目のフォーカス要素が額縁の裏に潜っている`).toBeNull();
+  }
+
+  await page.screenshot({ path: 'test-results/screenshots/ledger-journal-sticky-375x667.png' });
+
+  // ── 毎月のもの ──
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.allocations')).click();
+  await expect(page.locator(ui('allocations.view'))).toBeVisible();
+
+  const allocFrame = page.locator(ui('allocations.filterFrame'));
+  const aTopBefore = await allocFrame.evaluate((el) => Math.round(el.getBoundingClientRect().top));
+  expect(aTopBefore, 'スクロール前の額縁上端はヘッダー下').toBeGreaterThanOrEqual(57);
+
+  const aCardTopBefore = await page
+    .locator(ui('allocations.item'))
+    .first()
+    .evaluate((el) => el.getBoundingClientRect().top);
+
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  expect(
+    await page.evaluate(() => window.scrollY),
+    '毎月のものがスクロールしない = 検証が成立しない',
+  ).toBeGreaterThan(0);
+
+  const aTopAfter = await allocFrame.evaluate((el) => Math.round(el.getBoundingClientRect().top));
+  expect(aTopAfter, 'スクロール後の額縁上端 = ヘッダー実高に貼り付く').toBe(57);
+  expect(aTopAfter, '自然位置から貼り付き位置へ動いた（= sticky が効いた）').toBeLessThan(
+    aTopBefore,
+  );
+
+  const aSearchBox = (await page.locator(ui('allocations.search')).boundingBox())!;
+  expect(aSearchBox.y, '検索欄がヘッダーの裏に入っている').toBeGreaterThanOrEqual(57);
+  expect(aSearchBox.y + aSearchBox.height, '検索欄が画面外へ出ている').toBeLessThanOrEqual(667);
+  for (const name of ['allocations.sort.date', 'allocations.sort.desc']) {
+    const box = (await page.locator(ui(name)).boundingBox())!;
+    expect(box.y, `${name} が画面外`).toBeGreaterThanOrEqual(57);
+    expect(box.height, `${name} のタップ領域が 44px 未満`).toBeGreaterThanOrEqual(44);
+  }
+
+  // item カードは額縁の下を流れる（額縁が動かないぶん、カードだけが上がる）。
+  const aCardTopAfter = await page
+    .locator(ui('allocations.item'))
+    .first()
+    .evaluate((el) => el.getBoundingClientRect().top);
+  expect(aCardTopAfter, 'item カードはスクロールで上へ流れる').toBeLessThan(aCardTopBefore);
+
+  await page.screenshot({ path: 'test-results/screenshots/ledger-allocations-sticky-375x667.png' });
+});
+
 test('一番上へ移動ボタンは実ブラウザで出現し、押すと先頭へ戻る (375x667)', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 667 });
   await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));

@@ -43,6 +43,10 @@
      これが無いとフォーカス中の要素がフッターの下へ**完全に潜る**（キーボードで位置を見失う）。
      scroll-margin-top（.dashboard__entries .list__item）が上端を守るのと対になる下端側。 */
   scroll-padding-bottom: calc(var(--bottom-inset) + var(--space-3));
+  /* 上端側の対。app-header は全画面で sticky top:0 なので、スクロールポートの上端は常に
+     ヘッダー実高ぶん内側にある。額縁（.list-filter-frame / .dashboard__frame）の高さは
+     画面ごとに違うため、そのぶんは各要素の scroll-margin-top が足す。 */
+  scroll-padding-top: var(--sticky-top);
 }
 
 /* ── ヘッダーの時間の粒度（年間/全体）セグメント ──
@@ -191,6 +195,49 @@
    仕訳一覧・毎月のもの共通。yearly-overview / timeline-calendar の同種上書きは別部品のため残す。 */
 .list-sort .segmented__btn {
   min-height: var(--tap);
+}
+
+/* ── 一覧の絞り込み額縁（仕訳一覧・毎月のもの） ──
+   ホームの .dashboard__frame と同型（作者合意 2026-08-15）。検索・並び替え・絞り込みを
+   sticky で上端に貼り、下のカードだけが流れる。画面タイトル(h1)は額縁に含めない
+   （スクロールで流れてよい = ホームと同じ扱い）。
+   z は同一スクロール内の前後関係のみ（.dashboard__frame と同値の生数値運用）。
+   面は --bg（= app-main の地）。ここを透かすと下のカードが文字に重なって読めなくなる。
+   行間は gap が持ち、.toolbar 既定の下余白は消す（額縁の中で二重に空けない）。 */
+.list-filter-frame {
+  position: sticky;
+  top: var(--sticky-top);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--bg);
+  padding-bottom: var(--space-2);
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.list-filter-frame > .toolbar {
+  margin-bottom: 0;
+}
+/* 額縁より下のものは、キーボードでフォーカスしたときに額縁の裏へ潜らせない。
+   sticky はブラウザのスクロール計算に現れないため、:root の scroll-padding-top
+   （ヘッダーぶん）だけでは足りず、額縁の高さぶんを下の要素側で足す。
+   下端の scroll-padding-bottom（フッター）と対になる上端側の手当て。
+   ヘッダーぶんは :root が数えるので、ここは額縁の高さだけを足す（二重計上しない）。
+   --list-filter-frame-h は画面ごとの実測値（折り返しでズレても影響はフォーカス位置だけ）。 */
+.list-filter-frame ~ *,
+.list-filter-frame ~ * * {
+  scroll-margin-top: var(--list-filter-frame-h, 0px);
+}
+/* 額縁の実測高（@2026-08-15・?fixture=sample）。折り返しで変わるので画面ごとに持つ。 */
+.journal {
+  /* 375/390px 幅 = 246px（並び替えが 2 行に折り返す）。667px 幅以上は 1 行に収まり 194px。
+     広い画面では余分に逃がすだけなので、狭い方（＝隠れる側）の実測値を採る。 */
+  --list-filter-frame-h: 246px;
+}
+.allocations {
+  /* 「終了分も表示」+ 検索 + 並び替えで 113px（375〜1280px 幅で不変）。 */
+  --list-filter-frame-h: 113px;
 }
 
 /* ── 年間・全体マトリクス ── */
@@ -1049,9 +1096,11 @@ button.stmt-row:hover {
   font-size: 12px;
   margin: calc((30px - var(--tap)) / 2) 0;
 }
-/* キーボードフォーカスで仕訳行が額縁の下に隠れないよう逃がす。 */
+/* キーボードフォーカスで仕訳行が額縁の下に隠れないよう逃がす。
+   ヘッダーぶんは :root の scroll-padding-top が数えるので、ここは額縁の高さだけ
+   （両方に --sticky-top を入れると 2 回引かれて行き過ぎる）。 */
 .dashboard__entries .list__item {
-  scroll-margin-top: calc(var(--sticky-top) + var(--home-frame-h));
+  scroll-margin-top: var(--home-frame-h);
 }
 .entry-type-btn {
   display: flex;
@@ -1192,5 +1241,18 @@ button.stmt-row:hover {
 @media (max-height: 640px) {
   .dashboard__frame {
     position: static;
+  }
+  /* 仕訳一覧の額縁も同じ境界で外す。実測 246px（375px 幅・並び替えが 2 行）/ 194px（667px 幅以上）
+     = ホームの額縁より高いので、ホームで貼らない高さならこちらも貼らない。
+     必要高 = ヘッダー 57 + 額縁 194 + 仕訳 2 行 134 + フッター 53 ≒ 438、横向き実機（高さ 375〜430）
+     では 1 行しか残らない。
+     「毎月のもの」は額縁 113px（幅によらず一定）で、高さ 375 でも一覧が 150px 残るため貼ったまま
+     にする（＝この境界を共有しない。額縁の高さが違えば逃す高さも違う）。 */
+  .journal .list-filter-frame {
+    position: static;
+  }
+  /* 貼らないなら逃がす必要も無い（残すとフォーカスのたびに 246px 行き過ぎる）。 */
+  .journal {
+    --list-filter-frame-h: 0px;
   }
 }

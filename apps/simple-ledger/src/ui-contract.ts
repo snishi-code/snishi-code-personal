@@ -135,6 +135,8 @@ export const UI = {
   journal: {
     view: 'journal.view',
     list: 'journal.entry.list',
+    // 検索・並び替え・絞り込みの額縁（sticky。仕訳カードだけが下を流れる）
+    filterFrame: 'journal.filterFrame',
     search: 'journal.search',
     clearAccountFilter: 'journal.filter.clearAccount',
     clearNormalExpenseFilter: 'journal.filter.clearNormalExpense',
@@ -220,6 +222,8 @@ export const UI = {
   },
   allocations: {
     view: 'allocations.view',
+    // 検索・並び替え・「終了分も表示」の額縁（sticky。ルール/item カードだけが下を流れる）
+    filterFrame: 'allocations.filterFrame',
     search: 'allocations.search',
     searchEmpty: 'allocations.searchEmpty',
     searchCount: 'allocations.searchCount',

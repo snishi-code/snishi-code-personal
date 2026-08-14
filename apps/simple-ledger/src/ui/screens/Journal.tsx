@@ -251,7 +251,7 @@ export function Journal({
   const hasDateOrQuery = query !== '' || from !== '' || to !== '';
 
   return (
-    <section aria-labelledby="journal-title" data-ui={UI.journal.view}>
+    <section className="journal" aria-labelledby="journal-title" data-ui={UI.journal.view}>
       <h1 className="screen-title" id="journal-title">
         {t('journal.title')}
       </h1>
@@ -261,156 +261,166 @@ export function Journal({
         accounts={ledger?.accounts ?? []}
       />
 
-      {filterAccount || normalExpenseOnly ? (
+      {/* 絞り込み額縁: 検索・期間・タグ・並び替え・件数を sticky で上端に固定し、
+          仕訳カードだけが下を流れる（作者合意 2026-08-15・ホームの額縁と同型）。
+          h1 は含めない = スクロールで流れてよい。 */}
+      <div className="list-filter-frame" data-ui={UI.journal.filterFrame}>
+        {filterAccount || normalExpenseOnly ? (
+          <div className="toolbar">
+            {filterAccount ? (
+              <span className="filter-chip">
+                {t('journal.filteredByAccount', { name: filterAccount.name })}
+                <button
+                  type="button"
+                  onClick={onClearFilter}
+                  aria-label={t('journal.clearAccountFilter')}
+                  data-ui={UI.journal.clearAccountFilter}
+                >
+                  <Icon name="close" size={16} />
+                </button>
+              </span>
+            ) : null}
+            {normalExpenseOnly ? (
+              <span className="filter-chip">
+                {t('journal.filteredByNormalExpense')}
+                <button
+                  type="button"
+                  onClick={onClearFilter}
+                  aria-label={t('journal.clearNormalExpenseFilter')}
+                  data-ui={UI.journal.clearNormalExpenseFilter}
+                >
+                  <Icon name="close" size={16} />
+                </button>
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="toolbar">
-          {filterAccount ? (
-            <span className="filter-chip">
-              {t('journal.filteredByAccount', { name: filterAccount.name })}
-              <button
-                type="button"
-                onClick={onClearFilter}
-                aria-label={t('journal.clearAccountFilter')}
-                data-ui={UI.journal.clearAccountFilter}
+          <SearchInput
+            id="journal-search"
+            label={t('common.search')}
+            value={query}
+            onChange={setQuery}
+            placeholder={t('journal.searchPlaceholder')}
+            dataUi={UI.journal.search}
+          />
+          {allTags.length > 0 ? (
+            <>
+              <label className="sr-only" htmlFor="journal-tag">
+                {t('journal.filterTag')}
+              </label>
+              <select
+                id="journal-tag"
+                className="select"
+                value={tagFilter}
+                aria-label={t('journal.filterTag')}
+                onChange={(e) => setTagFilter(e.target.value)}
+                data-ui={UI.journal.filterTag}
               >
-                <Icon name="close" size={16} />
-              </button>
-            </span>
-          ) : null}
-          {normalExpenseOnly ? (
-            <span className="filter-chip">
-              {t('journal.filteredByNormalExpense')}
-              <button
-                type="button"
-                onClick={onClearFilter}
-                aria-label={t('journal.clearNormalExpenseFilter')}
-                data-ui={UI.journal.clearNormalExpenseFilter}
-              >
-                <Icon name="close" size={16} />
-              </button>
-            </span>
+                <option value="">{t('journal.allTags')}</option>
+                {allTags
+                  .filter((tg) => !tg.archived || tg.id === tagFilter)
+                  .map((tg) => (
+                    <option key={tg.id} value={tg.id}>
+                      {tg.name}
+                    </option>
+                  ))}
+              </select>
+            </>
           ) : null}
         </div>
-      ) : null}
-
-      <div className="toolbar">
-        <SearchInput
-          id="journal-search"
-          label={t('common.search')}
-          value={query}
-          onChange={setQuery}
-          placeholder={t('journal.searchPlaceholder')}
-          dataUi={UI.journal.search}
-        />
-        {allTags.length > 0 ? (
-          <>
-            <label className="sr-only" htmlFor="journal-tag">
-              {t('journal.filterTag')}
-            </label>
-            <select
-              id="journal-tag"
-              className="select"
-              value={tagFilter}
-              aria-label={t('journal.filterTag')}
-              onChange={(e) => setTagFilter(e.target.value)}
-              data-ui={UI.journal.filterTag}
-            >
-              <option value="">{t('journal.allTags')}</option>
-              {allTags
-                .filter((tg) => !tg.archived || tg.id === tagFilter)
-                .map((tg) => (
-                  <option key={tg.id} value={tg.id}>
-                    {tg.name}
-                  </option>
-                ))}
-            </select>
-          </>
-        ) : null}
-      </div>
-      <div className="toolbar">
-        <label className="sr-only" htmlFor="journal-from">
-          {t('journal.from')}
-        </label>
-        <input
-          id="journal-from"
-          className="input"
-          type="date"
-          value={from}
-          max={CONTINUOUS_COST_HARD_CAP}
-          aria-label={t('journal.from')}
-          onChange={(e) => setFrom(e.target.value)}
-        />
-        <label className="sr-only" htmlFor="journal-to">
-          {t('journal.to')}
-        </label>
-        <input
-          id="journal-to"
-          className="input"
-          type="date"
-          value={to}
-          max={CONTINUOUS_COST_HARD_CAP}
-          aria-label={t('journal.to')}
-          onChange={(e) => setTo(e.target.value)}
-        />
-        {hasDateOrQuery ? (
-          <button
-            type="button"
-            className="btn btn--ghost"
-            onClick={() => {
-              setQuery('');
-              setFrom('');
-              setTo('');
-            }}
-          >
-            {t('journal.clearFilter')}
-          </button>
-        ) : null}
-      </div>
-
-      <SortControls
-        ariaLabel={t('common.sort')}
-        extraClassName="journal__sort"
-        axisItems={LIST_SORT_AXES.map((axis) => ({
-          key: axis.key,
-          label: t(axis.labelKey),
-          dataUi: SORT_AXIS_DATA_UI[axis.key],
-        }))}
-        axisValue={sortKey}
-        onAxisChange={(key) => {
-          const next = listSortAxisKey(key);
-          setSortKey(next);
-          // 軸を変えたら方向は軸ごとの既定へ戻す（前の軸の方向を持ち越さない）。
-          setSortDirection(SORT_DEFAULT_DIRECTION[next]);
-        }}
-        directionItems={[
-          { key: 'desc', label: t('common.sortDesc'), dataUi: UI.journal.sortDesc },
-          { key: 'asc', label: t('common.sortAsc'), dataUi: UI.journal.sortAsc },
-        ]}
-        directionValue={sortDirection}
-        onDirectionChange={(key) => setSortDirection(key === 'asc' ? 'asc' : 'desc')}
-      />
-
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 'var(--space-3)',
-          margin: 'var(--space-2) 0',
-        }}
-      >
-        <span className="muted" style={{ fontSize: 13 }} data-ui={UI.journal.summary}>
-          {t('journal.count', { count: summary.count })}・{t('journal.total')}{' '}
-          <Money amount={summary.total} currency={currency} signed={filterAccount !== undefined} />
-        </span>
-        <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
+        <div className="toolbar">
+          <label className="sr-only" htmlFor="journal-from">
+            {t('journal.from')}
+          </label>
           <input
-            type="checkbox"
-            checked={showFuture}
-            onChange={(e) => setShowFuture(e.target.checked)}
-            data-ui={UI.journal.showFuture}
+            id="journal-from"
+            className="input"
+            type="date"
+            value={from}
+            max={CONTINUOUS_COST_HARD_CAP}
+            aria-label={t('journal.from')}
+            onChange={(e) => setFrom(e.target.value)}
           />
-          {t('journal.showFuture')}
-        </label>
+          <label className="sr-only" htmlFor="journal-to">
+            {t('journal.to')}
+          </label>
+          <input
+            id="journal-to"
+            className="input"
+            type="date"
+            value={to}
+            max={CONTINUOUS_COST_HARD_CAP}
+            aria-label={t('journal.to')}
+            onChange={(e) => setTo(e.target.value)}
+          />
+          {hasDateOrQuery ? (
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => {
+                setQuery('');
+                setFrom('');
+                setTo('');
+              }}
+            >
+              {t('journal.clearFilter')}
+            </button>
+          ) : null}
+        </div>
+
+        <SortControls
+          ariaLabel={t('common.sort')}
+          extraClassName="journal__sort"
+          axisItems={LIST_SORT_AXES.map((axis) => ({
+            key: axis.key,
+            label: t(axis.labelKey),
+            dataUi: SORT_AXIS_DATA_UI[axis.key],
+          }))}
+          axisValue={sortKey}
+          onAxisChange={(key) => {
+            const next = listSortAxisKey(key);
+            setSortKey(next);
+            // 軸を変えたら方向は軸ごとの既定へ戻す（前の軸の方向を持ち越さない）。
+            setSortDirection(SORT_DEFAULT_DIRECTION[next]);
+          }}
+          directionItems={[
+            { key: 'desc', label: t('common.sortDesc'), dataUi: UI.journal.sortDesc },
+            { key: 'asc', label: t('common.sortAsc'), dataUi: UI.journal.sortAsc },
+          ]}
+          directionValue={sortDirection}
+          onDirectionChange={(key) => setSortDirection(key === 'asc' ? 'asc' : 'desc')}
+        />
+
+        {/* 件数・合計と「未来分を表示」も額縁に含める（＝スクロール中も母集合が手元に残る）。
+            余白は額縁の gap が持つので margin は置かない。 */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 'var(--space-3)',
+          }}
+        >
+          <span className="muted" style={{ fontSize: 13 }} data-ui={UI.journal.summary}>
+            {t('journal.count', { count: summary.count })}・{t('journal.total')}{' '}
+            <Money
+              amount={summary.total}
+              currency={currency}
+              signed={filterAccount !== undefined}
+            />
+          </span>
+          <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={showFuture}
+              onChange={(e) => setShowFuture(e.target.checked)}
+              data-ui={UI.journal.showFuture}
+            />
+            {t('journal.showFuture')}
+          </label>
+        </div>
       </div>
 
       {filtered.length === 0 ? (

@@ -336,7 +336,11 @@ export function Allocations({
   }
 
   return (
-    <section aria-labelledby="allocations-title" data-ui={UI.allocations.view}>
+    <section
+      className="allocations"
+      aria-labelledby="allocations-title"
+      data-ui={UI.allocations.view}
+    >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 className="screen-title" id="allocations-title" style={{ marginBottom: 0 }}>
           {t('monthly.title')}
@@ -352,29 +356,36 @@ export function Allocations({
         </button>
       </div>
 
-      {hasEndedAtAsOf ? (
-        <label
-          style={{
-            display: 'inline-flex',
-            gap: 8,
-            alignItems: 'center',
-            minHeight: 'var(--tap)',
-            margin: 'var(--space-3) 0 0',
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={showEnded}
-            onChange={(e) => setShowEnded(e.target.checked)}
-            data-ui={UI.allocations.showCompleted}
-          />
-          {t('monthlyCost.showEnded')}
-        </label>
-      ) : null}
-
+      {/* 絞り込み額縁: 「終了分も表示」・検索・並び替えを sticky で上端に固定し、
+          ルール一覧と item カードだけが下を流れる（作者合意 2026-08-15・ホームの額縁と同型）。
+          h1 と「追加」は含めない = スクロールで流れてよい。
+          余白は額縁の gap が持つので、中の行に margin は置かない。
+          hasEndedAtAsOf は startedRules/startedItems から導くので hasAnyStarted を含意する
+          （= 額縁が「終了分も表示」だけで出ることはない）。 */}
       {hasAnyStarted ? (
-        <>
-          <div className="toolbar" style={{ margin: 'var(--space-3) 0 0' }}>
+        <div className="list-filter-frame" data-ui={UI.allocations.filterFrame}>
+          {hasEndedAtAsOf ? (
+            <label
+              style={{
+                display: 'inline-flex',
+                gap: 8,
+                alignItems: 'center',
+                minHeight: 'var(--tap)',
+                // 額縁は縦 flex。既定の stretch では全幅ラベルになり、右の余白を押しても
+                // チェックが切り替わってしまう。従来どおり中身ぶんだけに留める。
+                alignSelf: 'flex-start',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={showEnded}
+                onChange={(e) => setShowEnded(e.target.checked)}
+                data-ui={UI.allocations.showCompleted}
+              />
+              {t('monthlyCost.showEnded')}
+            </label>
+          ) : null}
+          <div className="toolbar">
             <SearchInput
               id="allocations-search"
               label={t('common.search')}
@@ -412,7 +423,7 @@ export function Allocations({
               ? ''
               : t('monthly.searchCount', { rules: rules.length, items: items.length })}
           </p>
-        </>
+        </div>
       ) : null}
 
       {!hasAnyStarted ? (
