@@ -11,6 +11,8 @@ export const UI = {
     // ヘッダーの日付チップ（透明な date input を重ねた 1 タップ選択）
     dateTrigger: 'period.date.trigger',
     dateInput: 'period.date.input',
+    // タイムスリップ中だけ現れる「今日」ボタン（日付だけを今日へ戻す・画面と粒度は不変）
+    today: 'period.today',
     // 年・全期間はロジックを維持するが、現在は UI から到達させない。
     yearPicker: 'period.year.picker',
     yearRow: 'period.year.row',

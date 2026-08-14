@@ -203,6 +203,7 @@ export function App() {
   // チップに透明な <input type="date"> を重ね、1 タップで OS のカレンダーを直接開く。
   // max = 継続コスト資産エンジンの展開上限（エンジンが展開できる範囲の外を選べなくする）。
   const selectedDate = period.mode === 'date' ? period.date : today;
+  const timeSlipped = !(period.mode === 'date' && period.date === today);
 
   const periodCenter = (
     <div className="period-context">
@@ -223,6 +224,19 @@ export function App() {
           data-ui={UI.period.dateInput}
         />
       </span>
+      {/* 「今」へ戻る。タイムスリップ中（ヘッダーの日付 ≠ 今日）だけ現れる＝警告灯を兼ねる
+          （iOS カレンダーの「今日」・マップの現在地ボタンと同型）。日付だけを戻し、
+          画面も粒度も動かさない（動作であって状態ではないので、粒度セグメントに混ぜない）。 */}
+      {timeSlipped ? (
+        <button
+          type="button"
+          className="period-today"
+          onClick={() => changePeriod({ mode: 'date', date: today })}
+          data-ui={UI.period.today}
+        >
+          {t('period.today')}
+        </button>
+      ) : null}
       {/* 時間の粒度（年間/全体）。ヘッダー = 時間、の「時間」には目盛りも含まれる
           （写真 App の 年別/月別/日別/すべて と同型・作者決定 2026-08-14）。
           押してもヘッダーの日付は変えない。年間の対象年は日付から導かれる。 */}

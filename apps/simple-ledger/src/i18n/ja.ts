@@ -325,6 +325,7 @@ export const ja = {
   'period.dateLabel': '{year}年{month}月{day}日',
   'period.openDate': '対象の日付を選ぶ',
   'period.yearUnit': '{year}年',
+  'period.today': '今日',
   'period.allPeriod': '全期間',
   'period.pickerYear': '対象期間（年）',
   'period.noTrendData': '推移を表示するデータがありません。',

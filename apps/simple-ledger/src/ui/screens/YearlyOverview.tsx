@@ -156,6 +156,13 @@ export function YearlyOverview({
   // 初期年はヘッダー年そのもの。候補外なら両側の最寄りデータ年へ移動できるが、
   // 画面を開いた瞬間に別の年へ丸めない。
   const [selectedYear, setSelectedYear] = useState(preferredYear);
+  // ヘッダーの年が変わったら表示年も追従する（「今日」ボタンで戻ったときに画面上何も
+  // 変わらないように見えるのを防ぐ）。render 中の派生調整パターン（effect での setState を避ける）。
+  const [trackedHeaderYear, setTrackedHeaderYear] = useState(preferredYear);
+  if (trackedHeaderYear !== preferredYear) {
+    setTrackedHeaderYear(preferredYear);
+    setSelectedYear(preferredYear);
+  }
   const previousYear = previousDataYear(dataYears, selectedYear);
   const nextYear = dataYears.find((year) => year > selectedYear);
   const currency = ledger?.settings.currency ?? '';
