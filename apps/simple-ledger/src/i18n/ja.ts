@@ -21,6 +21,12 @@ export const ja = {
   'common.sort': '並び替え',
   'common.sortDesc': '降順',
   'common.sortAsc': '昇順',
+
+  // 一覧の並び替えの軸（仕訳一覧・毎月のもので共通。正本は ui/ListSearchSort の LIST_SORT_AXES）。
+  'listSort.date': '日付',
+  'listSort.amount': '金額',
+  'listSort.name': '名称',
+
   'common.required': '必須',
   'common.menu': 'メニュー',
   'common.home': 'ホーム',
@@ -223,8 +229,6 @@ export const ja = {
   'journal.deleteConfirmBody': '「{description}」を削除します。この操作は取り消せません。',
   'journal.count': '{count}件',
   'journal.total': '合計',
-  'journal.sortDate': '日付',
-  'journal.sortAmount': '金額',
 
   'entry.editTitle': '仕訳を編集',
   'entry.date': '日付',
@@ -712,7 +716,6 @@ export const ja = {
   'monthly.searchPlaceholder': '項目名・科目名で検索',
   'monthly.searchEmpty': '該当する項目がありません。',
   'monthly.searchCount': 'くり返し記帳 {rules} 件・継続コスト資産 {items} 件',
-  'monthly.sortDate': '日付',
 
   'recurring.sectionTitle': 'くり返し記帳',
   'recurring.sectionIntro':

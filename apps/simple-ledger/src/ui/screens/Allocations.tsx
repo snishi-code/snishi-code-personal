@@ -11,7 +11,13 @@ import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { AccountPicker } from '../AccountPicker';
 import { FlowField } from '../FlowField';
-import { SearchInput, SortControls } from '../ListSearchSort';
+import {
+  LIST_SORT_AXES,
+  SearchInput,
+  SortControls,
+  listSortAxisKey,
+  type ListSortAxisKey,
+} from '../ListSearchSort';
 import { applySort, directionSign, matchesQuery, type SortDirection } from '../listQuery';
 import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
@@ -77,17 +83,25 @@ export interface AllocationsTarget {
 }
 
 /**
- * 並び替え state。軸は両セクション（定期ルール・継続コスト資産）に定義できるものだけ。
- * 仕訳一覧と同じ語彙で、日付軸の意味だけがセクションごとに違う
- * （継続コスト資産 = 終了日 / 定期ルール = 開始日）。
+ * 並び替え state。軸の集合は仕訳一覧と共通の正本（LIST_SORT_AXES）で、
+ * 日付軸の意味だけがセクションごとに違う（継続コスト資産 = 終了日 / 定期ルール = 開始日）。
  */
 interface ListSort {
-  key: 'date' | 'amount' | 'name';
+  key: ListSortAxisKey;
   direction: SortDirection;
 }
 
+/**
+ * 軸ごとの data-ui（軸の集合そのものは LIST_SORT_AXES が正本で、画面ごとに違うのはここだけ）。
+ */
+const SORT_AXIS_DATA_UI: Record<ListSortAxisKey, string> = {
+  date: UI.allocations.sortByDate,
+  amount: UI.allocations.sortByAmount,
+  name: UI.allocations.sortByName,
+};
+
 /** 軸ごとの既定方向（日付 = 終了/開始が近い順・金額 = 大きい順・名称 = 五十音順）。軸を切り替えたらここへ戻す。 */
-const SORT_DEFAULT_DIRECTION: Record<ListSort['key'], SortDirection> = {
+const SORT_DEFAULT_DIRECTION: Record<ListSortAxisKey, SortDirection> = {
   date: 'asc',
   amount: 'desc',
   name: 'asc',
@@ -355,22 +369,14 @@ export function Allocations({
           </div>
           <SortControls
             ariaLabel={t('common.sort')}
-            axisItems={[
-              {
-                key: 'date',
-                label: t('monthly.sortDate'),
-                dataUi: UI.allocations.sortByDate,
-              },
-              {
-                key: 'amount',
-                label: t('monthlyCost.amount'),
-                dataUi: UI.allocations.sortByAmount,
-              },
-              { key: 'name', label: t('monthlyCost.name'), dataUi: UI.allocations.sortByName },
-            ]}
+            axisItems={LIST_SORT_AXES.map((axis) => ({
+              key: axis.key,
+              label: t(axis.labelKey),
+              dataUi: SORT_AXIS_DATA_UI[axis.key],
+            }))}
             axisValue={sort.key}
             onAxisChange={(key) => {
-              const next = key === 'amount' || key === 'name' ? key : 'date';
+              const next = listSortAxisKey(key);
               // 軸を変えたら方向は軸ごとの既定へ戻す（前の軸の方向を持ち越さない）。
               setSort({ key: next, direction: SORT_DEFAULT_DIRECTION[next] });
             }}

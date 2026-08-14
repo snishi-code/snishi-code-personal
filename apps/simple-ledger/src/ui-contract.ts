@@ -143,6 +143,8 @@ export const UI = {
     // 表示専用の並び替え（C-4）と抽出結果の件数+合計（C-3）。
     sortByDate: 'journal.sort.date',
     sortByAmount: 'journal.sort.amount',
+    // 名称軸 = 摘要の五十音順（毎月のものの「名称」と同じ語彙・同じ正本 LIST_SORT_AXES）。
+    sortByName: 'journal.sort.name',
     sortDesc: 'journal.sort.desc',
     sortAsc: 'journal.sort.asc',
     summary: 'journal.summary',

@@ -10,7 +10,13 @@
  */
 import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
-import { SearchInput, SortControls } from '../ListSearchSort';
+import {
+  LIST_SORT_AXES,
+  SearchInput,
+  SortControls,
+  listSortAxisKey,
+  type ListSortAxisKey,
+} from '../ListSearchSort';
 import { applySort, directionSign, matchesQuery, type SortDirection } from '../listQuery';
 import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
@@ -43,6 +49,26 @@ import { useMoneyDigits } from '../money';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 import { assertSafeAmount } from '../../domain/safeSum';
+
+/**
+ * 軸ごとの data-ui（軸の集合そのものは LIST_SORT_AXES が正本で、画面ごとに違うのはここだけ）。
+ */
+const SORT_AXIS_DATA_UI: Record<ListSortAxisKey, string> = {
+  date: UI.journal.sortByDate,
+  amount: UI.journal.sortByAmount,
+  name: UI.journal.sortByName,
+};
+
+/**
+ * 軸ごとの既定方向（日付 = 新しい順 = 従来の既定 / 金額 = 大きい順 / 名称 = 五十音順）。
+ * 軸を切り替えたらここへ戻す（毎月のものと同じ規約。日付軸の向きだけ意味が違うため
+ * 値自体は画面ごとに持つ）。
+ */
+const SORT_DEFAULT_DIRECTION: Record<ListSortAxisKey, SortDirection> = {
+  date: 'desc',
+  amount: 'desc',
+  name: 'asc',
+};
 
 export interface JournalFilter {
   accountId?: string;
@@ -108,8 +134,8 @@ export function Journal({
   const [showFuture, setShowFuture] = useState(false);
   const [tagFilter, setTagFilter] = useState('');
   // 表示専用の並び替え（既定 = 日付降順・従来の並びそのもの）。データ・保存には影響しない。
-  const [sortKey, setSortKey] = useState<'date' | 'amount'>('date');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [sortKey, setSortKey] = useState<ListSortAxisKey>('date');
+  const [sortDirection, setSortDirection] = useState<SortDirection>(SORT_DEFAULT_DIRECTION.date);
   const [pendingDelete, setPendingDelete] = useState<JournalEntry | null>(null);
   const initialTarget = targetEntryId
     ? (ledger?.journalEntries.find((entry) => entry.id === targetEntryId) ?? null)
@@ -193,8 +219,9 @@ export function Journal({
   }, [source, query, from, to, accountFilterId, normalExpenseOnly, tagFilter, map]);
 
   // 表示専用の並び替え（C-4）。filtered は基準順（日付降順・同日は登録の新しい順・同時刻は
-  // id 昇順）なので、安定ソートにより同値（同日・同額）の並びは必ず基準順を保つ。
+  // id 昇順）なので、安定ソートにより同値（同日・同額・同摘要）の並びは必ず基準順を保つ。
   // 既定（日付降順）は applySort が compare=null を素通しする＝基準順そのもの。
+  // 名称軸 = 摘要の五十音順（毎月のものの項目名と同じ localeCompare(…, 'ja')）。
   const sorted = useMemo(() => {
     const direction = directionSign(sortDirection);
     const compare =
@@ -203,7 +230,10 @@ export function Journal({
         : sortKey === 'date'
           ? (a: JournalEntry, b: JournalEntry) =>
               a.date < b.date ? -direction : a.date > b.date ? direction : 0
-          : (a: JournalEntry, b: JournalEntry) => (entryAmount(a) - entryAmount(b)) * direction;
+          : sortKey === 'amount'
+            ? (a: JournalEntry, b: JournalEntry) => (entryAmount(a) - entryAmount(b)) * direction
+            : (a: JournalEntry, b: JournalEntry) =>
+                a.description.localeCompare(b.description, 'ja') * direction;
     return applySort(filtered, compare);
   }, [filtered, sortKey, sortDirection]);
 
@@ -339,12 +369,18 @@ export function Journal({
       <SortControls
         ariaLabel={t('common.sort')}
         extraClassName="journal__sort"
-        axisItems={[
-          { key: 'date', label: t('journal.sortDate'), dataUi: UI.journal.sortByDate },
-          { key: 'amount', label: t('journal.sortAmount'), dataUi: UI.journal.sortByAmount },
-        ]}
+        axisItems={LIST_SORT_AXES.map((axis) => ({
+          key: axis.key,
+          label: t(axis.labelKey),
+          dataUi: SORT_AXIS_DATA_UI[axis.key],
+        }))}
         axisValue={sortKey}
-        onAxisChange={(key) => setSortKey(key === 'amount' ? 'amount' : 'date')}
+        onAxisChange={(key) => {
+          const next = listSortAxisKey(key);
+          setSortKey(next);
+          // 軸を変えたら方向は軸ごとの既定へ戻す（前の軸の方向を持ち越さない）。
+          setSortDirection(SORT_DEFAULT_DIRECTION[next]);
+        }}
         directionItems={[
           { key: 'desc', label: t('common.sortDesc'), dataUi: UI.journal.sortDesc },
           { key: 'asc', label: t('common.sortAsc'), dataUi: UI.journal.sortAsc },
