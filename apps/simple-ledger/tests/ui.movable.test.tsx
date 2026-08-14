@@ -108,3 +108,61 @@ describe('「自由に動かせる」チェック', () => {
     expect(suica?.movable).toBe(false);
   });
 });
+
+describe('現預金の 2 箱化（自由に動かせるお金 / 動かせないお金）', () => {
+  it('movable で箱が分かれ、チェック切替で箱間を移動する', async () => {
+    render(
+      <Providers>
+        <Accounts />
+      </Providers>,
+    );
+    // 両方の箱が見出しとして出る（空でも「動かせない」箱は追加導線ごと出る）。
+    const freeBox = (await screen.findByText('自由に動かせるお金')).closest(
+      `[data-ui="${UI.accounts.box}.cash"]`,
+    );
+    expect(freeBox).not.toBeNull();
+    expect(document.querySelector(`[data-ui="${UI.accounts.box}.cashFixed"]`)).toHaveTextContent(
+      '自由に動かせないお金',
+    );
+
+    // 現金を OFF にすると「動かせない」箱へ移る（保存形式は movable フラグのまま）。
+    await openEdit('現金');
+    fireEvent.click(screen.getByRole('checkbox', { name: '自由に動かせる' }));
+    await saveSheet();
+    await waitFor(async () => {
+      const cash = (await loadLedger()).accounts.find((a) => a.name === '現金');
+      expect(cash?.movable).toBe(false);
+    });
+    const fixedHead = document.querySelector(`[data-ui="${UI.accounts.box}.cashFixed"]`)!;
+    const fixedSection = fixedHead.parentElement!;
+    expect(fixedSection).toHaveTextContent('現金');
+  });
+
+  it('「動かせない」箱で新規作成するとチェックは既定 OFF で、保存に movable=false が付く', async () => {
+    render(
+      <Providers>
+        <Accounts />
+      </Providers>,
+    );
+    const fixedHead = await waitFor(() => {
+      const el = document.querySelector(`[data-ui="${UI.accounts.box}.cashFixed"]`);
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    fireEvent.click(fixedHead.querySelector(`[data-ui="${UI.accounts.create}"]`)!);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.accounts.save}"]`)).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('checkbox', { name: '自由に動かせる' })).not.toBeChecked();
+    fireEvent.change(screen.getByLabelText(/科目名/), {
+      target: { value: 'チャージ残高2' },
+    });
+    await saveSheet();
+    await waitFor(async () => {
+      const created = (await loadLedger()).accounts.find((a) => a.name === 'チャージ残高2');
+      expect(created?.role).toBe('daily-asset');
+      expect(created?.movable).toBe(false);
+    });
+  });
+});

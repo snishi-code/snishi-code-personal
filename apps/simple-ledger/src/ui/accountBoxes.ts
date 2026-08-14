@@ -26,6 +26,7 @@ import type { MessageKey } from '../i18n';
 
 export type AccountBoxKey =
   | 'cash'
+  | 'cashFixed'
   | 'investment'
   | 'shortTermDebt'
   | 'longTermDebt'
@@ -147,6 +148,13 @@ export interface AccountBox {
   accent: AccountAccent;
   /** この箱に属する role。 */
   roles: readonly AccountRole[];
+  /**
+   * role の中での所属の絞り込み（現預金の movable 分割用）。未指定 = role だけで所属。
+   * 箱は保存形式を持たない表示の骨格なので、ここは Account の導出であって新しい保存項目ではない。
+   */
+  matches?: (account: Account) => boolean;
+  /** この箱で新規作成した内訳の movable 既定（cashFixed だけ false）。 */
+  defaultMovable?: false;
   /** 箱に対応する会計 type（残高の符号・初期残高の向きに使う）。 */
   type: AccountType;
   /**
@@ -162,15 +170,32 @@ export interface AccountBox {
 }
 
 export const ACCOUNT_BOXES: readonly AccountBox[] = [
+  // 現預金は「自由に動かせるか」で 2 箱に分ける（作者決定 2026-08-14）。
+  // 資産の内訳・タイムラインが既に使っている分割と同じ言葉・同じ判定
+  // （movable フラグの導出・保存形式は変えない）。箱間の移動 = 編集シートのチェック切替。
   {
     key: 'cash',
-    labelKey: 'box.cash',
+    labelKey: 'assets.frame.free',
     accent: ACCOUNT_ACCENTS.assetFree,
     roles: ['daily-asset'],
+    matches: (account) => account.movable !== false,
     type: 'asset',
     createRole: 'daily-asset',
     addLabelKey: 'box.addSubdivision',
     opening: true,
+  },
+  {
+    key: 'cashFixed',
+    labelKey: 'assets.frame.fixed',
+    accent: ACCOUNT_ACCENTS.assetFixed,
+    roles: ['daily-asset'],
+    matches: (account) => account.movable === false,
+    type: 'asset',
+    createRole: 'daily-asset',
+    addLabelKey: 'box.addSubdivision',
+    opening: true,
+    defaultMovable: false,
+    hintKey: 'box.cashFixedHint',
   },
   {
     key: 'investment',
@@ -243,8 +268,19 @@ export function boxForRole(role: AccountRole): AccountBox | undefined {
  * 収入・費用の箱へ含める（作者決定: 収入・費用項目の 1 つとして表示。科目管理は聖域のまま）。
  */
 export function boxIncludesAccount(box: AccountBox, account: Account): boolean {
-  if (box.roles.includes(account.role)) return true;
+  if (box.roles.includes(account.role)) return box.matches?.(account) ?? true;
   return account.role === 'system-adjustment' && box.type === account.type;
+}
+
+/**
+ * 科目そのものが属する箱（編集シートの見出し・アクセント用）。
+ * boxForRole は role → 最初の箱しか引けないため、movable で分かれた現預金は
+ * こちらで解決する。管理外（聖域）は undefined。
+ */
+export function boxForAccount(account: Account): AccountBox | undefined {
+  return ACCOUNT_BOXES.find(
+    (box) => box.roles.includes(account.role) && boxIncludesAccount(box, account),
+  );
 }
 
 export function boxByKey(key: AccountBoxKey): AccountBox {

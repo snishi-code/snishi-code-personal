@@ -109,6 +109,7 @@ describe('ACCOUNT_BOXES と role 順の整合', () => {
   it('画面に出す箱は比較関数と同じ順で、内部の継続コスト台帳を独立箱にしない', () => {
     expect(ACCOUNT_BOXES.map((box) => box.key)).toEqual([
       'cash',
+      'cashFixed', // 現預金の movable 分割（作者決定 2026-08-14・保存形式は不変）
       'investment',
       'shortTermDebt',
       'longTermDebt',

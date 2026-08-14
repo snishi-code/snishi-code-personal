@@ -23,7 +23,7 @@ import {
 } from '../../domain/investmentProjection';
 import { newId } from '../../domain/ids';
 import { nowIso, todayLocal } from '../../util/time';
-import { boxForRole, type AccountBox } from '../accountBoxes';
+import { boxForAccount, type AccountBox } from '../accountBoxes';
 import { errorText, t } from '../../i18n';
 import { parseAmountToMinor, sanitizeAmountText } from '../amountText';
 import { useMoneyDigits } from '../money';
@@ -43,15 +43,19 @@ export function AccountSheet({
   const accounts = ledger?.accounts ?? [];
 
   // 編集時は既存 role から箱を導く（聖域 role は勘定科目画面に出ないためここへ来ない）。
-  const effectiveBox = existing ? boxForRole(existing.role) : box;
+  // 既存は movable まで見て所属箱を解決する（現預金は自由/不自由の 2 箱に分かれた）。
+  const effectiveBox = existing ? boxForAccount(existing) : box;
   const createRole = box?.createRole;
 
   const [name, setName] = useState(existing?.name ?? '');
   // メモ入力欄は撤去済みだが、既存の note は保存時にそのまま引き継ぐ（消さない）。
   const [note] = useState(existing?.note ?? '');
-  // 「自由に動かせる」は現預金の箱のみ・既定 ON。OFF のときだけ movable=false を保存する
+  // 「自由に動かせる」は現預金の 2 箱のみ。既定は箱に従う（自由=ON / 不自由=OFF）。
+  // OFF のときだけ movable=false を保存し、チェックの切替がそのまま箱間の移動になる。
   // （Suica・チャージ残高など、資金繰りの原資に数えない例外側に印を付ける）。
-  const [movable, setMovable] = useState(existing ? existing.movable !== false : true);
+  const [movable, setMovable] = useState(
+    existing ? existing.movable !== false : box?.defaultMovable !== false,
+  );
   const digits = useMoneyDigits();
   const [openingAmountText, setOpeningAmountText] = useState('');
   const [openingDate, setOpeningDate] = useState(todayLocal());

@@ -453,7 +453,8 @@ export const ja = {
   'accounts.inUse': '使用中',
 
   // ユーザー向けの「大きな箱」（大分類）。アプリ側が守り、ユーザーは内訳だけを編集する。
-  'box.cash': '現預金・決済資産',
+  'box.cashFixedHint':
+    'Suica・チャージ残高など、支払いには使えるが資金繰りの原資には数えないお金。',
   'box.investment': '投資',
   'box.shortTermDebt': 'カード・未払',
   'box.longTermDebt': 'ローン',
