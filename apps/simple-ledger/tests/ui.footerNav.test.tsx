@@ -6,8 +6,8 @@
  *     data-ui を再利用すると Playwright の strict mode で E2E が全滅する。ここで前倒しに落とす。
  *  2. 戻るは window.history.back() を**呼ぶだけ**。overlay を閉じる → dirty guard → 画面履歴 →
  *     終了確認、の順序は useAppHistory の中央制御が持つ（app 側に分岐を複製しない）。
- *  3. ヘッダー右はハンバーガーから設定へ替わり、ハンバーガーはフッターへ**移設**された
- *     （複製ではない = 同じ data-ui が 2 つ出ない）。
+ *  3. ホーム = フッター中央 / 設定 = メニュー内 / ハンバーガー = フッター右、が**唯一の置き場所**。
+ *     ヘッダーは時間（日付 + 年間/全体の粒度）だけに徹する（同じ意味のボタンを 2 つ出さない）。
  */
 import { describe, it, expect, afterEach, beforeAll, beforeEach, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
@@ -75,18 +75,18 @@ describe('フッターナビ', () => {
     expect(q(UI.nav.footerBack)).toBeInTheDocument();
     expect(q(UI.nav.footerHome)).toBeInTheDocument();
     expect(q(UI.nav.menuButton)).toBeInTheDocument();
-    // ヘッダー左のホームとフッター中央のホームは別キー（重複させない）。
-    expect(UI.nav.home).not.toBe(UI.nav.footerHome);
+    // ホームはフッター中央が唯一。ヘッダー左のホームは撤去済み（重複を作らない）。
+    expect(document.querySelector('[data-ui="nav.home"]')).toBeNull();
     expect(duplicatedNavDataUi()).toEqual([]);
   });
 
-  it('メニューを開いても data-ui は一意のまま（ヘッダー右の設定とメニュー項目が衝突しない）', async () => {
+  it('メニューを開いても data-ui は一意のまま', async () => {
     await renderApp();
     fireEvent.click(q(UI.nav.menuButton)!);
     await waitFor(() => expect(q(UI.nav.menu)).toBeInTheDocument());
 
-    // メニュー項目の 'nav.settings' とヘッダー右の 'nav.settings.button' は別キー。
-    expect(UI.nav.settingsButton).not.toBe('nav.settings');
+    // 設定はメニュー項目の 'nav.settings' が唯一。ヘッダー右の設定ボタンは撤去済み。
+    expect(document.querySelector('[data-ui="nav.settings.button"]')).toBeNull();
     expect(duplicatedNavDataUi()).toEqual([]);
   });
 
@@ -94,7 +94,9 @@ describe('フッターナビ', () => {
     await renderApp();
     // **ホーム以外**で押す。dashboard で押すと「画面が変わらない」は実装が何をしても真になり、
     // アサーションが原理的に落ちない（＝偽緑）ため。
-    fireEvent.click(q(UI.nav.settingsButton)!);
+    fireEvent.click(q(UI.nav.menuButton)!);
+    await waitFor(() => expect(q(UI.nav.menu)).toBeInTheDocument());
+    fireEvent.click(q('nav.settings')!);
     await waitFor(() => expect(q(UI.settings.view)).toBeInTheDocument());
 
     fireEvent.click(q(UI.nav.footerBack)!);
@@ -140,13 +142,24 @@ describe('フッターナビ', () => {
     await waitFor(() => expect(q(UI.dashboard.view)).toBeInTheDocument());
   });
 
-  it('ヘッダー右は設定へ直行する（ハンバーガーはフッターへ移設済み）', async () => {
+  it('ヘッダーの粒度セグメントで年間・全体画面へ入れる（設定はメニュー内が唯一）', async () => {
     await renderApp();
-    const settings = q(UI.nav.settingsButton) as HTMLButtonElement;
-    expect(settings).toHaveAccessibleName('設定');
 
-    fireEvent.click(settings);
-    await waitFor(() => expect(q(UI.settings.view)).toBeInTheDocument());
+    fireEvent.click(q(UI.yearlyOverview.modeYear)!);
+    await waitFor(() => expect(q(UI.yearlyOverview.view)).toBeInTheDocument());
+    expect(q(UI.yearlyOverview.modeYear)).toHaveAttribute('aria-pressed', 'true');
+
+    // 既に年間・全体画面なら粒度だけ替わる（画面は動かない）。
+    fireEvent.click(q(UI.yearlyOverview.modeAll)!);
+    await waitFor(() =>
+      expect(q(UI.yearlyOverview.modeAll)).toHaveAttribute('aria-pressed', 'true'),
+    );
+    expect(q(UI.yearlyOverview.view)).toBeInTheDocument();
+    expect(q(UI.yearlyOverview.modeYear)).toHaveAttribute('aria-pressed', 'false');
+
+    // ヘッダーにはホームも設定も無い（フッター中央とメニュー内が唯一の置き場所）。
+    expect(document.querySelector('[data-ui="nav.settings.button"]')).toBeNull();
+    expect(document.querySelector('[data-ui="nav.home"]')).toBeNull();
     // フッターは画面が変わっても出続ける（常設ナビ）。
     expect(q(UI.nav.footer)).toBeInTheDocument();
   });

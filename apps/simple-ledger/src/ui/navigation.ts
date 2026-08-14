@@ -27,10 +27,10 @@ export interface NavItem {
 /**
  * ハンバーガーメニューのトップレベル項目。
  * ホームとは独立した俯瞰画面と、管理・補助機能を並べる。
+ * 年間・全体はヘッダーの粒度セグメントへ移設した（時間のズームは場所ではない・2026-08-14）。
  */
 export const NAV_ITEMS: NavItem[] = [
   { screen: 'timeline', labelKey: 'nav.timeline', icon: 'calendar' },
-  { screen: 'yearlyOverview', labelKey: 'nav.yearlyOverview', icon: 'chart' },
   { screen: 'allocations', labelKey: 'nav.allocations', icon: 'calendar' },
   { screen: 'cashflow', labelKey: 'nav.cashflow', icon: 'trending' },
   { screen: 'accounts', labelKey: 'nav.accounts', icon: 'wallet' },

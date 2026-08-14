@@ -73,7 +73,7 @@ for (const vp of VIEWPORTS) {
     });
 
     // 入力シート（支出）
-    await page.locator(ui('nav.home')).click();
+    await page.locator(ui('nav.footer.home')).click();
     await expect(page.locator(ui('dashboard.view'))).toBeVisible();
     await page.locator(ui('dashboard.entry.expense')).click();
     await expect(page.locator(ui('journal.entry.save'))).toBeVisible();
@@ -92,7 +92,7 @@ for (const vp of VIEWPORTS) {
       path: `test-results/screenshots/ledger-assets-${vp.name}.png`,
       fullPage: true,
     });
-    await page.locator(ui('nav.home')).click();
+    await page.locator(ui('nav.footer.home')).click();
     await page.locator(ui('dashboard.stat.liabilities')).click();
     await expect(page.locator(ui('liabilitiesBreakdown.view'))).toBeVisible();
     await expectNoHorizontalScroll(page, `liabilitiesBreakdown ${vp.name}`);
@@ -112,8 +112,8 @@ for (const vp of VIEWPORTS) {
     });
 
     // 年間・全体（ページ全体ではなく表のコンテナだけを横スクロール）。
-    await page.locator(ui('nav.menu.button')).click();
-    await page.locator(ui('nav.yearlyOverview')).click();
+    // 入口はヘッダーの粒度セグメント（メニューからは撤去済み）。
+    await page.locator(ui('yearlyOverview.mode.year')).click();
     await expect(page.locator(ui('yearlyOverview.view'))).toBeVisible();
     await expect(page.locator(ui('yearlyOverview.matrix'))).toBeVisible();
     await expectNoHorizontalScroll(page, `yearlyOverview ${vp.name}`);
@@ -339,7 +339,9 @@ test('フッターナビは全画面に常設され、下端のコンテンツ�
   ).toBeCloseTo(footerBox.y, 1);
 
   // 設定画面: 最下端の破壊的ボタンがフッターに隠れないこと（一番シビアな面）。
-  await page.locator(ui('nav.settings.button')).click();
+  // 設定はメニュー内が唯一の入口（ヘッダー右のボタンは撤去済み）。
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.settings')).click();
   await expect(page.locator(ui('settings.view'))).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   const resetBox = (await page.locator(ui('settings.resetAll')).boundingBox())!;

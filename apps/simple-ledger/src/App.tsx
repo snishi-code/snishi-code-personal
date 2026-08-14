@@ -23,7 +23,7 @@ import { Breakdown } from './ui/screens/Breakdown';
 import { ExpenseBreakdown } from './ui/screens/ExpenseBreakdown';
 import { NetIncome } from './ui/screens/NetIncome';
 import { Journal, type JournalFilter } from './ui/screens/Journal';
-import { YearlyOverview } from './ui/screens/YearlyOverview';
+import { YearlyOverview, type OverviewMode } from './ui/screens/YearlyOverview';
 import { TimelineCalendar } from './ui/screens/TimelineCalendar';
 import { Allocations, type AllocationsTarget } from './ui/screens/Allocations';
 import { Cashflow } from './ui/screens/Cashflow';
@@ -63,6 +63,9 @@ export function App() {
     mode: 'date',
     date: todayLocal(),
   }));
+  // 年間/全体（時間の粒度）。ヘッダーのセグメントが正本で、年間・全体画面はこれを表示する。
+  // ボタンは**日付を変えない**（タイムスリップはヘッダーの日付のみ。ズームは目盛りを変えるだけ）。
+  const [overviewMode, setOverviewMode] = useState<OverviewMode>('year');
 
   // 端末/ブラウザ Back の中央制御。overlay → (overlay 側 dirty guard) → 画面履歴 → 終了確認。
   const { view, navigate, beginExit } = useAppHistory({
@@ -86,6 +89,11 @@ export function App() {
     setAllocationsTarget(null);
     setAccountsTarget(null);
     navigate(s);
+  };
+  // ヘッダーの粒度セグメント → 年間・全体画面へ（既にその画面なら粒度だけ切り替える）。
+  const openOverview = (mode: OverviewMode) => {
+    setOverviewMode(mode);
+    if (screen !== 'yearlyOverview') go('yearlyOverview');
   };
   // ヘッダーの日付を変えたら明示フィルターより日付を優先する（フィルターが居座らない）。
   const changePeriod = (next: ReportPeriod) => {
@@ -215,6 +223,29 @@ export function App() {
           data-ui={UI.period.dateInput}
         />
       </span>
+      {/* 時間の粒度（年間/全体）。ヘッダー = 時間、の「時間」には目盛りも含まれる
+          （写真 App の 年別/月別/日別/すべて と同型・作者決定 2026-08-14）。
+          押してもヘッダーの日付は変えない。年間の対象年は日付から導かれる。 */}
+      <div className="period-zoom" role="group" aria-label={t('yearlyOverview.title')}>
+        <button
+          type="button"
+          className="period-zoom__btn"
+          aria-pressed={screen === 'yearlyOverview' && overviewMode === 'year'}
+          onClick={() => openOverview('year')}
+          data-ui={UI.yearlyOverview.modeYear}
+        >
+          {t('yearlyOverview.modeYear')}
+        </button>
+        <button
+          type="button"
+          className="period-zoom__btn"
+          aria-pressed={screen === 'yearlyOverview' && overviewMode === 'all'}
+          onClick={() => openOverview('all')}
+          data-ui={UI.yearlyOverview.modeAll}
+        >
+          {t('yearlyOverview.modeAll')}
+        </button>
+      </div>
     </div>
   );
 
@@ -224,35 +255,9 @@ export function App() {
         {t('common.home')}
       </a>
 
-      <AppHeader
-        left={
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={() => go('dashboard')}
-            aria-label={t('header.home')}
-            // フッター中央のホームと行き先が同じなので、現在地の状態も揃える。
-            {...(screen === 'dashboard' ? { 'aria-current': 'page' as const } : {})}
-            data-ui={UI.nav.home}
-          >
-            <Icon name="home" />
-          </button>
-        }
-        center={periodCenter}
-        right={
-          <>
-            <EnvBadge />
-            {/* ハンバーガーはフッター右へ移設。ここは設定への直行導線（作者決定 2026-08-14）。 */}
-            <IconButton
-              label={t('nav.settings')}
-              onClick={() => go('settings')}
-              dataUi={UI.nav.settingsButton}
-            >
-              <Icon name="settings" />
-            </IconButton>
-          </>
-        }
-      />
+      {/* ヘッダーは時間（日付 + 粒度）だけに徹する。ホームはフッター中央、
+          設定はメニュー内が唯一の置き場所（重複を作らない・作者決定 2026-08-14）。 */}
+      <AppHeader center={periodCenter} right={<EnvBadge />} />
 
       <main className="app-main" id="main">
         {screen === 'dashboard' ? (
@@ -333,7 +338,13 @@ export function App() {
           />
         ) : null}
         {screen === 'yearlyOverview' ? (
-          <YearlyOverview period={period} onPeriodChange={changePeriod} onNavigate={go} />
+          <YearlyOverview
+            period={period}
+            mode={overviewMode}
+            onModeChange={setOverviewMode}
+            onPeriodChange={changePeriod}
+            onNavigate={go}
+          />
         ) : null}
         {screen === 'allocations' ? (
           <Allocations period={period} onEditEntry={openEdit} target={allocationsTarget} />

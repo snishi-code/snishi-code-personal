@@ -44,6 +44,34 @@
   scroll-padding-bottom: calc(var(--bottom-inset) + var(--space-3));
 }
 
+/* ── ヘッダーの時間の粒度（年間/全体）セグメント ──
+   ヘッダー = 時間、の「時間」には目盛りも含まれる（日付チップの隣に置く理由）。
+   375px 幅に収めるため Segmented より詰めた専用スタイル。押下中（= 年間・全体画面に
+   いる間の現在粒度）は aria-pressed で示し、色 + 面の両方で手掛かりを持つ。 */
+.period-zoom {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.period-zoom__btn {
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+}
+.period-zoom__btn + .period-zoom__btn {
+  box-shadow: inset 1px 0 0 var(--border);
+}
+.period-zoom__btn[aria-pressed='true'] {
+  color: var(--primary-strong);
+  background: var(--primary-light);
+}
+
 /* ── Summary card (tappable: ホームの損益/資産負債サマリー) ── */
 .summary-card {
   display: block;

@@ -35,7 +35,7 @@ import { Money } from '../money';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 
-type OverviewMode = 'year' | 'all';
+export type OverviewMode = 'year' | 'all';
 
 /** 全体ビューの表示地平。actual = データのある年だけ（既定・従来挙動）。 */
 type OverviewHorizon = 'actual' | 'plus30' | 'hardCap';
@@ -135,10 +135,15 @@ function previousDataYear(years: readonly number[], selectedYear: number): numbe
 
 export function YearlyOverview({
   period,
+  mode,
+  onModeChange,
   onPeriodChange,
   onNavigate,
 }: {
   period: ReportPeriod;
+  /** 年間/全体はヘッダーの粒度セグメントが持つ（App が正本・作者決定 2026-08-14）。 */
+  mode: OverviewMode;
+  onModeChange: (mode: OverviewMode) => void;
   onPeriodChange: (period: ReportPeriod) => void;
   onNavigate: (screen: Screen) => void;
 }) {
@@ -146,7 +151,6 @@ export function YearlyOverview({
   const today = todayLocal();
   const preferredYear = yearOfPeriod(period, today);
   const dataYears = useMemo(() => (ledger ? matrixDataYears(ledger, today) : []), [ledger, today]);
-  const [mode, setMode] = useState<OverviewMode>('year');
   // 表示地平は全体ビューだけが使う画面ローカル状態（保存しない・既定 = 実績のみ）。
   const [horizon, setHorizon] = useState<OverviewHorizon>('actual');
   // 初期年はヘッダー年そのもの。候補外なら両側の最寄りデータ年へ移動できるが、
@@ -195,25 +199,7 @@ export function YearlyOverview({
       <p className="field__hint yearly-overview__intro">{t('yearlyOverview.intro')}</p>
 
       <div className="yearly-overview__controls">
-        <div className="yearly-overview__mode">
-          <Segmented
-            value={mode}
-            items={[
-              {
-                key: 'year',
-                label: t('yearlyOverview.modeYear'),
-                dataUi: UI.yearlyOverview.modeYear,
-              },
-              {
-                key: 'all',
-                label: t('yearlyOverview.modeAll'),
-                dataUi: UI.yearlyOverview.modeAll,
-              },
-            ]}
-            onChange={(value) => setMode(value === 'all' ? 'all' : 'year')}
-          />
-        </div>
-
+        {/* 年間/全体の切替はヘッダーの粒度セグメントへ移設した（作者決定 2026-08-14）。 */}
         {mode === 'all' && dataYears.length > 0 ? (
           <div className="yearly-overview__horizon">
             {/* 仮の数字が本物の顔をしない: 未来列に何が混ざるかを地平セレクタの近くで明示する。 */}
@@ -324,7 +310,7 @@ export function YearlyOverview({
                         type="button"
                         className="yearly-overview__col-btn"
                         onClick={() => {
-                          setMode('year');
+                          onModeChange('year');
                           setSelectedYear(column.year);
                         }}
                         aria-label={t('yearlyOverview.yearDrill', { year: column.year })}

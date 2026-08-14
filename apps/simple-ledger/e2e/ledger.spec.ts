@@ -132,7 +132,7 @@ test('表示桁数 2 で小数を入力すると、表示・保存とも 1/100 �
     .click();
 
   // 小数で支出を登録。
-  await page.locator(ui('nav.home')).click();
+  await page.locator(ui('nav.footer.home')).click();
   await expect(page.locator(ui('dashboard.view'))).toBeVisible();
   await page.locator(ui('dashboard.entry.expense')).click();
   await page.locator(ui('journal.entry.item')).fill('小数E2E');

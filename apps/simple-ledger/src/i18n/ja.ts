@@ -9,7 +9,6 @@ export const ja = {
   'nav.allocations': '毎月のもの',
   'nav.cashflow': '資金繰り',
   'nav.timeline': 'タイムライン',
-  'nav.yearlyOverview': '年間・全体',
   'nav.tags': 'タグ',
   'nav.settings': '設定',
   'nav.help': 'ヘルプ',
@@ -43,8 +42,6 @@ export const ja = {
   'timeline.flowCount': '{count}件のフロー',
   'timeline.generation': '継続コストを生成',
   'timeline.today': '今日',
-
-  'header.home': 'ホーム',
 
   'dashboard.title': 'ホーム',
   'dashboard.entryActions': '日常入力（収入・支出・振替）',

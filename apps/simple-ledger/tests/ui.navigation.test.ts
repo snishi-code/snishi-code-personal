@@ -3,15 +3,18 @@ import { t } from '../src/i18n';
 import { NAV_ITEMS } from '../src/ui/navigation';
 
 describe('ハンバーガーメニューのナビゲーション', () => {
-  it('年間・全体を独立画面として公開する', () => {
-    const item = NAV_ITEMS.find(({ screen }) => screen === 'yearlyOverview');
-
-    expect(item).toEqual({
-      screen: 'yearlyOverview',
-      labelKey: 'nav.yearlyOverview',
-      icon: 'chart',
-    });
-    expect(t(item!.labelKey)).toBe('年間・全体');
+  it('メニューは 5 項目（年間・全体はヘッダーの粒度セグメントへ移設済み）', () => {
+    expect(NAV_ITEMS.map(({ screen }) => screen)).toEqual([
+      'timeline',
+      'allocations',
+      'cashflow',
+      'accounts',
+      'settings',
+    ]);
+    // 時間のズームは「場所」ではないのでメニューに項目を持たない。
+    expect(NAV_ITEMS.some(({ screen }) => screen === 'yearlyOverview')).toBe(false);
+    // 表示名は i18n から引ける（キーの取り違えを落とす）。
+    expect(NAV_ITEMS.map((item) => t(item.labelKey))).not.toContain('');
   });
 
   it('画面キーを重複させない', () => {
