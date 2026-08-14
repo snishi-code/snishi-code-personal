@@ -238,14 +238,6 @@ export function Accounts({
                                 {t('accounts.autoBadge')}
                               </span>
                             ) : null}
-                            {account.role === 'daily-asset' && account.movable === false ? (
-                              <span
-                                className="tag tag--asset-muted"
-                                data-ui={UI.accounts.notMovableBadge}
-                              >
-                                {t('accounts.notMovable')}
-                              </span>
-                            ) : null}
                             {usedIds.has(account.id) ? (
                               <span className="tag tag--teal">{t('accounts.inUse')}</span>
                             ) : null}

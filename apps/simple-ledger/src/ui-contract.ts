@@ -188,7 +188,6 @@ export const UI = {
     save: 'accounts.save',
     list: 'accounts.list',
     box: 'accounts.box',
-    notMovableBadge: 'accounts.notMovableBadge',
     // 残高調整科目（system-adjustment）の「自動」バッジ。表示のみ＝管理操作は出さない
     systemBadge: 'accounts.systemBadge',
     adjust: 'accounts.adjust',
@@ -200,7 +199,6 @@ export const UI = {
     endDate: 'accounts.endDate',
     archiveRenameConfirm: 'accounts.archiveRenameConfirm',
     // 「自由に動かせる」チェック（現預金の内訳のみ・OFF = 資金繰りの原資に数えない）
-    movable: 'accounts.movable',
     // 返済設定（負債の編集シートのみ）
     repaymentAccount: 'accounts.repaymentAccount',
     repaymentDay: 'accounts.repaymentDay',

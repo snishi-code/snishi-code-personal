@@ -212,8 +212,7 @@ describe('勘定科目の色分けと可動性表示', () => {
     const heading = document.querySelector(`[data-ui="${UI.accounts.box}.cash"]`);
     expect(heading).toHaveAttribute('style', expect.stringContaining('--account-accent'));
     expect(screen.getByText('チャージ残高')).toBeInTheDocument();
-    expect(document.querySelector(`[data-ui="${UI.accounts.notMovableBadge}"]`)).toHaveTextContent(
-      '自由に動かせない',
-    );
+    // チップは撤去済み（「動かせない」箱の所属がその情報を表す・2026-08-14）。
+    expect(document.querySelector('[data-ui="accounts.notMovableBadge"]')).toBeNull();
   });
 });

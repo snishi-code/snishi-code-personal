@@ -649,8 +649,6 @@ export const ja = {
   'opening.registerSave': '初期残高を登録',
 
   // 「自由に動かせる」チェック（現預金の内訳のみ・既定 ON。OFF = 資金繰りの原資に数えない）
-  'accounts.movable': '自由に動かせる',
-  'accounts.notMovable': '自由に動かせない',
 
   // 返済設定（負債の勘定科目）と資金繰りの返済予定
   'accounts.repaymentAccount': '返済口座',
