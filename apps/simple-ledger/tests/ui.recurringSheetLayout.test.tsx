@@ -1,6 +1,6 @@
 /*
  * 定期ルールシートのレイアウト（実ユーズレビュー 2026-08-12 ②）:
- *  - フィールド順 = 基準日 → 摘要 → 金額 → 貸方→借方（FlowField）→ 周期 → 初回の起票 →
+ *  - フィールド順 = 基準日 → 摘要 → 金額 → 貸方→借方（FlowField）→ 月割りトグル → 周期 → 初回の起票 →
  *    ルールの開始日 → 終了点（作者指定の順）
  *  - 貸方/借方はホームの簿記編集と同じ flat チップ（グループ見出しを出さない・作者決定）
  *  - 「初回の起票」プレビューは保存値と同じ規則で導出し、入力が不正な間は行ごと消える
@@ -77,7 +77,7 @@ function statusText(): string {
 }
 
 describe('定期ルールシートのレイアウト', () => {
-  it('フィールドが作者指定の順に並ぶ（基準日→摘要→金額→貸借→周期→初回起票→開始日→終了点）', async () => {
+  it('フィールドが作者指定の順に並ぶ（基準日→摘要→金額→貸借→月割り→周期→初回起票→開始日→終了点）', async () => {
     const sheet = await openRuleSheet();
     const order = [...sheet.querySelectorAll('[data-ui^="allocations.recurring."]')].map((el) =>
       el.getAttribute('data-ui'),
@@ -89,6 +89,7 @@ describe('定期ルールシートのレイアウト', () => {
       UI.allocations.recurringFlow,
       UI.allocations.recurringFrom,
       UI.allocations.recurringTo,
+      UI.allocations.recurringSpreadToggle,
       UI.allocations.recurringEvery,
       UI.allocations.recurringFirstPosting,
       UI.allocations.recurringFirstPostingStatus,

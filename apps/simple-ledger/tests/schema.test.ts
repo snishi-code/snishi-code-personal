@@ -1467,6 +1467,15 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
     createdAt: 'x',
     updatedAt: 'x',
   };
+  const invest = {
+    id: 'invest',
+    name: '投資',
+    type: 'asset',
+    role: 'investment-asset',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
   const ccLedger = {
     id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
     name: '継続コスト台帳',
@@ -1493,7 +1502,7 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
       exportedAt: '2026-06-01T00:00:00.000Z',
       deviceId: 'd',
       revision: 0,
-      accounts: [bank, salary, fixed, ccLedger, adj],
+      accounts: [bank, salary, fixed, invest, ccLedger, adj],
       journalEntries: [],
       tags: [],
       monthlyCostItems: [],
@@ -1515,14 +1524,28 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
       ).success,
     ).toBe(false);
   });
-  it('package: spread の計上先は費用または収入の科目が valid（差引形 = spread に income-category）', () => {
-    // 差引形の v7 正規形: spread = 給与（income-category）・借方 = 台帳。
+  it('package: spread の計上先は自動起票できる全 role が valid（差引形 = spread に income-category）', () => {
+    // 差引形の正規形: spread = 給与（income-category）・借方 = 台帳。
     expect(
       ledgerExportPackageSchema.safeParse(
         rulePkg({ ...spreadRule, spreadExpenseAccountId: 'salary' }),
       ).success,
     ).toBe(true);
-    // 費用行き・差引形とも、借方直接の旧形は保存形として invalid（spread 形のみ）。
+    // 計上先が資産（クレカ積立・投資の積立など）でも valid ＝ 勘定科目で動作を変えない。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        rulePkg({ ...spreadRule, spreadExpenseAccountId: 'invest' }),
+      ).success,
+    ).toBe(true);
+    // 内部集約（継続コスト台帳）を計上先にはできない（fail-closed のまま）。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        rulePkg({ ...spreadRule, spreadExpenseAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID }),
+      ).success,
+    ).toBe(false);
+  });
+  it('package: 月割りトグル OFF の費用・収入行き（直接形）も valid', () => {
+    // 費用行きの直接形 = トグル OFF の保存形（role では動作を決めない）。
     expect(
       ledgerExportPackageSchema.safeParse(
         rulePkg({
@@ -1531,7 +1554,8 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
           debitAccountId: 'fixed',
         }),
       ).success,
-    ).toBe(false);
+    ).toBe(true);
+    // 差引形（借方 = 収入カテゴリ）の直接形も同様。
     expect(
       ledgerExportPackageSchema.safeParse(
         rulePkg({
@@ -1540,7 +1564,7 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
           debitAccountId: 'salary',
         }),
       ).success,
-    ).toBe(false);
+    ).toBe(true);
   });
   it('package: 源泉・費用の行き先とも残高調整科目（system-adjustment）は invalid', () => {
     expect(

@@ -34,11 +34,7 @@ import {
 import { accountEndingBalanceViolations } from './accountEnding';
 import { isValidIsoDate, isValidIsoMonth } from './calendar';
 import { ANNUAL_RETURN_BP_MAX, ANNUAL_RETURN_BP_MIN } from './investmentProjection';
-import {
-  CATCH_UP_HARD_CAP_MONTHS,
-  isRecurringPostableRole,
-  isRecurringSpreadDestinationRole,
-} from './recurring';
+import { CATCH_UP_HARD_CAP_MONTHS, isRecurringPostableRole } from './recurring';
 import { parseRuleEntryId, parseRuleItemId, ruleEntryId, ruleItemId } from './recurringIds';
 
 const isoDate = z
@@ -741,8 +737,8 @@ export const ledgerExportPackageSchema = z
         accountRole.get(r.creditAccountId) as AccountRole | undefined,
       );
       if (r.spreadExpenseAccountId !== undefined) {
-        // spread を持つ保存形: 借方 = 継続コスト台帳（rule schema で確認済み）、
-        // spread = 計上先（費用または収入=差引形）。旧形式は外部変換の管轄（in-app で読み替えない）。
+        // 月割りトグル ON の保存形: 借方 = 継続コスト台帳（rule schema で確認済み）、
+        // spread = 計上先。計上先は自動起票できる全 role を許す（勘定科目で動作を変えない）。
         if (hasAccount(r.creditAccountId) && !creditPostable)
           issue(
             `定期ルール「${r.name}」の源泉科目は定期ルールに使えません（内部集約・調整科目は自動起票できません）`,
@@ -751,12 +747,12 @@ export const ledgerExportPackageSchema = z
         if (!hasAccount(r.spreadExpenseAccountId))
           issue(`定期ルール「${r.name}」の計上先が存在しません`, at('spreadExpenseAccountId'));
         else if (
-          !isRecurringSpreadDestinationRole(
+          !isRecurringPostableRole(
             accountRole.get(r.spreadExpenseAccountId) as AccountRole | undefined,
           )
         )
           issue(
-            `定期ルール「${r.name}」の計上先は費用または収入の科目である必要があります`,
+            `定期ルール「${r.name}」の計上先に内部集約・残高調整の科目は使えません`,
             at('spreadExpenseAccountId'),
           );
       } else if (
@@ -766,19 +762,10 @@ export const ledgerExportPackageSchema = z
       ) {
         // 支出/収入/振替の定型に加え簿記編集（任意の科目ペア）を許容する。内部集約・調整科目
         // だけは自動起票の対象外（RECURRING_POSTABLE_ROLES が正本）。
+        // 月割りトグル OFF なら費用・収入行きも直接形が正規の保存形。
         issue(
           `定期ルール「${r.name}」の科目は定期ルールに使えません（内部集約・調整科目は自動起票できません）`,
           at('debitAccountId'),
-        );
-      } else if (
-        isRecurringSpreadDestinationRole(
-          accountRole.get(r.debitAccountId) as AccountRole | undefined,
-        )
-      ) {
-        // 費用行き・差引形（借方=収入カテゴリ）とも、直接形は v7 の保存形ではない。
-        issue(
-          `費用・収入行きの定期ルール「${r.name}」は継続コスト台帳経由の保存形である必要があります`,
-          at('spreadExpenseAccountId'),
         );
       }
     });
@@ -848,14 +835,11 @@ export const ledgerExportPackageSchema = z
         const purchaseRuleMonth = purchase.metadata?.recurringMonth;
         const purchaseRule =
           purchaseRuleId !== undefined ? recurringRuleById.get(purchaseRuleId) : undefined;
-        const purchaseRuleDestination =
-          purchaseRule?.spreadExpenseAccountId ?? purchaseRule?.debitAccountId;
         if (
           purchaseRule !== undefined &&
           purchaseRuleMonth !== undefined &&
-          isRecurringSpreadDestinationRole(
-            accountRole.get(purchaseRuleDestination ?? '') as AccountRole | undefined,
-          ) &&
+          // 月割りするルール = 保存形（spread の有無）。role からは再導出しない。
+          purchaseRule.spreadExpenseAccountId !== undefined &&
           mc.id !== ruleItemId(purchaseRule.id, purchaseRuleMonth)
         ) {
           issue(

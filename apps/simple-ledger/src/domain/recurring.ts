@@ -7,12 +7,13 @@
  *  - 起票済み管理はルール側のカーソル（postedThroughMonth）で行う。ユーザーが起票済み
  *    仕訳を削除しても再起票しない（「今月はスキップ」を尊重する）。
  *  - everyMonths（必須。1 = 毎月）で間引く。位相は startMonth 基点。
- *  - 行き先が費用科目または収入科目（差引形 = 給与から差し引く保険料など）のルールは
- *    **必ず継続コスト化**する:
- *    起票は `借方 継続コスト台帳 / 貸方 源泉` + item 自動生成（repository 側）。
+ *  - 継続コスト台帳を経由して月割りするかは**登録時の明示トグル**で決まる（勘定科目の
+ *    role で動作を変えない＝意味づけはユーザーが決める）。トグル ON の起票は
+ *    `借方 継続コスト台帳 / 貸方 源泉` + item 自動生成（repository 側）。
  *    投影もここで購入行 + 月割り行（cc-allocp）を両方出す＝未来断面で台帳が積み上がらない。
- *  - spreadExpenseAccountId は正規化済みの計上先（費用/収入）の保存表現。それ以外の
- *    行き先は借方へ直接起票する。v7 はこの二形だけを受理する。
+ *  - spreadExpenseAccountId の有無がトグルの状態そのもの（保存された正規形が唯一の真実）。
+ *    値は月割りの計上先（費用・収入に限らず、積立先の資産や税金の科目も入る）。
+ *    トグル OFF のルールは行き先へ直接起票する。保存形はこの二形だけ。
  */
 import { addMonths, monthOf, monthsBetween } from './allocation';
 import { ACCOUNT_ROLES, isInternalRole, type AccountRole } from './accountRoles';
@@ -64,35 +65,33 @@ export function recurringDestinationAccountId(
 }
 
 /**
- * 継続コスト化（台帳経由の起票）の対象になる行き先 role の正本。
- *  - expense-category: 費用ルール（従来どおり）。
+ * 「継続コスト台帳を経由して月割りする」トグルの**既定が ON** になる行き先 role の正本。
+ * 判定材料ではなく既定値の提案にすぎない（トグルはどの postable 科目でも ON/OFF できる）。
+ *  - expense-category: 費用ルール（毎月の支払いは既定で月割り）。
  *  - income-category: 差引形ルール（借方=収入カテゴリ。給与から差し引く保険料など）。
  *    起票形は費用ルールと同一で、月割りが収入のマイナスとして出る。
  * 通常の収入ルール（貸方=income-category・借方=資金）の行き先は daily-asset なので
- * ここには該当しない＝従来どおり直接起票する。振替/積立ルールも同様。
+ * ここには該当しない＝既定は OFF。振替/積立ルールも同様（トグルで ON にはできる）。
  */
 export const RECURRING_SPREAD_DESTINATION_ROLES: readonly AccountRole[] = [
   'expense-category',
   'income-category',
 ];
 
-/** この役割の科目を行き先に持つルールを継続コスト化（台帳経由）するか。 */
+/** この役割の科目を行き先に選んだとき、月割りトグルの既定を ON にするか。 */
 export function isRecurringSpreadDestinationRole(role: AccountRole | undefined): boolean {
   return role !== undefined && RECURRING_SPREAD_DESTINATION_ROLES.includes(role);
 }
 
 /**
- * 行き先 role から継続コスト化を自動判定する（spread の有無は判定材料にしない）。
- * 戻り値 = 自動生成 item の計上先（MonthlyCostItem.expenseAccountId。収入科目も入る）。
+ * 月割り（台帳経由）ルールの計上先。**保存された正規形が唯一の真実**で、role は見ない
+ * （role は登録時のトグル既定を提案するだけ）。
+ * 戻り値 = 自動生成 item の計上先（MonthlyCostItem.expenseAccountId。費用・収入に限らない）。
  */
 export function recurringExpenseAccountId(
-  rule: Pick<RecurringRule, 'debitAccountId' | 'spreadExpenseAccountId'>,
-  roleOf: (accountId: string) => AccountRole | undefined,
+  rule: Pick<RecurringRule, 'spreadExpenseAccountId'>,
 ): string | undefined {
-  const destinationAccountId = recurringDestinationAccountId(rule);
-  return isRecurringSpreadDestinationRole(roleOf(destinationAccountId))
-    ? destinationAccountId
-    : undefined;
+  return rule.spreadExpenseAccountId;
 }
 
 /**
@@ -279,7 +278,7 @@ function ruleProjectionContext(
 ): RuleProjectionContext | null {
   const destinationAccountId = recurringDestinationAccountId(rule);
   const destination = byId.get(destinationAccountId);
-  const expenseAccountId = recurringExpenseAccountId(rule, (id) => byId.get(id)?.role);
+  const expenseAccountId = recurringExpenseAccountId(rule);
   const spreadsExpense = expenseAccountId !== undefined;
   const debitAccountId = spreadsExpense ? CONTINUOUS_COST_LEDGER_ACCOUNT_ID : destinationAccountId;
   const debit = byId.get(debitAccountId);
@@ -368,7 +367,7 @@ export function projectedRuleItems(
  * 選択した基準日までの、未起票分を表示専用の仮想仕訳として投影する。
  * 永続化とカーソル更新は行わず、postedThroughMonth より後だけを出すため実仕訳と二重計上しない。
  *
- * 行き先が費用/収入科目（差引形）のルールは購入行に加えて**月割り行も投影する**
+ * 月割りトグルが ON のルール（spreadExpenseAccountId あり）は購入行に加えて**月割り行も投影する**
  * （`cc-allocp-{ruleId}-{postingMonth}-{YYYY-MM}`）。これを落とすと未来断面で
  * 継続コスト台帳が購入行ぶんだけ積み上がり、純資産が実在しない額まで膨らむ。
  * 二重展開はしない: 起票済み月は item 側（continuousCostEntries）が展開し、

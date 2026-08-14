@@ -54,7 +54,6 @@ import {
   firstRecurringPostingDate,
   isRecurringSpreadDestinationRole,
   recurringDestinationAccountId,
-  recurringExpenseAccountId,
   recurringKindOf,
   projectedRuleItems,
   type RecurringKind,
@@ -311,6 +310,8 @@ export function Allocations({
         dayOfMonth: rule.dayOfMonth,
         everyMonths: rule.everyMonths,
         debitAccountId: recurringDestinationAccountId(rule),
+        // 旧ルールの「月割りするか」の意図をそのまま引き継ぐ（role から再導出しない）。
+        spreadViaLedger: rule.spreadExpenseAccountId !== undefined,
         creditAccountId: rule.creditAccountId,
         startMonth: rule.startMonth,
         startDate: effectiveDate,
@@ -461,8 +462,7 @@ export function Allocations({
                     <div className="list__sub">
                       {t('recurring.postingSchedule')}: {ruleIntervalLabel(r)}・
                       {name(r.creditAccountId)} → {name(recurringDestinationAccountId(r))}
-                      {recurringExpenseAccountId(r, (id) => accountsMap.get(id)?.role) !==
-                      undefined ? (
+                      {r.spreadExpenseAccountId !== undefined ? (
                         <>
                           ・{t('monthlyCost.monthly')}{' '}
                           <Money
@@ -815,7 +815,7 @@ function resolveRuleDayOfMonth(firstPostingDate: string, existing?: RecurringRul
 /**
  * 定期ルールの追加・編集シート。周期（everyMonths）付き。
  * 独自の種別 UI は持たず、簿記編集と同じく貸方・借方を直接指定する。
- * 行き先が費用・収入（差引形）科目なら保存境界が自動で継続コスト台帳経由へ正規化する。
+ * 継続コスト台帳を経由して月割りするかは明示トグル（行き先 role は既定の提案だけに使う）。
  */
 function RecurringRuleSheet({
   existing,
@@ -859,6 +859,23 @@ function RecurringRuleSheet({
       accounts: group.accounts.filter((account) => account.id !== creditAccountId),
     }))
     .filter((group) => group.accounts.length > 0);
+
+  const roleOf = (accountId: string): AccountRole | undefined =>
+    accounts.find((account) => account.id === accountId)?.role;
+  /**
+   * 月割りトグルの既定。編集で行き先を変えていない間は保存済みの意図（spread の有無）を、
+   * 新規と行き先変更後は行き先 role の既定（費用・収入 = ON）を提案する。
+   */
+  const defaultSpreadFor = (destinationId: string): boolean =>
+    existing !== undefined && destinationId === existingDebit
+      ? existing.spreadExpenseAccountId !== undefined
+      : isRecurringSpreadDestinationRole(roleOf(destinationId));
+  // 一度でもトグルを触ったら固定する（それまでは行き先の変更に追従する）。
+  const [spreadTouched, setSpreadTouched] = useState(false);
+  const [spreadChoice, setSpreadChoice] = useState(() =>
+    defaultSpreadFor(existingDebit ?? firstToId),
+  );
+  const spreadViaLedger = spreadTouched ? spreadChoice : defaultSpreadFor(debitAccountId);
 
   const [name, setName] = useState(existing?.name ?? '');
   const fractionDigits = useMoneyDigits();
@@ -1007,9 +1024,10 @@ function RecurringRuleSheet({
         };
         if (endDate !== '') next.endDate = endDate;
         else delete next.endDate;
-        // 保存境界が選択した行き先 role から新形式へ正規化する。既存 spread を残すと
-        // 変更前の行き先が優先されるため、画面からは常に論理的な借方だけを渡す。
-        delete next.spreadExpenseAccountId;
+        // 月割りトグルの状態をそのまま保存形へ写す（debitAccountId は論理的な行き先のまま
+        // 渡し、台帳への正規化は保存境界が行う）。
+        if (spreadViaLedger) next.spreadExpenseAccountId = debitAccountId;
+        else delete next.spreadExpenseAccountId;
         if (amount !== existing.amount) {
           setPendingAmountChange({ rule: next, effectiveDate: todayLocal() });
           setAmountChangeError(undefined);
@@ -1026,6 +1044,7 @@ function RecurringRuleSheet({
           dayOfMonth,
           everyMonths,
           debitAccountId,
+          spreadViaLedger,
           creditAccountId,
           startMonth,
           startDate,
@@ -1132,12 +1151,8 @@ function RecurringRuleSheet({
               <AccountPicker
                 flat
                 label={
-                  // 費用・収入（差引形）行きは台帳経由の月割りになるため「計上先」と表示する。
-                  isRecurringSpreadDestinationRole(
-                    accounts.find((account) => account.id === debitAccountId)?.role,
-                  )
-                    ? t('monthlyCost.expenseCategory')
-                    : t('recurring.to.manual')
+                  // 台帳経由で月割りするときは行き先の意味が「計上先」になる。
+                  spreadViaLedger ? t('monthlyCost.expenseCategory') : t('recurring.to.manual')
                 }
                 required
                 value={debitAccountId}
@@ -1148,6 +1163,28 @@ function RecurringRuleSheet({
               />
             }
           />
+          <div className="field">
+            <label
+              style={{
+                display: 'inline-flex',
+                gap: 8,
+                alignItems: 'center',
+                minHeight: 'var(--tap)',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={spreadViaLedger}
+                onChange={(e) => {
+                  setSpreadTouched(true);
+                  setSpreadChoice(e.target.checked);
+                }}
+                data-ui={UI.allocations.recurringSpreadToggle}
+              />
+              {t('recurring.spreadToggle')}
+            </label>
+            <p className="field__hint">{t('recurring.spreadToggleHint')}</p>
+          </div>
           <TextInput
             label={t('recurring.intervalMonths')}
             required

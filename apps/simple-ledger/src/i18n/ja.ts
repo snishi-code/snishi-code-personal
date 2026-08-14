@@ -752,7 +752,10 @@ export const ja = {
   'recurring.from.manual': '貸方（支払い元・減る側）',
   'recurring.to.manual': '借方（増える・使う側）',
   'recurring.manualHint':
-    '行き先が費用または収入（給与から差し引く形）なら自動で継続コストとして月割りし、資産・負債なら直接記帳します。',
+    'このルールで増える・使う側の科目です。月割りするかは下のトグルで決めます。',
+  'recurring.spreadToggle': '継続コスト台帳を経由して月割りする',
+  'recurring.spreadToggleHint':
+    '支払いを一旦台帳（保管庫）に置き、次の支払いまでの期間に割り振ります。',
   'recurring.everyMonthDay': '毎月{day}日',
   'recurring.everyNMonthsDay': '{n}か月ごと {day}日',
   'recurring.firstPosting': '初回の起票',

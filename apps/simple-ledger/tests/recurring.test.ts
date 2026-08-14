@@ -556,12 +556,14 @@ describe('clampDayToMonth / recurringProjectionEntries', () => {
         updatedAt: 't',
       },
     ];
+    // 月割りトグル ON の保存済み正規形（借方 = 継続コスト台帳・spread = 計上先）。
     const rule = {
       id: 'rule',
       name: '家賃',
       amount: 80000,
       dayOfMonth: 27,
-      debitAccountId: 'expense',
+      debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      spreadExpenseAccountId: 'expense',
       creditAccountId: 'cash',
       everyMonths: 1,
       startMonth: '2026-07',
@@ -585,8 +587,9 @@ describe('clampDayToMonth / recurringProjectionEntries', () => {
         .filter((entry) => entry.id.startsWith('rec-proj-'))
         .map((entry) => entry.metadata?.continuousCostId),
     ).toEqual(projectedItems.map((p) => p.item.id));
-    // 直接起票（台帳を経由しない）ルールからは 1 件も出ない。
+    // 直接起票（月割りトグル OFF）のルールからは 1 件も出ない。
     const direct = { ...rule, id: 'direct', debitAccountId: 'cash2' };
+    delete (direct as { spreadExpenseAccountId?: string }).spreadExpenseAccountId;
     const cash2: Account = {
       id: 'cash2',
       name: '第二口座',
@@ -629,12 +632,14 @@ describe('clampDayToMonth / recurringProjectionEntries', () => {
         updatedAt: 't',
       },
     ];
+    // 月割りトグル ON の保存済み正規形（借方 = 継続コスト台帳・spread = 計上先）。
     const base = {
       id: 'rule',
       name: '家賃',
       amount: 80000,
       dayOfMonth: 27,
-      debitAccountId: 'expense',
+      debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      spreadExpenseAccountId: 'expense',
       creditAccountId: 'cash',
       everyMonths: 1,
       startMonth: '2026-07',
@@ -1348,8 +1353,9 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     await catchUpRecurringRules('2026-04-20');
     const stored = (await loadLedger()).recurringRules.find((r) => r.id === rule.id)!;
 
+    // UI と同じく、行き先（論理）と月割りトグル ON（spread = 計上先）を明示して渡す。
     await upsertRecurringRule(
-      { ...stored, amount: 1500, debitAccountId: fixed.id },
+      { ...stored, amount: 1500, debitAccountId: fixed.id, spreadExpenseAccountId: fixed.id },
       { amountChangeMode: 'split', effectiveDate: '2026-04-20' },
     );
 
@@ -1532,7 +1538,11 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     const detachedItem = ledger.monthlyCostItems[0]!;
     expect(detachedItem.id.startsWith(`ccr-${successor.id}-`)).toBe(false);
 
-    await upsertRecurringRule({ ...successor, debitAccountId: fixed.id });
+    await upsertRecurringRule({
+      ...successor,
+      debitAccountId: fixed.id,
+      spreadExpenseAccountId: fixed.id,
+    });
 
     ledger = await loadLedger();
     const expectedItemId = `ccr-${successor.id}-2026-04`;
@@ -1896,9 +1906,8 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     const stored = (await loadLedger()).recurringRules.find(
       (candidate) => candidate.id === rule.id,
     )!;
-    // UI と同じく、利用者が選んだ行き先を借方に置き spread は渡さない。
-    const changed = { ...stored, debitAccountId: salary.id };
-    delete changed.spreadExpenseAccountId;
+    // UI と同じく、利用者が選んだ行き先を借方と spread（月割りトグル ON）の両方に置く。
+    const changed = { ...stored, debitAccountId: salary.id, spreadExpenseAccountId: salary.id };
     await upsertRecurringRule(changed);
     const saved = (await loadLedger()).recurringRules.find(
       (candidate) => candidate.id === rule.id,
@@ -1930,6 +1939,112 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
       { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: 3000 },
       { accountId: salary.id, side: 'credit', amount: 3000 },
     ]);
+    expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
+  });
+});
+
+describe('継続コスト台帳の経由は明示トグル（勘定科目で動作を変えない）', () => {
+  it('費用行きでも spreadViaLedger: false なら直接形で保存し、item を作らない', async () => {
+    const bank = await accountByName('預金');
+    const fixed = await accountByName('固定費');
+    const rule = await createRecurringRule({
+      name: '直接記帳の家賃',
+      amount: 80000,
+      dayOfMonth: 25,
+      debitAccountId: fixed.id,
+      creditAccountId: bank.id,
+      spreadViaLedger: false,
+      startMonth: '2026-04',
+      startDate: '2026-04-01',
+    });
+    // 保存形 = 直接形（借方が費用科目のまま・spread なし）。
+    expect(rule.spreadExpenseAccountId).toBeUndefined();
+    expect(rule.debitAccountId).toBe(fixed.id);
+
+    expect(await catchUpRecurringRules('2026-04-25')).toBe(1);
+    const ledger = await loadLedger();
+    // 台帳を経由しない = item は 1 件も生まれない。
+    expect(ledger.monthlyCostItems).toHaveLength(0);
+    const posted = ledger.journalEntries.find((e) => e.metadata?.recurringRuleId === rule.id);
+    expect(posted?.lines).toEqual([
+      { accountId: fixed.id, side: 'debit', amount: 80000 },
+      { accountId: bank.id, side: 'credit', amount: 80000 },
+    ]);
+    expect(posted?.metadata?.monthlyCostId).toBeUndefined();
+    // 未来投影も直接形のまま = 月割り行（cc-allocp）を 1 本も作らない。
+    const projected = reportEntriesForAsOf(ledger, '2026-12-31');
+    expect(projected.some((e) => e.id === `rec-proj-${rule.id}-2026-05`)).toBe(true);
+    expect(projected.some((e) => e.id.startsWith(`cc-allocp-${rule.id}-`))).toBe(false);
+    expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
+  });
+
+  it('資産行き（積立）でも spreadViaLedger: true なら台帳経由 + 計上先が資産の item になる', async () => {
+    const bank = await accountByName('預金');
+    const invest = await accountByName('投資');
+    const rule = await createRecurringRule({
+      name: 'クレカ積立',
+      amount: 60000,
+      dayOfMonth: 25,
+      everyMonths: 12,
+      debitAccountId: invest.id,
+      creditAccountId: bank.id,
+      spreadViaLedger: true,
+      startMonth: '2026-04',
+      startDate: '2026-04-25',
+    });
+    // 保存形 = 月割りの正規形（借方 = 台帳・spread = 利用者が選んだ行き先）。
+    expect(rule.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+    expect(rule.spreadExpenseAccountId).toBe(invest.id);
+
+    expect(await catchUpRecurringRules('2026-04-25')).toBe(1);
+    const ledger = await loadLedger();
+    const itemId = `ccr-${rule.id}-2026-04`;
+    expect(ledger.monthlyCostItems.find((m) => m.id === itemId)).toMatchObject({
+      amount: 60000,
+      expenseAccountId: invest.id,
+      startDate: '2026-04-25',
+      endDate: '2027-04-25',
+    });
+    expect(ledger.journalEntries.find((e) => e.metadata?.monthlyCostId === itemId)?.lines).toEqual([
+      { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: 60000 },
+      { accountId: bank.id, side: 'credit', amount: 60000 },
+    ]);
+    // 月割り行は資産（投資）へ立つ: 5,000/刻み・4/25 購入の 5/25・6/25・7/25 の 3 刻み。
+    const allocations = reportEntriesForAsOf(ledger, '2026-07-31').filter(
+      (e) => e.metadata?.ccKind === 'monthly-allocation' && e.metadata.continuousCostId === itemId,
+    );
+    expect(allocations.map((e) => e.date)).toEqual(['2026-05-25', '2026-06-25', '2026-07-25']);
+    expect(allocations.map((e) => e.lines[0])).toEqual([
+      { accountId: invest.id, side: 'debit', amount: 5000 },
+      { accountId: invest.id, side: 'debit', amount: 5000 },
+      { accountId: invest.id, side: 'debit', amount: 5000 },
+    ]);
+    expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
+  });
+
+  it('費用行きの直接形は、金額以外を編集保存しても直接形のまま（role 再導出が復活していない）', async () => {
+    const bank = await accountByName('預金');
+    const fixed = await accountByName('固定費');
+    const rule = await createRecurringRule({
+      name: '直接記帳の家賃',
+      amount: 80000,
+      dayOfMonth: 25,
+      debitAccountId: fixed.id,
+      creditAccountId: bank.id,
+      spreadViaLedger: false,
+      startMonth: '2026-04',
+      startDate: '2026-04-01',
+    });
+    await catchUpRecurringRules('2026-04-25');
+    const stored = (await loadLedger()).recurringRules.find((r) => r.id === rule.id)!;
+    await upsertRecurringRule({ ...stored, name: '直接記帳の家賃（変更後）', dayOfMonth: 26 });
+
+    const ledger = await loadLedger();
+    const saved = ledger.recurringRules.find((r) => r.id === rule.id)!;
+    expect(saved.name).toBe('直接記帳の家賃（変更後）');
+    expect(saved.spreadExpenseAccountId).toBeUndefined();
+    expect(saved.debitAccountId).toBe(fixed.id);
+    expect(ledger.monthlyCostItems).toHaveLength(0);
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
 });
