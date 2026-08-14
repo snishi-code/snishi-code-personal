@@ -198,27 +198,6 @@ describe('継続コスト資産の export/import', () => {
       ),
     ).toBe(true);
   });
-
-  it('費用化の開始日（allocationStartDate）は export/import で round-trip 保持される（§D）', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    await createContinuousCost({
-      name: '前払い保険',
-      amount: 60000,
-      startDate: '2026-06-15',
-      allocationStartDate: '2026-12-01',
-      endDate: '2027-05-31',
-      expenseAccountId: food.id,
-      creditAccountId: cash.id,
-    });
-    const seeded = await loadLedger();
-    expect(seeded.monthlyCostItems[0]?.allocationStartDate).toBe('2026-12-01');
-    const outcome = await importFromJsonText(exportToJsonText(seeded));
-    expect(outcome.kind).toBe('ok');
-    const reloaded = await loadLedger();
-    expect(reloaded.monthlyCostItems[0]?.allocationStartDate).toBe('2026-12-01');
-  });
 });
 
 describe('restoreFromSnapshot（fail-closed）', () => {

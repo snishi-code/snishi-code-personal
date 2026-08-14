@@ -100,10 +100,7 @@ export const ja = {
   'ccItem.startDate': '開始日',
   'ccItem.endDate': '終了日（任意）',
   'ccItem.endDateClear': '終了日を解除',
-  'ccItem.allocationStartDate': '費用化の開始日（任意・既定 = 購入日）',
-  'ccItem.allocationStartHint': '購入日より後にすると、その間は台帳（保管庫）に価値が置かれます',
   'ccItem.period': '期間',
-  'ccItem.allocationFrom': '費用化 {date}〜',
   'ccItem.remainingValue': '残存価値',
   'ccItem.archiveTitle': 'アーカイブ',
   'ccItem.transferTarget': '振替先を選ぶ',
@@ -612,12 +609,6 @@ export const ja = {
     '回収の振替の日付は開始日（購入の仕訳の日付）以降にしてください。',
   'error.monthlyCost.editLiability':
     '負債（カード・ローン）で購入した項目は、支払い元・金額・日付を変更できません（自動作成した返済の仕訳と合わなくなるため）。終了はアーカイブ（終了日の設定）を使ってください。',
-  // 費用化の開始日（購入日との分離・指示書§D）で新設したエラーコード。
-  'error.monthlyCost.allocationBeforeStart': '費用化の開始日は購入日（開始日）以降にしてください。',
-  'error.monthlyCost.allocationAfterEnd':
-    '終了日は費用化の開始日以降にしてください。費用化を始める前にやめる場合は、先に費用化の開始日を戻して（または空にして）から終了日を設定してください。',
-  'error.monthlyCost.purchaseAfterAllocation':
-    '購入の仕訳の日付は費用化の開始日以前にしてください。後ろへ動かす場合は、先に項目の費用化の開始日を変更してください。',
   'error.common.staleData':
     '別のタブ（またはウィンドウ）でデータが変更されています。ページを再読み込みしてから、もう一度お試しください。',
   'error.common.revisionExhausted':

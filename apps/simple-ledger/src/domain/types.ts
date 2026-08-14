@@ -202,15 +202,6 @@ export interface MonthlyCostItem {
   startDate: string;
   /** 終了日 'YYYY-MM-DD'。任意。未設定 = まだ費用にしない。 */
   endDate?: string;
-  /**
-   * 費用化の開始日 'YYYY-MM-DD'。任意。**未設定 = 購入日（startDate）から月割り**。
-   * 設定すると月割りの起点（初月の月割り日・等分の月数）だけがこの日基準になり、
-   * 購入日〜費用化開始日の間は台帳（保管庫）に価値が置かれたままになる。
-   *  - 不変条件: `startDate ≤ allocationStartDate`（endDate 設定時は `≤ endDate`）。
-   *  - 科目線分への要求範囲は従来どおり startDate〜endDate（配分は必ずその内側）。
-   *  - ルール由来 item（`ccr-`）には設定しない（周期どおり配分する）。
-   */
-  allocationStartDate?: string;
   /** 計上先（費用カテゴリのほか、給与など収入カテゴリも可。内部集約・残高調整は不可）。 */
   expenseAccountId: string;
   createdAt: string;

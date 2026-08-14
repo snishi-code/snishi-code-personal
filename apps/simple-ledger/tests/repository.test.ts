@@ -10,9 +10,7 @@ import {
   deleteOpening,
   archiveAccount,
   archiveMonthlyCost,
-  catchUpRecurringRules,
   createContinuousCost,
-  createRecurringRule,
   createRepaymentEntries,
   deleteAccount,
   deleteEntry,
@@ -36,7 +34,6 @@ import {
   CONTINUOUS_COST_LEDGER_ACCOUNT_NAME,
 } from '../src/domain/constants';
 import { accountBalance } from '../src/domain/accounting';
-import { monthlyCostForMonth } from '../src/domain/monthlyCost';
 import { reportEntriesForAsOf } from '../src/domain/reportEntries';
 import { buildExportPackage, exportToJsonText, importFromJsonText } from '../src/data/exportImport';
 import { ledgerExportPackageSchema } from '../src/domain/schema';
@@ -649,190 +646,6 @@ describe('継続コスト資産の整合性（購入の仕訳・削除・不変�
     expect(repays).toHaveLength(12);
     await deleteEntry(repays[0]!.id); // 返済は通常仕訳＝自由に編集/削除できる
     expect((await loadLedger()).journalEntries.some((e) => e.id === repays[0]!.id)).toBe(false);
-  });
-});
-
-describe('費用化の開始日（allocationStartDate）の保存境界ガード（§D 端点）', () => {
-  async function makeDeferredItem(allocationStartDate?: string) {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    const item = await createContinuousCost({
-      name: '前払い保険',
-      amount: 60000,
-      startDate: '2026-06-15',
-      endDate: '2027-05-31',
-      ...(allocationStartDate !== undefined ? { allocationStartDate } : {}),
-      expenseAccountId: food.id,
-      creditAccountId: cash.id,
-    });
-    return { item, cash, food };
-  }
-
-  it('createContinuousCost: 範囲内は保存・購入日より前/終了日より後は拒否', async () => {
-    const { item } = await makeDeferredItem('2026-10-01');
-    const saved = (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)!;
-    expect(saved.allocationStartDate).toBe('2026-10-01');
-    await expect(makeDeferredItem('2026-06-14')).rejects.toMatchObject({
-      code: 'error.monthlyCost.allocationBeforeStart',
-    });
-    await expect(makeDeferredItem('2027-06-01')).rejects.toMatchObject({
-      code: 'error.monthlyCost.allocationAfterEnd',
-    });
-  });
-
-  it('upsertMonthlyCost: 後編集で設定/解除できる・範囲外は拒否', async () => {
-    const { item } = await makeDeferredItem();
-    const stored = (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)!;
-    await upsertMonthlyCost({ ...stored, allocationStartDate: '2026-10-01' });
-    expect(
-      (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)?.allocationStartDate,
-    ).toBe('2026-10-01');
-    // 購入日より前・終了日より後は専用エラーで拒否。
-    await expect(
-      upsertMonthlyCost({ ...stored, allocationStartDate: '2026-06-14' }),
-    ).rejects.toMatchObject({ code: 'error.monthlyCost.allocationBeforeStart' });
-    await expect(
-      upsertMonthlyCost({ ...stored, allocationStartDate: '2027-06-01' }),
-    ).rejects.toMatchObject({ code: 'error.monthlyCost.allocationAfterEnd' });
-    // 解除（フィールドを外して保存）= 購入日から月割りへ戻る。
-    const cleared = { ...stored, updatedAt: 'edit' };
-    delete cleared.allocationStartDate;
-    await upsertMonthlyCost(cleared);
-    expect(
-      (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)?.allocationStartDate,
-    ).toBeUndefined();
-  });
-
-  it('終了日なしでも費用化の開始日は保存できる（配分は発生しない・§D 端点）', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    const item = await createContinuousCost({
-      name: '持っているだけ',
-      amount: 60000,
-      startDate: '2026-06-15',
-      allocationStartDate: '2026-10-01',
-      expenseAccountId: food.id,
-      creditAccountId: cash.id,
-    });
-    const saved = (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)!;
-    expect(saved.allocationStartDate).toBe('2026-10-01');
-    expect(saved.endDate).toBeUndefined();
-    // 配分は従来どおり発生しない（月割り行が 1 本も出ない）。
-    const entries = reportEntriesForAsOf(await loadLedger(), '2030-12-31');
-    expect(
-      entries.some(
-        (e) =>
-          e.metadata?.continuousCostId === item.id && e.metadata.ccKind === 'monthly-allocation',
-      ),
-    ).toBe(false);
-  });
-
-  it('購入の仕訳の日付を費用化の開始日より後ろへ動かす編集は拒否（黙って clamp しない）', async () => {
-    const { item } = await makeDeferredItem('2026-10-01');
-    const purchase = (await loadLedger()).journalEntries.find(
-      (e) => e.metadata?.monthlyCostId === item.id,
-    )!;
-    await expect(upsertEntry({ ...purchase, date: '2026-10-02' })).rejects.toMatchObject({
-      code: 'error.monthlyCost.purchaseAfterAllocation',
-    });
-    // 費用化の開始日まで（以前）は動かせる。item へミラーされ、費用化の開始日は変わらない。
-    await upsertEntry({ ...purchase, date: '2026-10-01' });
-    const saved = (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)!;
-    expect(saved.startDate).toBe('2026-10-01');
-    expect(saved.allocationStartDate).toBe('2026-10-01');
-  });
-
-  it('アーカイブ: 終了日を費用化の開始日より前へ置くのは拒否（先に費用化の開始日を戻す）', async () => {
-    const { item } = await makeDeferredItem('2026-10-01');
-    await expect(archiveMonthlyCost({ id: item.id, endDate: '2026-09-30' })).rejects.toMatchObject({
-      code: 'error.monthlyCost.allocationAfterEnd',
-    });
-    // 費用化の開始日を戻してから終了日を設定する手順は通る。
-    const stored = (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)!;
-    const reverted = { ...stored, updatedAt: 'edit' };
-    delete reverted.allocationStartDate;
-    await upsertMonthlyCost(reverted);
-    await archiveMonthlyCost({ id: item.id, endDate: '2026-09-30' });
-    expect((await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)?.endDate).toBe(
-      '2026-09-30',
-    );
-  });
-
-  it('科目線分への要求範囲は従来どおり startDate〜endDate（allocation が内側でも購入日で検証）', async () => {
-    const { item } = await makeDeferredItem('2026-10-01');
-    // 明示 startDate = 2026-09-01 の計上先（購入日 2026-06-15 より後・費用化の開始日より前）。
-    await upsertAccount({
-      id: 'late-expense',
-      name: '後から作った費用',
-      type: 'expense',
-      role: 'expense-category',
-      archived: false,
-      startDate: '2026-09-01',
-      createdAt: '2026-09-01T00:00:00.000Z',
-      updatedAt: '2026-09-01T00:00:00.000Z',
-    });
-    const stored = (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)!;
-    // 配分（2026-10 以降）は科目線分の内側だが、要求範囲は購入日からなので拒否される。
-    await expect(
-      upsertMonthlyCost({ ...stored, expenseAccountId: 'late-expense' }),
-    ).rejects.toMatchObject({ code: 'error.account.referenceOutsidePeriod' });
-  });
-
-  it('ルール由来 item（ccr-）の起票時には費用化の開始日を設定しない（周期どおり）', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    const rule = await createRecurringRule({
-      name: '月払いサブスク',
-      amount: 1200,
-      dayOfMonth: 1,
-      everyMonths: 1,
-      debitAccountId: food.id,
-      creditAccountId: cash.id,
-      startMonth: '2026-01',
-      startDate: '2026-01-01',
-    });
-    expect(await catchUpRecurringRules('2026-03-15')).toBe(3);
-    const items = (await loadLedger()).monthlyCostItems.filter((m) =>
-      m.id.startsWith(`ccr-${rule.id}-`),
-    );
-    expect(items.length).toBe(3);
-    expect(items.every((m) => m.allocationStartDate === undefined)).toBe(true);
-  });
-
-  it('ルール由来 item（ccr-）にも費用化の開始日を後編集で設定できる（起票後は通常 item と同権・P1-2 決着）', async () => {
-    // 作者決定: ルールは起票の道具・起票後の item は通常 item と同権。ccr- item への
-    // allocationStartDate を禁止しない（縛りは「ルール存在期間外の誕生」のみ = schema の
-    // ruleExistsAt が担保。schema.test.ts 側で固定）。
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    const rule = await createRecurringRule({
-      name: '年払い保険',
-      amount: 1200,
-      dayOfMonth: 1,
-      everyMonths: 12,
-      debitAccountId: food.id,
-      creditAccountId: cash.id,
-      startMonth: '2026-01',
-      startDate: '2026-01-01',
-    });
-    expect(await catchUpRecurringRules('2026-03-15')).toBe(1);
-    const stored = (await loadLedger()).monthlyCostItems.find((m) =>
-      m.id.startsWith(`ccr-${rule.id}-`),
-    )!;
-    // ルール生成 item の終了日 = 次回起票日と同日（年払い・1/1 起票 → 2027-01-01）。
-    expect(stored).toMatchObject({ startDate: '2026-01-01', endDate: '2027-01-01' });
-    // 同日刻み = 2026-02-01〜2027-01-01 の 12 本・1,200 / 12 = 100。
-    expect(monthlyCostForMonth(stored, '2026-03')).toBe(100);
-
-    // 費用化の開始日は刻みへ影響しなくなった（機能廃止・フィールドは次コミットで撤去）。
-    // ここで残す網は「ccr- item でも保存を拒否しない = 起票後は通常 item と同権」だけ。
-    await upsertMonthlyCost({ ...stored, allocationStartDate: '2026-07-01' });
-    const saved = (await loadLedger()).monthlyCostItems.find((m) => m.id === stored.id)!;
-    expect(saved.allocationStartDate).toBe('2026-07-01');
   });
 });
 

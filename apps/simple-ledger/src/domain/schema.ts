@@ -271,22 +271,11 @@ export const monthlyCostItemSchema = z
     startDate: isoDate,
     // 終了日は任意。未設定 = 費用の割り振りをしない（残存価値 = 全額）。
     endDate: isoDate.optional(),
-    // 費用化の開始日は任意。未設定 = 購入日（startDate）から月割り（明示値のみ検証）。
-    allocationStartDate: isoDate.optional(),
     expenseAccountId: z.string().min(1),
     createdAt: isoDateTime,
     updatedAt: isoDateTime,
   })
   .superRefine((item, ctx) => {
-    // 費用化の開始日は明示値のみ検証（未設定 = 購入日で常に適法）。終了日未設定でも
-    // 購入日以降の不変条件は成立させる（保存はできるが配分は発生しない）。
-    if (item.allocationStartDate !== undefined && item.allocationStartDate < item.startDate) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: '費用化の開始日は開始日（購入日）以降である必要があります',
-        path: ['allocationStartDate'],
-      });
-    }
     if (item.endDate === undefined) return;
     // 日で比較・例外なしの単一条件。
     if (item.endDate < item.startDate) {
@@ -297,18 +286,8 @@ export const monthlyCostItemSchema = z
       });
       return;
     }
-    if (item.allocationStartDate !== undefined && item.allocationStartDate > item.endDate) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: '費用化の開始日は終了日以前である必要があります',
-        path: ['allocationStartDate'],
-      });
-    }
-    // 配分月数は実際の等分数と同じ基準 = 費用化開始月（allocationStartDate ?? startDate）〜
-    // 終了月で数える（購入日基準にすると、費用化開始を遅らせた item の上限が実配分より
-    // 厳しくなる・監査 P2-2）。
-    const spreadFrom = monthOf(item.allocationStartDate ?? item.startDate);
-    if (monthsBetween(spreadFrom, monthOf(item.endDate)) + 1 > SPREAD_MONTHS_CAP) {
+    // 配分月数は実際の等分数と同じ基準 = 購入月〜終了月で数える。
+    if (monthsBetween(monthOf(item.startDate), monthOf(item.endDate)) + 1 > SPREAD_MONTHS_CAP) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: `配分月数が上限(${SPREAD_MONTHS_CAP}ヶ月)を超えています`,

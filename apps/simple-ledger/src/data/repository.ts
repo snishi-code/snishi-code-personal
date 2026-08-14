@@ -1048,14 +1048,6 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
     if (linkedItem.endDate !== undefined && savable.date > linkedItem.endDate) {
       throw new LedgerError('error.monthlyCost.purchaseAfterEnd');
     }
-    // 購入日の変更で startDate > allocationStartDate になる編集は拒否（黙って clamp しない。
-    // 先に item 側の費用化の開始日を直してもらう・§D 端点）。
-    if (
-      linkedItem.allocationStartDate !== undefined &&
-      savable.date > linkedItem.allocationStartDate
-    ) {
-      throw new LedgerError('error.monthlyCost.purchaseAfterAllocation');
-    }
     mirroredItem = assertMonthlyCostItemSavable(
       {
         ...linkedItem,
@@ -1121,7 +1113,6 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
   const debitAmount = savable.lines.find((l) => l.side === 'debit')?.amount ?? 0;
   let missingRace = false;
   let afterEndRace = false;
-  let afterAllocRace = false;
   try {
     await writeWithRevision([STORE.accounts, STORE.journalEntries, STORE.monthlyCostItems], (t) => {
       const accountStore = t.objectStore(STORE.accounts);
@@ -1141,12 +1132,6 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
           t.abort();
           return;
         }
-        // 日付を費用化の開始日より後ろへ動かすのも拒否（不変条件: allocationStartDate >= startDate）。
-        if (item.allocationStartDate !== undefined && savable.date > item.allocationStartDate) {
-          afterAllocRace = true;
-          t.abort();
-          return;
-        }
         t.objectStore(STORE.journalEntries).put(savable);
         iStore.put(
           stripMonthlyCostItem({
@@ -1161,7 +1146,6 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
   } catch (error) {
     if (missingRace) throw new LedgerError('error.monthlyCost.notFound');
     if (afterEndRace) throw new LedgerError('error.monthlyCost.purchaseAfterEnd');
-    if (afterAllocRace) throw new LedgerError('error.monthlyCost.purchaseAfterAllocation');
     throw error;
   }
 }
@@ -3007,8 +2991,6 @@ export interface ContinuousCostInput {
   startDate: string;
   /** 終了日（任意）。未設定 = まだ費用にしない（資産として持っているだけ）。 */
   endDate?: string;
-  /** 費用化の開始日（任意）。未設定 = 購入日から月割り。startDate 以降・endDate 以前。 */
-  allocationStartDate?: string;
   /** 費用の行き先（費用カテゴリ等）。 */
   expenseAccountId: string;
   /**
@@ -3085,15 +3067,6 @@ async function createContinuousCostUnlocked(input: ContinuousCostInput): Promise
   if (!isValidIsoDate(input.startDate)) throw new LedgerError('error.monthlyCost.dateRequired');
   if (input.endDate !== undefined && input.endDate < input.startDate)
     throw new LedgerError('error.monthlyCost.endBeforeStart');
-  // 費用化の開始日は明示値のみ検証: 購入日以降・（終了日があれば）終了日以前（§D 端点）。
-  if (input.allocationStartDate !== undefined) {
-    if (!isValidIsoDate(input.allocationStartDate))
-      throw new LedgerError('error.monthlyCost.dateRequired');
-    if (input.allocationStartDate < input.startDate)
-      throw new LedgerError('error.monthlyCost.allocationBeforeStart');
-    if (input.endDate !== undefined && input.allocationStartDate > input.endDate)
-      throw new LedgerError('error.monthlyCost.allocationAfterEnd');
-  }
 
   const ctx = await loadSaveContext();
   // 費用科目の延長は不要（§A 案1: startDate 未設定 = 過去へ開いた線分。明示 startDate は
@@ -3132,9 +3105,6 @@ async function createContinuousCostUnlocked(input: ContinuousCostInput): Promise
     amount: input.amount,
     startDate: input.startDate,
     ...(input.endDate !== undefined ? { endDate: input.endDate } : {}),
-    ...(input.allocationStartDate !== undefined
-      ? { allocationStartDate: input.allocationStartDate }
-      : {}),
     expenseAccountId: input.expenseAccountId,
     createdAt: ts,
     updatedAt: ts,
@@ -3243,18 +3213,10 @@ async function upsertMonthlyCostUnlocked(item: MonthlyCostItem): Promise<void> {
     updatedAt: nowIso(),
   };
   if (merged.endDate === undefined) delete merged.endDate;
-  if (merged.allocationStartDate === undefined) delete merged.allocationStartDate;
 
   // 専用エラー契約を保つため、期間不変条件は構造 schema より先に判定する。
   if (merged.endDate !== undefined && merged.endDate < merged.startDate)
     throw new LedgerError('error.monthlyCost.endBeforeStart');
-  // 費用化の開始日（明示値のみ）: 購入日以降・（終了日があれば）終了日以前（§D 端点）。
-  if (merged.allocationStartDate !== undefined) {
-    if (merged.allocationStartDate < merged.startDate)
-      throw new LedgerError('error.monthlyCost.allocationBeforeStart');
-    if (merged.endDate !== undefined && merged.allocationStartDate > merged.endDate)
-      throw new LedgerError('error.monthlyCost.allocationAfterEnd');
-  }
   // 費用の行き先は内部集約・残高調整以外の勘定科目であること（定期ルールと同じ正本）。
   const ctx = await loadSaveContext();
   const expense = ctx.byId.get(merged.expenseAccountId);
@@ -3298,7 +3260,6 @@ async function upsertMonthlyCostUnlocked(item: MonthlyCostItem): Promise<void> {
   // 最終 readwrite transaction 内で item を再読し、削除済みを put で復活させない。
   // startDate は tx 内の現在値を正とする（並行して購入の仕訳の日付が動いた場合に巻き戻さない）。
   let missingRace = false;
-  let allocRace = false;
   try {
     await writeWithRevision([STORE.accounts, STORE.monthlyCostItems, STORE.journalEntries], (t) => {
       const accountStore = t.objectStore(STORE.accounts);
@@ -3312,15 +3273,6 @@ async function upsertMonthlyCostUnlocked(item: MonthlyCostItem): Promise<void> {
           t.abort();
           return;
         }
-        // 並行して購入の仕訳の日付が費用化の開始日より後ろへ動いていたら保存しない（fail-closed）。
-        if (
-          saved.allocationStartDate !== undefined &&
-          current.startDate > saved.allocationStartDate
-        ) {
-          allocRace = true;
-          t.abort();
-          return;
-        }
         iStore.put(stripMonthlyCostItem({ ...saved, startDate: current.startDate }));
         const eStore = t.objectStore(STORE.journalEntries);
         for (const e of updatedEntries) eStore.put(e);
@@ -3328,7 +3280,6 @@ async function upsertMonthlyCostUnlocked(item: MonthlyCostItem): Promise<void> {
     });
   } catch (error) {
     if (missingRace) throw new LedgerError('error.monthlyCost.notFound');
-    if (allocRace) throw new LedgerError('error.monthlyCost.allocationBeforeStart');
     throw error;
   }
 }
@@ -3358,9 +3309,6 @@ async function archiveMonthlyCostUnlocked(input: MonthlyCostArchiveInput): Promi
   const existing = items.find((m) => m.id === input.id);
   if (!existing) throw new LedgerError('error.monthlyCost.notFound');
   if (input.endDate < existing.startDate) throw new LedgerError('error.monthlyCost.endBeforeStart');
-  // 費用化開始前にやめたい場合は、先に費用化の開始日を戻してから終了日を設定する（§D 端点）。
-  if (existing.allocationStartDate !== undefined && input.endDate < existing.allocationStartDate)
-    throw new LedgerError('error.monthlyCost.allocationAfterEnd');
 
   const ts = nowIso();
   const ctx = await loadSaveContext();
@@ -3416,7 +3364,6 @@ async function archiveMonthlyCostUnlocked(input: MonthlyCostArchiveInput): Promi
   });
 
   let missingRace = false;
-  let allocRace = false;
   try {
     await writeWithRevision([STORE.monthlyCostItems, STORE.journalEntries], (t) => {
       const iStore = t.objectStore(STORE.monthlyCostItems);
@@ -3428,23 +3375,12 @@ async function archiveMonthlyCostUnlocked(input: MonthlyCostArchiveInput): Promi
           t.abort();
           return;
         }
-        // 並行して費用化の開始日が終了日より後ろへ動いていたら保存しない（fail-closed）。
-        if (
-          current.allocationStartDate !== undefined &&
-          saved.endDate !== undefined &&
-          saved.endDate < current.allocationStartDate
-        ) {
-          allocRace = true;
-          t.abort();
-          return;
-        }
         iStore.put(stripMonthlyCostItem({ ...current, endDate: saved.endDate, updatedAt: ts }));
         if (recoveryEntry) t.objectStore(STORE.journalEntries).put(recoveryEntry);
       };
     });
   } catch (error) {
     if (missingRace) throw new LedgerError('error.monthlyCost.notFound');
-    if (allocRace) throw new LedgerError('error.monthlyCost.allocationAfterEnd');
     throw error;
   }
 }

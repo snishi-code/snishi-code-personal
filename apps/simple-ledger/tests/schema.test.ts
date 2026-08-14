@@ -859,52 +859,14 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
     // ちょうど 1200ヶ月（2026-06 〜 2126-05）は valid。
     expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2126-05-31' }).success).toBe(true);
   });
-  it('配分月数の上限は費用化開始月〜終了月で数える（実際の等分数と同じ基準・P2-2）', () => {
-    // 購入月（2026-06）からは 1206 ヶ月でも、費用化開始（2026-12）からちょうど 1200 ヶ月なら valid。
+  it('配分月数の上限は購入月〜終了月で数える（実際の等分数と同じ基準）', () => {
+    // 購入月（2026-06）からちょうど 1200 ヶ月（2126-05）までは valid。
+    expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2126-05-31' }).success).toBe(true);
     expect(
-      monthlyCostItemSchema.safeParse({
-        ...base,
-        allocationStartDate: '2026-12-01',
-        endDate: '2126-11-30',
-      }).success,
+      ledgerExportPackageSchema.safeParse(mcPkg([{ ...base, endDate: '2126-05-31' }])).success,
     ).toBe(true);
-    // 費用化開始から 1201 ヶ月は invalid。
-    expect(
-      monthlyCostItemSchema.safeParse({
-        ...base,
-        allocationStartDate: '2026-12-01',
-        endDate: '2126-12-01',
-      }).success,
-    ).toBe(false);
-  });
-  it('費用化の開始日（allocationStartDate）は明示値のみ検証: startDate〜endDate の内側だけ valid（§D）', () => {
-    // 内側（両端含む）は valid。package でも valid（購入の仕訳は startDate 基準のまま）。
-    const mid = { ...base, allocationStartDate: '2026-12-01' };
-    expect(monthlyCostItemSchema.safeParse(mid).success).toBe(true);
-    expect(ledgerExportPackageSchema.safeParse(mcPkg([mid])).success).toBe(true);
-    expect(
-      monthlyCostItemSchema.safeParse({ ...base, allocationStartDate: '2026-06-15' }).success,
-    ).toBe(true);
-    expect(
-      monthlyCostItemSchema.safeParse({ ...base, allocationStartDate: '2027-05-31' }).success,
-    ).toBe(true);
-    // 購入日より前 / 終了日より後 / 暦にない日付は invalid。
-    expect(
-      monthlyCostItemSchema.safeParse({ ...base, allocationStartDate: '2026-06-14' }).success,
-    ).toBe(false);
-    expect(
-      monthlyCostItemSchema.safeParse({ ...base, allocationStartDate: '2027-06-01' }).success,
-    ).toBe(false);
-    expect(
-      monthlyCostItemSchema.safeParse({ ...base, allocationStartDate: '2027-02-30' }).success,
-    ).toBe(false);
-    // 終了日なしでも保存できる（配分は発生しないだけ）。購入日より前は終了日なしでも invalid。
-    const open = { ...base, allocationStartDate: '2026-12-01' };
-    delete (open as Record<string, unknown>).endDate;
-    expect(monthlyCostItemSchema.safeParse(open).success).toBe(true);
-    expect(
-      monthlyCostItemSchema.safeParse({ ...open, allocationStartDate: '2026-06-14' }).success,
-    ).toBe(false);
+    // 1201 ヶ月目に入ると invalid。
+    expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2126-06-01' }).success).toBe(false);
   });
   it('存在しない/内部集約の expenseAccountId は package で invalid', () => {
     expect(
@@ -1126,9 +1088,6 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
             issue.message.includes('定期ルールの存在期間外'),
           ),
     ).not.toHaveLength(0);
-    // ccr- item への allocationStartDate は禁止しない（通常 item と同権）。
-    const deferred = { ...a, allocationStartDate: '2026-10-01' };
-    expect(ledgerExportPackageSchema.safeParse(rulePkg([deferred, b])).success).toBe(true);
   });
   it('仕訳の monthlyCostId が存在しないと invalid', () => {
     const dangling = purchaseOf(base, { metadata: { inputMode: 'expense', monthlyCostId: 'no' } });

@@ -603,10 +603,6 @@ export function Allocations({
                     <span className="muted">{t('ccItem.period')}</span>
                     <span>
                       {m.startDate} 〜 {m.endDate ?? '—'}
-                      {/* 費用化の開始日を遅らせた item だけ、月割りの起点を追加表示（監査 P2-3）。 */}
-                      {m.allocationStartDate !== undefined
-                        ? `（${t('ccItem.allocationFrom', { date: m.allocationStartDate })}）`
-                        : ''}
                     </span>
                   </div>
                   <div className="kv">
@@ -1306,10 +1302,6 @@ function ContinuousCostItemSheet({
   const amountDirty = amountText !== initialAmountText;
   const [startDate, setStartDate] = useState(existing?.startDate ?? todayLocal());
   const [endDate, setEndDate] = useState(existing?.endDate ?? '');
-  // 費用化の開始日（任意）。空 = 購入日から月割り（既定挙動）。
-  const [allocationStartDate, setAllocationStartDate] = useState(
-    existing?.allocationStartDate ?? '',
-  );
   // 費用の行き先の既定値は「前回選んだもの」（連続登録の切り替え手間を減らす）。
   const [expenseAccountId, setExpenseAccountId] = useState(() => {
     if (existing) return existing.expenseAccountId;
@@ -1320,10 +1312,6 @@ function ContinuousCostItemSheet({
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  // 期間クイックボタンの起点 = 費用化の開始日（domain の allocationStartOf と同じ既定:
-  // 空 = 購入日）。費用化開始を遅らせた item の「1年」は費用化開始から 1 年になる（監査 P2-1）。
-  const quickSpanFrom = allocationStartDate.trim() !== '' ? allocationStartDate.trim() : startDate;
-
   // 過去から再計算される項目の変更予告（破壊的操作の予告なので削らない）。
   const effectiveAmount =
     existing !== undefined && !amountDirty
@@ -1333,7 +1321,6 @@ function ContinuousCostItemSheet({
     existing !== undefined &&
     (effectiveAmount !== existing.amount ||
       endDate !== (existing.endDate ?? '') ||
-      allocationStartDate !== (existing.allocationStartDate ?? '') ||
       expenseAccountId !== existing.expenseAccountId);
 
   async function submit() {
@@ -1356,8 +1343,6 @@ function ContinuousCostItemSheet({
         };
         if (endDate.trim() === '') delete next.endDate;
         else next.endDate = endDate.trim();
-        if (allocationStartDate.trim() === '') delete next.allocationStartDate;
-        else next.allocationStartDate = allocationStartDate.trim();
         await saveMonthlyCost(next);
       } else {
         await createContinuousCost({
@@ -1365,9 +1350,6 @@ function ContinuousCostItemSheet({
           amount,
           startDate,
           ...(endDate.trim() !== '' ? { endDate: endDate.trim() } : {}),
-          ...(allocationStartDate.trim() !== ''
-            ? { allocationStartDate: allocationStartDate.trim() }
-            : {}),
           expenseAccountId,
         });
       }
@@ -1464,15 +1446,6 @@ function ContinuousCostItemSheet({
             dataUi={UI.allocations.editStartDate}
           />
         )}
-        {/* 費用化の開始日（任意・既定 = 購入日）。購入日〜この日の間は台帳に価値が置かれたまま。 */}
-        <TextInput
-          label={t('ccItem.allocationStartDate')}
-          type="date"
-          value={allocationStartDate}
-          onChange={setAllocationStartDate}
-          dataUi={UI.allocations.editAllocationStartDate}
-        />
-        <p className="field__hint">{t('ccItem.allocationStartHint')}</p>
         <TextInput
           label={t('ccItem.endDate')}
           type="date"
@@ -1487,7 +1460,7 @@ function ContinuousCostItemSheet({
               type="button"
               className="btn btn--ghost"
               style={{ minHeight: 'var(--tap)' }}
-              onClick={() => setEndDate(quickSpanEndDate(quickSpanFrom, years))}
+              onClick={() => setEndDate(quickSpanEndDate(startDate, years))}
             >
               {t('ccItem.quickSpan', { years })}
             </button>

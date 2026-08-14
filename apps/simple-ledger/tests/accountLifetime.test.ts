@@ -93,13 +93,12 @@ describe('勘定科目の存在期間', () => {
     ).toBeUndefined();
   });
 
-  it('item の参照期間は費用化の開始日に依らず startDate〜endDate（§D: accountLifetime 不変）', () => {
+  it('item の参照期間は startDate〜endDate', () => {
     const deferredItem = {
       id: 'm-deferred',
       name: '前払い',
       amount: 60000,
       startDate: '2026-01-15',
-      allocationStartDate: '2026-07-01',
       endDate: '2026-12-31',
       expenseAccountId: 'expense',
       createdAt: 'x',
