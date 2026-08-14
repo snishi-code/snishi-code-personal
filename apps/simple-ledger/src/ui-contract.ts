@@ -150,6 +150,8 @@ export const UI = {
     summary: 'journal.summary',
     entry: {
       save: 'journal.entry.save',
+      // 固定額振替の「振替せずに実行」（費用・収入のアーカイブのみ）
+      transferSkip: 'journal.entry.transferSkip',
       cancel: 'journal.entry.cancel',
       delete: 'journal.entry.delete',
       reverse: 'journal.entry.reverse',

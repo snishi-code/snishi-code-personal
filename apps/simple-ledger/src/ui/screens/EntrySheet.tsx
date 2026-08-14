@@ -66,6 +66,11 @@ export interface TransferFixed {
   description?: string;
   /** 相手側の候補。未指定なら科目アーカイブ用の資産・負債だけに限定する。 */
   counterpartRoles?: AccountRole[];
+  /**
+   * 「振替せずに実行」の任意アクション（費用・収入のアーカイブ用）。
+   * 残高 0 が必須の資産・負債では渡さない（スキップさせない = fail-closed のまま）。
+   */
+  skip?: { label: string; run: () => Promise<void> };
   onSave: (input: SimpleEntryInput) => Promise<void>;
 }
 
@@ -166,6 +171,17 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [submitting, setSubmitting] = useState(false);
 
   const paymentRole = accounts.find((a) => a.id === form.creditAccountId)?.role;
+  const [skipping, setSkipping] = useState(false);
+  const runSkip = async () => {
+    if (!fixed?.skip || skipping) return;
+    setSkipping(true);
+    try {
+      await fixed.skip.run();
+      onClose();
+    } catch {
+      setSkipping(false);
+    }
+  };
   const isLiabilityPayment =
     paymentRole === 'payment-liability' || paymentRole === 'other-liability';
   // 継続コスト化は支出フローと簿記編集（manual）の新規作成で常に選べる。
@@ -893,6 +909,19 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           </>
         ) : (
           <>
+            {/* 費用・収入のアーカイブでは「振替せず終了」も正当な選択（残高 0 は必須でない）。
+                入力を始める前に選べるよう最上部に置く（作者決定 2026-08-14）。 */}
+            {fixed?.skip ? (
+              <button
+                type="button"
+                className="btn btn--block"
+                onClick={runSkip}
+                disabled={skipping}
+                data-ui={UI.journal.entry.transferSkip}
+              >
+                {fixed.skip.label}
+              </button>
+            ) : null}
             {dateField}
             {mode === 'transfer' || (canCreateContinuousCost && ccMode) ? null : itemField}
             {amountField}

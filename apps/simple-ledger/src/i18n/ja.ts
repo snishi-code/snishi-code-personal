@@ -433,7 +433,7 @@ export const ja = {
   'accounts.autoBadge': '自動',
   'accounts.outsideSlice': 'この断面には存在しない',
   'accounts.archive': 'アーカイブ',
-  'accounts.archiveWithTransfer': '累計を振り替えてアーカイブ',
+  'accounts.archiveSkipTransfer': '振替せずにアーカイブ',
   'accounts.unarchive': 'アーカイブ解除',
   'accounts.showArchived': 'この断面に存在しない科目も表示',
   'accounts.type.asset': '資産',

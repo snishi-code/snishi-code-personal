@@ -145,7 +145,16 @@ describe('勘定科目のアーカイブ', () => {
     );
 
     await renderReady();
+    // 累計が残る費用のアーカイブは（資産と同じ）振替シートが出る。UI を分散させない統一
+    // （作者決定 2026-08-14）。最上部の「振替せずにアーカイブ」で従来の直接アーカイブになる。
     fireEvent.click(await screen.findByRole('button', { name: `アーカイブ: ${fixed.name}` }));
+    const skip = await waitFor(() => {
+      const el = document.querySelector('[data-ui="journal.entry.transferSkip"]');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(skip).toHaveTextContent('振替せずにアーカイブ');
+    fireEvent.click(skip);
 
     await waitFor(async () => {
       const after = await loadLedger();
@@ -153,6 +162,8 @@ describe('勘定科目のアーカイブ', () => {
       expect(archived).toMatchObject({ archived: true, endDate: today });
       expect(accountBalance(fixed.id, 'expense', after.journalEntries)).toBe(100_000); // UI 入力 1000 = 100,000 minor
     });
+    // シートは閉じている。
+    expect(document.querySelector('[data-ui="journal.entry.transferSkip"]')).toBeNull();
     expect(document.querySelector(`[data-ui="${UI.journal.entry.save}"]`)).toBeNull();
   });
 
@@ -174,11 +185,8 @@ describe('勘定科目のアーカイブ', () => {
     );
 
     await renderReady();
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: `累計を振り替えてアーカイブ: ${fixed.name}`,
-      }),
-    );
+    // 独立した振替ボタンは撤去済み。アーカイブ → 振替シート、が唯一の導線。
+    fireEvent.click(await screen.findByRole('button', { name: `アーカイブ: ${fixed.name}` }));
     const destination = await waitFor(() => {
       const found = document.querySelector(
         `[data-ui="${UI.journal.entry.flowDestination}"]`,

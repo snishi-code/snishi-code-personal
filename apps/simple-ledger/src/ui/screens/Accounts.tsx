@@ -113,12 +113,13 @@ export function Accounts({
         await saveAccount(restored);
         return;
       }
-      // 資産・負債だけは「終了点の残高 = 0」。費用・収入の累計は過去の記録なので
-      // 残したまま終了でき、必要な場合だけ別ボタンから任意振替する。
-      // 判定は保存境界（archiveAccount）と同じ「導出仕訳（継続コストの費用行・定期ルールの
-      // 投影込み）の今日時点残高」で行う（画面に見えている残高と一致させる・監査 P1-2）。
+      // 資産・負債は「終了点の残高 = 0」が必須 = 残高が残るなら振替シートを必ず挟む。
+      // 費用・収入の累計は過去の記録なので残したまま終了できるが、UI は分散させない
+      // （作者決定 2026-08-14）: 同じアーカイブボタン → 同じ振替シートを出し、
+      // 最上部の「振替せずにアーカイブ」で任意スキップできる形にする。
+      // 判定は保存境界（archiveAccount）と同じ「導出仕訳込みの今日時点残高」（監査 P1-2）。
       const balance = accountBalance(account.id, account.type, todayEntries);
-      if ((account.type === 'asset' || account.type === 'liability') && balance !== 0) {
+      if (balance !== 0) {
         beginArchiveTransfer(account);
         return;
       }
@@ -320,18 +321,6 @@ export function Accounts({
                             >
                               <Icon name="edit" size={18} />
                             </button>
-                            {accountExistsAt(account, today) &&
-                            (account.type === 'expense' || account.type === 'revenue') &&
-                            accountBalance(account.id, account.type, todayEntries) !== 0 ? (
-                              <button
-                                type="button"
-                                className="icon-btn"
-                                onClick={() => beginArchiveTransfer(account)}
-                                aria-label={`${t('accounts.archiveWithTransfer')}: ${account.name}`}
-                              >
-                                <Icon name="transfer" size={18} />
-                              </button>
-                            ) : null}
                             <button
                               type="button"
                               className="icon-btn"
@@ -379,6 +368,19 @@ export function Accounts({
                     .map((account) => account.role),
                 ),
               ),
+              // 費用・収入だけ「振替せずにアーカイブ」を選べる（累計は残してよい）。
+              // 資産・負債には渡さない = 残高 0 必須の fail-closed を迂回させない。
+              ...(archiveTransfer.account.type === 'expense' ||
+              archiveTransfer.account.type === 'revenue'
+                ? {
+                    skip: {
+                      label: t('accounts.archiveSkipTransfer'),
+                      run: async () => {
+                        await archiveAccount(archiveTransfer.account.id);
+                      },
+                    },
+                  }
+                : {}),
               onSave: async (input) => {
                 // 振替仕訳の保存 + archived=true を 1 トランザクションで（キャンセルなら何もしない）。
                 await archiveAccount(archiveTransfer.account.id, buildSimpleEntry(input));
