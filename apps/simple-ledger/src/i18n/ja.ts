@@ -543,7 +543,6 @@ export const ja = {
   'a11y.openMenu': 'メニューを開く',
   'a11y.back': '戻る',
   'a11y.home': 'ホーム',
-  'a11y.footerNav': 'ナビゲーション',
   'a11y.scrollTop': '一番上へ移動',
 
   // ドメイン/リポジトリ由来のユーザー表示エラー。domain/repository は LedgerError(code, params)

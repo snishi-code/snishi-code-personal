@@ -16,7 +16,9 @@
      シート類は native <dialog> の top-layer なので常にこの上（重なりの心配は無い）。 */
   --z-bottom-bar: 30;
   /* タイムラインのポップオーバー。親（.timeline-calendar__canvas）は stacking context を
-     作らないため、この値はルート階層で --z-bottom-bar と直接競合する。フッターより上へ。 */
+     作らないため、この値はルート階層で --z-bottom-bar と直接競合する。フッターより上へ。
+     ※ 最下行では親（.timeline-calendar__viewport）のスクロール枠に先に切られる。これは
+     overflow のクリップであって z では解決しない（さらに上げても直らない）。 */
   --z-timeline-popover: 35;
   /* sticky 要素の上端 = app-header の実高。--header-h(56px) は .app-header__inner の
      min-height で、*{box-sizing:border-box}（foundation.css）により padding を含む。
@@ -28,12 +30,18 @@
      以前は .app-main（foundation）と .dashboard の両方が env を足しており、iPhone では
      safe-area が二重に積まれていた（実測 sab=34 で最終行下が 120 + 34×2）。
      フッターで 3 個目を足すと死に領域になるため、ここで数え方を 1 つにする。 */
-  --footer-h: calc(var(--tap) + var(--space-1) * 2 + 1px); /* 44 + 4 + 1 = 53px */
+  --footer-h: calc(var(--tap) + var(--space-1) * 2 + 1px); /* 44 + 4*2 + 1 = 53px */
   --entry-bar-h: 88px; /* .entry-bar の実測 87.8px（padding 8 + ボタン 70.8 + 8 + border 1）*/
   --bottom-inset: calc(var(--footer-h) + env(safe-area-inset-bottom, 0px));
   /* 一番上へ移動ボタンの下端。全画面共通でフッターを避ける（.scroll-top は position:fixed でも
      カスタムプロパティを DOM 祖先から継承するため、:root 定義が全画面へ効く）。 */
   --scroll-top-bottom: calc(var(--bottom-inset) + var(--space-3));
+
+  /* 下端に固定 furniture を置いたら、スクロールポート側にも同じぶんの余白が要る。
+     ブラウザは Tab のフォーカス移動で「要素の下端をビューポート下端へ」最小スクロールするため、
+     これが無いとフォーカス中の要素がフッターの下へ**完全に潜る**（キーボードで位置を見失う）。
+     scroll-margin-top（.dashboard__entries .list__item）が上端を守るのと対になる下端側。 */
+  scroll-padding-bottom: calc(var(--bottom-inset) + var(--space-3));
 }
 
 /* ── Summary card (tappable: ホームの損益/資産負債サマリー) ── */
@@ -926,7 +934,7 @@ button.stmt-row:hover {
 }
 
 /* ── 画面下端の固定ナビ（戻る / ホーム / メニュー） ──
-   高さ = --tap(44) + padding 上下 4 + border 1 = 53px（--footer-h）。--tap を割らない最小。
+   高さ = --tap(44) + padding 上下 4px ずつ + border 1 = 53px（--footer-h）。--tap を割らない最小。
    env(safe-area-inset-bottom) を足すのは**この padding だけ**（数え方の正本は --bottom-inset）。
    影は付けない（.entry-bar の box-shadow は色のハードコードで既存の逸脱。増やさない）。 */
 .app-footer {
@@ -951,9 +959,11 @@ button.stmt-row:hover {
   display: inline-flex;
   transform: scaleX(-1);
 }
-/* 現在地（ホーム）の手掛かり。色だけに頼らず aria-current も付けている（App.tsx）。 */
+/* 現在地（ホーム）の手掛かり。色**だけ**に頼らない（強制カラーモードでは色が系のパレットへ
+   置き換わるため下線が残る）。支援技術側は aria-current が持つ（App.tsx）。 */
 .app-footer .icon-btn[aria-current='page'] {
   color: var(--primary-strong);
+  box-shadow: inset 0 -2px 0 var(--primary-strong);
 }
 .dashboard {
   /* 記帳バーぶんだけ。フッター + safe-area は .app-main の --bottom-inset が数える。 */
@@ -1067,6 +1077,12 @@ button.stmt-row:hover {
     animation: none;
   }
 }
+/* ホームの仕訳行は記帳バーぶんさらに深い位置で止める（:root の scroll-padding-bottom に加算される）。
+   :has() を使わないのは、対応環境を問わずこの 1 行で足りるため。 */
+.dashboard__entries .list__item {
+  scroll-margin-bottom: var(--entry-bar-h);
+}
+
 /* ホームはフッターに加えて記帳バー（実測 87.8px = --entry-bar-h）があるため、その上へ逃がす。 */
 .dashboard {
   --scroll-top-bottom: calc(var(--bottom-inset) + var(--entry-bar-h));
@@ -1121,9 +1137,11 @@ button.stmt-row:hover {
 }
 
 /* 低背ビューポート（横向き・スプリットビュー）ではホームの額縁を貼り付けない。
-   貼ると仕訳が 1 行も見えない（667x375 は フッター以前から本文が負・フッターは 53px 悪化させる）。
-   既存 E2E の高さは 844 / 1180 / 800 / 667 で全て 500 超なので sticky 検証には影響しない。 */
-@media (max-height: 500px) {
+   貼ると仕訳が 1 行も見えないどころか、額縁が記帳バーと重なって最下段（「すべて見る」）が
+   押せなくなる。必要高 = ヘッダー 57 + 額縁 269 + 仕訳 1 行 67 + 記帳バー 88 + フッター 53 ≒ 534。
+   375px 幅では金額の折り返しで額縁がさらに伸びるため、余裕を見て 640px を境界にする
+   （iPhone SE の 667 は sticky のまま＝既存 E2E の 844 / 1180 / 800 / 667 も全て影響なし）。 */
+@media (max-height: 640px) {
   .dashboard__frame {
     position: static;
   }

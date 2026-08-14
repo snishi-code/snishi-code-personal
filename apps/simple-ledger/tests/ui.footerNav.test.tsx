@@ -55,9 +55,15 @@ async function renderApp() {
   return view;
 }
 
-/** 画面内で重複している data-ui（Playwright の strict mode が落ちる条件）。 */
-function duplicatedDataUi(): string[] {
-  const keys = [...document.querySelectorAll('[data-ui]')].map((e) => e.getAttribute('data-ui')!);
+/**
+ * 画面内で重複しているナビ系 data-ui（Playwright の strict mode が落ちる条件）。
+ * 検査対象を nav.* に絞るのは、一覧の行など**設計上重複してよいキー**があるため
+ * （全 data-ui を対象にすると、無関係な画面の変更でこのテストが落ちる）。
+ */
+function duplicatedNavDataUi(): string[] {
+  const keys = [...document.querySelectorAll('[data-ui^="nav."]')].map(
+    (e) => e.getAttribute('data-ui')!,
+  );
   return [...new Set(keys.filter((k, i) => keys.indexOf(k) !== i))];
 }
 
@@ -71,7 +77,7 @@ describe('フッターナビ', () => {
     expect(q(UI.nav.menuButton)).toBeInTheDocument();
     // ヘッダー左のホームとフッター中央のホームは別キー（重複させない）。
     expect(UI.nav.home).not.toBe(UI.nav.footerHome);
-    expect(duplicatedDataUi()).toEqual([]);
+    expect(duplicatedNavDataUi()).toEqual([]);
   });
 
   it('メニューを開いても data-ui は一意のまま（ヘッダー右の設定とメニュー項目が衝突しない）', async () => {
@@ -81,15 +87,33 @@ describe('フッターナビ', () => {
 
     // メニュー項目の 'nav.settings' とヘッダー右の 'nav.settings.button' は別キー。
     expect(UI.nav.settingsButton).not.toBe('nav.settings');
-    expect(duplicatedDataUi()).toEqual([]);
+    expect(duplicatedNavDataUi()).toEqual([]);
   });
 
   it('戻るは window.history.back() を呼ぶだけ（app 側で画面を切り替えない）', async () => {
     await renderApp();
-    fireEvent.click(q(UI.nav.footerBack)!);
+    // **ホーム以外**で押す。dashboard で押すと「画面が変わらない」は実装が何をしても真になり、
+    // アサーションが原理的に落ちない（＝偽緑）ため。
+    fireEvent.click(q(UI.nav.settingsButton)!);
+    await waitFor(() => expect(q(UI.settings.view)).toBeInTheDocument());
 
+    fireEvent.click(q(UI.nav.footerBack)!);
     expect(backSpy).toHaveBeenCalledTimes(1);
-    // 端末ジェスチャと同じ経路に委ねる＝この時点では画面は変わらない（popstate で変わる）。
+    // popstate を撃たない限り画面は動かない＝Back の意味論を app 側へ複製していない。
+    expect(q(UI.settings.view)).toBeInTheDocument();
+    expect(q(UI.dashboard.view)).not.toBeInTheDocument();
+  });
+
+  it('戻るは overlay を先に閉じる（画面は変わらない・中央制御に委ねている証拠）', async () => {
+    // spy を張らずに本物の history.back() を通し、useAppHistory の順序制御まで見る。
+    backSpy.mockRestore();
+    await renderApp();
+    fireEvent.click(q(UI.nav.menuButton)!);
+    await waitFor(() => expect(q(UI.nav.menu)).toBeInTheDocument());
+
+    fireEvent.click(q(UI.nav.footerBack)!);
+    await waitFor(() => expect(q(UI.nav.menu)).not.toBeInTheDocument());
+    // overlay が閉じただけで画面は据え置き（overlay → 画面履歴 の優先順）。
     expect(q(UI.dashboard.view)).toBeInTheDocument();
   });
 

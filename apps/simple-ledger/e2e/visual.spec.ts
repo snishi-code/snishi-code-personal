@@ -334,9 +334,9 @@ test('フッターナビは全画面に常設され、下端のコンテンツ�
   // ホーム: 記帳バーはフッターの上に積まれ、重ならない。
   const entryBarBox = (await page.locator(ui('dashboard.entryBar')).boundingBox())!;
   expect(
-    Math.round(entryBarBox.y + entryBarBox.height),
+    entryBarBox.y + entryBarBox.height,
     '記帳バーの下端がフッター上端と一致（重なりも隙間も無い）',
-  ).toBe(Math.round(footerBox.y));
+  ).toBeCloseTo(footerBox.y, 1);
 
   // 設定画面: 最下端の破壊的ボタンがフッターに隠れないこと（一番シビアな面）。
   await page.locator(ui('nav.settings.button')).click();
@@ -351,6 +351,27 @@ test('フッターナビは全画面に常設され、下端のコンテンツ�
 
   // フッターは画面が変わっても出続ける（常設ナビ）。
   await expect(footer).toBeVisible();
+
+  // **Tab のフォーカスがフッターの下へ潜らない**（scroll-padding-bottom が効いている）。
+  // 下端 furniture を足すとブラウザは「要素の下端をビューポート下端へ」寄せるため、
+  // 補正が無いとフォーカス中の要素が完全に隠れる。座標で見ないと検出できない。
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const footerTop = (await footer.boundingBox())!.y;
+  for (let i = 0; i < 30; i++) {
+    await page.keyboard.press('Tab');
+    const hidden = await page.evaluate((top) => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el || el === document.body || el.closest('.app-footer')) return null;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) return null;
+      return r.top >= top ? `${el.getAttribute('aria-label') ?? el.tagName} top=${r.top}` : null;
+    }, footerTop);
+    expect(hidden, `Tab ${i + 1} 回目のフォーカス要素がフッターの下に潜っている`).toBeNull();
+  }
+
+  // 実ブラウザで「見えるボタンで戻れる」ことまで見る（unit 側は history.back を spy で潰すため）。
+  await page.locator(ui('nav.footer.back')).click();
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible();
 
   await page.screenshot({ path: 'test-results/screenshots/ledger-footer-nav-375x667.png' });
 });

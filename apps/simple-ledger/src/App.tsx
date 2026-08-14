@@ -231,6 +231,8 @@ export function App() {
             className="icon-btn"
             onClick={() => go('dashboard')}
             aria-label={t('header.home')}
+            // フッター中央のホームと行き先が同じなので、現在地の状態も揃える。
+            {...(screen === 'dashboard' ? { 'aria-current': 'page' as const } : {})}
             data-ui={UI.nav.home}
           >
             <Icon name="home" />
@@ -359,7 +361,9 @@ export function App() {
        * loading / RecoveryScreen の早期 return には出さない（台帳が読めない状態で
        * 各画面へ入れないため・fail-closed）。
        */}
-      <nav className="app-footer" aria-label={t('a11y.footerNav')} data-ui={UI.nav.footer}>
+      {/* ページ内の navigation ランドマークはこれ 1 つなので aria-label は付けない
+          （名前にロール名を含めると読み上げが同語反復になる）。 */}
+      <nav className="app-footer" data-ui={UI.nav.footer}>
         <div className="app-footer__inner">
           <IconButton
             label={t('a11y.back')}
@@ -380,10 +384,13 @@ export function App() {
           >
             <Icon name="home" />
           </IconButton>
+          {/* 開くのは role=menu のウィジェットではなく native <dialog>（foundation の Menu）。
+              予告する型を実体に合わせ、開閉状態も伝える（foundation 側は編集しない）。 */}
           <IconButton
             label={t('a11y.openMenu')}
             onClick={() => setMenuOpen(true)}
-            aria-haspopup="menu"
+            aria-haspopup="dialog"
+            aria-expanded={menuOpen}
             dataUi={UI.nav.menuButton}
           >
             <Icon name="menu" />
