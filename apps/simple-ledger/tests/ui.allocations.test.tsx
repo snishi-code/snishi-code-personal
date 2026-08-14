@@ -361,6 +361,36 @@ describe('費用化の開始日の表示と期間クイックボタン（P2-1 / 
     expect(endInput.value).toBe('2026-12-31');
   });
 
+  it('「終了日を解除」で空にして保存すると終了日が消える（iOS の date input は空へ戻せないため）', async () => {
+    const ledger = await loadLedger();
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    const item = await createContinuousCost({
+      name: '解除する保守',
+      amount: 6000000,
+      startDate: '2026-01-10',
+      endDate: '2026-12-31',
+      expenseAccountId: expense.id,
+    });
+
+    await renderReady();
+    fireEvent.click(await screen.findByRole('button', { name: `編集: ${item.name}` }));
+    const endInput = document.querySelector(
+      `[data-ui="${UI.allocations.editEndDate}"]`,
+    ) as HTMLInputElement;
+    expect(endInput.value).toBe('2026-12-31');
+
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.editEndDateClear}"]`)!);
+    expect(endInput.value).toBe('');
+    // 空になったら解除ボタン自体も消える（押す対象が無い）。
+    expect(document.querySelector(`[data-ui="${UI.allocations.editEndDateClear}"]`)).toBeNull();
+
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.editSave}"]`)!);
+    await waitFor(async () => {
+      const after = (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)!;
+      expect(after.endDate).toBeUndefined();
+    });
+  });
+
   it('一覧の期間表示は費用化の開始日を設定した項目だけ追加表示する', async () => {
     const ledger = await loadLedger();
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;

@@ -261,6 +261,8 @@ export const UI = {
     // 費用化の開始日（任意・既定 = 購入日）。購入日より後にすると台帳に価値が置かれたままになる。
     editAllocationStartDate: 'allocations.edit.allocationStartDate',
     editEndDate: 'allocations.edit.endDate',
+    // 終了日の解除（iOS date input にクリア手段が無いための明示ボタン）
+    editEndDateClear: 'allocations.edit.endDateClear',
     editQuickSpan: 'allocations.edit.quickSpan',
     editOpenPurchase: 'allocations.edit.openPurchase',
     editExpense: 'allocations.edit.expense',

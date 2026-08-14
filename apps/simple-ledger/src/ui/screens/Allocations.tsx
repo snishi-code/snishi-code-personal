@@ -1454,6 +1454,19 @@ function ContinuousCostItemSheet({
               {t('ccItem.quickSpan', { years })}
             </button>
           ))}
+          {/* 空で保存 = 終了日の解除は元から許可されている（保存側の仕様）。
+              ただし iOS の date input には値を空へ戻す手段が無いため、明示ボタンで到達させる。 */}
+          {endDate !== '' ? (
+            <button
+              type="button"
+              className="btn btn--ghost"
+              style={{ minHeight: 'var(--tap)' }}
+              onClick={() => setEndDate('')}
+              data-ui={UI.allocations.editEndDateClear}
+            >
+              {t('ccItem.endDateClear')}
+            </button>
+          ) : null}
         </div>
         <SelectInput
           label={t('monthlyCost.expenseCategory')}

@@ -98,6 +98,7 @@ export const ja = {
     '「{name}」を削除します。購入の仕訳と回収の振替も一緒に削除されます。登録済みの返済仕訳（未来日付の振替）は残ります。',
   'ccItem.startDate': '開始日',
   'ccItem.endDate': '終了日（任意）',
+  'ccItem.endDateClear': '終了日を解除',
   'ccItem.allocationStartDate': '費用化の開始日（任意・既定 = 購入日）',
   'ccItem.allocationStartHint': '購入日より後にすると、その間は台帳（保管庫）に価値が置かれます',
   'ccItem.period': '期間',
