@@ -152,6 +152,25 @@ describe('TimelineCalendarView', () => {
     expect(onOpenTarget).toHaveBeenCalledWith({ kind: 'entry', entryId: 'entry-1' });
   });
 
+  it('接続線が下の行へ伸びるときはポップオーバーを行の上へ反転する（線を隠さない）', () => {
+    render(<Harness />);
+    const dots = document.querySelectorAll(`[data-ui="${UI.timeline.flowDot}"]`);
+    expect(dots.length).toBeGreaterThanOrEqual(2);
+
+    // 上の行（預金）のポッチ → 相手（食費）は下の行 → 線が下へ伸びる → 上へ反転。
+    fireEvent.click(dots[0]!);
+    let popover = document.querySelector<HTMLElement>(`[data-ui="${UI.timeline.popover}"]`)!;
+    expect(popover.style.bottom).toBe('calc(50% + 18px)');
+    expect(popover.style.top).toBe('auto');
+
+    fireEvent.click(dots[0]!); // 同じポッチで閉じる
+
+    // 下の行（食費）のポッチ → 相手は上の行 → 既定どおり行の下（反転しない）。
+    fireEvent.click(dots[dots.length - 1]!);
+    popover = document.querySelector<HTMLElement>(`[data-ui="${UI.timeline.popover}"]`)!;
+    expect(popover.style.bottom).toBe('');
+  });
+
   it('箱のアクセントは既存の色の正本を使う', () => {
     render(<Harness />);
     const first = document.querySelector(`[data-ui="${UI.timeline.boxRow}"]`) as HTMLElement;

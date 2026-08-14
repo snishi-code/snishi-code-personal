@@ -614,6 +614,9 @@ export function TimelineCalendarView({
   })();
 
   const sourceIndex = selection ? renderedRowById.get(selection.rowId)?.index : undefined;
+  // 接続線が**下の行**へ伸びるときはポップオーバーを行の上へ出す（線と重ねない・実測不要の決定則）。
+  const connectorGoesDown =
+    sourceIndex !== undefined && counterpartRow !== undefined && counterpartRow.index > sourceIndex;
   const connectedIds =
     sourceIndex !== undefined && counterpartRow
       ? new Set([selection?.rowId, counterpartRow.row.id])
@@ -759,6 +762,7 @@ export function TimelineCalendarView({
                 expanded={expanded.has(row.boxKey)}
                 dimmed={connectedIds !== undefined && !connectedIds.has(row.id)}
                 selection={selection?.rowId === row.id ? selection : null}
+                popoverAbove={selection?.rowId === row.id && connectorGoesDown}
                 accountById={accountById}
                 currency={currency}
                 onToggleBox={() =>
@@ -821,6 +825,7 @@ function TimelineRow({
   expanded,
   dimmed,
   selection,
+  popoverAbove,
   accountById,
   currency,
   onToggleBox,
@@ -833,6 +838,8 @@ function TimelineRow({
   expanded: boolean;
   dimmed: boolean;
   selection: Selection | null;
+  /** フロー選択の接続線が下の行へ伸びるとき true（ポップオーバーを行の上へ出す）。 */
+  popoverAbove: boolean;
   accountById: ReadonlyMap<string, Account>;
   currency: string;
   onToggleBox: () => void;
@@ -967,6 +974,7 @@ function TimelineRow({
           <TimelineFlowPopover
             dot={selection.dot}
             selectedFlow={selectedFlow}
+            above={popoverAbove}
             buckets={buckets}
             bucketWidth={bucketWidth}
             accountById={accountById}
@@ -994,11 +1002,15 @@ function popoverStyle(
   bucketKey: string,
   buckets: TimelineBucketView[],
   bucketWidth: number,
+  above = false,
 ): CSSProperties {
   const index = bucketIndex(buckets, bucketKey);
   const ratio = buckets.length <= 1 ? 0.5 : index / (buckets.length - 1);
   return {
     left: (index + 0.5) * bucketWidth,
+    // 既定は行の下（CSS の top）。接続線が下へ伸びる選択では行の上へ反転し、
+    // 縦線（ポッチと同じ x）へポップオーバーが重なって線が見えなくなる問題を避ける。
+    ...(above ? { top: 'auto', bottom: 'calc(50% + 18px)' } : {}),
     '--timeline-popover-shift': ratio < 0.2 ? '0%' : ratio > 0.8 ? '-100%' : '-50%',
   } as CSSProperties;
 }
@@ -1006,6 +1018,7 @@ function popoverStyle(
 function TimelineFlowPopover({
   dot,
   selectedFlow,
+  above,
   buckets,
   bucketWidth,
   accountById,
@@ -1015,6 +1028,7 @@ function TimelineFlowPopover({
 }: {
   dot: TimelineDotView;
   selectedFlow?: TimelineFlowView;
+  above: boolean;
   buckets: TimelineBucketView[];
   bucketWidth: number;
   accountById: ReadonlyMap<string, Account>;
@@ -1027,7 +1041,7 @@ function TimelineFlowPopover({
   return (
     <div
       className="timeline-calendar__popover"
-      style={popoverStyle(dot.bucketKey, buckets, bucketWidth)}
+      style={popoverStyle(dot.bucketKey, buckets, bucketWidth, above)}
       data-ui={UI.timeline.popover}
       onClick={(event) => event.stopPropagation()}
     >
