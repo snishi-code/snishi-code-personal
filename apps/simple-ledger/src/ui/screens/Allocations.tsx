@@ -12,7 +12,7 @@ import { Icon } from '@snishi/foundation/ui/Icon';
 import { AccountPicker } from '../AccountPicker';
 import { FlowField } from '../FlowField';
 import { SearchInput, SortControls } from '../ListSearchSort';
-import { applySort, matchesQuery } from '../listQuery';
+import { applySort, directionSign, matchesQuery, type SortDirection } from '../listQuery';
 import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import {
@@ -76,15 +76,19 @@ export interface AllocationsTarget {
   ruleId?: string;
 }
 
-/** 並び替え state。軸は両セクション（定期ルール・継続コスト資産）に定義できるものだけ。 */
+/**
+ * 並び替え state。軸は両セクション（定期ルール・継続コスト資産）に定義できるものだけ。
+ * 仕訳一覧と同じ語彙で、日付軸の意味だけがセクションごとに違う
+ * （継続コスト資産 = 終了日 / 定期ルール = 開始日）。
+ */
 interface ListSort {
-  key: 'default' | 'amount' | 'name';
-  direction: 'asc' | 'desc';
+  key: 'date' | 'amount' | 'name';
+  direction: SortDirection;
 }
 
-/** 軸ごとの既定方向（金額 = 大きい順・名称 = 五十音順）。軸を切り替えたらここへ戻す。 */
-const SORT_DEFAULT_DIRECTION: Record<ListSort['key'], ListSort['direction']> = {
-  default: 'desc',
+/** 軸ごとの既定方向（日付 = 終了/開始が近い順・金額 = 大きい順・名称 = 五十音順）。軸を切り替えたらここへ戻す。 */
+const SORT_DEFAULT_DIRECTION: Record<ListSort['key'], SortDirection> = {
+  date: 'asc',
   amount: 'desc',
   name: 'asc',
 };
@@ -106,8 +110,8 @@ export function Allocations({
   const [showEnded, setShowEnded] = useState(false);
   const [query, setQuery] = useState('');
   // 並び替え（表示専用・保存しない）。軸と方向を 1 つの state で持ち、軸を切り替えたら
-  // 方向を軸ごとの既定へ戻す（方向 Segmented 非表示中に古い方向が残らない）。
-  const [sort, setSort] = useState<ListSort>({ key: 'default', direction: 'desc' });
+  // 方向を軸ごとの既定へ戻す（前の軸で選んだ方向が別の軸へ持ち越されない）。
+  const [sort, setSort] = useState<ListSort>({ key: 'date', direction: 'asc' });
   const [pendingDelete, setPendingDelete] = useState<MonthlyCostItem | null>(null);
   const [itemSheet, setItemSheet] = useState<{ existing?: MonthlyCostItem } | null>(null);
   const [archiving, setArchiving] = useState<MonthlyCostItem | null>(null);
@@ -165,21 +169,36 @@ export function Allocations({
 
   // 検索: 1 つの検索欄が両セクションに効く（「終了分も表示」と同じ単一 state の型）。
   // 対象 = 名前 + 関係する科目名（Journal と同じ範囲。金額・日付・種別タグは対象外）。
-  const dir = sort.direction === 'asc' ? 1 : -1;
+  const dir = directionSign(sort.direction);
+  // 日付軸の意味はセクションごとに違う（継続コスト資産 = 終了日 / 定期ルール = 開始日）。
+  // 終了日なしは「いつ終わるか分からない」なので昇順・降順どちらでも最後に置く（方向を
+  // 掛ける前に決着させる）。同着はどちらの方向でも名前の五十音順で安定化する。
   const itemCompare =
-    sort.key === 'default'
-      ? null
+    sort.key === 'date'
+      ? (a: MonthlyCostItem, b: MonthlyCostItem) => {
+          if (a.endDate === undefined || b.endDate === undefined) {
+            if (a.endDate === b.endDate) return a.name.localeCompare(b.name, 'ja');
+            return a.endDate === undefined ? 1 : -1;
+          }
+          if (a.endDate !== b.endDate) return (a.endDate < b.endDate ? -1 : 1) * dir;
+          return a.name.localeCompare(b.name, 'ja');
+        }
       : sort.key === 'amount'
         ? (a: MonthlyCostItem, b: MonthlyCostItem) => (a.amount - b.amount) * dir
         : (a: MonthlyCostItem, b: MonthlyCostItem) => a.name.localeCompare(b.name, 'ja') * dir;
   const ruleCompare =
-    sort.key === 'default'
-      ? null
+    sort.key === 'date'
+      ? (a: RecurringRule, b: RecurringRule) => {
+          const sa = effectiveRecurringRuleStartDate(a);
+          const sb = effectiveRecurringRuleStartDate(b);
+          if (sa !== sb) return (sa < sb ? -1 : 1) * dir;
+          return a.name.localeCompare(b.name, 'ja');
+        }
       : sort.key === 'amount'
         ? (a: RecurringRule, b: RecurringRule) => (a.amount - b.amount) * dir
         : (a: RecurringRule, b: RecurringRule) => a.name.localeCompare(b.name, 'ja') * dir;
   // loadLedger は終了が近い順で返すが、編集直後の state 由来でも順序が崩れないよう再ソートする。
-  // 並び替え「標準」は applySort が素通しする＝既定の並び（終了が近い順）を 1 行も変えない。
+  // この基準順は金額・名称の軸で同値になった行の相対順（applySort は安定ソート）も決める。
   const items = applySort(
     [...startedItems]
       .filter((m) => showEnded || !isArchived(m, asOf))
@@ -187,8 +206,8 @@ export function Allocations({
       .sort(compareMonthlyCostItems),
     itemCompare,
   );
-  // 定期ルールの既定順 = loadLedger の createdAt 昇順（画面側では並べ替えない暗黙の既定。
-  // 「標準」はこれを素通しする）。
+  // 定期ルールは loadLedger の createdAt 昇順で届く。日付軸（開始日）以外では同値の相対順が
+  // この登録順になる。
   const rules = applySort(
     startedRules
       .filter((r) => showEnded || recurringRuleExistsAt(r, asOf))
@@ -338,9 +357,9 @@ export function Allocations({
             ariaLabel={t('common.sort')}
             axisItems={[
               {
-                key: 'default',
-                label: t('monthly.sortDefault'),
-                dataUi: UI.allocations.sortDefault,
+                key: 'date',
+                label: t('monthly.sortDate'),
+                dataUi: UI.allocations.sortByDate,
               },
               {
                 key: 'amount',
@@ -351,8 +370,8 @@ export function Allocations({
             ]}
             axisValue={sort.key}
             onAxisChange={(key) => {
-              const next = key === 'amount' || key === 'name' ? key : 'default';
-              // 軸を変えたら方向は軸ごとの既定へ戻す（非表示中の方向が残らない）。
+              const next = key === 'amount' || key === 'name' ? key : 'date';
+              // 軸を変えたら方向は軸ごとの既定へ戻す（前の軸の方向を持ち越さない）。
               setSort({ key: next, direction: SORT_DEFAULT_DIRECTION[next] });
             }}
             directionItems={[
@@ -363,7 +382,6 @@ export function Allocations({
             onDirectionChange={(key) =>
               setSort((s) => ({ ...s, direction: key === 'asc' ? 'asc' : 'desc' }))
             }
-            showDirection={sort.key !== 'default'}
           />
           {/* 絞り込み結果を読み上げる（検索は視覚的にしか結果が分からないため）。 */}
           <p className="sr-only" role="status" data-ui={UI.allocations.searchCount}>

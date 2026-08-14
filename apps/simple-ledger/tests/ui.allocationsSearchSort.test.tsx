@@ -1,9 +1,11 @@
 /*
  * 「毎月のもの」の検索・並び替え（実ユーズレビュー 2026-08-12 ①）:
  *  - 検索欄 1 つ・並び替え 1 組が定期ルールと継続コスト資産の両セクションへ同時に効く
- *  - 既定（検索空・並び替え「標準」）は既存の並びを 1 行も変えない
- *    （継続コスト資産 = 終了が近い順 / 定期ルール = createdAt 昇順の素通し）
- *  - 軸切替で方向は軸ごとの既定へ戻る・「標準」時は方向トグルを描画しない
+ *  - 軸は仕訳一覧と同じ語彙の「日付 / 金額 / 名称」。日付の意味だけがセクションごとに違う
+ *    （継続コスト資産 = 終了日 / 定期ルール = 開始日）
+ *  - 既定 = 日付・昇順（継続コスト資産は従来どおり終了が近い順に見える）
+ *  - どの軸でも方向を選べる。日付軸では終了日なしが昇降どちらでも最後に留まる
+ *  - 軸切替で方向は軸ごとの既定へ戻る
  *  - ルール由来（ccr-）item は「くり返し記帳から」を名乗る
  */
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -83,7 +85,8 @@ async function seed() {
     startDate: '2026-01-01',
     expenseAccountId: expense.id,
   });
-  // 定期ルール（振替 = item を生まない）。作成順 = createdAt 昇順の既定順。
+  // 定期ルール（振替 = item を生まない）。開始日を変えて日付軸の順を確かめられるようにする
+  // （さきの積立 = 3ヶ月前 → あとの積立 = 今日。名称順・金額順とは別の並びになる）。
   const month = today.slice(0, 7);
   await createRecurringRule({
     name: 'さきの積立',
@@ -92,7 +95,7 @@ async function seed() {
     debitAccountId: invest.id,
     creditAccountId: bank.id,
     startMonth: month,
-    startDate: today,
+    startDate: addMonthsToDate(today, -3),
   });
   await createRecurringRule({
     name: 'あとの積立',
@@ -128,7 +131,7 @@ describe('毎月のものの検索', () => {
   it('登録が 1 件も無いときは検索・並び替えを描画しない', async () => {
     await renderReady();
     expect(document.querySelector(`[data-ui="${UI.allocations.search}"]`)).toBeNull();
-    expect(document.querySelector(`[data-ui="${UI.allocations.sortDefault}"]`)).toBeNull();
+    expect(document.querySelector(`[data-ui="${UI.allocations.sortByDate}"]`)).toBeNull();
   });
 
   it('1 つの検索欄が両セクションへ同時に効き、計上先・貸方/行き先の科目名でも当たる', async () => {
@@ -194,23 +197,46 @@ describe('毎月のものの検索', () => {
   });
 });
 
+// タイトルには種別タグ・由来タグの文字列が続くため、名前の頭 5 文字だけで並びを比べる
+// （fixture の名前は先頭 5 文字で一意に決まる）。
+function itemHeads(): string[] {
+  return itemNames().map((s) => s.slice(0, 5));
+}
+
+function ruleHeads(): string[] {
+  return ruleNames().map((s) => s.slice(0, 5));
+}
+
 describe('毎月のものの並び替え', () => {
-  it('既定（標準）は既存の並びを変えず、方向トグルも出さない', async () => {
+  it('既定は日付・昇順で、継続コスト資産は終了が近い順・定期ルールは開始日順になる', async () => {
     await seed();
     await renderReady();
     await screen.findByText('もうすぐ終了');
-    expect(itemNames()[0]).toContain('もうすぐ終了');
-    expect(itemNames()[1]).toContain('まだ先');
-    expect(itemNames()[2]).toContain('終了日なし');
-    // 定期ルールの既定順は loadLedger の createdAt 昇順の素通し。同一ミリ秒作成では
-    // createdAt がタイになり順序を固定できないため、ここでは全件表示のみを確認し、
-    // 「既定順を変えない」ことは次のテスト（標準へ戻すと完全復帰）で固定する。
-    expect(ruleNames()).toHaveLength(2);
-    expect(document.querySelector(`[data-ui="${UI.allocations.sortDesc}"]`)).toBeNull();
-    expect(document.querySelector(`[data-ui="${UI.allocations.sortAsc}"]`)).toBeNull();
+    // 継続コスト資産の日付 = 終了日。終了日なしは最後。
+    expect(itemHeads()).toEqual(['もうすぐ終', 'まだ先', '終了日なし']);
+    // 定期ルールの日付 = 開始日（3ヶ月前 → 今日）。
+    expect(ruleHeads()).toEqual(['さきの積立', 'あとの積立']);
+    // 方向トグルはどの軸でも出る（「標準」軸の特別扱いは無い）。
+    expect(document.querySelector(`[data-ui="${UI.allocations.sortDesc}"]`)).not.toBeNull();
+    expect(document.querySelector(`[data-ui="${UI.allocations.sortAsc}"]`)).not.toBeNull();
   });
 
-  it('金額・名称の軸が両セクションへ効き、標準へ戻すと完全に元へ戻る', async () => {
+  it('日付軸の昇降で両セクションが反転し、終了日なしは降順でも最後に留まる', async () => {
+    await seed();
+    await renderReady();
+    await screen.findByText('もうすぐ終了');
+
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.sortDesc}"]`)!);
+    // 終了日を持つ 2 件だけが反転し、終了日なしは最後のまま。
+    expect(itemHeads()).toEqual(['まだ先', 'もうすぐ終', '終了日なし']);
+    expect(ruleHeads()).toEqual(['あとの積立', 'さきの積立']);
+
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.sortAsc}"]`)!);
+    expect(itemHeads()).toEqual(['もうすぐ終', 'まだ先', '終了日なし']);
+    expect(ruleHeads()).toEqual(['さきの積立', 'あとの積立']);
+  });
+
+  it('金額・名称の軸が両セクションへ効き、日付へ戻すと既定の並びへ戻る', async () => {
     await seed();
     await renderReady();
     await screen.findByText('もうすぐ終了');
@@ -219,23 +245,22 @@ describe('毎月のものの並び替え', () => {
 
     // 金額（既定 = 降順）。
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.sortByAmount}"]`)!);
-    expect(itemNames().map((s) => s.slice(0, 5))).toEqual(['もうすぐ終', '終了日なし', 'まだ先']);
-    expect(ruleNames()[0]).toContain('さきの積立'); // 200 > 100
+    expect(itemHeads()).toEqual(['もうすぐ終', '終了日なし', 'まだ先']);
+    expect(ruleHeads()[0]).toBe('さきの積立'); // 200 > 100
 
     // 昇順へ切り替え。
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.sortAsc}"]`)!);
     expect(itemNames().map((s) => s.slice(0, 3))).toEqual(['まだ先', '終了日', 'もうす']);
-    expect(ruleNames()[0]).toContain('あとの積立');
+    expect(ruleHeads()[0]).toBe('あとの積立');
 
     // 名称（既定 = 昇順・五十音）。
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.sortByName}"]`)!);
-    expect(ruleNames()[0]).toContain('あとの積立');
+    expect(ruleHeads()[0]).toBe('あとの積立');
 
-    // 標準へ戻すと両セクションとも初期の並びへ完全復帰（applySort の素通し）。
-    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.sortDefault}"]`)!);
+    // 日付へ戻すと方向も日付の既定（昇順）へ戻り、両セクションとも既定の並びへ復帰する。
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.sortByDate}"]`)!);
     expect(itemNames()).toEqual(defaultItems);
     expect(ruleNames()).toEqual(defaultRules);
-    expect(document.querySelector(`[data-ui="${UI.allocations.sortAsc}"]`)).toBeNull();
 
     // 再び金額を押すと方向は既定（降順）へ戻っている（昇順が残らない）。
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.sortByAmount}"]`)!);

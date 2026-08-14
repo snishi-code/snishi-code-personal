@@ -714,7 +714,7 @@ export const ja = {
   'monthly.searchPlaceholder': '項目名・科目名で検索',
   'monthly.searchEmpty': '該当する項目がありません。',
   'monthly.searchCount': 'くり返し記帳 {rules} 件・継続コスト資産 {items} 件',
-  'monthly.sortDefault': '標準',
+  'monthly.sortDate': '日付',
 
   'recurring.sectionTitle': 'くり返し記帳',
   'recurring.sectionIntro':

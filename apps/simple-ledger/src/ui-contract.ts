@@ -215,7 +215,7 @@ export const UI = {
     search: 'allocations.search',
     searchEmpty: 'allocations.searchEmpty',
     searchCount: 'allocations.searchCount',
-    sortDefault: 'allocations.sort.default',
+    sortByDate: 'allocations.sort.date',
     sortByAmount: 'allocations.sort.amount',
     sortByName: 'allocations.sort.name',
     sortDesc: 'allocations.sort.desc',

@@ -1,8 +1,8 @@
 /*
  * 一覧の検索欄・並び替えトグルの共通部品（presentational・state は持たない）。
  * 仕訳一覧と「毎月のもの」が同じ DOM / 44px 担保（.list-sort）を共有する。
- * 軸・方向の選択肢は画面ごとに違う（仕訳 = 日付/金額、毎月のもの = 標準/金額/名称）ため、
- * items は呼び出し側から渡す。
+ * 軸の選択肢は画面ごとに違う（仕訳 = 日付/金額、毎月のもの = 日付/金額/名称）ため、
+ * items は呼び出し側から渡す。方向（昇順/降順）はどの軸でも常に選べる。
  */
 import { Segmented, type SegmentedItem } from '@snishi/foundation/ui/Segmented';
 
@@ -43,8 +43,7 @@ export function SearchInput({
 
 /**
  * 並び替えトグル（軸 + 方向の Segmented 2 本）。
- * showDirection=false のとき方向側は描画しない（Segmented に disabled が無いため、
- * 「押せるのに効かない」ボタンを出さない）。44px は .list-sort が担保する。
+ * どの軸でも方向を選べるので、方向側を隠す分岐は持たない。44px は .list-sort が担保する。
  */
 export function SortControls({
   ariaLabel,
@@ -54,7 +53,6 @@ export function SortControls({
   directionItems,
   directionValue,
   onDirectionChange,
-  showDirection = true,
   extraClassName,
 }: {
   ariaLabel: string;
@@ -64,7 +62,6 @@ export function SortControls({
   directionItems: SegmentedItem[];
   directionValue: string;
   onDirectionChange: (key: string) => void;
-  showDirection?: boolean;
   extraClassName?: string;
 }) {
   return (
@@ -74,9 +71,7 @@ export function SortControls({
       aria-label={ariaLabel}
     >
       <Segmented value={axisValue} items={axisItems} onChange={onAxisChange} />
-      {showDirection ? (
-        <Segmented value={directionValue} items={directionItems} onChange={onDirectionChange} />
-      ) : null}
+      <Segmented value={directionValue} items={directionItems} onChange={onDirectionChange} />
     </div>
   );
 }

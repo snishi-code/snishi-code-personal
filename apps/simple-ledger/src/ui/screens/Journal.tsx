@@ -11,7 +11,7 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { SearchInput, SortControls } from '../ListSearchSort';
-import { applySort, matchesQuery } from '../listQuery';
+import { applySort, directionSign, matchesQuery, type SortDirection } from '../listQuery';
 import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import { AdjustmentEditSheet } from '../AdjustmentSheet';
@@ -109,7 +109,7 @@ export function Journal({
   const [tagFilter, setTagFilter] = useState('');
   // 表示専用の並び替え（既定 = 日付降順・従来の並びそのもの）。データ・保存には影響しない。
   const [sortKey, setSortKey] = useState<'date' | 'amount'>('date');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [pendingDelete, setPendingDelete] = useState<JournalEntry | null>(null);
   const initialTarget = targetEntryId
     ? (ledger?.journalEntries.find((entry) => entry.id === targetEntryId) ?? null)
@@ -196,7 +196,7 @@ export function Journal({
   // id 昇順）なので、安定ソートにより同値（同日・同額）の並びは必ず基準順を保つ。
   // 既定（日付降順）は applySort が compare=null を素通しする＝基準順そのもの。
   const sorted = useMemo(() => {
-    const direction = sortDirection === 'asc' ? 1 : -1;
+    const direction = directionSign(sortDirection);
     const compare =
       sortKey === 'date' && sortDirection === 'desc'
         ? null

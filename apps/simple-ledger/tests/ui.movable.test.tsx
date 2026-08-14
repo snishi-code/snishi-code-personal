@@ -10,7 +10,7 @@ import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider } from '../src/state/store';
 import { Accounts } from '../src/ui/screens/Accounts';
-import { createOpening, loadLedger } from '../src/data/repository';
+import { loadLedger } from '../src/data/repository';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import './setup';
