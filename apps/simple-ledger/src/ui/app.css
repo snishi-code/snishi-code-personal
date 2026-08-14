@@ -910,6 +910,22 @@ button.stmt-row:hover {
   padding-bottom: var(--space-2);
   border-bottom: 1px solid var(--border);
 }
+/* 額縁最下段の仕訳見出し + すべて見る。sticky に含めるため縦幅を詰める
+   （section-label の上余白と btn の --tap 最小高をこの行だけ上書き）。 */
+.dashboard__frame-journal {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: var(--space-2) 0 0;
+}
+.dashboard__frame-journal .btn {
+  /* タップ領域は --tap(44px) を維持し、負マージンで**見た目の行高だけ**約 30px へ詰める
+     （sticky 額縁に含めるため。44px 検証は visual E2E が守っている）。 */
+  min-height: var(--tap);
+  padding: 0 var(--space-2);
+  font-size: 12px;
+  margin: calc((30px - var(--tap)) / 2) 0;
+}
 /* キーボードフォーカスで仕訳行が額縁の下に隠れないよう逃がす。 */
 .dashboard__entries .list__item {
   scroll-margin-top: calc(var(--sticky-top) + var(--home-frame-h));

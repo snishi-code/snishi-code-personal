@@ -184,6 +184,24 @@ export function Dashboard({
               dataUi={UI.dashboard.statNetAssets}
             />
           </div>
+
+          {/* 仕訳の見出しと「すべて見る」も額縁ごと固定する（作者決定 2026-08-14）。
+              仕訳をスクロールしても月をまたぐ遡り導線が手元に残る。sticky に含めるぶん
+              縦幅は詰める（.dashboard__frame-journal）。 */}
+          <div className="dashboard__frame-journal section-label">
+            <span>{t('dashboard.entriesOf', { label })}</span>
+            {periodEntries.length > 0 ? (
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => onOpenJournal(journalFilter)}
+                data-ui={UI.dashboard.journalOpenAll}
+              >
+                {t('dashboard.viewAll')}
+                <Icon name="chevronRight" size={14} />
+              </button>
+            ) : null}
+          </div>
         </div>
 
         {trend ? (
@@ -219,23 +237,6 @@ export function Dashboard({
           </div>
         ) : null}
 
-        <div
-          className="section-label"
-          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-        >
-          <span>{t('dashboard.entriesOf', { label })}</span>
-          {periodEntries.length > 0 ? (
-            <button
-              type="button"
-              className="btn btn--ghost"
-              onClick={() => onOpenJournal(journalFilter)}
-              data-ui={UI.dashboard.journalOpenAll}
-            >
-              {t('dashboard.viewAll')}
-              <Icon name="chevronRight" size={16} />
-            </button>
-          ) : null}
-        </div>
         {periodEntries.length === 0 ? (
           <div className="card card--pad muted">{t('dashboard.noMonthEntries')}</div>
         ) : (

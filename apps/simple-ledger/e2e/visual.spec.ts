@@ -247,6 +247,11 @@ test('ホームの額縁は 6 枠を sticky 固定し、仕訳だけがスクロ
   for (const stat of STATS) {
     await expect(page.locator(ui(stat)), `${stat} がスクロール後も見えている`).toBeInViewport();
   }
+  // 「すべて見る」も額縁に含まれて固定される（作者決定 2026-08-14）。
+  await expect(
+    page.locator(ui('dashboard.journal.openAll')),
+    'すべて見るがスクロール後も見えている',
+  ).toBeInViewport();
 
   // 仕訳の方は流れている（先頭行が額縁の下へ隠れる）。
   const firstRowTop = await page
