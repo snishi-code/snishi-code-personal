@@ -83,6 +83,10 @@ describe('勘定科目のアーカイブ', () => {
     expect(
       document.querySelector(`[data-ui="${UI.journal.entry.flowSource}"]`),
     ).not.toBeInTheDocument();
+    // 資産・負債は残高 0 必須（fail-closed）。「振替せずにアーカイブ」は出さない。
+    expect(
+      document.querySelector(`[data-ui="${UI.journal.entry.transferSkip}"]`),
+    ).not.toBeInTheDocument();
     const destination = document.querySelector(
       `[data-ui="${UI.journal.entry.flowDestination}"]`,
     ) as HTMLElement;
@@ -149,7 +153,7 @@ describe('勘定科目のアーカイブ', () => {
     // （作者決定 2026-08-14）。最上部の「振替せずにアーカイブ」で従来の直接アーカイブになる。
     fireEvent.click(await screen.findByRole('button', { name: `アーカイブ: ${fixed.name}` }));
     const skip = await waitFor(() => {
-      const el = document.querySelector('[data-ui="journal.entry.transferSkip"]');
+      const el = document.querySelector(`[data-ui="${UI.journal.entry.transferSkip}"]`);
       expect(el).not.toBeNull();
       return el!;
     });
@@ -163,7 +167,7 @@ describe('勘定科目のアーカイブ', () => {
       expect(accountBalance(fixed.id, 'expense', after.journalEntries)).toBe(100_000); // UI 入力 1000 = 100,000 minor
     });
     // シートは閉じている。
-    expect(document.querySelector('[data-ui="journal.entry.transferSkip"]')).toBeNull();
+    expect(document.querySelector(`[data-ui="${UI.journal.entry.transferSkip}"]`)).toBeNull();
     expect(document.querySelector(`[data-ui="${UI.journal.entry.save}"]`)).toBeNull();
   });
 
