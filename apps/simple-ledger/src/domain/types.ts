@@ -269,6 +269,12 @@ export interface JournalEntry {
   metadata?: EntryMetadata;
   /** 仕訳全体タグ（旅行・帰省・学会 等のイベント/目的ラベル）。 */
   tagIds?: string[];
+  /**
+   * 諸口（複数フロー行の束）のグループ ID。v12 で**予約のみ**（2026-08-11 設計合意・
+   * グループ ID 方式）。UI・集計は未実装で、検証は形式のみ。グループに「2 行以上」等の
+   * 不変条件は将来も持たせない（1 行に減ったら普通の仕訳に退化する設計）。
+   */
+  groupId?: string;
   createdAt: string;
   updatedAt: string;
 }

@@ -68,6 +68,31 @@ describe('journalEntrySchema', () => {
       expect(journalEntrySchema.safeParse({ ...validEntry, date }).success).toBe(false);
     }
   });
+
+  /*
+   * 諸口 groupId は v12 で**予約のみ**（UI・集計は未実装）。検証は形式だけで、
+   * 「同じ groupId が 2 本以上ある」等の相互参照条件は持たせない
+   * （1 本に減ったら普通の仕訳に退化する設計）。
+   */
+  it('groupId は省略可・非空文字列のみ受け入れ、空文字と長すぎる値は拒否する', () => {
+    expect(journalEntrySchema.safeParse(validEntry).success).toBe(true);
+    expect(journalEntrySchema.safeParse({ ...validEntry, groupId: 'grp-1' }).success).toBe(true);
+    expect(journalEntrySchema.safeParse({ ...validEntry, groupId: '' }).success).toBe(false);
+    expect(journalEntrySchema.safeParse({ ...validEntry, groupId: 'g'.repeat(64) }).success).toBe(
+      true,
+    );
+    expect(journalEntrySchema.safeParse({ ...validEntry, groupId: 'g'.repeat(65) }).success).toBe(
+      false,
+    );
+    expect(journalEntrySchema.safeParse({ ...validEntry, groupId: 1 }).success).toBe(false);
+  });
+
+  it('同じ groupId の仕訳が 1 本だけでも適法（グループに件数の不変条件を持たせない）', () => {
+    const solo = { ...validEntry, id: 'solo', groupId: 'grp-solo' };
+    const parsed = journalEntrySchema.safeParse(solo);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.groupId).toBe('grp-solo');
+  });
 });
 
 describe('年月の暦検証', () => {

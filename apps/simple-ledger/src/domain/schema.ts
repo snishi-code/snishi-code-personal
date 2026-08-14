@@ -303,6 +303,10 @@ export const journalEntrySchema = z
     kind: z.enum(['normal', 'opening']),
     metadata: entryMetadataSchema.optional(),
     tagIds: tagIdList.optional(),
+    // 諸口のグループ ID。v12 は**予約のみ**（UI・集計は未実装）なので形式だけを見る。
+    // 相互参照（同 groupId の仕訳が何本あるか等）は検証しない = グループに件数の
+    // 不変条件を持たせない設計（1 本に減ったら普通の仕訳に退化する）。
+    groupId: z.string().min(1).max(64).optional(),
     createdAt: isoDateTime,
     updatedAt: isoDateTime,
   })
