@@ -823,23 +823,16 @@ describe('費用化の開始日（allocationStartDate）の保存境界ガード
     const stored = (await loadLedger()).monthlyCostItems.find((m) =>
       m.id.startsWith(`ccr-${rule.id}-`),
     )!;
-    expect(stored).toMatchObject({ startDate: '2026-01-01', endDate: '2026-12-31' });
-    // 既定 = 購入日起点: 12 等分で毎月 100。
+    // ルール生成 item の終了日 = 次回起票日と同日（年払い・1/1 起票 → 2027-01-01）。
+    expect(stored).toMatchObject({ startDate: '2026-01-01', endDate: '2027-01-01' });
+    // 同日刻み = 2026-02-01〜2027-01-01 の 12 本・1,200 / 12 = 100。
     expect(monthlyCostForMonth(stored, '2026-03')).toBe(100);
 
+    // 費用化の開始日は刻みへ影響しなくなった（機能廃止・フィールドは次コミットで撤去）。
+    // ここで残す網は「ccr- item でも保存を拒否しない = 起票後は通常 item と同権」だけ。
     await upsertMonthlyCost({ ...stored, allocationStartDate: '2026-07-01' });
     const saved = (await loadLedger()).monthlyCostItems.find((m) => m.id === stored.id)!;
     expect(saved.allocationStartDate).toBe('2026-07-01');
-    // 月割りが費用化開始へずれる（2026-07〜2026-12 の 6 等分 = 200・前半は 0）。
-    expect(monthlyCostForMonth(saved, '2026-03')).toBe(0);
-    expect(monthlyCostForMonth(saved, '2026-07')).toBe(200);
-    // ガード（startDate ≤ alloc ≤ endDate）は通常 item と同じ。
-    await expect(
-      upsertMonthlyCost({ ...saved, allocationStartDate: '2027-01-01' }),
-    ).rejects.toMatchObject({ code: 'error.monthlyCost.allocationAfterEnd' });
-    await expect(
-      upsertMonthlyCost({ ...saved, allocationStartDate: '2025-12-31' }),
-    ).rejects.toMatchObject({ code: 'error.monthlyCost.allocationBeforeStart' });
   });
 });
 
@@ -1219,7 +1212,10 @@ describe('継続コスト資産の後編集で過去集計が再計算される�
       (s, e) => s + (e.lines.find((l) => l.side === 'debit')?.amount ?? 0),
       0,
     );
-    expect(recogBefore).toBe(6000);
+    // 同日刻み: 2026-01-01 起点の刻み日は 2026-02-01〜2026-12-01 の 11 本
+    //（12 本目 2027-01-01 は終了日 2026-12-31 を超える）。12,000 / 11 = 1,090 余り 10 なので
+    // 先頭 10 本が 1,091。asOf までに立つのは 2〜6 月の 5 本 = 1,091 × 5。
+    expect(recogBefore).toBe(5455);
     const expenseBefore = accountBalance(fun.id, 'expense', reportEntriesForAsOf(before, asOf));
 
     await upsertMonthlyCost({ ...item, amount: 24000, updatedAt: 'y2' });
@@ -1229,9 +1225,10 @@ describe('継続コスト資産の後編集で過去集計が再計算される�
       (s, e) => s + (e.lines.find((l) => l.side === 'debit')?.amount ?? 0),
       0,
     );
-    expect(recogAfter).toBe(12000); // 月あたりが倍増（過去に遡って再計算）
+    // 24,000 / 11 = 2,181 余り 9 → 先頭 9 本が 2,182。同じ 5 本で 10,910 = 5,455 の倍。
+    expect(recogAfter).toBe(10910); // 月あたりが倍増（過去に遡って再計算）
     expect(accountBalance(fun.id, 'expense', reportEntriesForAsOf(after, asOf))).toBe(
-      expenseBefore + 6000,
+      expenseBefore + 5455,
     );
     // 購入の仕訳の金額もミラーされ、台帳残高 >= 0。
     const purchase = after.journalEntries.find((e) => e.metadata?.monthlyCostId === item.id)!;
@@ -1261,7 +1258,9 @@ describe('継続コスト資産の後編集で過去集計が再計算される�
     const { item } = await setupContinuous();
     await upsertMonthlyCost({ ...item, endDate: '2026-06-30', updatedAt: 'y2' });
     let after = await loadLedger();
-    expect(recogOf(reportEntriesForAsOf(after, '2027-12-31'), item.id)).toHaveLength(6);
+    // 終了日 2026-06-30 までの同日通過は 2026-02-01〜2026-06-01 の 5 本
+    //（6 本目 2026-07-01 は終了日超）。12,000 / 5 = 2,400 ちょうど。
+    expect(recogOf(reportEntriesForAsOf(after, '2027-12-31'), item.id)).toHaveLength(5);
     // 終了日を消す = 費用の割り振りが止まる（残存価値 = 全額）。
     const cleared = { ...after.monthlyCostItems.find((m) => m.id === item.id)! };
     delete cleared.endDate;
@@ -1736,14 +1735,16 @@ describe('継続コスト資産のアーカイブ（archiveMonthlyCost = 終了�
       { accountId: bank.id, side: 'debit', amount: 30000 },
       { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'credit', amount: 30000 },
     ]);
-    // 会計（§6-1 の検算）: 2024-06〜2026-06 = 25ヶ月・月あたり 8,400・台帳は 0 で閉じる。
+    // 会計（§6-1 の検算）: 2024-06-01 起点の同日通過は 2024-07-01〜2026-06-01 の 24 本
+    //（25 本目 2026-07-01 は終了日 2026-06-15 を超える）。割り振る総額 240,000 − 30,000 =
+    // 210,000 を 24 等分 = 8,750 ちょうど。費用 210,000・台帳は 0 で閉じる。
     const derived = reportEntriesForAsOf(after, '2026-12-31');
     const recogs = derived.filter(
       (e) =>
         e.metadata?.continuousCostId === item.id && e.metadata?.ccKind === 'monthly-allocation',
     );
-    expect(recogs).toHaveLength(25);
-    expect(recogs[0]?.lines[0]?.amount).toBe(8400);
+    expect(recogs).toHaveLength(24);
+    expect(recogs[0]?.lines[0]?.amount).toBe(8750);
     expect(accountBalance(food.id, 'expense', derived)).toBe(210000);
     expect(accountBalance(CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 'asset', derived)).toBe(0);
   });

@@ -5,18 +5,18 @@
  * metadata.monthlyCostId 付き）になったため、ここで生まれるのは
  * **月割りの行（monthly-allocation）だけ**: `借方 月割り先 / 貸方 継続コスト台帳`。
  *
- *  - 終了日が未設定の item からは 1 本も生まれない（monthlyCost.ts の monthlyAllocationSpan が正本）。
- *  - 初月の月割り日は費用化の開始日（allocationStartDate ?? startDate）、2ヶ月目以降は月初。
- *    起点は購入日以降（保存境界が保証）なので、購入（startDate）より前に月割り行が立たない
- *    ＝どの日付断面でも台帳がマイナスにならない。
+ *  - 終了日が未設定の item からは 1 本も生まれない（monthlyCost.ts の allocationSchedule が正本）。
+ *  - 刻み日 = 購入日（startDate）の同日通過（k 番目 = addMonthsToDate(startDate, k)）。
+ *    費用は必ず購入日より後に立つ（購入当日の費用 0）ので、購入（startDate）より前に
+ *    月割り行が立たない＝どの日付断面でも台帳がマイナスにならない。
  *  - 回収の振替（metadata.monthlyCostRecovery）が保存されていれば、割り振る総額から差し引く
  *    （spreadTotal = amount − 回収額。負になってよい＝過去にわたる費用減・マイナス表示）。
  *  - 計算で生まれる仕訳は保存されない導出専用（metadata.virtual）。`reportEntriesForAsOf` の
  *    結果だけに現れ、実仕訳・保存系・export には混ぜない。
  */
-import { addMonths, monthlyAmounts } from './allocation';
+import { monthOf } from './allocation';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from './constants';
-import { monthlyAllocationDate, monthlyAllocationSpan } from './monthlyCost';
+import { allocationSchedule } from './monthlyCost';
 import type { JournalEntry, MonthlyCostItem } from './types';
 import { assertSafeAmount } from './safeSum';
 
@@ -33,17 +33,14 @@ export function continuousCostEntriesForItem(
   spreadTotal: number = item.amount,
   idPrefix = 'cc-alloc',
 ): JournalEntry[] {
-  const span = monthlyAllocationSpan(item);
-  if (!span) return []; // 終了日なし = 何も生まれない
   const cap = upTo < CONTINUOUS_COST_HARD_CAP ? upTo : CONTINUOUS_COST_HARD_CAP;
-  const amounts = monthlyAmounts(spreadTotal, span.n);
   const out: JournalEntry[] = [];
-  for (let k = 0; k < span.n; k++) {
-    const ym = addMonths(span.from, k);
-    const date = monthlyAllocationDate(item, span.from, k);
-    if (date > cap) break;
-    const amount = amounts[k] ?? 0;
-    if (amount === 0) continue;
+  // 終了日なしは schedule が空 = 何も生まれない。刻み日は単調増加・月内に高々 1 本。
+  for (const cut of allocationSchedule(item, spreadTotal)) {
+    if (cut.date > cap) break;
+    if (cut.amount === 0) continue;
+    const { date, amount } = cut;
+    const ym = monthOf(date);
     out.push({
       id: `${idPrefix}-${item.id}-${ym}`,
       date,

@@ -64,18 +64,22 @@ describe('生活コストの二重計上防止（PL 費用の構成）', () => {
     expect(pl.totalExpense).toBe(1000);
   });
 
-  it('継続コストは開始月から月割りで 25,000 / 開始前は 0', () => {
+  it('継続コストは購入の翌同日から月割りで 25,000 / 購入月と購入前は 0', () => {
     const item: MonthlyCostItem = {
       id: 'm',
       name: '自動車',
       amount: 3_000_000,
       startDate: '2031-07-15',
-      endDate: '2041-06-30', // 120ヶ月
+      endDate: '2041-07-15',
       expenseAccountId: 'food',
       createdAt: 'x',
       updatedAt: 'x',
     };
-    expect(monthlyCostForMonth(item, '2031-07')).toBe(25000);
+    // 刻み: 2031-08-15〜2041-07-15 の毎月 15 日 = 120 本・3,000,000/120 = 25,000。
+    expect(monthlyCostForMonth(item, '2031-08')).toBe(25000);
+    expect(monthlyCostForMonth(item, '2041-07')).toBe(25000);
+    // 購入月（刻みは翌同日から）と購入前は 0。
+    expect(monthlyCostForMonth(item, '2031-07')).toBe(0);
     expect(monthlyCostForMonth(item, '2031-06')).toBe(0);
   });
 

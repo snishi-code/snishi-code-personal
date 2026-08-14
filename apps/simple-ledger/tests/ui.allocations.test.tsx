@@ -503,21 +503,23 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
     expect(screen.queryByText('未来開始の項目')).not.toBeInTheDocument();
     // 実際の今日は終了済みでも、選択日にはまだ有効。終了まで1ヶ月なのでマーカーも D 基準。
     expect(historicalCard.dataset['ending']).toBe('true');
-    // どの断面でも 6,000 / 6ヶ月 = 月1,000。5月末の残りは1,000。
-    expect(within(historicalCard).getByText('残存価値').closest('.kv')).toHaveTextContent('1,000');
+    // 同日刻み: 2024-01-01 起点の刻み日は 2024-02-01〜2024-06-01 の 5 本（2024-07-01 は
+    // 終了日 2024-06-30 超）。割り振る総額 = 12,000 − 回収 6,000 = 6,000 → 1 本 1,200。
+    // 5月末は 4 本（2〜5月）ぶん 4,800 が費用化済みなので、残りは 1,200。
+    expect(within(historicalCard).getByText('残存価値').closest('.kv')).toHaveTextContent('1,200');
     expect(within(historicalCard).getByText('今月の計上額').closest('.kv')).toHaveTextContent(
-      '1,000',
+      '1,200',
     );
 
     view.rerender(<View period={{ mode: 'date', date: '2024-06-30' }} />);
     const recoveredCard = (await screen.findByText(historical.name)).closest(
       `[data-ui="${UI.allocations.item}"]`,
     ) as HTMLElement;
-    // 回収後は割り振る総額 6,000 / 6ヶ月 = 月1,000、終了日時点の残りは0。
-    expect(within(recoveredCard).getByText('月あたり').closest('.kv')).toHaveTextContent('1,000');
+    // 回収後は割り振る総額 6,000 / 5 刻み = 1,200、最終刻み（6/01）を過ぎた 6月末は残り 0。
+    expect(within(recoveredCard).getByText('月あたり').closest('.kv')).toHaveTextContent('1,200');
     expect(within(recoveredCard).getByText('残存価値').closest('.kv')).toHaveTextContent('0');
     expect(within(recoveredCard).getByText('今月の計上額').closest('.kv')).toHaveTextContent(
-      '1,000',
+      '1,200',
     );
   });
 
@@ -542,20 +544,21 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
     const card = (await screen.findByText(item.name)).closest(
       `[data-ui="${UI.allocations.item}"]`,
     ) as HTMLElement;
-    // 後日の回収を全知識として反映するため、過去断面でも残存価値は1,000。
-    expect(within(card).getByText('残存価値').closest('.kv')).toHaveTextContent('1,000');
+    // 後日の回収を全知識として反映するため、過去断面でも残存価値は 1,200
+    //（同日刻み 2024-02-01〜06-01 の 5 本 × 1,200 のうち、5月末までに 4 本ぶん済み）。
+    expect(within(card).getByText('残存価値').closest('.kv')).toHaveTextContent('1,200');
 
     fireEvent.click(screen.getByRole('button', { name: `アーカイブ: ${item.name}` }));
     const dialog = document.querySelector(
       `[data-ui="${UI.allocations.archiveDialog}"]`,
     ) as HTMLElement;
-    // 配分最終日では回収額にかかわらず残存0になるため、途中日へ変えて差を固定する。
+    // 最終刻み（2024-06-01）以降は回収額にかかわらず残存 0 になるため、途中日へ変えて差を固定する。
     fireEvent.change(
       document.querySelector(`[data-ui="${UI.allocations.archiveDate}"]`) as HTMLInputElement,
       { target: { value: '2024-05-31' } },
     );
     // 表示と操作の両方が同じ全知識を使うため、値は変わらない。
-    expect(within(dialog).getByText('残存価値').closest('.kv')).toHaveTextContent('1,000');
+    expect(within(dialog).getByText('残存価値').closest('.kv')).toHaveTextContent('1,200');
     expect(
       document.querySelector(`[data-ui="${UI.allocations.archiveTransfer}"]`),
     ).toBeInTheDocument();

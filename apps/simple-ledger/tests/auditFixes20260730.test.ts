@@ -486,14 +486,18 @@ describe('既存itemと後続ルールの独立性', () => {
     const splitFebruaryItem = after.monthlyCostItems.find(
       (item) => item.id === `ccr-${successor.id}-2026-02`,
     );
-    expect(normalFebruaryItem).toMatchObject({ amount: 3000, endDate: '2026-02-28' });
-    expect(splitFebruaryItem).toMatchObject({ amount: 3000, endDate: '2026-02-28' });
+    // 2 月起票ぶんは編集後のルール（everyMonths 1・dayOfMonth 20）で作られる:
+    // 起票月 2026-02 + 1 か月 = 2026-03 の 20 日 = 次回起票日と同日。
+    expect(normalFebruaryItem).toMatchObject({ amount: 3000, endDate: '2026-03-20' });
+    expect(splitFebruaryItem).toMatchObject({ amount: 3000, endDate: '2026-03-20' });
+    // 1 月起票ぶんは生成時のルール（everyMonths 12）のまま: 2026-01 + 12 か月 = 2027-01-20。
+    // 全期間へ波及した編集は金額だけを訂正し、生成時に決まった期間は動かさない。
     expect(
       after.monthlyCostItems.find((item) => item.id === `ccr-${rule.id}-2026-01`),
-    ).toMatchObject({ amount: 12000, endDate: '2026-12-31' });
+    ).toMatchObject({ amount: 12000, endDate: '2027-01-20' });
     expect(
       after.monthlyCostItems.find((item) => item.id === `ccr-${normallyEditedRule.id}-2026-01`),
-    ).toMatchObject({ amount: 3000, endDate: '2026-12-31' });
+    ).toMatchObject({ amount: 3000, endDate: '2027-01-20' });
 
     const februaryAllocations = reportEntriesForAsOf(after, '2026-02-28')
       .filter((entry) => entry.date >= '2026-02-01' && entry.date <= '2026-02-28')
@@ -504,15 +508,18 @@ describe('既存itemと後続ルールの独立性', () => {
         .flatMap((entry) => entry.lines)
         .filter((line) => line.accountId === expense.id && line.side === 'debit')
         .reduce((sum, line) => sum + line.amount, 0);
+    // 2 月に立つ刻みは 1 月起票ぶんの 2/20（12,000 / 12 刻み = 1,000）だけ。2 月起票ぶんの
+    // 刻みは 3/20（購入当日の費用 0）なので 2 月には 1 円も入らない。
     expect(
       expenseForItems(new Set([`ccr-${rule.id}-2026-01`, `ccr-${successor.id}-2026-02`])),
-    ).toBe(4000);
-    // 全期間へ波及は既存itemも訂正する明示例外なので、分割とは過去itemの配分額だけが異なる。
+    ).toBe(1000);
+    // 全期間へ波及は既存itemも訂正する明示例外なので、分割とは過去itemの配分額だけが異なる
+    // （1 月起票ぶんが 3,000 / 12 刻み = 250 に訂正される）。
     expect(
       expenseForItems(
         new Set([`ccr-${normallyEditedRule.id}-2026-01`, `ccr-${normallyEditedRule.id}-2026-02`]),
       ),
-    ).toBe(3250);
+    ).toBe(250);
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(after)).success).toBe(true);
   });
 

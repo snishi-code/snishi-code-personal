@@ -262,9 +262,12 @@ describe('抽出結果の件数と合計', () => {
     const ledger = await loadLedger();
     const expense = ledger.accounts.find((account) => account.role === 'expense-category')!;
     const today = todayLocal();
+    // 同日刻み: 購入日（today − 5ヶ月）の同日通過は today + 6ヶ月まで 11 本。
+    // この網は「導出行が件数・合計に入るか」なので、11 で割り切れる額にして
+    // 表示丸め（minor → 表示単位）の誤差が合計比較へ混ざらないようにする（66,000 / 11 = 6,000）。
     await createContinuousCost({
       name: '月割り対象',
-      amount: 60000,
+      amount: 66000,
       startDate: addMonthsToDate(today, -5),
       endDate: addMonthsToDate(today, 6),
       expenseAccountId: expense.id,

@@ -223,11 +223,16 @@ export function firstRecurringPostingDate(rule: {
 /* ── 費用行きルールが自動生成する item ── */
 
 /**
- * ルール生成 item の終了日 = 周期がカバーする最終月の末日（厳密式）。
- * 「起票日 + 周期 − 1日」は day=1 のときしか一致しない（13ヶ月配分になる）ので使わない。
+ * ルール生成 item の終了日 = **次回起票日と同日**（v12・同日刻み）。
+ * 8/12 起票の毎月ルールなら [8/12, 9/12]・費用は 9/12 に 1 本（1 刻み遅れ・作者承認済み）。
+ * 年払い 8/15 起票なら [8/15, 翌8/15]・刻み 12 本（旧「月末」式の 13 分割問題は構造的に消える）。
  */
-export function ruleItemEndDate(postingMonth: string, everyMonths: number): string {
-  return recurringRuleItemEndDate(postingMonth, everyMonths);
+export function ruleItemEndDate(
+  postingMonth: string,
+  everyMonths: number,
+  dayOfMonth: number,
+): string {
+  return recurringRuleItemEndDate(postingMonth, everyMonths, dayOfMonth);
 }
 
 /**
@@ -245,7 +250,7 @@ export function buildRuleItem(
     name: rule.name,
     amount: rule.amount,
     startDate: posting.date,
-    endDate: ruleItemEndDate(posting.month, rule.everyMonths),
+    endDate: ruleItemEndDate(posting.month, rule.everyMonths, rule.dayOfMonth),
     expenseAccountId,
     createdAt: ts.createdAt,
     updatedAt: ts.updatedAt,
