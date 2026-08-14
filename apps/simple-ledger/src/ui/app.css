@@ -15,10 +15,11 @@
      --bottom-inset ぶん上げる）ので同レイヤでよい。--z-header(20) < ここ < --z-overlay(40)。
      シート類は native <dialog> の top-layer なので常にこの上（重なりの心配は無い）。 */
   --z-bottom-bar: 30;
-  /* タイムラインのポップオーバー。親（.timeline-calendar__canvas）は stacking context を
-     作らないため、この値はルート階層で --z-bottom-bar と直接競合する。フッターより上へ。
-     ※ 最下行では親（.timeline-calendar__viewport）のスクロール枠に先に切られる。これは
-     overflow のクリップであって z では解決しない（さらに上げても直らない）。 */
+  /* タイムラインのポップオーバー。body へ portal した position:fixed 要素なので、ルート階層で
+     --z-bottom-bar（フッターナビ）と直接競合する → その上へ。シート類は native <dialog> の
+     top-layer なので常にこの上（--z-overlay 40 未満に留めるのは順序の宣言として）。
+     ※ かつては表のスクロール枠の中に描いており、上下端で overflow に切られていた。これは z では
+     解決しない（portal で枠の外へ出すのが正解）＝ここを上げても直らない、が教訓。 */
   --z-timeline-popover: 35;
   /* sticky 要素の上端 = app-header の実高。--header-h(56px) は .app-header__inner の
      min-height で、*{box-sizing:border-box}（foundation.css）により padding を含む。
@@ -533,13 +534,14 @@ button.timeline-calendar__row-label {
   stroke-width: 2;
   stroke-dasharray: 4 3;
 }
+/* 表のスクロール枠の中に置くと上端・下端で切られる（実機で発生）ため、body へ portal した
+   position:fixed で置く。top/left は TimelineCalendar.tsx が viewport 座標で実測・クランプする
+   （CSS 側で位置を持たない = 座標規則の正本を 1 つにする）。 */
 .timeline-calendar__popover {
-  position: absolute;
-  top: calc(50% + 18px);
+  position: fixed;
   z-index: var(--z-timeline-popover);
   width: min(300px, calc(100vw - var(--space-6)));
   padding: var(--space-3);
-  transform: translateX(var(--timeline-popover-shift, -50%));
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
