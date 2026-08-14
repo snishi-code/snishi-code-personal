@@ -22,7 +22,11 @@ import {
   upsertMonthlyCost,
   upsertRecurringRule,
 } from '../src/data/repository';
-import { clampDayToMonth, recurringProjectionEntries } from '../src/domain/recurring';
+import {
+  clampDayToMonth,
+  projectedRuleItems,
+  recurringProjectionEntries,
+} from '../src/domain/recurring';
 import { earliestRecurringRuleEndDate } from '../src/domain/accountLifetime';
 import {
   accountBalance,
@@ -520,6 +524,79 @@ describe('clampDayToMonth / recurringProjectionEntries', () => {
     expect(clampDayToMonth('2026-02', 31)).toBe('2026-02-28');
     expect(clampDayToMonth('2024-02', 31)).toBe('2024-02-29');
     expect(clampDayToMonth('2026-04', 31)).toBe('2026-04-30');
+  });
+
+  it('projectedRuleItems は未起票周期の表示専用 item を投影と同じ規則で出す', () => {
+    const accounts: Account[] = [
+      {
+        id: 'cash',
+        name: '現金',
+        type: 'asset',
+        role: 'daily-asset',
+        archived: false,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+      {
+        id: 'expense',
+        name: '固定費',
+        type: 'expense',
+        role: 'expense-category',
+        archived: false,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+      {
+        id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+        name: '継続コスト台帳',
+        type: 'asset',
+        role: 'continuing-cost-asset',
+        archived: false,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+    ];
+    const rule = {
+      id: 'rule',
+      name: '家賃',
+      amount: 80000,
+      dayOfMonth: 27,
+      debitAccountId: 'expense',
+      creditAccountId: 'cash',
+      everyMonths: 1,
+      startMonth: '2026-07',
+      startDate: '2026-07-01',
+      postedThroughMonth: '2026-07',
+      createdAt: 't',
+      updatedAt: 't',
+    };
+    const projectedItems = projectedRuleItems([rule], accounts, '2026-10-31');
+    // カーソル（2026-07）より後・asOf までの起票 = 8/27・9/27・10/27 の 3 件。
+    // item は [起票日, 次回起票日]（同日刻み・endDate = 次回起票日）。
+    expect(projectedItems.map((p) => [p.item.id, p.item.startDate, p.item.endDate])).toEqual([
+      ['rule-2026-08', '2026-08-27', '2026-09-27'],
+      ['rule-2026-09', '2026-09-27', '2026-10-27'],
+      ['rule-2026-10', '2026-10-27', '2026-11-27'],
+    ]);
+    // 投影の購入行（continuousCostId）と同じ ephemeral ID = 由来の対応が 1:1（単一正本）。
+    const projected = recurringProjectionEntries([rule], accounts, '2026-10-31');
+    expect(
+      projected
+        .filter((entry) => entry.id.startsWith('rec-proj-'))
+        .map((entry) => entry.metadata?.continuousCostId),
+    ).toEqual(projectedItems.map((p) => p.item.id));
+    // 直接起票（台帳を経由しない）ルールからは 1 件も出ない。
+    const direct = { ...rule, id: 'direct', debitAccountId: 'cash2' };
+    const cash2: Account = {
+      id: 'cash2',
+      name: '第二口座',
+      type: 'asset',
+      role: 'daily-asset',
+      archived: false,
+      createdAt: 't',
+      updatedAt: 't',
+    };
+    expect(projectedRuleItems([direct], [...accounts, cash2], '2026-10-31')).toEqual([]);
   });
 
   it('未来投影は決定的IDで存在期間内だけを含む', () => {

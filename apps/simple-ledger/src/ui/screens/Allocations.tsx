@@ -56,6 +56,7 @@ import {
   recurringDestinationAccountId,
   recurringExpenseAccountId,
   recurringKindOf,
+  projectedRuleItems,
   type RecurringKind,
 } from '../../domain/recurring';
 import {
@@ -213,12 +214,27 @@ export function Allocations({
         : (a: RecurringRule, b: RecurringRule) => a.name.localeCompare(b.name, 'ja') * dir;
   // loadLedger は終了が近い順で返すが、編集直後の state 由来でも順序が崩れないよう再ソートする。
   // この基準順は金額・名称の軸で同値になった行の相対順（applySort は安定ソート）も決める。
+  // 未起票周期の導出 item カード（作者決定 2026-08-15）: カーソルより後の周期を表示専用で
+  // 出す。ヘッダーを未来へ動かすとその日の状態が見える。「予定」等の区別タグは付けず、
+  // タップ（編集）はルールへ（derivedOrigin と同じ導線）。判定は投影と同じ単一正本。
+  const projectedItems = useMemo(
+    () => projectedRuleItems(allRules, ledger?.accounts ?? [], asOf),
+    [allRules, ledger, asOf],
+  );
+  type ItemRow = { m: MonthlyCostItem; fromRule?: RecurringRule };
   const items = applySort(
-    [...startedItems]
-      .filter((m) => showEnded || !isArchived(m, asOf))
-      .filter((m) => matchesQuery([m.name, accountsMap.get(m.expenseAccountId)?.name], query))
-      .sort(compareMonthlyCostItems),
-    itemCompare,
+    (
+      [
+        ...startedItems.map((m): ItemRow => ({ m })),
+        ...projectedItems.map((p): ItemRow => ({ m: p.item, fromRule: p.rule })),
+      ] as ItemRow[]
+    )
+      .filter((row) => showEnded || !isArchived(row.m, asOf))
+      .filter((row) =>
+        matchesQuery([row.m.name, accountsMap.get(row.m.expenseAccountId)?.name], query),
+      )
+      .sort((a, b) => compareMonthlyCostItems(a.m, b.m)),
+    (a, b) => itemCompare(a.m, b.m),
   );
   // 定期ルールは loadLedger の createdAt 昇順で届く。日付軸（開始日）以外では同値の相対順が
   // この登録順になる。
@@ -522,8 +538,9 @@ export function Allocations({
             {t('monthlyCost.sectionTitle')}
           </p>
           <div className="stack" data-ui={UI.allocations.list}>
-            {items.map((m) => {
-              const spreadTotal = spreadTotalOf(m);
+            {items.map(({ m, fromRule }) => {
+              // 導出カードに回収は存在しない（未起票周期）ので spreadTotal = amount。
+              const spreadTotal = fromRule !== undefined ? m.amount : spreadTotalOf(m);
               const ending = isEndingSoon(m, asOf);
               const monthly = representativeMonthlyAmount(m, spreadTotal);
               return (
@@ -532,6 +549,7 @@ export function Allocations({
                   key={m.id}
                   data-ui={UI.allocations.item}
                   data-ending={ending ? 'true' : undefined}
+                  data-derived-rule={fromRule?.id}
                 >
                   <div
                     className="list__title"
@@ -547,41 +565,57 @@ export function Allocations({
                       {/* くり返し記帳が自動生成した item はルールと同名で並ぶ（buildRuleItem が
                           name: rule.name）ため、検索で「登録した覚えのない項目」に見えないよう
                           由来を名乗る。判定はルール由来 ID の単一正本 parseRuleItemId。 */}
-                      {parseRuleItemId(m.id) !== undefined ? (
+                      {fromRule !== undefined || parseRuleItemId(m.id) !== undefined ? (
                         <>
                           {' '}
                           <span className="tag tag--teal">{t('monthlyCost.fromRule')}</span>
                         </>
                       ) : null}
                     </span>
-                    <span className="row-actions">
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        onClick={() => setArchiving(m)}
-                        aria-label={`${t('ccItem.archiveTitle')}: ${m.name}`}
-                        data-ui={UI.allocations.archive}
-                      >
-                        <Icon name="archive" size={18} />
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        onClick={() => setItemSheet({ existing: m })}
-                        aria-label={`${t('common.edit')}: ${m.name}`}
-                        data-ui={UI.allocations.edit}
-                      >
-                        <Icon name="edit" size={18} />
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        onClick={() => setPendingDelete(m)}
-                        aria-label={`${t('common.delete')}: ${m.name}`}
-                      >
-                        <Icon name="delete" size={18} />
-                      </button>
-                    </span>
+                    {fromRule !== undefined ? (
+                      /* 導出カードは実在しない（保存された item が無い）ため、編集は由来の
+                         ルールを開く。アーカイブ・削除の対象も無いので出さない。 */
+                      <span className="row-actions">
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          onClick={() => setRuleSheet({ existing: fromRule })}
+                          aria-label={`${t('common.edit')}: ${fromRule.name}`}
+                          data-ui={UI.allocations.edit}
+                        >
+                          <Icon name="edit" size={18} />
+                        </button>
+                      </span>
+                    ) : (
+                      <span className="row-actions">
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          onClick={() => setArchiving(m)}
+                          aria-label={`${t('ccItem.archiveTitle')}: ${m.name}`}
+                          data-ui={UI.allocations.archive}
+                        >
+                          <Icon name="archive" size={18} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          onClick={() => setItemSheet({ existing: m })}
+                          aria-label={`${t('common.edit')}: ${m.name}`}
+                          data-ui={UI.allocations.edit}
+                        >
+                          <Icon name="edit" size={18} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          onClick={() => setPendingDelete(m)}
+                          aria-label={`${t('common.delete')}: ${m.name}`}
+                        >
+                          <Icon name="delete" size={18} />
+                        </button>
+                      </span>
+                    )}
                   </div>
                   <div className="kv">
                     <span className="muted">{t('monthlyCost.amount')}</span>

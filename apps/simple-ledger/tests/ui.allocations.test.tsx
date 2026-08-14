@@ -11,7 +11,13 @@ import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { Allocations } from '../src/ui/screens/Allocations';
-import { archiveMonthlyCost, createContinuousCost, loadLedger } from '../src/data/repository';
+import {
+  archiveMonthlyCost,
+  catchUpRecurringRules,
+  createContinuousCost,
+  createRecurringRule,
+  loadLedger,
+} from '../src/data/repository';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import { addMonthsToDate } from '../src/domain/allocation';
 import type { ReportPeriod } from '../src/domain/reportPeriod';
@@ -524,6 +530,76 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
     expect(
       document.querySelector(`[data-ui="${UI.allocations.archiveTransfer}"]`),
     ).toBeInTheDocument();
+  });
+});
+
+describe('導出 item カード（未起票周期・表示専用）', () => {
+  it('未来断面にその日の周期の item がカードで出る。区別タグは付けず、編集はルールを開く', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    // 未来開始のルール = catch-up が一切走らない（起票済みゼロ・全周期が未起票）。
+    await createRecurringRule({
+      name: '未来のサブスク',
+      amount: 3000,
+      dayOfMonth: 5,
+      debitAccountId: expense.id,
+      creditAccountId: cash.id,
+      startMonth: '2031-02',
+    });
+
+    // 断面 2031-04-30: 起票済みは無く、未起票周期 2/5・3/5・4/5 のうち
+    // [2/5,3/5]（終了 3/5 < 断面）と [3/5,4/5]（終了 4/5 < 断面）はアーカイブ済みで隠れ、
+    // [4/5,5/5] だけがその日の状態として見える（同日刻み・endDate = 次回起票日）。
+    await renderReady({ mode: 'date', date: '2031-04-30' });
+    const cards = document.querySelectorAll('[data-derived-rule]');
+    expect(cards).toHaveLength(1);
+    const card = within(cards[0] as HTMLElement);
+    expect(card.getByText('未来のサブスク')).toBeInTheDocument();
+    // 実 item のルール由来カードと同じタグ（「予定」等の追加区別は付けない）。
+    expect(card.getByText('くり返し記帳から')).toBeInTheDocument();
+    // 期間 = [起票日, 次回起票日]・残存価値 = 全額（刻み 5/5 は断面より未来）。
+    expect(card.getByText(/2031-04-05 〜 2031-05-05/)).toBeInTheDocument();
+    // アーカイブ・削除は出さない（実在しない item に対する操作は無い）。
+    expect(card.queryByRole('button', { name: /アーカイブ/ })).not.toBeInTheDocument();
+    expect(card.queryByRole('button', { name: /削除/ })).not.toBeInTheDocument();
+    // 編集 = 由来ルールのシートが開く（derivedOrigin と同じ導線）。
+    fireEvent.click(card.getByRole('button', { name: /編集/ }));
+    await waitFor(() => {
+      expect(
+        document.querySelector(`[data-ui="${UI.allocations.recurringSheet}"]`),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('起票済みの周期は実 item が出て、導出カードと二重にならない', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    const today = todayLocal();
+    // 今日始まりの毎月ルール: 今日ぶんは catch-up が実 item を起票し、
+    // 未来の周期だけが導出カードになる。
+    await createRecurringRule({
+      name: '今日始まりのサブスク',
+      amount: 3000,
+      dayOfMonth: Number.parseInt(today.slice(8, 10), 10),
+      debitAccountId: expense.id,
+      creditAccountId: cash.id,
+      startMonth: today.slice(0, 7),
+    });
+    await catchUpRecurringRules();
+
+    const nextMonth = addMonthsToDate(today, 1);
+    await renderReady({ mode: 'date', date: nextMonth });
+    const names = screen.getAllByText('今日始まりのサブスク');
+    const cards = [...document.querySelectorAll(`[data-ui="${UI.allocations.item}"]`)].filter(
+      (el) => el.textContent?.includes('今日始まりのサブスク'),
+    );
+    // 実 item（今日起票・終了 = 来月同日）と導出カード（来月周期）の 2 枚だけ。
+    // 同じ周期が実 item と導出カードで二重に出ない。
+    expect(cards).toHaveLength(2);
+    expect(cards.filter((el) => el.hasAttribute('data-derived-rule'))).toHaveLength(1);
+    expect(names.length).toBeGreaterThanOrEqual(2);
   });
 });
 
