@@ -163,7 +163,11 @@ export interface AccountBox {
   createRole?: AccountRole;
   /** 追加ボタンの文言。 */
   addLabelKey?: MessageKey;
-  /** 新規作成時に任意の初期残高（opening）入力を出すか（資産・負債の箱のみ）。 */
+  /**
+   * 新規作成時に任意の初期残高（opening）入力を出すか（資産・負債の箱のみ）。
+   * 履歴ゼロの科目の「補正」導線を初期残高登録へ回してよいかの判定にも使う
+   * （費用・収入は opening を持てないので、履歴ゼロでも補正シートを開く）。
+   */
   opening: boolean;
   /** 箱の説明・専用導線の案内。 */
   hintKey?: MessageKey;

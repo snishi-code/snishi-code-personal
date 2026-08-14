@@ -14,7 +14,8 @@ import {
   MAX_LEDGER_REVISION,
   SCHEMA_VERSION,
 } from './constants';
-import { counterpartRole } from './adjustment';
+import { counterpartRole, isAdjustableAccountType } from './adjustment';
+import { isDebitNormal } from './accounting';
 import { monthOf, monthsBetween } from './allocation';
 import {
   ACCOUNT_ROLES,
@@ -487,10 +488,12 @@ export const ledgerExportPackageSchema = z
         const targetRole = accountRole.get(adj.accountId) as AccountRole | undefined;
         const counter = accountById.get(adj.counterpartAccountId);
         if (targetType === undefined) issue('補正の対象科目が存在しません', ap('accountId'));
-        else if (targetType !== 'asset' && targetType !== 'liability')
-          issue('補正の対象科目は資産または負債である必要があります', ap('accountId'));
+        else if (!isAdjustableAccountType(targetType))
+          issue('補正の対象科目は資産・負債・費用・収入である必要があります', ap('accountId'));
+        // type 検査を通っても role で弾く: 内部集約(継続コスト台帳)と、相手側である
+        // 残高調整科目自身（type は expense / revenue なので type では弾けない）。
         else if (targetRole === undefined || !ADJUSTABLE_ACCOUNT_ROLES.includes(targetRole))
-          issue('補正の対象科目に内部集約科目は使えません', ap('accountId'));
+          issue('補正の対象科目に内部集約科目・残高調整科目は使えません', ap('accountId'));
         if (!counter) {
           issue('補正の相手科目が存在しません', ap('counterpartAccountId'));
         }
@@ -500,7 +503,7 @@ export const ledgerExportPackageSchema = z
         if (e.kind !== 'normal')
           issue('補正仕訳の kind は normal である必要があります', ['journalEntries', ei, 'kind']);
 
-        if ((targetType === 'asset' || targetType === 'liability') && adj.delta !== 0 && counter) {
+        if (isAdjustableAccountType(targetType) && adj.delta !== 0 && counter) {
           const expectedCounterType = counterpartRole(targetType, adj.delta);
           // 同定は role + type のみ（name 非依存・指示書v3 §B-4）。name を要求すると
           // 生成時の言語（将来の en seed 等）が違う台帳を import で丸ごと拒否してしまう。
@@ -511,14 +514,11 @@ export const ledgerExportPackageSchema = z
             );
           }
 
-          const targetSide =
-            targetType === 'asset'
-              ? adj.delta > 0
-                ? 'debit'
-                : 'credit'
-              : adj.delta > 0
-                ? 'credit'
-                : 'debit';
+          // 向きは正規方向で決まる（asset と expense が同じ・liability と revenue が同じ）。
+          // 相手 type（counterpartRole）とは別経路で導き、両方が一致する仕訳だけ受け入れる。
+          const targetSide = (isDebitNormal(targetType) ? adj.delta > 0 : adj.delta < 0)
+            ? 'debit'
+            : 'credit';
           const counterpartSide = targetSide === 'debit' ? 'credit' : 'debit';
           const amount = Math.abs(adj.delta);
           const targetLine = e.lines.find((line) => line.accountId === adj.accountId);

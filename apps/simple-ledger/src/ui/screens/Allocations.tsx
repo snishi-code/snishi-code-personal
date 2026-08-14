@@ -218,8 +218,8 @@ export function Allocations({
   // 出す。ヘッダーを未来へ動かすとその日の状態が見える。「予定」等の区別タグは付けず、
   // タップ（編集）はルールへ（derivedOrigin と同じ導線）。判定は投影と同じ単一正本。
   const projectedItems = useMemo(
-    () => projectedRuleItems(allRules, ledger?.accounts ?? [], asOf),
-    [allRules, ledger, asOf],
+    () => projectedRuleItems(ledger?.recurringRules ?? [], ledger?.accounts ?? [], asOf),
+    [ledger, asOf],
   );
   type ItemRow = { m: MonthlyCostItem; fromRule?: RecurringRule };
   const items = applySort(

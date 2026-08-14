@@ -15,7 +15,7 @@ import {
   MAX_LEDGER_REVISION,
   SCHEMA_VERSION,
 } from '../domain/constants';
-import { isInternalRole, roleAllowsType, type AccountRole } from '../domain/accountRoles';
+import { ADJUSTABLE_ACCOUNT_ROLES, roleAllowsType, type AccountRole } from '../domain/accountRoles';
 import { compareAccountOrder } from '../domain/accountOrder';
 import { isAccountReferenced, type AccountRefCollections } from '../domain/accountRefs';
 import {
@@ -78,7 +78,12 @@ import {
   monthOf,
 } from '../domain/allocation';
 import { compareMonthlyCostItems } from '../domain/monthlyCost';
-import { buildAdjustmentEntry, counterpartName, counterpartRole } from '../domain/adjustment';
+import {
+  buildAdjustmentEntry,
+  counterpartName,
+  counterpartRole,
+  isAdjustableAccountType,
+} from '../domain/adjustment';
 import { accountBalance, filterByDateRange } from '../domain/accounting';
 import { ANNUAL_RETURN_BP_MAX, ANNUAL_RETURN_BP_MIN } from '../domain/investmentProjection';
 import { reportEntriesForAsOf } from '../domain/reportEntries';
@@ -2504,12 +2509,14 @@ function buildAdjustmentForSave(args: {
   const { input, accounts, entries, existing } = args;
   const target = accounts.find((a) => a.id === input.accountId);
   if (!target) throw new LedgerError('error.adjust.targetNotFound');
-  if (target.type !== 'asset' && target.type !== 'liability') {
+  // equity（初期残高）だけは補正の対象外。開始時点の残高は opening の編集で直す。
+  if (!isAdjustableAccountType(target.type)) {
     throw new LedgerError('error.adjust.assetLiabilityOnly');
   }
-  // 内部集約口座（継続コスト台帳）は補正対象外。直接補正すると残存価値の導出と
-  // 矛盾するため、保存境界で fail-closed に弾く（UI 候補からも除外している）。
-  if (isInternalRole(target.role)) {
+  // 内部集約口座（継続コスト台帳）と残高調整科目自身は補正対象外。前者は直接補正すると
+  // 残存価値の導出と矛盾し、後者は補正の相手側（type が expense / revenue なので上の
+  // type 制限では弾けない）。保存境界で fail-closed に弾く（UI 候補からも除外している）。
+  if (!ADJUSTABLE_ACCOUNT_ROLES.includes(target.role)) {
     throw new LedgerError('error.adjust.internalRole');
   }
 

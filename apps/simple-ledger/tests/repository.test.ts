@@ -887,6 +887,151 @@ describe('残高補正 createAdjustment', () => {
   });
 });
 
+describe('残高補正の全科目化: 費用・収入（作者決定 2026-08-15）', () => {
+  /** 固定費へ 2 本（3,000 / 2,000）。理論値は「その日までの累計」になる。 */
+  async function seedFixedCost() {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const fixed = ledger.accounts.find((a) => a.name === '固定費')!;
+    for (const [date, amount] of [
+      ['2026-06-01', 3000],
+      ['2026-06-10', 2000],
+    ] as const) {
+      await upsertEntry(
+        buildSimpleEntry({
+          date,
+          description: '固定費の支払い',
+          debitAccountId: fixed.id,
+          creditAccountId: cash.id,
+          amount,
+        }),
+      );
+    }
+    return fixed;
+  }
+
+  it('費用 実累計12000・理論5000 → 借方 固定費 / 貸方 残高調整収入 7000', async () => {
+    const fixed = await seedFixedCost();
+    // 2026-06-30 までの累計 = 3,000 + 2,000 = 5,000。実際は 12,000 → delta = +7,000。
+    const entry = await createAdjustment({
+      accountId: fixed.id,
+      date: '2026-06-30',
+      actualBalance: 12000,
+    });
+    expect(entry!.metadata?.adjustment?.expectedBalance).toBe(5000);
+    expect(entry!.metadata?.adjustment?.delta).toBe(7000);
+    const rev = (await loadLedger()).accounts.find(
+      (a) => a.role === 'system-adjustment' && a.type === 'revenue',
+    )!;
+    expect(rev.name).toBe('残高調整収入');
+    expect(entry!.lines.find((l) => l.side === 'debit')).toMatchObject({
+      accountId: fixed.id,
+      amount: 7000,
+    });
+    expect(entry!.lines.find((l) => l.side === 'credit')).toMatchObject({
+      accountId: rev.id,
+      amount: 7000,
+    });
+  });
+
+  it('費用 実累計4000・理論5000 → 借方 残高調整費 / 貸方 固定費 1000', async () => {
+    const fixed = await seedFixedCost();
+    // 5,000 の理論に対し実際は 4,000 → delta = −1,000（費用を減らす = 貸方 費用）。
+    const entry = await createAdjustment({
+      accountId: fixed.id,
+      date: '2026-06-30',
+      actualBalance: 4000,
+    });
+    expect(entry!.metadata?.adjustment?.delta).toBe(-1000);
+    const exp = (await loadLedger()).accounts.find(
+      (a) => a.role === 'system-adjustment' && a.type === 'expense',
+    )!;
+    expect(entry!.lines.find((l) => l.side === 'debit')).toMatchObject({
+      accountId: exp.id,
+      amount: 1000,
+    });
+    expect(entry!.lines.find((l) => l.side === 'credit')).toMatchObject({
+      accountId: fixed.id,
+      amount: 1000,
+    });
+  });
+
+  it('理論値はその日までの累計（後日の仕訳を含めない）', async () => {
+    const fixed = await seedFixedCost();
+    // 2026-06-05 時点の累計は 1 本目の 3,000 だけ（2 本目 2026-06-10 は含まない）。
+    const entry = await createAdjustment({
+      accountId: fixed.id,
+      date: '2026-06-05',
+      actualBalance: 3500,
+    });
+    expect(entry!.metadata?.adjustment?.expectedBalance).toBe(3000);
+    expect(entry!.metadata?.adjustment?.delta).toBe(500);
+  });
+
+  it('収入は負債と同向: 実累計が多いと 貸方 給与 / 借方 残高調整費', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const salary = ledger.accounts.find((a) => a.name === '給与')!;
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2026-06-01',
+        description: '給与',
+        debitAccountId: cash.id,
+        creditAccountId: salary.id,
+        amount: 200000,
+      }),
+    );
+    // 理論 200,000 に対し実際は 250,000 → delta = +50,000（収入を増やす = 貸方 収入）。
+    const entry = await createAdjustment({
+      accountId: salary.id,
+      date: '2026-06-30',
+      actualBalance: 250000,
+    });
+    expect(entry!.metadata?.adjustment?.expectedBalance).toBe(200000);
+    const exp = (await loadLedger()).accounts.find(
+      (a) => a.role === 'system-adjustment' && a.type === 'expense',
+    )!;
+    expect(entry!.lines.find((l) => l.side === 'debit')).toMatchObject({
+      accountId: exp.id,
+      amount: 50000,
+    });
+    expect(entry!.lines.find((l) => l.side === 'credit')).toMatchObject({
+      accountId: salary.id,
+      amount: 50000,
+    });
+  });
+
+  it('残高調整科目そのものは補正できない（type 制限では弾けない経路・fail-closed）', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    // 1 回の補正で 残高調整費（type=expense）を生成する。
+    await createAdjustment({ accountId: cash.id, date: '2026-06-01', actualBalance: -1000 });
+    const adjustmentAccount = (await loadLedger()).accounts.find(
+      (a) => a.role === 'system-adjustment',
+    )!;
+
+    await expect(
+      createAdjustment({
+        accountId: adjustmentAccount.id,
+        date: '2026-06-30',
+        actualBalance: 999,
+      }),
+    ).rejects.toMatchObject({ code: 'error.adjust.internalRole' });
+    // 補正仕訳は 1 本目だけのまま（自己参照の補正を作らない）。
+    expect((await loadLedger()).journalEntries.filter((e) => e.metadata?.adjustment)).toHaveLength(
+      1,
+    );
+  });
+
+  it('equity（初期残高）は従来どおり補正できない', async () => {
+    const ledger = await loadLedger();
+    const capital = ledger.accounts.find((a) => a.name === '初期残高')!;
+    await expect(
+      createAdjustment({ accountId: capital.id, date: '2026-06-30', actualBalance: 100 }),
+    ).rejects.toMatchObject({ code: 'error.adjust.assetLiabilityOnly' });
+  });
+});
+
 describe('残高補正の編集・削除（updateAdjustment / deleteAdjustment）', () => {
   async function setBalance(accountName: string, amount: number) {
     const ledger = await loadLedger();

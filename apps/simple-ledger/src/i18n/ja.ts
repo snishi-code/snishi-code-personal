@@ -166,7 +166,7 @@ export const ja = {
   'tags.error.save': 'タグを保存できませんでした。',
 
   'adjust.intro': '実際の残高との差額を、任意の日に補正します（「締め」はありません）。',
-  'adjust.account': '対象科目（資産・負債）',
+  'adjust.account': '対象科目（資産・負債・費用・収入）',
   'adjust.date': '日付',
   'adjust.actual': '実残高',
   'adjust.expected': 'アプリ上の理論残高',
@@ -178,7 +178,7 @@ export const ja = {
   'adjust.createTitle': '「{name}」の残高を補正',
   'adjust.noChange': '差額がないため、補正仕訳は作成しませんでした。',
   'adjust.error.actual': '実残高を入力してください。',
-  'adjust.noAccounts': '資産・負債の科目がありません。',
+  'adjust.noAccounts': '補正できる科目がありません。',
   // 登録済みの補正（現実アンカー）は仕訳一覧から編集・削除する。
   'adjust.editTitle': '残高補正を編集',
   'adjust.editIntro':
@@ -571,8 +571,9 @@ export const ja = {
   'error.tag.duplicateName': '同じ名前の有効なタグが既にあります。',
   'error.tag.deleteInUse': 'このタグは使用中のため削除できません。アーカイブしてください。',
   'error.adjust.targetNotFound': '対象科目が見つかりません。',
-  'error.adjust.assetLiabilityOnly': '残高補正できるのは資産・負債の科目です。',
-  'error.adjust.internalRole': '継続コスト台帳は内部の集約口座のため残高補正できません。',
+  'error.adjust.assetLiabilityOnly': '残高補正できるのは資産・負債・費用・収入の科目です。',
+  'error.adjust.internalRole':
+    '継続コスト台帳（内部の集約口座）と残高調整科目は残高補正できません。',
   'error.adjust.notFound': '対象の残高補正が見つかりません。',
   'error.adjust.notAdjustment': 'この仕訳は残高補正ではありません。',
   'error.opening.assetLiabilityOnly': '初期残高を登録できるのは資産・負債の科目です。',

@@ -652,6 +652,200 @@ describe('残高補正 metadata の package 整合性', () => {
   });
 });
 
+describe('残高補正の対象科目の広さ（全科目化・作者決定 2026-08-15）', () => {
+  const balanceExpense = {
+    id: 'balance-expense',
+    name: '残高調整費',
+    type: 'expense',
+    role: 'system-adjustment',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  const balanceRevenue = {
+    id: 'balance-revenue',
+    name: '残高調整収入',
+    type: 'revenue',
+    role: 'system-adjustment',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  const account = (over: Record<string, unknown>) => ({
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+    ...over,
+  });
+
+  /** 対象 targetId・相手 counterId・差額 delta（>0 は借方 target）の 2 行補正仕訳。 */
+  const adjustmentEntry = (args: {
+    targetId: string;
+    counterId: string;
+    delta: number;
+    targetSide: 'debit' | 'credit';
+  }) => {
+    const amount = Math.abs(args.delta);
+    const counterSide = args.targetSide === 'debit' ? 'credit' : 'debit';
+    return {
+      id: 'adjustment',
+      date: '2026-06-30',
+      description: '残高補正',
+      kind: 'normal',
+      lines: [
+        { accountId: args.targetId, side: args.targetSide, amount },
+        { accountId: args.counterId, side: counterSide, amount },
+      ],
+      metadata: {
+        inputMode: 'manual',
+        adjustment: {
+          accountId: args.targetId,
+          expectedBalance: 5000,
+          actualBalance: 5000 + args.delta,
+          delta: args.delta,
+          counterpartAccountId: args.counterId,
+        },
+      },
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+  };
+
+  const pkg = (accounts: Record<string, unknown>[], entry: Record<string, unknown>) => ({
+    appId: APP_ID,
+    schemaVersion: SCHEMA_VERSION,
+    ledgerId: 'ledger',
+    exportedAt: '2026-06-01T00:00:00.000Z',
+    deviceId: 'd',
+    revision: 0,
+    accounts,
+    journalEntries: [entry],
+    tags: [],
+    monthlyCostItems: [],
+    recurringRules: [],
+    settings: { ledgerName: '家計簿', currency: 'JPY', displayFractionDigits: 0 },
+  });
+
+  it('費用が対象: 実累計が多い(delta>0)なら 借方 費用 / 貸方 残高調整収入 が valid', () => {
+    const fixed = account({
+      id: 'fixed',
+      name: '固定費',
+      type: 'expense',
+      role: 'expense-category',
+    });
+    // 借方正規なので資産と同じ向き。逆向き（貸方 費用）は拒否される。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg(
+          [fixed, balanceRevenue],
+          adjustmentEntry({
+            targetId: 'fixed',
+            counterId: balanceRevenue.id,
+            delta: 700,
+            targetSide: 'debit',
+          }),
+        ),
+      ).success,
+    ).toBe(true);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg(
+          [fixed, balanceRevenue],
+          adjustmentEntry({
+            targetId: 'fixed',
+            counterId: balanceRevenue.id,
+            delta: 700,
+            targetSide: 'credit',
+          }),
+        ),
+      ).success,
+    ).toBe(false);
+    // 相手 type も正規方向で決まる（delta>0 の費用に調整費を当てるのは不整合）。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg(
+          [fixed, balanceExpense],
+          adjustmentEntry({
+            targetId: 'fixed',
+            counterId: balanceExpense.id,
+            delta: 700,
+            targetSide: 'debit',
+          }),
+        ),
+      ).success,
+    ).toBe(false);
+  });
+
+  it('収入が対象: 実累計が多い(delta>0)なら 貸方 収入 / 借方 残高調整費 が valid（負債と同向）', () => {
+    const salary = account({
+      id: 'salary',
+      name: '給与',
+      type: 'revenue',
+      role: 'income-category',
+    });
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg(
+          [salary, balanceExpense],
+          adjustmentEntry({
+            targetId: 'salary',
+            counterId: balanceExpense.id,
+            delta: 700,
+            targetSide: 'credit',
+          }),
+        ),
+      ).success,
+    ).toBe(true);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg(
+          [salary, balanceExpense],
+          adjustmentEntry({
+            targetId: 'salary',
+            counterId: balanceExpense.id,
+            delta: 700,
+            targetSide: 'debit',
+          }),
+        ),
+      ).success,
+    ).toBe(false);
+  });
+
+  it('equity（初期残高）が対象の補正は invalid', () => {
+    const capital = account({ id: 'capital', name: '初期残高', type: 'equity', role: 'equity' });
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg(
+          [capital, balanceRevenue],
+          adjustmentEntry({
+            targetId: 'capital',
+            counterId: balanceRevenue.id,
+            delta: 700,
+            targetSide: 'debit',
+          }),
+        ),
+      ).success,
+    ).toBe(false);
+  });
+
+  it('残高調整科目そのものが対象の補正は invalid（type 検査を通っても role で弾く）', () => {
+    // 対象・相手とも system-adjustment。向きだけ見れば整合する形でも受け入れない。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg(
+          [balanceExpense, balanceRevenue],
+          adjustmentEntry({
+            targetId: balanceExpense.id,
+            counterId: balanceRevenue.id,
+            delta: 700,
+            targetSide: 'debit',
+          }),
+        ),
+      ).success,
+    ).toBe(false);
+  });
+});
+
 describe('journalEntrySchema 行数ルール（MVP: 1 借方・1 貸方）', () => {
   it('3 行以上の複合仕訳は拒否する', () => {
     const threeLines = {

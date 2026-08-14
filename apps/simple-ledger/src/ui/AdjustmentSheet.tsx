@@ -1,7 +1,8 @@
 /*
  * 残高補正のシート（作成・編集）。
- * 作成は勘定科目画面の内訳行（資産・負債）から、編集は仕訳一覧の補正行から開く。
+ * 作成は勘定科目画面の内訳行（資産・負債・費用・収入）から、編集は仕訳一覧の補正行から開く。
  * 補正は「ある日付の実残高に台帳をピン留めする現実アンカー」で、初期残高(opening)とは別物。
+ * 費用・収入の「実残高」はその日までの実際の累計額（accountBalance が type で符号を決める）。
  */
 import { useMemo, useState } from 'react';
 import { Modal } from './overlays';
@@ -10,6 +11,7 @@ import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../state/store';
 import { accountBalance, filterByDateRange } from '../domain/accounting';
 import { ADJUSTABLE_ACCOUNT_ROLES } from '../domain/accountRoles';
+import { isAdjustableAccountType } from '../domain/adjustment';
 import { isValidIsoDate } from '../domain/calendar';
 // 理論残高は意図的に reportEntriesForAsOf（投影なし）を使う: repository の保存側
 // （createAdjustment / updateAdjustment）と同じ算定でなければ expectedBalance がずれる。
@@ -175,7 +177,7 @@ export function AdjustmentEditSheet({
   const [submitting, setSubmitting] = useState(false);
 
   const target = accounts.find((a: Account) => a.id === accountId);
-  const adjustable = target?.type === 'asset' || target?.type === 'liability';
+  const adjustable = isAdjustableAccountType(target?.type);
 
   const expected = useMemo(() => {
     if (!ledger || !target || !adjustable || !isValidIsoDate(date)) return 0;
@@ -189,7 +191,8 @@ export function AdjustmentEditSheet({
   // 表示専用の差分（作成シートと同じ理由で render からは投げない）。
   const rawDelta = actual === null ? 0 : actual - expected;
   const delta = Number.isSafeInteger(rawDelta) ? rawDelta : 0;
-  // 補正対象は内部集約口座（継続コスト台帳）を除いた資産・負債のみ（聖域化）。
+  // 補正対象は資産・負債・費用・収入から内部集約口座（継続コスト台帳）と
+  // 残高調整科目自身を除いたもの（聖域化・ADJUSTABLE_ACCOUNT_ROLES が正本）。
   const groups = groupedAccountsByRole(accounts, [...ADJUSTABLE_ACCOUNT_ROLES], accountId);
 
   async function submit() {

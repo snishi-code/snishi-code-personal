@@ -3,7 +3,8 @@
  *
  * - 箱そのもの（大分類）はユーザーが追加・削除・移動できない。
  * - ユーザーは箱の中の内訳だけを追加・名前変更・アーカイブできる（削除は出さない）。
- * - 資産・負債の内訳行には残高補正の導線を置く（補正は対象科目が決まってから行う操作のため）。
+ * - 内訳行には残高補正の導線を置く（補正は対象科目が決まってから行う操作のため）。資産・負債は
+ *   残高、費用・収入はその日までの累計を実額へ合わせる（作者決定 2026-08-15・UI を分散させない）。
  * - 登録済みの初期残高・補正の履歴はこの画面に置かず、仕訳一覧に委ねる。
  * - 初期残高(equity)・内部集約 role は聖域として表示しない。残高調整(system-adjustment)は
  *   収入・費用の内訳として表示だけする（「自動」バッジ付き・管理操作は出さない）。
@@ -25,10 +26,11 @@ import { referencedAccountIds } from '../../domain/accountRefs';
 import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
 import { buildSimpleEntry } from '../../domain/entry';
+import { isAdjustableAccountType } from '../../domain/adjustment';
 import type { Account } from '../../domain/types';
 import { accountExistsAt } from '../../domain/accountLifetime';
 import { isRecurringPostableRole } from '../../domain/recurring';
-import { groupAccountsByBox, type AccountBox } from '../accountBoxes';
+import { boxForAccount, groupAccountsByBox, type AccountBox } from '../accountBoxes';
 import { AccountSheet } from './AccountSheet';
 import { AdjustmentCreateSheet } from '../AdjustmentSheet';
 import { OpeningRegisterSheet } from '../OpeningSheet';
@@ -187,7 +189,9 @@ export function Accounts({
 
       <div className="stack" data-ui={UI.accounts.list}>
         {groups.map(({ box, accounts }) => {
-          const canAdjust = box.type === 'asset' || box.type === 'liability';
+          // 補正は資産・負債・費用・収入の 4 箱すべてに置く（equity の箱は存在しない）。
+          // 残高調整科目の行は下の isSystemManaged で行アクションごと出さない。
+          const canAdjust = isAdjustableAccountType(box.type);
           const isFlowBox = box.type === 'revenue' || box.type === 'expense';
           return (
             <div key={box.key}>
@@ -396,7 +400,10 @@ export function Accounts({
       {adjustingAccount ? (
         // 履歴が全く無い科目への実残高入力は補正（差分が収入/費用扱い）ではなく
         // 初期残高として登録する。履歴があれば従来どおり補正。
-        accountHasEntries(entries, adjustingAccount.id) ? (
+        // 初期残高を持てるのは資産・負債だけなので、費用・収入は履歴ゼロでも補正へ回す
+        // （opening の保存境界が必ず弾く行き止まりへ送らない）。
+        accountHasEntries(entries, adjustingAccount.id) ||
+        boxForAccount(adjustingAccount)?.opening !== true ? (
           <AdjustmentCreateSheet
             account={adjustingAccount}
             onClose={() => setAdjustingAccount(null)}
