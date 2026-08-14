@@ -331,7 +331,9 @@ export function App() {
             onOpenAccount={goAccountFor}
           />
         ) : null}
-        {screen === 'yearlyOverview' ? <YearlyOverview period={period} /> : null}
+        {screen === 'yearlyOverview' ? (
+          <YearlyOverview period={period} onPeriodChange={changePeriod} onNavigate={go} />
+        ) : null}
         {screen === 'allocations' ? (
           <Allocations period={period} onEditEntry={openEdit} target={allocationsTarget} />
         ) : null}

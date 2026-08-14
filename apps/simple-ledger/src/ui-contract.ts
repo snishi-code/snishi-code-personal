@@ -105,6 +105,9 @@ export const UI = {
     matrix: 'yearlyOverview.matrix',
     projectionNote: 'yearlyOverview.projectionNote',
     projectionTruncatedNote: 'yearlyOverview.projectionTruncatedNote',
+    // 列見出しのタップ（年間 = 月末の基準日でホームへ / 全体 = その年の年間表示へ）
+    monthColumn: 'yearlyOverview.monthColumn',
+    yearColumn: 'yearlyOverview.yearColumn',
   },
   // 横軸=時間、縦軸=勘定科目の箱。保存データを変更しない閲覧専用の地図。
   timeline: {

@@ -368,6 +368,8 @@ export const ja = {
   'yearlyOverview.noPreviousYear': '前のデータ年はありません',
   'yearlyOverview.noNextYear': '次のデータ年はありません',
   'yearlyOverview.monthLabel': '{month}月',
+  'yearlyOverview.monthJump': '{date} 時点の残高をホームで見る',
+  'yearlyOverview.yearDrill': '{year}年の年間表示へ',
   'yearlyOverview.itemColumn': '項目',
   'yearlyOverview.revenue': '収入',
   'yearlyOverview.expense': '支出',

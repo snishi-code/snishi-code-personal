@@ -196,6 +196,19 @@
 .yearly-overview__corner {
   z-index: 2;
 }
+/* 列見出しのタップ導線。表の密度を保つため見た目は文字のまま、点線下線で押せることだけ示す。 */
+.yearly-overview__col-btn {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
 .yearly-overview__value {
   width: 112px;
   min-width: 112px;

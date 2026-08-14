@@ -30,6 +30,7 @@ import { useLedger } from '../../state/store';
 import { t } from '../../i18n';
 import { todayLocal } from '../../util/time';
 import { UI } from '../../ui-contract';
+import type { Screen } from '../navigation';
 import { Money } from '../money';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
@@ -132,7 +133,15 @@ function previousDataYear(years: readonly number[], selectedYear: number): numbe
   return undefined;
 }
 
-export function YearlyOverview({ period }: { period: ReportPeriod }) {
+export function YearlyOverview({
+  period,
+  onPeriodChange,
+  onNavigate,
+}: {
+  period: ReportPeriod;
+  onPeriodChange: (period: ReportPeriod) => void;
+  onNavigate: (screen: Screen) => void;
+}) {
   const { ledger } = useLedger();
   const today = todayLocal();
   const preferredYear = yearOfPeriod(period, today);
@@ -309,9 +318,36 @@ export function YearlyOverview({ period }: { period: ReportPeriod }) {
                 </th>
                 {matrix.columns.map((column) => (
                   <th className="yearly-overview__value" scope="col" key={column.key}>
-                    {column.month === undefined
-                      ? t('period.yearUnit', { year: column.year })
-                      : t('yearlyOverview.monthLabel', { month: column.month })}
+                    {column.month === undefined ? (
+                      // 全体表示: 年をタップ → その年の年間表示へ（画面内で完結・ヘッダーは変えない）。
+                      <button
+                        type="button"
+                        className="yearly-overview__col-btn"
+                        onClick={() => {
+                          setMode('year');
+                          setSelectedYear(column.year);
+                        }}
+                        aria-label={t('yearlyOverview.yearDrill', { year: column.year })}
+                        data-ui={UI.yearlyOverview.yearColumn}
+                      >
+                        {t('period.yearUnit', { year: column.year })}
+                      </button>
+                    ) : (
+                      // 年間表示: 月をタップ → 基準日をその月末にしてホームへ（残高を見に行く導線）。
+                      // column.to は集計と同じ月末の正本なので再計算しない。
+                      <button
+                        type="button"
+                        className="yearly-overview__col-btn"
+                        onClick={() => {
+                          onPeriodChange({ mode: 'date', date: column.to });
+                          onNavigate('dashboard');
+                        }}
+                        aria-label={t('yearlyOverview.monthJump', { date: column.to })}
+                        data-ui={UI.yearlyOverview.monthColumn}
+                      >
+                        {t('yearlyOverview.monthLabel', { month: column.month })}
+                      </button>
+                    )}
                   </th>
                 ))}
               </tr>
