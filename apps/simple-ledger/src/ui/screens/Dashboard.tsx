@@ -25,6 +25,8 @@ import { UI } from '../../ui-contract';
 import type { JournalEntry } from '../../domain/types';
 import type { Screen } from '../navigation';
 import type { FormMode } from '../entryModes';
+import type { AllocationsTarget } from './Allocations';
+import { entryOpenPlan } from '../entryOpen';
 import type { MessageKey } from '../../i18n';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { assertSafeAmount } from '../../domain/safeSum';
@@ -51,6 +53,9 @@ export function Dashboard({
   onEditEntry,
   onNavigate,
   onOpenJournal,
+  onOpenAllocations,
+  onOpenAccount,
+  onOpenEntry,
 }: {
   period: ReportPeriod;
   onPeriodChange: (p: ReportPeriod) => void;
@@ -58,6 +63,10 @@ export function Dashboard({
   onEditEntry: (entry: JournalEntry) => void;
   onNavigate: (screen: Screen) => void;
   onOpenJournal: (filter: { from?: string; to?: string }) => void;
+  /** 仕訳タップの行き先（entryOpenPlan の実行先）。仕訳一覧と同じ resolver を使う。 */
+  onOpenAllocations: (target: AllocationsTarget) => void;
+  onOpenAccount: (accountId: string) => void;
+  onOpenEntry: (entryId: string) => void;
 }) {
   const { ledger } = useLedger();
   const today = todayLocal();
@@ -247,14 +256,32 @@ export function Dashboard({
               data-ui={UI.dashboard.journalPreview}
             >
               {visibleEntries.map((entry) => {
-                const generated = !!entry.metadata?.monthlyCostId;
+                {
+                  /* 何を開くかは entryOpenPlan（単一正本）。以前は継続コスト絡みの行だけ
+                    仕訳一覧へ飛ばしており、「タップで編集 or 由来へ」の原則から外れていた。 */
+                }
+                const plan = entryOpenPlan(entry);
+                const onClick =
+                  plan.kind === 'none'
+                    ? undefined
+                    : plan.kind === 'rule'
+                      ? () => onOpenAllocations({ ruleId: plan.ruleId })
+                      : plan.kind === 'item'
+                        ? () => onOpenAllocations({ itemId: plan.itemId })
+                        : plan.kind === 'account'
+                          ? () => onOpenAccount(plan.accountId)
+                          : plan.kind === 'edit'
+                            ? () => onEditEntry(entry)
+                            : // opening / adjustment は専用シートが要る。仕訳一覧の該当行を
+                              // 直接開く（シートが開いた状態で遷移する既存の resolver を使う）。
+                              () => onOpenEntry(entry.id);
                 return (
                   <EntryListItem
                     key={entry.id}
                     entry={entry}
                     accounts={ledger?.accounts ?? []}
                     currency={currency}
-                    onClick={() => (generated ? onOpenJournal(journalFilter) : onEditEntry(entry))}
+                    {...(onClick ? { onClick } : {})}
                   />
                 );
               })}

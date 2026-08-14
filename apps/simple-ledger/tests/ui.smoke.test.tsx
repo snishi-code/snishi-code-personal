@@ -44,6 +44,9 @@ describe('Dashboard スモーク', () => {
           onEditEntry={() => undefined}
           onNavigate={() => undefined}
           onOpenJournal={() => undefined}
+          onOpenAllocations={() => undefined}
+          onOpenAccount={() => undefined}
+          onOpenEntry={() => undefined}
         />
       </Providers>,
     );

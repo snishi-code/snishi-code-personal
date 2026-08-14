@@ -21,6 +21,8 @@ import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { addMonthsToDate, MONTHLY_AMOUNTS_HARD_CAP, monthlyAmounts } from '../../domain/allocation';
 import { sortAccounts } from '../../domain/accountOrder';
 import { todayLocal } from '../../util/time';
+import { entryOpenPlan } from '../entryOpen';
+import type { AllocationsTarget } from './Allocations';
 import { cashflowHorizonMonths } from '../../data/localFlags';
 import type { Account, JournalEntry } from '../../domain/types';
 import { Money } from '../money';
@@ -54,7 +56,18 @@ function repaymentAmountOf(entry: JournalEntry, liabilityId: string): number {
   );
 }
 
-export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) => void }) {
+export function Cashflow({
+  onEditEntry,
+  onOpenAllocations,
+  onOpenAccount,
+  onOpenEntry,
+}: {
+  onEditEntry: (entry: JournalEntry) => void;
+  /** 仕訳タップの行き先（entryOpenPlan の実行先）。仕訳一覧・ホームと同じ resolver。 */
+  onOpenAllocations: (target: AllocationsTarget) => void;
+  onOpenAccount: (accountId: string) => void;
+  onOpenEntry: (entryId: string) => void;
+}) {
   const { ledger } = useLedger();
   const today = todayLocal();
   const basis = useMemo(() => reportBasis({ mode: 'all' }, today), [today]);
@@ -98,6 +111,7 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
         title: e.description,
         delta: cashDeltaOfEntry(e, isFree),
         amount: sumAmounts(e.lines.filter((l) => l.side === 'debit').map((l) => l.amount)),
+        entry: e,
       }))
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     return {
@@ -318,22 +332,59 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
         <div className="card card--pad empty">{t('cashflow.futureEmpty')}</div>
       ) : (
         <ul className="card list" data-ui={UI.cashflow.futureList}>
-          {futureRows.map((f) => (
-            <li key={f.id} className="list__item">
-              <div className="list__main">
-                <div className="list__title">{f.title}</div>
-                <div className="list__sub">{f.date}</div>
-              </div>
-              <span
-                className={`list__amount ${
-                  f.delta > 0 ? 'amount--pos' : f.delta < 0 ? 'amount--neg' : 'muted'
-                }`}
-              >
-                {f.delta > 0 ? '+' : f.delta < 0 ? '−' : '→ '}
-                <Money amount={f.delta === 0 ? f.amount : Math.abs(f.delta)} currency={currency} />
-              </span>
-            </li>
-          ))}
+          {futureRows.map((f) => {
+            {
+              /* タップで編集 or 由来へ（entryOpenPlan の単一正本・仕訳一覧/ホームと同じ規則）。 */
+            }
+            const plan = entryOpenPlan(f.entry);
+            const onTap =
+              plan.kind === 'none'
+                ? undefined
+                : plan.kind === 'rule'
+                  ? () => onOpenAllocations({ ruleId: plan.ruleId })
+                  : plan.kind === 'item'
+                    ? () => onOpenAllocations({ itemId: plan.itemId })
+                    : plan.kind === 'account'
+                      ? () => onOpenAccount(plan.accountId)
+                      : plan.kind === 'edit'
+                        ? () => onEditEntry(f.entry)
+                        : () => onOpenEntry(f.entry.id);
+            const body = (
+              <>
+                <div className="list__main">
+                  <div className="list__title">{f.title}</div>
+                  <div className="list__sub">{f.date}</div>
+                </div>
+                <span
+                  className={`list__amount ${
+                    f.delta > 0 ? 'amount--pos' : f.delta < 0 ? 'amount--neg' : 'muted'
+                  }`}
+                >
+                  {f.delta > 0 ? '+' : f.delta < 0 ? '−' : '→ '}
+                  <Money
+                    amount={f.delta === 0 ? f.amount : Math.abs(f.delta)}
+                    currency={currency}
+                  />
+                </span>
+              </>
+            );
+            return (
+              <li key={f.id} className="list__row">
+                {onTap ? (
+                  <button
+                    type="button"
+                    className="list__item list__item--button"
+                    onClick={onTap}
+                    data-ui={UI.cashflow.futureRow}
+                  >
+                    {body}
+                  </button>
+                ) : (
+                  <div className="list__item">{body}</div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
 

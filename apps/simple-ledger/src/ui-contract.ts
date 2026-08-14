@@ -332,6 +332,8 @@ export const UI = {
     repaySave: 'cashflow.repay.save',
     freeTrend: 'cashflow.freeTrend',
     futureList: 'cashflow.future.list',
+    // 将来行（タップで編集 or 由来へ・entryOpenPlan 消費）
+    futureRow: 'cashflow.future.row',
     summary: 'cashflow.summary',
     // 負債行の展開 = 登録済みの返済（未来日付の保存仕訳）。タップで仕訳の編集シートへ
     repaymentsToggle: 'cashflow.repayments.toggle',

@@ -22,7 +22,7 @@ import { UI } from '../../ui-contract';
 import { todayLocal } from '../../util/time';
 import { entryHasTag } from '../../domain/tags';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
-import { derivedEntryOrigin } from '../../domain/derivedOrigin';
+import { entryOpenPlan } from '../entryOpen';
 import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { periodRange, type ReportPeriod } from '../../domain/reportPeriod';
 import {
@@ -417,22 +417,22 @@ export function Journal({
             const isOpening = entry.kind === 'opening' && !isPurchase;
             // タップ: 計算で生まれた行は起票元（derivedEntryOrigin が単一正本）へ —
             // ルール投影 = そのルール / 月割り = その項目 / 投資利回りの投影 = その投資科目。
-            // 由来を名乗らない導出行はタップ不可（既定の遷移先へ流さない＝誤遷移させない）。
-            // opening / adjustment は専用シート。それ以外（購入・回収の振替を含む）は編集シート。
-            const origin = derivedEntryOrigin(entry);
-            const onRowTap = isVirtual
-              ? origin === undefined
+            // 何を開くかは entryOpenPlan（単一正本）が決める。ここは計画の実行だけ。
+            const plan = entryOpenPlan(entry);
+            const onRowTap =
+              plan.kind === 'none'
                 ? undefined
-                : origin.kind === 'recurringRule'
-                  ? () => onOpenAllocations({ ruleId: origin.recurringRuleId })
-                  : origin.kind === 'monthlyCost'
-                    ? () => onOpenAllocations({ itemId: origin.monthlyCostId })
-                    : () => onOpenAccount(origin.accountId)
-              : isAdjustment
-                ? () => setEditingAdjustment(entry)
-                : isOpening
-                  ? () => setEditingOpening(entry)
-                  : () => onEditEntry(entry);
+                : plan.kind === 'rule'
+                  ? () => onOpenAllocations({ ruleId: plan.ruleId })
+                  : plan.kind === 'item'
+                    ? () => onOpenAllocations({ itemId: plan.itemId })
+                    : plan.kind === 'account'
+                      ? () => onOpenAccount(plan.accountId)
+                      : plan.kind === 'adjustment'
+                        ? () => setEditingAdjustment(entry)
+                        : plan.kind === 'opening'
+                          ? () => setEditingOpening(entry)
+                          : () => onEditEntry(entry);
             const entryTagNames = tagNames(allTags, entry.tagIds);
             const title = (
               <>

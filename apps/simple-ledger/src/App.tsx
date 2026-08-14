@@ -282,6 +282,9 @@ export function App() {
             onEditEntry={openEdit}
             onNavigate={go}
             onOpenJournal={goJournalFiltered}
+            onOpenAllocations={goAllocationsFor}
+            onOpenAccount={goAccountFor}
+            onOpenEntry={goJournalEntry}
           />
         ) : null}
         {screen === 'incomeBreakdown' ? (
@@ -363,7 +366,14 @@ export function App() {
         {screen === 'allocations' ? (
           <Allocations period={period} onEditEntry={openEdit} target={allocationsTarget} />
         ) : null}
-        {screen === 'cashflow' ? <Cashflow onEditEntry={openEdit} /> : null}
+        {screen === 'cashflow' ? (
+          <Cashflow
+            onEditEntry={openEdit}
+            onOpenAllocations={goAllocationsFor}
+            onOpenAccount={goAccountFor}
+            onOpenEntry={goJournalEntry}
+          />
+        ) : null}
         {screen === 'tags' ? <Tags /> : null}
         {screen === 'accounts' ? <Accounts period={period} target={accountsTarget} /> : null}
         {screen === 'settings' ? (
