@@ -98,6 +98,8 @@ describe('自由に動かせない箱（movable の UI 撤去後）', () => {
   });
 
   it('「動かせない」箱で新規作成すると movable=false で保存される（箱 = 作成時に確定）', async () => {
+    // 全 suite 並列時の CAS 基準ずれ対策: 現 DB 世代へ同期してから UI 経由の保存を行う。
+    await loadLedger();
     render(
       <Providers>
         <Accounts />
@@ -122,6 +124,8 @@ describe('自由に動かせない箱（movable の UI 撤去後）', () => {
   });
 
   it('「動かせる」箱で新規作成すると movable フィールド自体を持たない（既定 = 自由）', async () => {
+    // 全 suite 並列時の CAS 基準ずれ対策: 現 DB 世代へ同期してから UI 経由の保存を行う。
+    await loadLedger();
     render(
       <Providers>
         <Accounts />

@@ -109,9 +109,9 @@ export const ja = {
   'cashflow.title': '資金繰り',
   'cashflow.intro':
     '未来日付の仕訳から、自由に動かせるお金の推移を見ます。カード・ローンは行をタップすると返済計画を登録できます。',
-  'cashflow.until': '表示する期間（ヶ月）',
-  'cashflow.untilHint': '今日から {date} までの入出金予定を投影します。',
-  'cashflow.untilError': '1〜1200 の整数で入力してください。',
+  'cashflow.until': '表示終了日',
+  'cashflow.untilHint':
+    '今日からこの日までの入出金予定を投影します。既定の期間は設定で変えられます。',
   'cashflow.freeFunds': '自由に動かせるお金',
   'cashflow.minFree': '期間内の最低額',
   'cashflow.depleteWarning': 'この期間に自由に動かせるお金がマイナスになる予定があります。',
@@ -483,6 +483,9 @@ export const ja = {
   'settings.ledgerNameRequired': '台帳名を入力してください。',
   'settings.currencyHint': '表示に使う単位の文字列です（8 文字まで）。換算はしません。',
   'settings.fractionDigits': '小数の表示桁数',
+  'settings.cashflowHorizon': '資金繰りの表示期間（ヶ月・既定）',
+  'settings.cashflowHorizonHint':
+    '資金繰りを開いたとき、今日から何ヶ月先までを表示するか（1〜1200）。画面での一時的な変更は保存されません。',
   'settings.fractionDigitsHint':
     '入力できる小数の桁もこの設定に従います。保存されている金額は変わりません。',
   'settings.currency': '金額の単位',

@@ -341,6 +341,8 @@ export const UI = {
   settings: {
     view: 'settings.view',
     fractionDigits: 'settings.fractionDigits',
+    // 資金繰りの既定表示期間（端末設定・ヶ月）
+    cashflowHorizon: 'settings.cashflowHorizon',
     manageList: 'settings.manage.list',
     exportJson: 'settings.exportJson',
     importJson: 'settings.importJson',

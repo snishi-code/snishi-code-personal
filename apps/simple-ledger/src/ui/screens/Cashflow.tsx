@@ -21,11 +21,7 @@ import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { addMonthsToDate, MONTHLY_AMOUNTS_HARD_CAP, monthlyAmounts } from '../../domain/allocation';
 import { sortAccounts } from '../../domain/accountOrder';
 import { todayLocal } from '../../util/time';
-import {
-  CASHFLOW_HORIZON_MAX_MONTHS,
-  cashflowHorizonMonths,
-  rememberCashflowHorizonMonths,
-} from '../../data/localFlags';
+import { cashflowHorizonMonths } from '../../data/localFlags';
 import type { Account, JournalEntry } from '../../domain/types';
 import { Money } from '../money';
 import { TrendChart, type TrendPoint } from '../components/TrendChart';
@@ -58,13 +54,6 @@ function repaymentAmountOf(entry: JournalEntry, liabilityId: string): number {
   );
 }
 
-/** 入力テキスト → 有効な地平ヶ月数（1〜上限の整数以外は null）。 */
-function parseCashflowHorizon(text: string): number | null {
-  if (!/^\d+$/.test(text)) return null;
-  const months = Number.parseInt(text, 10);
-  return months >= 1 && months <= CASHFLOW_HORIZON_MAX_MONTHS ? months : null;
-}
-
 export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) => void }) {
   const { ledger } = useLedger();
   const today = todayLocal();
@@ -74,13 +63,11 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
     [basis.asOf, ledger, today],
   );
   const reportEntries = useMemo(() => reportDisplay?.entries ?? [], [reportDisplay]);
-  // 地平は「今日から◯ヶ月」の端末の好み（台帳データではない・作者決定 2026-08-14）。
-  // 欄には文字列で持ち、確定できる値だけを記憶して untilDate へ反映する。
-  const [horizonText, setHorizonText] = useState(() => String(cashflowHorizonMonths()));
-  const horizonMonths = parseCashflowHorizon(horizonText);
-  const untilDate = useMemo(
-    () => addMonthsToDate(today, horizonMonths ?? cashflowHorizonMonths()),
-    [today, horizonMonths],
+  // 表示終了日。**開くたびに「今日 + 既定の期間（設定画面・端末設定）」へ戻る**。
+  // 画面内の変更はその場限りで持ち帰らない（普段は既定で見たい・一時的に伸ばしても
+  // 次回は既定に戻っていてほしい・作者決定 2026-08-14）。
+  const [untilDate, setUntilDate] = useState(() =>
+    addMonthsToDate(todayLocal(), cashflowHorizonMonths()),
   );
   const [repayFor, setRepayFor] = useState<{ account: Account; balance: number } | null>(null);
   // 負債行の展開（登録済みの返済リスト）。行タップ = 新規返済シートとは独立に開閉する。
@@ -189,16 +176,10 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
 
       <TextInput
         label={t('cashflow.until')}
-        inputMode="numeric"
-        value={horizonText}
-        hint={t('cashflow.untilHint', { date: untilDate })}
-        onChange={(v) => {
-          const text = v.replace(/[^\d]/g, '');
-          setHorizonText(text);
-          const months = parseCashflowHorizon(text);
-          if (months !== null) rememberCashflowHorizonMonths(months);
-        }}
-        error={horizonText !== '' && horizonMonths === null ? t('cashflow.untilError') : undefined}
+        type="date"
+        value={untilDate}
+        hint={t('cashflow.untilHint')}
+        onChange={setUntilDate}
         dataUi={UI.cashflow.until}
       />
 

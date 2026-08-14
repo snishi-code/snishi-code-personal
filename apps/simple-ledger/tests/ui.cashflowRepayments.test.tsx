@@ -21,7 +21,7 @@ import { MONTHLY_AMOUNTS_HARD_CAP } from '../src/domain/allocation';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { todayLocal } from '../src/util/time';
-import { CASHFLOW_HORIZON_DEFAULT_MONTHS, cashflowHorizonMonths } from '../src/data/localFlags';
+import { cashflowHorizonMonths, rememberCashflowHorizonMonths } from '../src/data/localFlags';
 import type { JournalEntry } from '../src/domain/types';
 import './setup';
 
@@ -46,32 +46,25 @@ function view(onEditEntry: (entry: JournalEntry) => void) {
 
 const ui = (name: string) => document.querySelector(`[data-ui="${name}"]`);
 
-describe('表示する期間（ヶ月）の入力と端末記憶', () => {
-  it('既定 6 ヶ月・数値のみ受け付け・確定値だけ記憶し、次回の初期値になる', async () => {
+describe('表示終了日（既定は設定画面の期間・画面での変更はその場限り）', () => {
+  it('開くと今日 + 既定期間の日付が入り、変更しても記憶されず次回は既定へ戻る', async () => {
+    rememberCashflowHorizonMonths(4);
     render(view(() => undefined));
-    const input = (await screen.findByLabelText('表示する期間（ヶ月）')) as HTMLInputElement;
-    expect(input.value).toBe(String(CASHFLOW_HORIZON_DEFAULT_MONTHS));
-    expect(input.getAttribute('inputmode')).toBe('numeric');
+    const input = (await screen.findByLabelText('表示終了日')) as HTMLInputElement;
+    expect(input.value).toBe(addMonthsToDate(todayLocal(), 4));
 
-    // 数字以外は削除される。
-    fireEvent.change(input, { target: { value: '1a2' } });
-    expect(input.value).toBe('12');
-    expect(cashflowHorizonMonths()).toBe(12);
+    // 一時的に伸ばす → 表示は変わるが端末設定は変わらない。
+    const stretched = addMonthsToDate(todayLocal(), 12);
+    fireEvent.change(input, { target: { value: stretched } });
+    expect(input.value).toBe(stretched);
+    expect(cashflowHorizonMonths()).toBe(4);
 
-    // 空・範囲外は記憶しない（前回の確定値 12 のまま）。
-    fireEvent.change(input, { target: { value: '' } });
-    expect(cashflowHorizonMonths()).toBe(12);
-    fireEvent.change(input, { target: { value: '0' } });
-    expect(cashflowHorizonMonths()).toBe(12);
-    fireEvent.change(input, { target: { value: '9999' } });
-    expect(cashflowHorizonMonths()).toBe(12);
-
-    // 再マウントすると記憶した 12 が初期値になる（端末の好み）。
+    // 開き直すと既定（4 ヶ月）へ戻る。
     cleanup();
     _resetOverlaysForTests();
     render(view(() => undefined));
-    const again = (await screen.findByLabelText('表示する期間（ヶ月）')) as HTMLInputElement;
-    expect(again.value).toBe('12');
+    const again = (await screen.findByLabelText('表示終了日')) as HTMLInputElement;
+    expect(again.value).toBe(addMonthsToDate(todayLocal(), 4));
   });
 });
 
