@@ -3254,16 +3254,24 @@ export interface MonthlyCostArchiveInput {
    */
   endDate: string;
   /**
-   * 残存価値の回収の振替（任意）: `借方 振替先 / 貸方 継続コスト台帳`・日付 = 終了日。
+   * 残存価値の回収の振替（0 本以上・すべて同一トランザクション）: 1 本ごとに
+   * `借方 振替先 / 貸方 継続コスト台帳`・日付 = 終了日。
+   *
+   * アーカイブシートは最大 2 本を作る（作者決定 2026-08-15）:
+   *  1. **回収**（売却・返金など）= 利用者が選んだ回収先へ R。
+   *  2. **「終了日に全額費用にする」の第 2 振替** = item の費用の行き先へ（残存価値 − R）。
+   *     これで割り振る総額が「終了日までに消費済みの額」に落ち、過去の刻みは元の額のまま
+   *     残りが終了日に 1 本だけ立つ（新しい数学もフィールドも増やさない）。
+   *
    * 金額に上限は設けない（残存価値・購入額を超えてよい。割り振る総額 = amount − 回収額 が
    * 負になったら過去にわたって費用減 = マイナス表示。作者決定 2026-07-29）。
    */
-  recovery?: { destinationAccountId: string; amount: number };
+  recoveries?: readonly { destinationAccountId: string; amount: number }[];
 }
 
 /**
  * 継続コスト資産をアーカイブする（終了日の設定 + 回収の振替を 1 トランザクションで）。
- * 「振替先を選ばずアーカイブ」= recovery なし＝残存価値は全額その月までの費用になる。
+ * 「回収 0 でアーカイブ」= recoveries なし＝残存価値は終了日までの期間へ割り振られる。
  */
 async function archiveMonthlyCostUnlocked(input: MonthlyCostArchiveInput): Promise<void> {
   // ルール由来の持ち物は個別にアーカイブできない（終わらせたいならルール側を終了する）。
@@ -3287,33 +3295,53 @@ async function archiveMonthlyCostUnlocked(input: MonthlyCostArchiveInput): Promi
     ctx,
   );
 
-  let recoveryEntry: JournalEntry | undefined;
-  if (input.recovery) {
-    if (!Number.isInteger(input.recovery.amount) || input.recovery.amount <= 0)
+  /*
+   * 回収の振替（0〜2 本）。第 2 振替も「回収の一種」なので、台帳にふれる保存仕訳が
+   * 「購入と回収の 2 種だけ」という不変条件（schema ⑧⑨）は変わらない。
+   *
+   * 振替先の受理は簿記入力と同じ RECURRING_POSTABLE_ROLES（v12 内・版は上げない）だが、
+   * **費用カテゴリだけは item の費用の行き先に限る**（fail-closed）。任意の費用科目への回収を
+   * 許すと、どの費用を打ち消したのかが台帳から追えないまま「支出のマイナス」が立つ。
+   * 費用の行き先が費用カテゴリ以外（v12 で配分先は全 postable 科目へ広がった）なら、
+   * その科目は元々ここを通る。schema/import はこの絞りをかけない（既存データの受理は
+   * 変えない・保存境界だけを狭める）。
+   */
+  const recoveryEntries: JournalEntry[] = [];
+  for (const recovery of input.recoveries ?? []) {
+    if (!Number.isInteger(recovery.amount) || recovery.amount <= 0)
       throw new LedgerError('error.common.amountInvalid');
-    const destination = ctx.byId.get(input.recovery.destinationAccountId);
+    const destination = ctx.byId.get(recovery.destinationAccountId);
     if (!destination || !isRecurringPostableRole(destination.role)) {
       throw new LedgerError('error.monthlyCost.recoveryDestination');
     }
-    recoveryEntry = assertEntrySavable(
-      {
-        id: newId(),
-        date: input.endDate,
-        description: existing.name,
-        kind: 'normal',
-        lines: [
-          { accountId: destination.id, side: 'debit', amount: input.recovery.amount },
-          {
-            accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
-            side: 'credit',
-            amount: input.recovery.amount,
+    if (destination.role === 'expense-category' && destination.id !== existing.expenseAccountId) {
+      throw new LedgerError('error.monthlyCost.recoveryDestination');
+    }
+    recoveryEntries.push(
+      assertEntrySavable(
+        {
+          id: newId(),
+          date: input.endDate,
+          description: existing.name,
+          kind: 'normal',
+          lines: [
+            { accountId: destination.id, side: 'debit', amount: recovery.amount },
+            {
+              accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+              side: 'credit',
+              amount: recovery.amount,
+            },
+          ],
+          metadata: {
+            inputMode: 'transfer',
+            monthlyCostId: existing.id,
+            monthlyCostRecovery: true,
           },
-        ],
-        metadata: { inputMode: 'transfer', monthlyCostId: existing.id, monthlyCostRecovery: true },
-        createdAt: ts,
-        updatedAt: ts,
-      },
-      ctx,
+          createdAt: ts,
+          updatedAt: ts,
+        },
+        ctx,
+      ),
     );
   }
 
@@ -3324,7 +3352,7 @@ async function archiveMonthlyCostUnlocked(input: MonthlyCostArchiveInput): Promi
   const candidateItems = items.map((item) => (item.id === saved.id ? saved : item));
   assertEndedAssetLiabilityBalances({
     accounts: [...ctx.byId.values()],
-    journalEntries: recoveryEntry ? [...entries, recoveryEntry] : entries,
+    journalEntries: recoveryEntries.length > 0 ? [...entries, ...recoveryEntries] : entries,
     monthlyCostItems: candidateItems,
     recurringRules,
   });
@@ -3342,7 +3370,8 @@ async function archiveMonthlyCostUnlocked(input: MonthlyCostArchiveInput): Promi
           return;
         }
         iStore.put(stripMonthlyCostItem({ ...current, endDate: saved.endDate, updatedAt: ts }));
-        if (recoveryEntry) t.objectStore(STORE.journalEntries).put(recoveryEntry);
+        const eStore = t.objectStore(STORE.journalEntries);
+        for (const recoveryEntry of recoveryEntries) eStore.put(recoveryEntry);
       };
     });
   } catch (error) {

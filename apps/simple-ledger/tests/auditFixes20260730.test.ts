@@ -79,7 +79,7 @@ describe('P1-1: 回収の振替の形（借方 ≠ 台帳・振替先 role・日
     await archiveMonthlyCost({
       id: item.id,
       endDate: '2026-06-30',
-      recovery: { destinationAccountId: bank.id, amount: 3000 },
+      recoveries: [{ destinationAccountId: bank.id, amount: 3000 }],
     });
     return buildExportPackage(await loadLedger());
   }

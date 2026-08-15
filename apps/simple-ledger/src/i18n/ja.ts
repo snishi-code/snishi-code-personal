@@ -102,7 +102,20 @@ export const ja = {
   'ccItem.period': '期間',
   'ccItem.remainingValue': '残存価値',
   'ccItem.archiveTitle': 'アーカイブ',
-  'ccItem.transferTarget': '振替先を選ぶ',
+  // アーカイブシート（終了日 + 回収 + 残りの扱いを 1 枚で決める。シート自体が確認面）。
+  'ccItem.archiveDateHint': 'この日で終わりにします。先の日付にすれば一覧へ戻せます。',
+  'ccItem.archiveRecovery': '回収額',
+  'ccItem.archiveRecoveryHint':
+    '売却・返金などで戻ってきた額。既定は終了日時点の残存価値です。0 なら回収の仕訳は作りません。',
+  'ccItem.archiveRecoveryTo': '回収先',
+  'ccItem.archiveRemainder': '残り（{amount}）の扱い',
+  'ccItem.archiveRemainderSpread': '期間に割り振る',
+  'ccItem.archiveRemainderSpreadHint': '開始日から終了日までの各月へ、残りを配り直します。',
+  'ccItem.archiveRemainderExpense': '終了日に全額費用にする',
+  'ccItem.archiveRemainderExpenseHint':
+    '過去の月額はそのままにして、残りを終了日の「{account}」へ 1 本で計上します。',
+  'ccItem.archiveRemainderNoneHint': '残りがないので、どちらを選んでも結果は変わりません。',
+  'ccItem.archiveConfirm': 'アーカイブする',
   'ccItem.openPurchase': 'その仕訳を開く',
   'ccItem.quickSpan': '{years}年',
 

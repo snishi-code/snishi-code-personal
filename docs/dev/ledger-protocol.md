@@ -100,9 +100,15 @@
 - **購入の仕訳**（保存される仕訳・item と 1:1）: `借方 継続コスト台帳(continuing-cost-ledger) /
 貸方 支払い元`。印は `metadata.monthlyCostId` のみ。持ち込み登録（貸方 = 初期残高 equity）は
   `kind:'opening'`。
-- **回収の振替**（アーカイブ時の売却・返金）: `借方 振替先 / 貸方 継続コスト台帳`・
+- **回収の振替**（アーカイブ時の売却・返金）: `借方 回収先 / 貸方 継続コスト台帳`・
   `metadata: { monthlyCostId, monthlyCostRecovery: true }`。普通のユーザー入力の振替として
-  編集・削除可。
+  編集・削除可。`archiveMonthlyCost` は `recoveries`（0 本以上）を同一トランザクションで保存する。
+  アーカイブシートが作るのは最大 2 本 = ①回収先への回収 ②「残りを終了日に全額費用にする」の
+  第 2 振替（借方 = `item.expenseAccountId`・金額 = 残存価値 − 回収額）。第 2 振替も回収の一種
+  なので、**台帳にふれる保存仕訳は購入と回収の 2 種だけ**という不変条件は変わらない。
+  保存境界は費用カテゴリ宛ての回収を `item.expenseAccountId` に限る（それ以外の費用科目は
+  `error.monthlyCost.recoveryDestination` で拒否・fail-closed）。schema / import 側はこの絞りを
+  かけない（既存データの受理は変えない）。
 - 費用の行は保存されない（`continuousCostEntriesForItem` が展開する）。
 - ルール生成 item の id は決定的（`ccr-{ruleId}-{YYYY-MM}`）。ルール起票の保存仕訳は
   `rec-{ruleId}-{month}`。生成 item の `endDate` は必ず埋まり、**次回起票日と同日**（v12）。

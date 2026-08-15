@@ -288,11 +288,17 @@ export const UI = {
     editExpense: 'allocations.edit.expense',
     editSave: 'allocations.edit.save',
     editImpactWarning: 'allocations.edit.impactWarning',
-    // アーカイブ = 終了日の設定（+ 残存価値の回収の振替）
+    // アーカイブ = 終了日の設定 + 残存価値の始末を 1 枚で決めるシート（シート自体が確認面）。
     archive: 'allocations.archive',
     archiveDialog: 'allocations.archiveDialog',
     archiveDate: 'allocations.archive.date',
-    archiveTransfer: 'allocations.archive.transfer',
+    // 回収額（既定 = 終了日時点の残存価値・0 も超過も可）と回収先（0 なら回収先は出さない）
+    archiveRecoveryAmount: 'allocations.archive.recoveryAmount',
+    archiveRecoveryTo: 'allocations.archive.recoveryTo',
+    // 残り（残存価値 − 回収額）の扱い: 期間に割り振る（既定）/ 終了日に全額費用にする
+    archiveRemainder: 'allocations.archive.remainder',
+    archiveRemainderSpread: 'allocations.archive.remainder.spread',
+    archiveRemainderExpense: 'allocations.archive.remainder.expense',
     archiveConfirm: 'allocations.archive.confirm',
   },
   // 残高補正・初期残高のシート（勘定科目の内訳行・仕訳一覧から開く）。

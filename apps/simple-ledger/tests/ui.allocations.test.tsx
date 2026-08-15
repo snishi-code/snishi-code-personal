@@ -3,7 +3,7 @@
  *  - 追加チューザーは 2 択（くり返し記帳 / 持ち込み）
  *  - 持ち込み登録（過去日・終了日なし可・貸方 = 初期残高）
  *  - 終了まで1ヶ月以内の行のマーカー（data-ending）
- *  - アーカイブ動線（終了日のみ / 残存価値の回収の振替 = ホームの振替シート再利用・既定値）
+ *  - アーカイブシート（終了日 + 回収額/回収先 + 残りの扱いを 1 枚で決める）
  */
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -448,7 +448,7 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
     await archiveMonthlyCost({
       id: historical.id,
       endDate: '2024-06-30',
-      recovery: { destinationAccountId: cash.id, amount: 600000 },
+      recoveries: [{ destinationAccountId: cash.id, amount: 600000 }],
     });
     await createContinuousCost({
       name: '未来開始の項目',
@@ -506,7 +506,7 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
     await archiveMonthlyCost({
       id: item.id,
       endDate: '2024-06-30',
-      recovery: { destinationAccountId: cash.id, amount: 600000 },
+      recoveries: [{ destinationAccountId: cash.id, amount: 600000 }],
     });
 
     await renderReady({ mode: 'date', date: '2024-05-31' });
@@ -528,9 +528,14 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
     );
     // 表示と操作の両方が同じ全知識を使うため、値は変わらない。
     expect(within(dialog).getByText('残存価値').closest('.kv')).toHaveTextContent('1,200');
+    // 回収額の既定もその同じ残存価値（シート内で計算し直さない）。
     expect(
-      document.querySelector(`[data-ui="${UI.allocations.archiveTransfer}"]`),
-    ).toBeInTheDocument();
+      (
+        document.querySelector(
+          `[data-ui="${UI.allocations.archiveRecoveryAmount}"]`,
+        ) as HTMLInputElement
+      ).value,
+    ).toBe('1200');
   });
 });
 
@@ -604,8 +609,59 @@ describe('導出 item カード（未起票周期・表示専用）', () => {
   });
 });
 
-describe('アーカイブ動線', () => {
-  it('振替せずアーカイブ = 終了日だけ設定される（既定 = 今日）', async () => {
+/*
+ * アーカイブシート（終了日 + 回収 + 残りの扱いを 1 枚で決める・2026-08-15）。
+ * 旧「終了日ダイアログ → 振替シート」の 2 段構えは無い。
+ */
+describe('アーカイブシート', () => {
+  /** 1,200,000 を 12 刻み（各 100,000）で割り切る item。回収前の残存価値は 600,000。 */
+  async function seedEvenItem() {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    const item = await createContinuousCost({
+      name: '割り切れる項目',
+      amount: 1200000,
+      startDate: '2026-01-01',
+      endDate: '2027-01-01',
+      expenseAccountId: expense.id,
+      creditAccountId: cash.id,
+    });
+    return { item, cash, expense };
+  }
+
+  function sheet(): HTMLElement {
+    return document.querySelector(`[data-ui="${UI.allocations.archiveDialog}"]`) as HTMLElement;
+  }
+  function dateInput(): HTMLInputElement {
+    return document.querySelector(`[data-ui="${UI.allocations.archiveDate}"]`) as HTMLInputElement;
+  }
+  function recoveryInput(): HTMLInputElement {
+    return document.querySelector(
+      `[data-ui="${UI.allocations.archiveRecoveryAmount}"]`,
+    ) as HTMLInputElement;
+  }
+  function remainderRadio(mode: 'spread' | 'expense'): HTMLInputElement {
+    const dataUi =
+      mode === 'spread'
+        ? UI.allocations.archiveRemainderSpread
+        : UI.allocations.archiveRemainderExpense;
+    return document.querySelector(`[data-ui="${dataUi}"]`) as HTMLInputElement;
+  }
+  async function openSheet(name: string) {
+    fireEvent.click(await screen.findByRole('button', { name: `アーカイブ: ${name}` }));
+    await waitFor(() => expect(sheet()).toBeInTheDocument());
+  }
+  function save() {
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.archiveConfirm}"]`)!);
+  }
+  async function recoveriesOf(itemId: string) {
+    return (await loadLedger()).journalEntries.filter(
+      (e) => e.metadata?.monthlyCostRecovery === true && e.metadata.monthlyCostId === itemId,
+    );
+  }
+
+  it('回収 0 でアーカイブ = 終了日だけ設定される（既定 = 今日・按分が既定）', async () => {
     const ledger = await loadLedger();
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
     const item = await createContinuousCost({
@@ -617,82 +673,147 @@ describe('アーカイブ動線', () => {
     });
 
     await renderReady();
-    fireEvent.click(await screen.findByRole('button', { name: `アーカイブ: ${item.name}` }));
-
-    const dateInput = document.querySelector(
-      `[data-ui="${UI.allocations.archiveDate}"]`,
-    ) as HTMLInputElement;
-    // 未終了の項目のアーカイブ既定日 = 今日。
-    expect(dateInput.value).toBe(todayLocal());
-    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.archiveConfirm}"]`)!);
+    await openSheet(item.name);
+    // 未終了の項目のアーカイブ既定日 = 今日。残りの扱いの既定は「期間に割り振る」。
+    expect(dateInput().value).toBe(todayLocal());
+    expect(remainderRadio('spread').checked).toBe(true);
+    // 回収額を 0 にすると回収先ピッカーは消える（作る仕訳が無いので選ばせない）。
+    fireEvent.change(recoveryInput(), { target: { value: '0' } });
+    expect(
+      document.querySelector(`[data-ui="${UI.allocations.archiveRecoveryTo}"]`),
+    ).not.toBeInTheDocument();
+    save();
 
     await waitFor(async () => {
       const after = (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id);
       expect(after?.endDate).toBe(todayLocal());
-      // 回収の振替は作られていない。
-      const recoveries = (await loadLedger()).journalEntries.filter(
-        (e) => e.metadata?.monthlyCostRecovery === true,
-      );
-      expect(recoveries).toHaveLength(0);
     });
+    expect(await recoveriesOf(item.id)).toHaveLength(0);
   });
 
-  it('残存価値が残るときはホームの振替と同じシートで回収し、既定値 = 残存価値・振替元は台帳に固定', async () => {
-    const ledger = await loadLedger();
-    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
-    // 終了日なし = 残存価値は全額（60,000）。
-    const item = await createContinuousCost({
-      name: '売る項目',
-      amount: 6000000,
-      startDate: '2026-01-01',
-      expenseAccountId: expense.id,
-    });
+  it('回収額の既定 = その終了日時点の残存価値。終了日を変えると既定が追従する', async () => {
+    const { item } = await seedEvenItem();
 
     await renderReady();
-    fireEvent.click(await screen.findByRole('button', { name: `アーカイブ: ${item.name}` }));
+    await openSheet(item.name);
+    // 既定日（今日 = 2026-08-15 相当）ではなく、明示した終了日での残存価値を出す。
+    fireEvent.change(dateInput(), { target: { value: '2026-07-01' } });
+    // 2026-02-01〜07-01 の 6 刻み（各 1,000）が済み、残り 6,000。
+    expect(recoveryInput().value).toBe('6000');
+    fireEvent.change(dateInput(), { target: { value: '2026-04-01' } });
+    // 3 刻み済みなら残り 9,000。手で触っていないので既定が追従する。
+    expect(recoveryInput().value).toBe('9000');
+    // 手で直した後は終了日を動かしても上書きしない（判定はフラグではなく値）。
+    fireEvent.change(recoveryInput(), { target: { value: '1234' } });
+    fireEvent.change(dateInput(), { target: { value: '2026-07-01' } });
+    expect(recoveryInput().value).toBe('1234');
+  });
 
-    const dialog = document.querySelector(`[data-ui="${UI.allocations.archiveDialog}"]`)!;
-    expect(dialog).toHaveTextContent('残存価値');
-    const transferButton = document.querySelector(`[data-ui="${UI.allocations.archiveTransfer}"]`)!;
-    expect(transferButton).toBeInTheDocument();
-    fireEvent.click(transferButton);
+  it('回収先を選んで 1 枚で保存する（終了日 + 回収の振替が同じ操作）', async () => {
+    const { item, cash } = await seedEvenItem();
 
-    // ホームの振替と同じシート（EntrySheet transfer 再利用）。金額の既定 = 残存価値・編集可。
-    const amountInput = await waitFor(() => {
-      const found = document.querySelector(
-        `[data-ui="${UI.journal.entry.amount}"]`,
-      ) as HTMLInputElement | null;
-      expect(found).toBeInTheDocument();
-      return found!;
-    });
-    expect(amountInput.value).toBe('60000');
-    // 振替元（貸方）は台帳に固定 = ピッカーが無い。振替先だけ選ぶ。
-    expect(
-      document.querySelector(`[data-ui="${UI.journal.entry.flowSource}"]`),
-    ).not.toBeInTheDocument();
-    fireEvent.change(amountInput, { target: { value: '30000' } });
-    const destination = document.querySelector(
-      `[data-ui="${UI.journal.entry.flowDestination}"]`,
+    await renderReady();
+    await openSheet(item.name);
+    fireEvent.change(dateInput(), { target: { value: '2026-07-01' } });
+    fireEvent.change(recoveryInput(), { target: { value: '2000' } });
+    const picker = document.querySelector(
+      `[data-ui="${UI.allocations.archiveRecoveryTo}"]`,
     ) as HTMLElement;
-    // 回収先は簿記編集と同じく費用カテゴリも選べる。
-    fireEvent.click(within(destination).getByRole('radio', { name: expense.name }));
-    fireEvent.click(document.querySelector(`[data-ui="${UI.journal.entry.save}"]`)!);
+    // 回収先は費用カテゴリを出さない（保存境界が item の費用の行き先以外を拒否するため）。
+    expect(within(picker).queryByRole('radio', { name: '娯楽費' })).not.toBeInTheDocument();
+    fireEvent.click(within(picker).getByRole('radio', { name: cash.name }));
+    save();
 
     await waitFor(async () => {
-      const after = await loadLedger();
-      const saved = after.monthlyCostItems.find((m) => m.id === item.id);
-      expect(saved?.endDate).toBe(todayLocal());
-      const recovery = after.journalEntries.find(
-        (e) => e.metadata?.monthlyCostRecovery === true && e.metadata.monthlyCostId === item.id,
-      );
-      expect(recovery).toBeDefined();
-      const debit = recovery!.lines.find((l) => l.side === 'debit')!;
-      const credit = recovery!.lines.find((l) => l.side === 'credit')!;
-      expect(debit.accountId).toBe(expense.id);
-      expect(credit.accountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
-      expect(credit.amount).toBe(3000000);
+      const saved = (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id);
+      expect(saved?.endDate).toBe('2026-07-01');
       // 金額は絶対に変更しない（購入の仕訳とのミラー維持）。
-      expect(saved?.amount).toBe(6000000);
+      expect(saved?.amount).toBe(1200000);
     });
+    const recoveries = await recoveriesOf(item.id);
+    expect(recoveries).toHaveLength(1);
+    expect(recoveries[0]!.date).toBe('2026-07-01');
+    expect(recoveries[0]!.lines).toEqual([
+      { accountId: cash.id, side: 'debit', amount: 200000 },
+      { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'credit', amount: 200000 },
+    ]);
+  });
+
+  it('「終了日に全額費用にする」= 残り全額の第 2 振替が費用の行き先へ立つ', async () => {
+    const { item, expense } = await seedEvenItem();
+
+    await renderReady();
+    await openSheet(item.name);
+    fireEvent.change(dateInput(), { target: { value: '2026-07-01' } });
+    fireEvent.change(recoveryInput(), { target: { value: '0' } });
+    fireEvent.click(remainderRadio('expense'));
+    save();
+
+    await waitFor(async () => {
+      expect(await recoveriesOf(item.id)).toHaveLength(1);
+    });
+    const [second] = await recoveriesOf(item.id);
+    // 借方 = item の費用の行き先・金額 = 残存価値（6,000）・日付 = 終了日。
+    expect(second!.date).toBe('2026-07-01');
+    expect(second!.lines).toEqual([
+      { accountId: expense.id, side: 'debit', amount: 600000 },
+      { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'credit', amount: 600000 },
+    ]);
+  });
+
+  it('部分回収 + 「終了日に全額」= 資産へ R・費用へ（残存 − R）の 2 本を 1 tx で', async () => {
+    const { item, cash, expense } = await seedEvenItem();
+
+    await renderReady();
+    await openSheet(item.name);
+    fireEvent.change(dateInput(), { target: { value: '2026-07-01' } });
+    fireEvent.change(recoveryInput(), { target: { value: '2000' } });
+    fireEvent.click(
+      within(
+        document.querySelector(`[data-ui="${UI.allocations.archiveRecoveryTo}"]`) as HTMLElement,
+      ).getByRole('radio', { name: cash.name }),
+    );
+    fireEvent.click(remainderRadio('expense'));
+    save();
+
+    await waitFor(async () => {
+      expect(await recoveriesOf(item.id)).toHaveLength(2);
+    });
+    const recoveries = await recoveriesOf(item.id);
+    expect(
+      recoveries
+        .map((e) => `${e.lines.find((l) => l.side === 'debit')!.accountId}:${e.lines[0]!.amount}`)
+        .sort(),
+    ).toEqual([`${cash.id}:200000`, `${expense.id}:400000`].sort());
+  });
+
+  it('残り 0（ちょうど回収）・超過回収では「終了日に全額」を選べない', async () => {
+    const { item, cash } = await seedEvenItem();
+
+    await renderReady();
+    await openSheet(item.name);
+    fireEvent.change(dateInput(), { target: { value: '2026-07-01' } });
+    // 既定 = 残存価値ちょうど → 残り 0。
+    expect(recoveryInput().value).toBe('6000');
+    expect(remainderRadio('expense').disabled).toBe(true);
+    // 超過回収（残りが負 = 過去にわたる費用減）でも選べない。
+    fireEvent.change(recoveryInput(), { target: { value: '9000' } });
+    expect(remainderRadio('expense').disabled).toBe(true);
+    // 一部だけ回収すれば選べる。
+    fireEvent.change(recoveryInput(), { target: { value: '2000' } });
+    expect(remainderRadio('expense').disabled).toBe(false);
+
+    // 超過回収は従来どおり保存できる（回収額に上限は無い）。
+    fireEvent.change(recoveryInput(), { target: { value: '9000' } });
+    fireEvent.click(
+      within(
+        document.querySelector(`[data-ui="${UI.allocations.archiveRecoveryTo}"]`) as HTMLElement,
+      ).getByRole('radio', { name: cash.name }),
+    );
+    save();
+    await waitFor(async () => {
+      expect(await recoveriesOf(item.id)).toHaveLength(1);
+    });
+    expect((await recoveriesOf(item.id))[0]!.lines[0]!.amount).toBe(900000);
   });
 });

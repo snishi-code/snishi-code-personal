@@ -537,7 +537,7 @@ describe('継続コスト資産の整合性（購入の仕訳・削除・不変�
     await archiveMonthlyCost({
       id: item.id,
       endDate: '2026-09-30',
-      recovery: { destinationAccountId: cash.id, amount: 3000 },
+      recoveries: [{ destinationAccountId: cash.id, amount: 3000 }],
     });
     await deleteMonthlyCost(item.id);
     const after = await loadLedger();
@@ -1488,7 +1488,7 @@ describe('継続コスト資産の後編集（upsertMonthlyCost 保存境界）'
     await archiveMonthlyCost({
       id: item.id,
       endDate: '2026-12-31',
-      recovery: { destinationAccountId: cash.id, amount: 3000 },
+      recoveries: [{ destinationAccountId: cash.id, amount: 3000 }],
     });
     await upsertMonthlyCost({ ...item, amount: 24000, updatedAt: 'y2' });
     const after = await loadLedger();
@@ -1574,7 +1574,7 @@ describe('継続コスト資産のアーカイブ（archiveMonthlyCost = 終了�
     await archiveMonthlyCost({
       id: item.id,
       endDate: '2026-06-15',
-      recovery: { destinationAccountId: bank.id, amount: 30000 },
+      recoveries: [{ destinationAccountId: bank.id, amount: 30000 }],
     });
     const after = await loadLedger();
     expect(after.monthlyCostItems.find((m) => m.id === item.id)?.endDate).toBe('2026-06-15');
@@ -1604,7 +1604,7 @@ describe('継続コスト資産のアーカイブ（archiveMonthlyCost = 終了�
     await archiveMonthlyCost({
       id: item.id,
       endDate: '2026-06-15',
-      recovery: { destinationAccountId: bank.id, amount: 300000 },
+      recoveries: [{ destinationAccountId: bank.id, amount: 300000 }],
     });
     const after = await loadLedger();
     const derived = reportEntriesForAsOf(after, '2026-12-31');
@@ -1633,14 +1633,15 @@ describe('継続コスト資産のアーカイブ（archiveMonthlyCost = 終了�
       archiveMonthlyCost({
         id: item.id,
         endDate: '2026-06-15',
-        recovery: { destinationAccountId: 'no-such-account', amount: 100 },
+        recoveries: [{ destinationAccountId: 'no-such-account', amount: 100 }],
       }),
     ).rejects.toMatchObject({ code: 'error.monthlyCost.recoveryDestination' });
-    // 費用カテゴリも簿記編集の振替先として許可する。
+    // 費用カテゴリのうち **item の費用の行き先** だけは振替先にできる
+    //（= 「終了日に全額費用にする」の第 2 振替）。
     await archiveMonthlyCost({
       id: item.id,
       endDate: '2026-06-15',
-      recovery: { destinationAccountId: food.id, amount: 100 },
+      recoveries: [{ destinationAccountId: food.id, amount: 100 }],
     });
     const recovery = (await loadLedger()).journalEntries.find(
       (entry) => entry.metadata?.monthlyCostRecovery === true,
@@ -1651,12 +1652,104 @@ describe('継続コスト資産のアーカイブ（archiveMonthlyCost = 終了�
     ).rejects.toMatchObject({ code: 'error.monthlyCost.notFound' });
   });
 
+  /** 同日刻みがちょうど割り切れる item（1,200,000 を 12 刻み = 各 100,000）。 */
+  async function setupEven() {
+    const ledger = await loadLedger();
+    const bank = ledger.accounts.find((a) => a.name === '預金')!;
+    const food = ledger.accounts.find((a) => a.name === '変動費')!;
+    const item = await createContinuousCost({
+      name: '割り切れる項目',
+      amount: 1200000,
+      startDate: '2026-01-01',
+      endDate: '2027-01-01',
+      expenseAccountId: food.id,
+      creditAccountId: bank.id,
+    });
+    return { item, bank, food };
+  }
+
+  /** その item の計算で生まれた月割り行（刻み）。 */
+  function cutsOf(derived: JournalEntry[], itemId: string) {
+    return derived.filter(
+      (e) => e.metadata?.continuousCostId === itemId && e.metadata?.ccKind === 'monthly-allocation',
+    );
+  }
+
+  it('「終了日に全額費用にする」= 費用の行き先への第 2 の回収の振替（過去の刻みは元の額のまま）', async () => {
+    const { item, food } = await setupEven();
+    // 2026-07-01 で終了 = 同日刻み 2026-02-01〜07-01 の 6 本（各 100,000）が消費済み。
+    // 残り 600,000 を終了日に 1 本で費用にする（= 割り振る総額が消費済み額へ落ちる）。
+    await archiveMonthlyCost({
+      id: item.id,
+      endDate: '2026-07-01',
+      recoveries: [{ destinationAccountId: food.id, amount: 600000 }],
+    });
+    const after = await loadLedger();
+    const second = after.journalEntries.find((e) => e.metadata?.monthlyCostRecovery === true)!;
+    expect(second.date).toBe('2026-07-01');
+    expect(second.lines).toEqual([
+      { accountId: food.id, side: 'debit', amount: 600000 },
+      { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'credit', amount: 600000 },
+    ]);
+    const derived = reportEntriesForAsOf(after, '2027-12-31');
+    const cuts = cutsOf(derived, item.id);
+    // 過去の刻みは本数も額も変わらない（新しい数学は入れていない）。
+    expect(cuts).toHaveLength(6);
+    expect(cuts.map((e) => e.lines[0]?.amount)).toEqual(Array(6).fill(100000));
+    // 費用の総額は購入額のまま・台帳は 0 で閉じる。
+    expect(accountBalance(food.id, 'expense', derived)).toBe(1200000);
+    expect(accountBalance(CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 'asset', derived)).toBe(0);
+  });
+
+  it('部分回収 + 「終了日に全額」: 資産へ R・費用へ（残存 − R）・過去の刻みは不変', async () => {
+    const { item, bank, food } = await setupEven();
+    await archiveMonthlyCost({
+      id: item.id,
+      endDate: '2026-07-01',
+      recoveries: [
+        { destinationAccountId: bank.id, amount: 200000 },
+        { destinationAccountId: food.id, amount: 400000 },
+      ],
+    });
+    const after = await loadLedger();
+    const recoveries = after.journalEntries.filter((e) => e.metadata?.monthlyCostRecovery === true);
+    expect(recoveries).toHaveLength(2);
+    expect(
+      recoveries
+        .map((e) => `${e.lines.find((l) => l.side === 'debit')!.accountId}:${e.lines[0]!.amount}`)
+        .sort(),
+    ).toEqual([`${bank.id}:200000`, `${food.id}:400000`].sort());
+    const derived = reportEntriesForAsOf(after, '2027-12-31');
+    expect(cutsOf(derived, item.id).map((e) => e.lines[0]?.amount)).toEqual(Array(6).fill(100000));
+    // 費用 = 導出 600,000 + 第 2 振替 400,000。回収した 200,000 は預金へ戻る。台帳は 0。
+    expect(accountBalance(food.id, 'expense', derived)).toBe(1000000);
+    expect(accountBalance(CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 'asset', derived)).toBe(0);
+  });
+
+  it('回収先は item の費用の行き先**以外**の費用科目を拒否する（保存境界の fail-closed）', async () => {
+    const { item, food } = await setupEven();
+    const other = (await loadLedger()).accounts.find(
+      (a) => a.role === 'expense-category' && a.id !== food.id,
+    )!;
+    await expect(
+      archiveMonthlyCost({
+        id: item.id,
+        endDate: '2026-07-01',
+        recoveries: [{ destinationAccountId: other.id, amount: 100 }],
+      }),
+    ).rejects.toMatchObject({ code: 'error.monthlyCost.recoveryDestination' });
+    // 終了日も回収も一切書かれていない（多段でも atomic）。
+    const after = await loadLedger();
+    expect(after.monthlyCostItems.find((m) => m.id === item.id)?.endDate).toBe('2027-01-01');
+    expect(after.journalEntries.some((e) => e.metadata?.monthlyCostRecovery === true)).toBe(false);
+  });
+
   it('回収の振替は普通の振替として編集・削除できる', async () => {
     const { item, bank } = await setup();
     await archiveMonthlyCost({
       id: item.id,
       endDate: '2026-06-15',
-      recovery: { destinationAccountId: bank.id, amount: 30000 },
+      recoveries: [{ destinationAccountId: bank.id, amount: 30000 }],
     });
     const ledger = await loadLedger();
     const recovery = ledger.journalEntries.find((e) => e.metadata?.monthlyCostRecovery === true)!;
