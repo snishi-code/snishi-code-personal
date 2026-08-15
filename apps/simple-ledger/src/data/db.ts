@@ -16,7 +16,7 @@ export const STORE = {
   kv: 'kv', // meta / settings の単一レコード置き場（out-of-line key）
   accounts: 'accounts',
   journalEntries: 'journalEntries',
-  tags: 'tags',
+  tags: 'tags', // タグ機能は撤去済み（2026-08-15）。受理のみ = 旧ストア温存の方針で残す
   monthlyCostItems: 'monthlyCostItems',
   recurringRules: 'recurringRules', // 定期ルール（v2 で追加）
   snapshots: 'snapshots',

@@ -39,7 +39,10 @@ export interface SimpleEntryInput {
   memo?: string;
   kind?: JournalEntryKind;
   metadata?: EntryMetadata;
-  /** 仕訳全体タグ（イベント/目的ラベル）。 */
+  /**
+   * @deprecated タグ機能は撤去済み（2026-08-15）。UI から値が入る経路は無いが、
+   * import 済みデータを編集しても消えないよう素通しだけ残す。
+   */
   tagIds?: string[];
 }
 
@@ -138,7 +141,7 @@ export function reversalInput(source: JournalEntry): SimpleEntryInput {
     creditAccountId: debit?.accountId ?? '',
     amount: debit?.amount ?? credit?.amount ?? 0,
     kind: 'normal',
-    // 仕訳全体タグは引き継ぐ（タグ別集計に取消を反映させるため）。
+    // タグは撤去済み。import 済みデータの値だけを素通しで引き継ぐ（黙って消さない）。
     ...(source.tagIds?.length ? { tagIds: source.tagIds } : {}),
     metadata: {
       inputMode: 'reversal',

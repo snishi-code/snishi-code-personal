@@ -19,7 +19,6 @@ import {
   upsertEntry,
   upsertMonthlyCost,
   upsertRecurringRule,
-  upsertTag,
 } from '../src/data/repository';
 import { buildExportPackage, exportToJsonText, importFromJsonText } from '../src/data/exportImport';
 import { getAll, getKv, putKv, putRecord, wipeDatabase, STORE } from '../src/data/db';
@@ -203,26 +202,12 @@ describe('P1-5: revision CAS（別タブの並行変更を検出して abort す
     const meta = (await getKv<LedgerMeta>('meta'))!;
     await putKv('meta', { ...meta, revision: meta.revision + 1 });
     await expect(
-      upsertTag({
-        id: 'tag-cas',
-        name: '競合テスト',
-        scope: 'entry',
-        archived: false,
-        createdAt: 'x',
-        updatedAt: 'x',
-      }),
+      upsertAccount(makeAccount({ id: 'acc-cas', name: '競合テスト' })),
     ).rejects.toMatchObject({ code: 'error.common.staleData' });
     // 再読み込み（loadLedger）でトラッカが追従すれば保存できる。
     await loadLedger();
     await expect(
-      upsertTag({
-        id: 'tag-cas',
-        name: '競合テスト',
-        scope: 'entry',
-        archived: false,
-        createdAt: 'x',
-        updatedAt: 'x',
-      }),
+      upsertAccount(makeAccount({ id: 'acc-cas', name: '競合テスト' })),
     ).resolves.toBeUndefined();
   });
 });
@@ -601,14 +586,7 @@ describe('P2-5: DB 全消去は onsuccess だけを成功扱いにする', () =>
 describe('再監査対応: import は全置換後に revision を必ず進める', () => {
   it('置換後 revision = max(現行, 封筒) + 1。同じ封筒の再取込は conflict になり force で通る', async () => {
     await loadLedger();
-    await upsertTag({
-      id: 'tag-rev',
-      name: '再監査',
-      scope: 'entry',
-      archived: false,
-      createdAt: 'x',
-      updatedAt: 'x',
-    });
+    await upsertAccount(makeAccount({ id: 'acc-rev', name: '再監査' }));
     const ledger = await loadLedger();
     const before = ledger.meta.revision;
     const text = exportToJsonText(ledger);
@@ -625,14 +603,7 @@ describe('再監査対応: import は全置換後に revision を必ず進める
 
   it('事前snapshot後に別操作が保存されたら、全置換をCASで拒否して更新を残す', async () => {
     const snapshot = await loadLedger();
-    await upsertTag({
-      id: 'tag-after-snapshot',
-      name: 'snapshot後の更新',
-      scope: 'entry',
-      archived: false,
-      createdAt: 'x',
-      updatedAt: 'x',
-    });
+    await upsertAccount(makeAccount({ id: 'acc-after-snapshot', name: 'snapshot後の更新' }));
 
     await expect(
       replaceLedger(
@@ -649,7 +620,9 @@ describe('再監査対応: import は全置換後に revision を必ず進める
       ),
     ).rejects.toMatchObject({ code: 'error.common.staleData' });
 
-    expect((await loadLedger()).tags.some((tag) => tag.id === 'tag-after-snapshot')).toBe(true);
+    expect(
+      (await loadLedger()).accounts.some((account) => account.id === 'acc-after-snapshot'),
+    ).toBe(true);
   });
 
   it('全初期化で revision が同値へ戻っても、deviceId の世代差で古い全置換を拒否する', async () => {
@@ -683,16 +656,11 @@ describe('再監査対応: import は全置換後に revision を必ず進める
     await loadLedger();
 
     await expect(
-      upsertTag({
-        id: 'tag-overflow',
-        name: '上限',
-        scope: 'entry',
-        archived: false,
-        createdAt: 'x',
-        updatedAt: 'x',
-      }),
+      upsertAccount(makeAccount({ id: 'acc-overflow', name: '上限' })),
     ).rejects.toMatchObject({ code: 'error.common.revisionExhausted' });
-    expect(await getAll(STORE.tags)).toHaveLength(0);
+    expect((await getAll<Account>(STORE.accounts)).some((a) => a.id === 'acc-overflow')).toBe(
+      false,
+    );
   });
 
   it('safe integer を超える封筒 revision は schema で拒否する', async () => {
@@ -714,14 +682,7 @@ describe('再監査対応: 起動時 catch-up（loadLedger 前）でも CAS の�
     const meta = (await getKv<LedgerMeta>('meta'))!;
     await putKv('meta', { ...meta, revision: meta.revision + 1 }); // 別タブの書込みを模す
     await expect(
-      upsertTag({
-        id: 'tag-boot-cas',
-        name: '起動競合',
-        scope: 'entry',
-        archived: false,
-        createdAt: 'x',
-        updatedAt: 'x',
-      }),
+      upsertAccount(makeAccount({ id: 'acc-boot-cas', name: '起動競合' })),
     ).rejects.toMatchObject({ code: 'error.common.staleData' });
   });
 });
@@ -730,59 +691,36 @@ describe('再監査対応: 同一タブの変更操作を事前読込から直�
   it('同時に開始した2保存を順に検証・保存し、後続を stale tracker へ乗せ替えない', async () => {
     const before = await loadLedger();
     const results = await Promise.allSettled([
-      upsertTag({
-        id: 'tag-serial-a',
-        name: '直列A',
-        scope: 'entry',
-        archived: false,
-        createdAt: 'x',
-        updatedAt: 'x',
-      }),
-      upsertTag({
-        id: 'tag-serial-b',
-        name: '直列B',
-        scope: 'entry',
-        archived: false,
-        createdAt: 'x',
-        updatedAt: 'x',
-      }),
+      upsertAccount(makeAccount({ id: 'acc-serial-a', name: '直列A' })),
+      upsertAccount(makeAccount({ id: 'acc-serial-b', name: '直列B' })),
     ]);
 
     expect(results.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
     const after = await loadLedger();
     expect(after.meta.revision).toBe(before.meta.revision + 2);
-    expect(after.tags.map((tag) => tag.id).sort()).toEqual(['tag-serial-a', 'tag-serial-b']);
+    expect(
+      after.accounts
+        .map((account) => account.id)
+        .filter((id) => id.startsWith('acc-serial-'))
+        .sort(),
+    ).toEqual(['acc-serial-a', 'acc-serial-b']);
   });
 
-  it('同名タグの同時作成は先行結果を見て再検証し、後続だけを拒否する', async () => {
+  it('同名科目の同時作成は先行結果を見て再検証し、後続だけを拒否する', async () => {
     const before = await loadLedger();
     const results = await Promise.allSettled([
-      upsertTag({
-        id: 'tag-same-name-a',
-        name: '同時作成',
-        scope: 'entry',
-        archived: false,
-        createdAt: 'x',
-        updatedAt: 'x',
-      }),
-      upsertTag({
-        id: 'tag-same-name-b',
-        name: '同時作成',
-        scope: 'entry',
-        archived: false,
-        createdAt: 'x',
-        updatedAt: 'x',
-      }),
+      upsertAccount(makeAccount({ id: 'acc-same-name-a', name: '同時作成' })),
+      upsertAccount(makeAccount({ id: 'acc-same-name-b', name: '同時作成' })),
     ]);
 
     expect(results[0]?.status).toBe('fulfilled');
     expect(results[1]).toMatchObject({
       status: 'rejected',
-      reason: { code: 'error.tag.duplicateName' },
+      reason: { code: 'error.account.nameConflict' },
     });
     const after = await loadLedger();
     expect(after.meta.revision).toBe(before.meta.revision + 1);
-    expect(after.tags.filter((tag) => tag.name === '同時作成')).toHaveLength(1);
+    expect(after.accounts.filter((account) => account.name === '同時作成')).toHaveLength(1);
   });
 });
 

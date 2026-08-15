@@ -26,7 +26,6 @@ import { Money } from '../money';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import { todayLocal } from '../../util/time';
-import { entryHasTag } from '../../domain/tags';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
 import { entryOpenPlan } from '../entryOpen';
 import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
@@ -41,7 +40,6 @@ import {
   isContinuousCostMonthlyAllocationEntry,
   isNormalExpenseEntry,
 } from '../../domain/livingCost';
-import { tagNames } from '../tagOptions';
 import type { AllocationsTarget } from './Allocations';
 import type { Account, JournalEntry } from '../../domain/types';
 import { formatMoney } from '../../util/format';
@@ -132,7 +130,6 @@ export function Journal({
     filter ? (filter.to ?? '') : (periodRange(period)?.to ?? ''),
   );
   const [showFuture, setShowFuture] = useState(false);
-  const [tagFilter, setTagFilter] = useState('');
   // 表示専用の並び替え（既定 = 日付降順・従来の並びそのもの）。データ・保存には影響しない。
   const [sortKey, setSortKey] = useState<ListSortAxisKey>('date');
   const [sortDirection, setSortDirection] = useState<SortDirection>(SORT_DEFAULT_DIRECTION.date);
@@ -175,8 +172,6 @@ export function Journal({
   const digits = useMoneyDigits();
   const filterAccount = accountFilterId ? map.get(accountFilterId) : undefined;
 
-  const allTags = ledger?.tags ?? [];
-
   // どこまで展開するか = いま表示している範囲そのもの。
   //  - to があればそこまで / 無ければ今日まで / 「将来予定も表示」は保存仕訳の最も遠い日付まで
   //    （返済の未来仕訳がそこまである。データで決まるので上限が青天井にならない）。
@@ -208,7 +203,6 @@ export function Journal({
     return source.filter((e) => {
       if (accountFilterId && !e.lines.some((l) => l.accountId === accountFilterId)) return false;
       if (normalExpenseOnly && !isNormalExpenseEntry(e, map)) return false;
-      if (tagFilter && !entryHasTag(e, tagFilter)) return false;
       if (from && e.date < from) return false;
       if (to && e.date > to) return false;
       // 検索対象 = 摘要・メモ + 借方/貸方の勘定科目名（「食費」で検索 → 食費が絡む仕訳が出る）。
@@ -216,7 +210,7 @@ export function Journal({
       const accountNames = e.lines.map((l) => map.get(l.accountId)?.name ?? '').join(' ');
       return matchesQuery([e.description, e.memo, accountNames], query);
     });
-  }, [source, query, from, to, accountFilterId, normalExpenseOnly, tagFilter, map]);
+  }, [source, query, from, to, accountFilterId, normalExpenseOnly, map]);
 
   // 表示専用の並び替え（C-4）。filtered は基準順（日付降順・同日は登録の新しい順・同時刻は
   // id 昇順）なので、安定ソートにより同値（同日・同額・同摘要）の並びは必ず基準順を保つ。
@@ -305,30 +299,6 @@ export function Journal({
             placeholder={t('journal.searchPlaceholder')}
             dataUi={UI.journal.search}
           />
-          {allTags.length > 0 ? (
-            <>
-              <label className="sr-only" htmlFor="journal-tag">
-                {t('journal.filterTag')}
-              </label>
-              <select
-                id="journal-tag"
-                className="select"
-                value={tagFilter}
-                aria-label={t('journal.filterTag')}
-                onChange={(e) => setTagFilter(e.target.value)}
-                data-ui={UI.journal.filterTag}
-              >
-                <option value="">{t('journal.allTags')}</option>
-                {allTags
-                  .filter((tg) => !tg.archived || tg.id === tagFilter)
-                  .map((tg) => (
-                    <option key={tg.id} value={tg.id}>
-                      {tg.name}
-                    </option>
-                  ))}
-              </select>
-            </>
-          ) : null}
         </div>
         <div className="toolbar">
           <label className="sr-only" htmlFor="journal-from">
@@ -479,7 +449,6 @@ export function Journal({
                         : plan.kind === 'opening'
                           ? () => setEditingOpening(entry)
                           : () => onEditEntry(entry);
-            const entryTagNames = tagNames(allTags, entry.tagIds);
             const title = (
               <>
                 <div className="list__title">
@@ -500,15 +469,6 @@ export function Journal({
                 <div className="list__sub">
                   {entry.date}・{flowText(map, entry)}
                 </div>
-                {entryTagNames.length > 0 ? (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-                    {entryTagNames.map((n) => (
-                      <span key={`e-${n}`} className="tag tag--teal">
-                        {n}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
               </>
             );
             return (

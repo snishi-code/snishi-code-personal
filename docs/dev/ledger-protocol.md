@@ -7,7 +7,8 @@
 
 - **実行時の正本 = IndexedDB**（`DB_NAME = "simple-ledger-v2"`）。ストア:
   `kv`（meta / settings）、`accounts`、`journalEntries`、
-  `tags`、`monthlyCostItems`、`recurringRules`、`snapshots`
+  `tags`（タグ機能は 2026-08-15 に撤去。受理のみ = 旧ストア温存の方針で残す）、
+  `monthlyCostItems`、`recurringRules`、`snapshots`
   （v7 で `cashflowSchedules` を全廃。「予定」= 未来日付の通常仕訳）。
 - **公式交換形式 = JSON**（端末間共有・バックアップ）。JSON をDB代わりに常用しない。
 - **計算で生まれる仕訳は保存しない**: 継続コスト資産の費用の行・ルールの未来投影は
@@ -33,7 +34,7 @@
     /* JournalEntry[]（保存される仕訳のみ。未来日付の仕訳 = 「予定」もここに入る） */
   ],
   "tags": [
-    /* Tag[]（分析タグ） */
+    /* Tag[]（撤去済み・受理のみ。作る経路は無く、実データは常に []） */
   ],
   "monthlyCostItems": [
     /* MonthlyCostItem[]（継続コスト資産） */
@@ -149,9 +150,12 @@
 〔`RECURRING_POSTABLE_ROLES`〕を置ける）。トグル OFF のルールは行き先へ直接起票する。
 保存形はこの二形だけ。
 
-### `Tag`（分析タグ）
+### `Tag`（撤去済み・受理のみ）
 
-`id` / `name` / `scope`（`'entry'` のみ＝仕訳全体。明細タグは廃止）/ `color?` / `archived`。
+`id` / `name` / `scope`（`'entry'` のみ）/ `color?` / `archived`。
+機能は 2026-08-15 に撤去した（実ユーズ 0 件）。schema は v12 の形を保つため残し、
+import した `tags` / `JournalEntry.tagIds` は**黙って保持して export へ素通し**する。
+新しく値が入る経路は無い。フィールドごとの削除は v13 の版上げに同乗させる。
 
 ### 予定（v7 で専用実体を全廃）
 
@@ -232,7 +236,7 @@ import では strip される）。
   金額の遡及変更、今日での segment 分割、削除時の由来解除は、ルール・仕訳・item・revision を
   単一 readwrite transaction で更新し、途中状態を保存しない。
 - 残高補正: `delta === actualBalance − expectedBalance`・対象/相手科目の存在と形・kind=normal。
-- タグ: id 一意・参照整合。
+- タグ: id 一意・参照整合（機能は撤去済みだが、受理したデータを往復させる以上 v12 のまま守る）。
 
 ### revision の原子性
 

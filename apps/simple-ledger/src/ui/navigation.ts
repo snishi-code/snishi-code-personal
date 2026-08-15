@@ -14,7 +14,6 @@ export type Screen =
   | 'yearlyOverview'
   | 'allocations'
   | 'cashflow'
-  | 'tags'
   | 'accounts'
   | 'settings';
 
@@ -36,8 +35,3 @@ export const NAV_ITEMS: NavItem[] = [
   { screen: 'accounts', labelKey: 'nav.accounts', icon: 'wallet' },
   { screen: 'settings', labelKey: 'nav.settings', icon: 'settings' },
 ];
-
-/**
- * 設定画面「管理」セクションから遷移する補助画面。
- */
-export const MANAGEMENT_ITEMS: NavItem[] = [{ screen: 'tags', labelKey: 'nav.tags', icon: 'tag' }];

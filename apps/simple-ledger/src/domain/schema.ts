@@ -177,7 +177,12 @@ export const journalLineSchema = z.object({
   amount: amountSchema,
 });
 
-// タグは「仕訳全体のみ」。明細・両方 scope は廃止。
+/*
+ * タグ（撤去済み・受理のみ）。
+ * 機能は 2026-08-15 に撤去した（実ユーズ 0 件）。schema は v12 の形を保つため残す:
+ * import は tags / tagIds を**受理して黙って保持**し、export でそのまま往復させる。
+ * フィールドごとの削除は v13 の版上げに同乗させる。
+ */
 export const tagScopeSchema = z.literal('entry');
 
 export const tagSchema = z.object({
@@ -926,7 +931,8 @@ export const ledgerExportPackageSchema = z
       ]);
     }
 
-    // タグ(tags): id 一意 + active な同名重複なし。タグは「仕訳全体のみ」（明細タグは廃止）。
+    // タグ(tags): id 一意 + active な同名重複なし + 参照整合。機能は撤去済みだが、
+    // 受理したデータをそのまま往復させる以上、交換の不変条件は v12 のまま守る。
     const tagIds = new Set<string>();
     const activeNames = new Set<string>();
     pkg.tags.forEach((tag, ti) => {

@@ -9,7 +9,6 @@ export const ja = {
   'nav.allocations': '毎月のもの',
   'nav.cashflow': '資金繰り',
   'nav.timeline': 'タイムライン',
-  'nav.tags': 'タグ',
   'nav.settings': '設定',
   'nav.help': 'ヘルプ',
 
@@ -143,28 +142,6 @@ export const ja = {
   'liability.role.loan': '借入・ローン',
   'liability.error.name': '名称を入力してください。',
 
-  'tags.title': 'タグ',
-  'tags.intro':
-    '勘定科目を増やさずに、旅行・帰省・学会などのイベント/目的で後から抽出できる分析軸です。PL/BS は変わりません。',
-  'tags.add': 'タグを追加',
-  'tags.edit': 'タグを編集',
-  'tags.name': '名称',
-  'tags.namePlaceholder': '例: 2026 北海道旅行 / 帰省 / 学会',
-  'tags.entryOnlyHint':
-    'タグは仕訳全体に付くイベント/目的ラベルです（カード名・銀行名には使いません）。',
-  'tags.archive': 'アーカイブ',
-  'tags.unarchive': 'アーカイブ解除',
-  'tags.archived': 'アーカイブ済み',
-  'tags.delete': '削除',
-  'tags.showArchived': 'アーカイブ済みも表示',
-  'tags.empty': 'タグはありません。「タグを追加」から作成できます。',
-  'tags.noneForScope': '対象のタグがありません。タグ画面で作成できます。',
-  'tags.deleteConfirmTitle': 'タグを削除しますか？',
-  'tags.deleteConfirmBody':
-    '「{name}」を削除します。使用中の場合は削除できません（アーカイブしてください）。',
-  'tags.error.name': '名称を入力してください。',
-  'tags.error.save': 'タグを保存できませんでした。',
-
   'adjust.intro': '実際の残高との差額を、任意の日に補正します（「締め」はありません）。',
   'adjust.account': '対象科目（資産・負債・費用・収入）',
   'adjust.date': '日付',
@@ -203,17 +180,6 @@ export const ja = {
   'opening.error.amount': '初期残高を入力してください（0 は不可）。',
 
   'journal.adjustmentTag': '補正',
-  'tags.summary': 'タグ集計',
-  'tags.period': '対象期間',
-  'tags.entryTags': '全体タグ',
-  'tags.taggedCount': '{count}件',
-  'tags.noTaggedData': 'タグ付きデータがありません。',
-
-  'entry.tags': 'タグ（全体）',
-  'entry.tagsHint': '旅行・イベントなど、仕訳全体に付くタグ（任意）。',
-
-  'journal.filterTag': 'タグで絞り込み',
-  'journal.allTags': 'すべてのタグ',
 
   'journal.title': '仕訳',
   'journal.searchPlaceholder': '摘要・メモで検索',
@@ -282,7 +248,7 @@ export const ja = {
   'entry.error.repayCount': '返済回数は 1〜{max} の整数で入力してください。',
   'entry.source.manual': '左側（貸方）',
   'entry.destination.manual': '右側（借方）',
-  'entry.detailToggle': '詳細（メモ・タグ）',
+  'entry.detailToggle': '詳細（メモ）',
   // 逆仕訳・特殊編集は日常の「詳細」と分け、簿記編集として明示する。
   'entry.manualSwitch': '簿記編集（左→右を直接指定）',
   'entry.noAccounts': '候補の科目がありません。「勘定科目」で追加してください。',
@@ -475,7 +441,6 @@ export const ja = {
     '住宅ローン・分割返済など返済予定を持つ債務です。借入の実行や分割返済の予定は、振替（借入）や継続コスト化の導線から作れます。',
 
   'settings.title': '設定',
-  'settings.manageSection': '管理',
   'settings.dataSection': 'データ',
   'settings.export': 'JSON で書き出し',
   'settings.exportDesc': '台帳を JSON ファイルに書き出します（バックアップ・端末間共有用）。',
@@ -578,9 +543,6 @@ export const ja = {
   'error.entry.invalidStructure': '仕訳の形式が正しくないため保存できません。',
   'error.entry.unknownAccount': '仕訳が存在しない勘定科目を参照しています。',
   'error.entry.accountRoleMismatch': '仕訳の勘定科目の役割と区分が一致していません。',
-  'error.tag.unknown': '存在しないタグを参照しています。',
-  'error.tag.duplicateName': '同じ名前の有効なタグが既にあります。',
-  'error.tag.deleteInUse': 'このタグは使用中のため削除できません。アーカイブしてください。',
   'error.adjust.targetNotFound': '対象科目が見つかりません。',
   'error.adjust.assetLiabilityOnly': '残高補正できるのは資産・負債・費用・収入の科目です。',
   'error.adjust.internalRole':
@@ -699,7 +661,6 @@ export const ja = {
     '1 = カードの次回引落などの単発。毎月同額のローンは {max} 回までまとめて登録できます（合計は返済額に一致）。',
   'cashflow.repayPerMonth': '月あたり約 {amount} × {count} 回',
   'error.repay.countInvalid': '返済回数は 1〜{max} の整数で入力してください。',
-  'error.tag.invalid': 'タグを保存できませんでした（名前は 1〜60 文字で入力してください）。',
   'error.settings.invalid':
     '台帳の設定を保存できませんでした（名前は 1〜120 文字・単位は 1〜8 文字で入力してください）。',
   'error.snapshot.invalid': 'スナップショットの形式が不正です。',

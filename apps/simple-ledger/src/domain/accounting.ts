@@ -199,6 +199,16 @@ export function entryAmount(entry: JournalEntry): number {
   return total;
 }
 
+/**
+ * 仕訳の代表額（2 行前提なので借方額 = 貸方額）。**checked sum を通さない**のが上の
+ * entryAmount との唯一の違い: React の render / useMemo から呼ぶ表示用の値で、
+ * assertSafeAmount が投げると root の ErrorBoundary がアプリ全体を復旧画面へ落とす。
+ * 集計・保存境界の正本は entryAmount（fail-closed）。表示だけがこちらを使う。
+ */
+export function representativeEntryAmount(entry: JournalEntry): number {
+  return entry.lines.find((l) => l.side === 'debit')?.amount ?? entry.lines[0]?.amount ?? 0;
+}
+
 /** 単純和（テキスト抽出視点）: 条件に一致した仕訳の件数と、仕訳ごとの金額（借方合計）の合計。 */
 export function summarizeEntries(
   entries: JournalEntry[],

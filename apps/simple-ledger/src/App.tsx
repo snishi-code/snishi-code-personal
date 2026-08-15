@@ -27,7 +27,6 @@ import { YearlyOverview, type OverviewMode } from './ui/screens/YearlyOverview';
 import { TimelineCalendar } from './ui/screens/TimelineCalendar';
 import { Allocations, type AllocationsTarget } from './ui/screens/Allocations';
 import { Cashflow } from './ui/screens/Cashflow';
-import { Tags } from './ui/screens/Tags';
 import { Accounts } from './ui/screens/Accounts';
 import { Settings } from './ui/screens/Settings';
 import { Help } from './ui/screens/Help';
@@ -374,10 +373,9 @@ export function App() {
             onOpenEntry={goJournalEntry}
           />
         ) : null}
-        {screen === 'tags' ? <Tags /> : null}
         {screen === 'accounts' ? <Accounts period={period} target={accountsTarget} /> : null}
         {screen === 'settings' ? (
-          <Settings onNavigate={go} onOpenOnboarding={() => setOnboardingManualOpen(true)} />
+          <Settings onOpenOnboarding={() => setOnboardingManualOpen(true)} />
         ) : null}
       </main>
 

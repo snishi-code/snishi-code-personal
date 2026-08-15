@@ -12,10 +12,8 @@ import { TextArea, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { AccountPicker } from '../AccountPicker';
 import { FlowField } from '../FlowField';
-import { TagPicker } from '../TagPicker';
 import { LiabilitySheet } from '../LiabilitySheet';
 import { groupedAccountsByRole, groupedMonthlyAllocationAccounts } from '../accountOptions';
-import { tagsForEntry } from '../tagOptions';
 import {
   FORM_MODE_TITLE,
   MODE_FLOW,
@@ -33,7 +31,7 @@ import {
 } from '../amountText';
 import { moneyText, useMoneyDigits } from '../money';
 import { useLedger } from '../../state/store';
-import { entryAmount } from '../../domain/tags';
+import { representativeEntryAmount } from '../../domain/accounting';
 import {
   reversalInput,
   toSimpleInput,
@@ -109,7 +107,6 @@ function errorText(
 export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => void }) {
   const { ledger, saveEntry, createContinuousCost, saveAccount } = useLedger();
   const accounts = ledger?.accounts ?? [];
-  const tags = ledger?.tags ?? [];
   const currency = ledger?.settings.currency ?? '';
 
   const fixed = init.kind === 'transfer-fixed' ? init.fixed : null;
@@ -482,9 +479,13 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     const done = (ledger?.journalEntries ?? []).filter(
       (e) => e.metadata?.reversalOfEntryId === sourceId,
     );
-    const reversed = done.reduce((sum, e) => sum + entryAmount(e), 0);
+    const reversed = done.reduce((sum, e) => sum + representativeEntryAmount(e), 0);
     // 残りは負になり得る（過剰返金・元仕訳の後からの減額編集）。負のまま見せる。
-    return { count: done.length, reversed, remaining: entryAmount(init.source) - reversed };
+    return {
+      count: done.length,
+      reversed,
+      remaining: representativeEntryAmount(init.source) - reversed,
+    };
   })();
   /*
    * 入力額が残りを超えたときの注意。**警告だけで保存はブロックしない**（作者合意 2026-08-15）。
@@ -526,17 +527,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       {t('entry.reversal.overWarning')}
     </div>
   ) : null;
-
-  const entryTagsField = continuousCostActive ? null : (
-    <TagPicker
-      label={t('entry.tags')}
-      hint={t('entry.tagsHint')}
-      tags={tagsForEntry(tags, form.tagIds ?? [])}
-      value={form.tagIds ?? []}
-      onChange={(ids) => setForm((f) => ({ ...f, tagIds: ids }))}
-      dataUi={UI.journal.entry.tags}
-    />
-  );
 
   const memoField = (
     <TextArea
@@ -961,12 +951,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             ) : null}
             {ccDetailField}
             {repaymentField}
-            {canCreateContinuousCost && ccMode ? null : (
-              <>
-                {memoField}
-                {entryTagsField}
-              </>
-            )}
+            {canCreateContinuousCost && ccMode ? null : memoField}
           </>
         ) : (
           <>
@@ -1008,7 +993,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                   <div className="stack">
                     {mode === 'transfer' ? itemField : null}
                     {memoField}
-                    {entryTagsField}
                   </div>
                 ) : null}
               </>

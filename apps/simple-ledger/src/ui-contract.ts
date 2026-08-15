@@ -141,7 +141,6 @@ export const UI = {
     clearAccountFilter: 'journal.filter.clearAccount',
     clearNormalExpenseFilter: 'journal.filter.clearNormalExpense',
     showFuture: 'journal.filter.showFuture',
-    filterTag: 'journal.filter.tag',
     // 表示専用の並び替え（C-4）と抽出結果の件数+合計（C-3）。
     sortByDate: 'journal.sort.date',
     sortByAmount: 'journal.sort.amount',
@@ -163,9 +162,6 @@ export const UI = {
       reversalOverWarning: 'journal.entry.reversal.overWarning',
       detailToggle: 'journal.entry.detailToggle',
       manualSwitch: 'journal.entry.manualSwitch',
-      tags: 'journal.entry.tags',
-      debitTags: 'journal.entry.debitTags',
-      creditTags: 'journal.entry.creditTags',
       monthlyizeRepayToggle: 'journal.entry.monthlyizeRepayToggle',
       monthlyizeRepayAccount: 'journal.entry.monthlyizeRepayAccount',
       monthlyizeRepayCount: 'journal.entry.monthlyizeRepayCount',
@@ -303,16 +299,6 @@ export const UI = {
     archiveTransfer: 'allocations.archive.transfer',
     archiveConfirm: 'allocations.archive.confirm',
   },
-  tags: {
-    view: 'tags.view',
-    create: 'tags.create',
-    save: 'tags.save',
-    name: 'tags.name',
-    list: 'tags.list',
-    period: 'tags.period',
-    entrySummary: 'tags.summary.entry',
-    lineSummary: 'tags.summary.line',
-  },
   // 残高補正・初期残高のシート（勘定科目の内訳行・仕訳一覧から開く）。
   adjustments: {
     account: 'adjust.account',
@@ -370,7 +356,6 @@ export const UI = {
     fractionDigits: 'settings.fractionDigits',
     // 資金繰りの既定表示期間（端末設定・ヶ月）
     cashflowHorizon: 'settings.cashflowHorizon',
-    manageList: 'settings.manage.list',
     exportJson: 'settings.exportJson',
     importJson: 'settings.importJson',
     importFile: 'settings.importFile',

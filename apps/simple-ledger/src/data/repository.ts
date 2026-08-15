@@ -39,7 +39,6 @@ import {
   monthlyCostItemSchema,
   recurringRuleSchema,
   settingsSchema,
-  tagSchema,
 } from '../domain/schema';
 import {
   buildRuleItem,
@@ -87,13 +86,7 @@ import {
 import { accountBalance, filterByDateRange } from '../domain/accounting';
 import { ANNUAL_RETURN_BP_MAX, ANNUAL_RETURN_BP_MIN } from '../domain/investmentProjection';
 import { reportEntriesForAsOf } from '../domain/reportEntries';
-import { isTagReferenced, tagAssignmentError } from '../domain/tags';
 import { nowIso, todayLocal } from '../util/time';
-
-async function tagMap(): Promise<Map<string, Tag>> {
-  const tags = await getAll<Tag>(STORE.tags);
-  return new Map(tags.map((t) => [t.id, t]));
-}
 
 const KV_META = 'meta';
 const KV_SETTINGS = 'settings';
@@ -268,6 +261,8 @@ export async function loadLedger(): Promise<Ledger> {
   journalEntries.sort((a, b) =>
     a.date === b.date ? cmp(b.createdAt, a.createdAt) : cmp(b.date, a.date),
   );
+  // タグ機能は撤去済み（2026-08-15）。store は「受理のみ」で残す: import 済みデータの
+  // tags / tagIds を黙って保持し、export でそのまま往復させる（作る経路だけが無い）。
   tags.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
   // 継続コスト資産は「終了が近い順」（endDate 昇順・未設定は最後・同着は名前）。
   monthlyCostItems.sort(compareMonthlyCostItems);
@@ -849,7 +844,6 @@ async function archiveAccountUnlocked(id: string, transferEntry?: JournalEntry):
     if (!counterpart || counterpart.type !== target.type) {
       throw new LedgerError('error.account.archiveCounterpartType');
     }
-    await assertEntryTagsValid(savable);
   }
   const withTransfer = savable
     ? [...entries.filter((e) => e.id !== savable!.id), savable]
@@ -905,13 +899,6 @@ function assertEntryDeletable(target: JournalEntry | undefined): void {
     throw new LedgerError('error.entry.monthlyCost');
   }
   if (target?.metadata?.adjustment) throw new LedgerError('error.entry.adjustment');
-}
-
-/** 仕訳のタグ代入を import 検証と同じ不変条件で確認する（保存時 fail-closed）。タグは仕訳全体のみ。 */
-async function assertEntryTagsValid(entry: JournalEntry): Promise<void> {
-  const tags = await tagMap();
-  const e1 = tagAssignmentError(entry.tagIds, tags);
-  if (e1) throw new LedgerError(e1);
 }
 
 async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
@@ -976,7 +963,6 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
       nowIso(),
     );
     const savable = assertEntrySavable(entry, ctx);
-    await assertEntryTagsValid(savable);
     await assertEndedBalancesAfterEntryChange(ctx, entries, {
       replacement: savable,
       affectedAccountIds: new Set(
@@ -1063,7 +1049,6 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
       ctx,
     );
   }
-  await assertEntryTagsValid(savable);
   await assertEndedBalancesAfterEntryChange(ctx, entries, {
     replacement: savable,
     // 回収額・購入額・購入日は item の月割り額を全期間へ遡及させるため、明細上の
@@ -2453,37 +2438,6 @@ async function catchUpRecurringRulesUnlocked(
   return posted;
 }
 
-/* ── タグ ── */
-
-async function upsertTagUnlocked(tag: Tag): Promise<void> {
-  const tags = await getAll<Tag>(STORE.tags);
-
-  // active な同名タグ重複は禁止（import 検証と同じ不変条件をアプリ内でも守る）。
-  if (!tag.archived && tags.some((x) => x.id !== tag.id && !x.archived && x.name === tag.name)) {
-    throw new LedgerError('error.tag.duplicateName');
-  }
-
-  // タグは仕訳全体のみ。scope は常に 'entry' に固定する。
-  const normalized: Tag = { ...tag, scope: 'entry' };
-  // 設定と同じく保存境界で schema を通す（「保存はできるが export だけ後で失敗する」を作らない）。
-  const validated = tagSchema.safeParse(normalized);
-  if (!validated.success) throw new LedgerError('error.tag.invalid');
-  await writeWithRevision([STORE.tags], (t) => {
-    t.objectStore(STORE.tags).put(validated.data);
-  });
-}
-
-/** 使用中のタグは物理削除できない（アーカイブを使う）。fail-closed。 */
-async function deleteTagUnlocked(id: string): Promise<void> {
-  const entries = await getAll<JournalEntry>(STORE.journalEntries);
-  if (isTagReferenced(id, entries)) {
-    throw new LedgerError('error.tag.deleteInUse');
-  }
-  await writeWithRevision([STORE.tags], (t) => {
-    t.objectStore(STORE.tags).delete(id);
-  });
-}
-
 /* ── 残高補正 ── */
 
 /**
@@ -3574,8 +3528,6 @@ export const createRecurringRule = serializeMutation(createRecurringRuleUnlocked
 export const upsertRecurringRule = serializeMutation(upsertRecurringRuleUnlocked);
 export const deleteRecurringRule = serializeMutation(deleteRecurringRuleUnlocked);
 export const catchUpRecurringRules = serializeMutation(catchUpRecurringRulesUnlocked);
-export const upsertTag = serializeMutation(upsertTagUnlocked);
-export const deleteTag = serializeMutation(deleteTagUnlocked);
 export const createAdjustment = serializeMutation(createAdjustmentUnlocked);
 export const updateAdjustment = serializeMutation(updateAdjustmentUnlocked);
 export const deleteAdjustment = serializeMutation(deleteAdjustmentUnlocked);

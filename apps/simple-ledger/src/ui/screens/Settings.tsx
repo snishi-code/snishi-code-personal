@@ -23,7 +23,6 @@ import {
   rememberCashflowHorizonMonths,
 } from '../../data/localFlags';
 import { APP_ID } from '../../domain/constants';
-import { MANAGEMENT_ITEMS, type Screen } from '../navigation';
 import type { ImportOutcome } from '../../data/exportImport';
 import type { Settings as LedgerSettings, Snapshot } from '../../domain/types';
 import { ScrollTopButton } from '../ScrollTopButton';
@@ -89,10 +88,8 @@ function snapshotReasonLabel(reason: string): string {
 }
 
 export function Settings({
-  onNavigate,
   onOpenOnboarding,
 }: {
-  onNavigate: (screen: Screen) => void;
   /** 初期残高の一括登録シートを開く（初回オンボーディングの再表示導線）。 */
   onOpenOnboarding: () => void;
 }) {
@@ -209,27 +206,6 @@ export function Settings({
       <h1 className="screen-title" id="settings-title">
         {t('settings.title')}
       </h1>
-
-      {/* 管理（補助画面へ） */}
-      <p className="section-label">{t('settings.manageSection')}</p>
-      <ul className="card list" data-ui={UI.settings.manageList}>
-        {MANAGEMENT_ITEMS.map((item) => (
-          <li key={item.screen}>
-            <button
-              type="button"
-              className="list__row-btn"
-              onClick={() => onNavigate(item.screen)}
-              data-ui={`settings.manage.${item.screen}`}
-            >
-              <span className="list__row-btn__label">
-                <Icon name={item.icon} size={18} />
-                {t(item.labelKey)}
-              </span>
-              <Icon name="chevronRight" size={16} />
-            </button>
-          </li>
-        ))}
-      </ul>
 
       {/* データ */}
       <p className="section-label">{t('settings.dataSection')}</p>

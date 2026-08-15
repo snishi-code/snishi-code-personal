@@ -47,7 +47,7 @@ export function RecoveryScreen({
         <p className="field__hint">{t('recovery.schemaMismatchHint')}</p>
       ) : settingsOpen ? (
         // 復旧中は他画面へ遷移させない（台帳が無い状態で開けないため）。
-        <Settings onNavigate={() => undefined} onOpenOnboarding={() => undefined} />
+        <Settings onOpenOnboarding={() => undefined} />
       ) : (
         <button
           type="button"

@@ -15,7 +15,6 @@ import {
   deleteAccount,
   deleteEntry,
   deleteMonthlyCost,
-  deleteTag,
   listSnapshots,
   loadLedger,
   makeSnapshotId,
@@ -25,7 +24,6 @@ import {
   upsertAccount,
   upsertEntry,
   upsertMonthlyCost,
-  upsertTag,
 } from '../src/data/repository';
 import { buildSimpleEntry } from '../src/domain/entry';
 import { LedgerError } from '../src/domain/errors';
@@ -41,7 +39,7 @@ import { getAll, getKv, putKv, putRecord, STORE } from '../src/data/db';
 import { SCHEMA_VERSION } from '../src/domain/constants';
 import { newId } from '../src/domain/ids';
 import { todayLocal } from '../src/util/time';
-import type { JournalEntry, LedgerMeta, Tag } from '../src/domain/types';
+import type { JournalEntry, LedgerMeta } from '../src/domain/types';
 
 async function addEntryRef(foodId: string, cashId: string) {
   await upsertEntry(
@@ -264,92 +262,6 @@ describe('resetAll', () => {
       }),
     ).rejects.toMatchObject({ code: 'error.common.staleData' });
     expect(await listSnapshots()).toHaveLength(0);
-  });
-});
-
-describe('タグ', () => {
-  function tag(): Tag {
-    return {
-      id: newId(),
-      name: '2026 北海道旅行',
-      scope: 'entry',
-      archived: false,
-      createdAt: 'x',
-      updatedAt: 'x',
-    };
-  }
-
-  it('未使用のタグは削除でき、使用中は削除できない', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    const tg = tag();
-    await upsertTag(tg);
-
-    // 未使用 → 別タグを作って削除できることを確認
-    const unused = { ...tag(), id: newId(), name: '一時' };
-    await upsertTag(unused);
-    await deleteTag(unused.id);
-    expect((await loadLedger()).tags.some((x) => x.id === unused.id)).toBe(false);
-
-    // tg を仕訳に付ける → 使用中で削除不可
-    await upsertEntry(
-      buildSimpleEntry({
-        date: '2026-06-01',
-        description: '旅行費',
-        debitAccountId: food.id,
-        creditAccountId: cash.id,
-        amount: 1000,
-        tagIds: [tg.id],
-      }),
-    );
-    await expect(deleteTag(tg.id)).rejects.toThrow();
-  });
-
-  it('仕訳全体タグを付けて保存できる', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    const tripTag = { ...tag(), id: newId(), name: '帰省' };
-    await upsertTag(tripTag);
-    await upsertEntry(
-      buildSimpleEntry({
-        date: '2026-06-01',
-        description: '帰省の食事',
-        debitAccountId: food.id,
-        creditAccountId: cash.id,
-        amount: 2000,
-        tagIds: [tripTag.id],
-      }),
-    );
-    const after = await loadLedger();
-    const e = after.journalEntries.find((x) => x.description === '帰省の食事')!;
-    expect(e.tagIds).toEqual([tripTag.id]);
-  });
-});
-
-describe('タグ不変条件（保存時）', () => {
-  const mkTag = (over: Partial<Tag> = {}): Tag => ({
-    id: newId(),
-    name: '旅行',
-    scope: 'entry',
-    archived: false,
-    createdAt: 'x',
-    updatedAt: 'x',
-    ...over,
-  });
-
-  it('active な同名タグは作れない', async () => {
-    await loadLedger();
-    await upsertTag(mkTag());
-    await expect(upsertTag(mkTag())).rejects.toThrow();
-  });
-
-  it('タグは常に仕訳全体（entry）scope で保存される', async () => {
-    await loadLedger();
-    const tg = mkTag();
-    await upsertTag(tg);
-    expect((await loadLedger()).tags.find((x) => x.id === tg.id)?.scope).toBe('entry');
   });
 });
 
@@ -763,26 +675,6 @@ describe('返済計画の一括登録（createRepaymentEntries）', () => {
     const created = await createRepaymentEntries({ ...base, firstDate: '2024-02-29' });
     expect(created).toHaveLength(1);
     expect(created[0]?.date).toBe('2024-02-29');
-  });
-});
-
-describe('タグ実行時検証（保存前）', () => {
-  it('upsertEntry: 存在しないタグ参照は拒否', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    await expect(
-      upsertEntry(
-        buildSimpleEntry({
-          date: '2026-06-01',
-          description: 'x',
-          debitAccountId: food.id,
-          creditAccountId: cash.id,
-          amount: 100,
-          tagIds: ['no-such-tag'],
-        }),
-      ),
-    ).rejects.toThrow();
   });
 });
 
@@ -2589,21 +2481,6 @@ describe('設定の保存境界（Codex 指摘・schema と保存の不整合）
     await expect(updateSettings({ ...ledger.settings, ledgerName: '   ' })).rejects.toMatchObject({
       code: 'error.settings.invalid',
     });
-  });
-
-  it('タグも保存境界で schema を通す（61 文字の名前は拒否）', async () => {
-    const { upsertTag } = await import('../src/data/repository');
-    await expect(
-      upsertTag({
-        id: 'too-long-tag',
-        name: 'あ'.repeat(61),
-        scope: 'entry',
-        archived: false,
-        createdAt: '2026-08-13T00:00:00.000Z',
-        updatedAt: '2026-08-13T00:00:00.000Z',
-      }),
-    ).rejects.toMatchObject({ code: 'error.tag.invalid' });
-    expect((await loadLedger()).tags.some((x) => x.id === 'too-long-tag')).toBe(false);
   });
 
   it('不正な表示桁数も保存境界で拒否する', async () => {
