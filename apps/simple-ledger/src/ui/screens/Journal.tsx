@@ -36,6 +36,7 @@ import { periodRange, type ReportPeriod } from '../../domain/reportPeriod';
 import {
   entryAmount,
   isDebitNormal,
+  representativeEntryAmount,
   summarizeEntries,
   summarizeEntriesForAccount,
 } from '../../domain/accounting';
@@ -414,7 +415,9 @@ export function Journal({
             // くり返し記帳から生まれた仕訳は読み取り専用（作者決定 2026-08-15）。
             // 編集・削除・反対仕訳はどれも出さず、タップは由来ルールへ（entryOpenPlan が担う）。
             const isRuleGenerated = generatedEntryRuleId(entry) !== undefined;
-            const displayedAmount = entry.lines.find((line) => line.side === 'debit')?.amount ?? 0;
+            // 仕訳の代表額は domain が正本（式を UI で書き直さない）。render から呼ぶので
+            // checked sum を通さない representativeEntryAmount を使う（表示中に投げない）。
+            const displayedAmount = representativeEntryAmount(entry);
             // 科目ドリル中だけ、その科目の自然な残高符号で増減を示す。金額自体には符号を付けない。
             const balanceChange = filterAccount ? accountBalanceChange(entry, filterAccount) : null;
             const balanceChangeClass =

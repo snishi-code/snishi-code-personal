@@ -7,7 +7,7 @@ import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { Modal } from '../overlays';
 import { useLedger } from '../../state/store';
-import { deriveBalanceSheet } from '../../domain/accounting';
+import { deriveBalanceSheet, representativeEntryAmount } from '../../domain/accounting';
 import {
   cashDeltaOfEntry,
   freeAssetTotal,
@@ -110,7 +110,8 @@ export function Cashflow({
         date: e.date,
         title: e.description,
         delta: cashDeltaOfEntry(e, isFree),
-        amount: sumAmounts(e.lines.filter((l) => l.side === 'debit').map((l) => l.amount)),
+        // 仕訳の代表額は domain が正本。useMemo = render 相当なので、投げない方を使う。
+        amount: representativeEntryAmount(e),
         entry: e,
       }))
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));

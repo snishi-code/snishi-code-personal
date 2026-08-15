@@ -533,6 +533,9 @@ export const ja = {
   'a11y.back': '戻る',
   'a11y.home': 'ホーム',
   'a11y.scrollTop': '一番上へ移動',
+  // ページ先頭の skip-link。行き先は本文（#main）なので、名前も行き先を言う
+  // （「ホーム」だと押した先と読み上げが食い違う）。
+  'a11y.skipToContent': '本文へ移動',
 
   // ドメイン/リポジトリ由来のユーザー表示エラー。domain/repository は LedgerError(code, params)
   // を投げ、表示は UI 層が errorText() で行う（保存境界の fail-closed なエラーも i18n に集約）。

@@ -116,11 +116,35 @@ export function App() {
     setOnboardingManualOpen(false);
   };
 
+  // 終了確認は overlay 登録簿に載せない: appHistory が isExitConfirmOpen で
+  // Back を消費して維持する（連打で確認なしに離脱させないため foundation を直接使う）。
+  //
+  // 早期 return より**前**で組み立て、loading / 復旧画面を含む全状態の return へ同じものを
+  // 差し込む。useAppHistory は status に関係なく popstate を拾って showExitConfirm を呼ぶので、
+  // ここが本文の後ろにしか無いと台帳が読めない状態だけ確認なしで離脱してしまう。
+  // 実体は 1 つ（分岐した return のどれか 1 本だけが描画される）＝ dialog の重複は生まれない。
+  const exitConfirmDialog = exitConfirm ? (
+    <ExitConfirmDialog
+      title={t('exit.confirmTitle')}
+      body={t('exit.confirmBody')}
+      confirmLabel={t('exit.confirmLabel')}
+      dataUi={UI.app.exitConfirm}
+      onCancel={() => setExitConfirm(false)}
+      onConfirm={() => {
+        setExitConfirm(false);
+        beginExit();
+      }}
+    />
+  ) : null;
+
   if (status === 'loading') {
     return (
-      <main className="app-main center" aria-busy="true">
-        <p className="muted">{t('common.loading')}</p>
-      </main>
+      <>
+        <main className="app-main center" aria-busy="true">
+          <p className="muted">{t('common.loading')}</p>
+        </main>
+        {exitConfirmDialog}
+      </>
     );
   }
 
@@ -129,10 +153,13 @@ export function App() {
     // 版不一致だけは直接 import も内部で loadLedger に失敗して通らないため、専用の
     // 手順（初期化 → 変換済み JSON 読み込み）を出す（再監査対応・正式な移行手順の固定）。
     return (
-      <RecoveryScreen
-        message={error}
-        schemaMismatch={errorCode === 'error.db.schemaVersionMismatch'}
-      />
+      <>
+        <RecoveryScreen
+          message={error}
+          schemaMismatch={errorCode === 'error.db.schemaVersionMismatch'}
+        />
+        {exitConfirmDialog}
+      </>
     );
   }
 
@@ -270,7 +297,7 @@ export function App() {
   return (
     <>
       <a className="skip-link" href="#main">
-        {t('common.home')}
+        {t('a11y.skipToContent')}
       </a>
 
       {/* ヘッダーは時間（日付 + 粒度）だけに徹する。ホームはフッター中央、
@@ -451,21 +478,7 @@ export function App() {
 
       {onboardingOpen ? <OnboardingSheet onClose={closeOnboarding} /> : null}
 
-      {exitConfirm ? (
-        // 終了確認は overlay 登録簿に載せない: appHistory が isExitConfirmOpen で
-        // Back を消費して維持する（連打で確認なしに離脱させないため foundation を直接使う）。
-        <ExitConfirmDialog
-          title={t('exit.confirmTitle')}
-          body={t('exit.confirmBody')}
-          confirmLabel={t('exit.confirmLabel')}
-          dataUi={UI.app.exitConfirm}
-          onCancel={() => setExitConfirm(false)}
-          onConfirm={() => {
-            setExitConfirm(false);
-            beginExit();
-          }}
-        />
-      ) : null}
+      {exitConfirmDialog}
     </>
   );
 }
