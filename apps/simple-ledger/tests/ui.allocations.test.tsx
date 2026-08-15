@@ -22,6 +22,7 @@ import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import { addMonthsToDate } from '../src/domain/allocation';
 import type { ReportPeriod } from '../src/domain/reportPeriod';
 import { UI } from '../src/ui-contract';
+import { firstRuleRow } from './tapTargets';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { todayLocal } from '../src/util/time';
 import './setup';
@@ -127,7 +128,7 @@ describe('定期ルールの継続コスト化（月割り）', () => {
     expect(rule!.creditAccountId).toBe(salary.id);
 
     const editButton = await waitFor(() => {
-      const found = document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`);
+      const found = firstRuleRow();
       expect(found).toBeInTheDocument();
       return found!;
     });
@@ -200,7 +201,7 @@ describe('定期ルールの継続コスト化（月割り）', () => {
     // 再編集でもチェックは存在せず、論理的な行き先だけを保持する。
     const editButton = await waitFor(
       () => {
-        const found = document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`);
+        const found = firstRuleRow();
         expect(found).toBeInTheDocument();
         return found!;
       },
@@ -563,8 +564,8 @@ describe('導出 item カード（未起票周期・表示専用）', () => {
     // アーカイブ・削除は出さない（実在しない item に対する操作は無い）。
     expect(card.queryByRole('button', { name: /アーカイブ/ })).not.toBeInTheDocument();
     expect(card.queryByRole('button', { name: /削除/ })).not.toBeInTheDocument();
-    // 編集 = 由来ルールのシートが開く（derivedOrigin と同じ導線）。
-    fireEvent.click(card.getByRole('button', { name: /編集/ }));
+    // 編集 = カードそのもののタップで由来ルールのシートが開く（derivedOrigin と同じ導線）。
+    fireEvent.click(cards[0] as HTMLElement);
     await waitFor(() => {
       expect(
         document.querySelector(`[data-ui="${UI.allocations.recurringSheet}"]`),

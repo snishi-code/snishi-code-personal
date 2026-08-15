@@ -267,7 +267,7 @@ export const UI = {
     recurringAmountChangeAll: 'allocations.recurring.amountChange.all',
     recurringAmountChangeFromToday: 'allocations.recurring.amountChange.fromToday',
     recurringAmountChangeCancel: 'allocations.recurring.amountChange.cancel',
-    recurringEdit: 'allocations.recurring.edit',
+    // 編集は行そのもののタップ（編集アイコンは置かない）。
     // 終了 = 排他的終点を打つ。同じ設定で新しく始める = 系譜なしの独立ルール作成。
     // どちらも無確認では実行しない（終了は終了日シート・再開は確認ダイアログ）。
     recurringEnd: 'allocations.recurring.end',
@@ -282,8 +282,8 @@ export const UI = {
     skipDialog: 'allocations.skipDialog',
     skipConfirm: 'allocations.skip.confirm',
     skipEndRule: 'allocations.skip.endRule',
-    // 継続コスト資産シート（登録＝編集の 1 コンポーネント）
-    edit: 'allocations.edit',
+    // 継続コスト資産シート（登録＝編集の 1 コンポーネント）。
+    // 編集の入口は item カードそのもののタップ（編集アイコンは置かない）。
     editDialog: 'allocations.editDialog',
     editName: 'allocations.edit.name',
     editAmount: 'allocations.edit.amount',

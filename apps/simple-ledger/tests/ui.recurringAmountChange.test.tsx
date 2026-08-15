@@ -6,6 +6,7 @@ import { catchUpRecurringRules, createRecurringRule, loadLedger } from '../src/d
 import * as repository from '../src/data/repository';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { UI } from '../src/ui-contract';
+import { firstRuleRow } from './tapTargets';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { Allocations } from '../src/ui/screens/Allocations';
 import type { RecurringRule } from '../src/domain/types';
@@ -65,9 +66,9 @@ async function seedRule(amount = 100_000): Promise<RecurringRule> {
 async function openAmountDecision(nextAmount: string): Promise<void> {
   render(<View />);
   await waitFor(() => {
-    expect(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)).toBeTruthy();
+    expect(firstRuleRow()).toBeTruthy();
   });
-  fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)!);
+  fireEvent.click(firstRuleRow()!);
   fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!, {
     target: { value: nextAmount },
   });
@@ -144,9 +145,9 @@ describe('定期ルールの金額変更範囲', () => {
     const original = await seedRule();
     render(<View />);
     await waitFor(() => {
-      expect(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)).toBeTruthy();
+      expect(firstRuleRow()).toBeTruthy();
     });
-    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)!);
+    fireEvent.click(firstRuleRow()!);
 
     expect(document.querySelector(`[data-ui="${UI.allocations.recurringStartDate}"]`)).toHaveValue(
       '2026-04-12',
@@ -180,9 +181,9 @@ describe('定期ルールの金額変更範囲', () => {
     _resetOverlaysForTests();
     render(<View />);
     await waitFor(() => {
-      expect(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)).toBeTruthy();
+      expect(firstRuleRow()).toBeTruthy();
     });
-    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)!);
+    fireEvent.click(firstRuleRow()!);
     fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringEndDate}"]`)!, {
       target: { value: '' },
     });
@@ -227,9 +228,9 @@ describe('定期ルールの金額変更範囲', () => {
     );
     render(<View />);
     await waitFor(() => {
-      expect(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)).toBeTruthy();
+      expect(firstRuleRow()).toBeTruthy();
     });
-    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)!);
+    fireEvent.click(firstRuleRow()!);
 
     const dayInput = document.querySelector(
       `[data-ui="${UI.allocations.recurringFirstPostingDate}"]`,
@@ -350,9 +351,9 @@ describe('定期ルールの金額変更範囲', () => {
     await repository.upsertRecurringRule({ ...original, endDate: '2026-04-22' });
     render(<View date="2026-04-20" />);
     await waitFor(() => {
-      expect(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)).toBeTruthy();
+      expect(firstRuleRow()).toBeTruthy();
     });
-    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)!);
+    fireEvent.click(firstRuleRow()!);
     fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!, {
       target: { value: '1500' },
     });

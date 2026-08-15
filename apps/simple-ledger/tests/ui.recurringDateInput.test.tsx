@@ -7,6 +7,7 @@ import { addMonths } from '../src/domain/allocation';
 import { clampDayToMonth } from '../src/domain/recurring';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { UI } from '../src/ui-contract';
+import { firstRuleRow } from './tapTargets';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { Allocations } from '../src/ui/screens/Allocations';
 import { todayLocal } from '../src/util/time';
@@ -106,7 +107,7 @@ describe('定期ルールの初回起票日', () => {
 
     render(<View />);
     await screen.findAllByText('月末ルール');
-    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)!);
+    fireEvent.click(firstRuleRow()!);
 
     expect(
       document.querySelector(`[data-ui="${UI.allocations.recurringFirstPostingDate}"]`),
@@ -128,7 +129,7 @@ describe('定期ルールの初回起票日', () => {
 
     render(<View />);
     await screen.findAllByText('月末ルール（据え置き）');
-    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)!);
+    fireEvent.click(firstRuleRow()!);
     // 日付欄は 2031-02-28（31 を 2 月へクランプした表示）。日付は触らず金額だけ変えて保存する
     // （金額の変化で「保存が実際に走った」ことを確かめる＝空振りで通らないようにする）。
     fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!, {
@@ -174,7 +175,7 @@ describe('定期ルールの初回起票日', () => {
 
     render(<View />);
     await screen.findAllByText('月末ルール（変更）');
-    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)!);
+    fireEvent.click(firstRuleRow()!);
     fireEvent.change(
       document.querySelector(`[data-ui="${UI.allocations.recurringFirstPostingDate}"]`)!,
       { target: { value: '2031-02-10' } },

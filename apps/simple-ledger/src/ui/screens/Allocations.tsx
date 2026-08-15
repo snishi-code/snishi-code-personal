@@ -66,6 +66,7 @@ import {
   recurringRuleReferenceStartDate,
   ruleExistsAt as recurringRuleExistsAt,
 } from '../../domain/accountLifetime';
+import { cardTapProps, rowActionClick } from '../cardTap';
 import { quickSpanEndDate } from '../ccQuickSpan';
 import { formatMinorForInput, parseAmountToMinor, sanitizeAmountText } from '../amountText';
 import { useMoneyDigits } from '../money';
@@ -462,82 +463,82 @@ export function Allocations({
               const canEndToday = activeToday && start < today && r.endDate === undefined;
               const canRestartToday = !activeToday && r.endDate !== undefined && r.endDate <= today;
               return (
-                <li key={r.id} className="list__item">
-                  <div className="list__main">
-                    <div className="list__title">
-                      {r.name} <span className="tag tag--teal">{ruleKindLabel(r)}</span>
-                    </div>
-                    <div className="list__sub">
-                      {t('recurring.rulePeriod')}: {effectiveRecurringRuleStartDate(r)} 〜{' '}
-                      {r.endDate !== undefined
-                        ? t('recurring.ruleEndBefore', { date: r.endDate })
-                        : t('recurring.ruleNoEnd')}
-                    </div>
-                    <div className="list__sub">
-                      {t('recurring.postingSchedule')}: {ruleIntervalLabel(r)}・
-                      {name(r.creditAccountId)} → {name(recurringDestinationAccountId(r))}
-                      {r.spreadExpenseAccountId !== undefined ? (
-                        <>
-                          ・{t('monthlyCost.monthly')}{' '}
-                          <Money
-                            amount={monthlyAmounts(r.amount, r.everyMonths)[0] ?? 0}
-                            currency={currency}
-                          />
-                        </>
+                // 行そのものをタップ = そのルールの編集シート（カードタップ = 編集の単一正本）。
+                // 行の中に終了・再開・削除のボタンが残るため <button> にはできない（入れ子不正）。
+                <li key={r.id}>
+                  <div
+                    className="list__item"
+                    {...cardTapProps(`${t('common.edit')}: ${r.name}`, () =>
+                      setRuleSheet({ existing: r }),
+                    )}
+                  >
+                    <div className="list__main">
+                      <div className="list__title">
+                        {r.name} <span className="tag tag--teal">{ruleKindLabel(r)}</span>
+                      </div>
+                      <div className="list__sub">
+                        {t('recurring.rulePeriod')}: {effectiveRecurringRuleStartDate(r)} 〜{' '}
+                        {r.endDate !== undefined
+                          ? t('recurring.ruleEndBefore', { date: r.endDate })
+                          : t('recurring.ruleNoEnd')}
+                      </div>
+                      <div className="list__sub">
+                        {t('recurring.postingSchedule')}: {ruleIntervalLabel(r)}・
+                        {name(r.creditAccountId)} → {name(recurringDestinationAccountId(r))}
+                        {r.spreadExpenseAccountId !== undefined ? (
+                          <>
+                            ・{t('monthlyCost.monthly')}{' '}
+                            <Money
+                              amount={monthlyAmounts(r.amount, r.everyMonths)[0] ?? 0}
+                              currency={currency}
+                            />
+                          </>
+                        ) : null}
+                      </div>
+                      {ruleRefBroken(r) ? (
+                        <div className="field__error" role="alert">
+                          {t('recurring.refBroken')}
+                        </div>
                       ) : null}
                     </div>
-                    {ruleRefBroken(r) ? (
-                      <div className="field__error" role="alert">
-                        {t('recurring.refBroken')}
-                      </div>
-                    ) : null}
-                  </div>
-                  <span className="list__amount">
-                    <Money amount={r.amount} currency={currency} />
-                  </span>
-                  <div className="row-actions">
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => setRuleSheet({ existing: r })}
-                      aria-label={`${t('common.edit')}: ${r.name}`}
-                      data-ui={UI.allocations.recurringEdit}
-                    >
-                      <Icon name="edit" size={18} />
-                    </button>
-                    {canEndToday ? (
+                    <span className="list__amount">
+                      <Money amount={r.amount} currency={currency} />
+                    </span>
+                    <div className="row-actions">
+                      {canEndToday ? (
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          disabled={pendingRuleActionId !== null}
+                          onClick={rowActionClick(() => setEndingRule(r))}
+                          aria-label={`${t('recurring.end')}: ${r.name}`}
+                          data-ui={UI.allocations.recurringEnd}
+                        >
+                          <Icon name="archive" size={18} />
+                        </button>
+                      ) : null}
+                      {canRestartToday ? (
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          disabled={pendingRuleActionId !== null}
+                          onClick={rowActionClick(() => setPendingRuleRestart(r))}
+                          aria-label={`${t('recurring.restart')}: ${r.name}`}
+                          data-ui={UI.allocations.recurringRestart}
+                        >
+                          <Icon name="restore" size={18} />
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="icon-btn"
-                        disabled={pendingRuleActionId !== null}
-                        onClick={() => setEndingRule(r)}
-                        aria-label={`${t('recurring.end')}: ${r.name}`}
-                        data-ui={UI.allocations.recurringEnd}
+                        onClick={rowActionClick(() => setPendingRuleDelete(r))}
+                        aria-label={`${t('common.delete')}: ${r.name}`}
+                        data-ui={UI.allocations.recurringDelete}
                       >
-                        <Icon name="archive" size={18} />
+                        <Icon name="delete" size={18} />
                       </button>
-                    ) : null}
-                    {canRestartToday ? (
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        disabled={pendingRuleActionId !== null}
-                        onClick={() => setPendingRuleRestart(r)}
-                        aria-label={`${t('recurring.restart')}: ${r.name}`}
-                        data-ui={UI.allocations.recurringRestart}
-                      >
-                        <Icon name="restore" size={18} />
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => setPendingRuleDelete(r)}
-                      aria-label={`${t('common.delete')}: ${r.name}`}
-                      data-ui={UI.allocations.recurringDelete}
-                    >
-                      <Icon name="delete" size={18} />
-                    </button>
+                    </div>
                   </div>
                 </li>
               );
@@ -560,12 +561,22 @@ export function Allocations({
               const ending = isEndingSoon(m, asOf);
               const monthly = representativeMonthlyAmount(m, spreadTotal);
               return (
+                // カードそのものをタップ = 編集。実 item は継続コスト資産シート、導出カード
+                // （保存された item が無い未起票周期）は由来のルールのシートを開く。
                 <div
                   className={`card card--pad${ending ? ' card--ending' : ''}`}
                   key={m.id}
                   data-ui={UI.allocations.item}
                   data-ending={ending ? 'true' : undefined}
                   data-derived-rule={fromRule?.id}
+                  {...cardTapProps(
+                    fromRule !== undefined
+                      ? `${t('common.edit')}: ${fromRule.name}`
+                      : `${t('common.edit')}: ${m.name}`,
+                    fromRule !== undefined
+                      ? () => setRuleSheet({ existing: fromRule })
+                      : () => setItemSheet({ existing: m }),
+                  )}
                 >
                   <div
                     className="list__title"
@@ -588,26 +599,14 @@ export function Allocations({
                         </>
                       ) : null}
                     </span>
-                    {fromRule !== undefined ? (
-                      /* 導出カードは実在しない（保存された item が無い）ため、編集は由来の
-                         ルールを開く。アーカイブ・削除の対象も無いので出さない。 */
+                    {fromRule !==
+                    undefined /* 導出カードは実在しない（保存された item が無い）ため、アーカイブ・削除の
+                         対象も無い。編集はカードタップ = 由来のルールのシート。 */ ? null : (
                       <span className="row-actions">
                         <button
                           type="button"
                           className="icon-btn"
-                          onClick={() => setRuleSheet({ existing: fromRule })}
-                          aria-label={`${t('common.edit')}: ${fromRule.name}`}
-                          data-ui={UI.allocations.edit}
-                        >
-                          <Icon name="edit" size={18} />
-                        </button>
-                      </span>
-                    ) : (
-                      <span className="row-actions">
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          onClick={() => setArchiving(m)}
+                          onClick={rowActionClick(() => setArchiving(m))}
                           aria-label={`${t('ccItem.archiveTitle')}: ${m.name}`}
                           data-ui={UI.allocations.archive}
                         >
@@ -616,16 +615,7 @@ export function Allocations({
                         <button
                           type="button"
                           className="icon-btn"
-                          onClick={() => setItemSheet({ existing: m })}
-                          aria-label={`${t('common.edit')}: ${m.name}`}
-                          data-ui={UI.allocations.edit}
-                        >
-                          <Icon name="edit" size={18} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          onClick={() => setPendingDelete(m)}
+                          onClick={rowActionClick(() => setPendingDelete(m))}
                           aria-label={`${
                             ruleOrigin !== undefined ? t('recurring.skip') : t('common.delete')
                           }: ${m.name}`}

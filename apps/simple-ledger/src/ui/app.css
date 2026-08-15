@@ -1210,6 +1210,17 @@ button.stmt-row:hover {
   gap: var(--space-1);
 }
 
+/* カードタップ = 編集（src/ui/cardTap.ts）。中に操作ボタンを含むため要素そのものは
+   button にできない（入れ子不正）ので role="button" で押せることを示す。
+   押せる手掛かりは button.list__item と同じ hover 面 + ポインタで揃える。 */
+.list__item[role='button'],
+.card[role='button'] {
+  cursor: pointer;
+}
+.list__item[role='button']:hover {
+  background: var(--bg);
+}
+
 /* 終了まで1ヶ月以内の継続コスト資産（毎月のもの）。色だけ変える（バッジ・文言は足さない）。
    --warning-light(#fffbeb) は白背景とほぼ区別がつかないため、視認できるアンバー + 左ボーダー。 */
 .card--ending {

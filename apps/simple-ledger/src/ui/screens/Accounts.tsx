@@ -31,6 +31,7 @@ import type { Account } from '../../domain/types';
 import { accountExistsAt } from '../../domain/accountLifetime';
 import { isRecurringPostableRole } from '../../domain/recurring';
 import { boxForAccount, groupAccountsByBox, type AccountBox } from '../accountBoxes';
+import { cardTapProps, rowActionClick } from '../cardTap';
 import { ConfirmDialog } from '../overlays';
 import { AccountSheet } from './AccountSheet';
 import { AdjustmentCreateSheet } from '../AdjustmentSheet';
@@ -241,110 +242,118 @@ export function Accounts({
                     );
                     const orderIndex = orderable.findIndex((a) => a.id === account.id);
                     return (
-                      <li key={account.id} className="list__item">
-                        <div className="list__main">
-                          <div className="list__title account-list__title">
-                            <span>{account.name}</span>
-                            {isSystemManaged ? (
-                              <span className="tag tag--neutral" data-ui={UI.accounts.systemBadge}>
-                                {t('accounts.autoBadge')}
-                              </span>
-                            ) : null}
-                            {usedIds.has(account.id) ? (
-                              <span className="tag tag--teal">{t('accounts.inUse')}</span>
-                            ) : null}
-                            {!existsAtSlice ? (
-                              <span className="tag tag--neutral">{t('accounts.outsideSlice')}</span>
-                            ) : null}
+                      // 行そのものをタップ = その科目の編集シート（カードタップ = 編集の単一正本）。
+                      // 表示だけの残高調整科目と、並び替え中（管理操作を出さない間）は押せない。
+                      <li key={account.id}>
+                        <div
+                          className="list__item"
+                          {...(isSystemManaged || reordering
+                            ? {}
+                            : cardTapProps(`${t('common.edit')}: ${account.name}`, () =>
+                                setEditing(account),
+                              ))}
+                        >
+                          <div className="list__main">
+                            <div className="list__title account-list__title">
+                              <span>{account.name}</span>
+                              {isSystemManaged ? (
+                                <span
+                                  className="tag tag--neutral"
+                                  data-ui={UI.accounts.systemBadge}
+                                >
+                                  {t('accounts.autoBadge')}
+                                </span>
+                              ) : null}
+                              {usedIds.has(account.id) ? (
+                                <span className="tag tag--teal">{t('accounts.inUse')}</span>
+                              ) : null}
+                              {!existsAtSlice ? (
+                                <span className="tag tag--neutral">
+                                  {t('accounts.outsideSlice')}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="list__sub">
+                              {isFlowBox ? (
+                                <>
+                                  {t('accounts.periodAmount', { period: periodLabel(period) })}:{' '}
+                                  <Money
+                                    amount={
+                                      summarizeEntriesForAccount(account, flowEntries, () => true)
+                                        .total
+                                    }
+                                    currency={currency}
+                                  />
+                                </>
+                              ) : (
+                                <>
+                                  {t('accounts.balance')}:{' '}
+                                  <Money
+                                    amount={accountBalance(account.id, account.type, entries)}
+                                    currency={currency}
+                                  />
+                                </>
+                              )}
+                            </div>
                           </div>
-                          <div className="list__sub">
-                            {isFlowBox ? (
-                              <>
-                                {t('accounts.periodAmount', { period: periodLabel(period) })}:{' '}
-                                <Money
-                                  amount={
-                                    summarizeEntriesForAccount(account, flowEntries, () => true)
-                                      .total
-                                  }
-                                  currency={currency}
-                                />
-                              </>
-                            ) : (
-                              <>
-                                {t('accounts.balance')}:{' '}
-                                <Money
-                                  amount={accountBalance(account.id, account.type, entries)}
-                                  currency={currency}
-                                />
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        {isSystemManaged ? null : reordering ? (
-                          orderIndex >= 0 ? (
+                          {isSystemManaged ? null : reordering ? (
+                            orderIndex >= 0 ? (
+                              <div className="row-actions">
+                                <button
+                                  type="button"
+                                  className="icon-btn"
+                                  disabled={orderIndex === 0}
+                                  onClick={() => moveAccount(orderable, orderIndex, 'up')}
+                                  aria-label={`${t('accounts.moveUp')}: ${account.name}`}
+                                  data-ui={UI.accounts.moveUp}
+                                >
+                                  <span aria-hidden="true" style={{ fontSize: 16 }}>
+                                    ↑
+                                  </span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="icon-btn"
+                                  disabled={orderIndex === orderable.length - 1}
+                                  onClick={() => moveAccount(orderable, orderIndex, 'down')}
+                                  aria-label={`${t('accounts.moveDown')}: ${account.name}`}
+                                  data-ui={UI.accounts.moveDown}
+                                >
+                                  <span aria-hidden="true" style={{ fontSize: 16 }}>
+                                    ↓
+                                  </span>
+                                </button>
+                              </div>
+                            ) : null
+                          ) : (
                             <div className="row-actions">
+                              {canAdjust ? (
+                                <button
+                                  type="button"
+                                  className="btn btn--ghost"
+                                  style={{ minHeight: 'var(--tap)' }}
+                                  onClick={rowActionClick(() => setAdjustingAccount(account))}
+                                  aria-label={`${t('adjust.rowAction')}: ${account.name}`}
+                                  data-ui={UI.accounts.adjust}
+                                >
+                                  <Icon name="adjust" size={16} />
+                                  {t('adjust.rowAction')}
+                                </button>
+                              ) : null}
                               <button
                                 type="button"
                                 className="icon-btn"
-                                disabled={orderIndex === 0}
-                                onClick={() => moveAccount(orderable, orderIndex, 'up')}
-                                aria-label={`${t('accounts.moveUp')}: ${account.name}`}
-                                data-ui={UI.accounts.moveUp}
+                                onClick={rowActionClick(() => toggleArchive(account))}
+                                aria-label={`${
+                                  account.archived ? t('accounts.unarchive') : t('accounts.archive')
+                                }: ${account.name}`}
+                                data-ui={UI.accounts.archiveToggle}
                               >
-                                <span aria-hidden="true" style={{ fontSize: 16 }}>
-                                  ↑
-                                </span>
-                              </button>
-                              <button
-                                type="button"
-                                className="icon-btn"
-                                disabled={orderIndex === orderable.length - 1}
-                                onClick={() => moveAccount(orderable, orderIndex, 'down')}
-                                aria-label={`${t('accounts.moveDown')}: ${account.name}`}
-                                data-ui={UI.accounts.moveDown}
-                              >
-                                <span aria-hidden="true" style={{ fontSize: 16 }}>
-                                  ↓
-                                </span>
+                                <Icon name={account.archived ? 'restore' : 'archive'} size={18} />
                               </button>
                             </div>
-                          ) : null
-                        ) : (
-                          <div className="row-actions">
-                            {canAdjust ? (
-                              <button
-                                type="button"
-                                className="btn btn--ghost"
-                                style={{ minHeight: 'var(--tap)' }}
-                                onClick={() => setAdjustingAccount(account)}
-                                aria-label={`${t('adjust.rowAction')}: ${account.name}`}
-                                data-ui={UI.accounts.adjust}
-                              >
-                                <Icon name="adjust" size={16} />
-                                {t('adjust.rowAction')}
-                              </button>
-                            ) : null}
-                            <button
-                              type="button"
-                              className="icon-btn"
-                              onClick={() => setEditing(account)}
-                              aria-label={`${t('common.edit')}: ${account.name}`}
-                            >
-                              <Icon name="edit" size={18} />
-                            </button>
-                            <button
-                              type="button"
-                              className="icon-btn"
-                              onClick={() => toggleArchive(account)}
-                              aria-label={`${
-                                account.archived ? t('accounts.unarchive') : t('accounts.archive')
-                              }: ${account.name}`}
-                              data-ui={UI.accounts.archiveToggle}
-                            >
-                              <Icon name={account.archived ? 'restore' : 'archive'} size={18} />
-                            </button>
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </li>
                     );
                   })}

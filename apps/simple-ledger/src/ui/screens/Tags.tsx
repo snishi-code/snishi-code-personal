@@ -7,6 +7,7 @@ import { useDirtyGuard } from '../overlays';
 import { TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { ConfirmDialog } from '../overlays';
+import { cardTapProps, rowActionClick } from '../cardTap';
 import { useLedger } from '../../state/store';
 import { aggregateEntryTags } from '../../domain/tags';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
@@ -97,40 +98,38 @@ export function Tags() {
       ) : (
         <ul className="card list" data-ui={UI.tags.list}>
           {visible.map((tag) => (
-            <li key={tag.id} className="list__item">
-              <div className="list__main">
-                <div className="list__title">
-                  {tag.name}{' '}
-                  {tag.archived ? (
-                    <span className="tag tag--neutral">{t('tags.archived')}</span>
-                  ) : null}
+            // 行そのものをタップ = そのタグの編集シート（カードタップ = 編集の単一正本）。
+            <li key={tag.id}>
+              <div
+                className="list__item"
+                {...cardTapProps(`${t('tags.edit')}: ${tag.name}`, () => setEditing(tag))}
+              >
+                <div className="list__main">
+                  <div className="list__title">
+                    {tag.name}{' '}
+                    {tag.archived ? (
+                      <span className="tag tag--neutral">{t('tags.archived')}</span>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-              <div className="row-actions">
-                <button
-                  type="button"
-                  className="icon-btn"
-                  onClick={() => setEditing(tag)}
-                  aria-label={`${t('tags.edit')}: ${tag.name}`}
-                >
-                  <Icon name="edit" size={18} />
-                </button>
-                <button
-                  type="button"
-                  className="icon-btn"
-                  onClick={() => toggleArchive(tag)}
-                  aria-label={`${tag.archived ? t('tags.unarchive') : t('tags.archive')}: ${tag.name}`}
-                >
-                  <Icon name={tag.archived ? 'restore' : 'archive'} size={18} />
-                </button>
-                <button
-                  type="button"
-                  className="icon-btn"
-                  onClick={() => setPendingDelete(tag)}
-                  aria-label={`${t('tags.delete')}: ${tag.name}`}
-                >
-                  <Icon name="delete" size={18} />
-                </button>
+                <div className="row-actions">
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    onClick={rowActionClick(() => toggleArchive(tag))}
+                    aria-label={`${tag.archived ? t('tags.unarchive') : t('tags.archive')}: ${tag.name}`}
+                  >
+                    <Icon name={tag.archived ? 'restore' : 'archive'} size={18} />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    onClick={rowActionClick(() => setPendingDelete(tag))}
+                    aria-label={`${t('tags.delete')}: ${tag.name}`}
+                  >
+                    <Icon name="delete" size={18} />
+                  </button>
+                </div>
               </div>
             </li>
           ))}

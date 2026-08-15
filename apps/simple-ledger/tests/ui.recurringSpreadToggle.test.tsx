@@ -16,6 +16,7 @@ import { createRecurringRule, loadLedger } from '../src/data/repository';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import type { ReportPeriod } from '../src/domain/reportPeriod';
 import { UI } from '../src/ui-contract';
+import { firstRuleRow } from './tapTargets';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import './setup';
 
@@ -170,9 +171,7 @@ describe('継続コスト台帳経由の明示トグル', () => {
     });
 
     await renderReady();
-    fireEvent.click(
-      await waitFor(() => document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)!),
-    );
+    fireEvent.click(await waitFor(() => firstRuleRow()!));
     // 費用行きでも保存形が直接形なら OFF で開く（role から再導出しない）。
     expect(toggle().checked).toBe(false);
   });
