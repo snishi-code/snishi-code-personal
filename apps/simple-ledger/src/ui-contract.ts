@@ -203,6 +203,9 @@ export const UI = {
     adjust: 'accounts.adjust',
     // アーカイブ/解除ボタン。残高が残る資産・負債は振替シート（EntrySheet transfer 再利用）を経由する
     archiveToggle: 'accounts.archiveToggle',
+    // 残高 0 のアーカイブ / 解除の確認（残高が残る科目は振替シートが確認を兼ねる）
+    archiveConfirm: 'accounts.archiveConfirm',
+    unarchiveConfirm: 'accounts.unarchiveConfirm',
     openingAmount: 'accounts.openingAmount',
     openingDate: 'accounts.openingDate',
     startDate: 'accounts.startDate',
@@ -265,10 +268,20 @@ export const UI = {
     recurringAmountChangeFromToday: 'allocations.recurring.amountChange.fromToday',
     recurringAmountChangeCancel: 'allocations.recurring.amountChange.cancel',
     recurringEdit: 'allocations.recurring.edit',
-    // 終了 = today を排他的終点へ。同じ設定で新しく始める = 系譜なしの独立ルール作成。
+    // 終了 = 排他的終点を打つ。同じ設定で新しく始める = 系譜なしの独立ルール作成。
+    // どちらも無確認では実行しない（終了は終了日シート・再開は確認ダイアログ）。
     recurringEnd: 'allocations.recurring.end',
+    recurringEndSheet: 'allocations.recurring.endSheet',
+    recurringEndSheetDate: 'allocations.recurring.endSheet.date',
+    recurringEndSheetConfirm: 'allocations.recurring.endSheet.confirm',
     recurringRestart: 'allocations.recurring.restart',
+    recurringRestartConfirm: 'allocations.recurring.restart.confirm',
     recurringDelete: 'allocations.recurring.delete',
+    // ルール由来 item の削除 = 「この回をスキップ」（ルールは続く）。ダイアログから
+    // 終了日シートへ乗り換えられる。
+    skipDialog: 'allocations.skipDialog',
+    skipConfirm: 'allocations.skip.confirm',
+    skipEndRule: 'allocations.skip.endRule',
     // 継続コスト資産シート（登録＝編集の 1 コンポーネント）
     edit: 'allocations.edit',
     editDialog: 'allocations.editDialog',

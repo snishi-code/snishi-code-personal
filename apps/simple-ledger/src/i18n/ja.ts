@@ -434,6 +434,13 @@ export const ja = {
   'accounts.autoBadge': '自動',
   'accounts.outsideSlice': 'この断面には存在しない',
   'accounts.archive': 'アーカイブ',
+  // 残高 0 の科目も無確認では終了させない（2026-08-15 作者合意）。残高が残る科目は
+  // 振替シートが確認を兼ねるので、この確認は通らない。
+  'accounts.archiveConfirmTitle': 'この科目をアーカイブしますか？',
+  'accounts.archiveConfirmBody':
+    '「{name}」を今日を終了点として記録します。登録済みの仕訳はそのまま残ります。',
+  'accounts.unarchiveConfirmTitle': 'アーカイブを解除しますか？',
+  'accounts.unarchiveConfirmBody': '「{name}」の終了点を消して、また使えるようにします。',
   'accounts.archiveSkipTransfer': '振替せずにアーカイブ',
   'accounts.unarchive': 'アーカイブ解除',
   'accounts.showArchived': 'この断面に存在しない科目も表示',
@@ -766,7 +773,24 @@ export const ja = {
   'recurring.firstPostingStatus': '初回の起票は {date} です',
   'recurring.firstPostingNone': '初回の起票はありません',
   'recurring.end': '終了',
+  // 終了日シート（無確認の即終了はしない・2026-08-15 作者合意）。終了点は含まない端点なので、
+  // 一覧の「{date} より前まで」と同じ意味を「この日以降は起票されません」で言い直す。
+  'recurring.endSheetTitle': 'ルールを終了する',
+  'recurring.endSheetDate': '終了点',
+  'recurring.endSheetBody':
+    'この日以降は起票されません。起票済みの仕訳と持ち物はそのまま残ります。',
+  'recurring.endSheetConfirm': '終了する',
   'recurring.restart': '同じ設定で新しく始める',
+  'recurring.restartConfirmTitle': '同じ設定で新しく始めますか？',
+  'recurring.restartConfirmBody':
+    '今日を開始点として、同じ内容の新しいルールを作ります。終了したルールと起票済みの記録はそのまま残ります。',
+  // ルール由来 item の削除は「この回をスキップ」と名乗る（手動 item の削除とは別の意味）。
+  'recurring.skip': 'この回をスキップ',
+  'recurring.skipTitle': 'この回をスキップしますか？',
+  'recurring.skipBody':
+    'この回の購入の仕訳ごと取り消します。ルールは続き、次回は {date} に起票されます。',
+  'recurring.skipNoNextBody': 'この回の購入の仕訳ごと取り消します。次回の起票はありません。',
+  'recurring.skipEndRule': 'ルールを終了する',
   'recurring.deleteConfirmTitle': '定期ルールを削除',
   'recurring.deleteConfirmBody':
     '「{name}」を削除します。起票済みの仕訳・できた継続コスト資産はそのまま残ります。',

@@ -51,16 +51,68 @@ async function renderReady() {
 }
 
 describe('勘定科目のアーカイブ', () => {
-  it('残高 0 の科目は即アーカイブされる', async () => {
+  it('残高 0 の科目は確認してからアーカイブされる', async () => {
     await loadLedger();
     await renderReady();
     fireEvent.click(await screen.findByRole('button', { name: 'アーカイブ: チャージ残高' }));
+    // 無確認では実行しない（2026-08-15 作者合意）。確認は「今日を終了点として記録する」意味。
+    const confirm = await waitFor(() => {
+      const found = document.querySelector(`[data-ui="${UI.accounts.archiveConfirm}"]`);
+      expect(found).toBeInTheDocument();
+      return found!;
+    });
+    expect(confirm).toHaveTextContent('今日を終了点として記録します');
+    expect((await loadLedger()).accounts.find((a) => a.name === 'チャージ残高')?.archived).toBe(
+      false,
+    );
+    fireEvent.click(confirm.querySelector(`[data-ui="${UI.dialog.confirm}"]`)!);
+
     await waitFor(async () => {
       const after = await loadLedger();
       expect(after.accounts.find((a) => a.name === 'チャージ残高')?.archived).toBe(true);
     });
     // 振替シートは開かない。
     expect(document.querySelector(`[data-ui="${UI.journal.entry.save}"]`)).toBeNull();
+  });
+
+  it('残高 0 のアーカイブ確認をキャンセルすると据え置く', async () => {
+    await loadLedger();
+    await renderReady();
+    fireEvent.click(await screen.findByRole('button', { name: 'アーカイブ: チャージ残高' }));
+    const confirm = await waitFor(() => {
+      const found = document.querySelector(`[data-ui="${UI.accounts.archiveConfirm}"]`);
+      expect(found).toBeInTheDocument();
+      return found!;
+    });
+    fireEvent.click(confirm.querySelector(`[data-ui="${UI.dialog.cancel}"]`)!);
+
+    expect(document.querySelector(`[data-ui="${UI.accounts.archiveConfirm}"]`)).toBeNull();
+    const after = await loadLedger();
+    expect(after.accounts.find((a) => a.name === 'チャージ残高')?.archived).toBe(false);
+    expect(after.accounts.find((a) => a.name === 'チャージ残高')?.endDate).toBeUndefined();
+  });
+
+  it('アーカイブ解除も確認を挟み、確定で終了点を消す', async () => {
+    const ledger = await loadLedger();
+    const charge = ledger.accounts.find((a) => a.name === 'チャージ残高')!;
+    await upsertAccount({ ...charge, archived: true, endDate: todayLocal() });
+
+    await renderReady();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'この断面に存在しない科目も表示' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'アーカイブ解除: チャージ残高' }));
+    const confirm = await waitFor(() => {
+      const found = document.querySelector(`[data-ui="${UI.accounts.unarchiveConfirm}"]`);
+      expect(found).toBeInTheDocument();
+      return found!;
+    });
+    expect((await loadLedger()).accounts.find((a) => a.id === charge.id)?.archived).toBe(true);
+    fireEvent.click(confirm.querySelector(`[data-ui="${UI.dialog.confirm}"]`)!);
+
+    await waitFor(async () => {
+      const after = (await loadLedger()).accounts.find((a) => a.id === charge.id)!;
+      expect(after.archived).toBe(false);
+      expect(after.endDate).toBeUndefined();
+    });
   });
 
   it('残高が残る資産は振替シートを経由し、振替 + アーカイブが 1 回で終わる', async () => {

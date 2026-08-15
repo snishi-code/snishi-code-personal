@@ -63,6 +63,7 @@ import {
   earliestRecurringRuleEndDate,
   effectiveRecurringRuleStartDate,
   recurringRuleLastExistingDate,
+  recurringRuleReferenceStartDate,
   ruleExistsAt as recurringRuleExistsAt,
 } from '../../domain/accountLifetime';
 import { quickSpanEndDate } from '../ccQuickSpan';
@@ -119,8 +120,7 @@ export function Allocations({
   /** 仕訳一覧の計算で生まれた行タップからの遷移対象（開くシート。同一オブジェクトは 1 回だけ消費）。 */
   target?: AllocationsTarget | null;
 }) {
-  const { ledger, removeMonthlyCost, createRecurringRule, saveRecurringRule, removeRecurringRule } =
-    useLedger();
+  const { ledger, removeMonthlyCost, createRecurringRule, removeRecurringRule } = useLedger();
   const [showEnded, setShowEnded] = useState(false);
   const [query, setQuery] = useState('');
   // 並び替え（表示専用・保存しない）。軸と方向を 1 つの state で持ち、軸を切り替えたら
@@ -132,6 +132,10 @@ export function Allocations({
   const [chooserOpen, setChooserOpen] = useState(false);
   const [ruleSheet, setRuleSheet] = useState<{ existing?: RecurringRule } | null>(null);
   const [pendingRuleDelete, setPendingRuleDelete] = useState<RecurringRule | null>(null);
+  // 状態を変える操作は必ず確認を挟む（2026-08-15 作者合意）: 終了は終了日シート、
+  // 再開は軽い確認ダイアログを通す（無確認の即実行はしない）。
+  const [endingRule, setEndingRule] = useState<RecurringRule | null>(null);
+  const [pendingRuleRestart, setPendingRuleRestart] = useState<RecurringRule | null>(null);
   const [pendingRuleActionId, setPendingRuleActionId] = useState<string | null>(null);
   const ruleActionInFlight = useRef(false);
   // 表示だけはヘッダーの断面へ追従する。シート内の書込日・catch-up は period を受け取らず、
@@ -288,19 +292,6 @@ export function Allocations({
     }
   };
 
-  const endRecurringRule = async (rule: RecurringRule): Promise<void> => {
-    // 「終了」= 今日以降は生まない。今日すでに起票済みならその事実は存在期間の中にあるので、
-    // 終了点は翌日に置く（今日に置くと半開区間の外へ出て保存境界が拒否する）。
-    const effectiveDate = earliestRecurringRuleEndDate(
-      rule,
-      ledger?.journalEntries ?? [],
-      todayLocal(),
-    );
-    await runRecurringRuleAction(rule.id, () =>
-      saveRecurringRule({ ...rule, endDate: effectiveDate, updatedAt: nowIso() }),
-    );
-  };
-
   const restartRecurringRule = async (rule: RecurringRule): Promise<void> => {
     const effectiveDate = todayLocal();
     await runRecurringRuleAction(rule.id, () =>
@@ -334,6 +325,18 @@ export function Allocations({
     if (targetItem) setItemSheet({ existing: targetItem });
     else if (targetRule) setRuleSheet({ existing: targetRule });
   }
+
+  // 削除確認の分岐材料。ルール由来 item なら「この回をスキップ」を名乗り、次回起票日を出す。
+  // 次回起票日は「カーソルより後に、周期位相と存在期間が一致する最初の未起票日」の単一正本
+  // （recurringRuleReferenceStartDate）。スキップはカーソルを戻さないので、この日付は
+  // 確定後も変わらない。ルールが既に削除済み・終了済みなら「次回の起票はありません」。
+  const pendingDeleteOrigin = pendingDelete ? parseRuleItemId(pendingDelete.id) : undefined;
+  const pendingSkipRule =
+    pendingDeleteOrigin !== undefined
+      ? allRules.find((r) => r.id === pendingDeleteOrigin.ruleId)
+      : undefined;
+  const pendingSkipNextDate =
+    pendingSkipRule !== undefined ? recurringRuleReferenceStartDate(pendingSkipRule) : undefined;
 
   return (
     <section
@@ -507,7 +510,7 @@ export function Allocations({
                         type="button"
                         className="icon-btn"
                         disabled={pendingRuleActionId !== null}
-                        onClick={() => endRecurringRule(r).catch(() => undefined)}
+                        onClick={() => setEndingRule(r)}
                         aria-label={`${t('recurring.end')}: ${r.name}`}
                         data-ui={UI.allocations.recurringEnd}
                       >
@@ -519,7 +522,7 @@ export function Allocations({
                         type="button"
                         className="icon-btn"
                         disabled={pendingRuleActionId !== null}
-                        onClick={() => restartRecurringRule(r).catch(() => undefined)}
+                        onClick={() => setPendingRuleRestart(r)}
                         aria-label={`${t('recurring.restart')}: ${r.name}`}
                         data-ui={UI.allocations.recurringRestart}
                       >
@@ -552,6 +555,8 @@ export function Allocations({
             {items.map(({ m, fromRule }) => {
               // 導出カードに回収は存在しない（未起票周期）ので spreadTotal = amount。
               const spreadTotal = fromRule !== undefined ? m.amount : spreadTotalOf(m);
+              // ルール由来 item の削除は「この回をスキップ」（ルールは続く）。判定は単一正本。
+              const ruleOrigin = parseRuleItemId(m.id);
               const ending = isEndingSoon(m, asOf);
               const monthly = representativeMonthlyAmount(m, spreadTotal);
               return (
@@ -576,7 +581,7 @@ export function Allocations({
                       {/* くり返し記帳が自動生成した item はルールと同名で並ぶ（buildRuleItem が
                           name: rule.name）ため、検索で「登録した覚えのない項目」に見えないよう
                           由来を名乗る。判定はルール由来 ID の単一正本 parseRuleItemId。 */}
-                      {fromRule !== undefined || parseRuleItemId(m.id) !== undefined ? (
+                      {fromRule !== undefined || ruleOrigin !== undefined ? (
                         <>
                           {' '}
                           <span className="tag tag--teal">{t('monthlyCost.fromRule')}</span>
@@ -621,7 +626,9 @@ export function Allocations({
                           type="button"
                           className="icon-btn"
                           onClick={() => setPendingDelete(m)}
-                          aria-label={`${t('common.delete')}: ${m.name}`}
+                          aria-label={`${
+                            ruleOrigin !== undefined ? t('recurring.skip') : t('common.delete')
+                          }: ${m.name}`}
                         >
                           <Icon name="delete" size={18} />
                         </button>
@@ -677,18 +684,76 @@ export function Allocations({
       )}
 
       {pendingDelete ? (
-        <ConfirmDialog
-          title={t('monthlyCost.deleteConfirmTitle')}
-          body={t('monthlyCost.deleteConfirmBody', { name: pendingDelete.name })}
-          confirmLabel={t('common.delete')}
-          danger
-          onCancel={() => setPendingDelete(null)}
-          onConfirm={async () => {
-            const m = pendingDelete;
-            setPendingDelete(null);
-            await removeMonthlyCost(m.id).catch(() => undefined);
-          }}
-        />
+        pendingDeleteOrigin !== undefined ? (
+          /* ルール由来 item = 「この回をスキップ」。同じ確定操作（item + 購入の仕訳の削除）だが、
+             ルールは続くという意味をタイトル・本文・ボタンで名乗る。ここからルールの終了日
+             シートへも乗り換えられる（「そもそももう要らない」への出口）。 */
+          <Modal
+            title={t('recurring.skipTitle')}
+            variant="dialog"
+            dismissMode="never"
+            onClose={() => setPendingDelete(null)}
+            dataUi={UI.allocations.skipDialog}
+            footer={
+              <>
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => setPendingDelete(null)}
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--danger"
+                  onClick={async () => {
+                    const m = pendingDelete;
+                    setPendingDelete(null);
+                    await removeMonthlyCost(m.id).catch(() => undefined);
+                  }}
+                  data-ui={UI.allocations.skipConfirm}
+                >
+                  {t('recurring.skip')}
+                </button>
+              </>
+            }
+          >
+            <div className="stack">
+              <p>
+                {pendingSkipNextDate !== undefined
+                  ? t('recurring.skipBody', { date: pendingSkipNextDate })
+                  : t('recurring.skipNoNextBody')}
+              </p>
+              {pendingSkipRule !== undefined ? (
+                <button
+                  type="button"
+                  className="btn btn--block"
+                  onClick={() => {
+                    setPendingDelete(null);
+                    setEndingRule(pendingSkipRule);
+                  }}
+                  data-ui={UI.allocations.skipEndRule}
+                >
+                  <Icon name="archive" size={16} />
+                  {t('recurring.skipEndRule')}
+                </button>
+              ) : null}
+            </div>
+          </Modal>
+        ) : (
+          <ConfirmDialog
+            title={t('monthlyCost.deleteConfirmTitle')}
+            body={t('monthlyCost.deleteConfirmBody', { name: pendingDelete.name })}
+            confirmLabel={t('common.delete')}
+            danger
+            onCancel={() => setPendingDelete(null)}
+            onConfirm={async () => {
+              const m = pendingDelete;
+              setPendingDelete(null);
+              await removeMonthlyCost(m.id).catch(() => undefined);
+            }}
+          />
+        )
       ) : null}
 
       {itemSheet ? (
@@ -725,6 +790,25 @@ export function Allocations({
         <RecurringRuleSheet
           {...(ruleSheet.existing !== undefined ? { existing: ruleSheet.existing } : {})}
           onClose={() => setRuleSheet(null)}
+        />
+      ) : null}
+
+      {endingRule ? (
+        <RecurringRuleEndSheet rule={endingRule} onClose={() => setEndingRule(null)} />
+      ) : null}
+
+      {pendingRuleRestart ? (
+        <ConfirmDialog
+          title={t('recurring.restartConfirmTitle')}
+          body={t('recurring.restartConfirmBody')}
+          confirmLabel={t('recurring.restart')}
+          dataUi={UI.allocations.recurringRestartConfirm}
+          onCancel={() => setPendingRuleRestart(null)}
+          onConfirm={async () => {
+            const r = pendingRuleRestart;
+            setPendingRuleRestart(null);
+            await restartRecurringRule(r).catch(() => undefined);
+          }}
         />
       ) : null}
 
@@ -1567,6 +1651,82 @@ function ContinuousCostItemSheet({
           onChange={setExpenseAccountId}
           options={monthlyAllocationOptions}
           dataUi={UI.allocations.editExpense}
+        />
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * ルールの終了 = 明示的に終了点を打つ（継続コスト item のアーカイブと同じ型の小シート）。
+ * 既定 = 「今日で終了する」ときに置ける最小の排他的終了日（earliestRecurringRuleEndDate）。
+ * それ未満を入れても保存境界が拒否するので、画面では入力を許して理由をそのまま見せる
+ * （fail-closed の判定を UI へ二重実装しない）。終了点は含まない端点なので、一覧の
+ * 「{date} より前まで」と同じ意味を hint で言い直す。
+ */
+function RecurringRuleEndSheet({ rule, onClose }: { rule: RecurringRule; onClose: () => void }) {
+  const { ledger, saveRecurringRule } = useLedger();
+  const [endDate, setEndDate] = useState(() =>
+    earliestRecurringRuleEndDate(rule, ledger?.journalEntries ?? [], todayLocal()),
+  );
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+
+  async function submit(): Promise<void> {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await saveRecurringRule({ ...rule, endDate, updatedAt: nowIso() });
+      onClose();
+    } catch (e) {
+      setError(errorText(e));
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={t('recurring.endSheetTitle')}
+      onClose={onClose}
+      variant="dialog"
+      dataUi={UI.allocations.recurringEndSheet}
+      footer={
+        <>
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={submit}
+            disabled={submitting || endDate === ''}
+            data-ui={UI.allocations.recurringEndSheetConfirm}
+          >
+            {t('recurring.endSheetConfirm')}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        {error ? (
+          <div className="field__error" role="alert">
+            <Icon name="alert" size={14} />
+            {error}
+          </div>
+        ) : null}
+        <div className="list__title">{rule.name}</div>
+        <TextInput
+          label={t('recurring.endSheetDate')}
+          type="date"
+          required
+          value={endDate}
+          onChange={setEndDate}
+          hint={t('recurring.endSheetBody')}
+          dataUi={UI.allocations.recurringEndSheetDate}
         />
       </div>
     </Modal>

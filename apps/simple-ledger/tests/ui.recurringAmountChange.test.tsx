@@ -87,7 +87,16 @@ describe('定期ルールの金額変更範囲', () => {
       expect(document.querySelector(`[data-ui="${UI.allocations.recurringEnd}"]`)).toBeTruthy();
     });
 
+    // 終了は終了日シートを通す（既定 = 今日で置ける最小の排他的終了点）。
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringEnd}"]`)!);
+    await waitFor(() => {
+      expect(
+        document.querySelector(`[data-ui="${UI.allocations.recurringEndSheet}"]`),
+      ).toBeInTheDocument();
+    });
+    fireEvent.click(
+      document.querySelector(`[data-ui="${UI.allocations.recurringEndSheetConfirm}"]`)!,
+    );
     await waitFor(async () => {
       expect(
         (await loadLedger()).recurringRules.find((rule) => rule.id === original.id)?.endDate,
@@ -105,6 +114,12 @@ describe('定期ルールの金額変更範囲', () => {
       expect(document.querySelector(`[data-ui="${UI.allocations.recurringRestart}"]`)).toBeTruthy();
     });
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringRestart}"]`)!);
+    // 再開も軽い確認を挟む（今日を開始点に同じ内容の新しいルールを作る）。
+    const restartConfirm = await waitFor(
+      () => document.querySelector(`[data-ui="${UI.allocations.recurringRestartConfirm}"]`)!,
+    );
+    expect(restartConfirm).toHaveTextContent('今日を開始点として');
+    fireEvent.click(restartConfirm.querySelector(`[data-ui="${UI.dialog.confirm}"]`)!);
 
     await waitFor(async () => {
       expect((await loadLedger()).recurringRules).toHaveLength(2);

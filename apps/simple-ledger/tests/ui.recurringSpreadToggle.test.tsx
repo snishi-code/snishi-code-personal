@@ -195,8 +195,14 @@ describe('継続コスト台帳経由の明示トグル', () => {
     });
 
     await renderReady();
+    // 終了は終了日シート経由（無確認では実行しない）。
     fireEvent.click(
       await waitFor(() => document.querySelector(`[data-ui="${UI.allocations.recurringEnd}"]`)!),
+    );
+    fireEvent.click(
+      await waitFor(
+        () => document.querySelector(`[data-ui="${UI.allocations.recurringEndSheetConfirm}"]`)!,
+      ),
     );
     await waitFor(async () => {
       expect(
@@ -207,9 +213,18 @@ describe('継続コスト台帳経由の明示トグル', () => {
     fireEvent.click(
       await waitFor(() => document.querySelector(`[data-ui="${UI.allocations.showCompleted}"]`)!),
     );
+    // 再開も確認ダイアログ経由。
     fireEvent.click(
       await waitFor(
         () => document.querySelector(`[data-ui="${UI.allocations.recurringRestart}"]`)!,
+      ),
+    );
+    fireEvent.click(
+      await waitFor(
+        () =>
+          document.querySelector(
+            `[data-ui="${UI.allocations.recurringRestartConfirm}"] [data-ui="${UI.dialog.confirm}"]`,
+          )!,
       ),
     );
     await waitFor(async () => {

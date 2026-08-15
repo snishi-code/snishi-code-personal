@@ -31,6 +31,7 @@ import type { Account } from '../../domain/types';
 import { accountExistsAt } from '../../domain/accountLifetime';
 import { isRecurringPostableRole } from '../../domain/recurring';
 import { boxForAccount, groupAccountsByBox, type AccountBox } from '../accountBoxes';
+import { ConfirmDialog } from '../overlays';
 import { AccountSheet } from './AccountSheet';
 import { AdjustmentCreateSheet } from '../AdjustmentSheet';
 import { OpeningRegisterSheet } from '../OpeningSheet';
@@ -70,6 +71,10 @@ export function Accounts({
     account: Account;
     debitBalance: number;
   } | null>(null);
+  // 状態を変える操作は必ず確認を挟む（2026-08-15 作者合意）。残高 0 のアーカイブと解除は
+  // 即実行だったので確認ダイアログを通す（残高が残る経路は振替シート自体が確認を兼ねる）。
+  const [pendingArchive, setPendingArchive] = useState<Account | null>(null);
+  const [pendingUnarchive, setPendingUnarchive] = useState<Account | null>(null);
 
   const today = todayLocal();
   const basis = reportBasis(period, today);
@@ -102,33 +107,35 @@ export function Accounts({
     setArchiveTransfer({ account, debitBalance });
   }
 
-  async function toggleArchive(account: Account) {
-    try {
-      if (account.archived) {
-        // アーカイブ解除は終了点も同時に消し、未来へ再び延ばす。
-        const restored: Account = {
-          ...account,
-          archived: false,
-          endDate: undefined,
-          updatedAt: nowIso(),
-        };
-        await saveAccount(restored);
-        return;
-      }
-      // 資産・負債は「終了点の残高 = 0」が必須 = 残高が残るなら振替シートを必ず挟む。
-      // 費用・収入の累計は過去の記録なので残したまま終了できるが、UI は分散させない
-      // （作者決定 2026-08-14）: 同じアーカイブボタン → 同じ振替シートを出し、
-      // 最上部の「振替せずにアーカイブ」で任意スキップできる形にする。
-      // 判定は保存境界（archiveAccount）と同じ「導出仕訳込みの今日時点残高」（監査 P1-2）。
-      const balance = accountBalance(account.id, account.type, todayEntries);
-      if (balance !== 0) {
-        beginArchiveTransfer(account);
-        return;
-      }
-      await archiveAccount(account.id);
-    } catch {
-      // エラーは store が toast 済み（握り潰さず、ここでは未処理拒否だけ防ぐ）。
+  /** アーカイブ/解除の入口。実行はいずれも確認（確認ダイアログ or 振替シート）の後。 */
+  function toggleArchive(account: Account): void {
+    if (account.archived) {
+      setPendingUnarchive(account);
+      return;
     }
+    // 資産・負債は「終了点の残高 = 0」が必須 = 残高が残るなら振替シートを必ず挟む。
+    // 費用・収入の累計は過去の記録なので残したまま終了できるが、UI は分散させない
+    // （作者決定 2026-08-14）: 同じアーカイブボタン → 同じ振替シートを出し、
+    // 最上部の「振替せずにアーカイブ」で任意スキップできる形にする。
+    // 判定は保存境界（archiveAccount）と同じ「導出仕訳込みの今日時点残高」（監査 P1-2）。
+    const balance = accountBalance(account.id, account.type, todayEntries);
+    if (balance !== 0) {
+      beginArchiveTransfer(account);
+      return;
+    }
+    setPendingArchive(account);
+  }
+
+  async function unarchive(account: Account): Promise<void> {
+    // アーカイブ解除は終了点も同時に消し、未来へ再び延ばす。
+    const restored: Account = {
+      ...account,
+      archived: false,
+      endDate: undefined,
+      updatedAt: nowIso(),
+    };
+    // エラーは store が toast 済み（握り潰さず、ここでは未処理拒否だけ防ぐ）。
+    await saveAccount(restored).catch(() => undefined);
   }
 
   // 箱内の非アーカイブ内訳を 1 つ上/下と入れ替え、その並びを sortIndex として保存する
@@ -392,6 +399,36 @@ export function Accounts({
             },
           }}
           onClose={() => setArchiveTransfer(null)}
+        />
+      ) : null}
+
+      {pendingArchive ? (
+        <ConfirmDialog
+          title={t('accounts.archiveConfirmTitle')}
+          body={t('accounts.archiveConfirmBody', { name: pendingArchive.name })}
+          confirmLabel={t('accounts.archive')}
+          dataUi={UI.accounts.archiveConfirm}
+          onCancel={() => setPendingArchive(null)}
+          onConfirm={async () => {
+            const account = pendingArchive;
+            setPendingArchive(null);
+            await archiveAccount(account.id).catch(() => undefined);
+          }}
+        />
+      ) : null}
+
+      {pendingUnarchive ? (
+        <ConfirmDialog
+          title={t('accounts.unarchiveConfirmTitle')}
+          body={t('accounts.unarchiveConfirmBody', { name: pendingUnarchive.name })}
+          confirmLabel={t('accounts.unarchive')}
+          dataUi={UI.accounts.unarchiveConfirm}
+          onCancel={() => setPendingUnarchive(null)}
+          onConfirm={async () => {
+            const account = pendingUnarchive;
+            setPendingUnarchive(null);
+            await unarchive(account);
+          }}
         />
       ) : null}
 
