@@ -324,7 +324,7 @@ function TemplateSection({
   useRevision(runtime);
   const { store } = runtime;
   const templates = store.getTemplateDefs();
-  const activeId = store.getSettings().activeTemplateId;
+  const activeId = store.getSettings().defaultTemplateId;
   const [sendTarget, setSendTarget] = useState<ShareWirePayload | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TemplateDef | null>(null);
@@ -334,7 +334,7 @@ function TemplateSection({
     if (busy || templateId === activeId) return;
     setBusy(true);
     try {
-      await store.setActiveTemplate(templateId);
+      await store.setDefaultTemplate(templateId);
       runtime.bump();
     } catch (e) {
       console.error('template activate failed:', e);
@@ -817,8 +817,23 @@ function PlaceSection({ runtime }: { runtime: AppRuntime }) {
 
   const activeId = store.storage.getActiveWorkspaceId();
   const places = store.listPlaces();
+  const templates = store.getTemplateDefs();
   const patientCountOf = (placeId: string) =>
     store.listAllPatients().filter((p) => p.placeId === placeId && !p.archivedAt).length;
+
+  async function changeTemplate(placeId: string, templateId: string): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await store.setPlaceTemplate(placeId, templateId);
+      runtime.bump();
+    } catch (e) {
+      console.error('place template change failed:', e);
+      toast.show(errorText(e, s.toast.saveFailed), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function switchTo(id: string): Promise<void> {
     if (busy || id === activeId) return;
@@ -931,6 +946,22 @@ function PlaceSection({ runtime }: { runtime: AppRuntime }) {
                     </span>
                   </button>
                   <span className="formatListActions">
+                    {/* グループのデフォルトテンプレート (新しいページ作成時に写すもの)。
+                        鉛筆の左に置く (実ユーズレビュー 2026-08-14)。 */}
+                    <select
+                      className="select wardTemplateSelect"
+                      value={w.templateId}
+                      disabled={busy}
+                      aria-label={s.settings.ward.templateAria(w.name || s.io.ws.untitled)}
+                      data-ui={UI.settings.wardTemplate}
+                      onChange={(e) => void changeTemplate(w.placeId, e.target.value)}
+                    >
+                      {templates.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name || s.common.untitled}
+                        </option>
+                      ))}
+                    </select>
                     <IconButton
                       label={s.io.ws.rename.title}
                       dataUi={UI.settings.wardRename}

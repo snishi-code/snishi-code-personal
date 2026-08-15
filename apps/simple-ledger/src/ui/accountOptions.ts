@@ -105,6 +105,28 @@ export function defaultMonthlyAllocationAccountId(accounts: Account[]): string {
   return monthlyAllocationAccountOptions(accounts)[0]?.value ?? '';
 }
 
+/**
+ * 継続コスト資産の「回収先」候補（アーカイブシート）。
+ *
+ * 起票できる全 role（簿記入力と同じ流儀）から**費用カテゴリだけを外す**。保存境界は
+ * item の費用の行き先以外の費用科目への回収を拒否する（どの費用を打ち消したのかが
+ * 台帳から追えないため）ので、選べるのに保存できない行き止まりを作らない。
+ * 費用の行き先そのものへ寄せたいときは、シートの「終了日に全額費用にする」を選ぶ。
+ * 区分順（資産 → 負債 → …）は ACCOUNT_TYPES が正本なので、資産が先頭に並ぶ。
+ */
+export function groupedRecoveryDestinationAccounts(
+  accounts: Account[],
+  includeId?: string,
+  atDate?: string,
+): AccountGroup[] {
+  return groupedAccountsByRole(
+    accounts,
+    RECURRING_POSTABLE_ROLES.filter((role) => role !== 'expense-category'),
+    includeId,
+    atDate,
+  );
+}
+
 /** AccountPicker 用の費用の行き先候補（区分別グループ）。 */
 export function groupedMonthlyAllocationAccounts(
   accounts: Account[],

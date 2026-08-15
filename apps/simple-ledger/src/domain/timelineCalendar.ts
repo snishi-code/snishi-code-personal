@@ -329,7 +329,6 @@ interface ItemCandidate {
 }
 
 function itemCandidates(
-  accounts: readonly Account[],
   items: readonly MonthlyCostItem[],
   rules: readonly RecurringRule[],
   through: string,
@@ -341,9 +340,8 @@ function itemCandidates(
     if (origin) existingOrigins.add(`${origin.ruleId}\u0000${origin.month}`);
     candidates.push({ item, projected: false, originRuleId: origin?.ruleId });
   }
-  const byId = new Map(accounts.map((account) => [account.id, account] as const));
   for (const rule of rules) {
-    const expenseAccountId = recurringExpenseAccountId(rule, (id) => byId.get(id)?.role);
+    const expenseAccountId = recurringExpenseAccountId(rule);
     if (expenseAccountId === undefined) continue;
     for (const posting of recurringPostingsDue(rule, through)) {
       if (existingOrigins.has(`${rule.id}\u0000${posting.month}`)) continue;
@@ -457,12 +455,7 @@ export function buildTimelineCalendar(input: BuildTimelineCalendarInput): Timeli
     }
   }
 
-  const candidates = itemCandidates(
-    input.accounts,
-    input.monthlyCostItems,
-    input.recurringRules,
-    input.range.end,
-  );
+  const candidates = itemCandidates(input.monthlyCostItems, input.recurringRules, input.range.end);
   const monthlyRowsAll = candidates.map<TimelineMonthlyCostRow>((candidate) => {
     const span: TimelineSpan = {
       startDate: candidate.item.startDate,
@@ -487,9 +480,7 @@ export function buildTimelineCalendar(input: BuildTimelineCalendarInput): Timeli
   const rulesById = new Map(input.recurringRules.map((rule) => [rule.id, rule] as const));
   const expenseRuleIds = new Set(
     input.recurringRules
-      .filter(
-        (rule) => recurringExpenseAccountId(rule, (id) => accountById.get(id)?.role) !== undefined,
-      )
+      .filter((rule) => recurringExpenseAccountId(rule) !== undefined)
       .map((rule) => rule.id),
   );
   const ruleGroups = input.recurringRules

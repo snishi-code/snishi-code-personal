@@ -14,7 +14,8 @@ import {
   MAX_LEDGER_REVISION,
   SCHEMA_VERSION,
 } from './constants';
-import { counterpartRole } from './adjustment';
+import { counterpartRole, isAdjustableAccountType } from './adjustment';
+import { isDebitNormal } from './accounting';
 import { monthOf, monthsBetween } from './allocation';
 import {
   ACCOUNT_ROLES,
@@ -33,11 +34,7 @@ import {
 import { accountEndingBalanceViolations } from './accountEnding';
 import { isValidIsoDate, isValidIsoMonth } from './calendar';
 import { ANNUAL_RETURN_BP_MAX, ANNUAL_RETURN_BP_MIN } from './investmentProjection';
-import {
-  CATCH_UP_HARD_CAP_MONTHS,
-  isRecurringPostableRole,
-  isRecurringSpreadDestinationRole,
-} from './recurring';
+import { CATCH_UP_HARD_CAP_MONTHS, isRecurringPostableRole } from './recurring';
 import { parseRuleEntryId, parseRuleItemId, ruleEntryId, ruleItemId } from './recurringIds';
 
 const isoDate = z
@@ -180,7 +177,12 @@ export const journalLineSchema = z.object({
   amount: amountSchema,
 });
 
-// タグは「仕訳全体のみ」。明細・両方 scope は廃止。
+/*
+ * タグ（撤去済み・受理のみ）。
+ * 機能は 2026-08-15 に撤去した（実ユーズ 0 件）。schema は v12 の形を保つため残す:
+ * import は tags / tagIds を**受理して黙って保持**し、export でそのまま往復させる。
+ * フィールドごとの削除は v13 の版上げに同乗させる。
+ */
 export const tagScopeSchema = z.literal('entry');
 
 export const tagSchema = z.object({
@@ -271,22 +273,11 @@ export const monthlyCostItemSchema = z
     startDate: isoDate,
     // 終了日は任意。未設定 = 費用の割り振りをしない（残存価値 = 全額）。
     endDate: isoDate.optional(),
-    // 費用化の開始日は任意。未設定 = 購入日（startDate）から月割り（明示値のみ検証）。
-    allocationStartDate: isoDate.optional(),
     expenseAccountId: z.string().min(1),
     createdAt: isoDateTime,
     updatedAt: isoDateTime,
   })
   .superRefine((item, ctx) => {
-    // 費用化の開始日は明示値のみ検証（未設定 = 購入日で常に適法）。終了日未設定でも
-    // 購入日以降の不変条件は成立させる（保存はできるが配分は発生しない）。
-    if (item.allocationStartDate !== undefined && item.allocationStartDate < item.startDate) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: '費用化の開始日は開始日（購入日）以降である必要があります',
-        path: ['allocationStartDate'],
-      });
-    }
     if (item.endDate === undefined) return;
     // 日で比較・例外なしの単一条件。
     if (item.endDate < item.startDate) {
@@ -297,18 +288,8 @@ export const monthlyCostItemSchema = z
       });
       return;
     }
-    if (item.allocationStartDate !== undefined && item.allocationStartDate > item.endDate) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: '費用化の開始日は終了日以前である必要があります',
-        path: ['allocationStartDate'],
-      });
-    }
-    // 配分月数は実際の等分数と同じ基準 = 費用化開始月（allocationStartDate ?? startDate）〜
-    // 終了月で数える（購入日基準にすると、費用化開始を遅らせた item の上限が実配分より
-    // 厳しくなる・監査 P2-2）。
-    const spreadFrom = monthOf(item.allocationStartDate ?? item.startDate);
-    if (monthsBetween(spreadFrom, monthOf(item.endDate)) + 1 > SPREAD_MONTHS_CAP) {
+    // 配分月数は実際の等分数と同じ基準 = 購入月〜終了月で数える。
+    if (monthsBetween(monthOf(item.startDate), monthOf(item.endDate)) + 1 > SPREAD_MONTHS_CAP) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: `配分月数が上限(${SPREAD_MONTHS_CAP}ヶ月)を超えています`,
@@ -327,6 +308,10 @@ export const journalEntrySchema = z
     kind: z.enum(['normal', 'opening']),
     metadata: entryMetadataSchema.optional(),
     tagIds: tagIdList.optional(),
+    // 諸口のグループ ID。v12 は**予約のみ**（UI・集計は未実装）なので形式だけを見る。
+    // 相互参照（同 groupId の仕訳が何本あるか等）は検証しない = グループに件数の
+    // 不変条件を持たせない設計（1 本に減ったら普通の仕訳に退化する）。
+    groupId: z.string().min(1).max(64).optional(),
     createdAt: isoDateTime,
     updatedAt: isoDateTime,
   })
@@ -508,10 +493,12 @@ export const ledgerExportPackageSchema = z
         const targetRole = accountRole.get(adj.accountId) as AccountRole | undefined;
         const counter = accountById.get(adj.counterpartAccountId);
         if (targetType === undefined) issue('補正の対象科目が存在しません', ap('accountId'));
-        else if (targetType !== 'asset' && targetType !== 'liability')
-          issue('補正の対象科目は資産または負債である必要があります', ap('accountId'));
+        else if (!isAdjustableAccountType(targetType))
+          issue('補正の対象科目は資産・負債・費用・収入である必要があります', ap('accountId'));
+        // type 検査を通っても role で弾く: 内部集約(継続コスト台帳)と、相手側である
+        // 残高調整科目自身（type は expense / revenue なので type では弾けない）。
         else if (targetRole === undefined || !ADJUSTABLE_ACCOUNT_ROLES.includes(targetRole))
-          issue('補正の対象科目に内部集約科目は使えません', ap('accountId'));
+          issue('補正の対象科目に内部集約科目・残高調整科目は使えません', ap('accountId'));
         if (!counter) {
           issue('補正の相手科目が存在しません', ap('counterpartAccountId'));
         }
@@ -521,7 +508,7 @@ export const ledgerExportPackageSchema = z
         if (e.kind !== 'normal')
           issue('補正仕訳の kind は normal である必要があります', ['journalEntries', ei, 'kind']);
 
-        if ((targetType === 'asset' || targetType === 'liability') && adj.delta !== 0 && counter) {
+        if (isAdjustableAccountType(targetType) && adj.delta !== 0 && counter) {
           const expectedCounterType = counterpartRole(targetType, adj.delta);
           // 同定は role + type のみ（name 非依存・指示書v3 §B-4）。name を要求すると
           // 生成時の言語（将来の en seed 等）が違う台帳を import で丸ごと拒否してしまう。
@@ -532,14 +519,11 @@ export const ledgerExportPackageSchema = z
             );
           }
 
-          const targetSide =
-            targetType === 'asset'
-              ? adj.delta > 0
-                ? 'debit'
-                : 'credit'
-              : adj.delta > 0
-                ? 'credit'
-                : 'debit';
+          // 向きは正規方向で決まる（asset と expense が同じ・liability と revenue が同じ）。
+          // 相手 type（counterpartRole）とは別経路で導き、両方が一致する仕訳だけ受け入れる。
+          const targetSide = (isDebitNormal(targetType) ? adj.delta > 0 : adj.delta < 0)
+            ? 'debit'
+            : 'credit';
           const counterpartSide = targetSide === 'debit' ? 'credit' : 'debit';
           const amount = Math.abs(adj.delta);
           const targetLine = e.lines.find((line) => line.accountId === adj.accountId);
@@ -762,8 +746,8 @@ export const ledgerExportPackageSchema = z
         accountRole.get(r.creditAccountId) as AccountRole | undefined,
       );
       if (r.spreadExpenseAccountId !== undefined) {
-        // spread を持つ保存形: 借方 = 継続コスト台帳（rule schema で確認済み）、
-        // spread = 計上先（費用または収入=差引形）。旧形式は外部変換の管轄（in-app で読み替えない）。
+        // 月割りトグル ON の保存形: 借方 = 継続コスト台帳（rule schema で確認済み）、
+        // spread = 計上先。計上先は自動起票できる全 role を許す（勘定科目で動作を変えない）。
         if (hasAccount(r.creditAccountId) && !creditPostable)
           issue(
             `定期ルール「${r.name}」の源泉科目は定期ルールに使えません（内部集約・調整科目は自動起票できません）`,
@@ -772,12 +756,12 @@ export const ledgerExportPackageSchema = z
         if (!hasAccount(r.spreadExpenseAccountId))
           issue(`定期ルール「${r.name}」の計上先が存在しません`, at('spreadExpenseAccountId'));
         else if (
-          !isRecurringSpreadDestinationRole(
+          !isRecurringPostableRole(
             accountRole.get(r.spreadExpenseAccountId) as AccountRole | undefined,
           )
         )
           issue(
-            `定期ルール「${r.name}」の計上先は費用または収入の科目である必要があります`,
+            `定期ルール「${r.name}」の計上先に内部集約・残高調整の科目は使えません`,
             at('spreadExpenseAccountId'),
           );
       } else if (
@@ -787,19 +771,10 @@ export const ledgerExportPackageSchema = z
       ) {
         // 支出/収入/振替の定型に加え簿記編集（任意の科目ペア）を許容する。内部集約・調整科目
         // だけは自動起票の対象外（RECURRING_POSTABLE_ROLES が正本）。
+        // 月割りトグル OFF なら費用・収入行きも直接形が正規の保存形。
         issue(
           `定期ルール「${r.name}」の科目は定期ルールに使えません（内部集約・調整科目は自動起票できません）`,
           at('debitAccountId'),
-        );
-      } else if (
-        isRecurringSpreadDestinationRole(
-          accountRole.get(r.debitAccountId) as AccountRole | undefined,
-        )
-      ) {
-        // 費用行き・差引形（借方=収入カテゴリ）とも、直接形は v7 の保存形ではない。
-        issue(
-          `費用・収入行きの定期ルール「${r.name}」は継続コスト台帳経由の保存形である必要があります`,
-          at('spreadExpenseAccountId'),
         );
       }
     });
@@ -869,14 +844,11 @@ export const ledgerExportPackageSchema = z
         const purchaseRuleMonth = purchase.metadata?.recurringMonth;
         const purchaseRule =
           purchaseRuleId !== undefined ? recurringRuleById.get(purchaseRuleId) : undefined;
-        const purchaseRuleDestination =
-          purchaseRule?.spreadExpenseAccountId ?? purchaseRule?.debitAccountId;
         if (
           purchaseRule !== undefined &&
           purchaseRuleMonth !== undefined &&
-          isRecurringSpreadDestinationRole(
-            accountRole.get(purchaseRuleDestination ?? '') as AccountRole | undefined,
-          ) &&
+          // 月割りするルール = 保存形（spread の有無）。role からは再導出しない。
+          purchaseRule.spreadExpenseAccountId !== undefined &&
           mc.id !== ruleItemId(purchaseRule.id, purchaseRuleMonth)
         ) {
           issue(
@@ -959,7 +931,8 @@ export const ledgerExportPackageSchema = z
       ]);
     }
 
-    // タグ(tags): id 一意 + active な同名重複なし。タグは「仕訳全体のみ」（明細タグは廃止）。
+    // タグ(tags): id 一意 + active な同名重複なし + 参照整合。機能は撤去済みだが、
+    // 受理したデータをそのまま往復させる以上、交換の不変条件は v12 のまま守る。
     const tagIds = new Set<string>();
     const activeNames = new Set<string>();
     pkg.tags.forEach((tag, ti) => {

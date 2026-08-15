@@ -93,13 +93,12 @@ describe('勘定科目の存在期間', () => {
     ).toBeUndefined();
   });
 
-  it('item の参照期間は費用化の開始日に依らず startDate〜endDate（§D: accountLifetime 不変）', () => {
+  it('item の参照期間は startDate〜endDate', () => {
     const deferredItem = {
       id: 'm-deferred',
       name: '前払い',
       amount: 60000,
       startDate: '2026-01-15',
-      allocationStartDate: '2026-07-01',
       endDate: '2026-12-31',
       expenseAccountId: 'expense',
       createdAt: 'x',
@@ -185,13 +184,16 @@ describe('勘定科目の存在期間', () => {
       updatedAt: 'x',
     };
 
+    // 最後の起票は 2026-01-20（ルールは 2026-02-01 排他終了）。その 1 起票が作る item は
+    // [2026-01-20, 次回起票日と同日] = recurringRuleItemEndDate('2026-01', 12, 20)
+    // = clampDayToMonth('2027-01', 20) = 2027-01-20。費用科目の参照はそこまで伸びる。
     expect(
       accountReferenceIntervals('expense', {
         entries: [],
         monthlyCostItems: [],
         recurringRules: [rule],
       }),
-    ).toEqual([{ kind: 'recurringRule', from: '2026-01-20', to: '2026-12-31' }]);
+    ).toEqual([{ kind: 'recurringRule', from: '2026-01-20', to: '2027-01-20' }]);
   });
 
   it('仕訳ピッカーはヘッダーではなく入力日付時点で存在する科目だけを返す', () => {

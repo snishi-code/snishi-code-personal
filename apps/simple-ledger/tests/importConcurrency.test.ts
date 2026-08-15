@@ -29,7 +29,7 @@ vi.mock('../src/data/repository', async (importOriginal) => {
 
 import './setup';
 import { exportToJsonText, importFromJsonText } from '../src/data/exportImport';
-import { loadLedger, upsertTag } from '../src/data/repository';
+import { loadLedger, updateSettings } from '../src/data/repository';
 
 describe('import の revision 確認から snapshot までの競合', () => {
   beforeEach(() => {
@@ -45,20 +45,12 @@ describe('import の revision 確認から snapshot までの競合', () => {
     // import 内の1回目 = step ⑤ revision確認、2回目 = step ⑥ snapshot用読取り。
     loadControl.triggerAt = loadControl.count + 2;
     loadControl.beforeTriggeredLoad = () =>
-      upsertTag({
-        id: 'tag-between-check-and-snapshot',
-        name: '確認後の保存',
-        scope: 'entry',
-        archived: false,
-        createdAt: 'x',
-        updatedAt: 'x',
-      });
+      updateSettings({ ...before.settings, ledgerName: '確認後の保存' });
 
     const outcome = await importFromJsonText(text);
     expect(outcome.kind).toBe('storage-error');
-    expect(
-      (await loadLedger()).tags.some((tag) => tag.id === 'tag-between-check-and-snapshot'),
-    ).toBe(true);
+    // import が通っていれば封筒側（元の台帳名）へ戻る。中断したので並行保存が残る。
+    expect((await loadLedger()).settings.ledgerName).toBe('確認後の保存');
   });
 
   it('snapshot 保存直後の別保存を置換せず、import を中断して保存を残す', async () => {
@@ -66,22 +58,13 @@ describe('import の revision 確認から snapshot までの競合', () => {
     const text = exportToJsonText(before);
 
     loadControl.afterSnapshotSaved = () =>
-      upsertTag({
-        id: 'tag-between-snapshot-and-replace',
-        name: 'スナップショット後の保存',
-        scope: 'entry',
-        archived: false,
-        createdAt: 'x',
-        updatedAt: 'x',
-      });
+      updateSettings({ ...before.settings, ledgerName: 'スナップショット後の保存' });
 
     const outcome = await importFromJsonText(text);
     expect(outcome).toMatchObject({
       kind: 'storage-error',
       detail: 'error.common.staleData',
     });
-    expect(
-      (await loadLedger()).tags.some((tag) => tag.id === 'tag-between-snapshot-and-replace'),
-    ).toBe(true);
+    expect((await loadLedger()).settings.ledgerName).toBe('スナップショット後の保存');
   });
 });

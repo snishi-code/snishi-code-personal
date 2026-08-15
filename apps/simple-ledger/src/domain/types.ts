@@ -90,12 +90,14 @@ export interface JournalLine {
 }
 
 /**
- * タグ。勘定科目を増やさずに、旅行・帰省・学会・引っ越しなどイベント/目的ラベルで
- * 仕訳を後から抽出する分析軸。PL/BS の会計ロジックは変えない。
- * タグは常に「仕訳全体（entry）」に付く。
+ * @deprecated タグ機能は 2026-08-15 に撤去した（実ユーズ 0 件・作者決定）。
+ * 型は交換フォーマット v12 の形を保つためだけに残る「受理のみ」の存在で、
+ * 作る経路（画面・保存 API）は無い。import されたタグは黙って保持し export へ素通しする。
+ * フィールドごとの削除は v13 の版上げに同乗させる。
  */
 export type TagScope = 'entry';
 
+/** @deprecated 撤去済み（受理のみ・v13 でフィールドごと削除）。TagScope を参照。 */
 export interface Tag {
   id: string;
   name: string;
@@ -202,15 +204,6 @@ export interface MonthlyCostItem {
   startDate: string;
   /** 終了日 'YYYY-MM-DD'。任意。未設定 = まだ費用にしない。 */
   endDate?: string;
-  /**
-   * 費用化の開始日 'YYYY-MM-DD'。任意。**未設定 = 購入日（startDate）から月割り**。
-   * 設定すると月割りの起点（初月の月割り日・等分の月数）だけがこの日基準になり、
-   * 購入日〜費用化開始日の間は台帳（保管庫）に価値が置かれたままになる。
-   *  - 不変条件: `startDate ≤ allocationStartDate`（endDate 設定時は `≤ endDate`）。
-   *  - 科目線分への要求範囲は従来どおり startDate〜endDate（配分は必ずその内側）。
-   *  - ルール由来 item（`ccr-`）には設定しない（周期どおり配分する）。
-   */
-  allocationStartDate?: string;
   /** 計上先（費用カテゴリのほか、給与など収入カテゴリも可。内部集約・残高調整は不可）。 */
   expenseAccountId: string;
   createdAt: string;
@@ -276,8 +269,17 @@ export interface JournalEntry {
   kind: JournalEntryKind;
   /** 付帯情報（入力方法・逆仕訳リンク・自動生成の由来など）。任意。 */
   metadata?: EntryMetadata;
-  /** 仕訳全体タグ（旅行・帰省・学会 等のイベント/目的ラベル）。 */
+  /**
+   * @deprecated タグ機能は撤去済み（2026-08-15）。新規に付く経路は無いが、import 済み
+   * データの値は黙って保持し export へ素通しする（v13 でフィールドごと削除）。
+   */
   tagIds?: string[];
+  /**
+   * 諸口（複数フロー行の束）のグループ ID。v12 で**予約のみ**（2026-08-11 設計合意・
+   * グループ ID 方式）。UI・集計は未実装で、検証は形式のみ。グループに「2 行以上」等の
+   * 不変条件は将来も持たせない（1 行に減ったら普通の仕訳に退化する設計）。
+   */
+  groupId?: string;
   createdAt: string;
   updatedAt: string;
 }

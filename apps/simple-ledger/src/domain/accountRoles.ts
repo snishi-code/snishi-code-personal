@@ -65,14 +65,27 @@ export function isInternalRole(role: AccountRole): boolean {
   return INTERNAL_ACCOUNT_ROLES.includes(role);
 }
 
+/** 残高補正の対象にできる会計 type（equity は対象外。初期残高は opening で直す）。 */
+const ADJUSTABLE_ACCOUNT_TYPES: readonly AccountType[] = [
+  'asset',
+  'liability',
+  'expense',
+  'revenue',
+];
+
 /**
- * 残高補正の対象にできる役割（資産・負債のうち内部集約 role を除く）。
+ * 残高補正の対象にできる役割（資産・負債・費用・収入のうち、内部集約と残高調整自身を除く）。
  * 継続コスト台帳(continuing-cost-asset)は集約口座であり、補正で直接動かすと
  * 残存価値の導出と矛盾するため対象外（fail-closed）。
+ * 残高調整科目(system-adjustment)は補正の相手側であり、対象にすると自分自身を相手に
+ * 取りうる（type が expense / revenue なので type 制限だけでは弾けない）ため明示除外する。
  * UI の補正対象ピッカーと repository の保存境界の双方がこの正本を使う。
  */
 export const ADJUSTABLE_ACCOUNT_ROLES: readonly AccountRole[] = ACCOUNT_ROLES.filter(
-  (r) => (roleAllowsType(r, 'asset') || roleAllowsType(r, 'liability')) && !isInternalRole(r),
+  (r) =>
+    ADJUSTABLE_ACCOUNT_TYPES.some((type) => roleAllowsType(r, type)) &&
+    !isInternalRole(r) &&
+    r !== 'system-adjustment',
 );
 
 /** type に対する既定 role（type 変更時のリセット先・migration の既定）。 */

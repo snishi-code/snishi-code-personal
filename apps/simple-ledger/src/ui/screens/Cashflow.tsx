@@ -7,7 +7,7 @@ import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { Modal } from '../overlays';
 import { useLedger } from '../../state/store';
-import { deriveBalanceSheet } from '../../domain/accounting';
+import { deriveBalanceSheet, representativeEntryAmount } from '../../domain/accounting';
 import {
   cashDeltaOfEntry,
   freeAssetTotal,
@@ -21,6 +21,9 @@ import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { addMonthsToDate, MONTHLY_AMOUNTS_HARD_CAP, monthlyAmounts } from '../../domain/allocation';
 import { sortAccounts } from '../../domain/accountOrder';
 import { todayLocal } from '../../util/time';
+import { entryOpenPlan } from '../entryOpen';
+import type { AllocationsTarget } from './Allocations';
+import { cashflowHorizonMonths } from '../../data/localFlags';
 import type { Account, JournalEntry } from '../../domain/types';
 import { Money } from '../money';
 import { TrendChart, type TrendPoint } from '../components/TrendChart';
@@ -53,7 +56,18 @@ function repaymentAmountOf(entry: JournalEntry, liabilityId: string): number {
   );
 }
 
-export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) => void }) {
+export function Cashflow({
+  onEditEntry,
+  onOpenAllocations,
+  onOpenAccount,
+  onOpenEntry,
+}: {
+  onEditEntry: (entry: JournalEntry) => void;
+  /** 仕訳タップの行き先（entryOpenPlan の実行先）。仕訳一覧・ホームと同じ resolver。 */
+  onOpenAllocations: (target: AllocationsTarget) => void;
+  onOpenAccount: (accountId: string) => void;
+  onOpenEntry: (entryId: string) => void;
+}) {
   const { ledger } = useLedger();
   const today = todayLocal();
   const basis = useMemo(() => reportBasis({ mode: 'all' }, today), [today]);
@@ -62,7 +76,12 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
     [basis.asOf, ledger, today],
   );
   const reportEntries = useMemo(() => reportDisplay?.entries ?? [], [reportDisplay]);
-  const [untilDate, setUntilDate] = useState(() => addMonthsToDate(todayLocal(), 6));
+  // 表示終了日。**開くたびに「今日 + 既定の期間（設定画面・端末設定）」へ戻る**。
+  // 画面内の変更はその場限りで持ち帰らない（普段は既定で見たい・一時的に伸ばしても
+  // 次回は既定に戻っていてほしい・作者決定 2026-08-14）。
+  const [untilDate, setUntilDate] = useState(() =>
+    addMonthsToDate(todayLocal(), cashflowHorizonMonths()),
+  );
   const [repayFor, setRepayFor] = useState<{ account: Account; balance: number } | null>(null);
   // 負債行の展開（登録済みの返済リスト）。行タップ = 新規返済シートとは独立に開閉する。
   const [openRepayments, setOpenRepayments] = useState<ReadonlySet<string>>(new Set());
@@ -91,7 +110,9 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
         date: e.date,
         title: e.description,
         delta: cashDeltaOfEntry(e, isFree),
-        amount: sumAmounts(e.lines.filter((l) => l.side === 'debit').map((l) => l.amount)),
+        // 仕訳の代表額は domain が正本。useMemo = render 相当なので、投げない方を使う。
+        amount: representativeEntryAmount(e),
+        entry: e,
       }))
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     return {
@@ -312,22 +333,59 @@ export function Cashflow({ onEditEntry }: { onEditEntry: (entry: JournalEntry) =
         <div className="card card--pad empty">{t('cashflow.futureEmpty')}</div>
       ) : (
         <ul className="card list" data-ui={UI.cashflow.futureList}>
-          {futureRows.map((f) => (
-            <li key={f.id} className="list__item">
-              <div className="list__main">
-                <div className="list__title">{f.title}</div>
-                <div className="list__sub">{f.date}</div>
-              </div>
-              <span
-                className={`list__amount ${
-                  f.delta > 0 ? 'amount--pos' : f.delta < 0 ? 'amount--neg' : 'muted'
-                }`}
-              >
-                {f.delta > 0 ? '+' : f.delta < 0 ? '−' : '→ '}
-                <Money amount={f.delta === 0 ? f.amount : Math.abs(f.delta)} currency={currency} />
-              </span>
-            </li>
-          ))}
+          {futureRows.map((f) => {
+            {
+              /* タップで編集 or 由来へ（entryOpenPlan の単一正本・仕訳一覧/ホームと同じ規則）。 */
+            }
+            const plan = entryOpenPlan(f.entry);
+            const onTap =
+              plan.kind === 'none'
+                ? undefined
+                : plan.kind === 'rule'
+                  ? () => onOpenAllocations({ ruleId: plan.ruleId })
+                  : plan.kind === 'item'
+                    ? () => onOpenAllocations({ itemId: plan.itemId })
+                    : plan.kind === 'account'
+                      ? () => onOpenAccount(plan.accountId)
+                      : plan.kind === 'edit'
+                        ? () => onEditEntry(f.entry)
+                        : () => onOpenEntry(f.entry.id);
+            const body = (
+              <>
+                <div className="list__main">
+                  <div className="list__title">{f.title}</div>
+                  <div className="list__sub">{f.date}</div>
+                </div>
+                <span
+                  className={`list__amount ${
+                    f.delta > 0 ? 'amount--pos' : f.delta < 0 ? 'amount--neg' : 'muted'
+                  }`}
+                >
+                  {f.delta > 0 ? '+' : f.delta < 0 ? '−' : '→ '}
+                  <Money
+                    amount={f.delta === 0 ? f.amount : Math.abs(f.delta)}
+                    currency={currency}
+                  />
+                </span>
+              </>
+            );
+            return (
+              <li key={f.id} className="list__row">
+                {onTap ? (
+                  <button
+                    type="button"
+                    className="list__item list__item--button"
+                    onClick={onTap}
+                    data-ui={UI.cashflow.futureRow}
+                  >
+                    {body}
+                  </button>
+                ) : (
+                  <div className="list__item">{body}</div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
 

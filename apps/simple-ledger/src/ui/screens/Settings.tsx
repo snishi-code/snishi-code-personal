@@ -17,8 +17,12 @@ import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
+import {
+  CASHFLOW_HORIZON_MAX_MONTHS,
+  cashflowHorizonMonths,
+  rememberCashflowHorizonMonths,
+} from '../../data/localFlags';
 import { APP_ID } from '../../domain/constants';
-import { MANAGEMENT_ITEMS, type Screen } from '../navigation';
 import type { ImportOutcome } from '../../data/exportImport';
 import type { Settings as LedgerSettings, Snapshot } from '../../domain/types';
 import { ScrollTopButton } from '../ScrollTopButton';
@@ -84,10 +88,8 @@ function snapshotReasonLabel(reason: string): string {
 }
 
 export function Settings({
-  onNavigate,
   onOpenOnboarding,
 }: {
-  onNavigate: (screen: Screen) => void;
   /** 初期残高の一括登録シートを開く（初回オンボーディングの再表示導線）。 */
   onOpenOnboarding: () => void;
 }) {
@@ -115,6 +117,8 @@ export function Settings({
 
   const [ledgerName, setLedgerName] = useState(ledger?.settings.ledgerName ?? '');
   const [currency, setCurrency] = useState(ledger?.settings.currency ?? '');
+  // 端末設定（台帳データではない）。確定できる値だけ記憶し、欄には打鍵中の文字列を保つ。
+  const [horizonText, setHorizonText] = useState(() => String(cashflowHorizonMonths()));
   const [fractionDigits, setFractionDigits] = useState<0 | 1 | 2>(
     ledger?.settings.displayFractionDigits ?? 0,
   );
@@ -202,27 +206,6 @@ export function Settings({
       <h1 className="screen-title" id="settings-title">
         {t('settings.title')}
       </h1>
-
-      {/* 管理（補助画面へ） */}
-      <p className="section-label">{t('settings.manageSection')}</p>
-      <ul className="card list" data-ui={UI.settings.manageList}>
-        {MANAGEMENT_ITEMS.map((item) => (
-          <li key={item.screen}>
-            <button
-              type="button"
-              className="list__row-btn"
-              onClick={() => onNavigate(item.screen)}
-              data-ui={`settings.manage.${item.screen}`}
-            >
-              <span className="list__row-btn__label">
-                <Icon name={item.icon} size={18} />
-                {t(item.labelKey)}
-              </span>
-              <Icon name="chevronRight" size={16} />
-            </button>
-          </li>
-        ))}
-      </ul>
 
       {/* データ */}
       <p className="section-label">{t('settings.dataSection')}</p>
@@ -373,6 +356,34 @@ export function Settings({
         <button type="button" className="btn" onClick={saveLedgerSettings}>
           {t('common.save')}
         </button>
+        {/* 資金繰りの既定表示期間。台帳データではなく端末の表示の好み（localFlags）なので、
+            上の「保存」とは独立に、変更したその場で確定する。資金繰り画面での一時的な
+            日付変更は持ち帰らない（次に開くとこの既定へ戻る・作者決定 2026-08-14）。 */}
+        <div className="field" style={{ marginTop: 'var(--space-4)' }}>
+          <span className="field__label" id="cashflow-horizon-label">
+            {t('settings.cashflowHorizon')}
+          </span>
+          <span className="field__hint">{t('settings.cashflowHorizonHint')}</span>
+          <input
+            className="input"
+            inputMode="numeric"
+            aria-labelledby="cashflow-horizon-label"
+            value={horizonText}
+            onChange={(e) => {
+              const text = e.target.value.replace(/[^\d]/g, '');
+              setHorizonText(text);
+              const months = Number.parseInt(text, 10);
+              if (
+                Number.isInteger(months) &&
+                months >= 1 &&
+                months <= CASHFLOW_HORIZON_MAX_MONTHS
+              ) {
+                rememberCashflowHorizonMonths(months);
+              }
+            }}
+            data-ui={UI.settings.cashflowHorizon}
+          />
+        </div>
         <div style={{ marginTop: 'var(--space-4)' }}>
           <div className="kv">
             <span className="muted">{t('settings.version')}</span>

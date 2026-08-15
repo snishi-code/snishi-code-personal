@@ -32,7 +32,6 @@ import {
   updateSettings,
   upsertAccount,
   upsertEntry,
-  upsertTag,
 } from '../src/data/repository';
 import { exportToJsonText } from '../src/data/exportImport';
 import { UI } from '../src/ui-contract';
@@ -473,34 +472,13 @@ describe('金額以外のフィールドの open→save 往復', () => {
     });
   });
 
-  it('タグ: 無変更保存で色・作成日時まで変わらない', async () => {
-    // このファイルは複数の LedgerProvider を開閉する。全suite並列時にも、直前Providerの
-    // teardownより後の現DB世代をCAS基準へ同期してから保存境界を直接呼ぶ。
-    await loadLedger();
-    await upsertTag({
-      id: 'round-trip-tag',
-      name: '往復タグ',
-      scope: 'entry',
-      color: '#123456',
-      archived: false,
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    });
-    const before = (await loadLedger()).tags.find((x) => x.id === 'round-trip-tag')!;
-    expect(before.color).toBe('#123456');
-    // シートを通さない経路（保存境界そのもの）でも同値であること。
-    await upsertTag(before);
-    const after = (await loadLedger()).tags.find((x) => x.id === 'round-trip-tag')!;
-    expect(ignoreVolatile(after)).toBe(ignoreVolatile(before));
-  });
-
   it('台帳設定: 名前・単位・桁数を読み込んで保存し直しても export が通る', async () => {
     const before = (await loadLedger()).settings;
     await updateSettings({ ...before });
     const after = (await loadLedger()).settings;
     expect(JSON.stringify(after)).toBe(JSON.stringify(before));
     // 「保存はできるのに export だけ落ちる」を 1 行で拾う。
-    expect(exportToJsonText(await loadLedger())).toContain('"schemaVersion": 11');
+    expect(exportToJsonText(await loadLedger())).toContain('"schemaVersion": 12');
   });
 });
 

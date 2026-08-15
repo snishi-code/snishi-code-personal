@@ -108,11 +108,16 @@ function monthFromIndex(index: number): string {
 }
 
 /**
- * ルールが 1 回の起票で作る継続コスト資産の終了日。
- * 起票月から周期ぶんを数えた最終月の月末になる。
+ * ルールが 1 回の起票で作る継続コスト資産の終了日 = **次回起票日と同日**（v12・同日刻み）。
+ * 「残高 0 になる日 = 期間の終わり = 次の支払い日」。実起票の有無に依存せず、周期上の
+ * 次回予定日（クランプ込み）を決定的に返す。旧「周期末の月末」は廃止（13 分割問題の根）。
  */
-export function recurringRuleItemEndDate(postingMonth: string, everyMonths: number): string {
-  return ruleFirstDate(monthFromIndex(monthIndex(postingMonth) + everyMonths - 1), 31);
+export function recurringRuleItemEndDate(
+  postingMonth: string,
+  everyMonths: number,
+  dayOfMonth: number,
+): string {
+  return ruleFirstDate(monthFromIndex(monthIndex(postingMonth) + everyMonths), dayOfMonth);
 }
 
 /**
@@ -178,7 +183,7 @@ export function recurringRuleReferenceEndDate(
   if (lastExistingDate === undefined || !spreadsExpense) return lastExistingDate;
   const lastPostingMonth = recurringRuleLastPostingMonth(rule);
   if (lastPostingMonth === undefined) return lastExistingDate;
-  const itemEnd = recurringRuleItemEndDate(lastPostingMonth, rule.everyMonths);
+  const itemEnd = recurringRuleItemEndDate(lastPostingMonth, rule.everyMonths, rule.dayOfMonth);
   return itemEnd > lastExistingDate ? itemEnd : lastExistingDate;
 }
 

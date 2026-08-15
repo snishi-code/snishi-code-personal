@@ -232,3 +232,84 @@ describe('科目一覧の費用・収入表示（C-1・ヘッダー期間の発�
     expect(bankAll.textContent).toContain(formatMoney(8_500, '円', 0));
   });
 });
+
+/*
+ * 補正の全科目化（作者決定 2026-08-15「補正ボタンを費用・収入にも。UI を分散させない」）。
+ * 費用・収入の内訳行にも同じ「補正」ボタンを出し、その日までの累計を実額へ合わせる。
+ */
+describe('補正導線の全科目化（費用・収入の内訳行）', () => {
+  async function seedFixedCostEntry() {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const fixed = ledger.accounts.find((a) => a.name === '固定費')!;
+    await createOpenings([{ accountId: cash.id, amount: 1_000_000, date: '2020-01-01' }]);
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2026-06-01',
+        description: '固定費の支払い',
+        debitAccountId: fixed.id,
+        creditAccountId: cash.id,
+        // 金額は minor（1/100 単位）。表示桁 0 の台帳では 200,000 minor = 2,000 円。
+        amount: 200_000,
+        kind: 'normal',
+      }),
+    );
+    return fixed;
+  }
+
+  function q(dataUi: string): HTMLElement {
+    const el = document.querySelector(`[data-ui="${dataUi}"]`);
+    expect(el).not.toBeNull();
+    return el as HTMLElement;
+  }
+
+  it('費用の内訳行に補正ボタンが出て、保存すると 借方 費用 / 貸方 残高調整収入 が立つ', async () => {
+    const fixed = await seedFixedCostEntry();
+    await renderReady();
+
+    const button = screen.getByRole('button', { name: '補正: 固定費' });
+    expect(rowOf('固定費').contains(button)).toBe(true);
+    // 収入の内訳行にも同じ導線がある（箱を分散させない）。
+    expect(screen.getByRole('button', { name: '補正: 給与' })).toBeInTheDocument();
+
+    fireEvent.click(button);
+    await waitFor(() => expect(q(UI.adjustments.createDialog)).toBeInTheDocument());
+    fireEvent.change(q(UI.adjustments.date), { target: { value: '2026-06-30' } });
+    // 実額 5,000 円（欄は表示単位で入力する = 500,000 minor）。
+    fireEvent.change(q(UI.adjustments.actual), { target: { value: '5000' } });
+    fireEvent.click(q(UI.adjustments.save));
+
+    await waitFor(async () => {
+      expect((await loadLedger()).journalEntries.some((e) => e.metadata?.adjustment)).toBe(true);
+    });
+    const after = await loadLedger();
+    const entry = after.journalEntries.find((e) => e.metadata?.adjustment)!;
+    const revenueAdjustment = after.accounts.find(
+      (a) => a.role === 'system-adjustment' && a.type === 'revenue',
+    )!;
+    // 2026-06-30 までの累計は 2,000 円の 1 本だけ = 200,000 minor。
+    // 実額 5,000 円 = 500,000 minor → 差額 +300,000 minor（3,000 円）。
+    expect(entry.metadata!.adjustment!.expectedBalance).toBe(200_000);
+    expect(entry.metadata!.adjustment!.delta).toBe(300_000);
+    expect(entry.lines.find((l) => l.side === 'debit')).toMatchObject({
+      accountId: fixed.id,
+      amount: 300_000,
+    });
+    expect(entry.lines.find((l) => l.side === 'credit')).toMatchObject({
+      accountId: revenueAdjustment.id,
+      amount: 300_000,
+    });
+  });
+
+  it('履歴の無い費用科目でも初期残高シートへ流さない（opening は資産・負債だけ）', async () => {
+    await seedFixedCostEntry();
+    await renderReady();
+
+    // 「健康」は仕訳ゼロ。資産なら初期残高登録へ分岐するが、費用は補正シートを開く。
+    fireEvent.click(screen.getByRole('button', { name: '補正: 健康' }));
+    await waitFor(() => expect(q(UI.adjustments.createDialog)).toBeInTheDocument());
+    expect(
+      document.querySelector(`[data-ui="${UI.adjustments.openingRegisterDialog}"]`),
+    ).toBeNull();
+  });
+});

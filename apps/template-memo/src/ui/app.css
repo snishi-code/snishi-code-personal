@@ -1057,9 +1057,30 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
 }
 
 /* ヘッダー直下のタグ行。ヘッダーは単一の <button> なので、その中ではなくこの行に置く
-   (ボタンの入れ子は不正)。タグが多いときは折り返す (.tagSelection が flex-wrap)。 */
+   (ボタンの入れ子は不正)。左 = タグ (多いときは折り返す・.tagSelection が flex-wrap)、
+   右端 = このページで使うテンプレートの切替 (実ユーズレビュー 2026-08-14)。 */
 .detailTagsRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
   margin-bottom: var(--space-2);
+}
+.detailTagsGroup {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* .select は既定で width:100% (foundation)。行の右端の部品なので中身ぶんの幅に抑える。 */
+.detailTemplateSelect {
+  flex: 0 1 auto;
+  width: auto;
+  max-width: 11rem;
+  margin-left: auto;
+}
+
+/* グループ一覧の行内テンプレート切替 (鉛筆の左)。375px でグループ名が残る幅に抑える。 */
+.wardTemplateSelect {
+  width: auto;
+  max-width: 8.5rem;
 }
 
 /* 共通の下部固定操作バー (患者詳細・設定)。

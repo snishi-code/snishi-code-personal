@@ -25,6 +25,8 @@ import { UI } from '../../ui-contract';
 import type { JournalEntry } from '../../domain/types';
 import type { Screen } from '../navigation';
 import type { FormMode } from '../entryModes';
+import type { AllocationsTarget } from './Allocations';
+import { entryOpenPlan } from '../entryOpen';
 import type { MessageKey } from '../../i18n';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { assertSafeAmount } from '../../domain/safeSum';
@@ -51,6 +53,9 @@ export function Dashboard({
   onEditEntry,
   onNavigate,
   onOpenJournal,
+  onOpenAllocations,
+  onOpenAccount,
+  onOpenEntry,
 }: {
   period: ReportPeriod;
   onPeriodChange: (p: ReportPeriod) => void;
@@ -58,6 +63,10 @@ export function Dashboard({
   onEditEntry: (entry: JournalEntry) => void;
   onNavigate: (screen: Screen) => void;
   onOpenJournal: (filter: { from?: string; to?: string }) => void;
+  /** 仕訳タップの行き先（entryOpenPlan の実行先）。仕訳一覧と同じ resolver を使う。 */
+  onOpenAllocations: (target: AllocationsTarget) => void;
+  onOpenAccount: (accountId: string) => void;
+  onOpenEntry: (entryId: string) => void;
 }) {
   const { ledger } = useLedger();
   const today = todayLocal();
@@ -96,7 +105,7 @@ export function Dashboard({
     });
   };
 
-  const { pl, bs, asOf, livingTotal, investmentProjectionTruncations } = useMemo(() => {
+  const { pl, bs, livingTotal, investmentProjectionTruncations } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
     // 表示は投影込み（displayEntries）。ヘッダー日付を未来にすると資産・純資産が投影込みになる。
     const display = ledger ? displayEntriesResultForAsOf(ledger, basis.asOf, today) : null;
@@ -105,7 +114,6 @@ export function Dashboard({
     return {
       pl: deriveProfitAndLoss(accounts, entries, range),
       bs: deriveBalanceSheet(accounts, entries, basis.asOf),
-      asOf: basis.asOf,
       // 支出合計・純益は domain の値をそのまま使う（UI で式を再実装しない）。
       livingTotal: breakdown.total,
       investmentProjectionTruncations: display?.investmentProjectionTruncations ?? [],
@@ -133,7 +141,8 @@ export function Dashboard({
         {/* 額縁: 収支 + 財政状態の 6 枠を sticky 固定し、下の仕訳だけが流れる
             （実ユーズ④・作者決定 2026-08-12「6枠を固定」）。 */}
         <div className="dashboard__frame" data-ui={UI.dashboard.frame}>
-          <p className="section-label">{t('dashboard.flowOf', { label })}</p>
+          {/* 「収支」「財政状態」の見出しは撤去（見れば明らか・作者決定 2026-08-14）。
+              縮めたぶん仕訳の可視領域を広げる。読み上げは各枠の aria-label（金額込み）が担う。 */}
           <div className="stat-grid">
             <StatButton
               label={t('dashboard.revenue')}
@@ -159,8 +168,7 @@ export function Dashboard({
             />
           </div>
 
-          <p className="section-label">{t('dashboard.positionAsOf', { date: asOf })}</p>
-          <div className="stat-grid">
+          <div className="stat-grid" style={{ marginTop: 'var(--space-2)' }}>
             <StatButton
               label={t('dashboard.assets')}
               amount={bs.totalAssets}
@@ -183,6 +191,24 @@ export function Dashboard({
               onClick={() => onNavigate('netAssets')}
               dataUi={UI.dashboard.statNetAssets}
             />
+          </div>
+
+          {/* 仕訳の見出しと「すべて見る」も額縁ごと固定する（作者決定 2026-08-14）。
+              仕訳をスクロールしても月をまたぐ遡り導線が手元に残る。sticky に含めるぶん
+              縦幅は詰める（.dashboard__frame-journal）。 */}
+          <div className="dashboard__frame-journal section-label">
+            <span>{t('dashboard.entriesOf', { label })}</span>
+            {periodEntries.length > 0 ? (
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => onOpenJournal(journalFilter)}
+                data-ui={UI.dashboard.journalOpenAll}
+              >
+                {t('dashboard.viewAll')}
+                <Icon name="chevronRight" size={14} />
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -219,23 +245,6 @@ export function Dashboard({
           </div>
         ) : null}
 
-        <div
-          className="section-label"
-          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-        >
-          <span>{t('dashboard.entriesOf', { label })}</span>
-          {periodEntries.length > 0 ? (
-            <button
-              type="button"
-              className="btn btn--ghost"
-              onClick={() => onOpenJournal(journalFilter)}
-              data-ui={UI.dashboard.journalOpenAll}
-            >
-              {t('dashboard.viewAll')}
-              <Icon name="chevronRight" size={16} />
-            </button>
-          ) : null}
-        </div>
         {periodEntries.length === 0 ? (
           <div className="card card--pad muted">{t('dashboard.noMonthEntries')}</div>
         ) : (
@@ -246,14 +255,32 @@ export function Dashboard({
               data-ui={UI.dashboard.journalPreview}
             >
               {visibleEntries.map((entry) => {
-                const generated = !!entry.metadata?.monthlyCostId;
+                {
+                  /* 何を開くかは entryOpenPlan（単一正本）。以前は継続コスト絡みの行だけ
+                    仕訳一覧へ飛ばしており、「タップで編集 or 由来へ」の原則から外れていた。 */
+                }
+                const plan = entryOpenPlan(entry);
+                const onClick =
+                  plan.kind === 'none'
+                    ? undefined
+                    : plan.kind === 'rule'
+                      ? () => onOpenAllocations({ ruleId: plan.ruleId })
+                      : plan.kind === 'item'
+                        ? () => onOpenAllocations({ itemId: plan.itemId })
+                        : plan.kind === 'account'
+                          ? () => onOpenAccount(plan.accountId)
+                          : plan.kind === 'edit'
+                            ? () => onEditEntry(entry)
+                            : // opening / adjustment は専用シートが要る。仕訳一覧の該当行を
+                              // 直接開く（シートが開いた状態で遷移する既存の resolver を使う）。
+                              () => onOpenEntry(entry.id);
                 return (
                   <EntryListItem
                     key={entry.id}
                     entry={entry}
                     accounts={ledger?.accounts ?? []}
                     currency={currency}
-                    onClick={() => (generated ? onOpenJournal(journalFilter) : onEditEntry(entry))}
+                    {...(onClick ? { onClick } : {})}
                   />
                 );
               })}

@@ -19,7 +19,6 @@ import {
   upsertEntry,
   upsertMonthlyCost,
   upsertRecurringRule,
-  upsertTag,
 } from '../src/data/repository';
 import { buildExportPackage, exportToJsonText, importFromJsonText } from '../src/data/exportImport';
 import { getAll, getKv, putKv, putRecord, wipeDatabase, STORE } from '../src/data/db';
@@ -80,7 +79,7 @@ describe('P1-1: 回収の振替の形（借方 ≠ 台帳・振替先 role・日
     await archiveMonthlyCost({
       id: item.id,
       endDate: '2026-06-30',
-      recovery: { destinationAccountId: bank.id, amount: 3000 },
+      recoveries: [{ destinationAccountId: bank.id, amount: 3000 }],
     });
     return buildExportPackage(await loadLedger());
   }
@@ -203,26 +202,12 @@ describe('P1-5: revision CAS（別タブの並行変更を検出して abort す
     const meta = (await getKv<LedgerMeta>('meta'))!;
     await putKv('meta', { ...meta, revision: meta.revision + 1 });
     await expect(
-      upsertTag({
-        id: 'tag-cas',
-        name: '競合テスト',
-        scope: 'entry',
-        archived: false,
-        createdAt: 'x',
-        updatedAt: 'x',
-      }),
+      upsertAccount(makeAccount({ id: 'acc-cas', name: '競合テスト' })),
     ).rejects.toMatchObject({ code: 'error.common.staleData' });
     // 再読み込み（loadLedger）でトラッカが追従すれば保存できる。
     await loadLedger();
     await expect(
-      upsertTag({
-        id: 'tag-cas',
-        name: '競合テスト',
-        scope: 'entry',
-        archived: false,
-        createdAt: 'x',
-        updatedAt: 'x',
-      }),
+      upsertAccount(makeAccount({ id: 'acc-cas', name: '競合テスト' })),
     ).resolves.toBeUndefined();
   });
 });
@@ -486,14 +471,18 @@ describe('既存itemと後続ルールの独立性', () => {
     const splitFebruaryItem = after.monthlyCostItems.find(
       (item) => item.id === `ccr-${successor.id}-2026-02`,
     );
-    expect(normalFebruaryItem).toMatchObject({ amount: 3000, endDate: '2026-02-28' });
-    expect(splitFebruaryItem).toMatchObject({ amount: 3000, endDate: '2026-02-28' });
+    // 2 月起票ぶんは編集後のルール（everyMonths 1・dayOfMonth 20）で作られる:
+    // 起票月 2026-02 + 1 か月 = 2026-03 の 20 日 = 次回起票日と同日。
+    expect(normalFebruaryItem).toMatchObject({ amount: 3000, endDate: '2026-03-20' });
+    expect(splitFebruaryItem).toMatchObject({ amount: 3000, endDate: '2026-03-20' });
+    // 1 月起票ぶんは生成時のルール（everyMonths 12）のまま: 2026-01 + 12 か月 = 2027-01-20。
+    // 全期間へ波及した編集は金額だけを訂正し、生成時に決まった期間は動かさない。
     expect(
       after.monthlyCostItems.find((item) => item.id === `ccr-${rule.id}-2026-01`),
-    ).toMatchObject({ amount: 12000, endDate: '2026-12-31' });
+    ).toMatchObject({ amount: 12000, endDate: '2027-01-20' });
     expect(
       after.monthlyCostItems.find((item) => item.id === `ccr-${normallyEditedRule.id}-2026-01`),
-    ).toMatchObject({ amount: 3000, endDate: '2026-12-31' });
+    ).toMatchObject({ amount: 3000, endDate: '2027-01-20' });
 
     const februaryAllocations = reportEntriesForAsOf(after, '2026-02-28')
       .filter((entry) => entry.date >= '2026-02-01' && entry.date <= '2026-02-28')
@@ -504,19 +493,22 @@ describe('既存itemと後続ルールの独立性', () => {
         .flatMap((entry) => entry.lines)
         .filter((line) => line.accountId === expense.id && line.side === 'debit')
         .reduce((sum, line) => sum + line.amount, 0);
+    // 2 月に立つ刻みは 1 月起票ぶんの 2/20（12,000 / 12 刻み = 1,000）だけ。2 月起票ぶんの
+    // 刻みは 3/20（購入当日の費用 0）なので 2 月には 1 円も入らない。
     expect(
       expenseForItems(new Set([`ccr-${rule.id}-2026-01`, `ccr-${successor.id}-2026-02`])),
-    ).toBe(4000);
-    // 全期間へ波及は既存itemも訂正する明示例外なので、分割とは過去itemの配分額だけが異なる。
+    ).toBe(1000);
+    // 全期間へ波及は既存itemも訂正する明示例外なので、分割とは過去itemの配分額だけが異なる
+    // （1 月起票ぶんが 3,000 / 12 刻み = 250 に訂正される）。
     expect(
       expenseForItems(
         new Set([`ccr-${normallyEditedRule.id}-2026-01`, `ccr-${normallyEditedRule.id}-2026-02`]),
       ),
-    ).toBe(3250);
+    ).toBe(250);
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(after)).success).toBe(true);
   });
 
-  it('ルール由来itemの終了日を後ろへ編集して次月itemと重ねてもexportできる', async () => {
+  it('ルール由来itemの終了日が後ろへずれて次月itemと重なってもexportできる', async () => {
     const bank = await accountByName('預金');
     const expense = await accountByName('固定費');
     const rule = await createRecurringRule({
@@ -533,7 +525,9 @@ describe('既存itemと後続ルールの独立性', () => {
     await catchUpRecurringRules('2026-02-15');
     const before = await loadLedger();
     const january = before.monthlyCostItems.find((item) => item.id === `ccr-${rule.id}-2026-01`)!;
-    await upsertMonthlyCost({ ...january, endDate: '2026-02-28' });
+    // ルール由来 item は保存境界から編集できない（2026-08-15）。旧データ・別経路で重なった
+    // 状態でも export → schema が通ることの検証なので、DB へ直接置いて重なりを作る。
+    await putRecord(STORE.monthlyCostItems, { ...january, endDate: '2026-02-28' });
 
     const after = await loadLedger();
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(after)).success).toBe(true);
@@ -594,14 +588,7 @@ describe('P2-5: DB 全消去は onsuccess だけを成功扱いにする', () =>
 describe('再監査対応: import は全置換後に revision を必ず進める', () => {
   it('置換後 revision = max(現行, 封筒) + 1。同じ封筒の再取込は conflict になり force で通る', async () => {
     await loadLedger();
-    await upsertTag({
-      id: 'tag-rev',
-      name: '再監査',
-      scope: 'entry',
-      archived: false,
-      createdAt: 'x',
-      updatedAt: 'x',
-    });
+    await upsertAccount(makeAccount({ id: 'acc-rev', name: '再監査' }));
     const ledger = await loadLedger();
     const before = ledger.meta.revision;
     const text = exportToJsonText(ledger);
@@ -618,14 +605,7 @@ describe('再監査対応: import は全置換後に revision を必ず進める
 
   it('事前snapshot後に別操作が保存されたら、全置換をCASで拒否して更新を残す', async () => {
     const snapshot = await loadLedger();
-    await upsertTag({
-      id: 'tag-after-snapshot',
-      name: 'snapshot後の更新',
-      scope: 'entry',
-      archived: false,
-      createdAt: 'x',
-      updatedAt: 'x',
-    });
+    await upsertAccount(makeAccount({ id: 'acc-after-snapshot', name: 'snapshot後の更新' }));
 
     await expect(
       replaceLedger(
@@ -642,7 +622,9 @@ describe('再監査対応: import は全置換後に revision を必ず進める
       ),
     ).rejects.toMatchObject({ code: 'error.common.staleData' });
 
-    expect((await loadLedger()).tags.some((tag) => tag.id === 'tag-after-snapshot')).toBe(true);
+    expect(
+      (await loadLedger()).accounts.some((account) => account.id === 'acc-after-snapshot'),
+    ).toBe(true);
   });
 
   it('全初期化で revision が同値へ戻っても、deviceId の世代差で古い全置換を拒否する', async () => {
@@ -676,16 +658,11 @@ describe('再監査対応: import は全置換後に revision を必ず進める
     await loadLedger();
 
     await expect(
-      upsertTag({
-        id: 'tag-overflow',
-        name: '上限',
-        scope: 'entry',
-        archived: false,
-        createdAt: 'x',
-        updatedAt: 'x',
-      }),
+      upsertAccount(makeAccount({ id: 'acc-overflow', name: '上限' })),
     ).rejects.toMatchObject({ code: 'error.common.revisionExhausted' });
-    expect(await getAll(STORE.tags)).toHaveLength(0);
+    expect((await getAll<Account>(STORE.accounts)).some((a) => a.id === 'acc-overflow')).toBe(
+      false,
+    );
   });
 
   it('safe integer を超える封筒 revision は schema で拒否する', async () => {
@@ -707,14 +684,7 @@ describe('再監査対応: 起動時 catch-up（loadLedger 前）でも CAS の�
     const meta = (await getKv<LedgerMeta>('meta'))!;
     await putKv('meta', { ...meta, revision: meta.revision + 1 }); // 別タブの書込みを模す
     await expect(
-      upsertTag({
-        id: 'tag-boot-cas',
-        name: '起動競合',
-        scope: 'entry',
-        archived: false,
-        createdAt: 'x',
-        updatedAt: 'x',
-      }),
+      upsertAccount(makeAccount({ id: 'acc-boot-cas', name: '起動競合' })),
     ).rejects.toMatchObject({ code: 'error.common.staleData' });
   });
 });
@@ -723,59 +693,36 @@ describe('再監査対応: 同一タブの変更操作を事前読込から直�
   it('同時に開始した2保存を順に検証・保存し、後続を stale tracker へ乗せ替えない', async () => {
     const before = await loadLedger();
     const results = await Promise.allSettled([
-      upsertTag({
-        id: 'tag-serial-a',
-        name: '直列A',
-        scope: 'entry',
-        archived: false,
-        createdAt: 'x',
-        updatedAt: 'x',
-      }),
-      upsertTag({
-        id: 'tag-serial-b',
-        name: '直列B',
-        scope: 'entry',
-        archived: false,
-        createdAt: 'x',
-        updatedAt: 'x',
-      }),
+      upsertAccount(makeAccount({ id: 'acc-serial-a', name: '直列A' })),
+      upsertAccount(makeAccount({ id: 'acc-serial-b', name: '直列B' })),
     ]);
 
     expect(results.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
     const after = await loadLedger();
     expect(after.meta.revision).toBe(before.meta.revision + 2);
-    expect(after.tags.map((tag) => tag.id).sort()).toEqual(['tag-serial-a', 'tag-serial-b']);
+    expect(
+      after.accounts
+        .map((account) => account.id)
+        .filter((id) => id.startsWith('acc-serial-'))
+        .sort(),
+    ).toEqual(['acc-serial-a', 'acc-serial-b']);
   });
 
-  it('同名タグの同時作成は先行結果を見て再検証し、後続だけを拒否する', async () => {
+  it('同名科目の同時作成は先行結果を見て再検証し、後続だけを拒否する', async () => {
     const before = await loadLedger();
     const results = await Promise.allSettled([
-      upsertTag({
-        id: 'tag-same-name-a',
-        name: '同時作成',
-        scope: 'entry',
-        archived: false,
-        createdAt: 'x',
-        updatedAt: 'x',
-      }),
-      upsertTag({
-        id: 'tag-same-name-b',
-        name: '同時作成',
-        scope: 'entry',
-        archived: false,
-        createdAt: 'x',
-        updatedAt: 'x',
-      }),
+      upsertAccount(makeAccount({ id: 'acc-same-name-a', name: '同時作成' })),
+      upsertAccount(makeAccount({ id: 'acc-same-name-b', name: '同時作成' })),
     ]);
 
     expect(results[0]?.status).toBe('fulfilled');
     expect(results[1]).toMatchObject({
       status: 'rejected',
-      reason: { code: 'error.tag.duplicateName' },
+      reason: { code: 'error.account.nameConflict' },
     });
     const after = await loadLedger();
     expect(after.meta.revision).toBe(before.meta.revision + 1);
-    expect(after.tags.filter((tag) => tag.name === '同時作成')).toHaveLength(1);
+    expect(after.accounts.filter((account) => account.name === '同時作成')).toHaveLength(1);
   });
 });
 

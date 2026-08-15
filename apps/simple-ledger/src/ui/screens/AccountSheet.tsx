@@ -23,7 +23,7 @@ import {
 } from '../../domain/investmentProjection';
 import { newId } from '../../domain/ids';
 import { nowIso, todayLocal } from '../../util/time';
-import { boxForRole, type AccountBox } from '../accountBoxes';
+import { boxForAccount, type AccountBox } from '../accountBoxes';
 import { errorText, t } from '../../i18n';
 import { parseAmountToMinor, sanitizeAmountText } from '../amountText';
 import { useMoneyDigits } from '../money';
@@ -43,15 +43,17 @@ export function AccountSheet({
   const accounts = ledger?.accounts ?? [];
 
   // 編集時は既存 role から箱を導く（聖域 role は勘定科目画面に出ないためここへ来ない）。
-  const effectiveBox = existing ? boxForRole(existing.role) : box;
+  // 既存は movable まで見て所属箱を解決する（現預金は自由/不自由の 2 箱に分かれた）。
+  const effectiveBox = existing ? boxForAccount(existing) : box;
   const createRole = box?.createRole;
 
   const [name, setName] = useState(existing?.name ?? '');
   // メモ入力欄は撤去済みだが、既存の note は保存時にそのまま引き継ぐ（消さない）。
   const [note] = useState(existing?.note ?? '');
-  // 「自由に動かせる」は現預金の箱のみ・既定 ON。OFF のときだけ movable=false を保存する
-  // （Suica・チャージ残高など、資金繰りの原資に数えない例外側に印を付ける）。
-  const [movable, setMovable] = useState(existing ? existing.movable !== false : true);
+  // 「自由に動かせるか」は**箱そのもの**が表す（2 箱化に伴い UI のチェックを撤去・作者決定
+  // 2026-08-14）。新規は作成した箱で確定し、既存は保存値を保持する＝箱間の移動導線は持たない
+  // （他の箱と同じ「箱は作成時に決まる」ルールに揃える）。
+  const movable = existing ? existing.movable !== false : box?.defaultMovable !== false;
   const digits = useMoneyDigits();
   const [openingAmountText, setOpeningAmountText] = useState('');
   const [openingDate, setOpeningDate] = useState(todayLocal());
@@ -88,7 +90,7 @@ export function AccountSheet({
   // 初期残高は新規作成 × 資産/負債の箱のみ（収入/支出/聖域には出さない）。
   const showOpening = !existing && !!box?.opening;
   // 「自由に動かせる」チェックは現預金（daily-asset）の内訳のみ。
-  const showMovable = (existing?.role ?? createRole) === 'daily-asset';
+  const isDailyAsset = (existing?.role ?? createRole) === 'daily-asset';
   // 返済設定は負債（カード・未払 / ローン）の編集時のみ（新規は作成後に編集で設定する）。
   const showRepayment =
     !!existing && (existing.role === 'payment-liability' || existing.role === 'other-liability');
@@ -141,7 +143,7 @@ export function AccountSheet({
             type: box.type,
             role: box.createRole,
             ...(note.trim() !== '' ? { note: note.trim() } : {}),
-            ...(showMovable && !movable ? { movable: false } : {}),
+            ...(isDailyAsset && !movable ? { movable: false } : {}),
           },
           amount: openingAmount,
           date: openingDate,
@@ -163,7 +165,7 @@ export function AccountSheet({
           ...(existing ? { startDate: startDate === '' ? undefined : startDate } : {}),
           ...(existing ? { endDate: endDate === '' ? undefined : endDate } : {}),
           ...(note.trim() !== '' ? { note: note.trim() } : {}),
-          ...(showMovable && !movable ? { movable: false } : {}),
+          ...(isDailyAsset && !movable ? { movable: false } : {}),
           ...(showRepayment && repaymentAccountId !== '' ? { repaymentAccountId } : {}),
           ...(showRepayment && repaymentDay !== null ? { repaymentDay } : {}),
           // 想定利回りと計上先は必ずセットで保存する（空欄 = 両方なし = 投影なし）。
@@ -323,24 +325,6 @@ export function AccountSheet({
               dataUi={UI.accounts.endDate}
             />
           </div>
-        ) : null}
-        {showMovable ? (
-          <label
-            style={{
-              display: 'inline-flex',
-              gap: 8,
-              alignItems: 'center',
-              minHeight: 'var(--tap)',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={movable}
-              onChange={(e) => setMovable(e.target.checked)}
-              data-ui={UI.accounts.movable}
-            />
-            {t('accounts.movable')}
-          </label>
         ) : null}
         {showRepayment ? (
           <>

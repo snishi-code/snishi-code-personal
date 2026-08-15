@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { AppHeader } from '@snishi/foundation/ui/AppHeader';
 import { ConfirmDialog as ExitConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
 import { Icon } from '@snishi/foundation/ui/Icon';
+import { IconButton } from '@snishi/foundation/ui/IconButton';
 import { EnvBadge } from '@snishi/foundation/pwa/EnvBadge';
 import { useAppHistory } from '@snishi/foundation/history/useAppHistory';
 import { Menu, closeTopOverlay, type MenuItem } from './ui/overlays';
@@ -22,11 +23,10 @@ import { Breakdown } from './ui/screens/Breakdown';
 import { ExpenseBreakdown } from './ui/screens/ExpenseBreakdown';
 import { NetIncome } from './ui/screens/NetIncome';
 import { Journal, type JournalFilter } from './ui/screens/Journal';
-import { YearlyOverview } from './ui/screens/YearlyOverview';
+import { YearlyOverview, type OverviewMode } from './ui/screens/YearlyOverview';
 import { TimelineCalendar } from './ui/screens/TimelineCalendar';
 import { Allocations, type AllocationsTarget } from './ui/screens/Allocations';
 import { Cashflow } from './ui/screens/Cashflow';
-import { Tags } from './ui/screens/Tags';
 import { Accounts } from './ui/screens/Accounts';
 import { Settings } from './ui/screens/Settings';
 import { Help } from './ui/screens/Help';
@@ -34,6 +34,7 @@ import { EntrySheet, type EntryInit } from './ui/screens/EntrySheet';
 import { OnboardingSheet } from './ui/OnboardingSheet';
 import { CONTINUOUS_COST_HARD_CAP } from './domain/continuousCost';
 import { NAV_ITEMS } from './ui/navigation';
+import { entryOpenPlan } from './ui/entryOpen';
 import { t } from './i18n';
 import { todayLocal } from './util/time';
 import type { ReportPeriod } from './domain/reportPeriod';
@@ -62,6 +63,9 @@ export function App() {
     mode: 'date',
     date: todayLocal(),
   }));
+  // 年間/全体（時間の粒度）。ヘッダーのセグメントが正本で、年間・全体画面はこれを表示する。
+  // ボタンは**日付を変えない**（タイムスリップはヘッダーの日付のみ。ズームは目盛りを変えるだけ）。
+  const [overviewMode, setOverviewMode] = useState<OverviewMode>('year');
 
   // 端末/ブラウザ Back の中央制御。overlay → (overlay 側 dirty guard) → 画面履歴 → 終了確認。
   const { view, navigate, beginExit } = useAppHistory({
@@ -86,6 +90,11 @@ export function App() {
     setAccountsTarget(null);
     navigate(s);
   };
+  // ヘッダーの粒度セグメント → 年間・全体画面へ（既にその画面なら粒度だけ切り替える）。
+  const openOverview = (mode: OverviewMode) => {
+    setOverviewMode(mode);
+    if (screen !== 'yearlyOverview') go('yearlyOverview');
+  };
   // ヘッダーの日付を変えたら明示フィルターより日付を優先する（フィルターが居座らない）。
   const changePeriod = (next: ReportPeriod) => {
     setJournalFilter(null);
@@ -107,11 +116,35 @@ export function App() {
     setOnboardingManualOpen(false);
   };
 
+  // 終了確認は overlay 登録簿に載せない: appHistory が isExitConfirmOpen で
+  // Back を消費して維持する（連打で確認なしに離脱させないため foundation を直接使う）。
+  //
+  // 早期 return より**前**で組み立て、loading / 復旧画面を含む全状態の return へ同じものを
+  // 差し込む。useAppHistory は status に関係なく popstate を拾って showExitConfirm を呼ぶので、
+  // ここが本文の後ろにしか無いと台帳が読めない状態だけ確認なしで離脱してしまう。
+  // 実体は 1 つ（分岐した return のどれか 1 本だけが描画される）＝ dialog の重複は生まれない。
+  const exitConfirmDialog = exitConfirm ? (
+    <ExitConfirmDialog
+      title={t('exit.confirmTitle')}
+      body={t('exit.confirmBody')}
+      confirmLabel={t('exit.confirmLabel')}
+      dataUi={UI.app.exitConfirm}
+      onCancel={() => setExitConfirm(false)}
+      onConfirm={() => {
+        setExitConfirm(false);
+        beginExit();
+      }}
+    />
+  ) : null;
+
   if (status === 'loading') {
     return (
-      <main className="app-main center" aria-busy="true">
-        <p className="muted">{t('common.loading')}</p>
-      </main>
+      <>
+        <main className="app-main center" aria-busy="true">
+          <p className="muted">{t('common.loading')}</p>
+        </main>
+        {exitConfirmDialog}
+      </>
     );
   }
 
@@ -120,10 +153,13 @@ export function App() {
     // 版不一致だけは直接 import も内部で loadLedger に失敗して通らないため、専用の
     // 手順（初期化 → 変換済み JSON 読み込み）を出す（再監査対応・正式な移行手順の固定）。
     return (
-      <RecoveryScreen
-        message={error}
-        schemaMismatch={errorCode === 'error.db.schemaVersionMismatch'}
-      />
+      <>
+        <RecoveryScreen
+          message={error}
+          schemaMismatch={errorCode === 'error.db.schemaVersionMismatch'}
+        />
+        {exitConfirmDialog}
+      </>
     );
   }
 
@@ -156,13 +192,17 @@ export function App() {
   const goJournalEntry = (entryId: string) => {
     const entry = ledger.journalEntries.find((candidate) => candidate.id === entryId);
     if (!entry) return;
-    const isPurchase =
-      entry.metadata?.monthlyCostId !== undefined && entry.metadata.monthlyCostRecovery !== true;
-    const needsJournalResolver =
-      !!entry.metadata?.adjustment || (entry.kind === 'opening' && !isPurchase);
+    // 何を開くかは entryOpenPlan（単一正本）。くり返し記帳から生まれた仕訳はここでも
+    // 編集シートではなく由来ルールへ流す（画面ごとに判定を手書きしない）。
+    const plan = entryOpenPlan(entry);
+    if (plan.kind === 'rule') {
+      goAllocationsFor({ ruleId: plan.ruleId });
+      return;
+    }
     navigate('journal');
     setJournalFilter(null);
-    if (needsJournalResolver) setJournalTargetEntryId(entryId);
+    // 初期残高・残高補正は専用シートが要る = 仕訳一覧の既存 resolver へ ID を渡す。
+    if (plan.kind === 'opening' || plan.kind === 'adjustment') setJournalTargetEntryId(entryId);
     else {
       setJournalTargetEntryId(null);
       openEdit(entry);
@@ -194,6 +234,7 @@ export function App() {
   // チップに透明な <input type="date"> を重ね、1 タップで OS のカレンダーを直接開く。
   // max = 継続コスト資産エンジンの展開上限（エンジンが展開できる範囲の外を選べなくする）。
   const selectedDate = period.mode === 'date' ? period.date : today;
+  const timeSlipped = !(period.mode === 'date' && period.date === today);
 
   const periodCenter = (
     <div className="period-context">
@@ -214,44 +255,54 @@ export function App() {
           data-ui={UI.period.dateInput}
         />
       </span>
+      {/* 「今」へ戻る。タイムスリップ中（ヘッダーの日付 ≠ 今日）だけ現れる＝警告灯を兼ねる
+          （iOS カレンダーの「今日」・マップの現在地ボタンと同型）。日付だけを戻し、
+          画面も粒度も動かさない（動作であって状態ではないので、粒度セグメントに混ぜない）。 */}
+      {timeSlipped ? (
+        <button
+          type="button"
+          className="period-today"
+          onClick={() => changePeriod({ mode: 'date', date: today })}
+          data-ui={UI.period.today}
+        >
+          {t('period.today')}
+        </button>
+      ) : null}
+      {/* 時間の粒度（年間/全体）。ヘッダー = 時間、の「時間」には目盛りも含まれる
+          （写真 App の 年別/月別/日別/すべて と同型・作者決定 2026-08-14）。
+          押してもヘッダーの日付は変えない。年間の対象年は日付から導かれる。 */}
+      <div className="period-zoom" role="group" aria-label={t('yearlyOverview.title')}>
+        <button
+          type="button"
+          className="period-zoom__btn"
+          aria-pressed={screen === 'yearlyOverview' && overviewMode === 'year'}
+          onClick={() => openOverview('year')}
+          data-ui={UI.yearlyOverview.modeYear}
+        >
+          {t('yearlyOverview.modeYear')}
+        </button>
+        <button
+          type="button"
+          className="period-zoom__btn"
+          aria-pressed={screen === 'yearlyOverview' && overviewMode === 'all'}
+          onClick={() => openOverview('all')}
+          data-ui={UI.yearlyOverview.modeAll}
+        >
+          {t('yearlyOverview.modeAll')}
+        </button>
+      </div>
     </div>
   );
 
   return (
     <>
       <a className="skip-link" href="#main">
-        {t('common.home')}
+        {t('a11y.skipToContent')}
       </a>
 
-      <AppHeader
-        left={
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={() => go('dashboard')}
-            aria-label={t('header.home')}
-            data-ui={UI.nav.home}
-          >
-            <Icon name="home" />
-          </button>
-        }
-        center={periodCenter}
-        right={
-          <>
-            <EnvBadge />
-            <button
-              type="button"
-              className="icon-btn"
-              onClick={() => setMenuOpen(true)}
-              aria-label={t('a11y.openMenu')}
-              aria-haspopup="menu"
-              data-ui={UI.nav.menuButton}
-            >
-              <Icon name="menu" />
-            </button>
-          </>
-        }
-      />
+      {/* ヘッダーは時間（日付 + 粒度）だけに徹する。ホームはフッター中央、
+          設定はメニュー内が唯一の置き場所（重複を作らない・作者決定 2026-08-14）。 */}
+      <AppHeader center={periodCenter} right={<EnvBadge />} />
 
       <main className="app-main" id="main">
         {screen === 'dashboard' ? (
@@ -262,6 +313,9 @@ export function App() {
             onEditEntry={openEdit}
             onNavigate={go}
             onOpenJournal={goJournalFiltered}
+            onOpenAllocations={goAllocationsFor}
+            onOpenAccount={goAccountFor}
+            onOpenEntry={goJournalEntry}
           />
         ) : null}
         {screen === 'incomeBreakdown' ? (
@@ -331,17 +385,83 @@ export function App() {
             onOpenAccount={goAccountFor}
           />
         ) : null}
-        {screen === 'yearlyOverview' ? <YearlyOverview period={period} /> : null}
+        {screen === 'yearlyOverview' ? (
+          <YearlyOverview
+            period={period}
+            mode={overviewMode}
+            onModeChange={setOverviewMode}
+            onPeriodChange={changePeriod}
+            onNavigate={go}
+          />
+        ) : null}
         {screen === 'allocations' ? (
           <Allocations period={period} onEditEntry={openEdit} target={allocationsTarget} />
         ) : null}
-        {screen === 'cashflow' ? <Cashflow onEditEntry={openEdit} /> : null}
-        {screen === 'tags' ? <Tags /> : null}
+        {screen === 'cashflow' ? (
+          <Cashflow
+            onEditEntry={openEdit}
+            onOpenAllocations={goAllocationsFor}
+            onOpenAccount={goAccountFor}
+            onOpenEntry={goJournalEntry}
+          />
+        ) : null}
         {screen === 'accounts' ? <Accounts period={period} target={accountsTarget} /> : null}
         {screen === 'settings' ? (
-          <Settings onNavigate={go} onOpenOnboarding={() => setOnboardingManualOpen(true)} />
+          <Settings onOpenOnboarding={() => setOnboardingManualOpen(true)} />
         ) : null}
       </main>
+
+      {/*
+       * 画面下端の固定ナビ（左 = 戻る / 中央 = ホーム / 右 = メニュー）。
+       * iOS の PWA は戻るジェスチャが効いたり効かなかったりするため、見えるボタンで補う
+       * （ジェスチャは残す・作者決定 2026-08-14）。
+       *
+       * 戻るは window.history.back() を呼ぶだけにする。overlay を閉じる → dirty guard →
+       * 画面履歴 → 終了確認、の順序は useAppHistory が中央制御しており、ジェスチャと
+       * 同じ popstate を起こす＝**意味が 1 箇所に留まる**（app 側に分岐を複製しない）。
+       * ホームで押すと終了確認が出るのは端末ジェスチャと同じ帰結なので、disabled にしない。
+       *
+       * overlay 表示中は native <dialog> が top-layer に乗り、フッターは inert で押せない
+       * （シート上の Back は端末ジェスチャ経由になる＝既存の .entry-bar と同じ状態）。
+       * loading / RecoveryScreen の早期 return には出さない（台帳が読めない状態で
+       * 各画面へ入れないため・fail-closed）。
+       */}
+      {/* ページ内の navigation ランドマークはこれ 1 つなので aria-label は付けない
+          （名前にロール名を含めると読み上げが同語反復になる）。 */}
+      <nav className="app-footer" data-ui={UI.nav.footer}>
+        <div className="app-footer__inner">
+          <IconButton
+            label={t('a11y.back')}
+            onClick={() => window.history.back()}
+            dataUi={UI.nav.footerBack}
+          >
+            {/* 左向きアイコンは foundation に無い。新概念を足さず chevronRight の鏡像で作る
+                （前例: .scroll-top__icon）。 */}
+            <span className="app-footer__back-icon">
+              <Icon name="chevronRight" />
+            </span>
+          </IconButton>
+          <IconButton
+            label={t('a11y.home')}
+            onClick={() => go('dashboard')}
+            {...(screen === 'dashboard' ? { 'aria-current': 'page' as const } : {})}
+            dataUi={UI.nav.footerHome}
+          >
+            <Icon name="home" />
+          </IconButton>
+          {/* 開くのは role=menu のウィジェットではなく native <dialog>（foundation の Menu）。
+              予告する型を実体に合わせ、開閉状態も伝える（foundation 側は編集しない）。 */}
+          <IconButton
+            label={t('a11y.openMenu')}
+            onClick={() => setMenuOpen(true)}
+            aria-haspopup="dialog"
+            aria-expanded={menuOpen}
+            dataUi={UI.nav.menuButton}
+          >
+            <Icon name="menu" />
+          </IconButton>
+        </div>
+      </nav>
 
       {menuOpen ? (
         <Menu
@@ -358,21 +478,7 @@ export function App() {
 
       {onboardingOpen ? <OnboardingSheet onClose={closeOnboarding} /> : null}
 
-      {exitConfirm ? (
-        // 終了確認は overlay 登録簿に載せない: appHistory が isExitConfirmOpen で
-        // Back を消費して維持する（連打で確認なしに離脱させないため foundation を直接使う）。
-        <ExitConfirmDialog
-          title={t('exit.confirmTitle')}
-          body={t('exit.confirmBody')}
-          confirmLabel={t('exit.confirmLabel')}
-          dataUi={UI.app.exitConfirm}
-          onCancel={() => setExitConfirm(false)}
-          onConfirm={() => {
-            setExitConfirm(false);
-            beginExit();
-          }}
-        />
-      ) : null}
+      {exitConfirmDialog}
     </>
   );
 }

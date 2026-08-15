@@ -1,8 +1,8 @@
 /*
- * 「自由に動かせる」チェック（現預金の内訳のみ・既定 ON）:
- *  - OFF で保存すると movable=false が付く。ON に戻すと保存境界の正規化でフィールドごと消える。
- *  - 負債の編集シートには出さない。
- *  - 新規作成（初期残高つき = createOpening 経路）でも OFF を引き継ぐ。
+ * 「自由に動かせるか」は箱そのものが表す（2 箱化・チェックボックスとチップは撤去済み）:
+ *  - 「動かせない」箱で新規作成 → movable=false で保存（箱 = 作成時に確定）。
+ *  - 編集シートにチェックは無く、無変更保存で既存の movable=false を落とさない。
+ *  - 一覧にチップは無い（所属箱の位置がその情報を表す）。
  */
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -10,7 +10,7 @@ import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider } from '../src/state/store';
 import { Accounts } from '../src/ui/screens/Accounts';
-import { createOpening, loadLedger } from '../src/data/repository';
+import { loadLedger } from '../src/data/repository';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import './setup';
@@ -50,61 +50,102 @@ async function saveSheet() {
   );
 }
 
-describe('「自由に動かせる」チェック', () => {
-  it('現預金の編集で既定 ON。OFF 保存 → movable=false・ON へ戻すとフィールドが消える', async () => {
+describe('自由に動かせない箱（movable の UI 撤去後）', () => {
+  it('編集シートにチェックボックスが無く、無変更保存でも movable=false を落とさない', async () => {
+    // 既存の movable=false 科目（seed のチャージ残高を OFF 化）を用意。
+    const ledger = await loadLedger();
+    const charge = ledger.accounts.find((a) => a.name === 'チャージ残高')!;
+    const { upsertAccount } = await import('../src/data/repository');
+    await upsertAccount({ ...charge, movable: false });
+
     render(
       <Providers>
         <Accounts />
       </Providers>,
     );
-    await openEdit('現金');
+    await openEdit('チャージ残高');
+    // チェックボックスは存在しない（箱がその情報を表す）。
+    expect(document.querySelector('[data-ui="accounts.movable"]')).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: '自由に動かせる' })).toBeNull();
 
-    const checkbox = screen.getByRole('checkbox', { name: '自由に動かせる' });
-    expect(checkbox).toBeChecked();
-    fireEvent.click(checkbox);
     await saveSheet();
-
-    await waitFor(
-      async () => {
-        const cash = (await loadLedger()).accounts.find((a) => a.name === '現金');
-        expect(cash?.movable).toBe(false);
-      },
-      { timeout: 3000 },
-    );
-
-    // ON に戻して保存 → 既定 ON なのでフィールドごと消える（保存境界の正規化）。
-    await openEdit('現金');
-    const again = screen.getByRole('checkbox', { name: '自由に動かせる' });
-    expect(again).not.toBeChecked();
-    fireEvent.click(again);
-    await saveSheet();
-    await waitFor(
-      async () => {
-        const cash = (await loadLedger()).accounts.find((a) => a.name === '現金');
-        expect(cash?.movable).toBeUndefined();
-      },
-      { timeout: 3000 },
-    );
-  });
-
-  it('負債の編集シートには出さない', async () => {
-    render(
-      <Providers>
-        <Accounts />
-      </Providers>,
-    );
-    await openEdit('クレジットカード');
-    expect(screen.queryByRole('checkbox', { name: '自由に動かせる' })).not.toBeInTheDocument();
-  });
-
-  it('新規作成（初期残高つき）でも movable=false を引き継ぐ', async () => {
-    await loadLedger();
-    await createOpening({
-      newAccount: { name: 'Suica', type: 'asset', role: 'daily-asset', movable: false },
-      amount: 3000,
-      date: '2026-01-01',
+    await waitFor(async () => {
+      const after = (await loadLedger()).accounts.find((a) => a.name === 'チャージ残高');
+      // 無変更保存でフラグが落ちない = 箱の所属が変わらない。
+      expect(after?.movable).toBe(false);
     });
-    const suica = (await loadLedger()).accounts.find((a) => a.name === 'Suica');
-    expect(suica?.movable).toBe(false);
+  });
+
+  it('一覧に「自由に動かせない」チップは出ない（箱の位置が表す）', async () => {
+    const ledger = await loadLedger();
+    const charge = ledger.accounts.find((a) => a.name === 'チャージ残高')!;
+    const { upsertAccount } = await import('../src/data/repository');
+    await upsertAccount({ ...charge, movable: false });
+
+    render(
+      <Providers>
+        <Accounts />
+      </Providers>,
+    );
+    const fixedHead = await waitFor(() => {
+      const el = document.querySelector(`[data-ui="${UI.accounts.box}.cashFixed"]`);
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(fixedHead.parentElement).toHaveTextContent('チャージ残高');
+    expect(document.querySelector('[data-ui="accounts.notMovableBadge"]')).toBeNull();
+    expect(document.body.textContent).not.toContain('自由に動かせないお金の内訳: 自由に動かせない');
+  });
+
+  it('「動かせない」箱で新規作成すると movable=false で保存される（箱 = 作成時に確定）', async () => {
+    // 全 suite 並列時の CAS 基準ずれ対策: 現 DB 世代へ同期してから UI 経由の保存を行う。
+    await loadLedger();
+    render(
+      <Providers>
+        <Accounts />
+      </Providers>,
+    );
+    const fixedHead = await waitFor(() => {
+      const el = document.querySelector(`[data-ui="${UI.accounts.box}.cashFixed"]`);
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    fireEvent.click(fixedHead.querySelector(`[data-ui="${UI.accounts.create}"]`)!);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.accounts.save}"]`)).toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByLabelText(/科目名/), { target: { value: 'チャージ残高2' } });
+    await saveSheet();
+    await waitFor(async () => {
+      const created = (await loadLedger()).accounts.find((a) => a.name === 'チャージ残高2');
+      expect(created?.role).toBe('daily-asset');
+      expect(created?.movable).toBe(false);
+    });
+  });
+
+  it('「動かせる」箱で新規作成すると movable フィールド自体を持たない（既定 = 自由）', async () => {
+    // 全 suite 並列時の CAS 基準ずれ対策: 現 DB 世代へ同期してから UI 経由の保存を行う。
+    await loadLedger();
+    render(
+      <Providers>
+        <Accounts />
+      </Providers>,
+    );
+    const freeHead = await waitFor(() => {
+      const el = document.querySelector(`[data-ui="${UI.accounts.box}.cash"]`);
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    fireEvent.click(freeHead.querySelector(`[data-ui="${UI.accounts.create}"]`)!);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.accounts.save}"]`)).toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByLabelText(/科目名/), { target: { value: '第二現金' } });
+    await saveSheet();
+    await waitFor(async () => {
+      const created = (await loadLedger()).accounts.find((a) => a.name === '第二現金');
+      expect(created?.role).toBe('daily-asset');
+      expect(created?.movable).toBeUndefined();
+    });
   });
 });

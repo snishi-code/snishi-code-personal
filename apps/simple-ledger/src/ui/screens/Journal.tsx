@@ -7,11 +7,19 @@
  * 展開範囲 = いま表示している範囲（to → 今日 or 保存仕訳の最も遠い日付。上限 2100-12-31）。
  * 行タップ: 通常 = 編集 / 初期残高・補正 = 専用シート / 購入の仕訳 = 編集（借方は台帳固定）/
  * 計算で生まれた行 = 起票元（項目・ルール・投資科目。derivedEntryOrigin が単一正本）へ遷移。
+ * くり返し記帳から生まれた実仕訳は読み取り専用（作者決定 2026-08-15）: row-action を出さず、
+ * タップは由来ルールへ（未起票の投影とまったく同じ行になる）。
  */
 import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
-import { SearchInput, SortControls } from '../ListSearchSort';
-import { applySort, matchesQuery } from '../listQuery';
+import {
+  LIST_SORT_AXES,
+  SearchInput,
+  SortControls,
+  listSortAxisKey,
+  type ListSortAxisKey,
+} from '../ListSearchSort';
+import { applySort, directionSign, matchesQuery, type SortDirection } from '../listQuery';
 import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import { AdjustmentEditSheet } from '../AdjustmentSheet';
@@ -20,14 +28,15 @@ import { Money } from '../money';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import { todayLocal } from '../../util/time';
-import { entryHasTag } from '../../domain/tags';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
-import { derivedEntryOrigin } from '../../domain/derivedOrigin';
+import { entryOpenPlan } from '../entryOpen';
+import { generatedEntryRuleId } from '../../domain/recurringIds';
 import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { periodRange, type ReportPeriod } from '../../domain/reportPeriod';
 import {
   entryAmount,
   isDebitNormal,
+  representativeEntryAmount,
   summarizeEntries,
   summarizeEntriesForAccount,
 } from '../../domain/accounting';
@@ -35,7 +44,6 @@ import {
   isContinuousCostMonthlyAllocationEntry,
   isNormalExpenseEntry,
 } from '../../domain/livingCost';
-import { tagNames } from '../tagOptions';
 import type { AllocationsTarget } from './Allocations';
 import type { Account, JournalEntry } from '../../domain/types';
 import { formatMoney } from '../../util/format';
@@ -43,6 +51,26 @@ import { useMoneyDigits } from '../money';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 import { assertSafeAmount } from '../../domain/safeSum';
+
+/**
+ * 軸ごとの data-ui（軸の集合そのものは LIST_SORT_AXES が正本で、画面ごとに違うのはここだけ）。
+ */
+const SORT_AXIS_DATA_UI: Record<ListSortAxisKey, string> = {
+  date: UI.journal.sortByDate,
+  amount: UI.journal.sortByAmount,
+  name: UI.journal.sortByName,
+};
+
+/**
+ * 軸ごとの既定方向（日付 = 新しい順 = 従来の既定 / 金額 = 大きい順 / 名称 = 五十音順）。
+ * 軸を切り替えたらここへ戻す（毎月のものと同じ規約。日付軸の向きだけ意味が違うため
+ * 値自体は画面ごとに持つ）。
+ */
+const SORT_DEFAULT_DIRECTION: Record<ListSortAxisKey, SortDirection> = {
+  date: 'desc',
+  amount: 'desc',
+  name: 'asc',
+};
 
 export interface JournalFilter {
   accountId?: string;
@@ -106,10 +134,9 @@ export function Journal({
     filter ? (filter.to ?? '') : (periodRange(period)?.to ?? ''),
   );
   const [showFuture, setShowFuture] = useState(false);
-  const [tagFilter, setTagFilter] = useState('');
   // 表示専用の並び替え（既定 = 日付降順・従来の並びそのもの）。データ・保存には影響しない。
-  const [sortKey, setSortKey] = useState<'date' | 'amount'>('date');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [sortKey, setSortKey] = useState<ListSortAxisKey>('date');
+  const [sortDirection, setSortDirection] = useState<SortDirection>(SORT_DEFAULT_DIRECTION.date);
   const [pendingDelete, setPendingDelete] = useState<JournalEntry | null>(null);
   const initialTarget = targetEntryId
     ? (ledger?.journalEntries.find((entry) => entry.id === targetEntryId) ?? null)
@@ -149,8 +176,6 @@ export function Journal({
   const digits = useMoneyDigits();
   const filterAccount = accountFilterId ? map.get(accountFilterId) : undefined;
 
-  const allTags = ledger?.tags ?? [];
-
   // どこまで展開するか = いま表示している範囲そのもの。
   //  - to があればそこまで / 無ければ今日まで / 「将来予定も表示」は保存仕訳の最も遠い日付まで
   //    （返済の未来仕訳がそこまである。データで決まるので上限が青天井にならない）。
@@ -182,7 +207,6 @@ export function Journal({
     return source.filter((e) => {
       if (accountFilterId && !e.lines.some((l) => l.accountId === accountFilterId)) return false;
       if (normalExpenseOnly && !isNormalExpenseEntry(e, map)) return false;
-      if (tagFilter && !entryHasTag(e, tagFilter)) return false;
       if (from && e.date < from) return false;
       if (to && e.date > to) return false;
       // 検索対象 = 摘要・メモ + 借方/貸方の勘定科目名（「食費」で検索 → 食費が絡む仕訳が出る）。
@@ -190,20 +214,24 @@ export function Journal({
       const accountNames = e.lines.map((l) => map.get(l.accountId)?.name ?? '').join(' ');
       return matchesQuery([e.description, e.memo, accountNames], query);
     });
-  }, [source, query, from, to, accountFilterId, normalExpenseOnly, tagFilter, map]);
+  }, [source, query, from, to, accountFilterId, normalExpenseOnly, map]);
 
   // 表示専用の並び替え（C-4）。filtered は基準順（日付降順・同日は登録の新しい順・同時刻は
-  // id 昇順）なので、安定ソートにより同値（同日・同額）の並びは必ず基準順を保つ。
+  // id 昇順）なので、安定ソートにより同値（同日・同額・同摘要）の並びは必ず基準順を保つ。
   // 既定（日付降順）は applySort が compare=null を素通しする＝基準順そのもの。
+  // 名称軸 = 摘要の五十音順（毎月のものの項目名と同じ localeCompare(…, 'ja')）。
   const sorted = useMemo(() => {
-    const direction = sortDirection === 'asc' ? 1 : -1;
+    const direction = directionSign(sortDirection);
     const compare =
       sortKey === 'date' && sortDirection === 'desc'
         ? null
         : sortKey === 'date'
           ? (a: JournalEntry, b: JournalEntry) =>
               a.date < b.date ? -direction : a.date > b.date ? direction : 0
-          : (a: JournalEntry, b: JournalEntry) => (entryAmount(a) - entryAmount(b)) * direction;
+          : sortKey === 'amount'
+            ? (a: JournalEntry, b: JournalEntry) => (entryAmount(a) - entryAmount(b)) * direction
+            : (a: JournalEntry, b: JournalEntry) =>
+                a.description.localeCompare(b.description, 'ja') * direction;
     return applySort(filtered, compare);
   }, [filtered, sortKey, sortDirection]);
 
@@ -221,7 +249,7 @@ export function Journal({
   const hasDateOrQuery = query !== '' || from !== '' || to !== '';
 
   return (
-    <section aria-labelledby="journal-title" data-ui={UI.journal.view}>
+    <section className="journal" aria-labelledby="journal-title" data-ui={UI.journal.view}>
       <h1 className="screen-title" id="journal-title">
         {t('journal.title')}
       </h1>
@@ -231,150 +259,142 @@ export function Journal({
         accounts={ledger?.accounts ?? []}
       />
 
-      {filterAccount || normalExpenseOnly ? (
+      {/* 絞り込み額縁: 検索・期間・タグ・並び替え・件数を sticky で上端に固定し、
+          仕訳カードだけが下を流れる（作者合意 2026-08-15・ホームの額縁と同型）。
+          h1 は含めない = スクロールで流れてよい。 */}
+      <div className="list-filter-frame" data-ui={UI.journal.filterFrame}>
+        {filterAccount || normalExpenseOnly ? (
+          <div className="toolbar">
+            {filterAccount ? (
+              <span className="filter-chip">
+                {t('journal.filteredByAccount', { name: filterAccount.name })}
+                <button
+                  type="button"
+                  onClick={onClearFilter}
+                  aria-label={t('journal.clearAccountFilter')}
+                  data-ui={UI.journal.clearAccountFilter}
+                >
+                  <Icon name="close" size={16} />
+                </button>
+              </span>
+            ) : null}
+            {normalExpenseOnly ? (
+              <span className="filter-chip">
+                {t('journal.filteredByNormalExpense')}
+                <button
+                  type="button"
+                  onClick={onClearFilter}
+                  aria-label={t('journal.clearNormalExpenseFilter')}
+                  data-ui={UI.journal.clearNormalExpenseFilter}
+                >
+                  <Icon name="close" size={16} />
+                </button>
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="toolbar">
-          {filterAccount ? (
-            <span className="filter-chip">
-              {t('journal.filteredByAccount', { name: filterAccount.name })}
-              <button
-                type="button"
-                onClick={onClearFilter}
-                aria-label={t('journal.clearAccountFilter')}
-                data-ui={UI.journal.clearAccountFilter}
-              >
-                <Icon name="close" size={16} />
-              </button>
-            </span>
-          ) : null}
-          {normalExpenseOnly ? (
-            <span className="filter-chip">
-              {t('journal.filteredByNormalExpense')}
-              <button
-                type="button"
-                onClick={onClearFilter}
-                aria-label={t('journal.clearNormalExpenseFilter')}
-                data-ui={UI.journal.clearNormalExpenseFilter}
-              >
-                <Icon name="close" size={16} />
-              </button>
-            </span>
+          <SearchInput
+            id="journal-search"
+            label={t('common.search')}
+            value={query}
+            onChange={setQuery}
+            placeholder={t('journal.searchPlaceholder')}
+            dataUi={UI.journal.search}
+          />
+        </div>
+        <div className="toolbar">
+          <label className="sr-only" htmlFor="journal-from">
+            {t('journal.from')}
+          </label>
+          <input
+            id="journal-from"
+            className="input"
+            type="date"
+            value={from}
+            max={CONTINUOUS_COST_HARD_CAP}
+            aria-label={t('journal.from')}
+            onChange={(e) => setFrom(e.target.value)}
+          />
+          <label className="sr-only" htmlFor="journal-to">
+            {t('journal.to')}
+          </label>
+          <input
+            id="journal-to"
+            className="input"
+            type="date"
+            value={to}
+            max={CONTINUOUS_COST_HARD_CAP}
+            aria-label={t('journal.to')}
+            onChange={(e) => setTo(e.target.value)}
+          />
+          {hasDateOrQuery ? (
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => {
+                setQuery('');
+                setFrom('');
+                setTo('');
+              }}
+            >
+              {t('journal.clearFilter')}
+            </button>
           ) : null}
         </div>
-      ) : null}
 
-      <div className="toolbar">
-        <SearchInput
-          id="journal-search"
-          label={t('common.search')}
-          value={query}
-          onChange={setQuery}
-          placeholder={t('journal.searchPlaceholder')}
-          dataUi={UI.journal.search}
+        <SortControls
+          ariaLabel={t('common.sort')}
+          extraClassName="journal__sort"
+          axisItems={LIST_SORT_AXES.map((axis) => ({
+            key: axis.key,
+            label: t(axis.labelKey),
+            dataUi: SORT_AXIS_DATA_UI[axis.key],
+          }))}
+          axisValue={sortKey}
+          onAxisChange={(key) => {
+            const next = listSortAxisKey(key);
+            setSortKey(next);
+            // 軸を変えたら方向は軸ごとの既定へ戻す（前の軸の方向を持ち越さない）。
+            setSortDirection(SORT_DEFAULT_DIRECTION[next]);
+          }}
+          directionItems={[
+            { key: 'desc', label: t('common.sortDesc'), dataUi: UI.journal.sortDesc },
+            { key: 'asc', label: t('common.sortAsc'), dataUi: UI.journal.sortAsc },
+          ]}
+          directionValue={sortDirection}
+          onDirectionChange={(key) => setSortDirection(key === 'asc' ? 'asc' : 'desc')}
         />
-        {allTags.length > 0 ? (
-          <>
-            <label className="sr-only" htmlFor="journal-tag">
-              {t('journal.filterTag')}
-            </label>
-            <select
-              id="journal-tag"
-              className="select"
-              value={tagFilter}
-              aria-label={t('journal.filterTag')}
-              onChange={(e) => setTagFilter(e.target.value)}
-              data-ui={UI.journal.filterTag}
-            >
-              <option value="">{t('journal.allTags')}</option>
-              {allTags
-                .filter((tg) => !tg.archived || tg.id === tagFilter)
-                .map((tg) => (
-                  <option key={tg.id} value={tg.id}>
-                    {tg.name}
-                  </option>
-                ))}
-            </select>
-          </>
-        ) : null}
-      </div>
-      <div className="toolbar">
-        <label className="sr-only" htmlFor="journal-from">
-          {t('journal.from')}
-        </label>
-        <input
-          id="journal-from"
-          className="input"
-          type="date"
-          value={from}
-          max={CONTINUOUS_COST_HARD_CAP}
-          aria-label={t('journal.from')}
-          onChange={(e) => setFrom(e.target.value)}
-        />
-        <label className="sr-only" htmlFor="journal-to">
-          {t('journal.to')}
-        </label>
-        <input
-          id="journal-to"
-          className="input"
-          type="date"
-          value={to}
-          max={CONTINUOUS_COST_HARD_CAP}
-          aria-label={t('journal.to')}
-          onChange={(e) => setTo(e.target.value)}
-        />
-        {hasDateOrQuery ? (
-          <button
-            type="button"
-            className="btn btn--ghost"
-            onClick={() => {
-              setQuery('');
-              setFrom('');
-              setTo('');
-            }}
-          >
-            {t('journal.clearFilter')}
-          </button>
-        ) : null}
-      </div>
 
-      <SortControls
-        ariaLabel={t('common.sort')}
-        extraClassName="journal__sort"
-        axisItems={[
-          { key: 'date', label: t('journal.sortDate'), dataUi: UI.journal.sortByDate },
-          { key: 'amount', label: t('journal.sortAmount'), dataUi: UI.journal.sortByAmount },
-        ]}
-        axisValue={sortKey}
-        onAxisChange={(key) => setSortKey(key === 'amount' ? 'amount' : 'date')}
-        directionItems={[
-          { key: 'desc', label: t('common.sortDesc'), dataUi: UI.journal.sortDesc },
-          { key: 'asc', label: t('common.sortAsc'), dataUi: UI.journal.sortAsc },
-        ]}
-        directionValue={sortDirection}
-        onDirectionChange={(key) => setSortDirection(key === 'asc' ? 'asc' : 'desc')}
-      />
-
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 'var(--space-3)',
-          margin: 'var(--space-2) 0',
-        }}
-      >
-        <span className="muted" style={{ fontSize: 13 }} data-ui={UI.journal.summary}>
-          {t('journal.count', { count: summary.count })}・{t('journal.total')}{' '}
-          <Money amount={summary.total} currency={currency} signed={filterAccount !== undefined} />
-        </span>
-        <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
-          <input
-            type="checkbox"
-            checked={showFuture}
-            onChange={(e) => setShowFuture(e.target.checked)}
-            data-ui={UI.journal.showFuture}
-          />
-          {t('journal.showFuture')}
-        </label>
+        {/* 件数・合計と「未来分を表示」も額縁に含める（＝スクロール中も母集合が手元に残る）。
+            余白は額縁の gap が持つので margin は置かない。 */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 'var(--space-3)',
+          }}
+        >
+          <span className="muted" style={{ fontSize: 13 }} data-ui={UI.journal.summary}>
+            {t('journal.count', { count: summary.count })}・{t('journal.total')}{' '}
+            <Money
+              amount={summary.total}
+              currency={currency}
+              signed={filterAccount !== undefined}
+            />
+          </span>
+          <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={showFuture}
+              onChange={(e) => setShowFuture(e.target.checked)}
+              data-ui={UI.journal.showFuture}
+            />
+            {t('journal.showFuture')}
+          </label>
+        </div>
       </div>
 
       {filtered.length === 0 ? (
@@ -392,7 +412,12 @@ export function Journal({
               md?.continuousCostId !== undefined ||
               isContinuousCostMonthlyAllocationEntry(entry);
             const isAdjustment = !!md?.adjustment;
-            const displayedAmount = entry.lines.find((line) => line.side === 'debit')?.amount ?? 0;
+            // くり返し記帳から生まれた仕訳は読み取り専用（作者決定 2026-08-15）。
+            // 編集・削除・反対仕訳はどれも出さず、タップは由来ルールへ（entryOpenPlan が担う）。
+            const isRuleGenerated = generatedEntryRuleId(entry) !== undefined;
+            // 仕訳の代表額は domain が正本（式を UI で書き直さない）。render から呼ぶので
+            // checked sum を通さない representativeEntryAmount を使う（表示中に投げない）。
+            const displayedAmount = representativeEntryAmount(entry);
             // 科目ドリル中だけ、その科目の自然な残高符号で増減を示す。金額自体には符号を付けない。
             const balanceChange = filterAccount ? accountBalanceChange(entry, filterAccount) : null;
             const balanceChangeClass =
@@ -417,23 +442,22 @@ export function Journal({
             const isOpening = entry.kind === 'opening' && !isPurchase;
             // タップ: 計算で生まれた行は起票元（derivedEntryOrigin が単一正本）へ —
             // ルール投影 = そのルール / 月割り = その項目 / 投資利回りの投影 = その投資科目。
-            // 由来を名乗らない導出行はタップ不可（既定の遷移先へ流さない＝誤遷移させない）。
-            // opening / adjustment は専用シート。それ以外（購入・回収の振替を含む）は編集シート。
-            const origin = derivedEntryOrigin(entry);
-            const onRowTap = isVirtual
-              ? origin === undefined
+            // 何を開くかは entryOpenPlan（単一正本）が決める。ここは計画の実行だけ。
+            const plan = entryOpenPlan(entry);
+            const onRowTap =
+              plan.kind === 'none'
                 ? undefined
-                : origin.kind === 'recurringRule'
-                  ? () => onOpenAllocations({ ruleId: origin.recurringRuleId })
-                  : origin.kind === 'monthlyCost'
-                    ? () => onOpenAllocations({ itemId: origin.monthlyCostId })
-                    : () => onOpenAccount(origin.accountId)
-              : isAdjustment
-                ? () => setEditingAdjustment(entry)
-                : isOpening
-                  ? () => setEditingOpening(entry)
-                  : () => onEditEntry(entry);
-            const entryTagNames = tagNames(allTags, entry.tagIds);
+                : plan.kind === 'rule'
+                  ? () => onOpenAllocations({ ruleId: plan.ruleId })
+                  : plan.kind === 'item'
+                    ? () => onOpenAllocations({ itemId: plan.itemId })
+                    : plan.kind === 'account'
+                      ? () => onOpenAccount(plan.accountId)
+                      : plan.kind === 'adjustment'
+                        ? () => setEditingAdjustment(entry)
+                        : plan.kind === 'opening'
+                          ? () => setEditingOpening(entry)
+                          : () => onEditEntry(entry);
             const title = (
               <>
                 <div className="list__title">
@@ -454,15 +478,6 @@ export function Journal({
                 <div className="list__sub">
                   {entry.date}・{flowText(map, entry)}
                 </div>
-                {entryTagNames.length > 0 ? (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-                    {entryTagNames.map((n) => (
-                      <span key={`e-${n}`} className="tag tag--teal">
-                        {n}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
               </>
             );
             return (
@@ -489,7 +504,7 @@ export function Journal({
                 >
                   <Money amount={displayedAmount} currency={currency} />
                 </span>
-                {isVirtual || isPurchase ? null : isAdjustment ? (
+                {isVirtual || isPurchase || isRuleGenerated ? null : isAdjustment ? (
                   <button
                     type="button"
                     className="icon-btn"

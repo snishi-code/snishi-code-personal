@@ -11,7 +11,6 @@ import type {
   RecurringRule,
   Settings,
   Snapshot,
-  Tag,
 } from '../domain/types';
 import { buildSimpleEntry, type SimpleEntryInput } from '../domain/entry';
 import * as repo from '../data/repository';
@@ -82,8 +81,6 @@ interface LedgerContextValue {
     options?: repo.RecurringRuleSaveOptions,
   ) => Promise<void>;
   removeRecurringRule: (id: string) => Promise<void>;
-  saveTag: (tag: Tag) => Promise<void>;
-  removeTag: (id: string) => Promise<void>;
   createAdjustment: (input: {
     accountId: string;
     date: string;
@@ -348,34 +345,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     async (id) => {
       try {
         await repo.deleteRecurringRule(id);
-        await refresh();
-        toast.show(t('toast.deleted'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const saveTag = useCallback<LedgerContextValue['saveTag']>(
-    async (tag) => {
-      try {
-        await repo.upsertTag(tag);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-    },
-    [refresh, toast],
-  );
-
-  const removeTag = useCallback<LedgerContextValue['removeTag']>(
-    async (id) => {
-      try {
-        await repo.deleteTag(id);
         await refresh();
         toast.show(t('toast.deleted'), 'success');
       } catch (e) {
@@ -672,8 +641,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       createRecurringRule,
       saveRecurringRule,
       removeRecurringRule,
-      saveTag,
-      removeTag,
       createAdjustment,
       updateAdjustment,
       deleteAdjustment,
@@ -709,8 +676,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       createRecurringRule,
       saveRecurringRule,
       removeRecurringRule,
-      saveTag,
-      removeTag,
       createAdjustment,
       updateAdjustment,
       deleteAdjustment,

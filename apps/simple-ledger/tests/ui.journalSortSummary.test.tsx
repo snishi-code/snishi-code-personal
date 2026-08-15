@@ -1,7 +1,8 @@
 /*
  * 仕訳一覧の並び替え（C-4）と抽出結果の件数+合計（C-3 の UI 出口）:
- *  - 日付/金額 × 昇順/降順。既定 = 日付降順（従来の並びそのもの）。
- *  - 同日・同額は基準順（日付降順・同日は登録の新しい順）を保つ安定ソート。
+ *  - 日付/金額/名称 × 昇順/降順。既定 = 日付降順（従来の並びそのもの）。
+ *    名称 = 摘要の五十音順（毎月のものと同じ語彙・軸の正本は LIST_SORT_AXES）。
+ *  - 同日・同額・同摘要は基準順（日付降順・同日は登録の新しい順）を保つ安定ソート。
  *  - 件数+合計の対象 = 表示している行の集合（＝ユーザーが数えたら合う）。
  *    テキスト抽出 = 単純和（仕訳ごとに金額 1 回・二重計上なし）/
  *    科目タップ抽出 = その科目視点の方向つき和。月割りの導出行も対象に含む。
@@ -63,6 +64,13 @@ function rowTitles(): string[] {
   );
 }
 
+/** 表示中の行の金額（表示単位の整数）を上から順に返す。同じ摘要の行を区別するために使う。 */
+function rowAmounts(): number[] {
+  return Array.from(document.querySelectorAll(`[data-ui="${UI.journal.list}"] .list__amount`)).map(
+    (el) => Number((el.textContent ?? '').replace(/[^0-9-]/g, '')),
+  );
+}
+
 function summaryText(): string {
   return document.querySelector(`[data-ui="${UI.journal.summary}"]`)?.textContent ?? '';
 }
@@ -100,6 +108,38 @@ async function createSortFixtures(): Promise<{ cash: Account; expense: Account }
   return { cash, expense };
 }
 
+/**
+ * 名称軸（摘要の五十音順）の検証用。日付順・金額順のどれとも違う並びになるようにし、
+ * 同じ摘要（あんぱん）を 2 件入れて同着の相対順（基準順 = 日付降順）を見られるようにする。
+ */
+async function createNameSortFixtures(): Promise<void> {
+  const ledger = await loadLedger();
+  const cash = ledger.accounts.find((account) => account.role === 'daily-asset')!;
+  const expense = ledger.accounts.find((account) => account.role === 'expense-category')!;
+  const rows = [
+    { id: 'namesort-a', date: '2026-03-03', description: 'うどん', amount: 100, second: 1 },
+    { id: 'namesort-b', date: '2026-03-01', description: 'あんぱん', amount: 200, second: 2 },
+    { id: 'namesort-c', date: '2026-03-02', description: 'いちご', amount: 300, second: 3 },
+    { id: 'namesort-d', date: '2026-03-04', description: 'あんぱん', amount: 400, second: 4 },
+  ];
+  for (const row of rows) {
+    const timestamp = `2026-03-01T00:00:0${row.second}.000Z`;
+    await upsertEntry({
+      id: row.id,
+      date: row.date,
+      description: row.description,
+      kind: 'normal',
+      lines: [
+        { accountId: expense.id, side: 'debit', amount: row.amount },
+        { accountId: cash.id, side: 'credit', amount: row.amount },
+      ],
+      metadata: { inputMode: 'expense' },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+  }
+}
+
 const MARCH: JournalFilter = { from: '2026-03-01', to: '2026-03-31' };
 
 describe('仕訳一覧の並び替え（表示専用）', () => {
@@ -128,6 +168,30 @@ describe('仕訳一覧の並び替え（表示専用）', () => {
     fireEvent.click(document.querySelector(`[data-ui="${UI.journal.sortAsc}"]`)!);
     // 金額昇順: 100, 100, 200, 300。同額（100）は安定（C → B）。
     expect(rowTitles()).toEqual(['ソートC', 'ソートB', 'ソートD', 'ソートA']);
+  });
+
+  it('名称軸は摘要の五十音順で、昇降が効き、同じ摘要は基準順を保つ', async () => {
+    await createNameSortFixtures();
+    render(<View filter={MARCH} />);
+    await screen.findByText('うどん');
+
+    // 既定 = 日付降順（3/4 あんぱん → 3/3 うどん → 3/2 いちご → 3/1 あんぱん）。
+    expect(rowAmounts()).toEqual([4, 1, 3, 2]);
+
+    // 名称軸へ切り替え。方向は名称の既定（昇順 = 五十音順）へ戻る。
+    fireEvent.click(document.querySelector(`[data-ui="${UI.journal.sortByName}"]`)!);
+    expect(document.querySelector(`[data-ui="${UI.journal.sortAsc}"]`)).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(rowTitles()).toEqual(['あんぱん', 'あんぱん', 'いちご', 'うどん']);
+    // 同じ摘要の 2 件は基準順（日付降順 = 3/4 の 400 が先）のまま。
+    expect(rowAmounts()).toEqual([4, 2, 3, 1]);
+
+    fireEvent.click(document.querySelector(`[data-ui="${UI.journal.sortDesc}"]`)!);
+    expect(rowTitles()).toEqual(['うどん', 'いちご', 'あんぱん', 'あんぱん']);
+    // 降順でも同じ摘要どうしの相対順は基準順のまま（方向で入れ替わらない）。
+    expect(rowAmounts()).toEqual([1, 3, 4, 2]);
   });
 });
 
@@ -198,9 +262,12 @@ describe('抽出結果の件数と合計', () => {
     const ledger = await loadLedger();
     const expense = ledger.accounts.find((account) => account.role === 'expense-category')!;
     const today = todayLocal();
+    // 同日刻み: 購入日（today − 5ヶ月）の同日通過は today + 6ヶ月まで 11 本。
+    // この網は「導出行が件数・合計に入るか」なので、11 で割り切れる額にして
+    // 表示丸め（minor → 表示単位）の誤差が合計比較へ混ざらないようにする（66,000 / 11 = 6,000）。
     await createContinuousCost({
       name: '月割り対象',
-      amount: 60000,
+      amount: 66000,
       startDate: addMonthsToDate(today, -5),
       endDate: addMonthsToDate(today, 6),
       expenseAccountId: expense.id,

@@ -12,10 +12,8 @@ import { TextArea, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { AccountPicker } from '../AccountPicker';
 import { FlowField } from '../FlowField';
-import { TagPicker } from '../TagPicker';
 import { LiabilitySheet } from '../LiabilitySheet';
 import { groupedAccountsByRole, groupedMonthlyAllocationAccounts } from '../accountOptions';
-import { tagsForEntry } from '../tagOptions';
 import {
   FORM_MODE_TITLE,
   MODE_FLOW,
@@ -31,8 +29,9 @@ import {
   parseAmountToMinor,
   sanitizeAmountText,
 } from '../amountText';
-import { useMoneyDigits } from '../money';
+import { moneyText, useMoneyDigits } from '../money';
 import { useLedger } from '../../state/store';
+import { representativeEntryAmount } from '../../domain/accounting';
 import {
   reversalInput,
   toSimpleInput,
@@ -66,6 +65,11 @@ export interface TransferFixed {
   description?: string;
   /** 相手側の候補。未指定なら科目アーカイブ用の資産・負債だけに限定する。 */
   counterpartRoles?: AccountRole[];
+  /**
+   * 「振替せずに実行」の任意アクション（費用・収入のアーカイブ用）。
+   * 残高 0 が必須の資産・負債では渡さない（スキップさせない = fail-closed のまま）。
+   */
+  skip?: { label: string; run: () => Promise<void> };
   onSave: (input: SimpleEntryInput) => Promise<void>;
 }
 
@@ -103,7 +107,7 @@ function errorText(
 export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => void }) {
   const { ledger, saveEntry, createContinuousCost, saveAccount } = useLedger();
   const accounts = ledger?.accounts ?? [];
-  const tags = ledger?.tags ?? [];
+  const currency = ledger?.settings.currency ?? '';
 
   const fixed = init.kind === 'transfer-fixed' ? init.fixed : null;
   /*
@@ -166,6 +170,17 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [submitting, setSubmitting] = useState(false);
 
   const paymentRole = accounts.find((a) => a.id === form.creditAccountId)?.role;
+  const [skipping, setSkipping] = useState(false);
+  const runSkip = async () => {
+    if (!fixed?.skip || skipping) return;
+    setSkipping(true);
+    try {
+      await fixed.skip.run();
+      onClose();
+    } catch {
+      setSkipping(false);
+    }
+  };
   const isLiabilityPayment =
     paymentRole === 'payment-liability' || paymentRole === 'other-liability';
   // 継続コスト化は支出フローと簿記編集（manual）の新規作成で常に選べる。
@@ -452,16 +467,66 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     />
   );
 
-  const entryTagsField = continuousCostActive ? null : (
-    <TagPicker
-      label={t('entry.tags')}
-      hint={t('entry.tagsHint')}
-      tags={tagsForEntry(tags, form.tagIds ?? [])}
-      value={form.tagIds ?? []}
-      onChange={(ids) => setForm((f) => ({ ...f, tagIds: ids }))}
-      dataUi={UI.journal.entry.tags}
-    />
-  );
+  /*
+   * 反対仕訳（取消/返金）の「この仕訳への取消済み合計 / 残り」。
+   * 元仕訳を指す既存の反対仕訳（metadata.reversalOfEntryId）だけを数える。
+   * 集計に domain の checked sum（assertSafeAmount）は使わない: render で投げると
+   * root の ErrorBoundary がアプリ全体を復旧画面へ落とす。fail-closed は保存境界の役目。
+   */
+  const reversalStatus = (() => {
+    if (init.kind !== 'reversal') return null;
+    const sourceId = init.source.id;
+    const done = (ledger?.journalEntries ?? []).filter(
+      (e) => e.metadata?.reversalOfEntryId === sourceId,
+    );
+    const reversed = done.reduce((sum, e) => sum + representativeEntryAmount(e), 0);
+    // 残りは負になり得る（過剰返金・元仕訳の後からの減額編集）。負のまま見せる。
+    return {
+      count: done.length,
+      reversed,
+      remaining: representativeEntryAmount(init.source) - reversed,
+    };
+  })();
+  /*
+   * 入力額が残りを超えたときの注意。**警告だけで保存はブロックしない**（作者合意 2026-08-15）。
+   * ハードブロックは過去編集モデルと両立しない: 元仕訳を後から減額編集すると保存済みの取消が
+   * 超過側へ回るため、保存境界に入れると編集のたびに壊れる台帳になる。
+   * 現実にも過剰返金・補償はありうるので、記録は止めず気づかせるだけにする。
+   */
+  const reversalOverRemaining = reversalStatus !== null && form.amount > reversalStatus.remaining;
+  /*
+   * 表示桁は金額欄と同じ（fractionDigits）。ただし取消済み・残りがその桁で表せないときだけ
+   * 桁を上げる: 丸めた「残り」と、丸めない値どうしで判定する上の警告が食い違って見えるのを防ぐ。
+   */
+  const summaryDigits = (
+    reversalStatus === null
+      ? fractionDigits
+      : Math.max(
+          fractionDigits,
+          exactDigitsFor(reversalStatus.reversed),
+          exactDigitsFor(reversalStatus.remaining),
+        )
+  ) as typeof displayDigits;
+  // 取消済みが 0 件のときは行ごと出さない（初回の取消で画面を汚さない）。
+  const reversalSummary =
+    reversalStatus !== null && reversalStatus.count > 0 ? (
+      <p
+        className="field__hint"
+        style={{ marginBottom: 'var(--space-4)' }}
+        data-ui={UI.journal.entry.reversalSummary}
+      >
+        {t('entry.reversal.reversedSoFar', {
+          reversed: moneyText(reversalStatus.reversed, currency, summaryDigits),
+          remaining: moneyText(reversalStatus.remaining, currency, summaryDigits),
+        })}
+      </p>
+    ) : null;
+  const reversalOverWarning = reversalOverRemaining ? (
+    <div className="field__warning" role="status" data-ui={UI.journal.entry.reversalOverWarning}>
+      <Icon name="alert" size={14} />
+      {t('entry.reversal.overWarning')}
+    </div>
+  ) : null;
 
   const memoField = (
     <TextArea
@@ -851,6 +916,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             {t('entry.reversalNote')}
           </div>
         ) : null}
+        {reversalSummary}
 
         {flowError ? (
           <div
@@ -869,6 +935,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             {dateField}
             {canCreateContinuousCost && ccMode ? null : descriptionField}
             {amountField}
+            {reversalOverWarning}
             {renderManualFlow()}
             {/* 簿記編集でも、貸方が資金/負債なら継続コスト化できる（支出フローと同じパネル）。 */}
             {canCreateContinuousCost && !ccMode ? (
@@ -884,18 +951,28 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             ) : null}
             {ccDetailField}
             {repaymentField}
-            {canCreateContinuousCost && ccMode ? null : (
-              <>
-                {memoField}
-                {entryTagsField}
-              </>
-            )}
+            {canCreateContinuousCost && ccMode ? null : memoField}
           </>
         ) : (
           <>
+            {/* 費用・収入のアーカイブでは「振替せず終了」も正当な選択（残高 0 は必須でない）。
+                入力を始める前に選べるよう最上部に置く（作者決定 2026-08-14）。 */}
+            {fixed?.skip ? (
+              <button
+                type="button"
+                className="btn btn--block"
+                onClick={runSkip}
+                disabled={skipping}
+                data-ui={UI.journal.entry.transferSkip}
+              >
+                {fixed.skip.label}
+              </button>
+            ) : null}
             {dateField}
             {mode === 'transfer' || (canCreateContinuousCost && ccMode) ? null : itemField}
             {amountField}
+            {/* 反対仕訳は常に簿記編集（上の分岐）だが、日常入力側にも同じ位置で置いておく。 */}
+            {reversalOverWarning}
             {renderFlow()}
             {ccDetailField}
             {repaymentField}
@@ -916,7 +993,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                   <div className="stack">
                     {mode === 'transfer' ? itemField : null}
                     {memoField}
-                    {entryTagsField}
                   </div>
                 ) : null}
               </>

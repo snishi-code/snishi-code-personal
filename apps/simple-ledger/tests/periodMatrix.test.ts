@@ -297,7 +297,10 @@ describe('buildPeriodMatrix（全体）', () => {
     const annualTotal = (values: readonly number[]) =>
       values.reduce((sum, value) => sum + value, 0);
 
-    expect(annualTotal(annual.rows.monthlyCost)).toBe(15_000);
+    // 同日刻み: 2025-10-05 起点の刻み日は 2025-11-05〜2026-03-05 の 5 本
+    //（6 本目 2026-04-05 は終了日 2026-03-31 超）。割り振る総額 = 60,000 − 回収 30,000 =
+    // 30,000 → 1 本 6,000。2025 年に入るのは 11/05・12/05 の 2 本 = 12,000。
+    expect(annualTotal(annual.rows.monthlyCost)).toBe(12_000);
     expect(annualTotal(annual.rows.monthlyCost)).toBe(all.rows.monthlyCost[0]);
     expect(annualTotal(annual.rows.expense)).toBe(all.rows.expense[0]);
     expect(annual.rows.totalAssets[11]).toBe(all.rows.totalAssets[0]);

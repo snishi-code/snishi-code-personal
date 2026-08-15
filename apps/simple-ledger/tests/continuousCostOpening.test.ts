@@ -50,20 +50,29 @@ describe('createContinuousCost（持ち込み = 初期残高払い）', () => {
       { accountId: equity!.id, side: 'credit', amount: 12000 },
     ]);
 
-    // BS: 6月末断面 → 台帳 = 12000 − 月割り6ヶ月ぶん 6000。equity = 12000。
+    // 刻み: 2026-02-01〜2026-12-01 の 11 本（2027-01-01 は終了日 12/31 の後）。
+    // 12000/11 = 1090 余り 10 → 先頭 10 本が 1,091・最後が 1,090。
+    // BS: 6月末断面 → 済んだ刻みは 2/1〜6/1 の 5 本 = 5,455 → 台帳 = 12000 − 5455。equity = 12000。
     const derived = reportEntriesForAsOf(ledger, '2026-06-30');
     const bs = deriveBalanceSheet(ledger.accounts, derived, '2026-06-30');
     const ccLedger = bs.assets.find((a) => a.account.id === CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
-    expect(ccLedger?.balance).toBe(6000);
+    expect(ccLedger?.balance).toBe(6545);
     expect(bs.equity.find((a) => a.account.id === equity!.id)?.balance).toBe(12000);
 
-    // PL: 収入 0・1月の費用 1000（初期残高は収入にならない）。
-    const pl = deriveProfitAndLoss(ledger.accounts, derived, {
+    // PL: 収入 0（初期残高は収入にならない）・購入月の費用は 0（費用は翌同日から）。
+    const january = deriveProfitAndLoss(ledger.accounts, derived, {
       from: '2026-01-01',
       to: '2026-01-31',
     });
-    expect(pl.totalRevenue).toBe(0);
-    expect(pl.totalExpense).toBe(1000);
+    expect(january.totalRevenue).toBe(0);
+    expect(january.totalExpense).toBe(0);
+    // 最初の刻み 2026-02-01 に 1,091（端数は先頭刻みから 1 ずつ）。
+    const february = deriveProfitAndLoss(ledger.accounts, derived, {
+      from: '2026-02-01',
+      to: '2026-02-28',
+    });
+    expect(february.totalRevenue).toBe(0);
+    expect(february.totalExpense).toBe(1091);
   });
 
   it('過去日・終了日なしで登録できる（制約なし・費用は 1 円も出ない）', async () => {

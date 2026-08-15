@@ -31,6 +31,14 @@ describe('counterpartRole / counterpartName', () => {
     expect(counterpartName('expense')).toBe('残高調整費');
     expect(counterpartName('revenue')).toBe('残高調整収入');
   });
+  it('費用・収入も正規方向で決まる（全科目化・作者決定 2026-08-15）', () => {
+    // 借方正規（asset と同向）: 費用の実累計が多い = 借方 費用 なので相手は貸方 = 調整収入。
+    expect(counterpartRole('expense', 2000)).toBe('revenue');
+    expect(counterpartRole('expense', -2000)).toBe('expense');
+    // 貸方正規（liability と同向）: 収入の実累計が多い = 貸方 収入 なので相手は借方 = 調整費。
+    expect(counterpartRole('revenue', 2000)).toBe('expense');
+    expect(counterpartRole('revenue', -2000)).toBe('revenue');
+  });
 });
 
 describe('buildAdjustmentEntry', () => {
@@ -97,6 +105,86 @@ describe('buildAdjustmentEntry', () => {
     expect(e.id).toBe('fixed-id');
     expect(e.createdAt).toBe('2026-01-01T00:00:00.000Z');
     expect(e.updatedAt).not.toBe(e.createdAt);
+  });
+});
+
+describe('buildAdjustmentEntry: 費用・収入（全科目化・作者決定 2026-08-15）', () => {
+  // 費用は借方正規なので資産と同向、収入は貸方正規なので負債と同向になる。
+  // 金額はすべて |7000 − 5000| = 2000（手計算）。
+  it('費用 実累計が多い(delta>0): 借方 対象費用 / 貸方 相手(調整収入)', () => {
+    const e = buildAdjustmentEntry(
+      base({ accountType: 'expense', expectedBalance: 5000, actualBalance: 7000 }),
+    )!;
+    expect(e.lines.find((l) => l.side === 'debit')).toMatchObject({
+      accountId: 'acc',
+      amount: 2000,
+    });
+    expect(e.lines.find((l) => l.side === 'credit')).toMatchObject({
+      accountId: 'ctr',
+      amount: 2000,
+    });
+    expect(e.metadata?.adjustment?.delta).toBe(2000);
+  });
+  it('費用 実累計が少ない(delta<0): 借方 相手(調整費) / 貸方 対象費用', () => {
+    const e = buildAdjustmentEntry(
+      base({ accountType: 'expense', expectedBalance: 7000, actualBalance: 5000 }),
+    )!;
+    expect(e.lines.find((l) => l.side === 'debit')).toMatchObject({
+      accountId: 'ctr',
+      amount: 2000,
+    });
+    expect(e.lines.find((l) => l.side === 'credit')).toMatchObject({
+      accountId: 'acc',
+      amount: 2000,
+    });
+    expect(e.metadata?.adjustment?.delta).toBe(-2000);
+  });
+  it('収入 実累計が多い(delta>0): 貸方 対象収入 / 借方 相手(調整費)（負債と同向）', () => {
+    const e = buildAdjustmentEntry(
+      base({ accountType: 'revenue', expectedBalance: 5000, actualBalance: 7000 }),
+    )!;
+    expect(e.lines.find((l) => l.side === 'debit')).toMatchObject({
+      accountId: 'ctr',
+      amount: 2000,
+    });
+    expect(e.lines.find((l) => l.side === 'credit')).toMatchObject({
+      accountId: 'acc',
+      amount: 2000,
+    });
+  });
+  it('収入 実累計が少ない(delta<0): 借方 対象収入 / 貸方 相手(調整収入)', () => {
+    const e = buildAdjustmentEntry(
+      base({ accountType: 'revenue', expectedBalance: 7000, actualBalance: 5000 }),
+    )!;
+    expect(e.lines.find((l) => l.side === 'debit')).toMatchObject({
+      accountId: 'acc',
+      amount: 2000,
+    });
+    expect(e.lines.find((l) => l.side === 'credit')).toMatchObject({
+      accountId: 'ctr',
+      amount: 2000,
+    });
+  });
+});
+
+describe('ADJUSTABLE_ACCOUNT_ROLES（補正対象の正本）', () => {
+  it('資産・負債・費用・収入の役割を許し、内部集約と残高調整自身・equity を外す', async () => {
+    const { ADJUSTABLE_ACCOUNT_ROLES } = await import('../src/domain/accountRoles');
+    expect([...ADJUSTABLE_ACCOUNT_ROLES].sort()).toEqual(
+      [
+        'daily-asset',
+        'investment-asset',
+        'payment-liability',
+        'other-liability',
+        'income-category',
+        'expense-category',
+      ].sort(),
+    );
+    // 相手側（system-adjustment）は type が expense / revenue なので、
+    // type だけを広げると入り込みうる。明示除外されていること。
+    expect(ADJUSTABLE_ACCOUNT_ROLES).not.toContain('system-adjustment');
+    expect(ADJUSTABLE_ACCOUNT_ROLES).not.toContain('continuing-cost-asset');
+    expect(ADJUSTABLE_ACCOUNT_ROLES).not.toContain('equity');
   });
 });
 

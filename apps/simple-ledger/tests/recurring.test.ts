@@ -6,12 +6,18 @@
  *  - everyMonths: startMonth 基点の位相で間引く（周期起票）。
  *  - 月割りするルール（spreadExpenseAccountId）: 起票 = 購入の仕訳 + item の 2 レコード 1 tx・
  *    未来投影は購入行 + 費用行の両方（台帳が積み上がらない = §13-1）。
- *  - 削除: ルールを消しても起票済み仕訳・item は残る（由来メタと決定的item IDを剥がす）。
+ *  - 読み取り専用: 起票された仕訳（rec-）・item（ccr-）は保存境界で直接編集・削除できない。
+ *  - 削除: ルール削除はカスケード（ルール + 起票済み仕訳 + item + 購入の仕訳）。
+ *    反対仕訳・回収の振替は利用者自身の実仕訳なので残り、宙に浮く参照だけ剥がれる。
  *  - export → schema round-trip / 必須キー欠落の拒否。
+ *
+ * 個別編集済みの月を作る検証では、保存境界が塞がれているため putRecord で DB へ直接置く
+ * （旧データ・別経路で生まれた個別編集を、ルール側の遡及・分割がどう扱うかの検証は残す）。
  */
 import { describe, expect, it } from 'vitest';
 import './setup';
 import {
+  archiveMonthlyCost,
   catchUpRecurringRules,
   createRecurringRule,
   deleteEntry,
@@ -22,7 +28,11 @@ import {
   upsertMonthlyCost,
   upsertRecurringRule,
 } from '../src/data/repository';
-import { clampDayToMonth, recurringProjectionEntries } from '../src/domain/recurring';
+import {
+  clampDayToMonth,
+  projectedRuleItems,
+  recurringProjectionEntries,
+} from '../src/domain/recurring';
 import { earliestRecurringRuleEndDate } from '../src/domain/accountLifetime';
 import {
   accountBalance,
@@ -202,7 +212,7 @@ describe('定期ルールのキャッチアップ起票', () => {
     expect(posted[0]!.date).toBe('2026-07-27');
   });
 
-  it('起票済み仕訳を削除しても再起票しない（カーソルでスキップを尊重）', async () => {
+  it('起票済み仕訳は個別に削除できない（読み取り専用・ルール側で調整する）', async () => {
     const bank = await accountByName('預金');
     const invest = await accountByName('投資');
     await createRecurringRule({
@@ -217,7 +227,10 @@ describe('定期ルールのキャッチアップ起票', () => {
     expect(await catchUpRecurringRules('2026-07-23')).toBe(1);
     const ledger = await loadLedger();
     const posted = ledger.journalEntries.find((e) => e.metadata?.recurringRuleId)!;
-    await deleteEntry(posted.id);
+    await expect(deleteEntry(posted.id)).rejects.toMatchObject({
+      code: 'error.recurring.generatedReadOnly',
+    });
+    expect((await loadLedger()).journalEntries.some((e) => e.id === posted.id)).toBe(true);
     expect(await catchUpRecurringRules('2026-07-23')).toBe(0);
   });
 
@@ -244,7 +257,7 @@ describe('定期ルールのキャッチアップ起票', () => {
     expect(await catchUpRecurringRules('2026-07-23')).toBe(0);
   });
 
-  it('ルール削除で起票済み仕訳は通常仕訳として残る（メタデータを剥がす）', async () => {
+  it('ルール削除は起票済み仕訳を道連れにし、反対仕訳だけ参照を剥がして残す（カスケード）', async () => {
     const bank = await accountByName('預金');
     const invest = await accountByName('投資');
     const rule = await createRecurringRule({
@@ -277,21 +290,19 @@ describe('定期ルールのキャッチアップ起票', () => {
 
     const ledger = await loadLedger();
     expect(ledger.recurringRules.length).toBe(0);
-    const entry = ledger.journalEntries.find((e) => e.description === '積立')!;
-    expect(entry).toBeDefined();
-    expect(entry.id).not.toBe(generated.id);
-    expect(entry.id.startsWith(`rec-${rule.id}-`)).toBe(false);
-    expect(entry.metadata?.recurringRuleId).toBeUndefined();
-    expect(
-      ledger.journalEntries.find((candidate) => candidate.id === 'rule-delete-reversal')?.metadata
-        ?.reversalOfEntryId,
-    ).toBe(entry.id);
-    // 剥がした後も export → schema 検証が通る（strict な存在チェックと両立）。
+    // 積み木の下（ルール）が消えれば上（起票）も消える。
+    expect(ledger.journalEntries.some((e) => e.id === generated.id)).toBe(false);
+    expect(ledger.journalEntries.some((e) => e.description === '積立')).toBe(false);
+    // 利用者自身が切った反対仕訳は最下層の積み木なので残り、宙に浮く参照だけ剥がれる。
+    const reversal = ledger.journalEntries.find((e) => e.id === 'rule-delete-reversal')!;
+    expect(reversal).toBeDefined();
+    expect(reversal.metadata?.reversalOfEntryId).toBeUndefined();
+    // カスケード後も export → schema 検証が通る（strict な存在チェックと両立）。
     const parsed = ledgerExportPackageSchema.safeParse(buildExportPackage(ledger));
     expect(parsed.success).toBe(true);
   });
 
-  it('費用ルールを削除しても作成済みの継続コスト資産と購入実績は残る', async () => {
+  it('費用ルールを削除すると継続コスト資産も購入の仕訳も一緒に消える（カスケード）', async () => {
     const bank = await accountByName('預金');
     const fixed = await accountByName('固定費');
     const rule = await createRecurringRule({
@@ -308,18 +319,56 @@ describe('定期ルールのキャッチアップ起票', () => {
     await deleteRecurringRule(rule.id);
 
     const ledger = await loadLedger();
-    const oldItemId = `ccr-${rule.id}-2026-07`;
     expect(ledger.recurringRules).toHaveLength(0);
-    expect(ledger.monthlyCostItems.some((item) => item.id === oldItemId)).toBe(false);
-    const detachedItem = ledger.monthlyCostItems.find((item) => item.name === '削除後も残る年払い');
-    expect(detachedItem).toBeDefined();
-    expect(detachedItem?.id.startsWith(`ccr-${rule.id}-`)).toBe(false);
-    const purchase = ledger.journalEntries.find(
-      (entry) => entry.metadata?.monthlyCostId === detachedItem?.id,
+    // item も購入の仕訳も残らない（通常 ID へ付け替えて残す旧仕様は撤去・作者決定 2026-08-15）。
+    expect(ledger.monthlyCostItems).toHaveLength(0);
+    expect(ledger.journalEntries.some((entry) => entry.metadata?.monthlyCostId !== undefined)).toBe(
+      false,
     );
-    expect(purchase).toBeDefined();
-    expect(purchase?.id.startsWith(`rec-${rule.id}-`)).toBe(false);
-    expect(purchase?.metadata?.recurringRuleId).toBeUndefined();
+    expect(ledger.journalEntries.some((entry) => entry.description === '削除後も残る年払い')).toBe(
+      false,
+    );
+    expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
+  });
+
+  it('ccr- item の回収の振替も道連れ（貸方 = 台帳なので item と対でしか成立しない）', async () => {
+    const bank = await accountByName('預金');
+    const fixed = await accountByName('固定費');
+    const rule = await createRecurringRule({
+      name: '回収つき年払い',
+      amount: 12000,
+      dayOfMonth: 1,
+      everyMonths: 12,
+      debitAccountId: fixed.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-07',
+      startDate: '2026-07-01',
+    });
+    await catchUpRecurringRules('2026-07-01');
+    const itemId = `ccr-${rule.id}-2026-07`;
+    // 回収の振替（借方 預金 / 貸方 継続コスト台帳）は利用者が自分で切った実仕訳。
+    // ルール由来 item はアーカイブできないので、既存データ相当を DB へ直接置く。
+    await putRecord(STORE.journalEntries, {
+      id: 'cascade-recovery',
+      date: '2026-08-01',
+      description: '途中解約の返金',
+      kind: 'normal',
+      lines: [
+        { accountId: bank.id, side: 'debit', amount: 3000 },
+        { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'credit', amount: 3000 },
+      ],
+      metadata: { inputMode: 'transfer', monthlyCostId: itemId, monthlyCostRecovery: true },
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    });
+
+    await deleteRecurringRule(rule.id);
+
+    const ledger = await loadLedger();
+    expect(ledger.monthlyCostItems.some((item) => item.id === itemId)).toBe(false);
+    // 台帳にふれる仕訳は monthlyCostId 必須（不変条件⑧）・購入の借方が消えれば台帳残高も
+    // 負に落ちるため、振替だけ残すことはできない。継続コスト item 単体の削除と同じ規則。
+    expect(ledger.journalEntries.some((entry) => entry.id === 'cascade-recovery')).toBe(false);
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
 
@@ -522,6 +571,82 @@ describe('clampDayToMonth / recurringProjectionEntries', () => {
     expect(clampDayToMonth('2026-04', 31)).toBe('2026-04-30');
   });
 
+  it('projectedRuleItems は未起票周期の表示専用 item を投影と同じ規則で出す', () => {
+    const accounts: Account[] = [
+      {
+        id: 'cash',
+        name: '現金',
+        type: 'asset',
+        role: 'daily-asset',
+        archived: false,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+      {
+        id: 'expense',
+        name: '固定費',
+        type: 'expense',
+        role: 'expense-category',
+        archived: false,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+      {
+        id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+        name: '継続コスト台帳',
+        type: 'asset',
+        role: 'continuing-cost-asset',
+        archived: false,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+    ];
+    // 月割りトグル ON の保存済み正規形（借方 = 継続コスト台帳・spread = 計上先）。
+    const rule = {
+      id: 'rule',
+      name: '家賃',
+      amount: 80000,
+      dayOfMonth: 27,
+      debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      spreadExpenseAccountId: 'expense',
+      creditAccountId: 'cash',
+      everyMonths: 1,
+      startMonth: '2026-07',
+      startDate: '2026-07-01',
+      postedThroughMonth: '2026-07',
+      createdAt: 't',
+      updatedAt: 't',
+    };
+    const projectedItems = projectedRuleItems([rule], accounts, '2026-10-31');
+    // カーソル（2026-07）より後・asOf までの起票 = 8/27・9/27・10/27 の 3 件。
+    // item は [起票日, 次回起票日]（同日刻み・endDate = 次回起票日）。
+    expect(projectedItems.map((p) => [p.item.id, p.item.startDate, p.item.endDate])).toEqual([
+      ['rule-2026-08', '2026-08-27', '2026-09-27'],
+      ['rule-2026-09', '2026-09-27', '2026-10-27'],
+      ['rule-2026-10', '2026-10-27', '2026-11-27'],
+    ]);
+    // 投影の購入行（continuousCostId）と同じ ephemeral ID = 由来の対応が 1:1（単一正本）。
+    const projected = recurringProjectionEntries([rule], accounts, '2026-10-31');
+    expect(
+      projected
+        .filter((entry) => entry.id.startsWith('rec-proj-'))
+        .map((entry) => entry.metadata?.continuousCostId),
+    ).toEqual(projectedItems.map((p) => p.item.id));
+    // 直接起票（月割りトグル OFF）のルールからは 1 件も出ない。
+    const direct = { ...rule, id: 'direct', debitAccountId: 'cash2' };
+    delete (direct as { spreadExpenseAccountId?: string }).spreadExpenseAccountId;
+    const cash2: Account = {
+      id: 'cash2',
+      name: '第二口座',
+      type: 'asset',
+      role: 'daily-asset',
+      archived: false,
+      createdAt: 't',
+      updatedAt: 't',
+    };
+    expect(projectedRuleItems([direct], [...accounts, cash2], '2026-10-31')).toEqual([]);
+  });
+
   it('未来投影は決定的IDで存在期間内だけを含む', () => {
     const accounts: Account[] = [
       {
@@ -552,12 +677,14 @@ describe('clampDayToMonth / recurringProjectionEntries', () => {
         updatedAt: 't',
       },
     ];
+    // 月割りトグル ON の保存済み正規形（借方 = 継続コスト台帳・spread = 計上先）。
     const base = {
       id: 'rule',
       name: '家賃',
       amount: 80000,
       dayOfMonth: 27,
-      debitAccountId: 'expense',
+      debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      spreadExpenseAccountId: 'expense',
       creditAccountId: 'cash',
       everyMonths: 1,
       startMonth: '2026-07',
@@ -570,7 +697,19 @@ describe('clampDayToMonth / recurringProjectionEntries', () => {
     expect(
       projected.filter((entry) => entry.id.startsWith('rec-proj-')).map((entry) => entry.id),
     ).toEqual(['rec-proj-rule-2026-08', 'rec-proj-rule-2026-09', 'rec-proj-rule-2026-10']);
-    expect(projected).toHaveLength(6);
+    // 月割り行の刻み日 = 起票日の翌月同日（購入当日の費用 0・item は [起票日, 次回起票日]）:
+    //  - 8/27 起票 → item [8/27, 9/27]・刻み 9/27（ID の月は刻み日の月 = 2026-09）
+    //  - 9/27 起票 → item [9/27, 10/27]・刻み 10/27
+    //  - 10/27 起票 → 刻み 11/27 は asOf(2026-10-31) を越えるので 1 本も出ない
+    expect(
+      projected
+        .filter((entry) => entry.id.startsWith('cc-allocp-'))
+        .map((entry) => [entry.id, entry.date]),
+    ).toEqual([
+      ['cc-allocp-rule-2026-08-2026-09', '2026-09-27'],
+      ['cc-allocp-rule-2026-09-2026-10', '2026-10-27'],
+    ]);
+    expect(projected).toHaveLength(5); // 購入 3 + 月割り 2
     expect(projected.every((entry) => entry.metadata?.continuousCostId !== undefined)).toBe(true);
     expect(recurringProjectionEntries([base], accounts, '2026-10-31')).toEqual(projected);
     expect(
@@ -629,15 +768,20 @@ describe('clampDayToMonth / recurringProjectionEntries', () => {
         },
       ],
       accounts,
-      '2026-08-31',
+      // 8/27 起票ぶんの刻み日は翌月同日 = 9/27。費用行が現れる 9 月末まで断面を取る
+      // （8 月末で切ると購入当日の費用 0 の仕様どおり月割り行が 1 本も無い）。
+      '2026-09-30',
     );
 
     const purchase = projected.find((entry) => entry.id === 'rec-proj-spread-rule-2026-08');
     expect(purchase?.metadata?.continuousCostId).toBe('spread-rule-2026-08');
-    expect(
-      projected.find((entry) => entry.metadata?.ccKind === 'monthly-allocation')?.metadata
-        ?.continuousCostId,
-    ).toBe('spread-rule-2026-08');
+    const allocation = projected.find((entry) => entry.metadata?.ccKind === 'monthly-allocation');
+    expect(allocation?.metadata?.continuousCostId).toBe('spread-rule-2026-08');
+    // ID の月・日付は刻み日基準（2026-09-27）。購入行の ephemeral item ID と対応する。
+    expect([allocation?.id, allocation?.date]).toEqual([
+      'cc-allocp-spread-rule-2026-08-2026-09',
+      '2026-09-27',
+    ]);
   });
 
   it('カーソル後の次月から独立して投影する', () => {
@@ -732,7 +876,8 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
 
     let ledger = await loadLedger();
     const mayItem = ledger.monthlyCostItems.find((item) => item.id === `ccr-${rule.id}-2026-05`)!;
-    await upsertMonthlyCost({
+    // ルール由来 item は保存境界から編集できないので、個別編集済みの状態は DB へ直接置く。
+    await putRecord(STORE.monthlyCostItems, {
       ...mayItem,
       name: '手編集済み5月分',
       endDate: '2026-06-30',
@@ -1003,7 +1148,7 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     await expect(upsertRecurringRule(reopened)).rejects.toThrow();
   });
 
-  it('分割後継の削除後に旧segmentを開いても、継承したカーソルで事実を再起票しない', async () => {
+  it('分割後継の削除は起票を道連れにし、旧segmentを開き直しても継承カーソルで再起票しない', async () => {
     const bank = await accountByName('預金');
     const invest = await accountByName('投資');
     const predecessor = await createRecurringRule({
@@ -1027,12 +1172,14 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
 
     ledger = await loadLedger();
     const remaining = ledger.recurringRules.find((rule) => rule.id === predecessor.id)!;
+    // 後継が走査した月は親のカーソルへ継承する（復旧は親の再オープンではなく登録し直し）。
     expect(remaining).toMatchObject({ endDate: '2026-04-22', postedThroughMonth: '2026-05' });
-    const neutralMayFacts = ledger.journalEntries.filter(
-      (entry) => entry.date === '2026-05-20' && entry.description === '後継削除後の境界',
-    );
-    expect(neutralMayFacts).toHaveLength(1);
-    expect(neutralMayFacts[0]?.metadata?.recurringRuleId).toBeUndefined();
+    // 後継が起票した 5 月分はカスケードで消える。
+    expect(
+      ledger.journalEntries.filter(
+        (entry) => entry.date === '2026-05-20' && entry.description === '後継削除後の境界',
+      ),
+    ).toHaveLength(0);
     const reopened = { ...remaining };
     delete reopened.endDate;
     await upsertRecurringRule(reopened);
@@ -1041,7 +1188,7 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
       (await loadLedger()).journalEntries.filter(
         (entry) => entry.date === '2026-05-20' && entry.description === '後継削除後の境界',
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
   });
 
   it('カーソルが遅れている状態で起票日を後ろへ動かして分割しても、同じ月を二重起票しない', async () => {
@@ -1118,7 +1265,7 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     );
   });
 
-  it('終了点を縮めてもカーソルを後退させず、利用者のスキップを保つ', async () => {
+  it('終了点を縮めてもカーソルは後退しない（同じ月を二重起票しない）', async () => {
     const bank = await accountByName('預金');
     const invest = await accountByName('投資');
     const rule = await createRecurringRule({
@@ -1132,18 +1279,13 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     });
     await catchUpRecurringRules('2026-07-01');
     let ledger = await loadLedger();
-    const july = ledger.journalEntries.find(
-      (entry) =>
-        entry.metadata?.recurringRuleId === rule.id && entry.metadata.recurringMonth === '2026-07',
-    )!;
-    await deleteEntry(july.id); // 「7月はスキップ」なのでカーソルは7月のまま。
-    ledger = await loadLedger();
     const stored = ledger.recurringRules.find((candidate) => candidate.id === rule.id)!;
-    await upsertRecurringRule({ ...stored, endDate: '2026-07-01' });
+    // 起票済み（7/1）の翌日で終了 = 起票された事実は存在期間の中に残る最小の終了点。
+    await upsertRecurringRule({ ...stored, endDate: '2026-07-02' });
 
     ledger = await loadLedger();
     expect(ledger.recurringRules[0]).toMatchObject({
-      endDate: '2026-07-01',
+      endDate: '2026-07-02',
       postedThroughMonth: '2026-07',
     });
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
@@ -1168,7 +1310,8 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     const generatedItem = before.monthlyCostItems.find(
       (item) => item.id === `ccr-${rule.id}-2026-04`,
     )!;
-    await upsertMonthlyCost({
+    // ルール由来 item は保存境界から編集できないので、個別編集済みの状態は DB へ直接置く。
+    await putRecord(STORE.monthlyCostItems, {
       ...generatedItem,
       name: '個別編集済みの当日分',
       endDate: '2026-06-30',
@@ -1254,8 +1397,9 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     await catchUpRecurringRules('2026-04-20');
     const stored = (await loadLedger()).recurringRules.find((r) => r.id === rule.id)!;
 
+    // UI と同じく、行き先（論理）と月割りトグル ON（spread = 計上先）を明示して渡す。
     await upsertRecurringRule(
-      { ...stored, amount: 1500, debitAccountId: fixed.id },
+      { ...stored, amount: 1500, debitAccountId: fixed.id, spreadExpenseAccountId: fixed.id },
       { amountChangeMode: 'split', effectiveDate: '2026-04-20' },
     );
 
@@ -1312,7 +1456,9 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     const successor = ledger.recurringRules.find((r) => r.id !== rule.id)!;
     const detached = ledger.monthlyCostItems[0]!;
     expect(detached.id.startsWith(`ccr-${successor.id}-`)).toBe(false);
-    expect(detached).toMatchObject({ amount: 1500, endDate: '2027-03-31' });
+    // 生成時のルール（everyMonths 12・dayOfMonth 20）で決まった endDate を保つ:
+    // 起票月 2026-04 + 12 か月 = 2027-04 の 20 日（次回起票日と同日）。
+    expect(detached).toMatchObject({ amount: 1500, endDate: '2027-04-20' });
     expect(await catchUpRecurringRules('2026-05-20')).toBe(1);
     ledger = await loadLedger();
     expect(
@@ -1436,7 +1582,11 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     const detachedItem = ledger.monthlyCostItems[0]!;
     expect(detachedItem.id.startsWith(`ccr-${successor.id}-`)).toBe(false);
 
-    await upsertRecurringRule({ ...successor, debitAccountId: fixed.id });
+    await upsertRecurringRule({
+      ...successor,
+      debitAccountId: fixed.id,
+      spreadExpenseAccountId: fixed.id,
+    });
 
     ledger = await loadLedger();
     const expectedItemId = `ccr-${successor.id}-2026-04`;
@@ -1459,7 +1609,7 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     ).toBe(true);
   });
 
-  it('ルール由来仕訳は由来月をまたぐ日付へ編集できない', async () => {
+  it('ルール由来仕訳は保存境界で編集できない（読み取り専用・調整はルール側）', async () => {
     const bank = await accountByName('預金');
     const invest = await accountByName('投資');
     const rule = await createRecurringRule({
@@ -1476,9 +1626,21 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
       (entry) => entry.metadata?.recurringRuleId === rule.id,
     )!;
 
+    // 由来月をまたぐ日付はもちろん、同じ月の中の摘要変更ですら通さない（fail-closed）。
     await expect(upsertEntry({ ...posted, date: '2026-05-01' })).rejects.toMatchObject({
-      code: 'error.recurring.periodInvalid',
+      code: 'error.recurring.generatedReadOnly',
     });
+    await expect(upsertEntry({ ...posted, description: '手で書き換え' })).rejects.toMatchObject({
+      code: 'error.recurring.generatedReadOnly',
+    });
+    // 由来メタを落として通常仕訳のふりをしても、決定的 ID（rec-）で塞がれる。
+    const stripped = { ...posted, metadata: { inputMode: 'manual' as const } };
+    await expect(upsertEntry(stripped)).rejects.toMatchObject({
+      code: 'error.recurring.generatedReadOnly',
+    });
+    const after = (await loadLedger()).journalEntries.find((entry) => entry.id === posted.id)!;
+    expect(after).toMatchObject({ date: posted.date, description: posted.description });
+    expect(after.metadata?.recurringRuleId).toBe(rule.id);
   });
 
   it('古いルールオブジェクトで upsert してもカーソルは巻き戻らない（二重起票しない）', async () => {
@@ -1543,7 +1705,7 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     return { rule, bank, fixed };
   }
 
-  it('1 起票 = 2 レコード: 購入の仕訳（借方 台帳・monthlyCostId 付き）+ item（endDate = 周期末）', async () => {
+  it('1 起票 = 2 レコード: 購入の仕訳（借方 台帳・monthlyCostId 付き）+ item（endDate = 次回起票日と同日）', async () => {
     const { rule, bank, fixed } = await createSpreadRule();
     expect(await catchUpRecurringRules('2026-07-23')).toBe(1);
     const ledger = await loadLedger();
@@ -1552,7 +1714,8 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     expect(item!.name).toBe('火災保険');
     expect(item!.amount).toBe(60000);
     expect(item!.startDate).toBe('2026-04-25');
-    expect(item!.endDate).toBe('2027-03-31'); // 周期がカバーする最終月の末日（§7-4）
+    // 起票月 2026-04 + everyMonths 12 = 2027-04 を dayOfMonth 25 でクランプ = 次回起票日と同日。
+    expect(item!.endDate).toBe('2027-04-25');
     expect(item!.expenseAccountId).toBe(fixed.id);
     const purchase = ledger.journalEntries.find((e) => e.metadata?.monthlyCostId === item!.id);
     expect(purchase).toBeDefined();
@@ -1572,24 +1735,37 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     const itemId = `ccr-${rule.id}-2026-04`;
     const before = await loadLedger();
     const item = before.monthlyCostItems.find((m) => m.id === itemId)!;
-    // ユーザー編集（終了日を縮める）。
-    await upsertMonthlyCost({ ...item, endDate: '2026-09-30' });
+    // 既存データや別経路で個別に変わっていた item を catchUp が上書きしないこと（tx 内の
+    // get → undefined のときだけ put）。保存境界は塞がれているので DB へ直接置く。
+    await putRecord(STORE.monthlyCostItems, { ...item, endDate: '2026-09-30' });
     expect(await catchUpRecurringRules('2026-07-23')).toBe(0);
     const after = await loadLedger();
     expect(after.monthlyCostItems.filter((m) => m.id === itemId)).toHaveLength(1);
     expect(after.monthlyCostItems.find((m) => m.id === itemId)?.endDate).toBe('2026-09-30');
   });
 
-  it('「今月はスキップ」= item 削除（購入の仕訳ごと消える）。カーソルは戻らず再生成されない（§13-11）', async () => {
+  it('ルール由来 item（ccr-）は編集も削除もアーカイブもできない（読み取り専用）', async () => {
     const { rule } = await createSpreadRule();
     await catchUpRecurringRules('2026-07-23');
     const itemId = `ccr-${rule.id}-2026-04`;
-    await deleteMonthlyCost(itemId);
-    const mid = await loadLedger();
-    expect(mid.monthlyCostItems.some((m) => m.id === itemId)).toBe(false);
-    expect(mid.journalEntries.some((e) => e.metadata?.monthlyCostId === itemId)).toBe(false);
-    expect(await catchUpRecurringRules('2026-07-23')).toBe(0);
-    expect((await loadLedger()).monthlyCostItems.some((m) => m.id === itemId)).toBe(false);
+    const item = (await loadLedger()).monthlyCostItems.find((m) => m.id === itemId)!;
+
+    await expect(deleteMonthlyCost(itemId)).rejects.toMatchObject({
+      code: 'error.recurring.generatedReadOnly',
+    });
+    await expect(upsertMonthlyCost({ ...item, name: '手で書き換え' })).rejects.toMatchObject({
+      code: 'error.recurring.generatedReadOnly',
+    });
+    await expect(archiveMonthlyCost({ id: itemId, endDate: '2026-08-01' })).rejects.toMatchObject({
+      code: 'error.recurring.generatedReadOnly',
+    });
+
+    const after = await loadLedger();
+    expect(after.monthlyCostItems.find((m) => m.id === itemId)).toMatchObject({
+      name: item.name,
+      endDate: item.endDate,
+    });
+    expect(after.journalEntries.some((e) => e.metadata?.monthlyCostId === itemId)).toBe(true);
   });
 
   it('未来断面で台帳が積み上がらない（§13-1: 5年後の asOf で残高 = まだ費用にしていないぶんのみ）', async () => {
@@ -1599,14 +1775,18 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     const derived = reportEntriesForAsOf(ledger, '2031-12-31');
     // 投影は購入行だけでなく月割り行（cc-allocp）も出す。
     expect(derived.some((e) => e.id.startsWith(`cc-allocp-${rule.id}-`))).toBe(true);
-    // 台帳残高 = 2031-04 サイクルの未費消ぶんのみ（2032-01〜03 = 15,000）。購入総額 360,000 にはならない。
+    // 購入 6 回（2026-04〜2031-04 の毎年 4/25）= 360,000。各 item は [4/25, 翌 4/25] で
+    // 刻み 12 本（翌月 25 日〜翌年 4/25・5,000 ずつ）。2031-12-31 断面までに費消済みなのは
+    // 2026〜2030 サイクルの 60 本 + 2031-04 サイクルの 2031-05-25〜12-25 の 8 本 = 340,000。
+    // 台帳残高 = 2031-04 サイクルの未費消 4 刻み（2032-01-25〜04-25）= 20,000。
     const balance = accountBalance(
       CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
       'asset',
       filterByDateRange(derived, undefined, '2031-12-31'),
     );
-    expect(balance).toBe(15000);
-    // PL: 2031 年の費用は 0 ではない（毎月 5,000）。
+    expect(balance).toBe(20000);
+    // PL: 2031 年の費用は 0 ではない（2030 サイクルの 1〜4 月 4 本 + 2031 サイクルの 5〜12 月
+    // 8 本 = 12 本 × 5,000）。
     const pl = deriveProfitAndLoss(ledger.accounts, derived, {
       from: '2031-01-01',
       to: '2031-12-31',
@@ -1614,7 +1794,7 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     expect(pl.totalExpense).toBe(60000);
   });
 
-  it('everyMonths = 1 でも月割りできる（毎月の家賃も台帳経由: item は起票日開始・当月末終了）', async () => {
+  it('everyMonths = 1 でも月割りできる（毎月の家賃も台帳経由: item は起票日開始・次回起票日終了）', async () => {
     const bank = await accountByName('預金');
     const fixed = await accountByName('固定費');
     const rule = await createRecurringRule({
@@ -1633,25 +1813,87 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     const ledger = await loadLedger();
     const june = ledger.monthlyCostItems.find((m) => m.id === `ccr-${rule.id}-2026-06`)!;
     expect(june.startDate).toBe('2026-06-27');
-    expect(june.endDate).toBe('2026-06-30'); // 周期 1 → 当月末（毎月生まれて消える）
+    expect(june.endDate).toBe('2026-07-27'); // 周期 1 → 次回起票日と同日（毎月生まれて消える）
     const july = ledger.monthlyCostItems.find((m) => m.id === `ccr-${rule.id}-2026-07`)!;
-    expect(july.endDate).toBe('2026-07-31');
-    // 支出内訳では「継続コスト」に分類される（6 月ぶんは 6 月内で全額月割り）。
+    expect(july.endDate).toBe('2026-08-27');
+    // 支出内訳では「継続コスト」に分類される。刻みは 1 本だけ（[6/27, 7/27] に同日通過は
+    // 7/27 の 1 回）で、購入当日の費用は 0 なので 6 月ぶん 80,000 は 7/27 に全額立つ。
     const derived = reportEntriesForAsOf(ledger, '2026-07-31');
     const juneCost = livingCostBreakdownForRange(ledger.accounts, derived, {
       from: '2026-06-01',
       to: '2026-06-30',
     });
-    expect(juneCost.monthlyCost).toBe(80000);
+    expect(juneCost.monthlyCost).toBe(0);
     expect(juneCost.normalExpense).toBe(0);
-    // 台帳残高は月末で 0（起票日開始・当月末終了 = 同月内で費消しきる）。
+    const julyCost = livingCostBreakdownForRange(ledger.accounts, derived, {
+      from: '2026-07-01',
+      to: '2026-07-31',
+    });
+    expect(julyCost.monthlyCost).toBe(80000);
+    expect(julyCost.normalExpense).toBe(0);
+    // 台帳残高 = 購入 2 本（160,000）− 費消 1 本（7/27 の 80,000）= 7/27 起票ぶんの未費消 80,000。
+    // 7 月ぶんの刻みは 8/27 なので、断面 7/31 ではまだ費用になっていない。
     const balance = accountBalance(
       CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
       'asset',
       filterByDateRange(derived, undefined, '2026-07-31'),
     );
-    expect(balance).toBe(0);
+    expect(balance).toBe(80000);
     // export → schema round-trip。
+    expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
+  });
+
+  it('月末クランプの縁: 31 日指定の item と刻み（2 月起点は endDate より 3 日早く残高 0）', async () => {
+    const bank = await accountByName('預金');
+    const fixed = await accountByName('固定費');
+    const rule = await createRecurringRule({
+      name: '月末サブスク',
+      amount: 3000,
+      dayOfMonth: 31,
+      everyMonths: 1,
+      spreadExpenseAccountId: fixed.id,
+      debitAccountId: fixed.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-01',
+      startDate: '2026-01-31',
+    });
+    // 起票日は clampDayToMonth: 1/31 と 2/28（クランプ産）の 2 回。
+    expect(await catchUpRecurringRules('2026-02-28')).toBe(2);
+    const ledger = await loadLedger();
+
+    // ① 1/31 起票。endDate = clampDayToMonth('2026-02', 31) = 2/28（次回起票日と同日）。
+    //    刻みは addMonthsToDate('2026-01-31', 1) = 2/28 の 1 本 = endDate ちょうど。
+    const january = ledger.monthlyCostItems.find((m) => m.id === `ccr-${rule.id}-2026-01`)!;
+    expect([january.startDate, january.endDate]).toEqual(['2026-01-31', '2026-02-28']);
+    // ② 2/28 起票（クランプ産）。endDate = clampDayToMonth('2026-03', 31) = 3/31。
+    //    刻みは起点日を保つので addMonthsToDate('2026-02-28', 1) = 3/28 の 1 本
+    //    ＝ endDate（3/31）より 3 日早く残高 0 になる。これが同日刻みの仕様。
+    const february = ledger.monthlyCostItems.find((m) => m.id === `ccr-${rule.id}-2026-02`)!;
+    expect([february.startDate, february.endDate]).toEqual(['2026-02-28', '2026-03-31']);
+
+    // 導出行の ID の月は刻み日の月（起票月ではない）。額は 1 刻みなので全額。
+    const derived = reportEntriesForAsOf(ledger, '2026-03-28');
+    expect(
+      derived
+        .filter((entry) => entry.metadata?.ccKind === 'monthly-allocation')
+        .map((entry) => [
+          entry.id,
+          entry.date,
+          entry.lines.find((line) => line.side === 'debit')?.amount,
+        ]),
+    ).toEqual([
+      [`cc-alloc-ccr-${rule.id}-2026-01-2026-02`, '2026-02-28', 3000],
+      [`cc-alloc-ccr-${rule.id}-2026-02-2026-03`, '2026-03-28', 3000],
+    ]);
+    // 3/27 断面は 2 月ぶんの購入が未費消（3,000）。3/28 の刻みで 0 になる（endDate 3/31 より前）。
+    const ledgerBalanceAt = (asOf: string): number =>
+      accountBalance(
+        CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+        'asset',
+        filterByDateRange(reportEntriesForAsOf(ledger, asOf), undefined, asOf),
+      );
+    expect(ledgerBalanceAt('2026-03-27')).toBe(3000);
+    expect(ledgerBalanceAt('2026-03-28')).toBe(0);
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
 
@@ -1705,7 +1947,7 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
       name: '医師賠償責任保険',
       amount: 60000,
       startDate: '2026-04-25',
-      endDate: '2027-03-31', // 周期がカバーする最終月の末日（費用ルールと同一）
+      endDate: '2027-04-25', // 次回起票日と同日（2026-04 + 12 か月の 25 日・費用ルールと同一）
       expenseAccountId: salary.id,
     });
     const purchase = ledger.journalEntries.find((e) => e.metadata?.monthlyCostId === item.id)!;
@@ -1713,11 +1955,12 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
       { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: 60000 },
       { accountId: bank.id, side: 'credit', amount: 60000 },
     ]);
-    // 月割り 5,000/月（2026-04〜07 の 4 か月ぶん）が収入のマイナスとして出る。
+    // 月割り 5,000/刻み（[4/25, 翌 4/25] の 12 刻み）。断面 2026-07-31 までに通過するのは
+    // 5/25・6/25・7/25 の 3 刻み = 15,000 が収入のマイナスとして出る（購入当日 4/25 は 0）。
     const derived = reportEntriesForAsOf(ledger, '2026-07-31');
     expect(
       accountBalance(salary.id, 'revenue', filterByDateRange(derived, undefined, '2026-07-31')),
-    ).toBe(-20000);
+    ).toBe(-15000);
     // 未来投影も費用ルールと同様に購入行 + 月割り行（cc-allocp）の両方を出す。
     const projected = reportEntriesForAsOf(ledger, '2027-12-31');
     expect(projected.some((e) => e.id === `rec-proj-${rule.id}-2027-04`)).toBe(true);
@@ -1732,9 +1975,8 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     const stored = (await loadLedger()).recurringRules.find(
       (candidate) => candidate.id === rule.id,
     )!;
-    // UI と同じく、利用者が選んだ行き先を借方に置き spread は渡さない。
-    const changed = { ...stored, debitAccountId: salary.id };
-    delete changed.spreadExpenseAccountId;
+    // UI と同じく、利用者が選んだ行き先を借方と spread（月割りトグル ON）の両方に置く。
+    const changed = { ...stored, debitAccountId: salary.id, spreadExpenseAccountId: salary.id };
     await upsertRecurringRule(changed);
     const saved = (await loadLedger()).recurringRules.find(
       (candidate) => candidate.id === rule.id,
@@ -1766,6 +2008,112 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
       { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: 3000 },
       { accountId: salary.id, side: 'credit', amount: 3000 },
     ]);
+    expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
+  });
+});
+
+describe('継続コスト台帳の経由は明示トグル（勘定科目で動作を変えない）', () => {
+  it('費用行きでも spreadViaLedger: false なら直接形で保存し、item を作らない', async () => {
+    const bank = await accountByName('預金');
+    const fixed = await accountByName('固定費');
+    const rule = await createRecurringRule({
+      name: '直接記帳の家賃',
+      amount: 80000,
+      dayOfMonth: 25,
+      debitAccountId: fixed.id,
+      creditAccountId: bank.id,
+      spreadViaLedger: false,
+      startMonth: '2026-04',
+      startDate: '2026-04-01',
+    });
+    // 保存形 = 直接形（借方が費用科目のまま・spread なし）。
+    expect(rule.spreadExpenseAccountId).toBeUndefined();
+    expect(rule.debitAccountId).toBe(fixed.id);
+
+    expect(await catchUpRecurringRules('2026-04-25')).toBe(1);
+    const ledger = await loadLedger();
+    // 台帳を経由しない = item は 1 件も生まれない。
+    expect(ledger.monthlyCostItems).toHaveLength(0);
+    const posted = ledger.journalEntries.find((e) => e.metadata?.recurringRuleId === rule.id);
+    expect(posted?.lines).toEqual([
+      { accountId: fixed.id, side: 'debit', amount: 80000 },
+      { accountId: bank.id, side: 'credit', amount: 80000 },
+    ]);
+    expect(posted?.metadata?.monthlyCostId).toBeUndefined();
+    // 未来投影も直接形のまま = 月割り行（cc-allocp）を 1 本も作らない。
+    const projected = reportEntriesForAsOf(ledger, '2026-12-31');
+    expect(projected.some((e) => e.id === `rec-proj-${rule.id}-2026-05`)).toBe(true);
+    expect(projected.some((e) => e.id.startsWith(`cc-allocp-${rule.id}-`))).toBe(false);
+    expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
+  });
+
+  it('資産行き（積立）でも spreadViaLedger: true なら台帳経由 + 計上先が資産の item になる', async () => {
+    const bank = await accountByName('預金');
+    const invest = await accountByName('投資');
+    const rule = await createRecurringRule({
+      name: 'クレカ積立',
+      amount: 60000,
+      dayOfMonth: 25,
+      everyMonths: 12,
+      debitAccountId: invest.id,
+      creditAccountId: bank.id,
+      spreadViaLedger: true,
+      startMonth: '2026-04',
+      startDate: '2026-04-25',
+    });
+    // 保存形 = 月割りの正規形（借方 = 台帳・spread = 利用者が選んだ行き先）。
+    expect(rule.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+    expect(rule.spreadExpenseAccountId).toBe(invest.id);
+
+    expect(await catchUpRecurringRules('2026-04-25')).toBe(1);
+    const ledger = await loadLedger();
+    const itemId = `ccr-${rule.id}-2026-04`;
+    expect(ledger.monthlyCostItems.find((m) => m.id === itemId)).toMatchObject({
+      amount: 60000,
+      expenseAccountId: invest.id,
+      startDate: '2026-04-25',
+      endDate: '2027-04-25',
+    });
+    expect(ledger.journalEntries.find((e) => e.metadata?.monthlyCostId === itemId)?.lines).toEqual([
+      { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: 60000 },
+      { accountId: bank.id, side: 'credit', amount: 60000 },
+    ]);
+    // 月割り行は資産（投資）へ立つ: 5,000/刻み・4/25 購入の 5/25・6/25・7/25 の 3 刻み。
+    const allocations = reportEntriesForAsOf(ledger, '2026-07-31').filter(
+      (e) => e.metadata?.ccKind === 'monthly-allocation' && e.metadata.continuousCostId === itemId,
+    );
+    expect(allocations.map((e) => e.date)).toEqual(['2026-05-25', '2026-06-25', '2026-07-25']);
+    expect(allocations.map((e) => e.lines[0])).toEqual([
+      { accountId: invest.id, side: 'debit', amount: 5000 },
+      { accountId: invest.id, side: 'debit', amount: 5000 },
+      { accountId: invest.id, side: 'debit', amount: 5000 },
+    ]);
+    expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
+  });
+
+  it('費用行きの直接形は、金額以外を編集保存しても直接形のまま（role 再導出が復活していない）', async () => {
+    const bank = await accountByName('預金');
+    const fixed = await accountByName('固定費');
+    const rule = await createRecurringRule({
+      name: '直接記帳の家賃',
+      amount: 80000,
+      dayOfMonth: 25,
+      debitAccountId: fixed.id,
+      creditAccountId: bank.id,
+      spreadViaLedger: false,
+      startMonth: '2026-04',
+      startDate: '2026-04-01',
+    });
+    await catchUpRecurringRules('2026-04-25');
+    const stored = (await loadLedger()).recurringRules.find((r) => r.id === rule.id)!;
+    await upsertRecurringRule({ ...stored, name: '直接記帳の家賃（変更後）', dayOfMonth: 26 });
+
+    const ledger = await loadLedger();
+    const saved = ledger.recurringRules.find((r) => r.id === rule.id)!;
+    expect(saved.name).toBe('直接記帳の家賃（変更後）');
+    expect(saved.spreadExpenseAccountId).toBeUndefined();
+    expect(saved.debitAccountId).toBe(fixed.id);
+    expect(ledger.monthlyCostItems).toHaveLength(0);
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
 });

@@ -5,7 +5,17 @@
  * domain/timelineCalendar に委ねる。ヘッダー日付は初期位置にだけ使い、この画面の
  * 前後移動・ズームで共有期間は書き換えない。
  */
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
+import { createPortal } from 'react-dom';
 import { Segmented } from '@snishi/foundation/ui/Segmented';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
@@ -23,6 +33,7 @@ import { formatMoney } from '../../util/format';
 import { useMoneyDigits } from '../money';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
+import { useRegisterOverlay } from '../overlays';
 import { TIMELINE_ACCOUNT_BOXES, timelineBoxForAccount, type AccountAccent } from '../accountBoxes';
 import type { Account, MonthlyCostItem, RecurringRule } from '../../domain/types';
 import type { ReportPeriod } from '../../domain/reportPeriod';
@@ -128,6 +139,8 @@ interface FlowSelection {
   kind: 'flow';
   rowId: string;
   dot: TimelineDotView;
+  /** ポップオーバーを置く基準になるポッチの実体（fixed 座標は毎回ここから実測する）。 */
+  anchor: HTMLElement;
   flowId?: string;
 }
 
@@ -135,6 +148,7 @@ interface GenerationSelection {
   kind: 'generation';
   rowId: string;
   dot: TimelineGenerationDotView;
+  anchor: HTMLElement;
   itemId?: string;
 }
 
@@ -143,6 +157,11 @@ type Selection = FlowSelection | GenerationSelection;
 const BUCKET_WIDTH: Record<TimelineZoom, number> = { day: 44, month: 80, year: 96 };
 const ROW_HEIGHT = 52;
 const TIMELINE_MIN_DATE = '0001-01-01';
+/** ポッチとポップオーバーの隙間 / viewport 端に残す余白（px）。 */
+const POPOVER_GAP = 8;
+const POPOVER_MARGIN = 8;
+/** 同時に開くのは 1 つだけなので固定 id でよい（ポッチの aria-controls の相手）。 */
+const POPOVER_ID = 'timeline-calendar-popover';
 
 function clampTimelineDate(value: string): string {
   if (value < TIMELINE_MIN_DATE) return TIMELINE_MIN_DATE;
@@ -614,6 +633,9 @@ export function TimelineCalendarView({
   })();
 
   const sourceIndex = selection ? renderedRowById.get(selection.rowId)?.index : undefined;
+  // 接続線が**下の行**へ伸びるときはポップオーバーを行の上へ出す（線と重ねない・実測不要の決定則）。
+  const connectorGoesDown =
+    sourceIndex !== undefined && counterpartRow !== undefined && counterpartRow.index > sourceIndex;
   const connectedIds =
     sourceIndex !== undefined && counterpartRow
       ? new Set([selection?.rowId, counterpartRow.row.id])
@@ -624,7 +646,11 @@ export function TimelineCalendarView({
       : selection?.kind === 'generation'
         ? bucketIndex(model.buckets, selection.dot.bucketKey)
         : -1;
-  const connectorX = (selectedBucketIndex + 0.5) * bucketWidth;
+  // 接続線・ポップオーバーはポッチと同じ x（日付比例）に置く。バケット中央だとポッチと分離する。
+  const connectorX =
+    selection !== null
+      ? positionForDate(model.buckets, selection.dot.date, bucketWidth)
+      : (selectedBucketIndex + 0.5) * bucketWidth;
   const todayX =
     model.buckets[0] &&
     model.buckets.at(-1) &&
@@ -759,6 +785,7 @@ export function TimelineCalendarView({
                 expanded={expanded.has(row.boxKey)}
                 dimmed={connectedIds !== undefined && !connectedIds.has(row.id)}
                 selection={selection?.rowId === row.id ? selection : null}
+                popoverAbove={selection?.rowId === row.id && connectorGoesDown}
                 accountById={accountById}
                 currency={currency}
                 onToggleBox={() =>
@@ -821,6 +848,7 @@ function TimelineRow({
   expanded,
   dimmed,
   selection,
+  popoverAbove,
   accountById,
   currency,
   onToggleBox,
@@ -833,6 +861,8 @@ function TimelineRow({
   expanded: boolean;
   dimmed: boolean;
   selection: Selection | null;
+  /** フロー選択の接続線が下の行へ伸びるとき true（ポップオーバーを行の上へ出す）。 */
+  popoverAbove: boolean;
   accountById: ReadonlyMap<string, Account>;
   currency: string;
   onToggleBox: () => void;
@@ -897,6 +927,10 @@ function TimelineRow({
         {row.dots.map((dot) => {
           const index = bucketIndex(buckets, dot.bucketKey);
           if (index < 0) return null;
+          // ポッチの x は帯と同じ「日付比例」で置く。バケット中央固定にすると、帯の端が
+          // バケット途中にあるとき（月の後半に始まる項目など）ポッチが帯の外へ浮いて見える
+          // ＝同じ軸に 2 つの座標規則を持たない（実ユーズ指摘 2026-08-14）。
+          const dotX = positionForDate(buckets, dot.date, bucketWidth);
           const selected = selection?.kind === 'flow' && selection.dot === dot;
           return (
             <button
@@ -908,16 +942,18 @@ function TimelineRow({
                     ? 'timeline-calendar__dot--negative'
                     : ''
               }`}
-              style={{ left: (index + 0.5) * bucketWidth }}
+              style={{ left: dotX }}
               aria-label={`${dot.date} ${t('timeline.flowCount', { count: dot.flows.length })}: ${formatMoney(
                 dot.netChange,
                 currency,
                 digits,
               )}`}
               aria-expanded={selected}
+              aria-controls={selected ? POPOVER_ID : undefined}
               data-ui={UI.timeline.flowDot}
               key={`${dot.bucketKey}-${dot.date}`}
               onClick={(event) => {
+                const anchor = event.currentTarget;
                 event.stopPropagation();
                 onSelect(
                   selected
@@ -926,6 +962,7 @@ function TimelineRow({
                         kind: 'flow',
                         rowId: row.id,
                         dot,
+                        anchor,
                         ...(dot.flows.length === 1 ? { flowId: dot.flows[0]!.id } : {}),
                       },
                 );
@@ -941,12 +978,14 @@ function TimelineRow({
             <button
               type="button"
               className="timeline-calendar__dot timeline-calendar__dot--generation"
-              style={{ left: (index + 0.5) * bucketWidth }}
+              style={{ left: positionForDate(buckets, dot.date, bucketWidth) }}
               aria-label={`${t('timeline.generation')}: ${dot.date}`}
               aria-expanded={selected}
+              aria-controls={selected ? POPOVER_ID : undefined}
               data-ui={UI.timeline.generationDot}
               key={dot.id}
               onClick={(event) => {
+                const anchor = event.currentTarget;
                 event.stopPropagation();
                 onSelect(
                   selected
@@ -955,6 +994,7 @@ function TimelineRow({
                         kind: 'generation',
                         rowId: row.id,
                         dot,
+                        anchor,
                         ...(dot.items.length === 1 ? { itemId: dot.items[0]!.id } : {}),
                       },
                 );
@@ -963,14 +1003,17 @@ function TimelineRow({
           );
         })}
 
+        {/* 実体は body へ portal される。React ツリー上はここなので、中のクリックは
+            行の onClick まで伝播する（器側の stopPropagation で閉じないようにしている）。 */}
         {selection?.kind === 'flow' ? (
           <TimelineFlowPopover
             dot={selection.dot}
             selectedFlow={selectedFlow}
-            buckets={buckets}
-            bucketWidth={bucketWidth}
+            above={popoverAbove}
+            anchor={selection.anchor}
             accountById={accountById}
             currency={currency}
+            onClose={() => onSelect(null)}
             onSelectFlow={(flow) => onSelect({ ...selection, flowId: flow.id })}
             onOpenTarget={onOpenTarget}
           />
@@ -978,9 +1021,9 @@ function TimelineRow({
           <TimelineGenerationPopover
             dot={selection.dot}
             selectedItemId={selection.itemId}
-            buckets={buckets}
-            bucketWidth={bucketWidth}
+            anchor={selection.anchor}
             currency={currency}
+            onClose={() => onSelect(null)}
             onSelectItem={(itemId) => onSelect({ ...selection, itemId })}
             onOpenTarget={onOpenTarget}
           />
@@ -990,47 +1033,183 @@ function TimelineRow({
   );
 }
 
-function popoverStyle(
-  bucketKey: string,
-  buckets: TimelineBucketView[],
-  bucketWidth: number,
-): CSSProperties {
-  const index = bucketIndex(buckets, bucketKey);
-  const ratio = buckets.length <= 1 ? 0.5 : index / (buckets.length - 1);
+export interface TimelinePopoverPlacement {
+  top: number;
+  left: number;
+  placement: 'above' | 'below';
+}
+
+function clampToViewport(value: number, size: number, extent: number): number {
+  return Math.max(POPOVER_MARGIN, Math.min(value, extent - size - POPOVER_MARGIN));
+}
+
+/**
+ * ポップオーバーの **viewport 座標**（position: fixed 用）。
+ *
+ * 表のスクロール枠の中に置くと上端・下端で切られる（実機で発生）。body へ portal し、
+ * ここで viewport 端にクランプ／反転して「必ず画面内に収まる」を座標側の不変則にする。
+ * preferAbove は接続線が下の行へ伸びる選択（線とポップオーバーを重ねない）の希望であって、
+ * 収まらないときは反対側へ反転する。どちらも収まらないときはクランプに委ねる。
+ * 実測に依らない純関数なので、テストが座標を直接固定できる。
+ */
+export function timelinePopoverPlacement(
+  anchor: { top: number; bottom: number; left: number; width: number },
+  size: { width: number; height: number },
+  viewport: { width: number; height: number },
+  preferAbove: boolean,
+): TimelinePopoverPlacement {
+  const needed = size.height + POPOVER_GAP;
+  const spaceAbove = anchor.top - POPOVER_MARGIN;
+  const spaceBelow = viewport.height - anchor.bottom - POPOVER_MARGIN;
+  const above = preferAbove
+    ? !(spaceAbove < needed && spaceBelow > spaceAbove)
+    : spaceBelow < needed && spaceAbove > spaceBelow;
   return {
-    left: (index + 0.5) * bucketWidth,
-    '--timeline-popover-shift': ratio < 0.2 ? '0%' : ratio > 0.8 ? '-100%' : '-50%',
-  } as CSSProperties;
+    top: clampToViewport(
+      above ? anchor.top - POPOVER_GAP - size.height : anchor.bottom + POPOVER_GAP,
+      size.height,
+      viewport.height,
+    ),
+    left: clampToViewport(
+      anchor.left + anchor.width / 2 - size.width / 2,
+      size.width,
+      viewport.width,
+    ),
+    placement: above ? 'above' : 'below',
+  };
+}
+
+/**
+ * ポップオーバーの器。**body へ portal** して親のスクロール枠から脱出させ、位置は
+ * アンカー実測からの fixed 座標で置く。
+ *
+ * 追従はしない（iOS のポップオーバーと同じ）: スクロール・リサイズ・外側タップ・Esc で閉じる。
+ * 端末 Back は overlays 登録簿（useRegisterOverlay）が拾い、ポップオーバーだけを閉じる
+ * ＝画面ごと遷移しない。
+ */
+function TimelinePopoverShell({
+  anchor,
+  preferAbove,
+  onClose,
+  children,
+}: {
+  anchor: HTMLElement;
+  preferAbove: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  useRegisterOverlay(onClose);
+  const ref = useRef<HTMLDivElement | null>(null);
+  const closeRef = useRef(onClose);
+  const [placed, setPlaced] = useState<TimelinePopoverPlacement>(() => ({
+    top: POPOVER_MARGIN,
+    left: POPOVER_MARGIN,
+    placement: preferAbove ? 'above' : 'below',
+  }));
+
+  useEffect(() => {
+    closeRef.current = onClose;
+  });
+
+  const reposition = useCallback(() => {
+    const element = ref.current;
+    if (!element) return;
+    const box = element.getBoundingClientRect();
+    const next = timelinePopoverPlacement(
+      anchor.getBoundingClientRect(),
+      { width: box.width, height: box.height },
+      { width: window.innerWidth, height: window.innerHeight },
+      preferAbove,
+    );
+    setPlaced((current) =>
+      current.top === next.top && current.left === next.left && current.placement === next.placement
+        ? current
+        : next,
+    );
+  }, [anchor, preferAbove]);
+
+  // 初回に実測して置き直し、以後は**自分の大きさが変わったとき**だけ計算し直す
+  // （フローを選ぶと「開く」が生えて背が変わる）。値が同じなら state を触らない。
+  useLayoutEffect(() => {
+    reposition();
+    const element = ref.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(reposition);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [reposition]);
+
+  useEffect(() => {
+    const close = () => closeRef.current();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close();
+    };
+    const onPointerDown = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      // アンカー自身は除く（同じポッチの再タップは開閉トグルのまま）。
+      if (ref.current?.contains(target) === true || anchor.contains(target)) return;
+      close();
+    };
+    const onScroll = (event: Event) => {
+      // ポップオーバー内の一覧を送っただけでは閉じない（枠の外が動いたときだけ）。
+      if (event.target instanceof Node && ref.current?.contains(event.target) === true) return;
+      close();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('pointerdown', onPointerDown, true);
+    // 表の横スクロールも画面の縦スクロールも拾うため capture で window に張る。
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [anchor]);
+
+  return createPortal(
+    <div
+      ref={ref}
+      id={POPOVER_ID}
+      className="timeline-calendar__popover"
+      style={{ top: placed.top, left: placed.left }}
+      data-ui={UI.timeline.popover}
+      data-placement={placed.placement}
+      onClick={(event) => event.stopPropagation()}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
 }
 
 function TimelineFlowPopover({
   dot,
   selectedFlow,
-  buckets,
-  bucketWidth,
+  above,
+  anchor,
   accountById,
   currency,
+  onClose,
   onSelectFlow,
   onOpenTarget,
 }: {
   dot: TimelineDotView;
   selectedFlow?: TimelineFlowView;
-  buckets: TimelineBucketView[];
-  bucketWidth: number;
+  above: boolean;
+  anchor: HTMLElement;
   accountById: ReadonlyMap<string, Account>;
   currency: string;
+  onClose: () => void;
   onSelectFlow: (flow: TimelineFlowView) => void;
   onOpenTarget: (target: TimelineOpenTarget) => void;
 }) {
   const digits = useMoneyDigits();
   const name = (id: string) => accountById.get(id)?.name ?? '—';
   return (
-    <div
-      className="timeline-calendar__popover"
-      style={popoverStyle(dot.bucketKey, buckets, bucketWidth)}
-      data-ui={UI.timeline.popover}
-      onClick={(event) => event.stopPropagation()}
-    >
+    <TimelinePopoverShell anchor={anchor} preferAbove={above} onClose={onClose}>
       <p className="timeline-calendar__popover-title">
         {t('timeline.flowCount', { count: dot.flows.length })}・
         <span
@@ -1076,36 +1255,31 @@ function TimelineFlowPopover({
           </button>
         </div>
       ) : null}
-    </div>
+    </TimelinePopoverShell>
   );
 }
 
 function TimelineGenerationPopover({
   dot,
   selectedItemId,
-  buckets,
-  bucketWidth,
+  anchor,
   currency,
+  onClose,
   onSelectItem,
   onOpenTarget,
 }: {
   dot: TimelineGenerationDotView;
   selectedItemId?: string;
-  buckets: TimelineBucketView[];
-  bucketWidth: number;
+  anchor: HTMLElement;
   currency: string;
+  onClose: () => void;
   onSelectItem: (itemId: string) => void;
   onOpenTarget: (target: TimelineOpenTarget) => void;
 }) {
   const digits = useMoneyDigits();
   const selectedItem = dot.items.find((item) => item.id === selectedItemId);
   return (
-    <div
-      className="timeline-calendar__popover"
-      style={popoverStyle(dot.bucketKey, buckets, bucketWidth)}
-      data-ui={UI.timeline.popover}
-      onClick={(event) => event.stopPropagation()}
-    >
+    <TimelinePopoverShell anchor={anchor} preferAbove={false} onClose={onClose}>
       <p className="timeline-calendar__popover-title">
         {t('timeline.generation')}・{dot.date}
       </p>
@@ -1138,7 +1312,7 @@ function TimelineGenerationPopover({
           </button>
         </div>
       ) : null}
-    </div>
+    </TimelinePopoverShell>
   );
 }
 

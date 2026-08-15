@@ -9,8 +9,6 @@ export const ja = {
   'nav.allocations': '毎月のもの',
   'nav.cashflow': '資金繰り',
   'nav.timeline': 'タイムライン',
-  'nav.yearlyOverview': '年間・全体',
-  'nav.tags': 'タグ',
   'nav.settings': '設定',
   'nav.help': 'ヘルプ',
 
@@ -22,6 +20,12 @@ export const ja = {
   'common.sort': '並び替え',
   'common.sortDesc': '降順',
   'common.sortAsc': '昇順',
+
+  // 一覧の並び替えの軸（仕訳一覧・毎月のもので共通。正本は ui/ListSearchSort の LIST_SORT_AXES）。
+  'listSort.date': '日付',
+  'listSort.amount': '金額',
+  'listSort.name': '名称',
+
   'common.required': '必須',
   'common.menu': 'メニュー',
   'common.home': 'ホーム',
@@ -44,8 +48,6 @@ export const ja = {
   'timeline.generation': '継続コストを生成',
   'timeline.today': '今日',
 
-  'header.home': 'ホーム',
-
   'dashboard.title': 'ホーム',
   'dashboard.entryActions': '日常入力（収入・支出・振替）',
   'dashboard.revenue': '収入',
@@ -60,8 +62,6 @@ export const ja = {
   'dashboard.statDetail': '{label} {amount}、内訳を開く',
   'dashboard.noMonthEntries': '仕訳はまだありません。',
   'dashboard.entriesOf': '仕訳',
-  'dashboard.flowOf': '収支',
-  'dashboard.positionAsOf': '財政状態（{date} 時点）',
   // 支出の内訳（ホーム「支出」のタップ先）
   'expenseBreakdown.title': '支出の内訳',
   'expenseBreakdown.intro':
@@ -98,13 +98,24 @@ export const ja = {
     '「{name}」を削除します。購入の仕訳と回収の振替も一緒に削除されます。登録済みの返済仕訳（未来日付の振替）は残ります。',
   'ccItem.startDate': '開始日',
   'ccItem.endDate': '終了日（任意）',
-  'ccItem.allocationStartDate': '費用化の開始日（任意・既定 = 購入日）',
-  'ccItem.allocationStartHint': '購入日より後にすると、その間は台帳（保管庫）に価値が置かれます',
+  'ccItem.endDateClear': '終了日を解除',
   'ccItem.period': '期間',
-  'ccItem.allocationFrom': '費用化 {date}〜',
   'ccItem.remainingValue': '残存価値',
   'ccItem.archiveTitle': 'アーカイブ',
-  'ccItem.transferTarget': '振替先を選ぶ',
+  // アーカイブシート（終了日 + 回収 + 残りの扱いを 1 枚で決める。シート自体が確認面）。
+  'ccItem.archiveDateHint': 'この日で終わりにします。先の日付にすれば一覧へ戻せます。',
+  'ccItem.archiveRecovery': '回収額',
+  'ccItem.archiveRecoveryHint':
+    '売却・返金などで戻ってきた額。既定は終了日時点の残存価値です。0 なら回収の仕訳は作りません。',
+  'ccItem.archiveRecoveryTo': '回収先',
+  'ccItem.archiveRemainder': '残り（{amount}）の扱い',
+  'ccItem.archiveRemainderSpread': '期間に割り振る',
+  'ccItem.archiveRemainderSpreadHint': '開始日から終了日までの各月へ、残りを配り直します。',
+  'ccItem.archiveRemainderExpense': '終了日に全額費用にする',
+  'ccItem.archiveRemainderExpenseHint':
+    '過去の月額はそのままにして、残りを終了日の「{account}」へ 1 本で計上します。',
+  'ccItem.archiveRemainderNoneHint': '残りがないので、どちらを選んでも結果は変わりません。',
+  'ccItem.archiveConfirm': 'アーカイブする',
   'ccItem.openPurchase': 'その仕訳を開く',
   'ccItem.quickSpan': '{years}年',
 
@@ -112,7 +123,8 @@ export const ja = {
   'cashflow.intro':
     '未来日付の仕訳から、自由に動かせるお金の推移を見ます。カード・ローンは行をタップすると返済計画を登録できます。',
   'cashflow.until': '表示終了日',
-  'cashflow.untilHint': '今日からこの日までの入出金予定を投影します。',
+  'cashflow.untilHint':
+    '今日からこの日までの入出金予定を投影します。既定の期間は設定で変えられます。',
   'cashflow.freeFunds': '自由に動かせるお金',
   'cashflow.minFree': '期間内の最低額',
   'cashflow.depleteWarning': 'この期間に自由に動かせるお金がマイナスになる予定があります。',
@@ -143,30 +155,8 @@ export const ja = {
   'liability.role.loan': '借入・ローン',
   'liability.error.name': '名称を入力してください。',
 
-  'tags.title': 'タグ',
-  'tags.intro':
-    '勘定科目を増やさずに、旅行・帰省・学会などのイベント/目的で後から抽出できる分析軸です。PL/BS は変わりません。',
-  'tags.add': 'タグを追加',
-  'tags.edit': 'タグを編集',
-  'tags.name': '名称',
-  'tags.namePlaceholder': '例: 2026 北海道旅行 / 帰省 / 学会',
-  'tags.entryOnlyHint':
-    'タグは仕訳全体に付くイベント/目的ラベルです（カード名・銀行名には使いません）。',
-  'tags.archive': 'アーカイブ',
-  'tags.unarchive': 'アーカイブ解除',
-  'tags.archived': 'アーカイブ済み',
-  'tags.delete': '削除',
-  'tags.showArchived': 'アーカイブ済みも表示',
-  'tags.empty': 'タグはありません。「タグを追加」から作成できます。',
-  'tags.noneForScope': '対象のタグがありません。タグ画面で作成できます。',
-  'tags.deleteConfirmTitle': 'タグを削除しますか？',
-  'tags.deleteConfirmBody':
-    '「{name}」を削除します。使用中の場合は削除できません（アーカイブしてください）。',
-  'tags.error.name': '名称を入力してください。',
-  'tags.error.save': 'タグを保存できませんでした。',
-
   'adjust.intro': '実際の残高との差額を、任意の日に補正します（「締め」はありません）。',
-  'adjust.account': '対象科目（資産・負債）',
+  'adjust.account': '対象科目（資産・負債・費用・収入）',
   'adjust.date': '日付',
   'adjust.actual': '実残高',
   'adjust.expected': 'アプリ上の理論残高',
@@ -178,7 +168,7 @@ export const ja = {
   'adjust.createTitle': '「{name}」の残高を補正',
   'adjust.noChange': '差額がないため、補正仕訳は作成しませんでした。',
   'adjust.error.actual': '実残高を入力してください。',
-  'adjust.noAccounts': '資産・負債の科目がありません。',
+  'adjust.noAccounts': '補正できる科目がありません。',
   // 登録済みの補正（現実アンカー）は仕訳一覧から編集・削除する。
   'adjust.editTitle': '残高補正を編集',
   'adjust.editIntro':
@@ -203,17 +193,6 @@ export const ja = {
   'opening.error.amount': '初期残高を入力してください（0 は不可）。',
 
   'journal.adjustmentTag': '補正',
-  'tags.summary': 'タグ集計',
-  'tags.period': '対象期間',
-  'tags.entryTags': '全体タグ',
-  'tags.taggedCount': '{count}件',
-  'tags.noTaggedData': 'タグ付きデータがありません。',
-
-  'entry.tags': 'タグ（全体）',
-  'entry.tagsHint': '旅行・イベントなど、仕訳全体に付くタグ（任意）。',
-
-  'journal.filterTag': 'タグで絞り込み',
-  'journal.allTags': 'すべてのタグ',
 
   'journal.title': '仕訳',
   'journal.searchPlaceholder': '摘要・メモで検索',
@@ -226,8 +205,6 @@ export const ja = {
   'journal.deleteConfirmBody': '「{description}」を削除します。この操作は取り消せません。',
   'journal.count': '{count}件',
   'journal.total': '合計',
-  'journal.sortDate': '日付',
-  'journal.sortAmount': '金額',
 
   'entry.editTitle': '仕訳を編集',
   'entry.date': '日付',
@@ -284,13 +261,17 @@ export const ja = {
   'entry.error.repayCount': '返済回数は 1〜{max} の整数で入力してください。',
   'entry.source.manual': '左側（貸方）',
   'entry.destination.manual': '右側（借方）',
-  'entry.detailToggle': '詳細（メモ・タグ）',
+  'entry.detailToggle': '詳細（メモ）',
   // 逆仕訳・特殊編集は日常の「詳細」と分け、簿記編集として明示する。
   'entry.manualSwitch': '簿記編集（左→右を直接指定）',
   'entry.noAccounts': '候補の科目がありません。「勘定科目」で追加してください。',
   'entry.reversalTitle': '取消/返金を記録',
   'entry.reversalNote':
     '元の仕訳は削除せず、反対の仕訳を作成します。金額を変えれば部分返金も記録できます。',
+  // 2 回目以降の取消で「この仕訳をいくら取り消し済みか」を常時見せる（0 件のときは出さない）。
+  'entry.reversal.reversedSoFar': '取消済み: {reversed} / 残り: {remaining}',
+  // 残りを超えても保存はできる（過剰返金・補償はありうる）。止めずに気づかせるだけ。
+  'entry.reversal.overWarning': '取消済みと合わせて元の金額を超えます（このまま保存できます）。',
   'entry.monthlyizeRepayToggle': '分割・後日引落を資金繰りに入れる',
   'entry.monthlyizeRepayNote':
     '支払い元が負債のため、返済を未来日付の振替仕訳としてまとめて登録できます（仕訳一覧・資金繰りに反映）。',
@@ -326,6 +307,7 @@ export const ja = {
   'period.dateLabel': '{year}年{month}月{day}日',
   'period.openDate': '対象の日付を選ぶ',
   'period.yearUnit': '{year}年',
+  'period.today': '今日',
   'period.allPeriod': '全期間',
   'period.pickerYear': '対象期間（年）',
   'period.noTrendData': '推移を表示するデータがありません。',
@@ -368,6 +350,8 @@ export const ja = {
   'yearlyOverview.noPreviousYear': '前のデータ年はありません',
   'yearlyOverview.noNextYear': '次のデータ年はありません',
   'yearlyOverview.monthLabel': '{month}月',
+  'yearlyOverview.monthJump': '{date} 時点の残高をホームで見る',
+  'yearlyOverview.yearDrill': '{year}年の年間表示へ',
   'yearlyOverview.itemColumn': '項目',
   'yearlyOverview.revenue': '収入',
   'yearlyOverview.expense': '支出',
@@ -429,7 +413,14 @@ export const ja = {
   'accounts.autoBadge': '自動',
   'accounts.outsideSlice': 'この断面には存在しない',
   'accounts.archive': 'アーカイブ',
-  'accounts.archiveWithTransfer': '累計を振り替えてアーカイブ',
+  // 残高 0 の科目も無確認では終了させない（2026-08-15 作者合意）。残高が残る科目は
+  // 振替シートが確認を兼ねるので、この確認は通らない。
+  'accounts.archiveConfirmTitle': 'この科目をアーカイブしますか？',
+  'accounts.archiveConfirmBody':
+    '「{name}」を今日を終了点として記録します。登録済みの仕訳はそのまま残ります。',
+  'accounts.unarchiveConfirmTitle': 'アーカイブを解除しますか？',
+  'accounts.unarchiveConfirmBody': '「{name}」の終了点を消して、また使えるようにします。',
+  'accounts.archiveSkipTransfer': '振替せずにアーカイブ',
   'accounts.unarchive': 'アーカイブ解除',
   'accounts.showArchived': 'この断面に存在しない科目も表示',
   'accounts.type.asset': '資産',
@@ -449,7 +440,8 @@ export const ja = {
   'accounts.inUse': '使用中',
 
   // ユーザー向けの「大きな箱」（大分類）。アプリ側が守り、ユーザーは内訳だけを編集する。
-  'box.cash': '現預金・決済資産',
+  'box.cashFixedHint':
+    'Suica・チャージ残高など、支払いには使えるが資金繰りの原資には数えないお金。',
   'box.investment': '投資',
   'box.shortTermDebt': 'カード・未払',
   'box.longTermDebt': 'ローン',
@@ -462,7 +454,6 @@ export const ja = {
     '住宅ローン・分割返済など返済予定を持つ債務です。借入の実行や分割返済の予定は、振替（借入）や継続コスト化の導線から作れます。',
 
   'settings.title': '設定',
-  'settings.manageSection': '管理',
   'settings.dataSection': 'データ',
   'settings.export': 'JSON で書き出し',
   'settings.exportDesc': '台帳を JSON ファイルに書き出します（バックアップ・端末間共有用）。',
@@ -480,6 +471,9 @@ export const ja = {
   'settings.ledgerNameRequired': '台帳名を入力してください。',
   'settings.currencyHint': '表示に使う単位の文字列です（8 文字まで）。換算はしません。',
   'settings.fractionDigits': '小数の表示桁数',
+  'settings.cashflowHorizon': '資金繰りの表示期間（ヶ月・既定）',
+  'settings.cashflowHorizonHint':
+    '資金繰りを開いたとき、今日から何ヶ月先までを表示するか（1〜1200）。画面での一時的な変更は保存されません。',
   'settings.fractionDigitsHint':
     '入力できる小数の桁もこの設定に従います。保存されている金額は変わりません。',
   'settings.currency': '金額の単位',
@@ -536,7 +530,12 @@ export const ja = {
     'これは複式簿記の家計簿です。日々の収入・支出・振替を記録すると、ホームと各項目（収入/支出/収支/資産/負債/純資産）の内訳・推移に自動で反映されます。データは端末内にのみ保存され、外部送信はありません。バックアップや端末間共有は設定の「JSON で書き出し／読み込み」を使ってください。',
 
   'a11y.openMenu': 'メニューを開く',
+  'a11y.back': '戻る',
+  'a11y.home': 'ホーム',
   'a11y.scrollTop': '一番上へ移動',
+  // ページ先頭の skip-link。行き先は本文（#main）なので、名前も行き先を言う
+  // （「ホーム」だと押した先と読み上げが食い違う）。
+  'a11y.skipToContent': '本文へ移動',
 
   // ドメイン/リポジトリ由来のユーザー表示エラー。domain/repository は LedgerError(code, params)
   // を投げ、表示は UI 層が errorText() で行う（保存境界の fail-closed なエラーも i18n に集約）。
@@ -560,12 +559,10 @@ export const ja = {
   'error.entry.invalidStructure': '仕訳の形式が正しくないため保存できません。',
   'error.entry.unknownAccount': '仕訳が存在しない勘定科目を参照しています。',
   'error.entry.accountRoleMismatch': '仕訳の勘定科目の役割と区分が一致していません。',
-  'error.tag.unknown': '存在しないタグを参照しています。',
-  'error.tag.duplicateName': '同じ名前の有効なタグが既にあります。',
-  'error.tag.deleteInUse': 'このタグは使用中のため削除できません。アーカイブしてください。',
   'error.adjust.targetNotFound': '対象科目が見つかりません。',
-  'error.adjust.assetLiabilityOnly': '残高補正できるのは資産・負債の科目です。',
-  'error.adjust.internalRole': '継続コスト台帳は内部の集約口座のため残高補正できません。',
+  'error.adjust.assetLiabilityOnly': '残高補正できるのは資産・負債・費用・収入の科目です。',
+  'error.adjust.internalRole':
+    '継続コスト台帳（内部の集約口座）と残高調整科目は残高補正できません。',
   'error.adjust.notFound': '対象の残高補正が見つかりません。',
   'error.adjust.notAdjustment': 'この仕訳は残高補正ではありません。',
   'error.opening.assetLiabilityOnly': '初期残高を登録できるのは資産・負債の科目です。',
@@ -597,17 +594,15 @@ export const ja = {
     '今日分の仕訳または継続コスト資産を安全に分けられません。対象の起票内容を確認してください。',
   'error.recurring.generatedDependency':
     '自動起票の仕訳と継続コスト資産の対応が壊れているため操作できません。バックアップを書き出してデータを確認してください。',
+  // ルール由来（rec- 仕訳 / ccr- item）の読み取り専用化（作者決定 2026-08-15）。
+  // 画面から到達できない経路でも保存境界で fail-closed に止める。
+  'error.recurring.generatedReadOnly':
+    'くり返し記帳から生まれた記録は直接編集できません。ルール側を編集してください。',
   // 監査 2026-07-30 対応で新設したエラーコード。
   'error.monthlyCost.recoveryBeforeStart':
     '回収の振替の日付は開始日（購入の仕訳の日付）以降にしてください。',
   'error.monthlyCost.editLiability':
     '負債（カード・ローン）で購入した項目は、支払い元・金額・日付を変更できません（自動作成した返済の仕訳と合わなくなるため）。終了はアーカイブ（終了日の設定）を使ってください。',
-  // 費用化の開始日（購入日との分離・指示書§D）で新設したエラーコード。
-  'error.monthlyCost.allocationBeforeStart': '費用化の開始日は購入日（開始日）以降にしてください。',
-  'error.monthlyCost.allocationAfterEnd':
-    '終了日は費用化の開始日以降にしてください。費用化を始める前にやめる場合は、先に費用化の開始日を戻して（または空にして）から終了日を設定してください。',
-  'error.monthlyCost.purchaseAfterAllocation':
-    '購入の仕訳の日付は費用化の開始日以前にしてください。後ろへ動かす場合は、先に項目の費用化の開始日を変更してください。',
   'error.common.staleData':
     '別のタブ（またはウィンドウ）でデータが変更されています。ページを再読み込みしてから、もう一度お試しください。',
   'error.common.revisionExhausted':
@@ -644,8 +639,6 @@ export const ja = {
   'opening.registerSave': '初期残高を登録',
 
   // 「自由に動かせる」チェック（現預金の内訳のみ・既定 ON。OFF = 資金繰りの原資に数えない）
-  'accounts.movable': '自由に動かせる',
-  'accounts.notMovable': '自由に動かせない',
 
   // 返済設定（負債の勘定科目）と資金繰りの返済予定
   'accounts.repaymentAccount': '返済口座',
@@ -688,7 +681,6 @@ export const ja = {
     '1 = カードの次回引落などの単発。毎月同額のローンは {max} 回までまとめて登録できます（合計は返済額に一致）。',
   'cashflow.repayPerMonth': '月あたり約 {amount} × {count} 回',
   'error.repay.countInvalid': '返済回数は 1〜{max} の整数で入力してください。',
-  'error.tag.invalid': 'タグを保存できませんでした（名前は 1〜60 文字で入力してください）。',
   'error.settings.invalid':
     '台帳の設定を保存できませんでした（名前は 1〜120 文字・単位は 1〜8 文字で入力してください）。',
   'error.snapshot.invalid': 'スナップショットの形式が不正です。',
@@ -708,7 +700,6 @@ export const ja = {
   'monthly.searchPlaceholder': '項目名・科目名で検索',
   'monthly.searchEmpty': '該当する項目がありません。',
   'monthly.searchCount': 'くり返し記帳 {rules} 件・継続コスト資産 {items} 件',
-  'monthly.sortDefault': '標準',
 
   'recurring.sectionTitle': 'くり返し記帳',
   'recurring.sectionIntro':
@@ -753,17 +744,34 @@ export const ja = {
   'recurring.from.manual': '貸方（支払い元・減る側）',
   'recurring.to.manual': '借方（増える・使う側）',
   'recurring.manualHint':
-    '行き先が費用または収入（給与から差し引く形）なら自動で継続コストとして月割りし、資産・負債なら直接記帳します。',
+    'このルールで増える・使う側の科目です。月割りするかは下のトグルで決めます。',
+  'recurring.spreadToggle': '継続コスト台帳を経由して月割りする',
+  'recurring.spreadToggleHint':
+    '支払いを一旦台帳（保管庫）に置き、次の支払いまでの期間に割り振ります。',
   'recurring.everyMonthDay': '毎月{day}日',
   'recurring.everyNMonthsDay': '{n}か月ごと {day}日',
   'recurring.firstPosting': '初回の起票',
   'recurring.firstPostingStatus': '初回の起票は {date} です',
   'recurring.firstPostingNone': '初回の起票はありません',
   'recurring.end': '終了',
+  // 終了日シート（無確認の即終了はしない・2026-08-15 作者合意）。終了点は含まない端点なので、
+  // 一覧の「{date} より前まで」と同じ意味を「この日以降は起票されません」で言い直す。
+  'recurring.endSheetTitle': 'ルールを終了する',
+  'recurring.endSheetDate': '終了点',
+  'recurring.endSheetBody':
+    'この日以降は起票されません。起票済みの仕訳と持ち物はそのまま残ります。',
+  'recurring.endSheetConfirm': '終了する',
   'recurring.restart': '同じ設定で新しく始める',
+  'recurring.restartConfirmTitle': '同じ設定で新しく始めますか？',
+  'recurring.restartConfirmBody':
+    '今日を開始点として、同じ内容の新しいルールを作ります。終了したルールと起票済みの記録はそのまま残ります。',
+  // ルール削除はカスケード（作者決定 2026-08-15）: 積み木の下が消えれば上も消える。
+  // 復旧は同じ内容で登録し直すだけなので、取り消せない旨ではなく戻し方を添える。
   'recurring.deleteConfirmTitle': '定期ルールを削除',
   'recurring.deleteConfirmBody':
-    '「{name}」を削除します。起票済みの仕訳・できた継続コスト資産はそのまま残ります。',
+    '「{name}」を削除します。このルールから生まれた {count} 回分の仕訳と持ち物も一緒に消えます。未来の予定もすべて消えます。（同じ内容でルールを登録し直せば復旧できます）',
+  'recurring.deleteConfirmNoPostingsBody':
+    '「{name}」を削除します。まだ起票はありません。未来の予定がすべて消えます。',
   'error.recurring.invalidStructure': '定期ルールの形式が不正です。',
   'error.recurring.flowInvalid':
     '科目の組み合わせが不正です（源泉と行き先を別の科目にしてください。内部集約・調整科目は使えません）。',

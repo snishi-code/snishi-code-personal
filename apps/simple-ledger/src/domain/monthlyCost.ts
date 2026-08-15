@@ -1,42 +1,60 @@
 /*
- * 継続コスト資産（MonthlyCostItem・4項目モデル）の月割り計算。
+ * 継続コスト資産（MonthlyCostItem・4項目モデル）の同日刻み計算（v12〜）。
  *
- * 開始日・終了日・金額から「月あたりの費用」を導出する純関数群。費用の行は 1 件も
- * 保存されないため、終了日を書き換えた瞬間に全期間が新しい月数で再計算される
- * （遡及アルゴリズムは存在しない。それが仕様）。
+ * 統一原則（作者決定 2026-08-15）: **「支払いが買った期間を同日刻みで n 等分し、各刻みの
+ * 終端の日に費用化する。残高 0 になる日 = 期間の終わり = 次の支払い日」**。
+ * 費用の行は 1 件も保存されないため、終了日を書き換えた瞬間に全期間が新しい刻みで
+ * 再計算される（遡及アルゴリズムは存在しない。それが仕様）。
  *
  * 規則:
- *  - **月割り**（日割りしない）。startDate/endDate の「日」は配分に使わない。
+ *  - **k 番目の刻み日 = addMonthsToDate(startDate, k)**（k = 1..n・月末クランプ・
+ *    起点は常に元の startDate なので 1/31 起点の刻みは 2/28, 3/31, … と日を保つ）。
+ *  - **n = 刻み日 <= endDate を満たす最大の k**（同日通過カウント）。購入日当日の費用は
+ *    常に 0（月払いの費用が 1 刻み遅れるのは作者承認済み: 「今日買ってもまだ消費していない」）。
+ *  - **n = 0（同日通過なしで終了）は終了日に全額 1 本**（作者決定 2026-08-15）。
  *  - **終了日が未設定なら費用の割り振りをしない**（n が決まらないので配分できないだけ。
  *    特別扱いの分岐を作らない）。残存価値 = 全額。
- *  - 月割りの起点は **費用化の開始日（allocationStartDate ?? startDate）**。初月の月割り日は
- *    起点日、2ヶ月目以降は月初（monthlyAllocationDate）。起点は購入日以降（保存境界が保証）
- *    なので、購入の仕訳より前に費用行が立って台帳がマイナスになる断面を構造的に防ぐ。
- *  - 端数は monthlyAmounts（合計が必ず配分総額に一致）。
+ *  - 端数は monthlyAmounts（合計が必ず配分総額に一致・先頭刻みから 1 ずつ）。
  *  - spreadTotal は既定 item.amount。アーカイブ時の回収の振替があるときだけ
  *    `amount − 回収額` が渡る（負になってよい＝過去にわたる費用減）。item.amount は
  *    絶対に書き換えない（購入の仕訳とのミラーが壊れる）。
  */
-import { addMonths, addMonthsToDate, monthlyAmounts, monthOf, monthsBetween } from './allocation';
+import { addMonthsToDate, monthlyAmounts, monthOf, monthsBetween } from './allocation';
 import { assertSafeAmount } from './safeSum';
 import type { MonthlyCostItem } from './types';
 
-/** 月割りの起点日（費用化の開始日）。未設定 = 購入日（startDate）。 */
-export function allocationStartOf(item: MonthlyCostItem): string {
-  return item.allocationStartDate ?? item.startDate;
+/** 費用化の 1 刻み（費用が立つ日とその額）。 */
+export interface AllocationCut {
+  date: string;
+  amount: number;
 }
 
-/** 月バケット（費用化開始月〜終了月）。終了日が無ければ null（= 配分しない）。 */
-export function monthlyAllocationSpan(item: MonthlyCostItem): { from: string; n: number } | null {
-  if (item.endDate === undefined) return null;
-  const from = monthOf(allocationStartOf(item));
-  const n = monthsBetween(from, monthOf(item.endDate)) + 1; // n >= 1 は保存境界が保証
-  return { from, n };
+/**
+ * 同日通過カウント: addMonthsToDate(startDate, k) <= endDate を満たす最大の k（>= 0）。
+ * 月数の差から候補を出し、日のクランプ差だけ 1 戻す（走査しない・決定的）。
+ */
+export function dayCutCount(startDate: string, endDate: string): number {
+  const k = monthsBetween(monthOf(startDate), monthOf(endDate));
+  if (k <= 0) return 0;
+  return addMonthsToDate(startDate, k) <= endDate ? k : k - 1;
 }
 
-/** k 番目に費用になる日。初月だけ費用化の開始日、2ヶ月目以降は月初。 */
-export function monthlyAllocationDate(item: MonthlyCostItem, from: string, k: number): string {
-  return k === 0 ? allocationStartOf(item) : `${addMonths(from, k)}-01`;
+/**
+ * 費用化の予定表（単一正本）。導出仕訳・画面・残存価値がすべてこれを使う。
+ *  - 終了日なし: 空（1 本も生まれない）。
+ *  - n >= 1: k = 1..n の刻み日に monthlyAmounts を配る。
+ *  - n = 0: 終了日に全額 1 本。
+ * 日付は単調増加・月内に高々 1 本（刻みは 1 か月間隔）。
+ */
+export function allocationSchedule(
+  item: MonthlyCostItem,
+  spreadTotal: number = item.amount,
+): AllocationCut[] {
+  if (item.endDate === undefined) return [];
+  const n = dayCutCount(item.startDate, item.endDate);
+  if (n === 0) return [{ date: item.endDate, amount: assertSafeAmount(spreadTotal) }];
+  const amounts = monthlyAmounts(spreadTotal, n);
+  return amounts.map((amount, i) => ({ date: addMonthsToDate(item.startDate, i + 1), amount }));
 }
 
 /** その月に費用として割り振られる額。寄与しない月・終了日なしは 0。 */
@@ -45,42 +63,35 @@ export function monthlyCostForMonth(
   ym: string,
   spreadTotal: number = item.amount,
 ): number {
-  const span = monthlyAllocationSpan(item);
-  if (!span) return 0;
-  const i = monthsBetween(span.from, ym);
-  if (i < 0 || i >= span.n) return 0;
-  return monthlyAmounts(spreadTotal, span.n)[i] ?? 0;
+  let sum = 0;
+  for (const cut of allocationSchedule(item, spreadTotal)) {
+    if (monthOf(cut.date) === ym) sum = assertSafeAmount(sum + cut.amount);
+  }
+  return sum;
 }
 
-/** 一覧に出す「月あたり」（先頭月額）。終了日なしは 0（UI は — を出す）。 */
+/** 一覧に出す「月あたり」（先頭刻みの額）。終了日なしは 0（UI は — を出す）。 */
 export function representativeMonthlyAmount(
   item: MonthlyCostItem,
   spreadTotal: number = item.amount,
 ): number {
-  const span = monthlyAllocationSpan(item);
-  if (!span) return 0;
-  return monthlyAmounts(spreadTotal, span.n)[0] ?? 0;
+  return allocationSchedule(item, spreadTotal)[0]?.amount ?? 0;
 }
 
 /**
  * asOf 時点でまだ費用になっていない額（= 残存価値）。
- * 単一正本 = `割り振る総額（購入額 − 回収額 = spreadTotal） − asOf までの月割り額`。
+ * 単一正本 = `割り振る総額（購入額 − 回収額 = spreadTotal） − asOf までの刻み額`。
  * 台帳残高のこの item ぶんと一致する（回収額を二重に引かない・引き忘れない。監査 P2-1）。
- * 終了日なしは月割り 0 なので spreadTotal がそのまま残る。
+ * 終了日なしは刻み 0 なので spreadTotal がそのまま残る。
  */
 export function remainingValue(
   item: MonthlyCostItem,
   asOf: string,
   spreadTotal: number = item.amount,
 ): number {
-  const span = monthlyAllocationSpan(item);
-  if (!span) return spreadTotal;
-  const amounts = monthlyAmounts(spreadTotal, span.n);
   let done = 0;
-  for (let k = 0; k < span.n; k++) {
-    if (monthlyAllocationDate(item, span.from, k) <= asOf) {
-      done = assertSafeAmount(done + (amounts[k] ?? 0));
-    }
+  for (const cut of allocationSchedule(item, spreadTotal)) {
+    if (cut.date <= asOf) done = assertSafeAmount(done + cut.amount);
   }
   return assertSafeAmount(spreadTotal - done);
 }

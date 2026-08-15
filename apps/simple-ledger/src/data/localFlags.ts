@@ -64,3 +64,28 @@ export function rememberExpenseCategoryId(id: string): void {
   memory.set(LAST_EXPENSE_CATEGORY_KEY, id);
   lsSet(LAST_EXPENSE_CATEGORY_KEY, id);
 }
+
+const CASHFLOW_HORIZON_KEY = `${LOCAL_PREFIX}cashflowHorizonMonths`;
+/** 資金繰りの表示地平の上限（月割りの既存上限と同じ数字に揃える）。 */
+export const CASHFLOW_HORIZON_MAX_MONTHS = 1_200;
+export const CASHFLOW_HORIZON_DEFAULT_MONTHS = 6;
+
+/**
+ * 資金繰りの表示地平（今日から何ヶ月先まで投影するか）。
+ * 台帳データではなく端末の表示の好みなので、locale と同じ理屈で台帳 settings には置かない。
+ * 壊れた保存値（範囲外・数値でない）は既定へ倒す（fail-soft・この層の方針どおり）。
+ */
+export function cashflowHorizonMonths(): number {
+  const raw = memory.get(CASHFLOW_HORIZON_KEY) ?? lsGet(CASHFLOW_HORIZON_KEY);
+  const parsed = raw === null ? NaN : Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > CASHFLOW_HORIZON_MAX_MONTHS) {
+    return CASHFLOW_HORIZON_DEFAULT_MONTHS;
+  }
+  return parsed;
+}
+
+export function rememberCashflowHorizonMonths(months: number): void {
+  const text = String(months);
+  memory.set(CASHFLOW_HORIZON_KEY, text);
+  lsSet(CASHFLOW_HORIZON_KEY, text);
+}

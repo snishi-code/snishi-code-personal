@@ -51,16 +51,68 @@ async function renderReady() {
 }
 
 describe('勘定科目のアーカイブ', () => {
-  it('残高 0 の科目は即アーカイブされる', async () => {
+  it('残高 0 の科目は確認してからアーカイブされる', async () => {
     await loadLedger();
     await renderReady();
     fireEvent.click(await screen.findByRole('button', { name: 'アーカイブ: チャージ残高' }));
+    // 無確認では実行しない（2026-08-15 作者合意）。確認は「今日を終了点として記録する」意味。
+    const confirm = await waitFor(() => {
+      const found = document.querySelector(`[data-ui="${UI.accounts.archiveConfirm}"]`);
+      expect(found).toBeInTheDocument();
+      return found!;
+    });
+    expect(confirm).toHaveTextContent('今日を終了点として記録します');
+    expect((await loadLedger()).accounts.find((a) => a.name === 'チャージ残高')?.archived).toBe(
+      false,
+    );
+    fireEvent.click(confirm.querySelector(`[data-ui="${UI.dialog.confirm}"]`)!);
+
     await waitFor(async () => {
       const after = await loadLedger();
       expect(after.accounts.find((a) => a.name === 'チャージ残高')?.archived).toBe(true);
     });
     // 振替シートは開かない。
     expect(document.querySelector(`[data-ui="${UI.journal.entry.save}"]`)).toBeNull();
+  });
+
+  it('残高 0 のアーカイブ確認をキャンセルすると据え置く', async () => {
+    await loadLedger();
+    await renderReady();
+    fireEvent.click(await screen.findByRole('button', { name: 'アーカイブ: チャージ残高' }));
+    const confirm = await waitFor(() => {
+      const found = document.querySelector(`[data-ui="${UI.accounts.archiveConfirm}"]`);
+      expect(found).toBeInTheDocument();
+      return found!;
+    });
+    fireEvent.click(confirm.querySelector(`[data-ui="${UI.dialog.cancel}"]`)!);
+
+    expect(document.querySelector(`[data-ui="${UI.accounts.archiveConfirm}"]`)).toBeNull();
+    const after = await loadLedger();
+    expect(after.accounts.find((a) => a.name === 'チャージ残高')?.archived).toBe(false);
+    expect(after.accounts.find((a) => a.name === 'チャージ残高')?.endDate).toBeUndefined();
+  });
+
+  it('アーカイブ解除も確認を挟み、確定で終了点を消す', async () => {
+    const ledger = await loadLedger();
+    const charge = ledger.accounts.find((a) => a.name === 'チャージ残高')!;
+    await upsertAccount({ ...charge, archived: true, endDate: todayLocal() });
+
+    await renderReady();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'この断面に存在しない科目も表示' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'アーカイブ解除: チャージ残高' }));
+    const confirm = await waitFor(() => {
+      const found = document.querySelector(`[data-ui="${UI.accounts.unarchiveConfirm}"]`);
+      expect(found).toBeInTheDocument();
+      return found!;
+    });
+    expect((await loadLedger()).accounts.find((a) => a.id === charge.id)?.archived).toBe(true);
+    fireEvent.click(confirm.querySelector(`[data-ui="${UI.dialog.confirm}"]`)!);
+
+    await waitFor(async () => {
+      const after = (await loadLedger()).accounts.find((a) => a.id === charge.id)!;
+      expect(after.archived).toBe(false);
+      expect(after.endDate).toBeUndefined();
+    });
   });
 
   it('残高が残る資産は振替シートを経由し、振替 + アーカイブが 1 回で終わる', async () => {
@@ -82,6 +134,10 @@ describe('勘定科目のアーカイブ', () => {
     expect(amountInput.value).toBe('5000');
     expect(
       document.querySelector(`[data-ui="${UI.journal.entry.flowSource}"]`),
+    ).not.toBeInTheDocument();
+    // 資産・負債は残高 0 必須（fail-closed）。「振替せずにアーカイブ」は出さない。
+    expect(
+      document.querySelector(`[data-ui="${UI.journal.entry.transferSkip}"]`),
     ).not.toBeInTheDocument();
     const destination = document.querySelector(
       `[data-ui="${UI.journal.entry.flowDestination}"]`,
@@ -145,7 +201,16 @@ describe('勘定科目のアーカイブ', () => {
     );
 
     await renderReady();
+    // 累計が残る費用のアーカイブは（資産と同じ）振替シートが出る。UI を分散させない統一
+    // （作者決定 2026-08-14）。最上部の「振替せずにアーカイブ」で従来の直接アーカイブになる。
     fireEvent.click(await screen.findByRole('button', { name: `アーカイブ: ${fixed.name}` }));
+    const skip = await waitFor(() => {
+      const el = document.querySelector(`[data-ui="${UI.journal.entry.transferSkip}"]`);
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(skip).toHaveTextContent('振替せずにアーカイブ');
+    fireEvent.click(skip);
 
     await waitFor(async () => {
       const after = await loadLedger();
@@ -153,6 +218,8 @@ describe('勘定科目のアーカイブ', () => {
       expect(archived).toMatchObject({ archived: true, endDate: today });
       expect(accountBalance(fixed.id, 'expense', after.journalEntries)).toBe(100_000); // UI 入力 1000 = 100,000 minor
     });
+    // シートは閉じている。
+    expect(document.querySelector(`[data-ui="${UI.journal.entry.transferSkip}"]`)).toBeNull();
     expect(document.querySelector(`[data-ui="${UI.journal.entry.save}"]`)).toBeNull();
   });
 
@@ -174,11 +241,8 @@ describe('勘定科目のアーカイブ', () => {
     );
 
     await renderReady();
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: `累計を振り替えてアーカイブ: ${fixed.name}`,
-      }),
-    );
+    // 独立した振替ボタンは撤去済み。アーカイブ → 振替シート、が唯一の導線。
+    fireEvent.click(await screen.findByRole('button', { name: `アーカイブ: ${fixed.name}` }));
     const destination = await waitFor(() => {
       const found = document.querySelector(
         `[data-ui="${UI.journal.entry.flowDestination}"]`,
@@ -212,8 +276,7 @@ describe('勘定科目の色分けと可動性表示', () => {
     const heading = document.querySelector(`[data-ui="${UI.accounts.box}.cash"]`);
     expect(heading).toHaveAttribute('style', expect.stringContaining('--account-accent'));
     expect(screen.getByText('チャージ残高')).toBeInTheDocument();
-    expect(document.querySelector(`[data-ui="${UI.accounts.notMovableBadge}"]`)).toHaveTextContent(
-      '自由に動かせない',
-    );
+    // チップは撤去済み（「動かせない」箱の所属がその情報を表す・2026-08-14）。
+    expect(document.querySelector('[data-ui="accounts.notMovableBadge"]')).toBeNull();
   });
 });

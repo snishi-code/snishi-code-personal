@@ -111,14 +111,17 @@ describe('reportEntriesForAsOf', () => {
       updatedAt: 'x',
     };
 
-    const january = reportEntriesForAsOf(
+    // 同日刻み: 2026-01-01 起点の刻み日は 2026-02-01〜2026-06-01 の 5 本（購入日当日は費用 0）。
+    // 割り振る総額 = 12,000 − 回収 6,000 = 6,000 → 1 本 1,200。
+    // 断面は最初の刻みを含む 2 月末（1 月末は刻みが 1 本もない = 全知識の遡及を見られない）。
+    const february = reportEntriesForAsOf(
       {
         accounts,
         journalEntries: [purchase, recovery],
         monthlyCostItems: [item],
         recurringRules: [],
       },
-      '2026-01-31',
+      '2026-02-28',
     );
     const june = reportEntriesForAsOf(
       {
@@ -130,13 +133,17 @@ describe('reportEntriesForAsOf', () => {
       '2026-06-30',
     );
 
-    const januaryAllocation = january.find((entry) => entry.metadata?.continuousCostId === item.id);
-    const juneJanuaryAllocation = june.find(
-      (entry) => entry.metadata?.continuousCostId === item.id && entry.date === item.startDate,
+    // 最初の刻み（2026-02-01）は、回収より前の断面でも回収後の断面でも同じ 1,200。
+    const firstCutDate = '2026-02-01';
+    const februaryAllocation = february.find(
+      (entry) => entry.metadata?.continuousCostId === item.id && entry.date === firstCutDate,
     );
-    expect(januaryAllocation?.lines[0]?.amount).toBe(1_000);
-    expect(juneJanuaryAllocation?.lines[0]?.amount).toBe(1_000);
-    expect(january.some((entry) => entry.id === recovery.id)).toBe(false);
+    const juneFirstAllocation = june.find(
+      (entry) => entry.metadata?.continuousCostId === item.id && entry.date === firstCutDate,
+    );
+    expect(februaryAllocation?.lines[0]?.amount).toBe(1_200);
+    expect(juneFirstAllocation?.lines[0]?.amount).toBe(1_200);
+    expect(february.some((entry) => entry.id === recovery.id)).toBe(false);
     expect(june.some((entry) => entry.id === recovery.id)).toBe(true);
   });
 });

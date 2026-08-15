@@ -138,10 +138,15 @@ function generatedBundle(readingsName = '測定結果'): TemplatePresetBundle {
   return { frame, formats: [readings, appearance], template };
 }
 
+/** アプリのデフォルトテンプレートを、空のページ相当で解決する (旧 getActiveTemplate 相当)。 */
+function defaultTemplateOf(store: HrStore) {
+  return store.getTemplateForPatient({ ...makeDefaultPatient(), placeId: '' });
+}
+
 function activeBundle(store: HrStore): TemplatePresetBundle {
   const template = store
     .getTemplateDefs()
-    .find((candidate) => candidate.id === store.getSettings().activeTemplateId)!;
+    .find((candidate) => candidate.id === store.getSettings().defaultTemplateId)!;
   const frame = store.getFrames().find((candidate) => candidate.id === template.frameId)!;
   const formatIds = new Set(template.placements.map((placement) => placement.formatId));
   const formats = store.getFormats().filter((format) => formatIds.has(format.id));
@@ -190,7 +195,7 @@ describe('initStore の初回 seed', () => {
       // 検査所見は seed するが回診には配置しない（必要な場所へ利用者が置く）。
       '検査所見',
     ]);
-    expect(store.getActiveTemplate()?.name).toBe('回診');
+    expect(defaultTemplateOf(store)?.name).toBe('回診');
     expect(store.getSettings().newlineMode).toBe('crlf');
     expect(store.getAppState().patients).toEqual([]);
   });
@@ -219,7 +224,7 @@ describe('正規化テンプレート部品 CRUD', () => {
   it('active テンプレートは配置 ID を持つ解決済み形で返す', async () => {
     const { store } = await setup();
     const definition = store.getTemplateDefs().find((template) => template.name === '回診')!;
-    const resolved = store.getActiveTemplate();
+    const resolved = defaultTemplateOf(store);
     const placementIds = definition.placements.map((placement) => placement.id);
     expect(
       resolved?.sections.flatMap((section) => section.formats.map((placed) => placed.id)),
@@ -268,7 +273,7 @@ describe('正規化テンプレート部品 CRUD', () => {
     const { db, store } = await setup();
     const source = store.getTemplateDefs().find((template) => template.name === '回診')!;
     const before = structuredClone(source);
-    const beforeActive = store.getSettings().activeTemplateId;
+    const beforeActive = store.getSettings().defaultTemplateId;
     const beforeFrames = store.getFrames().length;
 
     const copy = await store.duplicateTemplateDef(source.id);
@@ -308,7 +313,7 @@ describe('正規化テンプレート部品 CRUD', () => {
     expect(await db.get(STORE_TEMPLATES, before.id)).toEqual(before);
 
     // 使用中テンプレートは奪わない。
-    expect(store.getSettings().activeTemplateId).toBe(beforeActive);
+    expect(store.getSettings().defaultTemplateId).toBe(beforeActive);
     expect(store.getTemplateDefs().some((template) => template.id === copy.id)).toBe(true);
   });
 
@@ -327,18 +332,18 @@ describe('正規化テンプレート部品 CRUD', () => {
   it('active テンプレートの削除は残りへ付け替え、最後の 1 個は削除できない', async () => {
     const { db, store } = await setup();
     const [round, daily] = store.getTemplateDefs();
-    expect(store.getSettings().activeTemplateId).toBe(round!.id);
+    expect(store.getSettings().defaultTemplateId).toBe(round!.id);
 
     await store.deleteTemplateDef(round!.id);
-    expect(store.getSettings().activeTemplateId).toBe(daily!.id);
-    expect(store.getActiveTemplate()?.name).toBe('日報');
+    expect(store.getSettings().defaultTemplateId).toBe(daily!.id);
+    expect(defaultTemplateOf(store)?.name).toBe('日報');
 
     await expect(store.deleteTemplateDef(daily!.id)).rejects.toThrow(LAST_TEMPLATE_UNDELETABLE_MSG);
 
     // 付け替えは永続化まで含めて 1 操作（再起動しても daily が active のまま）。
     const reopened = await reopen(db);
     expect(reopened.getTemplateDefs().map((template) => template.name)).toEqual(['日報']);
-    expect(reopened.getActiveTemplate()?.name).toBe('日報');
+    expect(defaultTemplateOf(reopened)?.name).toBe('日報');
   });
 
   it('構造一致する既存部品は再利用し、既存行・active・対象入力を変えずテンプレートだけ足す', async () => {
@@ -384,7 +389,7 @@ describe('正規化テンプレート部品 CRUD', () => {
     expect(registered.placements.map((placement) => placement.sectionId)).toEqual(
       bundle.template.placements.map((placement) => placement.sectionId),
     );
-    expect(store.getActiveTemplate()?.id).toBe(beforeSettings.activeTemplateId);
+    expect(defaultTemplateOf(store)?.id).toBe(beforeSettings.defaultTemplateId);
   });
 
   it('構造一致する既存が無い生成一式は全 ID を再採番して 1 tx で追加する', async () => {
@@ -434,7 +439,7 @@ describe('正規化テンプレート部品 CRUD', () => {
     expect(await db.getAll(STORE_PATIENTS)).toEqual(beforePatientRows);
     expect(store.getTemplateDefs()).toHaveLength(beforeTemplates + 1);
     expect(store.getSettings()).toEqual(beforeSettings);
-    expect(store.getActiveTemplate()?.id).toBe(beforeSettings.activeTemplateId);
+    expect(defaultTemplateOf(store)?.id).toBe(beforeSettings.defaultTemplateId);
     expect(livePatient(store, pid).name).toBe('入力中');
 
     // 2 回目のテンプレートは 1 回目に作られた部品の ID を指す。
@@ -909,6 +914,96 @@ describe('place（グループ）CRUD', () => {
 // ============================
 // normalizePatientArray（store 読み出しの whitelist）
 // ============================
+
+describe('テンプレートの 3 段デフォルト（アプリ / グループ / ページ）', () => {
+  it('seed はグループにもアプリのデフォルト（回診）を写す', async () => {
+    const { store } = await setup();
+    const round = store.getTemplateDefs().find((t) => t.name === '回診')!;
+    expect(store.getSettings().defaultTemplateId).toBe(round.id);
+    expect(store.listPlaces()[0]!.templateId).toBe(round.id);
+  });
+
+  it('グループ作成時はアプリのデフォルトを写し、後からアプリ側を変えても波及しない', async () => {
+    const { store } = await setup();
+    const [round, daily] = store.getTemplateDefs();
+    const placeA = await store.addPlace('先に作る');
+    expect(placeA.templateId).toBe(round!.id);
+
+    await store.setDefaultTemplate(daily!.id);
+    const placeB = await store.addPlace('後で作る');
+    expect(placeB.templateId).toBe(daily!.id);
+    // 既存グループは変わらない（作成時に写す方式）。
+    expect(store.listPlaces().find((p) => p.placeId === placeA.placeId)!.templateId).toBe(
+      round!.id,
+    );
+  });
+
+  it('ページ作成時はグループのデフォルトを写し、reopen 後も保持する', async () => {
+    const { db, store } = await setup();
+    const daily = store.getTemplateDefs().find((t) => t.name === '日報')!;
+    const place = store.listPlaces()[0]!;
+    await store.setPlaceTemplate(place.placeId, daily.id);
+
+    const pid = await store.createPatientInActivePlace('新しいページ');
+    expect(livePatient(store, pid).templateId).toBe(daily.id);
+
+    const reopened = await reopen(db);
+    expect(reopened.listPlaces()[0]!.templateId).toBe(daily.id);
+    expect(reopened.listAllPatients().find((p) => p.pid === pid)!.templateId).toBe(daily.id);
+  });
+
+  it('getTemplateForPatient はページ → グループ → アプリの順に倒す', async () => {
+    const { store } = await setup();
+    const [round, daily] = store.getTemplateDefs();
+    const place = store.listPlaces()[0]!;
+    const pid = await store.createPatientInActivePlace('解決確認');
+    const patient = livePatient(store, pid);
+
+    // ページの指定が最優先。
+    patient.templateId = daily!.id;
+    expect(store.getTemplateForPatient(patient)?.id).toBe(daily!.id);
+
+    // ページの参照が迷子ならグループのデフォルトへ。
+    patient.templateId = 'tpl_ghost';
+    await store.setPlaceTemplate(place.placeId, daily!.id);
+    expect(store.getTemplateForPatient(patient)?.id).toBe(daily!.id);
+
+    // グループも迷子ならアプリのデフォルトへ（listPlaces の実体を直接汚して確かめる）。
+    store.listPlaces()[0]!.templateId = 'tpl_ghost2';
+    expect(store.getTemplateForPatient(patient)?.id).toBe(round!.id);
+  });
+
+  it('テンプレート削除は参照するデフォルト/ページを全て残りへつなぎ替える（reopen 込み）', async () => {
+    const { db, store } = await setup();
+    const [round, daily] = store.getTemplateDefs();
+    // 回診を指すグループとページを用意（seed の既定のまま）。
+    const pid = await store.createPatientInActivePlace('回診ページ');
+    expect(livePatient(store, pid).templateId).toBe(round!.id);
+
+    await store.deleteTemplateDef(round!.id);
+
+    // dangling 参照を 1 つも残さない（アプリ・グループ・ページ全部）。
+    expect(store.getSettings().defaultTemplateId).toBe(daily!.id);
+    expect(store.listPlaces().every((p) => p.templateId === daily!.id)).toBe(true);
+    expect(store.listAllPatients().every((p) => p.templateId === daily!.id)).toBe(true);
+
+    const reopened = await reopen(db);
+    expect(reopened.getSettings().defaultTemplateId).toBe(daily!.id);
+    expect(reopened.listPlaces().every((p) => p.templateId === daily!.id)).toBe(true);
+    expect(reopened.listAllPatients().every((p) => p.templateId === daily!.id)).toBe(true);
+  });
+
+  it('reopen 時に迷子の place.templateId をアプリのデフォルトへ修復する', async () => {
+    const { db, store } = await setup();
+    const round = store.getTemplateDefs().find((t) => t.name === '回診')!;
+    // DB に迷子参照を直接書き込む（取り込みや旧データ相当）。
+    const place = store.listPlaces()[0]!;
+    await db.put(STORE_PLACES, { ...place, templateId: 'tpl_ghost' });
+
+    const reopened = await reopen(db);
+    expect(reopened.listPlaces()[0]!.templateId).toBe(round.id);
+  });
+});
 
 describe('タグの改名・削除は全対象へ波及する', () => {
   /** 別グループとアーカイブ済みにも同じタグを付けた状態を作る。 */

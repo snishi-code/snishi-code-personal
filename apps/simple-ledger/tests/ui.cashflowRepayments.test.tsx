@@ -21,6 +21,7 @@ import { MONTHLY_AMOUNTS_HARD_CAP } from '../src/domain/allocation';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { todayLocal } from '../src/util/time';
+import { cashflowHorizonMonths, rememberCashflowHorizonMonths } from '../src/data/localFlags';
 import type { JournalEntry } from '../src/domain/types';
 import './setup';
 
@@ -33,17 +34,51 @@ afterEach(() => {
   _resetOverlaysForTests();
 });
 
-function view(onEditEntry: (entry: JournalEntry) => void) {
+function view(
+  onEditEntry: (entry: JournalEntry) => void,
+  handlers: {
+    onOpenAllocations?: (target: unknown) => void;
+    onOpenAccount?: (accountId: string) => void;
+    onOpenEntry?: (entryId: string) => void;
+  } = {},
+) {
   return (
     <ToastProvider>
       <LedgerProvider>
-        <Cashflow onEditEntry={onEditEntry} />
+        <Cashflow
+          onEditEntry={onEditEntry}
+          onOpenAllocations={(handlers.onOpenAllocations ?? (() => undefined)) as never}
+          onOpenAccount={handlers.onOpenAccount ?? (() => undefined)}
+          onOpenEntry={handlers.onOpenEntry ?? (() => undefined)}
+        />
       </LedgerProvider>
     </ToastProvider>
   );
 }
 
 const ui = (name: string) => document.querySelector(`[data-ui="${name}"]`);
+
+describe('表示終了日（既定は設定画面の期間・画面での変更はその場限り）', () => {
+  it('開くと今日 + 既定期間の日付が入り、変更しても記憶されず次回は既定へ戻る', async () => {
+    rememberCashflowHorizonMonths(4);
+    render(view(() => undefined));
+    const input = (await screen.findByLabelText('表示終了日')) as HTMLInputElement;
+    expect(input.value).toBe(addMonthsToDate(todayLocal(), 4));
+
+    // 一時的に伸ばす → 表示は変わるが端末設定は変わらない。
+    const stretched = addMonthsToDate(todayLocal(), 12);
+    fireEvent.change(input, { target: { value: stretched } });
+    expect(input.value).toBe(stretched);
+    expect(cashflowHorizonMonths()).toBe(4);
+
+    // 開き直すと既定（4 ヶ月）へ戻る。
+    cleanup();
+    _resetOverlaysForTests();
+    render(view(() => undefined));
+    const again = (await screen.findByLabelText('表示終了日')) as HTMLInputElement;
+    expect(again.value).toBe(addMonthsToDate(todayLocal(), 4));
+  });
+});
 
 describe('資金繰り', () => {
   it('上部は「自由に動かせるお金」1 値（movable=false は除外・総資金/取り置きの段は無い）', async () => {
@@ -155,6 +190,54 @@ describe('資金繰り', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       `返済回数は 1〜${MONTHLY_AMOUNTS_HARD_CAP} の整数で入力してください。`,
+    );
+  });
+});
+
+describe('将来の入出金の行タップ（entryOpenPlan の単一正本）', () => {
+  it('保存された返済仕訳は編集シート、定期ルールの投影は毎月のもの（ルール）へ', async () => {
+    const ledger = await loadLedger();
+    const bank = ledger.accounts.find((a) => a.name === '預金')!;
+    const card = ledger.accounts.find((a) => a.role === 'payment-liability')!;
+    await createOpenings([
+      { accountId: bank.id, amount: 50000000, date: '2000-01-01' },
+      { accountId: card.id, amount: 3000000, date: '2000-01-01' },
+    ]);
+    // 保存された将来の返済（実仕訳）。
+    await createRepaymentEntries({
+      title: 'カードの返済',
+      liabilityAccountId: card.id,
+      fromAccountId: bank.id,
+      total: 3000000,
+      count: 1,
+      firstDate: addMonthsToDate(todayLocal(), 1),
+    });
+    // 未来へ投影される定期ルール（給与）。
+    const income = ledger.accounts.find((a) => a.role === 'income-category')!;
+    const { createRecurringRule } = await import('../src/data/repository');
+    await createRecurringRule({
+      name: '給与ルール',
+      amount: 20000000,
+      dayOfMonth: 25,
+      debitAccountId: bank.id,
+      creditAccountId: income.id,
+      startMonth: todayLocal().slice(0, 7),
+      startDate: todayLocal(),
+    });
+
+    const onEditEntry = vi.fn();
+    const onOpenAllocations = vi.fn();
+    render(view(onEditEntry, { onOpenAllocations }));
+    const rows = await screen.findAllByRole('button', { name: /カードの返済|給与ルール/ });
+    const repayRow = rows.find((r) => r.textContent?.includes('カードの返済'))!;
+    const salaryRow = rows.find((r) => r.textContent?.includes('給与ルール'))!;
+
+    fireEvent.click(repayRow);
+    expect(onEditEntry).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(salaryRow);
+    expect(onOpenAllocations).toHaveBeenCalledWith(
+      expect.objectContaining({ ruleId: expect.any(String) }),
     );
   });
 });

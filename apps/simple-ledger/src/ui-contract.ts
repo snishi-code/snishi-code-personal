@@ -11,6 +11,8 @@ export const UI = {
     // ヘッダーの日付チップ（透明な date input を重ねた 1 タップ選択）
     dateTrigger: 'period.date.trigger',
     dateInput: 'period.date.input',
+    // タイムスリップ中だけ現れる「今日」ボタン（日付だけを今日へ戻す・画面と粒度は不変）
+    today: 'period.today',
     // 年・全期間はロジックを維持するが、現在は UI から到達させない。
     yearPicker: 'period.year.picker',
     yearRow: 'period.year.row',
@@ -95,6 +97,7 @@ export const UI = {
   // 年間・全体（年別の月次表 / 全期間の年次表）
   yearlyOverview: {
     view: 'yearlyOverview.view',
+    // 2026-08-14 に画面内からヘッダーの粒度セグメントへ移設（値は据え置き）。
     modeYear: 'yearlyOverview.mode.year',
     modeAll: 'yearlyOverview.mode.all',
     horizonActual: 'yearlyOverview.horizon.actual',
@@ -105,6 +108,9 @@ export const UI = {
     matrix: 'yearlyOverview.matrix',
     projectionNote: 'yearlyOverview.projectionNote',
     projectionTruncatedNote: 'yearlyOverview.projectionTruncatedNote',
+    // 列見出しのタップ（年間 = 月末の基準日でホームへ / 全体 = その年の年間表示へ）
+    monthColumn: 'yearlyOverview.monthColumn',
+    yearColumn: 'yearlyOverview.yearColumn',
   },
   // 横軸=時間、縦軸=勘定科目の箱。保存データを変更しない閲覧専用の地図。
   timeline: {
@@ -129,27 +135,33 @@ export const UI = {
   journal: {
     view: 'journal.view',
     list: 'journal.entry.list',
+    // 検索・並び替え・絞り込みの額縁（sticky。仕訳カードだけが下を流れる）
+    filterFrame: 'journal.filterFrame',
     search: 'journal.search',
     clearAccountFilter: 'journal.filter.clearAccount',
     clearNormalExpenseFilter: 'journal.filter.clearNormalExpense',
     showFuture: 'journal.filter.showFuture',
-    filterTag: 'journal.filter.tag',
     // 表示専用の並び替え（C-4）と抽出結果の件数+合計（C-3）。
     sortByDate: 'journal.sort.date',
     sortByAmount: 'journal.sort.amount',
+    // 名称軸 = 摘要の五十音順（毎月のものの「名称」と同じ語彙・同じ正本 LIST_SORT_AXES）。
+    sortByName: 'journal.sort.name',
     sortDesc: 'journal.sort.desc',
     sortAsc: 'journal.sort.asc',
     summary: 'journal.summary',
     entry: {
       save: 'journal.entry.save',
+      // 固定額振替の「振替せずに実行」（費用・収入のアーカイブのみ）
+      transferSkip: 'journal.entry.transferSkip',
       cancel: 'journal.entry.cancel',
       delete: 'journal.entry.delete',
       reverse: 'journal.entry.reverse',
+      // 反対仕訳シートの「取消済み / 残り」行（取消が 0 件なら出ない）と、
+      // 入力額が残りを超えたときの注意（警告のみ・保存は止めない）
+      reversalSummary: 'journal.entry.reversal.summary',
+      reversalOverWarning: 'journal.entry.reversal.overWarning',
       detailToggle: 'journal.entry.detailToggle',
       manualSwitch: 'journal.entry.manualSwitch',
-      tags: 'journal.entry.tags',
-      debitTags: 'journal.entry.debitTags',
-      creditTags: 'journal.entry.creditTags',
       monthlyizeRepayToggle: 'journal.entry.monthlyizeRepayToggle',
       monthlyizeRepayAccount: 'journal.entry.monthlyizeRepayAccount',
       monthlyizeRepayCount: 'journal.entry.monthlyizeRepayCount',
@@ -182,19 +194,20 @@ export const UI = {
     save: 'accounts.save',
     list: 'accounts.list',
     box: 'accounts.box',
-    notMovableBadge: 'accounts.notMovableBadge',
     // 残高調整科目（system-adjustment）の「自動」バッジ。表示のみ＝管理操作は出さない
     systemBadge: 'accounts.systemBadge',
     adjust: 'accounts.adjust',
     // アーカイブ/解除ボタン。残高が残る資産・負債は振替シート（EntrySheet transfer 再利用）を経由する
     archiveToggle: 'accounts.archiveToggle',
+    // 残高 0 のアーカイブ / 解除の確認（残高が残る科目は振替シートが確認を兼ねる）
+    archiveConfirm: 'accounts.archiveConfirm',
+    unarchiveConfirm: 'accounts.unarchiveConfirm',
     openingAmount: 'accounts.openingAmount',
     openingDate: 'accounts.openingDate',
     startDate: 'accounts.startDate',
     endDate: 'accounts.endDate',
     archiveRenameConfirm: 'accounts.archiveRenameConfirm',
     // 「自由に動かせる」チェック（現預金の内訳のみ・OFF = 資金繰りの原資に数えない）
-    movable: 'accounts.movable',
     // 返済設定（負債の編集シートのみ）
     repaymentAccount: 'accounts.repaymentAccount',
     repaymentDay: 'accounts.repaymentDay',
@@ -208,10 +221,12 @@ export const UI = {
   },
   allocations: {
     view: 'allocations.view',
+    // 検索・並び替え・「終了分も表示」の額縁（sticky。ルール/item カードだけが下を流れる）
+    filterFrame: 'allocations.filterFrame',
     search: 'allocations.search',
     searchEmpty: 'allocations.searchEmpty',
     searchCount: 'allocations.searchCount',
-    sortDefault: 'allocations.sort.default',
+    sortByDate: 'allocations.sort.date',
     sortByAmount: 'allocations.sort.amount',
     sortByName: 'allocations.sort.name',
     sortDesc: 'allocations.sort.desc',
@@ -233,10 +248,14 @@ export const UI = {
     recurringEvery: 'allocations.recurring.every',
     recurringFirstPostingDate: 'allocations.recurring.firstPostingDate',
     recurringFlow: 'allocations.recurring.flow',
+    // 継続コスト台帳を経由して月割りするか（明示トグル。勘定科目の role では決めない）
+    recurringSpreadToggle: 'allocations.recurring.spreadToggle',
     recurringFirstPosting: 'allocations.recurring.firstPosting',
     recurringFirstPostingStatus: 'allocations.recurring.firstPostingStatus',
     recurringStartDate: 'allocations.recurring.startDate',
     recurringEndDate: 'allocations.recurring.endDate',
+    // ルールの終了日の解除（iOS date input にクリア手段が無いための明示ボタン）
+    recurringEndDateClear: 'allocations.recurring.endDateClear',
     recurringFrom: 'allocations.recurring.from',
     recurringTo: 'allocations.recurring.to',
     recurringSave: 'allocations.recurring.save',
@@ -244,41 +263,43 @@ export const UI = {
     recurringAmountChangeAll: 'allocations.recurring.amountChange.all',
     recurringAmountChangeFromToday: 'allocations.recurring.amountChange.fromToday',
     recurringAmountChangeCancel: 'allocations.recurring.amountChange.cancel',
-    recurringEdit: 'allocations.recurring.edit',
-    // 終了 = today を排他的終点へ。同じ設定で新しく始める = 系譜なしの独立ルール作成。
+    // 編集は行そのもののタップ（編集アイコンは置かない）。
+    // 終了 = 排他的終点を打つ。同じ設定で新しく始める = 系譜なしの独立ルール作成。
+    // どちらも無確認では実行しない（終了は終了日シート・再開は確認ダイアログ）。
     recurringEnd: 'allocations.recurring.end',
+    recurringEndSheet: 'allocations.recurring.endSheet',
+    recurringEndSheetDate: 'allocations.recurring.endSheet.date',
+    recurringEndSheetConfirm: 'allocations.recurring.endSheet.confirm',
     recurringRestart: 'allocations.recurring.restart',
+    recurringRestartConfirm: 'allocations.recurring.restart.confirm',
+    // 削除はカスケード（ルール + 起票済みの仕訳・持ち物）。確認に起票回数を出す。
     recurringDelete: 'allocations.recurring.delete',
-    // 継続コスト資産シート（登録＝編集の 1 コンポーネント）
-    edit: 'allocations.edit',
+    // 継続コスト資産シート（登録＝編集の 1 コンポーネント）。
+    // 編集の入口は item カードそのもののタップ（編集アイコンは置かない）。
     editDialog: 'allocations.editDialog',
     editName: 'allocations.edit.name',
     editAmount: 'allocations.edit.amount',
     editStartDate: 'allocations.edit.startDate',
-    // 費用化の開始日（任意・既定 = 購入日）。購入日より後にすると台帳に価値が置かれたままになる。
-    editAllocationStartDate: 'allocations.edit.allocationStartDate',
     editEndDate: 'allocations.edit.endDate',
+    // 終了日の解除（iOS date input にクリア手段が無いための明示ボタン）
+    editEndDateClear: 'allocations.edit.endDateClear',
     editQuickSpan: 'allocations.edit.quickSpan',
     editOpenPurchase: 'allocations.edit.openPurchase',
     editExpense: 'allocations.edit.expense',
     editSave: 'allocations.edit.save',
     editImpactWarning: 'allocations.edit.impactWarning',
-    // アーカイブ = 終了日の設定（+ 残存価値の回収の振替）
+    // アーカイブ = 終了日の設定 + 残存価値の始末を 1 枚で決めるシート（シート自体が確認面）。
     archive: 'allocations.archive',
     archiveDialog: 'allocations.archiveDialog',
     archiveDate: 'allocations.archive.date',
-    archiveTransfer: 'allocations.archive.transfer',
+    // 回収額（既定 = 終了日時点の残存価値・0 も超過も可）と回収先（0 なら回収先は出さない）
+    archiveRecoveryAmount: 'allocations.archive.recoveryAmount',
+    archiveRecoveryTo: 'allocations.archive.recoveryTo',
+    // 残り（残存価値 − 回収額）の扱い: 期間に割り振る（既定）/ 終了日に全額費用にする
+    archiveRemainder: 'allocations.archive.remainder',
+    archiveRemainderSpread: 'allocations.archive.remainder.spread',
+    archiveRemainderExpense: 'allocations.archive.remainder.expense',
     archiveConfirm: 'allocations.archive.confirm',
-  },
-  tags: {
-    view: 'tags.view',
-    create: 'tags.create',
-    save: 'tags.save',
-    name: 'tags.name',
-    list: 'tags.list',
-    period: 'tags.period',
-    entrySummary: 'tags.summary.entry',
-    lineSummary: 'tags.summary.line',
   },
   // 残高補正・初期残高のシート（勘定科目の内訳行・仕訳一覧から開く）。
   adjustments: {
@@ -324,6 +345,8 @@ export const UI = {
     repaySave: 'cashflow.repay.save',
     freeTrend: 'cashflow.freeTrend',
     futureList: 'cashflow.future.list',
+    // 将来行（タップで編集 or 由来へ・entryOpenPlan 消費）
+    futureRow: 'cashflow.future.row',
     summary: 'cashflow.summary',
     // 負債行の展開 = 登録済みの返済（未来日付の保存仕訳）。タップで仕訳の編集シートへ
     repaymentsToggle: 'cashflow.repayments.toggle',
@@ -333,7 +356,8 @@ export const UI = {
   settings: {
     view: 'settings.view',
     fractionDigits: 'settings.fractionDigits',
-    manageList: 'settings.manage.list',
+    // 資金繰りの既定表示期間（端末設定・ヶ月）
+    cashflowHorizon: 'settings.cashflowHorizon',
     exportJson: 'settings.exportJson',
     importJson: 'settings.importJson',
     importFile: 'settings.importFile',
@@ -341,9 +365,14 @@ export const UI = {
     onboardingOpen: 'settings.onboardingOpen',
   },
   nav: {
-    home: 'nav.home',
+    // ハンバーガー。フッター右が唯一の置き場所（2026-08-14 ヘッダーから移設・値は据え置き）。
     menuButton: 'nav.menu.button',
     menu: 'nav.menu',
+    // 画面下端の固定ナビ（座標検証で上端を取るために nav 要素自体にも付ける）。
+    // ホームはフッター中央が唯一（旧ヘッダー左の nav.home は 2026-08-14 撤去）。
+    footer: 'nav.footer',
+    footerBack: 'nav.footer.back',
+    footerHome: 'nav.footer.home',
   },
   dialog: {
     confirm: 'dialog.confirm',

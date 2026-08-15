@@ -11,8 +11,14 @@ import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { AccountPicker } from '../AccountPicker';
 import { FlowField } from '../FlowField';
-import { SearchInput, SortControls } from '../ListSearchSort';
-import { applySort, matchesQuery } from '../listQuery';
+import {
+  LIST_SORT_AXES,
+  SearchInput,
+  SortControls,
+  listSortAxisKey,
+  type ListSortAxisKey,
+} from '../ListSearchSort';
+import { applySort, directionSign, matchesQuery, type SortDirection } from '../listQuery';
 import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import {
@@ -27,14 +33,14 @@ import {
   recoveredAmountsByItem,
   spreadTotalOf as computeSpreadTotal,
 } from '../../domain/continuousCost';
-import { parseRuleItemId } from '../../domain/recurringIds';
+import { generatedEntryRuleId, generatedItemRuleId } from '../../domain/recurringIds';
 import type { AccountRole } from '../../domain/accountRoles';
-import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../../domain/constants';
 import { lastExpenseCategoryId, rememberExpenseCategoryId } from '../../data/localFlags';
 import { sortAccounts } from '../../domain/accountOrder';
 import {
   defaultMonthlyAllocationAccountId,
   groupedAccountsByRole,
+  groupedRecoveryDestinationAccounts,
   monthlyAllocationAccountOptions,
 } from '../accountOptions';
 import { monthlyAmounts, monthOf } from '../../domain/allocation';
@@ -48,8 +54,8 @@ import {
   firstRecurringPostingDate,
   isRecurringSpreadDestinationRole,
   recurringDestinationAccountId,
-  recurringExpenseAccountId,
   recurringKindOf,
+  projectedRuleItems,
   type RecurringKind,
 } from '../../domain/recurring';
 import {
@@ -59,11 +65,16 @@ import {
   recurringRuleLastExistingDate,
   ruleExistsAt as recurringRuleExistsAt,
 } from '../../domain/accountLifetime';
+import { cardTapProps, rowActionClick } from '../cardTap';
 import { quickSpanEndDate } from '../ccQuickSpan';
-import { formatMinorForInput, parseAmountToMinor, sanitizeAmountText } from '../amountText';
+import {
+  exactDigitsFor,
+  formatMinorForInput,
+  parseAmountToMinor,
+  sanitizeAmountText,
+} from '../amountText';
 import { useMoneyDigits } from '../money';
-import { Money } from '../money';
-import { EntrySheet } from './EntrySheet';
+import { Money, moneyText } from '../money';
 import { errorText, t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
 import { UI } from '../../ui-contract';
@@ -76,15 +87,27 @@ export interface AllocationsTarget {
   ruleId?: string;
 }
 
-/** 並び替え state。軸は両セクション（定期ルール・継続コスト資産）に定義できるものだけ。 */
+/**
+ * 並び替え state。軸の集合は仕訳一覧と共通の正本（LIST_SORT_AXES）で、
+ * 日付軸の意味だけがセクションごとに違う（継続コスト資産 = 終了日 / 定期ルール = 開始日）。
+ */
 interface ListSort {
-  key: 'default' | 'amount' | 'name';
-  direction: 'asc' | 'desc';
+  key: ListSortAxisKey;
+  direction: SortDirection;
 }
 
-/** 軸ごとの既定方向（金額 = 大きい順・名称 = 五十音順）。軸を切り替えたらここへ戻す。 */
-const SORT_DEFAULT_DIRECTION: Record<ListSort['key'], ListSort['direction']> = {
-  default: 'desc',
+/**
+ * 軸ごとの data-ui（軸の集合そのものは LIST_SORT_AXES が正本で、画面ごとに違うのはここだけ）。
+ */
+const SORT_AXIS_DATA_UI: Record<ListSortAxisKey, string> = {
+  date: UI.allocations.sortByDate,
+  amount: UI.allocations.sortByAmount,
+  name: UI.allocations.sortByName,
+};
+
+/** 軸ごとの既定方向（日付 = 終了/開始が近い順・金額 = 大きい順・名称 = 五十音順）。軸を切り替えたらここへ戻す。 */
+const SORT_DEFAULT_DIRECTION: Record<ListSortAxisKey, SortDirection> = {
+  date: 'asc',
   amount: 'desc',
   name: 'asc',
 };
@@ -101,19 +124,22 @@ export function Allocations({
   /** 仕訳一覧の計算で生まれた行タップからの遷移対象（開くシート。同一オブジェクトは 1 回だけ消費）。 */
   target?: AllocationsTarget | null;
 }) {
-  const { ledger, removeMonthlyCost, createRecurringRule, saveRecurringRule, removeRecurringRule } =
-    useLedger();
+  const { ledger, removeMonthlyCost, createRecurringRule, removeRecurringRule } = useLedger();
   const [showEnded, setShowEnded] = useState(false);
   const [query, setQuery] = useState('');
   // 並び替え（表示専用・保存しない）。軸と方向を 1 つの state で持ち、軸を切り替えたら
-  // 方向を軸ごとの既定へ戻す（方向 Segmented 非表示中に古い方向が残らない）。
-  const [sort, setSort] = useState<ListSort>({ key: 'default', direction: 'desc' });
+  // 方向を軸ごとの既定へ戻す（前の軸で選んだ方向が別の軸へ持ち越されない）。
+  const [sort, setSort] = useState<ListSort>({ key: 'date', direction: 'asc' });
   const [pendingDelete, setPendingDelete] = useState<MonthlyCostItem | null>(null);
   const [itemSheet, setItemSheet] = useState<{ existing?: MonthlyCostItem } | null>(null);
   const [archiving, setArchiving] = useState<MonthlyCostItem | null>(null);
   const [chooserOpen, setChooserOpen] = useState(false);
   const [ruleSheet, setRuleSheet] = useState<{ existing?: RecurringRule } | null>(null);
   const [pendingRuleDelete, setPendingRuleDelete] = useState<RecurringRule | null>(null);
+  // 状態を変える操作は必ず確認を挟む（2026-08-15 作者合意）: 終了は終了日シート、
+  // 再開は軽い確認ダイアログを通す（無確認の即実行はしない）。
+  const [endingRule, setEndingRule] = useState<RecurringRule | null>(null);
+  const [pendingRuleRestart, setPendingRuleRestart] = useState<RecurringRule | null>(null);
   const [pendingRuleActionId, setPendingRuleActionId] = useState<string | null>(null);
   const ruleActionInFlight = useRef(false);
   // 表示だけはヘッダーの断面へ追従する。シート内の書込日・catch-up は period を受け取らず、
@@ -155,6 +181,10 @@ export function Allocations({
   // 未来開始の項目まで先取りしない。
   const startedItems = allItems.filter((m) => m.startDate <= asOf);
   const allRules = ledger?.recurringRules ?? [];
+  const rulesById = useMemo(
+    () => new Map((ledger?.recurringRules ?? []).map((r) => [r.id, r] as const)),
+    [ledger],
+  );
   const startedRules = allRules.filter((r) => effectiveRecurringRuleStartDate(r) <= asOf);
   // 「終了分も表示」の出現条件は検索前の全件で判定する（検索で 0 件になっても、
   // 母集合を変える唯一のコントロールを消さない）。
@@ -165,30 +195,60 @@ export function Allocations({
 
   // 検索: 1 つの検索欄が両セクションに効く（「終了分も表示」と同じ単一 state の型）。
   // 対象 = 名前 + 関係する科目名（Journal と同じ範囲。金額・日付・種別タグは対象外）。
-  const dir = sort.direction === 'asc' ? 1 : -1;
+  const dir = directionSign(sort.direction);
+  // 日付軸の意味はセクションごとに違う（継続コスト資産 = 終了日 / 定期ルール = 開始日）。
+  // 終了日なしは「いつ終わるか分からない」なので昇順・降順どちらでも最後に置く（方向を
+  // 掛ける前に決着させる）。同着はどちらの方向でも名前の五十音順で安定化する。
   const itemCompare =
-    sort.key === 'default'
-      ? null
+    sort.key === 'date'
+      ? (a: MonthlyCostItem, b: MonthlyCostItem) => {
+          if (a.endDate === undefined || b.endDate === undefined) {
+            if (a.endDate === b.endDate) return a.name.localeCompare(b.name, 'ja');
+            return a.endDate === undefined ? 1 : -1;
+          }
+          if (a.endDate !== b.endDate) return (a.endDate < b.endDate ? -1 : 1) * dir;
+          return a.name.localeCompare(b.name, 'ja');
+        }
       : sort.key === 'amount'
         ? (a: MonthlyCostItem, b: MonthlyCostItem) => (a.amount - b.amount) * dir
         : (a: MonthlyCostItem, b: MonthlyCostItem) => a.name.localeCompare(b.name, 'ja') * dir;
   const ruleCompare =
-    sort.key === 'default'
-      ? null
+    sort.key === 'date'
+      ? (a: RecurringRule, b: RecurringRule) => {
+          const sa = effectiveRecurringRuleStartDate(a);
+          const sb = effectiveRecurringRuleStartDate(b);
+          if (sa !== sb) return (sa < sb ? -1 : 1) * dir;
+          return a.name.localeCompare(b.name, 'ja');
+        }
       : sort.key === 'amount'
         ? (a: RecurringRule, b: RecurringRule) => (a.amount - b.amount) * dir
         : (a: RecurringRule, b: RecurringRule) => a.name.localeCompare(b.name, 'ja') * dir;
   // loadLedger は終了が近い順で返すが、編集直後の state 由来でも順序が崩れないよう再ソートする。
-  // 並び替え「標準」は applySort が素通しする＝既定の並び（終了が近い順）を 1 行も変えない。
-  const items = applySort(
-    [...startedItems]
-      .filter((m) => showEnded || !isArchived(m, asOf))
-      .filter((m) => matchesQuery([m.name, accountsMap.get(m.expenseAccountId)?.name], query))
-      .sort(compareMonthlyCostItems),
-    itemCompare,
+  // この基準順は金額・名称の軸で同値になった行の相対順（applySort は安定ソート）も決める。
+  // 未起票周期の導出 item カード（作者決定 2026-08-15）: カーソルより後の周期を表示専用で
+  // 出す。ヘッダーを未来へ動かすとその日の状態が見える。「予定」等の区別タグは付けず、
+  // タップ（編集）はルールへ（derivedOrigin と同じ導線）。判定は投影と同じ単一正本。
+  const projectedItems = useMemo(
+    () => projectedRuleItems(ledger?.recurringRules ?? [], ledger?.accounts ?? [], asOf),
+    [ledger, asOf],
   );
-  // 定期ルールの既定順 = loadLedger の createdAt 昇順（画面側では並べ替えない暗黙の既定。
-  // 「標準」はこれを素通しする）。
+  type ItemRow = { m: MonthlyCostItem; fromRule?: RecurringRule };
+  const items = applySort(
+    (
+      [
+        ...startedItems.map((m): ItemRow => ({ m })),
+        ...projectedItems.map((p): ItemRow => ({ m: p.item, fromRule: p.rule })),
+      ] as ItemRow[]
+    )
+      .filter((row) => showEnded || !isArchived(row.m, asOf))
+      .filter((row) =>
+        matchesQuery([row.m.name, accountsMap.get(row.m.expenseAccountId)?.name], query),
+      )
+      .sort((a, b) => compareMonthlyCostItems(a.m, b.m)),
+    (a, b) => itemCompare(a.m, b.m),
+  );
+  // 定期ルールは loadLedger の createdAt 昇順で届く。日付軸（開始日）以外では同値の相対順が
+  // この登録順になる。
   const rules = applySort(
     startedRules
       .filter((r) => showEnded || recurringRuleExistsAt(r, asOf))
@@ -240,19 +300,6 @@ export function Allocations({
     }
   };
 
-  const endRecurringRule = async (rule: RecurringRule): Promise<void> => {
-    // 「終了」= 今日以降は生まない。今日すでに起票済みならその事実は存在期間の中にあるので、
-    // 終了点は翌日に置く（今日に置くと半開区間の外へ出て保存境界が拒否する）。
-    const effectiveDate = earliestRecurringRuleEndDate(
-      rule,
-      ledger?.journalEntries ?? [],
-      todayLocal(),
-    );
-    await runRecurringRuleAction(rule.id, () =>
-      saveRecurringRule({ ...rule, endDate: effectiveDate, updatedAt: nowIso() }),
-    );
-  };
-
   const restartRecurringRule = async (rule: RecurringRule): Promise<void> => {
     const effectiveDate = todayLocal();
     await runRecurringRuleAction(rule.id, () =>
@@ -262,6 +309,8 @@ export function Allocations({
         dayOfMonth: rule.dayOfMonth,
         everyMonths: rule.everyMonths,
         debitAccountId: recurringDestinationAccountId(rule),
+        // 旧ルールの「月割りするか」の意図をそのまま引き継ぐ（role から再導出しない）。
+        spreadViaLedger: rule.spreadExpenseAccountId !== undefined,
         creditAccountId: rule.creditAccountId,
         startMonth: rule.startMonth,
         startDate: effectiveDate,
@@ -285,8 +334,21 @@ export function Allocations({
     else if (targetRule) setRuleSheet({ existing: targetRule });
   }
 
+  // ルール削除はカスケード（作者決定 2026-08-15）。確認では「一緒に消える起票数」を出す。
+  // 数える対象 = そのルールが起票した保存済み仕訳（＝道連れになる仕訳と持ち物の回数）。
+  const pendingRuleDeletePostings =
+    pendingRuleDelete === null
+      ? 0
+      : (ledger?.journalEntries ?? []).filter(
+          (entry) => generatedEntryRuleId(entry) === pendingRuleDelete.id,
+        ).length;
+
   return (
-    <section aria-labelledby="allocations-title" data-ui={UI.allocations.view}>
+    <section
+      className="allocations"
+      aria-labelledby="allocations-title"
+      data-ui={UI.allocations.view}
+    >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 className="screen-title" id="allocations-title" style={{ marginBottom: 0 }}>
           {t('monthly.title')}
@@ -302,29 +364,36 @@ export function Allocations({
         </button>
       </div>
 
-      {hasEndedAtAsOf ? (
-        <label
-          style={{
-            display: 'inline-flex',
-            gap: 8,
-            alignItems: 'center',
-            minHeight: 'var(--tap)',
-            margin: 'var(--space-3) 0 0',
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={showEnded}
-            onChange={(e) => setShowEnded(e.target.checked)}
-            data-ui={UI.allocations.showCompleted}
-          />
-          {t('monthlyCost.showEnded')}
-        </label>
-      ) : null}
-
+      {/* 絞り込み額縁: 「終了分も表示」・検索・並び替えを sticky で上端に固定し、
+          ルール一覧と item カードだけが下を流れる（作者合意 2026-08-15・ホームの額縁と同型）。
+          h1 と「追加」は含めない = スクロールで流れてよい。
+          余白は額縁の gap が持つので、中の行に margin は置かない。
+          hasEndedAtAsOf は startedRules/startedItems から導くので hasAnyStarted を含意する
+          （= 額縁が「終了分も表示」だけで出ることはない）。 */}
       {hasAnyStarted ? (
-        <>
-          <div className="toolbar" style={{ margin: 'var(--space-3) 0 0' }}>
+        <div className="list-filter-frame" data-ui={UI.allocations.filterFrame}>
+          {hasEndedAtAsOf ? (
+            <label
+              style={{
+                display: 'inline-flex',
+                gap: 8,
+                alignItems: 'center',
+                minHeight: 'var(--tap)',
+                // 額縁は縦 flex。既定の stretch では全幅ラベルになり、右の余白を押しても
+                // チェックが切り替わってしまう。従来どおり中身ぶんだけに留める。
+                alignSelf: 'flex-start',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={showEnded}
+                onChange={(e) => setShowEnded(e.target.checked)}
+                data-ui={UI.allocations.showCompleted}
+              />
+              {t('monthlyCost.showEnded')}
+            </label>
+          ) : null}
+          <div className="toolbar">
             <SearchInput
               id="allocations-search"
               label={t('common.search')}
@@ -336,23 +405,15 @@ export function Allocations({
           </div>
           <SortControls
             ariaLabel={t('common.sort')}
-            axisItems={[
-              {
-                key: 'default',
-                label: t('monthly.sortDefault'),
-                dataUi: UI.allocations.sortDefault,
-              },
-              {
-                key: 'amount',
-                label: t('monthlyCost.amount'),
-                dataUi: UI.allocations.sortByAmount,
-              },
-              { key: 'name', label: t('monthlyCost.name'), dataUi: UI.allocations.sortByName },
-            ]}
+            axisItems={LIST_SORT_AXES.map((axis) => ({
+              key: axis.key,
+              label: t(axis.labelKey),
+              dataUi: SORT_AXIS_DATA_UI[axis.key],
+            }))}
             axisValue={sort.key}
             onAxisChange={(key) => {
-              const next = key === 'amount' || key === 'name' ? key : 'default';
-              // 軸を変えたら方向は軸ごとの既定へ戻す（非表示中の方向が残らない）。
+              const next = listSortAxisKey(key);
+              // 軸を変えたら方向は軸ごとの既定へ戻す（前の軸の方向を持ち越さない）。
               setSort({ key: next, direction: SORT_DEFAULT_DIRECTION[next] });
             }}
             directionItems={[
@@ -363,7 +424,6 @@ export function Allocations({
             onDirectionChange={(key) =>
               setSort((s) => ({ ...s, direction: key === 'asc' ? 'asc' : 'desc' }))
             }
-            showDirection={sort.key !== 'default'}
           />
           {/* 絞り込み結果を読み上げる（検索は視覚的にしか結果が分からないため）。 */}
           <p className="sr-only" role="status" data-ui={UI.allocations.searchCount}>
@@ -371,7 +431,7 @@ export function Allocations({
               ? ''
               : t('monthly.searchCount', { rules: rules.length, items: items.length })}
           </p>
-        </>
+        </div>
       ) : null}
 
       {!hasAnyStarted ? (
@@ -407,83 +467,82 @@ export function Allocations({
               const canEndToday = activeToday && start < today && r.endDate === undefined;
               const canRestartToday = !activeToday && r.endDate !== undefined && r.endDate <= today;
               return (
-                <li key={r.id} className="list__item">
-                  <div className="list__main">
-                    <div className="list__title">
-                      {r.name} <span className="tag tag--teal">{ruleKindLabel(r)}</span>
-                    </div>
-                    <div className="list__sub">
-                      {t('recurring.rulePeriod')}: {effectiveRecurringRuleStartDate(r)} 〜{' '}
-                      {r.endDate !== undefined
-                        ? t('recurring.ruleEndBefore', { date: r.endDate })
-                        : t('recurring.ruleNoEnd')}
-                    </div>
-                    <div className="list__sub">
-                      {t('recurring.postingSchedule')}: {ruleIntervalLabel(r)}・
-                      {name(r.creditAccountId)} → {name(recurringDestinationAccountId(r))}
-                      {recurringExpenseAccountId(r, (id) => accountsMap.get(id)?.role) !==
-                      undefined ? (
-                        <>
-                          ・{t('monthlyCost.monthly')}{' '}
-                          <Money
-                            amount={monthlyAmounts(r.amount, r.everyMonths)[0] ?? 0}
-                            currency={currency}
-                          />
-                        </>
+                // 行そのものをタップ = そのルールの編集シート（カードタップ = 編集の単一正本）。
+                // 行の中に終了・再開・削除のボタンが残るため <button> にはできない（入れ子不正）。
+                <li key={r.id}>
+                  <div
+                    className="list__item"
+                    {...cardTapProps(`${t('common.edit')}: ${r.name}`, () =>
+                      setRuleSheet({ existing: r }),
+                    )}
+                  >
+                    <div className="list__main">
+                      <div className="list__title">
+                        {r.name} <span className="tag tag--teal">{ruleKindLabel(r)}</span>
+                      </div>
+                      <div className="list__sub">
+                        {t('recurring.rulePeriod')}: {effectiveRecurringRuleStartDate(r)} 〜{' '}
+                        {r.endDate !== undefined
+                          ? t('recurring.ruleEndBefore', { date: r.endDate })
+                          : t('recurring.ruleNoEnd')}
+                      </div>
+                      <div className="list__sub">
+                        {t('recurring.postingSchedule')}: {ruleIntervalLabel(r)}・
+                        {name(r.creditAccountId)} → {name(recurringDestinationAccountId(r))}
+                        {r.spreadExpenseAccountId !== undefined ? (
+                          <>
+                            ・{t('monthlyCost.monthly')}{' '}
+                            <Money
+                              amount={monthlyAmounts(r.amount, r.everyMonths)[0] ?? 0}
+                              currency={currency}
+                            />
+                          </>
+                        ) : null}
+                      </div>
+                      {ruleRefBroken(r) ? (
+                        <div className="field__error" role="alert">
+                          {t('recurring.refBroken')}
+                        </div>
                       ) : null}
                     </div>
-                    {ruleRefBroken(r) ? (
-                      <div className="field__error" role="alert">
-                        {t('recurring.refBroken')}
-                      </div>
-                    ) : null}
-                  </div>
-                  <span className="list__amount">
-                    <Money amount={r.amount} currency={currency} />
-                  </span>
-                  <div className="row-actions">
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => setRuleSheet({ existing: r })}
-                      aria-label={`${t('common.edit')}: ${r.name}`}
-                      data-ui={UI.allocations.recurringEdit}
-                    >
-                      <Icon name="edit" size={18} />
-                    </button>
-                    {canEndToday ? (
+                    <span className="list__amount">
+                      <Money amount={r.amount} currency={currency} />
+                    </span>
+                    <div className="row-actions">
+                      {canEndToday ? (
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          disabled={pendingRuleActionId !== null}
+                          onClick={rowActionClick(() => setEndingRule(r))}
+                          aria-label={`${t('recurring.end')}: ${r.name}`}
+                          data-ui={UI.allocations.recurringEnd}
+                        >
+                          <Icon name="archive" size={18} />
+                        </button>
+                      ) : null}
+                      {canRestartToday ? (
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          disabled={pendingRuleActionId !== null}
+                          onClick={rowActionClick(() => setPendingRuleRestart(r))}
+                          aria-label={`${t('recurring.restart')}: ${r.name}`}
+                          data-ui={UI.allocations.recurringRestart}
+                        >
+                          <Icon name="restore" size={18} />
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="icon-btn"
-                        disabled={pendingRuleActionId !== null}
-                        onClick={() => endRecurringRule(r).catch(() => undefined)}
-                        aria-label={`${t('recurring.end')}: ${r.name}`}
-                        data-ui={UI.allocations.recurringEnd}
+                        onClick={rowActionClick(() => setPendingRuleDelete(r))}
+                        aria-label={`${t('common.delete')}: ${r.name}`}
+                        data-ui={UI.allocations.recurringDelete}
                       >
-                        <Icon name="archive" size={18} />
+                        <Icon name="delete" size={18} />
                       </button>
-                    ) : null}
-                    {canRestartToday ? (
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        disabled={pendingRuleActionId !== null}
-                        onClick={() => restartRecurringRule(r).catch(() => undefined)}
-                        aria-label={`${t('recurring.restart')}: ${r.name}`}
-                        data-ui={UI.allocations.recurringRestart}
-                      >
-                        <Icon name="restore" size={18} />
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => setPendingRuleDelete(r)}
-                      aria-label={`${t('common.delete')}: ${r.name}`}
-                      data-ui={UI.allocations.recurringDelete}
-                    >
-                      <Icon name="delete" size={18} />
-                    </button>
+                    </div>
                   </div>
                 </li>
               );
@@ -498,16 +557,36 @@ export function Allocations({
             {t('monthlyCost.sectionTitle')}
           </p>
           <div className="stack" data-ui={UI.allocations.list}>
-            {items.map((m) => {
-              const spreadTotal = spreadTotalOf(m);
+            {items.map(({ m, fromRule }) => {
+              // 導出カードに回収は存在しない（未起票周期）ので spreadTotal = amount。
+              const spreadTotal = fromRule !== undefined ? m.amount : spreadTotalOf(m);
+              // ルール由来 item（保存済み ccr- / 未起票の導出）はどちらも読み取り専用
+              // （作者決定 2026-08-15）。行アクションは出さず、タップは由来ルールへ
+              // ＝実 item と導出 item の見た目・操作が完全に同型になる。判定は単一正本。
+              const originRule = fromRule ?? rulesById.get(generatedItemRuleId(m) ?? '');
+              const fromRuleItem = fromRule !== undefined || generatedItemRuleId(m) !== undefined;
+              // 由来ルールが引けない ccr-（カスケード削除の取りこぼし等の破損データ）は
+              // 開く先が無い＝押せる見た目にしない（誤って編集シートへ流さない・fail-closed）。
+              const open =
+                originRule !== undefined
+                  ? () => setRuleSheet({ existing: originRule })
+                  : fromRuleItem
+                    ? undefined
+                    : () => setItemSheet({ existing: m });
               const ending = isEndingSoon(m, asOf);
               const monthly = representativeMonthlyAmount(m, spreadTotal);
               return (
+                // カードそのものをタップ = 編集。手で登録した item は継続コスト資産シート、
+                // ルール由来（保存済み・未起票を問わず）は由来のルールのシートを開く。
                 <div
                   className={`card card--pad${ending ? ' card--ending' : ''}`}
                   key={m.id}
                   data-ui={UI.allocations.item}
                   data-ending={ending ? 'true' : undefined}
+                  data-derived-rule={fromRule?.id}
+                  {...(open !== undefined
+                    ? cardTapProps(`${t('common.edit')}: ${originRule?.name ?? m.name}`, open)
+                    : {})}
                 >
                   <div
                     className="list__title"
@@ -522,42 +601,37 @@ export function Allocations({
                       {m.name}
                       {/* くり返し記帳が自動生成した item はルールと同名で並ぶ（buildRuleItem が
                           name: rule.name）ため、検索で「登録した覚えのない項目」に見えないよう
-                          由来を名乗る。判定はルール由来 ID の単一正本 parseRuleItemId。 */}
-                      {parseRuleItemId(m.id) !== undefined ? (
+                          由来を名乗る。判定はルール由来の単一正本 generatedItemRuleId。 */}
+                      {fromRuleItem ? (
                         <>
                           {' '}
                           <span className="tag tag--teal">{t('monthlyCost.fromRule')}</span>
                         </>
                       ) : null}
                     </span>
-                    <span className="row-actions">
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        onClick={() => setArchiving(m)}
-                        aria-label={`${t('ccItem.archiveTitle')}: ${m.name}`}
-                        data-ui={UI.allocations.archive}
-                      >
-                        <Icon name="archive" size={18} />
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        onClick={() => setItemSheet({ existing: m })}
-                        aria-label={`${t('common.edit')}: ${m.name}`}
-                        data-ui={UI.allocations.edit}
-                      >
-                        <Icon name="edit" size={18} />
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        onClick={() => setPendingDelete(m)}
-                        aria-label={`${t('common.delete')}: ${m.name}`}
-                      >
-                        <Icon name="delete" size={18} />
-                      </button>
-                    </span>
+                    {fromRuleItem /* ルール由来 item は読み取り専用: アーカイブも削除も出さない
+                         （導出カードは実在しないので元から対象が無い。保存済み ccr- も
+                         「生まれたものへの個別操作は不可」＝調整は由来ルール側で行う）。 */ ? null : (
+                      <span className="row-actions">
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          onClick={rowActionClick(() => setArchiving(m))}
+                          aria-label={`${t('ccItem.archiveTitle')}: ${m.name}`}
+                          data-ui={UI.allocations.archive}
+                        >
+                          <Icon name="archive" size={18} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          onClick={rowActionClick(() => setPendingDelete(m))}
+                          aria-label={`${t('common.delete')}: ${m.name}`}
+                        >
+                          <Icon name="delete" size={18} />
+                        </button>
+                      </span>
+                    )}
                   </div>
                   <div className="kv">
                     <span className="muted">{t('monthlyCost.amount')}</span>
@@ -579,10 +653,6 @@ export function Allocations({
                     <span className="muted">{t('ccItem.period')}</span>
                     <span>
                       {m.startDate} 〜 {m.endDate ?? '—'}
-                      {/* 費用化の開始日を遅らせた item だけ、月割りの起点を追加表示（監査 P2-3）。 */}
-                      {m.allocationStartDate !== undefined
-                        ? `（${t('ccItem.allocationFrom', { date: m.allocationStartDate })}）`
-                        : ''}
                     </span>
                   </div>
                   <div className="kv">
@@ -638,7 +708,7 @@ export function Allocations({
       ) : null}
 
       {archiving ? (
-        <MonthlyCostArchiveDialog
+        <MonthlyCostArchiveSheet
           item={archiving}
           spreadTotal={spreadTotalOf(archiving)}
           onClose={() => setArchiving(null)}
@@ -663,10 +733,38 @@ export function Allocations({
         />
       ) : null}
 
+      {endingRule ? (
+        <RecurringRuleEndSheet rule={endingRule} onClose={() => setEndingRule(null)} />
+      ) : null}
+
+      {pendingRuleRestart ? (
+        <ConfirmDialog
+          title={t('recurring.restartConfirmTitle')}
+          body={t('recurring.restartConfirmBody')}
+          confirmLabel={t('recurring.restart')}
+          dataUi={UI.allocations.recurringRestartConfirm}
+          onCancel={() => setPendingRuleRestart(null)}
+          onConfirm={async () => {
+            const r = pendingRuleRestart;
+            setPendingRuleRestart(null);
+            await restartRecurringRule(r).catch(() => undefined);
+          }}
+        />
+      ) : null}
+
       {pendingRuleDelete ? (
         <ConfirmDialog
           title={t('recurring.deleteConfirmTitle')}
-          body={t('recurring.deleteConfirmBody', { name: pendingRuleDelete.name })}
+          /* カスケード削除（作者決定 2026-08-15）: 積み木の下（ルール）が消えれば上（起票された
+             仕訳・持ち物）も消える。何回ぶん消えるかを数で名乗る（0 件なら別文言）。 */
+          body={
+            pendingRuleDeletePostings > 0
+              ? t('recurring.deleteConfirmBody', {
+                  name: pendingRuleDelete.name,
+                  count: pendingRuleDeletePostings,
+                })
+              : t('recurring.deleteConfirmNoPostingsBody', { name: pendingRuleDelete.name })
+          }
           confirmLabel={t('common.delete')}
           danger
           onCancel={() => setPendingRuleDelete(null)}
@@ -761,7 +859,7 @@ function resolveRuleDayOfMonth(firstPostingDate: string, existing?: RecurringRul
 /**
  * 定期ルールの追加・編集シート。周期（everyMonths）付き。
  * 独自の種別 UI は持たず、簿記編集と同じく貸方・借方を直接指定する。
- * 行き先が費用・収入（差引形）科目なら保存境界が自動で継続コスト台帳経由へ正規化する。
+ * 継続コスト台帳を経由して月割りするかは明示トグル（行き先 role は既定の提案だけに使う）。
  */
 function RecurringRuleSheet({
   existing,
@@ -805,6 +903,23 @@ function RecurringRuleSheet({
       accounts: group.accounts.filter((account) => account.id !== creditAccountId),
     }))
     .filter((group) => group.accounts.length > 0);
+
+  const roleOf = (accountId: string): AccountRole | undefined =>
+    accounts.find((account) => account.id === accountId)?.role;
+  /**
+   * 月割りトグルの既定。編集で行き先を変えていない間は保存済みの意図（spread の有無）を、
+   * 新規と行き先変更後は行き先 role の既定（費用・収入 = ON）を提案する。
+   */
+  const defaultSpreadFor = (destinationId: string): boolean =>
+    existing !== undefined && destinationId === existingDebit
+      ? existing.spreadExpenseAccountId !== undefined
+      : isRecurringSpreadDestinationRole(roleOf(destinationId));
+  // 一度でもトグルを触ったら固定する（それまでは行き先の変更に追従する）。
+  const [spreadTouched, setSpreadTouched] = useState(false);
+  const [spreadChoice, setSpreadChoice] = useState(() =>
+    defaultSpreadFor(existingDebit ?? firstToId),
+  );
+  const spreadViaLedger = spreadTouched ? spreadChoice : defaultSpreadFor(debitAccountId);
 
   const [name, setName] = useState(existing?.name ?? '');
   const fractionDigits = useMoneyDigits();
@@ -953,9 +1068,10 @@ function RecurringRuleSheet({
         };
         if (endDate !== '') next.endDate = endDate;
         else delete next.endDate;
-        // 保存境界が選択した行き先 role から新形式へ正規化する。既存 spread を残すと
-        // 変更前の行き先が優先されるため、画面からは常に論理的な借方だけを渡す。
-        delete next.spreadExpenseAccountId;
+        // 月割りトグルの状態をそのまま保存形へ写す（debitAccountId は論理的な行き先のまま
+        // 渡し、台帳への正規化は保存境界が行う）。
+        if (spreadViaLedger) next.spreadExpenseAccountId = debitAccountId;
+        else delete next.spreadExpenseAccountId;
         if (amount !== existing.amount) {
           setPendingAmountChange({ rule: next, effectiveDate: todayLocal() });
           setAmountChangeError(undefined);
@@ -972,6 +1088,7 @@ function RecurringRuleSheet({
           dayOfMonth,
           everyMonths,
           debitAccountId,
+          spreadViaLedger,
           creditAccountId,
           startMonth,
           startDate,
@@ -1078,12 +1195,8 @@ function RecurringRuleSheet({
               <AccountPicker
                 flat
                 label={
-                  // 費用・収入（差引形）行きは台帳経由の月割りになるため「計上先」と表示する。
-                  isRecurringSpreadDestinationRole(
-                    accounts.find((account) => account.id === debitAccountId)?.role,
-                  )
-                    ? t('monthlyCost.expenseCategory')
-                    : t('recurring.to.manual')
+                  // 台帳経由で月割りするときは行き先の意味が「計上先」になる。
+                  spreadViaLedger ? t('monthlyCost.expenseCategory') : t('recurring.to.manual')
                 }
                 required
                 value={debitAccountId}
@@ -1094,6 +1207,28 @@ function RecurringRuleSheet({
               />
             }
           />
+          <div className="field">
+            <label
+              style={{
+                display: 'inline-flex',
+                gap: 8,
+                alignItems: 'center',
+                minHeight: 'var(--tap)',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={spreadViaLedger}
+                onChange={(e) => {
+                  setSpreadTouched(true);
+                  setSpreadChoice(e.target.checked);
+                }}
+                data-ui={UI.allocations.recurringSpreadToggle}
+              />
+              {t('recurring.spreadToggle')}
+            </label>
+            <p className="field__hint">{t('recurring.spreadToggleHint')}</p>
+          </div>
           <TextInput
             label={t('recurring.intervalMonths')}
             required
@@ -1132,6 +1267,20 @@ function RecurringRuleSheet({
             hint={t('recurring.ruleEndDateHint')}
             dataUi={UI.allocations.recurringEndDate}
           />
+          {/* iOS の date input には値を空へ戻す手段が無い（継続コスト編集シートと同じ理由の明示ボタン）。 */}
+          {endDate !== '' ? (
+            <div className="row-actions">
+              <button
+                type="button"
+                className="btn btn--ghost"
+                style={{ minHeight: 'var(--tap)' }}
+                onClick={() => setEndDate('')}
+                data-ui={UI.allocations.recurringEndDateClear}
+              >
+                {t('ccItem.endDateClear')}
+              </button>
+            </div>
+          ) : null}
         </div>
       </Modal>
       {pendingAmountChange && existing ? (
@@ -1268,10 +1417,6 @@ function ContinuousCostItemSheet({
   const amountDirty = amountText !== initialAmountText;
   const [startDate, setStartDate] = useState(existing?.startDate ?? todayLocal());
   const [endDate, setEndDate] = useState(existing?.endDate ?? '');
-  // 費用化の開始日（任意）。空 = 購入日から月割り（既定挙動）。
-  const [allocationStartDate, setAllocationStartDate] = useState(
-    existing?.allocationStartDate ?? '',
-  );
   // 費用の行き先の既定値は「前回選んだもの」（連続登録の切り替え手間を減らす）。
   const [expenseAccountId, setExpenseAccountId] = useState(() => {
     if (existing) return existing.expenseAccountId;
@@ -1282,10 +1427,6 @@ function ContinuousCostItemSheet({
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  // 期間クイックボタンの起点 = 費用化の開始日（domain の allocationStartOf と同じ既定:
-  // 空 = 購入日）。費用化開始を遅らせた item の「1年」は費用化開始から 1 年になる（監査 P2-1）。
-  const quickSpanFrom = allocationStartDate.trim() !== '' ? allocationStartDate.trim() : startDate;
-
   // 過去から再計算される項目の変更予告（破壊的操作の予告なので削らない）。
   const effectiveAmount =
     existing !== undefined && !amountDirty
@@ -1295,7 +1436,6 @@ function ContinuousCostItemSheet({
     existing !== undefined &&
     (effectiveAmount !== existing.amount ||
       endDate !== (existing.endDate ?? '') ||
-      allocationStartDate !== (existing.allocationStartDate ?? '') ||
       expenseAccountId !== existing.expenseAccountId);
 
   async function submit() {
@@ -1318,8 +1458,6 @@ function ContinuousCostItemSheet({
         };
         if (endDate.trim() === '') delete next.endDate;
         else next.endDate = endDate.trim();
-        if (allocationStartDate.trim() === '') delete next.allocationStartDate;
-        else next.allocationStartDate = allocationStartDate.trim();
         await saveMonthlyCost(next);
       } else {
         await createContinuousCost({
@@ -1327,9 +1465,6 @@ function ContinuousCostItemSheet({
           amount,
           startDate,
           ...(endDate.trim() !== '' ? { endDate: endDate.trim() } : {}),
-          ...(allocationStartDate.trim() !== ''
-            ? { allocationStartDate: allocationStartDate.trim() }
-            : {}),
           expenseAccountId,
         });
       }
@@ -1426,15 +1561,6 @@ function ContinuousCostItemSheet({
             dataUi={UI.allocations.editStartDate}
           />
         )}
-        {/* 費用化の開始日（任意・既定 = 購入日）。購入日〜この日の間は台帳に価値が置かれたまま。 */}
-        <TextInput
-          label={t('ccItem.allocationStartDate')}
-          type="date"
-          value={allocationStartDate}
-          onChange={setAllocationStartDate}
-          dataUi={UI.allocations.editAllocationStartDate}
-        />
-        <p className="field__hint">{t('ccItem.allocationStartHint')}</p>
         <TextInput
           label={t('ccItem.endDate')}
           type="date"
@@ -1449,11 +1575,24 @@ function ContinuousCostItemSheet({
               type="button"
               className="btn btn--ghost"
               style={{ minHeight: 'var(--tap)' }}
-              onClick={() => setEndDate(quickSpanEndDate(quickSpanFrom, years))}
+              onClick={() => setEndDate(quickSpanEndDate(startDate, years))}
             >
               {t('ccItem.quickSpan', { years })}
             </button>
           ))}
+          {/* 空で保存 = 終了日の解除は元から許可されている（保存側の仕様）。
+              ただし iOS の date input には値を空へ戻す手段が無いため、明示ボタンで到達させる。 */}
+          {endDate !== '' ? (
+            <button
+              type="button"
+              className="btn btn--ghost"
+              style={{ minHeight: 'var(--tap)' }}
+              onClick={() => setEndDate('')}
+              data-ui={UI.allocations.editEndDateClear}
+            >
+              {t('ccItem.endDateClear')}
+            </button>
+          ) : null}
         </div>
         <SelectInput
           label={t('monthlyCost.expenseCategory')}
@@ -1468,12 +1607,100 @@ function ContinuousCostItemSheet({
 }
 
 /**
- * アーカイブ = 終了日の設定。残存価値が残るなら「振替先を選ぶ」でホームの振替と同じシートを
- * 開き、回収の振替（借方 振替先 / 貸方 継続コスト台帳）を同一トランザクションで保存する。
- * 振替せずアーカイブ = 残存価値は全額その月までの費用になる（捨てた・使い切った）。
- * 終了済みの行にも同じボタンを出す（終了日を先へ動かせば一覧に戻る＝復元も同じ 1 操作）。
+ * ルールの終了 = 明示的に終了点を打つ（継続コスト item のアーカイブと同じ型の小シート）。
+ * 既定 = 「今日で終了する」ときに置ける最小の排他的終了日（earliestRecurringRuleEndDate）。
+ * それ未満を入れても保存境界が拒否するので、画面では入力を許して理由をそのまま見せる
+ * （fail-closed の判定を UI へ二重実装しない）。終了点は含まない端点なので、一覧の
+ * 「{date} より前まで」と同じ意味を hint で言い直す。
  */
-function MonthlyCostArchiveDialog({
+function RecurringRuleEndSheet({ rule, onClose }: { rule: RecurringRule; onClose: () => void }) {
+  const { ledger, saveRecurringRule } = useLedger();
+  const [endDate, setEndDate] = useState(() =>
+    earliestRecurringRuleEndDate(rule, ledger?.journalEntries ?? [], todayLocal()),
+  );
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+
+  async function submit(): Promise<void> {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await saveRecurringRule({ ...rule, endDate, updatedAt: nowIso() });
+      onClose();
+    } catch (e) {
+      setError(errorText(e));
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={t('recurring.endSheetTitle')}
+      onClose={onClose}
+      variant="dialog"
+      dataUi={UI.allocations.recurringEndSheet}
+      footer={
+        <>
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={submit}
+            disabled={submitting || endDate === ''}
+            data-ui={UI.allocations.recurringEndSheetConfirm}
+          >
+            {t('recurring.endSheetConfirm')}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        {error ? (
+          <div className="field__error" role="alert">
+            <Icon name="alert" size={14} />
+            {error}
+          </div>
+        ) : null}
+        <div className="list__title">{rule.name}</div>
+        <TextInput
+          label={t('recurring.endSheetDate')}
+          type="date"
+          required
+          value={endDate}
+          onChange={setEndDate}
+          hint={t('recurring.endSheetBody')}
+          dataUi={UI.allocations.recurringEndSheetDate}
+        />
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * アーカイブシート = 終了日と残存価値の始末を **1 枚で決める**（作者決定 2026-08-15）。
+ * 旧「終了日ダイアログ →（残存価値が残れば）振替シート」の 2 段構えは撤去した。
+ * 状態を変える操作だが、**シートそのものが確認面**なので前置きの確認ダイアログは置かない。
+ *
+ *  1. **終了日**: 既定 = 今日。終了済みの行だけ現在の終了日（先へ動かせば一覧へ戻る = 復元）。
+ *  2. **回収額**: 既定 = その終了日時点の残存価値。編集可・0（回収なし）も超過回収も許す。
+ *     終了日を動かすと、まだ手で直していない限り既定が追従する（判定はフラグでなく値）。
+ *     0 のときは回収先ピッカーを出さない（作る仕訳が無いので選ばせない）。
+ *  3. **残り（残存価値 − 回収額）の扱い**:
+ *     - 「期間に割り振る」（既定・現行挙動）= 残りは spreadTotal に残り、全期間へ配り直される。
+ *     - 「終了日に全額費用にする」= item の費用の行き先への**第 2 の回収の振替**を足す。
+ *       割り振る総額が「終了日までに消費済みの額」へ落ちるので、過去の刻みは元の額のまま
+ *       残りが終了日に 1 本だけ立つ（monthlyCost.ts の数学もフィールドも増やさない）。
+ *     残りが 0 以下（ちょうど回収・超過回収）なら選ぶ意味が無いので無効化する。
+ *
+ * 保存は終了日 + 回収の振替（0〜2 本）を同一トランザクションで（archiveMonthlyCost）。
+ */
+function MonthlyCostArchiveSheet({
   item,
   spreadTotal,
   onClose,
@@ -1483,124 +1710,187 @@ function MonthlyCostArchiveDialog({
   onClose: () => void;
 }) {
   const { ledger, archiveMonthlyCost } = useLedger();
+  const accounts = ledger?.accounts ?? [];
   const currency = ledger?.settings.currency ?? '';
+  const displayDigits = useMoneyDigits();
   // 既定 = 今日。終了済みの行だけ現在の endDate（先へ動かせば一覧へ戻る = 復元も同じ 1 操作）。
   const [endDate, setEndDate] = useState(() =>
     isArchived(item, todayLocal()) && item.endDate !== undefined ? item.endDate : todayLocal(),
   );
-  const [transferOpen, setTransferOpen] = useState(false);
+  const [recoveryAccountId, setRecoveryAccountId] = useState('');
+  const [remainderMode, setRemainderMode] = useState<'spread' | 'expense'>('spread');
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
 
+  const dateValid = isValidIsoDate(endDate);
   // 変更前の item の割り振りで「その日までに費用になっていない残り」。
   // remainingValue が回収済みを織り込んだ単一正本（spreadTotal − 月割り済み）なので、
   // ここで回収額をもう一度引かない（一覧と同じ値になる・監査 P2-1）。
-  const remaining = isValidIsoDate(endDate)
-    ? remainingValue(item, endDate, spreadTotal)
-    : remainingValue(item, todayLocal(), spreadTotal);
+  const remaining = remainingValue(item, dateValid ? endDate : todayLocal(), spreadTotal);
+  // 表示桁 0 の設定でも、この欄だけは端数を隠さない（見えている値 = 保存される値）。
+  const digits = Math.max(displayDigits, exactDigitsFor(remaining)) as typeof displayDigits;
 
-  async function archiveWithoutTransfer() {
-    if (submitting) return;
+  // 回収額の既定は終了日に追従する。過去に超過回収していて残存価値が負なら既定 0
+  //（マイナスは入力欄に載せない。超過をさらに増やしたいなら手で入れる）。
+  const defaultRecoveryText = formatMinorForInput(Math.max(remaining, 0), digits);
+  const [recoveryText, setRecoveryText] = useState(defaultRecoveryText);
+  const autoRecoveryRef = useRef(defaultRecoveryText);
+  useEffect(() => {
+    if (defaultRecoveryText === autoRecoveryRef.current) return;
+    const previousAuto = autoRecoveryRef.current;
+    autoRecoveryRef.current = defaultRecoveryText;
+    // 既定のままなら追従し、手で直してあればその値を尊重する（判定はフラグではなく値）。
+    setRecoveryText((current) => (current === previousAuto ? defaultRecoveryText : current));
+  }, [defaultRecoveryText]);
+
+  const recoveryAmount = parseAmountToMinor(recoveryText) ?? 0;
+  // 残り = 残存価値 − 回収額。負（超過回収）なら従来どおり spreadTotal が負になり、
+  // 過去にわたる費用減として按分される＝「終了日に全額」は選べない。
+  const rest = remaining - recoveryAmount;
+  const remainderChoosable = dateValid && rest > 0;
+  const toExpense = remainderChoosable && remainderMode === 'expense';
+  const expenseAccountName =
+    accounts.find((a) => a.id === item.expenseAccountId)?.name ?? item.expenseAccountId;
+  const recoveryGroups = groupedRecoveryDestinationAccounts(
+    accounts,
+    recoveryAccountId,
+    dateValid ? endDate : undefined,
+  );
+  const canSave = dateValid && (recoveryAmount === 0 || recoveryAccountId !== '');
+
+  async function submit(): Promise<void> {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setError(undefined);
     try {
-      await archiveMonthlyCost({ id: item.id, endDate });
+      const recoveries: { destinationAccountId: string; amount: number }[] = [];
+      if (recoveryAmount > 0) {
+        recoveries.push({ destinationAccountId: recoveryAccountId, amount: recoveryAmount });
+      }
+      // 第 2 の回収の振替（借方 = item の費用の行き先 / 貸方 = 継続コスト台帳）。
+      if (toExpense) {
+        recoveries.push({ destinationAccountId: item.expenseAccountId, amount: rest });
+      }
+      await archiveMonthlyCost({
+        id: item.id,
+        endDate,
+        ...(recoveries.length > 0 ? { recoveries } : {}),
+      });
       onClose();
     } catch (e) {
       setError(errorText(e));
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
 
   return (
-    <>
-      <Modal
-        title={t('ccItem.archiveTitle')}
-        onClose={onClose}
-        variant="dialog"
-        dataUi={UI.allocations.archiveDialog}
-        footer={
-          <>
-            <button type="button" className="btn btn--ghost" onClick={onClose}>
-              {t('common.cancel')}
-            </button>
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={archiveWithoutTransfer}
-              disabled={submitting || endDate === ''}
-              data-ui={UI.allocations.archiveConfirm}
-            >
-              {t('ccItem.archiveTitle')}
-            </button>
-          </>
-        }
-      >
-        <div className="stack">
-          {error ? (
-            <div className="field__error" role="alert">
-              <Icon name="alert" size={14} />
-              {error}
-            </div>
-          ) : null}
-          <div className="list__title">{item.name}</div>
-          <TextInput
-            label={t('ccItem.endDate')}
-            type="date"
-            required
-            value={endDate}
-            onChange={setEndDate}
-            dataUi={UI.allocations.archiveDate}
-          />
-          <div className="kv">
-            <span className="muted">{t('ccItem.remainingValue')}</span>
-            <span>
-              <Money amount={remaining} currency={currency} />
-            </span>
+    <Modal
+      title={t('ccItem.archiveTitle')}
+      onClose={onClose}
+      variant="dialog"
+      dataUi={UI.allocations.archiveDialog}
+      footer={
+        <>
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={submit}
+            disabled={submitting || !canSave}
+            data-ui={UI.allocations.archiveConfirm}
+          >
+            {t('ccItem.archiveConfirm')}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        {error ? (
+          <div className="field__error" role="alert">
+            <Icon name="alert" size={14} />
+            {error}
           </div>
-          {remaining > 0 ? (
-            <button
-              type="button"
-              className="btn btn--block"
-              onClick={() => setTransferOpen(true)}
-              disabled={endDate === ''}
-              data-ui={UI.allocations.archiveTransfer}
-            >
-              <Icon name="transfer" size={16} />
-              {t('ccItem.transferTarget')}
-            </button>
-          ) : null}
-        </div>
-      </Modal>
-
-      {transferOpen ? (
-        <EntrySheet
-          init={{
-            kind: 'transfer-fixed',
-            fixed: {
-              side: 'credit',
-              accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
-              counterpartRoles: [...RECURRING_POSTABLE_ROLES],
-              date: endDate,
-              lockDate: true,
-              amount: remaining,
-              description: item.name,
-              onSave: async (input) => {
-                await archiveMonthlyCost({
-                  id: item.id,
-                  endDate,
-                  recovery: {
-                    destinationAccountId: input.debitAccountId,
-                    amount: input.amount,
-                  },
-                });
-                onClose();
-              },
-            },
-          }}
-          onClose={() => setTransferOpen(false)}
+        ) : null}
+        <div className="list__title">{item.name}</div>
+        <TextInput
+          label={t('ccItem.endDate')}
+          type="date"
+          required
+          value={endDate}
+          onChange={setEndDate}
+          hint={t('ccItem.archiveDateHint')}
+          dataUi={UI.allocations.archiveDate}
         />
-      ) : null}
-    </>
+        <div className="kv">
+          <span className="muted">{t('ccItem.remainingValue')}</span>
+          <span>{moneyText(remaining, currency, digits)}</span>
+        </div>
+        <TextInput
+          label={t('ccItem.archiveRecovery')}
+          inputMode={digits === 0 ? 'numeric' : 'decimal'}
+          value={recoveryText}
+          onChange={(v) => setRecoveryText(sanitizeAmountText(v, digits, recoveryText))}
+          hint={t('ccItem.archiveRecoveryHint')}
+          dataUi={UI.allocations.archiveRecoveryAmount}
+        />
+        {/* 回収額 0 = 作る仕訳が無い。回収先は出さない（選ばせて捨てない）。 */}
+        {recoveryAmount > 0 ? (
+          <AccountPicker
+            label={t('ccItem.archiveRecoveryTo')}
+            required
+            value={recoveryAccountId}
+            onChange={setRecoveryAccountId}
+            groups={recoveryGroups}
+            dataUi={UI.allocations.archiveRecoveryTo}
+          />
+        ) : null}
+        <fieldset className="field picker" data-ui={UI.allocations.archiveRemainder}>
+          <legend className="field__label">
+            {t('ccItem.archiveRemainder', { amount: moneyText(rest, currency, digits) })}
+          </legend>
+          <span className="field__hint">
+            {remainderChoosable
+              ? remainderMode === 'expense'
+                ? t('ccItem.archiveRemainderExpenseHint', { account: expenseAccountName })
+                : t('ccItem.archiveRemainderSpreadHint')
+              : t('ccItem.archiveRemainderNoneHint')}
+          </span>
+          <div className="picker__chips">
+            {(
+              [
+                ['spread', 'ccItem.archiveRemainderSpread', UI.allocations.archiveRemainderSpread],
+                [
+                  'expense',
+                  'ccItem.archiveRemainderExpense',
+                  UI.allocations.archiveRemainderExpense,
+                ],
+              ] as const
+            ).map(([mode, labelKey, dataUi]) => (
+              <label className="chip" key={mode}>
+                <input
+                  type="radio"
+                  className="sr-only"
+                  name="cc-archive-remainder"
+                  value={mode}
+                  checked={remainderChoosable ? remainderMode === mode : mode === 'spread'}
+                  disabled={!remainderChoosable}
+                  onChange={() => setRemainderMode(mode)}
+                  data-ui={dataUi}
+                />
+                <span className="chip__check" aria-hidden="true">
+                  <Icon name="check" size={14} />
+                </span>
+                <span className="chip__text">{t(labelKey)}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      </div>
+    </Modal>
   );
 }

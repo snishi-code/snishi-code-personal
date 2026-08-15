@@ -3,6 +3,7 @@
  */
 import { useMemo } from 'react';
 import type { Account, JournalEntry } from '../domain/types';
+import { representativeEntryAmount } from '../domain/accounting';
 import { Money } from './money';
 import { t } from '../i18n';
 
@@ -24,7 +25,8 @@ export function EntryListItem({
   const map = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
   const debit = entry.lines.find((l) => l.side === 'debit');
   const credit = entry.lines.find((l) => l.side === 'credit');
-  const amount = debit?.amount ?? credit?.amount ?? 0;
+  // 仕訳の代表額は domain が正本（式を UI で書き直さない）。render から呼ぶので投げない方。
+  const amount = representativeEntryAmount(entry);
   // 「お金の流れ」は全画面で 源泉(credit) → 行き先(debit) に統一する。
   const flow = `${accountName(map, credit?.accountId ?? '')} → ${accountName(
     map,

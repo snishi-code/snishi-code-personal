@@ -3,9 +3,11 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { createRecurringRule, loadLedger } from '../src/data/repository';
+import { addMonths } from '../src/domain/allocation';
 import { clampDayToMonth } from '../src/domain/recurring';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { UI } from '../src/ui-contract';
+import { firstRuleRow } from './tapTargets';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { Allocations } from '../src/ui/screens/Allocations';
 import { todayLocal } from '../src/util/time';
@@ -104,8 +106,8 @@ describe('定期ルールの初回起票日', () => {
     });
 
     render(<View />);
-    await screen.findByText('月末ルール');
-    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)!);
+    await screen.findAllByText('月末ルール');
+    fireEvent.click(firstRuleRow()!);
 
     expect(
       document.querySelector(`[data-ui="${UI.allocations.recurringFirstPostingDate}"]`),
@@ -126,8 +128,8 @@ describe('定期ルールの初回起票日', () => {
     });
 
     render(<View />);
-    await screen.findByText('月末ルール（据え置き）');
-    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)!);
+    await screen.findAllByText('月末ルール（据え置き）');
+    fireEvent.click(firstRuleRow()!);
     // 日付欄は 2031-02-28（31 を 2 月へクランプした表示）。日付は触らず金額だけ変えて保存する
     // （金額の変化で「保存が実際に走った」ことを確かめる＝空振りで通らないようにする）。
     fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!, {
@@ -172,8 +174,8 @@ describe('定期ルールの初回起票日', () => {
     });
 
     render(<View />);
-    await screen.findByText('月末ルール（変更）');
-    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringEdit}"]`)!);
+    await screen.findAllByText('月末ルール（変更）');
+    fireEvent.click(firstRuleRow()!);
     fireEvent.change(
       document.querySelector(`[data-ui="${UI.allocations.recurringFirstPostingDate}"]`)!,
       { target: { value: '2031-02-10' } },
@@ -250,7 +252,7 @@ describe('費用行きルール', () => {
     });
   });
 
-  it('周期 1 でも費用を選ぶだけで起票日開始・当月末終了の item が生まれる', async () => {
+  it('周期 1 でも費用を選ぶだけで起票日開始・次回起票日終了の item が生まれる', async () => {
     render(<View />);
     await waitFor(() => {
       expect(document.querySelector(`[data-ui="${UI.allocations.view}"]`)).toBeInTheDocument();
@@ -292,10 +294,14 @@ describe('費用行きルール', () => {
     // 費用行きなので台帳経由（借方 = 台帳・費用の行き先 = 支出カテゴリ）。
     expect(saved).toMatchObject({ debitAccountId: ledgerAccount.id });
     expect(spread?.role).toBe('expense-category');
-    // 起票済みぶんの item は起票日開始・当月末終了で毎月生まれて消える。
+    // 起票済みぶんの item は起票日開始・次回起票日終了で毎月生まれて消える。
+    // 新規ルールの dayOfMonth は初回起票日（= 今日）の日そのもの。
     const today = todayLocal();
+    const dayOfMonth = Number.parseInt(today.slice(8, 10), 10);
+    expect(saved!.dayOfMonth).toBe(dayOfMonth);
     const item = ledger.monthlyCostItems.find((m) => m.id.startsWith(`ccr-${saved!.id}-`));
     expect(item).toMatchObject({ name: '毎月サブスク', amount: 100000, startDate: today });
-    expect(item!.endDate).toBe(clampDayToMonth(today.slice(0, 7), 31));
+    // endDate = 起票月 + everyMonths(1) を dayOfMonth でクランプ = 次回起票日と同日。
+    expect(item!.endDate).toBe(clampDayToMonth(addMonths(today.slice(0, 7), 1), dayOfMonth));
   });
 });

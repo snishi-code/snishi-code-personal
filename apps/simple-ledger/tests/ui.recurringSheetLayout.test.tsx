@@ -1,6 +1,6 @@
 /*
  * 定期ルールシートのレイアウト（実ユーズレビュー 2026-08-12 ②）:
- *  - フィールド順 = 基準日 → 摘要 → 金額 → 貸方→借方（FlowField）→ 周期 → 初回の起票 →
+ *  - フィールド順 = 基準日 → 摘要 → 金額 → 貸方→借方（FlowField）→ 月割りトグル → 周期 → 初回の起票 →
  *    ルールの開始日 → 終了点（作者指定の順）
  *  - 貸方/借方はホームの簿記編集と同じ flat チップ（グループ見出しを出さない・作者決定）
  *  - 「初回の起票」プレビューは保存値と同じ規則で導出し、入力が不正な間は行ごと消える
@@ -77,7 +77,7 @@ function statusText(): string {
 }
 
 describe('定期ルールシートのレイアウト', () => {
-  it('フィールドが作者指定の順に並ぶ（基準日→摘要→金額→貸借→周期→初回起票→開始日→終了点）', async () => {
+  it('フィールドが作者指定の順に並ぶ（基準日→摘要→金額→貸借→月割り→周期→初回起票→開始日→終了点）', async () => {
     const sheet = await openRuleSheet();
     const order = [...sheet.querySelectorAll('[data-ui^="allocations.recurring."]')].map((el) =>
       el.getAttribute('data-ui'),
@@ -89,6 +89,7 @@ describe('定期ルールシートのレイアウト', () => {
       UI.allocations.recurringFlow,
       UI.allocations.recurringFrom,
       UI.allocations.recurringTo,
+      UI.allocations.recurringSpreadToggle,
       UI.allocations.recurringEvery,
       UI.allocations.recurringFirstPosting,
       UI.allocations.recurringFirstPostingStatus,
@@ -131,6 +132,21 @@ describe('定期ルールシートのレイアウト', () => {
     setValue(UI.allocations.recurringEndDate, '2026-07-01');
     expect(previewText()).toBe('');
     expect(statusText()).toBe(t('recurring.firstPostingNone'));
+  });
+
+  it('終了日を「解除」ボタンで空へ戻せる（iOS の date input は空に戻せないため）', async () => {
+    await openRuleSheet();
+    const q = (dataUi: string) => document.querySelector(`[data-ui="${dataUi}"]`);
+    // 値が無い間は解除ボタン自体を出さない。
+    expect(q(UI.allocations.recurringEndDateClear)).toBeNull();
+
+    setValue(UI.allocations.recurringEndDate, '2027-01-31');
+    const clear = q(UI.allocations.recurringEndDateClear);
+    expect(clear).not.toBeNull();
+
+    fireEvent.click(clear!);
+    expect((q(UI.allocations.recurringEndDate) as HTMLInputElement).value).toBe('');
+    expect(q(UI.allocations.recurringEndDateClear)).toBeNull();
   });
 
   it('周期が空の間は視覚行を出さず、status は「ありません」を通知する', async () => {

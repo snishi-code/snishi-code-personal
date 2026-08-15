@@ -68,6 +68,31 @@ describe('journalEntrySchema', () => {
       expect(journalEntrySchema.safeParse({ ...validEntry, date }).success).toBe(false);
     }
   });
+
+  /*
+   * 諸口 groupId は v12 で**予約のみ**（UI・集計は未実装）。検証は形式だけで、
+   * 「同じ groupId が 2 本以上ある」等の相互参照条件は持たせない
+   * （1 本に減ったら普通の仕訳に退化する設計）。
+   */
+  it('groupId は省略可・非空文字列のみ受け入れ、空文字と長すぎる値は拒否する', () => {
+    expect(journalEntrySchema.safeParse(validEntry).success).toBe(true);
+    expect(journalEntrySchema.safeParse({ ...validEntry, groupId: 'grp-1' }).success).toBe(true);
+    expect(journalEntrySchema.safeParse({ ...validEntry, groupId: '' }).success).toBe(false);
+    expect(journalEntrySchema.safeParse({ ...validEntry, groupId: 'g'.repeat(64) }).success).toBe(
+      true,
+    );
+    expect(journalEntrySchema.safeParse({ ...validEntry, groupId: 'g'.repeat(65) }).success).toBe(
+      false,
+    );
+    expect(journalEntrySchema.safeParse({ ...validEntry, groupId: 1 }).success).toBe(false);
+  });
+
+  it('同じ groupId の仕訳が 1 本だけでも適法（グループに件数の不変条件を持たせない）', () => {
+    const solo = { ...validEntry, id: 'solo', groupId: 'grp-solo' };
+    const parsed = journalEntrySchema.safeParse(solo);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.groupId).toBe('grp-solo');
+  });
 });
 
 describe('年月の暦検証', () => {
@@ -652,6 +677,200 @@ describe('残高補正 metadata の package 整合性', () => {
   });
 });
 
+describe('残高補正の対象科目の広さ（全科目化・作者決定 2026-08-15）', () => {
+  const balanceExpense = {
+    id: 'balance-expense',
+    name: '残高調整費',
+    type: 'expense',
+    role: 'system-adjustment',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  const balanceRevenue = {
+    id: 'balance-revenue',
+    name: '残高調整収入',
+    type: 'revenue',
+    role: 'system-adjustment',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+  const account = (over: Record<string, unknown>) => ({
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+    ...over,
+  });
+
+  /** 対象 targetId・相手 counterId・差額 delta（>0 は借方 target）の 2 行補正仕訳。 */
+  const adjustmentEntry = (args: {
+    targetId: string;
+    counterId: string;
+    delta: number;
+    targetSide: 'debit' | 'credit';
+  }) => {
+    const amount = Math.abs(args.delta);
+    const counterSide = args.targetSide === 'debit' ? 'credit' : 'debit';
+    return {
+      id: 'adjustment',
+      date: '2026-06-30',
+      description: '残高補正',
+      kind: 'normal',
+      lines: [
+        { accountId: args.targetId, side: args.targetSide, amount },
+        { accountId: args.counterId, side: counterSide, amount },
+      ],
+      metadata: {
+        inputMode: 'manual',
+        adjustment: {
+          accountId: args.targetId,
+          expectedBalance: 5000,
+          actualBalance: 5000 + args.delta,
+          delta: args.delta,
+          counterpartAccountId: args.counterId,
+        },
+      },
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+  };
+
+  const pkg = (accounts: Record<string, unknown>[], entry: Record<string, unknown>) => ({
+    appId: APP_ID,
+    schemaVersion: SCHEMA_VERSION,
+    ledgerId: 'ledger',
+    exportedAt: '2026-06-01T00:00:00.000Z',
+    deviceId: 'd',
+    revision: 0,
+    accounts,
+    journalEntries: [entry],
+    tags: [],
+    monthlyCostItems: [],
+    recurringRules: [],
+    settings: { ledgerName: '家計簿', currency: 'JPY', displayFractionDigits: 0 },
+  });
+
+  it('費用が対象: 実累計が多い(delta>0)なら 借方 費用 / 貸方 残高調整収入 が valid', () => {
+    const fixed = account({
+      id: 'fixed',
+      name: '固定費',
+      type: 'expense',
+      role: 'expense-category',
+    });
+    // 借方正規なので資産と同じ向き。逆向き（貸方 費用）は拒否される。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg(
+          [fixed, balanceRevenue],
+          adjustmentEntry({
+            targetId: 'fixed',
+            counterId: balanceRevenue.id,
+            delta: 700,
+            targetSide: 'debit',
+          }),
+        ),
+      ).success,
+    ).toBe(true);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg(
+          [fixed, balanceRevenue],
+          adjustmentEntry({
+            targetId: 'fixed',
+            counterId: balanceRevenue.id,
+            delta: 700,
+            targetSide: 'credit',
+          }),
+        ),
+      ).success,
+    ).toBe(false);
+    // 相手 type も正規方向で決まる（delta>0 の費用に調整費を当てるのは不整合）。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg(
+          [fixed, balanceExpense],
+          adjustmentEntry({
+            targetId: 'fixed',
+            counterId: balanceExpense.id,
+            delta: 700,
+            targetSide: 'debit',
+          }),
+        ),
+      ).success,
+    ).toBe(false);
+  });
+
+  it('収入が対象: 実累計が多い(delta>0)なら 貸方 収入 / 借方 残高調整費 が valid（負債と同向）', () => {
+    const salary = account({
+      id: 'salary',
+      name: '給与',
+      type: 'revenue',
+      role: 'income-category',
+    });
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg(
+          [salary, balanceExpense],
+          adjustmentEntry({
+            targetId: 'salary',
+            counterId: balanceExpense.id,
+            delta: 700,
+            targetSide: 'credit',
+          }),
+        ),
+      ).success,
+    ).toBe(true);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg(
+          [salary, balanceExpense],
+          adjustmentEntry({
+            targetId: 'salary',
+            counterId: balanceExpense.id,
+            delta: 700,
+            targetSide: 'debit',
+          }),
+        ),
+      ).success,
+    ).toBe(false);
+  });
+
+  it('equity（初期残高）が対象の補正は invalid', () => {
+    const capital = account({ id: 'capital', name: '初期残高', type: 'equity', role: 'equity' });
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg(
+          [capital, balanceRevenue],
+          adjustmentEntry({
+            targetId: 'capital',
+            counterId: balanceRevenue.id,
+            delta: 700,
+            targetSide: 'debit',
+          }),
+        ),
+      ).success,
+    ).toBe(false);
+  });
+
+  it('残高調整科目そのものが対象の補正は invalid（type 検査を通っても role で弾く）', () => {
+    // 対象・相手とも system-adjustment。向きだけ見れば整合する形でも受け入れない。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg(
+          [balanceExpense, balanceRevenue],
+          adjustmentEntry({
+            targetId: balanceExpense.id,
+            counterId: balanceRevenue.id,
+            delta: 700,
+            targetSide: 'debit',
+          }),
+        ),
+      ).success,
+    ).toBe(false);
+  });
+});
+
 describe('journalEntrySchema 行数ルール（MVP: 1 借方・1 貸方）', () => {
   it('3 行以上の複合仕訳は拒否する', () => {
     const threeLines = {
@@ -859,52 +1078,14 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
     // ちょうど 1200ヶ月（2026-06 〜 2126-05）は valid。
     expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2126-05-31' }).success).toBe(true);
   });
-  it('配分月数の上限は費用化開始月〜終了月で数える（実際の等分数と同じ基準・P2-2）', () => {
-    // 購入月（2026-06）からは 1206 ヶ月でも、費用化開始（2026-12）からちょうど 1200 ヶ月なら valid。
+  it('配分月数の上限は購入月〜終了月で数える（実際の等分数と同じ基準）', () => {
+    // 購入月（2026-06）からちょうど 1200 ヶ月（2126-05）までは valid。
+    expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2126-05-31' }).success).toBe(true);
     expect(
-      monthlyCostItemSchema.safeParse({
-        ...base,
-        allocationStartDate: '2026-12-01',
-        endDate: '2126-11-30',
-      }).success,
+      ledgerExportPackageSchema.safeParse(mcPkg([{ ...base, endDate: '2126-05-31' }])).success,
     ).toBe(true);
-    // 費用化開始から 1201 ヶ月は invalid。
-    expect(
-      monthlyCostItemSchema.safeParse({
-        ...base,
-        allocationStartDate: '2026-12-01',
-        endDate: '2126-12-01',
-      }).success,
-    ).toBe(false);
-  });
-  it('費用化の開始日（allocationStartDate）は明示値のみ検証: startDate〜endDate の内側だけ valid（§D）', () => {
-    // 内側（両端含む）は valid。package でも valid（購入の仕訳は startDate 基準のまま）。
-    const mid = { ...base, allocationStartDate: '2026-12-01' };
-    expect(monthlyCostItemSchema.safeParse(mid).success).toBe(true);
-    expect(ledgerExportPackageSchema.safeParse(mcPkg([mid])).success).toBe(true);
-    expect(
-      monthlyCostItemSchema.safeParse({ ...base, allocationStartDate: '2026-06-15' }).success,
-    ).toBe(true);
-    expect(
-      monthlyCostItemSchema.safeParse({ ...base, allocationStartDate: '2027-05-31' }).success,
-    ).toBe(true);
-    // 購入日より前 / 終了日より後 / 暦にない日付は invalid。
-    expect(
-      monthlyCostItemSchema.safeParse({ ...base, allocationStartDate: '2026-06-14' }).success,
-    ).toBe(false);
-    expect(
-      monthlyCostItemSchema.safeParse({ ...base, allocationStartDate: '2027-06-01' }).success,
-    ).toBe(false);
-    expect(
-      monthlyCostItemSchema.safeParse({ ...base, allocationStartDate: '2027-02-30' }).success,
-    ).toBe(false);
-    // 終了日なしでも保存できる（配分は発生しないだけ）。購入日より前は終了日なしでも invalid。
-    const open = { ...base, allocationStartDate: '2026-12-01' };
-    delete (open as Record<string, unknown>).endDate;
-    expect(monthlyCostItemSchema.safeParse(open).success).toBe(true);
-    expect(
-      monthlyCostItemSchema.safeParse({ ...open, allocationStartDate: '2026-06-14' }).success,
-    ).toBe(false);
+    // 1201 ヶ月目に入ると invalid。
+    expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2126-06-01' }).success).toBe(false);
   });
   it('存在しない/内部集約の expenseAccountId は package で invalid', () => {
     expect(
@@ -1126,9 +1307,6 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
             issue.message.includes('定期ルールの存在期間外'),
           ),
     ).not.toHaveLength(0);
-    // ccr- item への allocationStartDate は禁止しない（通常 item と同権）。
-    const deferred = { ...a, allocationStartDate: '2026-10-01' };
-    expect(ledgerExportPackageSchema.safeParse(rulePkg([deferred, b])).success).toBe(true);
   });
   it('仕訳の monthlyCostId が存在しないと invalid', () => {
     const dangling = purchaseOf(base, { metadata: { inputMode: 'expense', monthlyCostId: 'no' } });
@@ -1314,6 +1492,15 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
     createdAt: 'x',
     updatedAt: 'x',
   };
+  const invest = {
+    id: 'invest',
+    name: '投資',
+    type: 'asset',
+    role: 'investment-asset',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
   const ccLedger = {
     id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
     name: '継続コスト台帳',
@@ -1340,7 +1527,7 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
       exportedAt: '2026-06-01T00:00:00.000Z',
       deviceId: 'd',
       revision: 0,
-      accounts: [bank, salary, fixed, ccLedger, adj],
+      accounts: [bank, salary, fixed, invest, ccLedger, adj],
       journalEntries: [],
       tags: [],
       monthlyCostItems: [],
@@ -1362,14 +1549,28 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
       ).success,
     ).toBe(false);
   });
-  it('package: spread の計上先は費用または収入の科目が valid（差引形 = spread に income-category）', () => {
-    // 差引形の v7 正規形: spread = 給与（income-category）・借方 = 台帳。
+  it('package: spread の計上先は自動起票できる全 role が valid（差引形 = spread に income-category）', () => {
+    // 差引形の正規形: spread = 給与（income-category）・借方 = 台帳。
     expect(
       ledgerExportPackageSchema.safeParse(
         rulePkg({ ...spreadRule, spreadExpenseAccountId: 'salary' }),
       ).success,
     ).toBe(true);
-    // 費用行き・差引形とも、借方直接の旧形は保存形として invalid（spread 形のみ）。
+    // 計上先が資産（クレカ積立・投資の積立など）でも valid ＝ 勘定科目で動作を変えない。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        rulePkg({ ...spreadRule, spreadExpenseAccountId: 'invest' }),
+      ).success,
+    ).toBe(true);
+    // 内部集約（継続コスト台帳）を計上先にはできない（fail-closed のまま）。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        rulePkg({ ...spreadRule, spreadExpenseAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID }),
+      ).success,
+    ).toBe(false);
+  });
+  it('package: 月割りトグル OFF の費用・収入行き（直接形）も valid', () => {
+    // 費用行きの直接形 = トグル OFF の保存形（role では動作を決めない）。
     expect(
       ledgerExportPackageSchema.safeParse(
         rulePkg({
@@ -1378,7 +1579,8 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
           debitAccountId: 'fixed',
         }),
       ).success,
-    ).toBe(false);
+    ).toBe(true);
+    // 差引形（借方 = 収入カテゴリ）の直接形も同様。
     expect(
       ledgerExportPackageSchema.safeParse(
         rulePkg({
@@ -1387,7 +1589,7 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
           debitAccountId: 'salary',
         }),
       ).success,
-    ).toBe(false);
+    ).toBe(true);
   });
   it('package: 源泉・費用の行き先とも残高調整科目（system-adjustment）は invalid', () => {
     expect(

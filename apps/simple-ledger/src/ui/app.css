@@ -11,10 +11,83 @@
      間に置く。foundation は他 repo が正本のためここで定義する（.entry-bar の 30 と同値だが、
      下端全幅バーと浮遊ボタンは別レイヤなので寄せない）。 */
   --z-float: 30;
+  /* 下端の全幅バー（記帳バー・フッターナビ）。両者は帯が重ならない（.entry-bar の bottom は
+     --bottom-inset ぶん上げる）ので同レイヤでよい。--z-header(20) < ここ < --z-overlay(40)。
+     シート類は native <dialog> の top-layer なので常にこの上（重なりの心配は無い）。 */
+  --z-bottom-bar: 30;
+  /* タイムラインのポップオーバー。body へ portal した position:fixed 要素なので、ルート階層で
+     --z-bottom-bar（フッターナビ）と直接競合する → その上へ。シート類は native <dialog> の
+     top-layer なので常にこの上（--z-overlay 40 未満に留めるのは順序の宣言として）。
+     ※ かつては表のスクロール枠の中に描いており、上下端で overflow に切られていた。これは z では
+     解決しない（portal で枠の外へ出すのが正解）＝ここを上げても直らない、が教訓。 */
+  --z-timeline-popover: 35;
   /* sticky 要素の上端 = app-header の実高。--header-h(56px) は .app-header__inner の
      min-height で、*{box-sizing:border-box}（foundation.css）により padding を含む。
      これに border-bottom 1px を足した 57px が実高（65px と誤認しやすいので注意）。 */
   --sticky-top: calc(var(--header-h) + 1px);
+
+  /* ── 下端の furniture（フッターナビ・記帳バー）の高さの正本 ──
+     env(safe-area-inset-bottom) の**登場を --bottom-inset の 1 本に集約する**。
+     以前は .app-main（foundation）と .dashboard の両方が env を足しており、iPhone では
+     safe-area が二重に積まれていた（実測 sab=34 で最終行下が 120 + 34×2）。
+     フッターで 3 個目を足すと死に領域になるため、ここで数え方を 1 つにする。 */
+  --footer-h: calc(var(--tap) + var(--space-1) * 2 + 1px); /* 44 + 4*2 + 1 = 53px */
+  --entry-bar-h: 88px; /* .entry-bar の実測 87.8px（padding 8 + ボタン 70.8 + 8 + border 1）*/
+  --bottom-inset: calc(var(--footer-h) + env(safe-area-inset-bottom, 0px));
+  /* 一番上へ移動ボタンの下端。全画面共通でフッターを避ける（.scroll-top は position:fixed でも
+     カスタムプロパティを DOM 祖先から継承するため、:root 定義が全画面へ効く）。 */
+  --scroll-top-bottom: calc(var(--bottom-inset) + var(--space-3));
+
+  /* 下端に固定 furniture を置いたら、スクロールポート側にも同じぶんの余白が要る。
+     ブラウザは Tab のフォーカス移動で「要素の下端をビューポート下端へ」最小スクロールするため、
+     これが無いとフォーカス中の要素がフッターの下へ**完全に潜る**（キーボードで位置を見失う）。
+     scroll-margin-top（.dashboard__entries .list__item）が上端を守るのと対になる下端側。 */
+  scroll-padding-bottom: calc(var(--bottom-inset) + var(--space-3));
+  /* 上端側の対。app-header は全画面で sticky top:0 なので、スクロールポートの上端は常に
+     ヘッダー実高ぶん内側にある。額縁（.list-filter-frame / .dashboard__frame）の高さは
+     画面ごとに違うため、そのぶんは各要素の scroll-margin-top が足す。 */
+  scroll-padding-top: var(--sticky-top);
+}
+
+/* ── ヘッダーの時間の粒度（年間/全体）セグメント ──
+   ヘッダー = 時間、の「時間」には目盛りも含まれる（日付チップの隣に置く理由）。
+   375px 幅に収めるため Segmented より詰めた専用スタイル。押下中（= 年間・全体画面に
+   いる間の現在粒度）は aria-pressed で示し、色 + 面の両方で手掛かりを持つ。 */
+/* タイムスリップ中だけ現れる「今日」。強めの色 = 「時間がずれている」の警告灯を兼ねる。 */
+.period-today {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary-strong);
+  background: var(--primary-light);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+}
+
+.period-zoom {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.period-zoom__btn {
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+}
+.period-zoom__btn + .period-zoom__btn {
+  box-shadow: inset 1px 0 0 var(--border);
+}
+.period-zoom__btn[aria-pressed='true'] {
+  color: var(--primary-strong);
+  background: var(--primary-light);
 }
 
 /* ── Summary card (tappable: ホームの損益/資産負債サマリー) ── */
@@ -124,6 +197,49 @@
   min-height: var(--tap);
 }
 
+/* ── 一覧の絞り込み額縁（仕訳一覧・毎月のもの） ──
+   ホームの .dashboard__frame と同型（作者合意 2026-08-15）。検索・並び替え・絞り込みを
+   sticky で上端に貼り、下のカードだけが流れる。画面タイトル(h1)は額縁に含めない
+   （スクロールで流れてよい = ホームと同じ扱い）。
+   z は同一スクロール内の前後関係のみ（.dashboard__frame と同値の生数値運用）。
+   面は --bg（= app-main の地）。ここを透かすと下のカードが文字に重なって読めなくなる。
+   行間は gap が持ち、.toolbar 既定の下余白は消す（額縁の中で二重に空けない）。 */
+.list-filter-frame {
+  position: sticky;
+  top: var(--sticky-top);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--bg);
+  padding-bottom: var(--space-2);
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.list-filter-frame > .toolbar {
+  margin-bottom: 0;
+}
+/* 額縁より下のものは、キーボードでフォーカスしたときに額縁の裏へ潜らせない。
+   sticky はブラウザのスクロール計算に現れないため、:root の scroll-padding-top
+   （ヘッダーぶん）だけでは足りず、額縁の高さぶんを下の要素側で足す。
+   下端の scroll-padding-bottom（フッター）と対になる上端側の手当て。
+   ヘッダーぶんは :root が数えるので、ここは額縁の高さだけを足す（二重計上しない）。
+   --list-filter-frame-h は画面ごとの実測値（折り返しでズレても影響はフォーカス位置だけ）。 */
+.list-filter-frame ~ *,
+.list-filter-frame ~ * * {
+  scroll-margin-top: var(--list-filter-frame-h, 0px);
+}
+/* 額縁の実測高（@2026-08-15・?fixture=sample）。折り返しで変わるので画面ごとに持つ。 */
+.journal {
+  /* 375/390px 幅 = 246px（並び替えが 2 行に折り返す）。667px 幅以上は 1 行に収まり 194px。
+     広い画面では余分に逃がすだけなので、狭い方（＝隠れる側）の実測値を採る。 */
+  --list-filter-frame-h: 246px;
+}
+.allocations {
+  /* 「終了分も表示」+ 検索 + 並び替えで 113px（375〜1280px 幅で不変）。 */
+  --list-filter-frame-h: 113px;
+}
+
 /* ── 年間・全体マトリクス ── */
 .yearly-overview__intro {
   margin-bottom: var(--space-3);
@@ -195,6 +311,19 @@
 }
 .yearly-overview__corner {
   z-index: 2;
+}
+/* 列見出しのタップ導線。表の密度を保つため見た目は文字のまま、点線下線で押せることだけ示す。 */
+.yearly-overview__col-btn {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
 }
 .yearly-overview__value {
   width: 112px;
@@ -312,8 +441,12 @@
   min-height: var(--timeline-row-height);
   transition: opacity 120ms ease;
 }
+/* 行の区切り線は**レイアウトに影響しない**書き方にする（border-top だと 1 行あたり 1px
+   背が高くなり、接続線が仮定する --timeline-row-height と 1px/行ずつずれていく＝
+   下の行ほど線が合わなくなる）。行の実高 = --timeline-row-height である不変則は
+   tests/ui.timelineCalendar.test.tsx が固定している。 */
 .timeline-calendar__row + .timeline-calendar__row {
-  border-top: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 var(--border);
 }
 .timeline-calendar__row--detail {
   background: color-mix(in srgb, var(--timeline-accent) 4%, var(--surface));
@@ -448,13 +581,14 @@ button.timeline-calendar__row-label {
   stroke-width: 2;
   stroke-dasharray: 4 3;
 }
+/* 表のスクロール枠の中に置くと上端・下端で切られる（実機で発生）ため、body へ portal した
+   position:fixed で置く。top/left は TimelineCalendar.tsx が viewport 座標で実測・クランプする
+   （CSS 側で位置を持たない = 座標規則の正本を 1 つにする）。 */
 .timeline-calendar__popover {
-  position: absolute;
-  top: calc(50% + 18px);
-  z-index: 12;
+  position: fixed;
+  z-index: var(--z-timeline-popover);
   width: min(300px, calc(100vw - var(--space-6)));
   padding: var(--space-3);
-  transform: translateX(var(--timeline-popover-shift, -50%));
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -877,12 +1011,13 @@ button.stmt-row:hover {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 0;
-  z-index: 30;
+  /* フッターナビの上へ積む（下端に接しなくなるので safe-area はここでは数えない）。 */
+  bottom: var(--bottom-inset);
+  z-index: var(--z-bottom-bar);
   background: var(--surface);
   border-top: 1px solid var(--border);
   box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.08);
-  padding: var(--space-2) var(--space-3) calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+  padding: var(--space-2) var(--space-3);
 }
 .entry-bar__inner {
   max-width: var(--maxw);
@@ -891,12 +1026,47 @@ button.stmt-row:hover {
   grid-template-columns: repeat(3, 1fr);
   gap: var(--space-2);
 }
+
+/* ── 画面下端の固定ナビ（戻る / ホーム / メニュー） ──
+   高さ = --tap(44) + padding 上下 4px ずつ + border 1 = 53px（--footer-h）。--tap を割らない最小。
+   env(safe-area-inset-bottom) を足すのは**この padding だけ**（数え方の正本は --bottom-inset）。
+   影は付けない（.entry-bar の box-shadow は色のハードコードで既存の逸脱。増やさない）。 */
+.app-footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-bottom-bar);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: var(--space-1) var(--space-3) calc(var(--space-1) + env(safe-area-inset-bottom, 0px));
+}
+.app-footer__inner {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  justify-items: center;
+}
+/* 左向きのアイコンは foundation に無い（新概念を足さない方針）。chevronRight を鏡像にする。 */
+.app-footer__back-icon {
+  display: inline-flex;
+  transform: scaleX(-1);
+}
+/* 現在地（ホーム）の手掛かり。色**だけ**に頼らない（強制カラーモードでは色が系のパレットへ
+   置き換わるため下線が残る）。支援技術側は aria-current が持つ（App.tsx）。 */
+.app-footer .icon-btn[aria-current='page'] {
+  color: var(--primary-strong);
+  box-shadow: inset 0 -2px 0 var(--primary-strong);
+}
 .dashboard {
-  padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
-  /* 額縁の目安高（375px 幅・金額 1 行時）。.stat__value は clamp + word-break: break-all
-     （上の .stat__value）なので桁数の多い金額が折り返すと 1 行ぶん高くなり、この値は不足する。
-     ズレの影響はキーボードでフォーカスした仕訳行のスクロール位置だけ。 */
-  --home-frame-h: 240px;
+  /* 記帳バーぶんだけ。フッター + safe-area は .app-main の --bottom-inset が数える。 */
+  padding-bottom: var(--entry-bar-h);
+  /* 額縁の目安高（375px 幅・金額 1 行時・実測 214.3px @2026-08-14 見出し撤去後）。
+     .stat__value は clamp + word-break: break-all なので桁数の多い金額が折り返すと
+     1 行ぶん高くなり、この値は不足する。ズレの影響はキーボードでフォーカスした
+     仕訳行のスクロール位置だけ。 */
+  --home-frame-h: 215px;
 }
 /* ホームの額縁: 収支 + 財政状態の 6 枠を sticky 固定し、下の仕訳だけが流れる（実ユーズ④）。
    z は同一スクロール内の前後関係のみ（yearly-overview__label と同じ生数値運用）。
@@ -910,9 +1080,27 @@ button.stmt-row:hover {
   padding-bottom: var(--space-2);
   border-bottom: 1px solid var(--border);
 }
-/* キーボードフォーカスで仕訳行が額縁の下に隠れないよう逃がす。 */
+/* 額縁最下段の仕訳見出し + すべて見る。sticky に含めるため縦幅を詰める
+   （section-label の上余白と btn の --tap 最小高をこの行だけ上書き）。 */
+.dashboard__frame-journal {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: var(--space-2) 0 0;
+}
+.dashboard__frame-journal .btn {
+  /* タップ領域は --tap(44px) を維持し、負マージンで**見た目の行高だけ**約 30px へ詰める
+     （sticky 額縁に含めるため。44px 検証は visual E2E が守っている）。 */
+  min-height: var(--tap);
+  padding: 0 var(--space-2);
+  font-size: 12px;
+  margin: calc((30px - var(--tap)) / 2) 0;
+}
+/* キーボードフォーカスで仕訳行が額縁の下に隠れないよう逃がす。
+   ヘッダーぶんは :root の scroll-padding-top が数えるので、ここは額縁の高さだけ
+   （両方に --sticky-top を入れると 2 回引かれて行き過ぎる）。 */
 .dashboard__entries .list__item {
-  scroll-margin-top: calc(var(--sticky-top) + var(--home-frame-h));
+  scroll-margin-top: var(--home-frame-h);
 }
 .entry-type-btn {
   display: flex;
@@ -950,6 +1138,8 @@ button.stmt-row:hover {
 .scroll-top {
   position: fixed;
   right: calc(var(--space-3) + env(safe-area-inset-right, 0px));
+  /* --scroll-top-bottom の正本は :root（全画面でフッターを避ける）。ホームは記帳バーぶん
+     さらに上へ。第 2 引数のフォールバックは :root 定義により到達しない。 */
   bottom: var(--scroll-top-bottom, calc(var(--space-3) + env(safe-area-inset-bottom, 0px)));
   z-index: var(--z-float);
   background: var(--surface);
@@ -984,9 +1174,15 @@ button.stmt-row:hover {
     animation: none;
   }
 }
-/* ホームは下部に記帳バー（.entry-bar 73px + safe-area）があるため、その上へ逃がす。 */
+/* ホームの仕訳行は記帳バーぶんさらに深い位置で止める（:root の scroll-padding-bottom に加算される）。
+   :has() を使わないのは、対応環境を問わずこの 1 行で足りるため。 */
+.dashboard__entries .list__item {
+  scroll-margin-bottom: var(--entry-bar-h);
+}
+
+/* ホームはフッターに加えて記帳バー（実測 87.8px = --entry-bar-h）があるため、その上へ逃がす。 */
 .dashboard {
-  --scroll-top-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+  --scroll-top-bottom: calc(var(--bottom-inset) + var(--entry-bar-h));
 }
 
 /* ── Badge / tag (app 固有色クラス) ── */
@@ -1014,10 +1210,60 @@ button.stmt-row:hover {
   gap: var(--space-1);
 }
 
+/* カードタップ = 編集（src/ui/cardTap.ts）。中に操作ボタンを含むため要素そのものは
+   button にできない（入れ子不正）ので role="button" で押せることを示す。
+   押せる手掛かりは button.list__item と同じ hover 面 + ポインタで揃える。 */
+.list__item[role='button'],
+.card[role='button'] {
+  cursor: pointer;
+}
+.list__item[role='button']:hover {
+  background: var(--bg);
+}
+
 /* 終了まで1ヶ月以内の継続コスト資産（毎月のもの）。色だけ変える（バッジ・文言は足さない）。
    --warning-light(#fffbeb) は白背景とほぼ区別がつかないため、視認できるアンバー + 左ボーダー。 */
 .card--ending {
   background: #fdf3d8;
   border-color: var(--warning-border);
   border-left: 3px solid var(--warning);
+}
+
+/* ── foundation の下端指定をフッターぶん押し上げる ──
+   どちらも src/main.tsx の import 順（foundation → app-theme → app.css）で app.css が最後、
+   セレクタの特異度も同値なので後勝ちする。foundation は medical からの一方向ミラーで
+   編集しないため、上書きはここに置く。 */
+/* .app-main は foundation 側が padding ショートハンドで env を足している。ロングハンドで
+   上書きして env の登場を --bottom-inset の 1 回に戻す（safe-area の二重計上を消す）。 */
+.app-main {
+  padding-bottom: calc(var(--space-6) + var(--bottom-inset));
+}
+/* トーストは --z-toast(60) でフッターより前面に出るため、常設ナビを覆わないよう上へ逃がす
+   （ホームで記帳バーと重なるのは従来どおり＝一時通知を隠さない既存の判断を維持）。 */
+.toast-region {
+  bottom: calc(var(--bottom-inset) + var(--space-3));
+}
+
+/* 低背ビューポート（横向き・スプリットビュー）ではホームの額縁を貼り付けない。
+   貼ると仕訳が 1 行も見えないどころか、額縁が記帳バーと重なって最下段（「すべて見る」）が
+   押せなくなる。必要高 = ヘッダー 57 + 額縁 269 + 仕訳 1 行 67 + 記帳バー 88 + フッター 53 ≒ 534。
+   375px 幅では金額の折り返しで額縁がさらに伸びるため、余裕を見て 640px を境界にする
+   （iPhone SE の 667 は sticky のまま＝既存 E2E の 844 / 1180 / 800 / 667 も全て影響なし）。 */
+@media (max-height: 640px) {
+  .dashboard__frame {
+    position: static;
+  }
+  /* 仕訳一覧の額縁も同じ境界で外す。実測 246px（375px 幅・並び替えが 2 行）/ 194px（667px 幅以上）
+     = ホームの額縁より高いので、ホームで貼らない高さならこちらも貼らない。
+     必要高 = ヘッダー 57 + 額縁 194 + 仕訳 2 行 134 + フッター 53 ≒ 438、横向き実機（高さ 375〜430）
+     では 1 行しか残らない。
+     「毎月のもの」は額縁 113px（幅によらず一定）で、高さ 375 でも一覧が 150px 残るため貼ったまま
+     にする（＝この境界を共有しない。額縁の高さが違えば逃す高さも違う）。 */
+  .journal .list-filter-frame {
+    position: static;
+  }
+  /* 貼らないなら逃がす必要も無い（残すとフォーカスのたびに 246px 行き過ぎる）。 */
+  .journal {
+    --list-filter-frame-h: 0px;
+  }
 }

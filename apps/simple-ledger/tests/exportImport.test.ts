@@ -72,6 +72,46 @@ describe('export/import round trip', () => {
       removedLegacyMonthlyCostKey,
     );
   });
+
+  /*
+   * 諸口 groupId（v12 で予約のみ）は保存・export・import の各境界を素通しする。
+   * UI は未実装だが、境界のどこかが未知キーとして落とすと将来の実装時に
+   * 「保存はできるのに export で消える」型の欠陥を静かに持ち込む。
+   */
+  it('groupId（v12 予約フィールド）は保存 → export → import で保持される', async () => {
+    const ledger = await seedWithEntry();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const food = ledger.accounts.find((a) => a.name === '変動費')!;
+    await upsertEntry({
+      ...buildSimpleEntry({
+        date: '2026-06-02',
+        description: '諸口の 1 行目',
+        debitAccountId: food.id,
+        creditAccountId: cash.id,
+        amount: 2500,
+      }),
+      id: 'grouped-entry',
+      groupId: 'grp-2026-06-02',
+    });
+
+    // 1) 保存境界（schema 経由の parse）で剥がれない。
+    const saved = (await loadLedger()).journalEntries.find((e) => e.id === 'grouped-entry');
+    expect(saved?.groupId).toBe('grp-2026-06-02');
+
+    // 2) export JSON に載る。
+    const text = exportToJsonText(await loadLedger());
+    expect(JSON.parse(text)).toMatchObject({
+      journalEntries: expect.arrayContaining([
+        expect.objectContaining({ id: 'grouped-entry', groupId: 'grp-2026-06-02' }),
+      ]) as unknown,
+    });
+
+    // 3) import で戻ってくる（相互参照検証はしない = 1 行だけのグループも ok）。
+    const outcome = await importFromJsonText(text, { force: true });
+    expect(outcome.kind).toBe('ok');
+    const imported = (await loadLedger()).journalEntries.find((e) => e.id === 'grouped-entry');
+    expect(imported?.groupId).toBe('grp-2026-06-02');
+  });
 });
 
 describe('fail-closed', () => {
@@ -117,6 +157,20 @@ describe('fail-closed', () => {
       JSON.stringify({ ...pkg, schemaVersion: pkg.schemaVersion + 1 }),
     );
     expect(outcome.kind).toBe('unsupported-version');
+  });
+
+  it('直前版 v11 のパッケージも unsupported-version で拒否される（単発変換が必須）', async () => {
+    // v11 → v12 は allocationStartDate 撤去と ccr endDate の意味変更を伴うため、
+    // 「1 つ前の版だから読めるだろう」を fail-closed で断つ。実データは
+    // _workspace-management/scripts/convert-ledger-v11-to-v12.mjs で単発変換する。
+    const before = await seedWithEntry();
+    const pkg = buildExportPackage(before);
+    const outcome = await importFromJsonText(
+      JSON.stringify({ ...pkg, schemaVersion: SCHEMA_VERSION - 1 }),
+    );
+    expect(outcome.kind).toBe('unsupported-version');
+    const after = await loadLedger();
+    expect(after.journalEntries.length).toBe(before.journalEntries.length);
   });
 
   it('v7 パッケージ（schemaVersion 7）は unsupported-version で拒否される（後方互換なし）', async () => {
@@ -198,27 +252,6 @@ describe('継続コスト資産の export/import', () => {
       ),
     ).toBe(true);
   });
-
-  it('費用化の開始日（allocationStartDate）は export/import で round-trip 保持される（§D）', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    await createContinuousCost({
-      name: '前払い保険',
-      amount: 60000,
-      startDate: '2026-06-15',
-      allocationStartDate: '2026-12-01',
-      endDate: '2027-05-31',
-      expenseAccountId: food.id,
-      creditAccountId: cash.id,
-    });
-    const seeded = await loadLedger();
-    expect(seeded.monthlyCostItems[0]?.allocationStartDate).toBe('2026-12-01');
-    const outcome = await importFromJsonText(exportToJsonText(seeded));
-    expect(outcome.kind).toBe('ok');
-    const reloaded = await loadLedger();
-    expect(reloaded.monthlyCostItems[0]?.allocationStartDate).toBe('2026-12-01');
-  });
 });
 
 describe('restoreFromSnapshot（fail-closed）', () => {
@@ -264,6 +297,19 @@ describe('restoreFromSnapshot（fail-closed）', () => {
     expect(after.journalEntries.some((e) => e.id === 'bad')).toBe(false);
     expect(after.journalEntries.length).toBe(beforeCount);
   });
+
+  /*
+   * 版上げのたびに旧版スナップショットは復元不能になる（migration チェーンが空）。
+   * これは起動時剪定（pruneIncompatibleSnapshots）の前提なので、版に依存しない形で
+   * 「1 つ前の版は前進できない」を固定する。
+   */
+  it('旧版（現行 - 1）のスナップショットは現行版へ前進できず復元しない', async () => {
+    const before = await seedWithEntry();
+    const stale = { ...buildExportPackage(before), schemaVersion: SCHEMA_VERSION - 1 };
+    await expect(restoreFromSnapshot(stale)).rejects.toThrow();
+    const after = await loadLedger();
+    expect(after.journalEntries.length).toBe(before.journalEntries.length);
+  });
 });
 
 describe('export package 形状', () => {
@@ -279,11 +325,11 @@ describe('export package 形状', () => {
     expect(pkg).toHaveProperty('settings');
   });
 
-  it('schemaVersion 11 で、廃止済みフィールドを含まない', async () => {
+  it('schemaVersion 12 で、廃止済みフィールドを含まない', async () => {
     const ledger = await seedWithEntry();
     const pkg = buildExportPackage(ledger);
     expect(pkg.schemaVersion).toBe(SCHEMA_VERSION);
-    expect(pkg.schemaVersion).toBe(11);
+    expect(pkg.schemaVersion).toBe(12);
     expect(pkg).not.toHaveProperty('cashflowSchedules');
     // v10 で撤去した CSV 取込の 3 配列も含まない。
     expect(pkg).not.toHaveProperty('importProfiles');

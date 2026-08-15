@@ -5,12 +5,14 @@
  *  - 一覧は保存される仕訳のみ（導出行を混ぜない）
  *  - 額縁（dashboard.frame）は収支 + 財政状態の 6 枠を含む
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { Dashboard } from '../src/ui/screens/Dashboard';
 import { createContinuousCost, loadLedger, upsertEntry } from '../src/data/repository';
+import { addMonthsToDate } from '../src/domain/allocation';
+import { todayLocal } from '../src/util/time';
 import type { ReportPeriod } from '../src/domain/reportPeriod';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
@@ -29,6 +31,29 @@ function Providers({ children }: { children: React.ReactNode }) {
   );
 }
 
+function DashboardTap({
+  onEditEntry,
+  onOpenAllocations,
+}: {
+  onEditEntry: (entry: unknown) => void;
+  onOpenAllocations: (target: unknown) => void;
+}) {
+  const { status } = useLedger();
+  return status === 'ready' ? (
+    <Dashboard
+      period={{ mode: 'date', date: todayLocal() }}
+      onPeriodChange={() => undefined}
+      onAddEntry={() => undefined}
+      onEditEntry={onEditEntry as never}
+      onNavigate={() => undefined}
+      onOpenJournal={() => undefined}
+      onOpenAllocations={onOpenAllocations as never}
+      onOpenAccount={() => undefined}
+      onOpenEntry={() => undefined}
+    />
+  ) : null;
+}
+
 function DashboardWhenReady({ period }: { period: ReportPeriod }) {
   const { status } = useLedger();
   return status === 'ready' ? (
@@ -39,6 +64,9 @@ function DashboardWhenReady({ period }: { period: ReportPeriod }) {
       onEditEntry={() => undefined}
       onNavigate={() => undefined}
       onOpenJournal={() => undefined}
+      onOpenAllocations={() => undefined}
+      onOpenAccount={() => undefined}
+      onOpenEntry={() => undefined}
     />
   ) : null;
 }
@@ -201,5 +229,45 @@ describe('ホームのアクセシビリティ（Codex 監査 2026-08-12 対応�
     expect(status.textContent).toContain('51');
     fireEvent.click(moreButton()!);
     await waitFor(() => expect(status.textContent).toContain('51 件中 51 件'));
+  });
+});
+
+describe('ホームの仕訳タップの行き先（entryOpenPlan の単一正本）', () => {
+  it('継続コスト絡みの保存仕訳（購入）もタップで編集になる（以前は仕訳一覧へ飛んでいた）', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    const today = todayLocal();
+    // 購入の保存仕訳（metadata.monthlyCostId 付き）が今月の一覧に出る。
+    await createContinuousCost({
+      name: 'タップ確認CC',
+      amount: 300000,
+      startDate: today,
+      endDate: addMonthsToDate(today, 2),
+      expenseAccountId: expense.id,
+      creditAccountId: cash.id,
+    });
+
+    const onEditEntry = vi.fn();
+    const onOpenAllocations = vi.fn();
+    render(
+      <Providers>
+        <DashboardTap onEditEntry={onEditEntry} onOpenAllocations={onOpenAllocations} />
+      </Providers>,
+    );
+    await waitFor(() => {
+      expect(
+        document.querySelector(`[data-ui="${UI.dashboard.journalPreview}"]`),
+      ).toBeInTheDocument();
+    });
+    const purchase = [
+      ...document.querySelectorAll(`[data-ui="${UI.dashboard.journalPreview}"] button.list__item`),
+    ].find((r) => r.textContent?.includes('タップ確認CC'))!;
+    expect(purchase).toBeDefined();
+
+    fireEvent.click(purchase);
+    // 保存仕訳なので編集シート。monthlyCostId を理由に仕訳一覧へ流さない。
+    expect(onEditEntry).toHaveBeenCalledTimes(1);
+    expect(onOpenAllocations).not.toHaveBeenCalled();
   });
 });

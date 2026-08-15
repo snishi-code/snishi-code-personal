@@ -219,7 +219,7 @@ export function HomeView({
             return (
               <DetailQrDialog
                 patient={target}
-                template={store.getActiveTemplate()}
+                template={store.getTemplateForPatient(target)}
                 settings={store.getSettings()}
                 onClose={() => setQrPid(null)}
               />

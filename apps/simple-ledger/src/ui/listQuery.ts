@@ -19,6 +19,17 @@ export function matchesQuery(parts: (string | undefined)[], query: string): bool
   return hay.includes(q);
 }
 
+/** 並び替えの方向。両画面で同じ語彙（軸は画面ごとに違うが方向は共通）。 */
+export type SortDirection = 'asc' | 'desc';
+
+/**
+ * 昇順 = +1 / 降順 = -1。昇順で書いた比較器の結果に掛けて方向を与える（両画面で同じ規約）。
+ * 「未設定は常に最後」のような方向に依らない規則は、掛ける前に決着させる。
+ */
+export function directionSign(direction: SortDirection): 1 | -1 {
+  return direction === 'asc' ? 1 : -1;
+}
+
 /**
  * 表示専用の並び替え。compare === null（既定の並び）は入力配列をそのまま返す
  * ＝既定順を 1 バイトも変えない（Journal の早期リターンと同じ規約）。

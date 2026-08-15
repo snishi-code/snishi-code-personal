@@ -10,14 +10,11 @@ import {
   deleteOpening,
   archiveAccount,
   archiveMonthlyCost,
-  catchUpRecurringRules,
   createContinuousCost,
-  createRecurringRule,
   createRepaymentEntries,
   deleteAccount,
   deleteEntry,
   deleteMonthlyCost,
-  deleteTag,
   listSnapshots,
   loadLedger,
   makeSnapshotId,
@@ -27,7 +24,6 @@ import {
   upsertAccount,
   upsertEntry,
   upsertMonthlyCost,
-  upsertTag,
 } from '../src/data/repository';
 import { buildSimpleEntry } from '../src/domain/entry';
 import { LedgerError } from '../src/domain/errors';
@@ -36,7 +32,6 @@ import {
   CONTINUOUS_COST_LEDGER_ACCOUNT_NAME,
 } from '../src/domain/constants';
 import { accountBalance } from '../src/domain/accounting';
-import { monthlyCostForMonth } from '../src/domain/monthlyCost';
 import { reportEntriesForAsOf } from '../src/domain/reportEntries';
 import { buildExportPackage, exportToJsonText, importFromJsonText } from '../src/data/exportImport';
 import { ledgerExportPackageSchema } from '../src/domain/schema';
@@ -44,7 +39,7 @@ import { getAll, getKv, putKv, putRecord, STORE } from '../src/data/db';
 import { SCHEMA_VERSION } from '../src/domain/constants';
 import { newId } from '../src/domain/ids';
 import { todayLocal } from '../src/util/time';
-import type { JournalEntry, LedgerMeta, Tag } from '../src/domain/types';
+import type { JournalEntry, LedgerMeta } from '../src/domain/types';
 
 async function addEntryRef(foodId: string, cashId: string) {
   await upsertEntry(
@@ -267,92 +262,6 @@ describe('resetAll', () => {
       }),
     ).rejects.toMatchObject({ code: 'error.common.staleData' });
     expect(await listSnapshots()).toHaveLength(0);
-  });
-});
-
-describe('タグ', () => {
-  function tag(): Tag {
-    return {
-      id: newId(),
-      name: '2026 北海道旅行',
-      scope: 'entry',
-      archived: false,
-      createdAt: 'x',
-      updatedAt: 'x',
-    };
-  }
-
-  it('未使用のタグは削除でき、使用中は削除できない', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    const tg = tag();
-    await upsertTag(tg);
-
-    // 未使用 → 別タグを作って削除できることを確認
-    const unused = { ...tag(), id: newId(), name: '一時' };
-    await upsertTag(unused);
-    await deleteTag(unused.id);
-    expect((await loadLedger()).tags.some((x) => x.id === unused.id)).toBe(false);
-
-    // tg を仕訳に付ける → 使用中で削除不可
-    await upsertEntry(
-      buildSimpleEntry({
-        date: '2026-06-01',
-        description: '旅行費',
-        debitAccountId: food.id,
-        creditAccountId: cash.id,
-        amount: 1000,
-        tagIds: [tg.id],
-      }),
-    );
-    await expect(deleteTag(tg.id)).rejects.toThrow();
-  });
-
-  it('仕訳全体タグを付けて保存できる', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    const tripTag = { ...tag(), id: newId(), name: '帰省' };
-    await upsertTag(tripTag);
-    await upsertEntry(
-      buildSimpleEntry({
-        date: '2026-06-01',
-        description: '帰省の食事',
-        debitAccountId: food.id,
-        creditAccountId: cash.id,
-        amount: 2000,
-        tagIds: [tripTag.id],
-      }),
-    );
-    const after = await loadLedger();
-    const e = after.journalEntries.find((x) => x.description === '帰省の食事')!;
-    expect(e.tagIds).toEqual([tripTag.id]);
-  });
-});
-
-describe('タグ不変条件（保存時）', () => {
-  const mkTag = (over: Partial<Tag> = {}): Tag => ({
-    id: newId(),
-    name: '旅行',
-    scope: 'entry',
-    archived: false,
-    createdAt: 'x',
-    updatedAt: 'x',
-    ...over,
-  });
-
-  it('active な同名タグは作れない', async () => {
-    await loadLedger();
-    await upsertTag(mkTag());
-    await expect(upsertTag(mkTag())).rejects.toThrow();
-  });
-
-  it('タグは常に仕訳全体（entry）scope で保存される', async () => {
-    await loadLedger();
-    const tg = mkTag();
-    await upsertTag(tg);
-    expect((await loadLedger()).tags.find((x) => x.id === tg.id)?.scope).toBe('entry');
   });
 });
 
@@ -628,7 +537,7 @@ describe('継続コスト資産の整合性（購入の仕訳・削除・不変�
     await archiveMonthlyCost({
       id: item.id,
       endDate: '2026-09-30',
-      recovery: { destinationAccountId: cash.id, amount: 3000 },
+      recoveries: [{ destinationAccountId: cash.id, amount: 3000 }],
     });
     await deleteMonthlyCost(item.id);
     const after = await loadLedger();
@@ -649,197 +558,6 @@ describe('継続コスト資産の整合性（購入の仕訳・削除・不変�
     expect(repays).toHaveLength(12);
     await deleteEntry(repays[0]!.id); // 返済は通常仕訳＝自由に編集/削除できる
     expect((await loadLedger()).journalEntries.some((e) => e.id === repays[0]!.id)).toBe(false);
-  });
-});
-
-describe('費用化の開始日（allocationStartDate）の保存境界ガード（§D 端点）', () => {
-  async function makeDeferredItem(allocationStartDate?: string) {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    const item = await createContinuousCost({
-      name: '前払い保険',
-      amount: 60000,
-      startDate: '2026-06-15',
-      endDate: '2027-05-31',
-      ...(allocationStartDate !== undefined ? { allocationStartDate } : {}),
-      expenseAccountId: food.id,
-      creditAccountId: cash.id,
-    });
-    return { item, cash, food };
-  }
-
-  it('createContinuousCost: 範囲内は保存・購入日より前/終了日より後は拒否', async () => {
-    const { item } = await makeDeferredItem('2026-10-01');
-    const saved = (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)!;
-    expect(saved.allocationStartDate).toBe('2026-10-01');
-    await expect(makeDeferredItem('2026-06-14')).rejects.toMatchObject({
-      code: 'error.monthlyCost.allocationBeforeStart',
-    });
-    await expect(makeDeferredItem('2027-06-01')).rejects.toMatchObject({
-      code: 'error.monthlyCost.allocationAfterEnd',
-    });
-  });
-
-  it('upsertMonthlyCost: 後編集で設定/解除できる・範囲外は拒否', async () => {
-    const { item } = await makeDeferredItem();
-    const stored = (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)!;
-    await upsertMonthlyCost({ ...stored, allocationStartDate: '2026-10-01' });
-    expect(
-      (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)?.allocationStartDate,
-    ).toBe('2026-10-01');
-    // 購入日より前・終了日より後は専用エラーで拒否。
-    await expect(
-      upsertMonthlyCost({ ...stored, allocationStartDate: '2026-06-14' }),
-    ).rejects.toMatchObject({ code: 'error.monthlyCost.allocationBeforeStart' });
-    await expect(
-      upsertMonthlyCost({ ...stored, allocationStartDate: '2027-06-01' }),
-    ).rejects.toMatchObject({ code: 'error.monthlyCost.allocationAfterEnd' });
-    // 解除（フィールドを外して保存）= 購入日から月割りへ戻る。
-    const cleared = { ...stored, updatedAt: 'edit' };
-    delete cleared.allocationStartDate;
-    await upsertMonthlyCost(cleared);
-    expect(
-      (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)?.allocationStartDate,
-    ).toBeUndefined();
-  });
-
-  it('終了日なしでも費用化の開始日は保存できる（配分は発生しない・§D 端点）', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    const item = await createContinuousCost({
-      name: '持っているだけ',
-      amount: 60000,
-      startDate: '2026-06-15',
-      allocationStartDate: '2026-10-01',
-      expenseAccountId: food.id,
-      creditAccountId: cash.id,
-    });
-    const saved = (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)!;
-    expect(saved.allocationStartDate).toBe('2026-10-01');
-    expect(saved.endDate).toBeUndefined();
-    // 配分は従来どおり発生しない（月割り行が 1 本も出ない）。
-    const entries = reportEntriesForAsOf(await loadLedger(), '2030-12-31');
-    expect(
-      entries.some(
-        (e) =>
-          e.metadata?.continuousCostId === item.id && e.metadata.ccKind === 'monthly-allocation',
-      ),
-    ).toBe(false);
-  });
-
-  it('購入の仕訳の日付を費用化の開始日より後ろへ動かす編集は拒否（黙って clamp しない）', async () => {
-    const { item } = await makeDeferredItem('2026-10-01');
-    const purchase = (await loadLedger()).journalEntries.find(
-      (e) => e.metadata?.monthlyCostId === item.id,
-    )!;
-    await expect(upsertEntry({ ...purchase, date: '2026-10-02' })).rejects.toMatchObject({
-      code: 'error.monthlyCost.purchaseAfterAllocation',
-    });
-    // 費用化の開始日まで（以前）は動かせる。item へミラーされ、費用化の開始日は変わらない。
-    await upsertEntry({ ...purchase, date: '2026-10-01' });
-    const saved = (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)!;
-    expect(saved.startDate).toBe('2026-10-01');
-    expect(saved.allocationStartDate).toBe('2026-10-01');
-  });
-
-  it('アーカイブ: 終了日を費用化の開始日より前へ置くのは拒否（先に費用化の開始日を戻す）', async () => {
-    const { item } = await makeDeferredItem('2026-10-01');
-    await expect(archiveMonthlyCost({ id: item.id, endDate: '2026-09-30' })).rejects.toMatchObject({
-      code: 'error.monthlyCost.allocationAfterEnd',
-    });
-    // 費用化の開始日を戻してから終了日を設定する手順は通る。
-    const stored = (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)!;
-    const reverted = { ...stored, updatedAt: 'edit' };
-    delete reverted.allocationStartDate;
-    await upsertMonthlyCost(reverted);
-    await archiveMonthlyCost({ id: item.id, endDate: '2026-09-30' });
-    expect((await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)?.endDate).toBe(
-      '2026-09-30',
-    );
-  });
-
-  it('科目線分への要求範囲は従来どおり startDate〜endDate（allocation が内側でも購入日で検証）', async () => {
-    const { item } = await makeDeferredItem('2026-10-01');
-    // 明示 startDate = 2026-09-01 の計上先（購入日 2026-06-15 より後・費用化の開始日より前）。
-    await upsertAccount({
-      id: 'late-expense',
-      name: '後から作った費用',
-      type: 'expense',
-      role: 'expense-category',
-      archived: false,
-      startDate: '2026-09-01',
-      createdAt: '2026-09-01T00:00:00.000Z',
-      updatedAt: '2026-09-01T00:00:00.000Z',
-    });
-    const stored = (await loadLedger()).monthlyCostItems.find((m) => m.id === item.id)!;
-    // 配分（2026-10 以降）は科目線分の内側だが、要求範囲は購入日からなので拒否される。
-    await expect(
-      upsertMonthlyCost({ ...stored, expenseAccountId: 'late-expense' }),
-    ).rejects.toMatchObject({ code: 'error.account.referenceOutsidePeriod' });
-  });
-
-  it('ルール由来 item（ccr-）の起票時には費用化の開始日を設定しない（周期どおり）', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    const rule = await createRecurringRule({
-      name: '月払いサブスク',
-      amount: 1200,
-      dayOfMonth: 1,
-      everyMonths: 1,
-      debitAccountId: food.id,
-      creditAccountId: cash.id,
-      startMonth: '2026-01',
-      startDate: '2026-01-01',
-    });
-    expect(await catchUpRecurringRules('2026-03-15')).toBe(3);
-    const items = (await loadLedger()).monthlyCostItems.filter((m) =>
-      m.id.startsWith(`ccr-${rule.id}-`),
-    );
-    expect(items.length).toBe(3);
-    expect(items.every((m) => m.allocationStartDate === undefined)).toBe(true);
-  });
-
-  it('ルール由来 item（ccr-）にも費用化の開始日を後編集で設定できる（起票後は通常 item と同権・P1-2 決着）', async () => {
-    // 作者決定: ルールは起票の道具・起票後の item は通常 item と同権。ccr- item への
-    // allocationStartDate を禁止しない（縛りは「ルール存在期間外の誕生」のみ = schema の
-    // ruleExistsAt が担保。schema.test.ts 側で固定）。
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    const rule = await createRecurringRule({
-      name: '年払い保険',
-      amount: 1200,
-      dayOfMonth: 1,
-      everyMonths: 12,
-      debitAccountId: food.id,
-      creditAccountId: cash.id,
-      startMonth: '2026-01',
-      startDate: '2026-01-01',
-    });
-    expect(await catchUpRecurringRules('2026-03-15')).toBe(1);
-    const stored = (await loadLedger()).monthlyCostItems.find((m) =>
-      m.id.startsWith(`ccr-${rule.id}-`),
-    )!;
-    expect(stored).toMatchObject({ startDate: '2026-01-01', endDate: '2026-12-31' });
-    // 既定 = 購入日起点: 12 等分で毎月 100。
-    expect(monthlyCostForMonth(stored, '2026-03')).toBe(100);
-
-    await upsertMonthlyCost({ ...stored, allocationStartDate: '2026-07-01' });
-    const saved = (await loadLedger()).monthlyCostItems.find((m) => m.id === stored.id)!;
-    expect(saved.allocationStartDate).toBe('2026-07-01');
-    // 月割りが費用化開始へずれる（2026-07〜2026-12 の 6 等分 = 200・前半は 0）。
-    expect(monthlyCostForMonth(saved, '2026-03')).toBe(0);
-    expect(monthlyCostForMonth(saved, '2026-07')).toBe(200);
-    // ガード（startDate ≤ alloc ≤ endDate）は通常 item と同じ。
-    await expect(
-      upsertMonthlyCost({ ...saved, allocationStartDate: '2027-01-01' }),
-    ).rejects.toMatchObject({ code: 'error.monthlyCost.allocationAfterEnd' });
-    await expect(
-      upsertMonthlyCost({ ...saved, allocationStartDate: '2025-12-31' }),
-    ).rejects.toMatchObject({ code: 'error.monthlyCost.allocationBeforeStart' });
   });
 });
 
@@ -960,26 +678,6 @@ describe('返済計画の一括登録（createRepaymentEntries）', () => {
   });
 });
 
-describe('タグ実行時検証（保存前）', () => {
-  it('upsertEntry: 存在しないタグ参照は拒否', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    await expect(
-      upsertEntry(
-        buildSimpleEntry({
-          date: '2026-06-01',
-          description: 'x',
-          debitAccountId: food.id,
-          creditAccountId: cash.id,
-          amount: 100,
-          tagIds: ['no-such-tag'],
-        }),
-      ),
-    ).rejects.toThrow();
-  });
-});
-
 describe('残高補正 createAdjustment', () => {
   async function setBalance(accountName: string, amount: number) {
     const ledger = await loadLedger();
@@ -1078,6 +776,151 @@ describe('残高補正 createAdjustment', () => {
     expect(after.accounts.find((account) => account.name === '残高調整費')?.role).toBe(
       'expense-category',
     );
+  });
+});
+
+describe('残高補正の全科目化: 費用・収入（作者決定 2026-08-15）', () => {
+  /** 固定費へ 2 本（3,000 / 2,000）。理論値は「その日までの累計」になる。 */
+  async function seedFixedCost() {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const fixed = ledger.accounts.find((a) => a.name === '固定費')!;
+    for (const [date, amount] of [
+      ['2026-06-01', 3000],
+      ['2026-06-10', 2000],
+    ] as const) {
+      await upsertEntry(
+        buildSimpleEntry({
+          date,
+          description: '固定費の支払い',
+          debitAccountId: fixed.id,
+          creditAccountId: cash.id,
+          amount,
+        }),
+      );
+    }
+    return fixed;
+  }
+
+  it('費用 実累計12000・理論5000 → 借方 固定費 / 貸方 残高調整収入 7000', async () => {
+    const fixed = await seedFixedCost();
+    // 2026-06-30 までの累計 = 3,000 + 2,000 = 5,000。実際は 12,000 → delta = +7,000。
+    const entry = await createAdjustment({
+      accountId: fixed.id,
+      date: '2026-06-30',
+      actualBalance: 12000,
+    });
+    expect(entry!.metadata?.adjustment?.expectedBalance).toBe(5000);
+    expect(entry!.metadata?.adjustment?.delta).toBe(7000);
+    const rev = (await loadLedger()).accounts.find(
+      (a) => a.role === 'system-adjustment' && a.type === 'revenue',
+    )!;
+    expect(rev.name).toBe('残高調整収入');
+    expect(entry!.lines.find((l) => l.side === 'debit')).toMatchObject({
+      accountId: fixed.id,
+      amount: 7000,
+    });
+    expect(entry!.lines.find((l) => l.side === 'credit')).toMatchObject({
+      accountId: rev.id,
+      amount: 7000,
+    });
+  });
+
+  it('費用 実累計4000・理論5000 → 借方 残高調整費 / 貸方 固定費 1000', async () => {
+    const fixed = await seedFixedCost();
+    // 5,000 の理論に対し実際は 4,000 → delta = −1,000（費用を減らす = 貸方 費用）。
+    const entry = await createAdjustment({
+      accountId: fixed.id,
+      date: '2026-06-30',
+      actualBalance: 4000,
+    });
+    expect(entry!.metadata?.adjustment?.delta).toBe(-1000);
+    const exp = (await loadLedger()).accounts.find(
+      (a) => a.role === 'system-adjustment' && a.type === 'expense',
+    )!;
+    expect(entry!.lines.find((l) => l.side === 'debit')).toMatchObject({
+      accountId: exp.id,
+      amount: 1000,
+    });
+    expect(entry!.lines.find((l) => l.side === 'credit')).toMatchObject({
+      accountId: fixed.id,
+      amount: 1000,
+    });
+  });
+
+  it('理論値はその日までの累計（後日の仕訳を含めない）', async () => {
+    const fixed = await seedFixedCost();
+    // 2026-06-05 時点の累計は 1 本目の 3,000 だけ（2 本目 2026-06-10 は含まない）。
+    const entry = await createAdjustment({
+      accountId: fixed.id,
+      date: '2026-06-05',
+      actualBalance: 3500,
+    });
+    expect(entry!.metadata?.adjustment?.expectedBalance).toBe(3000);
+    expect(entry!.metadata?.adjustment?.delta).toBe(500);
+  });
+
+  it('収入は負債と同向: 実累計が多いと 貸方 給与 / 借方 残高調整費', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const salary = ledger.accounts.find((a) => a.name === '給与')!;
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2026-06-01',
+        description: '給与',
+        debitAccountId: cash.id,
+        creditAccountId: salary.id,
+        amount: 200000,
+      }),
+    );
+    // 理論 200,000 に対し実際は 250,000 → delta = +50,000（収入を増やす = 貸方 収入）。
+    const entry = await createAdjustment({
+      accountId: salary.id,
+      date: '2026-06-30',
+      actualBalance: 250000,
+    });
+    expect(entry!.metadata?.adjustment?.expectedBalance).toBe(200000);
+    const exp = (await loadLedger()).accounts.find(
+      (a) => a.role === 'system-adjustment' && a.type === 'expense',
+    )!;
+    expect(entry!.lines.find((l) => l.side === 'debit')).toMatchObject({
+      accountId: exp.id,
+      amount: 50000,
+    });
+    expect(entry!.lines.find((l) => l.side === 'credit')).toMatchObject({
+      accountId: salary.id,
+      amount: 50000,
+    });
+  });
+
+  it('残高調整科目そのものは補正できない（type 制限では弾けない経路・fail-closed）', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    // 1 回の補正で 残高調整費（type=expense）を生成する。
+    await createAdjustment({ accountId: cash.id, date: '2026-06-01', actualBalance: -1000 });
+    const adjustmentAccount = (await loadLedger()).accounts.find(
+      (a) => a.role === 'system-adjustment',
+    )!;
+
+    await expect(
+      createAdjustment({
+        accountId: adjustmentAccount.id,
+        date: '2026-06-30',
+        actualBalance: 999,
+      }),
+    ).rejects.toMatchObject({ code: 'error.adjust.internalRole' });
+    // 補正仕訳は 1 本目だけのまま（自己参照の補正を作らない）。
+    expect((await loadLedger()).journalEntries.filter((e) => e.metadata?.adjustment)).toHaveLength(
+      1,
+    );
+  });
+
+  it('equity（初期残高）は従来どおり補正できない', async () => {
+    const ledger = await loadLedger();
+    const capital = ledger.accounts.find((a) => a.name === '初期残高')!;
+    await expect(
+      createAdjustment({ accountId: capital.id, date: '2026-06-30', actualBalance: 100 }),
+    ).rejects.toMatchObject({ code: 'error.adjust.assetLiabilityOnly' });
   });
 });
 
@@ -1219,7 +1062,10 @@ describe('継続コスト資産の後編集で過去集計が再計算される�
       (s, e) => s + (e.lines.find((l) => l.side === 'debit')?.amount ?? 0),
       0,
     );
-    expect(recogBefore).toBe(6000);
+    // 同日刻み: 2026-01-01 起点の刻み日は 2026-02-01〜2026-12-01 の 11 本
+    //（12 本目 2027-01-01 は終了日 2026-12-31 を超える）。12,000 / 11 = 1,090 余り 10 なので
+    // 先頭 10 本が 1,091。asOf までに立つのは 2〜6 月の 5 本 = 1,091 × 5。
+    expect(recogBefore).toBe(5455);
     const expenseBefore = accountBalance(fun.id, 'expense', reportEntriesForAsOf(before, asOf));
 
     await upsertMonthlyCost({ ...item, amount: 24000, updatedAt: 'y2' });
@@ -1229,9 +1075,10 @@ describe('継続コスト資産の後編集で過去集計が再計算される�
       (s, e) => s + (e.lines.find((l) => l.side === 'debit')?.amount ?? 0),
       0,
     );
-    expect(recogAfter).toBe(12000); // 月あたりが倍増（過去に遡って再計算）
+    // 24,000 / 11 = 2,181 余り 9 → 先頭 9 本が 2,182。同じ 5 本で 10,910 = 5,455 の倍。
+    expect(recogAfter).toBe(10910); // 月あたりが倍増（過去に遡って再計算）
     expect(accountBalance(fun.id, 'expense', reportEntriesForAsOf(after, asOf))).toBe(
-      expenseBefore + 6000,
+      expenseBefore + 5455,
     );
     // 購入の仕訳の金額もミラーされ、台帳残高 >= 0。
     const purchase = after.journalEntries.find((e) => e.metadata?.monthlyCostId === item.id)!;
@@ -1261,7 +1108,9 @@ describe('継続コスト資産の後編集で過去集計が再計算される�
     const { item } = await setupContinuous();
     await upsertMonthlyCost({ ...item, endDate: '2026-06-30', updatedAt: 'y2' });
     let after = await loadLedger();
-    expect(recogOf(reportEntriesForAsOf(after, '2027-12-31'), item.id)).toHaveLength(6);
+    // 終了日 2026-06-30 までの同日通過は 2026-02-01〜2026-06-01 の 5 本
+    //（6 本目 2026-07-01 は終了日超）。12,000 / 5 = 2,400 ちょうど。
+    expect(recogOf(reportEntriesForAsOf(after, '2027-12-31'), item.id)).toHaveLength(5);
     // 終了日を消す = 費用の割り振りが止まる（残存価値 = 全額）。
     const cleared = { ...after.monthlyCostItems.find((m) => m.id === item.id)! };
     delete cleared.endDate;
@@ -1639,7 +1488,7 @@ describe('継続コスト資産の後編集（upsertMonthlyCost 保存境界）'
     await archiveMonthlyCost({
       id: item.id,
       endDate: '2026-12-31',
-      recovery: { destinationAccountId: cash.id, amount: 3000 },
+      recoveries: [{ destinationAccountId: cash.id, amount: 3000 }],
     });
     await upsertMonthlyCost({ ...item, amount: 24000, updatedAt: 'y2' });
     const after = await loadLedger();
@@ -1725,7 +1574,7 @@ describe('継続コスト資産のアーカイブ（archiveMonthlyCost = 終了�
     await archiveMonthlyCost({
       id: item.id,
       endDate: '2026-06-15',
-      recovery: { destinationAccountId: bank.id, amount: 30000 },
+      recoveries: [{ destinationAccountId: bank.id, amount: 30000 }],
     });
     const after = await loadLedger();
     expect(after.monthlyCostItems.find((m) => m.id === item.id)?.endDate).toBe('2026-06-15');
@@ -1736,14 +1585,16 @@ describe('継続コスト資産のアーカイブ（archiveMonthlyCost = 終了�
       { accountId: bank.id, side: 'debit', amount: 30000 },
       { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'credit', amount: 30000 },
     ]);
-    // 会計（§6-1 の検算）: 2024-06〜2026-06 = 25ヶ月・月あたり 8,400・台帳は 0 で閉じる。
+    // 会計（§6-1 の検算）: 2024-06-01 起点の同日通過は 2024-07-01〜2026-06-01 の 24 本
+    //（25 本目 2026-07-01 は終了日 2026-06-15 を超える）。割り振る総額 240,000 − 30,000 =
+    // 210,000 を 24 等分 = 8,750 ちょうど。費用 210,000・台帳は 0 で閉じる。
     const derived = reportEntriesForAsOf(after, '2026-12-31');
     const recogs = derived.filter(
       (e) =>
         e.metadata?.continuousCostId === item.id && e.metadata?.ccKind === 'monthly-allocation',
     );
-    expect(recogs).toHaveLength(25);
-    expect(recogs[0]?.lines[0]?.amount).toBe(8400);
+    expect(recogs).toHaveLength(24);
+    expect(recogs[0]?.lines[0]?.amount).toBe(8750);
     expect(accountBalance(food.id, 'expense', derived)).toBe(210000);
     expect(accountBalance(CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 'asset', derived)).toBe(0);
   });
@@ -1753,7 +1604,7 @@ describe('継続コスト資産のアーカイブ（archiveMonthlyCost = 終了�
     await archiveMonthlyCost({
       id: item.id,
       endDate: '2026-06-15',
-      recovery: { destinationAccountId: bank.id, amount: 300000 },
+      recoveries: [{ destinationAccountId: bank.id, amount: 300000 }],
     });
     const after = await loadLedger();
     const derived = reportEntriesForAsOf(after, '2026-12-31');
@@ -1782,14 +1633,15 @@ describe('継続コスト資産のアーカイブ（archiveMonthlyCost = 終了�
       archiveMonthlyCost({
         id: item.id,
         endDate: '2026-06-15',
-        recovery: { destinationAccountId: 'no-such-account', amount: 100 },
+        recoveries: [{ destinationAccountId: 'no-such-account', amount: 100 }],
       }),
     ).rejects.toMatchObject({ code: 'error.monthlyCost.recoveryDestination' });
-    // 費用カテゴリも簿記編集の振替先として許可する。
+    // 費用カテゴリのうち **item の費用の行き先** だけは振替先にできる
+    //（= 「終了日に全額費用にする」の第 2 振替）。
     await archiveMonthlyCost({
       id: item.id,
       endDate: '2026-06-15',
-      recovery: { destinationAccountId: food.id, amount: 100 },
+      recoveries: [{ destinationAccountId: food.id, amount: 100 }],
     });
     const recovery = (await loadLedger()).journalEntries.find(
       (entry) => entry.metadata?.monthlyCostRecovery === true,
@@ -1800,12 +1652,104 @@ describe('継続コスト資産のアーカイブ（archiveMonthlyCost = 終了�
     ).rejects.toMatchObject({ code: 'error.monthlyCost.notFound' });
   });
 
+  /** 同日刻みがちょうど割り切れる item（1,200,000 を 12 刻み = 各 100,000）。 */
+  async function setupEven() {
+    const ledger = await loadLedger();
+    const bank = ledger.accounts.find((a) => a.name === '預金')!;
+    const food = ledger.accounts.find((a) => a.name === '変動費')!;
+    const item = await createContinuousCost({
+      name: '割り切れる項目',
+      amount: 1200000,
+      startDate: '2026-01-01',
+      endDate: '2027-01-01',
+      expenseAccountId: food.id,
+      creditAccountId: bank.id,
+    });
+    return { item, bank, food };
+  }
+
+  /** その item の計算で生まれた月割り行（刻み）。 */
+  function cutsOf(derived: JournalEntry[], itemId: string) {
+    return derived.filter(
+      (e) => e.metadata?.continuousCostId === itemId && e.metadata?.ccKind === 'monthly-allocation',
+    );
+  }
+
+  it('「終了日に全額費用にする」= 費用の行き先への第 2 の回収の振替（過去の刻みは元の額のまま）', async () => {
+    const { item, food } = await setupEven();
+    // 2026-07-01 で終了 = 同日刻み 2026-02-01〜07-01 の 6 本（各 100,000）が消費済み。
+    // 残り 600,000 を終了日に 1 本で費用にする（= 割り振る総額が消費済み額へ落ちる）。
+    await archiveMonthlyCost({
+      id: item.id,
+      endDate: '2026-07-01',
+      recoveries: [{ destinationAccountId: food.id, amount: 600000 }],
+    });
+    const after = await loadLedger();
+    const second = after.journalEntries.find((e) => e.metadata?.monthlyCostRecovery === true)!;
+    expect(second.date).toBe('2026-07-01');
+    expect(second.lines).toEqual([
+      { accountId: food.id, side: 'debit', amount: 600000 },
+      { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'credit', amount: 600000 },
+    ]);
+    const derived = reportEntriesForAsOf(after, '2027-12-31');
+    const cuts = cutsOf(derived, item.id);
+    // 過去の刻みは本数も額も変わらない（新しい数学は入れていない）。
+    expect(cuts).toHaveLength(6);
+    expect(cuts.map((e) => e.lines[0]?.amount)).toEqual(Array(6).fill(100000));
+    // 費用の総額は購入額のまま・台帳は 0 で閉じる。
+    expect(accountBalance(food.id, 'expense', derived)).toBe(1200000);
+    expect(accountBalance(CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 'asset', derived)).toBe(0);
+  });
+
+  it('部分回収 + 「終了日に全額」: 資産へ R・費用へ（残存 − R）・過去の刻みは不変', async () => {
+    const { item, bank, food } = await setupEven();
+    await archiveMonthlyCost({
+      id: item.id,
+      endDate: '2026-07-01',
+      recoveries: [
+        { destinationAccountId: bank.id, amount: 200000 },
+        { destinationAccountId: food.id, amount: 400000 },
+      ],
+    });
+    const after = await loadLedger();
+    const recoveries = after.journalEntries.filter((e) => e.metadata?.monthlyCostRecovery === true);
+    expect(recoveries).toHaveLength(2);
+    expect(
+      recoveries
+        .map((e) => `${e.lines.find((l) => l.side === 'debit')!.accountId}:${e.lines[0]!.amount}`)
+        .sort(),
+    ).toEqual([`${bank.id}:200000`, `${food.id}:400000`].sort());
+    const derived = reportEntriesForAsOf(after, '2027-12-31');
+    expect(cutsOf(derived, item.id).map((e) => e.lines[0]?.amount)).toEqual(Array(6).fill(100000));
+    // 費用 = 導出 600,000 + 第 2 振替 400,000。回収した 200,000 は預金へ戻る。台帳は 0。
+    expect(accountBalance(food.id, 'expense', derived)).toBe(1000000);
+    expect(accountBalance(CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 'asset', derived)).toBe(0);
+  });
+
+  it('回収先は item の費用の行き先**以外**の費用科目を拒否する（保存境界の fail-closed）', async () => {
+    const { item, food } = await setupEven();
+    const other = (await loadLedger()).accounts.find(
+      (a) => a.role === 'expense-category' && a.id !== food.id,
+    )!;
+    await expect(
+      archiveMonthlyCost({
+        id: item.id,
+        endDate: '2026-07-01',
+        recoveries: [{ destinationAccountId: other.id, amount: 100 }],
+      }),
+    ).rejects.toMatchObject({ code: 'error.monthlyCost.recoveryDestination' });
+    // 終了日も回収も一切書かれていない（多段でも atomic）。
+    const after = await loadLedger();
+    expect(after.monthlyCostItems.find((m) => m.id === item.id)?.endDate).toBe('2027-01-01');
+    expect(after.journalEntries.some((e) => e.metadata?.monthlyCostRecovery === true)).toBe(false);
+  });
+
   it('回収の振替は普通の振替として編集・削除できる', async () => {
     const { item, bank } = await setup();
     await archiveMonthlyCost({
       id: item.id,
       endDate: '2026-06-15',
-      recovery: { destinationAccountId: bank.id, amount: 30000 },
+      recoveries: [{ destinationAccountId: bank.id, amount: 30000 }],
     });
     const ledger = await loadLedger();
     const recovery = ledger.journalEntries.find((e) => e.metadata?.monthlyCostRecovery === true)!;
@@ -2630,21 +2574,6 @@ describe('設定の保存境界（Codex 指摘・schema と保存の不整合）
     await expect(updateSettings({ ...ledger.settings, ledgerName: '   ' })).rejects.toMatchObject({
       code: 'error.settings.invalid',
     });
-  });
-
-  it('タグも保存境界で schema を通す（61 文字の名前は拒否）', async () => {
-    const { upsertTag } = await import('../src/data/repository');
-    await expect(
-      upsertTag({
-        id: 'too-long-tag',
-        name: 'あ'.repeat(61),
-        scope: 'entry',
-        archived: false,
-        createdAt: '2026-08-13T00:00:00.000Z',
-        updatedAt: '2026-08-13T00:00:00.000Z',
-      }),
-    ).rejects.toMatchObject({ code: 'error.tag.invalid' });
-    expect((await loadLedger()).tags.some((x) => x.id === 'too-long-tag')).toBe(false);
   });
 
   it('不正な表示桁数も保存境界で拒否する', async () => {

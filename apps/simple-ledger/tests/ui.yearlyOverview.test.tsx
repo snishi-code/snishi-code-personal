@@ -1,11 +1,59 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, within } from '@testing-library/react';
-import { YearlyOverview } from '../src/ui/screens/YearlyOverview';
+import { useState } from 'react';
+import { act, cleanup, fireEvent, render, within } from '@testing-library/react';
+import { YearlyOverview, type OverviewMode } from '../src/ui/screens/YearlyOverview';
 import type { Account, JournalEntry, Ledger } from '../src/domain/types';
 import * as reportEntriesModule from '../src/domain/reportEntries';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID, SCHEMA_VERSION } from '../src/domain/constants';
 import { UI } from '../src/ui-contract';
 import './setup';
+import type { ReportPeriod } from '../src/domain/reportPeriod';
+
+/**
+ * 全 render の既定 props（タップ配線のテストだけ spy を渡す）。
+ *
+ * 年間/全体はヘッダーの粒度セグメントが持つ props になったので、この画面単体テストでは
+ * App の代わりに **stateful なラッパー**が mode を持つ。初期値は initialMode、画面からの
+ * onModeChange（全体の年見出しタップ）はラッパーが受けて実際に mode を進める＝
+ * 「タップ → 年間表示へ切り替わる」まで一続きで検証できる。
+ * setMode は「同じマウントのまま mode だけ変える」ための入口（再マウントと区別したいとき用）。
+ */
+function renderOverview(
+  period: ReportPeriod,
+  options: {
+    onPeriodChange?: (next: ReportPeriod) => void;
+    onNavigate?: (screen: string) => void;
+    onModeChange?: (mode: OverviewMode) => void;
+    initialMode?: OverviewMode;
+  } = {},
+) {
+  let setModeRef: ((mode: OverviewMode) => void) | undefined;
+
+  function Harness() {
+    const [mode, setMode] = useState<OverviewMode>(options.initialMode ?? 'year');
+    setModeRef = setMode;
+    return (
+      <YearlyOverview
+        period={period}
+        mode={mode}
+        onModeChange={(next) => {
+          setMode(next);
+          options.onModeChange?.(next);
+        }}
+        onPeriodChange={options.onPeriodChange ?? (() => undefined)}
+        onNavigate={(options.onNavigate ?? (() => undefined)) as never}
+      />
+    );
+  }
+
+  const view = render(<Harness />);
+  return {
+    ...view,
+    setMode: (mode: OverviewMode) => {
+      act(() => setModeRef!(mode));
+    },
+  };
+}
 
 const ledgerState = vi.hoisted(() => ({ ledger: null as Ledger | null }));
 
@@ -91,7 +139,7 @@ afterEach(() => {
 
 describe('YearlyOverview', () => {
   it('ヘッダー選択日の年を初期表示し、データ年だけを両端まで送る', () => {
-    render(<YearlyOverview period={{ mode: 'date', date: '2024-05-10' }} />);
+    renderOverview({ mode: 'date', date: '2024-05-10' });
 
     expect(document.querySelector(`[data-ui="${UI.yearlyOverview.view}"]`)).toHaveTextContent(
       '2024年',
@@ -119,8 +167,44 @@ describe('YearlyOverview', () => {
     expect(next).toBeDisabled();
   });
 
+  it('年間: 月の列見出しタップで基準日をその月末にしてホームへ飛ぶ', () => {
+    const onPeriodChange = vi.fn();
+    const onNavigate = vi.fn();
+    renderOverview({ mode: 'date', date: '2024-05-10' }, { onPeriodChange, onNavigate });
+
+    const months = document.querySelectorAll<HTMLButtonElement>(
+      `[data-ui="${UI.yearlyOverview.monthColumn}"]`,
+    );
+    expect(months).toHaveLength(12);
+    // 11 月の列 → 基準日 = 2024-11-30（集計列と同じ月末の正本）。
+    fireEvent.click(months[10]!);
+    expect(onPeriodChange).toHaveBeenCalledWith({ mode: 'date', date: '2024-11-30' });
+    expect(onNavigate).toHaveBeenCalledWith('dashboard');
+  });
+
+  it('全体: 年の列見出しタップでその年の年間表示へ切り替わる（ヘッダーは変えない）', () => {
+    const onPeriodChange = vi.fn();
+    renderOverview({ mode: 'date', date: '2024-05-10' }, { onPeriodChange, initialMode: 'all' });
+
+    const years = document.querySelectorAll<HTMLButtonElement>(
+      `[data-ui="${UI.yearlyOverview.yearColumn}"]`,
+    );
+    expect(years.length).toBeGreaterThan(0);
+    const target = [...years].find((b) => b.textContent?.includes('2026'))!;
+    fireEvent.click(target);
+
+    // 画面内で年間 2026 へ（月列が現れる）。ヘッダーの期間は動かさない。
+    expect(document.querySelector(`[data-ui="${UI.yearlyOverview.view}"]`)).toHaveTextContent(
+      '2026年',
+    );
+    expect(document.querySelectorAll(`[data-ui="${UI.yearlyOverview.monthColumn}"]`)).toHaveLength(
+      12,
+    );
+    expect(onPeriodChange).not.toHaveBeenCalled();
+  });
+
   it('ヘッダー年に仕訳がなくても、その年を丸めず初期表示する', () => {
-    render(<YearlyOverview period={{ mode: 'date', date: '2025-05-10' }} />);
+    renderOverview({ mode: 'date', date: '2025-05-10' });
 
     expect(document.querySelector(`[data-ui="${UI.yearlyOverview.view}"]`)).toHaveTextContent(
       '2025年',
@@ -154,7 +238,7 @@ describe('YearlyOverview', () => {
       ],
     };
 
-    render(<YearlyOverview period={{ mode: 'date', date: '2025-05-10' }} />);
+    renderOverview({ mode: 'date', date: '2025-05-10' });
     expect(document.querySelector(`[data-ui="${UI.yearlyOverview.matrix}"]`)).toBeInTheDocument();
     expect(document.querySelector(`[data-ui="${UI.yearlyOverview.view}"]`)).toHaveTextContent(
       '2025年',
@@ -184,13 +268,13 @@ describe('YearlyOverview', () => {
       ],
     };
 
-    render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
+    const view = renderOverview({ mode: 'date', date: '2026-07-15' });
     const next = document.querySelector(
       `[data-ui="${UI.yearlyOverview.nextYear}"]`,
     ) as HTMLButtonElement;
     expect(next).toHaveAccessibleName('2027年へ進む');
 
-    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.modeAll}"]`)!);
+    view.setMode('all');
     const matrix = document.querySelector(`[data-ui="${UI.yearlyOverview.matrix}"]`) as HTMLElement;
     expect(
       within(matrix)
@@ -204,9 +288,8 @@ describe('YearlyOverview', () => {
   });
 
   it('全体へ切り替えるとデータ年を昇順に並べ、未来年も投影値を表示する', () => {
-    render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
+    renderOverview({ mode: 'date', date: '2026-07-15' }, { initialMode: 'all' });
 
-    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.modeAll}"]`)!);
     const matrix = document.querySelector(`[data-ui="${UI.yearlyOverview.matrix}"]`) as HTMLElement;
     const headers = within(matrix).getAllByRole('columnheader');
     expect(headers.map((header) => header.textContent)).toEqual([
@@ -221,12 +304,12 @@ describe('YearlyOverview', () => {
   });
 
   it('表示地平セレクタは全体モードだけに出し、既定=実績のみは従来の歯抜け列のまま', () => {
-    render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
+    const view = renderOverview({ mode: 'date', date: '2026-07-15' });
     expect(
       document.querySelector(`[data-ui="${UI.yearlyOverview.horizonActual}"]`),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.modeAll}"]`)!);
+    view.setMode('all');
     const actual = document.querySelector(
       `[data-ui="${UI.yearlyOverview.horizonActual}"]`,
     ) as HTMLButtonElement;
@@ -240,8 +323,7 @@ describe('YearlyOverview', () => {
   });
 
   it('地平の切替で列数が変わる: +30年=今年+30まで連続、2100年まで=最終列2100年', () => {
-    render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
-    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.modeAll}"]`)!);
+    renderOverview({ mode: 'date', date: '2026-07-15' }, { initialMode: 'all' });
     const matrix = document.querySelector(`[data-ui="${UI.yearlyOverview.matrix}"]`) as HTMLElement;
     expect(within(matrix).getAllByRole('columnheader')).toHaveLength(4);
 
@@ -276,8 +358,7 @@ describe('YearlyOverview', () => {
       ],
     };
 
-    render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
-    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.modeAll}"]`)!);
+    renderOverview({ mode: 'date', date: '2026-07-15' }, { initialMode: 'all' });
     fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.horizonHardCap}"]`)!);
     const matrix = document.querySelector(`[data-ui="${UI.yearlyOverview.matrix}"]`) as HTMLElement;
     const headers = within(matrix)
@@ -320,8 +401,7 @@ describe('YearlyOverview', () => {
       ],
     };
 
-    render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
-    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.modeAll}"]`)!);
+    renderOverview({ mode: 'date', date: '2026-07-15' }, { initialMode: 'all' });
     fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.horizonPlus30}"]`)!);
     const matrix = document.querySelector(`[data-ui="${UI.yearlyOverview.matrix}"]`) as HTMLElement;
     expect(
@@ -365,8 +445,7 @@ describe('YearlyOverview', () => {
       ],
     };
 
-    render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
-    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.modeAll}"]`)!);
+    renderOverview({ mode: 'date', date: '2026-07-15' }, { initialMode: 'all' });
     const matrix = document.querySelector(`[data-ui="${UI.yearlyOverview.matrix}"]`) as HTMLElement;
     // 実績のみでは終了日なしルールは地平を延ばさない（データ年=2026のみ）。
     expect(within(matrix).getAllByRole('columnheader')).toHaveLength(2);
@@ -387,7 +466,7 @@ describe('YearlyOverview', () => {
   });
 
   it('当年の未来月も対象期間外にせず数値で表示する', () => {
-    render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
+    renderOverview({ mode: 'date', date: '2026-07-15' });
 
     const matrix = document.querySelector(`[data-ui="${UI.yearlyOverview.matrix}"]`) as HTMLElement;
     expect(within(matrix).queryByLabelText('対象期間外')).not.toBeInTheDocument();
@@ -399,15 +478,16 @@ describe('YearlyOverview', () => {
   it('表示単位ごとに仕訳の仮想展開を1回だけ行う', () => {
     // 画面の展開入口は displayEntriesResultForAsOf（投影込み+打ち切り診断の表示 API）。
     const expand = vi.spyOn(reportEntriesModule, 'displayEntriesResultForAsOf');
-    render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
+    const view = renderOverview({ mode: 'date', date: '2026-07-15' });
     expect(expand).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(document.querySelector(`[data-ui="${UI.yearlyOverview.modeAll}"]`)!);
+    // 同じマウントのまま全体へ（mode 変更は再マウントではなく props の入れ替え）。
+    view.setMode('all');
     expect(expand).toHaveBeenCalledTimes(2);
   });
 
   it('年間モードでも未来月を含む年には投影の注記を出す（過去年には出さない）', () => {
-    const { unmount } = render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
+    const { unmount } = renderOverview({ mode: 'date', date: '2026-07-15' });
     // 2026 年は未来月（8〜12月）を含む = 投影が混ざるので注記を出す。
     expect(
       document.querySelector(`[data-ui="${UI.yearlyOverview.projectionNote}"]`),
@@ -415,7 +495,7 @@ describe('YearlyOverview', () => {
     unmount();
 
     // 2024 年は全月が過去 = 投影ゼロなので注記を出さない。
-    render(<YearlyOverview period={{ mode: 'date', date: '2024-05-10' }} />);
+    renderOverview({ mode: 'date', date: '2024-05-10' });
     expect(
       document.querySelector(`[data-ui="${UI.yearlyOverview.projectionNote}"]`),
     ).not.toBeInTheDocument();
@@ -435,7 +515,7 @@ describe('YearlyOverview', () => {
     );
     ledgerState.ledger = ledger;
 
-    render(<YearlyOverview period={{ mode: 'date', date: '2026-07-15' }} />);
+    renderOverview({ mode: 'date', date: '2026-07-15' });
     const note = document.querySelector(`[data-ui="${UI.yearlyOverview.projectionTruncatedNote}"]`);
     expect(note).toBeInTheDocument();
     expect(note).toHaveTextContent('投資');

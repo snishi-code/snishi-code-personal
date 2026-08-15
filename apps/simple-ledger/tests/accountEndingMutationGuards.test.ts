@@ -181,10 +181,12 @@ async function seedEndedAssetBackedByContinuousCost(options?: {
     await archiveMonthlyCost({
       id: item.id,
       endDate: '2025-06-30',
-      recovery: {
-        destinationAccountId: bank.id,
-        amount: options.recoveryAmount,
-      },
+      recoveries: [
+        {
+          destinationAccountId: bank.id,
+          amount: options.recoveryAmount,
+        },
+      ],
     });
     recovery = (await loadLedger()).journalEntries.find(
       (entry) =>
@@ -343,7 +345,7 @@ describe('終了済み資産と継続コストの後続操作', () => {
       archiveMonthlyCost({
         id: item.id,
         endDate: '2025-06-30',
-        recovery: { destinationAccountId: bank.id, amount: 100 },
+        recoveries: [{ destinationAccountId: bank.id, amount: 100 }],
       }),
     ).rejects.toMatchObject({
       code: 'error.account.archiveBalance',

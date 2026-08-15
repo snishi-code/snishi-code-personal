@@ -19,12 +19,14 @@ export const DB_VERSION = 4 as const;
 export const APP_ID = 'snishi-code.template-memo' as const;
 
 /**
- * 現行スキーマ版。互換性のない変更ごとに +1 する。migration step は持たない
+ * 現行スキーマ版。互換性のない変更ごとに +1 する。
+ * v6 = テンプレートをアプリ/グループ/ページの 3 段で持つ形
+ *      (settings.defaultTemplateId / PlaceDef.templateId / Patient.templateId)。migration step は持たない
  * （simple-ledger と同じ単発変換方式。旧版 JSON は fail-closed に拒否し、
  * 必要なら変換ツールを別途用意する）。v4 = テンプレート部品の正規化。
  * v5 = 自由本文の場所化（旧・単一メモ欄と注入先設定を廃止し sectionTexts を追加）。
  */
-export const SCHEMA_VERSION = 5 as const;
+export const SCHEMA_VERSION = 6 as const;
 
 /** バックアップ JSON の kind 識別子。 */
 export const BACKUP_KIND = 'TEMPLATE_MEMO_BACKUP' as const;

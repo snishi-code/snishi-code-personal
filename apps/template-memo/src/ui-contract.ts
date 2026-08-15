@@ -32,6 +32,7 @@ export const UI = {
     // 画面内ボタン (患者固有 = 転記用QR)
     emrQr: 'detail.emrQr', // 患者詳細内「転記用QRを表示」ボタン
     qrDialog: 'detail.qr.dialog',
+    template: 'detail.template', // ページで使うテンプレートの切替 (タグ行の右端)
   },
   problem: {
     card: 'problem.card',
@@ -120,6 +121,7 @@ export const UI = {
     wardRename: 'settings.wards.rename',
     wardDelete: 'settings.wards.delete',
     wardAdd: 'settings.wards.add',
+    wardTemplate: 'settings.wards.template', // グループのデフォルトテンプレート切替
     // 一時: 旧 hospital-workspace からの単発移行 (移行完了後に削除する)。
   },
   picker: {
