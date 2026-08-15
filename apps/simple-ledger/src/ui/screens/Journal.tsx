@@ -7,6 +7,8 @@
  * 展開範囲 = いま表示している範囲（to → 今日 or 保存仕訳の最も遠い日付。上限 2100-12-31）。
  * 行タップ: 通常 = 編集 / 初期残高・補正 = 専用シート / 購入の仕訳 = 編集（借方は台帳固定）/
  * 計算で生まれた行 = 起票元（項目・ルール・投資科目。derivedEntryOrigin が単一正本）へ遷移。
+ * くり返し記帳から生まれた実仕訳は読み取り専用（作者決定 2026-08-15）: row-action を出さず、
+ * タップは由来ルールへ（未起票の投影とまったく同じ行になる）。
  */
 import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
@@ -28,6 +30,7 @@ import { UI } from '../../ui-contract';
 import { todayLocal } from '../../util/time';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
 import { entryOpenPlan } from '../entryOpen';
+import { generatedEntryRuleId } from '../../domain/recurringIds';
 import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { periodRange, type ReportPeriod } from '../../domain/reportPeriod';
 import {
@@ -408,6 +411,9 @@ export function Journal({
               md?.continuousCostId !== undefined ||
               isContinuousCostMonthlyAllocationEntry(entry);
             const isAdjustment = !!md?.adjustment;
+            // くり返し記帳から生まれた仕訳は読み取り専用（作者決定 2026-08-15）。
+            // 編集・削除・反対仕訳はどれも出さず、タップは由来ルールへ（entryOpenPlan が担う）。
+            const isRuleGenerated = generatedEntryRuleId(entry) !== undefined;
             const displayedAmount = entry.lines.find((line) => line.side === 'debit')?.amount ?? 0;
             // 科目ドリル中だけ、その科目の自然な残高符号で増減を示す。金額自体には符号を付けない。
             const balanceChange = filterAccount ? accountBalanceChange(entry, filterAccount) : null;
@@ -495,7 +501,7 @@ export function Journal({
                 >
                   <Money amount={displayedAmount} currency={currency} />
                 </span>
-                {isVirtual || isPurchase ? null : isAdjustment ? (
+                {isVirtual || isPurchase || isRuleGenerated ? null : isAdjustment ? (
                   <button
                     type="button"
                     className="icon-btn"

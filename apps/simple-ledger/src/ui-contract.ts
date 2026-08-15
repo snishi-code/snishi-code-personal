@@ -272,12 +272,8 @@ export const UI = {
     recurringEndSheetConfirm: 'allocations.recurring.endSheet.confirm',
     recurringRestart: 'allocations.recurring.restart',
     recurringRestartConfirm: 'allocations.recurring.restart.confirm',
+    // 削除はカスケード（ルール + 起票済みの仕訳・持ち物）。確認に起票回数を出す。
     recurringDelete: 'allocations.recurring.delete',
-    // ルール由来 item の削除 = 「この回をスキップ」（ルールは続く）。ダイアログから
-    // 終了日シートへ乗り換えられる。
-    skipDialog: 'allocations.skipDialog',
-    skipConfirm: 'allocations.skip.confirm',
-    skipEndRule: 'allocations.skip.endRule',
     // 継続コスト資産シート（登録＝編集の 1 コンポーネント）。
     // 編集の入口は item カードそのもののタップ（編集アイコンは置かない）。
     editDialog: 'allocations.editDialog',

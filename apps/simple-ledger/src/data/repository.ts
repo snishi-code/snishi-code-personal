@@ -45,7 +45,10 @@ import {
   clampDayToMonth,
   isRecurringPostableRole,
   isRecurringSpreadDestinationRole,
+  generatedEntryRuleId,
+  generatedItemRuleId,
   ruleEntryId,
+  parseRuleEntryId,
   parseRuleItemId,
   recurringCursorAfter,
   recurringDestinationAccountId,
@@ -895,6 +898,10 @@ async function archiveAccountUnlocked(id: string, transferEntry?: JournalEntry):
  *  - 残高補正（adjustment）: 専用画面（updateAdjustment / deleteAdjustment）でだけ管理する。
  */
 function assertEntryDeletable(target: JournalEntry | undefined): void {
+  // ルール由来の仕訳はそもそも個別に消せない（ルール削除のカスケードでだけ消える）。
+  if (target !== undefined && generatedEntryRuleId(target) !== undefined) {
+    throw new LedgerError('error.recurring.generatedReadOnly');
+  }
   if (target?.metadata?.monthlyCostId && target.metadata.monthlyCostRecovery !== true) {
     throw new LedgerError('error.entry.monthlyCost');
   }
@@ -905,45 +912,22 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
   const entries = await getAll<JournalEntry>(STORE.journalEntries);
   const existing = entries.find((e) => e.id === entry.id);
 
-  // 定期ルールが作った実仕訳は、個別月の金額・摘要などは編集できる一方、由来する
-  // ルール/月は保存境界で固定する。月をまたぐ日付変更を許すと recurringMonth と
-  // item の決定的 ID が食い違い、次の catch-up/import で同じ月を二重計上し得る。
-  const existingRuleId = existing?.metadata?.recurringRuleId;
-  const existingRuleMonth = existing?.metadata?.recurringMonth;
-  if (existingRuleId === undefined) {
-    if (
-      entry.metadata?.recurringRuleId !== undefined ||
-      entry.metadata?.recurringMonth !== undefined
-    ) {
-      throw new LedgerError('error.recurring.invalidStructure');
-    }
-  } else {
-    if (
-      existingRuleMonth === undefined ||
-      (entry.metadata?.recurringRuleId !== undefined &&
-        entry.metadata.recurringRuleId !== existingRuleId) ||
-      (entry.metadata?.recurringMonth !== undefined &&
-        entry.metadata.recurringMonth !== existingRuleMonth)
-    ) {
-      throw new LedgerError('error.recurring.invalidStructure');
-    }
-    const rules = await getAll<RecurringRule>(STORE.recurringRules);
-    const sourceRule = rules.find((rule) => rule.id === existingRuleId);
-    if (
-      sourceRule === undefined ||
-      monthOf(entry.date) !== existingRuleMonth ||
-      !recurringRuleExistsAt(sourceRule, entry.date)
-    ) {
-      throw new LedgerError('error.recurring.periodInvalid');
-    }
-    entry = {
-      ...entry,
-      metadata: {
-        ...entry.metadata,
-        recurringRuleId: existingRuleId,
-        recurringMonth: existingRuleMonth,
-      },
-    };
+  // くり返し記帳から生まれた仕訳は**通常経路では一切書き換えられない**（作者決定 2026-08-15）。
+  // ルールは定期起票するだけの軽い道具で、生まれたものへの個別操作は持たない＝調整はルール側の
+  // 編集・終了・再開で行う。ルール自身の内部処理（遡及の金額変更・分割・catch-up・カスケード
+  // 削除）はこの保存境界を通らず writeWithRevision へ直接書くため、ここで塞いでよい。
+  if (
+    (existing !== undefined && generatedEntryRuleId(existing) !== undefined) ||
+    parseRuleEntryId(entry.id) !== undefined
+  ) {
+    throw new LedgerError('error.recurring.generatedReadOnly');
+  }
+  // 由来を名乗らない ID の仕訳が、ユーザー入力からルール由来メタを持ち込むことも許さない。
+  if (
+    entry.metadata?.recurringRuleId !== undefined ||
+    entry.metadata?.recurringMonth !== undefined
+  ) {
+    throw new LedgerError('error.recurring.invalidStructure');
   }
   // 補正仕訳は専用画面でだけ管理する（現実アンカーを保つ）。ユーザー入力からも作れない。
   if (existing?.metadata?.adjustment || entry.metadata?.adjustment) {
@@ -2060,9 +2044,48 @@ async function upsertRecurringRuleUnlocked(
 }
 
 /**
- * 定期ルールを削除する。起票済みの仕訳・item は事実として残し、由来メタデータと
- * `rec-{ruleId}-...` / `ccr-{ruleId}-...` の決定的 ID を剥がし、参照も付け替えて
- * 独立した通常事実へ戻す（同一トランザクション）。
+ * ルール削除で道連れになる集合（検証と実書込みで同じ規則を使う単一正本）。
+ *  - item: `ccr-{ruleId}-{month}`
+ *  - 仕訳: そのルールが起票したもの（由来メタ / `rec-` ID）と、道連れ item に紐づく仕訳
+ *
+ * 回収の振替（`monthlyCostRecovery`）も、その item に紐づく限りは道連れにする。
+ * 「利用者の実仕訳は残す」の例外なのは、回収の振替が**貸方 = 継続コスト台帳**だからで、
+ * item を消して振替だけ残すと (a) 台帳にふれる仕訳は monthlyCostId 必須（不変条件⑧）を破り、
+ * (b) 購入の借方が消えて台帳残高が負に落ちる。継続コスト item 単体の削除
+ * （deleteMonthlyCostUnlocked）でも回収の振替は一緒に消しており、規則はそちらと同じ。
+ */
+function planRecurringCascade(
+  ruleId: string,
+  entries: readonly JournalEntry[],
+  items: readonly MonthlyCostItem[],
+): { entryIds: Set<string>; itemIds: Set<string> } {
+  const itemIds = new Set(
+    items.filter((item) => generatedItemRuleId(item) === ruleId).map((item) => item.id),
+  );
+  const entryIds = new Set<string>();
+  for (const entry of entries) {
+    const generated = generatedEntryRuleId(entry) === ruleId;
+    const linkedToRemovedItem =
+      entry.metadata?.monthlyCostId !== undefined && itemIds.has(entry.metadata.monthlyCostId);
+    if (generated || linkedToRemovedItem) entryIds.add(entry.id);
+  }
+  return { entryIds, itemIds };
+}
+
+/**
+ * 定期ルールを削除する = **カスケード**（作者決定 2026-08-15）。
+ *
+ * 積み木モデル: ルールが下でその起票が上。下を抜けば上も落ちる。ルール本体・そのルールが
+ * 起票した `rec-{ruleId}-{month}` の仕訳・`ccr-{ruleId}-{month}` の item・item の購入仕訳を
+ * 同一トランザクションで消す。ルールから生まれたものへの個別操作を持たない以上、
+ * 「ルールだけ消して起票を残す」= 誰も触れない孤児を作ることになるため、まとめて消す。
+ * 復旧は同じ内容でルールを登録し直すだけなので、確認は注意文（起票回数つき）だけにする。
+ *
+ * ただし**利用者が自分で作った実仕訳は最下層の積み木**なので消さない:
+ *  - 反対仕訳が消える仕訳を指していたら、反対仕訳は残して `reversalOfEntryId` だけ剥がす
+ *    （通常科目どうしの独立した事実として存続する）。
+ *  - 例外は回収の振替: 貸方が継続コスト台帳（内部集約）で item と対でしか成立しないため、
+ *    道連れにする（理由は planRecurringCascade のコメント）。
  */
 async function deleteRecurringRuleUnlocked(id: string): Promise<void> {
   // 関連データの読みも同一トランザクション内で行う（別読みだと、読みと書きの間に
@@ -2079,8 +2102,9 @@ async function deleteRecurringRuleUnlocked(id: string): Promise<void> {
     throw new LedgerError('error.recurring.notFound');
   }
   assertRecurringRuleGeneratedDependencies(existing, entries, items);
-  // 後継を削除して生成済み事実を通常仕訳へ戻しても、親を再び開いたときに同じ月を
-  // 起票し直さない。後継が走査した月（削除済み月を含む）を親の skip 履歴へ継承する。
+  // 後継を削除すると、その後継が起票した月ぶんの事実も一緒に消える。親を再び開いたとき
+  // その月を起票し直さないよう、後継が走査した月を親の起票カーソルへ継承する
+  // （復旧は「同じ内容でルールを登録し直す」であって、親の再オープンではない）。
   let inheritedCursor = existing.postedThroughMonth;
   for (const entry of entries) {
     if (
@@ -2093,8 +2117,6 @@ async function deleteRecurringRuleUnlocked(id: string): Promise<void> {
       inheritedCursor = entry.metadata.recurringMonth;
     }
   }
-  // 既起票の仕訳・item は削除後も同じ金額・日付で残るため、終了点残高に影響する差分は
-  // 将来投影を担う rule の除去だけ。ID の中立化前に同値な候補状態を検証する。
   const ruleUpdates = new Map<string, RecurringRule>();
   const remainingRules = rules
     .filter((rule) => rule.id !== id)
@@ -2123,10 +2145,13 @@ async function deleteRecurringRuleUnlocked(id: string): Promise<void> {
       return next;
     });
   assertRecurringLineagesSavable(remainingRules);
+  // カスケードで仕訳・item も消えるため、終了点残高は「消したあとの姿」で検証する
+  // （残す前提のままだと、終了済み科目の残高を崩す削除を素通しする）。
+  const cascade = planRecurringCascade(existing.id, entries, items);
   assertEndedAssetLiabilityBalances({
     accounts: [...ctx.byId.values()],
-    journalEntries: entries,
-    monthlyCostItems: items,
+    journalEntries: entries.filter((entry) => !cascade.entryIds.has(entry.id)),
+    monthlyCostItems: items.filter((item) => !cascade.itemIds.has(item.id)),
     recurringRules: remainingRules,
   });
   let missingRace = false;
@@ -2151,56 +2176,25 @@ async function deleteRecurringRuleUnlocked(id: string): Promise<void> {
             return;
           }
 
-          const itemIdRemap = new Map<string, string>();
-          for (const item of itemProbe.result as MonthlyCostItem[]) {
-            if (recurringRuleItemMonth(id, item.id) === undefined) continue;
-            const next = { ...item, id: newId(), updatedAt: ts };
-            itemIdRemap.set(item.id, next.id);
-            itemStore.delete(item.id);
-            itemStore.put(next);
-          }
-
+          // 対象集合は tx 内で読み直した現在値から作る（事前の読みと書きの間に catchUp が
+          // 起票していても、その回ぶんを取りこぼさず道連れにする）。
+          const storedItems = itemProbe.result as MonthlyCostItem[];
           const storedEntries = entryProbe.result as JournalEntry[];
-          const entryIdRemap = new Map<string, string>();
-          for (const entry of storedEntries) {
-            if (entry.metadata?.recurringRuleId === id) entryIdRemap.set(entry.id, newId());
-          }
+          const removed = planRecurringCascade(id, storedEntries, storedItems);
+          for (const itemId of removed.itemIds) itemStore.delete(itemId);
+          for (const entryId of removed.entryIds) eStore.delete(entryId);
 
+          // 消えた仕訳を指していた**利用者自身の実仕訳**（反対仕訳）は残し、
+          // 宙に浮いた由来リンクだけを剥がす（通常科目どうしの独立した事実として存続）。
           for (const entry of storedEntries) {
+            if (removed.entryIds.has(entry.id)) continue;
+            if (entry.metadata?.reversalOfEntryId === undefined) continue;
+            if (!removed.entryIds.has(entry.metadata.reversalOfEntryId)) continue;
             const metadata = { ...entry.metadata };
-            let changed = false;
-            if (metadata.recurringRuleId === id) {
-              delete metadata.recurringRuleId;
-              delete metadata.recurringMonth;
-              changed = true;
-            }
-            const remappedItemId =
-              metadata.monthlyCostId !== undefined
-                ? itemIdRemap.get(metadata.monthlyCostId)
-                : undefined;
-            if (remappedItemId !== undefined) {
-              metadata.monthlyCostId = remappedItemId;
-              changed = true;
-            }
-            const remappedReversalId =
-              metadata.reversalOfEntryId !== undefined
-                ? entryIdRemap.get(metadata.reversalOfEntryId)
-                : undefined;
-            if (remappedReversalId !== undefined) {
-              metadata.reversalOfEntryId = remappedReversalId;
-              changed = true;
-            }
-            const remappedEntryId = entryIdRemap.get(entry.id);
-            if (remappedEntryId !== undefined) changed = true;
-            if (!changed) continue;
-            const next: JournalEntry = {
-              ...entry,
-              ...(remappedEntryId !== undefined ? { id: remappedEntryId } : {}),
-              updatedAt: ts,
-            };
+            delete metadata.reversalOfEntryId;
+            const next: JournalEntry = { ...entry, updatedAt: ts };
             if (Object.keys(metadata).length > 0) next.metadata = metadata;
             else delete next.metadata;
-            if (remappedEntryId !== undefined) eStore.delete(entry.id);
             eStore.put(next);
           }
 
@@ -3160,6 +3154,10 @@ async function createContinuousCostUnlocked(input: ContinuousCostInput): Promise
  *    次の描画で全期間が新しい月数で再計算される（遡及処理は存在しない）。
  */
 async function upsertMonthlyCostUnlocked(item: MonthlyCostItem): Promise<void> {
+  // ルールから生まれた持ち物（ccr-）は読み取り専用（作者決定 2026-08-15）。
+  if (generatedItemRuleId(item) !== undefined) {
+    throw new LedgerError('error.recurring.generatedReadOnly');
+  }
   const [items, entries] = await Promise.all([
     getAll<MonthlyCostItem>(STORE.monthlyCostItems),
     getAll<JournalEntry>(STORE.journalEntries),
@@ -3268,6 +3266,10 @@ export interface MonthlyCostArchiveInput {
  * 「振替先を選ばずアーカイブ」= recovery なし＝残存価値は全額その月までの費用になる。
  */
 async function archiveMonthlyCostUnlocked(input: MonthlyCostArchiveInput): Promise<void> {
+  // ルール由来の持ち物は個別にアーカイブできない（終わらせたいならルール側を終了する）。
+  if (parseRuleItemId(input.id) !== undefined) {
+    throw new LedgerError('error.recurring.generatedReadOnly');
+  }
   if (!isValidIsoDate(input.endDate)) throw new LedgerError('error.monthlyCost.endBeforeStart');
   const items = await getAll<MonthlyCostItem>(STORE.monthlyCostItems);
   const existing = items.find((m) => m.id === input.id);
@@ -3351,13 +3353,17 @@ async function archiveMonthlyCostUnlocked(input: MonthlyCostArchiveInput): Promi
 
 /**
  * 継続コスト資産を削除する。購入の仕訳・回収の振替を同一トランザクションで cascade 削除する
- * （台帳残高 = 残存価値の不変条件を守る）。定期ルール由来の item も同じ（「今月はスキップ」＝
- * item を削除。カーソルは戻らないので再生成されない）。
+ * （台帳残高 = 残存価値の不変条件を守る）。
+ *  - **ルール由来の item（`ccr-`）は削除禁止**（作者決定 2026-08-15）: ルールから生まれたものへの
+ *    個別操作は持たない。消したいならルールごと削除する（そのカスケードで一緒に消える）。
  *  - **負債（カード・ローン）で買った item は削除禁止**（★6・fail-closed）: 返済仕訳には意図的に
  *    monthlyCostId を付けないため、item を消すと購入の仕訳だけ消えて返済が残り、負債残高が
  *    マイナスになる。アーカイブ（終了日の設定）で終わらせる。
  */
 async function deleteMonthlyCostUnlocked(id: string): Promise<void> {
+  if (parseRuleItemId(id) !== undefined) {
+    throw new LedgerError('error.recurring.generatedReadOnly');
+  }
   const [entries, accounts, monthlyCostItems, recurringRules] = await Promise.all([
     getAll<JournalEntry>(STORE.journalEntries),
     getAll<Account>(STORE.accounts),

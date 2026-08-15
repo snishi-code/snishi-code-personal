@@ -6,12 +6,18 @@
  *  - everyMonths: startMonth 基点の位相で間引く（周期起票）。
  *  - 月割りするルール（spreadExpenseAccountId）: 起票 = 購入の仕訳 + item の 2 レコード 1 tx・
  *    未来投影は購入行 + 費用行の両方（台帳が積み上がらない = §13-1）。
- *  - 削除: ルールを消しても起票済み仕訳・item は残る（由来メタと決定的item IDを剥がす）。
+ *  - 読み取り専用: 起票された仕訳（rec-）・item（ccr-）は保存境界で直接編集・削除できない。
+ *  - 削除: ルール削除はカスケード（ルール + 起票済み仕訳 + item + 購入の仕訳）。
+ *    反対仕訳・回収の振替は利用者自身の実仕訳なので残り、宙に浮く参照だけ剥がれる。
  *  - export → schema round-trip / 必須キー欠落の拒否。
+ *
+ * 個別編集済みの月を作る検証では、保存境界が塞がれているため putRecord で DB へ直接置く
+ * （旧データ・別経路で生まれた個別編集を、ルール側の遡及・分割がどう扱うかの検証は残す）。
  */
 import { describe, expect, it } from 'vitest';
 import './setup';
 import {
+  archiveMonthlyCost,
   catchUpRecurringRules,
   createRecurringRule,
   deleteEntry,
@@ -206,7 +212,7 @@ describe('定期ルールのキャッチアップ起票', () => {
     expect(posted[0]!.date).toBe('2026-07-27');
   });
 
-  it('起票済み仕訳を削除しても再起票しない（カーソルでスキップを尊重）', async () => {
+  it('起票済み仕訳は個別に削除できない（読み取り専用・ルール側で調整する）', async () => {
     const bank = await accountByName('預金');
     const invest = await accountByName('投資');
     await createRecurringRule({
@@ -221,7 +227,10 @@ describe('定期ルールのキャッチアップ起票', () => {
     expect(await catchUpRecurringRules('2026-07-23')).toBe(1);
     const ledger = await loadLedger();
     const posted = ledger.journalEntries.find((e) => e.metadata?.recurringRuleId)!;
-    await deleteEntry(posted.id);
+    await expect(deleteEntry(posted.id)).rejects.toMatchObject({
+      code: 'error.recurring.generatedReadOnly',
+    });
+    expect((await loadLedger()).journalEntries.some((e) => e.id === posted.id)).toBe(true);
     expect(await catchUpRecurringRules('2026-07-23')).toBe(0);
   });
 
@@ -248,7 +257,7 @@ describe('定期ルールのキャッチアップ起票', () => {
     expect(await catchUpRecurringRules('2026-07-23')).toBe(0);
   });
 
-  it('ルール削除で起票済み仕訳は通常仕訳として残る（メタデータを剥がす）', async () => {
+  it('ルール削除は起票済み仕訳を道連れにし、反対仕訳だけ参照を剥がして残す（カスケード）', async () => {
     const bank = await accountByName('預金');
     const invest = await accountByName('投資');
     const rule = await createRecurringRule({
@@ -281,21 +290,19 @@ describe('定期ルールのキャッチアップ起票', () => {
 
     const ledger = await loadLedger();
     expect(ledger.recurringRules.length).toBe(0);
-    const entry = ledger.journalEntries.find((e) => e.description === '積立')!;
-    expect(entry).toBeDefined();
-    expect(entry.id).not.toBe(generated.id);
-    expect(entry.id.startsWith(`rec-${rule.id}-`)).toBe(false);
-    expect(entry.metadata?.recurringRuleId).toBeUndefined();
-    expect(
-      ledger.journalEntries.find((candidate) => candidate.id === 'rule-delete-reversal')?.metadata
-        ?.reversalOfEntryId,
-    ).toBe(entry.id);
-    // 剥がした後も export → schema 検証が通る（strict な存在チェックと両立）。
+    // 積み木の下（ルール）が消えれば上（起票）も消える。
+    expect(ledger.journalEntries.some((e) => e.id === generated.id)).toBe(false);
+    expect(ledger.journalEntries.some((e) => e.description === '積立')).toBe(false);
+    // 利用者自身が切った反対仕訳は最下層の積み木なので残り、宙に浮く参照だけ剥がれる。
+    const reversal = ledger.journalEntries.find((e) => e.id === 'rule-delete-reversal')!;
+    expect(reversal).toBeDefined();
+    expect(reversal.metadata?.reversalOfEntryId).toBeUndefined();
+    // カスケード後も export → schema 検証が通る（strict な存在チェックと両立）。
     const parsed = ledgerExportPackageSchema.safeParse(buildExportPackage(ledger));
     expect(parsed.success).toBe(true);
   });
 
-  it('費用ルールを削除しても作成済みの継続コスト資産と購入実績は残る', async () => {
+  it('費用ルールを削除すると継続コスト資産も購入の仕訳も一緒に消える（カスケード）', async () => {
     const bank = await accountByName('預金');
     const fixed = await accountByName('固定費');
     const rule = await createRecurringRule({
@@ -312,18 +319,56 @@ describe('定期ルールのキャッチアップ起票', () => {
     await deleteRecurringRule(rule.id);
 
     const ledger = await loadLedger();
-    const oldItemId = `ccr-${rule.id}-2026-07`;
     expect(ledger.recurringRules).toHaveLength(0);
-    expect(ledger.monthlyCostItems.some((item) => item.id === oldItemId)).toBe(false);
-    const detachedItem = ledger.monthlyCostItems.find((item) => item.name === '削除後も残る年払い');
-    expect(detachedItem).toBeDefined();
-    expect(detachedItem?.id.startsWith(`ccr-${rule.id}-`)).toBe(false);
-    const purchase = ledger.journalEntries.find(
-      (entry) => entry.metadata?.monthlyCostId === detachedItem?.id,
+    // item も購入の仕訳も残らない（通常 ID へ付け替えて残す旧仕様は撤去・作者決定 2026-08-15）。
+    expect(ledger.monthlyCostItems).toHaveLength(0);
+    expect(ledger.journalEntries.some((entry) => entry.metadata?.monthlyCostId !== undefined)).toBe(
+      false,
     );
-    expect(purchase).toBeDefined();
-    expect(purchase?.id.startsWith(`rec-${rule.id}-`)).toBe(false);
-    expect(purchase?.metadata?.recurringRuleId).toBeUndefined();
+    expect(ledger.journalEntries.some((entry) => entry.description === '削除後も残る年払い')).toBe(
+      false,
+    );
+    expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
+  });
+
+  it('ccr- item の回収の振替も道連れ（貸方 = 台帳なので item と対でしか成立しない）', async () => {
+    const bank = await accountByName('預金');
+    const fixed = await accountByName('固定費');
+    const rule = await createRecurringRule({
+      name: '回収つき年払い',
+      amount: 12000,
+      dayOfMonth: 1,
+      everyMonths: 12,
+      debitAccountId: fixed.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-07',
+      startDate: '2026-07-01',
+    });
+    await catchUpRecurringRules('2026-07-01');
+    const itemId = `ccr-${rule.id}-2026-07`;
+    // 回収の振替（借方 預金 / 貸方 継続コスト台帳）は利用者が自分で切った実仕訳。
+    // ルール由来 item はアーカイブできないので、既存データ相当を DB へ直接置く。
+    await putRecord(STORE.journalEntries, {
+      id: 'cascade-recovery',
+      date: '2026-08-01',
+      description: '途中解約の返金',
+      kind: 'normal',
+      lines: [
+        { accountId: bank.id, side: 'debit', amount: 3000 },
+        { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'credit', amount: 3000 },
+      ],
+      metadata: { inputMode: 'transfer', monthlyCostId: itemId, monthlyCostRecovery: true },
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    });
+
+    await deleteRecurringRule(rule.id);
+
+    const ledger = await loadLedger();
+    expect(ledger.monthlyCostItems.some((item) => item.id === itemId)).toBe(false);
+    // 台帳にふれる仕訳は monthlyCostId 必須（不変条件⑧）・購入の借方が消えれば台帳残高も
+    // 負に落ちるため、振替だけ残すことはできない。継続コスト item 単体の削除と同じ規則。
+    expect(ledger.journalEntries.some((entry) => entry.id === 'cascade-recovery')).toBe(false);
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
 
@@ -831,7 +876,8 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
 
     let ledger = await loadLedger();
     const mayItem = ledger.monthlyCostItems.find((item) => item.id === `ccr-${rule.id}-2026-05`)!;
-    await upsertMonthlyCost({
+    // ルール由来 item は保存境界から編集できないので、個別編集済みの状態は DB へ直接置く。
+    await putRecord(STORE.monthlyCostItems, {
       ...mayItem,
       name: '手編集済み5月分',
       endDate: '2026-06-30',
@@ -1102,7 +1148,7 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     await expect(upsertRecurringRule(reopened)).rejects.toThrow();
   });
 
-  it('分割後継の削除後に旧segmentを開いても、継承したカーソルで事実を再起票しない', async () => {
+  it('分割後継の削除は起票を道連れにし、旧segmentを開き直しても継承カーソルで再起票しない', async () => {
     const bank = await accountByName('預金');
     const invest = await accountByName('投資');
     const predecessor = await createRecurringRule({
@@ -1126,12 +1172,14 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
 
     ledger = await loadLedger();
     const remaining = ledger.recurringRules.find((rule) => rule.id === predecessor.id)!;
+    // 後継が走査した月は親のカーソルへ継承する（復旧は親の再オープンではなく登録し直し）。
     expect(remaining).toMatchObject({ endDate: '2026-04-22', postedThroughMonth: '2026-05' });
-    const neutralMayFacts = ledger.journalEntries.filter(
-      (entry) => entry.date === '2026-05-20' && entry.description === '後継削除後の境界',
-    );
-    expect(neutralMayFacts).toHaveLength(1);
-    expect(neutralMayFacts[0]?.metadata?.recurringRuleId).toBeUndefined();
+    // 後継が起票した 5 月分はカスケードで消える。
+    expect(
+      ledger.journalEntries.filter(
+        (entry) => entry.date === '2026-05-20' && entry.description === '後継削除後の境界',
+      ),
+    ).toHaveLength(0);
     const reopened = { ...remaining };
     delete reopened.endDate;
     await upsertRecurringRule(reopened);
@@ -1140,7 +1188,7 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
       (await loadLedger()).journalEntries.filter(
         (entry) => entry.date === '2026-05-20' && entry.description === '後継削除後の境界',
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
   });
 
   it('カーソルが遅れている状態で起票日を後ろへ動かして分割しても、同じ月を二重起票しない', async () => {
@@ -1217,7 +1265,7 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     );
   });
 
-  it('終了点を縮めてもカーソルを後退させず、利用者のスキップを保つ', async () => {
+  it('終了点を縮めてもカーソルは後退しない（同じ月を二重起票しない）', async () => {
     const bank = await accountByName('預金');
     const invest = await accountByName('投資');
     const rule = await createRecurringRule({
@@ -1231,18 +1279,13 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     });
     await catchUpRecurringRules('2026-07-01');
     let ledger = await loadLedger();
-    const july = ledger.journalEntries.find(
-      (entry) =>
-        entry.metadata?.recurringRuleId === rule.id && entry.metadata.recurringMonth === '2026-07',
-    )!;
-    await deleteEntry(july.id); // 「7月はスキップ」なのでカーソルは7月のまま。
-    ledger = await loadLedger();
     const stored = ledger.recurringRules.find((candidate) => candidate.id === rule.id)!;
-    await upsertRecurringRule({ ...stored, endDate: '2026-07-01' });
+    // 起票済み（7/1）の翌日で終了 = 起票された事実は存在期間の中に残る最小の終了点。
+    await upsertRecurringRule({ ...stored, endDate: '2026-07-02' });
 
     ledger = await loadLedger();
     expect(ledger.recurringRules[0]).toMatchObject({
-      endDate: '2026-07-01',
+      endDate: '2026-07-02',
       postedThroughMonth: '2026-07',
     });
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
@@ -1267,7 +1310,8 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     const generatedItem = before.monthlyCostItems.find(
       (item) => item.id === `ccr-${rule.id}-2026-04`,
     )!;
-    await upsertMonthlyCost({
+    // ルール由来 item は保存境界から編集できないので、個別編集済みの状態は DB へ直接置く。
+    await putRecord(STORE.monthlyCostItems, {
       ...generatedItem,
       name: '個別編集済みの当日分',
       endDate: '2026-06-30',
@@ -1565,7 +1609,7 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
     ).toBe(true);
   });
 
-  it('ルール由来仕訳は由来月をまたぐ日付へ編集できない', async () => {
+  it('ルール由来仕訳は保存境界で編集できない（読み取り専用・調整はルール側）', async () => {
     const bank = await accountByName('預金');
     const invest = await accountByName('投資');
     const rule = await createRecurringRule({
@@ -1582,9 +1626,21 @@ describe('編集・削除と起票カーソルの整合（check-then-act の封�
       (entry) => entry.metadata?.recurringRuleId === rule.id,
     )!;
 
+    // 由来月をまたぐ日付はもちろん、同じ月の中の摘要変更ですら通さない（fail-closed）。
     await expect(upsertEntry({ ...posted, date: '2026-05-01' })).rejects.toMatchObject({
-      code: 'error.recurring.periodInvalid',
+      code: 'error.recurring.generatedReadOnly',
     });
+    await expect(upsertEntry({ ...posted, description: '手で書き換え' })).rejects.toMatchObject({
+      code: 'error.recurring.generatedReadOnly',
+    });
+    // 由来メタを落として通常仕訳のふりをしても、決定的 ID（rec-）で塞がれる。
+    const stripped = { ...posted, metadata: { inputMode: 'manual' as const } };
+    await expect(upsertEntry(stripped)).rejects.toMatchObject({
+      code: 'error.recurring.generatedReadOnly',
+    });
+    const after = (await loadLedger()).journalEntries.find((entry) => entry.id === posted.id)!;
+    expect(after).toMatchObject({ date: posted.date, description: posted.description });
+    expect(after.metadata?.recurringRuleId).toBe(rule.id);
   });
 
   it('古いルールオブジェクトで upsert してもカーソルは巻き戻らない（二重起票しない）', async () => {
@@ -1679,24 +1735,37 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     const itemId = `ccr-${rule.id}-2026-04`;
     const before = await loadLedger();
     const item = before.monthlyCostItems.find((m) => m.id === itemId)!;
-    // ユーザー編集（終了日を縮める）。
-    await upsertMonthlyCost({ ...item, endDate: '2026-09-30' });
+    // 既存データや別経路で個別に変わっていた item を catchUp が上書きしないこと（tx 内の
+    // get → undefined のときだけ put）。保存境界は塞がれているので DB へ直接置く。
+    await putRecord(STORE.monthlyCostItems, { ...item, endDate: '2026-09-30' });
     expect(await catchUpRecurringRules('2026-07-23')).toBe(0);
     const after = await loadLedger();
     expect(after.monthlyCostItems.filter((m) => m.id === itemId)).toHaveLength(1);
     expect(after.monthlyCostItems.find((m) => m.id === itemId)?.endDate).toBe('2026-09-30');
   });
 
-  it('「今月はスキップ」= item 削除（購入の仕訳ごと消える）。カーソルは戻らず再生成されない（§13-11）', async () => {
+  it('ルール由来 item（ccr-）は編集も削除もアーカイブもできない（読み取り専用）', async () => {
     const { rule } = await createSpreadRule();
     await catchUpRecurringRules('2026-07-23');
     const itemId = `ccr-${rule.id}-2026-04`;
-    await deleteMonthlyCost(itemId);
-    const mid = await loadLedger();
-    expect(mid.monthlyCostItems.some((m) => m.id === itemId)).toBe(false);
-    expect(mid.journalEntries.some((e) => e.metadata?.monthlyCostId === itemId)).toBe(false);
-    expect(await catchUpRecurringRules('2026-07-23')).toBe(0);
-    expect((await loadLedger()).monthlyCostItems.some((m) => m.id === itemId)).toBe(false);
+    const item = (await loadLedger()).monthlyCostItems.find((m) => m.id === itemId)!;
+
+    await expect(deleteMonthlyCost(itemId)).rejects.toMatchObject({
+      code: 'error.recurring.generatedReadOnly',
+    });
+    await expect(upsertMonthlyCost({ ...item, name: '手で書き換え' })).rejects.toMatchObject({
+      code: 'error.recurring.generatedReadOnly',
+    });
+    await expect(archiveMonthlyCost({ id: itemId, endDate: '2026-08-01' })).rejects.toMatchObject({
+      code: 'error.recurring.generatedReadOnly',
+    });
+
+    const after = await loadLedger();
+    expect(after.monthlyCostItems.find((m) => m.id === itemId)).toMatchObject({
+      name: item.name,
+      endDate: item.endDate,
+    });
+    expect(after.journalEntries.some((e) => e.metadata?.monthlyCostId === itemId)).toBe(true);
   });
 
   it('未来断面で台帳が積み上がらない（§13-1: 5年後の asOf で残高 = まだ費用にしていないぶんのみ）', async () => {

@@ -32,7 +32,14 @@ import type { Account, InputMode, JournalEntry, MonthlyCostItem, RecurringRule }
 
 /** repository/UI 向けの意味が明確な別名。判定の正本は accountLifetime.ruleExistsAt。 */
 export const recurringRuleExistsAt = ruleExistsAt;
-export { parseRuleEntryId, parseRuleItemId, ruleEntryId, ruleItemId } from './recurringIds';
+export {
+  generatedEntryRuleId,
+  generatedItemRuleId,
+  parseRuleEntryId,
+  parseRuleItemId,
+  ruleEntryId,
+  ruleItemId,
+} from './recurringIds';
 
 /** 表示用の種別（保存しない。勘定の役割から導出する）。 */
 export type RecurringKind = 'expense' | 'income' | 'transfer';

@@ -1,8 +1,9 @@
 /*
  * 状態を変える操作は必ず確認を挟む（2026-08-15 作者合意・docs/dev/ledger-ui-ux.md）:
  *  - 定期ルールの「終了」は終了日シート（既定 = 今日で置ける最小の排他的終了点）を通す
- *  - ルール由来 item の削除は「この回をスキップ」と名乗り、次回起票日を示す
- *  - スキップのダイアログから「ルールを終了する」（終了日シート）へ乗り換えられる
+ *  - ルール由来 item には確認どころか操作自体が無い（読み取り専用・作者決定 2026-08-15。
+ *    「この回をスキップ」は概念ごと撤去し、調整はルール側の編集・終了で行う）
+ *  - ルール削除はカスケード。確認で「一緒に消える起票回数」と復旧方法を示す
  *  - 手動で登録した継続コスト資産の削除は従来の削除確認のまま
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -137,57 +138,88 @@ describe('定期ルールの終了（終了日シート）', () => {
   });
 });
 
-describe('ルール由来 item の「この回をスキップ」', () => {
-  it('削除ではなくスキップと名乗り、次回の起票日を示す', async () => {
+describe('定期ルールの削除（カスケード）', () => {
+  it('確認に「一緒に消える起票回数」を出し、確定でルール・仕訳・持ち物がまとめて消える', async () => {
     const rule = await seedPostedRule();
     await renderReady();
 
-    const skip = await screen.findByRole('button', { name: `この回をスキップ: ${rule.name}` });
-    // item カードの側に「削除」は残らない（ルール行の削除ボタンは別物なので範囲を絞る）。
-    const card = document.querySelector(`[data-ui="${UI.allocations.item}"]`) as HTMLElement;
-    expect(
-      within(card).queryByRole('button', { name: `削除: ${rule.name}` }),
-    ).not.toBeInTheDocument();
-    fireEvent.click(skip);
+    fireEvent.click(
+      await waitFor(() => document.querySelector(`[data-ui="${UI.allocations.recurringDelete}"]`)!),
+    );
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('1 回分の仕訳と持ち物も一緒に消えます');
+    expect(dialog).toHaveTextContent('登録し直せば復旧できます');
 
-    const dialog = document.querySelector(`[data-ui="${UI.allocations.skipDialog}"]`)!;
-    expect(dialog).toHaveTextContent('この回をスキップしますか？');
-    // 次回 = カーソルより後の最初の未起票日（周期位相どおりの 5/20）。
-    expect(dialog).toHaveTextContent('次回は 2026-05-20 に起票されます');
-  });
-
-  it('確定すると item と購入の仕訳が消え、カーソルは戻らない', async () => {
-    const rule = await seedPostedRule();
-    const itemId = `ccr-${rule.id}-2026-04`;
-    await renderReady();
-
-    fireEvent.click(await screen.findByRole('button', { name: `この回をスキップ: ${rule.name}` }));
-    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.skipConfirm}"]`)!);
-
+    fireEvent.click(screen.getByRole('button', { name: '削除' }));
     await waitFor(async () => {
       const after = await loadLedger();
-      expect(after.monthlyCostItems.some((item) => item.id === itemId)).toBe(false);
-      expect(after.journalEntries.some((e) => e.metadata?.monthlyCostId === itemId)).toBe(false);
-      // カーソル（起票済み月）は戻らない = 同じ回が再起票されない。
-      expect(after.recurringRules.find((r) => r.id === rule.id)?.postedThroughMonth).toBe(
-        '2026-04',
-      );
+      expect(after.recurringRules).toHaveLength(0);
+      expect(after.monthlyCostItems).toHaveLength(0);
+      expect(after.journalEntries.filter((e) => e.description === rule.name)).toHaveLength(0);
     });
   });
 
-  it('「ルールを終了する」から終了日シートへ乗り換えられる（item はまだ消えない）', async () => {
-    const rule = await seedPostedRule();
-    const itemId = `ccr-${rule.id}-2026-04`;
+  it('起票ゼロのルールは「まだ起票はありません」だけを示す', async () => {
+    const ledger = await loadLedger();
+    const bank = ledger.accounts.find((account) => account.name === '預金')!;
+    const fixed = ledger.accounts.find((account) => account.name === '固定費')!;
+    await createRecurringRule({
+      name: 'これから始めるもの',
+      amount: 1000,
+      dayOfMonth: 25,
+      everyMonths: 1,
+      debitAccountId: fixed.id,
+      spreadViaLedger: true,
+      creditAccountId: bank.id,
+      startMonth: '2026-04',
+      // 表示断面（4/20）には存在するが、初回起票日（4/25）はまだ来ていない。
+      startDate: '2026-04-01',
+    });
     await renderReady();
 
-    fireEvent.click(await screen.findByRole('button', { name: `この回をスキップ: ${rule.name}` }));
-    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.skipEndRule}"]`)!);
+    fireEvent.click(
+      await waitFor(() => document.querySelector(`[data-ui="${UI.allocations.recurringDelete}"]`)!),
+    );
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('まだ起票はありません');
+    expect(dialog).not.toHaveTextContent('回分の仕訳と持ち物');
+  });
+});
 
-    expect(document.querySelector(`[data-ui="${UI.allocations.skipDialog}"]`)).toBeNull();
+describe('継続コスト item の削除確認', () => {
+  it('ルール由来 item にはそもそも削除・アーカイブを出さない（読み取り専用）', async () => {
+    const rule = await seedPostedRule();
+    await renderReady();
+
+    const card = (await waitFor(() =>
+      document.querySelector(`[data-ui="${UI.allocations.item}"]`),
+    )) as HTMLElement;
+    // 「この回をスキップ」という概念自体を撤去した（作者決定 2026-08-15）。
     expect(
-      document.querySelector(`[data-ui="${UI.allocations.recurringEndSheet}"]`),
+      within(card).queryByRole('button', { name: `この回をスキップ: ${rule.name}` }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(card).queryByRole('button', { name: `削除: ${rule.name}` }),
+    ).not.toBeInTheDocument();
+    expect(within(card).queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('ルール由来 item のタップは由来ルールの編集シート（未起票の導出カードと同型）', async () => {
+    const rule = await seedPostedRule();
+    await renderReady();
+
+    const card = (await waitFor(() =>
+      document.querySelector(`[data-ui="${UI.allocations.item}"]`),
+    )) as HTMLElement;
+    // 保存済み ccr- item でもアクセシブル名は由来ルール（導出カードと同じ）。
+    expect(card).toHaveAttribute('role', 'button');
+    expect(card).toHaveAttribute('aria-label', `編集: ${rule.name}`);
+    fireEvent.click(card);
+    // 継続コスト資産シートではなくルールの編集シートが開く。
+    expect(document.querySelector(`[data-ui="${UI.allocations.editDialog}"]`)).toBeNull();
+    expect(
+      document.querySelector(`[data-ui="${UI.allocations.recurringSheet}"]`),
     ).toBeInTheDocument();
-    expect((await loadLedger()).monthlyCostItems.some((item) => item.id === itemId)).toBe(true);
   });
 
   it('手動で登録した継続コスト資産は従来どおりの削除確認', async () => {
@@ -205,7 +237,6 @@ describe('ルール由来 item の「この回をスキップ」', () => {
     await renderReady();
 
     fireEvent.click(await screen.findByRole('button', { name: `削除: ${item.name}` }));
-    expect(document.querySelector(`[data-ui="${UI.allocations.skipDialog}"]`)).toBeNull();
     expect(screen.getByText('継続コスト資産を削除しますか？')).toBeInTheDocument();
   });
 });

@@ -73,4 +73,33 @@ describe('entryOpenPlan', () => {
       { kind: 'edit' },
     );
   });
+
+  it('くり返し記帳が起票した**保存済み**仕訳も由来ルールへ（読み取り専用・2026-08-15）', () => {
+    expect(
+      entryOpenPlan(
+        base({
+          metadata: { inputMode: 'manual', recurringRuleId: 'r1', recurringMonth: '2026-08' },
+        }),
+      ),
+    ).toEqual({ kind: 'rule', ruleId: 'r1' });
+    // 由来メタが欠けた破損データでも、決定的 ID だけで由来へ倒す（fail-closed）。
+    expect(entryOpenPlan(base({ id: 'rec-r1-2026-08' }))).toEqual({ kind: 'rule', ruleId: 'r1' });
+    // 持ち込み扱いの起票（貸方が equity）でも初期残高シートへは流さない。
+    expect(entryOpenPlan(base({ id: 'rec-r1-2026-08', kind: 'opening' }))).toEqual({
+      kind: 'rule',
+      ruleId: 'r1',
+    });
+    // 回収の振替は利用者自身の実仕訳なので、ccr- item を指していても編集シート。
+    expect(
+      entryOpenPlan(
+        base({
+          metadata: {
+            inputMode: 'transfer',
+            monthlyCostId: 'ccr-r1-2026-08',
+            monthlyCostRecovery: true,
+          },
+        }),
+      ),
+    ).toEqual({ kind: 'edit' });
+  });
 });

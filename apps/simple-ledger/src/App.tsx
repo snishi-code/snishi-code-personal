@@ -34,6 +34,7 @@ import { EntrySheet, type EntryInit } from './ui/screens/EntrySheet';
 import { OnboardingSheet } from './ui/OnboardingSheet';
 import { CONTINUOUS_COST_HARD_CAP } from './domain/continuousCost';
 import { NAV_ITEMS } from './ui/navigation';
+import { entryOpenPlan } from './ui/entryOpen';
 import { t } from './i18n';
 import { todayLocal } from './util/time';
 import type { ReportPeriod } from './domain/reportPeriod';
@@ -164,13 +165,17 @@ export function App() {
   const goJournalEntry = (entryId: string) => {
     const entry = ledger.journalEntries.find((candidate) => candidate.id === entryId);
     if (!entry) return;
-    const isPurchase =
-      entry.metadata?.monthlyCostId !== undefined && entry.metadata.monthlyCostRecovery !== true;
-    const needsJournalResolver =
-      !!entry.metadata?.adjustment || (entry.kind === 'opening' && !isPurchase);
+    // 何を開くかは entryOpenPlan（単一正本）。くり返し記帳から生まれた仕訳はここでも
+    // 編集シートではなく由来ルールへ流す（画面ごとに判定を手書きしない）。
+    const plan = entryOpenPlan(entry);
+    if (plan.kind === 'rule') {
+      goAllocationsFor({ ruleId: plan.ruleId });
+      return;
+    }
     navigate('journal');
     setJournalFilter(null);
-    if (needsJournalResolver) setJournalTargetEntryId(entryId);
+    // 初期残高・残高補正は専用シートが要る = 仕訳一覧の既存 resolver へ ID を渡す。
+    if (plan.kind === 'opening' || plan.kind === 'adjustment') setJournalTargetEntryId(entryId);
     else {
       setJournalTargetEntryId(null);
       openEdit(entry);

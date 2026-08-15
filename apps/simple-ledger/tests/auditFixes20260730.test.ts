@@ -508,7 +508,7 @@ describe('既存itemと後続ルールの独立性', () => {
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(after)).success).toBe(true);
   });
 
-  it('ルール由来itemの終了日を後ろへ編集して次月itemと重ねてもexportできる', async () => {
+  it('ルール由来itemの終了日が後ろへずれて次月itemと重なってもexportできる', async () => {
     const bank = await accountByName('預金');
     const expense = await accountByName('固定費');
     const rule = await createRecurringRule({
@@ -525,7 +525,9 @@ describe('既存itemと後続ルールの独立性', () => {
     await catchUpRecurringRules('2026-02-15');
     const before = await loadLedger();
     const january = before.monthlyCostItems.find((item) => item.id === `ccr-${rule.id}-2026-01`)!;
-    await upsertMonthlyCost({ ...january, endDate: '2026-02-28' });
+    // ルール由来 item は保存境界から編集できない（2026-08-15）。旧データ・別経路で重なった
+    // 状態でも export → schema が通ることの検証なので、DB へ直接置いて重なりを作る。
+    await putRecord(STORE.monthlyCostItems, { ...january, endDate: '2026-02-28' });
 
     const after = await loadLedger();
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(after)).success).toBe(true);

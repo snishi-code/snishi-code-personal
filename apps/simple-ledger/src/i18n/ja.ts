@@ -578,6 +578,10 @@ export const ja = {
     '今日分の仕訳または継続コスト資産を安全に分けられません。対象の起票内容を確認してください。',
   'error.recurring.generatedDependency':
     '自動起票の仕訳と継続コスト資産の対応が壊れているため操作できません。バックアップを書き出してデータを確認してください。',
+  // ルール由来（rec- 仕訳 / ccr- item）の読み取り専用化（作者決定 2026-08-15）。
+  // 画面から到達できない経路でも保存境界で fail-closed に止める。
+  'error.recurring.generatedReadOnly':
+    'くり返し記帳から生まれた記録は直接編集できません。ルール側を編集してください。',
   // 監査 2026-07-30 対応で新設したエラーコード。
   'error.monthlyCost.recoveryBeforeStart':
     '回収の振替の日付は開始日（購入の仕訳の日付）以降にしてください。',
@@ -745,16 +749,13 @@ export const ja = {
   'recurring.restartConfirmTitle': '同じ設定で新しく始めますか？',
   'recurring.restartConfirmBody':
     '今日を開始点として、同じ内容の新しいルールを作ります。終了したルールと起票済みの記録はそのまま残ります。',
-  // ルール由来 item の削除は「この回をスキップ」と名乗る（手動 item の削除とは別の意味）。
-  'recurring.skip': 'この回をスキップ',
-  'recurring.skipTitle': 'この回をスキップしますか？',
-  'recurring.skipBody':
-    'この回の購入の仕訳ごと取り消します。ルールは続き、次回は {date} に起票されます。',
-  'recurring.skipNoNextBody': 'この回の購入の仕訳ごと取り消します。次回の起票はありません。',
-  'recurring.skipEndRule': 'ルールを終了する',
+  // ルール削除はカスケード（作者決定 2026-08-15）: 積み木の下が消えれば上も消える。
+  // 復旧は同じ内容で登録し直すだけなので、取り消せない旨ではなく戻し方を添える。
   'recurring.deleteConfirmTitle': '定期ルールを削除',
   'recurring.deleteConfirmBody':
-    '「{name}」を削除します。起票済みの仕訳・できた継続コスト資産はそのまま残ります。',
+    '「{name}」を削除します。このルールから生まれた {count} 回分の仕訳と持ち物も一緒に消えます。未来の予定もすべて消えます。（同じ内容でルールを登録し直せば復旧できます）',
+  'recurring.deleteConfirmNoPostingsBody':
+    '「{name}」を削除します。まだ起票はありません。未来の予定がすべて消えます。',
   'error.recurring.invalidStructure': '定期ルールの形式が不正です。',
   'error.recurring.flowInvalid':
     '科目の組み合わせが不正です（源泉と行き先を別の科目にしてください。内部集約・調整科目は使えません）。',

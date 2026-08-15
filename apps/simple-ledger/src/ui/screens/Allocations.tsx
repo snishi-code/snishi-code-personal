@@ -33,7 +33,7 @@ import {
   recoveredAmountsByItem,
   spreadTotalOf as computeSpreadTotal,
 } from '../../domain/continuousCost';
-import { parseRuleItemId } from '../../domain/recurringIds';
+import { generatedEntryRuleId, generatedItemRuleId } from '../../domain/recurringIds';
 import type { AccountRole } from '../../domain/accountRoles';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../../domain/constants';
 import { lastExpenseCategoryId, rememberExpenseCategoryId } from '../../data/localFlags';
@@ -63,7 +63,6 @@ import {
   earliestRecurringRuleEndDate,
   effectiveRecurringRuleStartDate,
   recurringRuleLastExistingDate,
-  recurringRuleReferenceStartDate,
   ruleExistsAt as recurringRuleExistsAt,
 } from '../../domain/accountLifetime';
 import { cardTapProps, rowActionClick } from '../cardTap';
@@ -178,6 +177,10 @@ export function Allocations({
   // 未来開始の項目まで先取りしない。
   const startedItems = allItems.filter((m) => m.startDate <= asOf);
   const allRules = ledger?.recurringRules ?? [];
+  const rulesById = useMemo(
+    () => new Map((ledger?.recurringRules ?? []).map((r) => [r.id, r] as const)),
+    [ledger],
+  );
   const startedRules = allRules.filter((r) => effectiveRecurringRuleStartDate(r) <= asOf);
   // 「終了分も表示」の出現条件は検索前の全件で判定する（検索で 0 件になっても、
   // 母集合を変える唯一のコントロールを消さない）。
@@ -327,17 +330,14 @@ export function Allocations({
     else if (targetRule) setRuleSheet({ existing: targetRule });
   }
 
-  // 削除確認の分岐材料。ルール由来 item なら「この回をスキップ」を名乗り、次回起票日を出す。
-  // 次回起票日は「カーソルより後に、周期位相と存在期間が一致する最初の未起票日」の単一正本
-  // （recurringRuleReferenceStartDate）。スキップはカーソルを戻さないので、この日付は
-  // 確定後も変わらない。ルールが既に削除済み・終了済みなら「次回の起票はありません」。
-  const pendingDeleteOrigin = pendingDelete ? parseRuleItemId(pendingDelete.id) : undefined;
-  const pendingSkipRule =
-    pendingDeleteOrigin !== undefined
-      ? allRules.find((r) => r.id === pendingDeleteOrigin.ruleId)
-      : undefined;
-  const pendingSkipNextDate =
-    pendingSkipRule !== undefined ? recurringRuleReferenceStartDate(pendingSkipRule) : undefined;
+  // ルール削除はカスケード（作者決定 2026-08-15）。確認では「一緒に消える起票数」を出す。
+  // 数える対象 = そのルールが起票した保存済み仕訳（＝道連れになる仕訳と持ち物の回数）。
+  const pendingRuleDeletePostings =
+    pendingRuleDelete === null
+      ? 0
+      : (ledger?.journalEntries ?? []).filter(
+          (entry) => generatedEntryRuleId(entry) === pendingRuleDelete.id,
+        ).length;
 
   return (
     <section
@@ -556,27 +556,33 @@ export function Allocations({
             {items.map(({ m, fromRule }) => {
               // 導出カードに回収は存在しない（未起票周期）ので spreadTotal = amount。
               const spreadTotal = fromRule !== undefined ? m.amount : spreadTotalOf(m);
-              // ルール由来 item の削除は「この回をスキップ」（ルールは続く）。判定は単一正本。
-              const ruleOrigin = parseRuleItemId(m.id);
+              // ルール由来 item（保存済み ccr- / 未起票の導出）はどちらも読み取り専用
+              // （作者決定 2026-08-15）。行アクションは出さず、タップは由来ルールへ
+              // ＝実 item と導出 item の見た目・操作が完全に同型になる。判定は単一正本。
+              const originRule = fromRule ?? rulesById.get(generatedItemRuleId(m) ?? '');
+              const fromRuleItem = fromRule !== undefined || generatedItemRuleId(m) !== undefined;
+              // 由来ルールが引けない ccr-（カスケード削除の取りこぼし等の破損データ）は
+              // 開く先が無い＝押せる見た目にしない（誤って編集シートへ流さない・fail-closed）。
+              const open =
+                originRule !== undefined
+                  ? () => setRuleSheet({ existing: originRule })
+                  : fromRuleItem
+                    ? undefined
+                    : () => setItemSheet({ existing: m });
               const ending = isEndingSoon(m, asOf);
               const monthly = representativeMonthlyAmount(m, spreadTotal);
               return (
-                // カードそのものをタップ = 編集。実 item は継続コスト資産シート、導出カード
-                // （保存された item が無い未起票周期）は由来のルールのシートを開く。
+                // カードそのものをタップ = 編集。手で登録した item は継続コスト資産シート、
+                // ルール由来（保存済み・未起票を問わず）は由来のルールのシートを開く。
                 <div
                   className={`card card--pad${ending ? ' card--ending' : ''}`}
                   key={m.id}
                   data-ui={UI.allocations.item}
                   data-ending={ending ? 'true' : undefined}
                   data-derived-rule={fromRule?.id}
-                  {...cardTapProps(
-                    fromRule !== undefined
-                      ? `${t('common.edit')}: ${fromRule.name}`
-                      : `${t('common.edit')}: ${m.name}`,
-                    fromRule !== undefined
-                      ? () => setRuleSheet({ existing: fromRule })
-                      : () => setItemSheet({ existing: m }),
-                  )}
+                  {...(open !== undefined
+                    ? cardTapProps(`${t('common.edit')}: ${originRule?.name ?? m.name}`, open)
+                    : {})}
                 >
                   <div
                     className="list__title"
@@ -591,17 +597,17 @@ export function Allocations({
                       {m.name}
                       {/* くり返し記帳が自動生成した item はルールと同名で並ぶ（buildRuleItem が
                           name: rule.name）ため、検索で「登録した覚えのない項目」に見えないよう
-                          由来を名乗る。判定はルール由来 ID の単一正本 parseRuleItemId。 */}
-                      {fromRule !== undefined || ruleOrigin !== undefined ? (
+                          由来を名乗る。判定はルール由来の単一正本 generatedItemRuleId。 */}
+                      {fromRuleItem ? (
                         <>
                           {' '}
                           <span className="tag tag--teal">{t('monthlyCost.fromRule')}</span>
                         </>
                       ) : null}
                     </span>
-                    {fromRule !==
-                    undefined /* 導出カードは実在しない（保存された item が無い）ため、アーカイブ・削除の
-                         対象も無い。編集はカードタップ = 由来のルールのシート。 */ ? null : (
+                    {fromRuleItem /* ルール由来 item は読み取り専用: アーカイブも削除も出さない
+                         （導出カードは実在しないので元から対象が無い。保存済み ccr- も
+                         「生まれたものへの個別操作は不可」＝調整は由来ルール側で行う）。 */ ? null : (
                       <span className="row-actions">
                         <button
                           type="button"
@@ -616,9 +622,7 @@ export function Allocations({
                           type="button"
                           className="icon-btn"
                           onClick={rowActionClick(() => setPendingDelete(m))}
-                          aria-label={`${
-                            ruleOrigin !== undefined ? t('recurring.skip') : t('common.delete')
-                          }: ${m.name}`}
+                          aria-label={`${t('common.delete')}: ${m.name}`}
                         >
                           <Icon name="delete" size={18} />
                         </button>
@@ -674,76 +678,18 @@ export function Allocations({
       )}
 
       {pendingDelete ? (
-        pendingDeleteOrigin !== undefined ? (
-          /* ルール由来 item = 「この回をスキップ」。同じ確定操作（item + 購入の仕訳の削除）だが、
-             ルールは続くという意味をタイトル・本文・ボタンで名乗る。ここからルールの終了日
-             シートへも乗り換えられる（「そもそももう要らない」への出口）。 */
-          <Modal
-            title={t('recurring.skipTitle')}
-            variant="dialog"
-            dismissMode="never"
-            onClose={() => setPendingDelete(null)}
-            dataUi={UI.allocations.skipDialog}
-            footer={
-              <>
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  onClick={() => setPendingDelete(null)}
-                >
-                  {t('common.cancel')}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--danger"
-                  onClick={async () => {
-                    const m = pendingDelete;
-                    setPendingDelete(null);
-                    await removeMonthlyCost(m.id).catch(() => undefined);
-                  }}
-                  data-ui={UI.allocations.skipConfirm}
-                >
-                  {t('recurring.skip')}
-                </button>
-              </>
-            }
-          >
-            <div className="stack">
-              <p>
-                {pendingSkipNextDate !== undefined
-                  ? t('recurring.skipBody', { date: pendingSkipNextDate })
-                  : t('recurring.skipNoNextBody')}
-              </p>
-              {pendingSkipRule !== undefined ? (
-                <button
-                  type="button"
-                  className="btn btn--block"
-                  onClick={() => {
-                    setPendingDelete(null);
-                    setEndingRule(pendingSkipRule);
-                  }}
-                  data-ui={UI.allocations.skipEndRule}
-                >
-                  <Icon name="archive" size={16} />
-                  {t('recurring.skipEndRule')}
-                </button>
-              ) : null}
-            </div>
-          </Modal>
-        ) : (
-          <ConfirmDialog
-            title={t('monthlyCost.deleteConfirmTitle')}
-            body={t('monthlyCost.deleteConfirmBody', { name: pendingDelete.name })}
-            confirmLabel={t('common.delete')}
-            danger
-            onCancel={() => setPendingDelete(null)}
-            onConfirm={async () => {
-              const m = pendingDelete;
-              setPendingDelete(null);
-              await removeMonthlyCost(m.id).catch(() => undefined);
-            }}
-          />
-        )
+        <ConfirmDialog
+          title={t('monthlyCost.deleteConfirmTitle')}
+          body={t('monthlyCost.deleteConfirmBody', { name: pendingDelete.name })}
+          confirmLabel={t('common.delete')}
+          danger
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={async () => {
+            const m = pendingDelete;
+            setPendingDelete(null);
+            await removeMonthlyCost(m.id).catch(() => undefined);
+          }}
+        />
       ) : null}
 
       {itemSheet ? (
@@ -805,7 +751,16 @@ export function Allocations({
       {pendingRuleDelete ? (
         <ConfirmDialog
           title={t('recurring.deleteConfirmTitle')}
-          body={t('recurring.deleteConfirmBody', { name: pendingRuleDelete.name })}
+          /* カスケード削除（作者決定 2026-08-15）: 積み木の下（ルール）が消えれば上（起票された
+             仕訳・持ち物）も消える。何回ぶん消えるかを数で名乗る（0 件なら別文言）。 */
+          body={
+            pendingRuleDeletePostings > 0
+              ? t('recurring.deleteConfirmBody', {
+                  name: pendingRuleDelete.name,
+                  count: pendingRuleDeletePostings,
+                })
+              : t('recurring.deleteConfirmNoPostingsBody', { name: pendingRuleDelete.name })
+          }
           confirmLabel={t('common.delete')}
           danger
           onCancel={() => setPendingRuleDelete(null)}
