@@ -509,7 +509,7 @@ describe('定期ルールのキャッチアップ起票', () => {
     expect(parsed.success).toBe(false);
   });
 
-  it('未来基準日まではカーソル後の月だけを仮想投影し、実仕訳を保存しない', async () => {
+  it('未来基準日まで全期間をひとつの導出で出す（保存済みかどうかで行は変わらない）', async () => {
     const bank = await accountByName('預金');
     const fixed = await accountByName('固定費');
     const rule = await createRecurringRule({
@@ -525,7 +525,13 @@ describe('定期ルールのキャッチアップ起票', () => {
     const before = await loadLedger();
 
     const entries = reportEntriesForAsOf(before, '2026-10-31');
-    const allForRule = entries.filter((entry) => entry.metadata?.recurringRuleId === rule.id);
+    // v13: 月割り行は item（ccr-）帰属で recurringRuleId を持たない。ルールの寄与 =
+    // 購入行（recurringRuleId）+ 導出 item の月割り行（continuousCostId の ccr- 接頭辞）。
+    const allForRule = entries.filter(
+      (entry) =>
+        entry.metadata?.recurringRuleId === rule.id ||
+        (entry.metadata?.continuousCostId ?? '').startsWith(`ccr-${rule.id}-`),
+    );
     const forRule = allForRule
       .filter((entry) => entry.metadata?.ccKind !== 'monthly-allocation')
       .sort((a, b) => a.date.localeCompare(b.date));
@@ -535,8 +541,9 @@ describe('定期ルールのキャッチアップ起票', () => {
       '2026-09',
       '2026-10',
     ]);
+    // v13: ルール由来はすべて導出行（virtual）。起票済み・未起票の区別は存在しない。
     expect(forRule.map((entry) => entry.metadata?.virtual ?? false)).toEqual([
-      false,
+      true,
       true,
       true,
       true,
@@ -1773,8 +1780,8 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     await catchUpRecurringRules('2026-07-23');
     const ledger = await loadLedger();
     const derived = reportEntriesForAsOf(ledger, '2031-12-31');
-    // 投影は購入行だけでなく月割り行（cc-allocp）も出す。
-    expect(derived.some((e) => e.id.startsWith(`cc-allocp-${rule.id}-`))).toBe(true);
+    // 導出 item が実 item と同じ engine で月割り行（cc-alloc）を出す。
+    expect(derived.some((e) => e.id.startsWith(`cc-alloc-ccr-${rule.id}-`))).toBe(true);
     // 購入 6 回（2026-04〜2031-04 の毎年 4/25）= 360,000。各 item は [4/25, 翌 4/25] で
     // 刻み 12 本（翌月 25 日〜翌年 4/25・5,000 ずつ）。2031-12-31 断面までに費消済みなのは
     // 2026〜2030 サイクルの 60 本 + 2031-04 サイクルの 2031-05-25〜12-25 の 8 本 = 340,000。
@@ -1961,10 +1968,10 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     expect(
       accountBalance(salary.id, 'revenue', filterByDateRange(derived, undefined, '2026-07-31')),
     ).toBe(-15000);
-    // 未来投影も費用ルールと同様に購入行 + 月割り行（cc-allocp）の両方を出す。
+    // 未来断面も費用ルールと同様に購入行 + 月割り行（cc-alloc）の両方を導出する。
     const projected = reportEntriesForAsOf(ledger, '2027-12-31');
-    expect(projected.some((e) => e.id === `rec-proj-${rule.id}-2027-04`)).toBe(true);
-    expect(projected.some((e) => e.id.startsWith(`cc-allocp-${rule.id}-`))).toBe(true);
+    expect(projected.some((e) => e.id === `rec-${rule.id}-2027-04`)).toBe(true);
+    expect(projected.some((e) => e.id.startsWith(`cc-alloc-ccr-${rule.id}-`))).toBe(true);
     // export → schema round-trip（spread = income-category の v7 パッケージが受理される）。
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
@@ -2040,10 +2047,10 @@ describe('継続コスト台帳の経由は明示トグル（勘定科目で動�
       { accountId: bank.id, side: 'credit', amount: 80000 },
     ]);
     expect(posted?.metadata?.monthlyCostId).toBeUndefined();
-    // 未来投影も直接形のまま = 月割り行（cc-allocp）を 1 本も作らない。
+    // 未来断面も直接形のまま = item を導出しないので月割り行（cc-alloc）が 1 本も出ない。
     const projected = reportEntriesForAsOf(ledger, '2026-12-31');
-    expect(projected.some((e) => e.id === `rec-proj-${rule.id}-2026-05`)).toBe(true);
-    expect(projected.some((e) => e.id.startsWith(`cc-allocp-${rule.id}-`))).toBe(false);
+    expect(projected.some((e) => e.id === `rec-${rule.id}-2026-05`)).toBe(true);
+    expect(projected.some((e) => e.id.startsWith(`cc-alloc-ccr-${rule.id}-`))).toBe(false);
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
 

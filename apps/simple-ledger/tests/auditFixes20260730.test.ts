@@ -498,13 +498,14 @@ describe('既存itemと後続ルールの独立性', () => {
     expect(
       expenseForItems(new Set([`ccr-${rule.id}-2026-01`, `ccr-${successor.id}-2026-02`])),
     ).toBe(1000);
-    // 全期間へ波及は既存itemも訂正する明示例外なので、分割とは過去itemの配分額だけが異なる
-    // （1 月起票ぶんが 3,000 / 12 刻み = 250 に訂正される）。
+    // v13: 全期間編集は過去の item も現在のルール値（金額・周期）で引き直す。
+    // 1 月起票ぶんは everyMonths 1 で [1/20, 2/20] の 1 刻みになり、2/20 に 3,000 が立つ
+    // （v12 の「金額だけ訂正・生成時の期間は凍結」は保存実体とともに廃止）。
     expect(
       expenseForItems(
         new Set([`ccr-${normallyEditedRule.id}-2026-01`, `ccr-${normallyEditedRule.id}-2026-02`]),
       ),
-    ).toBe(250);
+    ).toBe(3000);
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(after)).success).toBe(true);
   });
 

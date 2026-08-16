@@ -255,12 +255,14 @@ const fixtureSource = buildFixtureSource();
 const expandedEntries = displayEntriesForAsOf(fixtureSource, FIXTURE_AS_OF, FIXTURE_TODAY);
 
 describe('恒等式: Δ純資産 = 収支 + equity自然増減', () => {
-  it('生成データが実データ規模で、導出行（月割り・ルール投影・利回り投影）を含む', () => {
+  it('生成データが実データ規模で、導出行（月割り・ルール導出・利回り投影）を含む', () => {
     expect(fixtureSource.journalEntries.length).toBeGreaterThan(3_000);
     expect(expandedEntries.length).toBeGreaterThan(fixtureSource.journalEntries.length);
     expect(expandedEntries.some((e) => e.id.startsWith('cc-alloc-'))).toBe(true);
-    expect(expandedEntries.some((e) => e.id.startsWith('cc-allocp-'))).toBe(true);
-    expect(expandedEntries.some((e) => e.id.startsWith('rec-proj-'))).toBe(true);
+    // v13: ルール由来の購入行は rec-（保存時代と同 ID）の導出行として出る。
+    expect(
+      expandedEntries.some((e) => e.id.startsWith('rec-') && e.metadata?.virtual === true),
+    ).toBe(true);
     expect(expandedEntries.some((e) => e.id.startsWith('inv-proj-'))).toBe(true);
     expect(expandedEntries.some((e) => e.kind === 'opening')).toBe(true);
   });

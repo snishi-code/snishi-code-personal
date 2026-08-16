@@ -3,8 +3,8 @@ import {
   investmentProjectionResult,
   type InvestmentProjectionTruncation,
 } from './investmentProjection';
-import { recurringProjectionEntries } from './recurring';
-import type { Ledger, JournalEntry } from './types';
+import { deriveRecurringOutputs, generatedEntryRuleId, generatedItemRuleId } from './recurring';
+import type { Ledger, JournalEntry, MonthlyCostItem } from './types';
 
 type ReportEntrySource = Pick<
   Ledger,
@@ -13,26 +13,48 @@ type ReportEntrySource = Pick<
 
 /**
  * 選択した基準日時点の集計に使う導出仕訳。
- * 実仕訳に、継続コスト資産の費用行と未起票の定期ルール（購入行 + 費用行）を仮想展開する。
- * 仮想行は保存・export しない。
+ * 実仕訳に、定期ルールの完全導出（購入行 + item 経由の費用行）と継続コスト資産の
+ * 費用行を仮想展開する。仮想行は保存・export しない。
+ *
+ * v13: ルール由来（rec- 仕訳・ccr- item）は保存せず、ルール線分から毎回導出する。
+ * 保存データに残っていても読まない（半移行状態の fail-closed 防御。二重計上を防ぐ）。
  *
  * 時間依存（today / knowledgeDate）は無い: 配分は「ユーザーが明示した終了日」だけで決まり、
  * asOf を動かしても展開範囲が変わるだけで過去の値は変わらない。
  *
  * これは**保存不変条件の正本**（科目アーカイブの残高 0・終了残高・残高補正の理論残高）。
  * 投資の利回り投影はここへ合流させない——画面表示は `displayEntriesForAsOf` を使う。
- * 投影行は常に today より未来の日付のみ＝過去断面は today に依存しない。
  */
 export function reportEntriesForAsOf(ledger: ReportEntrySource, asOf: string): JournalEntry[] {
-  const realThroughAsOf = ledger.journalEntries.filter((entry) => entry.date <= asOf);
+  const derived = deriveRecurringOutputs(ledger.recurringRules, ledger.accounts, asOf);
+  const realThroughAsOf = ledger.journalEntries.filter(
+    (entry) => entry.date <= asOf && generatedEntryRuleId(entry) === undefined,
+  );
   return [
     ...realThroughAsOf,
     // 回収・金額・期間は「現在わかっている全事実」を導出パラメータにする。
     // 表示する実仕訳と仮想行の日付だけを asOf で切るため、後日の回収による再配分は
-    // 過去・現在・未来のどの断面でも同じになる。
-    ...continuousCostEntries(ledger.monthlyCostItems, ledger.journalEntries, asOf),
-    ...recurringProjectionEntries(ledger.recurringRules, ledger.accounts, asOf),
+    // 過去・現在・未来のどの断面でも同じになる。回収の振替は実仕訳のまま
+    // journalEntries を走査する（導出 item も決定的 ID で同じ回収に到達する）。
+    ...continuousCostEntries(
+      reportMonthlyCostItems(ledger, derived.items),
+      ledger.journalEntries,
+      asOf,
+    ),
+    ...derived.entries,
   ];
+}
+
+/**
+ * 集計・一覧が見る item の集合 = 手動 item + ルールから導出した item。
+ * 保存データに残った ccr-（v12 以前の実体化の名残）は読まない（導出と二重になるため）。
+ */
+export function reportMonthlyCostItems(
+  ledger: Pick<Ledger, 'monthlyCostItems'>,
+  derivedItems: MonthlyCostItem[],
+): MonthlyCostItem[] {
+  const manual = ledger.monthlyCostItems.filter((item) => generatedItemRuleId(item) === undefined);
+  return [...manual, ...derivedItems];
 }
 
 /**
