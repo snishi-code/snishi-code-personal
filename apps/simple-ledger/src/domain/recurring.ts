@@ -19,7 +19,7 @@ import { addMonths, monthOf, monthsBetween } from './allocation';
 import { ACCOUNT_ROLES, isInternalRole, type AccountRole } from './accountRoles';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from './constants';
 import { continuousCostEntriesForItem } from './continuousCost';
-import { ruleItemId } from './recurringIds';
+import { ruleEntryId, ruleItemId } from './recurringIds';
 import { CATCH_UP_HARD_CAP_MONTHS } from './recurringLimits';
 import {
   accountExistsAt,
@@ -457,4 +457,80 @@ export function recurringCursorAfter(rule: RecurringRule, today: string): string
     return rule.postedThroughMonth;
   }
   return through;
+}
+
+/* ── 完全導出（v13）── */
+
+/**
+ * カーソル（postedThroughMonth）を落とした複製。完全導出はこれを入口にする。
+ * 存在期間 [startDate, endDate) と周期位相（startMonth / everyMonths / dayOfMonth）だけを
+ * 真実として、過去も未来も同じ規則で列挙する（「起票済みか」という概念を持たない）。
+ */
+function cursorlessRule(rule: RecurringRule): RecurringRule {
+  const copy: RecurringRule = { ...rule };
+  delete copy.postedThroughMonth;
+  return copy;
+}
+
+export interface DerivedRecurringOutputs {
+  /** 購入の仕訳（保存されない）。保存時代の rec- と同形・同 ID。 */
+  entries: JournalEntry[];
+  /** 継続コスト item（保存されない）。保存時代の ccr- と同形・同 ID。月割りルールのみ。 */
+  items: MonthlyCostItem[];
+}
+
+/**
+ * ルール集合から asOf までの購入仕訳と item を導出する（v13 の読み取り正本）。
+ *
+ * 保存時代（catch-up 起票）との差は 2 点だけ:
+ *  - metadata.virtual: true（保存されない計算値の印。集計・表示は同じに扱う）
+ *  - createdAt / updatedAt がルール由来（「起票した時刻」という概念が無い）
+ * それ以外（ID・日付・金額・行・inputMode・monthlyCostId）は catch-up が書いた形と一致する。
+ * 月割りの費用行はここでは出さない: 導出 item を continuousCostEntries へ渡すことで、
+ * 実 item と同じ engine（cc-alloc ID・回収込みの spreadTotal）で展開される。
+ */
+export function deriveRecurringOutputs(
+  rules: RecurringRule[],
+  accounts: Account[],
+  asOf: string,
+): DerivedRecurringOutputs {
+  const byId = new Map(accounts.map((account) => [account.id, account] as const));
+  const entries: JournalEntry[] = [];
+  const items: MonthlyCostItem[] = [];
+  for (const original of rules) {
+    const rule = cursorlessRule(original);
+    const ctx = ruleProjectionContext(rule, byId);
+    if (!ctx) continue;
+    const spreadsExpense = ctx.expenseAccountId !== undefined;
+    for (const posting of projectablePostings(ctx, asOf)) {
+      entries.push({
+        id: ruleEntryId(rule.id, posting.month),
+        date: posting.date,
+        description: rule.name,
+        kind: 'normal',
+        lines: [
+          { accountId: ctx.debitAccountId, side: 'debit', amount: rule.amount },
+          { accountId: rule.creditAccountId, side: 'credit', amount: rule.amount },
+        ],
+        metadata: {
+          virtual: true,
+          inputMode: ctx.inputMode,
+          recurringRuleId: rule.id,
+          recurringMonth: posting.month,
+          ...(spreadsExpense ? { monthlyCostId: ruleItemId(rule.id, posting.month) } : {}),
+        },
+        createdAt: rule.createdAt,
+        updatedAt: rule.updatedAt,
+      });
+      if (ctx.expenseAccountId !== undefined) {
+        items.push(
+          buildRuleItem(rule, posting, ctx.expenseAccountId, {
+            createdAt: rule.createdAt,
+            updatedAt: rule.updatedAt,
+          }),
+        );
+      }
+    }
+  }
+  return { entries, items };
 }
