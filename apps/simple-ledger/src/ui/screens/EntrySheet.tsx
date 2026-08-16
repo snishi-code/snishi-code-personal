@@ -206,7 +206,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [ccNameError, setCcNameError] = useState(false);
   const [categoryError, setCategoryError] = useState(false);
   const continuousCostActive = canCreateContinuousCost && ccMode;
-  // 終了日は空でよい（空なら費用の割り振りをしない。後から「毎月のもの」で入れられる）。
+  // 終了日は空でよい（空なら費用の割り振りをしない。後から「月割り台帳」で入れられる）。
   const [ccEndDate, setCcEndDate] = useState('');
   const [repayToggle, setRepayToggle] = useState(false);
   const [repayAccountId, setRepayAccountId] = useState('');

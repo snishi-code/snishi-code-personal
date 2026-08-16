@@ -62,7 +62,7 @@ const SORT_AXIS_DATA_UI: Record<ListSortAxisKey, string> = {
 
 /**
  * 軸ごとの既定方向（日付 = 新しい順 = 従来の既定 / 金額 = 大きい順 / 名称 = 五十音順）。
- * 軸を切り替えたらここへ戻す（毎月のものと同じ規約。日付軸の向きだけ意味が違うため
+ * 軸を切り替えたらここへ戻す（月割り台帳と同じ規約。日付軸の向きだけ意味が違うため
  * 値自体は画面ごとに持つ）。
  */
 const SORT_DEFAULT_DIRECTION: Record<ListSortAxisKey, SortDirection> = {
@@ -112,7 +112,7 @@ export function Journal({
 }: {
   onEditEntry: (entry: JournalEntry) => void;
   onReverse: (entry: JournalEntry) => void;
-  /** 計算で生まれた行のタップ: 「毎月のもの」へ遷移し、元の項目/ルールのシートを開く。 */
+  /** 計算で生まれた行のタップ: 「月割り台帳」へ遷移し、元の項目/ルールのシートを開く。 */
   onOpenAllocations: (target: AllocationsTarget) => void;
   /** 投資利回りの投影行のタップ: 勘定科目へ遷移し、その投資科目の編集シートを開く。 */
   onOpenAccount: (accountId: string) => void;
@@ -206,7 +206,7 @@ export function Journal({
       if (from && e.date < from) return false;
       if (to && e.date > to) return false;
       // 検索対象 = 摘要・メモ + 借方/貸方の勘定科目名（「食費」で検索 → 食費が絡む仕訳が出る）。
-      // 正規化は listQuery.matchesQuery が唯一の正本（毎月のもの画面と同じ規則）。
+      // 正規化は listQuery.matchesQuery が唯一の正本（月割り台帳画面と同じ規則）。
       const accountNames = e.lines.map((l) => map.get(l.accountId)?.name ?? '').join(' ');
       return matchesQuery([e.description, e.memo, accountNames], query);
     });
@@ -215,7 +215,7 @@ export function Journal({
   // 表示専用の並び替え（C-4）。filtered は基準順（日付降順・同日は登録の新しい順・同時刻は
   // id 昇順）なので、安定ソートにより同値（同日・同額・同摘要）の並びは必ず基準順を保つ。
   // 既定（日付降順）は applySort が compare=null を素通しする＝基準順そのもの。
-  // 名称軸 = 摘要の五十音順（毎月のものの項目名と同じ localeCompare(…, 'ja')）。
+  // 名称軸 = 摘要の五十音順（月割り台帳の項目名と同じ localeCompare(…, 'ja')）。
   const sorted = useMemo(() => {
     const direction = directionSign(sortDirection);
     const compare =
@@ -455,7 +455,7 @@ export function Journal({
                           ? () => setEditingOpening(entry)
                           : () => onEditEntry(entry);
             // バッジは摘要の後ろ（v13.1 その6・実ユーズ指摘）: 行の読み出しは摘要から始まり、
-            // バッジ・ボタンは摘要と金額の間に並ぶ（「毎月のもの」の種別タグと同位置）。
+            // バッジ・ボタンは摘要と金額の間に並ぶ（「月割り台帳」の種別タグと同位置）。
             const title = (
               <>
                 <div className="list__title">

@@ -20,9 +20,9 @@ export type EntryOpenPlan =
   | { kind: 'opening' }
   /** 残高補正 → 専用シート。 */
   | { kind: 'adjustment' }
-  /** 定期ルールの投影・**および起票済みの実仕訳** → そのルール（毎月のもの）。 */
+  /** 定期ルールの投影・**および起票済みの実仕訳** → そのルール（月割り台帳）。 */
   | { kind: 'rule'; ruleId: string }
-  /** 継続コストの月割り・購入投影 → その項目（毎月のもの）。 */
+  /** 継続コストの月割り・購入投影 → その項目（月割り台帳）。 */
   | { kind: 'item'; itemId: string }
   /** 投資の利回り投影 → 利回りを宣言した科目（勘定科目）。 */
   | { kind: 'account'; accountId: string }

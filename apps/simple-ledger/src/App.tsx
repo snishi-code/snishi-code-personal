@@ -50,7 +50,7 @@ export function App() {
   const [entryInit, setEntryInit] = useState<EntryInit | null>(null);
   const [journalFilter, setJournalFilter] = useState<JournalFilter | null>(null);
   const [journalTargetEntryId, setJournalTargetEntryId] = useState<string | null>(null);
-  // 仕訳一覧の計算で生まれた行タップ → 「毎月のもの」で開くシートの対象（1 回で消費）。
+  // 仕訳一覧の計算で生まれた行タップ → 「月割り台帳」で開くシートの対象（1 回で消費）。
   const [allocationsTarget, setAllocationsTarget] = useState<AllocationsTarget | null>(null);
   // 投資利回りの投影行タップ → 勘定科目で開く編集シートの対象（1 回で消費）。
   const [accountsTarget, setAccountsTarget] = useState<{ accountId: string } | null>(null);
@@ -175,7 +175,7 @@ export function App() {
     setJournalFilter(filter);
   };
 
-  // 仕訳一覧 → 毎月のもの（計算で生まれた行の由来を開く）。
+  // 仕訳一覧 → 月割り台帳（計算で生まれた行の由来を開く）。
   const goAllocationsFor = (target: AllocationsTarget) => {
     navigate('allocations');
     setAllocationsTarget(target);

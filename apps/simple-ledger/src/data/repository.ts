@@ -1146,7 +1146,7 @@ export interface RepaymentPlanInput {
 /**
  * 負債の返済計画を「未来日付の振替実仕訳 N 本」として一括登録する（1 トランザクション）。
  * 予定→実績化の 2 段は経由しない。返済は金額・回数が最初から確定しているため、
- * ルール（毎月のもの）ではなくただの未来仕訳で表す＝完済でぴったり終わる。
+ * ルール（月割り台帳）ではなくただの未来仕訳で表す＝完済でぴったり終わる。
  * 各仕訳は 借方 負債 / 貸方 返済元。仕訳一覧・資金繰りの投影にそのまま乗る。
  */
 async function createRepaymentEntriesUnlocked(input: RepaymentPlanInput): Promise<JournalEntry[]> {

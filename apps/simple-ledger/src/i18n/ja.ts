@@ -6,7 +6,7 @@
  */
 export const ja = {
   'nav.accounts': '勘定科目',
-  'nav.allocations': '毎月のもの',
+  'nav.allocations': '月割り台帳',
   'nav.cashflow': '資金繰り',
   'nav.timeline': 'タイムライン',
   'nav.settings': '設定',
@@ -21,7 +21,7 @@ export const ja = {
   'common.sortDesc': '降順',
   'common.sortAsc': '昇順',
 
-  // 一覧の並び替えの軸（仕訳一覧・毎月のもので共通。正本は ui/ListSearchSort の LIST_SORT_AXES）。
+  // 一覧の並び替えの軸（仕訳一覧・月割り台帳で共通。正本は ui/ListSearchSort の LIST_SORT_AXES）。
   'listSort.date': '日付',
   'listSort.amount': '金額',
   'listSort.name': '名称',
@@ -575,7 +575,7 @@ export const ja = {
   'error.account.archiveCounterpartType':
     '終了時の振替先は、元の科目と同じ区分から選んでください。',
   'error.entry.monthlyCost':
-    '購入の仕訳は削除できません。持ち物の項目（毎月のもの）を削除すると一緒に消えます。',
+    '購入の仕訳は削除できません。持ち物の項目（月割り台帳）を削除すると一緒に消えます。',
   'error.entry.adjustment': '残高補正の仕訳は、仕訳一覧の補正行から編集・削除してください。',
   'error.entry.virtual': '導出専用の仮想仕訳は保存できません。',
   'error.entry.invalidStructure': '仕訳の形式が正しくないため保存できません。',
@@ -711,8 +711,8 @@ export const ja = {
   'error.repay.totalTooSmall': '返済総額が回数より少なく、金額 0 の回ができるため登録できません。',
   'error.repay.liabilityRequired': '返済先はカード・未払 / ローンの負債科目を選んでください。',
 
-  // 毎月のもの（くり返し記帳 = 実仕訳の自動起票 / 継続コスト資産 = 月割りの導出）
-  'monthly.title': '毎月のもの',
+  // 月割り台帳（くり返し記帳 = 実仕訳の自動起票 / 継続コスト資産 = 月割りの導出）
+  'monthly.title': '月割り台帳',
   'monthly.add': '追加',
   'monthly.empty':
     'まだ登録がありません。「追加」からサブスク・給与・積立・持ち物などを登録できます。',

@@ -65,7 +65,7 @@ export const UI = {
     expense: 'netIncome.expense',
     result: 'netIncome.result',
   },
-  // 資産の内訳（4 枠: 自由に動かせるお金 / 自由に動かせないお金 / 投資 / 継続コスト台帳）
+  // 資産の内訳（4 枠: 自由に動かせるお金 / 自由に動かせないお金 / 投資 / 月割り台帳）
   assetsBreakdown: {
     view: 'assetsBreakdown.view',
     row: 'assetsBreakdown.row',
@@ -75,7 +75,7 @@ export const UI = {
     investmentSubtotal: 'assetsBreakdown.subtotal.investment',
     ledgerSubtotal: 'assetsBreakdown.subtotal.ledger',
     frame: 'assetsBreakdown.frame',
-    // 継続コスト台帳の 1 行（残存価値合計・タップで「毎月のもの」へ）
+    // 月割り台帳の 1 行（残存価値合計・タップで「月割り台帳」へ）
     ledgerRow: 'assetsBreakdown.ledgerRow',
   },
   // 負債の内訳
@@ -144,14 +144,14 @@ export const UI = {
     // 表示専用の並び替え（C-4）と抽出結果の件数+合計（C-3）。
     sortByDate: 'journal.sort.date',
     sortByAmount: 'journal.sort.amount',
-    // 名称軸 = 摘要の五十音順（毎月のものの「名称」と同じ語彙・同じ正本 LIST_SORT_AXES）。
+    // 名称軸 = 摘要の五十音順（月割り台帳の「名称」と同じ語彙・同じ正本 LIST_SORT_AXES）。
     sortByName: 'journal.sort.name',
     sortDesc: 'journal.sort.desc',
     sortAsc: 'journal.sort.asc',
     summary: 'journal.summary',
     entry: {
       save: 'journal.entry.save',
-      // 固定額振替の「振替せずに実行」（費用・収入のアーカイブのみ）
+      // 固定額振替の「振替せずに実行」（費用・収入の終了のみ）
       transferSkip: 'journal.entry.transferSkip',
       cancel: 'journal.entry.cancel',
       delete: 'journal.entry.delete',
@@ -197,9 +197,9 @@ export const UI = {
     // 残高調整科目（system-adjustment）の「自動」バッジ。表示のみ＝管理操作は出さない
     systemBadge: 'accounts.systemBadge',
     adjust: 'accounts.adjust',
-    // アーカイブ/解除ボタン。残高が残る資産・負債は振替シート（EntrySheet transfer 再利用）を経由する
+    // 終了/解除ボタン（tonal の文字ボタン・v13.2）。残高が残る資産・負債は振替シート（EntrySheet transfer 再利用）を経由する
     archiveToggle: 'accounts.archiveToggle',
-    // 残高 0 のアーカイブ / 解除の確認（残高が残る科目は振替シートが確認を兼ねる）
+    // 残高 0 の終了 / 解除の確認（残高が残る科目は振替シートが確認を兼ねる）
     archiveConfirm: 'accounts.archiveConfirm',
     unarchiveConfirm: 'accounts.unarchiveConfirm',
     // 削除は編集シート最下部（動詞体系 v13.1）: 未使用なら活性・使用中は件数つきで不活性
@@ -319,7 +319,7 @@ export const UI = {
     editImpactWarning: 'allocations.edit.impactWarning',
     // 削除は編集シート最下部（動詞体系 v13.1）。行アクションには置かない。
     editDelete: 'allocations.edit.delete',
-    // アーカイブ = 終了日の設定 + 残存価値の始末を 1 枚で決めるシート（シート自体が確認面）。
+    // 終了 = 終了日の設定 + 残存価値の始末を 1 枚で決めるシート（シート自体が確認面）。
     archive: 'allocations.archive',
     archiveDialog: 'allocations.archiveDialog',
     archiveDate: 'allocations.archive.date',
