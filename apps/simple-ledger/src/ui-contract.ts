@@ -254,6 +254,10 @@ export const UI = {
     recurringFirstPosting: 'allocations.recurring.firstPosting',
     recurringFirstPostingStatus: 'allocations.recurring.firstPostingStatus',
     recurringStartDate: 'allocations.recurring.startDate',
+    // 編集 = 全期間の引き直しの予告（過去の起票数つき・編集時のみ）
+    recurringEditRetroactiveNote: 'allocations.recurring.editRetroactiveNote',
+    // 存在期間（開始日・終了日）の折りたたみ（編集時のみ・新規は開始 = 初回起票日で自動)
+    recurringDetailsToggle: 'allocations.recurring.detailsToggle',
     recurringEndDate: 'allocations.recurring.endDate',
     // ルールの終了日の解除（iOS date input にクリア手段が無いための明示ボタン）
     recurringEndDateClear: 'allocations.recurring.endDateClear',

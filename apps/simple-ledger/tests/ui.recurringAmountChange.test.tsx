@@ -149,6 +149,10 @@ describe('定期ルールの金額変更範囲', () => {
     });
     fireEvent.click(firstRuleRow()!);
 
+    // 存在期間は詳細の折りたたみの中（v13.1 その4）。
+    fireEvent.click(
+      document.querySelector(`[data-ui="${UI.allocations.recurringDetailsToggle}"]`)!,
+    );
     expect(document.querySelector(`[data-ui="${UI.allocations.recurringStartDate}"]`)).toHaveValue(
       '2026-04-12',
     );
@@ -184,6 +188,9 @@ describe('定期ルールの金額変更範囲', () => {
       expect(firstRuleRow()).toBeTruthy();
     });
     fireEvent.click(firstRuleRow()!);
+    fireEvent.click(
+      document.querySelector(`[data-ui="${UI.allocations.recurringDetailsToggle}"]`)!,
+    );
     fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringEndDate}"]`)!, {
       target: { value: '' },
     });
@@ -238,6 +245,10 @@ describe('定期ルールの金額変更範囲', () => {
     expect(dayInput).toHaveAttribute('type', 'date');
     expect(dayInput).toHaveValue('2026-04-20');
     fireEvent.change(dayInput, { target: { value: '2026-05-31' } });
+    // 存在期間は詳細の折りたたみの中（v13.1 その4）。
+    fireEvent.click(
+      document.querySelector(`[data-ui="${UI.allocations.recurringDetailsToggle}"]`)!,
+    );
     fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringStartDate}"]`)!, {
       target: { value: '2026-04-19' },
     });

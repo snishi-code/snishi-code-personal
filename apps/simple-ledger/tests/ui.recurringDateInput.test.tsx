@@ -58,11 +58,12 @@ describe('定期ルールの初回起票日', () => {
     const firstDate = document.querySelector(
       `[data-ui="${UI.allocations.recurringFirstPostingDate}"]`,
     ) as HTMLInputElement;
-    const ruleStartDate = document.querySelector(
-      `[data-ui="${UI.allocations.recurringStartDate}"]`,
-    ) as HTMLInputElement;
     expect(firstDate.type).toBe('date');
-    expect(ruleStartDate).toHaveValue(todayLocal());
+    // 新規作成に存在期間の欄は無い（開始 = 初回の起票日で自動・v13.1 その4）。
+    expect(document.querySelector(`[data-ui="${UI.allocations.recurringStartDate}"]`)).toBeNull();
+    expect(
+      document.querySelector(`[data-ui="${UI.allocations.recurringDetailsToggle}"]`),
+    ).toBeNull();
 
     fireEvent.change(name, { target: { value: '未来の定期支出' } });
     fireEvent.change(amount, { target: { value: '1500' } });
@@ -88,7 +89,8 @@ describe('定期ルールの初回起票日', () => {
     expect(saved).toMatchObject({
       startMonth: '2031-03',
       dayOfMonth: 31,
-      startDate: todayLocal(),
+      // 開始 = 初回の起票日で自動（v13.1 その4）。
+      startDate: '2031-03-31',
     });
   });
 

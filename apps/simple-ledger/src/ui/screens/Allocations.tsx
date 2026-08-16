@@ -811,7 +811,11 @@ function RecurringRuleSheet({
   const [startDate, setStartDate] = useState(
     existing ? effectiveRecurringRuleStartDate(existing) : todayLocal(),
   );
+  // 新規作成は存在期間を出さない（開始 = 初回の起票日で自動・v13.1 その4）。
+  const effectiveStartDate = existing ? startDate : firstPostingDate;
   const [endDate, setEndDate] = useState(existing?.endDate ?? '');
+  // 存在期間（開始日・終了日）は詳細の折りたたみへ（編集時のみ・既定は閉じる）。
+  const [showDetails, setShowDetails] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [pendingAmountChange, setPendingAmountChange] = useState<{
     rule: RecurringRule;
@@ -824,11 +828,15 @@ function RecurringRuleSheet({
   const [pendingDelete, setPendingDelete] = useState(false);
   // 終了の Undo。削除と違い取り消し可能（解除 ⇄ 終了）だが、状態を変えるので確認は挟む。
   const [pendingClearEnd, setPendingClearEnd] = useState(false);
-  // ルール削除はカスケード。確認では「今日までに立った起票数」を出す（開いたときだけ数える）。
-  const deletePostings =
-    pendingDelete && existing !== undefined
-      ? deriveRecurringOutputs([existing], ledger?.accounts ?? [], todayLocal()).entries.length
-      : 0;
+  // 保存済みルールが今日までに立てている起票数。編集の引き直し予告と、カスケード削除の
+  // 確認の両方が同じ数を使う（v13: 数える対象 = 今日までに導出される起票）。
+  const pastPostings = useMemo(
+    () =>
+      existing !== undefined
+        ? deriveRecurringOutputs([existing], ledger?.accounts ?? [], todayLocal()).entries.length
+        : 0,
+    [existing, ledger],
+  );
   const canSplitAtEffectiveDate =
     pendingAmountChange !== null &&
     existing !== undefined &&
@@ -848,13 +856,13 @@ function RecurringRuleSheet({
     previewEvery >= 1 &&
     previewEvery <= CATCH_UP_HARD_CAP_MONTHS &&
     isValidIsoDate(firstPostingDate) &&
-    isValidIsoDate(startDate) &&
+    isValidIsoDate(effectiveStartDate) &&
     (endDate === '' || isValidIsoDate(endDate))
       ? firstRecurringPostingDate({
           startMonth: monthOf(firstPostingDate),
           dayOfMonth: resolveRuleDayOfMonth(firstPostingDate, existing),
           everyMonths: previewEvery,
-          startDate,
+          startDate: effectiveStartDate,
           ...(endDate !== '' ? { endDate } : {}),
         })
       : null;
@@ -918,11 +926,11 @@ function RecurringRuleSheet({
       setError(t('error.recurring.everyMonthsInvalid'));
       return;
     }
-    if (!isValidIsoDate(startDate)) {
+    if (!isValidIsoDate(effectiveStartDate)) {
       setError(t('error.recurring.periodInvalid'));
       return;
     }
-    if (endDate !== '' && (!isValidIsoDate(endDate) || endDate <= startDate)) {
+    if (endDate !== '' && (!isValidIsoDate(endDate) || endDate <= effectiveStartDate)) {
       setError(t('error.recurring.periodInvalid'));
       return;
     }
@@ -972,7 +980,8 @@ function RecurringRuleSheet({
           debitAccountId,
           creditAccountId,
           startMonth,
-          startDate,
+          // 新規は開始 = 初回の起票日で自動（存在期間の欄を出さない・v13.1 その4）。
+          startDate: effectiveStartDate,
           ...(endDate !== '' ? { endDate } : {}),
         });
       }
@@ -1006,7 +1015,7 @@ function RecurringRuleSheet({
                 amountText === '' ||
                 everyText === '' ||
                 firstPostingDate === '' ||
-                startDate === '' ||
+                (existing !== undefined && startDate === '') ||
                 creditAccountId === '' ||
                 debitAccountId === ''
               }
@@ -1025,6 +1034,8 @@ function RecurringRuleSheet({
               {error}
             </div>
           ) : null}
+          {/* 並び（v13.1 その4・作者確定）: 初回の起票日 → 周期 → 摘要 → 金額 →
+              貸方（支払い元）→ 借方（計上先）→ プレビュー → 詳細（存在期間・編集のみ）。 */}
           <TextInput
             label={t('recurring.firstPostingDate')}
             type="date"
@@ -1033,6 +1044,14 @@ function RecurringRuleSheet({
             onChange={setFirstPostingDate}
             hint={t('recurring.firstPostingDateHint')}
             dataUi={UI.allocations.recurringFirstPostingDate}
+          />
+          <TextInput
+            label={t('recurring.intervalMonths')}
+            required
+            inputMode="numeric"
+            value={everyText}
+            onChange={(v) => setEveryText(v.replace(/[^\d]/g, ''))}
+            dataUi={UI.allocations.recurringEvery}
           />
           <TextInput
             label={t('recurring.name')}
@@ -1086,14 +1105,6 @@ function RecurringRuleSheet({
               />
             }
           />
-          <TextInput
-            label={t('recurring.intervalMonths')}
-            required
-            inputMode="numeric"
-            value={everyText}
-            onChange={(v) => setEveryText(v.replace(/[^\d]/g, ''))}
-            dataUi={UI.allocations.recurringEvery}
-          />
           {/* 視覚行は値があるときだけ（空の枠を残さない）。読み上げは下の常設 status が担う。 */}
           {firstPosting !== null ? (
             <div className="kv" data-ui={UI.allocations.recurringFirstPosting}>
@@ -1101,42 +1112,73 @@ function RecurringRuleSheet({
               <span>{firstPosting}</span>
             </div>
           ) : null}
+          {/* 編集 = 全期間の引き直し（宣言モデル）。過去の起票数を添えて「切替」との
+              使い分けが学べるようにする（実ユーズレビュー 2026-08-16）。 */}
+          {existing !== undefined && pastPostings > 0 ? (
+            <p
+              className="field__hint"
+              data-ui={UI.allocations.recurringEditRetroactiveNote}
+              role="note"
+            >
+              {t('recurring.editRetroactiveNote', { count: pastPostings })}
+            </p>
+          ) : null}
           {/* live region は「内容が変わる前から存在」して初めて読み上げられるため、
               空でマウントし effect で流し込む（初期値も 1 回の変化として通知される）。
               値が消えたときも「ありません」を明示的に通知する。 */}
           <p className="sr-only" role="status" data-ui={UI.allocations.recurringFirstPostingStatus}>
             {firstPostingAnnounce}
           </p>
-          <TextInput
-            label={t('recurring.ruleStartDate')}
-            type="date"
-            required
-            value={startDate}
-            onChange={setStartDate}
-            hint={t('recurring.ruleStartDateHint')}
-            dataUi={UI.allocations.recurringStartDate}
-          />
-          <TextInput
-            label={t('recurring.ruleEndDate')}
-            type="date"
-            value={endDate}
-            onChange={setEndDate}
-            hint={t('recurring.ruleEndDateHint')}
-            dataUi={UI.allocations.recurringEndDate}
-          />
-          {/* iOS の date input には値を空へ戻す手段が無い（継続コスト編集シートと同じ理由の明示ボタン）。 */}
-          {endDate !== '' ? (
-            <div className="row-actions">
+          {/* 存在期間（開始日・終了日）は詳細の折りたたみへ。新規作成では出さない
+              （開始 = 初回の起票日で自動・v13.1 その4）。 */}
+          {existing ? (
+            <>
               <button
                 type="button"
-                className="btn btn--ghost"
-                style={{ minHeight: 'var(--tap)' }}
-                onClick={() => setEndDate('')}
-                data-ui={UI.allocations.recurringEndDateClear}
+                className="collapse-toggle"
+                aria-expanded={showDetails}
+                onClick={() => setShowDetails((v) => !v)}
+                data-ui={UI.allocations.recurringDetailsToggle}
               >
-                {t('ccItem.endDateClear')}
+                <Icon name={showDetails ? 'expand' : 'chevronRight'} size={16} />
+                {t('recurring.detailsToggle')}
               </button>
-            </div>
+              {showDetails ? (
+                <div className="stack">
+                  <TextInput
+                    label={t('recurring.ruleStartDate')}
+                    type="date"
+                    required
+                    value={startDate}
+                    onChange={setStartDate}
+                    hint={t('recurring.ruleStartDateHint')}
+                    dataUi={UI.allocations.recurringStartDate}
+                  />
+                  <TextInput
+                    label={t('recurring.ruleEndDate')}
+                    type="date"
+                    value={endDate}
+                    onChange={setEndDate}
+                    hint={t('recurring.ruleEndDateHint')}
+                    dataUi={UI.allocations.recurringEndDate}
+                  />
+                  {/* iOS の date input には値を空へ戻す手段が無い（継続コスト編集シートと同じ理由の明示ボタン）。 */}
+                  {endDate !== '' ? (
+                    <div className="row-actions">
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        style={{ minHeight: 'var(--tap)' }}
+                        onClick={() => setEndDate('')}
+                        data-ui={UI.allocations.recurringEndDateClear}
+                      >
+                        {t('ccItem.endDateClear')}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
           ) : null}
           {/* 破壊的なほど下（動詞体系 v13.1・HIG の連絡先・カレンダー方式）:
               [終了日を解除（終了済みのみ）] → [このルールを削除…]。 */}
@@ -1191,8 +1233,8 @@ function RecurringRuleSheet({
           /* カスケード削除（作者決定 2026-08-15）: 積み木の下（ルール）が消えれば上（起票された
              仕訳・持ち物）も消える。何回ぶん消えるかを数で名乗る（0 件なら別文言）。 */
           body={
-            deletePostings > 0
-              ? t('recurring.deleteConfirmBody', { name: existing.name, count: deletePostings })
+            pastPostings > 0
+              ? t('recurring.deleteConfirmBody', { name: existing.name, count: pastPostings })
               : t('recurring.deleteConfirmNoPostingsBody', { name: existing.name })
           }
           confirmLabel={t('common.delete')}

@@ -738,9 +738,15 @@ export const ja = {
   'recurring.amountHint':
     '金額を変えるときは、全期間を変えるか、今日から新しい金額に分けるかを選べます。',
   'recurring.intervalMonths': '周期（か月）',
-  'recurring.firstPostingDate': '起票周期の基準日',
+  // v13.1 その4: 旧「起票周期の基準日」の改枠。データは従来どおり startMonth + dayOfMonth と
+  // 相互変換する（保存形は不変・見せ方だけ「最初に起票される日」へ寄せる）。
+  'recurring.firstPostingDate': '初回の起票日',
   'recurring.firstPostingDateHint':
-    '毎回の起票日と周期の位相を決める日です。ルールの存在期間とは別です。',
+    '最初に起票する日です。毎回の起票日と周期の位相もこの日で決まります。',
+  'recurring.detailsToggle': '詳細（ルールの存在期間）',
+  // 編集 = 全期間の引き直し（宣言モデル）。この日から変えたいときの動詞は「切替」。
+  'recurring.editRetroactiveNote':
+    '編集は全期間に効きます。過去 {count} 回の起票が引き直されます（この日から変えるなら「切替」）。',
   'recurring.ruleStartDate': 'ルールの開始日',
   'recurring.ruleStartDateHint': 'このルールが存在し始める日です。',
   'recurring.ruleEndDate': 'ルールの終了点（任意）',
