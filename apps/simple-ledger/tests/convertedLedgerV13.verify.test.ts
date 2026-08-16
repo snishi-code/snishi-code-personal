@@ -66,6 +66,7 @@ const account = (over: Partial<Account> & Pick<Account, 'id' | 'name' | 'type' |
 
 const CASH = 'cash';
 const EXPENSE = 'expense';
+const INVEST = 'invest';
 
 function rule(over: Partial<RecurringRule> & Pick<RecurringRule, 'id'>): RecurringRule {
   return {
@@ -145,6 +146,14 @@ function v12Package() {
     startMonth: '2026-05',
     postedThroughMonth: '2026-05',
   } as Partial<RecurringRule> & { id: string });
+  // R6: v12 の直接形（spread なし・借方 = 投資へ直接。実データの「積立」相当）。
+  // v13.1 の c 案変換で台帳経由（spread = 投資・借方 = 台帳）になり、過去の保存 rec-
+  // （借方 = 投資）は構造的逸脱として手動仕訳へ降格される（¥ が消えないことが最優先）。
+  const r6 = rule({ id: 'r6', postedThroughMonth: '2026-04' } as Partial<RecurringRule> & {
+    id: string;
+  }) as RecurringRule & { postedThroughMonth?: string };
+  delete (r6 as Record<string, unknown>).spreadExpenseAccountId;
+  r6.debitAccountId = INVEST;
 
   const r1Recovery: JournalEntry = {
     id: 'recovery-r1',
@@ -191,6 +200,7 @@ function v12Package() {
     accounts: [
       account({ id: CASH, name: '現金', type: 'asset', role: 'daily-asset' }),
       account({ id: EXPENSE, name: '固定費', type: 'expense', role: 'expense-category' }),
+      account({ id: INVEST, name: '投資', type: 'asset', role: 'investment-asset' }),
       account({
         id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
         name: '継続コスト台帳',
@@ -210,6 +220,7 @@ function v12Package() {
       r4Direct, // 構造的逸脱
       storedPosting(r5, '2026-04'), // 孤児（位相の外）
       storedPosting(r5, '2026-05'), // こちらは導出される
+      storedPosting(r6, '2026-04'), // 直接形の過去起票（借方 = 投資・item なし）
     ],
     tags: [
       { id: 'trip', name: '旅行', scope: 'entry', archived: false, createdAt: 'x', updatedAt: 'x' },
@@ -224,7 +235,7 @@ function v12Package() {
       storedItem(r5, '2026-04'),
       storedItem(r5, '2026-05'),
     ],
-    recurringRules: [r1, r2, r3, r4, r5],
+    recurringRules: [r1, r2, r3, r4, r5, r6],
     settings: { ledgerName: '家計簿', currency: 'JPY', displayFractionDigits: 0 },
   };
 }
@@ -333,6 +344,32 @@ describe.skipIf(CONVERTER === undefined)('v12→v13 変換（合成フィクス�
         (e) => e.metadata?.recurringMonth,
       ),
     ).toEqual(['2026-05']);
+
+    // R6: 直接形 → 台帳経由へ変換（v13.1 の c 案・保存形は一形のみ）。
+    const r6 = byId.get('r6')!;
+    expect(r6.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+    expect(r6.spreadExpenseAccountId).toBe(INVEST);
+    // 過去の直接起票（借方 = 投資）は手動仕訳へ降格し、行はそのまま = 残高不変。
+    const r6Demoted = pkg.journalEntries.find(
+      (e) => e.description === 'r6' && e.date === '2026-04-20',
+    )!;
+    expect(r6Demoted).toBeDefined();
+    expect(r6Demoted.id.startsWith('rec-')).toBe(false);
+    expect(r6Demoted.metadata?.recurringRuleId).toBeUndefined();
+    expect(r6Demoted.lines[0]).toEqual({ accountId: INVEST, side: 'debit', amount: 1000 });
+    // 降格月は導出から除外（二重計上しない）。
+    expect(deriveRecurringOutputs([r6], accounts, '2026-04-30').entries).toEqual([]);
+    // 以後の回は台帳経由（借方 = 台帳 + item・計上先 = 投資 = 1 刻み遅れ・作者承認済み）。
+    const r6World = deriveRecurringOutputs([r6], accounts, '2026-05-31');
+    expect(r6World.entries.map((e) => e.metadata?.recurringMonth)).toEqual(['2026-05']);
+    expect(r6World.entries[0]!.lines[0]!.accountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+    expect(r6World.items[0]).toMatchObject({ expenseAccountId: INVEST });
+    expect(stdout).toContain('直接形ルール → 台帳経由へ変換');
+
+    // 台帳科目の表示名の書き換え（v13.1 その7 の改名にデータ側が追随・既定名のときだけ）。
+    expect(pkg.accounts.find((a) => a.id === CONTINUOUS_COST_LEDGER_ACCOUNT_ID)?.name).toBe(
+      '月割り台帳',
+    );
 
     // 実 import まで通る（v13 アプリの受け入れ）。
     const outcome = await importFromJsonText(JSON.stringify(out), { force: true });
