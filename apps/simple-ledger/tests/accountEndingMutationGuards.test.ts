@@ -425,14 +425,18 @@ describe('終了済み資産と定期ルールの後続操作', () => {
     expect((await loadLedger()).recurringRules).toHaveLength(0);
   });
 
-  it('終了点残高を0にする定期ルールの期間変更を拒否する', async () => {
+  it('終了点の消し込みを失わせる定期ルールの期間変更を拒否する', async () => {
     const { rule } = await seedEndedAssetBalancedByRecurringRule();
 
     // 起票日（11/01）を含まない区間へ動かすと消し込みが消える = 終了点残高が 100 に戻る。
+    // この経路で残高を壊すには起票を丸ごと外すしかなく（科目の終了日より後へ動かすと
+    // 先に referenceOutsidePeriod が出る）、v13.3 の「起票ゼロの線分は保存できない」が
+    // より手前の構造ガードとして先に拒否する。終了点残高そのもののガードは、同じ
+    // describe の新規作成・削除のテストが引き続き守る。
     await expect(
       upsertRecurringRule({ ...rule, startDate: '2025-11-02', endDate: '2025-11-03' }),
     ).rejects.toMatchObject({
-      code: 'error.account.archiveBalance',
+      code: 'error.recurring.neverPosts',
     });
     expect(
       (await loadLedger()).recurringRules.find((candidate) => candidate.id === rule.id)?.startDate,

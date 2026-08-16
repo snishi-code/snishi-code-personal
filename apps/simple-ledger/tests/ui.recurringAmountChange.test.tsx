@@ -84,6 +84,9 @@ async function openAmountDecision(nextAmount: string): Promise<void> {
 describe('定期ルールの金額変更範囲', () => {
   it('終了したルールに「再開」は無く、終了の取り消しは編集シートの「終了日を解除」で行う', async () => {
     const original = await seedRule();
+    // 起票を 1 回済ませてから終了する（v13.3: 起票ゼロになる終了は保存境界が拒否し、
+    // 削除へ誘導する。ここで見たいのは終了 → 解除の往復なので起票済みの線分を使う）。
+    clock.today = '2026-04-25';
     render(<View />);
     await waitFor(() => {
       expect(document.querySelector(`[data-ui="${UI.allocations.recurringEnd}"]`)).toBeTruthy();
@@ -102,7 +105,7 @@ describe('定期ルールの金額変更範囲', () => {
     await waitFor(async () => {
       expect(
         (await loadLedger()).recurringRules.find((rule) => rule.id === original.id)?.endDate,
-      ).toBe('2026-04-18');
+      ).toBe('2026-04-25');
     });
 
     await waitFor(() => {
@@ -114,13 +117,14 @@ describe('定期ルールの金額変更範囲', () => {
     fireEvent.click(showEnded);
     // 「再開」ボタンは撤去済み（実体は新規登録と同じで「終了の Undo」と誤読させるため。
     // 再契約 = 新規登録・終了の間違い = 解除）。
+    // 起票済みなので由来 item カードも同名で並ぶ。ルール行（先頭）を選ぶ。
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: `編集: ${original.name}` })).toBeInTheDocument();
+      expect(firstRuleRow()).toBeTruthy();
     });
     expect(document.querySelector('[data-ui="allocations.recurring.restart"]')).toBeNull();
 
     // 終了の Undo = 編集シート下部の「終了日を解除」（終了済みのときだけ表示・確認つき）。
-    fireEvent.click(screen.getByRole('button', { name: `編集: ${original.name}` }));
+    fireEvent.click(firstRuleRow()!);
     fireEvent.click(
       await waitFor(
         () => document.querySelector(`[data-ui="${UI.allocations.recurringClearEndDate}"]`)!,

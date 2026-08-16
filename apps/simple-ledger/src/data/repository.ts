@@ -1363,7 +1363,18 @@ export interface RecurringRuleSaveOptions {
 }
 
 /** 保存境界の検証（作成・編集で共通・fail-closed）。 */
-function assertRecurringRuleSavable(rule: RecurringRule, ctx: SaveContext): void {
+function assertRecurringRuleSavable(
+  rule: RecurringRule,
+  ctx: SaveContext,
+  options: {
+    /**
+     * 切り替え・分割の**旧線分**（後継へ寿命を引き継いだ残余）か。
+     * 残余は単独の宣言ではないので「起票ゼロ」を許す — 宣言そのものは後継が担う。
+     * 終了（successor = null）の旧線分はこれに当たらない = 結果が単独の死んだ線になるため。
+     */
+    residualOfSwitch?: boolean;
+  } = {},
+): void {
   if (!recurringRuleSchema.safeParse(rule).success)
     throw new LedgerError('error.recurring.invalidStructure');
   if (rule.name.trim() === '') throw new LedgerError('error.common.nameRequired');
@@ -1371,8 +1382,17 @@ function assertRecurringRuleSavable(rule: RecurringRule, ctx: SaveContext): void
   const credit = ctx.byId.get(rule.creditAccountId);
   if (!debit || !credit || rule.debitAccountId === rule.creditAccountId)
     throw new LedgerError('error.recurring.flowInvalid');
+  // 一度も起票しないルールは保存できない（v13.3・不変則）。
+  // 起票日が存在期間の外にある線分は「生まれない線」で、宣言モデルでは意味を持たない
+  // （実データで、終了点を初回の起票日より前へ打つと死んだルールが残った）。
+  // 期間の短縮そのものは正当な操作（生まれたものを消す）だが、起票がゼロになるなら
+  // それは終了ではなく削除。referenceStartDate が「起票ゼロ = undefined」の単一正本。
+  // import（wire）へは課さない: 変換スクリプトの線分手術が理論上作りうるため、
+  // 取り込み不能で立ち往生させない（表示上は無害・アプリ内の保存経路だけ塞ぐ）。
   const referenceStart = recurringRuleReferenceStartDate(rule);
-  if (referenceStart !== undefined) {
+  if (referenceStart === undefined) {
+    if (!options.residualOfSwitch) throw new LedgerError('error.recurring.neverPosts');
+  } else {
     const referenceEnd = recurringRuleReferenceEndDate(rule);
     const reference: AccountReferenceInterval = {
       kind: 'recurringRule',
@@ -1519,7 +1539,8 @@ async function splitRecurringRuleAtDate(args: {
     predecessor,
     successor,
   ];
-  assertRecurringRuleSavable(predecessor, validationCtx);
+  // 旧線分は後継へ寿命を引き継いだ残余（起票ゼロを許す）。宣言は後継が担う。
+  assertRecurringRuleSavable(predecessor, validationCtx, { residualOfSwitch: true });
   assertRecurringRuleSavable(successor, validationCtx);
   assertRecurringLineagesSavable(candidateRules);
   assertEndedAssetLiabilityBalances({
@@ -1895,7 +1916,12 @@ async function switchRecurringRuleUnlocked(input: RecurringRuleSwitchInput): Pro
     ...updatedById.values(),
     ...(successor !== undefined ? [successor] : []),
   ];
-  for (const rule of updatedById.values()) assertRecurringRuleSavable(rule, validationCtx);
+  // 切り替え（後継あり）の旧線分は残余なので起票ゼロを許す。終了（successor = null）は
+  // 旧線分が結果そのものなので許さない = 起票ゼロで終了しようとしたら削除へ誘導する。
+  for (const rule of updatedById.values())
+    assertRecurringRuleSavable(rule, validationCtx, {
+      residualOfSwitch: successor !== undefined,
+    });
   if (successor !== undefined) assertRecurringRuleSavable(successor, validationCtx);
   assertRecurringLineagesSavable(candidateRules);
   const candidateEntries = [...entries, ...recoveryEntries];

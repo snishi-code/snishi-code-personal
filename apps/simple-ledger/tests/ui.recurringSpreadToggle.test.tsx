@@ -159,6 +159,9 @@ describe('全ルール台帳経由（月割りトグルの廃止）', () => {
       startDate: '2026-04-12',
     });
 
+    // 起票を 1 回済ませてから終了する（v13.3: 起票ゼロになる終了は保存境界が拒否し、
+    // 削除へ誘導する。ここで見たいのは終了 → 解除の往復なので起票済みの線分を使う）。
+    clock.today = '2026-04-21';
     await renderReady();
     // 終了は終了日シート経由（無確認では実行しない）。
     fireEvent.click(
@@ -172,7 +175,7 @@ describe('全ルール台帳経由（月割りトグルの廃止）', () => {
     await waitFor(async () => {
       expect(
         (await loadLedger()).recurringRules.find((rule) => rule.id === original.id)?.endDate,
-      ).toBe('2026-04-18');
+      ).toBe('2026-04-21');
     });
 
     fireEvent.click(

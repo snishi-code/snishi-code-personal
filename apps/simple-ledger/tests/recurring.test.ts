@@ -23,6 +23,7 @@ import {
   deleteMonthlyCost,
   deleteRecurringRule,
   loadLedger,
+  switchRecurringRule,
   upsertEntry,
   upsertMonthlyCost,
   upsertRecurringRule,
@@ -872,6 +873,8 @@ describe('編集・切り替え・削除の保存境界', () => {
   it('終了点を空にした編集は有限segmentを将来へ再び開く', async () => {
     const bank = await accountByName('預金');
     const invest = await accountByName('投資');
+    // 有限 segment（4/20 だけ起票して 5/01 で閉じる）。起票ゼロの線分は v13.3 の
+    // 不変則で作れないため、終了点は初回の起票日より後に置く。
     const rule = await createRecurringRule({
       name: '終了点解除',
       amount: 1000,
@@ -880,10 +883,12 @@ describe('編集・切り替え・削除の保存境界', () => {
       creditAccountId: bank.id,
       startMonth: '2026-04',
       startDate: '2026-04-12',
-      endDate: '2026-04-18',
+      endDate: '2026-05-01',
     });
-    // 終了月の起票日は存在期間外 = 1 本も導出しない。
-    expect((await derivedFor('2026-04-20')).entries).toEqual([]);
+    // 終了点より後の起票日（5/20・6/20）は存在期間外 = 導出しない。
+    expect((await derivedFor('2026-06-30')).entries.map((entry) => entry.date)).toEqual([
+      '2026-04-20',
+    ]);
 
     const finite = (await loadLedger()).recurringRules.find(
       (candidate) => candidate.id === rule.id,
@@ -892,9 +897,9 @@ describe('編集・切り替え・削除の保存境界', () => {
     delete reopened.endDate;
     await upsertRecurringRule(reopened);
 
-    const { ledger, entries } = await derivedFor('2026-04-20');
+    const { ledger, entries } = await derivedFor('2026-06-30');
     expect(ledger.recurringRules.find((r) => r.id === rule.id)?.endDate).toBeUndefined();
-    expect(entries.map((entry) => entry.date)).toEqual(['2026-04-20']);
+    expect(entries.map((entry) => entry.date)).toEqual(['2026-04-20', '2026-05-20', '2026-06-20']);
   });
 
   it('分割系譜の期間重複は拒否し、隙間と位相の編集は許す', async () => {
@@ -1804,5 +1809,120 @@ describe('収入・振替ルールも台帳経由の一形で導出する（ス�
     ]);
     expect(ledger.journalEntries).toEqual([]);
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
+  });
+});
+
+/*
+ * 起票ゼロの線分は保存できない（v13.3・不変則）。
+ *
+ * 実ユーズ指摘（2026-08-16）: 初回の起票日より前へ終了点を打つと、起票を 1 本も持たない
+ * ルールが残った（実害は無いが宣言モデルでは「生まれない線」= 意味を持たない）。
+ * 期間の短縮そのものは正当（生まれたものを消す）だが、起票がゼロになるなら
+ * それは終了ではなく削除。保存境界が拒否し、エラー文で削除の扉を指す。
+ */
+describe('起票ゼロの線分は保存できない', () => {
+  async function baseRule() {
+    const bank = await accountByName('預金');
+    const invest = await accountByName('投資');
+    return { bank, invest };
+  }
+
+  it('作成: 初回の起票日が期間の外なら拒否する', async () => {
+    const { bank, invest } = await baseRule();
+    // 初回の起票 = 2026-12-01（12 か月ごと）。期間 [7/1, 11/1) はそれを含まない。
+    await expect(
+      createRecurringRule({
+        name: '生まれない線',
+        amount: 1000,
+        dayOfMonth: 1,
+        everyMonths: 12,
+        debitAccountId: invest.id,
+        creditAccountId: bank.id,
+        startMonth: '2026-12',
+        startDate: '2026-07-01',
+        endDate: '2026-11-01',
+      }),
+    ).rejects.toMatchObject({ code: 'error.recurring.neverPosts' });
+    expect((await loadLedger()).recurringRules).toHaveLength(0);
+  });
+
+  it('編集: 終了点を初回の起票日より前へ動かすと拒否し、ルールは元のまま', async () => {
+    const { bank, invest } = await baseRule();
+    const rule = await createRecurringRule({
+      name: 'サブスク予定',
+      amount: 1000,
+      dayOfMonth: 1,
+      everyMonths: 12,
+      debitAccountId: invest.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-12',
+      startDate: '2026-07-01',
+    });
+    await expect(upsertRecurringRule({ ...rule, endDate: '2026-11-01' })).rejects.toMatchObject({
+      code: 'error.recurring.neverPosts',
+    });
+    expect(
+      (await loadLedger()).recurringRules.find((r) => r.id === rule.id)?.endDate,
+    ).toBeUndefined();
+  });
+
+  it('終了（後継なし）: 起票が 1 本も残らない終了点は拒否する', async () => {
+    const { bank, invest } = await baseRule();
+    const rule = await createRecurringRule({
+      name: 'サブスク予定',
+      amount: 1000,
+      dayOfMonth: 1,
+      everyMonths: 12,
+      debitAccountId: invest.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-12',
+      startDate: '2026-07-01',
+    });
+    await expect(
+      switchRecurringRule({ ruleId: rule.id, effectiveDate: '2026-11-01', successor: null }),
+    ).rejects.toMatchObject({ code: 'error.recurring.neverPosts' });
+    expect(
+      (await loadLedger()).recurringRules.find((r) => r.id === rule.id)?.endDate,
+    ).toBeUndefined();
+  });
+
+  it('起票が 1 本でも残る終了点は通る（期間短縮そのものは正当）', async () => {
+    const { bank, invest } = await baseRule();
+    const rule = await createRecurringRule({
+      name: '毎月のもの',
+      amount: 1000,
+      dayOfMonth: 20,
+      debitAccountId: invest.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-04',
+      startDate: '2026-04-12',
+    });
+    // 4/20 の 1 本だけ残して閉じる（5/20 以降は消える）= 終了として正当。
+    await upsertRecurringRule({ ...rule, endDate: '2026-05-01' });
+    expect((await derivedFor('2026-06-30')).entries.map((e) => e.date)).toEqual(['2026-04-20']);
+  });
+
+  it('切り替え（後継あり）の旧線分は起票ゼロでも通る（後継へ寿命を引き継いだ残余）', async () => {
+    const { bank, invest } = await baseRule();
+    const rule = await createRecurringRule({
+      name: '切り替える線',
+      amount: 1000,
+      dayOfMonth: 20,
+      debitAccountId: invest.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-04',
+      startDate: '2026-04-12',
+    });
+    // 旧線分 [4/12, 4/18) は 1 本も起票しないが、宣言は後継が担うので保存できる。
+    await switchRecurringRule({
+      ruleId: rule.id,
+      effectiveDate: '2026-04-18',
+      successor: { amount: 1500, dayOfMonth: 20, everyMonths: 1 },
+    });
+    const ledger = await loadLedger();
+    expect(ledger.recurringRules).toHaveLength(2);
+    const successor = ledger.recurringRules.find((r) => r.splitFromRuleId === rule.id)!;
+    expect(successor.startDate).toBe('2026-04-18');
+    expect((await derivedFor('2026-04-30')).entries.map((e) => e.date)).toEqual(['2026-04-20']);
   });
 });
