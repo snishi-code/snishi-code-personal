@@ -152,10 +152,13 @@ describe('定期ルールの削除（カスケード）', () => {
     expect(derivedBefore.items).toHaveLength(1);
     await renderReady();
 
+    // 動詞体系 v13.1: 削除は行アクションではなく編集シート最下部（カードタップ → 削除…）。
+    // ルール行と由来 item カードが同名なので、先に並ぶルール行を選ぶ。
+    fireEvent.click((await screen.findAllByRole('button', { name: `編集: ${rule.name}` }))[0]!);
     fireEvent.click(
       await waitFor(() => document.querySelector(`[data-ui="${UI.allocations.recurringDelete}"]`)!),
     );
-    const dialog = screen.getByRole('dialog');
+    const dialog = screen.getByRole('dialog', { name: '定期ルールを削除' });
     expect(dialog).toHaveTextContent('1 回分の仕訳と持ち物も一緒に消えます');
     expect(dialog).toHaveTextContent('登録し直せば復旧できます');
 
@@ -190,10 +193,11 @@ describe('定期ルールの削除（カスケード）', () => {
     });
     await renderReady();
 
+    fireEvent.click(await screen.findByRole('button', { name: '編集: これから始めるもの' }));
     fireEvent.click(
       await waitFor(() => document.querySelector(`[data-ui="${UI.allocations.recurringDelete}"]`)!),
     );
-    const dialog = screen.getByRole('dialog');
+    const dialog = screen.getByRole('dialog', { name: '定期ルールを削除' });
     expect(dialog).toHaveTextContent('まだ起票はありません');
     expect(dialog).not.toHaveTextContent('回分の仕訳と持ち物');
   });
@@ -235,7 +239,7 @@ describe('継続コスト item の削除確認', () => {
     ).toBeInTheDocument();
   });
 
-  it('手動で登録した継続コスト資産は従来どおりの削除確認', async () => {
+  it('手動で登録した継続コスト資産は編集シート最下部から削除確認へ（行アクションには出ない）', async () => {
     const ledger = await loadLedger();
     const fixed = ledger.accounts.find((account) => account.name === '固定費')!;
     const cash = ledger.accounts.find((account) => account.name === '預金')!;
@@ -249,7 +253,12 @@ describe('継続コスト item の削除確認', () => {
     });
     await renderReady();
 
-    fireEvent.click(await screen.findByRole('button', { name: `削除: ${item.name}` }));
+    // 行アクションに削除は無い（動詞体系 v13.1: 破壊的操作は編集シート最下部）。
+    expect(screen.queryByRole('button', { name: `削除: ${item.name}` })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: `編集: ${item.name}` }));
+    fireEvent.click(
+      await waitFor(() => document.querySelector(`[data-ui="${UI.allocations.editDelete}"]`)!),
+    );
     expect(screen.getByText('継続コスト資産を削除しますか？')).toBeInTheDocument();
   });
 });

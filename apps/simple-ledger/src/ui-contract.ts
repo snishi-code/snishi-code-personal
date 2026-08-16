@@ -202,6 +202,9 @@ export const UI = {
     // 残高 0 のアーカイブ / 解除の確認（残高が残る科目は振替シートが確認を兼ねる）
     archiveConfirm: 'accounts.archiveConfirm',
     unarchiveConfirm: 'accounts.unarchiveConfirm',
+    // 削除は編集シート最下部（動詞体系 v13.1）: 未使用なら活性・使用中は件数つきで不活性
+    delete: 'accounts.delete',
+    deleteConfirm: 'accounts.deleteConfirm',
     openingAmount: 'accounts.openingAmount',
     openingDate: 'accounts.openingDate',
     startDate: 'accounts.startDate',
@@ -289,8 +292,9 @@ export const UI = {
     recurringSettlementRemainder: 'allocations.recurring.settlement.remainder',
     recurringSettlementRemainderSpread: 'allocations.recurring.settlement.remainder.spread',
     recurringSettlementRemainderExpense: 'allocations.recurring.settlement.remainder.expense',
-    recurringRestart: 'allocations.recurring.restart',
-    recurringRestartConfirm: 'allocations.recurring.restart.confirm',
+    // 終了の Undo（編集シート下部・終了済みのときだけ表示）。
+    recurringClearEndDate: 'allocations.recurring.clearEndDate',
+    recurringClearEndDateConfirm: 'allocations.recurring.clearEndDate.confirm',
     // 削除はカスケード（ルール + 起票済みの仕訳・持ち物）。確認に起票回数を出す。
     recurringDelete: 'allocations.recurring.delete',
     // 継続コスト資産シート（登録＝編集の 1 コンポーネント）。
@@ -307,6 +311,8 @@ export const UI = {
     editExpense: 'allocations.edit.expense',
     editSave: 'allocations.edit.save',
     editImpactWarning: 'allocations.edit.impactWarning',
+    // 削除は編集シート最下部（動詞体系 v13.1）。行アクションには置かない。
+    editDelete: 'allocations.edit.delete',
     // アーカイブ = 終了日の設定 + 残存価値の始末を 1 枚で決めるシート（シート自体が確認面）。
     archive: 'allocations.archive',
     archiveDialog: 'allocations.archiveDialog',
@@ -333,19 +339,20 @@ export const UI = {
     openingRegisterDate: 'adjustments.openingRegister.date',
     openingRegisterSave: 'adjustments.openingRegister.save',
     rowEdit: 'adjustments.row.edit',
-    rowDelete: 'adjustments.row.delete',
     editDialog: 'adjustments.editDialog',
     editAccount: 'adjustments.edit.account',
     editDate: 'adjustments.edit.date',
     editActual: 'adjustments.edit.actual',
     editSave: 'adjustments.edit.save',
+    // 削除は編集シート最下部（動詞体系 v13.1）。行アクションには置かない。
+    editDelete: 'adjustments.edit.delete',
     deleteConfirm: 'adjustments.deleteConfirm',
     openingRowEdit: 'opening.row.edit',
-    openingRowDelete: 'opening.row.delete',
     openingEditDialog: 'opening.editDialog',
     openingEditAmount: 'opening.edit.amount',
     openingEditDate: 'opening.edit.date',
     openingEditSave: 'opening.edit.save',
+    openingEditDelete: 'opening.edit.delete',
     openingDeleteConfirm: 'opening.deleteConfirm',
   },
   cashflow: {

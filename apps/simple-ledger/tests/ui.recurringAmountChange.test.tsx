@@ -82,7 +82,7 @@ async function openAmountDecision(nextAmount: string): Promise<void> {
 }
 
 describe('定期ルールの金額変更範囲', () => {
-  it('終了したルールは一覧から再表示し、同じ設定の独立した線分として新しく始められる', async () => {
+  it('終了したルールに「再開」は無く、終了の取り消しは編集シートの「終了日を解除」で行う', async () => {
     const original = await seedRule();
     render(<View />);
     await waitFor(() => {
@@ -112,33 +112,33 @@ describe('定期ルールの金額変更範囲', () => {
       `[data-ui="${UI.allocations.showCompleted}"]`,
     ) as HTMLInputElement;
     fireEvent.click(showEnded);
+    // 「再開」ボタンは撤去済み（実体は新規登録と同じで「終了の Undo」と誤読させるため。
+    // 再契約 = 新規登録・終了の間違い = 解除）。
     await waitFor(() => {
-      expect(document.querySelector(`[data-ui="${UI.allocations.recurringRestart}"]`)).toBeTruthy();
+      expect(screen.getByRole('button', { name: `編集: ${original.name}` })).toBeInTheDocument();
     });
-    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringRestart}"]`)!);
-    // 再開も軽い確認を挟む（今日を開始点に同じ内容の新しいルールを作る）。
-    const restartConfirm = await waitFor(
-      () => document.querySelector(`[data-ui="${UI.allocations.recurringRestartConfirm}"]`)!,
-    );
-    expect(restartConfirm).toHaveTextContent('今日を開始点として');
-    fireEvent.click(restartConfirm.querySelector(`[data-ui="${UI.dialog.confirm}"]`)!);
+    expect(document.querySelector('[data-ui="allocations.recurring.restart"]')).toBeNull();
 
+    // 終了の Undo = 編集シート下部の「終了日を解除」（終了済みのときだけ表示・確認つき）。
+    fireEvent.click(screen.getByRole('button', { name: `編集: ${original.name}` }));
+    fireEvent.click(
+      await waitFor(
+        () => document.querySelector(`[data-ui="${UI.allocations.recurringClearEndDate}"]`)!,
+      ),
+    );
+    const clearConfirm = await waitFor(
+      () => document.querySelector(`[data-ui="${UI.allocations.recurringClearEndDateConfirm}"]`)!,
+    );
+    expect(clearConfirm).toHaveTextContent('継続中に戻します');
+    fireEvent.click(clearConfirm.querySelector(`[data-ui="${UI.dialog.confirm}"]`)!);
+
+    // 新しいルールは作られず（再開の廃止）、同じルールの終了点だけが消える。
     await waitFor(async () => {
-      expect((await loadLedger()).recurringRules).toHaveLength(2);
+      const ledger = await loadLedger();
+      expect(ledger.recurringRules).toHaveLength(1);
+      expect(ledger.recurringRules[0]!.id).toBe(original.id);
+      expect(ledger.recurringRules[0]!.endDate).toBeUndefined();
     });
-    const ledger = await loadLedger();
-    const restarted = ledger.recurringRules.find((rule) => rule.id !== original.id)!;
-    expect(restarted).toMatchObject({
-      name: original.name,
-      amount: original.amount,
-      dayOfMonth: original.dayOfMonth,
-      everyMonths: original.everyMonths,
-      startMonth: original.startMonth,
-      startDate: '2026-04-18',
-      creditAccountId: original.creditAccountId,
-    });
-    expect(restarted.splitFromRuleId).toBeUndefined();
-    expect(restarted.endDate).toBeUndefined();
   });
 
   it('存在期間と起票周期の基準日を別の入力として保存する', async () => {

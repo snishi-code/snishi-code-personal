@@ -280,3 +280,63 @@ describe('勘定科目の色分けと可動性表示', () => {
     expect(document.querySelector('[data-ui="accounts.notMovableBadge"]')).toBeNull();
   });
 });
+
+/*
+ * 科目の削除 UI（v13.1・動詞体系・plan 未決①の解消）:
+ *  - 削除は編集シート最下部（行アクションには出さない）
+ *  - 未使用なら活性 → 確認 → 削除 / 使用中は紐づき件数を添えて不活性（fail-closed の理由開示）
+ */
+describe('科目の削除（編集シート最下部）', () => {
+  it('未使用の科目は削除ボタン → 確認で消える', async () => {
+    await loadLedger();
+    await renderReady();
+    // チャージ残高は seed 時点で仕訳・持ち物・ルールから参照されていない。
+    fireEvent.click(await screen.findByRole('button', { name: '編集: チャージ残高' }));
+    const deleteBtn = await waitFor(() => {
+      const found = document.querySelector<HTMLButtonElement>(`[data-ui="${UI.accounts.delete}"]`);
+      expect(found).toBeInTheDocument();
+      return found!;
+    });
+    expect(deleteBtn).toBeEnabled();
+    fireEvent.click(deleteBtn);
+    const confirm = await waitFor(() => {
+      const found = document.querySelector(`[data-ui="${UI.accounts.deleteConfirm}"]`);
+      expect(found).toBeInTheDocument();
+      return found!;
+    });
+    expect(confirm).toHaveTextContent('取り消せません');
+    fireEvent.click(confirm.querySelector(`[data-ui="${UI.dialog.confirm}"]`)!);
+    await waitFor(async () => {
+      expect((await loadLedger()).accounts.find((a) => a.name === 'チャージ残高')).toBeUndefined();
+    });
+  });
+
+  it('使用中の科目は件数つきで不活性（アーカイブへ誘導）', async () => {
+    const ledger = await loadLedger();
+    const charge = ledger.accounts.find((a) => a.name === 'チャージ残高')!;
+    const expense = ledger.accounts.find((a) => a.name === '固定費')!;
+    // 1 本だけ参照を作る（仕訳 1 件）。
+    await upsertEntry(
+      buildSimpleEntry({
+        date: todayLocal(),
+        description: '削除ブロック用',
+        debitAccountId: expense.id,
+        creditAccountId: charge.id,
+        amount: 100,
+        kind: 'normal',
+      }),
+    );
+    await renderReady();
+    fireEvent.click(await screen.findByRole('button', { name: '編集: チャージ残高' }));
+    const deleteBtn = await waitFor(() => {
+      const found = document.querySelector<HTMLButtonElement>(`[data-ui="${UI.accounts.delete}"]`);
+      expect(found).toBeInTheDocument();
+      return found!;
+    });
+    expect(deleteBtn).toBeDisabled();
+    expect(
+      screen.getByText(/仕訳 1 件・持ち物 0 件・くり返し記帳 0 件から参照/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/「アーカイブ」を使ってください/)).toBeInTheDocument();
+  });
+});

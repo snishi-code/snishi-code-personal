@@ -20,7 +20,6 @@ import {
   type ListSortAxisKey,
 } from '../ListSearchSort';
 import { applySort, directionSign, matchesQuery, type SortDirection } from '../listQuery';
-import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import { AdjustmentEditSheet } from '../AdjustmentSheet';
 import { OpeningEditSheet } from '../OpeningSheet';
@@ -123,7 +122,7 @@ export function Journal({
   targetEntryId?: string | null;
   onClearFilter: () => void;
 }) {
-  const { ledger, removeEntry, deleteOpening, deleteAdjustment } = useLedger();
+  const { ledger } = useLedger();
   const [query, setQuery] = useState('');
   // 明示フィルターで開いた場合はその範囲を優先し、メニューから直接開いた場合は
   // 初回描画から共有期間を反映する。period effect は明示フィルターを上書きしないよう初回を飛ばす。
@@ -137,18 +136,15 @@ export function Journal({
   // 表示専用の並び替え（既定 = 日付降順・従来の並びそのもの）。データ・保存には影響しない。
   const [sortKey, setSortKey] = useState<ListSortAxisKey>('date');
   const [sortDirection, setSortDirection] = useState<SortDirection>(SORT_DEFAULT_DIRECTION.date);
-  const [pendingDelete, setPendingDelete] = useState<JournalEntry | null>(null);
   const initialTarget = targetEntryId
     ? (ledger?.journalEntries.find((entry) => entry.id === targetEntryId) ?? null)
     : null;
   const [editingOpening, setEditingOpening] = useState<JournalEntry | null>(() =>
     initialTarget?.kind === 'opening' ? initialTarget : null,
   );
-  const [pendingOpeningDelete, setPendingOpeningDelete] = useState<JournalEntry | null>(null);
   const [editingAdjustment, setEditingAdjustment] = useState<JournalEntry | null>(() =>
     initialTarget?.metadata?.adjustment ? initialTarget : null,
   );
-  const [pendingAdjustmentDelete, setPendingAdjustmentDelete] = useState<JournalEntry | null>(null);
 
   useEffect(() => {
     if (!filter) return;
@@ -504,50 +500,23 @@ export function Journal({
                 >
                   <Money amount={displayedAmount} currency={currency} />
                 </span>
-                {isVirtual || isPurchase || isRuleGenerated ? null : isAdjustment ? (
+                {/* 行アクション = 「現実の変化を記す」動詞（反対仕訳）だけ。削除は各編集シートの
+                    最下部へ移設（動詞体系 v13.1・行から削除ボタンを撤去）。
+                    回収の振替の逆仕訳は台帳の不変条件（⑧）で保存できないため出さない。 */}
+                {isVirtual ||
+                isPurchase ||
+                isRuleGenerated ||
+                isAdjustment ||
+                isOpening ? null : isRecovery ? null : (
                   <button
                     type="button"
                     className="icon-btn"
-                    onClick={() => setPendingAdjustmentDelete(entry)}
-                    aria-label={`${t('common.delete')}: ${entry.description}`}
-                    data-ui={UI.adjustments.rowDelete}
+                    onClick={() => onReverse(entry)}
+                    aria-label={`${t('journal.reverseAction')}: ${entry.description}`}
+                    data-ui={UI.journal.entry.reverse}
                   >
-                    <Icon name="delete" size={18} />
+                    <Icon name="reverse" size={18} />
                   </button>
-                ) : isOpening ? (
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    onClick={() => setPendingOpeningDelete(entry)}
-                    aria-label={`${t('common.delete')}: ${entry.description}`}
-                    data-ui={UI.adjustments.openingRowDelete}
-                  >
-                    <Icon name="delete" size={18} />
-                  </button>
-                ) : (
-                  <>
-                    {/* 回収の振替の逆仕訳は台帳の不変条件（⑧）で保存できないため出さない。 */}
-                    {isRecovery ? null : (
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        onClick={() => onReverse(entry)}
-                        aria-label={`${t('journal.reverseAction')}: ${entry.description}`}
-                        data-ui={UI.journal.entry.reverse}
-                      >
-                        <Icon name="reverse" size={18} />
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => setPendingDelete(entry)}
-                      aria-label={`${t('common.delete')}: ${entry.description}`}
-                      data-ui={UI.journal.entry.delete}
-                    >
-                      <Icon name="delete" size={18} />
-                    </button>
-                  </>
                 )}
               </li>
             );
@@ -555,57 +524,12 @@ export function Journal({
         </ul>
       )}
 
-      {pendingDelete ? (
-        <ConfirmDialog
-          title={t('journal.deleteConfirmTitle')}
-          body={t('journal.deleteConfirmBody', { description: pendingDelete.description })}
-          confirmLabel={t('common.delete')}
-          danger
-          onCancel={() => setPendingDelete(null)}
-          onConfirm={async () => {
-            const target = pendingDelete;
-            setPendingDelete(null);
-            await removeEntry(target.id, target.description).catch(() => undefined);
-          }}
-        />
-      ) : null}
-
       {editingOpening ? (
         <OpeningEditSheet entry={editingOpening} onClose={() => setEditingOpening(null)} />
-      ) : null}
-      {pendingOpeningDelete ? (
-        <ConfirmDialog
-          title={t('opening.deleteConfirmTitle')}
-          body={t('opening.deleteConfirmBody')}
-          confirmLabel={t('common.delete')}
-          danger
-          dataUi={UI.adjustments.openingDeleteConfirm}
-          onCancel={() => setPendingOpeningDelete(null)}
-          onConfirm={async () => {
-            const target = pendingOpeningDelete;
-            setPendingOpeningDelete(null);
-            await deleteOpening(target.id).catch(() => undefined);
-          }}
-        />
       ) : null}
 
       {editingAdjustment ? (
         <AdjustmentEditSheet entry={editingAdjustment} onClose={() => setEditingAdjustment(null)} />
-      ) : null}
-      {pendingAdjustmentDelete ? (
-        <ConfirmDialog
-          title={t('adjust.deleteConfirmTitle')}
-          body={t('adjust.deleteConfirmBody')}
-          confirmLabel={t('common.delete')}
-          danger
-          dataUi={UI.adjustments.deleteConfirm}
-          onCancel={() => setPendingAdjustmentDelete(null)}
-          onConfirm={async () => {
-            const target = pendingAdjustmentDelete;
-            setPendingAdjustmentDelete(null);
-            await deleteAdjustment(target.id).catch(() => undefined);
-          }}
-        />
       ) : null}
       <ScrollTopButton />
     </section>

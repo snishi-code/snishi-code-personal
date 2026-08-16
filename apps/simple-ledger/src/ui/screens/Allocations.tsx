@@ -126,26 +126,20 @@ export function Allocations({
   /** 仕訳一覧の計算で生まれた行タップからの遷移対象（開くシート。同一オブジェクトは 1 回だけ消費）。 */
   target?: AllocationsTarget | null;
 }) {
-  const { ledger, removeMonthlyCost, createRecurringRule, removeRecurringRule } = useLedger();
+  const { ledger } = useLedger();
   const [showEnded, setShowEnded] = useState(false);
   const [query, setQuery] = useState('');
   // 並び替え（表示専用・保存しない）。軸と方向を 1 つの state で持ち、軸を切り替えたら
   // 方向を軸ごとの既定へ戻す（前の軸で選んだ方向が別の軸へ持ち越されない）。
   const [sort, setSort] = useState<ListSort>({ key: 'date', direction: 'asc' });
-  const [pendingDelete, setPendingDelete] = useState<MonthlyCostItem | null>(null);
   const [itemSheet, setItemSheet] = useState<{ existing?: MonthlyCostItem } | null>(null);
   const [archiving, setArchiving] = useState<MonthlyCostItem | null>(null);
   const [chooserOpen, setChooserOpen] = useState(false);
   const [ruleSheet, setRuleSheet] = useState<{ existing?: RecurringRule } | null>(null);
-  const [pendingRuleDelete, setPendingRuleDelete] = useState<RecurringRule | null>(null);
-  // 状態を変える操作は必ず確認を挟む（2026-08-15 作者合意）: 終了は終了日シート、
-  // 再開は軽い確認ダイアログを通す（無確認の即実行はしない）。
+  // 状態を変える操作は必ず確認を挟む（2026-08-15 作者合意）: 終了は終了日シート。
   const [endingRule, setEndingRule] = useState<RecurringRule | null>(null);
   // 切り替え = この日から別の線分（シートそのものが確認面なので前置きの確認は無い）。
   const [switchingRule, setSwitchingRule] = useState<RecurringRule | null>(null);
-  const [pendingRuleRestart, setPendingRuleRestart] = useState<RecurringRule | null>(null);
-  const [pendingRuleActionId, setPendingRuleActionId] = useState<string | null>(null);
-  const ruleActionInFlight = useRef(false);
   // 表示だけはヘッダーの断面へ追従する。シート内の書込日・catch-up は period を受け取らず、
   // 引き続き実際の今日を基準にする（過去/未来表示が durable state を動かさない）。
   const today = todayLocal();
@@ -289,37 +283,6 @@ export function Allocations({
       ? t('recurring.everyNMonthsDay', { n: r.everyMonths, day: r.dayOfMonth })
       : t('recurring.everyMonthDay', { day: r.dayOfMonth });
 
-  const runRecurringRuleAction = async (
-    ruleId: string,
-    action: () => Promise<void>,
-  ): Promise<void> => {
-    if (ruleActionInFlight.current) return;
-    ruleActionInFlight.current = true;
-    setPendingRuleActionId(ruleId);
-    try {
-      await action();
-    } finally {
-      ruleActionInFlight.current = false;
-      setPendingRuleActionId(null);
-    }
-  };
-
-  const restartRecurringRule = async (rule: RecurringRule): Promise<void> => {
-    const effectiveDate = todayLocal();
-    await runRecurringRuleAction(rule.id, () =>
-      createRecurringRule({
-        name: rule.name,
-        amount: rule.amount,
-        dayOfMonth: rule.dayOfMonth,
-        everyMonths: rule.everyMonths,
-        debitAccountId: recurringDestinationAccountId(rule),
-        creditAccountId: rule.creditAccountId,
-        startMonth: rule.startMonth,
-        startDate: effectiveDate,
-      }),
-    );
-  };
-
   // 仕訳一覧の計算で生まれた行タップからの遷移: 対象のシートを開く。
   // effect ではなく「render 中の派生調整」パターン（同一 target は 1 回だけ消費する）。
   const [consumedTarget, setConsumedTarget] = useState<AllocationsTarget | null>(null);
@@ -335,14 +298,6 @@ export function Allocations({
     if (targetItem) setItemSheet({ existing: targetItem });
     else if (targetRule) setRuleSheet({ existing: targetRule });
   }
-
-  // ルール削除はカスケード（作者決定 2026-08-15）。確認では「一緒に消える起票数」を出す。
-  // v13: 数える対象 = 今日までに導出される起票（削除で消えるのはルール線分そのもの =
-  // 過去も未来も消えるが、体感の回数は従来どおり「今日までに立った回数」で示す）。
-  const pendingRuleDeletePostings =
-    pendingRuleDelete === null
-      ? 0
-      : deriveRecurringOutputs([pendingRuleDelete], ledger?.accounts ?? [], today).entries.length;
 
   return (
     <section
@@ -468,10 +423,11 @@ export function Allocations({
               // 切り替えの出現条件は終了と同じ（今日存在していて終了点が未設定）。
               // どちらも「この日で旧線分を閉じる」操作で、後継を作るかどうかだけが違う。
               const canEndToday = activeToday && start < today && r.endDate === undefined;
-              const canRestartToday = !activeToday && r.endDate !== undefined && r.endDate <= today;
               return (
                 // 行そのものをタップ = そのルールの編集シート（カードタップ = 編集の単一正本）。
-                // 行の中に終了・再開・削除のボタンが残るため <button> にはできない（入れ子不正）。
+                // 行の中に終了・切替のボタンが残るため <button> にはできない（入れ子不正）。
+                // 削除・解除は編集シート最下部（動詞体系 v13.1）・再開は撤去
+                //（実体は新規登録と同じで「終了の Undo」と誤読させるため）。
                 <li key={r.id}>
                   <div
                     className="list__item"
@@ -507,53 +463,28 @@ export function Allocations({
                     <span className="list__amount">
                       <Money amount={r.amount} currency={currency} />
                     </span>
-                    <div className="row-actions">
-                      {canEndToday ? (
+                    {canEndToday ? (
+                      <div className="row-actions">
                         <button
                           type="button"
                           className="icon-btn"
-                          disabled={pendingRuleActionId !== null}
                           onClick={rowActionClick(() => setSwitchingRule(r))}
                           aria-label={`${t('recurring.switch')}: ${r.name}`}
                           data-ui={UI.allocations.recurringSwitch}
                         >
                           <Icon name="transfer" size={18} />
                         </button>
-                      ) : null}
-                      {canEndToday ? (
                         <button
                           type="button"
                           className="icon-btn"
-                          disabled={pendingRuleActionId !== null}
                           onClick={rowActionClick(() => setEndingRule(r))}
                           aria-label={`${t('recurring.end')}: ${r.name}`}
                           data-ui={UI.allocations.recurringEnd}
                         >
                           <Icon name="archive" size={18} />
                         </button>
-                      ) : null}
-                      {canRestartToday ? (
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          disabled={pendingRuleActionId !== null}
-                          onClick={rowActionClick(() => setPendingRuleRestart(r))}
-                          aria-label={`${t('recurring.restart')}: ${r.name}`}
-                          data-ui={UI.allocations.recurringRestart}
-                        >
-                          <Icon name="restore" size={18} />
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        onClick={rowActionClick(() => setPendingRuleDelete(r))}
-                        aria-label={`${t('common.delete')}: ${r.name}`}
-                        data-ui={UI.allocations.recurringDelete}
-                      >
-                        <Icon name="delete" size={18} />
-                      </button>
-                    </div>
+                      </div>
+                    ) : null}
                   </div>
                 </li>
               );
@@ -622,7 +553,8 @@ export function Allocations({
                     </span>
                     {fromRuleItem /* ルール由来 item は読み取り専用: アーカイブも削除も出さない
                          （導出カードは実在しないので元から対象が無い。保存済み ccr- も
-                         「生まれたものへの個別操作は不可」＝調整は由来ルール側で行う）。 */ ? null : (
+                         「生まれたものへの個別操作は不可」＝調整は由来ルール側で行う）。
+                         削除は編集シート最下部へ移設（動詞体系 v13.1）。 */ ? null : (
                       <span className="row-actions">
                         <button
                           type="button"
@@ -632,14 +564,6 @@ export function Allocations({
                           data-ui={UI.allocations.archive}
                         >
                           <Icon name="archive" size={18} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          onClick={rowActionClick(() => setPendingDelete(m))}
-                          aria-label={`${t('common.delete')}: ${m.name}`}
-                        >
-                          <Icon name="delete" size={18} />
                         </button>
                       </span>
                     )}
@@ -692,21 +616,6 @@ export function Allocations({
         </>
       )}
 
-      {pendingDelete ? (
-        <ConfirmDialog
-          title={t('monthlyCost.deleteConfirmTitle')}
-          body={t('monthlyCost.deleteConfirmBody', { name: pendingDelete.name })}
-          confirmLabel={t('common.delete')}
-          danger
-          onCancel={() => setPendingDelete(null)}
-          onConfirm={async () => {
-            const m = pendingDelete;
-            setPendingDelete(null);
-            await removeMonthlyCost(m.id).catch(() => undefined);
-          }}
-        />
-      ) : null}
-
       {itemSheet ? (
         <ContinuousCostItemSheet
           {...(itemSheet.existing !== undefined ? { existing: itemSheet.existing } : {})}
@@ -752,44 +661,6 @@ export function Allocations({
         <RecurringRuleSwitchSheet rule={switchingRule} onClose={() => setSwitchingRule(null)} />
       ) : null}
 
-      {pendingRuleRestart ? (
-        <ConfirmDialog
-          title={t('recurring.restartConfirmTitle')}
-          body={t('recurring.restartConfirmBody')}
-          confirmLabel={t('recurring.restart')}
-          dataUi={UI.allocations.recurringRestartConfirm}
-          onCancel={() => setPendingRuleRestart(null)}
-          onConfirm={async () => {
-            const r = pendingRuleRestart;
-            setPendingRuleRestart(null);
-            await restartRecurringRule(r).catch(() => undefined);
-          }}
-        />
-      ) : null}
-
-      {pendingRuleDelete ? (
-        <ConfirmDialog
-          title={t('recurring.deleteConfirmTitle')}
-          /* カスケード削除（作者決定 2026-08-15）: 積み木の下（ルール）が消えれば上（起票された
-             仕訳・持ち物）も消える。何回ぶん消えるかを数で名乗る（0 件なら別文言）。 */
-          body={
-            pendingRuleDeletePostings > 0
-              ? t('recurring.deleteConfirmBody', {
-                  name: pendingRuleDelete.name,
-                  count: pendingRuleDeletePostings,
-                })
-              : t('recurring.deleteConfirmNoPostingsBody', { name: pendingRuleDelete.name })
-          }
-          confirmLabel={t('common.delete')}
-          danger
-          onCancel={() => setPendingRuleDelete(null)}
-          onConfirm={async () => {
-            const r = pendingRuleDelete;
-            setPendingRuleDelete(null);
-            await removeRecurringRule(r.id).catch(() => undefined);
-          }}
-        />
-      ) : null}
       <ScrollTopButton />
     </section>
   );
@@ -883,7 +754,7 @@ function RecurringRuleSheet({
   existing?: RecurringRule;
   onClose: () => void;
 }) {
-  const { ledger, createRecurringRule, saveRecurringRule } = useLedger();
+  const { ledger, createRecurringRule, saveRecurringRule, removeRecurringRule } = useLedger();
   const accounts = sortAccounts(ledger?.accounts ?? []);
   const currency = ledger?.settings.currency ?? '';
 
@@ -944,6 +815,15 @@ function RecurringRuleSheet({
   const [amountChangeError, setAmountChangeError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
+  // 破壊的操作は編集シート最下部（動詞体系 v13.1）。確認ダイアログとの 2 段防御は従来どおり。
+  const [pendingDelete, setPendingDelete] = useState(false);
+  // 終了の Undo。削除と違い取り消し可能（解除 ⇄ 終了）だが、状態を変えるので確認は挟む。
+  const [pendingClearEnd, setPendingClearEnd] = useState(false);
+  // ルール削除はカスケード。確認では「今日までに立った起票数」を出す（開いたときだけ数える）。
+  const deletePostings =
+    pendingDelete && existing !== undefined
+      ? deriveRecurringOutputs([existing], ledger?.accounts ?? [], todayLocal()).entries.length
+      : 0;
   const canSplitAtEffectiveDate =
     pendingAmountChange !== null &&
     existing !== undefined &&
@@ -1253,8 +1133,73 @@ function RecurringRuleSheet({
               </button>
             </div>
           ) : null}
+          {/* 破壊的なほど下（動詞体系 v13.1・HIG の連絡先・カレンダー方式）:
+              [終了日を解除（終了済みのみ）] → [このルールを削除…]。 */}
+          {existing ? (
+            <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
+              {existing.endDate !== undefined ? (
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  style={{ minHeight: 'var(--tap)' }}
+                  disabled={submitting}
+                  onClick={() => setPendingClearEnd(true)}
+                  data-ui={UI.allocations.recurringClearEndDate}
+                >
+                  {t('recurring.clearEndDate')}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn btn--danger"
+                style={{ minHeight: 'var(--tap)' }}
+                disabled={submitting}
+                onClick={() => setPendingDelete(true)}
+                data-ui={UI.allocations.recurringDelete}
+              >
+                {t('recurring.deleteAction')}
+              </button>
+              <p className="field__hint">{t('recurring.deleteDangerHint')}</p>
+            </div>
+          ) : null}
         </div>
       </Modal>
+      {pendingClearEnd && existing ? (
+        <ConfirmDialog
+          title={t('recurring.clearEndDateConfirmTitle')}
+          body={t('recurring.clearEndDateConfirmBody', { name: existing.name })}
+          confirmLabel={t('recurring.clearEndDate')}
+          dataUi={UI.allocations.recurringClearEndDateConfirm}
+          onCancel={() => setPendingClearEnd(false)}
+          onConfirm={async () => {
+            setPendingClearEnd(false);
+            // 解除は保存済みルールに対する動詞（フォームの未保存編集は含めない）。
+            const next: RecurringRule = { ...existing, updatedAt: nowIso() };
+            delete next.endDate;
+            await persistExisting(next);
+          }}
+        />
+      ) : null}
+      {pendingDelete && existing ? (
+        <ConfirmDialog
+          title={t('recurring.deleteConfirmTitle')}
+          /* カスケード削除（作者決定 2026-08-15）: 積み木の下（ルール）が消えれば上（起票された
+             仕訳・持ち物）も消える。何回ぶん消えるかを数で名乗る（0 件なら別文言）。 */
+          body={
+            deletePostings > 0
+              ? t('recurring.deleteConfirmBody', { name: existing.name, count: deletePostings })
+              : t('recurring.deleteConfirmNoPostingsBody', { name: existing.name })
+          }
+          confirmLabel={t('common.delete')}
+          danger
+          onCancel={() => setPendingDelete(false)}
+          onConfirm={async () => {
+            setPendingDelete(false);
+            await removeRecurringRule(existing.id).catch(() => undefined);
+            onClose();
+          }}
+        />
+      ) : null}
       {pendingAmountChange && existing ? (
         <Modal
           title={t('recurring.amountChangeTitle')}
@@ -1373,12 +1318,14 @@ function ContinuousCostItemSheet({
   onOpenPurchase: (entry: JournalEntry) => void;
   onClose: () => void;
 }) {
-  const { ledger, createContinuousCost, saveMonthlyCost } = useLedger();
+  const { ledger, createContinuousCost, saveMonthlyCost, removeMonthlyCost } = useLedger();
   const accounts = ledger?.accounts ?? [];
   const monthlyAllocationOptions = monthlyAllocationAccountOptions(
     accounts,
     existing?.expenseAccountId,
   );
+  // 破壊的操作は編集シート最下部（動詞体系 v13.1）。確認ダイアログとの 2 段防御は従来どおり。
+  const [pendingDelete, setPendingDelete] = useState(false);
 
   const [name, setName] = useState(existing?.name ?? '');
   const fractionDigits = useMoneyDigits();
@@ -1449,132 +1396,168 @@ function ContinuousCostItemSheet({
   }
 
   return (
-    <Modal
-      title={existing ? t('monthlyCost.editTitle') : t('monthly.pick.asset')}
-      onClose={onClose}
-      dismissMode="if-clean"
-      dataUi={UI.allocations.editDialog}
-      footer={
-        <>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={submit}
-            disabled={submitting || name.trim() === '' || amountText === '' || startDate === ''}
-            data-ui={UI.allocations.editSave}
-          >
-            {t('common.save')}
-          </button>
-        </>
-      }
-    >
-      <div className="stack">
-        {error ? (
-          <div className="field__error" role="alert">
-            <Icon name="alert" size={14} />
-            {error}
-          </div>
-        ) : null}
-        {pastFieldsChanged ? (
-          <div className="field__warning" role="status" data-ui={UI.allocations.editImpactWarning}>
-            <Icon name="alert" size={14} />
-            {t('monthlyCost.pastRecalcWarning')}
-          </div>
-        ) : null}
-        <TextInput
-          label={t('monthlyCost.name')}
-          required
-          value={name}
-          onChange={setName}
-          dataUi={UI.allocations.editName}
-        />
-        <TextInput
-          label={t('monthlyCost.amount')}
-          required
-          inputMode={fractionDigits === 0 ? 'numeric' : 'decimal'}
-          value={amountText}
-          onChange={(v) => {
-            setAmountText(sanitizeAmountText(v, fractionDigits, amountText));
-          }}
-          dataUi={UI.allocations.editAmount}
-        />
-        {existing ? (
+    <>
+      <Modal
+        title={existing ? t('monthlyCost.editTitle') : t('monthly.pick.asset')}
+        onClose={onClose}
+        dismissMode="if-clean"
+        dataUi={UI.allocations.editDialog}
+        footer={
           <>
-            {/* 開始日 = 購入の仕訳の日付。変えるときは仕訳側（タップで開く）。 */}
-            <div className="kv" data-ui={UI.allocations.editStartDate}>
-              <span className="muted">{t('ccItem.startDate')}</span>
-              <span>{existing.startDate}</span>
+            <button type="button" className="btn btn--ghost" onClick={onClose}>
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={submit}
+              disabled={submitting || name.trim() === '' || amountText === '' || startDate === ''}
+              data-ui={UI.allocations.editSave}
+            >
+              {t('common.save')}
+            </button>
+          </>
+        }
+      >
+        <div className="stack">
+          {error ? (
+            <div className="field__error" role="alert">
+              <Icon name="alert" size={14} />
+              {error}
             </div>
-            {purchaseEntry ? (
+          ) : null}
+          {pastFieldsChanged ? (
+            <div
+              className="field__warning"
+              role="status"
+              data-ui={UI.allocations.editImpactWarning}
+            >
+              <Icon name="alert" size={14} />
+              {t('monthlyCost.pastRecalcWarning')}
+            </div>
+          ) : null}
+          <TextInput
+            label={t('monthlyCost.name')}
+            required
+            value={name}
+            onChange={setName}
+            dataUi={UI.allocations.editName}
+          />
+          <TextInput
+            label={t('monthlyCost.amount')}
+            required
+            inputMode={fractionDigits === 0 ? 'numeric' : 'decimal'}
+            value={amountText}
+            onChange={(v) => {
+              setAmountText(sanitizeAmountText(v, fractionDigits, amountText));
+            }}
+            dataUi={UI.allocations.editAmount}
+          />
+          {existing ? (
+            <>
+              {/* 開始日 = 購入の仕訳の日付。変えるときは仕訳側（タップで開く）。 */}
+              <div className="kv" data-ui={UI.allocations.editStartDate}>
+                <span className="muted">{t('ccItem.startDate')}</span>
+                <span>{existing.startDate}</span>
+              </div>
+              {purchaseEntry ? (
+                <button
+                  type="button"
+                  className="collapse-toggle"
+                  onClick={() => {
+                    onClose();
+                    onOpenPurchase(purchaseEntry);
+                  }}
+                  data-ui={UI.allocations.editOpenPurchase}
+                >
+                  <Icon name="chevronRight" size={16} />
+                  {t('ccItem.openPurchase')}
+                </button>
+              ) : null}
+            </>
+          ) : (
+            <TextInput
+              label={t('ccItem.startDate')}
+              type="date"
+              required
+              value={startDate}
+              onChange={setStartDate}
+              dataUi={UI.allocations.editStartDate}
+            />
+          )}
+          <TextInput
+            label={t('ccItem.endDate')}
+            type="date"
+            value={endDate}
+            onChange={setEndDate}
+            dataUi={UI.allocations.editEndDate}
+          />
+          <div className="row-actions" data-ui={UI.allocations.editQuickSpan}>
+            {[1, 3, 5].map((years) => (
+              <button
+                key={years}
+                type="button"
+                className="btn btn--ghost"
+                style={{ minHeight: 'var(--tap)' }}
+                onClick={() => setEndDate(quickSpanEndDate(startDate, years))}
+              >
+                {t('ccItem.quickSpan', { years })}
+              </button>
+            ))}
+            {/* 空で保存 = 終了日の解除は元から許可されている（保存側の仕様）。
+              ただし iOS の date input には値を空へ戻す手段が無いため、明示ボタンで到達させる。 */}
+            {endDate !== '' ? (
               <button
                 type="button"
-                className="collapse-toggle"
-                onClick={() => {
-                  onClose();
-                  onOpenPurchase(purchaseEntry);
-                }}
-                data-ui={UI.allocations.editOpenPurchase}
+                className="btn btn--ghost"
+                style={{ minHeight: 'var(--tap)' }}
+                onClick={() => setEndDate('')}
+                data-ui={UI.allocations.editEndDateClear}
               >
-                <Icon name="chevronRight" size={16} />
-                {t('ccItem.openPurchase')}
+                {t('ccItem.endDateClear')}
               </button>
             ) : null}
-          </>
-        ) : (
-          <TextInput
-            label={t('ccItem.startDate')}
-            type="date"
-            required
-            value={startDate}
-            onChange={setStartDate}
-            dataUi={UI.allocations.editStartDate}
+          </div>
+          <SelectInput
+            label={t('monthlyCost.expenseCategory')}
+            value={expenseAccountId}
+            onChange={setExpenseAccountId}
+            options={monthlyAllocationOptions}
+            dataUi={UI.allocations.editExpense}
           />
-        )}
-        <TextInput
-          label={t('ccItem.endDate')}
-          type="date"
-          value={endDate}
-          onChange={setEndDate}
-          dataUi={UI.allocations.editEndDate}
-        />
-        <div className="row-actions" data-ui={UI.allocations.editQuickSpan}>
-          {[1, 3, 5].map((years) => (
-            <button
-              key={years}
-              type="button"
-              className="btn btn--ghost"
-              style={{ minHeight: 'var(--tap)' }}
-              onClick={() => setEndDate(quickSpanEndDate(startDate, years))}
-            >
-              {t('ccItem.quickSpan', { years })}
-            </button>
-          ))}
-          {/* 空で保存 = 終了日の解除は元から許可されている（保存側の仕様）。
-              ただし iOS の date input には値を空へ戻す手段が無いため、明示ボタンで到達させる。 */}
-          {endDate !== '' ? (
-            <button
-              type="button"
-              className="btn btn--ghost"
-              style={{ minHeight: 'var(--tap)' }}
-              onClick={() => setEndDate('')}
-              data-ui={UI.allocations.editEndDateClear}
-            >
-              {t('ccItem.endDateClear')}
-            </button>
+          {/* 破壊的なほど下（動詞体系 v13.1）。行アクションには削除を置かない。 */}
+          {existing ? (
+            <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
+              <button
+                type="button"
+                className="btn btn--danger"
+                style={{ minHeight: 'var(--tap)' }}
+                disabled={submitting}
+                onClick={() => setPendingDelete(true)}
+                data-ui={UI.allocations.editDelete}
+              >
+                {t('monthlyCost.deleteAction')}
+              </button>
+              <p className="field__hint">{t('monthlyCost.deleteDangerHint')}</p>
+            </div>
           ) : null}
         </div>
-        <SelectInput
-          label={t('monthlyCost.expenseCategory')}
-          value={expenseAccountId}
-          onChange={setExpenseAccountId}
-          options={monthlyAllocationOptions}
-          dataUi={UI.allocations.editExpense}
+      </Modal>
+      {pendingDelete && existing ? (
+        <ConfirmDialog
+          title={t('monthlyCost.deleteConfirmTitle')}
+          body={t('monthlyCost.deleteConfirmBody', { name: existing.name })}
+          confirmLabel={t('common.delete')}
+          danger
+          onCancel={() => setPendingDelete(false)}
+          onConfirm={async () => {
+            setPendingDelete(false);
+            await removeMonthlyCost(existing.id).catch(() => undefined);
+            onClose();
+          }}
         />
-      </div>
-    </Modal>
+      ) : null}
+    </>
   );
 }
 

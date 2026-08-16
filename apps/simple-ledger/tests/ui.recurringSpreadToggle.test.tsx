@@ -144,7 +144,7 @@ describe('全ルール台帳経由（月割りトグルの廃止）', () => {
     expect(within(sheet()).queryAllByRole('checkbox')).toEqual([]);
   });
 
-  it('終了 → 再開（restart）でも台帳経由の保存形が引き継がれる', async () => {
+  it('終了 → 解除（clearEndDate）で同じ台帳経由の線分が継続中へ戻る', async () => {
     const ledger = await loadLedger();
     const bank = ledger.accounts.find((a) => a.name === '預金')!;
     const invest = ledger.accounts.find((a) => a.name === '投資')!;
@@ -178,26 +178,30 @@ describe('全ルール台帳経由（月割りトグルの廃止）', () => {
     fireEvent.click(
       await waitFor(() => document.querySelector(`[data-ui="${UI.allocations.showCompleted}"]`)!),
     );
-    // 再開も確認ダイアログ経由。
+    // 「再開」は撤去済み。終了の Undo = 編集シート下部の「終了日を解除」（確認つき）。
+    fireEvent.click(await waitFor(() => firstRuleRow()!));
     fireEvent.click(
       await waitFor(
-        () => document.querySelector(`[data-ui="${UI.allocations.recurringRestart}"]`)!,
+        () => document.querySelector(`[data-ui="${UI.allocations.recurringClearEndDate}"]`)!,
       ),
     );
     fireEvent.click(
       await waitFor(
         () =>
           document.querySelector(
-            `[data-ui="${UI.allocations.recurringRestartConfirm}"] [data-ui="${UI.dialog.confirm}"]`,
+            `[data-ui="${UI.allocations.recurringClearEndDateConfirm}"] [data-ui="${UI.dialog.confirm}"]`,
           )!,
       ),
     );
+    // 新しいルールは増えず、同じ線分の終了点だけが消える（保存形は台帳経由のまま）。
     await waitFor(async () => {
-      expect((await loadLedger()).recurringRules).toHaveLength(2);
+      const after = await loadLedger();
+      expect(after.recurringRules).toHaveLength(1);
+      expect(after.recurringRules[0]!.endDate).toBeUndefined();
     });
-
-    const restarted = (await loadLedger()).recurringRules.find((r) => r.id !== original.id)!;
-    expect(restarted.spreadExpenseAccountId).toBe(invest.id);
-    expect(restarted.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+    const restored = (await loadLedger()).recurringRules[0]!;
+    expect(restored.id).toBe(original.id);
+    expect(restored.spreadExpenseAccountId).toBe(invest.id);
+    expect(restored.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
   });
 });

@@ -5,7 +5,7 @@
  * 費用・収入の「実残高」はその日までの実際の累計額（accountBalance が type で符号を決める）。
  */
 import { useMemo, useState } from 'react';
-import { Modal } from './overlays';
+import { ConfirmDialog, Modal } from './overlays';
 import { TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../state/store';
@@ -158,7 +158,9 @@ export function AdjustmentEditSheet({
   entry: JournalEntry;
   onClose: () => void;
 }) {
-  const { ledger, updateAdjustment } = useLedger();
+  const { ledger, updateAdjustment, deleteAdjustment } = useLedger();
+  // 破壊的操作は編集シート最下部（動詞体系 v13.1）。行アクションには置かない。
+  const [pendingDelete, setPendingDelete] = useState(false);
   const accounts = ledger?.accounts ?? [];
   const currency = ledger?.settings.currency ?? '';
   const adj = entry.metadata!.adjustment!;
@@ -213,79 +215,110 @@ export function AdjustmentEditSheet({
   }
 
   return (
-    <Modal
-      title={t('adjust.editTitle')}
-      onClose={onClose}
-      dismissMode="if-clean"
-      footer={
-        <>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={submit}
-            disabled={submitting || date.trim() === ''}
-            data-ui={UI.adjustments.editSave}
-          >
-            {t('adjust.update')}
-          </button>
-        </>
-      }
-    >
-      <div className="stack" data-ui={UI.adjustments.editDialog}>
-        <p className="field__hint">{t('adjust.editIntro')}</p>
-        {error ? (
-          <div className="field__error" role="alert">
-            <Icon name="alert" size={14} />
-            {error}
+    <>
+      <Modal
+        title={t('adjust.editTitle')}
+        onClose={onClose}
+        dismissMode="if-clean"
+        footer={
+          <>
+            <button type="button" className="btn btn--ghost" onClick={onClose}>
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={submit}
+              disabled={submitting || date.trim() === ''}
+              data-ui={UI.adjustments.editSave}
+            >
+              {t('adjust.update')}
+            </button>
+          </>
+        }
+      >
+        <div className="stack" data-ui={UI.adjustments.editDialog}>
+          <p className="field__hint">{t('adjust.editIntro')}</p>
+          {error ? (
+            <div className="field__error" role="alert">
+              <Icon name="alert" size={14} />
+              {error}
+            </div>
+          ) : null}
+          <AccountPicker
+            label={t('adjust.account')}
+            required
+            value={accountId}
+            groups={groups}
+            onChange={setAccountId}
+            emptyText={t('adjust.noAccounts')}
+            dataUi={UI.adjustments.editAccount}
+          />
+          <TextInput
+            label={t('adjust.date')}
+            required
+            type="date"
+            value={date}
+            onChange={setDate}
+            dataUi={UI.adjustments.editDate}
+          />
+          <TextInput
+            label={t('adjust.actual')}
+            required
+            value={actualText}
+            // 符号付きの欄は inputMode を指定しない: numeric / decimal のソフトキーボードには
+            // '-' キーが無く、hint（マイナスは先頭に -）どおりの入力ができなくなる。
+            // 「表示桁が inputMode を決める」規約の明示的な例外（AccountSheet の想定利回り欄と同じ趣旨）。
+            onChange={(v) => {
+              setActualText(sanitizeSignedAmountText(v, digits, actualText));
+            }}
+            hint={t('common.signedAmountHint')}
+            dataUi={UI.adjustments.editActual}
+          />
+          <div className="kv">
+            <span className="muted">{t('adjust.expected')}</span>
+            <span>
+              <Money amount={expected} currency={currency} />
+            </span>
           </div>
-        ) : null}
-        <AccountPicker
-          label={t('adjust.account')}
-          required
-          value={accountId}
-          groups={groups}
-          onChange={setAccountId}
-          emptyText={t('adjust.noAccounts')}
-          dataUi={UI.adjustments.editAccount}
-        />
-        <TextInput
-          label={t('adjust.date')}
-          required
-          type="date"
-          value={date}
-          onChange={setDate}
-          dataUi={UI.adjustments.editDate}
-        />
-        <TextInput
-          label={t('adjust.actual')}
-          required
-          value={actualText}
-          // 符号付きの欄は inputMode を指定しない: numeric / decimal のソフトキーボードには
-          // '-' キーが無く、hint（マイナスは先頭に -）どおりの入力ができなくなる。
-          // 「表示桁が inputMode を決める」規約の明示的な例外（AccountSheet の想定利回り欄と同じ趣旨）。
-          onChange={(v) => {
-            setActualText(sanitizeSignedAmountText(v, digits, actualText));
+          <div className="kv">
+            <span className="muted">{t('adjust.delta')}</span>
+            <span>
+              <Money amount={delta} currency={currency} signed />
+            </span>
+          </div>
+          <p className="field__hint">{t('adjust.deltaHint')}</p>
+          {/* 破壊的なほど下（動詞体系 v13.1）。行アクションには削除を置かない。 */}
+          <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
+            <button
+              type="button"
+              className="btn btn--danger"
+              style={{ minHeight: 'var(--tap)' }}
+              disabled={submitting}
+              onClick={() => setPendingDelete(true)}
+              data-ui={UI.adjustments.editDelete}
+            >
+              {t('adjust.deleteAction')}
+            </button>
+            <p className="field__hint">{t('adjust.deleteDangerHint')}</p>
+          </div>
+        </div>
+      </Modal>
+      {pendingDelete ? (
+        <ConfirmDialog
+          title={t('adjust.deleteConfirmTitle')}
+          body={t('adjust.deleteConfirmBody')}
+          confirmLabel={t('common.delete')}
+          danger
+          dataUi={UI.adjustments.deleteConfirm}
+          onCancel={() => setPendingDelete(false)}
+          onConfirm={async () => {
+            setPendingDelete(false);
+            await deleteAdjustment(entry.id).catch(() => undefined);
+            onClose();
           }}
-          hint={t('common.signedAmountHint')}
-          dataUi={UI.adjustments.editActual}
         />
-        <div className="kv">
-          <span className="muted">{t('adjust.expected')}</span>
-          <span>
-            <Money amount={expected} currency={currency} />
-          </span>
-        </div>
-        <div className="kv">
-          <span className="muted">{t('adjust.delta')}</span>
-          <span>
-            <Money amount={delta} currency={currency} signed />
-          </span>
-        </div>
-        <p className="field__hint">{t('adjust.deltaHint')}</p>
-      </div>
-    </Modal>
+      ) : null}
+    </>
   );
 }

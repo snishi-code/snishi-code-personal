@@ -7,7 +7,7 @@
  */
 import { useState } from 'react';
 import { Modal } from '../overlays';
-import { useDirtyGuard } from '../overlays';
+import { ConfirmDialog, useDirtyGuard } from '../overlays';
 import { TextArea, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { AccountPicker } from '../AccountPicker';
@@ -105,9 +105,11 @@ function errorText(
 }
 
 export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => void }) {
-  const { ledger, saveEntry, createContinuousCost, saveAccount } = useLedger();
+  const { ledger, saveEntry, createContinuousCost, saveAccount, removeEntry } = useLedger();
   const accounts = ledger?.accounts ?? [];
   const currency = ledger?.settings.currency ?? '';
+  // 破壊的操作は編集シート最下部（動詞体系 v13.1）。確認ダイアログとの 2 段防御は従来どおり。
+  const [pendingDelete, setPendingDelete] = useState(false);
 
   const fixed = init.kind === 'transfer-fixed' ? init.fixed : null;
   /*
@@ -866,6 +868,30 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       </div>
     ) : null;
 
+  /*
+   * 削除セクション（編集時のみ・最下部）。購入の仕訳は item と 1:1 なので削除できない
+   * （持ち物側の削除に同乗する）: 理由ごと見せて不活性にする（fail-closed の理由開示）。
+   * 実取引の取り消しは反対仕訳（行アクション側の動詞）— 注意文で誘導する。
+   */
+  const deleteSection =
+    init.kind === 'edit' ? (
+      <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
+        <button
+          type="button"
+          className="btn btn--danger"
+          style={{ minHeight: 'var(--tap)' }}
+          disabled={submitting || lockedDebit}
+          onClick={() => setPendingDelete(true)}
+          data-ui={UI.journal.entry.delete}
+        >
+          {t('entry.deleteAction')}
+        </button>
+        <p className="field__hint">
+          {lockedDebit ? t('error.entry.monthlyCost') : t('entry.deleteDangerHint')}
+        </p>
+      </div>
+    ) : null;
+
   const manualSwitch =
     init.kind === 'create' && mode !== 'manual' && !ccMode ? (
       <button
@@ -952,6 +978,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             {ccDetailField}
             {repaymentField}
             {canCreateContinuousCost && ccMode ? null : memoField}
+            {deleteSection}
           </>
         ) : (
           <>
@@ -998,10 +1025,25 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               </>
             )}
 
+            {deleteSection}
             {manualSwitch}
           </>
         )}
       </Modal>
+      {pendingDelete && init.kind === 'edit' ? (
+        <ConfirmDialog
+          title={t('journal.deleteConfirmTitle')}
+          body={t('journal.deleteConfirmBody', { description: init.entry.description })}
+          confirmLabel={t('common.delete')}
+          danger
+          onCancel={() => setPendingDelete(false)}
+          onConfirm={async () => {
+            setPendingDelete(false);
+            await removeEntry(init.entry.id, init.entry.description).catch(() => undefined);
+            onClose();
+          }}
+        />
+      ) : null}
       {discardConfirm}
 
       {liabilitySheetOpen ? (

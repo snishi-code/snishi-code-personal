@@ -96,6 +96,11 @@ export const ja = {
   'monthlyCost.deleteConfirmTitle': '継続コスト資産を削除しますか？',
   'monthlyCost.deleteConfirmBody':
     '「{name}」を削除します。購入の仕訳と回収の振替も一緒に削除されます。登録済みの返済仕訳（未来日付の振替）は残ります。',
+  // 動詞体系（v13.1・作者確定 2026-08-16）: 破壊的操作は編集シート最下部（赤・注意文つき）。
+  // 削除 = 取り消し不可（保険は書き出した JSON とスナップショットのみ・注意文に明記）。
+  'monthlyCost.deleteAction': 'この持ち物を削除…',
+  'monthlyCost.deleteDangerHint':
+    '購入の仕訳と回収の振替も一緒に消えます。削除は取り消せません（保険は書き出した JSON とスナップショットだけです）。',
   'ccItem.startDate': '開始日',
   'ccItem.endDate': '終了日（任意）',
   'ccItem.endDateClear': '終了日を解除',
@@ -179,6 +184,9 @@ export const ja = {
   'adjust.deleteConfirmTitle': '残高補正を削除しますか？',
   'adjust.deleteConfirmBody':
     'この補正仕訳を削除します。対象日以降の理論残高は、補正前の状態に戻ります。',
+  'adjust.deleteAction': 'この補正を削除…',
+  'adjust.deleteDangerHint':
+    '削除は取り消せません（保険は書き出した JSON とスナップショットだけです）。',
 
   // 初期残高（kind='opening'）。登録は科目追加シート、編集・削除は仕訳一覧から。
   'opening.account': '対象科目（資産・負債）',
@@ -190,6 +198,9 @@ export const ja = {
   'opening.deleteConfirmTitle': '初期残高を削除しますか？',
   'opening.deleteConfirmBody':
     'この初期残高を削除します。対象科目の初期残高はなくなり、資産・負債の残高の意味が変わります。',
+  'opening.deleteAction': 'この初期残高を削除…',
+  'opening.deleteDangerHint':
+    '削除は取り消せません（保険は書き出した JSON とスナップショットだけです）。',
   'opening.error.amount': '初期残高を入力してください（0 は不可）。',
 
   'journal.adjustmentTag': '補正',
@@ -207,6 +218,9 @@ export const ja = {
   'journal.total': '合計',
 
   'entry.editTitle': '仕訳を編集',
+  'entry.deleteAction': 'この仕訳を削除…',
+  'entry.deleteDangerHint':
+    '削除は取り消せません（保険は書き出した JSON とスナップショットだけです）。実際の取引を取り消すなら反対仕訳を使ってください。',
   'entry.date': '日付',
   'entry.description': '摘要',
   'entry.descriptionPlaceholder': '例: スーパーで食料品',
@@ -422,6 +436,15 @@ export const ja = {
   'accounts.unarchiveConfirmBody': '「{name}」の終了点を消して、また使えるようにします。',
   'accounts.archiveSkipTransfer': '振替せずにアーカイブ',
   'accounts.unarchive': 'アーカイブ解除',
+  // 科目の削除 UI（v13.1・plan 未決①の解消）: 未使用なら活性・使用中は紐づき件数を添えて
+  // 不活性（fail-closed の理由を見せる）。記録を残して使うのをやめるのはアーカイブ。
+  'accounts.deleteAction': 'この科目を削除…',
+  'accounts.deleteDangerHint':
+    '削除は取り消せません（保険は書き出した JSON とスナップショットだけです）。',
+  'accounts.deleteInUseHint':
+    '仕訳 {entries} 件・持ち物 {items} 件・くり返し記帳 {rules} 件から参照されているため削除できません。使うのをやめるには「アーカイブ」を使ってください。',
+  'accounts.deleteConfirmTitle': '科目を削除しますか？',
+  'accounts.deleteConfirmBody': '「{name}」を削除します。この操作は取り消せません。',
   'accounts.showArchived': 'この断面に存在しない科目も表示',
   'accounts.type.asset': '資産',
   'accounts.type.liability': '負債',
@@ -778,10 +801,15 @@ export const ja = {
     'このルールから生まれた、まだ配分の途中の持ち物です。何も選ばなければ、それぞれの終了日まで配分を続けます。',
   'recurring.settlementKeep': 'そのまま使い切る',
   'recurring.settlementEnd': 'この日で終える',
-  'recurring.restart': '同じ設定で新しく始める',
-  'recurring.restartConfirmTitle': '同じ設定で新しく始めますか？',
-  'recurring.restartConfirmBody':
-    '今日を開始点として、同じ内容の新しいルールを作ります。終了したルールと起票済みの記録はそのまま残ります。',
+  // 動詞体系（v13.1）: 「再開」は撤去（実体は新規登録と同じで「終了の Undo」と誤読させる。
+  // 再契約 = 新規登録・終了の間違い = 解除）。終了の Undo = 「終了日を解除」（編集シート下部）。
+  'recurring.clearEndDate': '終了日を解除',
+  'recurring.clearEndDateConfirmTitle': '終了日を解除しますか？',
+  'recurring.clearEndDateConfirmBody':
+    '「{name}」の終了点を消して、ルールを継続中に戻します。止めていた間の起票も引き直されます。',
+  'recurring.deleteAction': 'このルールを削除…',
+  'recurring.deleteDangerHint':
+    '起票された仕訳と持ち物も一緒に消えます。削除は取り消せません（保険は書き出した JSON とスナップショットだけです）。今日までの分を残して止めるなら「終了」を使ってください。',
   // ルール削除はカスケード（作者決定 2026-08-15）: 積み木の下が消えれば上も消える。
   // 復旧は同じ内容で登録し直すだけなので、取り消せない旨ではなく戻し方を添える。
   'recurring.deleteConfirmTitle': '定期ルールを削除',

@@ -39,8 +39,29 @@ export function AccountSheet({
   existing?: Account;
   onClose: () => void;
 }) {
-  const { ledger, saveAccount, createOpening } = useLedger();
+  const { ledger, saveAccount, createOpening, removeAccount } = useLedger();
   const accounts = ledger?.accounts ?? [];
+  // 科目の削除 UI（v13.1・plan 未決①の解消）: 破壊的操作は編集シート最下部。
+  // 未使用なら活性・使用中は紐づき件数を添えて不活性（fail-closed の理由を見せる。
+  // 判定は保存境界 deleteAccount の isAccountReferenced と同じ参照集合）。
+  const [pendingDelete, setPendingDelete] = useState(false);
+  const deleteRefs = existing
+    ? {
+        entries: (ledger?.journalEntries ?? []).filter((e) =>
+          e.lines.some((l) => l.accountId === existing.id),
+        ).length,
+        items: (ledger?.monthlyCostItems ?? []).filter((m) => m.expenseAccountId === existing.id)
+          .length,
+        rules: (ledger?.recurringRules ?? []).filter(
+          (r) =>
+            r.debitAccountId === existing.id ||
+            r.creditAccountId === existing.id ||
+            r.spreadExpenseAccountId === existing.id,
+        ).length,
+      }
+    : null;
+  const deleteBlocked =
+    deleteRefs !== null && (deleteRefs.entries > 0 || deleteRefs.items > 0 || deleteRefs.rules > 0);
 
   // 編集時は既存 role から箱を導く（聖域 role は勘定科目画面に出ないためここへ来ない）。
   // 既存は movable まで見て所属箱を解決する（現預金は自由/不自由の 2 箱に分かれた）。
@@ -399,7 +420,46 @@ export function AccountSheet({
             ) : null}
           </>
         ) : null}
+        {/* 破壊的なほど下（動詞体系 v13.1）。記録を残して使うのをやめるのはアーカイブ（行側）。 */}
+        {existing && deleteRefs ? (
+          <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
+            <button
+              type="button"
+              className="btn btn--danger"
+              style={{ minHeight: 'var(--tap)' }}
+              disabled={submitting || deleteBlocked}
+              onClick={() => setPendingDelete(true)}
+              data-ui={UI.accounts.delete}
+            >
+              {t('accounts.deleteAction')}
+            </button>
+            <p className="field__hint">
+              {deleteBlocked
+                ? t('accounts.deleteInUseHint', {
+                    entries: deleteRefs.entries,
+                    items: deleteRefs.items,
+                    rules: deleteRefs.rules,
+                  })
+                : t('accounts.deleteDangerHint')}
+            </p>
+          </div>
+        ) : null}
       </Modal>
+      {pendingDelete && existing ? (
+        <ConfirmDialog
+          title={t('accounts.deleteConfirmTitle')}
+          body={t('accounts.deleteConfirmBody', { name: existing.name })}
+          confirmLabel={t('common.delete')}
+          danger
+          dataUi={UI.accounts.deleteConfirm}
+          onCancel={() => setPendingDelete(false)}
+          onConfirm={async () => {
+            setPendingDelete(false);
+            await removeAccount(existing.id).catch(() => undefined);
+            onClose();
+          }}
+        />
+      ) : null}
       {archiveRename ? (
         <ConfirmDialog
           title={t('accounts.archiveRenameTitle')}
