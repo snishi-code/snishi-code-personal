@@ -48,7 +48,6 @@ export function isPristineSeedLedger(l: Ledger): boolean {
   return (
     l.journalEntries.length === 0 &&
     l.monthlyCostItems.length === 0 &&
-    l.tags.length === 0 &&
     isDefaultSettings(l.settings) &&
     isDefaultSeedAccounts(l.accounts)
   );

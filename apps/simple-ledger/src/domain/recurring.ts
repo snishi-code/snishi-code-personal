@@ -18,7 +18,6 @@ import { addMonths, monthOf, monthsBetween } from './allocation';
 import { ACCOUNT_ROLES, isInternalRole, type AccountRole } from './accountRoles';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from './constants';
 import { ruleEntryId, ruleItemId } from './recurringIds';
-import { CATCH_UP_HARD_CAP_MONTHS } from './recurringLimits';
 import {
   accountExistsAt,
   recurringRuleItemEndDate,
@@ -135,7 +134,7 @@ export function clampDayToMonth(ym: string, day: number): string {
   return `${ym}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
 }
 
-/** 暴走防止の上限（1 回の導出列挙で走査する月数）。 */
+/** everyMonths・配分月数の上限（100 年）。ルールのパラメータ検証だけが使う。 */
 export { CATCH_UP_HARD_CAP_MONTHS } from './recurringLimits';
 
 export interface RecurringPosting {
@@ -144,40 +143,24 @@ export interface RecurringPosting {
 }
 
 /**
- * 列挙する月 index の範囲 [first, last]（startMonth からの月数）。
- * v13: カーソルは存在しない前提（deriveRecurringOutputs は落としてから渡す）だが、
- * 版上げまでの過渡データが持つ postedThroughMonth も従来規則で respect する。
+ * 基準日までの起票を列挙する（v13: ルールの唯一の真実 = 存在期間と位相）。
+ *  - 対象 = startMonth 〜 基準日の月のうち、起票日が到来し（date <= today）、
+ *    存在期間 [startDate, endDate) に含まれる月。
+ *  - 列挙は span（startMonth〜基準日の月数）で自然に有界。走査上限は置かない
+ *    （カーソル時代の「1 回 1,200 か月 + 続きから」は、上限が無言の恒久欠損へ
+ *    意味変質するため撤去。everyMonths と配分月数の上限は schema が守る）。
  */
-function catchUpWindow(rule: RecurringRule, today: string): { first: number; last: number } | null {
-  // 終了済みルールは排他的終了日の月まで見れば十分。today までカーソル走査を伸ばさない。
+export function recurringPostingsDue(rule: RecurringRule, today: string): RecurringPosting[] {
+  // 終了済みルールは排他的終了日の月まで見れば十分。
   const ended = rule.endDate !== undefined && rule.endDate <= today;
   const horizon = ended ? (recurringRuleLastExistingDate(rule) ?? today) : today;
   const span = monthsBetween(rule.startMonth, monthOf(horizon));
-  if (span < 0) return null;
-  const first =
-    rule.postedThroughMonth !== undefined && rule.postedThroughMonth >= rule.startMonth
-      ? monthsBetween(rule.startMonth, rule.postedThroughMonth) + 1
-      : 0;
-  if (first > span) return null;
-  return { first, last: Math.min(span, first + CATCH_UP_HARD_CAP_MONTHS - 1) };
-}
-
-/**
- * 今日までに起票すべき月を列挙する。
- *  - 対象 = startMonth 〜 今日の月のうち、起票日がすでに到来し（date <= today）、
- *    ルールの存在期間 [startDate, endDate) に含まれ、カーソルより後の月。
- *  - まだ起票日が来ていない当月は含めない（到来した次回起動で起票される）。
- *  - 1 回に走査するのはカーソルの次から CATCH_UP_HARD_CAP_MONTHS か月まで（catchUpWindow）。
- */
-export function recurringPostingsDue(rule: RecurringRule, today: string): RecurringPosting[] {
-  const window = catchUpWindow(rule, today);
-  if (!window) return [];
+  if (span < 0) return [];
   const out: RecurringPosting[] = [];
   const every = rule.everyMonths >= 1 ? rule.everyMonths : 1;
-  for (let i = window.first; i <= window.last; i++) {
+  for (let i = 0; i <= span; i++) {
     if (i % every !== 0) continue; // startMonth 基点の位相で間引く
     const month = addMonths(rule.startMonth, i);
-    if (rule.postedThroughMonth !== undefined && month <= rule.postedThroughMonth) continue;
     const date = clampDayToMonth(month, rule.dayOfMonth);
     if (date > today) break; // 起票日が未到来（以降の月も未来）
     if (!ruleExistsAt(rule, date)) continue;
@@ -320,17 +303,6 @@ function projectablePostings(ctx: RuleProjectionContext, asOf: string): Recurrin
 
 /* ── 完全導出（v13）── */
 
-/**
- * カーソル（postedThroughMonth）を落とした複製。完全導出はこれを入口にする。
- * 存在期間 [startDate, endDate) と周期位相（startMonth / everyMonths / dayOfMonth）だけを
- * 真実として、過去も未来も同じ規則で列挙する（「起票済みか」という概念を持たない）。
- */
-function cursorlessRule(rule: RecurringRule): RecurringRule {
-  const copy: RecurringRule = { ...rule };
-  delete copy.postedThroughMonth;
-  return copy;
-}
-
 export interface DerivedRecurringOutputs {
   /** 購入の仕訳（保存されない）。保存時代の rec- と同形・同 ID。 */
   entries: JournalEntry[];
@@ -356,8 +328,7 @@ export function deriveRecurringOutputs(
   const byId = new Map(accounts.map((account) => [account.id, account] as const));
   const entries: JournalEntry[] = [];
   const items: MonthlyCostItem[] = [];
-  for (const original of rules) {
-    const rule = cursorlessRule(original);
+  for (const rule of rules) {
     const ctx = ruleProjectionContext(rule, byId);
     if (!ctx) continue;
     const spreadsExpense = ctx.expenseAccountId !== undefined;
@@ -382,12 +353,14 @@ export function deriveRecurringOutputs(
         updatedAt: rule.updatedAt,
       });
       if (ctx.expenseAccountId !== undefined) {
-        items.push(
-          buildRuleItem(rule, posting, ctx.expenseAccountId, {
-            createdAt: rule.createdAt,
-            updatedAt: rule.updatedAt,
-          }),
-        );
+        const item = buildRuleItem(rule, posting, ctx.expenseAccountId, {
+          createdAt: rule.createdAt,
+          updatedAt: rule.updatedAt,
+        });
+        // 清算（settlements）: その月の item の endDate を既定（次回起票日）から上書きする。
+        // 解約・切り替えの「切り替え日で終える」の導出面（回収の振替は実仕訳のまま）。
+        const settlement = rule.settlements?.find((s) => s.month === posting.month);
+        items.push(settlement !== undefined ? { ...item, endDate: settlement.endDate } : item);
       }
     }
   }

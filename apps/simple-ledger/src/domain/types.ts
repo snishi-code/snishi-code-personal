@@ -90,27 +90,6 @@ export interface JournalLine {
 }
 
 /**
- * @deprecated タグ機能は 2026-08-15 に撤去した（実ユーズ 0 件・作者決定）。
- * 型は交換フォーマット v12 の形を保つためだけに残る「受理のみ」の存在で、
- * 作る経路（画面・保存 API）は無い。import されたタグは黙って保持し export へ素通しする。
- * フィールドごとの削除は v13 の版上げに同乗させる。
- */
-export type TagScope = 'entry';
-
-/** @deprecated 撤去済み（受理のみ・v13 でフィールドごと削除）。TagScope を参照。 */
-export interface Tag {
-  id: string;
-  name: string;
-  /** 常に 'entry'（仕訳全体タグ）。互換のためフィールドは残す。 */
-  scope: TagScope;
-  /** 表示色（CSS トークン名など）。任意。 */
-  color?: string;
-  archived: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
  * 仕訳。MVP では「1 借方・1 貸方・同額」のみ（lines.length === 2）。
  * 型としては複数行を許し、将来の複合仕訳へ拡張できる。
  */
@@ -217,6 +196,12 @@ export interface MonthlyCostItem {
  * 行き先が費用または収入（差引形 = 給与から差し引く形）なら起票時に継続コスト item を作り、
  * ルール自体は費用/収入減を直接作らない。それ以外（収入・振替・積立）は行き先へ直接起票する。
  */
+/** ルール由来 item の清算（早期終了の上書き）。month はそのルールが導出する起票月。 */
+export interface RuleSettlement {
+  month: string;
+  endDate: string;
+}
+
 export interface RecurringRule {
   id: string;
   /** 摘要（起票される仕訳の description）。 */
@@ -250,10 +235,11 @@ export interface RecurringRule {
    */
   endDate?: string;
   /**
-   * 起票済みカーソル（この月まで処理済み）。キャッチアップが管理する。
-   * 起票済み仕訳をユーザーが削除しても再起票しない（スキップの尊重）。
+   * 清算（v13）: ルール由来 item の早期終了の上書き。month の起票が作る item の endDate を
+   * 既定（次回起票日）から置き換える。解約・プラン切り替えの「切り替え日で終える」の保存形。
+   * 回収の振替は従来どおり実仕訳（monthlyCostRecovery + 導出 item の決定的 ID 参照）。
    */
-  postedThroughMonth?: string;
+  settlements?: RuleSettlement[];
   createdAt: string;
   updatedAt: string;
 }
@@ -269,11 +255,6 @@ export interface JournalEntry {
   kind: JournalEntryKind;
   /** 付帯情報（入力方法・逆仕訳リンク・自動生成の由来など）。任意。 */
   metadata?: EntryMetadata;
-  /**
-   * @deprecated タグ機能は撤去済み（2026-08-15）。新規に付く経路は無いが、import 済み
-   * データの値は黙って保持し export へ素通しする（v13 でフィールドごと削除）。
-   */
-  tagIds?: string[];
   /**
    * 諸口（複数フロー行の束）のグループ ID。v12 で**予約のみ**（2026-08-11 設計合意・
    * グループ ID 方式）。UI・集計は未実装で、検証は形式のみ。グループに「2 行以上」等の
@@ -333,7 +314,6 @@ export interface LedgerExportPackage {
   revision: number;
   accounts: Account[];
   journalEntries: JournalEntry[];
-  tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   /** 定期ルール。交換 JSON では必須（旧形式はリポジトリ外で一度だけ変換する）。 */
   recurringRules: RecurringRule[];
@@ -384,7 +364,6 @@ export interface Ledger {
   accounts: Account[];
   /** 実仕訳（保存される正本）。保存系・export・残高チェックはこれだけを見る。 */
   journalEntries: JournalEntry[];
-  tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   recurringRules: RecurringRule[];
 }

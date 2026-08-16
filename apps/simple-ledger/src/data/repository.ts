@@ -62,7 +62,6 @@ import type {
   RecurringRule,
   Settings,
   Snapshot,
-  Tag,
 } from '../domain/types';
 import {
   addMonthsToDate,
@@ -221,13 +220,12 @@ export async function loadLedger(): Promise<Ledger> {
     });
   // meta と各本体 store は同一 readonly transaction で読む。別タブの複数 store 書込みと
   // 読取りが交差して、存在しない中間状態を export / snapshot に残さない。
-  const [meta, settings, accounts, journalEntries, tags, monthlyCostItems, recurringRules] =
+  const [meta, settings, accounts, journalEntries, monthlyCostItems, recurringRules] =
     await runRead(
       [
         STORE.kv,
         STORE.accounts,
         STORE.journalEntries,
-        STORE.tags,
         STORE.monthlyCostItems,
         STORE.recurringRules,
       ],
@@ -238,7 +236,6 @@ export async function loadLedger(): Promise<Ledger> {
           requestResult(kv.get(KV_SETTINGS) as IDBRequest<Settings | undefined>),
           requestResult(t.objectStore(STORE.accounts).getAll() as IDBRequest<Account[]>),
           requestResult(t.objectStore(STORE.journalEntries).getAll() as IDBRequest<JournalEntry[]>),
-          requestResult(t.objectStore(STORE.tags).getAll() as IDBRequest<Tag[]>),
           requestResult(
             t.objectStore(STORE.monthlyCostItems).getAll() as IDBRequest<MonthlyCostItem[]>,
           ),
@@ -255,9 +252,6 @@ export async function loadLedger(): Promise<Ledger> {
   journalEntries.sort((a, b) =>
     a.date === b.date ? cmp(b.createdAt, a.createdAt) : cmp(b.date, a.date),
   );
-  // タグ機能は撤去済み（2026-08-15）。store は「受理のみ」で残す: import 済みデータの
-  // tags / tagIds を黙って保持し、export でそのまま往復させる（作る経路だけが無い）。
-  tags.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
   // 継続コスト資産は「終了が近い順」（endDate 昇順・未設定は最後・同着は名前）。
   monthlyCostItems.sort(compareMonthlyCostItems);
   recurringRules.sort((a, b) => cmp(a.createdAt, b.createdAt));
@@ -269,7 +263,6 @@ export async function loadLedger(): Promise<Ledger> {
     settings,
     accounts,
     journalEntries,
-    tags,
     monthlyCostItems,
     recurringRules,
   };
@@ -1535,7 +1528,6 @@ async function splitRecurringRuleAtDate(args: {
     createdAt: ts,
     updatedAt: ts,
   };
-  delete successor.postedThroughMonth;
   if (successor.endDate !== undefined && successor.endDate <= effectiveDate) {
     throw new LedgerError('error.recurring.periodInvalid');
   }
@@ -1618,7 +1610,6 @@ async function upsertRecurringRuleUnlocked(
   else delete saved.splitFromRuleId;
   if (saved.endDate === undefined) delete saved.endDate;
   if (!spreadsExpense) delete saved.spreadExpenseAccountId;
-  delete saved.postedThroughMonth;
 
   const amountChanged = saved.amount !== existing.amount;
   if (
@@ -2839,7 +2830,6 @@ export interface ReplacePayload {
   settings: Settings;
   accounts: Account[];
   journalEntries: JournalEntry[];
-  tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   recurringRules: RecurringRule[];
 }
@@ -2863,7 +2853,6 @@ async function replaceLedgerUnlocked(
         STORE.kv,
         STORE.accounts,
         STORE.journalEntries,
-        STORE.tags,
         STORE.monthlyCostItems,
         STORE.recurringRules,
       ],
@@ -2885,17 +2874,14 @@ async function replaceLedgerUnlocked(
           }
           const accounts = t.objectStore(STORE.accounts);
           const entries = t.objectStore(STORE.journalEntries);
-          const tags = t.objectStore(STORE.tags);
           const monthlyCosts = t.objectStore(STORE.monthlyCostItems);
           const rules = t.objectStore(STORE.recurringRules);
           accounts.clear();
           entries.clear();
-          tags.clear();
           monthlyCosts.clear();
           rules.clear();
           for (const a of payload.accounts) accounts.put(a);
           for (const e of payload.journalEntries) entries.put(e);
-          for (const tag of payload.tags) tags.put(tag);
           for (const mc of payload.monthlyCostItems) monthlyCosts.put(mc);
           for (const rule of payload.recurringRules) rules.put(rule);
           nextMeta = {
@@ -2932,7 +2918,6 @@ async function resetAllUnlocked(): Promise<void> {
       STORE.kv,
       STORE.accounts,
       STORE.journalEntries,
-      STORE.tags,
       STORE.monthlyCostItems,
       STORE.recurringRules,
       STORE.snapshots,
@@ -2941,7 +2926,6 @@ async function resetAllUnlocked(): Promise<void> {
       t.objectStore(STORE.kv).clear();
       t.objectStore(STORE.accounts).clear();
       t.objectStore(STORE.journalEntries).clear();
-      t.objectStore(STORE.tags).clear();
       t.objectStore(STORE.monthlyCostItems).clear();
       t.objectStore(STORE.recurringRules).clear();
       t.objectStore(STORE.snapshots).clear();

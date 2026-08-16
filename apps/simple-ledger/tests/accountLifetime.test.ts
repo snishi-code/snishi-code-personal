@@ -113,7 +113,7 @@ describe('勘定科目の存在期間', () => {
     ).toEqual([{ kind: 'monthlyCost', from: '2026-01-15', to: '2026-12-31' }]);
   });
 
-  it('定期ルールの参照開始はカーソル後の次回周期日になる', () => {
+  it('定期ルールの参照開始は存在期間内で位相に乗る最初の起票日になる（v13: カーソルなし）', () => {
     const rule = {
       id: 'rule',
       name: '年払い',
@@ -125,11 +125,11 @@ describe('勘定科目の存在期間', () => {
       spreadExpenseAccountId: 'expense',
       startMonth: '2026-01',
       startDate: '2026-01-01',
-      postedThroughMonth: '2026-04',
       createdAt: 'x',
       updatedAt: 'x',
     };
-    expect(recurringRuleReferenceStartDate(rule)).toBe('2026-07-31');
+    // 位相は 1 月起点の 3 か月ごと（1・4・7 月）。存在開始 1/1 以降の最初の起票日 = 1/31。
+    expect(recurringRuleReferenceStartDate(rule)).toBe('2026-01-31');
   });
 
   it('既存itemの期間はルールの次回参照を止めない', () => {

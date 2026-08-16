@@ -72,7 +72,6 @@ describe('テスト用 JSON（sample.json）', () => {
     expect(sample.monthlyCostItems.length).toBeGreaterThanOrEqual(1);
     // タグ機能は撤去済み（2026-08-15）。fixture のタグは**受理のみ**の回帰材料として残す:
     // 画面には出ないが、import で黙って保持され export へ素通しすることを担保する。
-    expect(sample.tags.length).toBeGreaterThanOrEqual(1);
     // 全仕訳は MVP 仕様どおり 1 借方・1 貸方の 2 行。
     for (const e of sample.journalEntries) {
       expect(e.lines.length).toBe(2);

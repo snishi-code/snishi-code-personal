@@ -43,7 +43,6 @@ export interface SimpleEntryInput {
    * @deprecated タグ機能は撤去済み（2026-08-15）。UI から値が入る経路は無いが、
    * import 済みデータを編集しても消えないよう素通しだけ残す。
    */
-  tagIds?: string[];
 }
 
 export type EntryValidationError =
@@ -101,7 +100,6 @@ export function buildSimpleEntry(
     ...(input.memo && input.memo.trim() !== '' ? { memo: input.memo.trim() } : {}),
     kind: input.kind ?? 'normal',
     ...(metadata ? { metadata } : {}),
-    ...(input.tagIds?.length ? { tagIds: input.tagIds } : {}),
     createdAt: existing?.createdAt ?? ts,
     updatedAt: ts,
   };
@@ -120,7 +118,6 @@ export function toSimpleInput(entry: JournalEntry): SimpleEntryInput {
     ...(entry.memo !== undefined ? { memo: entry.memo } : {}),
     kind: entry.kind,
     ...(entry.metadata ? { metadata: entry.metadata } : {}),
-    ...(entry.tagIds ? { tagIds: entry.tagIds } : {}),
   };
 }
 
@@ -142,7 +139,6 @@ export function reversalInput(source: JournalEntry): SimpleEntryInput {
     amount: debit?.amount ?? credit?.amount ?? 0,
     kind: 'normal',
     // タグは撤去済み。import 済みデータの値だけを素通しで引き継ぐ（黙って消さない）。
-    ...(source.tagIds?.length ? { tagIds: source.tagIds } : {}),
     metadata: {
       inputMode: 'reversal',
       reversalOfEntryId: source.id,

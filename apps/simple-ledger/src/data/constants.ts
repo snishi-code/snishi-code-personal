@@ -11,7 +11,10 @@
 export const DB_NAME = 'simple-ledger-v2' as const;
 
 /**
- * IndexedDB のバージョン。version 12 は SCHEMA_VERSION 12（継続コストの同日刻み化ほか）と
+ * IndexedDB のバージョン。version 13 は SCHEMA_VERSION 13（完全導出）と対で上げ、
+ * tags を現行構成から外した（機能・受理とも撤去。既存 DB のストアは「未知レガシー」として
+ * 温存し、復旧面の DB 初期化でのみ消える＝「黙って削除しない」原則は維持・監査 P1-1）。
+ * version 12 は SCHEMA_VERSION 12（継続コストの同日刻み化ほか）と
  * 対で上げた（store 構成は不変だが、版対応 1:1 の方針で DB_VERSION も上げる）。
  * version 11 は SCHEMA_VERSION 11（金額の 1/100 単位化）と対で上げた
  * （store 構成は不変だが保存値の意味 = スケールが変わるため、版対応 1:1 の方針で両方上げる）。
@@ -24,7 +27,7 @@ export const DB_NAME = 'simple-ledger-v2' as const;
  * schemaVersion 検査で復旧面へ送られ、復旧面の「DB 初期化」= DB 削除でのみ消える。
  * 黙って削除しない・監査 P1-1）。
  */
-export const DB_VERSION = 12 as const;
+export const DB_VERSION = 13 as const;
 
 /** エクスポート/import 照合用のアプリ ID（封筒 appId）。v1 とは別 ID。 */
 export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
@@ -57,6 +60,8 @@ export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
  * version 9 = 取込プロファイルのアーカイブ（v10 で機能ごと撤去）。
  * version 8 = CSV 取込（Import Profile）の導入（v10 で機能ごと撤去）。
  * version 7 = 予定キャッシュフロー（CashflowSchedule）の全廃。「予定 = 未来日付の通常仕訳」へ
+ * version 13 = 完全導出。ルール由来の保存（rec- 仕訳・ccr- item・postedThroughMonth）と
+ * tags / tagIds を撤去し、RecurringRule.settlements（清算）を追加。
  * 一本化し、export からも cashflowSchedules フィールドを削除。
  * version 6 = 定期ルールを時間軸上の線分にし、RecurringRule.startDate を必須化。
  * version 5 = 取り置き機能の全廃（store・仕訳メタデータ・専用 role を含む）+
@@ -64,7 +69,7 @@ export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
  * migration step は追加しない（作者決定＝後方互換を持たない）。旧版 JSON /
  * スナップショットは unsupported-version として fail-closed に拒否される。
  */
-export const SCHEMA_VERSION = 12 as const;
+export const SCHEMA_VERSION = 13 as const;
 
 /**
  * revision は JSON / IndexedDB の双方で安全な整数だけを扱う。
