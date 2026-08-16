@@ -911,7 +911,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         title={title}
         onClose={requestClose}
         dismissMode="if-clean"
-        variant="dialog"
         titleVariant="sr-only"
         scrollKey={mode}
         footer={

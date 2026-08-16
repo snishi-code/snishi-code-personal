@@ -1267,3 +1267,15 @@ button.stmt-row:hover {
     --list-filter-frame-h: 0px;
   }
 }
+
+/* ── モーダル統一（v13.1 その5・作者確定 2026-08-16）──
+   せり上がり（bottom sheet）とポップアップの 2 様式を廃し、全モーダルを中央ポップアップの
+   1 様式に固定する（単一正本は overlays.tsx の Modal ラッパー = variant を受け取らない）。
+   応答的の中身: 内容が長いときは高さを 92dvh（foundation の既定）まで広げ、sticky の
+   ヘッダー/フッターを残して中身だけがスクロールする。小画面では横の余白を狭めて
+   入力フォームの実効幅を確保する。 */
+@media (max-width: 599px) {
+  dialog.sheet.dialog {
+    width: calc(100% - var(--space-2) * 2);
+  }
+}

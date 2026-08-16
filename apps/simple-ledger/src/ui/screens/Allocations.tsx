@@ -688,12 +688,7 @@ function AddChooserSheet({
   onPick: (pick: AddPick) => void;
 }) {
   return (
-    <Modal
-      title={t('monthly.add')}
-      onClose={onClose}
-      variant="dialog"
-      dataUi={UI.allocations.addChooser}
-    >
+    <Modal title={t('monthly.add')} onClose={onClose} dataUi={UI.allocations.addChooser}>
       <div className="stack">
         {ADD_CHOICES.map((c) => (
           <button
@@ -1250,7 +1245,6 @@ function RecurringRuleSheet({
       {pendingAmountChange && existing ? (
         <Modal
           title={t('recurring.amountChangeTitle')}
-          variant="dialog"
           dismissMode="never"
           onClose={() => {
             if (submitting) return;
@@ -2192,7 +2186,6 @@ function RecurringRuleEndSheet({ rule, onClose }: { rule: RecurringRule; onClose
     <Modal
       title={t('recurring.endSheetTitle')}
       onClose={onClose}
-      variant="dialog"
       dataUi={UI.allocations.recurringEndSheet}
       footer={
         <>
@@ -2342,7 +2335,6 @@ function MonthlyCostArchiveSheet({
     <Modal
       title={t('ccItem.archiveTitle')}
       onClose={onClose}
-      variant="dialog"
       dataUi={UI.allocations.archiveDialog}
       footer={
         <>
