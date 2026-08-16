@@ -77,7 +77,7 @@ function statusText(): string {
 }
 
 describe('定期ルールシートのレイアウト', () => {
-  it('フィールドが作者指定の順に並ぶ（基準日→摘要→金額→貸借→月割り→周期→初回起票→開始日→終了点）', async () => {
+  it('フィールドが作者指定の順に並ぶ（基準日→摘要→金額→貸借→周期→初回起票→開始日→終了点）', async () => {
     const sheet = await openRuleSheet();
     const order = [...sheet.querySelectorAll('[data-ui^="allocations.recurring."]')].map((el) =>
       el.getAttribute('data-ui'),
@@ -89,7 +89,6 @@ describe('定期ルールシートのレイアウト', () => {
       UI.allocations.recurringFlow,
       UI.allocations.recurringFrom,
       UI.allocations.recurringTo,
-      UI.allocations.recurringSpreadToggle,
       UI.allocations.recurringEvery,
       UI.allocations.recurringFirstPosting,
       UI.allocations.recurringFirstPostingStatus,

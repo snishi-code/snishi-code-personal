@@ -248,8 +248,6 @@ export const UI = {
     recurringEvery: 'allocations.recurring.every',
     recurringFirstPostingDate: 'allocations.recurring.firstPostingDate',
     recurringFlow: 'allocations.recurring.flow',
-    // 継続コスト台帳を経由して月割りするか（明示トグル。勘定科目の role では決めない）
-    recurringSpreadToggle: 'allocations.recurring.spreadToggle',
     recurringFirstPosting: 'allocations.recurring.firstPosting',
     recurringFirstPostingStatus: 'allocations.recurring.firstPostingStatus',
     recurringStartDate: 'allocations.recurring.startDate',

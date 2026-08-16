@@ -213,13 +213,12 @@ export interface RecurringRule {
   /** 何か月ごとに起票するか（必須。1 = 毎月）。位相の基点は startMonth。 */
   everyMonths: number;
   /**
-   * 正規化済みの計上先（任意）。行き先 role が費用または収入（差引形）なら必ず継続コスト化し、
-   * 起票のたびに item（id = `ccr-{ruleId}-{month}`・endDate = 周期末）を同一 tx で自動生成し、
-   * 購入の仕訳の借方は継続コスト台帳に固定される。v7 の費用・差引形ルールはこの
-   * 正規形だけを保存する。
+   * 正規化済みの計上先（必須・v13.1 の c 案で直接形を廃止）。全ルールが台帳経由で、
+   * 起票のたびに item（id = `ccr-{ruleId}-{month}`・endDate = 周期末）を導出し、
+   * 購入の仕訳の借方は継続コスト台帳に固定される。
    */
-  spreadExpenseAccountId?: string;
-  /** 保存上の借方（月割りルールでは継続コスト台帳、それ以外では論理的な行き先）。 */
+  spreadExpenseAccountId: string;
+  /** 保存上の借方（常に継続コスト台帳）。 */
   debitAccountId: string;
   /** 源泉（資金 / カード / 収入カテゴリ）。 */
   creditAccountId: string;

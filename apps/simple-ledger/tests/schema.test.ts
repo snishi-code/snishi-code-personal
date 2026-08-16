@@ -102,7 +102,8 @@ describe('年月の暦検証', () => {
     amount: 100000,
     dayOfMonth: 27,
     everyMonths: 1,
-    debitAccountId: 'expense',
+    debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+    spreadExpenseAccountId: 'expense',
     creditAccountId: 'bank',
     startMonth: '2026-12',
     startDate: '2026-12-01',
@@ -1486,8 +1487,8 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
       ).success,
     ).toBe(false);
   });
-  it('package: 月割りトグル OFF の費用・収入行き（直接形）も valid', () => {
-    // 費用行きの直接形 = トグル OFF の保存形（role では動作を決めない）。
+  it('package: 直接形（台帳を経由しない保存形）は invalid（v13.1: 全ルール台帳経由）', () => {
+    // 計上先が無い直接形（費用行き）は wire で拒否する。
     expect(
       ledgerExportPackageSchema.safeParse(
         rulePkg({
@@ -1496,8 +1497,8 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
           debitAccountId: 'fixed',
         }),
       ).success,
-    ).toBe(true);
-    // 差引形（借方 = 収入カテゴリ）の直接形も同様。
+    ).toBe(false);
+    // 差引形（借方 = 収入カテゴリ）の直接形も同様に拒否。
     expect(
       ledgerExportPackageSchema.safeParse(
         rulePkg({
@@ -1506,7 +1507,17 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
           debitAccountId: 'salary',
         }),
       ).success,
-    ).toBe(true);
+    ).toBe(false);
+    // 計上先を持っていても、借方が台帳以外なら拒否（保存形は一形だけ）。
+    expect(
+      ledgerExportPackageSchema.safeParse(rulePkg({ ...spreadRule, debitAccountId: 'fixed' }))
+        .success,
+    ).toBe(false);
+    // 空文字の計上先も拒否（min(1)）。
+    expect(
+      ledgerExportPackageSchema.safeParse(rulePkg({ ...spreadRule, spreadExpenseAccountId: '' }))
+        .success,
+    ).toBe(false);
   });
   it('package: 源泉・費用の行き先とも残高調整科目（system-adjustment）は invalid', () => {
     expect(

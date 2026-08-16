@@ -246,8 +246,19 @@ describe('YearlyOverview', () => {
   });
 
   it('有限のルール線分が伸びる未来年を全体列と年送り候補に含める', () => {
+    const base = fixtureLedger();
     ledgerState.ledger = {
-      ...fixtureLedger(),
+      ...base,
+      // v13.1（c 案）: 全ルールが台帳経由なので、導出には台帳科目が要る。
+      accounts: [
+        ...base.accounts,
+        account(
+          CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+          '継続コスト台帳',
+          'asset',
+          'continuing-cost-asset',
+        ),
+      ],
       journalEntries: [entry('opening', '2026-01-01', 'cash', 'equity', 10_000)],
       recurringRules: [
         {
@@ -256,7 +267,8 @@ describe('YearlyOverview', () => {
           amount: 10000,
           dayOfMonth: 1,
           everyMonths: 1,
-          debitAccountId: 'cash',
+          debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+          spreadExpenseAccountId: 'cash',
           creditAccountId: 'salary',
           startMonth: '2026-01',
           startDate: '2026-01-01',

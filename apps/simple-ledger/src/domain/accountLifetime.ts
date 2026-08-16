@@ -170,14 +170,11 @@ function recurringRuleLastPostingMonth(rule: RecurringRule): string | undefined 
 
 /**
  * 定期ルールが科目を参照し得る終端（含む）。
- * 費用ルールは存在期間内の最後の起票が作る item の配分終端まで科目を使う。
+ * 全ルールが台帳経由なので、存在期間内の最後の起票が作る item の配分終端まで科目を使う。
  */
-export function recurringRuleReferenceEndDate(
-  rule: RecurringRule,
-  spreadsExpense: boolean,
-): string | undefined {
+export function recurringRuleReferenceEndDate(rule: RecurringRule): string | undefined {
   const lastExistingDate = recurringRuleLastExistingDate(rule);
-  if (lastExistingDate === undefined || !spreadsExpense) return lastExistingDate;
+  if (lastExistingDate === undefined) return lastExistingDate;
   const lastPostingMonth = recurringRuleLastPostingMonth(rule);
   if (lastPostingMonth === undefined) return lastExistingDate;
   const itemEnd = recurringRuleItemEndDate(lastPostingMonth, rule.everyMonths, rule.dayOfMonth);
@@ -327,10 +324,7 @@ export function accountReferenceIntervals(
     ) {
       const referenceStart = recurringRuleReferenceStartDate(rule);
       if (referenceStart === undefined) continue;
-      const referenceEnd = recurringRuleReferenceEndDate(
-        rule,
-        rule.spreadExpenseAccountId !== undefined,
-      );
+      const referenceEnd = recurringRuleReferenceEndDate(rule);
       intervals.push({
         kind: 'recurringRule',
         from: referenceStart,

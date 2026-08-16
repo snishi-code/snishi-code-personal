@@ -740,12 +740,8 @@ export const ja = {
   'recurring.refBroken':
     '参照している科目が削除またはアーカイブされています。このルールの起票は止まっています（編集で科目を選び直してください）。',
   'recurring.from.manual': '貸方（支払い元・減る側）',
-  'recurring.to.manual': '借方（増える・使う側）',
   'recurring.manualHint':
-    'このルールで増える・使う側の科目です。月割りするかは下のトグルで決めます。',
-  'recurring.spreadToggle': '継続コスト台帳を経由して月割りする',
-  'recurring.spreadToggleHint':
-    '支払いを一旦台帳（保管庫）に置き、次の支払いまでの期間に割り振ります。',
+    'このルールで増える・使う側の科目です。支払いは一旦台帳（保管庫）に置かれ、次の支払いまでの期間に割り振られます。',
   'recurring.everyMonthDay': '毎月{day}日',
   'recurring.everyNMonthsDay': '{n}か月ごと {day}日',
   'recurring.firstPosting': '初回の起票',

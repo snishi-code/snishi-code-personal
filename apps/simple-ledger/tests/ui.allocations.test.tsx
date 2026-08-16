@@ -122,8 +122,9 @@ describe('定期ルールの継続コスト化（月割り）', () => {
     const rule = (await loadLedger()).recurringRules.find((r) => r.name === '給与振込');
     expect(rule).toBeDefined();
     expect(rule!.everyMonths).toBe(1);
-    expect(rule!.spreadExpenseAccountId).toBeUndefined();
-    expect(rule!.debitAccountId).toBe(bank.id);
+    // v13.1（c 案）: 収入ルールも保存形は台帳経由（計上先 = 利用者が選んだ行き先）。
+    expect(rule!.spreadExpenseAccountId).toBe(bank.id);
+    expect(rule!.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
     expect(rule!.creditAccountId).toBe(salary.id);
 
     const editButton = await waitFor(() => {

@@ -43,12 +43,10 @@ import {
 import {
   clampDayToMonth,
   isRecurringPostableRole,
-  isRecurringSpreadDestinationRole,
   generatedEntryRuleId,
   generatedItemRuleId,
   parseRuleEntryId,
   parseRuleItemId,
-  recurringDestinationAccountId,
   recurringExpenseAccountId,
   ruleItemId,
 } from '../domain/recurring';
@@ -1342,15 +1340,9 @@ export interface RecurringRuleInput {
   /** 何か月ごとに起票するか。未指定は 1（毎月）。 */
   everyMonths?: number;
   /**
-   * 正規化済みの計上先。呼び出し側は通常 debitAccountId に利用者が選んだ行き先を渡し、
-   * 継続コスト台帳を経由するかは spreadViaLedger で明示する。
+   * 利用者が選んだ行き先（= 計上先）。全ルールが台帳経由（v13.1 の c 案）なので、
+   * 保存境界が spreadExpenseAccountId へ写し、保存上の借方は継続コスト台帳に固定する。
    */
-  spreadExpenseAccountId?: string;
-  /**
-   * 「継続コスト台帳を経由して月割りする」トグル（作者哲学: 勘定科目で動作を変えない）。
-   * 未指定のときだけ行き先 role から既定を提案する（費用・収入行きは ON・他は OFF）。
-   */
-  spreadViaLedger?: boolean;
   debitAccountId: string;
   creditAccountId: string;
   /** 起票開始月。未指定は今日の月。 */
@@ -1379,10 +1371,9 @@ function assertRecurringRuleSavable(rule: RecurringRule, ctx: SaveContext): void
   const credit = ctx.byId.get(rule.creditAccountId);
   if (!debit || !credit || rule.debitAccountId === rule.creditAccountId)
     throw new LedgerError('error.recurring.flowInvalid');
-  const spreadsExpense = rule.spreadExpenseAccountId !== undefined;
   const referenceStart = recurringRuleReferenceStartDate(rule);
   if (referenceStart !== undefined) {
-    const referenceEnd = recurringRuleReferenceEndDate(rule, spreadsExpense);
+    const referenceEnd = recurringRuleReferenceEndDate(rule);
     const reference: AccountReferenceInterval = {
       kind: 'recurringRule',
       from: referenceStart,
@@ -1391,29 +1382,21 @@ function assertRecurringRuleSavable(rule: RecurringRule, ctx: SaveContext): void
     for (const accountId of new Set([
       rule.debitAccountId,
       rule.creditAccountId,
-      ...(rule.spreadExpenseAccountId !== undefined ? [rule.spreadExpenseAccountId] : []),
+      rule.spreadExpenseAccountId,
     ])) {
       assertReferenceInsideAccount(ctx.byId.get(accountId), reference);
     }
   }
-  if (rule.spreadExpenseAccountId !== undefined) {
-    // 月割りトグル ON の保存形: 借方 = 継続コスト台帳、spread = 計上先。
-    // 計上先は自動起票できる全 role を許す（クレカ積立・税金なども同じ仕組みに乗せる）。
-    const spreadAccount = ctx.byId.get(rule.spreadExpenseAccountId);
-    if (
-      !spreadAccount ||
-      !isRecurringPostableRole(spreadAccount.role) ||
-      spreadAccount.id === credit.id
-    )
-      throw new LedgerError('error.monthlyCost.expenseCategory');
-    if (!isRecurringPostableRole(credit.role)) throw new LedgerError('error.recurring.flowInvalid');
-    return;
-  }
-  // 支出/収入/振替の定型に加え、簿記編集（任意の科目ペア）を許容する。ただし内部集約・
-  // 調整科目は自動起票の対象外（RECURRING_POSTABLE_ROLES が正本・fail-closed）。
-  // 月割りトグル OFF なら費用・収入行きも直接起票が正規形（role で動作を変えない）。
-  if (!isRecurringPostableRole(debit.role) || !isRecurringPostableRole(credit.role))
-    throw new LedgerError('error.recurring.flowInvalid');
+  // 全ルールの保存形: 借方 = 継続コスト台帳、spread = 計上先。
+  // 計上先は自動起票できる全 role を許す（クレカ積立・税金なども同じ仕組みに乗せる）。
+  const spreadAccount = ctx.byId.get(rule.spreadExpenseAccountId);
+  if (
+    !spreadAccount ||
+    !isRecurringPostableRole(spreadAccount.role) ||
+    spreadAccount.id === credit.id
+  )
+    throw new LedgerError('error.monthlyCost.expenseCategory');
+  if (!isRecurringPostableRole(credit.role)) throw new LedgerError('error.recurring.flowInvalid');
 }
 
 /** 保存後候補の全ルールに、import と同じ系譜内非重複を適用する。 */
@@ -1431,13 +1414,9 @@ async function createRecurringRuleUnlocked(input: RecurringRuleInput): Promise<R
     getAll<RecurringRule>(STORE.recurringRules),
   ]);
   const ts = nowIso();
-  const destinationAccountId = recurringDestinationAccountId(input);
-  // 台帳経由（月割り）は呼び出し側の明示トグルが正本。未指定のときだけ行き先 role から
-  // 既定を提案する（費用・収入行き = ON）。role は既定の提案にだけ使い、動作は決めない。
-  const spreadsExpense =
-    input.spreadViaLedger ??
-    isRecurringSpreadDestinationRole(ctx.byId.get(destinationAccountId)?.role);
-  const expenseAccountId = spreadsExpense ? destinationAccountId : undefined;
+  // 呼び出し側の debitAccountId = 利用者が選んだ行き先（= 計上先）。全ルール台帳経由。
+  const destinationAccountId = input.debitAccountId;
+  const expenseAccountId = destinationAccountId;
   const startMonth = input.startMonth ?? monthOf(todayLocal());
   // UI は登録日を明示して渡す。内部 API で省略された場合も保存データには必ず開始点を持たせ、
   // 呼び出し側が指定した周期 anchor 上の最初の起票日を安全な既定にする。
@@ -1448,8 +1427,8 @@ async function createRecurringRuleUnlocked(input: RecurringRuleInput): Promise<R
     amount: input.amount,
     dayOfMonth: input.dayOfMonth,
     everyMonths: input.everyMonths ?? 1,
-    ...(expenseAccountId !== undefined ? { spreadExpenseAccountId: expenseAccountId } : {}),
-    debitAccountId: spreadsExpense ? CONTINUOUS_COST_LEDGER_ACCOUNT_ID : destinationAccountId,
+    spreadExpenseAccountId: expenseAccountId,
+    debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
     creditAccountId: input.creditAccountId,
     startMonth,
     startDate,
@@ -1458,10 +1437,9 @@ async function createRecurringRuleUnlocked(input: RecurringRuleInput): Promise<R
     updatedAt: ts,
   };
   const referenceStart = recurringRuleReferenceStartDate(rule);
-  // 月割りルール（費用/差引形）の借方は継続コスト台帳（無ければこの tx で作る）。
-  const { account: ledgerAccount, writeNeeded: ledgerWriteNeeded } = spreadsExpense
-    ? findOrCreateContinuousCostLedgerAccount(ctx, ts, referenceStart)
-    : { account: undefined, writeNeeded: false };
+  // 借方は継続コスト台帳（無ければこの tx で作る）。
+  const { account: ledgerAccount, writeNeeded: ledgerWriteNeeded } =
+    findOrCreateContinuousCostLedgerAccount(ctx, ts, referenceStart);
   // 参照科目の延長は不要（§A 案1: startDate 未設定 = 過去へ開いた線分。明示 startDate は
   // 後続の assertRecurringRuleSavable が期間外参照として fail-closed に拒否する）。
   // 台帳（system 科目）だけは findOrCreateContinuousCostLedgerAccount が無条件延長する。
@@ -1490,11 +1468,9 @@ function prepareRecurringRuleAccountsForSave(
   ctx: SaveContext,
   ts: string,
 ): { validationCtx: SaveContext; accountsToPut: Map<string, Account> } {
-  const spreadsExpense = rule.spreadExpenseAccountId !== undefined;
   const referenceStart = recurringRuleReferenceStartDate(rule);
-  const { account: ledgerAccount, writeNeeded: ledgerWriteNeeded } = spreadsExpense
-    ? findOrCreateContinuousCostLedgerAccount(ctx, ts, referenceStart)
-    : { account: undefined, writeNeeded: false };
+  const { account: ledgerAccount, writeNeeded: ledgerWriteNeeded } =
+    findOrCreateContinuousCostLedgerAccount(ctx, ts, referenceStart);
   // 参照科目の延長は不要（§A 案1: startDate 未設定 = 過去へ開いた線分。明示 startDate は
   // 呼び出し側の保存境界検証が期間外参照として fail-closed に拒否する）。
   const validationCtx: SaveContext = { byId: new Map(ctx.byId) };
@@ -1594,25 +1570,21 @@ async function upsertRecurringRuleUnlocked(
   ]);
   const existing = rules.find((r) => r.id === rule.id);
   if (!existing) throw new LedgerError('error.recurring.notFound');
-  const destinationAccountId = recurringDestinationAccountId(rule);
-  // 月割りの有無は渡された保存形（spread の有無）が正本。role から再導出しない
-  // ＝シートが渡したトグルの意図も、内部呼び出しが渡す保存済み正規形も同じ規則で通る。
+  // 計上先は渡された保存形（spreadExpenseAccountId）が正本。role から再導出しない。
   const expenseAccountId = recurringExpenseAccountId(rule);
-  const spreadsExpense = expenseAccountId !== undefined;
   const ts = nowIso();
   const saved: RecurringRule = {
     ...rule,
     id: existing.id,
-    // 月割り ON は台帳 + spread（計上先 = 論理的な行き先）、OFF は行き先へ直接。
-    debitAccountId: spreadsExpense ? CONTINUOUS_COST_LEDGER_ACCOUNT_ID : destinationAccountId,
-    ...(expenseAccountId !== undefined ? { spreadExpenseAccountId: expenseAccountId } : {}),
+    // 全ルールの保存形 = 借方 台帳 + spread（計上先 = 論理的な行き先）。
+    debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+    spreadExpenseAccountId: expenseAccountId,
     createdAt: existing.createdAt,
     updatedAt: ts,
   };
   if (existing.splitFromRuleId !== undefined) saved.splitFromRuleId = existing.splitFromRuleId;
   else delete saved.splitFromRuleId;
   if (saved.endDate === undefined) delete saved.endDate;
-  if (!spreadsExpense) delete saved.spreadExpenseAccountId;
 
   const amountChanged = saved.amount !== existing.amount;
   if (
@@ -1814,7 +1786,7 @@ async function switchRecurringRuleUnlocked(input: RecurringRuleSwitchInput): Pro
   const recoveryEntries: JournalEntry[] = [];
   for (const settlement of input.settlements ?? []) {
     const owner = ruleFor(settlement.ruleId);
-    if (!owner || !lineage.has(owner.id) || owner.spreadExpenseAccountId === undefined) {
+    if (!owner || !lineage.has(owner.id)) {
       throw new LedgerError('error.recurring.settlementInvalid');
     }
     // 対象月がその線分の導出する月であること（位相・存在期間・切り替え後の姿で検証）。

@@ -207,9 +207,9 @@ export const recurringRuleSchema = z
     // 何か月ごとに起票するか（必須。1 = 毎月）。上限は配分月数と同じ（監査 P2-3:
     // これが無いと rule だけ保存できて生成 item が配分上限で保存できない）。
     everyMonths: z.number().int().min(1).max(CATCH_UP_HARD_CAP_MONTHS),
-    // 正規化済みの計上先（費用または収入=差引形）。v7 は後方互換を持たず、保存形を
-    // spread=計上先 + debit=継続コスト台帳の一つに限定する。
-    spreadExpenseAccountId: z.string().min(1).optional(),
+    // 正規化済みの計上先（費用・収入に限らず postable な全 role）。v13.1（c 案）で
+    // 直接形を廃止し、全ルールを「借方 = 継続コスト台帳 + 計上先」の一形に限定する（必須）。
+    spreadExpenseAccountId: z.string().min(1),
     debitAccountId: z.string().min(1),
     creditAccountId: z.string().min(1),
     startMonth: monthSchema,
@@ -231,8 +231,7 @@ export const recurringRuleSchema = z
         path: ['endDate'],
       });
     }
-    if (rule.spreadExpenseAccountId === undefined) return;
-    // 正規化済みの費用ルールは周期にかかわらず常に継続コスト台帳を経由する（everyMonths >= 1。
+    // 全ルールが周期にかかわらず常に継続コスト台帳を経由する（everyMonths >= 1。
     // 毎月の家賃も「起票日開始・当月末終了」の item が毎月生まれて消える）。
     // 借方は継続コスト台帳に固定。
     if (rule.debitAccountId !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID) {
@@ -439,10 +438,10 @@ export const ledgerExportPackageSchema = z
     const monthlyCostById = new Map(pkg.monthlyCostItems.map((m) => [m.id, m]));
     const recurringRuleById = new Map(pkg.recurringRules.map((r) => [r.id, r] as const));
     // ルール由来の導出 item（ccr-{ruleId}-{month}）の開始日 = そのルールが month に導出する
-    // 起票日。月割りしないルール・位相外・存在期間外は undefined（= 導出されない）。
+    // 起票日。位相外・存在期間外は undefined（= 導出されない）。
     const derivedItemStartDateOf = (ruleId: string, month: string): string | undefined => {
       const rule = recurringRuleById.get(ruleId);
-      if (!rule || rule.spreadExpenseAccountId === undefined) return undefined;
+      if (!rule) return undefined;
       const span = monthsBetween(rule.startMonth, month);
       if (span < 0 || span % Math.max(1, rule.everyMonths) !== 0) return undefined;
       const date = clampDayToMonth(month, rule.dayOfMonth);
@@ -691,55 +690,35 @@ export const ledgerExportPackageSchema = z
         issue(`定期ルール「${r.name}」の源泉科目が存在しません`, at('creditAccountId'));
       if (r.debitAccountId === r.creditAccountId)
         issue(`定期ルール「${r.name}」の源泉と行き先が同一です`, at('debitAccountId'));
-      if ((r.spreadExpenseAccountId ?? r.debitAccountId) === r.creditAccountId)
+      if (r.spreadExpenseAccountId === r.creditAccountId)
         issue(
           `定期ルール「${r.name}」の源泉と論理的な行き先が同一です`,
-          at(r.spreadExpenseAccountId !== undefined ? 'spreadExpenseAccountId' : 'debitAccountId'),
+          at('spreadExpenseAccountId'),
         );
-      const debitPostable = isRecurringPostableRole(
-        accountRole.get(r.debitAccountId) as AccountRole | undefined,
-      );
       const creditPostable = isRecurringPostableRole(
         accountRole.get(r.creditAccountId) as AccountRole | undefined,
       );
-      if (r.spreadExpenseAccountId !== undefined) {
-        // 月割りトグル ON の保存形: 借方 = 継続コスト台帳（rule schema で確認済み）、
-        // spread = 計上先。計上先は自動起票できる全 role を許す（勘定科目で動作を変えない）。
-        if (hasAccount(r.creditAccountId) && !creditPostable)
-          issue(
-            `定期ルール「${r.name}」の源泉科目は定期ルールに使えません（内部集約・調整科目は自動起票できません）`,
-            at('creditAccountId'),
-          );
-        if (!hasAccount(r.spreadExpenseAccountId))
-          issue(`定期ルール「${r.name}」の計上先が存在しません`, at('spreadExpenseAccountId'));
-        else if (
-          !isRecurringPostableRole(
-            accountRole.get(r.spreadExpenseAccountId) as AccountRole | undefined,
-          )
-        )
-          issue(
-            `定期ルール「${r.name}」の計上先に内部集約・残高調整の科目は使えません`,
-            at('spreadExpenseAccountId'),
-          );
-      } else if (
-        hasAccount(r.debitAccountId) &&
-        hasAccount(r.creditAccountId) &&
-        (!debitPostable || !creditPostable)
-      ) {
-        // 支出/収入/振替の定型に加え簿記編集（任意の科目ペア）を許容する。内部集約・調整科目
-        // だけは自動起票の対象外（RECURRING_POSTABLE_ROLES が正本）。
-        // 月割りトグル OFF なら費用・収入行きも直接形が正規の保存形。
+      // 全ルールの保存形 = 借方 = 継続コスト台帳（rule schema で確認済み）+ spread = 計上先。
+      // 計上先は自動起票できる全 role を許す（勘定科目で動作を変えない）。
+      if (hasAccount(r.creditAccountId) && !creditPostable)
         issue(
-          `定期ルール「${r.name}」の科目は定期ルールに使えません（内部集約・調整科目は自動起票できません）`,
-          at('debitAccountId'),
+          `定期ルール「${r.name}」の源泉科目は定期ルールに使えません（内部集約・調整科目は自動起票できません）`,
+          at('creditAccountId'),
         );
-      }
+      if (!hasAccount(r.spreadExpenseAccountId))
+        issue(`定期ルール「${r.name}」の計上先が存在しません`, at('spreadExpenseAccountId'));
+      else if (
+        !isRecurringPostableRole(
+          accountRole.get(r.spreadExpenseAccountId) as AccountRole | undefined,
+        )
+      )
+        issue(
+          `定期ルール「${r.name}」の計上先に内部集約・残高調整の科目は使えません`,
+          at('spreadExpenseAccountId'),
+        );
 
-      // 清算（settlements）: 月割りルール専用・清算月は一意・そのルールが導出する月であること・
+      // 清算（settlements）: 清算月は一意・そのルールが導出する月であること・
       // 終了日は起票日〜既定の終了日（次回起票日）の範囲。
-      if (r.settlements !== undefined && r.spreadExpenseAccountId === undefined) {
-        issue(`定期ルール「${r.name}」は月割りしないため清算を持てません`, at('settlements'));
-      }
       const seenSettlementMonths = new Set<string>();
       (r.settlements ?? []).forEach((settlement, si) => {
         if (seenSettlementMonths.has(settlement.month)) {

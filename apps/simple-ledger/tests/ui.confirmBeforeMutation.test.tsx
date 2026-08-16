@@ -76,7 +76,6 @@ async function seedPostedRule(): Promise<RecurringRule> {
     dayOfMonth: 20,
     everyMonths: 1,
     debitAccountId: fixed.id,
-    spreadViaLedger: true,
     creditAccountId: bank.id,
     startMonth: '2026-04',
     startDate: '2026-04-12',
@@ -184,7 +183,6 @@ describe('定期ルールの削除（カスケード）', () => {
       dayOfMonth: 25,
       everyMonths: 1,
       debitAccountId: fixed.id,
-      spreadViaLedger: true,
       creditAccountId: bank.id,
       startMonth: '2026-04',
       // 表示断面（4/20）には存在するが、初回起票日（4/25）はまだ来ていない。

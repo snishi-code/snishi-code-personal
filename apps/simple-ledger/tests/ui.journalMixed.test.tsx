@@ -224,7 +224,6 @@ describe('仕訳一覧の混合表示', () => {
       amount: 1500,
       dayOfMonth: Number.parseInt(today.slice(8, 10), 10),
       debitAccountId: invest.id,
-      spreadViaLedger: false,
       creditAccountId: cash.id,
       startMonth: monthOf(today),
       startDate: today,

@@ -128,12 +128,19 @@ describe('定期ルールの完全導出', () => {
       startDate: '2026-05-01',
     });
 
-    const { ledger, entries } = await derivedFor('2026-07-23');
+    const { ledger, entries, items } = await derivedFor('2026-07-23');
     const posted = purchasesOf(entries, rule.id);
     expect(posted.map((entry) => entry.date)).toEqual(['2026-05-01', '2026-06-01', '2026-07-01']);
+    // v13.1（c 案）: 全ルールが台帳経由。購入行は「借方 台帳 / 貸方 源泉」で、
+    // 利用者が選んだ行き先（= 計上先）は導出 item が持つ。
     expect(posted[0]!.lines).toEqual([
-      { accountId: invest.id, side: 'debit', amount: 33333 },
+      { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: 33333 },
       { accountId: bank.id, side: 'credit', amount: 33333 },
+    ]);
+    expect(items.map((item) => [item.id, item.expenseAccountId])).toEqual([
+      [ruleItemId(rule.id, '2026-05'), invest.id],
+      [ruleItemId(rule.id, '2026-06'), invest.id],
+      [ruleItemId(rule.id, '2026-07'), invest.id],
     ]);
     // 導出行は保存されない計算値（virtual）で、時刻はルール由来。
     expect(posted.every((entry) => entry.metadata?.virtual === true)).toBe(true);
@@ -164,7 +171,10 @@ describe('定期ルールの完全導出', () => {
       startMonth: '2026-07',
       startDate: '2026-07-01',
     });
-    await putRecord(STORE.recurringRules, { ...broken, debitAccountId: 'missing-account' });
+    await putRecord(STORE.recurringRules, {
+      ...broken,
+      spreadExpenseAccountId: 'missing-account',
+    });
 
     const { entries } = await derivedFor('2026-07-01');
     expect(entries.map((entry) => entry.id)).toEqual([ruleEntryId(healthy.id, '2026-07')]);
@@ -224,7 +234,10 @@ describe('定期ルールの完全導出', () => {
     // 集計は保存 rec- を読み飛ばすので、残っていても導出と二重にならない。
     const report = reportEntriesForAsOf(ledger, '2026-07-31');
     expect(report.filter((entry) => entry.metadata?.recurringRuleId === rule.id)).toHaveLength(1);
-    expect(accountBalance(invest.id, 'asset', report)).toBe(1000);
+    // 台帳経由なので購入行の借方は台帳。二重計上していれば 2,000 になる。
+    // （item [7/1, 8/1] の刻みは 8/1 なので、7/31 断面では計上先へまだ振られていない。）
+    expect(accountBalance(CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 'asset', report)).toBe(1000);
+    expect(accountBalance(invest.id, 'asset', report)).toBe(0);
   });
 
   it('everyMonths > 1 は startMonth 基点の位相で間引いて導出する', async () => {
@@ -235,13 +248,13 @@ describe('定期ルールの完全導出', () => {
       amount: 60000,
       dayOfMonth: 25,
       everyMonths: 12,
-      spreadExpenseAccountId: fixed.id,
-      debitAccountId: fixed.id, // spread 指定時は無視され台帳に固定される
+      debitAccountId: fixed.id, // 呼び出し側は行き先を渡し、保存境界が台帳へ正規化する
       creditAccountId: bank.id,
       startMonth: '2024-04',
       startDate: '2024-04-25',
     });
     expect(rule.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+    expect(rule.spreadExpenseAccountId).toBe(fixed.id);
     // 2024-04 / 2025-04 / 2026-04 の 3 回ぶん（2026-07 断面）。
     const { entries } = await derivedFor('2026-07-23');
     expect(purchasesOf(entries, rule.id).map((entry) => entry.date)).toEqual([
@@ -462,13 +475,17 @@ describe('定期ルールの完全導出', () => {
       startMonth: '2026-07',
       startDate: '2026-07-01',
     });
-    const { entries } = await derivedFor('2026-07-23');
+    const { entries, items } = await derivedFor('2026-07-23');
     const posted = entries.find((e) => e.metadata?.recurringRuleId === rule.id)!;
-    expect(posted.metadata?.inputMode).toBe('manual');
+    // 全ルールが台帳経由なので導出形は費用ルールと同一（inputMode も 'expense' に揃う）。
+    expect(posted.metadata?.inputMode).toBe('expense');
     expect(posted.lines).toEqual([
-      { accountId: invest.id, side: 'debit', amount: 10000 },
+      { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: 10000 },
       { accountId: card.id, side: 'credit', amount: 10000 },
     ]);
+    expect(items.find((m) => m.id === ruleItemId(rule.id, '2026-07'))?.expenseAccountId).toBe(
+      invest.id,
+    );
   });
 
   it('同一科目・内部集約科目は fail-closed に弾く（自動起票の対象外）', async () => {
@@ -485,15 +502,13 @@ describe('定期ルールの完全導出', () => {
         startDate: '2026-07-01',
       }),
     ).rejects.toThrow(LedgerError);
-    // 継続コスト台帳（内部集約）は簿記編集ルールの科目に直接指定できない
-    // （台帳経由は spreadExpenseAccountId を持つ月割りルールだけ）。
+    // 継続コスト台帳（内部集約）は計上先に指定できない（台帳は導出エンジンの持ち物）。
     const fixed = await accountByName('固定費');
     await createRecurringRule({
       name: '台帳を生むための家賃',
       amount: 100000,
       dayOfMonth: 27,
-      spreadExpenseAccountId: fixed.id,
-      debitAccountId: bank.id, // spread では無視され台帳に固定される
+      debitAccountId: fixed.id,
       creditAccountId: bank.id,
       startMonth: '2026-07',
       startDate: '2026-07-27',
@@ -815,9 +830,11 @@ describe('編集・切り替え・削除の保存境界', () => {
       startDate: '2026-04-18',
     });
     // 旧線分 [4/12, 4/18) は起票日（4/20）を含まない = 後継の 4/25 だけが出る。
+    // （全ルール台帳経由なので購入行の借方は台帳。行き先 invest は導出 item が持つ。）
     expect(entries.map((entry) => [entry.id, ...shapeOf(entry)])).toEqual([
-      [ruleEntryId(successor.id, '2026-04'), '2026-04-25', invest.id, 1500],
+      [ruleEntryId(successor.id, '2026-04'), '2026-04-25', CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 1500],
     ]);
+    expect(successor.spreadExpenseAccountId).toBe(invest.id);
   });
 
   it('境界の帰属は半開区間: 起票日を後ろへ動かすと同じ月に旧・新が 1 本ずつ並ぶ', async () => {
@@ -847,8 +864,8 @@ describe('編集・切り替え・削除の保存境界', () => {
         .sort((a, b) => a.date.localeCompare(b.date))
         .map((entry) => [entry.id, ...shapeOf(entry)]),
     ).toEqual([
-      [ruleEntryId(rule.id, '2026-04'), '2026-04-20', invest.id, 1000],
-      [ruleEntryId(successor.id, '2026-04'), '2026-04-25', invest.id, 1500],
+      [ruleEntryId(rule.id, '2026-04'), '2026-04-20', CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 1000],
+      [ruleEntryId(successor.id, '2026-04'), '2026-04-25', CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 1500],
     ]);
   });
 
@@ -1010,8 +1027,8 @@ describe('編集・切り替え・削除の保存境界', () => {
     delete reopened.endDate;
     await upsertRecurringRule(reopened);
     expect((await derivedFor('2026-05-20')).entries.map((entry) => shapeOf(entry))).toEqual([
-      ['2026-04-20', invest.id, 1000],
-      ['2026-05-20', invest.id, 1000],
+      ['2026-04-20', CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 1000],
+      ['2026-05-20', CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 1000],
     ]);
   });
 
@@ -1104,13 +1121,14 @@ describe('編集・切り替え・削除の保存境界', () => {
         .sort((a, b) => a.date.localeCompare(b.date))
         .map((entry) => [entry.id, ...shapeOf(entry)]),
     ).toEqual([
-      [ruleEntryId(rule.id, '2026-07'), '2026-07-01', invest.id, 1000],
-      [ruleEntryId(successor.id, '2026-08'), '2026-08-01', invest.id, 1500],
+      [ruleEntryId(rule.id, '2026-07'), '2026-07-01', CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 1000],
+      [ruleEntryId(successor.id, '2026-08'), '2026-08-01', CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 1500],
     ]);
+    expect(successor.spreadExpenseAccountId).toBe(invest.id);
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
 
-  it('切り替えと同時に月割りトグルを ON にすると、境界以降は台帳経由で導出する', async () => {
+  it('切り替えと同時に計上先を変えると、境界以降は新しい計上先の item を導出する', async () => {
     const bank = await accountByName('預金');
     const invest = await accountByName('投資');
     const fixed = await accountByName('固定費');
@@ -1125,7 +1143,7 @@ describe('編集・切り替え・削除の保存境界', () => {
     });
     const stored = (await loadLedger()).recurringRules.find((r) => r.id === rule.id)!;
 
-    // UI と同じく、行き先（論理）と月割りトグル ON（spread = 計上先）を明示して渡す。
+    // UI と同じく、行き先（= 計上先）を明示して渡す。保存境界が借方 = 台帳へ正規化する。
     await upsertRecurringRule(
       { ...stored, amount: 1500, debitAccountId: fixed.id, spreadExpenseAccountId: fixed.id },
       { amountChangeMode: 'split', effectiveDate: '2026-04-20' },
@@ -1144,7 +1162,7 @@ describe('編集・切り替え・削除の保存境界', () => {
     ]);
     expect(snapshot.ledger.monthlyCostItems).toEqual([]);
 
-    // 直接形と月割り形が系譜内に混在しても、後継の通常編集は通る。
+    // 計上先の違う線分が系譜内に並んでも、後継の通常編集は通る。
     await upsertRecurringRule({ ...successor, name: '積立から費用へ（変更後）' });
     snapshot = await derivedFor('2026-05-20');
     expect(snapshot.ledger.recurringRules.find((r) => r.id === successor.id)?.name).toBe(
@@ -1155,7 +1173,7 @@ describe('編集・切り替え・削除の保存境界', () => {
     );
   });
 
-  it('切り替えで月割りトグルを OFF にすると、境界以降は item を作らない直接形になる', async () => {
+  it('切り替えで周期と計上先を変えると、境界以降は新しい姿で導出し遡及の金額変更も効く', async () => {
     const bank = await accountByName('預金');
     const fixed = await accountByName('固定費');
     const invest = await accountByName('投資');
@@ -1171,17 +1189,26 @@ describe('編集・切り替え・削除の保存境界', () => {
     });
     const stored = (await loadLedger()).recurringRules.find((r) => r.id === rule.id)!;
 
-    const changed = { ...stored, amount: 1500, everyMonths: 1, debitAccountId: invest.id };
-    delete changed.spreadExpenseAccountId;
+    const changed = {
+      ...stored,
+      amount: 1500,
+      everyMonths: 1,
+      debitAccountId: invest.id,
+      spreadExpenseAccountId: invest.id,
+    };
     await upsertRecurringRule(changed, { amountChangeMode: 'split', effectiveDate: '2026-04-20' });
 
     const snapshot = await derivedFor('2026-05-20');
     const successor = snapshot.ledger.recurringRules.find((r) => r.id !== rule.id)!;
-    expect(snapshot.items).toEqual([]);
+    expect(successor.spreadExpenseAccountId).toBe(invest.id);
     expect(snapshot.ledger.monthlyCostItems).toEqual([]);
+    expect(snapshot.items.map((item) => [item.id, item.expenseAccountId, item.amount])).toEqual([
+      [ruleItemId(successor.id, '2026-04'), invest.id, 1500],
+      [ruleItemId(successor.id, '2026-05'), invest.id, 1500],
+    ]);
     expect(snapshot.entries.map((entry) => shapeOf(entry))).toEqual([
-      ['2026-04-20', invest.id, 1500],
-      ['2026-05-20', invest.id, 1500],
+      ['2026-04-20', CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 1500],
+      ['2026-05-20', CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 1500],
     ]);
 
     // 遡及の金額変更は全期間へ効く（生成時の値を凍結しない）。
@@ -1212,16 +1239,23 @@ describe('編集・切り替え・削除の保存境界', () => {
     const stored = (await loadLedger()).recurringRules.find(
       (candidate) => candidate.id === rule.id,
     )!;
-    const changed = { ...stored, everyMonths: 1, debitAccountId: invest.id };
-    delete changed.spreadExpenseAccountId;
+    const changed = {
+      ...stored,
+      everyMonths: 1,
+      debitAccountId: invest.id,
+      spreadExpenseAccountId: invest.id,
+    };
     await upsertRecurringRule(changed);
 
     const { ledger, entries, items } = await derivedFor('2026-05-20');
-    // 4 月ぶんも新しい姿（直接形・毎月）で引き直される。
-    expect(items).toEqual([]);
+    // 4 月ぶんも新しい姿（計上先 = 投資・毎月）で引き直される。
+    expect(items.map((item) => [item.id, item.expenseAccountId, item.amount])).toEqual([
+      [ruleItemId(rule.id, '2026-04'), invest.id, 12000],
+      [ruleItemId(rule.id, '2026-05'), invest.id, 12000],
+    ]);
     expect(entries.map((entry) => shapeOf(entry))).toEqual([
-      ['2026-04-20', invest.id, 12000],
-      ['2026-05-20', invest.id, 12000],
+      ['2026-04-20', CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 12000],
+      ['2026-05-20', CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 12000],
     ]);
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
@@ -1294,7 +1328,6 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
       amount: 60000,
       dayOfMonth: 25,
       everyMonths: 12,
-      spreadExpenseAccountId: fixed.id,
       debitAccountId: fixed.id,
       creditAccountId: bank.id,
       startMonth: '2026-04',
@@ -1383,8 +1416,7 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
       amount: 80000,
       dayOfMonth: 27,
       everyMonths: 1,
-      spreadExpenseAccountId: fixed.id,
-      debitAccountId: fixed.id, // spread では無視され台帳に固定される
+      debitAccountId: fixed.id,
       creditAccountId: bank.id,
       startMonth: '2026-06',
       startDate: '2026-06-27',
@@ -1431,7 +1463,6 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
       amount: 3000,
       dayOfMonth: 31,
       everyMonths: 1,
-      spreadExpenseAccountId: fixed.id,
       debitAccountId: fixed.id,
       creditAccountId: bank.id,
       startMonth: '2026-01',
@@ -1477,10 +1508,10 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
 
-  it('費用・収入以外の行き先（資産・負債など）は直接フローとして保存する', async () => {
+  it('費用・収入以外の行き先（資産・負債など）も台帳経由で保存する（勘定科目で動作を変えない）', async () => {
     const bank = await accountByName('預金');
     const invest = await accountByName('投資'); // investment-asset
-    // 行き先 = 投資（積立）・支払い元 = 銀行。費用/収入カテゴリではないため直接フロー。
+    // 行き先 = 投資（積立）・支払い元 = 銀行。費用/収入カテゴリでなくても保存形は一形。
     const rule = await createRecurringRule({
       name: '投信積立',
       amount: 4000,
@@ -1493,13 +1524,21 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     });
     const { ledger, items } = await derivedFor('2026-07-23');
     const saved = ledger.recurringRules.find((candidate) => candidate.id === rule.id)!;
-    expect(saved.spreadExpenseAccountId).toBeUndefined();
-    expect(saved.debitAccountId).toBe(invest.id);
-    expect(items).toEqual([]);
+    expect(saved.spreadExpenseAccountId).toBe(invest.id);
+    expect(saved.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+    expect(items.map((m) => [m.id, m.expenseAccountId, m.startDate, m.endDate])).toEqual([
+      [ruleItemId(rule.id, '2026-07'), invest.id, '2026-07-01', '2026-08-01'],
+    ]);
     const derived = reportEntriesForAsOf(ledger, '2026-07-31');
-    // 月末断面: 銀行 −4,000・投資 +4,000。item は作らない。
+    // 月末断面: 銀行 −4,000・台帳 +4,000（投資への刻みは 8/1 なのでまだ動かない）。
     expect(accountBalance(bank.id, 'asset', derived)).toBeLessThan(0);
-    expect(accountBalance(invest.id, 'asset', derived)).toBe(4000);
+    expect(
+      accountBalance(
+        CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+        'asset',
+        filterByDateRange(derived, undefined, '2026-07-31'),
+      ),
+    ).toBe(4000);
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
 
@@ -1553,7 +1592,7 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
     const stored = (await loadLedger()).recurringRules.find(
       (candidate) => candidate.id === rule.id,
     )!;
-    // UI と同じく、利用者が選んだ行き先を借方と spread（月割りトグル ON）の両方に置く。
+    // UI と同じく、利用者が選んだ行き先を借方と spread（計上先）の両方に置く。
     const changed = { ...stored, debitAccountId: salary.id, spreadExpenseAccountId: salary.id };
     await upsertRecurringRule(changed);
     const saved = (await loadLedger()).recurringRules.find(
@@ -1571,7 +1610,6 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
       amount: 3000,
       dayOfMonth: 1,
       everyMonths: 1,
-      spreadExpenseAccountId: fixed.id,
       debitAccountId: fixed.id,
       creditAccountId: salary.id, // 支払い元 = 給与（income-category）
       startMonth: '2026-07',
@@ -1589,41 +1627,8 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
   });
 });
 
-describe('継続コスト台帳の経由は明示トグル（勘定科目で動作を変えない）', () => {
-  it('費用行きでも spreadViaLedger: false なら直接形で保存し、item を作らない', async () => {
-    const bank = await accountByName('預金');
-    const fixed = await accountByName('固定費');
-    const rule = await createRecurringRule({
-      name: '直接記帳の家賃',
-      amount: 80000,
-      dayOfMonth: 25,
-      debitAccountId: fixed.id,
-      creditAccountId: bank.id,
-      spreadViaLedger: false,
-      startMonth: '2026-04',
-      startDate: '2026-04-01',
-    });
-    // 保存形 = 直接形（借方が費用科目のまま・spread なし）。
-    expect(rule.spreadExpenseAccountId).toBeUndefined();
-    expect(rule.debitAccountId).toBe(fixed.id);
-
-    const { ledger, entries, items } = await derivedFor('2026-04-25');
-    // 台帳を経由しない = item は 1 件も生まれない。
-    expect(items).toEqual([]);
-    const posted = entries.find((e) => e.metadata?.recurringRuleId === rule.id);
-    expect(posted?.lines).toEqual([
-      { accountId: fixed.id, side: 'debit', amount: 80000 },
-      { accountId: bank.id, side: 'credit', amount: 80000 },
-    ]);
-    expect(posted?.metadata?.monthlyCostId).toBeUndefined();
-    // 未来断面も直接形のまま = item を導出しないので月割り行（cc-alloc）が 1 本も出ない。
-    const projected = reportEntriesForAsOf(ledger, '2026-12-31');
-    expect(projected.some((e) => e.id === ruleEntryId(rule.id, '2026-05'))).toBe(true);
-    expect(projected.some((e) => e.id.startsWith(`cc-alloc-ccr-${rule.id}-`))).toBe(false);
-    expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
-  });
-
-  it('資産行き（積立）でも spreadViaLedger: true なら台帳経由 + 計上先が資産の item になる', async () => {
+describe('全ルールが台帳経由（v13.1 c 案・勘定科目で動作を変えない）', () => {
+  it('資産行き（積立）も台帳経由 + 計上先が資産の item になる', async () => {
     const bank = await accountByName('預金');
     const invest = await accountByName('投資');
     const rule = await createRecurringRule({
@@ -1633,11 +1638,10 @@ describe('継続コスト台帳の経由は明示トグル（勘定科目で動�
       everyMonths: 12,
       debitAccountId: invest.id,
       creditAccountId: bank.id,
-      spreadViaLedger: true,
       startMonth: '2026-04',
       startDate: '2026-04-25',
     });
-    // 保存形 = 月割りの正規形（借方 = 台帳・spread = 利用者が選んだ行き先）。
+    // 保存形は一形（借方 = 台帳・spread = 利用者が選んだ行き先）。
     expect(rule.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
     expect(rule.spreadExpenseAccountId).toBe(invest.id);
 
@@ -1666,34 +1670,35 @@ describe('継続コスト台帳の経由は明示トグル（勘定科目で動�
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
 
-  it('費用行きの直接形は、金額以外を編集保存しても直接形のまま（role 再導出が復活していない）', async () => {
+  it('金額以外を編集保存しても保存形は台帳経由のまま（直接形へ戻る経路が無い）', async () => {
     const bank = await accountByName('預金');
     const fixed = await accountByName('固定費');
     const rule = await createRecurringRule({
-      name: '直接記帳の家賃',
+      name: '家賃',
       amount: 80000,
       dayOfMonth: 25,
       debitAccountId: fixed.id,
       creditAccountId: bank.id,
-      spreadViaLedger: false,
       startMonth: '2026-04',
       startDate: '2026-04-01',
     });
     const stored = (await loadLedger()).recurringRules.find((r) => r.id === rule.id)!;
-    await upsertRecurringRule({ ...stored, name: '直接記帳の家賃（変更後）', dayOfMonth: 26 });
+    await upsertRecurringRule({ ...stored, name: '家賃（変更後）', dayOfMonth: 26 });
 
     const { ledger, items } = await derivedFor('2026-04-26');
     const saved = ledger.recurringRules.find((r) => r.id === rule.id)!;
-    expect(saved.name).toBe('直接記帳の家賃（変更後）');
-    expect(saved.spreadExpenseAccountId).toBeUndefined();
-    expect(saved.debitAccountId).toBe(fixed.id);
-    expect(items).toEqual([]);
+    expect(saved.name).toBe('家賃（変更後）');
+    expect(saved.spreadExpenseAccountId).toBe(fixed.id);
+    expect(saved.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+    expect(items.map((m) => [m.id, m.expenseAccountId])).toEqual([
+      [ruleItemId(rule.id, '2026-04'), fixed.id],
+    ]);
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
 });
 
-describe('§2 対象外の保全: 収入・振替ルールの導出は直接フローのまま（スナップショット）', () => {
-  it('収入ルール（貸方=給与・借方=銀行）: 保存形も導出行も直接フローのまま', async () => {
+describe('収入・振替ルールも台帳経由の一形で導出する（スナップショット）', () => {
+  it('収入ルール（源泉=給与・計上先=銀行）: 保存形も導出行も台帳経由の一形', async () => {
     const bank = await accountByName('預金');
     const salary = await accountByName('給与');
     const rule = await createRecurringRule({
@@ -1707,75 +1712,57 @@ describe('§2 対象外の保全: 収入・振替ルールの導出は直接フ�
     });
     const { ledger, entries, items } = await derivedFor('2026-09-30');
     const saved = ledger.recurringRules.find((candidate) => candidate.id === rule.id)!;
-    expect(saved.spreadExpenseAccountId).toBeUndefined();
-    expect(saved.debitAccountId).toBe(bank.id);
-    // 導出行の全フィールドを固定する（item なし・台帳なし・metadata に monthlyCostId 無し）。
+    // v13.1（c 案）: 収入ルールも保存形は一形（借方 = 台帳・計上先 = 利用者が選んだ行き先）。
+    expect(saved.spreadExpenseAccountId).toBe(bank.id);
+    expect(saved.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+    // 導出行の全フィールドを固定する（inputMode は常に 'expense'・monthlyCostId が必ず付く）。
     // 過去も未来も同じ規則で並ぶ = 「起票済み」と「投影」の区別が無い。
+    const purchase = (month: string, date: string): JournalEntry => ({
+      id: ruleEntryId(rule.id, month),
+      date,
+      description: '給与振込',
+      kind: 'normal',
+      lines: [
+        { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: 300000 },
+        { accountId: salary.id, side: 'credit', amount: 300000 },
+      ],
+      metadata: {
+        virtual: true,
+        inputMode: 'expense',
+        recurringRuleId: rule.id,
+        recurringMonth: month,
+        monthlyCostId: ruleItemId(rule.id, month),
+      },
+      createdAt: saved.createdAt,
+      updatedAt: saved.updatedAt,
+    });
     expect(entries).toEqual([
-      {
-        id: ruleEntryId(rule.id, '2026-07'),
-        date: '2026-07-05',
-        description: '給与振込',
-        kind: 'normal',
-        lines: [
-          { accountId: bank.id, side: 'debit', amount: 300000 },
-          { accountId: salary.id, side: 'credit', amount: 300000 },
-        ],
-        metadata: {
-          virtual: true,
-          inputMode: 'income',
-          recurringRuleId: rule.id,
-          recurringMonth: '2026-07',
-        },
-        createdAt: saved.createdAt,
-        updatedAt: saved.updatedAt,
-      },
-      {
-        id: ruleEntryId(rule.id, '2026-08'),
-        date: '2026-08-05',
-        description: '給与振込',
-        kind: 'normal',
-        lines: [
-          { accountId: bank.id, side: 'debit', amount: 300000 },
-          { accountId: salary.id, side: 'credit', amount: 300000 },
-        ],
-        metadata: {
-          virtual: true,
-          inputMode: 'income',
-          recurringRuleId: rule.id,
-          recurringMonth: '2026-08',
-        },
-        createdAt: saved.createdAt,
-        updatedAt: saved.updatedAt,
-      },
-      {
-        id: ruleEntryId(rule.id, '2026-09'),
-        date: '2026-09-05',
-        description: '給与振込',
-        kind: 'normal',
-        lines: [
-          { accountId: bank.id, side: 'debit', amount: 300000 },
-          { accountId: salary.id, side: 'credit', amount: 300000 },
-        ],
-        metadata: {
-          virtual: true,
-          inputMode: 'income',
-          recurringRuleId: rule.id,
-          recurringMonth: '2026-09',
-        },
-        createdAt: saved.createdAt,
-        updatedAt: saved.updatedAt,
-      },
+      purchase('2026-07', '2026-07-05'),
+      purchase('2026-08', '2026-08-05'),
+      purchase('2026-09', '2026-09-05'),
     ]);
-    expect(items).toEqual([]);
+    const item = (month: string, startDate: string, endDate: string): MonthlyCostItem => ({
+      id: ruleItemId(rule.id, month),
+      name: '給与振込',
+      amount: 300000,
+      startDate,
+      endDate,
+      expenseAccountId: bank.id,
+      createdAt: saved.createdAt,
+      updatedAt: saved.updatedAt,
+    });
+    expect(items).toEqual([
+      item('2026-07', '2026-07-05', '2026-08-05'),
+      item('2026-08', '2026-08-05', '2026-09-05'),
+      item('2026-09', '2026-09-05', '2026-10-05'),
+    ]);
+    // 保存されるのはルール本体だけ（購入行も item も保存しない）。
     expect(ledger.journalEntries).toEqual([]);
     expect(ledger.monthlyCostItems).toEqual([]);
-    // 台帳（内部集約科目）が作られない = 継続コスト化の副作用が一切入らない。
-    expect(ledger.accounts.some((a) => a.role === 'continuing-cost-asset')).toBe(false);
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
 
-  it('振替ルール（貸方=銀行・借方=投資）: 保存形も導出行も直接フローのまま', async () => {
+  it('振替ルール（源泉=銀行・計上先=投資）: 保存形も導出行も台帳経由の一形', async () => {
     const bank = await accountByName('預金');
     const invest = await accountByName('投資');
     const rule = await createRecurringRule({
@@ -1789,49 +1776,33 @@ describe('§2 対象外の保全: 収入・振替ルールの導出は直接フ�
     });
     const { ledger, entries, items } = await derivedFor('2026-08-31');
     const saved = ledger.recurringRules.find((candidate) => candidate.id === rule.id)!;
-    expect(saved.spreadExpenseAccountId).toBeUndefined();
-    expect(saved.debitAccountId).toBe(invest.id);
-    expect(entries).toEqual([
-      {
-        id: ruleEntryId(rule.id, '2026-07'),
-        date: '2026-07-01',
-        description: 'NISA積立',
-        kind: 'normal',
-        lines: [
-          { accountId: invest.id, side: 'debit', amount: 33333 },
-          { accountId: bank.id, side: 'credit', amount: 33333 },
-        ],
-        metadata: {
-          virtual: true,
-          inputMode: 'transfer',
-          recurringRuleId: rule.id,
-          recurringMonth: '2026-07',
-        },
-        createdAt: saved.createdAt,
-        updatedAt: saved.updatedAt,
+    expect(saved.spreadExpenseAccountId).toBe(invest.id);
+    expect(saved.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+    const purchase = (month: string, date: string): JournalEntry => ({
+      id: ruleEntryId(rule.id, month),
+      date,
+      description: 'NISA積立',
+      kind: 'normal',
+      lines: [
+        { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: 33333 },
+        { accountId: bank.id, side: 'credit', amount: 33333 },
+      ],
+      metadata: {
+        virtual: true,
+        inputMode: 'expense',
+        recurringRuleId: rule.id,
+        recurringMonth: month,
+        monthlyCostId: ruleItemId(rule.id, month),
       },
-      {
-        id: ruleEntryId(rule.id, '2026-08'),
-        date: '2026-08-01',
-        description: 'NISA積立',
-        kind: 'normal',
-        lines: [
-          { accountId: invest.id, side: 'debit', amount: 33333 },
-          { accountId: bank.id, side: 'credit', amount: 33333 },
-        ],
-        metadata: {
-          virtual: true,
-          inputMode: 'transfer',
-          recurringRuleId: rule.id,
-          recurringMonth: '2026-08',
-        },
-        createdAt: saved.createdAt,
-        updatedAt: saved.updatedAt,
-      },
+      createdAt: saved.createdAt,
+      updatedAt: saved.updatedAt,
+    });
+    expect(entries).toEqual([purchase('2026-07', '2026-07-01'), purchase('2026-08', '2026-08-01')]);
+    expect(items.map((m) => [m.id, m.startDate, m.endDate, m.expenseAccountId])).toEqual([
+      [ruleItemId(rule.id, '2026-07'), '2026-07-01', '2026-08-01', invest.id],
+      [ruleItemId(rule.id, '2026-08'), '2026-08-01', '2026-09-01', invest.id],
     ]);
-    expect(items).toEqual([]);
     expect(ledger.journalEntries).toEqual([]);
-    expect(ledger.accounts.some((a) => a.role === 'continuing-cost-asset')).toBe(false);
     expect(ledgerExportPackageSchema.safeParse(buildExportPackage(ledger)).success).toBe(true);
   });
 });

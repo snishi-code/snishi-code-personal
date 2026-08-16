@@ -9,9 +9,8 @@
  *  - 生まれたものへの個別操作は無い。調整はルールの編集（全期間を引き直す）・
  *    切り替え（この日から別線分）・補正で行う。
  *  - everyMonths（必須。1 = 毎月）で間引く。位相は startMonth 基点。
- *  - 継続コスト台帳を経由して月割りするかは**登録時の明示トグル**で決まる（勘定科目の
- *    role で動作を変えない）。spreadExpenseAccountId の有無がトグルの状態そのもの
- *    （保存された正規形が唯一の真実）。ON の導出 = `借方 台帳 / 貸方 源泉` の購入行 + item。
+ *  - 全ルールが継続コスト台帳を経由して月割りする（v13.1 の c 案・直接形の廃止。
+ *    アプリはルールへ意味付けしない）。導出 = `借方 台帳 / 貸方 源泉` の購入行 + item。
  *    月割りの費用行は導出 item を continuousCostEntries に通して出す（実 item と同じ engine）。
  */
 import { addMonths, monthOf, monthsBetween } from './allocation';
@@ -59,42 +58,22 @@ export function isRecurringPostableRole(role: AccountRole | undefined): boolean 
 /**
  * 画面・保存・起票で使うルールの論理的な行き先。
  *
- * 正規化済みの月割りルールは debitAccountId が内部台帳なので、利用者が指定した行き先は
- * spreadExpenseAccountId にある。それ以外の正規形は借方がそのまま行き先になる。
+ * 全ルールが台帳経由（c 案）なので debitAccountId は常に内部台帳で、利用者が指定した
+ * 行き先は spreadExpenseAccountId にある。
  */
 export function recurringDestinationAccountId(
-  rule: Pick<RecurringRule, 'debitAccountId' | 'spreadExpenseAccountId'>,
+  rule: Pick<RecurringRule, 'spreadExpenseAccountId'>,
 ): string {
-  return rule.spreadExpenseAccountId ?? rule.debitAccountId;
+  return rule.spreadExpenseAccountId;
 }
 
 /**
- * 「継続コスト台帳を経由して月割りする」トグルの**既定が ON** になる行き先 role の正本。
- * 判定材料ではなく既定値の提案にすぎない（トグルはどの postable 科目でも ON/OFF できる）。
- *  - expense-category: 費用ルール（毎月の支払いは既定で月割り）。
- *  - income-category: 差引形ルール（借方=収入カテゴリ。給与から差し引く保険料など）。
- *    起票形は費用ルールと同一で、月割りが収入のマイナスとして出る。
- * 通常の収入ルール（貸方=income-category・借方=資金）の行き先は daily-asset なので
- * ここには該当しない＝既定は OFF。振替/積立ルールも同様（トグルで ON にはできる）。
- */
-export const RECURRING_SPREAD_DESTINATION_ROLES: readonly AccountRole[] = [
-  'expense-category',
-  'income-category',
-];
-
-/** この役割の科目を行き先に選んだとき、月割りトグルの既定を ON にするか。 */
-export function isRecurringSpreadDestinationRole(role: AccountRole | undefined): boolean {
-  return role !== undefined && RECURRING_SPREAD_DESTINATION_ROLES.includes(role);
-}
-
-/**
- * 月割り（台帳経由）ルールの計上先。**保存された正規形が唯一の真実**で、role は見ない
- * （role は登録時のトグル既定を提案するだけ）。
- * 戻り値 = 自動生成 item の計上先（MonthlyCostItem.expenseAccountId。費用・収入に限らない）。
+ * ルールの計上先 = 自動生成 item の計上先（MonthlyCostItem.expenseAccountId。
+ * 費用・収入に限らず postable な全 role）。**保存された正規形が唯一の真実**。
  */
 export function recurringExpenseAccountId(
   rule: Pick<RecurringRule, 'spreadExpenseAccountId'>,
-): string | undefined {
+): string {
   return rule.spreadExpenseAccountId;
 }
 
@@ -243,9 +222,10 @@ interface RuleProjectionContext {
   destination: Account;
   credit: Account;
   debit: Account;
+  /** 保存上の借方（常に継続コスト台帳）。 */
   debitAccountId: string;
-  /** 台帳経由（月割り）ルールのときだけ計上先が入る。 */
-  expenseAccountId: string | undefined;
+  /** 計上先（= 自動生成 item の expenseAccountId）。 */
+  expenseAccountId: string;
   referenceStart: string;
   inputMode: InputMode;
 }
@@ -257,27 +237,21 @@ function ruleProjectionContext(
   const destinationAccountId = recurringDestinationAccountId(rule);
   const destination = byId.get(destinationAccountId);
   const expenseAccountId = recurringExpenseAccountId(rule);
-  const spreadsExpense = expenseAccountId !== undefined;
-  const debitAccountId = spreadsExpense ? CONTINUOUS_COST_LEDGER_ACCOUNT_ID : destinationAccountId;
+  const debitAccountId = CONTINUOUS_COST_LEDGER_ACCOUNT_ID;
   const debit = byId.get(debitAccountId);
   const credit = byId.get(rule.creditAccountId);
   if (!destination || !debit || !credit || destinationAccountId === rule.creditAccountId)
     return null;
   if (!isRecurringPostableRole(credit.role)) return null;
   if (!isRecurringPostableRole(destination.role)) return null;
-  // 月割りルール（費用/差引形）の実際の借方は内部台帳。未来投影より前の catch-up が必要なら作成する。
-  if (
-    spreadsExpense &&
-    (debit.id !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID || debit.role !== 'continuing-cost-asset')
-  )
+  // 実際の借方は内部台帳（無い・別 role は導出しない = fail-soft）。
+  if (debit.id !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID || debit.role !== 'continuing-cost-asset')
     return null;
   const referenceStart = recurringRuleReferenceStartDate(rule);
   if (referenceStart === undefined) return null;
-  // recurringKindOf(continuing-cost-asset, …) は null を返すため、月割りルールは起票形
+  // recurringKindOf(continuing-cost-asset, …) は null を返すため、起票形
   // （借方 台帳 / 貸方 源泉 = 費用ルールと同一）に合わせて 'expense' 直指定。
-  const inputMode: InputMode = spreadsExpense
-    ? 'expense'
-    : (recurringKindOf(destination.role, credit.role) ?? 'manual');
+  const inputMode: InputMode = 'expense';
   return {
     rule,
     destination,
@@ -331,7 +305,6 @@ export function deriveRecurringOutputs(
   for (const rule of rules) {
     const ctx = ruleProjectionContext(rule, byId);
     if (!ctx) continue;
-    const spreadsExpense = ctx.expenseAccountId !== undefined;
     for (const posting of projectablePostings(ctx, asOf)) {
       entries.push({
         id: ruleEntryId(rule.id, posting.month),
@@ -347,21 +320,19 @@ export function deriveRecurringOutputs(
           inputMode: ctx.inputMode,
           recurringRuleId: rule.id,
           recurringMonth: posting.month,
-          ...(spreadsExpense ? { monthlyCostId: ruleItemId(rule.id, posting.month) } : {}),
+          monthlyCostId: ruleItemId(rule.id, posting.month),
         },
         createdAt: rule.createdAt,
         updatedAt: rule.updatedAt,
       });
-      if (ctx.expenseAccountId !== undefined) {
-        const item = buildRuleItem(rule, posting, ctx.expenseAccountId, {
-          createdAt: rule.createdAt,
-          updatedAt: rule.updatedAt,
-        });
-        // 清算（settlements）: その月の item の endDate を既定（次回起票日）から上書きする。
-        // 解約・切り替えの「切り替え日で終える」の導出面（回収の振替は実仕訳のまま）。
-        const settlement = rule.settlements?.find((s) => s.month === posting.month);
-        items.push(settlement !== undefined ? { ...item, endDate: settlement.endDate } : item);
-      }
+      const item = buildRuleItem(rule, posting, ctx.expenseAccountId, {
+        createdAt: rule.createdAt,
+        updatedAt: rule.updatedAt,
+      });
+      // 清算（settlements）: その月の item の endDate を既定（次回起票日）から上書きする。
+      // 解約・切り替えの「切り替え日で終える」の導出面（回収の振替は実仕訳のまま）。
+      const settlement = rule.settlements?.find((s) => s.month === posting.month);
+      items.push(settlement !== undefined ? { ...item, endDate: settlement.endDate } : item);
     }
   }
   return { entries, items };

@@ -39,7 +39,6 @@ async function seedRule(overrides: Partial<RecurringRuleInput> = {}): Promise<Re
     dayOfMonth: 2,
     everyMonths: 1,
     debitAccountId: fixed.id,
-    spreadViaLedger: true,
     creditAccountId: bank.id,
     startMonth: '2026-08',
     startDate: '2026-08-01',

@@ -225,15 +225,18 @@ async function seedEndedAssetBalancedByRecurringRule(): Promise<{
       amount: 100,
     }),
   );
+  // v13.1（c 案）: 全ルールが台帳経由なので、ルールは購入行（貸方 = target）に加えて
+  // item [起票日, 次回起票日] を導出する。参照区間が科目の終了日（12/31）に収まるよう
+  // 起票を 11/01 に置く（item の終端 = 12/01）。target の残高は購入行が 11/01 に消す。
   const rule = await createRecurringRule({
     name: '終了前の残高消し込み',
     amount: 100,
     dayOfMonth: 1,
     debitAccountId: bank.id,
     creditAccountId: target.id,
-    startMonth: '2025-12',
-    startDate: '2025-12-01',
-    endDate: '2025-12-02',
+    startMonth: '2025-11',
+    startDate: '2025-11-01',
+    endDate: '2025-11-02',
   });
   await endAccountAtZero(target.id);
   return { target, rule };
@@ -405,6 +408,8 @@ describe('終了済み資産と定期ルールの後続操作', () => {
     await endAccountAtZero(target.id);
     const bank = await accountByName('預金');
 
+    // 11/01 起票 → item [11/01, 12/01] の刻みで 12/01 に target へ 100 が立つ
+    // （参照区間は終了日 12/31 の内側なので、弾くのは残高の不変条件のほう）。
     await expect(
       createRecurringRule({
         name: '終了残高を壊す追加ルール',
@@ -412,9 +417,9 @@ describe('終了済み資産と定期ルールの後続操作', () => {
         dayOfMonth: 1,
         debitAccountId: target.id,
         creditAccountId: bank.id,
-        startMonth: '2025-12',
-        startDate: '2025-12-01',
-        endDate: '2025-12-02',
+        startMonth: '2025-11',
+        startDate: '2025-11-01',
+        endDate: '2025-11-02',
       }),
     ).rejects.toMatchObject({ code: 'error.account.archiveBalance' });
     expect((await loadLedger()).recurringRules).toHaveLength(0);
@@ -423,14 +428,15 @@ describe('終了済み資産と定期ルールの後続操作', () => {
   it('終了点残高を0にする定期ルールの期間変更を拒否する', async () => {
     const { rule } = await seedEndedAssetBalancedByRecurringRule();
 
+    // 起票日（11/01）を含まない区間へ動かすと消し込みが消える = 終了点残高が 100 に戻る。
     await expect(
-      upsertRecurringRule({ ...rule, startDate: '2025-12-02', endDate: '2025-12-03' }),
+      upsertRecurringRule({ ...rule, startDate: '2025-11-02', endDate: '2025-11-03' }),
     ).rejects.toMatchObject({
       code: 'error.account.archiveBalance',
     });
     expect(
       (await loadLedger()).recurringRules.find((candidate) => candidate.id === rule.id)?.startDate,
-    ).toBe('2025-12-01');
+    ).toBe('2025-11-01');
   });
 
   it('終了点残高を0にする定期ルールの削除を拒否する', async () => {

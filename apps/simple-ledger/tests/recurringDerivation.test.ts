@@ -3,6 +3,7 @@ import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import { deriveRecurringOutputs } from '../src/domain/recurring';
 import type { Account, RecurringRule } from '../src/domain/types';
 
+/** v13.1（c 案）: 保存形は一形だけ — 借方 = 継続コスト台帳 + 計上先 = spread。 */
 function rule(overrides: Partial<RecurringRule> = {}): RecurringRule {
   return {
     id: 'rule',
@@ -10,7 +11,8 @@ function rule(overrides: Partial<RecurringRule> = {}): RecurringRule {
     amount: 1000,
     dayOfMonth: 20,
     everyMonths: 1,
-    debitAccountId: 'expense',
+    debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+    spreadExpenseAccountId: 'expense',
     creditAccountId: 'cash',
     startMonth: '2026-04',
     startDate: '2026-04-12',
@@ -18,14 +20,6 @@ function rule(overrides: Partial<RecurringRule> = {}): RecurringRule {
     updatedAt: '2026-04-12T00:00:00.000Z',
     ...overrides,
   };
-}
-
-function spreadRule(overrides: Partial<RecurringRule> = {}): RecurringRule {
-  return rule({
-    debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
-    spreadExpenseAccountId: 'expense',
-    ...overrides,
-  });
 }
 
 function account(overrides: Partial<Account> & Pick<Account, 'id' | 'type' | 'role'>): Account {
@@ -68,7 +62,7 @@ describe('完全導出（deriveRecurringOutputs）', () => {
   });
 
   it('月割りルールは catch-up の保存形をミラーする（virtual と時刻だけが差）', () => {
-    const subject = spreadRule({ id: 'r-1' });
+    const subject = rule({ id: 'r-1' });
     const { entries, items } = deriveRecurringOutputs([subject], accounts, '2026-05-31');
 
     expect(entries).toEqual([
@@ -135,18 +129,24 @@ describe('完全導出（deriveRecurringOutputs）', () => {
     ]);
   });
 
-  it('台帳を経由しないルールは item を作らず inputMode を役割から導出する', () => {
-    const { entries, items } = deriveRecurringOutputs([rule()], accounts, '2026-04-30');
-
-    expect(items).toEqual([]);
-    expect(entries).toHaveLength(1);
-    expect(entries[0]!.metadata).toEqual({
-      virtual: true,
-      inputMode: 'expense',
-      recurringRuleId: 'rule',
-      recurringMonth: '2026-04',
+  it('継続コスト台帳が無い・role が違うと fail-soft にそのルールを導出しない', () => {
+    const withoutLedger = [
+      account({ id: 'cash', type: 'asset', role: 'daily-asset' }),
+      account({ id: 'expense', type: 'expense', role: 'expense-category' }),
+    ];
+    expect(deriveRecurringOutputs([rule()], withoutLedger, '2026-04-30')).toEqual({
+      entries: [],
+      items: [],
     });
-    expect(entries[0]!.lines[0]).toEqual({ accountId: 'expense', side: 'debit', amount: 1000 });
+
+    const wrongRole = [
+      ...withoutLedger,
+      account({ id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, type: 'asset', role: 'daily-asset' }),
+    ];
+    expect(deriveRecurringOutputs([rule()], wrongRole, '2026-04-30')).toEqual({
+      entries: [],
+      items: [],
+    });
   });
 
   it('切り替え（半開区間）の境界日は後継の線分だけが導出する', () => {
@@ -172,16 +172,22 @@ describe('完全導出（deriveRecurringOutputs）', () => {
   });
 
   it('科目が存在しない期間・参照が壊れたルールは fail-soft に落とす', () => {
+    const ledger = account({
+      id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      type: 'asset',
+      role: 'continuing-cost-asset',
+    });
     const lateCredit = [
       account({ id: 'cash', type: 'asset', role: 'daily-asset', startDate: '2026-05-01' }),
       account({ id: 'expense', type: 'expense', role: 'expense-category' }),
+      ledger,
     ];
     const filtered = deriveRecurringOutputs([rule()], lateCredit, '2026-06-30');
     expect(filtered.entries.map((entry) => entry.date)).toEqual(['2026-05-20', '2026-06-20']);
 
     const missingCredit = deriveRecurringOutputs(
       [rule()],
-      [account({ id: 'expense', type: 'expense', role: 'expense-category' })],
+      [account({ id: 'expense', type: 'expense', role: 'expense-category' }), ledger],
       '2026-06-30',
     );
     expect(missingCredit.entries).toEqual([]);
@@ -215,7 +221,7 @@ describe('完全導出（deriveRecurringOutputs）', () => {
   });
 
   it('月割り item の終了日は次回起票日と同日（年払いも同じ規則）', () => {
-    const yearly = spreadRule({
+    const yearly = rule({
       id: 'y',
       everyMonths: 12,
       startMonth: '2026-04',

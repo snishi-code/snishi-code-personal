@@ -212,15 +212,15 @@ describe('将来の入出金の行タップ（entryOpenPlan の単一正本）',
       count: 1,
       firstDate: addMonthsToDate(todayLocal(), 1),
     });
-    // 未来へ投影される定期ルール（給与）。
-    const income = ledger.accounts.find((a) => a.role === 'income-category')!;
+    // 未来へ投影される定期ルール（支払い元 = 預金なので購入行が資金繰りへ出る）。
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
     const { createRecurringRule } = await import('../src/data/repository');
     await createRecurringRule({
-      name: '給与ルール',
+      name: '家賃ルール',
       amount: 20000000,
       dayOfMonth: 25,
-      debitAccountId: bank.id,
-      creditAccountId: income.id,
+      debitAccountId: expense.id,
+      creditAccountId: bank.id,
       startMonth: todayLocal().slice(0, 7),
       startDate: todayLocal(),
     });
@@ -228,14 +228,14 @@ describe('将来の入出金の行タップ（entryOpenPlan の単一正本）',
     const onEditEntry = vi.fn();
     const onOpenAllocations = vi.fn();
     render(view(onEditEntry, { onOpenAllocations }));
-    const rows = await screen.findAllByRole('button', { name: /カードの返済|給与ルール/ });
+    const rows = await screen.findAllByRole('button', { name: /カードの返済|家賃ルール/ });
     const repayRow = rows.find((r) => r.textContent?.includes('カードの返済'))!;
-    const salaryRow = rows.find((r) => r.textContent?.includes('給与ルール'))!;
+    const ruleRow = rows.find((r) => r.textContent?.includes('家賃ルール'))!;
 
     fireEvent.click(repayRow);
     expect(onEditEntry).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(salaryRow);
+    fireEvent.click(ruleRow);
     expect(onOpenAllocations).toHaveBeenCalledWith(
       expect.objectContaining({ ruleId: expect.any(String) }),
     );
