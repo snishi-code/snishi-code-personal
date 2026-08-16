@@ -498,3 +498,40 @@ describe('仕訳一覧の行レイアウト', () => {
     expect(text.indexOf('レイアウト確認')).toBeLessThan(text.indexOf('月割り'));
   });
 });
+
+/*
+ * 行アクションの文字化（v13.2・実ユーズ指摘「記号だと伝わりづらい」）:
+ * 反対仕訳は reverse アイコンではなく tonal の「取消」ボタン。読み上げ名は
+ * 従来の「取消/返金を記録: 摘要」を維持する（動詞: 対象 の型）。
+ */
+describe('仕訳一覧の反対仕訳ボタン', () => {
+  it('アイコンではなく tonal の「取消」文字ボタンになる', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    await upsertEntry({
+      id: 'reverse-label-entry',
+      date: todayLocal(),
+      description: '取り消せる支出',
+      kind: 'normal',
+      lines: [
+        { accountId: expense.id, side: 'debit', amount: 500 },
+        { accountId: cash.id, side: 'credit', amount: 500 },
+      ],
+      metadata: { inputMode: 'expense' },
+      createdAt: '2026-08-16T00:00:00.000Z',
+      updatedAt: '2026-08-16T00:00:00.000Z',
+    });
+    render(<View />);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.journal.view}"]`)).toBeInTheDocument();
+    });
+    await screen.findAllByText('取り消せる支出');
+
+    const button = screen.getByRole('button', { name: '取消/返金を記録: 取り消せる支出' });
+    expect(button).toHaveTextContent('取消');
+    expect(button.classList.contains('btn--tonal')).toBe(true);
+    expect(button.classList.contains('icon-btn')).toBe(false);
+    expect(button.querySelector('svg')).toBeNull();
+  });
+});

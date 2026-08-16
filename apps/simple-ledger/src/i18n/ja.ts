@@ -304,6 +304,8 @@ export const ja = {
   'entry.loanArrangeBack': 'ローンをやめる',
 
   'journal.reverseAction': '取消/返金を記録',
+  // 行ボタンは短い動詞（v13.2: 記号は伝わらない。既存タグ「取消/返金」と同じ語）。
+  'journal.reverseShort': '取消',
   'journal.reversalTag': '取消/返金',
   'journal.filteredByAccount': '「{name}」で絞り込み中',
   'journal.clearAccountFilter': '科目の絞り込みを解除',

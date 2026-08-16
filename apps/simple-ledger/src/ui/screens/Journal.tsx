@@ -507,12 +507,12 @@ export function Journal({
                 isOpening ? null : isRecovery ? null : (
                   <button
                     type="button"
-                    className="icon-btn"
+                    className="btn btn--tonal"
                     onClick={() => onReverse(entry)}
                     aria-label={`${t('journal.reverseAction')}: ${entry.description}`}
                     data-ui={UI.journal.entry.reverse}
                   >
-                    <Icon name="reverse" size={18} />
+                    {t('journal.reverseShort')}
                   </button>
                 )}
                 <span
