@@ -16,12 +16,18 @@ import type { AppRuntime } from './appRuntime';
 import { CheckRow, clone, Field, moveInArray, RowTools } from './EntityEditParts';
 import { useRegisterEditor } from './registries';
 
-const ITEM_KINDS: readonly ItemKind[] = ['text', 'select'];
+const ITEM_KINDS: readonly ItemKind[] = ['text', 'decimal', 'select'];
 
-/** 種類を切り替える。種類ごとの専用フィールド (単位/正常文 と 選択肢) は排他的に初期化する。 */
+/**
+ * 種類を切り替える。種類ごとの専用フィールド (単位/正常文 と 選択肢) は排他的に初期化する。
+ * text ⇄ decimal は持つフィールドが同じ (単位・正常文) なのでそのまま持ち越す
+ * — 出るキーボードを変えるだけの切替で、単位や正常文を入れ直させない。
+ */
 export function morphItemKind(item: TemplateItem, kind: ItemKind): void {
   if (!ITEM_KINDS.includes(kind)) return;
+  const crossesSelect = (item.kind === 'select') !== (kind === 'select');
   item.kind = kind;
+  if (!crossesSelect) return;
   delete item.unit;
   delete item.normal;
   delete item.options;
@@ -216,10 +222,11 @@ export function FormatEditView({
                 }
               >
                 <option value="text">{s.tpl.itemKindText}</option>
+                <option value="decimal">{s.tpl.itemKindDecimal}</option>
                 <option value="select">{s.tpl.itemKindSelect}</option>
               </select>
             </Field>
-            {item.kind === 'text' ? (
+            {item.kind !== 'select' ? (
               <Field label={s.tpl.itemUnit}>
                 <input
                   className="input"
@@ -231,8 +238,12 @@ export function FormatEditView({
               </Field>
             ) : null}
           </div>
+          {/* 「数字」は打てる文字を狭めない。"/" が打てないことだけ選んだ時点で伝える。 */}
+          {item.kind === 'decimal' ? (
+            <p className="muted settingsHint">{s.tpl.itemKindDecimalHint}</p>
+          ) : null}
           {/* 正常文は 1 行が長いので種類の行には並べず、全幅で置く。 */}
-          {item.kind === 'text' ? (
+          {item.kind !== 'select' ? (
             <Field label={s.tpl.itemNormal}>
               <input
                 className="input"

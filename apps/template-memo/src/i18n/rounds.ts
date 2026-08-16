@@ -267,7 +267,12 @@ export const s = {
     itemLabel: 'ラベル（例 肺音）',
     itemKind: '種類',
     itemKindText: '入力',
+    itemKindDecimal: '数字',
     itemKindSelect: '選択',
+    // 「数字」は打てる文字を狭めるのではなく、出るキーボードを寄せるだけ。
+    // "/" が要る項目 (血圧など) は「入力」のままにする必要があるので、選んだときだけ出す。
+    itemKindDecimalHint:
+      '数字のキーボードを優先して出します。「/」は打てないので、120/80 のような項目は「入力」にしてください。',
     itemUnit: '単位（例 mmHg・℃）',
     itemNormal: '正常文（例 明らかなラ音なし）',
     itemOptions: '選択肢',
