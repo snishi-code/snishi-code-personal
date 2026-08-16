@@ -137,6 +137,14 @@ function v12Package() {
   const r4 = rule({ id: 'r4', postedThroughMonth: '2026-04' } as Partial<RecurringRule> & {
     id: string;
   });
+  // R5: 孤児 — 04 に起票済みだが、その後ルールを編集して位相 anchor が 05 へ動いた。
+  // 現在のパラメータでは 04 をどう転んでも導出できない（span < 0）。
+  // 変換は購入仕訳と item を手動形へ降格して残高を保全しなければならない。
+  const r5 = rule({
+    id: 'r5',
+    startMonth: '2026-05',
+    postedThroughMonth: '2026-05',
+  } as Partial<RecurringRule> & { id: string });
 
   const r1Recovery: JournalEntry = {
     id: 'recovery-r1',
@@ -200,6 +208,8 @@ function v12Package() {
       storedPosting(r3, '2026-06'), // 05 はスキップ（中抜き）
       r3Recovery,
       r4Direct, // 構造的逸脱
+      storedPosting(r5, '2026-04'), // 孤児（位相の外）
+      storedPosting(r5, '2026-05'), // こちらは導出される
     ],
     tags: [
       { id: 'trip', name: '旅行', scope: 'entry', archived: false, createdAt: 'x', updatedAt: 'x' },
@@ -211,8 +221,10 @@ function v12Package() {
       storedItem(r2, '2026-05'),
       storedItem(r3, '2026-04'),
       storedItem(r3, '2026-06'),
+      storedItem(r5, '2026-04'),
+      storedItem(r5, '2026-05'),
     ],
-    recurringRules: [r1, r2, r3, r4],
+    recurringRules: [r1, r2, r3, r4, r5],
     settings: { ledgerName: '家計簿', currency: 'JPY', displayFractionDigits: 0 },
   };
 }
@@ -233,7 +245,8 @@ describe.skipIf(CONVERTER === undefined)('v12→v13 変換（合成フィクス�
 
     // 保存 rec-/ccr-/カーソルの消滅。
     expect(pkg.journalEntries.some((e) => e.id.startsWith('rec-'))).toBe(false);
-    expect(pkg.monthlyCostItems.length).toBe(0);
+    // ccr- は 1 件も残らない（降格した孤児 item は新しい UUID の手動 item になる）。
+    expect(pkg.monthlyCostItems.some((m) => m.id.startsWith('ccr-'))).toBe(false);
     expect(pkg.recurringRules.every((r) => !('postedThroughMonth' in r))).toBe(true);
 
     const byId = new Map(pkg.recurringRules.map((r) => [r.id, r] as const));
@@ -293,12 +306,40 @@ describe.skipIf(CONVERTER === undefined)('v12→v13 変換（合成フィクス�
     expect(deriveRecurringOutputs([r4], accounts, '2026-04-30').entries).toEqual([]);
     expect(stdout).toContain('降格');
 
+    // R5: 孤児（位相の外の過去起票）も手動仕訳 + 手動 item へ降格し、費用化ごと残高を保全する。
+    // ここを落とすと、変換で購入と月割りが黙って消える（実データで実際に 2 サイクル消えた）。
+    const r5 = byId.get('r5')!;
+    expect(deriveRecurringOutputs([r5], accounts, '2026-04-30').entries).toEqual([]);
+    const orphan = pkg.journalEntries.find(
+      (e) => e.description === 'r5' && e.date === '2026-04-20',
+    )!;
+    expect(orphan).toBeDefined();
+    expect(orphan.id.startsWith('rec-')).toBe(false);
+    expect(orphan.metadata?.recurringRuleId).toBeUndefined();
+    // 対の item は手動 item として同じ内容で残り、購入仕訳がそれを指す（台帳の不変条件⑧）。
+    const orphanItemId = orphan.metadata?.monthlyCostId!;
+    expect(orphanItemId).toBeDefined();
+    expect(orphanItemId.startsWith('ccr-')).toBe(false);
+    const orphanItem = pkg.monthlyCostItems.find((m) => m.id === orphanItemId)!;
+    expect(orphanItem).toMatchObject({
+      name: 'r5',
+      amount: 1000,
+      startDate: '2026-04-20',
+      endDate: '2026-05-20',
+    });
+    // 05 は現在のルールが導出するので降格しない（孤児判定が過剰でないこと）。
+    expect(
+      deriveRecurringOutputs([r5], accounts, '2026-05-31').entries.map(
+        (e) => e.metadata?.recurringMonth,
+      ),
+    ).toEqual(['2026-05']);
+
     // 実 import まで通る（v13 アプリの受け入れ）。
     const outcome = await importFromJsonText(JSON.stringify(out), { force: true });
     expect(outcome.kind).toBe('ok');
     const ledger = await loadLedger();
     expect(ledger.recurringRules.length).toBe(pkg.recurringRules.length);
-    expect(ledger.monthlyCostItems.length).toBe(0);
+    expect(ledger.monthlyCostItems.every((m) => !m.id.startsWith('ccr-'))).toBe(true);
   });
 
   it('版違い・出力既存・不正引数は fail-closed に拒否する', () => {
