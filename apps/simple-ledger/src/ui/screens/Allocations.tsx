@@ -463,25 +463,28 @@ export function Allocations({
                     <span className="list__amount">
                       <Money amount={r.amount} currency={currency} />
                     </span>
+                    {/* 一等地の動詞は文字ボタン（v13.1: 普遍的でない動詞はアイコンにしない）。 */}
                     {canEndToday ? (
                       <div className="row-actions">
                         <button
                           type="button"
-                          className="icon-btn"
+                          className="btn btn--ghost"
+                          style={{ minHeight: 'var(--tap)' }}
                           onClick={rowActionClick(() => setSwitchingRule(r))}
                           aria-label={`${t('recurring.switch')}: ${r.name}`}
                           data-ui={UI.allocations.recurringSwitch}
                         >
-                          <Icon name="transfer" size={18} />
+                          {t('recurring.switchShort')}
                         </button>
                         <button
                           type="button"
-                          className="icon-btn"
+                          className="btn btn--ghost"
+                          style={{ minHeight: 'var(--tap)' }}
                           onClick={rowActionClick(() => setEndingRule(r))}
                           aria-label={`${t('recurring.end')}: ${r.name}`}
                           data-ui={UI.allocations.recurringEnd}
                         >
-                          <Icon name="archive" size={18} />
+                          {t('recurring.end')}
                         </button>
                       </div>
                     ) : null}
@@ -556,14 +559,16 @@ export function Allocations({
                          「生まれたものへの個別操作は不可」＝調整は由来ルール側で行う）。
                          削除は編集シート最下部へ移設（動詞体系 v13.1）。 */ ? null : (
                       <span className="row-actions">
+                        {/* 一等地の動詞は文字ボタン「終了」（旧アーカイブ・v13.1）。 */}
                         <button
                           type="button"
-                          className="icon-btn"
+                          className="btn btn--ghost"
+                          style={{ minHeight: 'var(--tap)' }}
                           onClick={rowActionClick(() => setArchiving(m))}
                           aria-label={`${t('ccItem.archiveTitle')}: ${m.name}`}
                           data-ui={UI.allocations.archive}
                         >
-                          <Icon name="archive" size={18} />
+                          {t('ccItem.archiveTitle')}
                         </button>
                       </span>
                     )}

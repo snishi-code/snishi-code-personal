@@ -517,7 +517,7 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
     //（同日刻み 2024-02-01〜06-01 の 5 本 × 1,200 のうち、5月末までに 4 本ぶん済み）。
     expect(within(card).getByText('残存価値').closest('.kv')).toHaveTextContent('1,200');
 
-    fireEvent.click(screen.getByRole('button', { name: `アーカイブ: ${item.name}` }));
+    fireEvent.click(screen.getByRole('button', { name: `終了: ${item.name}` }));
     const dialog = document.querySelector(
       `[data-ui="${UI.allocations.archiveDialog}"]`,
     ) as HTMLElement;
@@ -651,7 +651,7 @@ describe('アーカイブシート', () => {
     return document.querySelector(`[data-ui="${dataUi}"]`) as HTMLInputElement;
   }
   async function openSheet(name: string) {
-    fireEvent.click(await screen.findByRole('button', { name: `アーカイブ: ${name}` }));
+    fireEvent.click(await screen.findByRole('button', { name: `終了: ${name}` }));
     await waitFor(() => expect(sheet()).toBeInTheDocument());
   }
   function save() {

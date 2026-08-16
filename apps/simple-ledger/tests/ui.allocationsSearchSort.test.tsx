@@ -113,9 +113,13 @@ async function seed() {
 }
 
 function itemNames(): string[] {
-  return [...document.querySelectorAll(`[data-ui="${UI.allocations.item}"] .list__title`)].map(
-    (el) => (el.textContent ?? '').trim(),
-  );
+  // タイトルバーには「終了」の文字ボタン（v13.1 のテキスト行アクション）も並ぶため、
+  // 名前部分（先頭の span）だけを読む。
+  return [
+    ...document.querySelectorAll(
+      `[data-ui="${UI.allocations.item}"] .list__title > span:first-child`,
+    ),
+  ].map((el) => (el.textContent ?? '').trim());
 }
 
 function ruleNames(): string[] {

@@ -106,7 +106,8 @@ export const ja = {
   'ccItem.endDateClear': '終了日を解除',
   'ccItem.period': '期間',
   'ccItem.remainingValue': '残存価値',
-  'ccItem.archiveTitle': 'アーカイブ',
+  // 動詞は「終了」（v13.1・行アクションのテキスト化。「アーカイブ」の語は持ち物系から撤去）。
+  'ccItem.archiveTitle': '終了',
   // アーカイブシート（終了日 + 回収 + 残りの扱いを 1 枚で決める。シート自体が確認面）。
   'ccItem.archiveDateHint': 'この日で終わりにします。先の日付にすれば一覧へ戻せます。',
   'ccItem.archiveRecovery': '回収額',
@@ -120,7 +121,7 @@ export const ja = {
   'ccItem.archiveRemainderExpenseHint':
     '過去の月額はそのままにして、残りを終了日の「{account}」へ 1 本で計上します。',
   'ccItem.archiveRemainderNoneHint': '残りがないので、どちらを選んでも結果は変わりません。',
-  'ccItem.archiveConfirm': 'アーカイブする',
+  'ccItem.archiveConfirm': '終了する',
   'ccItem.openPurchase': 'その仕訳を開く',
   'ccItem.quickSpan': '{years}年',
 
@@ -781,6 +782,8 @@ export const ja = {
   // 切り替えシート（v13・作者確定 2026-08-16）: 「編集 = 全期間を引き直す」に対して
   // 「切り替え = この日から別の線」。位相（起票周期の基準月）と科目は現在のルールから引き継ぐ。
   'recurring.switch': '切り替え',
+  // 行アクションのテキストボタン（44px・aria は従来どおり動詞: 名前）。
+  'recurring.switchShort': '切替',
   'recurring.switchTitle': 'この日から切り替える',
   'recurring.switchDate': '切り替え日',
   'recurring.switchDateHint':
