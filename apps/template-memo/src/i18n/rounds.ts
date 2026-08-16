@@ -536,6 +536,8 @@ export const s = {
       section: 'フレーム',
       add: 'フレームを作る',
       usage: (n: number) => `テンプレート ${n}件で使用`,
+      // 行そのものが編集ボタン (鉛筆は廃止)。読み上げでは名前と用途が要る。
+      editAria: (name: string) => `${name} を編集`,
       deleteConfirmTitle: 'フレームを削除しますか？',
       deleteConfirmBody: (name: string) => `「${name}」を削除します。`,
     },
@@ -543,6 +545,8 @@ export const s = {
       section: 'フォーマット',
       add: 'フォーマットを作る',
       usage: (n: number) => `テンプレート ${n}件で使用`,
+      // 行そのものが編集ボタン (鉛筆は廃止)。読み上げでは名前と用途が要る。
+      editAria: (name: string) => `${name} を編集`,
       deleteConfirmTitle: 'フォーマットを削除しますか？',
       deleteConfirmBody: (name: string) => `「${name}」を削除します。`,
     },

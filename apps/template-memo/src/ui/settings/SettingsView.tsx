@@ -568,14 +568,19 @@ function FrameSettingsSection({
         const usageCount = templates.filter((template) => template.frameId === frame.id).length;
         return (
           <div key={frame.id} className="formatListRow">
-            <span className="pickerRowMain">
+            {/* 行そのものが編集への入口 (家計簿と同じ「カードタップ = 編集」)。
+                編集アイコンは、行タップに別の操作が載っているもの
+                (テンプレート = デフォルト切替 / グループ = 切替) にだけ残す。 */}
+            <button
+              type="button"
+              className="pickerRowMain"
+              aria-label={s.settings.frame.editAria(frame.name || s.common.untitled)}
+              onClick={() => onEdit(frame)}
+            >
               <span className="pickerRowLabel">{frame.name || s.common.untitled}</span>
               <span className="pickerRowMeta">{s.settings.frame.usage(usageCount)}</span>
-            </span>
+            </button>
             <span className="formatListActions">
-              <IconButton label={s.common.edit} onClick={() => onEdit(frame)}>
-                <Icon name="edit" size={16} />
-              </IconButton>
               <IconButton
                 label={s.common.duplicate}
                 disabled={busy}
@@ -692,14 +697,19 @@ function FormatSettingsSection({
         ).length;
         return (
           <div key={format.id} className="formatListRow">
-            <span className="pickerRowMain">
+            {/* 行そのものが編集への入口 (家計簿と同じ「カードタップ = 編集」)。
+                編集アイコンは、行タップに別の操作が載っているもの
+                (テンプレート = デフォルト切替 / グループ = 切替) にだけ残す。 */}
+            <button
+              type="button"
+              className="pickerRowMain"
+              aria-label={s.settings.format.editAria(format.name || s.common.untitled)}
+              onClick={() => onEdit(format)}
+            >
               <span className="pickerRowLabel">{format.name || s.common.untitled}</span>
               <span className="pickerRowMeta">{s.settings.format.usage(usageCount)}</span>
-            </span>
+            </button>
             <span className="formatListActions">
-              <IconButton label={s.common.edit} onClick={() => onEdit(format)}>
-                <Icon name="edit" size={16} />
-              </IconButton>
               <IconButton
                 label={s.common.duplicate}
                 disabled={busy}
