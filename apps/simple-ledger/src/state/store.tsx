@@ -26,7 +26,6 @@ import {
 } from '../data/exportImport';
 import { useToast } from '@snishi/foundation/ui/toast';
 import { clearOnboardingDone } from '../data/localFlags';
-import { todayLocal } from '../util/time';
 import { errorText, t } from '../i18n';
 import { LedgerError } from '../domain/errors';
 
@@ -120,15 +119,6 @@ interface LedgerContextValue {
 
 const LedgerContext = createContext<LedgerContextValue | null>(null);
 
-/** 一部ルールだけを飛ばした場合は true。個別データを通知文へ含めない。 */
-async function catchUpRecurringRulesToday(): Promise<boolean> {
-  let skipped = false;
-  await repo.catchUpRecurringRules(todayLocal(), () => {
-    skipped = true;
-  });
-  return skipped;
-}
-
 export function LedgerProvider({ children }: { children: ReactNode }) {
   const toast = useToast();
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -157,15 +147,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     let active = true;
     (async () => {
       try {
-        // 定期ルールの経過分をキャッチアップ起票してから読み込む（GnuCash の Since-Last-Run 同型）。
-        // 起票に失敗してもアプリは開く（fail-soft）。
-        let catchUpFailed: boolean;
-        try {
-          catchUpFailed = await catchUpRecurringRulesToday();
-        } catch {
-          // 破損ルール等。台帳表示は続行する。
-          catchUpFailed = true;
-        }
+        // v13: 起動時のキャッチアップ起票は存在しない。ルール由来は読み取り時に導出する。
         let next = await repo.loadLedger();
         if (sampleFixtureRequested() && isPristineSeedLedger(next)) {
           next = await loadSampleFixture();
@@ -173,9 +155,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         if (active) {
           setLedger(next);
           setStatus('ready');
-          if (catchUpFailed) {
-            toast.show(t('toast.recurringCatchUpPartialFailed'), 'error');
-          }
         }
       } catch (e) {
         if (active) {
@@ -291,25 +270,17 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   );
 
   const finishRecurringMutation = useCallback(async () => {
-    // ルール本体の保存後に起票または再読込だけが失敗しても、再送可能な
-    // 「未保存」扱いに戻さない。新規では別 ID の同一ルール、分割では
-    // 追加 segment を重複保存し得るため、durable 境界の後は警告だけで完了する。
+    // ルール本体の保存後に再読込だけが失敗しても、再送可能な「未保存」扱いに戻さない。
+    // 新規では別 ID の同一ルール、分割では追加 segment を重複保存し得るため、
+    // durable 境界の後は警告だけで完了する。
     let followupError: unknown;
-    let catchUpSkipped = false;
-    try {
-      catchUpSkipped = await catchUpRecurringRulesToday();
-    } catch (e) {
-      followupError = e;
-    }
     try {
       await refresh();
     } catch (e) {
-      followupError ??= e;
+      followupError = e;
     }
     if (followupError !== undefined) {
       toast.show(t('toast.recurringSavedFollowupFailed'), 'error');
-    } else if (catchUpSkipped) {
-      toast.show(t('toast.recurringCatchUpPartialFailed'), 'error');
     } else {
       toast.show(t('toast.saved'), 'success');
     }
@@ -550,17 +521,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     async (text, force) => {
       const outcome = await importFromJsonText(text, { force: force ?? false });
       if (outcome.kind === 'ok') {
-        // 取り込んだ定期ルールの経過分を起票してから表示する（失敗しても import は成立）。
-        let latest = outcome.ledger;
-        let catchUpFailed: boolean;
-        try {
-          catchUpFailed = await catchUpRecurringRulesToday();
-          latest = await repo.loadLedger();
-        } catch {
-          // fail-soft
-          catchUpFailed = true;
-        }
-        applyRecoveredLedger(latest);
+        applyRecoveredLedger(outcome.ledger);
         toast.show(
           t('import.success', {
             accounts: outcome.counts.accounts,
@@ -568,9 +529,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           }),
           'success',
         );
-        if (catchUpFailed) {
-          toast.show(t('toast.recurringCatchUpPartialFailed'), 'error');
-        }
       }
       return outcome;
     },
@@ -584,21 +542,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const restoreSnapshot = useCallback<LedgerContextValue['restoreSnapshot']>(
     async (snapshot) => {
       try {
-        let next = await restoreFromSnapshot(snapshot.data);
-        // 復元した定期ルールの経過分を起票（失敗しても復元は成立）。
-        let catchUpFailed: boolean;
-        try {
-          catchUpFailed = await catchUpRecurringRulesToday();
-          next = await repo.loadLedger();
-        } catch {
-          // fail-soft
-          catchUpFailed = true;
-        }
+        const next = await restoreFromSnapshot(snapshot.data);
         applyRecoveredLedger(next);
         toast.show(t('toast.restored'), 'success');
-        if (catchUpFailed) {
-          toast.show(t('toast.recurringCatchUpPartialFailed'), 'error');
-        }
       } catch (e) {
         toast.show(errorText(e), 'error');
         throw e;

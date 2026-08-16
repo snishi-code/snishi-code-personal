@@ -515,10 +515,8 @@ export const ja = {
     '旧版データのままでは JSON の読み込みもできません。手順: ①「DB を初期化して再起動」で初期化 → ②起動後に設定から、現行版へ変換済みの JSON を読み込んでください。',
 
   'toast.saved': '保存しました。',
-  'toast.recurringCatchUpPartialFailed':
-    '一部の定期ルールを自動起票できませんでした。ルールの科目と期間を確認してください。',
   'toast.recurringSavedFollowupFailed':
-    'ルールは保存しましたが、自動起票または画面の再読込に失敗しました。画面を開き直してください。',
+    'ルールは保存しましたが、画面の再読込に失敗しました。画面を開き直してください。',
   'toast.deleted': '削除しました。',
   'toast.exported': '書き出しました。',
   'toast.restored': '復元しました。',
@@ -592,8 +590,6 @@ export const ja = {
     '金額の変更方法（全期間、または今日から）を選んでください。',
   'error.recurring.splitDependency':
     '今日分の仕訳または継続コスト資産を安全に分けられません。対象の起票内容を確認してください。',
-  'error.recurring.generatedDependency':
-    '自動起票の仕訳と継続コスト資産の対応が壊れているため操作できません。バックアップを書き出してデータを確認してください。',
   // ルール由来（rec- 仕訳 / ccr- item）の読み取り専用化（作者決定 2026-08-15）。
   // 画面から到達できない経路でも保存境界で fail-closed に止める。
   'error.recurring.generatedReadOnly':

@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
-import {
-  deriveRecurringOutputs,
-  projectedRuleItems,
-  recurringProjectionEntries,
-} from '../src/domain/recurring';
-import type { Account, JournalEntry, RecurringRule } from '../src/domain/types';
+import { deriveRecurringOutputs } from '../src/domain/recurring';
+import type { Account, RecurringRule } from '../src/domain/types';
 
 function rule(overrides: Partial<RecurringRule> = {}): RecurringRule {
   return {
@@ -52,11 +48,6 @@ const accounts: Account[] = [
     role: 'continuing-cost-asset',
   }),
 ];
-
-/** 購入行だけ（月割りの費用行を除く）。 */
-function purchaseRows(entries: JournalEntry[]): JournalEntry[] {
-  return entries.filter((entry) => entry.id.startsWith('rec-'));
-}
 
 describe('完全導出（deriveRecurringOutputs）', () => {
   it('カーソル（postedThroughMonth）を無視して存在期間の全体を導出する', () => {
@@ -156,30 +147,6 @@ describe('完全導出（deriveRecurringOutputs）', () => {
       recurringMonth: '2026-04',
     });
     expect(entries[0]!.lines[0]).toEqual({ accountId: 'expense', side: 'debit', amount: 1000 });
-  });
-
-  it('カーソル無しルールでは既存投影（購入行）と同じ集合を導出する', () => {
-    const subject = spreadRule({ id: 'r-p' });
-    const derived = deriveRecurringOutputs([subject], accounts, '2026-08-31');
-    const projected = purchaseRows(recurringProjectionEntries([subject], accounts, '2026-08-31'));
-
-    const normalize = (entry: JournalEntry) => ({
-      date: entry.date,
-      description: entry.description,
-      lines: entry.lines,
-      inputMode: entry.metadata?.inputMode,
-      recurringRuleId: entry.metadata?.recurringRuleId,
-      recurringMonth: entry.metadata?.recurringMonth,
-    });
-    expect(derived.entries.map(normalize)).toEqual(projected.map(normalize));
-
-    const projectedItems = projectedRuleItems([subject], accounts, '2026-08-31');
-    expect(derived.items.map((item) => ({ ...item, id: undefined }))).toEqual(
-      projectedItems.map((p) => ({ ...p.item, id: undefined })),
-    );
-    expect(derived.items.map((item) => item.id)).toEqual(
-      projectedItems.map((p) => `ccr-${p.rule.id}-${p.postingMonth}`),
-    );
   });
 
   it('切り替え（半開区間）の境界日は後継の線分だけが導出する', () => {

@@ -6,10 +6,9 @@ import {
   ruleExistsAt,
 } from '../src/domain/accountLifetime';
 import {
+  deriveRecurringOutputs,
   parseRuleItemId,
-  recurringCursorAfter,
   recurringPostingsDue,
-  recurringProjectionEntries,
 } from '../src/domain/recurring';
 import type { Account, RecurringRule } from '../src/domain/types';
 
@@ -117,16 +116,8 @@ describe('定期ルールの存在期間（半開区間）', () => {
     ]);
   });
 
-  it('終了済みルールのカーソルは存在期間内で起票日が来た最後の月までに限る', () => {
-    const ended = rule({ endDate: '2026-04-18' });
-    // 4/20 は終了後なので、4月を処理済みにしない。
-    expect(recurringCursorAfter(ended, '2030-12-31')).toBeUndefined();
-    // 4/20 を含む形で4/30まで存在した場合は4月まで閉じる。
-    expect(recurringCursorAfter(rule({ endDate: '2026-05-01' }), '2030-12-31')).toBe('2026-04');
-  });
-
-  it('未来投影も存在期間外の予定を作らない', () => {
-    const entries = recurringProjectionEntries(
+  it('導出も存在期間外の起票を作らない', () => {
+    const { entries } = deriveRecurringOutputs(
       [
         rule({
           debitAccountId: 'investment',
@@ -138,6 +129,7 @@ describe('定期ルールの存在期間（半開区間）', () => {
       '2026-07-31',
     );
 
+    // 4/20 は開始前・6/20 は排他的終了日の後なので、断面をどれだけ先へ伸ばしても 5/20 だけ。
     expect(entries.map((entry) => entry.date)).toEqual(['2026-05-20']);
   });
 

@@ -7,7 +7,8 @@
 import { addMonths, monthOf } from './allocation';
 import { recurringRuleLastExistingDate } from './accountLifetime';
 import { derivedEntryOrigin, type DerivedEntryOrigin } from './derivedOrigin';
-import { buildRuleItem, recurringExpenseAccountId, recurringPostingsDue } from './recurring';
+import { deriveRecurringOutputs, recurringExpenseAccountId } from './recurring';
+import { reportMonthlyCostItems } from './reportEntries';
 import { parseRuleItemId } from './recurringIds';
 import type { Account, JournalEntry, MonthlyCostItem, RecurringRule } from './types';
 import { assertSafeAmount } from './safeSum';
@@ -66,7 +67,8 @@ export interface TimelineFlowDot {
 export interface TimelineGenerationItem {
   id: string;
   name: string;
-  projected: boolean;
+  /** ルール由来の導出 item か（タップは由来ルールへ）。 */
+  ruleDerived: boolean;
   target: TimelineTarget;
 }
 
@@ -91,7 +93,8 @@ export interface TimelineMonthlyCostRow {
   id: string;
   boxKey: string;
   item: MonthlyCostItem;
-  projected: boolean;
+  /** ルール由来の導出 item か（タップは由来ルールへ）。 */
+  ruleDerived: boolean;
   originRuleId?: string;
   spans: TimelineSpan[];
   dots: TimelineFlowDot[];
@@ -324,40 +327,21 @@ function dotsOf(
 
 interface ItemCandidate {
   item: MonthlyCostItem;
-  projected: boolean;
+  ruleDerived: boolean;
   originRuleId?: string;
 }
 
-function itemCandidates(
-  items: readonly MonthlyCostItem[],
-  rules: readonly RecurringRule[],
-  through: string,
-): ItemCandidate[] {
-  const candidates: ItemCandidate[] = [];
-  const existingOrigins = new Set<string>();
-  for (const item of items) {
+function itemCandidates(items: readonly MonthlyCostItem[]): ItemCandidate[] {
+  // v13: ルール由来 item は保存されず、呼び出し側で導出済みの合成リストを受け取る。
+  // 由来（ccr- ID）だけで判定し、起票済み/未起票の区別は存在しない。
+  return items.map((item) => {
     const origin = parseRuleItemId(item.id);
-    if (origin) existingOrigins.add(`${origin.ruleId}\u0000${origin.month}`);
-    candidates.push({ item, projected: false, originRuleId: origin?.ruleId });
-  }
-  for (const rule of rules) {
-    const expenseAccountId = recurringExpenseAccountId(rule);
-    if (expenseAccountId === undefined) continue;
-    for (const posting of recurringPostingsDue(rule, through)) {
-      if (existingOrigins.has(`${rule.id}\u0000${posting.month}`)) continue;
-      const built = buildRuleItem(rule, posting, expenseAccountId, {
-        createdAt: rule.createdAt,
-        updatedAt: rule.updatedAt,
-      });
-      // recurringProjectionEntries が metadata.continuousCostId に使う一時 ID と揃える。
-      candidates.push({
-        item: { ...built, id: `${rule.id}-${posting.month}` },
-        projected: true,
-        originRuleId: rule.id,
-      });
-    }
-  }
-  return candidates;
+    return {
+      item,
+      ruleDerived: origin !== undefined,
+      ...(origin !== undefined ? { originRuleId: origin.ruleId } : {}),
+    };
+  });
 }
 
 function generationDotsOf(
@@ -375,8 +359,8 @@ function generationDotsOf(
     current.items.push({
       id: row.id,
       name: row.item.name,
-      projected: row.projected,
-      target: row.projected
+      ruleDerived: row.ruleDerived,
+      target: row.ruleDerived
         ? { kind: 'recurringRule', recurringRuleId: row.originRuleId! }
         : { kind: 'monthlyCost', monthlyCostId: row.item.id },
     });
@@ -455,7 +439,12 @@ export function buildTimelineCalendar(input: BuildTimelineCalendarInput): Timeli
     }
   }
 
-  const candidates = itemCandidates(input.monthlyCostItems, input.recurringRules, input.range.end);
+  const candidates = itemCandidates(
+    reportMonthlyCostItems(
+      { monthlyCostItems: [...input.monthlyCostItems] },
+      deriveRecurringOutputs([...input.recurringRules], [...input.accounts], input.range.end).items,
+    ),
+  );
   const monthlyRowsAll = candidates.map<TimelineMonthlyCostRow>((candidate) => {
     const span: TimelineSpan = {
       startDate: candidate.item.startDate,
@@ -466,8 +455,8 @@ export function buildTimelineCalendar(input: BuildTimelineCalendarInput): Timeli
       id: `monthlyCost:${candidate.item.id}`,
       boxKey: input.boxes.find((box) => box.kind === 'continuousCost')?.key ?? 'continuingCost',
       item: candidate.item,
-      projected: candidate.projected,
-      originRuleId: candidate.originRuleId,
+      ruleDerived: candidate.ruleDerived,
+      ...(candidate.originRuleId !== undefined ? { originRuleId: candidate.originRuleId } : {}),
       spans: [span],
       dots: dotsOf(itemDots.get(candidate.item.id) ?? new Map(), bucketOrder, input.zoom),
     };

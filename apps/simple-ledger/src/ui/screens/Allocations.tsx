@@ -33,7 +33,7 @@ import {
   recoveredAmountsByItem,
   spreadTotalOf as computeSpreadTotal,
 } from '../../domain/continuousCost';
-import { generatedEntryRuleId, generatedItemRuleId } from '../../domain/recurringIds';
+import { generatedItemRuleId } from '../../domain/recurringIds';
 import type { AccountRole } from '../../domain/accountRoles';
 import { lastExpenseCategoryId, rememberExpenseCategoryId } from '../../data/localFlags';
 import { sortAccounts } from '../../domain/accountOrder';
@@ -51,13 +51,14 @@ import {
   CATCH_UP_HARD_CAP_MONTHS,
   RECURRING_POSTABLE_ROLES,
   clampDayToMonth,
+  deriveRecurringOutputs,
   firstRecurringPostingDate,
   isRecurringSpreadDestinationRole,
   recurringDestinationAccountId,
   recurringKindOf,
-  projectedRuleItems,
   type RecurringKind,
 } from '../../domain/recurring';
+import { reportMonthlyCostItems } from '../../domain/reportEntries';
 import {
   accountExistsAt,
   earliestRecurringRuleEndDate,
@@ -176,7 +177,20 @@ export function Allocations({
   const purchaseEntryOf = (m: MonthlyCostItem): JournalEntry | undefined =>
     purchaseEntryByItem.get(m.id);
 
-  const allItems = ledger?.monthlyCostItems ?? [];
+  // v13: ルール由来 item は保存されない。ヘッダー断面までを導出して手動 item と合成する
+  // （集計と同じ単一正本 reportMonthlyCostItems。保存に残る ccr- は読まない）。
+  const derivedRecurring = useMemo(
+    () => deriveRecurringOutputs(ledger?.recurringRules ?? [], ledger?.accounts ?? [], asOf),
+    [ledger, asOf],
+  );
+  const allItems = useMemo(
+    () =>
+      reportMonthlyCostItems(
+        { monthlyCostItems: ledger?.monthlyCostItems ?? [] },
+        derivedRecurring.items,
+      ),
+    [ledger, derivedRecurring],
+  );
   // 開始前の項目はその断面にはまだ存在しない。showEnded は終了済みだけを再表示し、
   // 未来開始の項目まで先取りしない。
   const startedItems = allItems.filter((m) => m.startDate <= asOf);
@@ -225,27 +239,14 @@ export function Allocations({
         : (a: RecurringRule, b: RecurringRule) => a.name.localeCompare(b.name, 'ja') * dir;
   // loadLedger は終了が近い順で返すが、編集直後の state 由来でも順序が崩れないよう再ソートする。
   // この基準順は金額・名称の軸で同値になった行の相対順（applySort は安定ソート）も決める。
-  // 未起票周期の導出 item カード（作者決定 2026-08-15）: カーソルより後の周期を表示専用で
-  // 出す。ヘッダーを未来へ動かすとその日の状態が見える。「予定」等の区別タグは付けず、
-  // タップ（編集）はルールへ（derivedOrigin と同じ導線）。判定は投影と同じ単一正本。
-  const projectedItems = useMemo(
-    () => projectedRuleItems(ledger?.recurringRules ?? [], ledger?.accounts ?? [], asOf),
-    [ledger, asOf],
-  );
-  type ItemRow = { m: MonthlyCostItem; fromRule?: RecurringRule };
+  // ルール由来 item（導出）と手動 item は allItems で既に合成済み。見た目・操作も同型
+  // （「予定」等の区別タグは付けず、タップはルール由来なら由来ルールへ）。
   const items = applySort(
-    (
-      [
-        ...startedItems.map((m): ItemRow => ({ m })),
-        ...projectedItems.map((p): ItemRow => ({ m: p.item, fromRule: p.rule })),
-      ] as ItemRow[]
-    )
-      .filter((row) => showEnded || !isArchived(row.m, asOf))
-      .filter((row) =>
-        matchesQuery([row.m.name, accountsMap.get(row.m.expenseAccountId)?.name], query),
-      )
-      .sort((a, b) => compareMonthlyCostItems(a.m, b.m)),
-    (a, b) => itemCompare(a.m, b.m),
+    startedItems
+      .filter((m) => showEnded || !isArchived(m, asOf))
+      .filter((m) => matchesQuery([m.name, accountsMap.get(m.expenseAccountId)?.name], query))
+      .sort((a, b) => compareMonthlyCostItems(a, b)),
+    itemCompare,
   );
   // 定期ルールは loadLedger の createdAt 昇順で届く。日付軸（開始日）以外では同値の相対順が
   // この登録順になる。
@@ -335,13 +336,12 @@ export function Allocations({
   }
 
   // ルール削除はカスケード（作者決定 2026-08-15）。確認では「一緒に消える起票数」を出す。
-  // 数える対象 = そのルールが起票した保存済み仕訳（＝道連れになる仕訳と持ち物の回数）。
+  // v13: 数える対象 = 今日までに導出される起票（削除で消えるのはルール線分そのもの =
+  // 過去も未来も消えるが、体感の回数は従来どおり「今日までに立った回数」で示す）。
   const pendingRuleDeletePostings =
     pendingRuleDelete === null
       ? 0
-      : (ledger?.journalEntries ?? []).filter(
-          (entry) => generatedEntryRuleId(entry) === pendingRuleDelete.id,
-        ).length;
+      : deriveRecurringOutputs([pendingRuleDelete], ledger?.accounts ?? [], today).entries.length;
 
   return (
     <section
@@ -557,14 +557,14 @@ export function Allocations({
             {t('monthlyCost.sectionTitle')}
           </p>
           <div className="stack" data-ui={UI.allocations.list}>
-            {items.map(({ m, fromRule }) => {
-              // 導出カードに回収は存在しない（未起票周期）ので spreadTotal = amount。
-              const spreadTotal = fromRule !== undefined ? m.amount : spreadTotalOf(m);
-              // ルール由来 item（保存済み ccr- / 未起票の導出）はどちらも読み取り専用
-              // （作者決定 2026-08-15）。行アクションは出さず、タップは由来ルールへ
-              // ＝実 item と導出 item の見た目・操作が完全に同型になる。判定は単一正本。
-              const originRule = fromRule ?? rulesById.get(generatedItemRuleId(m) ?? '');
-              const fromRuleItem = fromRule !== undefined || generatedItemRuleId(m) !== undefined;
+            {items.map((m) => {
+              // 回収は実仕訳（monthlyCostRecovery）から導出する。導出 item も決定的 ID で
+              // 同じ回収に到達する（清算後の spreadTotal = amount − 回収額）。
+              const spreadTotal = spreadTotalOf(m);
+              // ルール由来 item は読み取り専用（作者決定 2026-08-15）。行アクションは出さず、
+              // タップは由来ルールへ。判定は単一正本 generatedItemRuleId。
+              const originRule = rulesById.get(generatedItemRuleId(m) ?? '');
+              const fromRuleItem = generatedItemRuleId(m) !== undefined;
               // 由来ルールが引けない ccr-（カスケード削除の取りこぼし等の破損データ）は
               // 開く先が無い＝押せる見た目にしない（誤って編集シートへ流さない・fail-closed）。
               const open =
@@ -583,7 +583,7 @@ export function Allocations({
                   key={m.id}
                   data-ui={UI.allocations.item}
                   data-ending={ending ? 'true' : undefined}
-                  data-derived-rule={fromRule?.id}
+                  data-derived-rule={fromRuleItem ? originRule?.id : undefined}
                   {...(open !== undefined
                     ? cardTapProps(`${t('common.edit')}: ${originRule?.name ?? m.name}`, open)
                     : {})}
@@ -1609,14 +1609,19 @@ function ContinuousCostItemSheet({
 /**
  * ルールの終了 = 明示的に終了点を打つ（継続コスト item のアーカイブと同じ型の小シート）。
  * 既定 = 「今日で終了する」ときに置ける最小の排他的終了日（earliestRecurringRuleEndDate）。
- * それ未満を入れても保存境界が拒否するので、画面では入力を許して理由をそのまま見せる
- * （fail-closed の判定を UI へ二重実装しない）。終了点は含まない端点なので、一覧の
- * 「{date} より前まで」と同じ意味を hint で言い直す。
+ * v13: 判定材料は保存仕訳ではなく**今日までの導出行**（保存 rec- は存在しない）。
+ * 既定より前の終了点も入力自体は許す — 存在期間の短縮は「生まれたものを消す」ための
+ * 正当な操作（作者確定 2026-08-16）で、その場合は当日までの導出も一緒に消える。
+ * 終了点は含まない端点なので、一覧の「{date} より前まで」と同じ意味を hint で言い直す。
  */
 function RecurringRuleEndSheet({ rule, onClose }: { rule: RecurringRule; onClose: () => void }) {
   const { ledger, saveRecurringRule } = useLedger();
   const [endDate, setEndDate] = useState(() =>
-    earliestRecurringRuleEndDate(rule, ledger?.journalEntries ?? [], todayLocal()),
+    earliestRecurringRuleEndDate(
+      rule,
+      deriveRecurringOutputs([rule], ledger?.accounts ?? [], todayLocal()).entries,
+      todayLocal(),
+    ),
   );
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);

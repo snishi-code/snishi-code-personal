@@ -1,9 +1,10 @@
 /*
  * 仕訳一覧の混合表示（§8）:
- *  - 保存される仕訳と計算で生まれる仕訳（費用行・ルール投影）を同じ一覧に日付順で出す
+ *  - 保存される仕訳と計算で生まれる仕訳（費用行・ルール由来の行）を同じ一覧に日付順で出す
  *  - 計算で生まれた行のタップは「毎月のもの」の元の項目 / ルールへ遷移する
  *  - 購入の仕訳はタップで編集（削除ボタンは出さない）
- *  - くり返し記帳が起票した実仕訳は読み取り専用（row-action なし・タップは由来ルール）
+ *  - くり返し記帳の行は v13 ではすべて導出行。読み取り専用（row-action なし・
+ *    タップは由来ルール）で、過去の回も未来の回も同じ見た目になる
  *  - from/to には展開上限（2100-12-31）の max が付く
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -13,7 +14,6 @@ import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { Journal, type JournalFilter } from '../src/ui/screens/Journal';
 import {
-  catchUpRecurringRules,
   createContinuousCost,
   createRecurringRule,
   loadLedger,
@@ -176,11 +176,11 @@ describe('仕訳一覧の混合表示', () => {
     expect(onOpenAllocations).toHaveBeenCalledWith({ itemId: item.id });
   });
 
-  it('未来の to を選ぶとルール投影の行が出て、タップでルールへ遷移する', async () => {
+  it('未来の to を選ぶとルール由来の行が出て、タップでルールへ遷移する', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
-    // 未来開始のルール（catchUp では起票されない = 投影だけが出る）。
+    // 未来開始のルール（断面を延ばして初めて導出される）。
     const futureMonth = addMonths(monthOf(todayLocal()), 2);
     const rule = await createRecurringRule({
       name: '未来の定期支出',
@@ -211,15 +211,16 @@ describe('仕訳一覧の混合表示', () => {
     expect(onOpenAllocations).toHaveBeenCalledWith({ ruleId: rule.id });
   });
 
-  it('くり返し記帳が起票した実仕訳は読み取り専用（row-action なし・タップは由来ルール）', async () => {
+  it('くり返し記帳の行（今日ぶんの導出行）は読み取り専用（row-action なし・タップは由来ルール）', async () => {
     // 作者決定 2026-08-15: ルールは定期起票するだけの軽い道具。生まれたものへの個別操作
     // （編集・削除・反対仕訳）は持たず、調整はルール側で行う。
+    // v13: 保存 rec- は無くなり、今日ぶんの回も未来の回と同じ導出行として出る。
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
     const invest = ledger.accounts.find((a) => a.role === 'investment-asset')!;
     const today = todayLocal();
     const rule = await createRecurringRule({
-      name: '起票済みの積立',
+      name: '今日ぶんの積立',
       amount: 1500,
       dayOfMonth: Number.parseInt(today.slice(8, 10), 10),
       debitAccountId: invest.id,
@@ -228,15 +229,15 @@ describe('仕訳一覧の混合表示', () => {
       startMonth: monthOf(today),
       startDate: today,
     });
-    // Provider 初期化時の catch-up が今日ぶんを起票する。
-    await catchUpRecurringRules(today);
+    // 起票は保存しない: 今日が周期日なので、既定の断面（今日まで）でこの回が導出される。
+    expect((await loadLedger()).journalEntries).toHaveLength(0);
 
     const onEditEntry = vi.fn();
     const onOpenAllocations = vi.fn();
     render(<View onEditEntry={onEditEntry} onOpenAllocations={onOpenAllocations} />);
-    const row = (await screen.findByText('起票済みの積立')).closest('li')!;
+    const row = (await screen.findByText('今日ぶんの積立')).closest('li')!;
 
-    // 削除・反対仕訳の row-action は出ない（未起票の投影行とまったく同じ見た目）。
+    // 削除・反対仕訳の row-action は出ない（未来の回とまったく同じ見た目）。
     expect(row.querySelector(`[data-ui="${UI.journal.entry.delete}"]`)).toBeNull();
     expect(row.querySelector(`[data-ui="${UI.journal.entry.reverse}"]`)).toBeNull();
 

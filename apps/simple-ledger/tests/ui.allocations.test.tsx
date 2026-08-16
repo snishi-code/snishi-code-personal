@@ -13,7 +13,6 @@ import { LedgerProvider, useLedger } from '../src/state/store';
 import { Allocations } from '../src/ui/screens/Allocations';
 import {
   archiveMonthlyCost,
-  catchUpRecurringRules,
   createContinuousCost,
   createRecurringRule,
   loadLedger,
@@ -539,12 +538,12 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
   });
 });
 
-describe('導出 item カード（未起票周期・表示専用）', () => {
+describe('ルール由来の item カード（導出・読み取り専用）', () => {
   it('未来断面にその日の周期の item がカードで出る。区別タグは付けず、編集はルールを開く', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
-    // 未来開始のルール = catch-up が一切走らない（起票済みゼロ・全周期が未起票）。
+    // 未来開始のルール（保存される item は無く、断面ごとに導出されるだけ）。
     await createRecurringRule({
       name: '未来のサブスク',
       amount: 3000,
@@ -554,7 +553,7 @@ describe('導出 item カード（未起票周期・表示専用）', () => {
       startMonth: '2031-02',
     });
 
-    // 断面 2031-04-30: 起票済みは無く、未起票周期 2/5・3/5・4/5 のうち
+    // 断面 2031-04-30: 導出される周期 2/5・3/5・4/5 のうち
     // [2/5,3/5]（終了 3/5 < 断面）と [3/5,4/5]（終了 4/5 < 断面）はアーカイブ済みで隠れ、
     // [4/5,5/5] だけがその日の状態として見える（同日刻み・endDate = 次回起票日）。
     await renderReady({ mode: 'date', date: '2031-04-30' });
@@ -578,13 +577,13 @@ describe('導出 item カード（未起票周期・表示専用）', () => {
     });
   });
 
-  it('起票済みの周期は実 item が出て、導出カードと二重にならない', async () => {
+  it('過去の周期も未来の周期も 1 枚ずつ出る（同じ周期が二重にならない）', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
     const today = todayLocal();
-    // 今日始まりの毎月ルール: 今日ぶんは catch-up が実 item を起票し、
-    // 未来の周期だけが導出カードになる。
+    // 今日始まりの毎月ルール。v13 では今日ぶんも来月ぶんも同じ導出カードで、
+    // 「起票済み / 未起票」の区別は無い。
     await createRecurringRule({
       name: '今日始まりのサブスク',
       amount: 3000,
@@ -593,7 +592,7 @@ describe('導出 item カード（未起票周期・表示専用）', () => {
       creditAccountId: cash.id,
       startMonth: today.slice(0, 7),
     });
-    await catchUpRecurringRules();
+    expect((await loadLedger()).monthlyCostItems).toHaveLength(0);
 
     const nextMonth = addMonthsToDate(today, 1);
     await renderReady({ mode: 'date', date: nextMonth });
@@ -601,10 +600,12 @@ describe('導出 item カード（未起票周期・表示専用）', () => {
     const cards = [...document.querySelectorAll(`[data-ui="${UI.allocations.item}"]`)].filter(
       (el) => el.textContent?.includes('今日始まりのサブスク'),
     );
-    // 実 item（今日起票・終了 = 来月同日）と導出カード（来月周期）の 2 枚だけ。
-    // 同じ周期が実 item と導出カードで二重に出ない。
+    // 今日の周期 [今日, 来月同日] と来月の周期 [来月同日, 再来月同日] の 2 枚だけ。
     expect(cards).toHaveLength(2);
-    expect(cards.filter((el) => el.hasAttribute('data-derived-rule'))).toHaveLength(1);
+    expect(cards[0]).toHaveTextContent(`${today} 〜 ${nextMonth}`);
+    expect(cards[1]).toHaveTextContent(`${nextMonth} 〜 ${addMonthsToDate(today, 2)}`);
+    // data-derived-rule はルール由来の全カードに付く（保存の有無で見た目が割れない）。
+    expect(cards.filter((el) => el.hasAttribute('data-derived-rule'))).toHaveLength(2);
     expect(names.length).toBeGreaterThanOrEqual(2);
   });
 });

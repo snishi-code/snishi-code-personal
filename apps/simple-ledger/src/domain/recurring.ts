@@ -1,24 +1,22 @@
 /*
  * 定期ルール（くり返し記帳）の純関数。
  *
- * 方式 = 会計ソフト標準の「実仕訳の自動起票」（GnuCash の Since-Last-Run と同型）:
- *  - ルールは起票の道具で、正本は起票された実仕訳（明細照合・個別月の編集ができる）。
- *  - アプリ起動時に経過月ぶんをキャッチアップ起票する（idempotent）。
- *  - 起票済み管理はルール側のカーソル（postedThroughMonth）で行う。ユーザーが起票済み
- *    仕訳を削除しても再起票しない（「今月はスキップ」を尊重する）。
+ * 方式 = **完全導出**（v13・作者決定 2026-08-16）:
+ *  - 保存するのはルール本体だけ。ルールが起票する仕訳（rec-）と継続コスト item（ccr-）は
+ *    保存せず、存在期間 [startDate, endDate) と周期位相から任意の断面へ毎回導出する。
+ *  - 「起票済みか」という概念・カーソル・キャッチアップ起票は存在しない。過去も未来も
+ *    同じ規則で並ぶ（今日は挙動境界ではない）。
+ *  - 生まれたものへの個別操作は無い。調整はルールの編集（全期間を引き直す）・
+ *    切り替え（この日から別線分）・補正で行う。
  *  - everyMonths（必須。1 = 毎月）で間引く。位相は startMonth 基点。
  *  - 継続コスト台帳を経由して月割りするかは**登録時の明示トグル**で決まる（勘定科目の
- *    role で動作を変えない＝意味づけはユーザーが決める）。トグル ON の起票は
- *    `借方 継続コスト台帳 / 貸方 源泉` + item 自動生成（repository 側）。
- *    投影もここで購入行 + 月割り行（cc-allocp）を両方出す＝未来断面で台帳が積み上がらない。
- *  - spreadExpenseAccountId の有無がトグルの状態そのもの（保存された正規形が唯一の真実）。
- *    値は月割りの計上先（費用・収入に限らず、積立先の資産や税金の科目も入る）。
- *    トグル OFF のルールは行き先へ直接起票する。保存形はこの二形だけ。
+ *    role で動作を変えない）。spreadExpenseAccountId の有無がトグルの状態そのもの
+ *    （保存された正規形が唯一の真実）。ON の導出 = `借方 台帳 / 貸方 源泉` の購入行 + item。
+ *    月割りの費用行は導出 item を continuousCostEntries に通して出す（実 item と同じ engine）。
  */
 import { addMonths, monthOf, monthsBetween } from './allocation';
 import { ACCOUNT_ROLES, isInternalRole, type AccountRole } from './accountRoles';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from './constants';
-import { continuousCostEntriesForItem } from './continuousCost';
 import { ruleEntryId, ruleItemId } from './recurringIds';
 import { CATCH_UP_HARD_CAP_MONTHS } from './recurringLimits';
 import {
@@ -137,16 +135,7 @@ export function clampDayToMonth(ym: string, day: number): string {
   return `${ym}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
 }
 
-/**
- * 指定日まで走査済みにしてよい最後の月。
- * その月の予定日が指定日より後なら前月に留め、未到来の発生を飛ばさない。
- */
-export function recurringCursorThroughDate(rule: RecurringRule, date: string): string {
-  const month = monthOf(date);
-  return clampDayToMonth(month, rule.dayOfMonth) <= date ? month : addMonths(month, -1);
-}
-
-/** 暴走防止の上限（1 回の catch-up で走査する月数。超過分は次回の catch-up が続きを処理する）。 */
+/** 暴走防止の上限（1 回の導出列挙で走査する月数）。 */
 export { CATCH_UP_HARD_CAP_MONTHS } from './recurringLimits';
 
 export interface RecurringPosting {
@@ -155,10 +144,9 @@ export interface RecurringPosting {
 }
 
 /**
- * 1 回の catch-up が走査する月 index の範囲 [first, last]（startMonth からの月数）。
- * カーソル（postedThroughMonth）の次の月から最大 CATCH_UP_HARD_CAP_MONTHS か月。
- * recurringPostingsDue と recurringCursorAfter が同じ窓を共有する＝カーソルは走査した
- * 最後の月より先へ進まない（上限を超えた月が「処理済み」になって永久に飛ばされない）。
+ * 列挙する月 index の範囲 [first, last]（startMonth からの月数）。
+ * v13: カーソルは存在しない前提（deriveRecurringOutputs は落としてから渡す）だが、
+ * 版上げまでの過渡データが持つ postedThroughMonth も従来規則で respect する。
  */
 function catchUpWindow(rule: RecurringRule, today: string): { first: number; last: number } | null {
   // 終了済みルールは排他的終了日の月まで見れば十分。today までカーソル走査を伸ばさない。
@@ -328,135 +316,6 @@ function projectablePostings(ctx: RuleProjectionContext, asOf: string): Recurrin
       accountExistsAt(ctx.credit, posting.date) &&
       accountExistsAt(ctx.debit, posting.date),
   );
-}
-
-/** 未起票周期の表示専用 item（「毎月のもの」の導出カード）。 */
-export interface ProjectedRuleItem {
-  /** 仮 item。id = `{ruleId}-{postingMonth}`（保存されない・投影の費用行と同じ規則）。 */
-  item: MonthlyCostItem;
-  rule: RecurringRule;
-  postingMonth: string;
-}
-
-/**
- * 未起票周期の item を表示専用で導出する（作者決定 2026-08-15・導出 item カード）。
- * カーソル（postedThroughMonth）より後だけを出すため実 item と重複しない。
- * 「予定」等の区別タグは付けない・タップはルールへ（derivedOrigin と同じ導線）。
- * 判定は recurringProjectionEntries と同じ文脈（ruleProjectionContext）を使う。
- */
-export function projectedRuleItems(
-  rules: RecurringRule[],
-  accounts: Account[],
-  asOf: string,
-): ProjectedRuleItem[] {
-  const byId = new Map(accounts.map((account) => [account.id, account] as const));
-  const out: ProjectedRuleItem[] = [];
-  for (const rule of rules) {
-    const ctx = ruleProjectionContext(rule, byId);
-    if (!ctx || ctx.expenseAccountId === undefined) continue;
-    const expenseAccountId = ctx.expenseAccountId;
-    for (const posting of projectablePostings(ctx, asOf)) {
-      const ephemeral = buildRuleItem(rule, posting, expenseAccountId, {
-        createdAt: rule.createdAt,
-        updatedAt: rule.updatedAt,
-      });
-      out.push({
-        item: { ...ephemeral, id: `${rule.id}-${posting.month}` },
-        rule,
-        postingMonth: posting.month,
-      });
-    }
-  }
-  return out;
-}
-
-/**
- * 選択した基準日までの、未起票分を表示専用の仮想仕訳として投影する。
- * 永続化とカーソル更新は行わず、postedThroughMonth より後だけを出すため実仕訳と二重計上しない。
- *
- * 月割りトグルが ON のルール（spreadExpenseAccountId あり）は購入行に加えて**月割り行も投影する**
- * （`cc-allocp-{ruleId}-{postingMonth}-{YYYY-MM}`）。これを落とすと未来断面で
- * 継続コスト台帳が購入行ぶんだけ積み上がり、純資産が実在しない額まで膨らむ。
- * 二重展開はしない: 起票済み月は item 側（continuousCostEntries）が展開し、
- * ここはカーソルより後の月だけを出す。
- */
-export function recurringProjectionEntries(
-  rules: RecurringRule[],
-  accounts: Account[],
-  asOf: string,
-): JournalEntry[] {
-  const byId = new Map(accounts.map((account) => [account.id, account] as const));
-  const projected: JournalEntry[] = [];
-  for (const rule of rules) {
-    const ctx = ruleProjectionContext(rule, byId);
-    if (!ctx) continue;
-    const spreadsExpense = ctx.expenseAccountId !== undefined;
-    for (const posting of projectablePostings(ctx, asOf)) {
-      projected.push({
-        id: `rec-proj-${rule.id}-${posting.month}`,
-        date: posting.date,
-        description: rule.name,
-        kind: 'normal',
-        lines: [
-          { accountId: ctx.debitAccountId, side: 'debit', amount: rule.amount },
-          { accountId: rule.creditAccountId, side: 'credit', amount: rule.amount },
-        ],
-        metadata: {
-          virtual: true,
-          inputMode: ctx.inputMode,
-          recurringRuleId: rule.id,
-          recurringMonth: posting.month,
-          // 月割りルールの投影購入行も、同じ投影から生まれる費用行と同じ
-          // ephemeral item ID を持たせる。仕訳一覧では両方を「継続コスト」と表示する。
-          // virtual 行だけの印であり、保存境界の continuousCostId 拒否は維持する。
-          ...(spreadsExpense ? { continuousCostId: `${rule.id}-${posting.month}` } : {}),
-        },
-        createdAt: rule.createdAt,
-        updatedAt: rule.updatedAt,
-      });
-      if (ctx.expenseAccountId !== undefined) {
-        const ephemeral = buildRuleItem(rule, posting, ctx.expenseAccountId, {
-          createdAt: rule.createdAt,
-          updatedAt: rule.updatedAt,
-        });
-        // id を `{ruleId}-{postingMonth}` にすると費用行 ID が
-        // `cc-allocp-{ruleId}-{postingMonth}-{YYYY-MM}` になる（item 由来の cc-alloc と衝突しない）。
-        // metadata に recurringRuleId を足す＝仕訳一覧のタップでルールへ飛べる（投影 item は実在しないため）。
-        projected.push(
-          ...continuousCostEntriesForItem(
-            { ...ephemeral, id: `${rule.id}-${posting.month}` },
-            asOf,
-            ephemeral.amount,
-            'cc-allocp',
-          ).map((e) => ({
-            ...e,
-            metadata: { ...e.metadata, recurringRuleId: rule.id, recurringMonth: posting.month },
-          })),
-        );
-      }
-    }
-  }
-  return projected;
-}
-
-/** キャッチアップ後にルールへ書き戻すカーソル（起票日が到来した最後の月。走査した窓の中まで）。 */
-export function recurringCursorAfter(rule: RecurringRule, today: string): string | undefined {
-  const window = catchUpWindow(rule, today);
-  if (!window) return rule.postedThroughMonth;
-  const ended = rule.endDate !== undefined && rule.endDate <= today;
-  const horizon = ended ? (recurringRuleLastExistingDate(rule) ?? today) : today;
-  // 終了月も、起票日が実際の最終存在日までに来た場合だけ処理済みとする。
-  // 存在期間外の予定日までカーソルを進めると、後から endDate を外して線分を
-  // 再び伸ばしたときに、未起票の当月分を永久に飛ばしてしまう。
-  let through = recurringCursorThroughDate(rule, horizon);
-  // 走査していない月をカーソルが飛び越えない（recurringPostingsDue と同じ窓・監査 P1-9）。
-  const scannedThrough = addMonths(rule.startMonth, window.last);
-  if (through > scannedThrough) through = scannedThrough;
-  if (through < rule.startMonth) return rule.postedThroughMonth;
-  if (rule.postedThroughMonth !== undefined && through <= rule.postedThroughMonth) {
-    return rule.postedThroughMonth;
-  }
-  return through;
 }
 
 /* ── 完全導出（v13）── */
