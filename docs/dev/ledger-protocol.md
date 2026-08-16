@@ -22,7 +22,7 @@
 ```jsonc
 {
   "appId": "snishi-code.simple-ledger-v2",
-  "schemaVersion": 12,
+  "schemaVersion": 13,
   "ledgerId": "ledger",
   "exportedAt": "2026-07-29T00:00:00.000Z",
   "deviceId": "<uuid>",
@@ -31,10 +31,8 @@
     /* Account[]（type + role 付き） */
   ],
   "journalEntries": [
-    /* JournalEntry[]（保存される仕訳のみ。未来日付の仕訳 = 「予定」もここに入る） */
-  ],
-  "tags": [
-    /* Tag[]（撤去済み・受理のみ。作る経路は無く、実データは常に []） */
+    /* JournalEntry[]（保存される仕訳のみ。未来日付の仕訳 = 「予定」もここに入る。
+       ルール由来（rec- / 由来メタ）は保存されない = 含まれていたら invalid・v13） */
   ],
   "monthlyCostItems": [
     /* MonthlyCostItem[]（継続コスト資産） */
@@ -89,6 +87,7 @@
 | **v8→v9**（2026-08-11）                        | 取込プロファイルのアーカイブ（`ImportProfile.archived`）・上書き保存の廃止・`ProfileBinding.importFromDate`（取込開始日）。ストア構成は不変（DB_VERSION 9 は版対応を 1:1 に保つために上げた）。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | **v9→v10**（2026-08-11・CSV 取込の全撤去）     | **CSV 取込一式を撤去**（実ユーズの結論・作者決定 2026-08-11。「ざっくり登録して差額は残高補正で吸収」の使い方に明細単位の CSV 取込は合わない＝使わない死荷重）。v8〜v9 の型・schema・store 参照・UI・交換 JSON の 3 配列・`EntryMetadata` の取込由来を削除（DB_VERSION 10。upgrade は旧 3 ストアを温存 = 黙って削除しない）。設計は git 履歴に残る（将来要望が出たら再導入可能）。                                                                                                                                                                                                                                                                                                                                                              |
 | **v10→v11**（2026-08-13・金額の 1/100 単位化） | **全金額 ×100（minor 単位）**・`settings.locale` 撤去・`settings.displayFractionDigits`（表示桁数 0\|1\|2・入力の刻み連動）新設・snapshot `reason` の理由コード化・`amountSchema` に上限 10^12 追加（集計 overflow ガード = `domain/safeSum` と対）。導出（月割り・投影・返済分割）は minor をそのまま扱い 1 単位へ丸め直さない（表示の丸めは表示層のみ）。実データは単発変換（DB_VERSION 11）。 |
+| **v12→v13**（2026-08-16・完全導出） | **ルール由来の保存を全廃**（`rec-` 仕訳・`ccr-` item・`postedThroughMonth`。wire では invalid・アプリはルール線分から毎回導出）。**`RecurringRule.settlements`（清算）を新設**（ルール由来 item の早期終了の上書き。回収は実仕訳のまま）。**タグをフィールドごと削除**（`tags` / `tagIds`）。編集 = 全期間の引き直し / 切り替え = 半開区間の境界（切り替えシート + 清算）。実データの変換 = `_workspace-management/scripts/convert-ledger-v12-to-v13.mjs`（単発・アプリ内 migration なし。DB_VERSION 13）。 |
 | **v11→v12**（2026-08-15・継続コスト同日刻み）  | **費用化を同日刻みへ**（支払いが買った期間を同日刻みで n 等分し、各刻みの終端の日に費用化する。`allocationSchedule` が正本）。ルール由来 item（`ccr-{ruleId}-{YYYY-MM}`）の `endDate` の意味を「周期末の月末」から**「次回起票日と同日」**へ変更（単発変換で書き換える）。**`MonthlyCostItem.allocationStartDate` を撤去**（機能ごと廃止）。**残高補正を全科目へ開放**（`asset`/`liability` に加え `expense`/`revenue`。向きは借方正規/貸方正規の 2 分岐へ一般化）。**ルールの台帳経由を登録時の明示トグル化**（role で動作を決めない。`spreadExpenseAccountId` の許容先を起票できる全 role = `RECURRING_POSTABLE_ROLES` へ拡大）。**`JournalEntry.groupId?` を予約**（諸口・形式検証のみ・UI 未実装）。実データの変換 = `_workspace-management/scripts/convert-ledger-v11-to-v12.mjs`（単発・アプリ内 migration なし。DB_VERSION 12）。 |
 
 ### `MonthlyCostItem`（継続コスト資産）
@@ -110,8 +109,11 @@
   `error.monthlyCost.recoveryDestination` で拒否・fail-closed）。schema / import 側はこの絞りを
   かけない（既存データの受理は変えない）。
 - 費用の行は保存されない（`continuousCostEntriesForItem` が展開する）。
-- ルール生成 item の id は決定的（`ccr-{ruleId}-{YYYY-MM}`）。ルール起票の保存仕訳は
-  `rec-{ruleId}-{month}`。生成 item の `endDate` は必ず埋まり、**次回起票日と同日**（v12）。
+- **ルール由来はまるごと保存されない**（v13・完全導出）: 起票仕訳 `rec-{ruleId}-{month}` と
+  item `ccr-{ruleId}-{YYYY-MM}` はルール線分から毎回導出される決定的な名前で、wire に
+  含まれていたら invalid。回収の振替の `monthlyCostId` が `ccr-…` を指す場合、参照整合は
+  「そのルールがその月の item を導出できるか」（spread・位相・存在期間）で検証する。
+  導出 item の `endDate` は**次回起票日と同日**（清算 `settlements` があればその終了日）。
 
 ### `RecurringRule`（定期ルール）
 
@@ -120,18 +122,19 @@
 `debitAccountId`（台帳経由なら継続コスト台帳、直接起票なら行き先）/ `creditAccountId` / `startMonth`
 （周期の位相 anchor）/ `startDate`（存在開始日・含む・必須）/ `splitFromRuleId?`（金額分割の直前 segment）/
 `endDate?`（存在終了日・含まない）/
-`postedThroughMonth?`（起票カーソル）。
+`settlements?`（清算 = ルール由来 item の早期終了の上書き `{month, endDate}[]`・v13）。
 
 - 存在期間は半開区間 **`[startDate, endDate)`**。`startDate` は必須で、`endDate` がある場合は
   開始日より後でなければならない。
 - `startMonth` は `everyMonths` の周期の位相だけを決め、存在期間とは独立する。起票日が存在期間内に
-  入るときだけ catch-up・未来投影の対象になる。
+  入る月だけが導出される（カーソル・キャッチアップは存在しない。過去も未来も同じ規則）。
 - 終了は `endDate=today` として表す。同じ設定をもう一度使う操作では、金額・周期・位相・フローを
-  引き継ぎ、`startDate=today`・`endDate` なしの独立したルールを作る。id・時刻・起票カーソル・
+  引き継ぎ、`startDate=today`・`endDate` なしの独立したルールを作る。id・時刻・
   `splitFromRuleId` は引き継がない。
-- 金額の遡及変更は、同じ `rule.id` が自動生成した全保存仕訳・item の金額を、利用者が手編集した月も
-  含めて新額へ同一トランザクションで揃える。これは登録金額を最初から訂正するために利用者が選ぶ
-  明示操作であり、生成済み item を通常編集で書き換えない原則の例外である。
+- ルールの編集（過去から変更）は保存行を書き換えない。**全期間が現在のルール値で引き直される**
+  （金額だけでなく周期・item の配分期間も変わる）。
+- 清算（`settlements`）は月割りルール専用で、清算月は一意・そのルールが導出する月・終了日は
+  起票日〜既定の終了日（次回起票日）の範囲だけを受理する。回収は実仕訳（回収の振替）。
 - 今日からの金額変更は旧ルールを `endDate=today`、新しい id の後継ルールを `startDate=today` として
   分割する。今日以降にすでに起票された仕訳・item は後継へ移管し、今日より前の事実は旧ルールに残す。
   移管時に変更するのは由来 ID と今回選択した金額だけで、個別編集済みの摘要・科目・item の名称・
@@ -141,17 +144,15 @@
   重ならないことだけを系譜の不変条件とする。境界間の空白、開始点・終了点・周期位相の変更は
   非重複を守る限り許可する。削除した segment を指す残存後継の `splitFromRuleId` は、同一
   transaction で剥がす。
-- ルールが起票した `rec-{ruleId}-{month}` の仕訳と `ccr-{ruleId}-{month}` の item は**読み取り
-  専用**（2026-08-15）。`upsertEntry` / `deleteEntry` / `upsertMonthlyCost` /
+- `rec-{ruleId}-{month}` の仕訳と `ccr-{ruleId}-{month}` の item は導出値で、個別操作を持たない
+  （2026-08-15）。`upsertEntry` / `deleteEntry` / `upsertMonthlyCost` /
   `archiveMonthlyCost` / `deleteMonthlyCost` は対象が由来を名乗った時点で
   `error.recurring.generatedReadOnly` を投げる。判定は由来メタ（`recurringRuleId`）と決定的 ID の
-  どちらか一方でも名乗れば由来あり（片側だけ壊れたデータも読み取り専用側へ倒す）。
-  遡及の金額変更・分割・catch-up・カスケード削除はこの保存境界を通らない内部処理なので、
-  従来どおり生成物を書き換えてよい。
-- ルール削除は**カスケード**。ルール本体・そのルールが起票した仕訳・`ccr-` の item・item に
-  紐づく仕訳（購入の仕訳と回収の振替）を同一トランザクションで削除する。対象集合は tx 内で
-  読み直した現在値から作り、事前の読みと書きの間に catch-up が起票した回も取りこぼさない。
-  消える仕訳を指していた反対仕訳は残し、`reversalOfEntryId` だけを同じ transaction で剥がす。
+  どちらか一方でも名乗れば由来あり（過渡の保存データも読み取り専用側へ倒す・fail-closed）。
+- ルール削除は**カスケード**。ルール本体を消せば導出はすべて消え、保存側では item に紐づく
+  実仕訳（回収の振替）と過渡の保存 rec- / ccr- を同一トランザクションで道連れにする。
+  消える・導出されなくなる仕訳を指していた反対仕訳は残し、`reversalOfEntryId` だけを
+  同じ transaction で剥がす。
   回収の振替は残せない（貸方 = 継続コスト台帳。台帳にふれる仕訳は `monthlyCostId` 必須
   〔不変条件⑧〕で、購入の借方が消えれば台帳残高も負に落ちる）。
   終了点残高の検証は「消したあとの姿」で行う。
@@ -166,12 +167,11 @@
 〔`RECURRING_POSTABLE_ROLES`〕を置ける）。トグル OFF のルールは行き先へ直接起票する。
 保存形はこの二形だけ。
 
-### `Tag`（撤去済み・受理のみ）
+### タグ（v13 で削除済み）
 
-`id` / `name` / `scope`（`'entry'` のみ）/ `color?` / `archived`。
-機能は 2026-08-15 に撤去した（実ユーズ 0 件）。schema は v12 の形を保つため残し、
-import した `tags` / `JournalEntry.tagIds` は**黙って保持して export へ素通し**する。
-新しく値が入る経路は無い。フィールドごとの削除は v13 の版上げに同乗させる。
+機能は 2026-08-15 に撤去し、v13 で `tags` / `JournalEntry.tagIds` をフィールドごと削除した
+（v13 の zod は未知キーを strip する。旧 IndexedDB の `tags` ストアは未知レガシーとして温存され、
+復旧面の DB 初期化でのみ消える）。
 
 ### 予定（v7 で専用実体を全廃）
 
@@ -233,8 +233,8 @@ import では strip される）。
     仮想月割り行の日付は `asOf` までに切るため、後日の回収は月割りへ遡及するが回収仕訳自体は過去へ現れない。
   - `endDate?` は `>= startDate`・配分月数（購入月〜終了月）≤ 1200 ヶ月。
     `expenseAccountId` は内部集約・残高調整以外（`isRecurringPostableRole`）。
-  - ルール由来 item の配分期間は、後から周期を変更して生まれた item と重なってよい。同じルール・
-    同じ起票月の二重生成は、決定的 ID と起票カーソルで防ぐ。
+  - ルール由来 item の配分期間は、別線分から生まれた item と重なってよい。同じ月が二重に
+    導出されないことは、半開区間の存在期間と系譜の非重複が保証する。
 - `endDate` を持つ**資産・負債**は、その終了点で導出仕訳込みの残高が 0 でなければならない。
   保存境界と import schema の双方で検証する。費用・収入の累計は「過去に起きたこと」の記録なので
   残高 0 を要求せず、そのまま終了できる。
@@ -247,12 +247,11 @@ import では strip される）。
   参照科目の存在期間にも含まれることを保存境界・import の双方で確認する。
   `splitFromRuleId` で連なる同一系譜では、ルールの半開存在期間どうしが重ならないことを保存境界・
   import の双方で検証する。
-  catch-up はルール単位で検証・起票し、1 本の失敗で他のルールを止めない。失敗したルールは
-  書き込まずに飛ばして処理を続け、画面には個別データを含めない共通警告を出す。
-  金額の遡及変更、今日での segment 分割、削除時の由来解除は、ルール・仕訳・item・revision を
-  単一 readwrite transaction で更新し、途中状態を保存しない。
+  導出は純関数で、参照が壊れたルールは fail-soft に飛ばす（他のルールを止めない）。
+  切り替え・終了・清算・削除は、ルール・回収仕訳・revision を単一 readwrite transaction で
+  更新し、途中状態を保存しない。
+- ルール由来の保存拒否（v13）: `rec-` ID / 由来メタを持つ仕訳・`ccr-` ID の item は invalid。
 - 残高補正: `delta === actualBalance − expectedBalance`・対象/相手科目の存在と形・kind=normal。
-- タグ: id 一意・参照整合（機能は撤去済みだが、受理したデータを往復させる以上 v12 のまま守る）。
 
 ### revision の原子性
 
@@ -299,7 +298,7 @@ step 4 で見た `deviceId + revision` は step 5 の保存 transaction でも�
 
 ## migration ポリシー（後方互換をコードで持たない）
 
-- `schemaVersion` を必ず持つ。現行は **`12`**（`SCHEMA_VERSION`・`src/data/constants.ts`）。
+- `schemaVersion` を必ず持つ。現行は **`13`**（`SCHEMA_VERSION`・`src/data/constants.ts`）。
 - **アプリ内に migration チェーンを持たない**（作者決定・単発変換方式）。版を上げたら:
   1. `SCHEMA_VERSION` を +1 する（旧版 JSON / スナップショットは fail-closed に拒否される）。
   2. 実データは書き出した JSON を**単発の変換スクリプト**（`_workspace-management/scripts/`）で
@@ -343,6 +342,18 @@ step 4 で見た `deviceId + revision` は step 5 の保存 transaction でも�
   （`apps/simple-ledger/tests/convertedLedger.verify.test.ts` に `CONVERTED_LEDGER_JSON=<path>` を渡す）
   → v12 更新 → DB 初期化 → import）。ここでも**旧版スナップショットは復元不可**なので、
   保険は変換前の v11 JSON を手元に残すこと。
+- 2026-08-16 の**完全導出化**（v13）は `SCHEMA_VERSION=13` / `DB_VERSION=13`。
+  **ルール由来の保存を全廃**（`rec-` 仕訳・`ccr-` item・`postedThroughMonth` を撤去し、wire では
+  invalid。起票機構 = catch-up / カーソルもアプリから消滅）+ **`RecurringRule.settlements`
+  （清算）を新設** + **タグをフィールドごと削除**（`tags` / `tagIds`。IndexedDB の旧 `tags`
+  ストアは未知レガシーとして温存）。v12 以前の JSON は unsupported-version、v12 以前の DB は
+  復旧面へ（in-app 変換なし。実データの v12→v13 変換 =
+  `_workspace-management/scripts/convert-ledger-v12-to-v13.mjs`・**順序固定**: v12 ビルドの
+  まま export → 変換（過去のスキップ = 線分手術・構造的逸脱 = 手動仕訳へ降格・値の逸脱 =
+  導出値へ置換・早期アーカイブ = `settlements` へ移設。すべて変換ログで目視）→
+  **変換結果を実 schema と実 import で検証**（`apps/simple-ledger/tests/convertedLedgerV13.verify.test.ts`
+  に `CONVERTED_LEDGER_JSON=<path>` を渡す）→ v13 更新 → DB 初期化 → import）。
+  ここでも**旧版スナップショットは復元不可**なので、保険は変換前の v12 JSON を手元に残すこと。
 
 ## 外部送信ゼロとの関係
 
