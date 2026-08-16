@@ -270,6 +270,27 @@ export const UI = {
     recurringEndSheet: 'allocations.recurring.endSheet',
     recurringEndSheetDate: 'allocations.recurring.endSheet.date',
     recurringEndSheetConfirm: 'allocations.recurring.endSheet.confirm',
+    // 切り替え = この日から別の線分（編集 = 全期間の引き直しとは別の動詞）。
+    // シートそのものが確認面なので前置きの確認ダイアログは無い。
+    recurringSwitch: 'allocations.recurring.switch',
+    recurringSwitchSheet: 'allocations.recurring.switchSheet',
+    recurringSwitchDate: 'allocations.recurring.switchSheet.date',
+    recurringSwitchAmount: 'allocations.recurring.switchSheet.amount',
+    recurringSwitchDayOfMonth: 'allocations.recurring.switchSheet.dayOfMonth',
+    recurringSwitchEvery: 'allocations.recurring.switchSheet.every',
+    recurringSwitchPreview: 'allocations.recurring.switchSheet.preview',
+    recurringSwitchConfirm: 'allocations.recurring.switchSheet.confirm',
+    // 配分中 item の清算パネル（切り替えシート・終了シートで共通）。
+    // item 行は data-item-id で個別に引く（同じ data-ui が item のぶんだけ並ぶ）。
+    recurringSettlement: 'allocations.recurring.settlement',
+    recurringSettlementItem: 'allocations.recurring.settlement.item',
+    recurringSettlementKeep: 'allocations.recurring.settlement.keep',
+    recurringSettlementEnd: 'allocations.recurring.settlement.end',
+    recurringSettlementRecoveryAmount: 'allocations.recurring.settlement.recoveryAmount',
+    recurringSettlementRecoveryTo: 'allocations.recurring.settlement.recoveryTo',
+    recurringSettlementRemainder: 'allocations.recurring.settlement.remainder',
+    recurringSettlementRemainderSpread: 'allocations.recurring.settlement.remainder.spread',
+    recurringSettlementRemainderExpense: 'allocations.recurring.settlement.remainder.expense',
     recurringRestart: 'allocations.recurring.restart',
     recurringRestartConfirm: 'allocations.recurring.restart.confirm',
     // 削除はカスケード（ルール + 起票済みの仕訳・持ち物）。確認に起票回数を出す。

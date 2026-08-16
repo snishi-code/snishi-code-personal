@@ -586,6 +586,8 @@ export const ja = {
   'error.recurring.everyMonthsInvalid': '周期は 1〜1200 か月の整数で入力してください。',
   'error.recurring.dayOfMonthInvalid': '起票日は 1〜31 日の整数で入力してください。',
   'error.recurring.periodInvalid': 'ルールの開始日・終了日を確認してください。',
+  'error.recurring.settlementInvalid':
+    '清算の対象（配分中の持ち物）と終了日を確認してください。切り替え日は起票日から次回起票日までの間である必要があります。',
   'error.recurring.amountChangeModeRequired':
     '金額の変更方法（全期間、または今日から）を選んでください。',
   'error.recurring.splitDependency':
@@ -757,6 +759,29 @@ export const ja = {
   'recurring.endSheetBody':
     'この日以降は起票されません。起票済みの仕訳と持ち物はそのまま残ります。',
   'recurring.endSheetConfirm': '終了する',
+  // 切り替えシート（v13・作者確定 2026-08-16）: 「編集 = 全期間を引き直す」に対して
+  // 「切り替え = この日から別の線」。位相（起票周期の基準月）と科目は現在のルールから引き継ぐ。
+  'recurring.switch': '切り替え',
+  'recurring.switchTitle': 'この日から切り替える',
+  'recurring.switchDate': '切り替え日',
+  'recurring.switchDateHint':
+    'この日の起票から新しい条件になります。現在のルールはこの日より前までです。',
+  'recurring.switchNewConditions': '新しい条件',
+  'recurring.switchDayOfMonth': '起票日',
+  'recurring.switchDayOfMonthHint':
+    '毎回の起票日（1〜31。その日が無い月は月末へ寄せます）。周期の位相は現在のルールから引き継ぎます。',
+  'recurring.switchPreview': '起票プレビュー',
+  'recurring.switchPreviewPredecessor': '現在のルールは {date} より前までです。',
+  'recurring.switchPreviewSuccessor': '新しい条件の初回の起票は {date} です。',
+  'recurring.switchPreviewSuccessorNone': '新しい条件では起票されません。',
+  'recurring.switchConfirm': '切り替える',
+  // 清算パネル（切り替えシート・終了シートで共通）。「生まれた線は自分の寿命を持つ」の
+  // 唯一の調整口: 選んだ持ち物だけをその日で終わりにし、回収はアーカイブと同じ 3 点で決める。
+  'recurring.settlementTitle': '配分中の持ち物',
+  'recurring.settlementIntro':
+    'このルールから生まれた、まだ配分の途中の持ち物です。何も選ばなければ、それぞれの終了日まで配分を続けます。',
+  'recurring.settlementKeep': 'そのまま使い切る',
+  'recurring.settlementEnd': 'この日で終える',
   'recurring.restart': '同じ設定で新しく始める',
   'recurring.restartConfirmTitle': '同じ設定で新しく始めますか？',
   'recurring.restartConfirmBody':

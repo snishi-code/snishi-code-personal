@@ -79,6 +79,8 @@ interface LedgerContextValue {
     options?: repo.RecurringRuleSaveOptions,
   ) => Promise<void>;
   removeRecurringRule: (id: string) => Promise<void>;
+  /** 切り替え/終了 + 清算（v13）: 旧線分の終了・後継の開始・配分中 item の清算を 1 tx で。 */
+  switchRecurringRule: (input: repo.RecurringRuleSwitchInput) => Promise<void>;
   createAdjustment: (input: {
     accountId: string;
     date: string;
@@ -325,6 +327,18 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [refresh, toast],
   );
 
+  const switchRecurringRule = useCallback<LedgerContextValue['switchRecurringRule']>(
+    async (input) => {
+      try {
+        await repo.switchRecurringRule(input);
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+      await finishRecurringMutation();
+    },
+    [finishRecurringMutation, toast],
+  );
   const createAdjustment = useCallback<LedgerContextValue['createAdjustment']>(
     async (input) => {
       try {
@@ -586,6 +600,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       createRecurringRule,
       saveRecurringRule,
       removeRecurringRule,
+      switchRecurringRule,
       createAdjustment,
       updateAdjustment,
       deleteAdjustment,
@@ -621,6 +636,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       createRecurringRule,
       saveRecurringRule,
       removeRecurringRule,
+      switchRecurringRule,
       createAdjustment,
       updateAdjustment,
       deleteAdjustment,

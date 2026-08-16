@@ -24,6 +24,7 @@ import {
   accountReferenceIntervals,
   effectiveRecurringRuleStartDate,
   recurringLineageViolations,
+  recurringRuleItemEndDate,
   recurringRuleReferenceEndDate,
   recurringRuleReferenceStartDate,
   type AccountReferenceInterval,
@@ -49,6 +50,7 @@ import {
   parseRuleItemId,
   recurringDestinationAccountId,
   recurringExpenseAccountId,
+  ruleItemId,
 } from '../domain/recurring';
 import type {
   Account,
@@ -68,6 +70,7 @@ import {
   MONTHLY_AMOUNTS_HARD_CAP,
   monthlyAmounts,
   monthOf,
+  monthsBetween,
 } from '../domain/allocation';
 import { compareMonthlyCostItems } from '../domain/monthlyCost';
 import {
@@ -1729,6 +1732,233 @@ function planRecurringCascade(
  *  - 例外は回収の振替: 貸方が継続コスト台帳（内部集約）で item と対でしか成立しないため、
  *    道連れにする（理由は planRecurringCascade のコメント）。
  */
+export interface RecurringRuleSettlementInput {
+  /** 清算する item を導出する線分（切り替えるルールと同じ系譜であること）。 */
+  ruleId: string;
+  /** 起票月（= ccr-{ruleId}-{month} の month）。 */
+  month: string;
+  /**
+   * 回収の振替（0〜2 本・日付 = 切り替え日）。意味論はアーカイブシートと同一:
+   * 1 本目 = 回収先へ R・2 本目 = 「終了日に全額」の第 2 振替（費用の行き先へ）。
+   */
+  recoveries?: readonly { destinationAccountId: string; amount: number }[];
+}
+
+export interface RecurringRuleSwitchInput {
+  ruleId: string;
+  /** 切り替え日（半開区間の境界。この日の起票から後継 = 旧線分はこの日を含まない）。 */
+  effectiveDate: string;
+  /**
+   * 新線分の条件。null = 終了のみ（後継を作らない = ルール終了シートの保存形）。
+   * 位相（startMonth）と台帳経由（spread）・科目は旧線分から引き継ぐ。
+   */
+  successor: { amount: number; dayOfMonth: number; everyMonths: number } | null;
+  /** 切り替え日で終える配分中 item（選択分のみ。endDate = effectiveDate で清算に記録）。 */
+  settlements?: readonly RecurringRuleSettlementInput[];
+}
+
+/** splitFromRuleId で連結する系譜（connected component）のルール ID 集合。 */
+function lineageRuleIds(rules: readonly RecurringRule[], ruleId: string): Set<string> {
+  const ids = new Set<string>([ruleId]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const rule of rules) {
+      if (ids.has(rule.id)) {
+        if (rule.splitFromRuleId !== undefined && !ids.has(rule.splitFromRuleId)) {
+          ids.add(rule.splitFromRuleId);
+          grew = true;
+        }
+      } else if (rule.splitFromRuleId !== undefined && ids.has(rule.splitFromRuleId)) {
+        ids.add(rule.id);
+        grew = true;
+      }
+    }
+  }
+  return ids;
+}
+
+/**
+ * ルールの切り替え/終了と、配分中 item の清算を 1 トランザクションで行う（v13）。
+ *
+ * 切り替え = 「同じ位置から別の線」（作者確定 2026-08-16）: 旧線分の endDate と後継の
+ * startDate をともに切り替え日に置く（半開区間 = 当日の起票は後継）。清算は
+ * 「生まれた線は自分の寿命を持つ」の唯一の調整口: 選ばれた item の endDate だけを
+ * ルール側の settlements で上書きし、回収は実仕訳（回収の振替）として保存する。
+ * どちらも選ばなければ既存 item は自分の終了日まで走り切る（そのまま使い切る）。
+ */
+async function switchRecurringRuleUnlocked(input: RecurringRuleSwitchInput): Promise<void> {
+  const { effectiveDate } = input;
+  if (!isValidIsoDate(effectiveDate)) throw new LedgerError('error.recurring.periodInvalid');
+  const [ctx, rules, entries, items] = await Promise.all([
+    loadSaveContext(),
+    getAll<RecurringRule>(STORE.recurringRules),
+    getAll<JournalEntry>(STORE.journalEntries),
+    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
+  ]);
+  const existing = rules.find((rule) => rule.id === input.ruleId);
+  if (!existing) throw new LedgerError('error.recurring.notFound');
+  const existingStart = effectiveRecurringRuleStartDate(existing);
+  // 旧線分が 1 日も存在しない境界は切り替えではない（split と同じ fail-closed）。
+  if (effectiveDate <= existingStart) throw new LedgerError('error.recurring.periodInvalid');
+  if (existing.endDate !== undefined && effectiveDate >= existing.endDate) {
+    throw new LedgerError('error.recurring.periodInvalid');
+  }
+  const ts = nowIso();
+  const lineage = lineageRuleIds(rules, existing.id);
+
+  // 清算の反映（settlements は month ごとに置換 = 再清算は上書き）。
+  const updatedById = new Map<string, RecurringRule>();
+  const ruleFor = (id: string): RecurringRule | undefined =>
+    updatedById.get(id) ?? rules.find((rule) => rule.id === id);
+  const recoveryEntries: JournalEntry[] = [];
+  for (const settlement of input.settlements ?? []) {
+    const owner = ruleFor(settlement.ruleId);
+    if (!owner || !lineage.has(owner.id) || owner.spreadExpenseAccountId === undefined) {
+      throw new LedgerError('error.recurring.settlementInvalid');
+    }
+    // 対象月がその線分の導出する月であること（位相・存在期間・切り替え後の姿で検証）。
+    const span = monthsBetween(owner.startMonth, settlement.month);
+    const postingDate = clampDayToMonth(settlement.month, owner.dayOfMonth);
+    const ownerEnd = owner.id === existing.id ? effectiveDate : owner.endDate;
+    const insideOwner =
+      postingDate >= effectiveRecurringRuleStartDate(owner) &&
+      (ownerEnd === undefined || postingDate < ownerEnd);
+    if (span < 0 || span % Math.max(1, owner.everyMonths) !== 0 || !insideOwner) {
+      throw new LedgerError('error.recurring.settlementInvalid');
+    }
+    const defaultEnd = recurringRuleItemEndDate(
+      settlement.month,
+      owner.everyMonths,
+      owner.dayOfMonth,
+    );
+    if (effectiveDate < postingDate || effectiveDate > defaultEnd) {
+      throw new LedgerError('error.recurring.settlementInvalid');
+    }
+    const next: RecurringRule = {
+      ...owner,
+      settlements: [
+        ...(owner.settlements ?? []).filter((s) => s.month !== settlement.month),
+        { month: settlement.month, endDate: effectiveDate },
+      ],
+      updatedAt: ts,
+    };
+    updatedById.set(next.id, next);
+
+    // 回収の振替（アーカイブシートと同じ意味論・受理・形）。
+    for (const recovery of settlement.recoveries ?? []) {
+      if (!Number.isInteger(recovery.amount) || recovery.amount <= 0)
+        throw new LedgerError('error.common.amountInvalid');
+      const destination = ctx.byId.get(recovery.destinationAccountId);
+      if (!destination || !isRecurringPostableRole(destination.role)) {
+        throw new LedgerError('error.monthlyCost.recoveryDestination');
+      }
+      if (
+        destination.role === 'expense-category' &&
+        destination.id !== owner.spreadExpenseAccountId
+      ) {
+        throw new LedgerError('error.monthlyCost.recoveryDestination');
+      }
+      recoveryEntries.push(
+        assertEntrySavable(
+          {
+            id: newId(),
+            date: effectiveDate,
+            description: owner.name,
+            kind: 'normal',
+            lines: [
+              { accountId: destination.id, side: 'debit', amount: recovery.amount },
+              {
+                accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+                side: 'credit',
+                amount: recovery.amount,
+              },
+            ],
+            metadata: {
+              inputMode: 'transfer',
+              monthlyCostId: ruleItemId(owner.id, settlement.month),
+              monthlyCostRecovery: true,
+            },
+            createdAt: ts,
+            updatedAt: ts,
+          },
+          ctx,
+        ),
+      );
+    }
+  }
+
+  // 旧線分の終了（清算で更新済みならその姿の上へ）。
+  const predecessorBase = ruleFor(existing.id) ?? existing;
+  const predecessor: RecurringRule = { ...predecessorBase, endDate: effectiveDate, updatedAt: ts };
+  updatedById.set(predecessor.id, predecessor);
+
+  // 後継（切り替えのみ。終了は successor = null）。
+  let successor: RecurringRule | undefined;
+  if (input.successor !== null) {
+    successor = {
+      ...existing,
+      id: newId(),
+      amount: input.successor.amount,
+      dayOfMonth: input.successor.dayOfMonth,
+      everyMonths: input.successor.everyMonths,
+      // 位相 anchor は旧線分から引き継ぐ（split と同じ規則）。
+      startMonth: existing.startMonth,
+      startDate: effectiveDate,
+      splitFromRuleId: existing.id,
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    delete successor.endDate;
+    delete successor.settlements;
+  }
+
+  const { validationCtx, accountsToPut } = prepareRecurringRuleAccountsForSave(
+    successor ?? predecessor,
+    ctx,
+    ts,
+  );
+  const candidateRules = [
+    ...rules.filter((rule) => !updatedById.has(rule.id)),
+    ...updatedById.values(),
+    ...(successor !== undefined ? [successor] : []),
+  ];
+  for (const rule of updatedById.values()) assertRecurringRuleSavable(rule, validationCtx);
+  if (successor !== undefined) assertRecurringRuleSavable(successor, validationCtx);
+  assertRecurringLineagesSavable(candidateRules);
+  const candidateEntries = [...entries, ...recoveryEntries];
+  assertEndedAssetLiabilityBalances({
+    accounts: [...validationCtx.byId.values()],
+    journalEntries: candidateEntries,
+    monthlyCostItems: items,
+    recurringRules: candidateRules,
+  });
+
+  let missingRace = false;
+  try {
+    await writeWithRevision([STORE.recurringRules, STORE.accounts, STORE.journalEntries], (t) => {
+      const ruleStore = t.objectStore(STORE.recurringRules);
+      const probe = ruleStore.get(existing.id);
+      probe.onsuccess = () => {
+        if (!probe.result) {
+          missingRace = true;
+          t.abort();
+          return;
+        }
+        for (const rule of updatedById.values()) ruleStore.put(rule);
+        if (successor !== undefined) ruleStore.put(successor);
+        const accountStore = t.objectStore(STORE.accounts);
+        for (const account of accountsToPut.values()) accountStore.put(account);
+        const entryStore = t.objectStore(STORE.journalEntries);
+        for (const entry of recoveryEntries) entryStore.put(entry);
+      };
+    });
+  } catch (error) {
+    if (missingRace) throw new LedgerError('error.recurring.notFound');
+    throw error;
+  }
+}
+
 async function deleteRecurringRuleUnlocked(id: string): Promise<void> {
   const ts = nowIso();
   const [ctx, entries, items, rules] = await Promise.all([
@@ -2954,6 +3184,7 @@ export const updateSettings = serializeMutation(updateSettingsUnlocked);
 export const createRecurringRule = serializeMutation(createRecurringRuleUnlocked);
 export const upsertRecurringRule = serializeMutation(upsertRecurringRuleUnlocked);
 export const deleteRecurringRule = serializeMutation(deleteRecurringRuleUnlocked);
+export const switchRecurringRule = serializeMutation(switchRecurringRuleUnlocked);
 export const createAdjustment = serializeMutation(createAdjustmentUnlocked);
 export const updateAdjustment = serializeMutation(updateAdjustmentUnlocked);
 export const deleteAdjustment = serializeMutation(deleteAdjustmentUnlocked);
