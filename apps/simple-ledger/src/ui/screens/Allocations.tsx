@@ -428,7 +428,13 @@ export function Allocations({
               const status =
                 r.endDate !== undefined
                   ? activeToday
-                    ? { label: t('recurring.statusEndScheduled'), tone: 'warning' }
+                    ? {
+                        // 「いつまで動くか」を日付で名乗る（終了済みとの違いが読める）。
+                        label: t('recurring.statusEndScheduled', {
+                          date: recurringRuleLastExistingDate(r) ?? r.endDate,
+                        }),
+                        tone: 'warning',
+                      }
                     : { label: t('recurring.statusEnded'), tone: 'neutral' }
                   : activeToday
                     ? { label: t('recurring.ruleNoEnd'), tone: 'neutral' }

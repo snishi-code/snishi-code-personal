@@ -496,31 +496,35 @@ export function Journal({
                     {title}
                   </button>
                 )}
-                {/* 行アクション = 「現実の変化を記す」動詞（反対仕訳）だけ。削除は各編集シートの
-                    最下部へ移設（動詞体系 v13.1・行から削除ボタンを撤去）。
-                    回収の振替の逆仕訳は台帳の不変条件（⑧）で保存できないため出さない。
-                    位置は摘要と金額の間 = 金額は行の右端ラインに固定（v13.1 その6）。 */}
-                {isVirtual ||
-                isPurchase ||
-                isRuleGenerated ||
-                isAdjustment ||
-                isOpening ? null : isRecovery ? null : (
-                  <button
-                    type="button"
-                    className="btn btn--tonal"
-                    onClick={() => onReverse(entry)}
-                    aria-label={`${t('journal.reverseAction')}: ${entry.description}`}
-                    data-ui={UI.journal.entry.reverse}
+                {/* 右列 = 上段 金額 / 下段 操作。月割り台帳・勘定科目と同じ行の設計図
+                    （v13.3: 金額の桁数でボタンの位置がずれない = 両方が縦に揃う）。
+                    行アクションは「現実の変化を記す」動詞（反対仕訳）だけ。削除は各編集シートの
+                    最下部（動詞体系 v13.1）。回収の振替の逆仕訳は台帳の不変条件（⑧）で
+                    保存できないため出さない。操作の無い行は読み取り専用だが、その理由は
+                    摘要の後ろのタグ（月割り・取消/返金・補正・初期残高）が既に名乗っている。 */}
+                <div className="row-trailing">
+                  <span
+                    className={`list__amount ${balanceChangeClass}`.trim()}
+                    aria-label={balanceChangeLabel}
                   >
-                    {t('journal.reverseShort')}
-                  </button>
-                )}
-                <span
-                  className={`list__amount ${balanceChangeClass}`.trim()}
-                  aria-label={balanceChangeLabel}
-                >
-                  <Money amount={displayedAmount} currency={currency} />
-                </span>
+                    <Money amount={displayedAmount} currency={currency} />
+                  </span>
+                  {isVirtual ||
+                  isPurchase ||
+                  isRuleGenerated ||
+                  isAdjustment ||
+                  isOpening ? null : isRecovery ? null : (
+                    <button
+                      type="button"
+                      className="btn btn--tonal"
+                      onClick={() => onReverse(entry)}
+                      aria-label={`${t('journal.reverseAction')}: ${entry.description}`}
+                      data-ui={UI.journal.entry.reverse}
+                    >
+                      {t('journal.reverseShort')}
+                    </button>
+                  )}
+                </div>
               </li>
             );
           })}

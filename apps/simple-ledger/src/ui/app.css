@@ -227,7 +227,9 @@
    --list-filter-frame-h は画面ごとの実測値（折り返しでズレても影響はフォーカス位置だけ）。 */
 .list-filter-frame ~ *,
 .list-filter-frame ~ * * {
-  scroll-margin-top: var(--list-filter-frame-h, 0px);
+  /* 実測高は小数になりうる（行の高さが変わると sticky の bottom が 0.5px 単位でずれる）。
+     ぴったりだとフォーカスが額縁の裏へ 1px 未満だけ潜るので、丸め余白を 1px 足す。 */
+  scroll-margin-top: calc(var(--list-filter-frame-h, 0px) + 1px);
 }
 /* 額縁の実測高（@2026-08-15・?fixture=sample）。折り返しで変わるので画面ごとに持つ。 */
 .journal {

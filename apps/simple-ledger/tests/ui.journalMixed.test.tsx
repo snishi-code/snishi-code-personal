@@ -447,7 +447,7 @@ describe('仕訳一覧の混合表示', () => {
  *  - バッジ（継続コスト等）は摘要の後ろに置く（バッジ・ボタンは摘要と金額の間）
  */
 describe('仕訳一覧の行レイアウト', () => {
-  it('金額が行の最終要素で、バッジは摘要の後ろに来る', async () => {
+  it('金額とボタンが右列に縦積みされ、バッジは摘要の後ろに来る', async () => {
     const ledger = await loadLedger();
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
     const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
@@ -482,13 +482,18 @@ describe('仕訳一覧の行レイアウト', () => {
     const rows = Array.from(list.querySelectorAll('li.list__item'));
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
-      // 金額は右端ライン = li の最終要素（行アクションは摘要と金額の間）。
-      expect(row.lastElementChild!.classList.contains('list__amount')).toBe(true);
+      // 右列（.row-trailing）= 上段 金額 / 下段 操作。行の最終要素はその列
+      //（v13.3: 金額の桁数でボタンの位置がずれない = 金額もボタンも縦に揃う）。
+      const trailing = row.lastElementChild!;
+      expect(trailing.classList.contains('row-trailing')).toBe(true);
+      expect(trailing.firstElementChild!.classList.contains('list__amount')).toBe(true);
     }
-    // 反対仕訳ボタンを持つ行でも、ボタンは金額の前（摘要と金額の間）。
+    // 反対仕訳ボタンを持つ行では、ボタンが右列の下段に入る。
     const normalRow = rows.find((row) => row.textContent?.includes('通常の支出行'))!;
-    expect(normalRow.querySelector(`[data-ui="${UI.journal.entry.reverse}"]`)).not.toBeNull();
-    expect(normalRow.lastElementChild!.classList.contains('list__amount')).toBe(true);
+    const normalTrailing = normalRow.lastElementChild!;
+    expect(normalTrailing.querySelector(`[data-ui="${UI.journal.entry.reverse}"]`)).not.toBeNull();
+    expect(normalTrailing.children.length).toBe(2);
+    expect(normalTrailing.firstElementChild!.classList.contains('list__amount')).toBe(true);
     // バッジは摘要の後ろ（タイトル内で description が先・tag が後）。
     const title = rows
       .map((row) => row.querySelector('.list__title'))

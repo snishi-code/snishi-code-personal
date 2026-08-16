@@ -757,7 +757,9 @@ export const ja = {
   'recurring.ruleNoEnd': '継続中',
   // 行の右列の状態チップ（v13.2）: 操作ボタンが出ない行も同じ位置を状態で埋める
   // （空白にすると縦揃えが崩れ、「なぜボタンが無いか」も分からないため）。
-  'recurring.statusEndScheduled': '終了予定',
+  // 終了予定は「いつまで動くか」を日付で示す（v13.3・実ユーズ指摘「予定と済みの違いが
+  // 分からない」）。日付は排他的終了点の前日 = 実際にルールが存在する最後の日。
+  'recurring.statusEndScheduled': '{date} まで',
   'recurring.statusEnded': '終了済み',
   'recurring.statusNotStarted': '開始前',
   'recurring.postingSchedule': '起票',

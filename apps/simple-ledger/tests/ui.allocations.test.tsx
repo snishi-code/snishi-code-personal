@@ -913,11 +913,13 @@ describe('行の設計図（右端列・tonal ボタン・状態チップ）', (
     expect(active.querySelector(`[data-ui="${UI.allocations.recurringStatus}"]`)).toBeNull();
 
     // 終了予定・終了済み: 操作は出さず、同じ右列に状態チップ。
+    // 終了予定は「いつまで動くか」を日付で名乗る（v13.3: 終了済みとの違いが読める）。
+    // 日付 = 排他的終了点 2030-01-01 の前日。
     const scheduled = rowOf('終了予定ルール');
     expect(scheduled.querySelector(`[data-ui="${UI.allocations.recurringEnd}"]`)).toBeNull();
     expect(
       scheduled.querySelector(`[data-ui="${UI.allocations.recurringStatus}"]`),
-    ).toHaveTextContent('終了予定');
+    ).toHaveTextContent('2029-12-31 まで');
     const ended = rowOf('終了済みルール');
     expect(ended.querySelector(`[data-ui="${UI.allocations.recurringStatus}"]`)).toHaveTextContent(
       '終了済み',
