@@ -259,6 +259,6 @@ describe('継続コスト item の削除確認', () => {
     fireEvent.click(
       await waitFor(() => document.querySelector(`[data-ui="${UI.allocations.editDelete}"]`)!),
     );
-    expect(screen.getByText('継続コスト資産を削除しますか？')).toBeInTheDocument();
+    expect(screen.getByText('持ち物を削除しますか？')).toBeInTheDocument();
   });
 });

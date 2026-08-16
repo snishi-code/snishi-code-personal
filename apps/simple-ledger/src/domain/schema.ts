@@ -237,7 +237,7 @@ export const recurringRuleSchema = z
     if (rule.debitAccountId !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `月割りするルールの借方は継続コスト台帳(${CONTINUOUS_COST_LEDGER_ACCOUNT_ID})である必要があります`,
+        message: `月割りするルールの借方は月割り台帳(${CONTINUOUS_COST_LEDGER_ACCOUNT_ID})である必要があります`,
         path: ['debitAccountId'],
       });
     }
@@ -395,7 +395,7 @@ export const ledgerExportPackageSchema = z
       // これがないと import で品目別の continuing-cost-asset 科目を再導入できてしまう。
       if (a.role === 'continuing-cost-asset' && a.id !== CONTINUOUS_COST_LEDGER_ACCOUNT_ID)
         issue(
-          `継続コスト台帳(continuing-cost-asset)は集約口座(${CONTINUOUS_COST_LEDGER_ACCOUNT_ID})のみ許可されます`,
+          `月割り台帳(continuing-cost-asset)は集約口座(${CONTINUOUS_COST_LEDGER_ACCOUNT_ID})のみ許可されます`,
           ['accounts', i, 'id'],
         );
       if (
@@ -403,7 +403,7 @@ export const ledgerExportPackageSchema = z
         (a.role !== 'continuing-cost-asset' || a.type !== 'asset')
       )
         issue(
-          `集約口座(${CONTINUOUS_COST_LEDGER_ACCOUNT_ID})は資産の継続コスト台帳である必要があります`,
+          `集約口座(${CONTINUOUS_COST_LEDGER_ACCOUNT_ID})は資産の月割り台帳である必要があります`,
           ['accounts', i, 'role'],
         );
     });
@@ -585,7 +585,7 @@ export const ledgerExportPackageSchema = z
       // ⑧ 台帳を借方/貸方に持つ保存仕訳は必ず monthlyCostId を持つ
       //    （借方に台帳 = 購入の仕訳 / 貸方に台帳 = 回収の振替。この 2 種類しかない）。
       if ((debitLedger || creditLedger) && mcId === undefined) {
-        issue(`継続コスト台帳にふれる仕訳「${e.description}」は monthlyCostId が必要です`, [
+        issue(`月割り台帳にふれる仕訳「${e.description}」は monthlyCostId が必要です`, [
           'journalEntries',
           ei,
           'metadata',
@@ -607,14 +607,14 @@ export const ledgerExportPackageSchema = z
           ]);
         }
         if (!creditLedger) {
-          issue(`回収の振替「${e.description}」は貸方が継続コスト台帳である必要があります`, [
+          issue(`回収の振替「${e.description}」は貸方が月割り台帳である必要があります`, [
             'journalEntries',
             ei,
             'lines',
           ]);
         }
         if (debitLedger) {
-          issue(`回収の振替「${e.description}」の借方に継続コスト台帳は使えません`, [
+          issue(`回収の振替「${e.description}」の借方に月割り台帳は使えません`, [
             'journalEntries',
             ei,
             'lines',
@@ -656,7 +656,7 @@ export const ledgerExportPackageSchema = z
       }
       if (mcId !== undefined && !isRecovery && mcRef === undefined) {
         if (!debitLedger) {
-          issue(`購入の仕訳「${e.description}」は借方が継続コスト台帳である必要があります`, [
+          issue(`購入の仕訳「${e.description}」は借方が月割り台帳である必要があります`, [
             'journalEntries',
             ei,
             'lines',
@@ -771,17 +771,17 @@ export const ledgerExportPackageSchema = z
     const monthlyCostIds = new Set<string>();
     pkg.monthlyCostItems.forEach((mc, mi) => {
       const at = (...p: (string | number)[]) => ['monthlyCostItems', mi, ...p];
-      if (monthlyCostIds.has(mc.id)) issue(`継続コストの ID が重複しています(${mc.id})`, at('id'));
+      if (monthlyCostIds.has(mc.id)) issue(`持ち物の ID が重複しています(${mc.id})`, at('id'));
       monthlyCostIds.add(mc.id);
 
       // 費用の行き先: 内部集約・残高調整以外の勘定科目（定期ルールと同じ正本）。
       if (!accountType.has(mc.expenseAccountId))
-        issue(`継続コスト「${mc.name}」の expenseAccountId が存在しません`, at('expenseAccountId'));
+        issue(`持ち物「${mc.name}」の expenseAccountId が存在しません`, at('expenseAccountId'));
       else if (
         !isRecurringPostableRole(accountRole.get(mc.expenseAccountId) as AccountRole | undefined)
       )
         issue(
-          `継続コスト「${mc.name}」の expenseAccountId に内部集約・残高調整の科目は使えません`,
+          `持ち物「${mc.name}」の expenseAccountId に内部集約・残高調整の科目は使えません`,
           at('expenseAccountId'),
         );
 
@@ -790,20 +790,20 @@ export const ledgerExportPackageSchema = z
       const purchases = purchaseEntriesByItem.get(mc.id) ?? [];
       if (purchases.length !== 1) {
         issue(
-          `継続コスト「${mc.name}」の購入の仕訳がちょうど 1 件必要です（現在 ${purchases.length} 件）`,
+          `持ち物「${mc.name}」の購入の仕訳がちょうど 1 件必要です（現在 ${purchases.length} 件）`,
           at('id'),
         );
       } else {
         const purchase = purchases[0]!;
         if (purchase.date !== mc.startDate)
           issue(
-            `継続コスト「${mc.name}」の開始日(${mc.startDate})が購入の仕訳の日付(${purchase.date})と一致しません`,
+            `持ち物「${mc.name}」の開始日(${mc.startDate})が購入の仕訳の日付(${purchase.date})と一致しません`,
             at('startDate'),
           );
         const debitAmount = purchase.lines.find((l) => l.side === 'debit')?.amount;
         if (debitAmount !== mc.amount)
           issue(
-            `継続コスト「${mc.name}」の金額(${mc.amount})が購入の仕訳の金額(${debitAmount})と一致しません`,
+            `持ち物「${mc.name}」の金額(${mc.amount})が購入の仕訳の金額(${debitAmount})と一致しません`,
             at('amount'),
           );
       }
@@ -811,7 +811,7 @@ export const ledgerExportPackageSchema = z
       // v13: ルール由来の item は保存しない（完全導出）。
       if (parseRuleItemId(mc.id) !== undefined) {
         issue(
-          `v13 ではルール由来の継続コスト(ccr-)は保存されません（ルールから導出されます）`,
+          `v13 ではルール由来の持ち物(ccr-)は保存されません（ルールから導出されます）`,
           at('id'),
         );
       }

@@ -474,7 +474,7 @@ describe('YearlyOverview', () => {
     };
     // 最終年も 12 か月ぶんの月割り（100×12）が費用・継続コスト行へ乗る。
     expect(lastCellOf('支出')).toHaveTextContent('1,200');
-    expect(lastCellOf('継続コスト')).toHaveTextContent('1,200');
+    expect(lastCellOf('月割り')).toHaveTextContent('1,200');
   });
 
   it('当年の未来月も対象期間外にせず数値で表示する', () => {

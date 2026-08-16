@@ -168,8 +168,13 @@ describe('仕訳一覧の混合表示', () => {
     // 先頭（日付降順で最新）の行をタップ → 「毎月のもの」の item へ。
     const list = document.querySelector(`[data-ui="${UI.journal.list}"]`)!;
     const buttons = Array.from(list.querySelectorAll('button.list__main'));
+    // 「月割り」バッジは摘要（fixture 名）と字面が重なるため、タグ要素そのもので絞る。
     const virtualRow = buttons.find(
-      (b) => b.textContent?.includes('月割り対象') && b.textContent.includes('継続コスト'),
+      (b) =>
+        b.textContent?.includes('月割り対象') &&
+        Array.from(b.querySelectorAll('.list__title .tag')).some(
+          (tag) => tag.textContent === '月割り',
+        ),
     );
     expect(virtualRow).toBeDefined();
     fireEvent.click(virtualRow!);
@@ -487,9 +492,9 @@ describe('仕訳一覧の行レイアウト', () => {
     // バッジは摘要の後ろ（タイトル内で description が先・tag が後）。
     const title = rows
       .map((row) => row.querySelector('.list__title'))
-      .find((el) => el?.textContent?.includes('継続コスト'))!;
+      .find((el) => el?.textContent?.includes('月割り'))!;
     expect(title).toBeDefined();
     const text = title.textContent ?? '';
-    expect(text.indexOf('レイアウト確認')).toBeLessThan(text.indexOf('継続コスト'));
+    expect(text.indexOf('レイアウト確認')).toBeLessThan(text.indexOf('月割り'));
   });
 });

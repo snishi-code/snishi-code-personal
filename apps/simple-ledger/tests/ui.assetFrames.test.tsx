@@ -92,9 +92,9 @@ describe('資産の内訳 4 枠', () => {
     expect(ui(UI.assetsBreakdown.investmentSubtotal)).toHaveTextContent('50,000');
     // ④ 継続コスト台帳は 1 行（残存価値合計 120,000）。
     const ledgerRow = ui(UI.assetsBreakdown.ledgerRow)!;
-    expect(ledgerRow).toHaveTextContent('継続コスト台帳');
+    expect(ledgerRow).toHaveTextContent('月割り台帳');
     expect(ledgerRow).toHaveTextContent('120,000');
-    expect(ui(`${UI.assetsBreakdown.frame}.ledger`)).toHaveTextContent('継続コスト台帳');
+    expect(ui(`${UI.assetsBreakdown.frame}.ledger`)).toHaveTextContent('月割り台帳');
     expect(ui(UI.assetsBreakdown.ledgerSubtotal)).toHaveTextContent('120,000');
     expect(document.querySelectorAll(`[data-ui="${UI.assetsBreakdown.ledgerRow}"]`)).toHaveLength(
       1,

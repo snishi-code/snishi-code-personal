@@ -33,7 +33,7 @@ export const ja = {
   'common.proceed': '実行する',
 
   'timeline.title': 'タイムライン',
-  'timeline.intro': '時間の中で、勘定科目・継続コスト・フローがどのようにつながるかを見ます。',
+  'timeline.intro': '時間の中で、勘定科目・持ち物・フローがどのようにつながるかを見ます。',
   'timeline.zoom': '表示単位',
   'timeline.zoom.day': '日',
   'timeline.zoom.month': '月',
@@ -45,7 +45,7 @@ export const ja = {
   'timeline.empty': 'この期間に存在するものはありません。',
   'timeline.flow': '{credit} → {debit}',
   'timeline.flowCount': '{count}件のフロー',
-  'timeline.generation': '継続コストを生成',
+  'timeline.generation': '持ち物を生成',
   'timeline.today': '今日',
 
   'dashboard.title': 'ホーム',
@@ -65,12 +65,12 @@ export const ja = {
   // 支出の内訳（ホーム「支出」のタップ先）
   'expenseBreakdown.title': '支出の内訳',
   'expenseBreakdown.intro':
-    '何へ支出したかを費用カテゴリ別に見られます。継続コストの月割り分も各カテゴリに含まれます。',
+    '何へ支出したかを費用カテゴリ別に見られます。持ち物の月割り分も各カテゴリに含まれます。',
   'expenseBreakdown.byCategory': '費用カテゴリ別',
   'expenseBreakdown.categoryTotal': '支出合計',
   'expenseBreakdown.noCategory': 'この期間の支出はまだありません。',
   'expenseBreakdown.normalExpense': '通常支出',
-  'expenseBreakdown.monthlyCost': '継続コスト',
+  'expenseBreakdown.monthlyCost': '月割り',
   'expenseBreakdown.total': '支出合計',
   'expenseBreakdown.trend': '支出の推移',
   'dashboard.trendNet': '収支の推移',
@@ -78,7 +78,7 @@ export const ja = {
   'dashboard.trendAssets': '純資産の推移',
   'dashboard.trendDrillYear': 'その年の月別へ',
 
-  'journal.monthlyCostTag': '継続コスト',
+  'journal.monthlyCostTag': '月割り',
 
   // 継続コスト資産（項目名・金額・開始日・終了日の4項目。開始日 = 購入の仕訳の日付）
   'monthlyCost.amount': '金額',
@@ -87,13 +87,13 @@ export const ja = {
   'monthlyCost.fromRule': 'くり返し記帳から',
   // 計上先 = 月割り（継続コスト）の費用/収入の行き先。income 行き（差引形）も通るため中立表記。
   'monthlyCost.expenseCategory': '計上先',
-  'monthlyCost.editTitle': '継続コスト資産を編集',
+  'monthlyCost.editTitle': '持ち物を編集',
   'monthlyCost.name': '名称',
   'monthlyCost.showEnded': '終了分も表示',
   // 過去から再計算される項目を変えたときの注意（破壊的操作の予告。不具合ではなく仕様）。
   'monthlyCost.pastRecalcWarning':
     '金額・期間・計上先を変えると、過去の支出・収支・残存価値もさかのぼって再計算されます。',
-  'monthlyCost.deleteConfirmTitle': '継続コスト資産を削除しますか？',
+  'monthlyCost.deleteConfirmTitle': '持ち物を削除しますか？',
   'monthlyCost.deleteConfirmBody':
     '「{name}」を削除します。購入の仕訳と回収の振替も一緒に削除されます。登録済みの返済仕訳（未来日付の振替）は残ります。',
   // 動詞体系（v13.1・作者確定 2026-08-16）: 破壊的操作は編集シート最下部（赤・注意文つき）。
@@ -263,14 +263,14 @@ export const ja = {
   'entry.source.expense': '支払い方法',
   'entry.destination.expense': '使い道',
   // 継続コスト資産の入力: 行き先を「継続コスト資産（自由入力の項目名）」に切り替える。
-  'entry.ccToggle': '継続コスト資産として持つ',
+  'entry.ccToggle': '持ち物として登録する',
   'entry.ccBackToCategory': '通常のカテゴリに戻す',
-  'entry.ccTargetName': '継続コスト資産の名前',
+  'entry.ccTargetName': '持ち物の名前',
   'entry.ccTargetNameHint':
-    '継続コスト資産として登録する項目名です（例: 自動車 / 洗濯機）。勘定科目は増えません。',
+    '持ち物として登録する項目名です（例: 自動車 / 洗濯機）。勘定科目は増えません。',
   'entry.ccCategory': '計上先',
   'entry.error.loanNotExpense':
-    'ローン（その他負債）は通常の支出の支払い元にできません。継続コスト化するか、借入として振替で実行してください。',
+    'ローン（その他負債）は通常の支出の支払い元にできません。持ち物として登録するか、借入として振替で実行してください。',
   // 返済を資金繰りに入れるトグル ON 時の必須検証（口座・回数が無いと CF が作られないため fail closed）。
   'entry.error.repayAccount': '返済元の口座を選んでください。',
   'entry.error.repayCount': '返済回数は 1〜{max} の整数で入力してください。',
@@ -356,7 +356,7 @@ export const ja = {
   'yearlyOverview.horizonActual': '実績のみ',
   'yearlyOverview.horizonPlus30': '+{years}年',
   'yearlyOverview.horizonHardCap': '{year}年まで',
-  'yearlyOverview.projectionNote': '未来列は定期ルール・継続コスト・投資利回りの投影を含みます。',
+  'yearlyOverview.projectionNote': '未来列は定期ルール・持ち物・投資利回りの投影を含みます。',
   // 桁あふれで投影を打ち切った科目の注記（アプリ都合の端点を名乗る・仮の数字が本物の顔をしない）。
   'projection.truncatedNotice':
     '「{name}」の投影は金額が計算上限を超えるため {month} で打ち切りました。それ以降の投影は表示に含まれません。',
@@ -371,7 +371,7 @@ export const ja = {
   'yearlyOverview.revenue': '収入',
   'yearlyOverview.expense': '支出',
   'yearlyOverview.net': '収支',
-  'yearlyOverview.monthlyCost': '継続コスト',
+  'yearlyOverview.monthlyCost': '月割り',
   'yearlyOverview.totalAssets': '総資産',
   'yearlyOverview.netAssets': '純資産',
   'yearlyOverview.expenseCategory': '費目別: {name}',
@@ -387,7 +387,7 @@ export const ja = {
   'assets.frame.free': '自由に動かせるお金',
   'assets.frame.fixed': '自由に動かせないお金',
   'assets.frame.investment': '投資',
-  'assets.frame.ledger': '継続コスト台帳',
+  'assets.frame.ledger': '月割り台帳',
 
   // 負債の内訳（ホーム「負債」のタップ先）。
   'liabilities.title': '負債の内訳',
@@ -454,7 +454,7 @@ export const ja = {
   'accounts.type.expense': '費用',
   'accounts.role.daily-asset': '日常資産（現金・預金）',
   'accounts.role.investment-asset': '投資資産',
-  'accounts.role.continuing-cost-asset': '継続コスト台帳（内部集約）',
+  'accounts.role.continuing-cost-asset': '月割り台帳（内部集約）',
   'accounts.role.payment-liability': '支払用負債（クレジットカード等）',
   'accounts.role.other-liability': 'その他の負債（ローン等）',
   'accounts.role.equity': '純資産（元入金等）',
@@ -475,7 +475,7 @@ export const ja = {
   'box.addLoan': 'ローンを追加',
   'box.addCategory': 'カテゴリを追加',
   'box.longTermDebtHint':
-    '住宅ローン・分割返済など返済予定を持つ債務です。借入の実行や分割返済の予定は、振替（借入）や継続コスト化の導線から作れます。',
+    '住宅ローン・分割返済など返済予定を持つ債務です。借入の実行や分割返済の予定は、振替（借入）や持ち物の登録の導線から作れます。',
 
   'settings.title': '設定',
   'settings.dataSection': 'データ',
@@ -575,7 +575,7 @@ export const ja = {
   'error.account.archiveCounterpartType':
     'アーカイブ時の振替先は、元の科目と同じ区分から選んでください。',
   'error.entry.monthlyCost':
-    '購入の仕訳は削除できません。継続コスト資産の項目（毎月のもの）を削除すると一緒に消えます。',
+    '購入の仕訳は削除できません。持ち物の項目（毎月のもの）を削除すると一緒に消えます。',
   'error.entry.adjustment': '残高補正の仕訳は、仕訳一覧の補正行から編集・削除してください。',
   'error.entry.virtual': '導出専用の仮想仕訳は保存できません。',
   'error.entry.invalidStructure': '仕訳の形式が正しくないため保存できません。',
@@ -583,8 +583,7 @@ export const ja = {
   'error.entry.accountRoleMismatch': '仕訳の勘定科目の役割と区分が一致していません。',
   'error.adjust.targetNotFound': '対象科目が見つかりません。',
   'error.adjust.assetLiabilityOnly': '残高補正できるのは資産・負債・費用・収入の科目です。',
-  'error.adjust.internalRole':
-    '継続コスト台帳（内部の集約口座）と残高調整科目は残高補正できません。',
+  'error.adjust.internalRole': '月割り台帳（内部の集約口座）と残高調整科目は残高補正できません。',
   'error.adjust.notFound': '対象の残高補正が見つかりません。',
   'error.adjust.notAdjustment': 'この仕訳は残高補正ではありません。',
   'error.opening.assetLiabilityOnly': '初期残高を登録できるのは資産・負債の科目です。',
@@ -596,15 +595,15 @@ export const ja = {
   'error.monthlyCost.paymentSource':
     '支払い元は資金（現金・預金）かカード・ローンを選んでください。',
   'error.monthlyCost.repaymentAccount': '返済口座は日常資産を選んでください。',
-  'error.monthlyCost.notFound': '対象の継続コスト資産が見つかりません。',
-  'error.monthlyCost.invalidStructure': '継続コスト資産の内容が不正です。',
+  'error.monthlyCost.notFound': '対象の持ち物が見つかりません。',
+  'error.monthlyCost.invalidStructure': '持ち物の内容が不正です。',
   'error.monthlyCost.endBeforeStart': '終了日は開始日以降にしてください。',
   // 4項目モデル（指示書#5）で新設したエラーコード。
   'error.monthlyCost.purchaseAfterEnd': '購入の仕訳の日付は終了日以前にしてください。',
   'error.monthlyCost.deleteLiability':
     '負債で購入した項目は削除できません。アーカイブ（終了日の設定）を使ってください。',
   'error.monthlyCost.recoveryDestination': '振替先の科目を選んでください。',
-  'error.entry.ledgerAccount': '継続コスト台帳の科目は継続コスト資産の登録からだけ使えます。',
+  'error.entry.ledgerAccount': '月割り台帳の科目は持ち物の登録からだけ使えます。',
   'error.account.archiveBalance':
     '残高が残っている科目はアーカイブできません。先に振替で残高を 0 にしてください。',
   'error.recurring.everyMonthsInvalid': '周期は 1〜1200 か月の整数で入力してください。',
@@ -615,7 +614,7 @@ export const ja = {
   'error.recurring.amountChangeModeRequired':
     '金額の変更方法（全期間、または今日から）を選んでください。',
   'error.recurring.splitDependency':
-    '今日分の仕訳または継続コスト資産を安全に分けられません。対象の起票内容を確認してください。',
+    '今日分の仕訳または持ち物を安全に分けられません。対象の起票内容を確認してください。',
   // ルール由来（rec- 仕訳 / ccr- item）の読み取り専用化（作者決定 2026-08-15）。
   // 画面から到達できない経路でも保存境界で fail-closed に止める。
   'error.recurring.generatedReadOnly':
@@ -721,7 +720,7 @@ export const ja = {
   'monthly.pick.asset': 'いま持っているものを登録',
   'monthly.searchPlaceholder': '項目名・科目名で検索',
   'monthly.searchEmpty': '該当する項目がありません。',
-  'monthly.searchCount': 'くり返し記帳 {rules} 件・継続コスト資産 {items} 件',
+  'monthly.searchCount': 'くり返し記帳 {rules} 件・持ち物 {items} 件',
 
   'recurring.sectionTitle': 'くり返し記帳',
   'recurring.sectionIntro':
@@ -761,8 +760,7 @@ export const ja = {
   'recurring.amountChangeWholeOnlyBody':
     'このルールには {date} より前またはその日以降の期間がないため、その日を境に分けられません。全期間の金額変更だけ選べます。',
   'recurring.amountChangeAll': '全期間の金額を変更',
-  'recurring.amountChangeAllHint':
-    '過去に起票された仕訳と継続コスト資産も、新しい金額へ変更します。',
+  'recurring.amountChangeAllHint': '過去に起票された仕訳と持ち物も、新しい金額へ変更します。',
   'recurring.amountChangeFromToday': '{date} から新しい金額',
   'recurring.amountChangeFromTodayHint':
     '現在のルールは {date} より前までとし、その日から新しいルールを開始します。起票周期の基準月は現在のルールから引き継ぎ、日と周期は編集内容を使います。',
@@ -830,7 +828,7 @@ export const ja = {
   'error.recurring.flowInvalid':
     '科目の組み合わせが不正です（源泉と行き先を別の科目にしてください。内部集約・調整科目は使えません）。',
   'error.recurring.notFound': '定期ルールが見つかりません。',
-  'monthlyCost.sectionTitle': '継続コスト資産',
+  'monthlyCost.sectionTitle': '持ち物',
 
   // 初期残高の一括登録（初回起動時に自動表示・設定から再表示可能）
   'onboarding.title': 'はじめに：いまの残高を登録',
