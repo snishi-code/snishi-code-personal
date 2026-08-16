@@ -423,6 +423,16 @@ export function Allocations({
               // 切り替えの出現条件は終了と同じ（今日存在していて終了点が未設定）。
               // どちらも「この日で旧線分を閉じる」操作で、後継を作るかどうかだけが違う。
               const canEndToday = activeToday && start < today && r.endDate === undefined;
+              // 操作ボタンが出ない行も、右列の同じ位置を状態チップで埋める（v13.2）。
+              // 空けると縦揃えが崩れ、「なぜボタンが無いか」も読めなくなる。
+              const status =
+                r.endDate !== undefined
+                  ? activeToday
+                    ? { label: t('recurring.statusEndScheduled'), tone: 'warning' }
+                    : { label: t('recurring.statusEnded'), tone: 'neutral' }
+                  : activeToday
+                    ? { label: t('recurring.ruleNoEnd'), tone: 'neutral' }
+                    : { label: t('recurring.statusNotStarted'), tone: 'neutral' };
               return (
                 // 行そのものをタップ = そのルールの編集シート（カードタップ = 編集の単一正本）。
                 // 行の中に終了・切替のボタンが残るため <button> にはできない（入れ子不正）。
@@ -460,34 +470,42 @@ export function Allocations({
                         </div>
                       ) : null}
                     </div>
-                    <span className="list__amount">
-                      <Money amount={r.amount} currency={currency} />
-                    </span>
-                    {/* 一等地の動詞は文字ボタン（v13.1: 普遍的でない動詞はアイコンにしない）。 */}
-                    {canEndToday ? (
-                      <div className="row-actions">
-                        <button
-                          type="button"
-                          className="btn btn--ghost"
-                          style={{ minHeight: 'var(--tap)' }}
-                          onClick={rowActionClick(() => setSwitchingRule(r))}
-                          aria-label={`${t('recurring.switch')}: ${r.name}`}
-                          data-ui={UI.allocations.recurringSwitch}
+                    {/* 右列 = 上段 金額 / 下段 操作（または状態）。行をまたいで縦に揃う。 */}
+                    <div className="row-trailing">
+                      <span className="list__amount">
+                        <Money amount={r.amount} currency={currency} />
+                      </span>
+                      {/* 一等地の動詞は tonal ボタン（v13.2: 押せる面を持たせる）。 */}
+                      {canEndToday ? (
+                        <div className="row-actions">
+                          <button
+                            type="button"
+                            className="btn btn--tonal"
+                            onClick={rowActionClick(() => setSwitchingRule(r))}
+                            aria-label={`${t('recurring.switch')}: ${r.name}`}
+                            data-ui={UI.allocations.recurringSwitch}
+                          >
+                            {t('recurring.switchShort')}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn--tonal"
+                            onClick={rowActionClick(() => setEndingRule(r))}
+                            aria-label={`${t('recurring.end')}: ${r.name}`}
+                            data-ui={UI.allocations.recurringEnd}
+                          >
+                            {t('recurring.end')}
+                          </button>
+                        </div>
+                      ) : (
+                        <span
+                          className={`tag tag--${status.tone}`}
+                          data-ui={UI.allocations.recurringStatus}
                         >
-                          {t('recurring.switchShort')}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn--ghost"
-                          style={{ minHeight: 'var(--tap)' }}
-                          onClick={rowActionClick(() => setEndingRule(r))}
-                          aria-label={`${t('recurring.end')}: ${r.name}`}
-                          data-ui={UI.allocations.recurringEnd}
-                        >
-                          {t('recurring.end')}
-                        </button>
-                      </div>
-                    ) : null}
+                          {status.label}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </li>
               );
@@ -533,6 +551,8 @@ export function Allocations({
                     ? cardTapProps(`${t('common.edit')}: ${originRule?.name ?? m.name}`, open)
                     : {})}
                 >
+                  {/* ルール行と同じ設計図（v13.2）: 左 = 名前 / 右列 = 上段 金額・下段 操作
+                      （または状態）。金額の kv 行は右列へ移したぶん重複を避けて外す。 */}
                   <div
                     className="list__title"
                     style={{
@@ -540,43 +560,31 @@ export function Allocations({
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
+                      gap: 'var(--space-3)',
                     }}
                   >
-                    <span>
-                      {m.name}
-                      {/* くり返し記帳が自動生成した item はルールと同名で並ぶ（buildRuleItem が
-                          name: rule.name）ため、検索で「登録した覚えのない項目」に見えないよう
-                          由来を名乗る。判定はルール由来の単一正本 generatedItemRuleId。 */}
-                      {fromRuleItem ? (
-                        <>
-                          {' '}
-                          <span className="tag tag--teal">{t('monthlyCost.fromRule')}</span>
-                        </>
-                      ) : null}
-                    </span>
-                    {fromRuleItem /* ルール由来 item は読み取り専用: アーカイブも削除も出さない
-                         （導出カードは実在しないので元から対象が無い。保存済み ccr- も
-                         「生まれたものへの個別操作は不可」＝調整は由来ルール側で行う）。
-                         削除は編集シート最下部へ移設（動詞体系 v13.1）。 */ ? null : (
-                      <span className="row-actions">
-                        {/* 一等地の動詞は文字ボタン「終了」（旧アーカイブ・v13.1）。 */}
+                    <span>{m.name}</span>
+                    <span className="row-trailing">
+                      <span className="list__amount">
+                        <Money amount={m.amount} currency={currency} />
+                      </span>
+                      {fromRuleItem /* ルール由来 item は読み取り専用: 終了も削除も出さない
+                           （導出カードは実在しないので元から対象が無い。保存済み ccr- も
+                           「生まれたものへの個別操作は不可」＝調整は由来ルール側で行う）。
+                           ボタンの代わりに由来を名乗るチップを同じ位置へ置く（v13.2:
+                           縦揃えを崩さず「なぜボタンが無いか」も読める）。 */ ? (
+                        <span className="tag tag--teal">{t('monthlyCost.fromRule')}</span>
+                      ) : (
                         <button
                           type="button"
-                          className="btn btn--ghost"
-                          style={{ minHeight: 'var(--tap)' }}
+                          className="btn btn--tonal"
                           onClick={rowActionClick(() => setArchiving(m))}
                           aria-label={`${t('ccItem.archiveTitle')}: ${m.name}`}
                           data-ui={UI.allocations.archive}
                         >
                           {t('ccItem.archiveTitle')}
                         </button>
-                      </span>
-                    )}
-                  </div>
-                  <div className="kv">
-                    <span className="muted">{t('monthlyCost.amount')}</span>
-                    <span>
-                      <Money amount={m.amount} currency={currency} />
+                      )}
                     </span>
                   </div>
                   <div className="kv">

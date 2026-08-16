@@ -753,6 +753,11 @@ export const ja = {
   'recurring.rulePeriod': 'ルール期間',
   'recurring.ruleEndBefore': '{date} より前まで',
   'recurring.ruleNoEnd': '継続中',
+  // 行の右列の状態チップ（v13.2）: 操作ボタンが出ない行も同じ位置を状態で埋める
+  // （空白にすると縦揃えが崩れ、「なぜボタンが無いか」も分からないため）。
+  'recurring.statusEndScheduled': '終了予定',
+  'recurring.statusEnded': '終了済み',
+  'recurring.statusNotStarted': '開始前',
   'recurring.postingSchedule': '起票',
   'recurring.amountChangeTitle': '金額の変更方法',
   'recurring.amountChangeBody':

@@ -272,6 +272,8 @@ export const UI = {
     // 終了 = 排他的終点を打つ。同じ設定で新しく始める = 系譜なしの独立ルール作成。
     // どちらも無確認では実行しない（終了は終了日シート・再開は確認ダイアログ）。
     recurringEnd: 'allocations.recurring.end',
+    // 操作ボタンが出ない行の状態チップ（同じ位置・縦揃えを崩さない）
+    recurringStatus: 'allocations.recurring.status',
     recurringEndSheet: 'allocations.recurring.endSheet',
     recurringEndSheetDate: 'allocations.recurring.endSheet.date',
     recurringEndSheetConfirm: 'allocations.recurring.endSheet.confirm',

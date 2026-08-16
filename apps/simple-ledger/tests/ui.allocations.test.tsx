@@ -819,3 +819,149 @@ describe('アーカイブシート', () => {
     expect((await recoveriesOf(item.id))[0]!.lines[0]!.amount).toBe(900000);
   });
 });
+
+/*
+ * 行の設計図（v13.2・作者確定 2026-08-16）:
+ *  - 一覧の行は「左 = 名前と説明 / 右 = 固定列」。右列は上段に金額、下段に操作（または状態）。
+ *    金額とボタンが行をまたいで縦に揃う（v13.1 までは操作がある行だけ金額が内側へ押されていた）
+ *  - 一等地の動詞は tonal ボタン（btn--ghost は地も枠も透明でボタンに見えない）
+ *  - 操作が出ない行も同じ位置を状態チップで埋める（空白にしない）
+ */
+describe('行の設計図（右端列・tonal ボタン・状態チップ）', () => {
+  async function seedRules() {
+    const ledger = await loadLedger();
+    const bank = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    // 継続中（操作あり）・終了予定（未来の終了点）・終了済み（過去の終了点）の 3 状態。
+    await createRecurringRule({
+      name: '継続中ルール',
+      amount: 1000,
+      dayOfMonth: 5,
+      everyMonths: 1,
+      debitAccountId: expense.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-01',
+      startDate: '2026-01-05',
+    });
+    await createRecurringRule({
+      name: '終了予定ルール',
+      amount: 2000,
+      dayOfMonth: 6,
+      everyMonths: 1,
+      debitAccountId: expense.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-01',
+      startDate: '2026-01-06',
+      endDate: '2030-01-01',
+    });
+    await createRecurringRule({
+      name: '終了済みルール',
+      amount: 3000,
+      dayOfMonth: 7,
+      everyMonths: 1,
+      debitAccountId: expense.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-01',
+      startDate: '2026-01-07',
+      endDate: '2026-02-01',
+    });
+  }
+
+  it('ルール行は右列に金額・操作を積み、全行の右端が揃う', async () => {
+    await seedRules();
+    render(<View period={{ mode: 'all' }} />);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.allocations.recurringList}"]`)).not.toBeNull();
+    });
+    // 「終了分も表示」で 3 行そろえる。
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.showCompleted}"]`)!);
+
+    const rows = [
+      ...document.querySelectorAll(`[data-ui="${UI.allocations.recurringList}"] .list__item`),
+    ];
+    expect(rows.length).toBe(3);
+    for (const row of rows) {
+      // 金額と操作/状態は同じ右列（.row-trailing）の中にあり、行の最終要素はその列。
+      const trailing = row.lastElementChild!;
+      expect(trailing.classList.contains('row-trailing')).toBe(true);
+      expect(trailing.querySelector('.list__amount')).not.toBeNull();
+      // 操作が無い行も空にしない（状態チップで埋める）。
+      expect(trailing.children.length).toBe(2);
+    }
+  });
+
+  it('継続中は tonal ボタン、終了予定・終了済みは状態チップを同じ位置に出す', async () => {
+    await seedRules();
+    render(<View period={{ mode: 'all' }} />);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.allocations.recurringList}"]`)).not.toBeNull();
+    });
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.showCompleted}"]`)!);
+
+    const rowOf = (name: string) =>
+      [
+        ...document.querySelectorAll(`[data-ui="${UI.allocations.recurringList}"] .list__item`),
+      ].find((row) => row.textContent?.includes(name))!;
+
+    // 継続中: 切替・終了が tonal ボタン（btn--ghost ではない = 押せる面を持つ）。
+    const active = rowOf('継続中ルール');
+    const switchBtn = active.querySelector(`[data-ui="${UI.allocations.recurringSwitch}"]`)!;
+    const endBtn = active.querySelector(`[data-ui="${UI.allocations.recurringEnd}"]`)!;
+    expect(switchBtn.classList.contains('btn--tonal')).toBe(true);
+    expect(endBtn.classList.contains('btn--tonal')).toBe(true);
+    expect(switchBtn.classList.contains('btn--ghost')).toBe(false);
+    expect(active.querySelector(`[data-ui="${UI.allocations.recurringStatus}"]`)).toBeNull();
+
+    // 終了予定・終了済み: 操作は出さず、同じ右列に状態チップ。
+    const scheduled = rowOf('終了予定ルール');
+    expect(scheduled.querySelector(`[data-ui="${UI.allocations.recurringEnd}"]`)).toBeNull();
+    expect(
+      scheduled.querySelector(`[data-ui="${UI.allocations.recurringStatus}"]`),
+    ).toHaveTextContent('終了予定');
+    const ended = rowOf('終了済みルール');
+    expect(ended.querySelector(`[data-ui="${UI.allocations.recurringStatus}"]`)).toHaveTextContent(
+      '終了済み',
+    );
+  });
+
+  it('持ち物カードも右列に金額を積み、ルール由来は終了ボタンの位置に由来チップを出す', async () => {
+    const ledger = await loadLedger();
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    const bank = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    await createContinuousCost({
+      name: '手で登録した持ち物',
+      amount: 120_000,
+      startDate: '2026-01-01',
+      endDate: '2027-01-01',
+      expenseAccountId: expense.id,
+      creditAccountId: bank.id,
+    });
+    await createRecurringRule({
+      name: 'ルール由来の持ち物',
+      amount: 1000,
+      dayOfMonth: 5,
+      everyMonths: 1,
+      debitAccountId: expense.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-01',
+      startDate: '2026-01-05',
+    });
+    render(<View period={{ mode: 'all' }} />);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.allocations.item}"]`)).not.toBeNull();
+    });
+
+    const cards = [...document.querySelectorAll(`[data-ui="${UI.allocations.item}"]`)];
+    const manual = cards.find((c) => c.textContent?.includes('手で登録した持ち物'))!;
+    const derived = cards.find((c) => c.textContent?.includes('ルール由来の持ち物'))!;
+    for (const card of [manual, derived]) {
+      const trailing = card.querySelector('.row-trailing')!;
+      expect(trailing.querySelector('.list__amount')).not.toBeNull();
+      expect(trailing.children.length).toBe(2);
+    }
+    // 手動 item は終了ボタン、ルール由来は同じ位置に由来チップ（読み取り専用の理由が読める）。
+    expect(manual.querySelector(`[data-ui="${UI.allocations.archive}"]`)).not.toBeNull();
+    expect(derived.querySelector(`[data-ui="${UI.allocations.archive}"]`)).toBeNull();
+    expect(derived.querySelector('.row-trailing .tag')).toHaveTextContent('くり返し記帳から');
+  });
+});

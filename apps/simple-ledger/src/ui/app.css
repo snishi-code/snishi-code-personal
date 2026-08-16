@@ -1287,3 +1287,45 @@ button.stmt-row:hover {
 .field > .field__label {
   align-self: flex-start;
 }
+
+/* ── 行の設計図（v13.2・作者確定 2026-08-16）──
+   一覧の行は「左 = 名前と説明 / 右 = 固定列」の 2 分割。右列は上段に金額、下段に操作
+   （または状態）を積み、行をまたいで**金額とボタンが縦に揃う**のを原則にする。
+   v13.1 までは [main][金額][操作] の横並びで、操作がある行だけ金額が内側へ押されていた。
+   数字は tabular-nums で桁位置も揃える（金融アプリの通例）。 */
+.row-trailing {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+.list__amount {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+}
+/* kv の値（右側）も同じ桁揃えに乗せる。 */
+.kv > :last-child {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 行アクションのボタン様式（v13.2）──
+   一等地の動詞は「押せる面」を持つ: 薄い地 + 細い枠 + カプセル形
+   （App Store の「入手」・Material 3 の tonal と同型）。btn--ghost は地も枠も透明で
+   文字が置いてあるだけに見えるため、行内の動詞には使わない（シート内の副次動作専用）。
+   高さは .btn の min-height = var(--tap) を継承する（44px のタップ目標を守る）。 */
+.btn--tonal {
+  background: var(--primary-light);
+  border-color: var(--primary-border);
+  color: var(--primary-strong);
+  border-radius: var(--radius-pill);
+  /* 2 文字の動詞でも円に見えないよう横に伸ばす（.btn 既定の 16px より狭め・
+     2 つ並べても 375px 幅に収まる 14px）。 */
+  padding: 0 14px;
+}
+.btn--tonal:hover {
+  background: var(--primary-border);
+}
