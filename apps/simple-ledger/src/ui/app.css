@@ -1279,3 +1279,11 @@ button.stmt-row:hover {
     width: calc(100% - var(--space-2) * 2);
   }
 }
+
+/* ── フィールドラベルの当たり判定（v13.1 その6・実ユーズ指摘）──
+   .field は縦 flex で label が既定 stretch のまま全幅へ伸び、文字の右の透明な余白を
+   タップしても input が作動する（date input では OS カレンダーが開いて驚かせる）。
+   ラベルの当たり判定を見た目（文字ぶんの幅）に一致させる。 */
+.field > .field__label {
+  align-self: flex-start;
+}

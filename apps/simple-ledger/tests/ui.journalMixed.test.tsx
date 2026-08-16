@@ -435,3 +435,61 @@ describe('仕訳一覧の混合表示', () => {
     expect(amount).not.toHaveAttribute('aria-label');
   });
 });
+
+/*
+ * 行レイアウト（v13.1 その6・実ユーズ指摘）:
+ *  - 金額は行の右端ライン（li の最終要素）に固定する
+ *  - バッジ（継続コスト等）は摘要の後ろに置く（バッジ・ボタンは摘要と金額の間）
+ */
+describe('仕訳一覧の行レイアウト', () => {
+  it('金額が行の最終要素で、バッジは摘要の後ろに来る', async () => {
+    const ledger = await loadLedger();
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const today = todayLocal();
+    await createContinuousCost({
+      name: 'レイアウト確認',
+      amount: 60000,
+      startDate: addMonthsToDate(today, -2),
+      endDate: addMonthsToDate(today, 4),
+      expenseAccountId: expense.id,
+    });
+    // 反対仕訳ボタンつきの通常仕訳も混ぜる（ボタンが金額より前に来ることを見る）。
+    await upsertEntry({
+      id: 'layout-normal-entry',
+      date: today,
+      description: '通常の支出行',
+      kind: 'normal',
+      lines: [
+        { accountId: expense.id, side: 'debit', amount: 700 },
+        { accountId: cash.id, side: 'credit', amount: 700 },
+      ],
+      metadata: { inputMode: 'expense' },
+      createdAt: '2026-08-16T00:00:00.000Z',
+      updatedAt: '2026-08-16T00:00:00.000Z',
+    });
+    render(<View />);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.journal.view}"]`)).toBeInTheDocument();
+    });
+    await screen.findAllByText('レイアウト確認');
+    const list = document.querySelector(`[data-ui="${UI.journal.list}"]`)!;
+    const rows = Array.from(list.querySelectorAll('li.list__item'));
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      // 金額は右端ライン = li の最終要素（行アクションは摘要と金額の間）。
+      expect(row.lastElementChild!.classList.contains('list__amount')).toBe(true);
+    }
+    // 反対仕訳ボタンを持つ行でも、ボタンは金額の前（摘要と金額の間）。
+    const normalRow = rows.find((row) => row.textContent?.includes('通常の支出行'))!;
+    expect(normalRow.querySelector(`[data-ui="${UI.journal.entry.reverse}"]`)).not.toBeNull();
+    expect(normalRow.lastElementChild!.classList.contains('list__amount')).toBe(true);
+    // バッジは摘要の後ろ（タイトル内で description が先・tag が後）。
+    const title = rows
+      .map((row) => row.querySelector('.list__title'))
+      .find((el) => el?.textContent?.includes('継続コスト'))!;
+    expect(title).toBeDefined();
+    const text = title.textContent ?? '';
+    expect(text.indexOf('レイアウト確認')).toBeLessThan(text.indexOf('継続コスト'));
+  });
+});

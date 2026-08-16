@@ -454,9 +454,12 @@ export function Journal({
                         : plan.kind === 'opening'
                           ? () => setEditingOpening(entry)
                           : () => onEditEntry(entry);
+            // バッジは摘要の後ろ（v13.1 その6・実ユーズ指摘）: 行の読み出しは摘要から始まり、
+            // バッジ・ボタンは摘要と金額の間に並ぶ（「毎月のもの」の種別タグと同位置）。
             const title = (
               <>
                 <div className="list__title">
+                  {entry.description}{' '}
                   {entry.kind === 'opening' ? (
                     <span className="tag tag--neutral">{t('journal.opening')}</span>
                   ) : null}
@@ -468,8 +471,7 @@ export function Journal({
                   ) : null}
                   {entry.metadata?.adjustment ? (
                     <span className="tag tag--neutral">{t('journal.adjustmentTag')}</span>
-                  ) : null}{' '}
-                  {entry.description}
+                  ) : null}
                 </div>
                 <div className="list__sub">
                   {entry.date}・{flowText(map, entry)}
@@ -494,15 +496,10 @@ export function Journal({
                     {title}
                   </button>
                 )}
-                <span
-                  className={`list__amount ${balanceChangeClass}`.trim()}
-                  aria-label={balanceChangeLabel}
-                >
-                  <Money amount={displayedAmount} currency={currency} />
-                </span>
                 {/* 行アクション = 「現実の変化を記す」動詞（反対仕訳）だけ。削除は各編集シートの
                     最下部へ移設（動詞体系 v13.1・行から削除ボタンを撤去）。
-                    回収の振替の逆仕訳は台帳の不変条件（⑧）で保存できないため出さない。 */}
+                    回収の振替の逆仕訳は台帳の不変条件（⑧）で保存できないため出さない。
+                    位置は摘要と金額の間 = 金額は行の右端ラインに固定（v13.1 その6）。 */}
                 {isVirtual ||
                 isPurchase ||
                 isRuleGenerated ||
@@ -518,6 +515,12 @@ export function Journal({
                     <Icon name="reverse" size={18} />
                   </button>
                 )}
+                <span
+                  className={`list__amount ${balanceChangeClass}`.trim()}
+                  aria-label={balanceChangeLabel}
+                >
+                  <Money amount={displayedAmount} currency={currency} />
+                </span>
               </li>
             );
           })}
