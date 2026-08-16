@@ -71,7 +71,7 @@
   `startDate` **未設定 = 過去へ開いた線分**（過去側制限なし・§A 案1 2026-08-11。旧
   「`createdAt` を暗黙開始日とみなす」は廃止）。新規作成（初期残高付きを含む）の既定も空欄で、
   作者が科目編集で明示したときだけ保存される。
-  アーカイブ操作は今日を `endDate` に記録し、アーカイブ解除は `endDate` を消す。
+  終了操作は今日を `endDate` に記録し、終了の解除は `endDate` を消す。
   schema / DB の版は変えず、端点のない JSON も受理する。
 - `JournalEntry.groupId?`: 諸口（複数フロー行の束・グループ ID 方式）の**予約フィールド**（v12。
   検証は形式のみ〔1〜64 文字〕で、UI・集計は未実装。同 groupId の件数など相互参照の不変条件は
@@ -112,10 +112,10 @@
 - **購入の仕訳**（保存される仕訳・item と 1:1）: `借方 月割り台帳(continuing-cost-ledger) /
 貸方 支払い元`。印は `metadata.monthlyCostId` のみ。持ち込み登録（貸方 = 初期残高 equity）は
   `kind:'opening'`。
-- **回収の振替**（アーカイブ時の売却・返金）: `借方 回収先 / 貸方 月割り台帳`・
+- **回収の振替**（終了時の売却・返金）: `借方 回収先 / 貸方 月割り台帳`・
   `metadata: { monthlyCostId, monthlyCostRecovery: true }`。普通のユーザー入力の振替として
   編集・削除可。`archiveMonthlyCost` は `recoveries`（0 本以上）を同一トランザクションで保存する。
-  アーカイブシートが作るのは最大 2 本 = ①回収先への回収 ②「残りを終了日に全額費用にする」の
+  終了シートが作るのは最大 2 本 = ①回収先への回収 ②「残りを終了日に全額費用にする」の
   第 2 振替（借方 = `item.expenseAccountId`・金額 = 残存価値 − 回収額）。第 2 振替も回収の一種
   なので、**台帳にふれる保存仕訳は購入と回収の 2 種だけ**という不変条件は変わらない。
   保存境界は費用カテゴリ宛ての回収を `item.expenseAccountId` に限る（それ以外の費用科目は
@@ -363,7 +363,7 @@ step 4 で見た `deviceId + revision` は step 5 の保存 transaction でも�
   復旧面へ（in-app 変換なし。実データの v12→v13 変換 =
   `_workspace-management/scripts/convert-ledger-v12-to-v13.mjs`・**順序固定**: v12 ビルドの
   まま export → 変換（過去のスキップ = 線分手術・構造的逸脱 = 手動仕訳へ降格・値の逸脱 =
-  導出値へ置換・早期アーカイブ = `settlements` へ移設。すべて変換ログで目視）→
+  導出値へ置換・早期終了 = `settlements` へ移設。すべて変換ログで目視）→
   **変換結果を実 schema と実 import で検証**（`apps/simple-ledger/tests/convertedLedgerV13.verify.test.ts`
   に `CONVERTED_LEDGER_JSON=<path>` を渡す）→ v13 更新 → DB 初期化 → import）。
   ここでも**旧版スナップショットは復元不可**なので、保険は変換前の v12 JSON を手元に残すこと。

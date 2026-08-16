@@ -405,12 +405,12 @@ export const ja = {
 
   'accounts.title': '勘定科目',
   'accounts.intro':
-    '大きな箱はアプリが管理します。箱の中の内訳だけを追加・名前変更・アーカイブできます。登録済みの初期残高・補正は仕訳一覧で確認できます。',
+    '大きな箱はアプリが管理します。箱の中の内訳だけを追加・名前変更・終了できます。登録済みの初期残高・補正は仕訳一覧で確認できます。',
   'accounts.edit': '内訳を編集',
   'accounts.addTitle': '{box}の内訳を追加',
   'accounts.boxLabel': '大分類',
   'accounts.boxLockedHint':
-    '大分類は変更できません。分類を変えたい場合は、新しい内訳を作って古い内訳をアーカイブしてください。',
+    '大分類は変更できません。分類を変えたい場合は、新しい内訳を作って古い内訳を終了してください。',
   'accounts.emptyBox': 'まだ内訳がありません。',
   // 開始日欄（§A 案1）: 空欄 = 過去へ開いた線分。明示値を空欄へ戻せば開始日を削除できる。
   'accounts.startDateHint': '空欄 = 過去の制限なし。空欄に戻すと開始日を削除します。',
@@ -418,32 +418,32 @@ export const ja = {
   'accounts.openingDate': '基準日',
   'accounts.openingHint':
     '入力すると、内訳の作成と同時に初期残高（opening 仕訳）を登録します。空欄なら内訳だけを作成します。登録した初期残高は仕訳一覧で確認できます。',
-  'accounts.archiveRenameTitle': 'アーカイブ済みと名前が重複しています',
+  'accounts.archiveRenameTitle': '終了済みと名前が重複しています',
   'accounts.archiveRenameBody':
-    '同じ名前「{name}」のアーカイブ済み内訳があります。アーカイブ側を「{renamed}」へ変更して続行しますか？',
+    '同じ名前「{name}」の終了済み内訳があります。終了済み側を「{renamed}」へ変更して続行しますか？',
   'accounts.archiveRenameConfirm': '変更して続行',
   'accounts.name': '科目名',
   'accounts.balance': '残高',
   'accounts.periodAmount': '{period}の発生額',
   'accounts.autoBadge': '自動',
   'accounts.outsideSlice': 'この断面には存在しない',
-  'accounts.archive': 'アーカイブ',
+  'accounts.archive': '終了',
   // 残高 0 の科目も無確認では終了させない（2026-08-15 作者合意）。残高が残る科目は
   // 振替シートが確認を兼ねるので、この確認は通らない。
-  'accounts.archiveConfirmTitle': 'この科目をアーカイブしますか？',
+  'accounts.archiveConfirmTitle': 'この科目を終了しますか？',
   'accounts.archiveConfirmBody':
     '「{name}」を今日を終了点として記録します。登録済みの仕訳はそのまま残ります。',
-  'accounts.unarchiveConfirmTitle': 'アーカイブを解除しますか？',
+  'accounts.unarchiveConfirmTitle': '終了を解除しますか？',
   'accounts.unarchiveConfirmBody': '「{name}」の終了点を消して、また使えるようにします。',
-  'accounts.archiveSkipTransfer': '振替せずにアーカイブ',
-  'accounts.unarchive': 'アーカイブ解除',
+  'accounts.archiveSkipTransfer': '振替せずに終了',
+  'accounts.unarchive': '終了を解除',
   // 科目の削除 UI（v13.1・plan 未決①の解消）: 未使用なら活性・使用中は紐づき件数を添えて
   // 不活性（fail-closed の理由を見せる）。記録を残して使うのをやめるのはアーカイブ。
   'accounts.deleteAction': 'この科目を削除…',
   'accounts.deleteDangerHint':
     '削除は取り消せません（保険は書き出した JSON とスナップショットだけです）。',
   'accounts.deleteInUseHint':
-    '仕訳 {entries} 件・持ち物 {items} 件・くり返し記帳 {rules} 件から参照されているため削除できません。使うのをやめるには「アーカイブ」を使ってください。',
+    '仕訳 {entries} 件・持ち物 {items} 件・くり返し記帳 {rules} 件から参照されているため削除できません。使うのをやめるには「終了」を使ってください。',
   'accounts.deleteConfirmTitle': '科目を削除しますか？',
   'accounts.deleteConfirmBody': '「{name}」を削除します。この操作は取り消せません。',
   'accounts.showArchived': 'この断面に存在しない科目も表示',
@@ -564,16 +564,16 @@ export const ja = {
   'error.account.roleTypeMismatch': '役割が区分と一致しません。',
   'error.account.typeLocked': '使用中の科目は区分を変更できません。',
   'error.account.roleLocked':
-    '使用中の内訳は別の大分類へ移動できません。新しい内訳を作り、古い内訳をアーカイブしてください。',
+    '使用中の内訳は別の大分類へ移動できません。新しい内訳を作り、古い内訳を終了してください。',
   'error.account.nameConflict': '同じ名前の内訳が既にあります（別の箱でも重複できません）。',
-  'error.account.nameConflictArchived': '同じ名前のアーカイブ済み内訳があります。',
-  'error.account.deleteInUse': 'この科目は使用中のため削除できません。アーカイブしてください。',
+  'error.account.nameConflictArchived': '同じ名前の終了済み内訳があります。',
+  'error.account.deleteInUse': 'この科目は使用中のため削除できません。終了してください。',
   'error.account.periodInvalid': '科目の開始日・終了日を確認してください。',
   'error.account.referenceOutsidePeriod':
     'この科目を使う仕訳・予定・ルールが存在期間の外にあります。先に開始日・終了日または参照先を見直してください。',
-  'error.account.archiveDate': 'アーカイブ時の振替日はアーカイブ日と同じ日にしてください。',
+  'error.account.archiveDate': '終了時の振替日は終了日と同じ日にしてください。',
   'error.account.archiveCounterpartType':
-    'アーカイブ時の振替先は、元の科目と同じ区分から選んでください。',
+    '終了時の振替先は、元の科目と同じ区分から選んでください。',
   'error.entry.monthlyCost':
     '購入の仕訳は削除できません。持ち物の項目（毎月のもの）を削除すると一緒に消えます。',
   'error.entry.adjustment': '残高補正の仕訳は、仕訳一覧の補正行から編集・削除してください。',
@@ -601,11 +601,11 @@ export const ja = {
   // 4項目モデル（指示書#5）で新設したエラーコード。
   'error.monthlyCost.purchaseAfterEnd': '購入の仕訳の日付は終了日以前にしてください。',
   'error.monthlyCost.deleteLiability':
-    '負債で購入した項目は削除できません。アーカイブ（終了日の設定）を使ってください。',
+    '負債で購入した項目は削除できません。「終了」（終了日の設定）を使ってください。',
   'error.monthlyCost.recoveryDestination': '振替先の科目を選んでください。',
   'error.entry.ledgerAccount': '月割り台帳の科目は持ち物の登録からだけ使えます。',
   'error.account.archiveBalance':
-    '残高が残っている科目はアーカイブできません。先に振替で残高を 0 にしてください。',
+    '残高が残っている科目は終了できません。先に振替で残高を 0 にしてください。',
   'error.recurring.everyMonthsInvalid': '周期は 1〜1200 か月の整数で入力してください。',
   'error.recurring.dayOfMonthInvalid': '起票日は 1〜31 日の整数で入力してください。',
   'error.recurring.periodInvalid': 'ルールの開始日・終了日を確認してください。',
@@ -623,7 +623,7 @@ export const ja = {
   'error.monthlyCost.recoveryBeforeStart':
     '回収の振替の日付は開始日（購入の仕訳の日付）以降にしてください。',
   'error.monthlyCost.editLiability':
-    '負債（カード・ローン）で購入した項目は、支払い元・金額・日付を変更できません（自動作成した返済の仕訳と合わなくなるため）。終了はアーカイブ（終了日の設定）を使ってください。',
+    '負債（カード・ローン）で購入した項目は、支払い元・金額・日付を変更できません（自動作成した返済の仕訳と合わなくなるため）。終わらせるには「終了」（終了日の設定）を使ってください。',
   'error.common.staleData':
     '別のタブ（またはウィンドウ）でデータが変更されています。ページを再読み込みしてから、もう一度お試しください。',
   'error.common.revisionExhausted':
@@ -674,7 +674,7 @@ export const ja = {
   'projection.entryDescription': '投影: {name}',
   'projection.suggestedAccountName': '投資益',
   'accounts.projectionAccountArchivedHint':
-    '計上先はアーカイブ済みのため、投影は生成されません。別の収入科目を選ぶか、アーカイブを解除してください。',
+    '計上先は終了済みのため、投影は生成されません。別の収入科目を選ぶか、終了を解除してください。',
   'accounts.annualReturn': '想定利回り（年率%）',
   'accounts.annualReturnHint':
     '空欄 = 投影なし。設定すると、未来の断面にだけ毎月「計上先 → この科目」の評価益（投影）が現れます。',
@@ -771,7 +771,7 @@ export const ja = {
     '現在のルールは {date} より前までとし、その日から新しいルールを開始します。起票周期の基準月は現在のルールから引き継ぎ、日と周期は編集内容を使います。',
   'recurring.amountChangeBack': '編集に戻る',
   'recurring.refBroken':
-    '参照している科目が削除またはアーカイブされています。このルールの起票は止まっています（編集で科目を選び直してください）。',
+    '参照している科目が削除または終了しています。このルールの起票は止まっています（編集で科目を選び直してください）。',
   'recurring.from.manual': '貸方（支払い元・減る側）',
   'recurring.manualHint':
     'このルールで増える・使う側の科目です。支払いは一旦台帳（保管庫）に置かれ、次の支払いまでの期間に割り振られます。',

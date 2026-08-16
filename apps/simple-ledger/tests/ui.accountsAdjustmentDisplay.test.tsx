@@ -91,10 +91,8 @@ describe('残高調整科目の一覧表示（C-7・表示だけ普通に）', (
 
     // 管理操作は一切出さない（編集・アーカイブ・振替導線）。
     expect(screen.queryByRole('button', { name: '編集: 残高調整費' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'アーカイブ: 残高調整費' })).toBeNull();
-    expect(
-      screen.queryByRole('button', { name: '累計を振り替えてアーカイブ: 残高調整費' }),
-    ).toBeNull();
+    expect(screen.queryByRole('button', { name: '終了: 残高調整費' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '累計を振り替えて終了: 残高調整費' })).toBeNull();
     expect(screen.queryByRole('button', { name: '補正: 残高調整費' })).toBeNull();
     // 通常の費用科目には従来どおり管理操作がある（抑止の範囲が広すぎないこと）。
     expect(screen.getByRole('button', { name: '編集: 固定費' })).toBeInTheDocument();
