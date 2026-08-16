@@ -317,9 +317,9 @@ describe.skipIf(CONVERTER === undefined)('v12→v13 変換（合成フィクス�
     expect(orphan.id.startsWith('rec-')).toBe(false);
     expect(orphan.metadata?.recurringRuleId).toBeUndefined();
     // 対の item は手動 item として同じ内容で残り、購入仕訳がそれを指す（台帳の不変条件⑧）。
-    const orphanItemId = orphan.metadata?.monthlyCostId!;
+    const orphanItemId = orphan.metadata?.monthlyCostId;
     expect(orphanItemId).toBeDefined();
-    expect(orphanItemId.startsWith('ccr-')).toBe(false);
+    expect(orphanItemId!.startsWith('ccr-')).toBe(false);
     const orphanItem = pkg.monthlyCostItems.find((m) => m.id === orphanItemId)!;
     expect(orphanItem).toMatchObject({
       name: 'r5',
