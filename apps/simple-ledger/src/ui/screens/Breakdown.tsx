@@ -178,10 +178,11 @@ export function Breakdown({
   const visibleProjectionTruncations =
     trends?.investmentProjectionTruncations ?? reportDisplay?.investmentProjectionTruncations ?? [];
 
-  const drill = (accountId: string) =>
-    cfg.kind === 'flow'
-      ? onDrillDown({ accountId, ...range })
-      : onDrillDown({ accountId, to: asOf });
+  // ドリルの窓はフロー・ストックで同じ（reportBasis の flowRange = 月初〜断面、
+  // 休眠モード（year/all）もフローと同じ range）。ストックだけ from を落とすと、
+  // 「いま見ている期間」の画面から全期間の仕訳一覧へ落ちる = 窓が黙って変わる。
+  // 期間を外して見たい人は仕訳一覧側でフィルタを外せる（現行挙動のまま）。
+  const drill = (accountId: string) => onDrillDown({ accountId, ...range });
 
   // 資産は4枠、負債はカード/未払とローンの2枠。同じ描画構造と色の正本を共有する。
   const frames: BreakdownFrame[] | null =
