@@ -84,7 +84,7 @@ describe('Settings — スナップショット失敗', () => {
     render(
       <ToastProvider>
         <LedgerProvider>
-          <Settings onNavigate={() => undefined} onOpenOnboarding={() => undefined} />
+          <Settings onOpenOnboarding={() => undefined} />
         </LedgerProvider>
       </ToastProvider>,
     );

@@ -37,7 +37,8 @@ import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { todayLocal } from '../src/util/time';
 import { accountBalance } from '../src/domain/accounting';
-import type { Account, JournalEntry, SimpleEntryInput } from '../src/domain/types';
+import type { Account, JournalEntry } from '../src/domain/types';
+import type { SimpleEntryInput } from '../src/domain/entry';
 import './setup';
 
 beforeAll(() => {
@@ -409,7 +410,7 @@ describe('打ち消しの額は表示桁 0 でも丸めない', () => {
  * 生えたり消えたりするのを取り逃がす。updatedAt / revision を除いた全体を比べる。
  */
 describe('金額以外のフィールドの open→save 往復', () => {
-  const ignoreVolatile = (o: Record<string, unknown>) =>
+  const ignoreVolatile = <T extends object>(o: T) =>
     JSON.stringify(Object.fromEntries(Object.entries(o).filter(([k]) => k !== 'updatedAt')));
 
   it('勘定科目: 利回り・返済日・note・開始日を持つ科目が無変更保存で変わらない', async () => {

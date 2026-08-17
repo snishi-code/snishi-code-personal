@@ -46,7 +46,11 @@ const accounts: Account[] = [
 describe('完全導出（deriveRecurringOutputs）', () => {
   it('カーソル（postedThroughMonth）を無視して存在期間の全体を導出する', () => {
     const withCursor = deriveRecurringOutputs(
-      [rule({ postedThroughMonth: '2026-12' })],
+      [
+        rule({ postedThroughMonth: '2026-12' } as Partial<RecurringRule> & {
+          postedThroughMonth?: string;
+        }),
+      ],
       accounts,
       '2026-07-31',
     );
@@ -205,7 +209,7 @@ describe('完全導出（deriveRecurringOutputs）', () => {
       endDate: '2026-10-01',
       everyMonths: 3,
       postedThroughMonth: '2026-07',
-    });
+    } as Partial<RecurringRule> & { postedThroughMonth?: string });
     const { entries } = deriveRecurringOutputs([quarterly], accounts, '2026-12-31');
     expect(entries.map((entry) => entry.date)).toEqual(['2026-04-20', '2026-07-20']);
   });

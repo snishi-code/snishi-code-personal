@@ -130,8 +130,6 @@ const accounts = [
 
 const FIXTURE_YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026] as const;
 const FIXTURE_AS_OF = '2026-12-31';
-/** 投影の起点（固定値・決定的）。2026-07-01〜12-01 に利回り投影行が生まれる。 */
-const FIXTURE_TODAY = '2026-06-15';
 
 /** seed 固定の擬似乱数（Park–Miller LCG）。再現性のため Math.random は使わない。 */
 function createRandom(seed: number): () => number {
@@ -252,7 +250,7 @@ function buildFixtureSource(): {
 
 const fixtureSource = buildFixtureSource();
 // 表示用の導出込み仕訳 = 実仕訳 + 月割り + ルール投影 + 投資利回り投影（displayEntries）。
-const expandedEntries = displayEntriesForAsOf(fixtureSource, FIXTURE_AS_OF, FIXTURE_TODAY);
+const expandedEntries = displayEntriesForAsOf(fixtureSource, FIXTURE_AS_OF);
 
 describe('恒等式: Δ純資産 = 収支 + equity自然増減', () => {
   it('生成データが実データ規模で、導出行（月割り・ルール導出・利回り投影）を含む', () => {

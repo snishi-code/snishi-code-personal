@@ -109,12 +109,20 @@ describe('定期ルール存在期間のschema検証', () => {
     expect(recurringRuleSchema.safeParse(baseRule()).success).toBe(true);
     expect(recurringRuleSchema.safeParse(baseRule({ endDate: '2026-04-18' })).success).toBe(false);
     expect(recurringRuleSchema.safeParse(baseRule({ endDate: '2026-04-17' })).success).toBe(false);
-    expect(recurringRuleSchema.safeParse(baseRule({ postedThroughMonth: '2026-06' })).success).toBe(
-      true,
-    );
-    expect(recurringRuleSchema.safeParse(baseRule({ postedThroughMonth: '2026-05' })).success).toBe(
-      true,
-    );
+    expect(
+      recurringRuleSchema.safeParse(
+        baseRule({ postedThroughMonth: '2026-06' } as Partial<RecurringRule> & {
+          postedThroughMonth?: string;
+        }),
+      ).success,
+    ).toBe(true);
+    expect(
+      recurringRuleSchema.safeParse(
+        baseRule({ postedThroughMonth: '2026-05' } as Partial<RecurringRule> & {
+          postedThroughMonth?: string;
+        }),
+      ).success,
+    ).toBe(true);
   });
 
   it('ルール由来の保存仕訳（rec- ID / 由来メタ）は wire で拒否する（v13: 完全導出）', () => {

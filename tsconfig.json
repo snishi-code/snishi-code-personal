@@ -5,6 +5,9 @@
     "packages/*/vitest.config.ts",
     "apps/*/src/**/*",
     "apps/*/vite.config.ts",
-    "apps/*/vitest.config.ts"
+    "apps/*/vitest.config.ts",
+    "apps/*/tests/**/*",
+    "apps/*/e2e/**/*",
+    "apps/*/playwright.config.ts"
   ]
 }

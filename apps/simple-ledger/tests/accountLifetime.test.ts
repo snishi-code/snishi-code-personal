@@ -72,6 +72,7 @@ describe('勘定科目の存在期間', () => {
           amount: 100,
           dayOfMonth: 31,
           everyMonths: 1,
+          spreadExpenseAccountId: 'investment',
           debitAccountId: 'investment',
           creditAccountId: 'cash',
           startMonth: '2026-04',

@@ -75,7 +75,6 @@ describe('追補監査の画面回帰', () => {
       ],
       metadata: {
         adjustment: {
-          kind: 'unknown-balance',
           accountId: cash.id,
           expectedBalance: 0,
           actualBalance: 100,

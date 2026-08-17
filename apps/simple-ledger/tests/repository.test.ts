@@ -2293,7 +2293,6 @@ describe('M2 保存境界の回帰（不正日付・導出残高・MonthlyCostIt
       settings: ledger.settings,
       accounts: ledger.accounts,
       journalEntries: ledger.journalEntries,
-      tags: ledger.tags,
       monthlyCostItems: ledger.monthlyCostItems,
       recurringRules: ledger.recurringRules,
     };

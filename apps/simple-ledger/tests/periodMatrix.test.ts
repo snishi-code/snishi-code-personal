@@ -282,7 +282,6 @@ describe('buildPeriodMatrix（全体）', () => {
           monthlyCostRecovery: true,
         }),
       ],
-      tags: [],
       monthlyCostItems: [item],
       recurringRules: [],
     };

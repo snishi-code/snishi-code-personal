@@ -58,7 +58,6 @@ describe('負の実残高の補正', () => {
   it('実残高 -2000 の補正で残高がマイナスへピン留めされる', async () => {
     const cash = await cashAccount();
     const entry = await createAdjustment({
-      kind: 'unknown-balance',
       accountId: cash.id,
       date: '2026-07-23',
       actualBalance: -2000,

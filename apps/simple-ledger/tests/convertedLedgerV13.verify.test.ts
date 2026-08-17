@@ -152,7 +152,7 @@ function v12Package() {
   const r6 = rule({ id: 'r6', postedThroughMonth: '2026-04' } as Partial<RecurringRule> & {
     id: string;
   }) as RecurringRule & { postedThroughMonth?: string };
-  delete (r6 as Record<string, unknown>).spreadExpenseAccountId;
+  delete (r6 as unknown as Record<string, unknown>).spreadExpenseAccountId;
   r6.debitAccountId = INVEST;
 
   const r1Recovery: JournalEntry = {

@@ -55,7 +55,6 @@ function fixtureLedger(): Ledger {
     settings: { ledgerName: 'test', currency: '円', displayFractionDigits: 0 },
     accounts,
     journalEntries: [opening],
-    tags: [],
     monthlyCostItems: [],
     recurringRules: [],
   };

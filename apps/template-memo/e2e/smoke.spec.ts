@@ -331,7 +331,10 @@ test('フォーマット単独QRを受け取り、同じIDはコピーとして�
   await openSettings(page);
   const pages = await page.evaluate(async () => {
     // Vite がブラウザへ配信する実モジュールを使い、UI と同じ C1/FMT wire を作る。
-    const wire = await import('/src/domain/templateWire.ts');
+    // モジュール指定子はブラウザ側の URL パスで、tsc のモジュール解決対象ではないため、
+    // 文字列リテラルのまま import() へ渡さない（変数越しにして静的解決を避ける）。
+    const wireModulePath = '/src/domain/templateWire.ts';
+    const wire = await import(wireModulePath);
     return wire.encodeShareWirePages(
       {
         kind: wire.FORMAT_WIRE_KIND,
