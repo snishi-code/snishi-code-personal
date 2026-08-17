@@ -22,7 +22,7 @@ import {
   isIdentitySection,
   orderedDisplayBoxes,
 } from '../src/domain/displayOrder';
-import { STOCK_SERIES_KEYS } from '../src/domain/stockSeries';
+import { buildLensRowTree } from '../src/domain/lensRows';
 import { ACCOUNT_BOXES, groupAccountsByBox, timelineBoxForAccount } from '../src/ui/accountBoxes';
 import { TIMELINE_ACCOUNT_BOXES } from '../src/ui/accountBoxes';
 import { ledgerExportPackageSchema } from '../src/domain/schema';
@@ -129,8 +129,28 @@ describe('表示順マスタ（6 分類）', () => {
     expect(DISPLAY_SECTION_KEYS.filter(isDisplaySectionGroupStart)).toEqual(['totalAssets']);
   });
 
-  it('グラフの系列順もマスタの射影（集計 3 行 → 箱由来）', () => {
-    expect([...STOCK_SERIES_KEYS]).toEqual(['assets', 'liabilities', 'netAssets', 'freeFunds']);
+  it('3 レンズ共通の木は箱の並び + 恒等行の自動配置（式の右辺の最後の箱の直後）', () => {
+    expect(buildLensRowTree([]).map((row) => row.id)).toEqual([
+      'box:assetFree',
+      'box:assetFixed',
+      'box:investment',
+      'box:continuingCost',
+      'box:shortTermDebt',
+      'box:longTermDebt',
+      // 純資産 = 資産 − 負債 → 負債の最後の箱の直後。
+      'identity:netAssets',
+      'box:income',
+      'box:expense',
+      // 収支 = 収入 − 支出 → 支出の箱の直後。
+      'identity:net',
+      'box:equity',
+    ]);
+    // フロー（期間の発生額）はグラフに描けない行。ストック性はマスタの段から導く。
+    expect(
+      buildLensRowTree([])
+        .filter((row) => !row.stock)
+        .map((row) => row.id),
+    ).toEqual(['box:income', 'box:expense', 'identity:net']);
   });
 });
 

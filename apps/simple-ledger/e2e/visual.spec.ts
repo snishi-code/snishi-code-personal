@@ -132,29 +132,37 @@ for (const vp of VIEWPORTS) {
       path: `test-results/screenshots/ledger-timeline-matrix-${vp.name}.png`,
       fullPage: true,
     });
-    // グラフレンズ（ストック 4 系列）。ラベル列 = 凡例トグルで、横スクロールは枠の中だけ。
+    // グラフレンズ。ラベル列は 3 レンズ共通で、チェックボックスが系列選択を兼ねる。
     await page.locator(ui('timeline.lens.chart')).click();
     await expect(page.locator(ui('timeline.chart'))).toBeVisible();
     // 数値レンズと違い、グラフには日のバケットがある = ヘッダーの「日」が押せる。
     await expect(page.locator(ui('period.zoom.day'))).toBeEnabled();
     await expectNoHorizontalScroll(page, `timelineChart ${vp.name}`);
-    // 既定 ON は純資産と自由に動かせるお金。凡例は 44px のタップ領域。
-    const netAssetsLegend = page.locator(
-      `${ui('timeline.chart.legend')}[data-series-key="netAssets"]`,
+    // 既定は全 ON。ラベル列の 1 行は 44px のタップ領域。
+    const netAssetsRow = page.locator(
+      `${ui('timeline.row.label')}[data-row-key="identity:netAssets"]`,
     );
-    await expect(netAssetsLegend).toHaveAttribute('aria-pressed', 'true');
-    const legendBox = await netAssetsLegend.boundingBox();
-    expect(legendBox?.height ?? 0, `グラフ凡例のタップ領域 ${vp.name}`).toBeGreaterThanOrEqual(44);
+    const netAssetsCheck = page.locator(
+      `${ui('timeline.row.check')}[data-row-key="identity:netAssets"]`,
+    );
+    await expect(netAssetsCheck).toBeChecked();
+    const rowBox = await netAssetsRow.boundingBox();
+    expect(rowBox?.height ?? 0, `共通ラベル列のタップ領域 ${vp.name}`).toBeGreaterThanOrEqual(44);
+    // フローの行はグラフでは選べない（描き方が決まるまで）。
+    await expect(
+      page.locator(`${ui('timeline.row.check')}[data-row-key="box:expense"]`),
+    ).toBeDisabled();
     await page.screenshot({
       path: `test-results/screenshots/ledger-timeline-chart-${vp.name}.png`,
       fullPage: true,
     });
-    // 凡例タップで系列が消える（描画の正本が凡例であることを実ブラウザでも見る）。
-    await netAssetsLegend.click();
-    await expect(netAssetsLegend).toHaveAttribute('aria-pressed', 'false');
+    // チェックを外すと線が消える（描画の正本がチェックであることを実ブラウザでも見る）。
+    await netAssetsCheck.click();
+    await expect(netAssetsCheck).not.toBeChecked();
     await expect(
-      page.locator(`${ui('timeline.chart.line')}[data-series-key="netAssets"]`),
+      page.locator(`${ui('timeline.chart.line')}[data-row-key="identity:netAssets"]`),
     ).toHaveCount(0);
+    await netAssetsCheck.click();
 
     // 線分レンズへ戻す（以降のシナリオは既定のレンズで進める）。
     await page.locator(ui('timeline.lens.segment')).click();
@@ -719,5 +727,61 @@ test('タイムラインは端に近づくと窓が自動で伸び、左へ伸�
 
   await page.screenshot({
     path: 'test-results/screenshots/ledger-timeline-continuous-375x667.png',
+  });
+});
+
+/**
+ * v13.6 H3: **レンズは右ペインの描画を交換するだけ**。左のラベル列（行・順序・名前・
+ * チェック状態・開閉）は 3 レンズで同じ 1 つのものを共有する。
+ * jsdom では「同じに見える」を測れないので、実ブラウザの実幅（375px）で突き合わせる。
+ */
+test('375px で 3 レンズのラベル列が同一（行・順序・名前・幅・チェック状態）', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
+  await page.goto('./?fixture=sample');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.timeline')).click();
+  await expect(page.locator(ui('timeline.view'))).toBeVisible();
+
+  /**
+   * ラベル列のスナップショット（行 id・見えている名前・チェック・列幅）。
+   * 読み上げ専用の補足（グラフでフロー行が選べない理由）はレンズ固有でよいので、
+   * 見えている文字（.lens-row__text）だけを比べる。
+   */
+  const labelColumn = () =>
+    page.locator(ui('timeline.row.label')).evaluateAll((rows) =>
+      rows.map((row) => ({
+        key: row.getAttribute('data-row-key'),
+        text: (row.querySelector('.lens-row__text')?.textContent ?? '').trim(),
+        checked: row.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked ?? null,
+        width: Math.round(row.getBoundingClientRect().width),
+      })),
+    );
+
+  const segment = await labelColumn();
+  expect(segment.length, 'ラベル列の行が 1 つも無い').toBeGreaterThan(0);
+  // 幅は 1 つの正本（--lens-label-width）。行ごとに違えば列が揃わない。
+  expect(new Set(segment.map((row) => row.width)).size, 'ラベル列の幅が行ごとに違う').toBe(1);
+
+  // 箱を 1 つ開き、チェックを 1 つ外した状態で比べる（既定値だけの一致にしない）。
+  await page.locator(`${ui('timeline.row.toggle')}[data-row-key="box:assetFree"]`).click();
+  await page.locator(`${ui('timeline.row.check')}[data-row-key="box:income"]`).click();
+  const opened = await labelColumn();
+  expect(opened.length, '箱を開いても行が増えていない').toBeGreaterThan(segment.length);
+  expect(opened.find((row) => row.key === 'box:income')?.checked).toBe(false);
+
+  for (const lens of ['timeline.lens.matrix', 'timeline.lens.chart']) {
+    await page.locator(ui(lens)).click();
+    await expect(page.locator(ui('timeline.row.label')).first()).toBeVisible();
+    // グラフはフロー行のチェックを disabled にするだけで、行と状態そのものは同じ。
+    expect(await labelColumn(), `${lens} のラベル列が線分レンズと違う`).toEqual(opened);
+    await expectNoHorizontalScroll(page, `lens label column ${lens} 375x667`);
+  }
+
+  await page.screenshot({
+    path: 'test-results/screenshots/ledger-timeline-lens-labels-375x667.png',
+    fullPage: true,
   });
 });

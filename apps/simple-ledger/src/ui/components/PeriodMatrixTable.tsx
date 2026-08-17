@@ -1,116 +1,28 @@
 /*
  * 期間マトリクスの表（時間平面の**数値レンズ**）。
  *
- * 旧「年間・全体」画面の表をそのまま持ってきたもの。違いは列が「年 12 か月」ではなく
- * **可視範囲 + 前後バッファの窓**であること（年をまたいで連続し、横スクロール/シフトで移動する）。
- * 集計は domain/periodMatrix が済ませており、ここは描画と横スクロールの幾何だけを持つ。
+ * 列は「年 12 か月」ではなく**可視範囲 + 前後バッファの窓**（年をまたいで連続し、
+ * 横スクロール/シフトで移動する）。集計は domain/periodMatrix が済ませており、
+ * ここは描画と横スクロールの幾何だけを持つ。
  *
- * 行はホームの 6 カードと同じ 6 分類（収入 / 支出 / 収支 / 資産 / 負債 / 純資産。v13.5 E）。
- * **段階的開示**: 子を持つ行はタップで展開するインライン木（ラベル列にインデント）。
- * 展開状態はこの画面のローカル状態で、保存しない。展開して初めて列 × 子の行を DOM 化するので、
- * 既定（全部たたんだ状態）の描画量は 6 行 × 窓の列数のまま。
+ * **行は 3 レンズ共通のラベル列**（v13.6 H3）。数値レンズ専用の 6 分類の木は廃止し、
+ * 線分レンズと同じ「箱 → 科目」の木 + 恒等行（収支・純資産）に periodMatrix の値を
+ * 対応づけるだけにした。ラベル列の中身（チェック・展開トグル・色）は `LensRowTree` が持つ。
+ * チェック OFF の行は値のセルが空になる（行そのものは残る = チェックし直せる）。
  *
  * 行ラベル列は sticky。横スクロールは**この枠の中だけ**で起き、ページ本体は横に伸びない。
  */
-import { useCallback, useMemo, useRef, useState, type CSSProperties } from 'react';
-import type {
-  PeriodMatrix,
-  PeriodMatrixColumn,
-  PeriodMatrixNode,
-  PeriodMatrixRowKey,
-} from '../../domain/periodMatrix';
-import { isDisplaySectionGroupStart } from '../../domain/displayOrder';
-import { t, type MessageKey } from '../../i18n';
+import { useCallback, useMemo, useRef, type CSSProperties } from 'react';
+import type { PeriodMatrix, PeriodMatrixColumn } from '../../domain/periodMatrix';
+import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import { Money, type MoneyTone } from '../money';
 import { visibleIndexRange, type ScrollEdge } from '../scrollWindow';
 import { useHorizonScroll } from '../horizonScroll';
+import { LensRowLabel, lensLabelWidth, lensRowLabelProps, type LensRowView } from './LensRowTree';
 
-/** 行ラベル列と値列の幅（px）。CSS は JS のこの値を custom property 経由で受け取る。 */
-const LABEL_WIDTH = 112;
+/** 値列の幅（px）。CSS は JS のこの値を custom property 経由で受け取る。 */
 const COLUMN_WIDTH = 112;
-
-/**
- * 6 分類の見せ方。**ラベルはホームのカードと同じメッセージキーを使う**（語彙を 2 か所に
- * 持たない = ホームと表で呼び名がずれない）。tone は C-2 の規約で負債の数字だけに付く。
- * 並びと段（フロー / ストックの区切り線）は持たない — 表示順マスタが決める。
- */
-const SECTION_META: Record<
-  PeriodMatrixRowKey,
-  {
-    labelKey: MessageKey;
-    signed?: boolean;
-    emphasis?: boolean;
-    tone?: MoneyTone;
-  }
-> = {
-  revenue: { labelKey: 'dashboard.revenue' },
-  expense: { labelKey: 'dashboard.expense' },
-  net: { labelKey: 'dashboard.netIncome', signed: true, emphasis: true },
-  totalAssets: { labelKey: 'dashboard.assets' },
-  totalLiabilities: { labelKey: 'dashboard.liabilities', tone: 'liability' },
-  netAssets: { labelKey: 'dashboard.netAssets', emphasis: true },
-};
-
-interface MatrixRowSpec {
-  key: string;
-  depth: number;
-  label: string;
-  values: number[];
-  hasChildren: boolean;
-  expanded: boolean;
-  signed: boolean;
-  emphasis: boolean;
-  sectionStart: boolean;
-  tone?: MoneyTone;
-}
-
-function nodeLabel(node: PeriodMatrixNode): string {
-  return node.label.kind === 'account' ? node.label.name : t(node.label.key);
-}
-
-/** 6 分類 + 展開中の子だけを、表に出す順で 1 本の配列にする。 */
-function flattenRows(matrix: PeriodMatrix, expanded: ReadonlySet<string>): MatrixRowSpec[] {
-  const rows: MatrixRowSpec[] = [];
-  const pushNode = (node: PeriodMatrixNode, depth: number, tone?: MoneyTone) => {
-    const isExpanded = expanded.has(node.key);
-    rows.push({
-      key: node.key,
-      depth,
-      label: nodeLabel(node),
-      values: node.values,
-      hasChildren: node.children.length > 0,
-      expanded: isExpanded,
-      signed: false,
-      emphasis: false,
-      sectionStart: false,
-      ...(tone ? { tone } : {}),
-    });
-    if (!isExpanded) return;
-    for (const child of node.children) pushNode(child, depth + 1, tone);
-  };
-
-  for (const section of matrix.sections) {
-    const meta = SECTION_META[section.key];
-    const isExpanded = expanded.has(section.key);
-    rows.push({
-      key: section.key,
-      depth: 0,
-      label: t(meta.labelKey),
-      values: section.values,
-      hasChildren: section.children.length > 0,
-      expanded: isExpanded,
-      signed: meta.signed === true,
-      emphasis: meta.emphasis === true,
-      // 段の切り替わり（フロー → ストック）に区切り線。どこが変わり目かはマスタが持つ。
-      sectionStart: isDisplaySectionGroupStart(section.key),
-      ...(meta.tone ? { tone: meta.tone } : {}),
-    });
-    if (!isExpanded) continue;
-    for (const child of section.children) pushNode(child, 1, meta.tone);
-  }
-  return rows;
-}
 
 /** 年をまたぐ窓なので、年の変わり目（1 月）と先頭列だけ年を名乗る。 */
 function monthColumnLabel(column: PeriodMatrixColumn, index: number): string {
@@ -120,8 +32,24 @@ function monthColumnLabel(column: PeriodMatrixColumn, index: number): string {
     : t('matrix.monthLabel', { month });
 }
 
+/**
+ * 数字の見せ方。C-2 の規約で負債の行だけ負債トークン色、恒等行のうち収支だけ符号付き
+ * （増減の向きが意味を持つ唯一の行）。行の種類は共通木が名乗るのでここでは並びを持たない。
+ */
+function rowTone(row: LensRowView): MoneyTone | undefined {
+  const box = row.node.boxKey;
+  return box === 'shortTermDebt' || box === 'longTermDebt' ? 'liability' : undefined;
+}
+
+function isSigned(row: LensRowView): boolean {
+  return row.node.sectionKey === 'net';
+}
+
 export function PeriodMatrixTable({
   matrix,
+  rows,
+  onToggleRow,
+  onCheckRow,
   currency,
   focusDate,
   windowKey,
@@ -131,6 +59,10 @@ export function PeriodMatrixTable({
   onExtend,
 }: {
   matrix: PeriodMatrix;
+  /** 3 レンズ共通のラベル列の行（画面が解決済み）。 */
+  rows: LensRowView[];
+  onToggleRow: (id: string) => void;
+  onCheckRow: (id: string, checked: boolean) => void;
   currency: string;
   /** 開いたとき / 窓を送ったときに中央へ置く日付。 */
   focusDate?: string;
@@ -146,28 +78,18 @@ export function PeriodMatrixTable({
   onExtend?: (edge: ScrollEdge) => void;
 }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
-  // 展開状態は画面ローカル・保存しない（窓を送っても木のキーは変わらないので開いたまま）。
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set<string>());
-  const toggleRow = (key: string) => {
-    setExpanded((previous) => {
-      const next = new Set(previous);
-      if (!next.delete(key)) next.add(key);
-      return next;
-    });
-  };
   const { columns } = matrix;
   const first = columns[0];
   const last = columns.at(-1);
   const caption =
     first && last ? t('matrix.caption', { from: first.key, to: last.key }) : t('matrix.noData');
-  const rows = useMemo(() => flattenRows(matrix, expanded), [matrix, expanded]);
 
   const readViewport = useCallback(
     (viewport: HTMLDivElement) => {
       if (viewport.clientWidth <= 0) return;
       const visible = visibleIndexRange(
         viewport.scrollLeft,
-        viewport.clientWidth - LABEL_WIDTH,
+        viewport.clientWidth - lensLabelWidth(viewport.clientWidth),
         COLUMN_WIDTH,
         columns.length,
       );
@@ -192,7 +114,7 @@ export function PeriodMatrixTable({
     windowKey: `${windowKey ?? ''}:${focusDate ?? ''}`,
     focusScrollLeft: (viewport) => {
       if (focusIndex < 0) return viewport.scrollLeft;
-      const trackWidth = Math.max(0, viewport.clientWidth - LABEL_WIDTH);
+      const trackWidth = Math.max(0, viewport.clientWidth - lensLabelWidth(viewport.clientWidth));
       return Math.max(0, (focusIndex + 0.5) * COLUMN_WIDTH - trackWidth / 2);
     },
     onSettle: readViewport,
@@ -212,18 +134,13 @@ export function PeriodMatrixTable({
       tabIndex={0}
       data-ui={UI.timeline.matrix}
       onScroll={(event) => handleScroll(event.currentTarget)}
-      style={
-        {
-          '--period-matrix-label-width': `${LABEL_WIDTH}px`,
-          '--period-matrix-column-width': `${COLUMN_WIDTH}px`,
-        } as CSSProperties
-      }
+      style={{ '--period-matrix-column-width': `${COLUMN_WIDTH}px` } as CSSProperties}
     >
       <table className="period-matrix__table">
         <caption className="sr-only">{caption}</caption>
         <thead>
           <tr>
-            <th className="period-matrix__label period-matrix__corner" scope="col">
+            <th className="period-matrix__corner lens-row__label" scope="col">
               {t('matrix.itemColumn')}
             </th>
             {columns.map((column, index) => (
@@ -258,7 +175,16 @@ export function PeriodMatrixTable({
         </thead>
         <tbody>
           {rows.map((row) => (
-            <MatrixRow key={row.key} row={row} currency={currency} onToggle={toggleRow} />
+            <MatrixRow
+              key={row.id}
+              row={row}
+              // チェック OFF の行 / 値を持たない行（月割り項目など）はセルを空にする。
+              values={row.checked ? matrix.values.get(row.id) : undefined}
+              columnCount={columns.length}
+              currency={currency}
+              onToggleRow={onToggleRow}
+              onCheckRow={onCheckRow}
+            />
           ))}
         </tbody>
       </table>
@@ -268,61 +194,40 @@ export function PeriodMatrixTable({
 
 function MatrixRow({
   row,
+  values,
+  columnCount,
   currency,
-  onToggle,
+  onToggleRow,
+  onCheckRow,
 }: {
-  row: MatrixRowSpec;
+  row: LensRowView;
+  values: readonly number[] | undefined;
+  columnCount: number;
   currency: string;
-  onToggle: (key: string) => void;
+  onToggleRow: (id: string) => void;
+  onCheckRow: (id: string, checked: boolean) => void;
 }) {
-  const classes = [
-    row.emphasis ? 'period-matrix__row--emphasis' : '',
-    row.depth > 0 ? 'period-matrix__row--child' : '',
-    row.sectionStart ? 'period-matrix__row--section' : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-  const labelClasses = [
-    'period-matrix__label',
-    row.hasChildren ? 'period-matrix__label--interactive' : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const labelProps = lensRowLabelProps(row);
+  const tone = rowTone(row);
   return (
     <tr
-      className={classes || undefined}
+      className={row.emphasis ? 'period-matrix__row--emphasis' : undefined}
       data-ui={UI.timeline.matrixRow}
-      data-row-key={row.key}
-      style={{ '--period-matrix-depth': row.depth } as CSSProperties}
+      data-row-key={row.id}
     >
-      <th className={labelClasses} scope="row">
-        {row.hasChildren ? (
-          // 段階的開示のトグル（タップ領域は --tap = 44px。開閉は aria-expanded が名乗る）。
-          <button
-            type="button"
-            className="period-matrix__row-btn"
-            aria-expanded={row.expanded}
-            onClick={() => onToggle(row.key)}
-            data-ui={UI.timeline.matrixRowToggle}
-            data-row-key={row.key}
-          >
-            <span className="period-matrix__caret" aria-hidden="true">
-              {row.expanded ? '▾' : '▸'}
-            </span>
-            {row.label}
-          </button>
-        ) : (
-          row.label
-        )}
+      <th {...labelProps} scope="row">
+        <LensRowLabel row={row} onToggle={onToggleRow} onCheckChange={onCheckRow} />
       </th>
-      {row.values.map((value, index) => (
-        <td className="period-matrix__value" key={index}>
-          <Money
-            amount={value}
-            currency={currency}
-            signed={row.signed}
-            {...(row.tone ? { tone: row.tone } : {})}
-          />
+      {Array.from({ length: columnCount }, (_unused, index) => (
+        <td className="period-matrix__value" data-ui={UI.timeline.matrixCell} key={index}>
+          {values === undefined ? null : (
+            <Money
+              amount={values[index] ?? 0}
+              currency={currency}
+              signed={isSigned(row)}
+              {...(tone ? { tone } : {})}
+            />
+          )}
         </td>
       ))}
     </tr>

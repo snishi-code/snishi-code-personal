@@ -2,8 +2,14 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render } from '@testing-library/react';
-import { act, useState } from 'react';
-import { TimelineCalendarView, type TimelineZoom } from '../src/ui/screens/TimelineCalendar';
+import { act, useEffect, useState } from 'react';
+import {
+  TimelineCalendarView,
+  continuousCostChildren,
+  type TimelineZoom,
+} from '../src/ui/screens/TimelineCalendar';
+import { buildLensRowViews } from '../src/ui/components/LensRowTree';
+import { buildLensRowTree } from '../src/domain/lensRows';
 import { ACCOUNT_ACCENTS, TIMELINE_ACCOUNT_BOXES } from '../src/ui/accountBoxes';
 import { closeTopOverlay, _resetOverlaysForTests } from '../src/ui/overlays';
 import type { Account } from '../src/domain/types';
@@ -75,6 +81,40 @@ const model = {
   ],
 };
 
+/**
+ * v13.6 H3: ラベル列（行の集合・開閉・チェック）は**画面**が持ち、描画本体は受け取るだけ。
+ * 単体テストでも画面と同じ規則で組む薄いラッパーを通す（テスト専用の木を作らない）。
+ */
+type ViewProps = Parameters<typeof TimelineCalendarView>[0];
+function LensView(props: Omit<ViewProps, 'rows' | 'onToggleRow' | 'onCheckRow'>) {
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const tree = buildLensRowTree(props.accounts, {
+    extraChildren: (boxKey) => continuousCostChildren(props.model.boxes, boxKey),
+  });
+  return (
+    <TimelineCalendarView
+      {...props}
+      rows={buildLensRowViews({ tree, expanded, hidden })}
+      onToggleRow={(id) =>
+        setExpanded((current) => {
+          const next = new Set(current);
+          if (!next.delete(id)) next.add(id);
+          return next;
+        })
+      }
+      onCheckRow={(id, checked) =>
+        setHidden((current) => {
+          const next = new Set(current);
+          if (checked) next.delete(id);
+          else next.add(id);
+          return next;
+        })
+      }
+    />
+  );
+}
+
 afterEach(() => {
   cleanup();
   _resetOverlaysForTests();
@@ -126,20 +166,26 @@ function renderView({
   onOpenTarget = () => undefined,
   initialWindowKey = 'month:initial',
 }: { onOpenTarget?: (target: unknown) => void; initialWindowKey?: string } = {}) {
-  let setZoomRef: ((zoom: TimelineZoom) => void) | undefined;
-  let setWindowKeyRef: ((key: string) => void) | undefined;
+  // props を差し替える入口をテスト側へ出す。変数の再代入は render 中の副作用として
+  // lint に弾かれるので、器（オブジェクト）のプロパティへ載せる。
+  const handles: {
+    setZoom?: (zoom: TimelineZoom) => void;
+    setWindowKey?: (key: string) => void;
+  } = {};
 
   function Harness() {
     const [zoom, setZoom] = useState<TimelineZoom>('month');
     const [windowKey, setWindowKey] = useState(initialWindowKey);
-    setZoomRef = setZoom;
-    setWindowKeyRef = setWindowKey;
+    // 差し替え口の公開は commit 後（render 中に外の値を書かない）。
+    useEffect(() => {
+      handles.setZoom = setZoom;
+      handles.setWindowKey = setWindowKey;
+      // setState は同一性が保たれるので 1 回でよい（毎 render 書き直す必要が無い）。
+    }, []);
     return (
-      <TimelineCalendarView
+      <LensView
         model={model}
         zoom={zoom}
-        showEnded={false}
-        onShowEndedChange={() => undefined}
         today="2026-02-15"
         accounts={[cash, food]}
         currency="JPY"
@@ -153,10 +199,10 @@ function renderView({
   return {
     ...view,
     setZoom: (zoom: TimelineZoom) => {
-      act(() => setZoomRef!(zoom));
+      act(() => handles.setZoom!(zoom));
     },
     setWindowKey: (key: string) => {
-      act(() => setWindowKeyRef!(key));
+      act(() => handles.setWindowKey!(key));
     },
   };
 }
@@ -177,21 +223,28 @@ describe('TimelineCalendarView', () => {
     ]);
   });
 
-  it('箱は既定で畳み、開いた状態をズーム変更後も維持する', () => {
+  it('箱は 9 つ + 恒等行 2 つが常に並び、子を持つ箱だけが開く（開閉はズーム変更後も残る）', () => {
     const view = renderView();
 
-    const boxToggles = document.querySelectorAll(`[data-ui="${UI.timeline.boxToggle}"]`);
+    // 骨格（9 箱）はデータの有無によらず並ぶ。恒等行（収支・純資産）も列に出る。
+    expect(document.querySelectorAll(`[data-ui="${UI.timeline.boxRow}"]`)).toHaveLength(9);
+    const detailRows = () =>
+      document.querySelectorAll(`[data-ui="${UI.timeline.detailRow}"]`).length;
+    // 既定は全部たたんだ状態 = 見えている非箱行は恒等行の 2 つだけ。
+    expect(detailRows()).toBe(2);
+
+    // 展開トグルが付くのは子を持つ箱（預金のある assetFree・食費のある expense）だけ。
+    const boxToggles = document.querySelectorAll(`[data-ui="${UI.timeline.rowToggle}"]`);
     expect(boxToggles).toHaveLength(2);
-    expect(document.querySelectorAll(`[data-ui="${UI.timeline.detailRow}"]`)).toHaveLength(0);
 
     fireEvent.click(boxToggles[0]!);
-    expect(document.querySelectorAll(`[data-ui="${UI.timeline.detailRow}"]`)).toHaveLength(1);
+    expect(detailRows()).toBe(3);
     expect(document.body).toHaveTextContent('預金');
 
     // ズームはヘッダー（App）から props で降ってくる。同じマウントのまま差し替えても
     // 開閉状態は画面ローカルに残る。
     view.setZoom('year');
-    expect(document.querySelectorAll(`[data-ui="${UI.timeline.detailRow}"]`)).toHaveLength(1);
+    expect(detailRows()).toBe(3);
     expect(document.body).toHaveTextContent('預金');
   });
 
@@ -226,7 +279,8 @@ describe('TimelineCalendarView', () => {
     );
     expect(document.querySelector(`[data-ui="${UI.timeline.popover}"]`)).toHaveTextContent('1,200');
     expect(document.querySelector('.timeline-calendar__connector line')).toBeInTheDocument();
-    expect(document.querySelectorAll('.timeline-calendar__row--dimmed')).toHaveLength(0);
+    // つながっている 2 行（預金の箱・支出の箱）以外は薄くなる = 骨格の残り 9 行。
+    expect(document.querySelectorAll('.timeline-calendar__row--dimmed')).toHaveLength(9);
 
     fireEvent.click(document.querySelector(`[data-ui="${UI.timeline.open}"]`)!);
     expect(onOpenTarget).toHaveBeenCalledWith({ kind: 'entry', entryId: 'entry-1' });
@@ -412,11 +466,9 @@ describe('TimelineCalendarView', () => {
       ],
     };
     render(
-      <TimelineCalendarView
+      <LensView
         model={generationModel}
         zoom="month"
-        showEnded={false}
-        onShowEndedChange={() => undefined}
         today="2026-02-15"
         accounts={[cash, food]}
         currency="JPY"
@@ -424,7 +476,12 @@ describe('TimelineCalendarView', () => {
       />,
     );
 
-    fireEvent.click(document.querySelector(`[data-ui="${UI.timeline.boxToggle}"]`)!);
+    // 行の識別は共通木のノード id（data-row-key）。継続コスト台帳の箱を開く。
+    fireEvent.click(
+      document.querySelector(
+        `[data-ui="${UI.timeline.rowToggle}"][data-row-key="box:continuingCost"]`,
+      )!,
+    );
     fireEvent.click(document.querySelector(`[data-ui="${UI.timeline.generationDot}"]`)!);
     expect(document.querySelector(`[data-ui="${UI.timeline.popover}"]`)).toHaveTextContent(
       '動画サービス 2月分',
@@ -440,11 +497,9 @@ describe('TimelineCalendarView', () => {
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(196);
     const onVisibleRangeChange = vi.fn();
     render(
-      <TimelineCalendarView
+      <LensView
         model={model}
         zoom="month"
-        showEnded={false}
-        onShowEndedChange={() => undefined}
         today="2026-01-15"
         focusDate="2026-01-15"
         accounts={[cash, food]}
@@ -482,11 +537,9 @@ describe('TimelineCalendarView', () => {
     );
     const onVisibleRangeChange = vi.fn();
     render(
-      <TimelineCalendarView
+      <LensView
         model={model}
         zoom="month"
-        showEnded={false}
-        onShowEndedChange={() => undefined}
         today="2026-01-15"
         focusDate="2026-01-15"
         accounts={[cash, food]}
@@ -506,14 +559,12 @@ describe('TimelineCalendarView', () => {
 
   it('終了分表示の範囲外線分を表示窓の端へ偽装しない', () => {
     render(
-      <TimelineCalendarView
+      <LensView
         model={{
           buckets: model.buckets,
           boxes: [{ ...model.boxes[0]!, spans: [{ from: '2024-01-01', to: '2024-12-31' }] }],
         }}
         zoom="month"
-        showEnded
-        onShowEndedChange={() => undefined}
         today="2026-01-15"
         accounts={[cash, food]}
         currency="JPY"
@@ -527,11 +578,9 @@ describe('TimelineCalendarView', () => {
   it('見えている期間が空でも横スクロール領域と時間軸を残す', () => {
     const onVisibleRangeChange = vi.fn();
     render(
-      <TimelineCalendarView
+      <LensView
         model={{ buckets: model.buckets, boxes: [] }}
         zoom="month"
-        showEnded={false}
-        onShowEndedChange={() => undefined}
         today="2026-01-15"
         accounts={[]}
         currency="JPY"

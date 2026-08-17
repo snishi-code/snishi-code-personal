@@ -111,9 +111,14 @@ export const UI = {
     previous: 'timeline.range.previous',
     next: 'timeline.range.next',
     showEnded: 'timeline.showEnded',
+    // 3 レンズ共通のラベル列（v13.6 H3）。行の識別は data-row-key = 共通木のノード id
+    // （box:<箱> / account:<科目 id> / identity:<分類> / rule: / item:）。
+    // rowCheck = その行を右ペインへ出すか（グラフでは系列選択を兼ねる）。
+    rowLabel: 'timeline.row.label',
+    rowToggle: 'timeline.row.toggle',
+    rowCheck: 'timeline.row.check',
     viewport: 'timeline.viewport',
     boxRow: 'timeline.box.row',
-    boxToggle: 'timeline.box.toggle',
     detailRow: 'timeline.detail.row',
     band: 'timeline.band',
     flowDot: 'timeline.dot.flow',
@@ -129,20 +134,18 @@ export const UI = {
     // 列見出しのタップ（月 = 月末の基準日でホームへ / 年 = その年を月ズームで見る）
     matrixMonthColumn: 'timeline.matrix.monthColumn',
     matrixYearColumn: 'timeline.matrix.yearColumn',
-    // 6 分類の行と、その段階的開示のトグル（行の識別は data-row-key = 木のノードキー）
+    // 共通木の行（data-row-key で識別）。値のセルは matrixCell。
     matrixRow: 'timeline.matrix.row',
-    matrixRowToggle: 'timeline.matrix.rowToggle',
-    // グラフレンズ（ストック 4 系列 = 資産 / 負債 / 純資産 / 自由に動かせるお金）。
+    matrixCell: 'timeline.matrix.cell',
+    // グラフレンズ。系列 = チェックされたストック行（箱 = 合算 / 科目 = 単独）。
     // 横スクロールはこの枠の中だけ。値は各バケット末断面のストック（階段折れ線）。
     chart: 'timeline.chart',
     chartViewport: 'timeline.chart.viewport',
     // 未来の断面が混ざることの名乗り（数値レンズの matrixNote と同じ文言・別の器）
     chartNote: 'timeline.chart.projectionNote',
-    // ラベル列 = 凡例トグル（系列の識別は data-series-key・aria-pressed が表示状態を名乗る）
-    chartLegend: 'timeline.chart.legend',
-    // 描かれている 1 系列の折れ線（ON の系列のぶんだけ存在する・data-series-key で識別）
+    // 描かれている 1 系列の折れ線（ON の行のぶんだけ存在する・data-row-key で識別）
     chartLine: 'timeline.chart.line',
-    // 全部 OFF のときだけ出る案内（グラフの下・空表示の代わり）
+    // 系列が 1 本も無いときだけ出る案内（グラフの下・空表示の代わり）
     chartNoSeries: 'timeline.chart.noSeries',
   },
   journal: {

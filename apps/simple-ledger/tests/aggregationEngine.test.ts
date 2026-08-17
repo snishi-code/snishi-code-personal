@@ -20,7 +20,9 @@ import {
   summarizeEntries,
   summarizeEntriesForAccount,
 } from '../src/domain/accounting';
-import { buildPeriodMatrix } from '../src/domain/periodMatrix';
+import { buildPeriodMatrix, periodMatrixRow } from '../src/domain/periodMatrix';
+import { lensRowId } from '../src/domain/lensRows';
+import type { DisplayBoxKey, DisplaySectionKey } from '../src/domain/displayOrder';
 import { displayEntriesForAsOf } from '../src/domain/reportEntries';
 import {
   CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
@@ -286,6 +288,38 @@ describe('恒等式: Δ純資産 = 収支 + equity自然増減', () => {
   });
 });
 
+/*
+ * v13.6 H3: 数値レンズの行は共通ラベル列と同じ id（box: / identity:）。
+ * 総資産・総負債は箱ではないので、箱を足して accounting 系と突き合わせる
+ * （= 箱の合計が BS の総額と一致することも同時に固定される）。
+ */
+const ASSET_BOXES: DisplayBoxKey[] = ['assetFree', 'assetFixed', 'investment', 'continuingCost'];
+const LIABILITY_BOXES: DisplayBoxKey[] = ['shortTermDebt', 'longTermDebt'];
+function boxSum(
+  matrix: ReturnType<typeof buildPeriodMatrix>,
+  keys: readonly DisplayBoxKey[],
+  index: number,
+): number {
+  return keys.reduce(
+    (total, key) => total + (periodMatrixRow(matrix, lensRowId.box(key))[index] ?? 0),
+    0,
+  );
+}
+function boxValue(
+  matrix: ReturnType<typeof buildPeriodMatrix>,
+  key: DisplayBoxKey,
+  index: number,
+): number {
+  return periodMatrixRow(matrix, lensRowId.box(key))[index] ?? 0;
+}
+function identityValue(
+  matrix: ReturnType<typeof buildPeriodMatrix>,
+  key: DisplaySectionKey,
+  index: number,
+): number {
+  return periodMatrixRow(matrix, lensRowId.identity(key))[index] ?? 0;
+}
+
 describe('エンジン一致: accounting 系と periodMatrix 系', () => {
   it('mode: all の各年列が deriveProfitAndLoss / deriveBalanceSheet と一致する', () => {
     const matrix = buildPeriodMatrix(accounts, expandedEntries, {
@@ -299,12 +333,12 @@ describe('エンジン一致: accounting 系と periodMatrix 系', () => {
         to: `${year}-12-31`,
       });
       const bs = deriveBalanceSheet(accounts, expandedEntries, `${year}-12-31`);
-      expect(matrix.rows.revenue[index]).toBe(pl.totalRevenue);
-      expect(matrix.rows.expense[index]).toBe(pl.totalExpense);
-      expect(matrix.rows.net[index]).toBe(pl.netIncome);
-      expect(matrix.rows.totalAssets[index]).toBe(bs.totalAssets);
-      expect(matrix.rows.totalLiabilities[index]).toBe(bs.totalLiabilities);
-      expect(matrix.rows.netAssets[index]).toBe(bs.netAssets);
+      expect(boxValue(matrix, 'income', index)).toBe(pl.totalRevenue);
+      expect(boxValue(matrix, 'expense', index)).toBe(pl.totalExpense);
+      expect(identityValue(matrix, 'net', index)).toBe(pl.netIncome);
+      expect(boxSum(matrix, ASSET_BOXES, index)).toBe(bs.totalAssets);
+      expect(boxSum(matrix, LIABILITY_BOXES, index)).toBe(bs.totalLiabilities);
+      expect(identityValue(matrix, 'netAssets', index)).toBe(bs.netAssets);
     });
   });
 
@@ -320,12 +354,12 @@ describe('エンジン一致: accounting 系と periodMatrix 系', () => {
         const pl = deriveProfitAndLoss(accounts, expandedEntries, { from, to });
         const bs = deriveBalanceSheet(accounts, expandedEntries, to);
         const index = month - 1;
-        expect(matrix.rows.revenue[index]).toBe(pl.totalRevenue);
-        expect(matrix.rows.expense[index]).toBe(pl.totalExpense);
-        expect(matrix.rows.net[index]).toBe(pl.netIncome);
-        expect(matrix.rows.totalAssets[index]).toBe(bs.totalAssets);
-        expect(matrix.rows.totalLiabilities[index]).toBe(bs.totalLiabilities);
-        expect(matrix.rows.netAssets[index]).toBe(bs.netAssets);
+        expect(boxValue(matrix, 'income', index)).toBe(pl.totalRevenue);
+        expect(boxValue(matrix, 'expense', index)).toBe(pl.totalExpense);
+        expect(identityValue(matrix, 'net', index)).toBe(pl.netIncome);
+        expect(boxSum(matrix, ASSET_BOXES, index)).toBe(bs.totalAssets);
+        expect(boxSum(matrix, LIABILITY_BOXES, index)).toBe(bs.totalLiabilities);
+        expect(identityValue(matrix, 'netAssets', index)).toBe(bs.netAssets);
       }
     }
   });

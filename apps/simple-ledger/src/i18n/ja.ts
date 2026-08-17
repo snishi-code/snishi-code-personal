@@ -49,15 +49,18 @@ export const ja = {
   'timeline.lens.matrix': '数値',
   'timeline.lens.chart': 'グラフ',
 
-  // グラフレンズ（ストック 4 系列 = 資産 / 負債 / 純資産 / 自由に動かせるお金）。
-  // 系列名はホームのカード・資産内訳の枠と同じキーを使うので、ここには持たない。
+  // 3 レンズ共通のラベル列（箱と科目の木 + チェックボックス）。行の名前は箱・ホームの
+  // カードと同じキーを使うので、ここには持たない。
+  'lens.rowTree': '表示する行',
+  'lens.showRow': '{name} を表示',
+  'lens.flowNotPlottable': 'グラフの描き方が決まるまで、フローの行は描けません。',
+
+  // グラフレンズ（系列 = チェックされたストックの行）。
   'chart.caption': '{from} 〜 {to} のストックの推移',
   // 目盛り（年 = period.yearUnit / 月 = matrix.monthLabel を流用。日だけここに持つ）
   'chart.tickDay': '{day}日',
-  'chart.legend': '系列（タップで表示 / 非表示）',
-  'chart.legendToggle': '{name}（{date} 時点 {amount}）の表示を切り替える',
   'chart.seriesSummary': '{name}: {from} は {start}、{to} は {end}。',
-  'chart.noSeries': '表示する系列がありません。左の系列名をタップして選びます。',
+  'chart.noSeries': '表示する系列がありません。左のチェックボックスで選びます。',
   'timeline.previous': '前の期間',
   'timeline.next': '次の期間',
   'timeline.showEnded': '終了分も表示',
@@ -491,6 +494,9 @@ export const ja = {
   'box.investment': '投資',
   'box.shortTermDebt': 'カード・未払',
   'box.longTermDebt': 'ローン',
+  // 純資産の箱 = equity 科目そのもの。恒等行の「純資産」（資産 − 負債）と
+  // 同じ列に並ぶので、名前で区別できるようにする。
+  'box.equity': '純資産の科目',
   'box.income': '収入カテゴリ',
   'box.expense': '支出カテゴリ',
   'box.addSubdivision': '内訳を追加',

@@ -27,11 +27,9 @@ vi.mock('../src/domain/displayOrder', async () => {
   };
 });
 
-const { buildPeriodMatrix } = await import('../src/domain/periodMatrix');
-const { STOCK_SERIES_KEYS } = await import('../src/domain/stockSeries');
+const { buildLensRowTree } = await import('../src/domain/lensRows');
 const { Dashboard } = await import('../src/ui/screens/Dashboard');
 const { LedgerProvider, useLedger } = await import('../src/state/store');
-const { loadLedger } = await import('../src/data/repository');
 const { UI } = await import('../src/ui-contract');
 const { _resetOverlaysForTests } = await import('../src/ui/overlays');
 const { todayLocal } = await import('../src/util/time');
@@ -51,6 +49,7 @@ const REVERSED_SECTIONS: DisplaySectionKey[] = [
   'expense',
   'revenue',
 ];
+void (REVERSED_SECTIONS satisfies DisplaySectionKey[]);
 
 function DashboardWhenReady() {
   const { status } = useLedger();
@@ -70,17 +69,30 @@ function DashboardWhenReady() {
 }
 
 describe('mutation: 6 分類の並びを反転すると全画面が追従する', () => {
-  it('数値レンズの行がマスタに従う', async () => {
-    const ledger = await loadLedger();
-    const matrix = buildPeriodMatrix(ledger.accounts, ledger.journalEntries, {
-      mode: 'all',
-      years: [2026],
-    });
-    expect(matrix.sections.map((section) => section.key)).toEqual(REVERSED_SECTIONS);
-  });
-
-  it('グラフの系列順がマスタに従う（集計 3 行の並び）', () => {
-    expect([...STOCK_SERIES_KEYS]).toEqual(['netAssets', 'liabilities', 'assets', 'freeFunds']);
+  it('3 レンズ共通の木は 6 分類の並びに引きずられない（恒等行は箱の並びから引き直す）', () => {
+    // 恒等行の位置は「式の右辺の最後の**箱**の直後」。6 分類の並びを反転しても、
+    // 箱の並びは動いていないので木は変わらない = 木が独自の並びを持っていない証拠。
+    const rows = buildLensRowTree([]);
+    expect(rows.map((row) => row.id)).toEqual([
+      'box:assetFree',
+      'box:assetFixed',
+      'box:investment',
+      'box:continuingCost',
+      'box:shortTermDebt',
+      'box:longTermDebt',
+      'identity:netAssets',
+      'box:income',
+      'box:expense',
+      'identity:net',
+      'box:equity',
+    ]);
+    // 段（フロー / ストック）の所属も 6 分類の並べ替えでは動かない
+    // ＝ グラフに描ける行の集合が並び順の副作用で変わらない。
+    expect(rows.filter((row) => !row.stock).map((row) => row.id)).toEqual([
+      'box:income',
+      'box:expense',
+      'identity:net',
+    ]);
   });
 
   it('ホームの 6 カードがマスタの順・マスタの段組みで描画される', async () => {

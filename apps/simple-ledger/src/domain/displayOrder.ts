@@ -253,6 +253,47 @@ export function isIdentitySection(key: DisplaySectionKey): boolean {
   return IDENTITY_SECTIONS.some((row) => row.key === key);
 }
 
+/** その分類が属する段（フロー = 期間の発生額 / ストック = 断面の残高）。 */
+export function displaySectionGroupOf(key: DisplaySectionKey): DisplaySectionGroupKey {
+  return DISPLAY_SECTION_GROUPS.find((group) => group.sections.includes(key))?.key ?? 'stock';
+}
+
+/**
+ * その分類を右辺の最後の項に持つ恒等行（`net` は支出の後・`netAssets` は負債の後）。
+ * 恒等行を「どの行の直後へ差し込むか」を知りたい側は、並びを自前で書かずにこれを引く。
+ */
+export function identitySectionsAfter(key: DisplaySectionKey): DisplaySectionKey[] {
+  return IDENTITY_SECTIONS.filter((row) => row.after === key).map((row) => row.key);
+}
+
+/* ------------------------------------------------------------------ *
+ * 4. 箱 → 6 分類（レンズ共通ラベル列の恒等行の自動配置）
+ * ------------------------------------------------------------------ */
+
+/**
+ * 箱が集計上どの分類（6 分類）の内訳になるか。
+ * 恒等行（収支・純資産）を「その式の右辺の最後の箱の直後」へ自動で置くためだけの対応表で、
+ * **並びは持たない**（並びは `DISPLAY_BOX_KEYS` / `DISPLAY_SECTION_KEYS` が正本）。
+ * 純資産の箱（equity 科目そのもの）は 6 分類のどれの内訳でもないので undefined
+ * （恒等行の `netAssets` = 資産 − 負債 とは別物なので、ここで結び付けない）。
+ */
+const SECTION_BY_BOX: Record<DisplayBoxKey, DisplaySectionKey | undefined> = {
+  assetFree: 'totalAssets',
+  assetFixed: 'totalAssets',
+  investment: 'totalAssets',
+  continuingCost: 'totalAssets',
+  shortTermDebt: 'totalLiabilities',
+  longTermDebt: 'totalLiabilities',
+  income: 'revenue',
+  expense: 'expense',
+  equity: undefined,
+};
+
+/** 箱が属する 6 分類（無い箱は undefined）。 */
+export function displaySectionOfBox(key: DisplayBoxKey): DisplaySectionKey | undefined {
+  return SECTION_BY_BOX[key];
+}
+
 /**
  * その分類が段の切り替わりか（数値レンズがフローとストックの間に引く区切り線）。
  * 最初の段の先頭には引かない。

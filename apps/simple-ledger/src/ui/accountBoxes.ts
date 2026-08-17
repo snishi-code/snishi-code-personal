@@ -87,7 +87,7 @@ const BOX_LOOK: Record<DisplayBoxKey, { labelKey: MessageKey; accent: AccountAcc
   longTermDebt: { labelKey: 'box.longTermDebt', accent: ACCOUNT_ACCENTS.longTermDebt },
   income: { labelKey: 'box.income', accent: ACCOUNT_ACCENTS.income },
   expense: { labelKey: 'box.expense', accent: ACCOUNT_ACCENTS.expense },
-  equity: { labelKey: 'accounts.type.equity', accent: ACCOUNT_ACCENTS.equity },
+  equity: { labelKey: 'box.equity', accent: ACCOUNT_ACCENTS.equity },
 };
 
 /** 箱の見た目（ラベル・色）。並びは持たないので、列挙は TIMELINE_ACCOUNT_BOXES を使う。 */

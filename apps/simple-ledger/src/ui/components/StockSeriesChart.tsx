@@ -1,49 +1,43 @@
 /*
- * ストック 4 系列の折れ線（時間平面の**グラフレンズ**）。
+ * ストックの折れ線（時間平面の**グラフレンズ**）。
  *
- * 数値レンズと同じ窓・同じ横スクロールの幾何に載る（可視添字の正本は `ui/scrollWindow`）。
- * 集計は `domain/stockSeries` が済ませており、ここは描画と凡例の開閉だけを持つ。
+ * 数値レンズと同じ窓・同じ横スクロールの幾何・同じ集計（`domain/periodMatrix`）に載る。
+ * ここは描画だけを持つ。
  *
- * - **ラベル列 = 凡例トグル**。系列名の行をタップで表示 / 非表示（`aria-pressed`・44px）。
- *   既定 ON は純資産と自由に動かせるお金（`STOCK_SERIES_DEFAULT_VISIBLE`）。
+ * - **ラベル列は 3 レンズ共通**（v13.6 H3）。専用の凡例は持たない: チェックボックスが
+ *   そのまま系列選択で、色と名前も線分レンズ・数値レンズと同じもの。
+ * - 系列 = **チェックされたストックの行**（箱 = その箱の科目の合算 / 科目 = 単独 /
+ *   恒等行の純資産）。フロー行（収入・支出・収支）は描き方が決まるまで対象外で、
+ *   チェックボックス自体が disabled（理由は読み上げる）。
  * - 線は**階段**（値はバケット末断面のストックなので、そのバケットの幅ぶん水平に引く）。
- * - 色は意味色のトークン（`--series-*`）。**色だけに頼らない**ため、系列ごとに線種を変え、
- *   凡例のチップも同じ線種で描く（凡例 → 線の対応が白黒でも辿れる）。
- * - 縦軸は表示中の系列だけで決める（0 は必ず含める＝負債が下へ、資産が上へ伸びる）。
+ * - 符号は自然符号（負債は借金の大きさがそのまま上へ伸びる）。0 の線は必ず軸に含める。
+ * - 色は行の色（箱のアクセント = ラベル列と同じ）。同じ箱の科目どうしは色が同じになるので、
+ *   **色だけに頼らない**ため線種をマスタ順に割り当てる。
+ * - 縦軸は表示中の系列だけで決める。
  */
-import { useCallback, useMemo, useRef, useState, type CSSProperties } from 'react';
-import {
-  STOCK_SERIES_DEFAULT_VISIBLE,
-  STOCK_SERIES_KEYS,
-  type StockSeries,
-  type StockSeriesKey,
-} from '../../domain/stockSeries';
+import { useCallback, useMemo, useRef, type CSSProperties } from 'react';
+import type { PeriodMatrix } from '../../domain/periodMatrix';
 import type { TimelineZoom } from '../../domain/timelineCalendar';
-import { t, type MessageKey } from '../../i18n';
+import { t } from '../../i18n';
 import { formatMoney } from '../../util/format';
 import { UI } from '../../ui-contract';
-import { Money } from '../money';
 import { useMoneyDigits } from '../money';
 import { visibleIndexRange, type ScrollEdge } from '../scrollWindow';
 import { useHorizonScroll } from '../horizonScroll';
+import { LensRowLabel, lensLabelWidth, lensRowLabelProps, type LensRowView } from './LensRowTree';
 
-/** 凡例列の幅（px）。可視添字の計算にも同じ値を使う（2 か所に生値を置かない）。 */
-const LEGEND_WIDTH = 140;
-const CHART_HEIGHT = 200;
+/** ラベル列 1 行の高さ（px）= タップ規約の 44px。CSS と同じ値をここでも使う。 */
+const ROW_HEIGHT = 44;
+const MIN_CHART_HEIGHT = 200;
 const PLOT_TOP = 12;
-/** これより下は目盛りのラベル帯。 */
-const PLOT_BOTTOM = 168;
+/** 目盛りのラベル帯の高さ（グラフの下端からこのぶん上がプロット領域）。 */
+const TICK_BAND = 32;
 
 /**
- * 系列の見せ方。ラベルは**ホームのカード / 資産内訳の枠と同じメッセージキー**を使う
- * （語彙を 2 か所に持たない）。`dash` は色以外の識別子（凡例のチップと線で同じ）。
+ * 線種（色以外の識別子）。同じ箱の科目は色が同じなので、**マスタ順**に順番へ割り当てる
+ * ＝ どの行がどの線かが白黒でも辿れる。先頭は実線。
  */
-const SERIES_META: Record<StockSeriesKey, { labelKey: MessageKey; dash: string }> = {
-  assets: { labelKey: 'dashboard.assets', dash: '6 3' },
-  liabilities: { labelKey: 'dashboard.liabilities', dash: '2 3' },
-  netAssets: { labelKey: 'dashboard.netAssets', dash: '' },
-  freeFunds: { labelKey: 'assets.frame.free', dash: '10 3 2 3' },
-};
+const DASH_PATTERNS: readonly string[] = ['', '6 3', '2 3', '10 3 2 3', '1 4'];
 
 /** 大きい単位の変わり目（日 = 月が変わる / 月・年 = 年が変わる）。ここは必ず目盛りを打つ。 */
 function tickGroupOf(date: string, zoom: TimelineZoom): string {
@@ -72,6 +66,9 @@ function tickLabelOf(date: string, zoom: TimelineZoom, groupStart: boolean): str
 
 export function StockSeriesChart({
   series,
+  rows,
+  onToggleRow,
+  onCheckRow,
   zoom,
   bucketWidth,
   currency,
@@ -80,7 +77,12 @@ export function StockSeriesChart({
   onVisibleRangeChange,
   onExtend,
 }: {
-  series: StockSeries;
+  /** バケット末断面の値（行 id → 列値）。数値レンズと同じ集計エンジンの出力。 */
+  series: PeriodMatrix;
+  /** 3 レンズ共通のラベル列の行（画面が解決済み）。 */
+  rows: LensRowView[];
+  onToggleRow: (id: string) => void;
+  onCheckRow: (id: string, checked: boolean) => void;
   zoom: TimelineZoom;
   /** 1 バケットの幅（px）。線分レンズと同じ値を受け取る（窓の幾何を揃える）。 */
   bucketWidth: number;
@@ -91,24 +93,12 @@ export function StockSeriesChart({
   windowKey?: string;
   /** 実際に見えている範囲（窓送りの起点に使う）。 */
   onVisibleRangeChange?: (range: { from: string; to: string }) => void;
-  /** 端に近づいた = 窓をその側へ伸ばしたい（連続スクロール・v13.6 H2-3）。 */
+  /** 端に近づいた = 窓を伸ばしたい（連続スクロール・v13.6 H2-3）。 */
   onExtend?: (edge: ScrollEdge) => void;
 }) {
   const digits = useMoneyDigits();
   const viewportRef = useRef<HTMLDivElement | null>(null);
-  // 凡例の開閉は画面ローカル・保存しない（数値レンズの展開状態と同じ作法）。
-  const [visible, setVisible] = useState<ReadonlySet<StockSeriesKey>>(
-    () => new Set(STOCK_SERIES_DEFAULT_VISIBLE),
-  );
-  const toggle = (key: StockSeriesKey) => {
-    setVisible((previous) => {
-      const next = new Set(previous);
-      if (!next.delete(key)) next.add(key);
-      return next;
-    });
-  };
-
-  const { buckets, values } = series;
+  const buckets = series.columns;
   const first = buckets[0];
   const last = buckets.at(-1);
   const caption =
@@ -119,7 +109,7 @@ export function StockSeriesChart({
       if (viewport.clientWidth <= 0) return;
       const range = visibleIndexRange(
         viewport.scrollLeft,
-        viewport.clientWidth - LEGEND_WIDTH,
+        viewport.clientWidth - lensLabelWidth(viewport.clientWidth),
         bucketWidth,
         buckets.length,
       );
@@ -144,28 +134,40 @@ export function StockSeriesChart({
     windowKey: `${windowKey ?? ''}:${focusDate ?? ''}`,
     focusScrollLeft: (viewport) => {
       if (focusIndex < 0) return viewport.scrollLeft;
-      const trackWidth = Math.max(0, viewport.clientWidth - LEGEND_WIDTH);
+      const trackWidth = Math.max(0, viewport.clientWidth - lensLabelWidth(viewport.clientWidth));
       return Math.max(0, (focusIndex + 0.5) * bucketWidth - trackWidth / 2);
     },
     onSettle: readViewport,
     ...(onExtend ? { onExtend } : {}),
   });
 
-  // 縦軸は**表示中の系列だけ**で決める。0 は必ず入れる（負債が下・資産が上に出る軸にする）。
-  const shown = STOCK_SERIES_KEYS.filter((key) => visible.has(key));
-  const plotted = shown.flatMap((key) => values[key]);
-  const top = plotted.reduce((maximum, value) => Math.max(maximum, value), 0);
-  const bottom = plotted.reduce((minimum, value) => Math.min(minimum, value), 0);
+  /**
+   * 描く系列 = チェックされたストックの行のうち、値を持つもの。**行の並びのまま**
+   * （ラベル列を上から読んだ順に線種が割り当たる）。
+   */
+  const plotted = rows
+    .map((row, index) => ({ row, values: series.values.get(row.id), index }))
+    .filter(
+      (candidate): candidate is { row: LensRowView; values: number[]; index: number } =>
+        candidate.row.node.stock && candidate.row.checked && candidate.values !== undefined,
+    );
+
+  // 縦軸は**表示中の系列だけ**で決める。0 は必ず入れる。
+  const shownValues = plotted.flatMap((candidate) => candidate.values);
+  const top = shownValues.reduce((maximum, value) => Math.max(maximum, value), 0);
+  const bottom = shownValues.reduce((minimum, value) => Math.min(minimum, value), 0);
   const span = top - bottom || 1;
-  const plotHeight = PLOT_BOTTOM - PLOT_TOP;
+  const chartHeight = Math.max(MIN_CHART_HEIGHT, rows.length * ROW_HEIGHT);
+  const plotBottom = chartHeight - TICK_BAND;
+  const plotHeight = plotBottom - PLOT_TOP;
   const yOf = (value: number): number => PLOT_TOP + ((top - value) / span) * plotHeight;
   const width = Math.max(bucketWidth, buckets.length * bucketWidth);
 
   /** 階段折れ線。値はバケット末の断面なので、そのバケットの幅ぶん水平に引く。 */
-  const stepPoints = (key: StockSeriesKey): string =>
+  const stepPoints = (values: readonly number[]): string =>
     buckets
       .flatMap((_bucket, index) => {
-        const y = yOf(values[key][index] ?? 0);
+        const y = yOf(values[index] ?? 0);
         return [`${index * bucketWidth},${y}`, `${(index + 1) * bucketWidth},${y}`];
       })
       .join(' ');
@@ -199,57 +201,16 @@ export function StockSeriesChart({
         aria-label={caption}
         data-ui={UI.timeline.chartViewport}
         onScroll={(event) => handleScroll(event.currentTarget)}
-        style={{ '--timeline-chart-legend-width': `${LEGEND_WIDTH}px` } as CSSProperties}
       >
         <div className="timeline-chart__canvas">
-          {/* ラベル列 = 凡例。系列名の行そのものがトグル（別のチェックボックスを足さない）。 */}
-          <div className="timeline-chart__legend" role="group" aria-label={t('chart.legend')}>
-            {STOCK_SERIES_KEYS.map((key) => {
-              const meta = SERIES_META[key];
-              const name = t(meta.labelKey);
-              const endValue = values[key].at(-1) ?? 0;
-              const on = visible.has(key);
+          {/* ラベル列は 3 レンズ共通（チェックボックスが凡例を兼ねる）。 */}
+          <div className="timeline-chart__rows" role="group" aria-label={t('lens.rowTree')}>
+            {rows.map((row) => {
+              const labelProps = lensRowLabelProps(row);
               return (
-                <button
-                  type="button"
-                  key={key}
-                  className="timeline-chart__legend-btn"
-                  style={{ '--timeline-series': `var(--series-${key})` } as CSSProperties}
-                  aria-pressed={on}
-                  aria-label={t('chart.legendToggle', {
-                    name,
-                    date: last?.to ?? '',
-                    amount: formatMoney(endValue, currency, digits),
-                  })}
-                  onClick={() => toggle(key)}
-                  data-ui={UI.timeline.chartLegend}
-                  data-series-key={key}
-                >
-                  {/* 色見本チップ。線と**同じ線種**で描くので、色が見えなくても対応が取れる。 */}
-                  <svg
-                    className="timeline-chart__chip"
-                    width={24}
-                    height={8}
-                    viewBox="0 0 24 8"
-                    aria-hidden="true"
-                    focusable="false"
-                  >
-                    <line
-                      className="timeline-chart__chip-line"
-                      x1={1}
-                      x2={23}
-                      y1={4}
-                      y2={4}
-                      {...(meta.dash ? { strokeDasharray: meta.dash } : {})}
-                    />
-                  </svg>
-                  <span className="timeline-chart__legend-text" aria-hidden="true">
-                    <span className="timeline-chart__legend-name">{name}</span>
-                    <span className="timeline-chart__legend-value">
-                      <Money amount={endValue} currency={currency} />
-                    </span>
-                  </span>
-                </button>
+                <div key={row.id} {...labelProps}>
+                  <LensRowLabel row={row} onToggle={onToggleRow} onCheckChange={onCheckRow} />
+                </div>
               );
             })}
           </div>
@@ -258,8 +219,8 @@ export function StockSeriesChart({
             <svg
               className="timeline-chart__svg"
               width={width}
-              height={CHART_HEIGHT}
-              viewBox={`0 0 ${width} ${CHART_HEIGHT}`}
+              height={chartHeight}
+              viewBox={`0 0 ${width} ${chartHeight}`}
               aria-hidden="true"
               focusable="false"
             >
@@ -270,43 +231,46 @@ export function StockSeriesChart({
                     x1={tick.x}
                     x2={tick.x}
                     y1={PLOT_TOP}
-                    y2={PLOT_BOTTOM}
+                    y2={plotBottom}
                   />
-                  <text className="timeline-chart__tick" x={tick.x + 2} y={CHART_HEIGHT - 8}>
+                  <text className="timeline-chart__tick" x={tick.x + 2} y={chartHeight - 8}>
                     {tick.label}
                   </text>
                 </g>
               ))}
               <line className="timeline-chart__zero" x1={0} x2={width} y1={yOf(0)} y2={yOf(0)} />
-              {shown.map((key) => (
-                <polyline
-                  key={key}
-                  className="timeline-chart__line"
-                  style={{ '--timeline-series': `var(--series-${key})` } as CSSProperties}
-                  data-ui={UI.timeline.chartLine}
-                  data-series-key={key}
-                  points={stepPoints(key)}
-                  {...(SERIES_META[key].dash ? { strokeDasharray: SERIES_META[key].dash } : {})}
-                />
-              ))}
+              {plotted.map((candidate) => {
+                const dash = DASH_PATTERNS[candidate.index % DASH_PATTERNS.length]!;
+                return (
+                  <polyline
+                    key={candidate.row.id}
+                    className="timeline-chart__line"
+                    style={{ '--lens-accent': candidate.row.accent } as CSSProperties}
+                    data-ui={UI.timeline.chartLine}
+                    data-row-key={candidate.row.id}
+                    points={stepPoints(candidate.values)}
+                    {...(dash ? { strokeDasharray: dash } : {})}
+                  />
+                );
+              })}
             </svg>
           </div>
         </div>
       </div>
-      {shown.length === 0 ? (
+      {plotted.length === 0 ? (
         <p className="field__hint" data-ui={UI.timeline.chartNoSeries}>
           {t('chart.noSeries')}
         </p>
       ) : (
         <p className="sr-only">
-          {shown
-            .map((key) =>
+          {plotted
+            .map((candidate) =>
               t('chart.seriesSummary', {
-                name: t(SERIES_META[key].labelKey),
+                name: candidate.row.label,
                 from: first?.from ?? '',
-                start: formatMoney(values[key][0] ?? 0, currency, digits),
+                start: formatMoney(candidate.values[0] ?? 0, currency, digits),
                 to: last?.to ?? '',
-                end: formatMoney(values[key].at(-1) ?? 0, currency, digits),
+                end: formatMoney(candidate.values.at(-1) ?? 0, currency, digits),
               }),
             )
             .join('')}

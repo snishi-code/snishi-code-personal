@@ -36,7 +36,7 @@ vi.mock('../src/domain/displayOrder', async () => {
 });
 
 const { ACCOUNT_BOXES, TIMELINE_ACCOUNT_BOXES } = await import('../src/ui/accountBoxes');
-const { buildPeriodMatrix } = await import('../src/domain/periodMatrix');
+const { buildLensRowTree } = await import('../src/domain/lensRows');
 const { Accounts } = await import('../src/ui/screens/Accounts');
 const { Breakdown } = await import('../src/ui/screens/Breakdown');
 const { LedgerProvider, useLedger } = await import('../src/state/store');
@@ -103,7 +103,7 @@ describe('mutation: 箱の並びを反転すると全画面が追従する', () 
     ]);
   });
 
-  it('数値レンズの資産グループの展開もマスタに従う', async () => {
+  it('3 レンズ共通の木が箱の並びに追従し、恒等行も差し込み直される', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
     const charge = ledger.accounts.find((a) => a.name === 'チャージ残高')!;
@@ -115,16 +115,28 @@ describe('mutation: 箱の並びを反転すると全画面が追従する', () 
       { accountId: invest.id, amount: 50_000, date: '2026-01-01' },
     ]);
     const after = await loadLedger();
-    const matrix = buildPeriodMatrix(after.accounts, after.journalEntries, {
-      mode: 'all',
-      years: [2026],
-    });
-    const assets = matrix.sections.find((section) => section.key === 'totalAssets')!;
-    expect(assets.children.map((child) => child.key)).toEqual([
-      'totalAssets.investment',
-      'totalAssets.fixed',
-      'totalAssets.free',
+    const rows = buildLensRowTree(after.accounts);
+
+    // 箱は反転後のマスタ順。恒等行は「式の右辺の最後の箱の直後」なので、
+    // 反転で最後になった箱の後ろへ**自動で移る**（位置をどこにも書いていない証拠）。
+    expect(rows.map((row) => row.id)).toEqual([
+      'box:equity',
+      'box:expense',
+      // 収支 = 収入 − 支出 → 支出の箱の直後（反転しても支出の直後のまま）。
+      'identity:net',
+      'box:income',
+      'box:longTermDebt',
+      'box:shortTermDebt',
+      // 純資産 = 資産 − 負債 → 反転後の「負債の最後の箱」= shortTermDebt の直後。
+      'identity:netAssets',
+      'box:continuingCost',
+      'box:investment',
+      'box:assetFixed',
+      'box:assetFree',
     ]);
+    // 科目の子も箱の所属どおりに付く（投資の箱に投資科目）。
+    const investmentBox = rows.find((row) => row.id === 'box:investment')!;
+    expect(investmentBox.children.map((child) => child.accountId)).toContain(invest.id);
   });
 
   it('勘定科目画面の箱見出しがマスタの順で描画される', async () => {

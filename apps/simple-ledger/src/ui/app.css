@@ -269,6 +269,98 @@
   --list-filter-frame-h: 113px;
 }
 
+/* ラベル列の幅の正本。CSS と JS（LensRowTree の LENS_LABEL_WIDTH / lensLabelWidth）は
+   同じ値・同じ境界を持つ: CSS が実際の描画幅、JS が可視範囲の計算に使う。
+   3 レンズで同じ器に載るので、どのレンズでもラベル列の幅は 1 つ。 */
+.timeline-calendar__canvas,
+.period-matrix__scroll,
+.timeline-chart__viewport {
+  --lens-label-width: 156px;
+}
+@media (max-width: 480px) {
+  .timeline-calendar__canvas,
+  .period-matrix__scroll,
+  .timeline-chart__viewport {
+    --lens-label-width: 144px;
+  }
+}
+
+/* ── 3 レンズ共通のラベル列（v13.6 H3） ──
+   線分 / 数値 / グラフのどのレンズでも同じ見た目・同じ操作になるよう、器の種類
+   （div / th）によらず 1 つの規則で描く。幅の正本は JS（LensRowTree の LENS_LABEL_WIDTH）で、
+   可視範囲の計算と同じ値を custom property で受け取る。 */
+.lens-row__label {
+  position: sticky;
+  left: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  box-sizing: border-box;
+  width: var(--lens-label-width);
+  min-width: var(--lens-label-width);
+  max-width: var(--lens-label-width);
+  min-height: var(--tap);
+  /* 深さぶんの字下げ（箱 → 科目 → 月割り項目）。深さは JS が渡す。 */
+  padding: 0 var(--space-2) 0 calc(var(--space-2) + var(--lens-depth, 0) * var(--space-3));
+  color: var(--text);
+  font: inherit;
+  font-weight: 400;
+  text-align: left;
+  background: var(--surface);
+  border: 0;
+  border-left: 4px solid var(--lens-accent, var(--border));
+  box-shadow: 1px 0 0 var(--border);
+}
+.lens-row__label--detail {
+  color: var(--muted);
+}
+.lens-row__label--emphasis {
+  font-weight: 700;
+  color: var(--text);
+}
+/* チェックが外れている行 = 右ペインに出ていない。行は残るので、薄くして違いを見せる
+   （読み上げの正本はチェックボックスの checked）。 */
+.lens-row__label--off .lens-row__toggle,
+.lens-row__label--off .lens-row__text {
+  opacity: 0.45;
+}
+.lens-row__check {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+}
+.lens-row__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap);
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.lens-row__text {
+  /* 狭幅で「自由に動かせるお金/動かせないお金」が同じ見出しに切れないよう、
+     1 行省略ではなく 2 行までの折返しで見分けを保つ。 */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  min-width: 0;
+  overflow: hidden;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.lens-row__text--leaf {
+  flex: 1;
+}
+
 /* ── 期間マトリクス（時間平面の数値レンズ。旧「年間・全体」画面の表） ──
    列幅とラベル列幅の正本は JS（PeriodMatrixTable）。可視範囲の計算と同じ値を使うため、
    custom property で受け取る（2 か所に生値を置かない）。 */
@@ -298,19 +390,10 @@
 .period-matrix__table tbody tr:last-child td {
   border-bottom: none;
 }
-.period-matrix__label {
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  width: var(--period-matrix-label-width);
-  min-width: var(--period-matrix-label-width);
-  max-width: var(--period-matrix-label-width);
-  text-align: left;
-  overflow-wrap: anywhere;
-  box-shadow: 1px 0 0 var(--border);
-}
+/* 隅（項目見出し）はラベル列と同じ幅・同じ sticky。中身は文字だけ。 */
 .period-matrix__corner {
   z-index: 2;
+  padding: var(--space-2) var(--space-3);
 }
 /* 列見出しのタップ導線。表の密度を保つため見た目は文字のまま、点線下線で押せることだけ示す。 */
 .period-matrix__col-btn {
@@ -342,41 +425,9 @@
   font-weight: 700;
   background: var(--bg);
 }
-/* 段階的開示（v13.5 E）。深さぶんラベルを字下げする。深さは JS が custom property で渡す。 */
-.period-matrix__table .period-matrix__label {
-  padding-left: calc(var(--space-3) + var(--period-matrix-depth, 0) * var(--space-4));
-}
-/* トグルを持つセルは余白をボタンへ移し、タップ領域の高さを 44px（--tap）にする。 */
-.period-matrix__table .period-matrix__label--interactive {
+/* 表のセル余白はラベル列（.lens-row__label）が自前で持つ。 */
+.period-matrix__table th.lens-row__label {
   padding: 0;
-}
-.period-matrix__row-btn {
-  display: flex;
-  gap: var(--space-1);
-  align-items: center;
-  width: 100%;
-  min-height: var(--tap);
-  padding: var(--space-2) var(--space-3);
-  padding-left: calc(var(--space-3) + var(--period-matrix-depth, 0) * var(--space-4));
-  border: none;
-  background: transparent;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-}
-.period-matrix__caret {
-  flex: none;
-  width: 10px;
-  color: var(--muted);
-  font-size: 10px;
-}
-.period-matrix__row--child th {
-  color: var(--muted);
-  font-weight: 500;
-}
-.period-matrix__row--section th,
-.period-matrix__row--section td {
-  border-top: 2px solid var(--border);
 }
 .period-matrix__empty {
   padding: var(--space-5) 0;
@@ -384,8 +435,8 @@
 }
 
 /* ── グラフレンズ（時間平面のストック 4 系列） ──
-   数値レンズと同じ「ラベル列は sticky・横スクロールは枠の中だけ」。ラベル列の中身が
-   凡例トグルになっているところだけが違う。凡例の幅の正本は JS（StockSeriesChart）。 */
+   数値レンズと同じ「ラベル列は sticky・横スクロールは枠の中だけ」。ラベル列そのものは
+   3 レンズ共通（LensRowTree）で、チェックボックスが凡例を兼ねる。幅の正本は JS。 */
 .timeline-chart {
   margin: 0;
   min-width: 0;
@@ -404,61 +455,16 @@
   width: max-content;
   min-width: 100%;
 }
-.timeline-chart__legend {
+/* ラベル列は 3 レンズ共通（.lens-row__*）。ここは縦に積む器だけを持つ。 */
+.timeline-chart__rows {
   position: sticky;
   left: 0;
   z-index: 1;
   flex: none;
   display: flex;
   flex-direction: column;
-  width: var(--timeline-chart-legend-width);
+  width: var(--lens-label-width);
   background: var(--surface);
-  box-shadow: 1px 0 0 var(--border);
-}
-.timeline-chart__legend-btn {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  min-height: var(--tap);
-  padding: var(--space-1) var(--space-2);
-  border: none;
-  border-bottom: 1px solid var(--border);
-  background: transparent;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-}
-.timeline-chart__legend-btn:last-child {
-  border-bottom: none;
-}
-/* OFF = 押されていない。色見本と文字を薄くして、点いている系列と一目で分ける
-   （aria-pressed が読み上げの正本で、これはその見た目側）。 */
-.timeline-chart__legend-btn[aria-pressed='false'] {
-  opacity: 0.45;
-}
-.timeline-chart__chip {
-  flex: none;
-  overflow: visible;
-}
-.timeline-chart__chip-line {
-  stroke: var(--timeline-series, var(--primary));
-  stroke-width: 2;
-  stroke-linecap: round;
-}
-.timeline-chart__legend-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  gap: 1px;
-}
-.timeline-chart__legend-name {
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.timeline-chart__legend-value {
-  font-size: 12px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
 }
 .timeline-chart__plot {
   flex: none;
@@ -482,7 +488,7 @@
 }
 .timeline-chart__line {
   fill: none;
-  stroke: var(--timeline-series, var(--primary));
+  stroke: var(--lens-accent, var(--primary));
   stroke-width: 2;
   stroke-linejoin: round;
   stroke-linecap: butt;
@@ -528,14 +534,13 @@
   min-width: 100%;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-  --timeline-label-width: 132px;
   --timeline-row-height: 52px;
 }
 .timeline-calendar__header-row,
 .timeline-calendar__row {
   display: grid;
   grid-template-columns:
-    var(--timeline-label-width)
+    var(--lens-label-width)
     repeat(var(--timeline-bucket-count), var(--timeline-bucket-width));
   width: max-content;
   min-width: 100%;
@@ -587,45 +592,8 @@
 .timeline-calendar__row--dimmed {
   opacity: 0.3;
 }
-.timeline-calendar__row-label {
-  position: sticky;
-  left: 0;
-  z-index: 6;
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  width: 100%;
-  min-width: 0;
+.timeline-calendar__row .lens-row__label {
   min-height: var(--timeline-row-height);
-  padding: 0 var(--space-2);
-  color: var(--text);
-  text-align: left;
-  background: var(--surface);
-  border: 0;
-  border-left: 4px solid var(--timeline-accent, var(--border));
-  box-shadow: 1px 0 0 var(--border);
-  font: inherit;
-}
-button.timeline-calendar__row-label {
-  cursor: pointer;
-}
-.timeline-calendar__row-label--detail {
-  padding-left: var(--space-4);
-  color: var(--muted);
-}
-.timeline-calendar__row-label--item {
-  padding-left: var(--space-6);
-}
-.timeline-calendar__row-label-text {
-  /* 狭幅で「自由に動かせるお金/動かせないお金」が同じ見出しに切れないよう、
-     1 行省略ではなく 2 行までの折返しで見分けを保つ。 */
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  min-width: 0;
-  overflow: hidden;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
 }
 .timeline-calendar__track {
   position: relative;
@@ -704,7 +672,7 @@ button.timeline-calendar__row-label {
 .timeline-calendar__connector {
   position: absolute;
   top: 0;
-  left: var(--timeline-label-width);
+  left: var(--lens-label-width);
   z-index: 4;
   overflow: visible;
   pointer-events: none;
@@ -778,34 +746,8 @@ button.timeline-calendar__row-label {
   justify-content: flex-end;
   margin-top: var(--space-2);
 }
-.timeline-calendar__empty {
-  position: sticky;
-  left: 0;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: min(100vw, 360px);
-  min-height: var(--timeline-row-height);
-  padding: var(--space-5);
-  color: var(--muted);
-  text-align: center;
-  background: var(--surface);
-}
 
 @media (max-width: 480px) {
-  .timeline-calendar__canvas {
-    --timeline-label-width: 116px;
-  }
-  .timeline-calendar__row-label {
-    padding-inline: var(--space-1);
-  }
-  .timeline-calendar__row-label--detail {
-    padding-left: var(--space-3);
-  }
-  .timeline-calendar__row-label--item {
-    padding-left: var(--space-5);
-  }
 }
 
 /* ── Statement rows ── */

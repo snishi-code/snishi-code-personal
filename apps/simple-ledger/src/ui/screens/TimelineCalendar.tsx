@@ -20,7 +20,6 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Segmented } from '@snishi/foundation/ui/Segmented';
-import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../../state/store';
 import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
@@ -36,6 +35,14 @@ import {
   periodMatrixAsOf,
   type PeriodMatrixScope,
 } from '../../domain/periodMatrix';
+import { buildLensRowTree, type LensRowNode } from '../../domain/lensRows';
+import {
+  LensRowLabel,
+  buildLensRowViews,
+  lensLabelWidth,
+  lensRowLabelProps,
+  type LensRowView,
+} from '../components/LensRowTree';
 import { effectiveRecurringRuleStartDate } from '../../domain/accountLifetime';
 import { todayLocal } from '../../util/time';
 import { formatMoney } from '../../util/format';
@@ -43,7 +50,7 @@ import { useMoneyDigits } from '../money';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import { useRegisterOverlay } from '../overlays';
-import { TIMELINE_ACCOUNT_BOXES, timelineBoxForAccount, type AccountAccent } from '../accountBoxes';
+import { TIMELINE_ACCOUNT_BOXES, timelineBoxForAccount } from '../accountBoxes';
 import type { Account, Ledger, MonthlyCostItem, RecurringRule } from '../../domain/types';
 import type { ReportPeriod } from '../../domain/reportPeriod';
 import type { Screen } from '../navigation';
@@ -53,7 +60,6 @@ import { ScrollTopButton } from '../ScrollTopButton';
 import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 import { PeriodMatrixTable } from '../components/PeriodMatrixTable';
 import { StockSeriesChart } from '../components/StockSeriesChart';
-import { buildStockSeries } from '../../domain/stockSeries';
 
 export type { TimelineZoom } from '../../domain/timelineCalendar';
 
@@ -164,17 +170,17 @@ interface TimelineCalendarProps {
   onOpenAccount: (accountId: string) => void;
 }
 
-interface RenderRow {
-  id: string;
-  kind: 'box' | 'account' | 'rule' | 'item';
-  boxKey: string;
-  label: string;
-  accent: AccountAccent;
+/**
+ * 線分レンズが 1 行に描くもの。**行そのもの**（並び・名前・色・チェック）は 3 レンズ共通の
+ * ラベル列が持ち、ここはその行 id に紐づく帯とポッチだけを持つ。
+ */
+interface SegmentRowData {
   spans: TimelineSpanView[];
   dots: TimelineDotView[];
   generationDots: TimelineGenerationDotView[];
-  accountId?: string;
 }
+
+const EMPTY_SEGMENT_ROW: SegmentRowData = { spans: [], dots: [], generationDots: [] };
 
 interface FlowSelection {
   kind: 'flow';
@@ -466,79 +472,80 @@ function bandStyle(
   return { left: start, width: Math.max(2, end - start) };
 }
 
-function flattenRows(boxes: TimelineBoxView[], expanded: ReadonlySet<string>): RenderRow[] {
-  const boxUiByKey = new Map(TIMELINE_ACCOUNT_BOXES.map((box) => [box.key, box] as const));
-  const rows: RenderRow[] = [];
+/** 線分レンズの計算結果を、共通ラベル列の行 id で引けるようにする。 */
+function segmentRowData(boxes: TimelineBoxView[]): Map<string, SegmentRowData> {
+  const byId = new Map<string, SegmentRowData>();
   for (const box of boxes) {
-    const boxUi = boxUiByKey.get(box.key as (typeof TIMELINE_ACCOUNT_BOXES)[number]['key']);
-    if (!boxUi) continue;
-    rows.push({
-      id: `box:${box.key}`,
-      kind: 'box',
-      boxKey: box.key,
-      label: t(boxUi.labelKey),
-      accent: boxUi.accent,
+    byId.set(`box:${box.key}`, {
       spans: box.spans,
       dots: box.dots,
       generationDots: [],
     });
-    if (!expanded.has(box.key)) continue;
-
-    if (box.continuousCost) {
-      for (const group of box.continuousCost.rules) {
-        rows.push({
-          id: `rule:${group.rule.id}`,
-          kind: 'rule',
-          boxKey: box.key,
-          label: group.rule.name,
-          accent: boxUi.accent,
-          spans: group.spans,
-          dots: [],
-          generationDots: group.generationDots,
-        });
-        for (const child of group.items) {
-          rows.push({
-            id: `item:${child.item.id}`,
-            kind: 'item',
-            boxKey: box.key,
-            label: child.item.name,
-            accent: boxUi.accent,
-            spans: child.spans,
-            dots: child.dots,
-            generationDots: [],
-          });
-        }
-      }
-      for (const child of box.continuousCost.unlinkedItems) {
-        rows.push({
-          id: `item:${child.item.id}`,
-          kind: 'item',
-          boxKey: box.key,
-          label: child.item.name,
-          accent: boxUi.accent,
+    for (const child of box.accounts) {
+      byId.set(`account:${child.account.id}`, {
+        spans: child.spans,
+        dots: child.dots,
+        generationDots: [],
+      });
+    }
+    for (const group of box.continuousCost?.rules ?? []) {
+      byId.set(`rule:${group.rule.id}`, {
+        spans: group.spans,
+        dots: [],
+        generationDots: group.generationDots,
+      });
+      for (const child of group.items) {
+        byId.set(`item:${child.item.id}`, {
           spans: child.spans,
           dots: child.dots,
           generationDots: [],
         });
       }
-      continue;
     }
-
-    for (const child of box.accounts) {
-      rows.push({
-        id: `account:${child.account.id}`,
-        kind: 'account',
-        boxKey: box.key,
-        label: child.account.name,
-        accent: boxUi.accent,
+    for (const child of box.continuousCost?.unlinkedItems ?? []) {
+      byId.set(`item:${child.item.id}`, {
         spans: child.spans,
         dots: child.dots,
         generationDots: [],
-        accountId: child.account.id,
       });
     }
   }
-  return rows;
+  return byId;
+}
+
+/**
+ * 継続コスト台帳の箱に線分レンズだけが足す子（定期ルール → 月割り項目）。
+ * 科目ではない実体なので共通木は持たず、線分レンズが `extraChildren` として渡す。
+ */
+export function continuousCostChildren(boxes: TimelineBoxView[], boxKey: string): LensRowNode[] {
+  const box = boxes.find((candidate) => candidate.key === boxKey);
+  const rows = box?.continuousCost;
+  if (!rows) return [];
+  return [
+    ...rows.rules.map<LensRowNode>((group) => ({
+      id: `rule:${group.rule.id}`,
+      kind: 'rule',
+      stock: true,
+      boxKey: box!.key as LensRowNode['boxKey'],
+      name: group.rule.name,
+      children: group.items.map<LensRowNode>((child) => ({
+        id: `item:${child.item.id}`,
+        kind: 'item',
+        stock: true,
+        boxKey: box!.key as LensRowNode['boxKey'],
+        name: child.item.name,
+        children: [],
+      })),
+    })),
+    ...rows.unlinkedItems.map<LensRowNode>((child) => ({
+      id: `item:${child.item.id}`,
+      kind: 'item',
+      stock: true,
+      boxKey: box!.key as LensRowNode['boxKey'],
+      name: child.item.name,
+      children: [],
+    })),
+  ];
 }
 
 /** domain の計算結果を描画名に合わせる薄い adapter。金額の再集計はしない。 */
@@ -612,7 +619,7 @@ function visibleRangeOf(
   bucketWidth: number,
 ): { from: string; to: string } | undefined {
   if (buckets.length === 0 || viewport.clientWidth <= 0) return undefined;
-  const labelWidth = viewport.clientWidth <= 480 ? 116 : 132;
+  const labelWidth = lensLabelWidth(viewport.clientWidth);
   const visible = visibleIndexRange(
     viewport.scrollLeft,
     viewport.clientWidth - labelWidth,
@@ -630,9 +637,10 @@ function visibleRangeOf(
  */
 export function TimelineCalendarView({
   model,
+  rows,
+  onToggleRow,
+  onCheckRow,
   zoom,
-  showEnded,
-  onShowEndedChange,
   today,
   accounts,
   currency,
@@ -643,9 +651,11 @@ export function TimelineCalendarView({
   windowKey,
 }: {
   model: TimelineCalendarViewModel;
+  /** 3 レンズ共通のラベル列の行（並び・名前・色・チェックは画面が解決済み）。 */
+  rows: LensRowView[];
+  onToggleRow: (id: string) => void;
+  onCheckRow: (id: string, checked: boolean) => void;
   zoom: TimelineZoom;
-  showEnded: boolean;
-  onShowEndedChange: (show: boolean) => void;
   today: string;
   accounts: Account[];
   currency: string;
@@ -659,7 +669,6 @@ export function TimelineCalendarView({
   /** 窓（ズーム・前後移動）の同一性。変わったら開いているポップオーバーを捨てる。 */
   windowKey?: string;
 }) {
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [selection, setSelection] = useState<Selection | null>(null);
   // 窓が変わればポッチの実体も座標も入れ替わる。選択を持ち越すと、消えたポッチに
   // 紐づいたポップオーバーだけが残る（render 中の派生調整パターン）。
@@ -673,7 +682,7 @@ export function TimelineCalendarView({
     model.buckets[Math.floor(model.buckets.length / 2)]?.from ?? today,
   );
   const bucketWidth = BUCKET_WIDTH[zoom];
-  const rows = useMemo(() => flattenRows(model.boxes, expanded), [expanded, model.boxes]);
+  const rowData = useMemo(() => segmentRowData(model.boxes), [model.boxes]);
   const accountById = useMemo(
     () => new Map(accounts.map((account) => [account.id, account] as const)),
     [accounts],
@@ -689,7 +698,7 @@ export function TimelineCalendarView({
   const readViewport = useCallback(
     (viewport: HTMLDivElement): string => {
       if (model.buckets.length === 0) return visibleCenterRef.current;
-      const labelWidth = viewport.clientWidth <= 480 ? 116 : 132;
+      const labelWidth = lensLabelWidth(viewport.clientWidth);
       const visibleTrackWidth = Math.max(0, viewport.clientWidth - labelWidth);
       const pixel = viewport.scrollLeft + visibleTrackWidth / 2;
       const index = Math.max(
@@ -715,7 +724,7 @@ export function TimelineCalendarView({
     windowKey: `${windowKey ?? ''}:${windowCenter}`,
     focusScrollLeft: (viewport) => {
       const focusX = positionForDate(model.buckets, windowCenter, bucketWidth);
-      const labelWidth = viewport.clientWidth <= 480 ? 116 : 132;
+      const labelWidth = lensLabelWidth(viewport.clientWidth);
       visibleCenterRef.current = windowCenter;
       return Math.max(0, focusX - Math.max(0, viewport.clientWidth - labelWidth) / 2);
     },
@@ -750,13 +759,13 @@ export function TimelineCalendarView({
     let otherAccountId: string | undefined;
     if (source.kind === 'account') {
       otherAccountId =
-        source.accountId === selectedFlow.sourceAccountId
+        source.node.accountId === selectedFlow.sourceAccountId
           ? selectedFlow.destinationAccountId
           : selectedFlow.sourceAccountId;
     } else if (source.kind === 'box') {
       const sourceBox = accountBoxKey(selectedFlow.sourceAccountId);
       otherAccountId =
-        sourceBox === source.boxKey
+        sourceBox === source.node.boxKey
           ? selectedFlow.destinationAccountId
           : selectedFlow.sourceAccountId;
     } else {
@@ -799,21 +808,23 @@ export function TimelineCalendarView({
       ? positionForDate(model.buckets, today, bucketWidth)
       : undefined;
 
+  // 箱の行は骨格なので常に並ぶ。「何も無い」は**帯もポッチも 1 つも無い**ことで言う
+  // （行が消えることではない）。器の中に置くと 9 行の骨格と重なるので、枠の手前に出す。
+  const hasAnything = rows.some((row) => {
+    const data = rowData.get(row.id);
+    return (
+      data !== undefined &&
+      (data.spans.length > 0 || data.dots.length > 0 || data.generationDots.length > 0)
+    );
+  });
+
   return (
     <>
-      <label className="timeline-calendar__show-ended">
-        <input
-          type="checkbox"
-          checked={showEnded}
-          onChange={(event) => {
-            setSelection(null);
-            onShowEndedChange(event.target.checked);
-          }}
-          data-ui={UI.timeline.showEnded}
-        />
-        {t('timeline.showEnded')}
-      </label>
-
+      {hasAnything ? null : (
+        <p className="field__hint" role="status">
+          {t('timeline.empty')}
+        </p>
+      )}
       <div
         ref={viewportRef}
         className="timeline-calendar__viewport card"
@@ -834,11 +845,6 @@ export function TimelineCalendarView({
         >
           <TimelineHeader buckets={model.buckets} zoom={zoom} />
           <div className="timeline-calendar__body">
-            {rows.length === 0 ? (
-              <div className="timeline-calendar__empty" role="status">
-                {t('timeline.empty')}
-              </div>
-            ) : null}
             {todayX !== undefined ? (
               <div
                 className="timeline-calendar__today-line"
@@ -868,22 +874,17 @@ export function TimelineCalendarView({
               <TimelineRow
                 key={row.id}
                 row={row}
+                // チェック OFF の行は帯もポッチも消える（行そのものは残る = 戻せる）。
+                data={row.checked ? (rowData.get(row.id) ?? EMPTY_SEGMENT_ROW) : EMPTY_SEGMENT_ROW}
                 buckets={model.buckets}
                 bucketWidth={bucketWidth}
-                expanded={expanded.has(row.boxKey)}
                 dimmed={connectedIds !== undefined && !connectedIds.has(row.id)}
                 selection={selection?.rowId === row.id ? selection : null}
                 popoverAbove={selection?.rowId === row.id && connectorGoesDown}
                 accountById={accountById}
                 currency={currency}
-                onToggleBox={() =>
-                  setExpanded((current) => {
-                    const next = new Set(current);
-                    if (next.has(row.boxKey)) next.delete(row.boxKey);
-                    else next.add(row.boxKey);
-                    return next;
-                  })
-                }
+                onToggleRow={onToggleRow}
+                onCheckRow={onCheckRow}
                 onSelect={setSelection}
                 onOpenTarget={onOpenTarget}
               />
@@ -931,40 +932,44 @@ function TimelineHeader({ buckets, zoom }: { buckets: TimelineBucketView[]; zoom
 
 function TimelineRow({
   row,
+  data,
   buckets,
   bucketWidth,
-  expanded,
   dimmed,
   selection,
   popoverAbove,
   accountById,
   currency,
-  onToggleBox,
+  onToggleRow,
+  onCheckRow,
   onSelect,
   onOpenTarget,
 }: {
-  row: RenderRow;
+  row: LensRowView;
+  /** この行に描く帯とポッチ（チェック OFF なら空）。 */
+  data: SegmentRowData;
   buckets: TimelineBucketView[];
   bucketWidth: number;
-  expanded: boolean;
   dimmed: boolean;
   selection: Selection | null;
   /** フロー選択の接続線が下の行へ伸びるとき true（ポップオーバーを行の上へ出す）。 */
   popoverAbove: boolean;
   accountById: ReadonlyMap<string, Account>;
   currency: string;
-  onToggleBox: () => void;
+  onToggleRow: (id: string) => void;
+  onCheckRow: (id: string, checked: boolean) => void;
   onSelect: (selection: Selection | null) => void;
   onOpenTarget: (target: TimelineOpenTarget) => void;
 }) {
   const digits = useMoneyDigits();
   const rowClass = [
     'timeline-calendar__row',
-    row.kind === 'box' ? '' : 'timeline-calendar__row--detail',
+    row.heading ? '' : 'timeline-calendar__row--detail',
     dimmed ? 'timeline-calendar__row--dimmed' : '',
   ]
     .filter(Boolean)
     .join(' ');
+  const labelProps = lensRowLabelProps(row);
   const rowStyle = { '--timeline-accent': row.accent } as CSSProperties;
   const selectedFlow =
     selection?.kind === 'flow'
@@ -975,32 +980,13 @@ function TimelineRow({
     <div
       className={rowClass}
       style={rowStyle}
-      data-ui={row.kind === 'box' ? UI.timeline.boxRow : UI.timeline.detailRow}
+      data-ui={row.heading ? UI.timeline.boxRow : UI.timeline.detailRow}
     >
-      {row.kind === 'box' ? (
-        <button
-          type="button"
-          className="timeline-calendar__row-label"
-          aria-expanded={expanded}
-          onClick={onToggleBox}
-          data-ui={UI.timeline.boxToggle}
-          title={row.label}
-        >
-          <Icon name={expanded ? 'expand' : 'chevronRight'} size={16} />
-          <span className="timeline-calendar__row-label-text">{row.label}</span>
-        </button>
-      ) : (
-        <div
-          className={`timeline-calendar__row-label timeline-calendar__row-label--detail${
-            row.kind === 'item' ? ' timeline-calendar__row-label--item' : ''
-          }`}
-          title={row.label}
-        >
-          <span className="timeline-calendar__row-label-text">{row.label}</span>
-        </div>
-      )}
+      <div {...labelProps} style={{ ...labelProps.style, ...rowStyle }}>
+        <LensRowLabel row={row} onToggle={onToggleRow} onCheckChange={onCheckRow} />
+      </div>
       <div className="timeline-calendar__track" onClick={() => onSelect(null)}>
-        {row.spans.map((span, index) => {
+        {data.spans.map((span, index) => {
           const style = bandStyle(span, buckets, bucketWidth);
           return style ? (
             <div
@@ -1012,7 +998,7 @@ function TimelineRow({
             />
           ) : null;
         })}
-        {row.dots.map((dot) => {
+        {data.dots.map((dot) => {
           const index = bucketIndex(buckets, dot.bucketKey);
           if (index < 0) return null;
           // ポッチの x は帯と同じ「日付比例」で置く。バケット中央固定にすると、帯の端が
@@ -1058,7 +1044,7 @@ function TimelineRow({
             />
           );
         })}
-        {row.generationDots.map((dot) => {
+        {data.generationDots.map((dot) => {
           const index = bucketIndex(buckets, dot.bucketKey);
           if (index < 0) return null;
           const selected = selection?.kind === 'generation' && selection.dot === dot;
@@ -1536,12 +1522,15 @@ export function TimelineCalendar({
     [display, ledger, lens, matrixScope],
   );
 
-  // ストック 4 系列。列ごとに deriveBalanceSheet を回さず、domain が日付順の単一走査で
-  // バケット末断面を焼き付ける（断面の本数が増えても走査は 1 回）。
+  // グラフレンズの断面。数値レンズと同じ集計エンジンへ、線分レンズと同じバケットを渡す
+  // （列ごとに deriveBalanceSheet を回さず、日付順の単一走査で焼き付ける）。
   const series = useMemo(
     () =>
       ledger && lens === 'chart'
-        ? buildStockSeries(ledger.accounts, display?.entries ?? [], displayBuckets)
+        ? buildPeriodMatrix(ledger.accounts, display?.entries ?? [], {
+            mode: 'buckets',
+            buckets: displayBuckets,
+          })
         : null,
     [display, displayBuckets, ledger, lens],
   );
@@ -1576,6 +1565,73 @@ export function TimelineCalendar({
     visibleRange.to,
     zoom,
   ]);
+
+  /*
+   * ── 3 レンズ共通のラベル列（v13.6 H3）──
+   * 行の集合・並び・開閉・チェックは**画面が 1 つだけ持つ**。レンズを切り替えても、
+   * 同じ木・同じ開閉・同じチェックのまま右ペインの描画だけが入れ替わる。
+   * どちらも画面ローカルで保存しない（既定 = 全部たたんだ状態・全部 ON）。
+   */
+  const [expandedRows, setExpandedRows] = useState<ReadonlySet<string>>(() => new Set<string>());
+  /** チェックが**外れている**行。既定は全 ON なので、持つのは OFF の側だけ。 */
+  const [hiddenRows, setHiddenRows] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const toggleRow = useCallback((id: string) => {
+    setExpandedRows((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }, []);
+  const checkRow = useCallback((id: string, checked: boolean) => {
+    setHiddenRows((current) => {
+      const next = new Set(current);
+      if (checked) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  /**
+   * 行に出す科目。**レンズによらず同じ絞り込み**（窓に重なる存在期間だけ / 「終了分も表示」で
+   * 全部）。ここでレンズごとに違う条件を書くと「レンズごとの独自ラベル列」が戻ってくる。
+   */
+  const rowAccounts = useMemo(() => {
+    const all = ledger?.accounts ?? [];
+    if (showEnded) return all;
+    return all.filter((account) => {
+      // 旧 archived で終了日が復元できない科目は、線分が描けないので通常表示から外す。
+      if (account.archived && account.endDate === undefined) return false;
+      const startsAfter = account.startDate !== undefined && account.startDate > visibleRange.to;
+      const endedBefore = account.endDate !== undefined && account.endDate < visibleRange.from;
+      return !startsAfter && !endedBefore;
+    });
+  }, [ledger, showEnded, visibleRange.from, visibleRange.to]);
+
+  const rowTree = useMemo(
+    () =>
+      buildLensRowTree(rowAccounts, {
+        // 継続コスト台帳の中身（定期ルール → 月割り項目）は科目ではないので線分レンズだけ。
+        extraChildren: (boxKey) =>
+          lens === 'segment' ? continuousCostChildren(model.boxes, boxKey) : [],
+      }),
+    [lens, model.boxes, rowAccounts],
+  );
+  const rowViews = useMemo(
+    () =>
+      buildLensRowViews({
+        tree: rowTree,
+        expanded: expandedRows,
+        hidden: hiddenRows,
+        // グラフはストック（残高の断面）しか描けない。フロー行は形式が決まるまで選べない。
+        ...(lens === 'chart'
+          ? {
+              disabledReason: (node: LensRowNode) =>
+                node.stock ? undefined : t('lens.flowNotPlottable'),
+            }
+          : {}),
+      }),
+    [expandedRows, hiddenRows, lens, rowTree],
+  );
 
   // 年列タップ = その年を月ズームで見る（旧「全体 → その年の年間表示へ」のドリルの後継）。
   // ズームは App が持つので、行き先の中心を預けてから切り替える（同じ 1 回の更新で届く）。
@@ -1671,6 +1727,17 @@ export function TimelineCalendar({
         </div>
       </div>
 
+      {/* 「終了分も表示」は行の集合を決めるので、レンズの外（3 レンズ共通）に置く。 */}
+      <label className="timeline-calendar__show-ended">
+        <input
+          type="checkbox"
+          checked={showEnded}
+          onChange={(event) => setShowEnded(event.target.checked)}
+          data-ui={UI.timeline.showEnded}
+        />
+        {t('timeline.showEnded')}
+      </label>
+
       {lens === 'chart' ? (
         <>
           {/* 仮の数字が本物の顔をしない: 折れ線に何が混ざるかをグラフの手前で名乗る。 */}
@@ -1682,6 +1749,9 @@ export function TimelineCalendar({
           {series ? (
             <StockSeriesChart
               series={series}
+              rows={rowViews}
+              onToggleRow={toggleRow}
+              onCheckRow={checkRow}
               zoom={zoom}
               bucketWidth={BUCKET_WIDTH[zoom]}
               currency={ledger?.settings.currency ?? ''}
@@ -1705,6 +1775,9 @@ export function TimelineCalendar({
           {matrix ? (
             <PeriodMatrixTable
               matrix={matrix}
+              rows={rowViews}
+              onToggleRow={toggleRow}
+              onCheckRow={checkRow}
               currency={ledger?.settings.currency ?? ''}
               focusDate={center}
               windowKey={anchorKey}
@@ -1723,9 +1796,10 @@ export function TimelineCalendar({
       ) : (
         <TimelineCalendarView
           model={model}
+          rows={rowViews}
+          onToggleRow={toggleRow}
+          onCheckRow={checkRow}
           zoom={zoom}
-          showEnded={showEnded}
-          onShowEndedChange={setShowEnded}
           today={today}
           accounts={ledger?.accounts ?? []}
           currency={ledger?.settings.currency ?? ''}

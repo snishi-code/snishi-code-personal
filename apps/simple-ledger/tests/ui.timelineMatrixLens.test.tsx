@@ -283,69 +283,88 @@ describe('時間平面の数値レンズ', () => {
   });
 
   /*
-   * v13.5 E: 行はホームの 6 カードと同じ 6 分類。費目・科目は**行タップで開く**
-   *（常時全展開をやめた）。展開は保存しない画面ローカル状態。
+   * v13.6 H3: 行は**3 レンズ共通のラベル列**（箱 → 科目の木 + 恒等行）。
+   * 数値レンズ専用の 6 分類の木は無くなり、線分レンズと同じ行に値が載る。
    */
-  describe('6 分類と段階的開示', () => {
+  describe('共通ラベル列', () => {
     const rowKeys = () =>
       [...matrixEl().querySelectorAll(`[data-ui="${UI.timeline.matrixRow}"]`)].map((row) =>
         row.getAttribute('data-row-key'),
       );
     const toggle = (key: string) =>
       matrixEl().querySelector<HTMLButtonElement>(
-        `[data-ui="${UI.timeline.matrixRowToggle}"][data-row-key="${key}"]`,
+        `[data-ui="${UI.timeline.rowToggle}"][data-row-key="${key}"]`,
       );
+    const check = (key: string) =>
+      matrixEl().querySelector<HTMLInputElement>(
+        `[data-ui="${UI.timeline.rowCheck}"][data-row-key="${key}"]`,
+      );
+    const cellsOf = (key: string) =>
+      matrixEl().querySelector(`[data-ui="${UI.timeline.matrixRow}"][data-row-key="${key}"]`)!;
 
-    it('既定はホームの 6 カードと同じ 6 行だけ（費目は開くまで出さない）', () => {
+    it('既定は箱 9 つ + 恒等行 2 つ（科目は開くまで出さない）', () => {
       renderTimeline({ mode: 'date', date: '2026-07-15' });
 
       expect(rowKeys()).toEqual([
-        'revenue',
-        'expense',
-        'net',
-        'totalAssets',
-        'totalLiabilities',
-        'netAssets',
+        'box:assetFree',
+        'box:assetFixed',
+        'box:investment',
+        'box:continuingCost',
+        'box:shortTermDebt',
+        'box:longTermDebt',
+        'identity:netAssets',
+        'box:income',
+        'box:expense',
+        'identity:net',
+        'box:equity',
       ]);
-      for (const row of ['収入', '支出', '収支', '資産', '負債', '純資産']) {
-        expect(within(matrixEl()).getByRole('rowheader', { name: row })).toBeInTheDocument();
-      }
-      // 旧構成の言い換え（総資産）と常時展開の費目行は無い。
-      expect(within(matrixEl()).queryByRole('rowheader', { name: '総資産' })).toBeNull();
-      expect(within(matrixEl()).queryByRole('rowheader', { name: '食費' })).toBeNull();
+      // 恒等行の名前はホームのカードと同じ語彙（行の識別は data-row-key）。
+      expect(cellsOf('identity:net')).toHaveTextContent('収支');
+      expect(cellsOf('identity:netAssets')).toHaveTextContent('純資産');
+      // 科目は開くまで出さない。
+      expect(within(matrixEl()).queryByRole('rowheader', { name: /食費/ })).toBeNull();
     });
 
-    it('支出行のタップで費目を開き、もう一度で閉じる（aria-expanded が名乗る）', () => {
+    it('箱のタップで科目を開き、もう一度で閉じる（aria-expanded が名乗る）', () => {
       renderTimeline({ mode: 'date', date: '2026-07-15' });
 
-      const expense = toggle('expense')!;
+      const expense = toggle('box:expense')!;
       expect(expense).toHaveAttribute('aria-expanded', 'false');
       fireEvent.click(expense);
-      expect(toggle('expense')).toHaveAttribute('aria-expanded', 'true');
-      expect(rowKeys()).toContain('expense.food');
-      expect(within(matrixEl()).getByRole('rowheader', { name: '食費' })).toBeInTheDocument();
+      expect(toggle('box:expense')).toHaveAttribute('aria-expanded', 'true');
+      expect(rowKeys()).toContain('account:food');
+      expect(within(matrixEl()).getByRole('rowheader', { name: /食費/ })).toBeInTheDocument();
 
-      fireEvent.click(toggle('expense')!);
-      expect(rowKeys()).not.toContain('expense.food');
+      fireEvent.click(toggle('box:expense')!);
+      expect(rowKeys()).not.toContain('account:food');
     });
 
-    it('資産行は 4 グループ → 科目の 2 段で開く', () => {
+    it('恒等行にはトグルが無い（引き算の結果はばらさない）', () => {
       renderTimeline({ mode: 'date', date: '2026-07-15' });
-
-      fireEvent.click(toggle('totalAssets')!);
-      expect(rowKeys()).toContain('totalAssets.free');
-      // グループを開くまで科目は出さない（段階的開示）。
-      expect(rowKeys()).not.toContain('totalAssets.free.cash');
-
-      fireEvent.click(toggle('totalAssets.free')!);
-      expect(rowKeys()).toContain('totalAssets.free.cash');
-      expect(within(matrixEl()).getByRole('rowheader', { name: '預金' })).toBeInTheDocument();
+      expect(toggle('identity:net')).toBeNull();
+      expect(toggle('identity:netAssets')).toBeNull();
     });
 
-    it('収支・純資産にはトグルが無い（引き算の結果はばらさない）', () => {
+    /* mutation 系統: チェックと右ペインの連動。 */
+    it('チェックを外すとその行の値が列から消え、戻すと出る（行そのものは残る）', () => {
       renderTimeline({ mode: 'date', date: '2026-07-15' });
-      expect(toggle('net')).toBeNull();
-      expect(toggle('netAssets')).toBeNull();
+
+      const box = check('box:assetFree')!;
+      expect(box.checked).toBe(true);
+      const filled = () =>
+        [
+          ...cellsOf('box:assetFree').querySelectorAll(`[data-ui="${UI.timeline.matrixCell}"]`),
+        ].filter((cell) => cell.textContent !== '').length;
+      expect(filled()).toBeGreaterThan(0);
+
+      fireEvent.click(box);
+      expect(check('box:assetFree')!.checked).toBe(false);
+      // 行は残る（チェックし直せる）が、値のセルは空になる。
+      expect(rowKeys()).toContain('box:assetFree');
+      expect(filled()).toBe(0);
+
+      fireEvent.click(check('box:assetFree')!);
+      expect(filled()).toBeGreaterThan(0);
     });
 
     it('負債の数字は負債トークンの色（C-2）で、資産の数字には付かない', () => {
@@ -360,13 +379,11 @@ describe('時間平面の数値レンズ', () => {
       };
       renderTimeline({ mode: 'date', date: '2026-07-15' });
 
-      const cells = (key: string) =>
-        matrixEl().querySelector(`[data-ui="${UI.timeline.matrixRow}"][data-row-key="${key}"]`)!;
-      expect(cells('totalLiabilities').querySelector('.amount--liability')).not.toBeNull();
-      expect(cells('totalAssets').querySelector('.amount--liability')).toBeNull();
+      expect(cellsOf('box:longTermDebt').querySelector('.amount--liability')).not.toBeNull();
+      expect(cellsOf('box:assetFree').querySelector('.amount--liability')).toBeNull();
 
-      fireEvent.click(toggle('totalLiabilities')!);
-      expect(cells('totalLiabilities.loan').querySelector('.amount--liability')).not.toBeNull();
+      fireEvent.click(toggle('box:longTermDebt')!);
+      expect(cellsOf('account:loan').querySelector('.amount--liability')).not.toBeNull();
     });
   });
 });
