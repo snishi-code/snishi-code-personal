@@ -11,8 +11,13 @@ export const UI = {
     // ヘッダーの日付チップ（透明な date input を重ねた 1 タップ選択）
     dateTrigger: 'period.date.trigger',
     dateInput: 'period.date.input',
-    // タイムスリップ中だけ現れる「今日」ボタン（日付だけを今日へ戻す・画面と粒度は不変）
+    // タイムスリップ中だけ現れる「今日」ボタン（日付だけを今日へ戻す・画面とズームは不変）
     today: 'period.today',
+    // 時間平面のズーム（日/月/年）。点灯 = ウィンドウ世界の名乗り（ズーム対応画面に居るときだけ）。
+    // 断面画面では消灯し、押すと時間平面へ移動してそのズームで点灯する。
+    zoomDay: 'period.zoom.day',
+    zoomMonth: 'period.zoom.month',
+    zoomYear: 'period.zoom.year',
     // 年・全期間はロジックを維持するが、現在は UI から到達させない。
     yearPicker: 'period.year.picker',
     yearRow: 'period.year.row',
@@ -94,30 +99,13 @@ export const UI = {
     row: 'netAssets.row',
     total: 'netAssets.total',
   },
-  // 年間・全体（年別の月次表 / 全期間の年次表）
-  yearlyOverview: {
-    view: 'yearlyOverview.view',
-    // 2026-08-14 に画面内からヘッダーの粒度セグメントへ移設（値は据え置き）。
-    modeYear: 'yearlyOverview.mode.year',
-    modeAll: 'yearlyOverview.mode.all',
-    horizonActual: 'yearlyOverview.horizon.actual',
-    horizonPlus30: 'yearlyOverview.horizon.plus30',
-    horizonHardCap: 'yearlyOverview.horizon.hardCap',
-    prevYear: 'yearlyOverview.year.previous',
-    nextYear: 'yearlyOverview.year.next',
-    matrix: 'yearlyOverview.matrix',
-    projectionNote: 'yearlyOverview.projectionNote',
-    projectionTruncatedNote: 'yearlyOverview.projectionTruncatedNote',
-    // 列見出しのタップ（年間 = 月末の基準日でホームへ / 全体 = その年の年間表示へ）
-    monthColumn: 'yearlyOverview.monthColumn',
-    yearColumn: 'yearlyOverview.yearColumn',
-  },
-  // 横軸=時間、縦軸=勘定科目の箱。保存データを変更しない閲覧専用の地図。
+  // 時間平面。横軸=時間、縦軸=勘定科目の箱。保存データを変更しない閲覧専用の地図。
+  // ズーム（日/月/年）はヘッダー（period.zoom.*）が持ち、この画面はレンズ（線分/数値）を持つ。
   timeline: {
     view: 'timeline.view',
-    zoomDay: 'timeline.zoom.day',
-    zoomMonth: 'timeline.zoom.month',
-    zoomYear: 'timeline.zoom.year',
+    // レンズ = 同じ時間平面の見え方（線分 = 帯とポッチ / 数値 = 表。旧「年間・全体」画面）
+    lensSegment: 'timeline.lens.segment',
+    lensMatrix: 'timeline.lens.matrix',
     previous: 'timeline.range.previous',
     next: 'timeline.range.next',
     showEnded: 'timeline.showEnded',
@@ -131,6 +119,14 @@ export const UI = {
     popover: 'timeline.popover',
     flowList: 'timeline.popover.flows',
     open: 'timeline.popover.open',
+    // 桁あふれで投影を打ち切った科目の注記（レンズによらず画面の頭で名乗る）
+    truncatedNote: 'timeline.projectionTruncatedNote',
+    // 数値レンズの表（月ズーム = 月列 / 年ズーム = 年列）。横スクロールは表の枠の中だけ。
+    matrix: 'timeline.matrix',
+    matrixNote: 'timeline.matrix.projectionNote',
+    // 列見出しのタップ（月 = 月末の基準日でホームへ / 年 = その年を月ズームで見る）
+    matrixMonthColumn: 'timeline.matrix.monthColumn',
+    matrixYearColumn: 'timeline.matrix.yearColumn',
   },
   journal: {
     view: 'journal.view',

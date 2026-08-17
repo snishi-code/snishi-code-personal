@@ -18,6 +18,11 @@ import './setup';
 import { LedgerError } from '../src/domain/errors';
 import { MAX_AMOUNT_MINOR } from '../src/domain/schema';
 
+/** 月ズームの列は「窓」なので、従来の年間 12 列は 1〜12 月を渡して作る。 */
+function monthsOfYear(year: number): string[] {
+  return Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, '0')}`);
+}
+
 function account(
   id: string,
   type: Account['type'],
@@ -89,7 +94,7 @@ const accounts: Account[] = [
   account('zero', 'expense', 'expense-category', { sortIndex: 3 }),
 ];
 
-describe('buildPeriodMatrix（年間）', () => {
+describe('buildPeriodMatrix（月ズーム）', () => {
   it('月末・月初を別列へ帰属させ、当月・未来列も列末まで数値化する', () => {
     const input = [
       entry('future-real', '2026-06-16', 'food', 'cash', 999),
@@ -100,7 +105,10 @@ describe('buildPeriodMatrix（年間）', () => {
     ];
     const originalOrder = input.map(({ id }) => id);
 
-    const matrix = buildPeriodMatrix(accounts, input, { mode: 'year', year: 2026 });
+    const matrix = buildPeriodMatrix(accounts, input, {
+      mode: 'months',
+      months: monthsOfYear(2026),
+    });
 
     expect(matrix.columns).toHaveLength(12);
     expect(matrix.columns[4]).toMatchObject({
@@ -118,6 +126,39 @@ describe('buildPeriodMatrix（年間）', () => {
     expect(input.map(({ id }) => id)).toEqual(originalOrder);
   });
 
+  it('年をまたぐ窓を切り出し、窓の外の仕訳はフロー列に載せずBSにだけ積む', () => {
+    // 数値レンズは「可視範囲 + 前後バッファ」だけを列にする。窓の外は列を作らないが、
+    // 残高は窓の手前から連続していなければならない（列の切り出しと累積の分離）。
+    const matrix = buildPeriodMatrix(
+      accounts,
+      [
+        entry('before-window', '2025-06-30', 'cash', 'equity', 1000),
+        entry('in-window-dec', '2025-12-10', 'food', 'cash', 100),
+        entry('in-window-jan', '2026-01-10', 'food', 'cash', 200),
+        entry('after-window', '2026-03-10', 'food', 'cash', 400),
+      ],
+      { mode: 'months', months: ['2026-01', '2025-12', '2026-02'] },
+    );
+
+    // 順不同で渡しても昇順の連続列になる（年またぎ）。
+    expect(matrix.columns.map((column) => column.key)).toEqual(['2025-12', '2026-01', '2026-02']);
+    expect(matrix.columns.map((column) => column.year)).toEqual([2025, 2026, 2026]);
+    expect(matrix.columns.map((column) => column.month)).toEqual([12, 1, 2]);
+    // 窓の外（2025-06 / 2026-03）はフロー列に現れない。
+    expect(matrix.rows.expense).toEqual([100, 200, 0]);
+    // BS は窓の手前の 1000 から連続する（列が無い月の移動も繰り越す）。
+    expect(matrix.rows.totalAssets).toEqual([900, 700, 700]);
+  });
+
+  it('壊れた月キーは列にしない（窓の指定ミスで空セルを増やさない）', () => {
+    const matrix = buildPeriodMatrix(accounts, [], {
+      mode: 'months',
+      months: ['2026-13', '2026-00', '20260-1', '2026-1', '', '2026-07'],
+    });
+
+    expect(matrix.columns.map((column) => column.key)).toEqual(['2026-07']);
+  });
+
   it('資産・負債の自然符号を累積し、各月末の純資産を総資産−総負債で返す', () => {
     const matrix = buildPeriodMatrix(
       accounts,
@@ -127,7 +168,7 @@ describe('buildPeriodMatrix（年間）', () => {
         entry('spend', '2026-01-31', 'food', 'cash', 100),
         entry('repay', '2026-02-01', 'loan', 'cash', 150),
       ],
-      { mode: 'year', year: 2026 },
+      { mode: 'months', months: monthsOfYear(2026) },
     );
 
     expect(matrix.rows.totalAssets.slice(0, 2)).toEqual([1300, 1150]);
@@ -148,7 +189,7 @@ describe('buildPeriodMatrix（年間）', () => {
         }),
         entry('normal', '2026-01-25', 'food', 'cash', 50),
       ],
-      { mode: 'year', year: 2026 },
+      { mode: 'months', months: monthsOfYear(2026) },
     );
 
     expect(matrix.rows.expense[0]).toBe(170);
@@ -167,7 +208,7 @@ describe('buildPeriodMatrix（年間）', () => {
         entry('zero-debit', '2026-03-10', 'zero', 'cash', 50),
         entry('zero-credit', '2026-03-11', 'cash', 'zero', 50),
       ],
-      { mode: 'year', year: 2026 },
+      { mode: 'months', months: monthsOfYear(2026) },
     );
 
     expect(matrix.expenseCategories.map(({ account: a }) => a.id)).toEqual(['cancelled']);
@@ -178,7 +219,7 @@ describe('buildPeriodMatrix（年間）', () => {
     const matrix = buildPeriodMatrix(
       accounts,
       [entry('future', '2027-01-01', 'food', 'cash', 100)],
-      { mode: 'year', year: 2027 },
+      { mode: 'months', months: monthsOfYear(2027) },
     );
 
     expect(matrix.columns.every((column) => column.asOf === column.to)).toBe(true);
@@ -194,7 +235,10 @@ describe('buildPeriodMatrix（年間）', () => {
       entry('future-income', '2027-01-10', 'cash', 'salary', 500),
       entry('future-expense', '2027-01-20', 'food', 'cash', 120),
     ];
-    const matrix = buildPeriodMatrix(accounts, entries, { mode: 'year', year: 2027 });
+    const matrix = buildPeriodMatrix(accounts, entries, {
+      mode: 'months',
+      months: monthsOfYear(2027),
+    });
     const pl = deriveProfitAndLoss(accounts, entries, {
       from: '2027-01-01',
       to: '2027-01-31',
@@ -215,12 +259,12 @@ describe('buildPeriodMatrix（年間）', () => {
       entry('contra-expense', '2026-01-02', 'ignored', 'food', 2),
     ];
     expect(() =>
-      buildPeriodMatrix(accounts, overflowEntries, { mode: 'year', year: 2026 }),
+      buildPeriodMatrix(accounts, overflowEntries, { mode: 'months', months: monthsOfYear(2026) }),
     ).toThrow(LedgerError);
   });
 });
 
-describe('buildPeriodMatrix（全体）', () => {
+describe('buildPeriodMatrix（年ズーム）', () => {
   it('疎な年列でも中間年の移動を次のBSへ繰り越し、全列を年末まで扱う', () => {
     const matrix = buildPeriodMatrix(
       accounts,
@@ -288,7 +332,10 @@ describe('buildPeriodMatrix（全体）', () => {
 
     const annualEntries = reportEntriesForAsOf(ledger, '2025-12-31');
     const allEntries = reportEntriesForAsOf(ledger, '2026-12-31');
-    const annual = buildPeriodMatrix(accounts, annualEntries, { mode: 'year', year: 2025 });
+    const annual = buildPeriodMatrix(accounts, annualEntries, {
+      mode: 'months',
+      months: monthsOfYear(2025),
+    });
     const all = buildPeriodMatrix(accounts, allEntries, {
       mode: 'all',
       years: [2025, 2026],
@@ -309,9 +356,11 @@ describe('buildPeriodMatrix（全体）', () => {
 
 describe('periodMatrixAsOf', () => {
   it.each([
-    [{ mode: 'year', year: 2025 } as PeriodMatrixScope, '2025-12-31'],
-    [{ mode: 'year', year: 2026 } as PeriodMatrixScope, '2026-12-31'],
-    [{ mode: 'year', year: 2027 } as PeriodMatrixScope, '2027-12-31'],
+    [{ mode: 'months', months: monthsOfYear(2025) } as PeriodMatrixScope, '2025-12-31'],
+    [{ mode: 'months', months: monthsOfYear(2026) } as PeriodMatrixScope, '2026-12-31'],
+    [{ mode: 'months', months: monthsOfYear(2027) } as PeriodMatrixScope, '2027-12-31'],
+    [{ mode: 'months', months: ['2026-01', '2025-11'] } as PeriodMatrixScope, '2026-01-31'],
+    [{ mode: 'months', months: [] } as PeriodMatrixScope, '2026-06-15'],
     [{ mode: 'all', years: [2026, 2024, 2026] } as PeriodMatrixScope, '2026-12-31'],
     [{ mode: 'all', years: [] } as PeriodMatrixScope, '2026-06-15'],
   ])('%j の最大展開日を返す', (scope, expected) => {

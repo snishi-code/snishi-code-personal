@@ -1,9 +1,11 @@
 /*
- * タイムラインカレンダー。
+ * タイムライン = **時間平面**。
  *
- * 画面は表示範囲と開閉状態だけを持ち、帯・ポッチ・純増減の計算は
- * domain/timelineCalendar に委ねる。ヘッダー日付は初期位置にだけ使い、この画面の
- * 前後移動・ズームで共有期間は書き換えない。
+ * ズーム（日/月/年）はヘッダーが持つ App の state で、この画面はそれに従う（ローカルには持たない）。
+ * 画面が持つのはレンズ（線分/数値）の中身・表示範囲・開閉状態だけで、帯・ポッチ・純増減の計算は
+ * domain/timelineCalendar、数値レンズの集計は domain/periodMatrix に委ねる。
+ * ヘッダー日付は初期位置にだけ使い、この画面の前後移動・ズームで共有期間は書き換えない
+ * （例外は月列タップのドリル = 明示的に基準日を動かしてホームへ行く操作）。
  */
 import {
   useCallback,
@@ -28,6 +30,12 @@ import {
   type TimelineTarget,
   type TimelineZoom,
 } from '../../domain/timelineCalendar';
+import {
+  buildPeriodMatrix,
+  periodMatrixAsOf,
+  type PeriodMatrixScope,
+} from '../../domain/periodMatrix';
+import { effectiveRecurringRuleStartDate } from '../../domain/accountLifetime';
 import { todayLocal } from '../../util/time';
 import { formatMoney } from '../../util/format';
 import { useMoneyDigits } from '../money';
@@ -35,12 +43,23 @@ import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import { useRegisterOverlay } from '../overlays';
 import { TIMELINE_ACCOUNT_BOXES, timelineBoxForAccount, type AccountAccent } from '../accountBoxes';
-import type { Account, MonthlyCostItem, RecurringRule } from '../../domain/types';
+import type { Account, Ledger, MonthlyCostItem, RecurringRule } from '../../domain/types';
 import type { ReportPeriod } from '../../domain/reportPeriod';
+import type { Screen } from '../navigation';
+import { visibleIndexRange } from '../scrollWindow';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
+import { PeriodMatrixTable } from '../components/PeriodMatrixTable';
 
 export type { TimelineZoom } from '../../domain/timelineCalendar';
+
+/**
+ * 時間平面のレンズ = 同じ窓の見え方。
+ *  - `segment`: 帯とポッチ（存在期間とフロー）
+ *  - `matrix`:  表（旧「年間・全体」画面。月ズーム = 月列 / 年ズーム = 年列）
+ * グラフレンズは後続バッチで足す。
+ */
+export type TimelineLens = 'segment' | 'matrix';
 
 type TimelineOpenTarget = TimelineTarget;
 
@@ -117,6 +136,16 @@ interface TimelineCalendarViewModel {
 
 interface TimelineCalendarProps {
   period: ReportPeriod;
+  /** 時間の単位。正本はヘッダー（App）で、この画面は従うだけ。 */
+  zoom: TimelineZoom;
+  /** 画面内からズームを動かす唯一の操作（数値レンズの年列タップ = その年を月で見る）。 */
+  onZoomChange: (zoom: TimelineZoom) => void;
+  /** レンズ。セレクタはこの画面にあるが、state は App が持つ（ヘッダーの「日」の可否が依存する）。 */
+  lens: TimelineLens;
+  onLensChange: (lens: TimelineLens) => void;
+  /** 月列タップのドリル: 基準日をその月末にしてホームへ。 */
+  onPeriodChange: (period: ReportPeriod) => void;
+  onNavigate: (screen: Screen) => void;
   onOpenEntry: (entryId: string) => void;
   onOpenAllocations: (target: { itemId?: string; ruleId?: string }) => void;
   /** 投資利回りの投影行の「開く」: その利回りを宣言した投資科目の編集シートへ。 */
@@ -247,6 +276,56 @@ function rangeAround(center: string, zoom: TimelineZoom): { from: string; to: st
     from: `${String(Math.max(1, year - 7)).padStart(4, '0')}-01-01`,
     to: clampTimelineDate(`${String(year + 7).padStart(4, '0')}-12-31`),
   };
+}
+
+/**
+ * 数値レンズが 1 度に描く列の上限。窓（可視範囲 + 前後バッファ）は zoom ごとに数十列だが、
+ * 壊れた日付から無制限に列を増やさないための歯止め（periodMatrix の年上限と同じ 200）。
+ */
+const MATRIX_MAX_COLUMNS = 200;
+
+/** 窓に入る 'YYYY-MM' の並び。年をまたいで連続する。 */
+function monthsBetween(from: string, to: string): string[] {
+  const months: string[] = [];
+  const end = to.slice(0, 7);
+  let cursor = from.slice(0, 7);
+  while (cursor <= end && months.length < MATRIX_MAX_COLUMNS) {
+    months.push(cursor);
+    const next = addMonths(`${cursor}-01`, 1).slice(0, 7);
+    // 上限（HARD_CAP）に貼り付いたら進めない = そこが最終列。
+    if (next <= cursor) break;
+    cursor = next;
+  }
+  return months;
+}
+
+/** 窓に入る年の並び。 */
+function yearsBetween(from: string, to: string): number[] {
+  const first = Number.parseInt(from.slice(0, 4), 10);
+  const last = Number.parseInt(to.slice(0, 4), 10);
+  if (!Number.isFinite(first) || !Number.isFinite(last) || last < first) return [];
+  const years: number[] = [];
+  for (let year = first; year <= last && years.length < MATRIX_MAX_COLUMNS; year += 1) {
+    years.push(year);
+  }
+  return years;
+}
+
+/**
+ * 数値レンズのスクロール可能範囲の下端 = データのある最初の年の 1/1。
+ * 上端は HARD_CAP（`rangeAround` / `addMonths` が既にクランプする）。
+ * 旧「年間・全体」画面の表示地平セレクタ（実績のみ / +30年 / 2100年）は、この下端と
+ * 横スクロールに溶けて消えた（見たい先まで送れば列は生える・v13.5 D）。
+ */
+function matrixFloorDate(ledger: Ledger | null, today: string): string {
+  let floor: string | undefined;
+  const consider = (date: string) => {
+    if (floor === undefined || date < floor) floor = date;
+  };
+  for (const entry of ledger?.journalEntries ?? []) consider(entry.date);
+  for (const item of ledger?.monthlyCostItems ?? []) consider(item.startDate);
+  for (const rule of ledger?.recurringRules ?? []) consider(effectiveRecurringRuleStartDate(rule));
+  return clampTimelineDate(`${(floor ?? today).slice(0, 4)}-01-01`);
 }
 
 function shiftCenter(center: string, zoom: TimelineZoom, direction: -1 | 1): string {
@@ -465,20 +544,14 @@ function visibleRangeOf(
 ): { from: string; to: string } | undefined {
   if (buckets.length === 0 || viewport.clientWidth <= 0) return undefined;
   const labelWidth = viewport.clientWidth <= 480 ? 116 : 132;
-  const visibleTrackWidth = Math.max(0, viewport.clientWidth - labelWidth);
-  const firstIndex = Math.max(
-    0,
-    Math.min(buckets.length - 1, Math.floor(viewport.scrollLeft / bucketWidth)),
+  const visible = visibleIndexRange(
+    viewport.scrollLeft,
+    viewport.clientWidth - labelWidth,
+    bucketWidth,
+    buckets.length,
   );
-  const lastIndex = Math.max(
-    firstIndex,
-    Math.min(
-      buckets.length - 1,
-      Math.ceil((viewport.scrollLeft + visibleTrackWidth) / bucketWidth) - 1,
-    ),
-  );
-  const first = buckets[firstIndex];
-  const last = buckets[lastIndex];
+  const first = visible && buckets[visible.first];
+  const last = visible && buckets[visible.last];
   return first && last ? { from: first.from, to: last.to } : undefined;
 }
 
@@ -489,9 +562,6 @@ function visibleRangeOf(
 export function TimelineCalendarView({
   model,
   zoom,
-  onZoomChange,
-  onPrevious,
-  onNext,
   showEnded,
   onShowEndedChange,
   today,
@@ -500,12 +570,10 @@ export function TimelineCalendarView({
   onOpenTarget,
   onVisibleRangeChange,
   focusDate,
+  windowKey,
 }: {
   model: TimelineCalendarViewModel;
   zoom: TimelineZoom;
-  onZoomChange: (zoom: TimelineZoom, visibleCenter: string) => void;
-  onPrevious: (visibleCenter: string) => void;
-  onNext: (visibleCenter: string) => void;
   showEnded: boolean;
   onShowEndedChange: (show: boolean) => void;
   today: string;
@@ -516,9 +584,18 @@ export function TimelineCalendarView({
   onVisibleRangeChange?: (range: { from: string; to: string }) => void;
   /** ヘッダー日付または窓送り後の中心。初期スクロール位置にだけ使う。 */
   focusDate?: string;
+  /** 窓（ズーム・前後移動）の同一性。変わったら開いているポップオーバーを捨てる。 */
+  windowKey?: string;
 }) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [selection, setSelection] = useState<Selection | null>(null);
+  // 窓が変わればポッチの実体も座標も入れ替わる。選択を持ち越すと、消えたポッチに
+  // 紐づいたポップオーバーだけが残る（render 中の派生調整パターン）。
+  const [trackedWindowKey, setTrackedWindowKey] = useState(windowKey);
+  if (trackedWindowKey !== windowKey) {
+    setTrackedWindowKey(windowKey);
+    if (selection !== null) setSelection(null);
+  }
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const visibleCenterRef = useRef(
     model.buckets[Math.floor(model.buckets.length / 2)]?.from ?? today,
@@ -586,11 +663,6 @@ export function TimelineCalendarView({
     observer.observe(viewport);
     return () => observer.disconnect();
   }, [readViewport]);
-
-  const captureVisibleCenter = () => {
-    const viewport = viewportRef.current;
-    return viewport ? readViewport(viewport) : visibleCenterRef.current;
-  };
 
   const selectedFlow =
     selection?.kind === 'flow'
@@ -661,58 +733,6 @@ export function TimelineCalendarView({
 
   return (
     <>
-      <div className="toolbar timeline-calendar__controls">
-        <div className="timeline-calendar__zoom" role="group" aria-label={t('timeline.zoom')}>
-          <Segmented
-            value={zoom}
-            items={(
-              [
-                ['day', 'timeline.zoom.day', UI.timeline.zoomDay],
-                ['month', 'timeline.zoom.month', UI.timeline.zoomMonth],
-                ['year', 'timeline.zoom.year', UI.timeline.zoomYear],
-              ] as const
-            ).map(([key, labelKey, dataUi]) => ({
-              key,
-              label: t(labelKey),
-              dataUi,
-            }))}
-            onChange={(value) => {
-              setSelection(null);
-              onZoomChange(
-                value === 'month' || value === 'year' ? value : 'day',
-                captureVisibleCenter(),
-              );
-            }}
-          />
-        </div>
-        <div className="row-actions">
-          <button
-            type="button"
-            className="btn btn--ghost timeline-calendar__range-button"
-            aria-label={t('timeline.previous')}
-            onClick={() => {
-              setSelection(null);
-              onPrevious(captureVisibleCenter());
-            }}
-            data-ui={UI.timeline.previous}
-          >
-            <span aria-hidden="true">←</span>
-          </button>
-          <button
-            type="button"
-            className="btn btn--ghost timeline-calendar__range-button"
-            aria-label={t('timeline.next')}
-            onClick={() => {
-              setSelection(null);
-              onNext(captureVisibleCenter());
-            }}
-            data-ui={UI.timeline.next}
-          >
-            <span aria-hidden="true">→</span>
-          </button>
-        </div>
-      </div>
-
       <label className="timeline-calendar__show-ended">
         <input
           type="checkbox"
@@ -733,7 +753,7 @@ export function TimelineCalendarView({
         tabIndex={0}
         aria-label={t('timeline.title')}
         data-ui={UI.timeline.viewport}
-        onScroll={captureVisibleCenter}
+        onScroll={(event) => readViewport(event.currentTarget)}
       >
         <div
           className="timeline-calendar__canvas"
@@ -816,9 +836,9 @@ function TimelineHeader({ buckets, zoom }: { buckets: TimelineBucketView[]; zoom
     zoom === 'day' ? String(Number.parseInt(bucket.from.slice(8, 10), 10)) : '',
   );
   const rows = [
-    { label: t('timeline.zoom.year'), groups: yearGroups },
-    { label: t('timeline.zoom.month'), groups: monthGroups },
-    { label: t('timeline.zoom.day'), groups: dayGroups },
+    { label: t('zoom.year'), groups: yearGroups },
+    { label: t('zoom.month'), groups: monthGroups },
+    { label: t('zoom.day'), groups: dayGroups },
   ];
   return (
     <div>
@@ -1319,13 +1339,18 @@ function TimelineGenerationPopover({
 /** store/domain と描画本体をつなぐ薄い画面 adapter。 */
 export function TimelineCalendar({
   period,
+  zoom,
+  onZoomChange,
+  lens,
+  onLensChange,
+  onPeriodChange,
+  onNavigate,
   onOpenEntry,
   onOpenAllocations,
   onOpenAccount,
 }: TimelineCalendarProps) {
   const { ledger } = useLedger();
   const today = todayLocal();
-  const [zoom, setZoom] = useState<TimelineZoom>('month');
   const [center, setCenter] = useState(() => centerOfPeriod(period, today));
   const [showEnded, setShowEnded] = useState(false);
   const range = useMemo(() => rangeAround(center, zoom), [center, zoom]);
@@ -1335,19 +1360,35 @@ export function TimelineCalendar({
     from: range.from,
     to: range.to,
   }));
+  // 実際に見えている範囲の中心。窓送りとズーム変更の起点（画面内セグメントだった頃に
+  // その場で実測していたものを state にした = ヘッダーから変わっても「いま見ている時点」を保つ）。
+  const [visibleCenter, setVisibleCenter] = useState(center);
   const visibleRange =
     visibleWindow.key === rangeKey
       ? { from: visibleWindow.from, to: visibleWindow.to }
       : { from: range.from, to: range.to };
   const updateVisibleRange = useCallback(
-    (next: { from: string; to: string }) =>
+    (next: { from: string; to: string }) => {
       setVisibleWindow((current) =>
         current.key === rangeKey && current.from === next.from && current.to === next.to
           ? current
           : { key: rangeKey, from: next.from, to: next.to },
-      ),
+      );
+      setVisibleCenter(midpoint(next.from, next.to));
+    },
     [rangeKey],
   );
+
+  // ヘッダーのズームが変わったら、見えていた時点を中心に窓を組み直す（render 中の派生調整
+  // パターン。effect での setState を避ける）。年列タップのドリルだけは行き先を明示するので、
+  // 見えていた中心ではなくその年を中心に置く（同じ 1 回の操作で set されるので取りこぼさない）。
+  const [pendingZoomFocus, setPendingZoomFocus] = useState<string | null>(null);
+  const [trackedZoom, setTrackedZoom] = useState(zoom);
+  if (trackedZoom !== zoom) {
+    setTrackedZoom(zoom);
+    setCenter(pendingZoomFocus ?? visibleCenter);
+    if (pendingZoomFocus !== null) setPendingZoomFocus(null);
+  }
   const displayBuckets = useMemo(
     () =>
       buildTimelineBuckets({ start: range.from, end: range.to }, zoom).map((bucket) => ({
@@ -1358,13 +1399,38 @@ export function TimelineCalendar({
     [range.from, range.to, zoom],
   );
 
+  // 数値レンズの列窓。線分レンズと同じ窓（rangeAround）を使い、下端だけデータの最初の年で
+  // 止める（= スクロール可能範囲はデータ年〜HARD_CAP）。日ズームで数値レンズは選べないが、
+  // 万一来ても月列へ落として表を壊さない。
+  const matrixZoom: Extract<TimelineZoom, 'month' | 'year'> = zoom === 'year' ? 'year' : 'month';
+  const floorDate = useMemo(() => matrixFloorDate(ledger, today), [ledger, today]);
+  const matrixScope = useMemo<PeriodMatrixScope>(() => {
+    const from = range.from < floorDate ? floorDate : range.from;
+    const to = range.to < from ? from : range.to;
+    return matrixZoom === 'year'
+      ? { mode: 'all', years: yearsBetween(from, to) }
+      : { mode: 'months', months: monthsBetween(from, to) };
+  }, [floorDate, matrixZoom, range.from, range.to]);
+  const matrixAsOf = periodMatrixAsOf(matrixScope, today);
+
+  // 仕訳の仮想展開はレンズによらず 1 回だけ。線分は「見えている右端」まで、
+  // 数値は「最終列の列末」まで（列に空白を作らないため窓の全体が要る）。
+  const displayAsOf = lens === 'matrix' ? matrixAsOf : visibleRange.to;
   const display = useMemo(
-    () => (ledger ? displayEntriesResultForAsOf(ledger, visibleRange.to) : null),
-    [ledger, visibleRange.to],
+    () => (ledger ? displayEntriesResultForAsOf(ledger, displayAsOf) : null),
+    [displayAsOf, ledger],
+  );
+
+  const matrix = useMemo(
+    () =>
+      ledger && lens === 'matrix'
+        ? buildPeriodMatrix(ledger.accounts, display?.entries ?? [], matrixScope)
+        : null,
+    [display, ledger, lens, matrixScope],
   );
 
   const model = useMemo<TimelineCalendarViewModel>(() => {
-    if (!ledger) return { buckets: [], boxes: [] };
+    if (!ledger || lens !== 'segment') return { buckets: [], boxes: [] };
     const boxes = TIMELINE_ACCOUNT_BOXES.map((box) => ({
       key: box.key,
       accountIds: ledger.accounts.filter(box.includes).map((account) => account.id),
@@ -1385,6 +1451,7 @@ export function TimelineCalendar({
     displayBuckets,
     display,
     ledger,
+    lens,
     range.from,
     range.to,
     showEnded,
@@ -1392,6 +1459,18 @@ export function TimelineCalendar({
     visibleRange.to,
     zoom,
   ]);
+
+  // 年列タップ = その年を月ズームで見る（旧「全体 → その年の年間表示へ」のドリルの後継）。
+  // ズームは App が持つので、行き先の中心を預けてから切り替える（同じ 1 回の更新で届く）。
+  const openMatrixYear = (year: number) => {
+    const focus = clampTimelineDate(`${String(year).padStart(4, '0')}-07-01`);
+    if (zoom === 'month') {
+      setCenter(focus);
+      return;
+    }
+    setPendingZoomFocus(focus);
+    onZoomChange('month');
+  };
 
   // 「開く」先の分岐。TimelineTarget は導出行の起票元（derivedEntryOrigin）と同じ union
   // なので、種類が増えるとここが型エラーで落ちる（黙って捨てる・空 ID で誤遷移する余地を残さない）。
@@ -1431,25 +1510,85 @@ export function TimelineCalendar({
       <InvestmentProjectionTruncationNotice
         truncations={display?.investmentProjectionTruncations ?? []}
         accounts={ledger?.accounts ?? []}
+        dataUi={UI.timeline.truncatedNote}
       />
-      <TimelineCalendarView
-        model={model}
-        zoom={zoom}
-        onZoomChange={(next, visibleCenter) => {
-          setCenter(visibleCenter);
-          setZoom(next);
-        }}
-        onPrevious={(visibleCenter) => setCenter(shiftCenter(visibleCenter, zoom, -1))}
-        onNext={(visibleCenter) => setCenter(shiftCenter(visibleCenter, zoom, 1))}
-        showEnded={showEnded}
-        onShowEndedChange={setShowEnded}
-        today={today}
-        accounts={ledger?.accounts ?? []}
-        currency={ledger?.settings.currency ?? ''}
-        onOpenTarget={openTarget}
-        onVisibleRangeChange={updateVisibleRange}
-        focusDate={center}
-      />
+
+      {/* レンズ（見え方）と窓送り。ズーム（日/月/年）はヘッダーにあり、ここには置かない
+          （同じ意味のボタンを 2 つ出さない）。 */}
+      <div className="toolbar timeline-calendar__controls">
+        <div className="timeline-calendar__lens" role="group" aria-label={t('timeline.lens')}>
+          <Segmented
+            value={lens}
+            items={(
+              [
+                ['segment', 'timeline.lens.segment', UI.timeline.lensSegment],
+                ['matrix', 'timeline.lens.matrix', UI.timeline.lensMatrix],
+              ] as const
+            ).map(([key, labelKey, dataUi]) => ({ key, label: t(labelKey), dataUi }))}
+            onChange={(value) => onLensChange(value === 'matrix' ? 'matrix' : 'segment')}
+          />
+        </div>
+        <div className="row-actions">
+          <button
+            type="button"
+            className="btn btn--ghost timeline-calendar__range-button"
+            aria-label={t('timeline.previous')}
+            onClick={() => setCenter(shiftCenter(visibleCenter, zoom, -1))}
+            data-ui={UI.timeline.previous}
+          >
+            <span aria-hidden="true">←</span>
+          </button>
+          <button
+            type="button"
+            className="btn btn--ghost timeline-calendar__range-button"
+            aria-label={t('timeline.next')}
+            onClick={() => setCenter(shiftCenter(visibleCenter, zoom, 1))}
+            data-ui={UI.timeline.next}
+          >
+            <span aria-hidden="true">→</span>
+          </button>
+        </div>
+      </div>
+
+      {lens === 'matrix' ? (
+        <>
+          {/* 仮の数字が本物の顔をしない: 表に何が混ざるかを表の手前で名乗る。 */}
+          {matrixAsOf > today ? (
+            <p className="field__hint" data-ui={UI.timeline.matrixNote}>
+              {t('matrix.projectionNote')}
+            </p>
+          ) : null}
+          {matrix ? (
+            <PeriodMatrixTable
+              matrix={matrix}
+              currency={ledger?.settings.currency ?? ''}
+              focusDate={center}
+              onOpenMonth={(asOf) => {
+                onPeriodChange({ mode: 'date', date: asOf });
+                onNavigate('dashboard');
+              }}
+              onOpenYear={openMatrixYear}
+              onVisibleRangeChange={updateVisibleRange}
+            />
+          ) : (
+            <p className="muted period-matrix__empty">{t('matrix.noData')}</p>
+          )}
+        </>
+      ) : (
+        <TimelineCalendarView
+          model={model}
+          zoom={zoom}
+          showEnded={showEnded}
+          onShowEndedChange={setShowEnded}
+          today={today}
+          accounts={ledger?.accounts ?? []}
+          currency={ledger?.settings.currency ?? ''}
+          onOpenTarget={openTarget}
+          onVisibleRangeChange={updateVisibleRange}
+          focusDate={center}
+          windowKey={rangeKey}
+        />
+      )}
       <ScrollTopButton />
     </section>
   );

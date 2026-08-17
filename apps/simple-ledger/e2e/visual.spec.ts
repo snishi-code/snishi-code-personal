@@ -111,22 +111,30 @@ for (const vp of VIEWPORTS) {
       fullPage: true,
     });
 
-    // 年間・全体（ページ全体ではなく表のコンテナだけを横スクロール）。
-    // 入口はヘッダーの粒度セグメント（メニューからは撤去済み）。
-    await page.locator(ui('yearlyOverview.mode.year')).click();
-    await expect(page.locator(ui('yearlyOverview.view'))).toBeVisible();
-    await expect(page.locator(ui('yearlyOverview.matrix'))).toBeVisible();
-    await expectNoHorizontalScroll(page, `yearlyOverview ${vp.name}`);
+    // 時間平面の数値レンズ（旧「年間・全体」画面）。ページ全体ではなく表のコンテナだけを
+    // 横スクロールする。入口はヘッダーのズーム（断面画面から押すと時間平面へ移動する）+
+    // 画面内のレンズセレクタ。
+    await page.locator(ui('period.zoom.month')).click();
+    await expect(page.locator(ui('timeline.view'))).toBeVisible();
+    await expect(page.locator(ui('period.zoom.month'))).toHaveAttribute('aria-pressed', 'true');
+    await page.locator(ui('timeline.lens.matrix')).click();
+    await expect(page.locator(ui('timeline.matrix'))).toBeVisible();
+    // 数値レンズに日の列は無い = ヘッダーの「日」は押せない。
+    await expect(page.locator(ui('period.zoom.day'))).toBeDisabled();
+    await expectNoHorizontalScroll(page, `timelineMatrix ${vp.name}`);
     if (vp.width === 390) {
-      const matrixScrolls = await page.locator(ui('yearlyOverview.matrix')).evaluate((element) => {
+      const matrixScrolls = await page.locator(ui('timeline.matrix')).evaluate((element) => {
         return element.scrollWidth > element.clientWidth;
       });
-      expect(matrixScrolls, 'mobile: 年間表のコンテナ内で横スクロールできる').toBe(true);
+      expect(matrixScrolls, 'mobile: 数値レンズの表のコンテナ内で横スクロールできる').toBe(true);
     }
     await page.screenshot({
-      path: `test-results/screenshots/ledger-yearly-overview-${vp.name}.png`,
+      path: `test-results/screenshots/ledger-timeline-matrix-${vp.name}.png`,
       fullPage: true,
     });
+    // 線分レンズへ戻す（以降のシナリオは既定のレンズで進める）。
+    await page.locator(ui('timeline.lens.segment')).click();
+    await expect(page.locator(ui('timeline.viewport'))).toBeVisible();
 
     // 毎月のもの → くり返し記帳シート: flat 2 列でもシート内に横スクロールが出ない（実ユーズ②）。
     await page.locator(ui('nav.menu.button')).click();

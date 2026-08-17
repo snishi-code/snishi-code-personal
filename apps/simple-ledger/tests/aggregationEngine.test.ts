@@ -306,10 +306,13 @@ describe('エンジン一致: accounting 系と periodMatrix 系', () => {
     });
   });
 
-  it('mode: year の各月列が deriveProfitAndLoss / deriveBalanceSheet と一致する', () => {
+  it('mode: months の各月列が deriveProfitAndLoss / deriveBalanceSheet と一致する', () => {
     // 2021 = 回収の再配分がある年、2025 = ルール投影・終了日なし item がある年。
     for (const year of [2021, 2025]) {
-      const matrix = buildPeriodMatrix(accounts, expandedEntries, { mode: 'year', year });
+      const matrix = buildPeriodMatrix(accounts, expandedEntries, {
+        mode: 'months',
+        months: Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`),
+      });
       for (let month = 1; month <= 12; month++) {
         const { from, to } = monthRange(year, month);
         const pl = deriveProfitAndLoss(accounts, expandedEntries, { from, to });

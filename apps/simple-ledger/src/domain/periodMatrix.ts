@@ -1,9 +1,12 @@
 /*
- * 年間・全体マトリクスの集計。
+ * 期間マトリクス（時間平面の数値レンズ）の集計。
  *
  * `displayEntriesForAsOf` で実仕訳と導出仕訳を一度だけ展開した配列を受け取り、
  * 日付順の単一走査でフロー（PL）と列末のストック（BS）を同時に作る。
  * この関数内では導出仕訳を再展開しない。
+ *
+ * 列は「見せたい窓」を呼び出し側が渡す（月ズーム = 年をまたぐ月の並び / 年ズーム = 年の並び）。
+ * 全期間を常に全列 DOM 化しないための可視範囲 + 前後バッファは呼び出し側の責務。
  */
 import { compareAccountOrder } from './accountOrder';
 import { naturalDelta } from './accounting';
@@ -12,14 +15,16 @@ import type { Account, JournalEntry } from './types';
 import { assertSafeAmount } from './safeSum';
 
 export type PeriodMatrixScope =
-  | { mode: 'year'; year: number }
+  /** 月ズーム。'YYYY-MM' の並び（年をまたいでよい・順不同/重複は正規化する）。 */
+  | { mode: 'months'; months: readonly string[] }
+  /** 年ズーム。年の並び（順不同/重複は正規化する）。 */
   | { mode: 'all'; years: readonly number[] };
 
 export interface PeriodMatrixColumn {
-  /** 年間は YYYY-MM、全体は YYYY。 */
+  /** 月ズームは YYYY-MM、年ズームは YYYY。 */
   key: string;
   year: number;
-  /** 年間列だけが持つ 1〜12 の月。 */
+  /** 月ズームの列だけが持つ 1〜12 の月。 */
   month?: number;
   /** 列の暦上の開始日。 */
   from: string;
@@ -68,24 +73,29 @@ function validYear(year: number): boolean {
   return Number.isInteger(year) && year > 0 && year <= 9999;
 }
 
-function columnsFor(scope: PeriodMatrixScope): PeriodMatrixColumn[] {
-  if (scope.mode === 'year') {
-    if (!validYear(scope.year)) return [];
-    return Array.from({ length: 12 }, (_, index) => {
-      const month = index + 1;
-      const key = `${scope.year}-${pad2(month)}`;
-      const from = `${key}-01`;
-      const to = monthEnd(scope.year, month);
-      return {
-        key,
-        year: scope.year,
-        month,
-        from,
-        to,
-        asOf: to,
-      };
+/** 'YYYY-MM' を [年, 月] へ。形式・範囲が壊れていれば undefined（列を作らない）。 */
+function parseMonthKey(key: string): [number, number] | undefined {
+  if (!/^\d{4}-\d{2}$/.test(key)) return undefined;
+  const year = Number.parseInt(key.slice(0, 4), 10);
+  const month = Number.parseInt(key.slice(5, 7), 10);
+  if (!validYear(year) || month < 1 || month > 12) return undefined;
+  return [year, month];
+}
+
+/** 月ズームの列。順不同・重複を正規化して昇順に並べる（年ズームの years と同じ作法）。 */
+function monthColumns(months: readonly string[]): PeriodMatrixColumn[] {
+  return Array.from(new Set(months))
+    .filter((key) => parseMonthKey(key) !== undefined)
+    .sort()
+    .map((key) => {
+      const [year, month] = parseMonthKey(key)!;
+      const to = monthEnd(year, month);
+      return { key, year, month, from: `${key}-01`, to, asOf: to };
     });
-  }
+}
+
+function columnsFor(scope: PeriodMatrixScope): PeriodMatrixColumn[] {
+  if (scope.mode === 'months') return monthColumns(scope.months);
 
   const years = Array.from(new Set(scope.years.filter(validYear))).sort((a, b) => a - b);
   return years.map((year) => {
@@ -102,17 +112,12 @@ function columnsFor(scope: PeriodMatrixScope): PeriodMatrixColumn[] {
 }
 
 /**
- * UI が導出仕訳を一度だけ展開するときの最大基準日。
- * 年間は年末、全体は最終列の年末。現在・未来も同じ地図として列末まで展開する。
- * 全体の有効年が空なら、呼び出し側が安全に空表示できるよう today を返す。
+ * UI が導出仕訳を一度だけ展開するときの最大基準日 = 最終列の暦上の終了日。
+ * 現在・未来も同じ地図として列末まで展開する。
+ * 有効な列が 1 つも無ければ、呼び出し側が安全に空表示できるよう today を返す。
  */
 export function periodMatrixAsOf(scope: PeriodMatrixScope, today: string): string {
-  if (scope.mode === 'year') {
-    return validYear(scope.year) ? `${scope.year}-12-31` : today;
-  }
-  const years = Array.from(new Set(scope.years.filter(validYear))).sort((a, b) => a - b);
-  const last = years.at(-1);
-  return last === undefined ? today : `${last}-12-31`;
+  return columnsFor(scope).at(-1)?.asOf ?? today;
 }
 
 function blankValues(columns: PeriodMatrixColumn[]): PeriodMatrixValue[] {
@@ -126,7 +131,7 @@ function addValue(values: PeriodMatrixValue[], index: number, amount: number): v
 }
 
 /**
- * 展開済み仕訳から年間（月12列）または全体（年列）のマトリクスを作る。
+ * 展開済み仕訳から月列または年列のマトリクスを作る。
  *
  * - entries は最大基準日まで `displayEntriesForAsOf` した結果を渡す。
  * - 入力配列は変更しない。
@@ -177,7 +182,7 @@ export function buildPeriodMatrix(
       if (entry.date > maximumAsOf) break;
       snapshotThrough(entry.date);
 
-      const flowKey = scope.mode === 'year' ? entry.date.slice(0, 7) : entry.date.slice(0, 4);
+      const flowKey = scope.mode === 'months' ? entry.date.slice(0, 7) : entry.date.slice(0, 4);
       const flowColumnIndex = flowColumnByKey.get(flowKey);
       const monthlyAllocation = isContinuousCostMonthlyAllocationEntry(entry);
 

@@ -32,12 +32,20 @@ export const ja = {
   'common.loading': '読み込み中…',
   'common.proceed': '実行する',
 
+  // 時間の単位（ズーム）。ヘッダーのセグメントと、時間平面の目盛り見出しで同じ語を使う。
+  'zoom.group': '時間の単位',
+  'zoom.day': '日',
+  'zoom.month': '月',
+  'zoom.year': '年',
+  // 数値レンズには日の列が無い（1 日 1 列の表は数字として読めない）。理由を読み上げにも出す。
+  'zoom.dayUnavailable': '日（数値では選べません）',
+
   'timeline.title': 'タイムライン',
   'timeline.intro': '時間の中で、勘定科目・持ち物・フローがどのようにつながるかを見ます。',
-  'timeline.zoom': '表示単位',
-  'timeline.zoom.day': '日',
-  'timeline.zoom.month': '月',
-  'timeline.zoom.year': '年',
+  // レンズ = 同じ時間平面の見え方。線分 = 帯とポッチ、数値 = 表。
+  'timeline.lens': '見え方',
+  'timeline.lens.segment': '線分',
+  'timeline.lens.matrix': '数値',
   'timeline.previous': '前の期間',
   'timeline.next': '次の期間',
   'timeline.showEnded': '終了分も表示',
@@ -354,39 +362,29 @@ export const ja = {
   'netIncome.result': '収支',
   'netIncome.trend': '収支の推移',
 
-  // 年間・全体（旧帳簿の年次シート相当。月別 / 年別の表だけを表示する）。
-  'yearlyOverview.title': '年間・全体',
-  'yearlyOverview.intro': '収支・費目・資産の推移を、月別または年別の表で確認できます。',
-  'yearlyOverview.modeYear': '年間',
-  'yearlyOverview.modeAll': '全体',
-  'yearlyOverview.horizonActual': '実績のみ',
-  'yearlyOverview.horizonPlus30': '+{years}年',
-  'yearlyOverview.horizonHardCap': '{year}年まで',
+  // 数値レンズの表（旧「年間・全体」画面。v13.5 D で時間平面のレンズへ吸収）。
   // v13.4 ②で利回りも導出（保存境界と同じもの）になり、過去列にも導出行が出る。
   // 「未来だけが投影」ではなくなったので、表全体が導出込みであることを先に名乗る。
-  'yearlyOverview.projectionNote':
+  'matrix.projectionNote':
     '表は定期ルール・持ち物・投資利回りの導出を含みます。未来列にはまだ起きていない予定も含みます。',
   // 桁あふれで投影を打ち切った科目の注記（アプリ都合の端点を名乗る・仮の数字が本物の顔をしない）。
   'projection.truncatedNotice':
     '「{name}」の投影は金額が計算上限を超えるため {month} で打ち切りました。それ以降の投影は表示に含まれません。',
-  'yearlyOverview.previousYear': '{year}年へ戻る',
-  'yearlyOverview.nextYear': '{year}年へ進む',
-  'yearlyOverview.noPreviousYear': '前のデータ年はありません',
-  'yearlyOverview.noNextYear': '次のデータ年はありません',
-  'yearlyOverview.monthLabel': '{month}月',
-  'yearlyOverview.monthJump': '{date} 時点の残高をホームで見る',
-  'yearlyOverview.yearDrill': '{year}年の年間表示へ',
-  'yearlyOverview.itemColumn': '項目',
-  'yearlyOverview.revenue': '収入',
-  'yearlyOverview.expense': '支出',
-  'yearlyOverview.net': '収支',
-  'yearlyOverview.monthlyCost': '月割り',
-  'yearlyOverview.totalAssets': '総資産',
-  'yearlyOverview.netAssets': '純資産',
-  'yearlyOverview.expenseCategory': '費目別: {name}',
-  'yearlyOverview.yearCaption': '{year}年の月別一覧',
-  'yearlyOverview.allCaption': '全期間の年別一覧',
-  'yearlyOverview.noData': '表示できる仕訳データがありません。',
+  'matrix.monthLabel': '{month}月',
+  // 年をまたぐ窓なので、年の変わり目の列だけ年を名乗る（読み上げは常に年つき）。
+  'matrix.monthLabelWithYear': '{year}年{month}月',
+  'matrix.monthJump': '{date} 時点の残高をホームで見る',
+  'matrix.yearDrill': '{year}年を月で見る',
+  'matrix.itemColumn': '項目',
+  'matrix.revenue': '収入',
+  'matrix.expense': '支出',
+  'matrix.net': '収支',
+  'matrix.monthlyCost': '月割り',
+  'matrix.totalAssets': '総資産',
+  'matrix.netAssets': '純資産',
+  'matrix.expenseCategory': '費目別: {name}',
+  'matrix.caption': '{from} 〜 {to} の一覧',
+  'matrix.noData': '表示できる仕訳データがありません。',
 
   // 資産の内訳（ホーム「資産」のタップ先）。4 枠（自由 / 自由でない / 投資 / 継続コスト台帳）。
   'assets.title': '資産の内訳',

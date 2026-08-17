@@ -49,10 +49,10 @@
   scroll-padding-top: var(--sticky-top);
 }
 
-/* ── ヘッダーの時間の粒度（年間/全体）セグメント ──
+/* ── ヘッダーの時間の単位（日/月/年 = 時間平面のズーム）セグメント ──
    ヘッダー = 時間、の「時間」には目盛りも含まれる（日付チップの隣に置く理由）。
-   375px 幅に収めるため Segmented より詰めた専用スタイル。押下中（= 年間・全体画面に
-   いる間の現在粒度）は aria-pressed で示し、色 + 面の両方で手掛かりを持つ。 */
+   375px 幅に収めるため Segmented より詰めた専用スタイル。押下中（= ズーム対応画面に
+   いる間の現在ズーム）は aria-pressed で示し、色 + 面の両方で手掛かりを持つ。 */
 /* タイムスリップ中だけ現れる「今日」。強めの色 = 「時間がずれている」の警告灯を兼ねる。 */
 .period-today {
   flex-shrink: 0;
@@ -88,6 +88,10 @@
 .period-zoom__btn[aria-pressed='true'] {
   color: var(--primary-strong);
   background: var(--primary-light);
+}
+/* 数値レンズには日の列が無い = 「日」は押せない。理由はアクセシブル名で名乗る。 */
+.period-zoom__btn:disabled {
+  opacity: 0.4;
 }
 
 /* ── Summary card (tappable: ホームの損益/資産負債サマリー) ── */
@@ -201,7 +205,7 @@
 
 /* ── 一覧の並び替えトグル（共通部品 SortControls が常に .list-sort を付ける） ── */
 /* foundation の Segmented は既定 38px。ソート UI でも 44px のタップ領域を保証する（監査 P1-4）。
-   仕訳一覧・月割り台帳共通。yearly-overview / timeline-calendar の同種上書きは別部品のため残す。 */
+   仕訳一覧・月割り台帳共通。timeline-calendar の同種上書きは別部品のため残す。 */
 .list-sort .segmented__btn {
   min-height: var(--tap);
 }
@@ -251,46 +255,17 @@
   --list-filter-frame-h: 113px;
 }
 
-/* ── 年間・全体マトリクス ── */
-.yearly-overview__intro {
-  margin-bottom: var(--space-3);
-}
-.yearly-overview__controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-3);
-}
-/* foundation の Segmented は既定 38px。分析画面でも 44px のタップ領域を保証する。 */
-.yearly-overview__mode .segmented__btn,
-.yearly-overview__horizon .segmented__btn {
-  min-height: var(--tap);
-}
-.yearly-overview__year-nav {
-  display: grid;
-  grid-template-columns: var(--tap) minmax(88px, auto) var(--tap);
-  align-items: center;
-  gap: var(--space-1);
-}
-.yearly-overview__year-button {
-  min-width: var(--tap);
-  padding: 0;
-  font-size: 18px;
-}
-.yearly-overview__year {
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-.yearly-overview__scroll {
+/* ── 期間マトリクス（時間平面の数値レンズ。旧「年間・全体」画面の表） ──
+   列幅とラベル列幅の正本は JS（PeriodMatrixTable）。可視範囲の計算と同じ値を使うため、
+   custom property で受け取る（2 か所に生値を置かない）。 */
+.period-matrix__scroll {
   width: 100%;
   max-width: 100%;
   min-width: 0;
   overflow-x: auto;
   overscroll-behavior-inline: contain;
 }
-.yearly-overview__table {
+.period-matrix__table {
   width: max-content;
   min-width: 100%;
   border-collapse: separate;
@@ -298,33 +273,33 @@
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
-.yearly-overview__table th,
-.yearly-overview__table td {
+.period-matrix__table th,
+.period-matrix__table td {
   height: var(--tap);
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
-.yearly-overview__table tbody tr:last-child th,
-.yearly-overview__table tbody tr:last-child td {
+.period-matrix__table tbody tr:last-child th,
+.period-matrix__table tbody tr:last-child td {
   border-bottom: none;
 }
-.yearly-overview__label {
+.period-matrix__label {
   position: sticky;
   left: 0;
   z-index: 1;
-  width: 112px;
-  min-width: 112px;
-  max-width: 112px;
+  width: var(--period-matrix-label-width);
+  min-width: var(--period-matrix-label-width);
+  max-width: var(--period-matrix-label-width);
   text-align: left;
   overflow-wrap: anywhere;
   box-shadow: 1px 0 0 var(--border);
 }
-.yearly-overview__corner {
+.period-matrix__corner {
   z-index: 2;
 }
 /* 列見出しのタップ導線。表の密度を保つため見た目は文字のまま、点線下線で押せることだけ示す。 */
-.yearly-overview__col-btn {
+.period-matrix__col-btn {
   display: block;
   width: 100%;
   min-height: 28px;
@@ -336,32 +311,33 @@
   text-decoration: underline dotted;
   text-underline-offset: 3px;
 }
-.yearly-overview__value {
-  width: 112px;
-  min-width: 112px;
+.period-matrix__value {
+  width: var(--period-matrix-column-width);
+  min-width: var(--period-matrix-column-width);
+  max-width: var(--period-matrix-column-width);
   text-align: right;
   white-space: nowrap;
 }
-.yearly-overview__table thead th {
+.period-matrix__table thead th {
   color: var(--muted);
   font-weight: 700;
   background: var(--bg);
 }
-.yearly-overview__row--emphasis th,
-.yearly-overview__row--emphasis td {
+.period-matrix__row--emphasis th,
+.period-matrix__row--emphasis td {
   font-weight: 700;
   background: var(--bg);
 }
-.yearly-overview__row--category th {
+.period-matrix__row--category th {
   padding-left: var(--space-5);
   color: var(--muted);
   font-weight: 500;
 }
-.yearly-overview__row--section th,
-.yearly-overview__row--section td {
+.period-matrix__row--section th,
+.period-matrix__row--section td {
   border-top: 2px solid var(--border);
 }
-.yearly-overview__empty {
+.period-matrix__empty {
   padding: var(--space-5) 0;
   text-align: center;
 }
@@ -377,7 +353,7 @@
   gap: var(--space-2);
   flex-wrap: wrap;
 }
-.timeline-calendar__zoom .segmented__btn {
+.timeline-calendar__lens .segmented__btn {
   min-height: var(--tap);
 }
 .timeline-calendar__range-button {
@@ -1138,7 +1114,7 @@ button.stmt-row:hover {
   --home-frame-h: 215px;
 }
 /* ホームの額縁: 収支 + 財政状態の 6 枠を sticky 固定し、下の仕訳だけが流れる（実ユーズ④）。
-   z は同一スクロール内の前後関係のみ（yearly-overview__label と同じ生数値運用）。
+   z は同一スクロール内の前後関係のみ（period-matrix__label と同じ生数値運用）。
    border-bottom は app-main の左右 padding ぶん全幅より狭い（ヘッダー境界線と幅が違う）が、
    額縁とその下の行の区切りとして意図的に引く。 */
 .dashboard__frame {

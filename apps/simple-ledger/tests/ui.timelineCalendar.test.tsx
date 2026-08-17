@@ -118,23 +118,47 @@ function stubLayout(
   });
 }
 
-function Harness({ onOpenTarget = () => undefined }: { onOpenTarget?: (target: unknown) => void }) {
-  const [zoom, setZoom] = useState<TimelineZoom>('month');
-  return (
-    <TimelineCalendarView
-      model={model}
-      zoom={zoom}
-      onZoomChange={(next) => setZoom(next)}
-      onPrevious={() => undefined}
-      onNext={() => undefined}
-      showEnded={false}
-      onShowEndedChange={() => undefined}
-      today="2026-02-15"
-      accounts={[cash, food]}
-      currency="JPY"
-      onOpenTarget={onOpenTarget}
-    />
-  );
+/**
+ * ズームは App（ヘッダー）が持つ props になったので、単体テストでは**stateful なラッパー**が
+ * 持つ。`setZoom` は「同じマウントのまま props だけ差し替える」入口（再マウントと区別する）。
+ */
+function renderView({
+  onOpenTarget = () => undefined,
+  initialWindowKey = 'month:initial',
+}: { onOpenTarget?: (target: unknown) => void; initialWindowKey?: string } = {}) {
+  let setZoomRef: ((zoom: TimelineZoom) => void) | undefined;
+  let setWindowKeyRef: ((key: string) => void) | undefined;
+
+  function Harness() {
+    const [zoom, setZoom] = useState<TimelineZoom>('month');
+    const [windowKey, setWindowKey] = useState(initialWindowKey);
+    setZoomRef = setZoom;
+    setWindowKeyRef = setWindowKey;
+    return (
+      <TimelineCalendarView
+        model={model}
+        zoom={zoom}
+        showEnded={false}
+        onShowEndedChange={() => undefined}
+        today="2026-02-15"
+        accounts={[cash, food]}
+        currency="JPY"
+        onOpenTarget={onOpenTarget}
+        windowKey={windowKey}
+      />
+    );
+  }
+
+  const view = render(<Harness />);
+  return {
+    ...view,
+    setZoom: (zoom: TimelineZoom) => {
+      act(() => setZoomRef!(zoom));
+    },
+    setWindowKey: (key: string) => {
+      act(() => setWindowKeyRef!(key));
+    },
+  };
 }
 
 describe('TimelineCalendarView', () => {
@@ -154,7 +178,7 @@ describe('TimelineCalendarView', () => {
   });
 
   it('箱は既定で畳み、開いた状態をズーム変更後も維持する', () => {
-    render(<Harness />);
+    const view = renderView();
 
     const boxToggles = document.querySelectorAll(`[data-ui="${UI.timeline.boxToggle}"]`);
     expect(boxToggles).toHaveLength(2);
@@ -164,14 +188,30 @@ describe('TimelineCalendarView', () => {
     expect(document.querySelectorAll(`[data-ui="${UI.timeline.detailRow}"]`)).toHaveLength(1);
     expect(document.body).toHaveTextContent('預金');
 
-    fireEvent.click(document.querySelector(`[data-ui="${UI.timeline.zoomYear}"]`)!);
+    // ズームはヘッダー（App）から props で降ってくる。同じマウントのまま差し替えても
+    // 開閉状態は画面ローカルに残る。
+    view.setZoom('year');
     expect(document.querySelectorAll(`[data-ui="${UI.timeline.detailRow}"]`)).toHaveLength(1);
     expect(document.body).toHaveTextContent('預金');
   });
 
+  it('窓（ズーム・前後移動）が変わったら開いているポップオーバーを捨てる', () => {
+    // 窓が変わるとポッチの実体も座標も入れ替わる。持ち越すと、消えたポッチに紐づいた
+    // ポップオーバーだけが宙に浮いて残る。
+    const view = renderView({ initialWindowKey: 'month:2026-01-01:2026-02-28' });
+    fireEvent.click(document.querySelector(`[data-ui="${UI.timeline.flowDot}"]`)!);
+    expect(popover()).toBeInTheDocument();
+
+    // 同じマウントのまま窓だけ送る（再マウントで消えたのでは検証にならない）。
+    view.setWindowKey('month:2029-01-01:2029-02-28');
+    expect(popover()).not.toBeInTheDocument();
+    // 表そのものは残る = 窓を送っただけで画面ごと作り直していない。
+    expect(viewportEl()).toBeInTheDocument();
+  });
+
   it('フローのポッチから摘要・矢印・金額を出し、実体の遷移 target を渡す', () => {
     const onOpenTarget = vi.fn();
-    render(<Harness onOpenTarget={onOpenTarget} />);
+    renderView({ onOpenTarget });
 
     fireEvent.click(document.querySelector(`[data-ui="${UI.timeline.flowDot}"]`)!);
 
@@ -193,7 +233,7 @@ describe('TimelineCalendarView', () => {
   });
 
   it('行の実高は接続線が仮定する ROW_HEIGHT と一致する（1px/行のズレを作らない）', () => {
-    render(<Harness />);
+    renderView();
     // 接続線は y を `index * ROW_HEIGHT + ROW_HEIGHT / 2` で置く。行がそれより 1px でも高いと
     // ズレが行数ぶん累積し、下の行ほど線が繋がらなくなる（border-top で実際に起きた）。
     // jsdom は実レイアウトを持たないので、**レイアウトに影響する指定が無いこと**を CSS 側で守る:
@@ -218,7 +258,7 @@ describe('TimelineCalendarView', () => {
   });
 
   it('ポップオーバーは表のスクロール枠の外（body 直下）へ出す＝上下端で切られない', () => {
-    render(<Harness />);
+    renderView();
     fireEvent.click(document.querySelector(`[data-ui="${UI.timeline.flowDot}"]`)!);
 
     // 実バグの再発防止: スクロール枠（overflow を持つ表）の子孫に描くと端で切られる。
@@ -237,7 +277,7 @@ describe('TimelineCalendarView', () => {
 
   it('接続線が下の行へ伸びるときはポップオーバーをポッチの上へ出す（線を隠さない）', () => {
     stubLayout({ top: 400, left: 500 }, { width: 300, height: 200 });
-    render(<Harness />);
+    renderView();
     const dots = document.querySelectorAll(`[data-ui="${UI.timeline.flowDot}"]`);
     expect(dots.length).toBeGreaterThanOrEqual(2);
 
@@ -257,7 +297,7 @@ describe('TimelineCalendarView', () => {
   it('画面下端のポッチでも viewport に収める（下に入らなければ上へ反転する）', () => {
     // 実機で見切れた条件: 表の最下行のポッチ。fixed 座標を viewport 基準で反転・クランプする。
     stubLayout({ top: 700, left: 500 }, { width: 300, height: 200 });
-    render(<Harness />);
+    renderView();
     const dots = document.querySelectorAll(`[data-ui="${UI.timeline.flowDot}"]`);
 
     fireEvent.click(dots[dots.length - 1]!); // 既定は下だが 768 の viewport に入らない
@@ -269,7 +309,7 @@ describe('TimelineCalendarView', () => {
   });
 
   it('端末 Back（overlays 登録簿）はポップオーバーだけを閉じ、画面は据え置く', () => {
-    render(<Harness />);
+    renderView();
     fireEvent.click(document.querySelector(`[data-ui="${UI.timeline.flowDot}"]`)!);
     expect(popover()).toBeInTheDocument();
 
@@ -284,7 +324,7 @@ describe('TimelineCalendarView', () => {
   });
 
   it('Esc でポップオーバーだけが閉じる', () => {
-    render(<Harness />);
+    renderView();
     fireEvent.click(document.querySelector(`[data-ui="${UI.timeline.flowDot}"]`)!);
     expect(popover()).toBeInTheDocument();
 
@@ -294,7 +334,7 @@ describe('TimelineCalendarView', () => {
   });
 
   it('スクロールで閉じる（追従はしない）', () => {
-    render(<Harness />);
+    renderView();
     fireEvent.click(document.querySelector(`[data-ui="${UI.timeline.flowDot}"]`)!);
     expect(popover()).toBeInTheDocument();
 
@@ -303,7 +343,7 @@ describe('TimelineCalendarView', () => {
   });
 
   it('外側タップで閉じる（ポップオーバーの中のタップでは閉じない）', () => {
-    render(<Harness />);
+    renderView();
     fireEvent.click(document.querySelector(`[data-ui="${UI.timeline.flowDot}"]`)!);
 
     fireEvent.pointerDown(document.querySelector(`[data-ui="${UI.timeline.flowList}"]`)!);
@@ -314,7 +354,7 @@ describe('TimelineCalendarView', () => {
   });
 
   it('箱のアクセントは既存の色の正本を使う', () => {
-    render(<Harness />);
+    renderView();
     const first = document.querySelector(`[data-ui="${UI.timeline.boxRow}"]`) as HTMLElement;
     expect(first.style.getPropertyValue('--timeline-accent')).toBe(ACCOUNT_ACCENTS.assetFree);
   });
@@ -375,9 +415,6 @@ describe('TimelineCalendarView', () => {
       <TimelineCalendarView
         model={generationModel}
         zoom="month"
-        onZoomChange={() => undefined}
-        onPrevious={() => undefined}
-        onNext={() => undefined}
         showEnded={false}
         onShowEndedChange={() => undefined}
         today="2026-02-15"
@@ -406,9 +443,6 @@ describe('TimelineCalendarView', () => {
       <TimelineCalendarView
         model={model}
         zoom="month"
-        onZoomChange={() => undefined}
-        onPrevious={() => undefined}
-        onNext={() => undefined}
         showEnded={false}
         onShowEndedChange={() => undefined}
         today="2026-01-15"
@@ -451,9 +485,6 @@ describe('TimelineCalendarView', () => {
       <TimelineCalendarView
         model={model}
         zoom="month"
-        onZoomChange={() => undefined}
-        onPrevious={() => undefined}
-        onNext={() => undefined}
         showEnded={false}
         onShowEndedChange={() => undefined}
         today="2026-01-15"
@@ -481,9 +512,6 @@ describe('TimelineCalendarView', () => {
           boxes: [{ ...model.boxes[0]!, spans: [{ from: '2024-01-01', to: '2024-12-31' }] }],
         }}
         zoom="month"
-        onZoomChange={() => undefined}
-        onPrevious={() => undefined}
-        onNext={() => undefined}
         showEnded
         onShowEndedChange={() => undefined}
         today="2026-01-15"
@@ -502,9 +530,6 @@ describe('TimelineCalendarView', () => {
       <TimelineCalendarView
         model={{ buckets: model.buckets, boxes: [] }}
         zoom="month"
-        onZoomChange={() => undefined}
-        onPrevious={() => undefined}
-        onNext={() => undefined}
         showEnded={false}
         onShowEndedChange={() => undefined}
         today="2026-01-15"
