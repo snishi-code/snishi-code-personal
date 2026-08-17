@@ -1075,7 +1075,7 @@ describe('残高補正の按分と保存側の理論残高', () => {
     expect(await derivedBalance(cash.id, '2026-07-10')).toBe(9_400);
   });
 
-  it('編集の自己除外は「その pin を除いた導出」= 区間が結合された世界で測る', async () => {
+  it('編集の理論残高は「その pin が居る世界」で測る（後ろの pin の按分を先取りしない・C-3）', async () => {
     const cash = await seedCash(10_000);
     const first = await createAdjustment({
       accountId: cash.id,
@@ -1083,15 +1083,18 @@ describe('残高補正の按分と保存側の理論残高', () => {
       actualBalance: 9_700,
     });
     await createAdjustment({ accountId: cash.id, date: '2026-07-10', actualBalance: 9_400 });
-    // 1 本目を編集する断面では、2 本目の区間が 2026-01-10 まで伸びた世界になる
-    // （G = 9,400 − 10,000 = −600 の 6 分割 → 2026-04-10 までに 3 刻み = 300）。
+    // 編集後の世界では 1 本目の区間は (2026-01-10, 2026-04-10]。そこに後ろの pin の
+    // スライスは 1 本も入らないので、理論残高は非補正フローそのもの = 10,000。
+    // 旧: 自分を除いた世界（2 本目の区間が 01-10 まで伸びる）で測って 9,700 だったが、
+    // その差分（−100）は実際に按分されるスライス合計（−400）と食い違っていた。
     const updated = await updateAdjustment({
       id: first!.id,
       accountId: cash.id,
       date: '2026-04-10',
       actualBalance: 9_600,
     });
-    expect(updated!.metadata?.adjustment?.expectedBalance).toBe(9_700);
+    expect(updated!.metadata?.adjustment?.expectedBalance).toBe(10_000);
+    expect(updated!.metadata?.adjustment?.delta).toBe(-400);
     // 保存後は両方の宣言が生き、それぞれの日で実額に着地する。
     expect(await derivedBalance(cash.id, '2026-04-10')).toBe(9_600);
     expect(await derivedBalance(cash.id, '2026-07-10')).toBe(9_400);

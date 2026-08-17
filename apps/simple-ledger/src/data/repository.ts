@@ -79,7 +79,10 @@ import {
 } from '../domain/adjustment';
 import { accountBalance, filterByDateRange } from '../domain/accounting';
 import { ANNUAL_RETURN_BP_MAX, ANNUAL_RETURN_BP_MIN } from '../domain/investmentProjection';
-import { reportEntriesForAsOf } from '../domain/reportEntries';
+import {
+  adjustmentPinExpectedBalanceForLedger,
+  reportEntriesForAsOf,
+} from '../domain/reportEntries';
 import { nowIso, todayLocal } from '../util/time';
 
 const KV_META = 'meta';
@@ -2075,17 +2078,20 @@ interface AdjustmentSaveInput {
 }
 
 /**
- * 補正の理論残高・相手科目・補正仕訳を組み立てる共通処理（新規 createAdjustment / 編集 updateAdjustment で共有）。
- * `entries` は理論残高の母集合。**編集時は補正自身を除外して渡す**（補正の二重掛けを避ける＝最重要）。
+ * 補正の相手科目・補正仕訳を組み立てる共通処理（新規 createAdjustment / 編集 updateAdjustment で共有）。
+ * `expected` は理論残高 = **その pin を置いたあとの世界での pin 直前残高**
+ * （`adjustmentPinExpectedBalanceForLedger` が単一正本。補正シートの表示と同じ値で、
+ * 差分は必ず按分されるスライスの合計になる）。編集時は補正自身を母集合から除いて求める
+ * （補正の二重掛けを避ける＝最重要）。
  * delta=0 のときは仕訳を作らず `{ entry: null }` を返す。
  */
 function buildAdjustmentForSave(args: {
   input: AdjustmentSaveInput;
   accounts: Account[];
-  entries: JournalEntry[];
+  expected: number;
   existing?: { id: string; createdAt: string };
 }): { entry: JournalEntry | null; newCounter: Account | null } {
-  const { input, accounts, entries, existing } = args;
+  const { input, accounts, expected, existing } = args;
   const target = accounts.find((a) => a.id === input.accountId);
   if (!target) throw new LedgerError('error.adjust.targetNotFound');
   // equity（初期残高）だけは補正の対象外。開始時点の残高は opening の編集で直す。
@@ -2099,11 +2105,6 @@ function buildAdjustmentForSave(args: {
     throw new LedgerError('error.adjust.internalRole');
   }
 
-  const expected = accountBalance(
-    input.accountId,
-    target.type,
-    filterByDateRange(entries, undefined, input.date),
-  );
   const delta = input.actualBalance - expected;
   if (delta === 0) return { entry: null, newCounter: null };
 
@@ -2164,15 +2165,11 @@ async function createAdjustmentUnlocked(input: AdjustmentSaveInput): Promise<Jou
     getAll<RecurringRule>(STORE.recurringRules),
   ]);
   const accounts = [...ctx.byId.values()];
-  const derivedEntries = reportEntriesForAsOf(
+  const expected = adjustmentPinExpectedBalanceForLedger(
     { accounts, journalEntries: entries, monthlyCostItems, recurringRules },
-    input.date,
+    { accountId: input.accountId, date: input.date },
   );
-  const { entry, newCounter } = buildAdjustmentForSave({
-    input,
-    accounts,
-    entries: derivedEntries,
-  });
+  const { entry, newCounter } = buildAdjustmentForSave({ input, accounts, expected });
   if (!entry) return null;
 
   const validationCtx: SaveContext = {
@@ -2223,14 +2220,21 @@ async function updateAdjustmentUnlocked(
 
   const others = entries.filter((e) => e.id !== input.id);
   const accounts = [...ctx.byId.values()];
-  const derivedEntries = reportEntriesForAsOf(
+  // 編集中の pin は母集合から外し、その id / createdAt を probe に載せる（同日に別の pin が
+  // あるときの走査順を保存後と一致させる）。
+  const expected = adjustmentPinExpectedBalanceForLedger(
     { accounts, journalEntries: others, monthlyCostItems, recurringRules },
-    input.date,
+    {
+      accountId: input.accountId,
+      date: input.date,
+      id: existing.id,
+      createdAt: existing.createdAt,
+    },
   );
   const { entry, newCounter } = buildAdjustmentForSave({
     input: { ...input, description: input.description ?? existing.description },
     accounts,
-    entries: derivedEntries,
+    expected,
     existing: { id: existing.id, createdAt: existing.createdAt },
   });
 

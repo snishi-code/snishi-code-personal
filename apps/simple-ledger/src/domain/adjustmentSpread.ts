@@ -165,6 +165,136 @@ export function lastAdjustmentAnchors(
   return anchors;
 }
 
+/** 科目に触れる集計対象仕訳（実効開始 anchor_0 と区間内フローの走査に使う）。 */
+function touchingEntries(baseEntries: readonly JournalEntry[], accountId: string): JournalEntry[] {
+  return baseEntries
+    .filter((entry) => entry.lines.some((line) => line.accountId === accountId))
+    .sort(byDate);
+}
+
+/** 走査が 1 つの pin について確定させた値。 */
+interface PinWalkStep {
+  pin: JournalEntry;
+  /** 区間の始点（直前の pin。無ければ科目の実効開始・それも無ければ pin 当日）。 */
+  anchor: string;
+  /**
+   * **この pin が存在する世界での pin 直前残高**（= 非補正フロー + それ以前の pin の
+   * スライス合計）。投資の複利はこの値に入らない——pin を置いた瞬間、その区間の複利は
+   * 按分に置き換わるため（利回り導出の起点は最後の pin）。
+   */
+  expected: number;
+  /** 差額 G = actualBalance − expected。0 なら 1 行も作らない。 */
+  gap: number;
+}
+
+/**
+ * 1 科目の pin 走査（**按分の値の単一正本**）。
+ * 按分スライスの生成と「予定 pin の理論残高」（`adjustmentPinExpectedBalance`）が
+ * この 1 本を共有する（二重実装を作らない）。
+ *
+ * 状態（flowBalance / spreadSoFar / previousPinDate）は generator の中だけで進む。
+ * 消費側が行を作らない判断（G=0・対象と計上先が同じ破損データ）をしても、走査の
+ * 状態は変わらない = 「差額は宣言どおり埋まった」という前提を崩さない。
+ */
+function* walkPins(
+  account: Account,
+  pins: readonly JournalEntry[],
+  touching: readonly JournalEntry[],
+): Generator<PinWalkStep> {
+  const effectiveStart = touching[0]?.date;
+  let cursor = 0;
+  /** 非補正フローだけの自然符号残高（走査位置 = 直近に処理した pin の日まで）。 */
+  let flowBalance = 0;
+  /** ここまでに生成したスライスの合計（= Σ G_j。すべて直近 pin 以前に置かれている）。 */
+  let spreadSoFar = 0;
+  let previousPinDate: string | undefined;
+
+  for (const pin of pins) {
+    while (cursor < touching.length && touching[cursor]!.date <= pin.date) {
+      flowBalance = assertSafeAmount(flowBalance + naturalDeltaOf(touching[cursor]!, account));
+      cursor += 1;
+    }
+    // 区間の始点は「直前の pin」。差額 0 で 1 行も作らなかった pin も宣言点としては生きる。
+    const anchor = previousPinDate ?? effectiveStart ?? pin.date;
+    previousPinDate = pin.date;
+
+    const expected = assertSafeAmount(flowBalance + spreadSoFar);
+    const actual = pin.metadata!.adjustment!.actualBalance;
+    const gap = assertSafeAmount(actual - expected);
+    spreadSoFar = assertSafeAmount(spreadSoFar + gap);
+    yield { pin, anchor, expected, gap };
+  }
+}
+
+/** 予定している pin（作成・編集中で、まだ保存されていない宣言）。 */
+export interface AdjustmentPinProbe {
+  accountId: string;
+  date: string;
+  /**
+   * 既存 pin の編集ならその ID と作成時刻。同日に複数の pin があるときの走査順
+   * （日付 → 作成時刻 → ID）を保存後の世界と一致させるために渡す。
+   * 未指定 = 新規宣言なので、同日の既存 pin より**後**に並ぶ（後から宣言した方がその日の
+   * 実額を決める・comparePins の規約と同じ）。
+   */
+  id?: string;
+  createdAt?: string;
+}
+
+/** 新規宣言の走査順（同日なら既存のどの pin よりも後）。 */
+const PROBE_SORT_KEY = '9999-12-31T23:59:59.999Z';
+
+/**
+ * **予定 pin の理論残高**（= その pin を置いたあとの世界での pin 直前残高）。
+ *
+ * 補正シートの「理論残高 / 差分」と repository の保存時 expectedBalance が**同じ値**を
+ * 見るための単一正本。`adjustmentSpread` の走査そのものを通すので、シートが見せた差分は
+ * 必ず按分されるスライスの合計（G）と一致する。
+ *
+ * 投資科目で従来値（`accountBalance` に利回り導出を含めた残高）とずれるのが本題:
+ * pin を置くとその区間の月次複利は按分に置き換わるので、複利込みの残高は「pin を置いた
+ * あとの世界」には存在しない。非投資科目（複利が 1 円も無い科目）では従来値と一致する。
+ *
+ * `baseEntries` は**補正を除いた**集計対象行（利回り導出も含めない）。
+ * `adjustments` に予定 pin 自身を含めない（編集時は呼び出し側が除いて渡す）。
+ * 対象科目が引けない / 補正できない type なら 0（保存境界が別途 fail-closed に弾く）。
+ */
+export function adjustmentPinExpectedBalance(
+  accounts: readonly Account[],
+  baseEntries: readonly JournalEntry[],
+  adjustments: readonly JournalEntry[],
+  probe: AdjustmentPinProbe,
+): number {
+  const account = accounts.find((a) => a.id === probe.accountId);
+  if (!account || !isAdjustableAccountType(account.type)) return 0;
+  const probePin: JournalEntry = {
+    id: probe.id ?? PROBE_SORT_KEY,
+    date: probe.date,
+    description: '',
+    kind: 'normal',
+    lines: [],
+    // actualBalance は走査の状態に効かない（この pin で打ち切るため）。
+    metadata: {
+      adjustment: {
+        accountId: probe.accountId,
+        expectedBalance: 0,
+        actualBalance: 0,
+        delta: 0,
+        counterpartAccountId: probe.accountId,
+      },
+    },
+    createdAt: probe.createdAt ?? PROBE_SORT_KEY,
+    updatedAt: probe.createdAt ?? PROBE_SORT_KEY,
+  };
+  const pins = [
+    ...(collectPins(accounts, adjustments).pinsByAccount.get(probe.accountId) ?? []),
+    probePin,
+  ].sort(comparePins);
+  for (const step of walkPins(account, pins, touchingEntries(baseEntries, probe.accountId))) {
+    if (step.pin === probePin) return step.expected;
+  }
+  return 0;
+}
+
 /**
  * 補正（pin）を按分スライスへ展開する。
  *
@@ -184,32 +314,12 @@ export function adjustmentSpread(
   const entries: JournalEntry[] = [];
   for (const [accountId, pins] of pinsByAccount) {
     const account = byId.get(accountId)!;
-    // 科目に触れる集計対象仕訳（実効開始 anchor_0 と区間内フローの走査に使う）。
-    const touching = baseEntries
-      .filter((entry) => entry.lines.some((line) => line.accountId === accountId))
-      .sort(byDate);
-    const effectiveStart = touching[0]?.date;
-
-    let cursor = 0;
-    /** 非補正フローだけの自然符号残高（走査位置 = 直近に処理した pin の日まで）。 */
-    let flowBalance = 0;
-    /** ここまでに生成したスライスの合計（= Σ G_j。すべて直近 pin 以前に置かれている）。 */
-    let spreadSoFar = 0;
-    let previousPinDate: string | undefined;
-
-    for (const pin of pins) {
-      while (cursor < touching.length && touching[cursor]!.date <= pin.date) {
-        flowBalance = assertSafeAmount(flowBalance + naturalDeltaOf(touching[cursor]!, account));
-        cursor += 1;
-      }
-      // 区間の始点は「直前の pin」。差額 0 で 1 行も作らなかった pin も宣言点としては生きる。
-      const anchor = previousPinDate ?? effectiveStart ?? pin.date;
-      previousPinDate = pin.date;
-
-      const actual = pin.metadata!.adjustment!.actualBalance;
-      const gap = assertSafeAmount(actual - flowBalance - spreadSoFar);
+    for (const { pin, anchor, gap } of walkPins(
+      account,
+      pins,
+      touchingEntries(baseEntries, accountId),
+    )) {
       if (gap === 0) continue;
-      spreadSoFar = assertSafeAmount(spreadSoFar + gap);
 
       // 向きは buildAdjustmentEntry と同じ規約（借方正規なら gap>0 で対象が借方）。
       const targetOnDebit = isDebitNormal(account.type) ? gap > 0 : gap < 0;

@@ -9,22 +9,22 @@ import { ConfirmDialog, Modal } from './overlays';
 import { TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../state/store';
-import { accountBalance, filterByDateRange } from '../domain/accounting';
 import { ADJUSTABLE_ACCOUNT_ROLES } from '../domain/accountRoles';
 import { isAdjustableAccountType } from '../domain/adjustment';
 import { isValidIsoDate } from '../domain/calendar';
-// 理論残高は reportEntriesForAsOf を使う: repository の保存側（createAdjustment /
-// updateAdjustment）と同じ算定でなければ expectedBalance がずれる。v13.4 ② で投資の
-// 利回り導出もこの単一正本に含まれる（利回りは仮の数字ではなく作者の宣言なので、
-// 補正の基準にも入る。宣言を打ち直すと、その pin より前の複利は按分に置き換わる）。
-import { reportEntriesForAsOf } from '../domain/reportEntries';
+// 理論残高は「この pin を置いたあとの世界での pin 直前残高」（v13.5 C-3）。
+// repository の保存側（createAdjustment / updateAdjustment）と**同じヘルパ**を通す
+// ——ずれると、シートが見せた差分と実際に按分されるスライス合計が食い違う。
+// 投資科目では、pin を置いた区間の月次複利は按分に置き換わるので理論残高に含めない
+// （利回りの起点は最後の pin。adjustmentSpread.ts が値の正本）。
+import { adjustmentPinExpectedBalanceForLedger } from '../domain/reportEntries';
 import { formatMinorForInput, parseAmountToMinor, sanitizeSignedAmountText } from './amountText';
 import { useMoneyDigits } from './money';
 import { groupedAccountsByRole } from './accountOptions';
 import { AccountPicker } from './AccountPicker';
 import { Money } from './money';
 import { todayLocal } from '../util/time';
-import type { Account, AccountType, JournalEntry } from '../domain/types';
+import type { Account, JournalEntry } from '../domain/types';
 import { t } from '../i18n';
 import { UI } from '../ui-contract';
 
@@ -43,15 +43,10 @@ export function AdjustmentCreateSheet({
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  const type = account.type as AccountType;
   const expected = useMemo(() => {
     if (!ledger || !isValidIsoDate(date)) return 0;
-    return accountBalance(
-      account.id,
-      type,
-      filterByDateRange(reportEntriesForAsOf(ledger, date), undefined, date),
-    );
-  }, [account.id, type, ledger, date]);
+    return adjustmentPinExpectedBalanceForLedger(ledger, { accountId: account.id, date });
+  }, [account.id, ledger, date]);
   const digits = useMoneyDigits();
   const actual = parseAmountToMinor(actualText);
   // 表示専用の差分。入力途中の異常値（17 桁など）で render から throw するとアプリ全体が
@@ -181,12 +176,18 @@ export function AdjustmentEditSheet({
   const target = accounts.find((a: Account) => a.id === accountId);
   const adjustable = isAdjustableAccountType(target?.type);
 
+  // adjustable は「科目が引けて、かつ補正できる type」を含意する（isAdjustableAccountType は
+  // undefined を false にする）ので、target そのものは依存に取らない。
   const expected = useMemo(() => {
-    if (!ledger || !target || !adjustable || !isValidIsoDate(date)) return 0;
+    if (!ledger || !adjustable || !isValidIsoDate(date)) return 0;
+    // 編集中の pin は母集合から外し、その id / createdAt を probe に載せる（除かないと
+    // 補正が二重に効く。同日に別の pin があるときの走査順は保存後と同じになる）。
     const others = (ledger?.journalEntries ?? []).filter((e) => e.id !== entry.id);
-    const entries = reportEntriesForAsOf({ ...ledger, journalEntries: others }, date);
-    return accountBalance(accountId, target.type, filterByDateRange(entries, undefined, date));
-  }, [accountId, target, adjustable, ledger, date, entry.id]);
+    return adjustmentPinExpectedBalanceForLedger(
+      { ...ledger, journalEntries: others },
+      { accountId, date, id: entry.id, createdAt: entry.createdAt },
+    );
+  }, [accountId, adjustable, ledger, date, entry.id, entry.createdAt]);
 
   // 金額欄を触っていない保存では、粗い表示桁で隠れた minor を失わない。
   const actual = actualDirty ? parseAmountToMinor(actualText) : adj.actualBalance;

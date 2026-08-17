@@ -10,7 +10,9 @@
  *  - ① との結合: 補正を作ると pin 以前の複利行が消えて按分スライスへ置き換わる。
  *    利回りをいつ変えても pin 以前の残高は 1 円も動かない。
  *  - 断面の決定性: 実装から today が消えた（asOf を動かしても手前の断面は不変）。
- *  - 保存境界: 補正の理論残高・アーカイブの残高 0 判定に導出益が**入る**（旧期待の反転）。
+ *  - 保存境界: アーカイブの残高 0 判定に導出益が**入る**（v13.4 ② の反転）。
+ *    ただし補正（pin）の理論残高だけは v13.5 C-3 で複利を**含まない**——pin を置いた
+ *    世界では区間の複利が按分に置き換わるため（値の正本 = adjustmentSpread の走査）。
  *  - 科目編集 UI の % ⇄ bp 変換。
  */
 import { describe, expect, it } from 'vitest';
@@ -39,6 +41,7 @@ import { APP_ID, SCHEMA_VERSION } from '../src/domain/constants';
 import {
   createAdjustment,
   deleteAccount,
+  deleteEntry,
   loadLedger,
   upsertAccount,
   upsertEntry,
@@ -696,53 +699,73 @@ describe('保存境界（repository）', () => {
     expect(renamed.projectionAccountId).toBe(income.id);
   });
 
-  it('残高補正の理論残高に導出益が入る（v13.4 ② の反転）', async () => {
+  it('補正の理論残高は「pin を置いたあとの世界」= 区間の複利を含まない（C-3）', async () => {
     const { investAcc } = await seedDeclaredInvestment();
-    // 旧: 未来日付の補正でも expectedBalance は投影なしの 100,000 のままだった。
-    // 新: 画面（AdjustmentSheet）と保存側が同じ導出（reportEntriesForAsOf）を見る。
-    const expected = accountBalance(
+    // pin が無い世界の残高は複利込みで元本より大きい。
+    const withProjection = accountBalance(
       investAcc.id,
       'asset',
       reportEntriesForAsOf(await loadLedger(), '2099-12-31'),
     );
-    expect(expected).toBeGreaterThan(100_000);
+    expect(withProjection).toBeGreaterThan(100_000);
 
+    // pin を置くと利回りの起点がその日へ移り、手前の区間の複利は按分へ置き換わる。
+    // したがって理論残高は非補正フローそのもの（元本 100,000）で、差分はそのまま
+    // 按分されるスライスの合計になる（旧: 複利込みの残高を基準にしていたため、
+    // シートが見せた差分と実際のスライス合計が食い違っていた）。
     const adjusted = await createAdjustment({
       accountId: investAcc.id,
       date: '2099-12-31',
       actualBalance: 90_000,
     });
     expect(adjusted?.metadata?.adjustment).toMatchObject({
-      expectedBalance: expected,
+      expectedBalance: 100_000,
       actualBalance: 90_000,
-      delta: 90_000 - expected,
+      delta: -10_000,
     });
+    // 宣言した日の残高は実額ちょうど（按分の不変条件）。
+    expect(
+      accountBalance(investAcc.id, 'asset', reportEntriesForAsOf(await loadLedger(), '2099-12-31')),
+    ).toBe(90_000);
   });
 
   it('科目アーカイブの残高 0 判定に導出益が入る（宣言 1 本で断面を固定すれば終了できる）', async () => {
     const { investAcc, cashAcc } = await seedDeclaredInvestment();
     // 未来日付の引き出しで**元本だけ**を 0 にする。
-    await upsertEntry(
-      buildSimpleEntry({
-        date: '2099-12-31',
-        description: '全額引き出し',
-        debitAccountId: cashAcc.id,
-        creditAccountId: investAcc.id,
-        amount: 100_000,
-      }),
-    );
+    const withdrawal = buildSimpleEntry({
+      date: '2099-12-31',
+      description: '全額引き出し',
+      debitAccountId: cashAcc.id,
+      creditAccountId: investAcc.id,
+      amount: 100_000,
+    });
+    await upsertEntry(withdrawal);
     const current = (await loadLedger()).accounts.find((a) => a.id === investAcc.id)!;
     // 導出益が残っているので、終了点の残高 0 を満たさない（挙動変更）。
     await expect(
       upsertAccount({ ...current, archived: true, endDate: '2099-12-31', updatedAt: nowIso() }),
     ).rejects.toMatchObject({ code: 'error.account.archiveBalance' });
 
-    // 終了日に「実残高 0」を宣言すると、その日以前の複利は按分へ置き換わり残高が 0 になる。
-    await createAdjustment({
+    // C-3: pin を置いた世界に区間の複利は無いので、理論残高は非補正フローそのもの
+    // （元本 100,000 − 引き出し 100,000 = 0）。実額 0 を宣言しても差額 0 = 宣言が
+    // 何も動かさないので pin は作られない（引き出して 0 にしてから宣言しても終われない）。
+    expect(
+      await createAdjustment({ accountId: investAcc.id, date: '2099-12-31', actualBalance: 0 }),
+    ).toBeNull();
+
+    // 終わらせ方は**宣言 1 本**: 引き出しを取り消し、終了日の実残高 0 を宣言する。
+    // 差額 −100,000 が (実効開始, 2099-12-31] へ月割りされ、その日の残高はちょうど 0 になる
+    // （複利は宣言日より後にしか効かず、終了点で打ち切られる）。
+    await deleteEntry(withdrawal.id);
+    const pin = await createAdjustment({
       accountId: investAcc.id,
       date: '2099-12-31',
       actualBalance: 0,
     });
+    expect(pin).not.toBeNull();
+    expect(
+      accountBalance(investAcc.id, 'asset', reportEntriesForAsOf(await loadLedger(), '2099-12-31')),
+    ).toBe(0);
     const pinned = (await loadLedger()).accounts.find((a) => a.id === investAcc.id)!;
     await upsertAccount({
       ...pinned,

@@ -1,4 +1,10 @@
-import { adjustmentSpread, isAdjustmentEntry, lastAdjustmentAnchors } from './adjustmentSpread';
+import {
+  adjustmentPinExpectedBalance,
+  adjustmentSpread,
+  isAdjustmentEntry,
+  lastAdjustmentAnchors,
+  type AdjustmentPinProbe,
+} from './adjustmentSpread';
 import { continuousCostEntries, CONTINUOUS_COST_HARD_CAP } from './continuousCost';
 import {
   investmentProjectionResult,
@@ -165,8 +171,22 @@ export function reportEntriesResultForAsOfUncached(
   };
 }
 
-/** 導出の本体（切り落とし前）。asOf は展開の要求地平であって、ここでは切らない。 */
-function deriveAll(ledger: ReportEntrySource, asOf: string): FullDerivation {
+/** 按分の素材（補正を除いた集計対象行と、宣言として読む pin 群）。 */
+interface DerivedBase {
+  /** 実仕訳 + 継続コスト + ルール導出（**補正も利回りも含まない**）。 */
+  base: JournalEntry[];
+  /** 補正（pin）の stored 仕訳。 */
+  adjustments: JournalEntry[];
+  horizon: string;
+  maxAdjustmentDate: string | undefined;
+}
+
+/**
+ * 按分・利回りへ入る前の素材を作る。
+ * 按分の走査（`adjustmentSpread` / `adjustmentPinExpectedBalance`）が要求する
+ * 「補正を除いた集計対象行」の作り方をここ 1 箇所に置く。
+ */
+function deriveBase(ledger: ReportEntrySource, asOf: string): DerivedBase {
   const real: JournalEntry[] = [];
   const adjustments: JournalEntry[] = [];
   // 補正日が asOf より先にあると、その区間のスライスは asOf 以前にも落ちる。按分を asOf に
@@ -200,6 +220,30 @@ function deriveAll(ledger: ReportEntrySource, asOf: string): FullDerivation {
     ),
     ...derived.entries,
   ];
+  return { base, adjustments, horizon, maxAdjustmentDate };
+}
+
+/**
+ * **予定 pin の理論残高**（v13.5 C-3）。補正シートの表示と repository の保存時
+ * `expectedBalance` がこの 1 本を共有する。
+ *
+ * 値の定義は `adjustmentPinExpectedBalance`（= 按分の走査そのもの）。ここは素材
+ * （補正を除いた集計対象行 + 既存の pin 群）を揃えるだけで、算定を再実装しない。
+ *
+ * 編集中の pin は**呼び出し側が `ledger.journalEntries` から除いて**渡し、その id /
+ * createdAt を `probe` に載せる（同日に複数ある pin の走査順を保存後と一致させる）。
+ */
+export function adjustmentPinExpectedBalanceForLedger(
+  ledger: ReportEntrySource,
+  probe: AdjustmentPinProbe,
+): number {
+  const { base, adjustments } = deriveBase(ledger, probe.date);
+  return adjustmentPinExpectedBalance(ledger.accounts, base, adjustments, probe);
+}
+
+/** 導出の本体（切り落とし前）。asOf は展開の要求地平であって、ここでは切らない。 */
+function deriveAll(ledger: ReportEntrySource, asOf: string): FullDerivation {
+  const { base, adjustments, horizon, maxAdjustmentDate } = deriveBase(ledger, asOf);
   const spread = adjustmentSpread(ledger.accounts, base, adjustments);
   const spreadEntries = [...base, ...spread.entries, ...spread.unspread];
   // 利回りは按分の**後**に積む: 生成されるのは最後の pin より後だけなので、按分が支配する
