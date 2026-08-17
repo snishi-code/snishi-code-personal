@@ -26,13 +26,14 @@ import type { AccountBalance } from '../../domain/types';
 import type { MessageKey } from '../../i18n';
 import type { Screen } from '../navigation';
 import type { JournalFilter } from './Journal';
-import { ACCOUNT_ACCENTS, boxByKey, type AccountAccent } from '../accountBoxes';
+import { ACCOUNT_ACCENTS, boxByKey, displayBoxLook, type AccountAccent } from '../accountBoxes';
 import {
   ASSET_GROUP_KEYS,
-  ASSET_GROUP_LABEL_KEYS,
-  assetGroupOf,
-  type AssetGroupKey,
-} from '../../domain/assetGroups';
+  displayBoxIncludes,
+  orderedDisplayBoxes,
+  type DisplayBoxKey,
+} from '../../domain/displayOrder';
+import { ASSET_GROUP_LABEL_KEYS, assetGroupOf, type AssetGroupKey } from '../../domain/assetGroups';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { sumAmounts } from '../../domain/safeSum';
 import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
@@ -128,6 +129,16 @@ const ASSET_FRAME_ACCENTS: Record<AssetGroupKey, AccountAccent> = {
   ledger: ACCOUNT_ACCENTS.continuingCost,
 };
 
+/** 負債の 2 枠。並びは持たず、表示順マスタから箱を切り出す（下の orderedDisplayBoxes）。 */
+type LiabilityFrameKey = Extract<DisplayBoxKey, 'shortTermDebt' | 'longTermDebt'>;
+
+const LIABILITY_FRAME_KEYS: readonly LiabilityFrameKey[] = ['shortTermDebt', 'longTermDebt'];
+
+const LIABILITY_FRAME_SUBTOTAL_UI: Record<LiabilityFrameKey, string> = {
+  shortTermDebt: UI.liabilitiesBreakdown.shortTermSubtotal,
+  longTermDebt: UI.liabilitiesBreakdown.longTermSubtotal,
+};
+
 function Row({
   b,
   currency,
@@ -219,22 +230,13 @@ export function Breakdown({
           ...(key === 'ledger' ? { aggregateLedger: true } : {}),
         }))
       : section === 'liability'
-        ? [
-            {
-              key: 'shortTermDebt',
-              labelKey: 'box.shortTermDebt',
-              rows: rows.filter((b) => b.account.role === 'payment-liability'),
-              subtotalUi: UI.liabilitiesBreakdown.shortTermSubtotal,
-              accent: boxByKey('shortTermDebt').accent,
-            },
-            {
-              key: 'longTermDebt',
-              labelKey: 'box.longTermDebt',
-              rows: rows.filter((b) => b.account.role === 'other-liability'),
-              subtotalUi: UI.liabilitiesBreakdown.longTermSubtotal,
-              accent: boxByKey('longTermDebt').accent,
-            },
-          ]
+        ? orderedDisplayBoxes(LIABILITY_FRAME_KEYS).map((key) => ({
+            key,
+            labelKey: displayBoxLook(key).labelKey,
+            rows: rows.filter((b) => displayBoxIncludes(key, b.account)),
+            subtotalUi: LIABILITY_FRAME_SUBTOTAL_UI[key],
+            accent: displayBoxLook(key).accent,
+          }))
         : null;
 
   return (

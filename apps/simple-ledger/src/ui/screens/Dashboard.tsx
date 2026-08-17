@@ -12,6 +12,7 @@ import {
   filterByDateRange,
 } from '../../domain/accounting';
 import { livingCostBreakdownForRange } from '../../domain/livingCost';
+import { DISPLAY_SECTION_GROUPS, type DisplaySectionKey } from '../../domain/displayOrder';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
 import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { todayLocal } from '../../util/time';
@@ -34,6 +35,48 @@ import { InvestmentProjectionTruncationNotice } from '../components/InvestmentPr
 
 /** ホームの仕訳一覧の 1 ページぶん（「さらに表示」で足す刻み）。 */
 const HOME_ENTRY_PAGE = 50;
+
+/**
+ * 6 カードの見せ方。**並びは持たない**（順序も段組みも `DISPLAY_SECTION_GROUPS` が正本で、
+ * ここはラベル・行き先・data-ui だけ）。ラベルのキーは数値レンズの行・グラフの凡例と共有する。
+ */
+const SECTION_META: Record<
+  DisplaySectionKey,
+  { labelKey: MessageKey; screen: Screen; dataUi: string; signed?: boolean }
+> = {
+  revenue: {
+    labelKey: 'dashboard.revenue',
+    screen: 'incomeBreakdown',
+    dataUi: UI.dashboard.statRevenue,
+  },
+  expense: {
+    labelKey: 'dashboard.expense',
+    screen: 'expenseBreakdown',
+    dataUi: UI.dashboard.statExpense,
+  },
+  net: {
+    labelKey: 'dashboard.netIncome',
+    screen: 'netIncome',
+    dataUi: UI.dashboard.statNetIncome,
+    signed: true,
+  },
+  totalAssets: {
+    labelKey: 'dashboard.assets',
+    screen: 'assetsBreakdown',
+    dataUi: UI.dashboard.statAssets,
+  },
+  totalLiabilities: {
+    labelKey: 'dashboard.liabilities',
+    screen: 'liabilitiesBreakdown',
+    dataUi: UI.dashboard.statLiabilities,
+  },
+  netAssets: {
+    labelKey: 'dashboard.netAssets',
+    screen: 'netAssets',
+    dataUi: UI.dashboard.statNetAssets,
+    signed: true,
+  },
+};
 
 const ENTRY_TYPES: { mode: FormMode; labelKey: MessageKey; icon: IconName; ui: string }[] = [
   { mode: 'income', labelKey: 'entry.type.income', icon: 'income', ui: UI.dashboard.income },
@@ -121,6 +164,16 @@ export function Dashboard({
     };
   }, [basis.asOf, ledger, range]);
 
+  // 6 分類の金額。値は domain の導出をそのまま使い、恒等行だけ式で作る（UI で式を再実装しない）。
+  const sectionAmounts: Record<DisplaySectionKey, number> = {
+    revenue: pl.totalRevenue,
+    expense: livingTotal,
+    net: assertSafeAmount(pl.totalRevenue - livingTotal),
+    totalAssets: bs.totalAssets,
+    totalLiabilities: bs.totalLiabilities,
+    netAssets: bs.netAssets,
+  };
+
   const trend = useMemo(() => buildSectionTrends(period, ledger, today), [period, ledger, today]);
   const visibleProjectionTruncations =
     trend?.investmentProjectionTruncations ?? investmentProjectionTruncations;
@@ -144,55 +197,30 @@ export function Dashboard({
         <div className="dashboard__frame" data-ui={UI.dashboard.frame}>
           {/* 「収支」「財政状態」の見出しは撤去（見れば明らか・作者決定 2026-08-14）。
               縮めたぶん仕訳の可視領域を広げる。読み上げは各枠の aria-label（金額込み）が担う。 */}
-          <div className="stat-grid">
-            <StatButton
-              label={t('dashboard.revenue')}
-              amount={pl.totalRevenue}
-              currency={currency}
-              onClick={() => onNavigate('incomeBreakdown')}
-              dataUi={UI.dashboard.statRevenue}
-            />
-            <StatButton
-              label={t('dashboard.expense')}
-              amount={livingTotal}
-              currency={currency}
-              onClick={() => onNavigate('expenseBreakdown')}
-              dataUi={UI.dashboard.statExpense}
-            />
-            <StatButton
-              label={t('dashboard.netIncome')}
-              amount={assertSafeAmount(pl.totalRevenue - livingTotal)}
-              currency={currency}
-              signed
-              onClick={() => onNavigate('netIncome')}
-              dataUi={UI.dashboard.statNetIncome}
-            />
-          </div>
-
-          <div className="stat-grid" style={{ marginTop: 'var(--space-2)' }}>
-            <StatButton
-              label={t('dashboard.assets')}
-              amount={bs.totalAssets}
-              currency={currency}
-              onClick={() => onNavigate('assetsBreakdown')}
-              dataUi={UI.dashboard.statAssets}
-            />
-            <StatButton
-              label={t('dashboard.liabilities')}
-              amount={bs.totalLiabilities}
-              currency={currency}
-              onClick={() => onNavigate('liabilitiesBreakdown')}
-              dataUi={UI.dashboard.statLiabilities}
-            />
-            <StatButton
-              label={t('dashboard.netAssets')}
-              amount={bs.netAssets}
-              currency={currency}
-              signed
-              onClick={() => onNavigate('netAssets')}
-              dataUi={UI.dashboard.statNetAssets}
-            />
-          </div>
+          {/* カードの順も段組みも表示順マスタ（DISPLAY_SECTION_GROUPS）。収支・純資産は
+              恒等式の行としてマスタが自動で式の後ろへ差し込む。 */}
+          {DISPLAY_SECTION_GROUPS.map((group, index) => (
+            <div
+              key={group.key}
+              className="stat-grid"
+              {...(index > 0 ? { style: { marginTop: 'var(--space-2)' } } : {})}
+            >
+              {group.sections.map((key) => {
+                const meta = SECTION_META[key];
+                return (
+                  <StatButton
+                    key={key}
+                    label={t(meta.labelKey)}
+                    amount={sectionAmounts[key]}
+                    currency={currency}
+                    signed={meta.signed === true}
+                    onClick={() => onNavigate(meta.screen)}
+                    dataUi={meta.dataUi}
+                  />
+                );
+              })}
+            </div>
+          ))}
 
           {/* 仕訳の見出しと「すべて見る」も額縁ごと固定する（作者決定 2026-08-14）。
               仕訳をスクロールしても月をまたぐ遡り導線が手元に残る。sticky に含めるぶん

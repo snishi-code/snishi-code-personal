@@ -39,7 +39,7 @@ import {
 import { generatedItemRuleId, parseRuleItemId } from '../../domain/recurringIds';
 import type { AccountRole } from '../../domain/accountRoles';
 import { lastExpenseCategoryId, rememberExpenseCategoryId } from '../../data/localFlags';
-import { sortAccounts } from '../../domain/accountOrder';
+import { sortAccounts } from '../../domain/displayOrder';
 import {
   defaultMonthlyAllocationAccountId,
   groupedAccountsByRole,

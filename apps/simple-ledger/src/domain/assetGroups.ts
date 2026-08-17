@@ -8,14 +8,14 @@
  * `assetGroupOf` は資産科目に対して**必ず 1 つ**のグループを返す（全域関数）。
  * 想定外の role が来てもどこにも入らない資産を作らない = 「グループの合計 = 総資産」を
  * 壊さないための取り決め（schema 上 asset の role は 3 種だが、既定を明示しておく）。
+ *
+ * **ここは分類だけを持つ。並び（4 グループをどの順で出すか）は `domain/displayOrder` の
+ * 箱の並びが正本**（`ASSET_GROUP_KEYS`）。分類と並びを 2 か所で書き分けないための役割分担。
  */
 import type { MessageKey } from '../i18n';
 import type { Account } from './types';
 
 export type AssetGroupKey = 'free' | 'fixed' | 'investment' | 'ledger';
-
-/** 表示順（内訳画面の枠の並び = 数値レンズの展開の並び）。 */
-export const ASSET_GROUP_KEYS: readonly AssetGroupKey[] = ['free', 'fixed', 'investment', 'ledger'];
 
 export const ASSET_GROUP_LABEL_KEYS: Record<AssetGroupKey, MessageKey> = {
   free: 'assets.frame.free',

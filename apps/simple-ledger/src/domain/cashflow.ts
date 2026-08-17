@@ -11,7 +11,7 @@
  *    タイムスリップに追従し、過去の断面でもその日から先を投影する。この層に today は無い。
  */
 import { addMonths, addMonthsToDate, monthOf } from './allocation';
-import { sortAccounts } from './accountOrder';
+import { sortAccounts } from './displayOrder';
 import type { TimelineZoom } from './timelineCalendar';
 import type { Account, AccountBalance, JournalEntry } from './types';
 import { assertSafeAmount, sumAmounts } from './safeSum';

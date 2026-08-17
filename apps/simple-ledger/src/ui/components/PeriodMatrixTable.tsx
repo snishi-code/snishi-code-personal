@@ -19,6 +19,7 @@ import type {
   PeriodMatrixNode,
   PeriodMatrixRowKey,
 } from '../../domain/periodMatrix';
+import { isDisplaySectionGroupStart } from '../../domain/displayOrder';
 import { t, type MessageKey } from '../../i18n';
 import { UI } from '../../ui-contract';
 import { Money, type MoneyTone } from '../money';
@@ -31,6 +32,7 @@ const COLUMN_WIDTH = 112;
 /**
  * 6 分類の見せ方。**ラベルはホームのカードと同じメッセージキーを使う**（語彙を 2 か所に
  * 持たない = ホームと表で呼び名がずれない）。tone は C-2 の規約で負債の数字だけに付く。
+ * 並びと段（フロー / ストックの区切り線）は持たない — 表示順マスタが決める。
  */
 const SECTION_META: Record<
   PeriodMatrixRowKey,
@@ -38,15 +40,13 @@ const SECTION_META: Record<
     labelKey: MessageKey;
     signed?: boolean;
     emphasis?: boolean;
-    sectionStart?: boolean;
     tone?: MoneyTone;
   }
 > = {
   revenue: { labelKey: 'dashboard.revenue' },
   expense: { labelKey: 'dashboard.expense' },
   net: { labelKey: 'dashboard.netIncome', signed: true, emphasis: true },
-  // ストックの始まり（フローとの間に区切り線を引く）。
-  totalAssets: { labelKey: 'dashboard.assets', sectionStart: true },
+  totalAssets: { labelKey: 'dashboard.assets' },
   totalLiabilities: { labelKey: 'dashboard.liabilities', tone: 'liability' },
   netAssets: { labelKey: 'dashboard.netAssets', emphasis: true },
 };
@@ -101,7 +101,8 @@ function flattenRows(matrix: PeriodMatrix, expanded: ReadonlySet<string>): Matri
       expanded: isExpanded,
       signed: meta.signed === true,
       emphasis: meta.emphasis === true,
-      sectionStart: meta.sectionStart === true,
+      // 段の切り替わり（フロー → ストック）に区切り線。どこが変わり目かはマスタが持つ。
+      sectionStart: isDisplaySectionGroupStart(section.key),
       ...(meta.tone ? { tone: meta.tone } : {}),
     });
     if (!isExpanded) continue;

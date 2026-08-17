@@ -19,14 +19,14 @@
  * （資産の 4 グループの合計 = 総資産、各グループ = その科目の合計）。値は minor unit の整数で、
  * 途中の丸めを一切しない。
  */
-import { compareAccountOrder } from './accountOrder';
-import { debitSignedBalance, naturalDelta } from './accounting';
 import {
   ASSET_GROUP_KEYS,
-  ASSET_GROUP_LABEL_KEYS,
-  assetGroupOf,
-  type AssetGroupKey,
-} from './assetGroups';
+  DISPLAY_SECTION_KEYS,
+  compareAccountOrder,
+  type DisplaySectionKey,
+} from './displayOrder';
+import { debitSignedBalance, naturalDelta } from './accounting';
+import { ASSET_GROUP_LABEL_KEYS, assetGroupOf, type AssetGroupKey } from './assetGroups';
 import type { MessageKey } from '../i18n';
 import type { Account, JournalEntry } from './types';
 import { assertSafeAmount } from './safeSum';
@@ -53,24 +53,11 @@ export interface PeriodMatrixColumn {
 
 export type PeriodMatrixValue = number;
 
-/** ホームの 6 カードと同じ 6 分類。並びは `PERIOD_MATRIX_ROW_KEYS`。 */
-export type PeriodMatrixRowKey =
-  | 'revenue'
-  | 'expense'
-  | 'net'
-  | 'totalAssets'
-  | 'totalLiabilities'
-  | 'netAssets';
-
-/** 6 分類の並び（ホームのカードと同じ）。 */
-export const PERIOD_MATRIX_ROW_KEYS: readonly PeriodMatrixRowKey[] = [
-  'revenue',
-  'expense',
-  'net',
-  'totalAssets',
-  'totalLiabilities',
-  'netAssets',
-];
+/**
+ * ホームの 6 カードと同じ 6 分類。**種類も並びも `domain/displayOrder` が正本**
+ * （ここで並びを書かない = ホームと表がずれない）。
+ */
+export type PeriodMatrixRowKey = DisplaySectionKey;
 
 /** 固定行。配列の添字は columns と一致する。 */
 export type PeriodMatrixRows = Record<PeriodMatrixRowKey, PeriodMatrixValue[]>;
@@ -367,7 +354,7 @@ export function buildPeriodMatrix(
   return {
     columns,
     rows,
-    sections: PERIOD_MATRIX_ROW_KEYS.map((key) => ({
+    sections: DISPLAY_SECTION_KEYS.map((key) => ({
       key,
       values: rows[key],
       children: childrenByRow[key],

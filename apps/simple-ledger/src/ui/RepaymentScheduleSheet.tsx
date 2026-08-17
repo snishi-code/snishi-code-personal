@@ -17,7 +17,7 @@ import { Modal } from './overlays';
 import { useLedger } from '../state/store';
 import { nextRepaymentDate } from '../domain/cashflow';
 import { MONTHLY_AMOUNTS_HARD_CAP, monthlyAmounts } from '../domain/allocation';
-import { sortAccounts } from '../domain/accountOrder';
+import { sortAccounts } from '../domain/displayOrder';
 import { todayLocal } from '../util/time';
 import type { Account } from '../domain/types';
 import { errorText, t } from '../i18n';

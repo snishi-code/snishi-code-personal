@@ -16,7 +16,7 @@ import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { useLedger } from '../../state/store';
 import type { Account } from '../../domain/types';
 import { findAccountNameConflicts, planArchiveRenames } from '../../domain/accountNames';
-import { sortAccounts } from '../../domain/accountOrder';
+import { sortAccounts } from '../../domain/displayOrder';
 import {
   annualReturnBpToPercentText,
   parseAnnualReturnPercentText,

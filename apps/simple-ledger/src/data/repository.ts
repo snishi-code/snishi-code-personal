@@ -16,7 +16,7 @@ import {
   SCHEMA_VERSION,
 } from '../domain/constants';
 import { ADJUSTABLE_ACCOUNT_ROLES, roleAllowsType, type AccountRole } from '../domain/accountRoles';
-import { compareAccountOrder } from '../domain/accountOrder';
+import { compareAccountOrder } from '../domain/displayOrder';
 import { isAccountReferenced, type AccountRefCollections } from '../domain/accountRefs';
 import {
   accountExistsAt,

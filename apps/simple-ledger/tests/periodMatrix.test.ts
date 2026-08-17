@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPeriodMatrix,
   periodMatrixAsOf,
-  PERIOD_MATRIX_ROW_KEYS,
   type PeriodMatrix,
   type PeriodMatrixNode,
   type PeriodMatrixRowKey,
   type PeriodMatrixScope,
 } from '../src/domain/periodMatrix';
+import { DISPLAY_SECTION_KEYS } from '../src/domain/displayOrder';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../src/domain/accounting';
 import { reportEntriesForAsOf } from '../src/domain/reportEntries';
 import { SCHEMA_VERSION } from '../src/domain/constants';
@@ -220,7 +220,7 @@ describe('buildPeriodMatrix（月ズーム）', () => {
 
     expect(matrix.rows.expense[0]).toBe(170);
     // 「月割り」の独立行は無い（6 分類だけ）。月割り分は費用カテゴリ側へ入る。
-    expect(matrix.sections.map((s) => s.key)).toEqual([...PERIOD_MATRIX_ROW_KEYS]);
+    expect(matrix.sections.map((s) => s.key)).toEqual([...DISPLAY_SECTION_KEYS]);
     const categories = sectionOf(matrix, 'expense').children;
     expect(labelsOf(categories)).toEqual(['fixed', 'food']);
     expect(categories[0]?.values[0]).toBe(120);

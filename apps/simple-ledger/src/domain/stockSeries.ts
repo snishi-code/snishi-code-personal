@@ -20,19 +20,38 @@
  */
 import { debitSignedBalance, naturalDelta } from './accounting';
 import { isFreeAsset } from './cashflow';
+import {
+  DISPLAY_BOX_KEYS,
+  DISPLAY_SECTION_KEYS,
+  type DisplayBoxKey,
+  type DisplaySectionKey,
+} from './displayOrder';
 import { assertSafeAmount } from './safeSum';
 import type { Account, JournalEntry } from './types';
 
 /** 4 系列の識別子。 */
 export type StockSeriesKey = 'assets' | 'liabilities' | 'netAssets' | 'freeFunds';
 
-/** 凡例と描画の並び（上から）。 */
+/** ホームの 6 分類のうちストックの 3 行に対応する系列。 */
+const SERIES_BY_SECTION: Partial<Record<DisplaySectionKey, StockSeriesKey>> = {
+  totalAssets: 'assets',
+  totalLiabilities: 'liabilities',
+  netAssets: 'netAssets',
+};
+
+/** 箱に対応する系列（集計 3 行の後ろに箱の並び順で続く）。いまは自由に動かせるお金の 1 本。 */
+const SERIES_BY_BOX: Partial<Record<DisplayBoxKey, StockSeriesKey>> = {
+  assetFree: 'freeFunds',
+};
+
+/**
+ * 凡例と描画の並び（上から）。**独自の並びを持たず表示順マスタから導出する**
+ * — 集計行はホームのカードと同じ並び、その後ろに箱由来の系列が箱の並びで続く。
+ */
 export const STOCK_SERIES_KEYS: readonly StockSeriesKey[] = [
-  'assets',
-  'liabilities',
-  'netAssets',
-  'freeFunds',
-];
+  ...DISPLAY_SECTION_KEYS.map((key) => SERIES_BY_SECTION[key]),
+  ...DISPLAY_BOX_KEYS.map((key) => SERIES_BY_BOX[key]),
+].filter((key): key is StockSeriesKey => key !== undefined);
 
 /**
  * 既定で表示する系列。**純資産**と**自由に動かせるお金**（「いま全体でいくら」と

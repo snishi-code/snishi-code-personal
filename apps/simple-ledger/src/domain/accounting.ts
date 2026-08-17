@@ -13,7 +13,7 @@ import type {
   ProfitAndLoss,
   Side,
 } from './types';
-import { compareAccountOrder } from './accountOrder';
+import { compareAccountOrder } from './displayOrder';
 import { assertSafeAmount } from './safeSum';
 
 /** asset / expense は借方が正。liability / equity / revenue は貸方が正。 */
