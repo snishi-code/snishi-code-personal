@@ -51,14 +51,24 @@
 
 /* ── ヘッダーの時間の単位（日/月/年 = 時間平面のズーム）セグメント ──
    ヘッダー = 時間、の「時間」には目盛りも含まれる（日付チップの隣に置く理由）。
-   375px 幅に収めるため Segmented より詰めた専用スタイル。押下中（= ズーム対応画面に
-   いる間の現在ズーム）は aria-pressed で示し、色 + 面の両方で手掛かりを持つ。 */
+   押下中（= ズーム対応画面にいる間の現在ズーム）は aria-pressed で示し、色 + 面の
+   両方で手掛かりを持つ。
+
+   タップ領域は 44×44px（AGENTS.md の不変条件・v13.6 H2-1 で 32px から是正）。
+   高さは .app-header__inner（min-height 56px・padding 4px）の中身 48px に収まるので、
+   ヘッダーの実高（--sticky-top = 57px）は変わらない。文字は 12px のままだと 44px の面の
+   中で迷子になるので 13px へ上げ、横は min-width で 44px を確保する（375px でも
+   日付チップ + 今日 + 3 ボタンが 1 行に収まる幅）。 */
 /* タイムスリップ中だけ現れる「今日」。強めの色 = 「時間がずれている」の警告灯を兼ねる。 */
 .period-today {
   flex-shrink: 0;
-  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  min-width: var(--tap);
   padding: 0 var(--space-2);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--primary-strong);
   background: var(--primary-light);
@@ -74,9 +84,13 @@
   flex-shrink: 0;
 }
 .period-zoom__btn {
-  min-height: 32px;
-  padding: 0 var(--space-2);
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  min-width: var(--tap);
+  padding: 0 var(--space-1);
+  font-size: 13px;
   font-weight: 600;
   color: var(--muted);
   background: transparent;
@@ -889,7 +903,12 @@ button.timeline-calendar__row-label {
   align-items: center;
   gap: var(--space-1);
   min-height: var(--tap);
-  padding: 0 var(--space-2);
+  /* 375px で「今日」まで並ぶと 1 行が溢れる。**縮むのは日付チップ**（中の
+     .period-context__text が ellipsis を持つ）で、44px を確保したボタン側は縮ませない
+     （タップ領域の規約が先。flex は既定で min-width:auto = 縮まないので明示する）。 */
+  min-width: 0;
+  /* 44px のボタンが 4 つ並ぶぶん、チップ側の余白は詰める（日付の文字そのものを優先する）。 */
+  padding: 0 var(--space-1);
   background: transparent;
   border: none;
   border-radius: var(--radius-sm);
