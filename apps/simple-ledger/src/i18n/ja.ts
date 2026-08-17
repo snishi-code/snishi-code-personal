@@ -126,29 +126,36 @@ export const ja = {
   'ccItem.quickSpan': '{years}年',
 
   'cashflow.title': '資金繰り',
+  // v13.4 ③: 起点はヘッダーの日付（基準日）。今日ではない。
   'cashflow.intro':
-    '未来日付の仕訳から、自由に動かせるお金の推移を見ます。カード・ローンは行をタップすると返済計画を登録できます。',
-  'cashflow.until': '表示終了日',
-  'cashflow.untilHint':
-    '今日からこの日までの入出金予定を投影します。既定の期間は設定で変えられます。',
-  'cashflow.freeFunds': '自由に動かせるお金',
-  'cashflow.minFree': '期間内の最低額',
-  'cashflow.depleteWarning': 'この期間に自由に動かせるお金がマイナスになる予定があります。',
+    'ヘッダーの日付から先の仕訳で、自由に動かせるお金の推移を見ます。日付を変えるとその日を起点に見直します。カード・ローンは行をタップすると返済計画を登録できます。',
+  'cashflow.freeFundsAsOf': '{date} の自由に動かせるお金',
   'cashflow.nextDue': '次回支払日',
   'cashflow.installmentsLeft': '残り {count} 回',
-  // CF 再構成: 自由に動かせるお金の推移・負債返済を主役に、未来予定はホーム入力へ寄せる。
-  'cashflow.freeTrendTitle': '自由に動かせるお金の推移',
+  // 「いつ足りなくなるか」。下回りが無いときは警告色を使わない静かな 1 行。
+  'cashflow.shortfallOn': '{date} に自由に動かせるお金が 0 を下回る見込みです。',
+  'cashflow.shortfallNone': '{year}年まで、自由に動かせるお金が 0 を下回る予定はありません。',
+  // グラフ（基準日起点・右へ横スクロールする日次折れ線）。
+  'cashflow.chartTitle': '自由に動かせるお金の推移（{from} 〜 {to}）',
+  'cashflow.chartExtend': 'さらに {months} ヶ月先へ',
+  'cashflow.chartAtHorizon': '{year}年（見通せる上限）まで表示しています。',
+  'cashflow.chartEnd': '{date} の見込み: ',
+  'cashflow.chartSummary':
+    '自由に動かせるお金の推移。{from} は {start}、{to} は {end}。この範囲の最低額は {low}。',
+  'cashflow.chartTickYear': '{year}年',
+  'cashflow.chartTickMonth': '{month}月',
   'cashflow.debtTitle': '支払用負債・返済予定',
-  'cashflow.debtIntro': '負債ごとに、残りの支払予定・次回支払日・残回数を確認できます。',
+  'cashflow.debtIntro':
+    'ヘッダーの日付の時点で残高がある負債だけを、残りの支払予定・次回支払日・残回数とともに出します。',
   'cashflow.debtBalance': '残高',
-  'cashflow.debtNoPlan': '返済予定が未登録です。',
+  'cashflow.debtNone': 'この日の時点で残高のある負債はありません。',
   'cashflow.debtNoPlanHint': '残高があるなら、ホームの「支出」で未来日付の返済を登録できます。',
-  // 負債行の展開 = 登録済みの返済（未来日付の保存仕訳）。タップで仕訳の編集シートへ。
+  // 負債行の展開 = 登録済みの返済（基準日より後の保存仕訳）。タップで仕訳の編集シートへ。
   'cashflow.repaymentsRegistered': '登録済みの返済',
-  'cashflow.futureTitle': '未来の入出金・振替予定',
+  'cashflow.futureTitle': '先の入出金・振替予定',
   'cashflow.futureIntro':
-    'ホームの 収入 / 支出 / 振替 で未来日付を選ぶと、ここに表示され資金繰りに反映されます。',
-  'cashflow.futureEmpty': '未来日付の予定はありません。',
+    'グラフに出している範囲（{from} 〜 {to}）の予定です。ホームの 収入 / 支出 / 振替 で先の日付を選ぶと、ここに表示され資金繰りに反映されます。',
+  'cashflow.futureEmpty': 'この範囲に予定はありません。',
 
   // 負債の新規作成（支出の支払い方法 / 振替の源泉・行き先から）
   'liability.form.title': '新しい負債を作る',
@@ -358,7 +365,10 @@ export const ja = {
   'yearlyOverview.horizonActual': '実績のみ',
   'yearlyOverview.horizonPlus30': '+{years}年',
   'yearlyOverview.horizonHardCap': '{year}年まで',
-  'yearlyOverview.projectionNote': '未来列は定期ルール・持ち物・投資利回りの投影を含みます。',
+  // v13.4 ②で利回りも導出（保存境界と同じもの）になり、過去列にも導出行が出る。
+  // 「未来だけが投影」ではなくなったので、表全体が導出込みであることを先に名乗る。
+  'yearlyOverview.projectionNote':
+    '表は定期ルール・持ち物・投資利回りの導出を含みます。未来列にはまだ起きていない予定も含みます。',
   // 桁あふれで投影を打ち切った科目の注記（アプリ都合の端点を名乗る・仮の数字が本物の顔をしない）。
   'projection.truncatedNotice':
     '「{name}」の投影は金額が計算上限を超えるため {month} で打ち切りました。それ以降の投影は表示に含まれません。',
@@ -497,9 +507,6 @@ export const ja = {
   'settings.ledgerNameRequired': '台帳名を入力してください。',
   'settings.currencyHint': '表示に使う単位の文字列です（8 文字まで）。換算はしません。',
   'settings.fractionDigits': '小数の表示桁数',
-  'settings.cashflowHorizon': '資金繰りの表示期間（ヶ月・既定）',
-  'settings.cashflowHorizonHint':
-    '資金繰りを開いたとき、今日から何ヶ月先までを表示するか（1〜1200）。画面での一時的な変更は保存されません。',
   'settings.fractionDigitsHint':
     '入力できる小数の桁もこの設定に従います。保存されている金額は変わりません。',
   'settings.currency': '金額の単位',

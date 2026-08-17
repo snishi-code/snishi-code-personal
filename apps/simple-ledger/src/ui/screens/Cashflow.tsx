@@ -1,6 +1,15 @@
 /*
- * 資金繰り（将来CF）。未来日付の仕訳から「自由に動かせるお金」の推移・最低残高を投影し、
- * 負債の返済計画（登録済みの返済仕訳の確認・編集を含む）を扱う。
+ * 資金繰り（将来CF）。**ヘッダーの日付（基準日）を起点に**「自由に動かせるお金」の推移を
+ * 投影し、負債の返済計画（登録済みの返済仕訳の確認・編集を含む）を扱う。
+ *
+ * v13.4 ③（作者決定 2026-08-17）:
+ *  - 起点は today ではなく period（ヘッダーの日付）。資金繰りもタイムスリップに追従する。
+ *    この画面に「今日」は残らない（返済シートの日付**既定値**だけが today 規約 (a) の例外）。
+ *  - 表示終了日の入力欄・設定の既定期間は引退。範囲は右方向の横スクロールで見る
+ *    （「さらに先へ」で +12 ヶ月ずつ・上限 = 展開の地平 CONTINUOUS_COST_HARD_CAP）。
+ *  - 最低点の金額カードではなく「基準日以降で最初に 0 を下回る日」を出す。
+ *  - 負債一覧は基準日断面で残高を持つものだけ（未来に始まるローンは基準日を進めれば現れ、
+ *    完済済みは消える）。
  */
 import { useMemo, useState } from 'react';
 import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
@@ -10,23 +19,31 @@ import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, representativeEntryAmount } from '../../domain/accounting';
 import {
   cashDeltaOfEntry,
+  firstShortfallPoint,
   freeAssetTotal,
   isFreeAsset,
   nextRepaymentDate,
   projectCashflow,
   uniqueEntriesById,
+  type CashflowPoint,
 } from '../../domain/cashflow';
-import { reportBasis } from '../../domain/reportPeriod';
+import type { ReportPeriod } from '../../domain/reportPeriod';
 import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
-import { addMonthsToDate, MONTHLY_AMOUNTS_HARD_CAP, monthlyAmounts } from '../../domain/allocation';
+import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
+import {
+  addMonths,
+  addMonthsToDate,
+  MONTHLY_AMOUNTS_HARD_CAP,
+  monthlyAmounts,
+  monthOf,
+  monthsBetween,
+} from '../../domain/allocation';
 import { sortAccounts } from '../../domain/accountOrder';
 import { todayLocal } from '../../util/time';
 import { entryOpenPlan } from '../entryOpen';
 import type { AllocationsTarget } from './Allocations';
-import { cashflowHorizonMonths } from '../../data/localFlags';
 import type { Account, JournalEntry } from '../../domain/types';
 import { Money } from '../money';
-import { TrendChart, type TrendPoint } from '../components/TrendChart';
 import { errorText, t } from '../../i18n';
 import {
   exactDigitsFor,
@@ -41,10 +58,26 @@ import { ScrollTopButton } from '../ScrollTopButton';
 import { sumAmounts } from '../../domain/safeSum';
 import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 
-function shortDateLabel(date: string): string {
-  const [, month, day] = date.split('-');
-  if (!month || !day) return date;
-  return `${Number.parseInt(month, 10)}/${Number.parseInt(day, 10)}`;
+/** 展開の地平の年（下回り日を探す範囲・グラフを伸ばせる上限）。 */
+const HORIZON_YEAR = Number.parseInt(CONTINUOUS_COST_HARD_CAP.slice(0, 4), 10);
+/** グラフの窓の初期値と、「さらに先へ」1 回ぶんの伸び（月）。 */
+const CHART_STEP_MONTHS = 12;
+/** 1 日ぶんの横幅(px)。12 ヶ月 ≒ 730px = 実機幅の 2 画面ぶんで、日次の起伏が潰れない。 */
+const CHART_DAY_WIDTH = 2;
+const CHART_HEIGHT = 168;
+const CHART_PAD_X = 8;
+const CHART_PLOT_TOP = 12;
+/** これより下は月目盛りのラベル帯。 */
+const CHART_PLOT_BOTTOM = 132;
+
+function utcMs(date: string): number {
+  const [year, month, day] = date.split('-').map(Number);
+  return Date.UTC(year ?? 1970, (month ?? 1) - 1, day ?? 1);
+}
+
+/** to − from（日数）。グラフの横位置は「日」で決まる（点の個数では決まらない）。 */
+function daysBetween(from: string, to: string): number {
+  return Math.round((utcMs(to) - utcMs(from)) / 86_400_000);
 }
 
 /** 仕訳がこの負債（借方）へ返す金額（返済仕訳の表示額）。 */
@@ -57,11 +90,14 @@ function repaymentAmountOf(entry: JournalEntry, liabilityId: string): number {
 }
 
 export function Cashflow({
+  period,
   onEditEntry,
   onOpenAllocations,
   onOpenAccount,
   onOpenEntry,
 }: {
+  /** ヘッダーの日付（基準日の正本）。 */
+  period: ReportPeriod;
   onEditEntry: (entry: JournalEntry) => void;
   /** 仕訳タップの行き先（entryOpenPlan の実行先）。仕訳一覧・ホームと同じ resolver。 */
   onOpenAllocations: (target: AllocationsTarget) => void;
@@ -69,40 +105,84 @@ export function Cashflow({
   onOpenEntry: (entryId: string) => void;
 }) {
   const { ledger } = useLedger();
-  const today = todayLocal();
-  const basis = useMemo(() => reportBasis({ mode: 'all' }, today), [today]);
-  const reportDisplay = useMemo(
-    () => (ledger ? displayEntriesResultForAsOf(ledger, basis.asOf) : null),
-    [basis.asOf, ledger],
-  );
-  const reportEntries = useMemo(() => reportDisplay?.entries ?? [], [reportDisplay]);
-  // 表示終了日。**開くたびに「今日 + 既定の期間（設定画面・端末設定）」へ戻る**。
-  // 画面内の変更はその場限りで持ち帰らない（普段は既定で見たい・一時的に伸ばしても
-  // 次回は既定に戻っていてほしい・作者決定 2026-08-14）。
-  const [untilDate, setUntilDate] = useState(() =>
-    addMonthsToDate(todayLocal(), cashflowHorizonMonths()),
-  );
+
+  /*
+   * 基準日 = ヘッダーの日付。year / all はヘッダーから選べない休眠モードなので、
+   * 期間末 / todayLocal() を**デフォルト値**として置くだけ（today 規約 (a)。表示のアンカーを
+   * today にする経路はここには無い）。
+   */
+  const anchorDate = useMemo(() => {
+    const raw =
+      period.mode === 'date'
+        ? period.date
+        : period.mode === 'year'
+          ? `${String(period.year).padStart(4, '0')}-12-31`
+          : todayLocal();
+    return raw < CONTINUOUS_COST_HARD_CAP ? raw : CONTINUOUS_COST_HARD_CAP;
+  }, [period]);
+
+  // グラフの窓（基準日から何ヶ月ぶん描くか）。「さらに先へ」で +12 ヶ月・地平で止まる。
+  const [windowMonths, setWindowMonths] = useState(CHART_STEP_MONTHS);
+  const windowEnd = useMemo(() => {
+    const raw = addMonthsToDate(anchorDate, windowMonths);
+    return raw < CONTINUOUS_COST_HARD_CAP ? raw : CONTINUOUS_COST_HARD_CAP;
+  }, [anchorDate, windowMonths]);
+  const canExtend = windowEnd < CONTINUOUS_COST_HARD_CAP;
+
   const [repayFor, setRepayFor] = useState<{ account: Account; balance: number } | null>(null);
   // 負債行の展開（登録済みの返済リスト）。行タップ = 新規返済シートとは独立に開閉する。
   const [openRepayments, setOpenRepayments] = useState<ReadonlySet<string>>(new Set());
 
   const currency = ledger?.settings.currency ?? '';
 
-  const { projection, liabBalById, futureRows, investmentProjectionTruncations } = useMemo(() => {
+  /*
+   * 導出は**地平まで 1 回だけ**。ここから (a) 基準日断面の残高 (b) 下回り日 (c) グラフの点列
+   * (d) 未来の入出金一覧、をすべて派生させる（画面が展開を何度も走らせない）。
+   * 展開は保存データだけで決まるので、地平を伸ばしても過去の断面は変わらない
+   * （reportEntries.ts の不変則）。
+   */
+  const display = useMemo(
+    () => (ledger ? displayEntriesResultForAsOf(ledger, CONTINUOUS_COST_HARD_CAP) : null),
+    [ledger],
+  );
+  const entries = useMemo(() => display?.entries ?? [], [display]);
+
+  const { projection, liabBalById, freeIds } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = reportEntries;
-    const bs = deriveBalanceSheet(accounts, entries, today);
-    const liabById = new Map(bs.liabilities.map((l) => [l.account.id, l.balance] as const));
-    const freeIds = new Set(accounts.filter((a) => isFreeAsset(a)).map((a) => a.id));
-    const isFree = (id: string) => freeIds.has(id);
+    const bs = deriveBalanceSheet(accounts, entries, anchorDate);
+    const ids = new Set(accounts.filter((a) => isFreeAsset(a)).map((a) => a.id));
+    const isFree = (id: string) => ids.has(id);
     const startFree = freeAssetTotal(bs.assets);
-    const end = untilDate;
-    // 投影の入力 = 導出込み仕訳（displayEntriesForAsOf を表示終了日まで展開した結果）。
-    const futureDisplay = ledger ? displayEntriesResultForAsOf(ledger, end) : null;
-    const futureEntries = futureDisplay?.entries ?? [];
-    const future = uniqueEntriesById(
-      futureEntries.filter(
-        (e) => e.date > today && e.date <= end && e.lines.some((l) => isFree(l.accountId)),
+    return {
+      freeIds: ids,
+      liabBalById: new Map(bs.liabilities.map((l) => [l.account.id, l.balance] as const)),
+      // 下回り日は地平まで探す（遠い未来の枯渇も見つける）。グラフは窓で切って描く。
+      projection: projectCashflow({
+        startFree,
+        entries,
+        anchorDate,
+        end: CONTINUOUS_COST_HARD_CAP,
+        isFree,
+      }),
+    };
+  }, [ledger, entries, anchorDate]);
+
+  const shortfall = useMemo(() => firstShortfallPoint(projection), [projection]);
+  const windowPoints = useMemo(
+    () => projection.points.filter((p) => p.date <= windowEnd),
+    [projection, windowEnd],
+  );
+
+  const accountName = (id: string): string =>
+    (ledger?.accounts ?? []).find((a) => a.id === id)?.name ?? '—';
+
+  // 未来の入出金一覧の範囲 = いまグラフを開いている範囲。
+  const futureRows = useMemo(() => {
+    const isFree = (id: string) => freeIds.has(id);
+    return uniqueEntriesById(
+      entries.filter(
+        (e) =>
+          e.date > anchorDate && e.date <= windowEnd && e.lines.some((l) => isFree(l.accountId)),
       ),
     )
       .map((e) => ({
@@ -115,57 +195,39 @@ export function Cashflow({
         entry: e,
       }))
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-    return {
-      liabBalById: liabById,
-      futureRows: future,
-      projection: projectCashflow({
-        startFree,
-        entries: futureEntries,
-        today,
-        isFree,
-        untilDate: end,
-      }),
-      investmentProjectionTruncations: futureDisplay?.investmentProjectionTruncations ?? [],
-    };
-  }, [ledger, reportEntries, untilDate, today]);
+  }, [entries, anchorDate, windowEnd, freeIds]);
 
-  const accountName = (id: string): string =>
-    (ledger?.accounts ?? []).find((a) => a.id === id)?.name ?? '—';
-  const freeTrend: TrendPoint[] = projection.points.map((p, i) => ({
-    key: `${p.date}-${i}`,
-    label: shortDateLabel(i === 0 ? today : p.date),
-    value: p.free,
-  }));
-
+  /*
+   * 負債一覧は**基準日断面**で導出残高 ≠ 0 のものだけ（role 条件は維持）。
+   * 「残高 0 だが返済予定だけ残っている」行は出さない = 一覧の規則を断面に一本化する。
+   */
   const liabilitySummary = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const entries = ledger?.journalEntries ?? [];
+    const stored = ledger?.journalEntries ?? [];
     return sortAccounts(accounts)
       .filter((a) => a.role === 'payment-liability' || a.role === 'other-liability')
       .map((a) => {
-        // 返済予定 = 未来日付の返済実仕訳（借方がこの負債）。
-        const repayments = entries
+        // 返済予定 = 基準日より後の返済実仕訳（借方がこの負債）。
+        const repayments = stored
           .filter(
             (e) =>
-              e.date > today && e.lines.some((l) => l.side === 'debit' && l.accountId === a.id),
+              e.date > anchorDate &&
+              e.lines.some((l) => l.side === 'debit' && l.accountId === a.id),
           )
           .sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
-        const remaining = sumAmounts(repayments.map((e) => repaymentAmountOf(e, a.id)));
-        const count = repayments.length;
-        const nextDue = repayments.map((e) => e.date).sort()[0];
         return {
           id: a.id,
           account: a,
           name: a.name,
-          count,
+          count: repayments.length,
           repayments,
-          remaining,
-          nextDue,
+          remaining: sumAmounts(repayments.map((e) => repaymentAmountOf(e, a.id))),
+          nextDue: repayments[0]?.date,
           balance: liabBalById.get(a.id) ?? 0,
         };
       })
-      .filter((x) => x.count > 0 || x.balance !== 0);
-  }, [ledger, liabBalById, today]);
+      .filter((x) => x.balance !== 0);
+  }, [ledger, liabBalById, anchorDate]);
 
   const toggleRepayments = (id: string) =>
     setOpenRepayments((prev) => {
@@ -185,64 +247,60 @@ export function Cashflow({
       </p>
 
       <InvestmentProjectionTruncationNotice
-        truncations={investmentProjectionTruncations}
+        truncations={display?.investmentProjectionTruncations ?? []}
         accounts={ledger?.accounts ?? []}
       />
 
-      <TextInput
-        label={t('cashflow.until')}
-        type="date"
-        value={untilDate}
-        hint={t('cashflow.untilHint')}
-        onChange={setUntilDate}
-        dataUi={UI.cashflow.until}
-      />
-
-      <div
-        className="stat-grid"
-        data-ui={UI.cashflow.summary}
-        style={{ marginTop: 'var(--space-3)' }}
-      >
+      <div className="stat-grid stat-grid--single" data-ui={UI.cashflow.summary}>
         <div className="stat">
-          <span className="stat__label">{t('cashflow.freeFunds')}</span>
+          <span className="stat__label">{t('cashflow.freeFundsAsOf', { date: anchorDate })}</span>
           <span className="stat__value">
             <Money amount={projection.startFree} currency={currency} signed />
           </span>
         </div>
       </div>
 
-      <div className="card card--pad" style={{ marginTop: 'var(--space-3)' }}>
-        <div className="kv">
-          <span className="muted">{t('cashflow.minFree')}</span>
-          <span>
-            <Money amount={projection.minFree} currency={currency} signed />
-          </span>
-        </div>
-      </div>
-
-      {projection.minFree < 0 ? (
-        <div className="banner" role="alert" style={{ marginTop: 'var(--space-3)' }}>
+      {/*
+       * 最低点の金額ではなく「いつ足りなくなるか」を出す。下回りが無いときは静かな 1 行
+       * （警告色を使わない）＝ 警告灯が常時点いている画面にしない。
+       */}
+      {shortfall ? (
+        <div className="banner" role="alert" data-ui={UI.cashflow.shortfall}>
           <Icon name="alert" size={18} />
-          {t('cashflow.depleteWarning')}
+          {t('cashflow.shortfallOn', { date: shortfall.date })}
         </div>
-      ) : null}
+      ) : (
+        <p className="field__hint" data-ui={UI.cashflow.shortfall}>
+          {t('cashflow.shortfallNone', { year: HORIZON_YEAR })}
+        </p>
+      )}
 
-      {freeTrend.length > 1 ? (
-        <TrendChart
-          title={t('cashflow.freeTrendTitle')}
-          data={freeTrend}
-          currency={currency}
-          variant="line"
-          dataUi={UI.cashflow.freeTrend}
-        />
-      ) : null}
+      <FreeFundsChart
+        anchorDate={anchorDate}
+        endDate={windowEnd}
+        points={windowPoints}
+        shortfall={shortfall}
+        currency={currency}
+      />
+      {canExtend ? (
+        <button
+          type="button"
+          className="btn"
+          onClick={() => setWindowMonths((m) => m + CHART_STEP_MONTHS)}
+          data-ui={UI.cashflow.chartExtend}
+        >
+          {t('cashflow.chartExtend', { months: CHART_STEP_MONTHS })}
+        </button>
+      ) : (
+        <p className="field__hint">{t('cashflow.chartAtHorizon', { year: HORIZON_YEAR })}</p>
+      )}
 
       <p className="section-label">{t('cashflow.debtTitle')}</p>
       <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
         {t('cashflow.debtIntro')}
       </p>
       {liabilitySummary.length === 0 ? (
-        <div className="card card--pad empty">{t('cashflow.debtNoPlan')}</div>
+        <div className="card card--pad empty">{t('cashflow.debtNone')}</div>
       ) : (
         <ul className="card list" data-ui={UI.cashflow.liabilityList}>
           {liabilitySummary.map((l) => (
@@ -285,7 +343,7 @@ export function Cashflow({
                 </div>
                 <Icon name="chevronRight" size={18} />
               </button>
-              {/* 展開 = 登録済みの返済（未来日付の保存仕訳・借方 = この負債）。タップで編集。 */}
+              {/* 展開 = 登録済みの返済（基準日より後の保存仕訳・借方 = この負債）。タップで編集。 */}
               {l.repayments.length > 0 ? (
                 <>
                   <button
@@ -327,7 +385,7 @@ export function Cashflow({
 
       <p className="section-label">{t('cashflow.futureTitle')}</p>
       <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
-        {t('cashflow.futureIntro')}
+        {t('cashflow.futureIntro', { from: anchorDate, to: windowEnd })}
       </p>
       {futureRows.length === 0 ? (
         <div className="card card--pad empty">{t('cashflow.futureEmpty')}</div>
@@ -405,6 +463,148 @@ export function Cashflow({
 }
 
 /**
+ * 「自由に動かせるお金」の日次折れ線（基準日起点・右方向へ横スクロール）。
+ *
+ * 残高は**階段関数**（動いた日だけ変わる）なので、点と点を斜めに結ばず次の変化日まで
+ * 水平に引く。横位置は日数に比例させる（点の個数では決めない）ので、間隔の空いた区間が
+ * 詰まって見えない。基準日より過去へは遡らない（過去はヘッダーの日付を戻して見る）。
+ *
+ * v13.5 で時間平面へ統合する予定なので、TimelineCalendar との共通化はまだしない。
+ */
+function FreeFundsChart({
+  anchorDate,
+  endDate,
+  points,
+  shortfall,
+  currency,
+}: {
+  anchorDate: string;
+  endDate: string;
+  points: CashflowPoint[];
+  shortfall: CashflowPoint | null;
+  currency: string;
+}) {
+  const digits = useMoneyDigits();
+  const span = Math.max(1, daysBetween(anchorDate, endDate));
+  const width = CHART_PAD_X * 2 + span * CHART_DAY_WIDTH;
+  const xOf = (date: string): number =>
+    CHART_PAD_X + Math.min(span, Math.max(0, daysBetween(anchorDate, date))) * CHART_DAY_WIDTH;
+
+  const values = points.map((p) => p.free);
+  const lowest = values.reduce((m, v) => Math.min(m, v), values[0] ?? 0);
+  const highest = values.reduce((m, v) => Math.max(m, v), values[0] ?? 0);
+  // 0 は必ず目盛りに入れる（「足りているか」が読み取れる縦軸にする）。
+  const top = Math.max(0, highest);
+  const bottom = Math.min(0, lowest);
+  const range = top - bottom || 1;
+  const plotH = CHART_PLOT_BOTTOM - CHART_PLOT_TOP;
+  const yOf = (value: number): number => CHART_PLOT_TOP + ((top - value) / range) * plotH;
+
+  const line: string[] = [];
+  let previousY = yOf(points[0]?.free ?? 0);
+  line.push(`${xOf(anchorDate)},${previousY}`);
+  for (const point of points.slice(1)) {
+    const x = xOf(point.date);
+    line.push(`${x},${previousY}`);
+    previousY = yOf(point.free);
+    line.push(`${x},${previousY}`);
+  }
+  line.push(`${width - CHART_PAD_X},${previousY}`);
+
+  // 月目盛り。窓が長いほど間引く（74 年ぶんのラベルを全部描かない）。
+  const totalMonths = monthsBetween(monthOf(anchorDate), monthOf(endDate));
+  const tickStep = totalMonths <= 18 ? 1 : totalMonths <= 60 ? 3 : totalMonths <= 240 ? 12 : 60;
+  const ticks: { key: string; x: number; label: string }[] = [];
+  for (let i = 0; i <= totalMonths; i += tickStep) {
+    const month = addMonths(monthOf(anchorDate), i);
+    const date = `${month}-01`;
+    if (date < anchorDate || date > endDate) continue;
+    const [year, mm] = month.split('-');
+    ticks.push({
+      key: month,
+      x: xOf(date),
+      label:
+        tickStep >= 12 || mm === '01'
+          ? t('cashflow.chartTickYear', { year: Number.parseInt(year ?? '0', 10) })
+          : t('cashflow.chartTickMonth', { month: Number.parseInt(mm ?? '0', 10) }),
+    });
+  }
+
+  const marker = shortfall !== null && shortfall.date >= anchorDate && shortfall.date <= endDate;
+
+  return (
+    <figure className="cashflow-chart" data-ui={UI.cashflow.freeTrend}>
+      <figcaption className="section-label">
+        {t('cashflow.chartTitle', { from: anchorDate, to: endDate })}
+      </figcaption>
+      <div className="cashflow-chart__viewport" data-ui={UI.cashflow.chartViewport}>
+        <svg
+          className="cashflow-chart__svg"
+          width={width}
+          height={CHART_HEIGHT}
+          viewBox={`0 0 ${width} ${CHART_HEIGHT}`}
+          aria-hidden="true"
+          focusable="false"
+        >
+          <line
+            className="cashflow-chart__zero"
+            x1={CHART_PAD_X}
+            x2={width - CHART_PAD_X}
+            y1={yOf(0)}
+            y2={yOf(0)}
+          />
+          {ticks.map((tick) => (
+            <g key={tick.key}>
+              <line
+                className="cashflow-chart__gridline"
+                x1={tick.x}
+                x2={tick.x}
+                y1={CHART_PLOT_TOP}
+                y2={CHART_PLOT_BOTTOM}
+              />
+              <text className="cashflow-chart__tick" x={tick.x + 2} y={CHART_HEIGHT - 8}>
+                {tick.label}
+              </text>
+            </g>
+          ))}
+          <polyline className="cashflow-chart__line" points={line.join(' ')} />
+          {marker ? (
+            <>
+              <line
+                className="cashflow-chart__shortfall"
+                x1={xOf(shortfall.date)}
+                x2={xOf(shortfall.date)}
+                y1={CHART_PLOT_TOP}
+                y2={CHART_PLOT_BOTTOM}
+              />
+              <circle
+                className="cashflow-chart__shortfall-dot"
+                cx={xOf(shortfall.date)}
+                cy={yOf(shortfall.free)}
+                r={3.5}
+              />
+            </>
+          ) : null}
+        </svg>
+      </div>
+      <p className="sr-only">
+        {t('cashflow.chartSummary', {
+          from: anchorDate,
+          start: formatMoney(points[0]?.free ?? 0, currency, digits),
+          to: endDate,
+          end: formatMoney(points.at(-1)?.free ?? 0, currency, digits),
+          low: formatMoney(lowest, currency, digits),
+        })}
+      </p>
+      <p className="cashflow-chart__end muted">
+        {t('cashflow.chartEnd', { date: endDate })}
+        <Money amount={points.at(-1)?.free ?? 0} currency={currency} signed />
+      </p>
+    </figure>
+  );
+}
+
+/**
  * カード・ローンの返済計画を登録するシート（負債の行タップで開く）。
  * 勘定科目の返済設定（返済口座・毎月の返済日）が既定値になる。金額の既定はいまの残高（全額）。
  *  - 回数 1（既定）: カードの次回引落など、支払日の振替仕訳（借方 負債 / 貸方 返済口座）を 1 本。
@@ -423,6 +623,7 @@ function RepaymentScheduleSheet({
   const { ledger, createRepaymentEntries } = useLedger();
   const accounts = ledger?.accounts ?? [];
   const currency = ledger?.settings.currency ?? '';
+  // 書込フォームの**日付の既定値**（today 規約 (a)）。表示の導出には使わない。
   const today = todayLocal();
 
   const fromOptions = sortAccounts(accounts)

@@ -4,7 +4,7 @@
  * また storage-error の importErrorMessage マッピングを確認する。
  */
 import { afterEach, beforeAll, describe, it, expect, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import './setup';
@@ -13,7 +13,6 @@ import { t } from '../src/i18n';
 import { importErrorMessage, Settings } from '../src/ui/screens/Settings';
 import { LedgerProvider } from '../src/state/store';
 import * as repo from '../src/data/repository';
-import { cashflowHorizonMonths } from '../src/data/localFlags';
 
 beforeAll(() => {
   patchDialogIfNeeded();
@@ -95,30 +94,5 @@ describe('Settings — スナップショット失敗', () => {
     await waitFor(() => {
       expect(screen.queryByText(t('snapshot.empty'))).not.toBeInTheDocument();
     });
-  });
-});
-
-describe('Settings — 資金繰りの既定表示期間（端末設定）', () => {
-  it('確定できる値だけを記憶し、資金繰り画面の初期日付の既定になる', async () => {
-    render(
-      <ToastProvider>
-        <LedgerProvider>
-          <Settings onNavigate={() => undefined} onOpenOnboarding={() => undefined} />
-        </LedgerProvider>
-      </ToastProvider>,
-    );
-    const input = (await screen.findByLabelText(
-      '資金繰りの表示期間（ヶ月・既定）',
-    )) as HTMLInputElement;
-    expect(input.value).toBe('6'); // 既定
-
-    fireEvent.change(input, { target: { value: '12' } });
-    expect(cashflowHorizonMonths()).toBe(12);
-
-    // 範囲外・空は記憶しない（前回の確定値のまま）。
-    fireEvent.change(input, { target: { value: '' } });
-    expect(cashflowHorizonMonths()).toBe(12);
-    fireEvent.change(input, { target: { value: '0' } });
-    expect(cashflowHorizonMonths()).toBe(12);
   });
 });

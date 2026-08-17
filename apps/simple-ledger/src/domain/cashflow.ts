@@ -5,8 +5,10 @@
  *  - 投影の原資は**「自由に動かせるお金」1 値**（daily-asset かつ movable !== false で、
  *    基準日に存在する科目の残高合計）。総資金/自由資金という 2 段の概念は持たない。
  *    貸借対照表・資産内訳は従来どおり全資産を出す（資金繰りだけ絞る）。
- *  - 投影の入力は導出込み仕訳（displayEntriesForAsOf を表示終了日まで展開した結果）。
+ *  - 投影の入力は導出込み仕訳（displayEntriesForAsOf を地平まで展開した結果）。
  *    未来日付の実仕訳・継続コストの導出行・定期ルールの投影が同じ列で扱われる。
+ *  - 起点は **today ではなくヘッダーの日付（基準日 = anchorDate）**（v13.4 ③）。資金繰りは
+ *    タイムスリップに追従し、過去の断面でもその日から先を投影する。この層に today は無い。
  */
 import { addMonths, monthOf } from './allocation';
 import type { Account, AccountBalance, JournalEntry } from './types';
@@ -42,21 +44,18 @@ export interface CashflowPoint {
 }
 
 export interface CashflowProjection {
-  /** today 時点の「自由に動かせるお金」。 */
+  /** 基準日（points[0]）時点の「自由に動かせるお金」。 */
   startFree: number;
+  /**
+   * 基準日から終端までの推移。points[0] は必ず基準日で、以降は「自由に動かせるお金」に
+   * ふれる仕訳がある**日ごと**に 1 点（同じ日は 1 点にまとめる）。
+   */
   points: CashflowPoint[];
-  /** 投影期間中の最低額。 */
-  minFree: number;
 }
 
 /** 同じ仮想仕訳が複数の投影経路から渡されても、未来 CF では 1 回だけ扱う。 */
 export function uniqueEntriesById(entries: JournalEntry[]): JournalEntry[] {
   return [...new Map(entries.map((entry) => [entry.id, entry])).values()];
-}
-
-/** 月数ぶん先の期間上限（'YYYY-MM-31' の文字列比較で十分）。 */
-export function horizonEnd(today: string, months: number): string {
-  return `${addMonths(monthOf(today), months)}-31`;
 }
 
 /**
@@ -102,50 +101,86 @@ export function cashDeltaOfEntry(
   return delta;
 }
 
+/** 1 日ぶんの「自由に動かせるお金」の純増減。 */
+export interface CashflowDayDelta {
+  date: string;
+  amount: number;
+}
+
 /**
- * 未来日付の導出込み仕訳を期日順に適用して将来残高を投影する。
+ * 基準日より後・`until` までの、日ごとの「自由に動かせるお金」の純増減（日付昇順）。
  *
- * `entries` は displayEntriesForAsOf を表示終了日まで展開した結果を渡す（導出込み仕訳が
- * 投影の唯一の入力）。startFree は today 時点の残高なので、today より後の仕訳だけを積む。
+ * 同じ日に複数の仕訳があっても 1 点にまとめる。台帳は日の中の順序を持たないので、
+ * 日中の並べ方次第で一瞬だけマイナスに見える谷を作らない（「その日を終えた時点」で見る）。
+ * これで折れ線の点と下回り日の判定が同じ粒度に揃う。
+ *
  * 同一 ID の重複（複数の投影経路から来た仮想仕訳）は 1 回だけ数え、
  * 「自由に動かせるお金」にふれない仕訳は点を作らない。
- *
- * 終端は `untilDate`（表示終了日）を指定すればそこまで、無ければ `months` ぶん先（既定 6 か月）。
  */
-export function projectCashflow(params: {
-  /** today 時点の「自由に動かせるお金」（freeAssetTotal の結果）。 */
-  startFree: number;
-  /** 導出込み仕訳（displayEntriesForAsOf を表示終了日まで展開した結果）。 */
+export function cashflowDayDeltas(params: {
+  /** 導出込み仕訳（displayEntriesForAsOf を地平まで展開した結果）。 */
   entries: JournalEntry[];
-  today: string;
+  /** 基準日。この日**より後**の仕訳だけを積む（基準日までは startFree に含み済み）。 */
+  after: string;
+  /** 終端 'YYYY-MM-DD'。この日**まで**を含む。 */
+  until: string;
   /** 「自由に動かせるお金」に数える科目か（cashDeltaOfEntry と同じ判定を渡す）。 */
   isFree: (accountId: string) => boolean;
-  /** 月数ぶん先を終端にする（後方互換）。`untilDate` 指定時は無視される。 */
-  months?: number;
-  /** 表示終了日 'YYYY-MM-DD'。指定時はこの日までを投影する（months より優先）。 */
-  untilDate?: string;
-}): CashflowProjection {
-  const { startFree, entries, today, isFree } = params;
-  const end = params.untilDate ?? horizonEnd(today, params.months ?? 6);
-  const events = uniqueEntriesById(entries)
-    .filter(
-      (entry) =>
-        entry.date > today &&
-        entry.date <= end &&
-        entry.lines.some((line) => isFree(line.accountId)),
-    )
-    .map((entry) => ({ date: entry.date, amount: cashDeltaOfEntry(entry, isFree) }))
-    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-
-  const checkedStartFree = assertSafeAmount(startFree);
-  const points: CashflowPoint[] = [{ date: today, free: checkedStartFree }];
-  let free = checkedStartFree;
-  for (const e of events) {
-    free = assertSafeAmount(free + e.amount);
-    points.push({ date: e.date, free });
+}): CashflowDayDelta[] {
+  const { entries, after, until, isFree } = params;
+  const byDate = new Map<string, number>();
+  for (const entry of uniqueEntriesById(entries)) {
+    if (entry.date <= after || entry.date > until) continue;
+    if (!entry.lines.some((line) => isFree(line.accountId))) continue;
+    byDate.set(
+      entry.date,
+      assertSafeAmount((byDate.get(entry.date) ?? 0) + cashDeltaOfEntry(entry, isFree)),
+    );
   }
+  return [...byDate]
+    .map(([date, amount]) => ({ date, amount }))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
 
-  const minFree = points.reduce((m, p) => Math.min(m, p.free), checkedStartFree);
+/**
+ * 基準日以降の導出込み仕訳を日付順に適用して残高の推移を投影する。
+ *
+ * `entries` は displayEntriesForAsOf を地平まで展開した結果を渡す（導出込み仕訳が投影の
+ * 唯一の入力）。`startFree` は**基準日時点**の残高なので、基準日より後の仕訳だけを積む。
+ * 終端 `end` は呼び出し側が明示する（画面の窓 = 基準日 + N ヶ月、下回り日の探索 = 地平）。
+ */
+export function projectCashflow(params: {
+  /** 基準日時点の「自由に動かせるお金」（freeAssetTotal の結果）。 */
+  startFree: number;
+  /** 導出込み仕訳（displayEntriesForAsOf を地平まで展開した結果）。 */
+  entries: JournalEntry[];
+  /** 起点 = ヘッダーの日付（基準日）。points[0] はこの日になる。 */
+  anchorDate: string;
+  /** 終端 'YYYY-MM-DD'（境界を含む）。既定は持たない。 */
+  end: string;
+  /** 「自由に動かせるお金」に数える科目か（cashDeltaOfEntry と同じ判定を渡す）。 */
+  isFree: (accountId: string) => boolean;
+}): CashflowProjection {
+  const { startFree, entries, anchorDate, end, isFree } = params;
+  const checkedStartFree = assertSafeAmount(startFree);
+  const points: CashflowPoint[] = [{ date: anchorDate, free: checkedStartFree }];
+  let free = checkedStartFree;
+  for (const delta of cashflowDayDeltas({ entries, after: anchorDate, until: end, isFree })) {
+    free = assertSafeAmount(free + delta.amount);
+    points.push({ date: delta.date, free });
+  }
+  return { startFree: checkedStartFree, points };
+}
 
-  return { startFree: checkedStartFree, points, minFree };
+/**
+ * 基準日以降で「自由に動かせるお金」が**最初に 0 を下回る**点。無ければ null。
+ *
+ *  - ちょうど 0 は下回りではない（払えている）。厳密に負のときだけ拾う。
+ *  - 基準日当日に負なら基準日そのものを返す（points[0] = 基準日）。
+ *  - **基準日より前**の下回りは見ない。points は基準日から始まる＝過去の谷は startFree に
+ *    織り込み済みで、そこへ戻る手段は「ヘッダーの日付を戻す」しかない。
+ *  - どこまで探すかは projection の終端が決める（画面は地平まで投影して渡す）。
+ */
+export function firstShortfallPoint(projection: CashflowProjection): CashflowPoint | null {
+  return projection.points.find((point) => point.free < 0) ?? null;
 }

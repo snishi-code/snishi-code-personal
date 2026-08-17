@@ -179,6 +179,38 @@ test('タイムラインは 390px でページを横にはみ出さず、表示�
   });
 });
 
+test('資金繰りのグラフは 390px でページを横にはみ出さず、表示領域内だけを横スクロールできる', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
+  await page.goto('./?fixture=sample');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.cashflow')).click();
+  await expect(page.locator(ui('cashflow.view'))).toBeVisible();
+
+  // グラフの幅は「窓の日数 × 1 日あたりの px」なので、必ず実機幅より広くなる。
+  // はみ出す先は viewport の中だけ = ページ本体は横スクロールしない。
+  const viewport = page.locator(ui('cashflow.chart.viewport'));
+  await expect(viewport).toBeVisible();
+  await expectNoHorizontalScroll(page, 'cashflow mobile-390x844');
+  const widthBefore = await viewport.evaluate((el) => el.scrollWidth);
+  expect(widthBefore, 'mobile: グラフの表示領域内で横スクロールできる').toBeGreaterThan(
+    await viewport.evaluate((el) => el.clientWidth),
+  );
+
+  // 「さらに先へ」で窓が伸びても、はみ出しは viewport の中に留まる。
+  await page.locator(ui('cashflow.chart.extend')).click();
+  await expect.poll(() => viewport.evaluate((el) => el.scrollWidth)).toBeGreaterThan(widthBefore);
+  await expectNoHorizontalScroll(page, 'cashflow extended mobile-390x844');
+  await page.screenshot({
+    path: 'test-results/screenshots/ledger-cashflow-mobile-390x844.png',
+    fullPage: true,
+  });
+});
+
 /**
  * 当日の支出を n 件登録する（ホームを実際にスクロールさせるため）。
  * 保存トーストは画面下端の記帳バーに重なり次のクリックを遮るので、都度タップして閉じる。

@@ -147,6 +147,11 @@
   grid-template-columns: repeat(3, 1fr);
   gap: var(--space-2);
 }
+/* 値が 1 つだけの stat-grid（資金繰りの「自由に動かせるお金」）。3 列のままだと
+   1/3 幅に押し込まれてラベルも金額も折り返す。 */
+.stat-grid--single {
+  grid-template-columns: 1fr;
+}
 .stat {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -816,6 +821,64 @@ button.timeline-calendar__row-label {
 }
 .period-context__sep {
   color: var(--muted);
+}
+
+/* ── 資金繰りのグラフ（基準日起点・右へ伸ばす日次折れ線） ──
+   TrendChart（固定幅 320x140・バケット数で横位置が決まる）とは別物。ここは横位置が
+   **日数**に比例し、幅が窓の長さで伸びるため viewport でスクロールさせる。 */
+.cashflow-chart {
+  margin: var(--space-3) 0 var(--space-2);
+  min-width: 0;
+}
+.cashflow-chart__viewport {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.cashflow-chart__svg {
+  display: block;
+}
+.cashflow-chart__zero {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.cashflow-chart__gridline {
+  stroke: var(--border);
+  stroke-width: 1;
+  opacity: 0.4;
+}
+.cashflow-chart__tick {
+  fill: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.cashflow-chart__line {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.cashflow-chart__shortfall {
+  stroke: var(--neg);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+.cashflow-chart__shortfall-dot {
+  fill: var(--neg);
+}
+.cashflow-chart__end {
+  margin: var(--space-1) 0 0;
+  font-size: 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── トレンドチャート（自前 SVG） ── */

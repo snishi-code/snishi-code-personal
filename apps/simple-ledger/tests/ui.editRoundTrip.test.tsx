@@ -384,7 +384,13 @@ describe('打ち消しの額は表示桁 0 でも丸めない', () => {
     render(
       <Providers>
         <Ready>
-          <Cashflow onEditEntry={() => undefined} />
+          <Cashflow
+            period={{ mode: 'date', date: todayLocal() }}
+            onEditEntry={() => undefined}
+            onOpenAllocations={() => undefined}
+            onOpenAccount={() => undefined}
+            onOpenEntry={() => undefined}
+          />
         </Ready>
       </Providers>,
     );

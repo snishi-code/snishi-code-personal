@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import './setup';
 import {
   cashDeltaOfEntry,
+  cashflowDayDeltas,
+  firstShortfallPoint,
   freeAssetTotal,
-  horizonEnd,
   isFreeAsset,
   projectCashflow,
   uniqueEntriesById,
 } from '../src/domain/cashflow';
+import { CONTINUOUS_COST_HARD_CAP } from '../src/domain/continuousCost';
 import type { Account, AccountBalance, JournalEntry } from '../src/domain/types';
 import type { AccountRole } from '../src/domain/accountRoles';
 import { LedgerError } from '../src/domain/errors';
@@ -189,23 +191,25 @@ describe('uniqueEntriesById', () => {
   });
 });
 
-describe('projectCashflow（未来日付の導出込み仕訳が唯一の入力）', () => {
-  const today = '2026-06-15';
+describe('projectCashflow（基準日起点・終端は明示引数）', () => {
+  // 基準日 = ヘッダーの日付。today ではない（過去日でも同じ規則で先を投影する）。
+  const anchorDate = '2026-06-15';
+  const end = '2026-12-31';
   // 自由に動かせるお金 = bank / cash。suica は movable=false 相当（原資に入れない）。
   const freeIds = new Set(['bank', 'cash']);
   const isFree = (id: string) => freeIds.has(id);
 
-  it('未来の支出仕訳で自由に動かせるお金が減る', () => {
+  it('points[0] は必ず基準日（起点は today ではない）', () => {
     const proj = projectCashflow({
       startFree: 200000,
       entries: [expenseEntry('out', '2026-07-10', 50000)],
-      today,
+      anchorDate,
+      end,
       isFree,
-      months: 3,
     });
     expect(proj.startFree).toBe(200000);
+    expect(proj.points[0]).toEqual({ date: anchorDate, free: 200000 });
     expect(proj.points.at(-1)?.free).toBe(150000);
-    expect(proj.minFree).toBe(150000);
   });
 
   it('振替仕訳（自由 → 自由）は自由に動かせるお金を変えない（点は残る）', () => {
@@ -221,12 +225,12 @@ describe('projectCashflow（未来日付の導出込み仕訳が唯一の入力�
           ],
         }),
       ],
-      today,
+      anchorDate,
+      end,
       isFree,
-      months: 3,
     });
+    expect(proj.points).toHaveLength(2);
     expect(proj.points.at(-1)?.free).toBe(100000);
-    expect(proj.minFree).toBe(100000);
   });
 
   it('振替仕訳（自由 → movable=false）は自由に動かせるお金が減る', () => {
@@ -242,12 +246,11 @@ describe('projectCashflow（未来日付の導出込み仕訳が唯一の入力�
           ],
         }),
       ],
-      today,
+      anchorDate,
+      end,
       isFree,
-      months: 3,
     });
     expect(proj.points.at(-1)?.free).toBe(90000);
-    expect(proj.minFree).toBe(90000);
   });
 
   it('movable=false の口座だけにふれる仕訳は投影に乗らない', () => {
@@ -257,33 +260,33 @@ describe('projectCashflow（未来日付の導出込み仕訳が唯一の入力�
         incomeEntry('in', '2026-06-20', 5000, 'suica'),
         expenseEntry('out', '2026-06-25', 3000, 'suica'),
       ],
-      today,
+      anchorDate,
+      end,
       isFree,
-      months: 3,
     });
     expect(proj.points).toHaveLength(1);
     expect(proj.points.at(-1)?.free).toBe(100000);
-    expect(proj.minFree).toBe(100000);
   });
 
-  it('表示期間より先の仕訳は含めない', () => {
+  it('終端 end までを含み、その先は含めない（境界は含む）', () => {
     const proj = projectCashflow({
       startFree: 100000,
-      entries: [expenseEntry('far', '2027-01-10', 1000)],
-      today,
+      entries: [expenseEntry('a', '2026-07-31', 10000), expenseEntry('b', '2026-08-01', 20000)],
+      anchorDate,
+      end: '2026-07-31',
       isFree,
-      months: 3,
     });
-    expect(proj.points).toHaveLength(1);
+    expect(proj.points).toHaveLength(2);
+    expect(proj.points.at(-1)?.free).toBe(90000);
   });
 
-  it('today 以前の仕訳は startFree に含み済みとして無視する', () => {
+  it('基準日当日までの仕訳は startFree に含み済みとして無視する', () => {
     const proj = projectCashflow({
       startFree: 100000,
-      entries: [expenseEntry('past', '2026-06-15', 1000)],
-      today,
+      entries: [expenseEntry('past', anchorDate, 1000), expenseEntry('older', '2026-01-05', 5000)],
+      anchorDate,
+      end,
       isFree,
-      months: 3,
     });
     expect(proj.points).toHaveLength(1);
     expect(proj.points.at(-1)?.free).toBe(100000);
@@ -294,71 +297,124 @@ describe('projectCashflow（未来日付の導出込み仕訳が唯一の入力�
     const proj = projectCashflow({
       startFree: 100000,
       entries: [e, { ...e }],
-      today,
+      anchorDate,
+      end,
       isFree,
-      months: 3,
     });
     expect(proj.points).toHaveLength(2);
     expect(proj.points.at(-1)?.free).toBe(70000);
   });
 
-  it('入金仕訳で増える / minFree は最小', () => {
+  it('同じ日の仕訳は 1 点にまとめる（日中の並び順で谷を作らない）', () => {
     const proj = projectCashflow({
       startFree: 10000,
-      entries: [expenseEntry('a', '2026-06-20', 8000), incomeEntry('b', '2026-06-25', 30000)],
-      today,
+      entries: [
+        expenseEntry('out', '2026-07-10', 8000),
+        incomeEntry('in', '2026-07-10', 30000),
+        expenseEntry('later', '2026-08-10', 2000),
+      ],
+      anchorDate,
+      end,
       isFree,
-      months: 3,
     });
-    // 10000 → 2000 → 32000。最低額は 2000。
-    expect(proj.minFree).toBe(2000);
-    expect(proj.points.at(-1)?.free).toBe(32000);
+    // 7/10 は 1 点（+22,000 の合算）・8/10 で 1 点。基準日を入れて 3 点。
+    expect(proj.points).toHaveLength(3);
+    expect(proj.points[1]).toEqual({ date: '2026-07-10', free: 32000 });
+    expect(proj.points.at(-1)?.free).toBe(30000);
   });
 });
 
-describe('horizonEnd', () => {
-  it('月数ぶん先の上限', () => {
-    expect(horizonEnd('2026-06-15', 3)).toBe('2026-09-31');
-    expect(horizonEnd('2026-11-01', 3)).toBe('2027-02-31');
-  });
-});
-
-describe('projectCashflow（表示終了日 untilDate）', () => {
-  const today = '2026-06-15';
+describe('cashflowDayDeltas（日ごとの純増減）', () => {
   const isFree = (id: string) => id === 'bank';
-  it('untilDate までの仕訳だけを取り込む（境界含む）', () => {
-    const proj = projectCashflow({
-      startFree: 100000,
-      entries: [expenseEntry('a', '2026-07-31', 10000), expenseEntry('b', '2026-08-01', 20000)],
-      today,
+  it('基準日より後・until までを日付昇順で合算する', () => {
+    const deltas = cashflowDayDeltas({
+      entries: [
+        expenseEntry('b', '2026-07-10', 3000),
+        expenseEntry('a', '2026-06-20', 1000),
+        incomeEntry('c', '2026-07-10', 5000),
+        expenseEntry('tooLate', '2027-01-01', 9000),
+        expenseEntry('tooEarly', '2026-06-15', 9000),
+      ],
+      after: '2026-06-15',
+      until: '2026-12-31',
       isFree,
-      untilDate: '2026-07-31',
     });
-    // 7-31 は含み、8-01 は範囲外。
-    expect(proj.points).toHaveLength(2);
-    expect(proj.points.at(-1)?.free).toBe(90000);
+    expect(deltas).toEqual([
+      { date: '2026-06-20', amount: -1000 },
+      { date: '2026-07-10', amount: 2000 },
+    ]);
   });
-  it('untilDate は months より優先される', () => {
-    const proj = projectCashflow({
-      startFree: 100000,
-      entries: [expenseEntry('far', '2027-01-10', 5000)],
-      today,
-      isFree,
-      months: 3, // この月数だと 2027-01 は範囲外だが、untilDate で含める。
-      untilDate: '2027-03-31',
-    });
-    expect(proj.points).toHaveLength(2);
-    expect(proj.points.at(-1)?.free).toBe(95000);
+});
+
+describe('firstShortfallPoint（基準日以降で最初に 0 を下回る日）', () => {
+  const anchorDate = '2026-06-15';
+  const isFree = (id: string) => id === 'bank';
+  const horizon = CONTINUOUS_COST_HARD_CAP;
+
+  const shortfallOf = (startFree: number, entries: JournalEntry[], end = horizon) =>
+    firstShortfallPoint(projectCashflow({ startFree, entries, anchorDate, end, isFree }));
+
+  it('基準日当日に負なら基準日そのものを返す', () => {
+    expect(shortfallOf(-500, [])).toEqual({ date: anchorDate, free: -500 });
   });
-  it('未指定なら既定 6 か月で投影する', () => {
-    const proj = projectCashflow({
-      startFree: 100000,
-      entries: [expenseEntry('c', '2026-09-10', 1000)],
-      today,
-      isFree,
+
+  it('ちょうど 0 は下回りではない（払えている）', () => {
+    expect(shortfallOf(0, [])).toBeNull();
+    // 途中でちょうど 0 になるだけの列も下回りではない。
+    expect(shortfallOf(10000, [expenseEntry('exact', '2026-07-01', 10000)])).toBeNull();
+    // 1 円でも足りなければ下回り。
+    expect(shortfallOf(10000, [expenseEntry('over', '2026-07-01', 10001)])).toEqual({
+      date: '2026-07-01',
+      free: -1,
     });
-    // 既定 6 か月（2026-12-31 まで）に含まれる。
-    expect(proj.points).toHaveLength(2);
-    expect(proj.points.at(-1)?.free).toBe(99000);
+  });
+
+  it('基準日より前の下回りはスルーする（過去の谷は startFree に織り込み済み）', () => {
+    // 2026-03 に大きな出金があっても、基準日時点の残高が正なら下回りとして出さない。
+    expect(shortfallOf(50000, [expenseEntry('past', '2026-03-01', 900000)])).toBeNull();
+  });
+
+  it('下回りが無ければ null', () => {
+    expect(
+      shortfallOf(100000, [
+        expenseEntry('a', '2026-07-01', 20000),
+        incomeEntry('b', '2026-08-01', 30000),
+      ]),
+    ).toBeNull();
+  });
+
+  it('最初に下回った日を返す（その後に持ち直しても最初の日）', () => {
+    expect(
+      shortfallOf(10000, [
+        expenseEntry('a', '2026-07-01', 12000),
+        incomeEntry('b', '2026-08-01', 50000),
+        expenseEntry('c', '2026-09-01', 60000),
+      ]),
+    ).toEqual({ date: '2026-07-01', free: -2000 });
+  });
+
+  it('遠い未来（2050 年）の下回りも地平まで探して見つける', () => {
+    expect(shortfallOf(100000, [expenseEntry('far', '2050-04-30', 100001)])).toEqual({
+      date: '2050-04-30',
+      free: -1,
+    });
+    // 地平の最終日でも見つかる（探索範囲の端）。
+    expect(shortfallOf(1000, [expenseEntry('edge', CONTINUOUS_COST_HARD_CAP, 2000)])).toEqual({
+      date: CONTINUOUS_COST_HARD_CAP,
+      free: -1000,
+    });
+  });
+
+  it('同じ日に出て入るだけなら下回らない（日次で合算して判定する）', () => {
+    expect(
+      shortfallOf(1000, [
+        expenseEntry('out', '2026-07-01', 5000),
+        incomeEntry('in', '2026-07-01', 5000),
+      ]),
+    ).toBeNull();
+  });
+
+  it('探索範囲（projection の終端）より先の下回りは見つけない', () => {
+    expect(shortfallOf(1000, [expenseEntry('far', '2027-01-10', 5000)], '2026-12-31')).toBeNull();
   });
 });

@@ -363,7 +363,6 @@ export const UI = {
   },
   cashflow: {
     view: 'cashflow.view',
-    until: 'cashflow.until',
     liabilityList: 'cashflow.liability.list',
     // カード・ローンの返済計画づくり（負債行から開く）
     repayAdd: 'cashflow.repay.add',
@@ -375,7 +374,12 @@ export const UI = {
     repayCount: 'cashflow.repay.count',
     repayPerMonth: 'cashflow.repay.perMonth',
     repaySave: 'cashflow.repay.save',
+    // 自由に動かせるお金の日次折れ線（基準日起点・右へ横スクロール）と、窓を +12ヶ月 伸ばす操作
     freeTrend: 'cashflow.freeTrend',
+    chartViewport: 'cashflow.chart.viewport',
+    chartExtend: 'cashflow.chart.extend',
+    // 基準日以降で最初に 0 を下回る日（下回りが無いときは静かな 1 行が同じ場所に出る）
+    shortfall: 'cashflow.shortfall',
     futureList: 'cashflow.future.list',
     // 将来行（タップで編集 or 由来へ・entryOpenPlan 消費）
     futureRow: 'cashflow.future.row',
@@ -388,8 +392,6 @@ export const UI = {
   settings: {
     view: 'settings.view',
     fractionDigits: 'settings.fractionDigits',
-    // 資金繰りの既定表示期間（端末設定・ヶ月）
-    cashflowHorizon: 'settings.cashflowHorizon',
     exportJson: 'settings.exportJson',
     importJson: 'settings.importJson',
     importFile: 'settings.importFile',

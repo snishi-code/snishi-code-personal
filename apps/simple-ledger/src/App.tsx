@@ -401,6 +401,7 @@ export function App() {
         ) : null}
         {screen === 'cashflow' ? (
           <Cashflow
+            period={period}
             onEditEntry={openEdit}
             onOpenAllocations={goAllocationsFor}
             onOpenAccount={goAccountFor}
