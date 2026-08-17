@@ -22,7 +22,6 @@ import { OpeningEditSheet } from '../src/ui/OpeningSheet';
 import { EntrySheet } from '../src/ui/screens/EntrySheet';
 import { AccountSheet } from '../src/ui/screens/AccountSheet';
 import { Allocations } from '../src/ui/screens/Allocations';
-import { Cashflow } from '../src/ui/screens/Cashflow';
 import {
   createAdjustment,
   createContinuousCost,
@@ -375,6 +374,7 @@ describe('打ち消しの額は表示桁 0 でも丸めない', () => {
     expect(saved!.amount).toBe(ODD);
   });
 
+  // v13.4 ④: 返済シートは資金繰りではなく**月割り台帳の「支払用負債」**から開く。
   it('返済計画の「全額」既定: 表示桁 0 でも負債残高の端数を落とさない', async () => {
     await setDigits(0);
     const ledger = await loadLedger();
@@ -384,21 +384,18 @@ describe('打ち消しの額は表示桁 0 でも丸めない', () => {
     render(
       <Providers>
         <Ready>
-          <Cashflow
+          <Allocations
             period={{ mode: 'date', date: todayLocal() }}
             onEditEntry={() => undefined}
-            onOpenAllocations={() => undefined}
-            onOpenAccount={() => undefined}
-            onOpenEntry={() => undefined}
           />
         </Ready>
       </Providers>,
     );
-    await waitFor(() => expect(q(UI.cashflow.liabilityRow)).toBeInTheDocument());
-    fireEvent.click(q(UI.cashflow.liabilityRow)!);
-    await waitFor(() => expect(q(UI.cashflow.repaySheet)).toBeInTheDocument());
+    await waitFor(() => expect(q(UI.allocations.repayAdd)).toBeInTheDocument());
+    fireEvent.click(q(UI.allocations.repayAdd)!);
+    await waitFor(() => expect(q(UI.allocations.repaySheet)).toBeInTheDocument());
 
-    const amount = q(UI.cashflow.repayAmount) as HTMLInputElement;
+    const amount = q(UI.allocations.repayAmount) as HTMLInputElement;
     expect(amount.value).toBe('123.45');
     expect(amount.inputMode).toBe('decimal');
   });

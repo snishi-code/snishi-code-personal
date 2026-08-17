@@ -331,6 +331,23 @@ export const UI = {
     archiveRemainderSpread: 'allocations.archive.remainder.spread',
     archiveRemainderExpense: 'allocations.archive.remainder.expense',
     archiveConfirm: 'allocations.archive.confirm',
+    // 支払用負債（v13.4 ④ で資金繰りから移設）。行 = 基準日断面で残高 ≠ 0 のカード・ローン。
+    // 資金繰りの負債行タップ（liabilityAccountId）はこの行へ着地する。
+    liabilityList: 'allocations.liability.list',
+    liabilityRow: 'allocations.liability.row',
+    // 返済計画づくり（負債行の tonal ボタンから開く）
+    repayAdd: 'allocations.repay.add',
+    repaySheet: 'allocations.repay.sheet',
+    repayAmount: 'allocations.repay.amount',
+    repayDate: 'allocations.repay.date',
+    repayFrom: 'allocations.repay.from',
+    repayCount: 'allocations.repay.count',
+    repayPerMonth: 'allocations.repay.perMonth',
+    repaySave: 'allocations.repay.save',
+    // 負債行の展開 = 登録済みの返済（基準日より後の保存仕訳）。タップで仕訳の編集シートへ
+    repaymentsToggle: 'allocations.repayments.toggle',
+    repaymentsList: 'allocations.repayments.list',
+    repaymentRow: 'allocations.repayments.row',
   },
   // 残高補正・初期残高のシート（勘定科目の内訳行・仕訳一覧から開く）。
   adjustments: {
@@ -364,16 +381,9 @@ export const UI = {
   cashflow: {
     view: 'cashflow.view',
     liabilityList: 'cashflow.liability.list',
-    // カード・ローンの返済計画づくり（負債行から開く）
-    repayAdd: 'cashflow.repay.add',
+    // 負債行は表示オンリー（v13.4 ④）。タップ = 月割り台帳の該当負債へ遷移するだけで、
+    // 返済の登録・編集は台帳（allocations.repay.*）が持つ。
     liabilityRow: 'cashflow.liability.row',
-    repaySheet: 'cashflow.repay.sheet',
-    repayAmount: 'cashflow.repay.amount',
-    repayDate: 'cashflow.repay.date',
-    repayFrom: 'cashflow.repay.from',
-    repayCount: 'cashflow.repay.count',
-    repayPerMonth: 'cashflow.repay.perMonth',
-    repaySave: 'cashflow.repay.save',
     // 自由に動かせるお金の日次折れ線（基準日起点・右へ横スクロール）と、窓を +12ヶ月 伸ばす操作
     freeTrend: 'cashflow.freeTrend',
     chartViewport: 'cashflow.chart.viewport',
@@ -384,10 +394,6 @@ export const UI = {
     // 将来行（タップで編集 or 由来へ・entryOpenPlan 消費）
     futureRow: 'cashflow.future.row',
     summary: 'cashflow.summary',
-    // 負債行の展開 = 登録済みの返済（未来日付の保存仕訳）。タップで仕訳の編集シートへ
-    repaymentsToggle: 'cashflow.repayments.toggle',
-    repaymentsList: 'cashflow.repayments.list',
-    repaymentRow: 'cashflow.repayments.row',
   },
   settings: {
     view: 'settings.view',

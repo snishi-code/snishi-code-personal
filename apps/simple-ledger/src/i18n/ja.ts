@@ -127,11 +127,10 @@ export const ja = {
 
   'cashflow.title': '資金繰り',
   // v13.4 ③: 起点はヘッダーの日付（基準日）。今日ではない。
+  // v13.4 ④: 返済の登録・編集は月割り台帳へ移した（この画面は見るだけ）。
   'cashflow.intro':
-    'ヘッダーの日付から先の仕訳で、自由に動かせるお金の推移を見ます。日付を変えるとその日を起点に見直します。カード・ローンは行をタップすると返済計画を登録できます。',
+    'ヘッダーの日付から先の仕訳で、自由に動かせるお金の推移を見ます。日付を変えるとその日を起点に見直します。返済計画の登録・編集は月割り台帳で行います。',
   'cashflow.freeFundsAsOf': '{date} の自由に動かせるお金',
-  'cashflow.nextDue': '次回支払日',
-  'cashflow.installmentsLeft': '残り {count} 回',
   // 「いつ足りなくなるか」。下回りが無いときは警告色を使わない静かな 1 行。
   'cashflow.shortfallOn': '{date} に自由に動かせるお金が 0 を下回る見込みです。',
   'cashflow.shortfallNone': '{year}年まで、自由に動かせるお金が 0 を下回る予定はありません。',
@@ -145,13 +144,11 @@ export const ja = {
   'cashflow.chartTickYear': '{year}年',
   'cashflow.chartTickMonth': '{month}月',
   'cashflow.debtTitle': '支払用負債・返済予定',
+  // v13.4 ④: 資金繰りの負債行は表示オンリー。タップ = 月割り台帳の同じ負債へ移動。
   'cashflow.debtIntro':
-    'ヘッダーの日付の時点で残高がある負債だけを、残りの支払予定・次回支払日・残回数とともに出します。',
-  'cashflow.debtBalance': '残高',
-  'cashflow.debtNone': 'この日の時点で残高のある負債はありません。',
-  'cashflow.debtNoPlanHint': '残高があるなら、ホームの「支出」で未来日付の返済を登録できます。',
-  // 負債行の展開 = 登録済みの返済（基準日より後の保存仕訳）。タップで仕訳の編集シートへ。
-  'cashflow.repaymentsRegistered': '登録済みの返済',
+    'ヘッダーの日付の時点で残高がある負債だけを、残りの支払予定・次回支払日・残回数とともに出します。行をタップすると月割り台帳の同じ負債へ移動し、そこで返済予定を登録・編集できます。',
+  'cashflow.debtOpenInAllocations': '{name} を月割り台帳で開く',
+  'cashflow.debtNoPlan': '返済予定がありません（月割り台帳で登録できます）。',
   'cashflow.futureTitle': '先の入出金・振替予定',
   'cashflow.futureIntro':
     'グラフに出している範囲（{from} 〜 {to}）の予定です。ホームの 収入 / 支出 / 振替 で先の日付を選ぶと、ここに表示され資金繰りに反映されます。',
@@ -694,22 +691,34 @@ export const ja = {
   'error.account.returnInvalid': '想定利回りは -99.99〜1000%（小数第2位まで）で入力してください。',
   'error.account.projectionPair': '想定利回りと投影の計上先はセットで設定してください。',
   'error.account.projectionAccountInvalid': '投影の計上先には既存の収入科目を選んでください。',
-  'cashflow.repayAdd': '返済予定を追加',
-  'cashflow.repayTitle': '返済予定を追加',
-  'cashflow.repayIntro':
+  // 支払用負債・返済予定（v13.4 ④ で資金繰りから月割り台帳へ移設。文言は画面をまたいで共有する）
+  'repay.sectionTitle': '支払用負債',
+  'repay.sectionIntro':
+    'ヘッダーの日付の時点で残高があるカード・ローンです。返済予定の登録・編集はここで行います（資金繰りには登録した予定が反映されます）。',
+  'repay.none': 'この日の時点で残高のある負債はありません。',
+  'repay.balance': '残高',
+  'repay.nextDue': '次回支払日',
+  'repay.installmentsLeft': '残り {count} 回',
+  'repay.noPlanHint': '返済予定がありません。「返済を登録」から登録できます。',
+  'repay.noPlanTag': '返済予定なし',
+  // 負債行の展開 = 登録済みの返済（基準日より後の保存仕訳）。タップで仕訳の編集シートへ。
+  'repay.registered': '登録済みの返済',
+  'repay.add': '返済を登録',
+  'repay.title': '返済予定を追加',
+  'repay.intro':
     '返済口座から「{name}」への返済を、支払日の振替仕訳としてそのまま登録します（仕訳一覧・資金繰りに反映）。',
-  'cashflow.repayAmount': '返済額',
-  'cashflow.repayAmountHint': '既定はいまの残高（全額）です。請求額に合わせて変更できます。',
-  'cashflow.repayFrom': '返済口座',
-  'cashflow.repayDate': '支払日',
-  'cashflow.repaySettingsHint':
+  'repay.amount': '返済額',
+  'repay.amountHint': '既定はいまの残高（全額）です。請求額に合わせて変更できます。',
+  'repay.from': '返済口座',
+  'repay.date': '支払日',
+  'repay.settingsHint':
     '勘定科目（カード・ローン）の編集で返済口座と毎月の返済日を設定すると、ここに既定値が入ります。',
-  'cashflow.repaySettingsLine': '返済口座: {account}・毎月{day}日',
-  'cashflow.repayScheduleTitle': '{name}の返済',
-  'cashflow.repayCount': '返済回数',
-  'cashflow.repayCountHint':
+  'repay.settingsLine': '返済口座: {account}・毎月{day}日',
+  'repay.scheduleTitle': '{name}の返済',
+  'repay.count': '返済回数',
+  'repay.countHint':
     '1 = カードの次回引落などの単発。毎月同額のローンは {max} 回までまとめて登録できます（合計は返済額に一致）。',
-  'cashflow.repayPerMonth': '月あたり約 {amount} × {count} 回',
+  'repay.perMonth': '月あたり約 {amount} × {count} 回',
   'error.repay.countInvalid': '返済回数は 1〜{max} の整数で入力してください。',
   'error.settings.invalid':
     '台帳の設定を保存できませんでした（名前は 1〜120 文字・単位は 1〜8 文字で入力してください）。',
@@ -729,7 +738,7 @@ export const ja = {
   'monthly.pick.asset': 'いま持っているものを登録',
   'monthly.searchPlaceholder': '項目名・科目名で検索',
   'monthly.searchEmpty': '該当する項目がありません。',
-  'monthly.searchCount': 'くり返し記帳 {rules} 件・持ち物 {items} 件',
+  'monthly.searchCount': 'くり返し記帳 {rules} 件・持ち物 {items} 件・支払用負債 {liabilities} 件',
 
   'recurring.sectionTitle': 'くり返し記帳',
   'recurring.sectionIntro':

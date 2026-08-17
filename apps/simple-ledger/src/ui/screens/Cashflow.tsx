@@ -1,6 +1,11 @@
 /*
  * 資金繰り（将来CF）。**ヘッダーの日付（基準日）を起点に**「自由に動かせるお金」の推移を
- * 投影し、負債の返済計画（登録済みの返済仕訳の確認・編集を含む）を扱う。
+ * 投影し、負債の残高と返済予定を**見る**（確認専用）。
+ *
+ * v13.4 ④（作者決定 2026-08-17）:
+ *  - 返済予定の登録・編集（RepaymentScheduleSheet と「返済を登録」導線）は**月割り台帳の
+ *    「支払用負債」セクションへ移設**した。この画面の負債行は表示オンリーで、タップは
+ *    台帳の該当負債へ遷移するだけ（onOpenAllocations({ liabilityAccountId })）。
  *
  * v13.4 ③（作者決定 2026-08-17）:
  *  - 起点は today ではなく period（ヘッダーの日付）。資金繰りもタイムスリップに追従する。
@@ -9,12 +14,10 @@
  *    （「さらに先へ」で +12 ヶ月ずつ・上限 = 展開の地平 CONTINUOUS_COST_HARD_CAP）。
  *  - 最低点の金額カードではなく「基準日以降で最初に 0 を下回る日」を出す。
  *  - 負債一覧は基準日断面で残高を持つものだけ（未来に始まるローンは基準日を進めれば現れ、
- *    完済済みは消える）。
+ *    完済済みは消える）。台帳の「支払用負債」も同じ断面・同じ絞り込みで並ぶ。
  */
 import { useMemo, useState } from 'react';
-import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
-import { Modal } from '../overlays';
 import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, representativeEntryAmount } from '../../domain/accounting';
 import {
@@ -22,7 +25,7 @@ import {
   firstShortfallPoint,
   freeAssetTotal,
   isFreeAsset,
-  nextRepaymentDate,
+  liabilityScheduleRows,
   projectCashflow,
   uniqueEntriesById,
   type CashflowPoint,
@@ -30,32 +33,17 @@ import {
 import type { ReportPeriod } from '../../domain/reportPeriod';
 import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
-import {
-  addMonths,
-  addMonthsToDate,
-  MONTHLY_AMOUNTS_HARD_CAP,
-  monthlyAmounts,
-  monthOf,
-  monthsBetween,
-} from '../../domain/allocation';
-import { sortAccounts } from '../../domain/accountOrder';
+import { addMonths, addMonthsToDate, monthOf, monthsBetween } from '../../domain/allocation';
 import { todayLocal } from '../../util/time';
 import { entryOpenPlan } from '../entryOpen';
 import type { AllocationsTarget } from './Allocations';
-import type { Account, JournalEntry } from '../../domain/types';
+import type { JournalEntry } from '../../domain/types';
 import { Money } from '../money';
-import { errorText, t } from '../../i18n';
-import {
-  exactDigitsFor,
-  formatMinorForInput,
-  parseAmountToMinor,
-  sanitizeAmountText,
-} from '../amountText';
+import { t } from '../../i18n';
 import { useMoneyDigits } from '../money';
 import { formatMoney } from '../../util/format';
 import { UI } from '../../ui-contract';
 import { ScrollTopButton } from '../ScrollTopButton';
-import { sumAmounts } from '../../domain/safeSum';
 import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 
 /** 展開の地平の年（下回り日を探す範囲・グラフを伸ばせる上限）。 */
@@ -78,15 +66,6 @@ function utcMs(date: string): number {
 /** to − from（日数）。グラフの横位置は「日」で決まる（点の個数では決まらない）。 */
 function daysBetween(from: string, to: string): number {
   return Math.round((utcMs(to) - utcMs(from)) / 86_400_000);
-}
-
-/** 仕訳がこの負債（借方）へ返す金額（返済仕訳の表示額）。 */
-function repaymentAmountOf(entry: JournalEntry, liabilityId: string): number {
-  return sumAmounts(
-    entry.lines
-      .filter((l) => l.side === 'debit' && l.accountId === liabilityId)
-      .map((l) => l.amount),
-  );
 }
 
 export function Cashflow({
@@ -129,10 +108,6 @@ export function Cashflow({
   }, [anchorDate, windowMonths]);
   const canExtend = windowEnd < CONTINUOUS_COST_HARD_CAP;
 
-  const [repayFor, setRepayFor] = useState<{ account: Account; balance: number } | null>(null);
-  // 負債行の展開（登録済みの返済リスト）。行タップ = 新規返済シートとは独立に開閉する。
-  const [openRepayments, setOpenRepayments] = useState<ReadonlySet<string>>(new Set());
-
   const currency = ledger?.settings.currency ?? '';
 
   /*
@@ -173,9 +148,6 @@ export function Cashflow({
     [projection, windowEnd],
   );
 
-  const accountName = (id: string): string =>
-    (ledger?.accounts ?? []).find((a) => a.id === id)?.name ?? '—';
-
   // 未来の入出金一覧の範囲 = いまグラフを開いている範囲。
   const futureRows = useMemo(() => {
     const isFree = (id: string) => freeIds.has(id);
@@ -198,44 +170,19 @@ export function Cashflow({
   }, [entries, anchorDate, windowEnd, freeIds]);
 
   /*
-   * 負債一覧は**基準日断面**で導出残高 ≠ 0 のものだけ（role 条件は維持）。
-   * 「残高 0 だが返済予定だけ残っている」行は出さない = 一覧の規則を断面に一本化する。
+   * 負債一覧は**基準日断面**で導出残高 ≠ 0 のものだけ（domain の単一正本
+   * liabilityScheduleRows。月割り台帳の「支払用負債」と同じ行集合が並ぶ）。
    */
-  const liabilitySummary = useMemo(() => {
-    const accounts = ledger?.accounts ?? [];
-    const stored = ledger?.journalEntries ?? [];
-    return sortAccounts(accounts)
-      .filter((a) => a.role === 'payment-liability' || a.role === 'other-liability')
-      .map((a) => {
-        // 返済予定 = 基準日より後の返済実仕訳（借方がこの負債）。
-        const repayments = stored
-          .filter(
-            (e) =>
-              e.date > anchorDate &&
-              e.lines.some((l) => l.side === 'debit' && l.accountId === a.id),
-          )
-          .sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
-        return {
-          id: a.id,
-          account: a,
-          name: a.name,
-          count: repayments.length,
-          repayments,
-          remaining: sumAmounts(repayments.map((e) => repaymentAmountOf(e, a.id))),
-          nextDue: repayments[0]?.date,
-          balance: liabBalById.get(a.id) ?? 0,
-        };
-      })
-      .filter((x) => x.balance !== 0);
-  }, [ledger, liabBalById, anchorDate]);
-
-  const toggleRepayments = (id: string) =>
-    setOpenRepayments((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const liabilitySummary = useMemo(
+    () =>
+      liabilityScheduleRows({
+        accounts: ledger?.accounts ?? [],
+        storedEntries: ledger?.journalEntries ?? [],
+        balanceById: liabBalById,
+        asOf: anchorDate,
+      }),
+    [ledger, liabBalById, anchorDate],
+  );
 
   return (
     <section aria-labelledby="cashflow-title" data-ui={UI.cashflow.view}>
@@ -300,84 +247,40 @@ export function Cashflow({
         {t('cashflow.debtIntro')}
       </p>
       {liabilitySummary.length === 0 ? (
-        <div className="card card--pad empty">{t('cashflow.debtNone')}</div>
+        <div className="card card--pad empty">{t('repay.none')}</div>
       ) : (
         <ul className="card list" data-ui={UI.cashflow.liabilityList}>
           {liabilitySummary.map((l) => (
-            <li
-              key={l.id}
-              className="list__item"
-              style={{ flexDirection: 'column', alignItems: 'stretch', gap: 0 }}
-            >
-              {/* 行タップ = 返済シート（残高を見ながら返済計画を入力する）。 */}
+            <li key={l.id} className="list__row">
+              {/*
+               * 行は**表示オンリー**（v13.4 ④）。タップ = 月割り台帳の同じ負債へ移動するだけで、
+               * この画面から返済を書き込む経路は無い（読み上げ名も行き先を名乗る）。
+               * 高さは .list__row-btn の min-height = var(--tap)（44px）。
+               */}
               <button
                 type="button"
                 className="list__row-btn"
-                onClick={() => setRepayFor({ account: l.account, balance: l.balance })}
-                aria-label={`${t('cashflow.repayAdd')}: ${l.name}`}
+                onClick={() => onOpenAllocations({ liabilityAccountId: l.id })}
+                aria-label={t('cashflow.debtOpenInAllocations', { name: l.name })}
                 data-ui={UI.cashflow.liabilityRow}
               >
                 <div className="list__main">
                   <div className="list__title">{l.name}</div>
                   <div className="list__sub">
-                    {t('cashflow.debtBalance')}: <Money amount={l.balance} currency={currency} />
+                    {t('repay.balance')}: <Money amount={l.balance} currency={currency} />
                   </div>
-                  {l.account.repaymentAccountId !== undefined &&
-                  l.account.repaymentDay !== undefined ? (
-                    <div className="list__sub">
-                      {t('cashflow.repaySettingsLine', {
-                        account: accountName(l.account.repaymentAccountId),
-                        day: l.account.repaymentDay,
-                      })}
-                    </div>
-                  ) : null}
                   {l.count > 0 ? (
                     <div className="list__sub">
-                      {t('cashflow.nextDue')}: {l.nextDue ?? '—'}・
-                      {t('cashflow.installmentsLeft', { count: l.count })}・
-                      {t('cashflow.debtBalance')} <Money amount={l.remaining} currency={currency} />
+                      {t('repay.nextDue')}: {l.nextDue ?? '—'}・
+                      {t('repay.installmentsLeft', { count: l.count })}・{t('repay.balance')}{' '}
+                      <Money amount={l.remaining} currency={currency} />
                     </div>
                   ) : (
-                    <div className="list__sub amount--neg">{t('cashflow.debtNoPlanHint')}</div>
+                    <div className="list__sub amount--neg">{t('cashflow.debtNoPlan')}</div>
                   )}
                 </div>
                 <Icon name="chevronRight" size={18} />
               </button>
-              {/* 展開 = 登録済みの返済（基準日より後の保存仕訳・借方 = この負債）。タップで編集。 */}
-              {l.repayments.length > 0 ? (
-                <>
-                  <button
-                    type="button"
-                    className="collapse-toggle"
-                    aria-expanded={openRepayments.has(l.id)}
-                    onClick={() => toggleRepayments(l.id)}
-                    data-ui={UI.cashflow.repaymentsToggle}
-                  >
-                    <Icon name={openRepayments.has(l.id) ? 'expand' : 'chevronRight'} size={16} />
-                    {t('cashflow.repaymentsRegistered')}
-                  </button>
-                  {openRepayments.has(l.id) ? (
-                    <ul className="list" data-ui={UI.cashflow.repaymentsList}>
-                      {l.repayments.map((e) => (
-                        <li key={e.id}>
-                          <button
-                            type="button"
-                            className="list__row-btn"
-                            onClick={() => onEditEntry(e)}
-                            aria-label={`${t('common.edit')}: ${e.date} ${e.description}`}
-                            data-ui={UI.cashflow.repaymentRow}
-                          >
-                            <span>{e.date}</span>
-                            <span className="list__amount">
-                              <Money amount={repaymentAmountOf(e, l.id)} currency={currency} />
-                            </span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </>
-              ) : null}
             </li>
           ))}
         </ul>
@@ -450,13 +353,6 @@ export function Cashflow({
         </ul>
       )}
 
-      {repayFor ? (
-        <RepaymentScheduleSheet
-          account={repayFor.account}
-          balance={repayFor.balance}
-          onClose={() => setRepayFor(null)}
-        />
-      ) : null}
       <ScrollTopButton />
     </section>
   );
@@ -601,167 +497,5 @@ function FreeFundsChart({
         <Money amount={points.at(-1)?.free ?? 0} currency={currency} signed />
       </p>
     </figure>
-  );
-}
-
-/**
- * カード・ローンの返済計画を登録するシート（負債の行タップで開く）。
- * 勘定科目の返済設定（返済口座・毎月の返済日）が既定値になる。金額の既定はいまの残高（全額）。
- *  - 回数 1（既定）: カードの次回引落など、支払日の振替仕訳（借方 負債 / 貸方 返済口座）を 1 本。
- *  - 回数 N: 毎月同額のローン。総額を N 回に配分した未来の振替仕訳を一括登録（合計は総額に一致）。
- * どちらも未来日付の実仕訳として仕訳一覧・資金繰りの投影に乗る。
- */
-function RepaymentScheduleSheet({
-  account,
-  balance,
-  onClose,
-}: {
-  account: Account;
-  balance: number;
-  onClose: () => void;
-}) {
-  const { ledger, createRepaymentEntries } = useLedger();
-  const accounts = ledger?.accounts ?? [];
-  const currency = ledger?.settings.currency ?? '';
-  // 書込フォームの**日付の既定値**（today 規約 (a)）。表示の導出には使わない。
-  const today = todayLocal();
-
-  const fromOptions = sortAccounts(accounts)
-    .filter((a) => a.role === 'daily-asset' && (!a.archived || a.id === account.repaymentAccountId))
-    .map((a) => ({ value: a.id, label: a.name }));
-  const [fromAccountId, setFromAccountId] = useState(
-    account.repaymentAccountId ?? fromOptions[0]?.value ?? '',
-  );
-  const [date, setDate] = useState(
-    account.repaymentDay !== undefined ? nextRepaymentDate(today, account.repaymentDay) : today,
-  );
-  const digits = useMoneyDigits();
-  // 既定は「残高全額」なので、表示桁が粗くても端数を落とさず全額を見せる。
-  const amountDigits =
-    balance > 0 ? (Math.max(digits, exactDigitsFor(balance)) as typeof digits) : digits;
-  const [amountText, setAmountText] = useState(
-    balance > 0 ? formatMinorForInput(balance, amountDigits) : '',
-  );
-  const [countText, setCountText] = useState('1');
-  const [error, setError] = useState<string | undefined>(undefined);
-  const [submitting, setSubmitting] = useState(false);
-
-  const amount = parseAmountToMinor(amountText) ?? 0;
-  const count = countText === '' ? 0 : Number.parseInt(countText, 10);
-  // プレビューは保存側と同じ monthlyAmounts の先頭額（独自の丸めを持たない・指示書v3 §A-2）。
-  // 表示条件 = 最終回 > 0（プレビューが出た = 保存できる、が成立。§R-1 と同条件）。
-  const repayParts =
-    count >= 2 && count <= MONTHLY_AMOUNTS_HARD_CAP && amount >= count
-      ? monthlyAmounts(amount, count)
-      : null;
-  const perMonth = repayParts !== null && repayParts.at(-1)! > 0 ? repayParts[0]! : null;
-
-  async function submit() {
-    if (submitting) return;
-    if (!Number.isInteger(amount) || amount < 1 || fromAccountId === '') return;
-    if (!Number.isInteger(count) || count < 1 || count > MONTHLY_AMOUNTS_HARD_CAP) {
-      setError(t('error.repay.countInvalid', { max: MONTHLY_AMOUNTS_HARD_CAP }));
-      return;
-    }
-    // 保存境界（buildRepaymentEntries）と同じ条件を先に検証して理由を示す（0 金額の回の防止）。
-    if (amount < count) {
-      setError(t('error.repay.totalTooSmall'));
-      return;
-    }
-    setSubmitting(true);
-    setError(undefined);
-    try {
-      await createRepaymentEntries({
-        liabilityAccountId: account.id,
-        fromAccountId,
-        firstDate: date,
-        total: amount,
-        count,
-        title: t('cashflow.repayScheduleTitle', { name: account.name }),
-      });
-      onClose();
-    } catch (e) {
-      setError(errorText(e));
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <Modal
-      title={t('cashflow.repayTitle')}
-      onClose={onClose}
-      dismissMode="if-clean"
-      dataUi={UI.cashflow.repaySheet}
-      footer={
-        <>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={submit}
-            disabled={submitting || amountText === '' || countText === '' || fromAccountId === ''}
-            data-ui={UI.cashflow.repaySave}
-          >
-            {t('common.save')}
-          </button>
-        </>
-      }
-    >
-      <div className="stack">
-        <p className="field__hint">{t('cashflow.repayIntro', { name: account.name })}</p>
-        {account.repaymentAccountId === undefined || account.repaymentDay === undefined ? (
-          <p className="field__hint">{t('cashflow.repaySettingsHint')}</p>
-        ) : null}
-        {error ? (
-          <div className="field__error" role="alert">
-            <Icon name="alert" size={14} />
-            {error}
-          </div>
-        ) : null}
-        <SelectInput
-          label={t('cashflow.repayFrom')}
-          value={fromAccountId}
-          onChange={setFromAccountId}
-          options={fromOptions}
-          dataUi={UI.cashflow.repayFrom}
-        />
-        <TextInput
-          label={t('cashflow.repayDate')}
-          type="date"
-          required
-          value={date}
-          onChange={setDate}
-          dataUi={UI.cashflow.repayDate}
-        />
-        <TextInput
-          label={t('cashflow.repayAmount')}
-          required
-          inputMode={amountDigits === 0 ? 'numeric' : 'decimal'}
-          value={amountText}
-          onChange={(v) => setAmountText(sanitizeAmountText(v, amountDigits, amountText))}
-          hint={t('cashflow.repayAmountHint')}
-          dataUi={UI.cashflow.repayAmount}
-        />
-        <TextInput
-          label={t('cashflow.repayCount')}
-          required
-          inputMode="numeric"
-          value={countText}
-          onChange={(v) => setCountText(v.replace(/[^\d]/g, ''))}
-          hint={t('cashflow.repayCountHint', { max: MONTHLY_AMOUNTS_HARD_CAP })}
-          dataUi={UI.cashflow.repayCount}
-        />
-        {perMonth !== null ? (
-          <p className="field__hint" data-ui={UI.cashflow.repayPerMonth}>
-            {t('cashflow.repayPerMonth', {
-              amount: formatMoney(perMonth, currency, digits),
-              count: String(count),
-            })}
-          </p>
-        ) : null}
-      </div>
-    </Modal>
   );
 }

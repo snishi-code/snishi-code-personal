@@ -11,6 +11,7 @@
  *    タイムスリップに追従し、過去の断面でもその日から先を投影する。この層に today は無い。
  */
 import { addMonths, monthOf } from './allocation';
+import { sortAccounts } from './accountOrder';
 import type { Account, AccountBalance, JournalEntry } from './types';
 import { assertSafeAmount, sumAmounts } from './safeSum';
 
@@ -183,4 +184,78 @@ export function projectCashflow(params: {
  */
 export function firstShortfallPoint(projection: CashflowProjection): CashflowPoint | null {
   return projection.points.find((point) => point.free < 0) ?? null;
+}
+
+/** 返済予定つきの負債 1 行（資金繰りの表示・月割り台帳の編集が同じ行集合を見る）。 */
+export interface LiabilityScheduleRow {
+  id: string;
+  account: Account;
+  name: string;
+  /** 基準日より後に登録済みの返済（日付昇順）。 */
+  repayments: JournalEntry[];
+  /** 残回数 = repayments.length。 */
+  count: number;
+  /** 登録済みの返済の合計（この負債への借方額の合計）。 */
+  remaining: number;
+  /** 次回支払日（登録済みの返済が無ければ undefined）。 */
+  nextDue?: string;
+  /** 基準日断面の導出残高。 */
+  balance: number;
+}
+
+/** 仕訳がこの負債（借方）へ返す金額（返済仕訳の表示額）。 */
+function repaymentAmountOf(entry: JournalEntry, liabilityId: string): number {
+  return sumAmounts(
+    entry.lines
+      .filter((l) => l.side === 'debit' && l.accountId === liabilityId)
+      .map((l) => l.amount),
+  );
+}
+
+/**
+ * 支払用負債の一覧（**単一正本**。資金繰り = 表示・月割り台帳 = 編集で同じ行が並ぶ）。
+ *
+ *  - 対象は payment-liability / other-liability のうち、**基準日断面で導出残高 ≠ 0** のものだけ
+ *    （未来に始まるローンは基準日を進めれば現れ、完済済みは消える。「残高 0 だが返済予定だけ
+ *    残っている」行は作らない）。
+ *  - 返済予定は**保存された実仕訳**（借方 = その負債・基準日より後）から引く。導出行は数えない。
+ *  - 残高は呼び出し側が渡す（画面が既に持っている貸借対照表を二度作らせない）。
+ */
+export function liabilityScheduleRows(params: {
+  accounts: Account[];
+  /** 保存された仕訳（導出行を含めない）。 */
+  storedEntries: JournalEntry[];
+  /** 基準日断面の負債残高（deriveBalanceSheet の liabilities から作る）。 */
+  balanceById: ReadonlyMap<string, number>;
+  /** 基準日（この日より後の返済を「予定」とする）。 */
+  asOf: string;
+}): LiabilityScheduleRow[] {
+  // 並びは画面共通の勘定科目順（sortAccounts が単一正本）。
+  return sortAccounts(params.accounts)
+    .filter((a) => a.role === 'payment-liability' || a.role === 'other-liability')
+    .map((a) => {
+      const repayments = params.storedEntries
+        .filter(
+          (e) =>
+            e.date > params.asOf && e.lines.some((l) => l.side === 'debit' && l.accountId === a.id),
+        )
+        .sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
+      const nextDue = repayments[0]?.date;
+      return {
+        id: a.id,
+        account: a,
+        name: a.name,
+        repayments,
+        count: repayments.length,
+        remaining: sumAmounts(repayments.map((e) => repaymentAmountOf(e, a.id))),
+        ...(nextDue !== undefined ? { nextDue } : {}),
+        balance: params.balanceById.get(a.id) ?? 0,
+      };
+    })
+    .filter((row) => row.balance !== 0);
+}
+
+/** 返済仕訳の表示額（行の展開で 1 件ずつ出す金額）。行集合と同じ規則を UI へ渡す。 */
+export function repaymentEntryAmount(entry: JournalEntry, liabilityId: string): number {
+  return repaymentAmountOf(entry, liabilityId);
 }

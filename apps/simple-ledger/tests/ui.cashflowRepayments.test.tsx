@@ -1,12 +1,13 @@
 /*
- * 資金繰り（v13.4 ③ = 基準日起点）:
+ * 資金繰り（v13.4 ③ = 基準日起点 / ④ = 負債行は表示オンリー）:
  *  - 上部は「自由に動かせるお金」1 値（movable=false の現預金は原資に数えない）。
  *  - 起点は **ヘッダーの日付（period）**。表示終了日の入力欄は無い。
  *  - 負債一覧は基準日断面で残高を持つものだけ（開始前は出ない・完済後は消える）。
  *  - 最低点の金額ではなく「最初に 0 を下回る日」を出し、無ければ静かな 1 行。
  *  - グラフの窓は「さらに先へ」で +12 ヶ月ずつ伸び、未来一覧の範囲もそれに従う。
- *  - 負債行の展開 = 登録済みの返済（基準日より後の保存仕訳・借方 = その負債）を日付昇順で表示し、
- *    タップで仕訳の編集シート（onEditEntry 経路）を開く。
+ *  - **負債行は表示オンリー**（v13.4 ④）。返済の登録・編集はこの画面から消え、行タップは
+ *    月割り台帳の該当負債への遷移（onOpenAllocations({ liabilityAccountId })）だけになった。
+ *    登録・編集そのものの試験は ui.allocationsLiabilities.test.tsx が持つ。
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -22,7 +23,6 @@ import {
   upsertEntry,
 } from '../src/data/repository';
 import { addMonthsToDate } from '../src/domain/allocation';
-import { MONTHLY_AMOUNTS_HARD_CAP } from '../src/domain/allocation';
 import { CONTINUOUS_COST_HARD_CAP } from '../src/domain/continuousCost';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
@@ -176,7 +176,7 @@ describe('資金繰り', () => {
     expect(ui(UI.cashflow.liabilityRow)).not.toBeInTheDocument();
   });
 
-  it('負債行の展開で登録済みの返済（未来仕訳）を日付昇順に出し、タップで編集シートへ渡す', async () => {
+  it('負債行は表示オンリー: タップで月割り台帳の該当負債へ渡すだけ（返済シートは無い）', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
     const card = ledger.accounts.find((a) => a.role === 'payment-liability')!;
@@ -195,69 +195,29 @@ describe('資金繰り', () => {
     });
 
     const onEditEntry = vi.fn();
-    render(view(onEditEntry));
+    const onOpenAllocations = vi.fn();
+    render(view(onEditEntry, { onOpenAllocations }));
 
-    // 負債行の展開トグル（行タップ = 新規返済シートとは独立）。
-    const toggle = await waitFor(() => {
-      const found = ui(UI.cashflow.repaymentsToggle);
-      expect(found).toBeInTheDocument();
-      return found!;
-    });
-    expect(toggle).toHaveTextContent('登録済みの返済');
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-
-    const rows = Array.from(
-      document.querySelectorAll(`[data-ui="${UI.cashflow.repaymentRow}"]`),
-    ) as HTMLElement[];
-    expect(rows).toHaveLength(3);
-    // 日付昇順（初回 = firstDate）+ 金額（30,000 を 3 回 = 各 10,000）。
-    expect(rows[0]).toHaveTextContent(firstDate);
-    expect(rows[0]).toHaveTextContent('10,000');
-    const dates = rows.map((row) => row.textContent ?? '');
-    expect(dates).toEqual([...dates].sort());
-
-    // タップ = その返済仕訳の編集（既存の onEditEntry 経路）。
-    fireEvent.click(rows[0]!);
-    expect(onEditEntry).toHaveBeenCalledTimes(1);
-    const entry = onEditEntry.mock.calls[0]![0] as JournalEntry;
-    expect(entry.date).toBe(firstDate);
-    expect(
-      entry.lines.some(
-        (l) => l.side === 'debit' && l.accountId === card.id && l.amount === 1000000,
-      ),
-    ).toBe(true);
-  });
-
-  it('返済回数が hard cap を超えたら、巨大配列を作らず画面上で理由を示す', async () => {
-    const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
-    const card = ledger.accounts.find((a) => a.role === 'payment-liability')!;
-    await createOpenings([
-      { accountId: cash.id, amount: 1_000_000, date: '2000-01-01' },
-      {
-        accountId: card.id,
-        amount: MONTHLY_AMOUNTS_HARD_CAP + 1,
-        date: '2000-01-01',
-      },
-    ]);
-    render(view(() => undefined));
-
-    const liabilityRow = await waitFor(() => {
+    const row = await waitFor(() => {
       const found = ui(UI.cashflow.liabilityRow);
       expect(found).toBeInTheDocument();
       return found!;
     });
-    fireEvent.click(liabilityRow);
-    fireEvent.change(ui(UI.cashflow.repayCount)!, {
-      target: { value: String(MONTHLY_AMOUNTS_HARD_CAP + 1) },
-    });
-    fireEvent.click(ui(UI.cashflow.repaySave)!);
+    // 表示情報は残す（残高・次回支払日・残回数）。
+    expect(row).toHaveTextContent('30,000');
+    expect(row).toHaveTextContent(`次回支払日: ${firstDate}`);
+    expect(row).toHaveTextContent('残り 3 回');
+    // 読み上げ名は行き先を名乗る。タップ目標は 44px（.list__row-btn の min-height）。
+    expect(row).toHaveAttribute('aria-label', `${card.name} を月割り台帳で開く`);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      `返済回数は 1〜${MONTHLY_AMOUNTS_HARD_CAP} の整数で入力してください。`,
-    );
+    fireEvent.click(row);
+    expect(onOpenAllocations).toHaveBeenCalledTimes(1);
+    expect(onOpenAllocations).toHaveBeenCalledWith({ liabilityAccountId: card.id });
+    // 遷移だけ。この画面は書込フォームを開かない（返済シート・展開トグルは撤去済み）。
+    expect(onEditEntry).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-ui="allocations.repay.sheet"]')).toBeNull();
+    expect(document.querySelector('[data-ui="cashflow.repayments.toggle"]')).toBeNull();
+    expect(screen.queryByText('登録済みの返済')).not.toBeInTheDocument();
   });
 });
 
