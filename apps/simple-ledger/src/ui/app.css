@@ -369,6 +369,111 @@
   text-align: center;
 }
 
+/* ── グラフレンズ（時間平面のストック 4 系列） ──
+   数値レンズと同じ「ラベル列は sticky・横スクロールは枠の中だけ」。ラベル列の中身が
+   凡例トグルになっているところだけが違う。凡例の幅の正本は JS（StockSeriesChart）。 */
+.timeline-chart {
+  margin: 0;
+  min-width: 0;
+}
+.timeline-chart__viewport {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+}
+.timeline-chart__canvas {
+  display: flex;
+  align-items: flex-start;
+  width: max-content;
+  min-width: 100%;
+}
+.timeline-chart__legend {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  width: var(--timeline-chart-legend-width);
+  background: var(--surface);
+  box-shadow: 1px 0 0 var(--border);
+}
+.timeline-chart__legend-btn {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-height: var(--tap);
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+.timeline-chart__legend-btn:last-child {
+  border-bottom: none;
+}
+/* OFF = 押されていない。色見本と文字を薄くして、点いている系列と一目で分ける
+   （aria-pressed が読み上げの正本で、これはその見た目側）。 */
+.timeline-chart__legend-btn[aria-pressed='false'] {
+  opacity: 0.45;
+}
+.timeline-chart__chip {
+  flex: none;
+  overflow: visible;
+}
+.timeline-chart__chip-line {
+  stroke: var(--timeline-series, var(--primary));
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.timeline-chart__legend-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+.timeline-chart__legend-name {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.timeline-chart__legend-value {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.timeline-chart__plot {
+  flex: none;
+}
+.timeline-chart__svg {
+  display: block;
+}
+.timeline-chart__zero {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.timeline-chart__gridline {
+  stroke: var(--border);
+  stroke-width: 1;
+  opacity: 0.4;
+}
+.timeline-chart__tick {
+  fill: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.timeline-chart__line {
+  fill: none;
+  stroke: var(--timeline-series, var(--primary));
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: butt;
+}
+
 /* ── タイムラインカレンダー ── */
 .timeline-calendar {
   min-width: 0;
@@ -872,6 +977,18 @@ button.timeline-calendar__row-label {
   stroke-width: 2;
   stroke-linejoin: round;
   stroke-linecap: round;
+}
+/* 月次純増減の副表示（月ズームのみ）。符号を必ず付けるので色だけの手がかりにしない。 */
+.cashflow-chart__delta {
+  fill: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.cashflow-chart__delta--pos {
+  fill: var(--pos);
+}
+.cashflow-chart__delta--neg {
+  fill: var(--neg);
 }
 .cashflow-chart__shortfall {
   stroke: var(--neg);

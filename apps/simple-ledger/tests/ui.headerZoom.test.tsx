@@ -6,6 +6,10 @@
  *    （旧「別画面なら移動・当画面なら切替」= openOverview の一般化）。
  *  - ズームは**日付を変えない**（タイムスリップはヘッダーの日付だけ）。
  *  - 数値レンズに日の列は無い = レンズが数値のとき「日」は押せず、理由を読み上げにも出す。
+ *
+ * v13.5 F: この最後の制約は**タイムラインに居るときだけ**効く。レンズはタイムラインの
+ * 見え方でしかないので、レンズを持たない資金繰りでは日/月/年のすべてを押せる。
+ * 資金繰りで日を選んだままタイムライン（数値レンズ）へ戻る経路でも不変則は保たれる。
  */
 import { describe, it, expect, afterEach, beforeAll, beforeEach } from 'vitest';
 import { render, cleanup, fireEvent, waitFor } from '@testing-library/react';
@@ -108,6 +112,40 @@ describe('ヘッダーのズーム（日/月/年）', () => {
     expect(q(UI.period.dateTrigger)).toHaveTextContent(today);
     // 日付が動いていないので「今日」ボタン（ずれの警告灯）も出ない。
     expect(q(UI.period.today)).toBeNull();
+  });
+
+  it('資金繰りでは数値レンズのままでも 日/月/年 をすべて押せる（レンズはタイムラインの話）', async () => {
+    await renderApp();
+    fireEvent.click(q(UI.period.zoomMonth)!);
+    await waitFor(() => expect(q(UI.timeline.view)).toBeInTheDocument());
+    fireEvent.click(q(UI.timeline.lensMatrix)!);
+    await waitFor(() => expect(q(UI.timeline.matrix)).toBeInTheDocument());
+    expect(q(UI.period.zoomDay)).toBeDisabled();
+
+    await openMenuItem('nav.cashflow');
+    await waitFor(() => expect(q(UI.cashflow.view)).toBeInTheDocument());
+    // 資金繰りはレンズを持たないウィンドウ世界。日繰り表が見たいときに押せないと困る。
+    expect(q(UI.period.zoomDay)).not.toBeDisabled();
+    fireEvent.click(q(UI.period.zoomDay)!);
+    expect(pressed()).toEqual(['日']);
+
+    // タイムライン（数値レンズ）へ戻ると、日の列は無いので月へ丸まる（不変則は保つ）。
+    await openMenuItem('nav.timeline');
+    await waitFor(() => expect(q(UI.timeline.matrix)).toBeInTheDocument());
+    expect(pressed()).toEqual(['月']);
+    expect(q(UI.period.zoomDay)).toBeDisabled();
+  });
+
+  it('グラフレンズには日の列があるので「日」を押せる', async () => {
+    await renderApp();
+    fireEvent.click(q(UI.period.zoomDay)!);
+    await waitFor(() => expect(q(UI.timeline.view)).toBeInTheDocument());
+
+    fireEvent.click(q(UI.timeline.lensChart)!);
+    await waitFor(() => expect(q(UI.timeline.chart)).toBeInTheDocument());
+    // 数値レンズと違い、日ズームのまま切り替えても丸めない。
+    expect(pressed()).toEqual(['日']);
+    expect(q(UI.period.zoomDay)).not.toBeDisabled();
   });
 
   it('数値レンズでは「日」を押せず、理由を読み上げに出す', async () => {

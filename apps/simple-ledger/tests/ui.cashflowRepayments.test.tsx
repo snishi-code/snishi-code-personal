@@ -54,6 +54,7 @@ function view(
       <LedgerProvider>
         <Cashflow
           period={handlers.period ?? { mode: 'date', date: todayLocal() }}
+          zoom="day"
           onEditEntry={onEditEntry}
           onOpenAllocations={(handlers.onOpenAllocations ?? (() => undefined)) as never}
           onOpenAccount={handlers.onOpenAccount ?? (() => undefined)}

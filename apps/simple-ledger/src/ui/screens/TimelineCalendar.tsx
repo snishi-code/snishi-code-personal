@@ -2,8 +2,9 @@
  * タイムライン = **時間平面**。
  *
  * ズーム（日/月/年）はヘッダーが持つ App の state で、この画面はそれに従う（ローカルには持たない）。
- * 画面が持つのはレンズ（線分/数値）の中身・表示範囲・開閉状態だけで、帯・ポッチ・純増減の計算は
- * domain/timelineCalendar、数値レンズの集計は domain/periodMatrix に委ねる。
+ * 画面が持つのはレンズ（線分/数値/グラフ）の中身・表示範囲・開閉状態だけで、帯・ポッチ・純増減の
+ * 計算は domain/timelineCalendar、数値レンズの集計は domain/periodMatrix、グラフレンズの
+ * ストック 4 系列は domain/stockSeries に委ねる。
  * ヘッダー日付は初期位置にだけ使い、この画面の前後移動・ズームで共有期間は書き換えない
  * （例外は月列タップのドリル = 明示的に基準日を動かしてホームへ行く操作）。
  */
@@ -50,6 +51,8 @@ import { visibleIndexRange } from '../scrollWindow';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 import { PeriodMatrixTable } from '../components/PeriodMatrixTable';
+import { StockSeriesChart } from '../components/StockSeriesChart';
+import { buildStockSeries } from '../../domain/stockSeries';
 
 export type { TimelineZoom } from '../../domain/timelineCalendar';
 
@@ -57,9 +60,14 @@ export type { TimelineZoom } from '../../domain/timelineCalendar';
  * 時間平面のレンズ = 同じ窓の見え方。
  *  - `segment`: 帯とポッチ（存在期間とフロー）
  *  - `matrix`:  表（旧「年間・全体」画面。月ズーム = 月列 / 年ズーム = 年列）
- * グラフレンズは後続バッチで足す。
+ *  - `chart`:   ストック 4 系列の折れ線（日/月/年すべてのズームで描ける）
  */
-export type TimelineLens = 'segment' | 'matrix';
+export type TimelineLens = 'segment' | 'matrix' | 'chart';
+
+/** Segmented は key を文字列で返す。未知の値は既定（線分）へ落とす。 */
+export function timelineLensOf(value: string): TimelineLens {
+  return value === 'matrix' || value === 'chart' ? value : 'segment';
+}
 
 type TimelineOpenTarget = TimelineTarget;
 
@@ -140,7 +148,10 @@ interface TimelineCalendarProps {
   zoom: TimelineZoom;
   /** 画面内からズームを動かす唯一の操作（数値レンズの年列タップ = その年を月で見る）。 */
   onZoomChange: (zoom: TimelineZoom) => void;
-  /** レンズ。セレクタはこの画面にあるが、state は App が持つ（ヘッダーの「日」の可否が依存する）。 */
+  /**
+   * レンズ（線分/数値/グラフ）。セレクタはこの画面にあるが、state は App が持つ
+   * （ヘッダーの「日」の可否が数値レンズかどうかに依存するため）。
+   */
   lens: TimelineLens;
   onLensChange: (lens: TimelineLens) => void;
   /** 月列タップのドリル: 基準日をその月末にしてホームへ。 */
@@ -1412,10 +1423,14 @@ export function TimelineCalendar({
       : { mode: 'months', months: monthsBetween(from, to) };
   }, [floorDate, matrixZoom, range.from, range.to]);
   const matrixAsOf = periodMatrixAsOf(matrixScope, today);
+  // グラフレンズの断面は線分レンズと同じバケット（日/月/年すべて描ける）。最終バケットの
+  // 末日まで展開しないと右端の断面が欠けるので、数値レンズと同じく窓の全体を要求する。
+  const chartAsOf = displayBuckets.at(-1)?.to ?? today;
 
   // 仕訳の仮想展開はレンズによらず 1 回だけ。線分は「見えている右端」まで、
-  // 数値は「最終列の列末」まで（列に空白を作らないため窓の全体が要る）。
-  const displayAsOf = lens === 'matrix' ? matrixAsOf : visibleRange.to;
+  // 数値・グラフは「最終列/最終バケットの末日」まで（右端に空白を作らないため窓の全体が要る）。
+  const displayAsOf =
+    lens === 'matrix' ? matrixAsOf : lens === 'chart' ? chartAsOf : visibleRange.to;
   const display = useMemo(
     () => (ledger ? displayEntriesResultForAsOf(ledger, displayAsOf) : null),
     [displayAsOf, ledger],
@@ -1427,6 +1442,16 @@ export function TimelineCalendar({
         ? buildPeriodMatrix(ledger.accounts, display?.entries ?? [], matrixScope)
         : null,
     [display, ledger, lens, matrixScope],
+  );
+
+  // ストック 4 系列。列ごとに deriveBalanceSheet を回さず、domain が日付順の単一走査で
+  // バケット末断面を焼き付ける（断面の本数が増えても走査は 1 回）。
+  const series = useMemo(
+    () =>
+      ledger && lens === 'chart'
+        ? buildStockSeries(ledger.accounts, display?.entries ?? [], displayBuckets)
+        : null,
+    [display, displayBuckets, ledger, lens],
   );
 
   const model = useMemo<TimelineCalendarViewModel>(() => {
@@ -1523,9 +1548,10 @@ export function TimelineCalendar({
               [
                 ['segment', 'timeline.lens.segment', UI.timeline.lensSegment],
                 ['matrix', 'timeline.lens.matrix', UI.timeline.lensMatrix],
+                ['chart', 'timeline.lens.chart', UI.timeline.lensChart],
               ] as const
             ).map(([key, labelKey, dataUi]) => ({ key, label: t(labelKey), dataUi }))}
-            onChange={(value) => onLensChange(value === 'matrix' ? 'matrix' : 'segment')}
+            onChange={(value) => onLensChange(timelineLensOf(value))}
           />
         </div>
         <div className="row-actions">
@@ -1550,7 +1576,28 @@ export function TimelineCalendar({
         </div>
       </div>
 
-      {lens === 'matrix' ? (
+      {lens === 'chart' ? (
+        <>
+          {/* 仮の数字が本物の顔をしない: 折れ線に何が混ざるかをグラフの手前で名乗る。 */}
+          {chartAsOf > today ? (
+            <p className="field__hint" data-ui={UI.timeline.chartNote}>
+              {t('matrix.projectionNote')}
+            </p>
+          ) : null}
+          {series ? (
+            <StockSeriesChart
+              series={series}
+              zoom={zoom}
+              bucketWidth={BUCKET_WIDTH[zoom]}
+              currency={ledger?.settings.currency ?? ''}
+              focusDate={center}
+              onVisibleRangeChange={updateVisibleRange}
+            />
+          ) : (
+            <p className="muted period-matrix__empty">{t('matrix.noData')}</p>
+          )}
+        </>
+      ) : lens === 'matrix' ? (
         <>
           {/* 仮の数字が本物の顔をしない: 表に何が混ざるかを表の手前で名乗る。 */}
           {matrixAsOf > today ? (

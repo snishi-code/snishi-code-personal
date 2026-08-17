@@ -69,7 +69,7 @@ export function App() {
   // 時間平面のズーム（日/月/年）。ヘッダーのセグメントが正本で、ウィンドウ世界の画面が従う。
   // ボタンは**日付を変えない**（タイムスリップはヘッダーの日付のみ。ズームは目盛りを変えるだけ）。
   const [timeZoom, setTimeZoom] = useState<TimelineZoom>('month');
-  // 時間平面のレンズ（線分/数値）。セレクタは時間平面の画面内にあるが、状態は App が持つ:
+  // 時間平面のレンズ（線分/数値/グラフ）。セレクタは時間平面の画面内にあるが、状態は App が持つ:
   // 「数値レンズに日の列は無い」＝ヘッダーの「日」の可否がレンズに依存するため
   // （旧 overviewMode がヘッダーのために App に居たのと同じ理由）。
   const [timelineLens, setTimelineLens] = useState<TimelineLens>('segment');
@@ -90,24 +90,41 @@ export function App() {
     if (typeof window.scrollTo === 'function') window.scrollTo(0, 0);
   }, [screen]);
 
+  /*
+   * 不変則「**タイムラインの**数値レンズに日の列は無い」の唯一の強制点（v13.5 F）。
+   *
+   * レンズはタイムラインの見え方でしかないので、効かせるのも**タイムラインに居るとき
+   * （これから行くとき）だけ**にする。資金繰りはレンズを持たないウィンドウ世界なので、
+   * 日/月/年のすべてを押せる（v13.5 D で「数値レンズのまま資金繰りへ行くと日が押せない」
+   * という取り違えが出ていた）。グラフレンズには日のバケットがあるので丸めない。
+   */
+  const enforceLensZoom = (
+    destination: Screen,
+    lens: TimelineLens,
+    zoom: TimelineZoom,
+  ): TimelineZoom =>
+    destination === TIME_PLANE_SCREEN && lens === 'matrix' && zoom === 'day' ? 'month' : zoom;
+
   const go = (s: Screen) => {
     setJournalFilter(null);
     setJournalTargetEntryId(null);
     setAllocationsTarget(null);
     setAccountsTarget(null);
+    // 資金繰りで「日」を選んだままタイムライン（数値レンズ）へ戻る経路でも不変則を保つ。
+    setTimeZoom((current) => enforceLensZoom(s, timelineLens, current));
     navigate(s);
   };
   // ヘッダーのズーム = ウィンドウ世界の名乗り。ズーム対応画面なら目盛りだけを変え、
   // 断面画面なら時間平面へ移動してそのズームで点灯する（旧 openOverview の一般化）。
   const changeZoom = (zoom: TimelineZoom) => {
-    setTimeZoom(zoom);
-    if (!supportsTimeZoom(screen)) go(TIME_PLANE_SCREEN);
+    const destination = supportsTimeZoom(screen) ? screen : TIME_PLANE_SCREEN;
+    setTimeZoom(enforceLensZoom(destination, timelineLens, zoom));
+    if (destination !== screen) go(destination);
   };
-  // レンズの切替。数値レンズに日の列は無いので、日ズームのまま切り替えたら月へ丸める
-  // （不変則「数値レンズ ⇒ 日ズームではない」の唯一の強制点）。
+  // レンズの切替。数値レンズに日の列は無いので、日ズームのまま切り替えたら月へ丸める。
   const changeLens = (lens: TimelineLens) => {
     setTimelineLens(lens);
-    if (lens === 'matrix' && timeZoom === 'day') setTimeZoom('month');
+    setTimeZoom((current) => enforceLensZoom(screen, lens, current));
   };
   // ヘッダーの日付を変えたら明示フィルターより日付を優先する（フィルターが居座らない）。
   const changePeriod = (next: ReportPeriod) => {
@@ -297,8 +314,10 @@ export function App() {
             ['year', 'zoom.year', UI.period.zoomYear],
           ] as const
         ).map(([zoom, labelKey, dataUi]) => {
-          // 数値レンズには日の列が無い。押せないことと**理由**を読み上げにも出す。
-          const unavailable = zoom === 'day' && timelineLens === 'matrix';
+          // タイムラインの数値レンズには日の列が無い。押せないことと**理由**を読み上げにも出す。
+          // 資金繰り（レンズを持たないウィンドウ世界）では日も押せる（v13.5 F）。
+          const unavailable =
+            zoom === 'day' && timelineLens === 'matrix' && screen === TIME_PLANE_SCREEN;
           return (
             <button
               key={zoom}
@@ -421,6 +440,7 @@ export function App() {
         {screen === 'cashflow' ? (
           <Cashflow
             period={period}
+            zoom={timeZoom}
             onEditEntry={openEdit}
             onOpenAllocations={goAllocationsFor}
             onOpenAccount={goAccountFor}

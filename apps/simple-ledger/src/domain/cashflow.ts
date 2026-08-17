@@ -10,8 +10,9 @@
  *  - 起点は **today ではなくヘッダーの日付（基準日 = anchorDate）**（v13.4 ③）。資金繰りは
  *    タイムスリップに追従し、過去の断面でもその日から先を投影する。この層に today は無い。
  */
-import { addMonths, monthOf } from './allocation';
+import { addMonths, addMonthsToDate, monthOf } from './allocation';
 import { sortAccounts } from './accountOrder';
+import type { TimelineZoom } from './timelineCalendar';
 import type { Account, AccountBalance, JournalEntry } from './types';
 import { assertSafeAmount, sumAmounts } from './safeSum';
 
@@ -184,6 +185,110 @@ export function projectCashflow(params: {
  */
 export function firstShortfallPoint(projection: CashflowProjection): CashflowPoint | null {
   return projection.points.find((point) => point.free < 0) ?? null;
+}
+
+/*
+ * ── ヘッダーズームへの追従（v13.5 F・作者決定 2026-08-18）──────────────────
+ *
+ * 会計実務の 日繰り表 / 月次資金繰り表 / 年次計画 の 3 粒度に対応する。**投影も下回り日の
+ * 探索も常に日次のまま**で、ここで畳むのは「グラフに描く点」だけ（表示だけバケット）。
+ * 下回り日・負債一覧・未来一覧は畳んだ結果を見ない。
+ */
+
+/** バケット末の本数の歯止め（壊れた日付から無限に点を作らない）。 */
+const CASHFLOW_BUCKET_CAP = 400;
+
+function monthEndOf(ym: string): string {
+  const [year, month] = ym.split('-').map(Number);
+  const day = new Date(Date.UTC(year ?? 1970, month ?? 1, 0)).getUTCDate();
+  return `${ym}-${String(day).padStart(2, '0')}`;
+}
+
+/**
+ * グラフの窓の終端。**バケットの末日に揃える**（月ズームなら月末・年ズームなら年末）ので、
+ * 最後のバケットが半端に切れず「窓の終端の値 = 最後のバケット末の値」が一致する。
+ * 上限 `cap`（展開の地平）を越えない。
+ */
+export function cashflowWindowEnd(params: {
+  anchorDate: string;
+  months: number;
+  zoom: TimelineZoom;
+  cap: string;
+}): string {
+  const raw = addMonthsToDate(params.anchorDate, params.months);
+  const snapped =
+    params.zoom === 'month'
+      ? monthEndOf(monthOf(raw))
+      : params.zoom === 'year'
+        ? `${raw.slice(0, 4)}-12-31`
+        : raw;
+  return snapped < params.cap ? snapped : params.cap;
+}
+
+/**
+ * 基準日より後・`endDate` までのバケット末（月末 / 年末）の並び。日ズームは空
+ * （日次の点をそのまま使う＝畳まない）。
+ */
+export function cashflowBucketEnds(
+  anchorDate: string,
+  endDate: string,
+  zoom: TimelineZoom,
+): string[] {
+  if (zoom === 'day' || endDate <= anchorDate) return [];
+  const ends: string[] = [];
+  if (zoom === 'month') {
+    const lastMonth = monthOf(endDate);
+    for (
+      let month = monthOf(anchorDate);
+      month <= lastMonth && ends.length < CASHFLOW_BUCKET_CAP;
+      month = addMonths(month, 1)
+    ) {
+      const end = monthEndOf(month);
+      if (end > anchorDate && end <= endDate) ends.push(end);
+    }
+    return ends;
+  }
+  const lastYear = Number.parseInt(endDate.slice(0, 4), 10);
+  for (
+    let year = Number.parseInt(anchorDate.slice(0, 4), 10);
+    year <= lastYear && ends.length < CASHFLOW_BUCKET_CAP;
+    year += 1
+  ) {
+    const end = `${String(year).padStart(4, '0')}-12-31`;
+    if (end > anchorDate && end <= endDate) ends.push(end);
+  }
+  return ends;
+}
+
+/**
+ * 日次の投影を、グラフに描く粒度へ畳む。
+ *
+ *  - 日ズーム: 窓に入る日次の点をそのまま（現行の見え方は変えない）。
+ *  - 月 / 年ズーム: **バケット末の断面**（その日を終えた時点の残高）を 1 点ずつ。
+ *    途中の動きは畳まれるので、バケットの中で一瞬だけ 0 を割る谷は**線には出ない**
+ *    （下回り日は日次の projection から別に出す＝探索の精度は落とさない）。
+ *  - 先頭は必ず基準日（線の起点をズームで動かさない）。
+ */
+export function foldCashflowPoints(params: {
+  projection: CashflowProjection;
+  anchorDate: string;
+  endDate: string;
+  zoom: TimelineZoom;
+}): CashflowPoint[] {
+  const { projection, anchorDate, endDate, zoom } = params;
+  const within = projection.points.filter((point) => point.date <= endDate);
+  if (zoom === 'day') return within;
+  const folded: CashflowPoint[] = [{ date: anchorDate, free: projection.startFree }];
+  let index = 0;
+  let free = projection.startFree;
+  for (const end of cashflowBucketEnds(anchorDate, endDate, zoom)) {
+    while (index < within.length && (within[index]?.date ?? '') <= end) {
+      free = within[index]?.free ?? free;
+      index += 1;
+    }
+    folded.push({ date: end, free });
+  }
+  return folded;
 }
 
 /** 返済予定つきの負債 1 行（資金繰りの表示・月割り台帳の編集が同じ行集合を見る）。 */

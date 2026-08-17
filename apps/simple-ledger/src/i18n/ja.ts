@@ -37,15 +37,27 @@ export const ja = {
   'zoom.day': '日',
   'zoom.month': '月',
   'zoom.year': '年',
-  // 数値レンズには日の列が無い（1 日 1 列の表は数字として読めない）。理由を読み上げにも出す。
+  // タイムラインの数値レンズには日の列が無い（1 日 1 列の表は数字として読めない）。
+  // 理由を読み上げにも出す。この制約はタイムラインに居るときだけで、資金繰りでは日も選べる。
   'zoom.dayUnavailable': '日（数値では選べません）',
 
   'timeline.title': 'タイムライン',
   'timeline.intro': '時間の中で、勘定科目・持ち物・フローがどのようにつながるかを見ます。',
-  // レンズ = 同じ時間平面の見え方。線分 = 帯とポッチ、数値 = 表。
+  // レンズ = 同じ時間平面の見え方。線分 = 帯とポッチ、数値 = 表、グラフ = ストックの折れ線。
   'timeline.lens': '見え方',
   'timeline.lens.segment': '線分',
   'timeline.lens.matrix': '数値',
+  'timeline.lens.chart': 'グラフ',
+
+  // グラフレンズ（ストック 4 系列 = 資産 / 負債 / 純資産 / 自由に動かせるお金）。
+  // 系列名はホームのカード・資産内訳の枠と同じキーを使うので、ここには持たない。
+  'chart.caption': '{from} 〜 {to} のストックの推移',
+  // 目盛り（年 = period.yearUnit / 月 = matrix.monthLabel を流用。日だけここに持つ）
+  'chart.tickDay': '{day}日',
+  'chart.legend': '系列（タップで表示 / 非表示）',
+  'chart.legendToggle': '{name}（{date} 時点 {amount}）の表示を切り替える',
+  'chart.seriesSummary': '{name}: {from} は {start}、{to} は {end}。',
+  'chart.noSeries': '表示する系列がありません。左の系列名をタップして選びます。',
   'timeline.previous': '前の期間',
   'timeline.next': '次の期間',
   'timeline.showEnded': '終了分も表示',
@@ -142,8 +154,10 @@ export const ja = {
   // 「いつ足りなくなるか」。下回りが無いときは警告色を使わない静かな 1 行。
   'cashflow.shortfallOn': '{date} に自由に動かせるお金が 0 を下回る見込みです。',
   'cashflow.shortfallNone': '{year}年まで、自由に動かせるお金が 0 を下回る予定はありません。',
-  // グラフ（基準日起点・右へ横スクロールする日次折れ線）。
+  // グラフ（基準日起点・右へ横スクロールする折れ線）。点の粒度はヘッダーのズームに追従する
+  // （日 = 日繰り / 月 = 月末残高 + 月次純増減の副表示 / 年 = 年末残高）。
   'cashflow.chartTitle': '自由に動かせるお金の推移（{from} 〜 {to}）',
+  'cashflow.chartMonthlyDelta': '{date} の純増減 {amount}。',
   'cashflow.chartExtend': 'さらに {months} ヶ月先へ',
   'cashflow.chartAtHorizon': '{year}年（見通せる上限）まで表示しています。',
   'cashflow.chartEnd': '{date} の見込み: ',

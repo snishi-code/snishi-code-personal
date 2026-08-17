@@ -103,9 +103,11 @@ export const UI = {
   // ズーム（日/月/年）はヘッダー（period.zoom.*）が持ち、この画面はレンズ（線分/数値）を持つ。
   timeline: {
     view: 'timeline.view',
-    // レンズ = 同じ時間平面の見え方（線分 = 帯とポッチ / 数値 = 表。旧「年間・全体」画面）
+    // レンズ = 同じ時間平面の見え方（線分 = 帯とポッチ / 数値 = 表。旧「年間・全体」画面 /
+    // グラフ = ストック 4 系列の折れ線）
     lensSegment: 'timeline.lens.segment',
     lensMatrix: 'timeline.lens.matrix',
+    lensChart: 'timeline.lens.chart',
     previous: 'timeline.range.previous',
     next: 'timeline.range.next',
     showEnded: 'timeline.showEnded',
@@ -130,6 +132,18 @@ export const UI = {
     // 6 分類の行と、その段階的開示のトグル（行の識別は data-row-key = 木のノードキー）
     matrixRow: 'timeline.matrix.row',
     matrixRowToggle: 'timeline.matrix.rowToggle',
+    // グラフレンズ（ストック 4 系列 = 資産 / 負債 / 純資産 / 自由に動かせるお金）。
+    // 横スクロールはこの枠の中だけ。値は各バケット末断面のストック（階段折れ線）。
+    chart: 'timeline.chart',
+    chartViewport: 'timeline.chart.viewport',
+    // 未来の断面が混ざることの名乗り（数値レンズの matrixNote と同じ文言・別の器）
+    chartNote: 'timeline.chart.projectionNote',
+    // ラベル列 = 凡例トグル（系列の識別は data-series-key・aria-pressed が表示状態を名乗る）
+    chartLegend: 'timeline.chart.legend',
+    // 描かれている 1 系列の折れ線（ON の系列のぶんだけ存在する・data-series-key で識別）
+    chartLine: 'timeline.chart.line',
+    // 全部 OFF のときだけ出る案内（グラフの下・空表示の代わり）
+    chartNoSeries: 'timeline.chart.noSeries',
   },
   journal: {
     view: 'journal.view',
@@ -383,10 +397,13 @@ export const UI = {
     // 負債行は表示オンリー（v13.4 ④）。タップ = 月割り台帳の該当負債へ遷移するだけで、
     // 返済の登録・編集は台帳（allocations.repay.*）が持つ。
     liabilityRow: 'cashflow.liability.row',
-    // 自由に動かせるお金の日次折れ線（基準日起点・右へ横スクロール）と、窓を +12ヶ月 伸ばす操作
+    // 自由に動かせるお金の折れ線（基準日起点・右へ横スクロール）と、窓を 1 段伸ばす操作。
+    // 点の粒度はヘッダーのズームに追従する（日 = 日次 / 月 = 月末 / 年 = 年末・v13.5 F）。
     freeTrend: 'cashflow.freeTrend',
     chartViewport: 'cashflow.chart.viewport',
     chartExtend: 'cashflow.chart.extend',
+    // グラフの読み上げ本文（SVG は aria-hidden。月ズームの純増減の副表示もここに出る）
+    chartSummary: 'cashflow.chart.summary',
     // 基準日以降で最初に 0 を下回る日（下回りが無いときは静かな 1 行が同じ場所に出る）
     shortfall: 'cashflow.shortfall',
     futureList: 'cashflow.future.list',

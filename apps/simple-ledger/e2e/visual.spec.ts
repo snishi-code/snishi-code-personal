@@ -132,6 +132,30 @@ for (const vp of VIEWPORTS) {
       path: `test-results/screenshots/ledger-timeline-matrix-${vp.name}.png`,
       fullPage: true,
     });
+    // グラフレンズ（ストック 4 系列）。ラベル列 = 凡例トグルで、横スクロールは枠の中だけ。
+    await page.locator(ui('timeline.lens.chart')).click();
+    await expect(page.locator(ui('timeline.chart'))).toBeVisible();
+    // 数値レンズと違い、グラフには日のバケットがある = ヘッダーの「日」が押せる。
+    await expect(page.locator(ui('period.zoom.day'))).toBeEnabled();
+    await expectNoHorizontalScroll(page, `timelineChart ${vp.name}`);
+    // 既定 ON は純資産と自由に動かせるお金。凡例は 44px のタップ領域。
+    const netAssetsLegend = page.locator(
+      `${ui('timeline.chart.legend')}[data-series-key="netAssets"]`,
+    );
+    await expect(netAssetsLegend).toHaveAttribute('aria-pressed', 'true');
+    const legendBox = await netAssetsLegend.boundingBox();
+    expect(legendBox?.height ?? 0, `グラフ凡例のタップ領域 ${vp.name}`).toBeGreaterThanOrEqual(44);
+    await page.screenshot({
+      path: `test-results/screenshots/ledger-timeline-chart-${vp.name}.png`,
+      fullPage: true,
+    });
+    // 凡例タップで系列が消える（描画の正本が凡例であることを実ブラウザでも見る）。
+    await netAssetsLegend.click();
+    await expect(netAssetsLegend).toHaveAttribute('aria-pressed', 'false');
+    await expect(
+      page.locator(`${ui('timeline.chart.line')}[data-series-key="netAssets"]`),
+    ).toHaveCount(0);
+
     // 線分レンズへ戻す（以降のシナリオは既定のレンズで進める）。
     await page.locator(ui('timeline.lens.segment')).click();
     await expect(page.locator(ui('timeline.viewport'))).toBeVisible();

@@ -22,7 +22,9 @@ import { useLedger } from '../../state/store';
 import { deriveBalanceSheet, representativeEntryAmount } from '../../domain/accounting';
 import {
   cashDeltaOfEntry,
+  cashflowWindowEnd,
   firstShortfallPoint,
+  foldCashflowPoints,
   freeAssetTotal,
   isFreeAsset,
   liabilityScheduleRows,
@@ -30,15 +32,16 @@ import {
   uniqueEntriesById,
   type CashflowPoint,
 } from '../../domain/cashflow';
+import type { TimelineZoom } from '../../domain/timelineCalendar';
 import type { ReportPeriod } from '../../domain/reportPeriod';
 import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
-import { addMonths, addMonthsToDate, monthOf, monthsBetween } from '../../domain/allocation';
+import { addMonths, monthOf, monthsBetween } from '../../domain/allocation';
 import { todayLocal } from '../../util/time';
 import { entryOpenPlan } from '../entryOpen';
 import type { AllocationsTarget } from './Allocations';
 import type { JournalEntry } from '../../domain/types';
-import { Money } from '../money';
+import { Money, moneyText } from '../money';
 import { t } from '../../i18n';
 import { useMoneyDigits } from '../money';
 import { formatMoney } from '../../util/format';
@@ -48,10 +51,19 @@ import { InvestmentProjectionTruncationNotice } from '../components/InvestmentPr
 
 /** 展開の地平の年（下回り日を探す範囲・グラフを伸ばせる上限）。 */
 const HORIZON_YEAR = Number.parseInt(CONTINUOUS_COST_HARD_CAP.slice(0, 4), 10);
-/** グラフの窓の初期値と、「さらに先へ」1 回ぶんの伸び（月）。 */
-const CHART_STEP_MONTHS = 12;
-/** 1 日ぶんの横幅(px)。12 ヶ月 ≒ 730px = 実機幅の 2 画面ぶんで、日次の起伏が潰れない。 */
-const CHART_DAY_WIDTH = 2;
+/**
+ * ズームごとの窓（初期値 = 「さらに先へ」1 回ぶんの伸び・月数）と 1 日ぶんの横幅(px)。
+ * どのズームでも窓 1 つぶんが ≒ 730px（実機幅の 2 画面ぶん）になるよう幅を決める:
+ * 起伏が潰れず、かつ横に無限に伸びない。
+ *  - 日 = 日繰り表（12 ヶ月）/ 月 = 月次資金繰り表（18 ヶ月）/ 年 = 年次計画（10 年）。
+ */
+const CHART_ZOOM: Record<TimelineZoom, { stepMonths: number; dayWidth: number }> = {
+  day: { stepMonths: 12, dayWidth: 2 },
+  month: { stepMonths: 18, dayWidth: 1.3 },
+  year: { stepMonths: 120, dayWidth: 0.2 },
+};
+/** 月次純増減の副表示を出す上限（これを超えると数字が重なって読めない）。 */
+const CHART_DELTA_MAX_POINTS = 24;
 const CHART_HEIGHT = 168;
 const CHART_PAD_X = 8;
 const CHART_PLOT_TOP = 12;
@@ -70,6 +82,7 @@ function daysBetween(from: string, to: string): number {
 
 export function Cashflow({
   period,
+  zoom,
   onEditEntry,
   onOpenAllocations,
   onOpenAccount,
@@ -77,6 +90,11 @@ export function Cashflow({
 }: {
   /** ヘッダーの日付（基準日の正本）。 */
   period: ReportPeriod;
+  /**
+   * ヘッダーのズーム（日/月/年）。資金繰りもウィンドウ世界なので**グラフの粒度が追従する**
+   * （v13.5 F）。投影と下回り日の探索は常に日次のままで、変わるのは描く点だけ。
+   */
+  zoom: TimelineZoom;
   onEditEntry: (entry: JournalEntry) => void;
   /** 仕訳タップの行き先（entryOpenPlan の実行先）。仕訳一覧・ホームと同じ resolver。 */
   onOpenAllocations: (target: AllocationsTarget) => void;
@@ -100,12 +118,26 @@ export function Cashflow({
     return raw < CONTINUOUS_COST_HARD_CAP ? raw : CONTINUOUS_COST_HARD_CAP;
   }, [period]);
 
-  // グラフの窓（基準日から何ヶ月ぶん描くか）。「さらに先へ」で +12 ヶ月・地平で止まる。
-  const [windowMonths, setWindowMonths] = useState(CHART_STEP_MONTHS);
-  const windowEnd = useMemo(() => {
-    const raw = addMonthsToDate(anchorDate, windowMonths);
-    return raw < CONTINUOUS_COST_HARD_CAP ? raw : CONTINUOUS_COST_HARD_CAP;
-  }, [anchorDate, windowMonths]);
+  // グラフの窓（基準日から何ヶ月ぶん描くか）。「さらに先へ」で 1 段ぶん伸び、地平で止まる。
+  // ズームが変わると窓の尺そのものが変わるので、そのズームの 1 段へ戻す
+  // （render 中の派生調整パターン。effect での setState を避ける）。
+  const step = CHART_ZOOM[zoom];
+  const [windowMonths, setWindowMonths] = useState(step.stepMonths);
+  const [trackedZoom, setTrackedZoom] = useState(zoom);
+  if (trackedZoom !== zoom) {
+    setTrackedZoom(zoom);
+    setWindowMonths(step.stepMonths);
+  }
+  const windowEnd = useMemo(
+    () =>
+      cashflowWindowEnd({
+        anchorDate,
+        months: windowMonths,
+        zoom,
+        cap: CONTINUOUS_COST_HARD_CAP,
+      }),
+    [anchorDate, windowMonths, zoom],
+  );
   const canExtend = windowEnd < CONTINUOUS_COST_HARD_CAP;
 
   const currency = ledger?.settings.currency ?? '';
@@ -142,10 +174,12 @@ export function Cashflow({
     };
   }, [ledger, entries, anchorDate]);
 
+  // 下回り日は**日次の投影**から出す（グラフをどの粒度で描いても探索の精度は落とさない）。
   const shortfall = useMemo(() => firstShortfallPoint(projection), [projection]);
+  // グラフに描く点だけをズームの粒度へ畳む（日 = 日次 / 月 = 月末 / 年 = 年末）。
   const windowPoints = useMemo(
-    () => projection.points.filter((p) => p.date <= windowEnd),
-    [projection, windowEnd],
+    () => foldCashflowPoints({ projection, anchorDate, endDate: windowEnd, zoom }),
+    [projection, anchorDate, windowEnd, zoom],
   );
 
   // 未来の入出金一覧の範囲 = いまグラフを開いている範囲。
@@ -228,15 +262,16 @@ export function Cashflow({
         points={windowPoints}
         shortfall={shortfall}
         currency={currency}
+        zoom={zoom}
       />
       {canExtend ? (
         <button
           type="button"
           className="btn"
-          onClick={() => setWindowMonths((m) => m + CHART_STEP_MONTHS)}
+          onClick={() => setWindowMonths((m) => m + step.stepMonths)}
           data-ui={UI.cashflow.chartExtend}
         >
-          {t('cashflow.chartExtend', { months: CHART_STEP_MONTHS })}
+          {t('cashflow.chartExtend', { months: step.stepMonths })}
         </button>
       ) : (
         <p className="field__hint">{t('cashflow.chartAtHorizon', { year: HORIZON_YEAR })}</p>
@@ -361,11 +396,16 @@ export function Cashflow({
 }
 
 /**
- * 「自由に動かせるお金」の日次折れ線（基準日起点・右方向へ横スクロール）。
+ * 「自由に動かせるお金」の折れ線（基準日起点・右方向へ横スクロール）。
  *
- * 残高は**階段関数**（動いた日だけ変わる）なので、点と点を斜めに結ばず次の変化日まで
+ * 残高は**階段関数**（動いた日だけ変わる）なので、点と点を斜めに結ばず次の点まで
  * 水平に引く。横位置は日数に比例させる（点の個数では決めない）ので、間隔の空いた区間が
  * 詰まって見えない。基準日より過去へは遡らない（過去はヘッダーの日付を戻して見る）。
+ *
+ * 点の粒度はヘッダーのズームが決める（日 = 日次 / 月 = 月末 / 年 = 年末。畳むのは
+ * `foldCashflowPoints`）。月ズームでは**月次純増減**を副表示する（2 軸は持たない。
+ * 前の点との差を各点に添えるだけ）。下回り日の縦線は畳んだ点ではなく日次の探索結果なので、
+ * どのズームでも同じ日を指す。
  *
  * v13.5 で時間平面へ統合する予定なので、TimelineCalendar との共通化はまだしない。
  */
@@ -375,18 +415,21 @@ function FreeFundsChart({
   points,
   shortfall,
   currency,
+  zoom,
 }: {
   anchorDate: string;
   endDate: string;
   points: CashflowPoint[];
   shortfall: CashflowPoint | null;
   currency: string;
+  zoom: TimelineZoom;
 }) {
   const digits = useMoneyDigits();
+  const dayWidth = CHART_ZOOM[zoom].dayWidth;
   const span = Math.max(1, daysBetween(anchorDate, endDate));
-  const width = CHART_PAD_X * 2 + span * CHART_DAY_WIDTH;
+  const width = CHART_PAD_X * 2 + span * dayWidth;
   const xOf = (date: string): number =>
-    CHART_PAD_X + Math.min(span, Math.max(0, daysBetween(anchorDate, date))) * CHART_DAY_WIDTH;
+    CHART_PAD_X + Math.min(span, Math.max(0, daysBetween(anchorDate, date))) * dayWidth;
 
   const values = points.map((p) => p.free);
   const lowest = values.reduce((m, v) => Math.min(m, v), values[0] ?? 0);
@@ -430,6 +473,20 @@ function FreeFundsChart({
 
   const marker = shortfall !== null && shortfall.date >= anchorDate && shortfall.date <= endDate;
 
+  /*
+   * 月次純増減の副表示（月ズームのみ）。前の点との差なので、月末残高の列だけで完結する
+   * （軸を増やさない）。点が多すぎると数字が重なって読めないので上限を置く。
+   */
+  const deltas =
+    zoom === 'month' && points.length <= CHART_DELTA_MAX_POINTS
+      ? points.slice(1).map((point, index) => ({
+          date: point.date,
+          amount: point.free - (points[index]?.free ?? 0),
+          x: xOf(point.date),
+          y: yOf(point.free),
+        }))
+      : [];
+
   return (
     <figure className="cashflow-chart" data-ui={UI.cashflow.freeTrend}>
       <figcaption className="section-label">
@@ -466,6 +523,23 @@ function FreeFundsChart({
             </g>
           ))}
           <polyline className="cashflow-chart__line" points={line.join(' ')} />
+          {deltas.map((delta) => (
+            <text
+              key={delta.date}
+              className={`cashflow-chart__delta ${
+                delta.amount > 0
+                  ? 'cashflow-chart__delta--pos'
+                  : delta.amount < 0
+                    ? 'cashflow-chart__delta--neg'
+                    : ''
+              }`}
+              x={delta.x}
+              y={Math.max(9, delta.y - 6)}
+              textAnchor="middle"
+            >
+              {moneyText(delta.amount, currency, digits, true)}
+            </text>
+          ))}
           {marker ? (
             <>
               <line
@@ -485,7 +559,7 @@ function FreeFundsChart({
           ) : null}
         </svg>
       </div>
-      <p className="sr-only">
+      <p className="sr-only" data-ui={UI.cashflow.chartSummary}>
         {t('cashflow.chartSummary', {
           from: anchorDate,
           start: formatMoney(points[0]?.free ?? 0, currency, digits),
@@ -493,6 +567,15 @@ function FreeFundsChart({
           end: formatMoney(points.at(-1)?.free ?? 0, currency, digits),
           low: formatMoney(lowest, currency, digits),
         })}
+        {/* SVG は aria-hidden なので、副表示の数字も読み上げに出す（見える情報と揃える）。 */}
+        {deltas.map((delta) => (
+          <span key={delta.date}>
+            {t('cashflow.chartMonthlyDelta', {
+              date: delta.date,
+              amount: moneyText(delta.amount, currency, digits, true),
+            })}
+          </span>
+        ))}
       </p>
       <p className="cashflow-chart__end muted">
         {t('cashflow.chartEnd', { date: endDate })}

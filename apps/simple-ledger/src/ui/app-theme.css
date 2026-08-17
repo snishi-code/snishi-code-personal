@@ -33,6 +33,15 @@
   --fs-revenue: #15803d; /* green-700 */
   --fs-expense: #d97706; /* amber-600 */
 
+  /* 時間平面のグラフレンズ（ストック 4 系列）のカテゴリカル色。
+     新しい色相を増やさず、会計区分の意味色と teal（資金繰りの折れ線と同じ）から引く。
+     色だけに頼らないため、系列は線種でも区別する（StockSeriesChart の SERIES_META）。
+     名前は系列キー（StockSeriesKey）そのままで、JS が `--series-<key>` を組み立てる。 */
+  --series-assets: var(--fs-asset); /* 資産 = blue */
+  --series-liabilities: var(--fs-liability); /* 負債 = red */
+  --series-netAssets: var(--fs-equity); /* 純資産 = slate */
+  --series-freeFunds: var(--primary-strong); /* 自由に動かせるお金 = teal（資金繰りと同色） */
+
   /* 科目の箱・資産/負債内訳枠。自由/不自由は同じ青系の濃淡にする。 */
   --account-asset-free: var(--fs-asset);
   --account-asset-fixed: #3b82f6; /* blue-500（背景との非テキストコントラスト 3:1 以上） */

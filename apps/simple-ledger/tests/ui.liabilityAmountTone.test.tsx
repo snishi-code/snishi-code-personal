@@ -139,6 +139,7 @@ describe('負債残高の数字色', () => {
       <View>
         <Cashflow
           period={period}
+          zoom="day"
           onEditEntry={() => undefined}
           onOpenAllocations={() => undefined}
           onOpenAccount={() => undefined}
