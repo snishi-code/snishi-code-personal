@@ -39,14 +39,14 @@ export function NetIncome({
 
   const { revenue, living, investmentProjectionTruncations } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const display = ledger ? displayEntriesResultForAsOf(ledger, basis.asOf, today) : null;
+    const display = ledger ? displayEntriesResultForAsOf(ledger, basis.asOf) : null;
     const entries = display?.entries ?? [];
     return {
       revenue: deriveProfitAndLoss(accounts, entries, basis.flowRange).totalRevenue,
       living: livingCostForRange(accounts, entries, basis.flowRange),
       investmentProjectionTruncations: display?.investmentProjectionTruncations ?? [],
     };
-  }, [basis, ledger, today]);
+  }, [basis, ledger]);
 
   const trends = useMemo(() => buildSectionTrends(period, ledger, today), [period, ledger, today]);
   const visibleProjectionTruncations =

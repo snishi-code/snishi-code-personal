@@ -181,13 +181,13 @@ export function YearlyOverview({
   const matrixAsOf = periodMatrixAsOf(scope, today);
   const matrixResult = useMemo(() => {
     if (!ledger || dataYears.length === 0) return null;
-    const display = displayEntriesResultForAsOf(ledger, matrixAsOf, today);
+    const display = displayEntriesResultForAsOf(ledger, matrixAsOf);
     return {
       matrix: buildPeriodMatrix(ledger.accounts, display.entries, scope),
       // 桁あふれで投影を打ち切った科目（アプリ都合の端点）。注記として名乗る。
       truncations: display.investmentProjectionTruncations,
     };
-  }, [dataYears.length, ledger, matrixAsOf, scope, today]);
+  }, [dataYears.length, ledger, matrixAsOf, scope]);
   const matrix = matrixResult?.matrix ?? null;
   const truncations = matrixResult?.truncations ?? [];
   // 表示対象に未来断面が含まれるか（年間モードでも未来月には投影が混ざる）。

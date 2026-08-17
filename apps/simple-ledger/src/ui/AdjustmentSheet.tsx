@@ -13,10 +13,10 @@ import { accountBalance, filterByDateRange } from '../domain/accounting';
 import { ADJUSTABLE_ACCOUNT_ROLES } from '../domain/accountRoles';
 import { isAdjustableAccountType } from '../domain/adjustment';
 import { isValidIsoDate } from '../domain/calendar';
-// 理論残高は意図的に reportEntriesForAsOf（投影なし）を使う: repository の保存側
-// （createAdjustment / updateAdjustment）と同じ算定でなければ expectedBalance がずれる。
-// 投資利回りの投影（displayEntriesForAsOf）は仮の数字であり、補正の基準（現実アンカー）に
-// 混ぜない（§D・Codex 指摘）。
+// 理論残高は reportEntriesForAsOf を使う: repository の保存側（createAdjustment /
+// updateAdjustment）と同じ算定でなければ expectedBalance がずれる。v13.4 ② で投資の
+// 利回り導出もこの単一正本に含まれる（利回りは仮の数字ではなく作者の宣言なので、
+// 補正の基準にも入る。宣言を打ち直すと、その pin より前の複利は按分に置き換わる）。
 import { reportEntriesForAsOf } from '../domain/reportEntries';
 import { formatMinorForInput, parseAmountToMinor, sanitizeSignedAmountText } from './amountText';
 import { useMoneyDigits } from './money';

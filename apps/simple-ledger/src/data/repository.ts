@@ -258,7 +258,8 @@ export async function loadLedger(): Promise<Ledger> {
   recurringRules.sort((a, b) => cmp(a.createdAt, b.createdAt));
   // 導出専用 entries は持たない。集計は各画面が displayEntriesForAsOf で
   // 基準日ごとに必要範囲だけ仮想展開する（単一正本 = reportBasis + displayEntriesForAsOf）。
-  // repository 内の保存不変条件だけは reportEntriesForAsOf（投影を混ぜない）を使う。
+  // repository 内の保存不変条件も同じ導出（reportEntriesForAsOf）を使う。v13.4 ② で
+  // 利回り導出が合流したため、表示と保存で違う世界を見ることはもう無い。
   return {
     meta,
     settings,

@@ -1,7 +1,7 @@
 /*
  * 仕訳一覧。保存される仕訳と計算で生まれる仕訳（継続コスト資産の費用行・定期ルール・
- * 投資利回りの投影）を**区別せず全部**日付順で出す（displayEntriesForAsOf が単一の正本。
- * export には混ぜない）。
+ * 残高補正の按分スライス・投資の利回り導出）を**区別せず全部**日付順で出す
+ * （displayEntriesForAsOf が単一の正本。export には混ぜない）。
  * 並び替え（日付/金額 × 昇/降・既定 = 日付降順）は表示専用。抽出結果には件数と合計を出し、
  * 合計の対象 = 表示している行の集合（科目タップ抽出 = 方向つき和 / それ以外 = 単純和）。
  * 展開範囲 = いま表示している範囲（to → 今日 or 保存仕訳の最も遠い日付。上限 2100-12-31）。
@@ -192,7 +192,7 @@ export function Journal({
   // 保存される仕訳 + 計算で生まれる仕訳（分けない）。混合後に必ずソートし直す。
   const sourceDisplay = useMemo(() => {
     if (!ledger) return null;
-    const display = displayEntriesResultForAsOf(ledger, expandTo, today);
+    const display = displayEntriesResultForAsOf(ledger, expandTo);
     return {
       ...display,
       entries: display.entries.sort((a, b) => {
@@ -201,7 +201,7 @@ export function Journal({
         return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
       }),
     };
-  }, [ledger, expandTo, today]);
+  }, [ledger, expandTo]);
   const source = useMemo(() => sourceDisplay?.entries ?? [], [sourceDisplay]);
 
   const filtered = useMemo(() => {

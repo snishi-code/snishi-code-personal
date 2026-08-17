@@ -288,7 +288,8 @@ describe('仕訳一覧の混合表示', () => {
     });
 
     const toInput = document.querySelector('#journal-to') as HTMLInputElement;
-    fireEvent.change(toInput, { target: { value: `${addMonths(monthOf(today), 1)}-15` } });
+    // v13.4 ②: 刻みは起点（この仕訳の日）の同日刻みなので、月初ではなく同日で範囲を取る。
+    fireEvent.change(toInput, { target: { value: addMonthsToDate(today, 2) } });
 
     const rows = await screen.findAllByText(`投影: ${invest.name}`);
     fireEvent.click(rows[0]!.closest('button')!);

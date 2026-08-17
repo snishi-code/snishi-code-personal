@@ -53,7 +53,7 @@ export function buildSectionTrends(
   if (period.mode === 'date' || !ledger) return null;
   const accounts = ledger.accounts;
   const basis = reportBasis(period, today);
-  const basisDisplay = displayEntriesResultForAsOf(ledger, basis.asOf, today);
+  const basisDisplay = displayEntriesResultForAsOf(ledger, basis.asOf);
   const basisEntries = basisDisplay.entries;
   const dataYears = dataYearsOf(
     basisEntries.filter((entry) => entry.date <= basis.asOf).map((entry) => entry.date),
@@ -73,7 +73,7 @@ export function buildSectionTrends(
   }
 
   for (const b of buckets) {
-    const display = displayEntriesResultForAsOf(ledger, b.asOf, today);
+    const display = displayEntriesResultForAsOf(ledger, b.asOf);
     const entries = display.entries;
     for (const truncation of display.investmentProjectionTruncations) {
       const previous = truncations.get(truncation.accountId);

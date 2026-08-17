@@ -1359,8 +1359,8 @@ export function TimelineCalendar({
   );
 
   const display = useMemo(
-    () => (ledger ? displayEntriesResultForAsOf(ledger, visibleRange.to, today) : null),
-    [ledger, today, visibleRange.to],
+    () => (ledger ? displayEntriesResultForAsOf(ledger, visibleRange.to) : null),
+    [ledger, visibleRange.to],
   );
 
   const model = useMemo<TimelineCalendarViewModel>(() => {

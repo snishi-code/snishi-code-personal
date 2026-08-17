@@ -132,9 +132,9 @@ export interface EntryMetadata {
   /** 仮想仕訳の種別。funding=資産化（支払元→対象資産）/ monthly-allocation=月割り（対象資産→月割り先）。 */
   ccKind?: 'funding' | 'monthly-allocation';
   /**
-   * 投資利回り投影の仮想仕訳の印（対象の投資科目 ID）。保存されない導出専用で、
-   * `displayEntriesForAsOf` の結果にのみ現れる（保存不変条件用の `reportEntriesForAsOf`
-   * には決して合流しない）。実仕訳・保存系・export には入れない。
+   * 投資の利回り導出の仮想仕訳の印（対象の投資科目 ID）。保存されない導出専用で、
+   * `reportEntriesForAsOf` の結果にのみ現れる（v13.4 ② で保存不変条件へ合流した。
+   * 利回りは仮の数字ではなく作者の宣言）。実仕訳・保存系・export には入れない。
    */
   investmentProjectionOf?: string;
   /**

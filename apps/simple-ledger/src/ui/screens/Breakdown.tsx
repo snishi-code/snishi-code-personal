@@ -155,8 +155,8 @@ export function Breakdown({
   const range = basis.flowRange;
   const asOf = basis.asOf;
   const reportDisplay = useMemo(
-    () => (ledger ? displayEntriesResultForAsOf(ledger, asOf, today) : null),
-    [asOf, ledger, today],
+    () => (ledger ? displayEntriesResultForAsOf(ledger, asOf) : null),
+    [asOf, ledger],
   );
   const reportEntries = useMemo(() => reportDisplay?.entries ?? [], [reportDisplay]);
 

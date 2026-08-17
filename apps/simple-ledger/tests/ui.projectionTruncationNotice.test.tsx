@@ -112,7 +112,7 @@ describe('投資投影の打ち切り通知', () => {
       />,
     );
 
-    expect(expand).toHaveBeenCalledWith(ledger, '2026-12-31', '2026-07-15');
+    expect(expand).toHaveBeenCalledWith(ledger, '2026-12-31');
     expect(screen.getByRole('note')).toHaveTextContent('「投資」の投影');
     expect(screen.getByRole('note')).toHaveTextContent('2026-09');
   });

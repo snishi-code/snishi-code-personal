@@ -80,11 +80,11 @@ export function Accounts({
   const today = todayLocal();
   const basis = reportBasis(period, today);
   const asOf = basis.asOf;
-  const display = ledger ? displayEntriesResultForAsOf(ledger, asOf, today) : null;
+  const display = ledger ? displayEntriesResultForAsOf(ledger, asOf) : null;
   const entries = filterByDateRange(display?.entries ?? [], undefined, asOf);
   // 費用・収入の発生額はホームと同じ期間（flowRange）で数える（C-1。導出＝統一エンジン）。
   const flowEntries = filterByDateRange(entries, basis.flowRange.from, basis.flowRange.to);
-  const todayDisplay = ledger ? displayEntriesResultForAsOf(ledger, today, today) : null;
+  const todayDisplay = ledger ? displayEntriesResultForAsOf(ledger, today) : null;
   const todayEntries = filterByDateRange(todayDisplay?.entries ?? [], undefined, today);
   const currency = ledger?.settings.currency ?? '';
 

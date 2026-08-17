@@ -107,8 +107,9 @@ export function Dashboard({
 
   const { pl, bs, livingTotal, investmentProjectionTruncations } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    // 表示は投影込み（displayEntries）。ヘッダー日付を未来にすると資産・純資産が投影込みになる。
-    const display = ledger ? displayEntriesResultForAsOf(ledger, basis.asOf, today) : null;
+    // 導出込み（継続コスト・定期ルール・補正の按分・投資の利回り）。v13.4 ② 以降、
+    // 利回りは最後の補正より後の全断面に効く（未来だけでなく過去の断面にも現れる）。
+    const display = ledger ? displayEntriesResultForAsOf(ledger, basis.asOf) : null;
     const entries = display?.entries ?? [];
     const breakdown = livingCostBreakdownForRange(accounts, entries, range);
     return {
@@ -118,7 +119,7 @@ export function Dashboard({
       livingTotal: breakdown.total,
       investmentProjectionTruncations: display?.investmentProjectionTruncations ?? [],
     };
-  }, [basis.asOf, ledger, range, today]);
+  }, [basis.asOf, ledger, range]);
 
   const trend = useMemo(() => buildSectionTrends(period, ledger, today), [period, ledger, today]);
   const visibleProjectionTruncations =

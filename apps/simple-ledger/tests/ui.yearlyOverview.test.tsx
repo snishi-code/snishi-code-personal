@@ -531,6 +531,7 @@ describe('YearlyOverview', () => {
     const note = document.querySelector(`[data-ui="${UI.yearlyOverview.projectionTruncatedNote}"]`);
     expect(note).toBeInTheDocument();
     expect(note).toHaveTextContent('投資');
-    expect(note).toHaveTextContent('2026-09');
+    // v13.4 ②: 起点は today ではなく実効開始（2026-01-01）なので、打ち切りも手前へ来る。
+    expect(note).toHaveTextContent('2026-03');
   });
 });

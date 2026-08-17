@@ -44,14 +44,14 @@ export function ExpenseBreakdown({
 
   const { breakdown, categories, investmentProjectionTruncations } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
-    const display = ledger ? displayEntriesResultForAsOf(ledger, basis.asOf, today) : null;
+    const display = ledger ? displayEntriesResultForAsOf(ledger, basis.asOf) : null;
     const entries = display?.entries ?? [];
     return {
       breakdown: livingCostBreakdownForRange(accounts, entries, range),
       categories: expenseCategoryBreakdownForRange(accounts, entries, range),
       investmentProjectionTruncations: display?.investmentProjectionTruncations ?? [],
     };
-  }, [basis.asOf, ledger, range, today]);
+  }, [basis.asOf, ledger, range]);
 
   const trends = useMemo(() => buildSectionTrends(period, ledger, today), [period, ledger, today]);
   const visibleProjectionTruncations =

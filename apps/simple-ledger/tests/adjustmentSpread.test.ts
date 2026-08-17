@@ -501,7 +501,8 @@ describe('投資科目の計上先', () => {
     for (const row of rows) expect(sides(row)).toEqual({ debit: 'invest', credit: 'gain' });
     // 残高調整科目は 1 円も動かない（評価損益は調整費ではない）。
     expect(balanceAt(src, 'adj-rev', 'revenue', '2026-12-31')).toBe(0);
-    expect(balanceAt(src, 'gain', 'revenue', '2026-12-31')).toBe(3_000);
+    // 宣言の日までは按分だけが効く（利回りの複利は最後の pin より後・v13.4 ②）。
+    expect(balanceAt(src, 'gain', 'revenue', '2026-04-10')).toBe(3_000);
     expect(balanceAt(src, 'invest', 'asset', '2026-04-10')).toBe(103_000);
   });
 

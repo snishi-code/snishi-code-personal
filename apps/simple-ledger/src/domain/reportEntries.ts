@@ -1,4 +1,4 @@
-import { adjustmentSpread, isAdjustmentEntry } from './adjustmentSpread';
+import { adjustmentSpread, isAdjustmentEntry, lastAdjustmentAnchors } from './adjustmentSpread';
 import { continuousCostEntries } from './continuousCost';
 import {
   investmentProjectionResult,
@@ -12,25 +12,41 @@ type ReportEntrySource = Pick<
   'accounts' | 'journalEntries' | 'monthlyCostItems' | 'recurringRules'
 >;
 
+export interface ReportEntriesResult {
+  entries: JournalEntry[];
+  /**
+   * 算術限界で利回り導出を打ち切った科目。**アプリ都合の端点**なので、これを消費する画面は
+   * 「導出を含む」と言い続けず、止まった事実を名乗る（数字が黙って横ばいの顔をしない）。
+   */
+  investmentProjectionTruncations: InvestmentProjectionTruncation[];
+}
+
 /**
- * 選択した基準日時点の集計に使う導出仕訳。
- * 実仕訳に、定期ルールの完全導出（購入行 + item 経由の費用行）と継続コスト資産の
- * 費用行を仮想展開する。仮想行は保存・export しない。
+ * 選択した基準日時点の集計に使う導出仕訳（**単一正本**）と、導出が黙って止まっていないかの診断。
+ *
+ * 実仕訳に、定期ルールの完全導出（購入行 + item 経由の費用行）・継続コスト資産の費用行・
+ * 残高補正の按分スライス・投資の利回り導出を仮想展開する。仮想行は保存・export しない。
  *
  * v13: ルール由来（rec- 仕訳・ccr- item）は保存せず、ルール線分から毎回導出する。
  * 保存データに残っていても読まない（半移行状態の fail-closed 防御。二重計上を防ぐ）。
  *
- * 時間依存（today / knowledgeDate）は無い: 配分は「ユーザーが明示した終了日」だけで決まり、
- * asOf を動かしても展開範囲が変わるだけで過去の値は変わらない。
- *
- * v13.4: 残高補正（metadata.adjustment）の stored 仕訳は**集計に入れない**。宣言（pin）として
+ * v13.4 ①: 残高補正（metadata.adjustment）の stored 仕訳は**集計に入れない**。宣言（pin）として
  * 読み、直前の補正との区間へ月割りした按分スライスへ置き換える（adjustmentSpread.ts が正本）。
  * 補正日以降の残高は置き換え前と完全に一致する。
  *
- * これは**保存不変条件の正本**（科目アーカイブの残高 0・終了残高・残高補正の理論残高）。
- * 投資の利回り投影はここへ合流させない——画面表示は `displayEntriesForAsOf` を使う。
+ * v13.4 ②: 投資の利回り導出も**ここへ合流する**（作者決定 2026-08-17）。利回りは「仮の数字」
+ * ではなく作者の**宣言**なので、表示専用にせず保存不変条件（科目アーカイブの残高 0・終了残高・
+ * 残高補正の理論残高）にも載せる。§D（2026-08-11）の「仮の投影を保存判断へ逆流させない」は
+ * 意識的に逆転した。起点は最後の補正（pin）で、pin より手前は按分が支配する
+ * （investmentProjection.ts が正本）。
+ *
+ * 時間依存（today / knowledgeDate）は無い: 展開はすべて保存データ（宣言された日付）だけで
+ * 決まり、asOf を動かしても展開範囲が変わるだけで過去の値は変わらない。
  */
-export function reportEntriesForAsOf(ledger: ReportEntrySource, asOf: string): JournalEntry[] {
+export function reportEntriesResultForAsOf(
+  ledger: ReportEntrySource,
+  asOf: string,
+): ReportEntriesResult {
   const real: JournalEntry[] = [];
   const adjustments: JournalEntry[] = [];
   // 補正日が asOf より先にあると、その区間のスライスは asOf 以前にも落ちる。按分を asOf に
@@ -61,7 +77,24 @@ export function reportEntriesForAsOf(ledger: ReportEntrySource, asOf: string): J
     ...derived.entries,
   ];
   const spread = adjustmentSpread(ledger.accounts, base, adjustments);
-  return [...base, ...spread.entries, ...spread.unspread].filter((entry) => entry.date <= asOf);
+  const spreadEntries = [...base, ...spread.entries, ...spread.unspread];
+  // 利回りは按分の**後**に積む: 生成されるのは最後の pin より後だけなので、按分が支配する
+  // 区間（pin どうしの間）へは決して入り込まない = 差額 G の算定と循環しない。
+  const projection = investmentProjectionResult(
+    ledger.accounts,
+    spreadEntries,
+    lastAdjustmentAnchors(ledger.accounts, adjustments),
+    asOf,
+  );
+  return {
+    entries: [...spreadEntries, ...projection.entries].filter((entry) => entry.date <= asOf),
+    investmentProjectionTruncations: projection.truncations,
+  };
+}
+
+/** 行だけが要る呼び出し向けの薄い入口（打ち切りは `reportEntriesResultForAsOf` で見る）。 */
+export function reportEntriesForAsOf(ledger: ReportEntrySource, asOf: string): JournalEntry[] {
+  return reportEntriesResultForAsOf(ledger, asOf).entries;
 }
 
 /**
@@ -76,41 +109,22 @@ export function reportMonthlyCostItems(
   return [...manual, ...derivedItems];
 }
 
-/**
- * **画面表示用**の導出仕訳 = reportEntriesForAsOf + 投資の利回り投影。
- *
- * today は明示引数（domain で Date.now を呼ばない）。投影行は常に today より未来の
- * 月初日にだけ生まれるため、過去断面（asOf <= today）は reportEntriesForAsOf と完全一致する。
- * 保存判断（repository の残高 0 検証・残高補正の理論残高）は reportEntriesForAsOf のまま
- * 変えない——仮の利回りを保存判断へ逆流させない（Codex 指摘・§D 2026-08-11）。
+/* ── 「画面表示用」の入口 ──
+ * v13.4 ② で**保存境界とまったく同じもの**になった（利回り導出が合流したため、
+ * 「表示専用の投影」という区別自体が消えた）。画面側の呼び名として別名だけ残す。
  */
-export function displayEntriesForAsOf(
-  ledger: ReportEntrySource,
-  asOf: string,
-  today: string,
-): JournalEntry[] {
-  return displayEntriesResultForAsOf(ledger, asOf, today).entries;
+
+export type DisplayEntriesResult = ReportEntriesResult;
+
+/** `reportEntriesForAsOf` の別名（画面から呼ぶときの名前）。 */
+export function displayEntriesForAsOf(ledger: ReportEntrySource, asOf: string): JournalEntry[] {
+  return reportEntriesForAsOf(ledger, asOf);
 }
 
-export interface DisplayEntriesResult {
-  entries: JournalEntry[];
-  /**
-   * 算術限界で投影を打ち切った科目。**アプリ都合の端点**なので、これを消費する画面は
-   * 「投影を含む」と言い続けず、止まった事実を名乗る（仮の数字が本物の顔をしない）。
-   */
-  investmentProjectionTruncations: InvestmentProjectionTruncation[];
-}
-
-/** `displayEntriesForAsOf` と同じ結果に、投影が黙って止まっていないかの診断を添えて返す。 */
+/** `reportEntriesResultForAsOf` の別名（画面から呼ぶときの名前）。 */
 export function displayEntriesResultForAsOf(
   ledger: ReportEntrySource,
   asOf: string,
-  today: string,
 ): DisplayEntriesResult {
-  const base = reportEntriesForAsOf(ledger, asOf);
-  const projection = investmentProjectionResult(ledger.accounts, base, asOf, today);
-  return {
-    entries: [...base, ...projection.entries],
-    investmentProjectionTruncations: projection.truncations,
-  };
+  return reportEntriesResultForAsOf(ledger, asOf);
 }

@@ -72,8 +72,8 @@ export function Cashflow({
   const today = todayLocal();
   const basis = useMemo(() => reportBasis({ mode: 'all' }, today), [today]);
   const reportDisplay = useMemo(
-    () => (ledger ? displayEntriesResultForAsOf(ledger, basis.asOf, today) : null),
-    [basis.asOf, ledger, today],
+    () => (ledger ? displayEntriesResultForAsOf(ledger, basis.asOf) : null),
+    [basis.asOf, ledger],
   );
   const reportEntries = useMemo(() => reportDisplay?.entries ?? [], [reportDisplay]);
   // 表示終了日。**開くたびに「今日 + 既定の期間（設定画面・端末設定）」へ戻る**。
@@ -98,7 +98,7 @@ export function Cashflow({
     const startFree = freeAssetTotal(bs.assets);
     const end = untilDate;
     // 投影の入力 = 導出込み仕訳（displayEntriesForAsOf を表示終了日まで展開した結果）。
-    const futureDisplay = ledger ? displayEntriesResultForAsOf(ledger, end, today) : null;
+    const futureDisplay = ledger ? displayEntriesResultForAsOf(ledger, end) : null;
     const futureEntries = futureDisplay?.entries ?? [];
     const future = uniqueEntriesById(
       futureEntries.filter(
