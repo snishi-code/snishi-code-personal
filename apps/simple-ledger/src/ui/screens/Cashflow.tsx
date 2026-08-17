@@ -357,12 +357,26 @@ export function Cashflow({
                   <div className="list__title">{f.title}</div>
                   <div className="list__sub">{f.date}</div>
                 </div>
+                {/*
+                 * 方向は**色 + 言葉**で言う（v13.6 H2-2・作者確定 2026-08-18）。
+                 * 数字は絶対値のままで、+ / − の符号は付けない: 符号は「フローが負の量である」
+                 * という別の主張になり、赤 = 出金の色の意味論と二重に方向を語るため。
+                 * 色だけに頼らないぶんは sr-only の「入金 / 出金 / 増減なし」が引き受ける
+                 * （仕訳一覧・月割り台帳と同じ作法。docs/dev/ledger-ui-ux.md）。
+                 * 上部の残高（自由に動かせるお金）はストックなので signed のまま = ここだけの規約。
+                 */}
                 <span
                   className={`list__amount ${
                     f.delta > 0 ? 'amount--pos' : f.delta < 0 ? 'amount--neg' : 'muted'
                   }`}
                 >
-                  {f.delta > 0 ? '+' : f.delta < 0 ? '−' : '→ '}
+                  <span className="sr-only">
+                    {f.delta > 0
+                      ? t('cashflow.futureInflow')
+                      : f.delta < 0
+                        ? t('cashflow.futureOutflow')
+                        : t('cashflow.futureNoChange')}
+                  </span>
                   <Money
                     amount={f.delta === 0 ? f.amount : Math.abs(f.delta)}
                     currency={currency}

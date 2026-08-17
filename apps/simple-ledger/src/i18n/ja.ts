@@ -175,6 +175,11 @@ export const ja = {
   'cashflow.futureIntro':
     'グラフに出している範囲（{from} 〜 {to}）の予定です。ホームの 収入 / 支出 / 振替 で先の日付を選ぶと、ここに表示され資金繰りに反映されます。',
   'cashflow.futureEmpty': 'この範囲に予定はありません。',
+  // v13.6 H2-2: 入出金（フロー）の行は色 + 絶対値で方向を示し、符号は付けない。
+  // 色だけに頼らないための言葉はここ（見える数字の手前で読み上げられる）。
+  'cashflow.futureInflow': '入金',
+  'cashflow.futureOutflow': '出金',
+  'cashflow.futureNoChange': '自由に動かせるお金は増減なし',
 
   // 負債の新規作成（支出の支払い方法 / 振替の源泉・行き先から）
   'liability.form.title': '新しい負債を作る',
