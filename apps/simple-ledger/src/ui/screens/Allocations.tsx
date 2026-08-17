@@ -47,7 +47,7 @@ import {
   monthlyAllocationAccountOptions,
 } from '../accountOptions';
 import { monthlyAmounts, monthOf } from '../../domain/allocation';
-import { deriveBalanceSheet } from '../../domain/accounting';
+import { debitSignedBalance, deriveBalanceSheet } from '../../domain/accounting';
 import { liabilityScheduleRows, repaymentEntryAmount } from '../../domain/cashflow';
 import { RepaymentScheduleSheet } from '../RepaymentScheduleSheet';
 import { isValidIsoDate } from '../../domain/calendar';
@@ -320,8 +320,19 @@ export function Allocations({
       ? t('recurring.everyNMonthsDay', { n: r.everyMonths, day: r.dayOfMonth })
       : t('recurring.everyMonthDay', { day: r.dayOfMonth });
 
-  // 検索は 1 つの欄が全セクションに効く（負債は科目名で当てる。並び替え軸は科目順のまま）。
-  const shownLiabilities = liabilities.filter((l) => matchesQuery([l.name], query));
+  // 検索は 1 つの欄が全セクションに効く（負債は科目名で当てる）。
+  // 金額軸だけは負債セクションにも効かせる（C-2）。比較は**自然符号**（貸方残高は負）で
+  // 行うので、昇順ではローン（最も大きな負債）が先頭に来る。表示は絶対値のまま。
+  // 日付軸（次回返済日）・名称軸は導入せず、従来どおり科目順（sortAccounts）を保つ。
+  const shownLiabilities = applySort(
+    liabilities.filter((l) => matchesQuery([l.name], query)),
+    sort.key === 'amount'
+      ? (a, b) =>
+          (debitSignedBalance(a.account.type, a.balance) -
+            debitSignedBalance(b.account.type, b.balance)) *
+          dir
+      : null,
+  );
   // 検索でどのセクションも 0 件（データが無いのではなく絞り込みで消えた）。
   const searchMissed =
     query !== '' && rules.length === 0 && items.length === 0 && shownLiabilities.length === 0;
@@ -756,7 +767,8 @@ export function Allocations({
                   {/* 右列 = 上段 残高 / 下段 動詞（tonal・高さは .btn の var(--tap)）。 */}
                   <div className="row-trailing">
                     <span className="list__amount">
-                      <Money amount={l.balance} currency={currency} />
+                      {/* 負債残高は専用トークンの色（C-2）。絶対値表示のままで符号は付けない。 */}
+                      <Money amount={l.balance} currency={currency} tone="liability" />
                     </span>
                     <button
                       type="button"

@@ -284,9 +284,14 @@ export function Accounts({
                                   currency={currency}
                                 />
                               ) : (
+                                // 負債の箱の残高だけ専用トークンの色（C-2）。表示は絶対値の
+                                // ままで符号は付けない（箱の見出しが色以外の手がかり）。
                                 <Money
                                   amount={accountBalance(account.id, account.type, entries)}
                                   currency={currency}
+                                  {...(box.type === 'liability'
+                                    ? { tone: 'liability' as const }
+                                    : {})}
                                 />
                               )}
                             </span>

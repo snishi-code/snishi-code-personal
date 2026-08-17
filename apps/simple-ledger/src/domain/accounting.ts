@@ -22,6 +22,19 @@ export function isDebitNormal(type: AccountType): boolean {
 }
 
 /**
+ * `accountBalance` の残高（type ごとに増加 = 正）を、**資産と負債を 1 本の数直線へ並べる
+ * 符号**へ直す（借方正規 = 正・貸方正規 = 負）。金額ソートの比較の単一正本（C-2）。
+ *
+ * 表示は絶対値のままにする（マイナス記号は付けない）。負債が資産と同じ正の値として
+ * 混ざって並ぶのを防ぐのは**比較だけ**の仕事で、昇順ならローン（最も大きな負債）が先頭に来る。
+ *
+ * `naturalDelta` の「自然な符号」（= その科目にとっての増加が正）とは別軸なので混同しない。
+ */
+export function debitSignedBalance(type: AccountType, balance: number): number {
+  return isDebitNormal(type) ? balance : -balance;
+}
+
+/**
  * 1 行の金額を、その科目の自然な符号（増加 = 正）の増減へ変換する。
  * asset/expense は借方が増、liability/equity/revenue は貸方が増（isDebitNormal が正本）。
  * periodMatrix・抽出→合計エンジンが共有する符号規則の単一正本。

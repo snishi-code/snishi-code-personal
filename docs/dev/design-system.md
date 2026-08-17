@@ -31,6 +31,7 @@ CSS variables による design tokens。共通正本は `packages/foundation/src
 | `--warning-light` / `--warning-border` | `#fffbeb` / `#fde68a` | 警告面/枠 |
 | `--success` | `#0f766e` | 成功（toast 背景 = 白文字 4.9:1） |
 | `--pos` / `--neg` | `#0f766e` / `#dc2626` | 金額の増（teal-700）/減（赤）。記号 +/− も併記 |
+| `--amount-liability` | `#b91c1c`（red-700） | 負債残高の数字色（白地で 5.9:1）。増減の向きではなく**残高の性質**の 1 軸。表示は絶対値のままで記号は付けないため、必ず負債の箱/セクション見出しと一緒に使う（振替・投資積立には付けない） |
 | `--focus` / `--focus-ring` | `#14b8a6` / ring | フォーカス表示 |
 | `--radius` / `--radius-sm` / `--radius-pill` | `12px` / `8px` / `999px` | 角丸 |
 | `--shadow` / `--shadow-pop` | … | カード影 / ポップオーバー影 |

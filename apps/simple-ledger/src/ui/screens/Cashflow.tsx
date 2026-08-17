@@ -267,7 +267,9 @@ export function Cashflow({
                 <div className="list__main">
                   <div className="list__title">{l.name}</div>
                   <div className="list__sub">
-                    {t('repay.balance')}: <Money amount={l.balance} currency={currency} />
+                    {/* 負債残高は専用トークンの色（C-2）。絶対値表示のままで符号は付けない。 */}
+                    {t('repay.balance')}:{' '}
+                    <Money amount={l.balance} currency={currency} tone="liability" />
                   </div>
                   {l.count > 0 ? (
                     <div className="list__sub">
