@@ -302,6 +302,8 @@ describe('エンジン一致: accounting 系と periodMatrix 系', () => {
       expect(matrix.rows.revenue[index]).toBe(pl.totalRevenue);
       expect(matrix.rows.expense[index]).toBe(pl.totalExpense);
       expect(matrix.rows.net[index]).toBe(pl.netIncome);
+      expect(matrix.rows.totalAssets[index]).toBe(bs.totalAssets);
+      expect(matrix.rows.totalLiabilities[index]).toBe(bs.totalLiabilities);
       expect(matrix.rows.netAssets[index]).toBe(bs.netAssets);
     });
   });
@@ -321,6 +323,8 @@ describe('エンジン一致: accounting 系と periodMatrix 系', () => {
         expect(matrix.rows.revenue[index]).toBe(pl.totalRevenue);
         expect(matrix.rows.expense[index]).toBe(pl.totalExpense);
         expect(matrix.rows.net[index]).toBe(pl.netIncome);
+        expect(matrix.rows.totalAssets[index]).toBe(bs.totalAssets);
+        expect(matrix.rows.totalLiabilities[index]).toBe(bs.totalLiabilities);
         expect(matrix.rows.netAssets[index]).toBe(bs.netAssets);
       }
     }

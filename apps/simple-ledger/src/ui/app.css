@@ -328,8 +328,35 @@
   font-weight: 700;
   background: var(--bg);
 }
-.period-matrix__row--category th {
-  padding-left: var(--space-5);
+/* 段階的開示（v13.5 E）。深さぶんラベルを字下げする。深さは JS が custom property で渡す。 */
+.period-matrix__table .period-matrix__label {
+  padding-left: calc(var(--space-3) + var(--period-matrix-depth, 0) * var(--space-4));
+}
+/* トグルを持つセルは余白をボタンへ移し、タップ領域の高さを 44px（--tap）にする。 */
+.period-matrix__table .period-matrix__label--interactive {
+  padding: 0;
+}
+.period-matrix__row-btn {
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+  width: 100%;
+  min-height: var(--tap);
+  padding: var(--space-2) var(--space-3);
+  padding-left: calc(var(--space-3) + var(--period-matrix-depth, 0) * var(--space-4));
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+.period-matrix__caret {
+  flex: none;
+  width: 10px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.period-matrix__row--child th {
   color: var(--muted);
   font-weight: 500;
 }

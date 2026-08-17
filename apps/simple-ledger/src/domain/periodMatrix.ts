@@ -7,10 +7,27 @@
  *
  * 列は「見せたい窓」を呼び出し側が渡す（月ズーム = 年をまたぐ月の並び / 年ズーム = 年の並び）。
  * 全期間を常に全列 DOM 化しないための可視範囲 + 前後バッファは呼び出し側の責務。
+ *
+ * 行は**ホームの 6 カードと同じ 6 分類**（収入 / 支出 / 収支 / 資産 / 負債 / 純資産。v13.5 E）。
+ * 各分類は段階的開示のための子（インライン木）を持つ:
+ *   収入 → 収入カテゴリ / 支出 → 費用カテゴリ / 資産 → 資産の 4 グループ → 科目 /
+ *   負債 → 負債科目 / 収支・純資産 → 葉。
+ * 「月割り」の独立行は廃止し、資産の 4 グループのうち「月割り台帳」（残存価値の合計）へ移した
+ * （内訳画面と同じ 1 行の見せ方）。展開状態は画面ローカルで、ここには持たない。
+ *
+ * **親子の整合**: 子を持つ行の値は、必ず「表示する子の値の列ごとの合計」に一致する
+ * （資産の 4 グループの合計 = 総資産、各グループ = その科目の合計）。値は minor unit の整数で、
+ * 途中の丸めを一切しない。
  */
 import { compareAccountOrder } from './accountOrder';
-import { naturalDelta } from './accounting';
-import { isContinuousCostMonthlyAllocationEntry } from './livingCost';
+import { debitSignedBalance, naturalDelta } from './accounting';
+import {
+  ASSET_GROUP_KEYS,
+  ASSET_GROUP_LABEL_KEYS,
+  assetGroupOf,
+  type AssetGroupKey,
+} from './assetGroups';
+import type { MessageKey } from '../i18n';
 import type { Account, JournalEntry } from './types';
 import { assertSafeAmount } from './safeSum';
 
@@ -36,28 +53,56 @@ export interface PeriodMatrixColumn {
 
 export type PeriodMatrixValue = number;
 
+/** ホームの 6 カードと同じ 6 分類。並びは `PERIOD_MATRIX_ROW_KEYS`。 */
 export type PeriodMatrixRowKey =
   | 'revenue'
   | 'expense'
   | 'net'
-  | 'monthlyCost'
   | 'totalAssets'
+  | 'totalLiabilities'
   | 'netAssets';
+
+/** 6 分類の並び（ホームのカードと同じ）。 */
+export const PERIOD_MATRIX_ROW_KEYS: readonly PeriodMatrixRowKey[] = [
+  'revenue',
+  'expense',
+  'net',
+  'totalAssets',
+  'totalLiabilities',
+  'netAssets',
+];
 
 /** 固定行。配列の添字は columns と一致する。 */
 export type PeriodMatrixRows = Record<PeriodMatrixRowKey, PeriodMatrixValue[]>;
 
-export interface PeriodMatrixExpenseCategory {
-  account: Account;
+/** 展開行のラベル。科目は名前そのまま、グループは i18n キー（表示は UI 側で解決する）。 */
+export type PeriodMatrixLabel =
+  | { kind: 'account'; name: string }
+  | { kind: 'message'; key: MessageKey };
+
+/** 展開行（インライン木の 1 行）。子を持つ行の値は子の合計に一致する。 */
+export interface PeriodMatrixNode {
+  /** 行の一意キー（React key・展開状態の識別子）。 */
+  key: string;
+  label: PeriodMatrixLabel;
   /** 配列の添字は columns と一致する。 */
   values: PeriodMatrixValue[];
+  /** さらに下の階層。空 = 葉。 */
+  children: PeriodMatrixNode[];
+}
+
+/** 6 分類の 1 行。values は `rows` と同じ配列を指す（二重に持たない）。 */
+export interface PeriodMatrixSection {
+  key: PeriodMatrixRowKey;
+  values: PeriodMatrixValue[];
+  children: PeriodMatrixNode[];
 }
 
 export interface PeriodMatrix {
   columns: PeriodMatrixColumn[];
   rows: PeriodMatrixRows;
-  /** 表示列のいずれかが 0 ではない費用科目だけを、科目の正本順で返す。 */
-  expenseCategories: PeriodMatrixExpenseCategory[];
+  /** 6 分類を表示順で。行タップの段階的開示はこの木をそのまま辿る。 */
+  sections: PeriodMatrixSection[];
 }
 
 function pad2(value: number): string {
@@ -130,13 +175,43 @@ function addValue(values: PeriodMatrixValue[], index: number, amount: number): v
   if (current !== undefined) values[index] = assertSafeAmount(current + amount);
 }
 
+/** 列ごとの合計（親の値は必ずこれで作る = 子の合計と一致させる）。 */
+function sumValues(
+  columns: PeriodMatrixColumn[],
+  rows: readonly PeriodMatrixValue[][],
+): PeriodMatrixValue[] {
+  const total = blankValues(columns);
+  for (const values of rows) {
+    values.forEach((value, index) => addValue(total, index, value));
+  }
+  return total;
+}
+
+/** 表示列のどれかが 0 ではない = その行を出す（全列 0 の科目は展開しても無意味）。 */
+function hasAnyValue(values: readonly PeriodMatrixValue[]): boolean {
+  return values.some((value) => value !== 0);
+}
+
+function accountNode(
+  prefix: string,
+  account: Account,
+  values: PeriodMatrixValue[],
+): PeriodMatrixNode {
+  return {
+    key: `${prefix}.${account.id}`,
+    label: { kind: 'account', name: account.name },
+    values,
+    children: [],
+  };
+}
+
 /**
  * 展開済み仕訳から月列または年列のマトリクスを作る。
  *
  * - entries は最大基準日まで `displayEntriesForAsOf` した結果を渡す。
  * - 入力配列は変更しない。
  * - 現在・未来を問わず、列末時点の投影値を数値で返す。
- * - PL、継続コスト、費用カテゴリ、BS のために仕訳を複数回走査しない。
+ * - PL、カテゴリ、BS、科目別残高のために仕訳を複数回走査しない。
  */
 export function buildPeriodMatrix(
   accounts: readonly Account[],
@@ -146,15 +221,23 @@ export function buildPeriodMatrix(
   const columns = columnsFor(scope);
   const revenue = blankValues(columns);
   const expense = blankValues(columns);
-  const monthlyCost = blankValues(columns);
   const totalAssets = blankValues(columns);
+  const totalLiabilities = blankValues(columns);
   const netAssets = blankValues(columns);
   const accountById = new Map(accounts.map((account) => [account.id, account] as const));
-  const expenseValuesById = new Map<string, PeriodMatrixValue[]>(
+  // フロー（収入・費用カテゴリ）は列バケットへ加算、ストック（資産・負債科目）は列末を焼き付ける。
+  const flowValuesById = new Map<string, PeriodMatrixValue[]>(
     accounts
-      .filter((account) => account.type === 'expense')
+      .filter((account) => account.type === 'revenue' || account.type === 'expense')
       .map((account) => [account.id, blankValues(columns)]),
   );
+  const stockAccounts = accounts.filter(
+    (account) => account.type === 'asset' || account.type === 'liability',
+  );
+  const stockValuesById = new Map<string, PeriodMatrixValue[]>(
+    stockAccounts.map((account) => [account.id, blankValues(columns)]),
+  );
+  const stockBalanceById = new Map<string, number>(stockAccounts.map((account) => [account.id, 0]));
 
   const flowColumnByKey = new Map(columns.map((column, index) => [column.key, index] as const));
   const orderedEntries = [...entries].sort((a, b) => {
@@ -172,7 +255,11 @@ export function buildPeriodMatrix(
       const boundary = activeBoundaries[boundaryIndex];
       if (!boundary || (beforeDate !== undefined && boundary.asOf >= beforeDate)) break;
       totalAssets[boundary.index] = assetsBalance;
+      totalLiabilities[boundary.index] = liabilitiesBalance;
       netAssets[boundary.index] = assertSafeAmount(assetsBalance - liabilitiesBalance);
+      for (const [accountId, values] of stockValuesById) {
+        values[boundary.index] = stockBalanceById.get(accountId) ?? 0;
+      }
       boundaryIndex += 1;
     }
   };
@@ -184,24 +271,25 @@ export function buildPeriodMatrix(
 
       const flowKey = scope.mode === 'months' ? entry.date.slice(0, 7) : entry.date.slice(0, 4);
       const flowColumnIndex = flowColumnByKey.get(flowKey);
-      const monthlyAllocation = isContinuousCostMonthlyAllocationEntry(entry);
 
       for (const line of entry.lines) {
         const account = accountById.get(line.accountId);
         if (!account) continue;
         const delta = naturalDelta(account, line.side, line.amount);
 
-        if (account.type === 'asset') assetsBalance = assertSafeAmount(assetsBalance + delta);
-        if (account.type === 'liability')
-          liabilitiesBalance = assertSafeAmount(liabilitiesBalance + delta);
+        if (account.type === 'asset' || account.type === 'liability') {
+          const balance = assertSafeAmount((stockBalanceById.get(account.id) ?? 0) + delta);
+          stockBalanceById.set(account.id, balance);
+          if (account.type === 'asset') assetsBalance = assertSafeAmount(assetsBalance + delta);
+          else liabilitiesBalance = assertSafeAmount(liabilitiesBalance + delta);
+        }
         if (flowColumnIndex === undefined) continue;
 
         if (account.type === 'revenue') addValue(revenue, flowColumnIndex, delta);
-        if (account.type === 'expense') {
-          addValue(expense, flowColumnIndex, delta);
-          const categoryValues = expenseValuesById.get(account.id);
+        if (account.type === 'expense') addValue(expense, flowColumnIndex, delta);
+        if (account.type === 'revenue' || account.type === 'expense') {
+          const categoryValues = flowValuesById.get(account.id);
           if (categoryValues) addValue(categoryValues, flowColumnIndex, delta);
-          if (monthlyAllocation) addValue(monthlyCost, flowColumnIndex, delta);
         }
       }
     }
@@ -212,21 +300,77 @@ export function buildPeriodMatrix(
     const expenseValue = expense[index];
     return assertSafeAmount(value - (expenseValue ?? 0));
   });
-  const expenseCategories = accounts
-    .filter((account) => account.type === 'expense')
-    .filter((account) => {
-      const values = expenseValuesById.get(account.id);
-      return values?.some((value) => value !== 0) === true;
+
+  /** フロー分類（収入 / 支出）の子 = 表示列のどれかが 0 ではないカテゴリを科目の正本順で。 */
+  const flowChildren = (type: 'revenue' | 'expense', prefix: string): PeriodMatrixNode[] =>
+    accounts
+      .filter((account) => account.type === type)
+      .filter((account) => hasAnyValue(flowValuesById.get(account.id) ?? []))
+      .sort(compareAccountOrder)
+      .map((account) => accountNode(prefix, account, flowValuesById.get(account.id)!));
+
+  const stockValuesOf = (account: Account): PeriodMatrixValue[] =>
+    stockValuesById.get(account.id) ?? blankValues(columns);
+
+  // 資産 → 4 グループ → 科目。グループ分けの正本は domain/assetGroups（内訳画面と共有）。
+  // 「月割り台帳」だけは内訳画面と同じく 1 行（残存価値の合計）で、科目へは展開しない。
+  const assetGroupNode = (groupKey: AssetGroupKey): PeriodMatrixNode | null => {
+    const members = accounts
+      .filter((account) => assetGroupOf(account) === groupKey)
+      .filter((account) => hasAnyValue(stockValuesOf(account)))
+      .sort(compareAccountOrder);
+    if (members.length === 0) return null;
+    const prefix = `totalAssets.${groupKey}`;
+    const children =
+      groupKey === 'ledger'
+        ? []
+        : members.map((account) => accountNode(prefix, account, stockValuesOf(account)));
+    return {
+      key: prefix,
+      label: { kind: 'message', key: ASSET_GROUP_LABEL_KEYS[groupKey] },
+      values: sumValues(columns, members.map(stockValuesOf)),
+      children,
+    };
+  };
+
+  // 負債 → 負債科目。C-2 の規約に合わせ、比較だけ自然符号（貸方残高は負）で行う
+  // = 昇順で最も大きな負債が先頭。基準は窓の最終列（一番新しい断面）の残高。
+  const liabilityChildren = accounts
+    .filter((account) => account.type === 'liability')
+    .filter((account) => hasAnyValue(stockValuesOf(account)))
+    .sort((a, b) => {
+      const latest = (account: Account) => stockValuesOf(account).at(-1) ?? 0;
+      const diff = debitSignedBalance(a.type, latest(a)) - debitSignedBalance(b.type, latest(b));
+      return diff !== 0 ? diff : compareAccountOrder(a, b);
     })
-    .sort(compareAccountOrder)
-    .map((account) => ({
-      account,
-      values: expenseValuesById.get(account.id) ?? blankValues(columns),
-    }));
+    .map((account) => accountNode('totalLiabilities', account, stockValuesOf(account)));
+
+  const childrenByRow: Record<PeriodMatrixRowKey, PeriodMatrixNode[]> = {
+    revenue: flowChildren('revenue', 'revenue'),
+    expense: flowChildren('expense', 'expense'),
+    net: [],
+    totalAssets: ASSET_GROUP_KEYS.map(assetGroupNode).filter(
+      (node): node is PeriodMatrixNode => node !== null,
+    ),
+    totalLiabilities: liabilityChildren,
+    netAssets: [],
+  };
+  const rows: PeriodMatrixRows = {
+    revenue,
+    expense,
+    net,
+    totalAssets,
+    totalLiabilities,
+    netAssets,
+  };
 
   return {
     columns,
-    rows: { revenue, expense, net, monthlyCost, totalAssets, netAssets },
-    expenseCategories,
+    rows,
+    sections: PERIOD_MATRIX_ROW_KEYS.map((key) => ({
+      key,
+      values: rows[key],
+      children: childrenByRow[key],
+    })),
   };
 }

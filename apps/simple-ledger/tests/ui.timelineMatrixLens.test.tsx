@@ -126,6 +126,8 @@ function fixtureLedger(): Ledger {
     journalEntries: [
       entry('opening', '2024-01-01', 'cash', 'equity', 100000),
       entry('past-expense', '2024-03-31', 'food', 'cash', 10000),
+      // 窓の中の支出（段階的開示で費目を開けるようにする）。
+      entry('window-expense', '2026-05-10', 'food', 'cash', 3000),
       entry('current-income', '2026-06-30', 'cash', 'salary', 50000),
       entry('future-income', '2027-01-01', 'cash', 'salary', 80000),
     ],
@@ -278,9 +280,93 @@ describe('時間平面の数値レンズ', () => {
     renderTimeline({ mode: 'date', date: '2026-07-15' });
     expect(within(matrixEl()).queryByLabelText('対象期間外')).not.toBeInTheDocument();
     expect(matrixEl()).not.toHaveTextContent('—');
-    // 旧「年間・全体」と同じ行構成のまま。
-    for (const row of ['収入', '支出', '収支', '月割り', '総資産', '純資産']) {
-      expect(within(matrixEl()).getByRole('rowheader', { name: row })).toBeInTheDocument();
-    }
+  });
+
+  /*
+   * v13.5 E: 行はホームの 6 カードと同じ 6 分類。費目・科目は**行タップで開く**
+   *（常時全展開をやめた）。展開は保存しない画面ローカル状態。
+   */
+  describe('6 分類と段階的開示', () => {
+    const rowKeys = () =>
+      [...matrixEl().querySelectorAll(`[data-ui="${UI.timeline.matrixRow}"]`)].map((row) =>
+        row.getAttribute('data-row-key'),
+      );
+    const toggle = (key: string) =>
+      matrixEl().querySelector<HTMLButtonElement>(
+        `[data-ui="${UI.timeline.matrixRowToggle}"][data-row-key="${key}"]`,
+      );
+
+    it('既定はホームの 6 カードと同じ 6 行だけ（費目は開くまで出さない）', () => {
+      renderTimeline({ mode: 'date', date: '2026-07-15' });
+
+      expect(rowKeys()).toEqual([
+        'revenue',
+        'expense',
+        'net',
+        'totalAssets',
+        'totalLiabilities',
+        'netAssets',
+      ]);
+      for (const row of ['収入', '支出', '収支', '資産', '負債', '純資産']) {
+        expect(within(matrixEl()).getByRole('rowheader', { name: row })).toBeInTheDocument();
+      }
+      // 旧構成の言い換え（総資産）と常時展開の費目行は無い。
+      expect(within(matrixEl()).queryByRole('rowheader', { name: '総資産' })).toBeNull();
+      expect(within(matrixEl()).queryByRole('rowheader', { name: '食費' })).toBeNull();
+    });
+
+    it('支出行のタップで費目を開き、もう一度で閉じる（aria-expanded が名乗る）', () => {
+      renderTimeline({ mode: 'date', date: '2026-07-15' });
+
+      const expense = toggle('expense')!;
+      expect(expense).toHaveAttribute('aria-expanded', 'false');
+      fireEvent.click(expense);
+      expect(toggle('expense')).toHaveAttribute('aria-expanded', 'true');
+      expect(rowKeys()).toContain('expense.food');
+      expect(within(matrixEl()).getByRole('rowheader', { name: '食費' })).toBeInTheDocument();
+
+      fireEvent.click(toggle('expense')!);
+      expect(rowKeys()).not.toContain('expense.food');
+    });
+
+    it('資産行は 4 グループ → 科目の 2 段で開く', () => {
+      renderTimeline({ mode: 'date', date: '2026-07-15' });
+
+      fireEvent.click(toggle('totalAssets')!);
+      expect(rowKeys()).toContain('totalAssets.free');
+      // グループを開くまで科目は出さない（段階的開示）。
+      expect(rowKeys()).not.toContain('totalAssets.free.cash');
+
+      fireEvent.click(toggle('totalAssets.free')!);
+      expect(rowKeys()).toContain('totalAssets.free.cash');
+      expect(within(matrixEl()).getByRole('rowheader', { name: '預金' })).toBeInTheDocument();
+    });
+
+    it('収支・純資産にはトグルが無い（引き算の結果はばらさない）', () => {
+      renderTimeline({ mode: 'date', date: '2026-07-15' });
+      expect(toggle('net')).toBeNull();
+      expect(toggle('netAssets')).toBeNull();
+    });
+
+    it('負債の数字は負債トークンの色（C-2）で、資産の数字には付かない', () => {
+      const base = fixtureLedger();
+      ledgerState.ledger = {
+        ...base,
+        accounts: [...base.accounts, account('loan', 'ローン', 'liability', 'other-liability')],
+        journalEntries: [
+          ...base.journalEntries,
+          entry('borrow', '2026-05-01', 'cash', 'loan', 300),
+        ],
+      };
+      renderTimeline({ mode: 'date', date: '2026-07-15' });
+
+      const cells = (key: string) =>
+        matrixEl().querySelector(`[data-ui="${UI.timeline.matrixRow}"][data-row-key="${key}"]`)!;
+      expect(cells('totalLiabilities').querySelector('.amount--liability')).not.toBeNull();
+      expect(cells('totalAssets').querySelector('.amount--liability')).toBeNull();
+
+      fireEvent.click(toggle('totalLiabilities')!);
+      expect(cells('totalLiabilities.loan').querySelector('.amount--liability')).not.toBeNull();
+    });
   });
 });

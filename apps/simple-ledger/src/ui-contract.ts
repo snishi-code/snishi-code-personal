@@ -127,6 +127,9 @@ export const UI = {
     // 列見出しのタップ（月 = 月末の基準日でホームへ / 年 = その年を月ズームで見る）
     matrixMonthColumn: 'timeline.matrix.monthColumn',
     matrixYearColumn: 'timeline.matrix.yearColumn',
+    // 6 分類の行と、その段階的開示のトグル（行の識別は data-row-key = 木のノードキー）
+    matrixRow: 'timeline.matrix.row',
+    matrixRowToggle: 'timeline.matrix.rowToggle',
   },
   journal: {
     view: 'journal.view',

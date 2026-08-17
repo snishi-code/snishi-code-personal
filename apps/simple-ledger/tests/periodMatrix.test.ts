@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPeriodMatrix,
   periodMatrixAsOf,
+  PERIOD_MATRIX_ROW_KEYS,
+  type PeriodMatrix,
+  type PeriodMatrixNode,
+  type PeriodMatrixRowKey,
   type PeriodMatrixScope,
 } from '../src/domain/periodMatrix';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../src/domain/accounting';
@@ -80,6 +84,28 @@ function entriesForTotal(
     remaining -= amount;
   }
   return result;
+}
+
+function sectionOf(matrix: PeriodMatrix, key: PeriodMatrixRowKey) {
+  const section = matrix.sections.find((s) => s.key === key);
+  if (!section) throw new Error(`section ${key} not found`);
+  return section;
+}
+
+/** 展開行の見出し（科目は名前・グループは i18n キー）。 */
+function nodeLabel(node: PeriodMatrixNode): string {
+  return node.label.kind === 'account' ? node.label.name : node.label.key;
+}
+
+function labelsOf(nodes: readonly PeriodMatrixNode[]): string[] {
+  return nodes.map(nodeLabel);
+}
+
+/** 列ごとの単純合計（親子の整合を確かめる側は checked sum を使わない = 実装と別経路）。 */
+function columnSums(nodes: readonly PeriodMatrixNode[], columnCount: number): number[] {
+  return Array.from({ length: columnCount }, (_, index) =>
+    nodes.reduce((total, node) => total + (node.values[index] ?? 0), 0),
+  );
 }
 
 const accounts: Account[] = [
@@ -177,7 +203,7 @@ describe('buildPeriodMatrix（月ズーム）', () => {
     expect(matrix.rows.netAssets[1]).toBe(matrix.rows.totalAssets[1]! - 250);
   });
 
-  it('導出月割りだけを継続コストの費用純増減へ分類する', () => {
+  it('導出月割りも費用カテゴリへ合算する（「月割り」の独立行は持たない）', () => {
     const matrix = buildPeriodMatrix(
       accounts,
       [
@@ -193,10 +219,12 @@ describe('buildPeriodMatrix（月ズーム）', () => {
     );
 
     expect(matrix.rows.expense[0]).toBe(170);
-    expect(matrix.rows.monthlyCost[0]).toBe(120);
-    expect(matrix.expenseCategories.map(({ account: a }) => a.id)).toEqual(['fixed', 'food']);
-    expect(matrix.expenseCategories[0]?.values[0]).toBe(120);
-    expect(matrix.expenseCategories[1]?.values[0]).toBe(50);
+    // 「月割り」の独立行は無い（6 分類だけ）。月割り分は費用カテゴリ側へ入る。
+    expect(matrix.sections.map((s) => s.key)).toEqual([...PERIOD_MATRIX_ROW_KEYS]);
+    const categories = sectionOf(matrix, 'expense').children;
+    expect(labelsOf(categories)).toEqual(['fixed', 'food']);
+    expect(categories[0]?.values[0]).toBe(120);
+    expect(categories[1]?.values[0]).toBe(50);
   });
 
   it('全表示列が 0 のカテゴリを除外し、月ごとに増減があれば通期純額 0 でも残す', () => {
@@ -211,8 +239,9 @@ describe('buildPeriodMatrix（月ズーム）', () => {
       { mode: 'months', months: monthsOfYear(2026) },
     );
 
-    expect(matrix.expenseCategories.map(({ account: a }) => a.id)).toEqual(['cancelled']);
-    expect(matrix.expenseCategories[0]?.values.slice(0, 3)).toEqual([100, -100, 0]);
+    const categories = sectionOf(matrix, 'expense').children;
+    expect(labelsOf(categories)).toEqual(['cancelled']);
+    expect(categories[0]?.values.slice(0, 3)).toEqual([100, -100, 0]);
   });
 
   it('未来年も年末断面として固定行・カテゴリ行を数値で返す', () => {
@@ -226,7 +255,7 @@ describe('buildPeriodMatrix（月ズーム）', () => {
     expect(matrix.rows.expense[0]).toBe(100);
     expect(matrix.rows.net[0]).toBe(-100);
     expect(matrix.rows.totalAssets.every((value) => value === -100)).toBe(true);
-    expect(matrix.expenseCategories[0]?.values[0]).toBe(100);
+    expect(sectionOf(matrix, 'expense').children[0]?.values[0]).toBe(100);
   });
 
   it('未来月列はホームが同じ月末断面で出すPL・BSと一致する', () => {
@@ -291,7 +320,7 @@ describe('buildPeriodMatrix（年ズーム）', () => {
     expect(matrix.rows.net).toEqual([100, -1024, 999]);
     expect(matrix.rows.totalAssets).toEqual([1100, 326, 1325]);
     expect(matrix.rows.netAssets).toEqual([1100, 126, 1125]);
-    expect(matrix.expenseCategories[0]?.values).toEqual([0, 1024, 0]);
+    expect(sectionOf(matrix, 'expense').children[0]?.values).toEqual([0, 1024, 0]);
   });
 
   it('後年の回収を全知識として使い、年間表示と全体表示の同じ年を一致させる', () => {
@@ -343,14 +372,154 @@ describe('buildPeriodMatrix（年ズーム）', () => {
     const annualTotal = (values: readonly number[]) =>
       values.reduce((sum, value) => sum + value, 0);
 
+    // 月割り分は費用カテゴリ（fixed）へ入る。「月割り」の独立行はもう無いので、
+    // 年間表示と全体表示の一致はカテゴリ行で確かめる。
+    const monthlyValues = (matrix: PeriodMatrix) =>
+      sectionOf(matrix, 'expense').children.find((node) => nodeLabel(node) === 'fixed')?.values ??
+      [];
+
     // 同日刻み: 2025-10-05 起点の刻み日は 2025-11-05〜2026-03-05 の 5 本
     //（6 本目 2026-04-05 は終了日 2026-03-31 超）。割り振る総額 = 60,000 − 回収 30,000 =
     // 30,000 → 1 本 6,000。2025 年に入るのは 11/05・12/05 の 2 本 = 12,000。
-    expect(annualTotal(annual.rows.monthlyCost)).toBe(12_000);
-    expect(annualTotal(annual.rows.monthlyCost)).toBe(all.rows.monthlyCost[0]);
+    expect(annualTotal(monthlyValues(annual))).toBe(12_000);
+    expect(annualTotal(monthlyValues(annual))).toBe(monthlyValues(all)[0]);
     expect(annualTotal(annual.rows.expense)).toBe(all.rows.expense[0]);
     expect(annual.rows.totalAssets[11]).toBe(all.rows.totalAssets[0]);
     expect(annual.rows.netAssets[11]).toBe(all.rows.netAssets[0]);
+  });
+});
+
+/*
+ * v13.5 E: 6 分類 + 段階的開示。
+ * ホームの 6 カード（収入 / 支出 / 収支 / 資産 / 負債 / 純資産）と同じ並び・同じ集計正本で、
+ * 行タップで開く子（インライン木）を持つ。ここで固定するのは
+ *  ① 負債行が BS と同じ集計であること（総資産 − 純資産の引き算で作らない）
+ *  ② 子の合計が親と一致すること（丸めで割れない）
+ * の 2 系統。
+ */
+describe('buildPeriodMatrix（6 分類と段階的開示）', () => {
+  const drillAccounts: Account[] = [
+    account('cash', 'asset', 'daily-asset'),
+    { ...account('locked', 'asset', 'daily-asset', { sortIndex: 1 }), movable: false },
+    account('invest', 'asset', 'investment-asset'),
+    account('continuing', 'asset', 'continuing-cost-asset'),
+    account('card', 'liability', 'payment-liability'),
+    account('loan', 'liability', 'other-liability'),
+    account('equity', 'equity', 'equity'),
+    account('salary', 'revenue', 'income-category', { sortIndex: 0 }),
+    account('bonus', 'revenue', 'income-category', { sortIndex: 1 }),
+    account('food', 'expense', 'expense-category'),
+  ];
+  const drillEntries: JournalEntry[] = [
+    entry('open-cash', '2025-12-31', 'cash', 'equity', 1_000),
+    entry('open-locked', '2025-12-31', 'locked', 'equity', 300),
+    entry('open-invest', '2025-12-31', 'invest', 'equity', 500),
+    entry('open-continuing', '2025-12-31', 'continuing', 'equity', 200),
+    entry('card-spend', '2026-01-10', 'food', 'card', 150),
+    entry('borrow', '2026-01-15', 'cash', 'loan', 800),
+    entry('salary', '2026-01-20', 'cash', 'salary', 400),
+    entry('bonus', '2026-02-05', 'cash', 'bonus', 100),
+  ];
+  const drillMatrix = () =>
+    buildPeriodMatrix(drillAccounts, drillEntries, {
+      mode: 'months',
+      months: monthsOfYear(2026),
+    });
+
+  it('行はホームの 6 カードと同じ並び', () => {
+    expect(drillMatrix().sections.map((section) => section.key)).toEqual([
+      'revenue',
+      'expense',
+      'net',
+      'totalAssets',
+      'totalLiabilities',
+      'netAssets',
+    ]);
+  });
+
+  it('負債行は BS と同じ集計（総資産 − 純資産の引き算で作らない）', () => {
+    const matrix = drillMatrix();
+
+    matrix.columns.forEach((column, index) => {
+      const bs = deriveBalanceSheet(drillAccounts, drillEntries, column.asOf);
+      expect(matrix.rows.totalLiabilities[index]).toBe(bs.totalLiabilities);
+      expect(matrix.rows.totalAssets[index]).toBe(bs.totalAssets);
+      expect(matrix.rows.netAssets[index]).toBe(bs.netAssets);
+    });
+    // 1 月末 = カード 150 + ローン 800。返済も借入もない 2 月以降は据え置き。
+    expect(matrix.rows.totalLiabilities.slice(0, 3)).toEqual([950, 950, 950]);
+  });
+
+  it('負債の子は科目・自然符号の昇順（最も大きな負債が先頭）で数字は負債トークン扱い', () => {
+    const liabilities = sectionOf(drillMatrix(), 'totalLiabilities');
+
+    // 表示は絶対値のまま（card 150 / loan 800）。比較だけ自然符号 = 昇順で loan が先頭（C-2）。
+    expect(labelsOf(liabilities.children)).toEqual(['loan', 'card']);
+    expect(liabilities.children.map((node) => node.values[0])).toEqual([800, 150]);
+    // 負債科目はそれ以上たたまない（葉）。
+    expect(liabilities.children.every((node) => node.children.length === 0)).toBe(true);
+  });
+
+  it('資産の子はホームの資産ドリルと同じ 4 グループ、月割り台帳だけは 1 行', () => {
+    const assets = sectionOf(drillMatrix(), 'totalAssets');
+
+    expect(labelsOf(assets.children)).toEqual([
+      'assets.frame.free',
+      'assets.frame.fixed',
+      'assets.frame.investment',
+      'assets.frame.ledger',
+    ]);
+    expect(assets.children.map((node) => node.values[0])).toEqual([2_200, 300, 500, 200]);
+    expect(assets.children.map((node) => labelsOf(node.children))).toEqual([
+      ['cash'],
+      ['locked'],
+      ['invest'],
+      // 月割り台帳は残存価値の合計 1 行（内訳は台帳画面で見る）。
+      [],
+    ]);
+  });
+
+  it('収支・純資産は葉（引き算の結果はそれ以上ばらさない）', () => {
+    const matrix = drillMatrix();
+    expect(sectionOf(matrix, 'net').children).toEqual([]);
+    expect(sectionOf(matrix, 'netAssets').children).toEqual([]);
+    expect(labelsOf(sectionOf(matrix, 'revenue').children)).toEqual(['salary', 'bonus']);
+    expect(labelsOf(sectionOf(matrix, 'expense').children)).toEqual(['food']);
+  });
+
+  it('子の合計は列ごとに親と一致し、丸めで割れない', () => {
+    const matrix = drillMatrix();
+    const columnCount = matrix.columns.length;
+    let checked = 0;
+
+    for (const section of matrix.sections) {
+      expect(section.values.every(Number.isInteger)).toBe(true);
+      if (section.children.length === 0) continue;
+      expect(columnSums(section.children, columnCount)).toEqual(section.values);
+      checked += 1;
+      for (const child of section.children) {
+        expect(child.values.every(Number.isInteger)).toBe(true);
+        if (child.children.length === 0) continue;
+        expect(columnSums(child.children, columnCount)).toEqual(child.values);
+        checked += 1;
+      }
+    }
+    // 収入 / 支出 / 資産 / 負債 + 資産の 3 グループ（月割り台帳は葉）。
+    expect(checked).toBe(7);
+  });
+
+  it('全列 0 の科目は子に出さないが、親の合計はその科目ぶんも含めて一致したまま', () => {
+    const matrix = buildPeriodMatrix(
+      [...drillAccounts, account('sleeping', 'asset', 'daily-asset', { sortIndex: 9 })],
+      drillEntries,
+      { mode: 'months', months: monthsOfYear(2026) },
+    );
+    const free = sectionOf(matrix, 'totalAssets').children[0];
+
+    expect(labelsOf(free?.children ?? [])).toEqual(['cash']);
+    expect(columnSums(sectionOf(matrix, 'totalAssets').children, matrix.columns.length)).toEqual(
+      matrix.rows.totalAssets,
+    );
   });
 });
 

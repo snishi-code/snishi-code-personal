@@ -376,13 +376,9 @@ export const ja = {
   'matrix.monthJump': '{date} 時点の残高をホームで見る',
   'matrix.yearDrill': '{year}年を月で見る',
   'matrix.itemColumn': '項目',
-  'matrix.revenue': '収入',
-  'matrix.expense': '支出',
-  'matrix.net': '収支',
-  'matrix.monthlyCost': '月割り',
-  'matrix.totalAssets': '総資産',
-  'matrix.netAssets': '純資産',
-  'matrix.expenseCategory': '費目別: {name}',
+  // 6 分類の行名はホームのカードと同じ語彙（dashboard.revenue 〜 dashboard.netAssets）を
+  // そのまま使う。表専用の言い換え（旧 matrix.totalAssets = 「総資産」・旧 matrix.monthlyCost）は
+  // 置かない = ホームと表で呼び名がずれない（v13.5 E）。
   'matrix.caption': '{from} 〜 {to} の一覧',
   'matrix.noData': '表示できる仕訳データがありません。',
 

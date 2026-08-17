@@ -27,6 +27,12 @@ import type { MessageKey } from '../../i18n';
 import type { Screen } from '../navigation';
 import type { JournalFilter } from './Journal';
 import { ACCOUNT_ACCENTS, boxByKey, type AccountAccent } from '../accountBoxes';
+import {
+  ASSET_GROUP_KEYS,
+  ASSET_GROUP_LABEL_KEYS,
+  assetGroupOf,
+  type AssetGroupKey,
+} from '../../domain/assetGroups';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { sumAmounts } from '../../domain/safeSum';
 import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
@@ -107,6 +113,21 @@ const CONFIG: Record<BreakdownSection, SectionConfig> = {
   },
 };
 
+/** 資産の 4 枠の見た目（分類そのものは domain/assetGroups が正本）。 */
+const ASSET_FRAME_SUBTOTAL_UI: Record<AssetGroupKey, string> = {
+  free: UI.assetsBreakdown.freeSubtotal,
+  fixed: UI.assetsBreakdown.fixedSubtotal,
+  investment: UI.assetsBreakdown.investmentSubtotal,
+  ledger: UI.assetsBreakdown.ledgerSubtotal,
+};
+
+const ASSET_FRAME_ACCENTS: Record<AssetGroupKey, AccountAccent> = {
+  free: ACCOUNT_ACCENTS.assetFree,
+  fixed: ACCOUNT_ACCENTS.assetFixed,
+  investment: boxByKey('investment').accent,
+  ledger: ACCOUNT_ACCENTS.continuingCost,
+};
+
 function Row({
   b,
   currency,
@@ -185,43 +206,18 @@ export function Breakdown({
   const drill = (accountId: string) => onDrillDown({ accountId, ...range });
 
   // 資産は4枠、負債はカード/未払とローンの2枠。同じ描画構造と色の正本を共有する。
+  // 資産の枠分けは domain/assetGroups が正本（時間平面の数値レンズの資産行の展開と共有）。
   const frames: BreakdownFrame[] | null =
     section === 'asset'
-      ? [
-          {
-            key: 'free',
-            labelKey: 'assets.frame.free',
-            rows: rows.filter(
-              (b) => b.account.role === 'daily-asset' && b.account.movable !== false,
-            ),
-            subtotalUi: UI.assetsBreakdown.freeSubtotal,
-            accent: ACCOUNT_ACCENTS.assetFree,
-          },
-          {
-            key: 'fixed',
-            labelKey: 'assets.frame.fixed',
-            rows: rows.filter(
-              (b) => b.account.role === 'daily-asset' && b.account.movable === false,
-            ),
-            subtotalUi: UI.assetsBreakdown.fixedSubtotal,
-            accent: ACCOUNT_ACCENTS.assetFixed,
-          },
-          {
-            key: 'investment',
-            labelKey: 'assets.frame.investment',
-            rows: rows.filter((b) => b.account.role === 'investment-asset'),
-            subtotalUi: UI.assetsBreakdown.investmentSubtotal,
-            accent: boxByKey('investment').accent,
-          },
-          {
-            key: 'ledger',
-            labelKey: 'assets.frame.ledger',
-            rows: rows.filter((b) => b.account.role === 'continuing-cost-asset'),
-            subtotalUi: UI.assetsBreakdown.ledgerSubtotal,
-            accent: ACCOUNT_ACCENTS.continuingCost,
-            aggregateLedger: true,
-          },
-        ]
+      ? ASSET_GROUP_KEYS.map((key) => ({
+          key,
+          labelKey: ASSET_GROUP_LABEL_KEYS[key],
+          rows: rows.filter((b) => assetGroupOf(b.account) === key),
+          subtotalUi: ASSET_FRAME_SUBTOTAL_UI[key],
+          accent: ASSET_FRAME_ACCENTS[key],
+          // 継続コスト台帳だけは科目を並べず、残存価値合計の 1 行にする。
+          ...(key === 'ledger' ? { aggregateLedger: true } : {}),
+        }))
       : section === 'liability'
         ? [
             {

@@ -5,18 +5,110 @@
  * **可視範囲 + 前後バッファの窓**であること（年をまたいで連続し、横スクロール/シフトで移動する）。
  * 集計は domain/periodMatrix が済ませており、ここは描画と横スクロールの幾何だけを持つ。
  *
+ * 行はホームの 6 カードと同じ 6 分類（収入 / 支出 / 収支 / 資産 / 負債 / 純資産。v13.5 E）。
+ * **段階的開示**: 子を持つ行はタップで展開するインライン木（ラベル列にインデント）。
+ * 展開状態はこの画面のローカル状態で、保存しない。展開して初めて列 × 子の行を DOM 化するので、
+ * 既定（全部たたんだ状態）の描画量は 6 行 × 窓の列数のまま。
+ *
  * 行ラベル列は sticky。横スクロールは**この枠の中だけ**で起き、ページ本体は横に伸びない。
  */
-import { useCallback, useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react';
-import type { PeriodMatrix, PeriodMatrixColumn } from '../../domain/periodMatrix';
-import { t } from '../../i18n';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import type {
+  PeriodMatrix,
+  PeriodMatrixColumn,
+  PeriodMatrixNode,
+  PeriodMatrixRowKey,
+} from '../../domain/periodMatrix';
+import { t, type MessageKey } from '../../i18n';
 import { UI } from '../../ui-contract';
-import { Money } from '../money';
+import { Money, type MoneyTone } from '../money';
 import { visibleIndexRange } from '../scrollWindow';
 
 /** 行ラベル列と値列の幅（px）。CSS は JS のこの値を custom property 経由で受け取る。 */
 const LABEL_WIDTH = 112;
 const COLUMN_WIDTH = 112;
+
+/**
+ * 6 分類の見せ方。**ラベルはホームのカードと同じメッセージキーを使う**（語彙を 2 か所に
+ * 持たない = ホームと表で呼び名がずれない）。tone は C-2 の規約で負債の数字だけに付く。
+ */
+const SECTION_META: Record<
+  PeriodMatrixRowKey,
+  {
+    labelKey: MessageKey;
+    signed?: boolean;
+    emphasis?: boolean;
+    sectionStart?: boolean;
+    tone?: MoneyTone;
+  }
+> = {
+  revenue: { labelKey: 'dashboard.revenue' },
+  expense: { labelKey: 'dashboard.expense' },
+  net: { labelKey: 'dashboard.netIncome', signed: true, emphasis: true },
+  // ストックの始まり（フローとの間に区切り線を引く）。
+  totalAssets: { labelKey: 'dashboard.assets', sectionStart: true },
+  totalLiabilities: { labelKey: 'dashboard.liabilities', tone: 'liability' },
+  netAssets: { labelKey: 'dashboard.netAssets', emphasis: true },
+};
+
+interface MatrixRowSpec {
+  key: string;
+  depth: number;
+  label: string;
+  values: number[];
+  hasChildren: boolean;
+  expanded: boolean;
+  signed: boolean;
+  emphasis: boolean;
+  sectionStart: boolean;
+  tone?: MoneyTone;
+}
+
+function nodeLabel(node: PeriodMatrixNode): string {
+  return node.label.kind === 'account' ? node.label.name : t(node.label.key);
+}
+
+/** 6 分類 + 展開中の子だけを、表に出す順で 1 本の配列にする。 */
+function flattenRows(matrix: PeriodMatrix, expanded: ReadonlySet<string>): MatrixRowSpec[] {
+  const rows: MatrixRowSpec[] = [];
+  const pushNode = (node: PeriodMatrixNode, depth: number, tone?: MoneyTone) => {
+    const isExpanded = expanded.has(node.key);
+    rows.push({
+      key: node.key,
+      depth,
+      label: nodeLabel(node),
+      values: node.values,
+      hasChildren: node.children.length > 0,
+      expanded: isExpanded,
+      signed: false,
+      emphasis: false,
+      sectionStart: false,
+      ...(tone ? { tone } : {}),
+    });
+    if (!isExpanded) return;
+    for (const child of node.children) pushNode(child, depth + 1, tone);
+  };
+
+  for (const section of matrix.sections) {
+    const meta = SECTION_META[section.key];
+    const isExpanded = expanded.has(section.key);
+    rows.push({
+      key: section.key,
+      depth: 0,
+      label: t(meta.labelKey),
+      values: section.values,
+      hasChildren: section.children.length > 0,
+      expanded: isExpanded,
+      signed: meta.signed === true,
+      emphasis: meta.emphasis === true,
+      sectionStart: meta.sectionStart === true,
+      ...(meta.tone ? { tone: meta.tone } : {}),
+    });
+    if (!isExpanded) continue;
+    for (const child of section.children) pushNode(child, 1, meta.tone);
+  }
+  return rows;
+}
 
 /** 年をまたぐ窓なので、年の変わり目（1 月）と先頭列だけ年を名乗る。 */
 function monthColumnLabel(column: PeriodMatrixColumn, index: number): string {
@@ -46,11 +138,21 @@ export function PeriodMatrixTable({
   onVisibleRangeChange?: (range: { from: string; to: string }) => void;
 }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  // 展開状態は画面ローカル・保存しない（窓を送っても木のキーは変わらないので開いたまま）。
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const toggleRow = (key: string) => {
+    setExpanded((previous) => {
+      const next = new Set(previous);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  };
   const { columns } = matrix;
   const first = columns[0];
   const last = columns.at(-1);
   const caption =
     first && last ? t('matrix.caption', { from: first.key, to: last.key }) : t('matrix.noData');
+  const rows = useMemo(() => flattenRows(matrix, expanded), [matrix, expanded]);
 
   const readViewport = useCallback(
     (viewport: HTMLDivElement) => {
@@ -142,42 +244,9 @@ export function PeriodMatrixTable({
           </tr>
         </thead>
         <tbody>
-          <MatrixRow label={t('matrix.revenue')} values={matrix.rows.revenue} currency={currency} />
-          <MatrixRow label={t('matrix.expense')} values={matrix.rows.expense} currency={currency} />
-          <MatrixRow
-            label={t('matrix.net')}
-            values={matrix.rows.net}
-            currency={currency}
-            signed
-            emphasis
-          />
-          <MatrixRow
-            label={t('matrix.monthlyCost')}
-            values={matrix.rows.monthlyCost}
-            currency={currency}
-          />
-          {matrix.expenseCategories.map(({ account, values }) => (
-            <MatrixRow
-              key={account.id}
-              label={account.name}
-              accessibleLabel={t('matrix.expenseCategory', { name: account.name })}
-              values={values}
-              currency={currency}
-              category
-            />
+          {rows.map((row) => (
+            <MatrixRow key={row.key} row={row} currency={currency} onToggle={toggleRow} />
           ))}
-          <MatrixRow
-            label={t('matrix.totalAssets')}
-            values={matrix.rows.totalAssets}
-            currency={currency}
-            sectionStart
-          />
-          <MatrixRow
-            label={t('matrix.netAssets')}
-            values={matrix.rows.netAssets}
-            currency={currency}
-            emphasis
-          />
         </tbody>
       </table>
     </div>
@@ -185,39 +254,62 @@ export function PeriodMatrixTable({
 }
 
 function MatrixRow({
-  label,
-  accessibleLabel,
-  values,
+  row,
   currency,
-  signed = false,
-  emphasis = false,
-  category = false,
-  sectionStart = false,
+  onToggle,
 }: {
-  label: string;
-  accessibleLabel?: string;
-  values: number[];
+  row: MatrixRowSpec;
   currency: string;
-  signed?: boolean;
-  emphasis?: boolean;
-  category?: boolean;
-  sectionStart?: boolean;
+  onToggle: (key: string) => void;
 }) {
   const classes = [
-    emphasis ? 'period-matrix__row--emphasis' : '',
-    category ? 'period-matrix__row--category' : '',
-    sectionStart ? 'period-matrix__row--section' : '',
+    row.emphasis ? 'period-matrix__row--emphasis' : '',
+    row.depth > 0 ? 'period-matrix__row--child' : '',
+    row.sectionStart ? 'period-matrix__row--section' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const labelClasses = [
+    'period-matrix__label',
+    row.hasChildren ? 'period-matrix__label--interactive' : '',
   ]
     .filter(Boolean)
     .join(' ');
   return (
-    <tr className={classes || undefined}>
-      <th className="period-matrix__label" scope="row" aria-label={accessibleLabel ?? label}>
-        {label}
+    <tr
+      className={classes || undefined}
+      data-ui={UI.timeline.matrixRow}
+      data-row-key={row.key}
+      style={{ '--period-matrix-depth': row.depth } as CSSProperties}
+    >
+      <th className={labelClasses} scope="row">
+        {row.hasChildren ? (
+          // 段階的開示のトグル（タップ領域は --tap = 44px。開閉は aria-expanded が名乗る）。
+          <button
+            type="button"
+            className="period-matrix__row-btn"
+            aria-expanded={row.expanded}
+            onClick={() => onToggle(row.key)}
+            data-ui={UI.timeline.matrixRowToggle}
+            data-row-key={row.key}
+          >
+            <span className="period-matrix__caret" aria-hidden="true">
+              {row.expanded ? '▾' : '▸'}
+            </span>
+            {row.label}
+          </button>
+        ) : (
+          row.label
+        )}
       </th>
-      {values.map((value, index) => (
+      {row.values.map((value, index) => (
         <td className="period-matrix__value" key={index}>
-          <Money amount={value} currency={currency} signed={signed} />
+          <Money
+            amount={value}
+            currency={currency}
+            signed={row.signed}
+            {...(row.tone ? { tone: row.tone } : {})}
+          />
         </td>
       ))}
     </tr>
