@@ -58,8 +58,20 @@ const PROJECTION_BALANCE_LIMIT = Number.MAX_SAFE_INTEGER / 2;
  */
 export interface InvestmentProjectionTruncation {
   accountId: string;
-  /** 生成できなくなった最初の月（`YYYY-MM`）。 */
+  /** 生成できなくなった最初の月（`YYYY-MM`）。画面が名乗るのはこちら。 */
   month: string;
+  /**
+   * 打ち切りが起きた日（`month` の実日）。
+   * 断面の切り出し（reportEntries の導出キャッシュ）が**月ではなく日**で切るために持つ:
+   * 月で切ると月半ばの asOf で「まだ届いていない打ち切り」を見せてしまう。
+   */
+  date: string;
+  /**
+   * どこで諦めたか。`step` = 月次の刻み（その日以降の行が無い）、
+   * `opening` = 刻みへ入る前の起点残高の畳み込み（1 行も生成していない）。
+   * 見え始める断面の条件が違う（`step` は asOf、`opening` は展開地平で決まる）。
+   */
+  at: 'step' | 'opening';
 }
 
 /** 投影の生成結果。行と、アプリ都合で止まった事実を分けて返す。 */
@@ -177,7 +189,12 @@ export function investmentProjectionResult(
         try {
           balance = assertSafeAmount(balance + balanceDelta(flows[i]!, account.id));
         } catch {
-          truncations.push({ accountId: account.id, month: monthOf(anchorDate) });
+          truncations.push({
+            accountId: account.id,
+            month: monthOf(anchorDate),
+            date: anchorDate,
+            at: 'opening',
+          });
           openingOverflow = true;
           break;
         }
@@ -198,7 +215,7 @@ export function investmentProjectionResult(
         } catch {
           // 後続の逆向き仕訳で安全域へ戻っても、一度失った整数精度は回復しない。
           // 最初に表現不能になった月から導出を止め、既存の診断経路で明示する。
-          truncations.push({ accountId: account.id, month });
+          truncations.push({ accountId: account.id, month, date, at: 'step' });
           flowOverflow = true;
           break;
         }
@@ -214,13 +231,13 @@ export function investmentProjectionResult(
       try {
         next = assertSafeAmount(balance + gain);
       } catch {
-        truncations.push({ accountId: account.id, month });
+        truncations.push({ accountId: account.id, month, date, at: 'step' });
         break;
       }
       // 桁あふれガード: 超える月からはこの科目の生成を停止する（それ以前の行は維持）。
       // 黙って止めない——アプリ都合の端点として戻り値で名乗る。
       if (Math.abs(next) > PROJECTION_BALANCE_LIMIT) {
-        truncations.push({ accountId: account.id, month });
+        truncations.push({ accountId: account.id, month, date, at: 'step' });
         break;
       }
       const amount = Math.abs(gain);

@@ -128,7 +128,7 @@ describe('buildSectionTrends（画面サマリーと同じ期間基準）', () =
     // 推移は12月末まで表示するため、その最大地平で起きる打ち切りを画面へ返す。
     const trends = buildSectionTrends({ mode: 'year', year: 2026 }, hugeLedger, today);
     expect(trends?.investmentProjectionTruncations).toEqual([
-      { accountId: 'investment', month: '2026-08' },
+      { accountId: 'investment', month: '2026-08', date: '2026-08-01', at: 'step' },
     ]);
   });
 

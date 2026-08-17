@@ -1,5 +1,5 @@
 import { adjustmentSpread, isAdjustmentEntry, lastAdjustmentAnchors } from './adjustmentSpread';
-import { continuousCostEntries } from './continuousCost';
+import { continuousCostEntries, CONTINUOUS_COST_HARD_CAP } from './continuousCost';
 import {
   investmentProjectionResult,
   type InvestmentProjectionTruncation,
@@ -21,11 +21,97 @@ export interface ReportEntriesResult {
   investmentProjectionTruncations: InvestmentProjectionTruncation[];
 }
 
+/** 全地平ぶんの導出（キャッシュの中身・断面はここから切り出す）。 */
+interface FullDerivation {
+  /** 導出行（`cached` 側は日付昇順、直接導出は合流順）。 */
+  entries: JournalEntry[];
+  /** 全地平ぶんの打ち切り診断（断面ごとに `truncationVisibleAt` で切る）。 */
+  truncations: InvestmentProjectionTruncation[];
+  /** この導出が実際に展開した最遠日（= max(要求 asOf, 補正の最遠日)）。 */
+  horizon: string;
+  /** 補正（pin）の最遠日。`opening` 打ち切りが見え始める断面の判定に使う。 */
+  maxAdjustmentDate: string | undefined;
+}
+
+/**
+ * ledger 1 つにつき 1 回だけ行う全地平導出のキャッシュ。
+ *
+ * キーは ledger オブジェクトの**同一性**。state/store（`LedgerProvider`）は変更のたびに
+ * `repo.loadLedger()` の戻り値で丸ごと差し替えるだけで、既存の ledger を in-place で
+ * 書き換えない（`setLedger(next)` = 新しいオブジェクト）。だから「同じオブジェクト =
+ * 同じ内容」が成り立つ。WeakMap なので古い ledger は参照が切れれば回収される。
+ *
+ * 一時的に組み立てた source（repository の保存検証・補正シートの「自分を除いた世界」）は
+ * 毎回別オブジェクトなので必ずミスする = 従来どおりその場で導出する（正しさは変わらない）。
+ */
+const derivationCache = new WeakMap<ReportEntrySource, FullDerivation>();
+
+/** 日付昇順（同日は安定 = 元の合流順を保つ）。 */
+function byDate(a: JournalEntry, b: JournalEntry): number {
+  return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+}
+
+/**
+ * `date <= asOf` の prefix の長さ（日付昇順配列の上界を二分探索）。
+ * 過去断面の決定性（asOf を動かしても過去の行は変わらない）があるから、断面の切り替えが
+ * 「導出し直し」ではなく「配列を切る」で済む。
+ */
+function prefixLengthForAsOf(entries: readonly JournalEntry[], asOf: string): number {
+  let lo = 0;
+  let hi = entries.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (entries[mid]!.date <= asOf) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/**
+ * その打ち切りが asOf の断面で見えるか（直接導出と 1 件も違わないための判定）。
+ *
+ *  - `step`: 刻みが `min(asOf, 2100, 終了点)` を越えたら生成自体が始まらない = `date <= asOf`。
+ *  - `opening`: 刻みへ入る前の畳み込みなので、その科目に触れる行が**展開地平**
+ *    （= max(asOf, 補正の最遠日)）に現れた時点で見える。補正が先にあると asOf より
+ *    先まで展開されるため、asOf だけで切ると直接導出と食い違う。
+ */
+function truncationVisibleAt(
+  truncation: InvestmentProjectionTruncation,
+  asOf: string,
+  maxAdjustmentDate: string | undefined,
+): boolean {
+  if (truncation.at === 'step') return truncation.date <= asOf;
+  const horizon =
+    maxAdjustmentDate !== undefined && maxAdjustmentDate > asOf ? maxAdjustmentDate : asOf;
+  return truncation.date <= horizon;
+}
+
+/**
+ * 全地平（`CONTINUOUS_COST_HARD_CAP`）まで 1 回導出して日付昇順に並べたもの。
+ * 同じ ledger オブジェクトで 2 回目以降はここを使い回す。
+ */
+function cachedDerivation(ledger: ReportEntrySource): FullDerivation {
+  const hit = derivationCache.get(ledger);
+  if (hit) return hit;
+  const full = deriveAll(ledger, CONTINUOUS_COST_HARD_CAP);
+  // sort は stable なので、同日の中では合流順（実仕訳 → 継続コスト → ルール導出 →
+  // 按分スライス → 利回り）がそのまま残る。
+  full.entries.sort(byDate);
+  derivationCache.set(ledger, full);
+  return full;
+}
+
 /**
  * 選択した基準日時点の集計に使う導出仕訳（**単一正本**）と、導出が黙って止まっていないかの診断。
  *
  * 実仕訳に、定期ルールの完全導出（購入行 + item 経由の費用行）・継続コスト資産の費用行・
  * 残高補正の按分スライス・投資の利回り導出を仮想展開する。仮想行は保存・export しない。
+ *
+ * v13.5 B: 導出は ledger が変わったときだけ全地平（2100）へ 1 回行い、断面（asOf）の
+ * 切り替えは日付昇順配列の**二分探索**と打ち切り診断のフィルタだけで済ませる（キャッシュ）。
+ * 根拠は下の「時間依存が無い」= 過去断面の決定性で、切り出した結果は直接導出と一致する
+ * （`reportEntriesResultForAsOfUncached` との一致をテストで固定している）。
+ * 戻り値の行は**日付昇順**（同日は合流順）。
  *
  * v13: ルール由来（rec- 仕訳・ccr- item）は保存せず、ルール線分から毎回導出する。
  * 保存データに残っていても読まない（半移行状態の fail-closed 防御。二重計上を防ぐ）。
@@ -47,17 +133,55 @@ export function reportEntriesResultForAsOf(
   ledger: ReportEntrySource,
   asOf: string,
 ): ReportEntriesResult {
+  // 地平の外（2100 より先の断面。補正がもっと先にあればそこまで）はキャッシュが覆えない。
+  // その場合だけ従来どおりその場で導出する（キャッシュを作り直さない）。
+  const cached =
+    asOf > CONTINUOUS_COST_HARD_CAP ? derivationCache.get(ledger) : cachedDerivation(ledger);
+  if (cached === undefined || asOf > cached.horizon) {
+    return reportEntriesResultForAsOfUncached(ledger, asOf);
+  }
+  return {
+    entries: cached.entries.slice(0, prefixLengthForAsOf(cached.entries, asOf)),
+    investmentProjectionTruncations: cached.truncations.filter((truncation) =>
+      truncationVisibleAt(truncation, asOf, cached.maxAdjustmentDate),
+    ),
+  };
+}
+
+/**
+ * キャッシュを通さない直接導出（v13.4 までの経路そのまま）。
+ *
+ * **キャッシュ切り出しの正しさの基準**として残す（テストが「切り出し === 直接導出」を
+ * 固定する）。地平の外の断面を要求されたときの実経路でもある。
+ */
+export function reportEntriesResultForAsOfUncached(
+  ledger: ReportEntrySource,
+  asOf: string,
+): ReportEntriesResult {
+  const full = deriveAll(ledger, asOf);
+  return {
+    entries: full.entries.filter((entry) => entry.date <= asOf),
+    investmentProjectionTruncations: full.truncations,
+  };
+}
+
+/** 導出の本体（切り落とし前）。asOf は展開の要求地平であって、ここでは切らない。 */
+function deriveAll(ledger: ReportEntrySource, asOf: string): FullDerivation {
   const real: JournalEntry[] = [];
   const adjustments: JournalEntry[] = [];
   // 補正日が asOf より先にあると、その区間のスライスは asOf 以前にも落ちる。按分を asOf に
   // 依存させない（過去の断面が地平の取り方で変わらない）ため、導出は最も遠い補正日まで
-  // 広げてから最後に asOf で切る。補正が無い / すべて過去なら従来と同じ展開量になる。
+  // 広げる。asOf で切るのは切り出し側（この関数は 1 行も落とさない）。
   let horizon = asOf;
+  let maxAdjustmentDate: string | undefined;
   for (const entry of ledger.journalEntries) {
     if (generatedEntryRuleId(entry) !== undefined) continue;
     if (isAdjustmentEntry(entry)) {
       adjustments.push(entry);
       if (entry.date > horizon) horizon = entry.date;
+      if (maxAdjustmentDate === undefined || entry.date > maxAdjustmentDate) {
+        maxAdjustmentDate = entry.date;
+      }
     } else {
       real.push(entry);
     }
@@ -87,8 +211,10 @@ export function reportEntriesResultForAsOf(
     asOf,
   );
   return {
-    entries: [...spreadEntries, ...projection.entries].filter((entry) => entry.date <= asOf),
-    investmentProjectionTruncations: projection.truncations,
+    entries: [...spreadEntries, ...projection.entries],
+    truncations: projection.truncations,
+    horizon,
+    maxAdjustmentDate,
   };
 }
 

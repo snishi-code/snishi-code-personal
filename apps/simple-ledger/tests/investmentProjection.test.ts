@@ -420,7 +420,8 @@ describe('上限', () => {
     // 「行が無い」に 3 つの意味（対象外 / 0 円 / 計算を諦めた）を畳まない: 打ち切りは
     // 構造化された診断として返り、UI が注記として名乗れる（黙って横ばいの顔をしない）。
     expect(result.investmentProjectionTruncations).toEqual([
-      { accountId: 'invest', month: '2026-03' },
+      // date / at は断面の切り出し（導出キャッシュ）が月ではなく日で切るための情報。
+      { accountId: 'invest', month: '2026-03', date: '2026-03-01', at: 'step' },
     ]);
   });
 
@@ -451,7 +452,9 @@ describe('上限', () => {
       '2026-03-31',
     );
     expect(result.entries).toEqual([]);
-    expect(result.truncations).toEqual([{ accountId: 'invest', month: '2026-02' }]);
+    expect(result.truncations).toEqual([
+      { accountId: 'invest', month: '2026-02', date: '2026-02-01', at: 'step' },
+    ]);
   });
 });
 
