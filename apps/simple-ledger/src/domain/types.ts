@@ -138,6 +138,13 @@ export interface EntryMetadata {
    */
   investmentProjectionOf?: string;
   /**
+   * 残高補正の按分スライスの印（宣言した補正仕訳＝ pin の ID）。保存されない導出専用で、
+   * `reportEntriesForAsOf` の結果にのみ現れる（実仕訳・保存系・export には入れない。
+   * `investmentProjectionOf` と同じく schema の entryMetadata に無い＝保存境界で剥がれる）。
+   * 補正の stored 仕訳は集計から外れ、代わりにこの印を持つスライスが区間へ並ぶ。
+   */
+  adjustmentSliceOf?: string;
+  /**
    * 定期ルールから自動起票された仕訳の由来（recurringMonth とペア）。
    * 起票後は通常の仕訳として編集・削除できる。ルール削除時はこのメタデータを剥がして
    * 通常仕訳へ戻す（事実は消さない）。

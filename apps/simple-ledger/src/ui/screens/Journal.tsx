@@ -168,6 +168,11 @@ export function Journal({
   const accountFilterId = filter?.accountId;
   const normalExpenseOnly = filter?.expenseKind === 'normal';
   const map = useMemo(() => new Map((ledger?.accounts ?? []).map((a) => [a.id, a])), [ledger]);
+  // 導出行から宣言（stored 仕訳）へ戻る引き当て表。補正の按分スライスが親の pin を開く。
+  const storedById = useMemo(
+    () => new Map((ledger?.journalEntries ?? []).map((e) => [e.id, e])),
+    [ledger],
+  );
   const currency = ledger?.settings.currency ?? '';
   const digits = useMoneyDigits();
   const filterAccount = accountFilterId ? map.get(accountFilterId) : undefined;
@@ -407,7 +412,9 @@ export function Journal({
               md?.monthlyCostId !== undefined ||
               md?.continuousCostId !== undefined ||
               isContinuousCostMonthlyAllocationEntry(entry);
-            const isAdjustment = !!md?.adjustment;
+            // 補正の stored 仕訳は集計から外れて一覧に出ない。並ぶのは按分スライスなので、
+            // タグも操作の抑止もスライス側で名乗る（v13.4 ①）。
+            const isAdjustment = !!md?.adjustment || md?.adjustmentSliceOf !== undefined;
             // くり返し記帳から生まれた仕訳は読み取り専用（作者決定 2026-08-15）。
             // 編集・削除・反対仕訳はどれも出さず、タップは由来ルールへ（entryOpenPlan が担う）。
             const isRuleGenerated = generatedEntryRuleId(entry) !== undefined;
@@ -440,6 +447,10 @@ export function Journal({
             // ルール投影 = そのルール / 月割り = その項目 / 投資利回りの投影 = その投資科目。
             // 何を開くかは entryOpenPlan（単一正本）が決める。ここは計画の実行だけ。
             const plan = entryOpenPlan(entry);
+            // 補正は宣言した stored の pin を開く（並んでいるのは按分スライス）。
+            // pin が引けない壊れたデータでは押せなくする（空のシートを開かない）。
+            const adjustmentPin =
+              plan.kind === 'adjustment' ? (storedById.get(plan.entryId) ?? null) : null;
             const onRowTap =
               plan.kind === 'none'
                 ? undefined
@@ -450,7 +461,9 @@ export function Journal({
                     : plan.kind === 'account'
                       ? () => onOpenAccount(plan.accountId)
                       : plan.kind === 'adjustment'
-                        ? () => setEditingAdjustment(entry)
+                        ? adjustmentPin
+                          ? () => setEditingAdjustment(adjustmentPin)
+                          : undefined
                         : plan.kind === 'opening'
                           ? () => setEditingOpening(entry)
                           : () => onEditEntry(entry);
@@ -469,7 +482,7 @@ export function Journal({
                   {isMonthlyCost ? (
                     <span className="tag tag--teal">{t('journal.monthlyCostTag')}</span>
                   ) : null}
-                  {entry.metadata?.adjustment ? (
+                  {isAdjustment ? (
                     <span className="tag tag--neutral">{t('journal.adjustmentTag')}</span>
                   ) : null}
                 </div>

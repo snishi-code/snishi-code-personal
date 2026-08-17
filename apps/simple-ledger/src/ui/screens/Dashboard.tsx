@@ -273,7 +273,10 @@ export function Dashboard({
                             ? () => onEditEntry(entry)
                             : // opening / adjustment は専用シートが要る。仕訳一覧の該当行を
                               // 直接開く（シートが開いた状態で遷移する既存の resolver を使う）。
-                              () => onOpenEntry(entry.id);
+                              // 補正は按分スライスなので、開くのは宣言した stored の pin。
+                              plan.kind === 'adjustment'
+                              ? () => onOpenEntry(plan.entryId)
+                              : () => onOpenEntry(entry.id);
                 return (
                   <EntryListItem
                     key={entry.id}

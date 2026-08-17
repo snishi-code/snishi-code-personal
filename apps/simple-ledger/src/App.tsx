@@ -202,7 +202,9 @@ export function App() {
     navigate('journal');
     setJournalFilter(null);
     // 初期残高・残高補正は専用シートが要る = 仕訳一覧の既存 resolver へ ID を渡す。
-    if (plan.kind === 'opening' || plan.kind === 'adjustment') setJournalTargetEntryId(entryId);
+    // 補正は plan が指す宣言（stored の pin）を開く（按分スライスからの遷移でも親へ着く）。
+    if (plan.kind === 'adjustment') setJournalTargetEntryId(plan.entryId);
+    else if (plan.kind === 'opening') setJournalTargetEntryId(entryId);
     else {
       setJournalTargetEntryId(null);
       openEdit(entry);

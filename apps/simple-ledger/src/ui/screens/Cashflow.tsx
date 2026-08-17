@@ -349,7 +349,10 @@ export function Cashflow({
                       ? () => onOpenAccount(plan.accountId)
                       : plan.kind === 'edit'
                         ? () => onEditEntry(f.entry)
-                        : () => onOpenEntry(f.entry.id);
+                        : // 補正は按分スライスなので、開くのは宣言した stored の pin。
+                          plan.kind === 'adjustment'
+                          ? () => onOpenEntry(plan.entryId)
+                          : () => onOpenEntry(f.entry.id);
             const body = (
               <>
                 <div className="list__main">

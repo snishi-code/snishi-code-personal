@@ -14,7 +14,9 @@ import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { Journal, type JournalFilter } from '../src/ui/screens/Journal';
 import {
+  createAdjustment,
   createContinuousCost,
+  createOpenings,
   createRecurringRule,
   loadLedger,
   upsertAccount,
@@ -538,5 +540,71 @@ describe('仕訳一覧の反対仕訳ボタン', () => {
     expect(button.classList.contains('btn--tonal')).toBe(true);
     expect(button.classList.contains('icon-btn')).toBe(false);
     expect(button.querySelector('svg')).toBeNull();
+  });
+});
+
+/*
+ * 残高補正の按分（v13.4 ①）: 一覧に並ぶのは宣言（stored の補正仕訳）ではなく、
+ * 区間へ月割りした按分スライス。タップは親の宣言へ解決し、既存の補正編集シートが開く。
+ */
+describe('仕訳一覧の残高補正（按分スライス）', () => {
+  async function seedAdjustment() {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const today = todayLocal();
+    await createOpenings([
+      { accountId: cash.id, amount: 10_000, date: addMonthsToDate(today, -5) },
+    ]);
+    const pin = await createAdjustment({
+      accountId: cash.id,
+      date: today,
+      actualBalance: 8_800,
+    });
+    return { cash, pin: pin! };
+  }
+
+  function adjustmentRows(): HTMLElement[] {
+    const list = document.querySelector(`[data-ui="${UI.journal.list}"]`)!;
+    return Array.from(list.querySelectorAll('button.list__main')).filter((button) =>
+      Array.from(button.querySelectorAll('.list__title .tag')).some(
+        (tag) => tag.textContent === '補正',
+      ),
+    ) as HTMLElement[];
+  }
+
+  it('宣言 1 本ではなく区間の刻みぶん並び、合計は差額に一致する', async () => {
+    await seedAdjustment();
+    render(<View />);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.journal.view}"]`)).toBeInTheDocument();
+    });
+    await waitFor(() => expect(adjustmentRows().length).toBeGreaterThan(0));
+    // 実効開始（5 ヶ月前の初期残高）から今日までの同日通過 = 5 刻み。
+    const rows = adjustmentRows();
+    expect(rows).toHaveLength(5);
+    // 摘要は宣言のもの（1 本 1 本が「どの補正から生まれたか」を名乗る）。
+    for (const row of rows) {
+      expect(row.textContent).toContain('残高補正');
+    }
+  });
+
+  it('スライスのタップで宣言（親の補正）の編集シートが開く', async () => {
+    await seedAdjustment();
+    render(<View />);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.journal.view}"]`)).toBeInTheDocument();
+    });
+    await waitFor(() => expect(adjustmentRows().length).toBeGreaterThan(0));
+    fireEvent.click(adjustmentRows()[0]!);
+    await waitFor(() => {
+      expect(
+        document.querySelector(`[data-ui="${UI.adjustments.editDialog}"]`),
+      ).toBeInTheDocument();
+    });
+    // 開いたのは宣言そのもの = 実額の欄に actualBalance が入っている。
+    const actual = document.querySelector(
+      `[data-ui="${UI.adjustments.editActual}"]`,
+    ) as HTMLInputElement;
+    expect(actual.value).toBe('88');
   });
 });

@@ -40,21 +40,30 @@ export function dayCutCount(startDate: string, endDate: string): number {
 }
 
 /**
+ * 同日刻みの配分そのもの（**刻み規約の単一正本**）。継続コストの費用化
+ * （allocationSchedule）と残高補正の按分（adjustmentSpread.ts）が同じ規約を共有する。
+ *  - n >= 1: k = 1..n の刻み日（addMonthsToDate(startDate, k)）に monthlyAmounts を配る。
+ *  - n = 0（同日通過なし・endDate < startDate も含む）: endDate に全額 1 本。
+ * 日付は単調増加・月内に高々 1 本（刻みは 1 か月間隔）。合計は必ず total に一致する。
+ */
+export function allocationCuts(startDate: string, endDate: string, total: number): AllocationCut[] {
+  const n = dayCutCount(startDate, endDate);
+  if (n === 0) return [{ date: endDate, amount: assertSafeAmount(total) }];
+  const amounts = monthlyAmounts(total, n);
+  return amounts.map((amount, i) => ({ date: addMonthsToDate(startDate, i + 1), amount }));
+}
+
+/**
  * 費用化の予定表（単一正本）。導出仕訳・画面・残存価値がすべてこれを使う。
  *  - 終了日なし: 空（1 本も生まれない）。
- *  - n >= 1: k = 1..n の刻み日に monthlyAmounts を配る。
- *  - n = 0: 終了日に全額 1 本。
- * 日付は単調増加・月内に高々 1 本（刻みは 1 か月間隔）。
+ *  - それ以外は allocationCuts（刻み規約）そのもの。
  */
 export function allocationSchedule(
   item: MonthlyCostItem,
   spreadTotal: number = item.amount,
 ): AllocationCut[] {
   if (item.endDate === undefined) return [];
-  const n = dayCutCount(item.startDate, item.endDate);
-  if (n === 0) return [{ date: item.endDate, amount: assertSafeAmount(spreadTotal) }];
-  const amounts = monthlyAmounts(spreadTotal, n);
-  return amounts.map((amount, i) => ({ date: addMonthsToDate(item.startDate, i + 1), amount }));
+  return allocationCuts(item.startDate, item.endDate, spreadTotal);
 }
 
 /** その月に費用として割り振られる額。寄与しない月・終了日なしは 0。 */

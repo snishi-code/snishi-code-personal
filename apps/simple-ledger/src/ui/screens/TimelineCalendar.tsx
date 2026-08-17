@@ -1409,6 +1409,10 @@ export function TimelineCalendar({
       case 'investmentAccount':
         onOpenAccount(target.accountId);
         return;
+      case 'adjustmentEntry':
+        // 按分スライスは宣言した補正仕訳（stored）へ。既存の resolver が補正シートを開く。
+        onOpenEntry(target.entryId);
+        return;
     }
   };
 

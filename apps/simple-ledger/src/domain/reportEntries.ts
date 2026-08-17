@@ -1,3 +1,4 @@
+import { adjustmentSpread, isAdjustmentEntry } from './adjustmentSpread';
 import { continuousCostEntries } from './continuousCost';
 import {
   investmentProjectionResult,
@@ -22,16 +23,32 @@ type ReportEntrySource = Pick<
  * 時間依存（today / knowledgeDate）は無い: 配分は「ユーザーが明示した終了日」だけで決まり、
  * asOf を動かしても展開範囲が変わるだけで過去の値は変わらない。
  *
+ * v13.4: 残高補正（metadata.adjustment）の stored 仕訳は**集計に入れない**。宣言（pin）として
+ * 読み、直前の補正との区間へ月割りした按分スライスへ置き換える（adjustmentSpread.ts が正本）。
+ * 補正日以降の残高は置き換え前と完全に一致する。
+ *
  * これは**保存不変条件の正本**（科目アーカイブの残高 0・終了残高・残高補正の理論残高）。
  * 投資の利回り投影はここへ合流させない——画面表示は `displayEntriesForAsOf` を使う。
  */
 export function reportEntriesForAsOf(ledger: ReportEntrySource, asOf: string): JournalEntry[] {
-  const derived = deriveRecurringOutputs(ledger.recurringRules, ledger.accounts, asOf);
-  const realThroughAsOf = ledger.journalEntries.filter(
-    (entry) => entry.date <= asOf && generatedEntryRuleId(entry) === undefined,
-  );
-  return [
-    ...realThroughAsOf,
+  const real: JournalEntry[] = [];
+  const adjustments: JournalEntry[] = [];
+  // 補正日が asOf より先にあると、その区間のスライスは asOf 以前にも落ちる。按分を asOf に
+  // 依存させない（過去の断面が地平の取り方で変わらない）ため、導出は最も遠い補正日まで
+  // 広げてから最後に asOf で切る。補正が無い / すべて過去なら従来と同じ展開量になる。
+  let horizon = asOf;
+  for (const entry of ledger.journalEntries) {
+    if (generatedEntryRuleId(entry) !== undefined) continue;
+    if (isAdjustmentEntry(entry)) {
+      adjustments.push(entry);
+      if (entry.date > horizon) horizon = entry.date;
+    } else {
+      real.push(entry);
+    }
+  }
+  const derived = deriveRecurringOutputs(ledger.recurringRules, ledger.accounts, horizon);
+  const base = [
+    ...real.filter((entry) => entry.date <= horizon),
     // 回収・金額・期間は「現在わかっている全事実」を導出パラメータにする。
     // 表示する実仕訳と仮想行の日付だけを asOf で切るため、後日の回収による再配分は
     // 過去・現在・未来のどの断面でも同じになる。回収の振替は実仕訳のまま
@@ -39,10 +56,12 @@ export function reportEntriesForAsOf(ledger: ReportEntrySource, asOf: string): J
     ...continuousCostEntries(
       reportMonthlyCostItems(ledger, derived.items),
       ledger.journalEntries,
-      asOf,
+      horizon,
     ),
     ...derived.entries,
   ];
+  const spread = adjustmentSpread(ledger.accounts, base, adjustments);
+  return [...base, ...spread.entries, ...spread.unspread].filter((entry) => entry.date <= asOf);
 }
 
 /**
