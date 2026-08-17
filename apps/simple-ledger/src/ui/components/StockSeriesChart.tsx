@@ -11,7 +11,7 @@
  *   凡例のチップも同じ線種で描く（凡例 → 線の対応が白黒でも辿れる）。
  * - 縦軸は表示中の系列だけで決める（0 は必ず含める＝負債が下へ、資産が上へ伸びる）。
  */
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   STOCK_SERIES_DEFAULT_VISIBLE,
   STOCK_SERIES_KEYS,
@@ -24,7 +24,8 @@ import { formatMoney } from '../../util/format';
 import { UI } from '../../ui-contract';
 import { Money } from '../money';
 import { useMoneyDigits } from '../money';
-import { visibleIndexRange } from '../scrollWindow';
+import { visibleIndexRange, type ScrollEdge } from '../scrollWindow';
+import { useHorizonScroll } from '../horizonScroll';
 
 /** 凡例列の幅（px）。可視添字の計算にも同じ値を使う（2 か所に生値を置かない）。 */
 const LEGEND_WIDTH = 140;
@@ -75,7 +76,9 @@ export function StockSeriesChart({
   bucketWidth,
   currency,
   focusDate,
+  windowKey,
   onVisibleRangeChange,
+  onExtend,
 }: {
   series: StockSeries;
   zoom: TimelineZoom;
@@ -84,8 +87,12 @@ export function StockSeriesChart({
   currency: string;
   /** 開いたとき / 窓を送ったときに中央へ置く日付。 */
   focusDate?: string;
+  /** 窓の同一性。**バケットが継ぎ足されただけでは変わらない**（変わると中央へ戻ってしまう）。 */
+  windowKey?: string;
   /** 実際に見えている範囲（窓送りの起点に使う）。 */
   onVisibleRangeChange?: (range: { from: string; to: string }) => void;
+  /** 端に近づいた = 窓をその側へ伸ばしたい（連続スクロール・v13.6 H2-3）。 */
+  onExtend?: (edge: ScrollEdge) => void;
 }) {
   const digits = useMoneyDigits();
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -123,20 +130,26 @@ export function StockSeriesChart({
     [bucketWidth, buckets, onVisibleRangeChange],
   );
 
+  // 中央寄せ（窓を送った直後）と、連続スクロールの継ぎ足し・scrollLeft 補正は
+  // 3 レンズ共通の機構が持つ（線分レンズ・数値レンズと同じ規則で動く）。
   const focusIndex = useMemo(() => {
     if (focusDate === undefined) return -1;
     return buckets.findIndex((bucket) => bucket.from <= focusDate && focusDate <= bucket.to);
   }, [buckets, focusDate]);
-
-  useLayoutEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    if (focusIndex >= 0) {
+  const bucketKeys = useMemo(() => buckets.map((bucket) => bucket.key), [buckets]);
+  const handleScroll = useHorizonScroll({
+    viewportRef,
+    keys: bucketKeys,
+    itemWidth: bucketWidth,
+    windowKey: `${windowKey ?? ''}:${focusDate ?? ''}`,
+    focusScrollLeft: (viewport) => {
+      if (focusIndex < 0) return viewport.scrollLeft;
       const trackWidth = Math.max(0, viewport.clientWidth - LEGEND_WIDTH);
-      viewport.scrollLeft = Math.max(0, (focusIndex + 0.5) * bucketWidth - trackWidth / 2);
-    }
-    readViewport(viewport);
-  }, [bucketWidth, focusIndex, readViewport]);
+      return Math.max(0, (focusIndex + 0.5) * bucketWidth - trackWidth / 2);
+    },
+    onSettle: readViewport,
+    ...(onExtend ? { onExtend } : {}),
+  });
 
   // 縦軸は**表示中の系列だけ**で決める。0 は必ず入れる（負債が下・資産が上に出る軸にする）。
   const shown = STOCK_SERIES_KEYS.filter((key) => visible.has(key));
@@ -185,7 +198,7 @@ export function StockSeriesChart({
         tabIndex={0}
         aria-label={caption}
         data-ui={UI.timeline.chartViewport}
-        onScroll={(event) => readViewport(event.currentTarget)}
+        onScroll={(event) => handleScroll(event.currentTarget)}
         style={{ '--timeline-chart-legend-width': `${LEGEND_WIDTH}px` } as CSSProperties}
       >
         <div className="timeline-chart__canvas">

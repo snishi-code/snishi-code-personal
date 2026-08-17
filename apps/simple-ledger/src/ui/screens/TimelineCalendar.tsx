@@ -47,7 +47,8 @@ import { TIMELINE_ACCOUNT_BOXES, timelineBoxForAccount, type AccountAccent } fro
 import type { Account, Ledger, MonthlyCostItem, RecurringRule } from '../../domain/types';
 import type { ReportPeriod } from '../../domain/reportPeriod';
 import type { Screen } from '../navigation';
-import { visibleIndexRange } from '../scrollWindow';
+import { visibleIndexRange, type ScrollEdge } from '../scrollWindow';
+import { useHorizonScroll } from '../horizonScroll';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 import { PeriodMatrixTable } from '../components/PeriodMatrixTable';
@@ -274,7 +275,7 @@ function centerOfPeriod(period: ReportPeriod, today: string): string {
 
 /**
  * 青天井のルールを日単位で 2100 年まで DOM 化しないための有限窓。
- * 前後ボタンで同じ幅ずつ送れるため、見たい時点へ到達できる。
+ * 端に近づけば `grownRange` が継ぎ足す（連続スクロール）ので、ここは**開いた直後の窓**。
  */
 function rangeAround(center: string, zoom: TimelineZoom): { from: string; to: string } {
   if (zoom === 'day') return { from: addDays(center, -46), to: addDays(center, 46) };
@@ -294,6 +295,63 @@ function rangeAround(center: string, zoom: TimelineZoom): { from: string; to: st
  * 壊れた日付から無制限に列を増やさないための歯止め（periodMatrix の年上限と同じ 200）。
  */
 const MATRIX_MAX_COLUMNS = 200;
+
+/*
+ * ── 連続スクロールの継ぎ足し（v13.6 H2-3・作者確定 2026-08-18）──
+ * 端に近づいたら窓が自動で伸びる。伸びるのは端だけで、反対側は捨てない
+ * （捨てると戻ったときに作り直しになり、`grownRange` が純関数でなくなる）。
+ */
+/** 1 回の継ぎ足し量（`rangeAround` 1 窓のおよそ半分 = 継ぎ足し直後にまた端へ触れない距離）。 */
+const EXTEND_STEP: Record<TimelineZoom, number> = { day: 46, month: 18, year: 7 };
+/**
+ * 継ぎ足しの上限（before + after の合計回数）。窓は伸びるだけなので、DOM の列数はここで
+ * 頭打ちになる: 日 93 + 46×5 = 323 列 / 月 36 + 18×9 = 198 列 / 年 15 + 7×26 = 197 列。
+ * 月・年は数値レンズの列上限 `MATRIX_MAX_COLUMNS`(200) を超えない（超えると表の列だけ
+ * 生えなくなり、同じ窓のはずの帯・折れ線とずれる）。ここで止まったあとは左右ボタンで送る
+ * = ボタンを残す理由の 1 つ（もう 1 つはキーボード / 支援技術）。
+ */
+const MAX_EXTEND_STEPS: Record<TimelineZoom, number> = { day: 5, month: 9, year: 26 };
+
+/** 窓の伸び具合。`key` = どの窓に対する伸びか（送り直したら 0 に戻る）。 */
+interface WindowGrowth {
+  key: string;
+  before: number;
+  after: number;
+}
+const NO_GROWTH: WindowGrowth = { key: '', before: 0, after: 0 };
+
+/** 窓の端を `steps` 段ぶん動かす。バケット末（月末 / 年末）へ揃えるのもここ。 */
+function shiftWindowEdge(date: string, zoom: TimelineZoom, steps: number): string {
+  if (zoom === 'day') return addDays(date, steps * EXTEND_STEP.day);
+  if (zoom === 'month') {
+    const shifted = addMonths(date, steps * EXTEND_STEP.month);
+    return steps > 0 ? monthEnd(shifted) : shifted;
+  }
+  const shifted = addYears(date, steps * EXTEND_STEP.year);
+  return clampTimelineDate(`${shifted.slice(0, 4)}-${steps > 0 ? '12-31' : '01-01'}`);
+}
+
+/**
+ * 継ぎ足し後の窓。**開いた直後の窓 + 段数**から毎回引き直す純関数なので、同じ段数なら
+ * 何度描いても同じ範囲になる（差分を足し込まないので丸めも溜まらない）。
+ *
+ * 上限は従来どおり: 右は `CONTINUOUS_COST_HARD_CAP`（`addDays` / `addMonths` / `addYears` が
+ * 既にクランプする）、左は**データのある最初の年**。開いた直後の窓が既にそれより過去から
+ * 始まっているときは、そこを下限にする（今見えているものを取り上げない）。
+ */
+function grownRange(
+  base: { from: string; to: string },
+  zoom: TimelineZoom,
+  growth: WindowGrowth,
+  floor: string,
+): { from: string; to: string } {
+  const limit = floor < base.from ? floor : base.from;
+  const shifted = growth.before > 0 ? shiftWindowEdge(base.from, zoom, -growth.before) : base.from;
+  return {
+    from: shifted < limit ? limit : shifted,
+    to: growth.after > 0 ? shiftWindowEdge(base.to, zoom, growth.after) : base.to,
+  };
+}
 
 /** 窓に入る 'YYYY-MM' の並び。年をまたいで連続する。 */
 function monthsBetween(from: string, to: string): string[] {
@@ -580,6 +638,7 @@ export function TimelineCalendarView({
   currency,
   onOpenTarget,
   onVisibleRangeChange,
+  onExtend,
   focusDate,
   windowKey,
 }: {
@@ -593,6 +652,8 @@ export function TimelineCalendarView({
   onOpenTarget: (target: TimelineOpenTarget) => void;
   /** 実際に viewport 内へ見えている横軸。行の存在期間フィルタへ返す。 */
   onVisibleRangeChange?: (range: { from: string; to: string }) => void;
+  /** 端に近づいた = 窓をその側へ伸ばしたい（連続スクロール・v13.6 H2-3）。 */
+  onExtend?: (edge: ScrollEdge) => void;
   /** ヘッダー日付または窓送り後の中心。初期スクロール位置にだけ使う。 */
   focusDate?: string;
   /** 窓（ズーム・前後移動）の同一性。変わったら開いているポップオーバーを捨てる。 */
@@ -618,8 +679,6 @@ export function TimelineCalendarView({
     [accounts],
   );
   const trackWidth = model.buckets.length * bucketWidth;
-  const firstBucketFrom = model.buckets[0]?.from;
-  const lastBucketTo = model.buckets.at(-1)?.to;
   const windowCenter =
     focusDate ??
     (() => {
@@ -646,25 +705,23 @@ export function TimelineCalendarView({
     [bucketWidth, model.buckets, onVisibleRangeChange],
   );
 
-  // 窓を送ったときとズーム時は、中央日付が見える位置から始める。
-  useLayoutEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    const focusX = positionForDate(model.buckets, windowCenter, bucketWidth);
-    const labelWidth = viewport.clientWidth <= 480 ? 116 : 132;
-    const middle = Math.max(0, focusX - Math.max(0, viewport.clientWidth - labelWidth) / 2);
-    viewport.scrollLeft = middle;
-    visibleCenterRef.current = windowCenter;
-    readViewport(viewport);
-  }, [
-    bucketWidth,
-    firstBucketFrom,
-    lastBucketTo,
-    model.buckets,
-    readViewport,
-    trackWidth,
-    windowCenter,
-  ]);
+  // 窓を送ったときとズーム時は中央日付が見える位置から始め、連続スクロールで窓が左へ
+  // 伸びたぶんは scrollLeft で打ち消す（機構は 3 レンズ共通の useHorizonScroll が持つ）。
+  const bucketKeys = useMemo(() => model.buckets.map((bucket) => bucket.key), [model.buckets]);
+  const handleScroll = useHorizonScroll({
+    viewportRef,
+    keys: bucketKeys,
+    itemWidth: bucketWidth,
+    windowKey: `${windowKey ?? ''}:${windowCenter}`,
+    focusScrollLeft: (viewport) => {
+      const focusX = positionForDate(model.buckets, windowCenter, bucketWidth);
+      const labelWidth = viewport.clientWidth <= 480 ? 116 : 132;
+      visibleCenterRef.current = windowCenter;
+      return Math.max(0, focusX - Math.max(0, viewport.clientWidth - labelWidth) / 2);
+    },
+    onSettle: readViewport,
+    ...(onExtend ? { onExtend } : {}),
+  });
 
   // 画面回転やコンテナ幅の変化でも、物理的に見えている期間へ行とポッチを追従させる。
   useLayoutEffect(() => {
@@ -764,7 +821,7 @@ export function TimelineCalendarView({
         tabIndex={0}
         aria-label={t('timeline.title')}
         data-ui={UI.timeline.viewport}
-        onScroll={(event) => readViewport(event.currentTarget)}
+        onScroll={(event) => handleScroll(event.currentTarget)}
       >
         <div
           className="timeline-calendar__canvas"
@@ -1364,30 +1421,66 @@ export function TimelineCalendar({
   const today = todayLocal();
   const [center, setCenter] = useState(() => centerOfPeriod(period, today));
   const [showEnded, setShowEnded] = useState(false);
-  const range = useMemo(() => rangeAround(center, zoom), [center, zoom]);
-  const rangeKey = `${zoom}:${range.from}:${range.to}`;
+  const baseRange = useMemo(() => rangeAround(center, zoom), [center, zoom]);
+  /**
+   * 窓の同一性 = **送り直したか**（ズーム変更・左右ボタン・年列ドリル）。連続スクロールの
+   * 継ぎ足しでは変えない: これが変わると各レンズが中心へスクロールし直すので、
+   * 伸ばすたびに画面が飛ぶ。範囲そのもの（from/to）を鍵にしてはいけないのはそのため。
+   */
+  const anchorKey = `${zoom}:${center}`;
+  /** 数値レンズだけでなく**全レンズ**の左の下限（= データのある最初の年）。 */
+  const floorDate = useMemo(() => matrixFloorDate(ledger, today), [ledger, today]);
+  const [growth, setGrowth] = useState<WindowGrowth>(() => ({ ...NO_GROWTH, key: anchorKey }));
+  const range = useMemo(
+    () => grownRange(baseRange, zoom, growth.key === anchorKey ? growth : NO_GROWTH, floorDate),
+    [anchorKey, baseRange, floorDate, growth, zoom],
+  );
+  /**
+   * 端に近づいた = 窓をその側へ 1 段伸ばす（`horizonScroll` の共通機構から呼ばれる）。
+   * 上限・下限に貼り付いていて実際には範囲が動かないときは state を触らない
+   * （スクロールのたびに再描画を作らない = 端で指が止まらない）。
+   */
+  const extendWindow = useCallback(
+    (edge: ScrollEdge) => {
+      setGrowth((current) => {
+        const from: WindowGrowth =
+          current.key === anchorKey ? current : { ...NO_GROWTH, key: anchorKey };
+        if (from.before + from.after >= MAX_EXTEND_STEPS[zoom]) return current;
+        const next: WindowGrowth =
+          edge === 'start'
+            ? { ...from, before: from.before + 1 }
+            : { ...from, after: from.after + 1 };
+        const grown = grownRange(baseRange, zoom, next, floorDate);
+        const previous = grownRange(baseRange, zoom, from, floorDate);
+        if (grown.from === previous.from && grown.to === previous.to) return current;
+        return next;
+      });
+    },
+    [anchorKey, baseRange, floorDate, zoom],
+  );
   const [visibleWindow, setVisibleWindow] = useState(() => ({
-    key: rangeKey,
+    key: anchorKey,
     from: range.from,
     to: range.to,
   }));
   // 実際に見えている範囲の中心。窓送りとズーム変更の起点（画面内セグメントだった頃に
   // その場で実測していたものを state にした = ヘッダーから変わっても「いま見ている時点」を保つ）。
   const [visibleCenter, setVisibleCenter] = useState(center);
+  // 可視範囲は**日付**なので、窓を継ぎ足しても意味を失わない（鍵は anchorKey で足りる）。
   const visibleRange =
-    visibleWindow.key === rangeKey
+    visibleWindow.key === anchorKey
       ? { from: visibleWindow.from, to: visibleWindow.to }
       : { from: range.from, to: range.to };
   const updateVisibleRange = useCallback(
     (next: { from: string; to: string }) => {
       setVisibleWindow((current) =>
-        current.key === rangeKey && current.from === next.from && current.to === next.to
+        current.key === anchorKey && current.from === next.from && current.to === next.to
           ? current
-          : { key: rangeKey, from: next.from, to: next.to },
+          : { key: anchorKey, from: next.from, to: next.to },
       );
       setVisibleCenter(midpoint(next.from, next.to));
     },
-    [rangeKey],
+    [anchorKey],
   );
 
   // ヘッダーのズームが変わったら、見えていた時点を中心に窓を組み直す（render 中の派生調整
@@ -1410,11 +1503,10 @@ export function TimelineCalendar({
     [range.from, range.to, zoom],
   );
 
-  // 数値レンズの列窓。線分レンズと同じ窓（rangeAround）を使い、下端だけデータの最初の年で
+  // 数値レンズの列窓。線分レンズと同じ窓（`grownRange`）を使い、下端だけデータの最初の年で
   // 止める（= スクロール可能範囲はデータ年〜HARD_CAP）。日ズームで数値レンズは選べないが、
   // 万一来ても月列へ落として表を壊さない。
   const matrixZoom: Extract<TimelineZoom, 'month' | 'year'> = zoom === 'year' ? 'year' : 'month';
-  const floorDate = useMemo(() => matrixFloorDate(ledger, today), [ledger, today]);
   const matrixScope = useMemo<PeriodMatrixScope>(() => {
     const from = range.from < floorDate ? floorDate : range.from;
     const to = range.to < from ? from : range.to;
@@ -1539,7 +1631,10 @@ export function TimelineCalendar({
       />
 
       {/* レンズ（見え方）と窓送り。ズーム（日/月/年）はヘッダーにあり、ここには置かない
-          （同じ意味のボタンを 2 つ出さない）。 */}
+          （同じ意味のボタンを 2 つ出さない）。
+          左右ボタンは v13.6 H2-3 の連続スクロール後も残す: (a) キーボード・支援技術からの
+          フォールバック (b) 継ぎ足しの上限（MAX_EXTEND_STEPS）に達したあとの唯一の移動手段。
+          押すと窓ごと送り直す（= 継ぎ足しは 0 に戻る）ので、伸ばし続けても DOM は肥大しない。 */}
       <div className="toolbar timeline-calendar__controls">
         <div className="timeline-calendar__lens" role="group" aria-label={t('timeline.lens')}>
           <Segmented
@@ -1591,7 +1686,9 @@ export function TimelineCalendar({
               bucketWidth={BUCKET_WIDTH[zoom]}
               currency={ledger?.settings.currency ?? ''}
               focusDate={center}
+              windowKey={anchorKey}
               onVisibleRangeChange={updateVisibleRange}
+              onExtend={extendWindow}
             />
           ) : (
             <p className="muted period-matrix__empty">{t('matrix.noData')}</p>
@@ -1610,12 +1707,14 @@ export function TimelineCalendar({
               matrix={matrix}
               currency={ledger?.settings.currency ?? ''}
               focusDate={center}
+              windowKey={anchorKey}
               onOpenMonth={(asOf) => {
                 onPeriodChange({ mode: 'date', date: asOf });
                 onNavigate('dashboard');
               }}
               onOpenYear={openMatrixYear}
               onVisibleRangeChange={updateVisibleRange}
+              onExtend={extendWindow}
             />
           ) : (
             <p className="muted period-matrix__empty">{t('matrix.noData')}</p>
@@ -1632,8 +1731,9 @@ export function TimelineCalendar({
           currency={ledger?.settings.currency ?? ''}
           onOpenTarget={openTarget}
           onVisibleRangeChange={updateVisibleRange}
+          onExtend={extendWindow}
           focusDate={center}
-          windowKey={rangeKey}
+          windowKey={anchorKey}
         />
       )}
       <ScrollTopButton />

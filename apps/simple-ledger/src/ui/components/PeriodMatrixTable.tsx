@@ -12,7 +12,7 @@
  *
  * 行ラベル列は sticky。横スクロールは**この枠の中だけ**で起き、ページ本体は横に伸びない。
  */
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type {
   PeriodMatrix,
   PeriodMatrixColumn,
@@ -23,7 +23,8 @@ import { isDisplaySectionGroupStart } from '../../domain/displayOrder';
 import { t, type MessageKey } from '../../i18n';
 import { UI } from '../../ui-contract';
 import { Money, type MoneyTone } from '../money';
-import { visibleIndexRange } from '../scrollWindow';
+import { visibleIndexRange, type ScrollEdge } from '../scrollWindow';
+import { useHorizonScroll } from '../horizonScroll';
 
 /** 行ラベル列と値列の幅（px）。CSS は JS のこの値を custom property 経由で受け取る。 */
 const LABEL_WIDTH = 112;
@@ -123,20 +124,26 @@ export function PeriodMatrixTable({
   matrix,
   currency,
   focusDate,
+  windowKey,
   onOpenMonth,
   onOpenYear,
   onVisibleRangeChange,
+  onExtend,
 }: {
   matrix: PeriodMatrix;
   currency: string;
   /** 開いたとき / 窓を送ったときに中央へ置く日付。 */
   focusDate?: string;
+  /** 窓の同一性。**列が継ぎ足されただけでは変わらない**（変わると中央へ戻ってしまう）。 */
+  windowKey?: string;
   /** 月列のタップ: その月末を基準日にしてホームへ。 */
   onOpenMonth: (asOf: string) => void;
   /** 年列のタップ: その年を月ズームで見る。 */
   onOpenYear: (year: number) => void;
   /** 実際に見えている列の範囲（窓送りの起点に使う）。 */
   onVisibleRangeChange?: (range: { from: string; to: string }) => void;
+  /** 端に近づいた = 窓をその側へ伸ばしたい（連続スクロール・v13.6 H2-3）。 */
+  onExtend?: (edge: ScrollEdge) => void;
 }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   // 展開状態は画面ローカル・保存しない（窓を送っても木のキーは変わらないので開いたまま）。
@@ -172,20 +179,25 @@ export function PeriodMatrixTable({
   );
 
   // 窓を送った / ズームを変えた直後は、中央日付が見える位置から始める（線分レンズと同じ作法）。
+  // 連続スクロールで列が左へ継ぎ足されたときの scrollLeft 補正も同じ機構が持つ。
   const focusIndex = useMemo(() => {
     if (focusDate === undefined) return -1;
     return columns.findIndex((column) => column.from <= focusDate && focusDate <= column.to);
   }, [columns, focusDate]);
-
-  useLayoutEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    if (focusIndex >= 0) {
+  const columnKeys = useMemo(() => columns.map((column) => column.key), [columns]);
+  const handleScroll = useHorizonScroll({
+    viewportRef,
+    keys: columnKeys,
+    itemWidth: COLUMN_WIDTH,
+    windowKey: `${windowKey ?? ''}:${focusDate ?? ''}`,
+    focusScrollLeft: (viewport) => {
+      if (focusIndex < 0) return viewport.scrollLeft;
       const trackWidth = Math.max(0, viewport.clientWidth - LABEL_WIDTH);
-      viewport.scrollLeft = Math.max(0, (focusIndex + 0.5) * COLUMN_WIDTH - trackWidth / 2);
-    }
-    readViewport(viewport);
-  }, [focusIndex, readViewport]);
+      return Math.max(0, (focusIndex + 0.5) * COLUMN_WIDTH - trackWidth / 2);
+    },
+    onSettle: readViewport,
+    ...(onExtend ? { onExtend } : {}),
+  });
 
   if (columns.length === 0) {
     return <p className="muted period-matrix__empty">{t('matrix.noData')}</p>;
@@ -199,7 +211,7 @@ export function PeriodMatrixTable({
       aria-label={caption}
       tabIndex={0}
       data-ui={UI.timeline.matrix}
-      onScroll={(event) => readViewport(event.currentTarget)}
+      onScroll={(event) => handleScroll(event.currentTarget)}
       style={
         {
           '--period-matrix-label-width': `${LABEL_WIDTH}px`,
