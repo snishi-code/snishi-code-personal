@@ -183,6 +183,26 @@ describe('継続コスト資産の費用の行き先候補', () => {
       return found!;
     });
     fireEvent.click(toggle);
+    // v13.7 I3: 支出の 1 ページ目は選択だけ。持ち物の入力は次のページ（項目・金額を埋めて進む）。
+    fireEvent.change(document.querySelector(`[data-ui="${UI.journal.entry.item}"]`)!, {
+      target: { value: '継続コストの行き先' },
+    });
+    fireEvent.change(document.querySelector(`[data-ui="${UI.journal.entry.amount}"]`)!, {
+      target: { value: '1000' },
+    });
+    // 支払い元（貸方）は 1 ページ目の必須（持ち物を選んでも支払いは起きる）。
+    const sourceChip = await waitFor(() => {
+      const found = document.querySelector(
+        `[data-ui="${UI.journal.entry.flowSource}"] label.chip input`,
+      );
+      expect(found).toBeInTheDocument();
+      return found!;
+    });
+    fireEvent.click(sourceChip);
+    fireEvent.click(document.querySelector(`[data-ui="${UI.journal.entry.next}"]`)!);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.journal.entry.ccName}"]`)).toBeInTheDocument();
+    });
 
     // 終了日は任意の日付ピッカー（空のままでよい）。月数欄は存在しない。
     const endDate = document.querySelector(

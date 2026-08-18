@@ -80,6 +80,12 @@ export interface TransferFixed {
   onSave: (input: SimpleEntryInput) => Promise<void>;
 }
 
+/**
+ * 登録のページ（v13.7 I3）。`base` = 支出そのもの（ローン・持ち物は使うかどうかの選択だけ）、
+ * `loan` = ローンの入力、`item` = 持ち物の入力。選んだものだけが順に足される。
+ */
+type EntryStep = 'base' | 'loan' | 'item';
+
 export type EntryInit =
   | { kind: 'create'; mode: FormMode }
   | { kind: 'edit'; entry: JournalEntry }
@@ -239,6 +245,36 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     loanEndDate.trim() === '' ? 0 : loanInstallmentCount(loanFirstDate, loanEndDate.trim());
   const loanMonthly = loanMonthlyAmount(form.amount, loanCount);
   const loanScheduled = loanScheduledTotal(loanMonthly, loanCount);
+
+  /*
+   * マルチステップ登録（v13.7 I3・作者決定 2026-08-18）。1 画面 1 決定にする:
+   * 支出の画面ではローン・持ち物を**使うかどうかだけ**選び、入力そのものは次のページへ送る
+   * （選ぶと保存ボタンが「ローンを入力する」「持ち物を入力する」に変わる）。
+   * どちらも選ばなければページは 1 枚のまま = 従来どおりその場で保存する（挙動不変）。
+   * 簿記編集（manual）は 1 枚のまま扱う（貸借を直に指定する画面の力を割らない）。
+   */
+  const [step, setStep] = useState<EntryStep>('base');
+  const steps: EntryStep[] =
+    mode === 'manual'
+      ? ['base']
+      : [
+          'base',
+          ...(canArrangeLoan && loanMode ? (['loan'] as const) : []),
+          ...(canCreateContinuousCost && ccMode ? (['item'] as const) : []),
+        ];
+  // 選択を外したページに留まらない（steps から消えたら基本の画面へ戻る）。
+  const activeStep: EntryStep = steps.includes(step) ? step : 'base';
+  const stepIndex = steps.indexOf(activeStep);
+  const nextStep: EntryStep | undefined = steps[stepIndex + 1];
+  const goBackStep = () => setStep(steps[stepIndex - 1] ?? 'base');
+  const disableLoanMode = () => {
+    setLoanMode(false);
+    setStep('base');
+  };
+  const disableCcMode = () => {
+    setCcMode(false);
+    setStep('base');
+  };
 
   const snapshot = JSON.stringify({
     form,
@@ -449,6 +485,42 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     }
   }
 
+  /**
+   * 基本の画面（1 ページ目）で決着させる検証。**そのページが持つ欄だけ**を見る
+   * （エラーは必ずその欄が見えているページに出す）。条件は最終的な保存境界と同じ:
+   *  - ローンを選んだら支払い元は「新しいローン」に決まる = 貸方は要らない
+   *  - 持ち物を選んだら使い道は持ち物の計上先（次のページ）に決まる = 借方は要らない
+   */
+  function validateBaseStep(): boolean {
+    const toSave = effectiveForm();
+    const found: EntryValidationError[] = [];
+    if (toSave.date.trim() === '') found.push('date-required');
+    if (mode !== 'transfer' && toSave.description.trim() === '') found.push('description-required');
+    if (!Number.isInteger(toSave.amount) || toSave.amount < 1) found.push('amount-invalid');
+    if (!loanActive && toSave.creditAccountId === '') found.push('credit-required');
+    if (!continuousCostActive && toSave.debitAccountId === '') found.push('debit-required');
+    setErrors(found);
+    setFlowError(undefined);
+    return found.length === 0;
+  }
+
+  /**
+   * 主ボタン。最後のページだけが「保存」で、手前のページは次のページへ進む。
+   * 進むときに今のページを検証する（後のページで前のページのエラーを出さない）。
+   */
+  async function onPrimary() {
+    if (nextStep === undefined) {
+      await onSave();
+      return;
+    }
+    if (activeStep === 'base' && !validateBaseStep()) return;
+    if (activeStep === 'loan' && !validateLoan()) return;
+    // 名前は摘要から引き継ぐ（ページを分けても一度書いた語を書き直させない）。
+    if (nextStep === 'loan' && loanName.trim() === '') setLoanName(form.description);
+    if (nextStep === 'item' && ccTargetName.trim() === '') setCcTargetName(form.description);
+    setStep(nextStep);
+  }
+
   const sameAccount = errorText(errors, 'same-account');
   const isManual = mode === 'manual';
   // 購入の仕訳（継続コスト資産と 1:1）の編集: 借方は継続コスト台帳に固定（読み取り専用）。
@@ -601,11 +673,43 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         error={ccNameError ? t('entry.error.description-required') : undefined}
         dataUi={UI.journal.entry.ccName}
       />
-      <button type="button" className="collapse-toggle" onClick={() => setCcMode(false)}>
+      <button
+        type="button"
+        className="collapse-toggle"
+        onClick={disableCcMode}
+        data-ui={UI.journal.entry.ccBackToCategory}
+      >
         {t('entry.ccBackToCategory')}
       </button>
     </>
   );
+
+  // ローンの名前（ローンのページの先頭）。摘要から引き継いだ値が既に入っている。
+  const loanNameField = loanActive ? (
+    <>
+      <TextInput
+        label={t('entry.loanName')}
+        required
+        value={loanName}
+        placeholder={t('entry.loanNamePlaceholder')}
+        hint={t('entry.loanNameHint')}
+        onChange={(v) => {
+          setLoanName(v);
+          setLoanNameError(false);
+        }}
+        error={loanNameError ? t('entry.error.description-required') : undefined}
+        dataUi={UI.journal.entry.loanName}
+      />
+      <button
+        type="button"
+        className="collapse-toggle"
+        onClick={disableLoanMode}
+        data-ui={UI.journal.entry.loanArrangeBack}
+      >
+        {t('entry.loanArrangeBack')}
+      </button>
+    </>
+  ) : null;
 
   const flowDef = isManual ? null : MODE_FLOW[mode as FlowMode];
   // 固定側 pass-through: 相手側の候補（振替先/振替元）。台帳・アーカイブ対象は候補に出さない。
@@ -679,30 +783,21 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         dataUi={UI.journal.entry.flow}
         source={
           loanActive ? (
-            // 支払い元 = これから組むローン。名前は摘要から自動で入る（持ち物と同じ挙動）。
-            <>
-              <TextInput
-                label={t('entry.loanName')}
-                required
-                value={loanName}
-                placeholder={t('entry.loanNamePlaceholder')}
-                hint={t('entry.loanNameHint')}
-                onChange={(v) => {
-                  setLoanName(v);
-                  setLoanNameError(false);
-                }}
-                error={loanNameError ? t('entry.error.description-required') : undefined}
-                dataUi={UI.journal.entry.loanName}
-              />
+            // 選んだ状態だけを名乗る。ローンの中身（名前・終了日・返済元）は次のページ。
+            <div className="field">
+              <span className="field__label">{t(flowDef.source.labelKey)}</span>
+              <div className="list__title" data-ui={UI.journal.entry.loanSelected}>
+                {t('entry.loanSelected')}
+              </div>
               <button
                 type="button"
                 className="collapse-toggle"
-                onClick={() => setLoanMode(false)}
+                onClick={disableLoanMode}
                 data-ui={UI.journal.entry.loanArrangeBack}
               >
                 {t('entry.loanArrangeBack')}
               </button>
-            </>
+            </div>
           ) : (
             <>
               <AccountPicker
@@ -731,7 +826,21 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         }
         destination={
           canCreateContinuousCost && ccMode ? (
-            ccNameField
+            // 同じく選択だけ。持ち物の名前・計上先・終了日は次のページ。
+            <div className="field">
+              <span className="field__label">{t(flowDef.destination.labelKey)}</span>
+              <div className="list__title" data-ui={UI.journal.entry.ccSelected}>
+                {t('entry.ccSelected')}
+              </div>
+              <button
+                type="button"
+                className="collapse-toggle"
+                onClick={disableCcMode}
+                data-ui={UI.journal.entry.ccBackToCategory}
+              >
+                {t('entry.ccBackToCategory')}
+              </button>
+            </div>
           ) : lockedDebit ? (
             // 購入の仕訳の借方 = 継続コスト台帳（固定）。日付・金額・貸方だけ編集できる。
             readOnlyAccount(flowDef.destination.labelKey, form.debitAccountId)
@@ -967,32 +1076,57 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       </button>
     ) : null;
 
+  // ページの名前（1 枚しかないときは出さない = 従来の見た目を変えない）。
+  const stepTitle =
+    activeStep === 'loan'
+      ? t('entry.stepTitleLoan')
+      : activeStep === 'item'
+        ? t('entry.stepTitleItem')
+        : title;
+  const stepIndicator =
+    steps.length > 1 ? (
+      <p className="field__hint" data-ui={UI.journal.entry.step}>
+        {t('entry.stepIndicator', {
+          current: stepIndex + 1,
+          total: steps.length,
+          title: stepTitle,
+        })}
+      </p>
+    ) : null;
+
   return (
     <>
       <Modal
-        title={title}
+        // 見出しは sr-only。ページを分けたときは読み上げにも今のページ名を載せる。
+        title={activeStep === 'base' ? title : `${title} — ${stepTitle}`}
         onClose={requestClose}
         dismissMode="if-clean"
         titleVariant="sr-only"
-        scrollKey={mode}
+        scrollKey={`${mode}:${activeStep}`}
         footer={
           <>
+            {/* 手前のページがあれば「戻る」（入力は保持する）。無ければ従来のキャンセル。
+                × と端末の戻るは常に「シートを閉じる」= dirty guard の破棄確認を経由する。 */}
             <button
               type="button"
               className="btn btn--ghost"
-              onClick={requestClose}
-              data-ui={UI.journal.entry.cancel}
+              onClick={activeStep === 'base' ? requestClose : goBackStep}
+              data-ui={activeStep === 'base' ? UI.journal.entry.cancel : UI.journal.entry.stepBack}
             >
-              {t('common.cancel')}
+              {activeStep === 'base' ? t('common.cancel') : t('entry.stepBack')}
             </button>
             <button
               type="button"
               className="btn btn--primary"
-              onClick={onSave}
+              onClick={onPrimary}
               disabled={submitting}
-              data-ui={UI.journal.entry.save}
+              data-ui={nextStep === undefined ? UI.journal.entry.save : UI.journal.entry.next}
             >
-              {t('common.save')}
+              {nextStep === 'loan'
+                ? t('entry.stepNextLoan')
+                : nextStep === 'item'
+                  ? t('entry.stepNextItem')
+                  : t('common.save')}
             </button>
           </>
         }
@@ -1040,8 +1174,23 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             {canCreateContinuousCost && ccMode ? null : memoField}
             {deleteSection}
           </>
+        ) : activeStep === 'loan' ? (
+          // 2 ページ目: ローンだけの画面（名前 → 終了日 → 返済元 → 導出のプレビュー）。
+          <>
+            {stepIndicator}
+            {loanNameField}
+            {loanDetailField}
+          </>
+        ) : activeStep === 'item' ? (
+          // 最後のページ: 持ち物だけの画面（名前 → 終了日 → 計上先）。
+          <>
+            {stepIndicator}
+            {ccNameField}
+            {ccDetailField}
+          </>
         ) : (
           <>
+            {stepIndicator}
             {/* 費用・収入のアーカイブでは「振替せず終了」も正当な選択（残高 0 は必須でない）。
                 入力を始める前に選べるよう最上部に置く（作者決定 2026-08-14）。 */}
             {fixed?.skip ? (
@@ -1056,15 +1205,13 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               </button>
             ) : null}
             {dateField}
-            {mode === 'transfer' || (canCreateContinuousCost && ccMode) ? null : itemField}
+            {mode === 'transfer' ? null : itemField}
             {amountField}
             {/* 反対仕訳は常に簿記編集（上の分岐）だが、日常入力側にも同じ位置で置いておく。 */}
             {reversalOverWarning}
             {renderFlow()}
-            {ccDetailField}
-            {loanDetailField}
 
-            {continuousCostActive || fixed ? null : (
+            {fixed ? null : (
               <>
                 <button
                   type="button"

@@ -48,8 +48,11 @@ async function seed() {
   return { cash };
 }
 
-/** 支出シートを開き、日付・項目・金額を埋めて「ローンで払う」へ切り替える。 */
-async function openLoanMode(amountText = '1200000') {
+/**
+ * 支出シートの 1 ページ目を埋めて「ローンで払う」を**選ぶ**（v13.7 I3: 1 ページ目は選択だけ）。
+ * ローンの入力欄はまだ出ない。
+ */
+async function selectLoan(amountText = '1200000') {
   render(
     <Providers>
       <EntrySheet init={{ kind: 'create', mode: 'expense' }} onClose={() => undefined} />
@@ -66,6 +69,13 @@ async function openLoanMode(amountText = '1200000') {
   // 使い道（費用カテゴリ）を選ぶ。
   fireEvent.click(destination);
   fireEvent.click(q(UI.journal.entry.loanArrange)!);
+  await waitFor(() => expect(q(UI.journal.entry.loanSelected)).toBeInTheDocument());
+}
+
+/** 「ローンを入力する」で 2 ページ目（ローンの入力）まで進む。 */
+async function openLoanMode(amountText = '1200000') {
+  await selectLoan(amountText);
+  fireEvent.click(q(UI.journal.entry.next)!);
   await waitFor(() => expect(q(UI.journal.entry.loanName)).toBeInTheDocument());
 }
 
@@ -75,15 +85,25 @@ function pick(dataUi: string, name: string) {
 }
 
 describe('ローンで払う（支出シート）', () => {
-  it('摘要が名前へ自動で入り、既存ローンを選ぶ導線は無い', async () => {
+  it('1 ページ目は選択だけ・2 ページ目で摘要が名前へ自動で入り、既存ローンを選ぶ導線は無い', async () => {
     await seed();
-    await openLoanMode();
-    expect((q(UI.journal.entry.loanName) as HTMLInputElement).value).toBe('自動車');
+    await selectLoan();
+    // 1 ページ目にローンの入力欄は無い（選んだことだけを名乗る）。
+    expect(q(UI.journal.entry.loanName)).not.toBeInTheDocument();
+    expect(q(UI.journal.entry.loanEndDate)).not.toBeInTheDocument();
     // 支払い元のピッカーは消える（= 既存の負債を選ぶ経路が無い）。
     expect(q(UI.journal.entry.flowSource)).not.toBeInTheDocument();
-    // 「やめる」で元の支払い元へ戻れる。
+    // 保存ボタンは「ローンを入力する」へ変わる（この段では保存しない）。
+    expect(q(UI.journal.entry.save)).not.toBeInTheDocument();
+    expect(q(UI.journal.entry.next)).toHaveTextContent('ローンを入力する');
+
+    fireEvent.click(q(UI.journal.entry.next)!);
+    await waitFor(() => expect(q(UI.journal.entry.loanName)).toBeInTheDocument());
+    expect((q(UI.journal.entry.loanName) as HTMLInputElement).value).toBe('自動車');
+    // 「やめる」で選択が外れ、1 ページ目の支払い元へ戻る。
     fireEvent.click(q(UI.journal.entry.loanArrangeBack)!);
     await waitFor(() => expect(q(UI.journal.entry.flowSource)).toBeInTheDocument());
+    expect(q(UI.journal.entry.save)).toBeInTheDocument();
   });
 
   it('1/3/5 年チップが終了日を入れ、回数と月額を導出して見せる', async () => {
@@ -104,8 +124,17 @@ describe('ローンで払う（支出シート）', () => {
 
     fireEvent.click(chips[2]!);
     expect(q(UI.journal.entry.loanPreview)).toHaveTextContent('× 60 回');
-    // 割り切れない額では、最後に残る差額を明示する（丸めて消さない）。
+
+    // 金額は 1 ページ目の欄。「戻る」で直しても、進むとローンの入力は残っている。
+    fireEvent.click(q(UI.journal.entry.stepBack)!);
+    await waitFor(() => expect(q(UI.journal.entry.amount)).toBeInTheDocument());
     fireEvent.change(q(UI.journal.entry.amount)!, { target: { value: '10000' } });
+    fireEvent.click(q(UI.journal.entry.next)!);
+    await waitFor(() => expect(q(UI.journal.entry.loanEndDate)).toBeInTheDocument());
+    expect((q(UI.journal.entry.loanEndDate) as HTMLInputElement).value).toBe(
+      loanRuleEndDate(first, 60),
+    );
+    // 割り切れない額では、最後に残る差額を明示する（丸めて消さない）。
     expect(q(UI.journal.entry.loanRemainder)).toBeInTheDocument();
   });
 
@@ -157,18 +186,30 @@ describe('ローンで払う（支出シート）', () => {
     expect(ledger.monthlyCostItems).toHaveLength(0);
   });
 
-  it('持ち物として登録すると、費用化の item と返済ルールが両立する', async () => {
+  it('持ち物として登録すると、費用化の item と返済ルールが両立する（ローン → 持ち物 → 保存）', async () => {
     await seed();
-    await openLoanMode();
-    // 行き先を「持ち物として登録する」へ切り替える（ローンと併用）。
+    // 1 ページ目で両方を選ぶ（入力はまだしない）。
+    await selectLoan();
     fireEvent.click(q(UI.journal.entry.ccToggle)!);
+    await waitFor(() => expect(q(UI.journal.entry.ccSelected)).toBeInTheDocument());
+    expect(q(UI.journal.entry.ccName)).not.toBeInTheDocument();
+
+    // 2 ページ目 = ローン。次は「持ち物を入力する」になる（保存はまだ出ない）。
+    fireEvent.click(q(UI.journal.entry.next)!);
+    await waitFor(() => expect(q(UI.journal.entry.loanEndDate)).toBeInTheDocument());
+    fireEvent.click(qa(UI.journal.entry.loanQuickSpan)[0]!);
+    pick(UI.journal.entry.loanFrom, '現金');
+    expect(q(UI.journal.entry.save)).not.toBeInTheDocument();
+    expect(q(UI.journal.entry.next)).toHaveTextContent('持ち物を入力する');
+
+    // 3 ページ目 = 持ち物。ここで初めて「保存」。
+    fireEvent.click(q(UI.journal.entry.next)!);
     await waitFor(() => expect(q(UI.journal.entry.ccName)).toBeInTheDocument());
+    expect((q(UI.journal.entry.ccName) as HTMLInputElement).value).toBe('自動車');
     pick(UI.journal.entry.ccCategory, '固定費');
     fireEvent.change(q(UI.journal.entry.ccEndDate)!, {
       target: { value: addMonthsToDate(todayLocal(), 60) },
     });
-    fireEvent.click(qa(UI.journal.entry.loanQuickSpan)[0]!);
-    pick(UI.journal.entry.loanFrom, '現金');
     fireEvent.click(q(UI.journal.entry.save)!);
 
     const ledger = await waitFor(async () => {

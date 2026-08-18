@@ -183,7 +183,16 @@ export const UI = {
       reversalOverWarning: 'journal.entry.reversal.overWarning',
       detailToggle: 'journal.entry.detailToggle',
       manualSwitch: 'journal.entry.manualSwitch',
+      // マルチステップ登録（v13.7 I3）。ローン・持ち物を選ぶとページが足され、
+      // 主ボタンは最後のページだけ save・手前は next（= 進む）を名乗る。
+      step: 'journal.entry.step',
+      stepBack: 'journal.entry.stepBack',
+      next: 'journal.entry.next',
+      // 基本の画面での「選んだ」表示（中身の入力は次のページ）。
+      loanSelected: 'journal.entry.loanSelected',
+      ccSelected: 'journal.entry.ccSelected',
       ccToggle: 'journal.entry.ccToggle',
+      ccBackToCategory: 'journal.entry.ccBackToCategory',
       ccName: 'journal.entry.ccName',
       ccCategory: 'journal.entry.ccCategory',
       ccEndDate: 'journal.entry.ccEndDate',

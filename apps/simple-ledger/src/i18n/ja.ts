@@ -294,6 +294,16 @@ export const ja = {
   // 継続コスト資産の入力: 行き先を「継続コスト資産（自由入力の項目名）」に切り替える。
   'entry.ccToggle': '持ち物として登録する',
   'entry.ccBackToCategory': '通常のカテゴリに戻す',
+  // マルチステップ登録（v13.7 I3）: 支出の画面では「使うかどうか」だけを選び、
+  // 中身の入力は次のページへ送る。
+  'entry.ccSelected': '持ち物として登録（次のページで入力）',
+  'entry.loanSelected': '新しいローン（次のページで入力）',
+  'entry.stepIndicator': '{current} / {total}・{title}',
+  'entry.stepTitleLoan': 'ローンの入力',
+  'entry.stepTitleItem': '持ち物の入力',
+  'entry.stepNextLoan': 'ローンを入力する',
+  'entry.stepNextItem': '持ち物を入力する',
+  'entry.stepBack': '戻る',
   'entry.ccTargetName': '持ち物の名前',
   'entry.ccTargetNameHint':
     '持ち物として登録する項目名です（例: 自動車 / 洗濯機）。勘定科目は増えません。',
