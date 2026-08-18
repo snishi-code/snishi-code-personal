@@ -110,6 +110,9 @@ export const UI = {
     lensChart: 'timeline.lens.chart',
     previous: 'timeline.range.previous',
     next: 'timeline.range.next',
+    // 基準日が可視範囲の外にあるときだけ現れる、表示位置だけを戻すボタン（v13.7 I2）。
+    // ヘッダーの period.today（= 断面そのものを今日へ戻す）とは別物。
+    backToBasis: 'timeline.backToBasis',
     showEnded: 'timeline.showEnded',
     // 3 レンズ共通のラベル列（v13.6 H3）。行の識別は data-row-key = 共通木のノード id
     // （box:<箱> / account:<科目 id> / identity:<分類> / rule: / item:）。
@@ -141,6 +144,8 @@ export const UI = {
     // 横スクロールはこの枠の中だけ。値は各バケット末断面のストック（階段折れ線）。
     chart: 'timeline.chart',
     chartViewport: 'timeline.chart.viewport',
+    // グラフレンズの目盛り行（枠の上端に貼る。線分の年月日行・数値の列見出しと同じ役割）
+    chartHead: 'timeline.chart.head',
     // 未来の断面が混ざることの名乗り（数値レンズの matrixNote と同じ文言・別の器）
     chartNote: 'timeline.chart.projectionNote',
     // 描かれている 1 系列の折れ線（ON の行のぶんだけ存在する・data-row-key で識別）

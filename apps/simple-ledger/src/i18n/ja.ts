@@ -63,6 +63,10 @@ export const ja = {
   'chart.noSeries': '表示する系列がありません。左のチェックボックスで選びます。',
   'timeline.previous': '前の期間',
   'timeline.next': '次の期間',
+  // 窓を送って基準日を見失ったときだけ出る警告灯（ヘッダーの「今日」= 断面を動かす、とは別物。
+  // これは**見ている位置だけ**を基準日へ戻す）。
+  'timeline.backToBasis': '{date} へ戻る',
+  'timeline.backToBasisHint': '基準日（{date}）が表示範囲の外にあります。表示位置だけを戻します。',
   'timeline.showEnded': '終了分も表示',
   'timeline.open': '開く',
   'timeline.empty': 'この期間に存在するものはありません。',

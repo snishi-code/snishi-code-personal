@@ -10,7 +10,8 @@
  * 対応づけるだけにした。ラベル列の中身（チェック・展開トグル・色）は `LensRowTree` が持つ。
  * チェック OFF の行は値のセルが空になる（行そのものは残る = チェックし直せる）。
  *
- * 行ラベル列は sticky。横スクロールは**この枠の中だけ**で起き、ページ本体は横に伸びない。
+ * 枠は 3 レンズ共通（`LensFrame`）。ラベル列は左・目盛り行（列見出し）は上・左上の隅は
+ * 両方に貼り、スクロールは**この枠の中だけ**で起きる（ページ本体は横に伸びない）。
  */
 import { useCallback, useMemo, useRef, type CSSProperties } from 'react';
 import type { PeriodMatrix, PeriodMatrixColumn } from '../../domain/periodMatrix';
@@ -20,6 +21,7 @@ import { Money, type MoneyTone } from '../money';
 import { visibleIndexRange, type ScrollEdge } from '../scrollWindow';
 import { useHorizonScroll } from '../horizonScroll';
 import { LensRowLabel, lensLabelWidth, lensRowLabelProps, type LensRowView } from './LensRowTree';
+import { LENS_FRAME, LensFrame } from './LensFrame';
 
 /** 値列の幅（px）。CSS は JS のこの値を custom property 経由で受け取る。 */
 const COLUMN_WIDTH = 112;
@@ -126,25 +128,33 @@ export function PeriodMatrixTable({
   }
 
   return (
-    <div
-      ref={viewportRef}
+    <LensFrame
+      viewportRef={viewportRef}
       className="period-matrix__scroll card"
-      role="region"
-      aria-label={caption}
-      tabIndex={0}
-      data-ui={UI.timeline.matrix}
-      onScroll={(event) => handleScroll(event.currentTarget)}
+      label={caption}
+      dataUi={UI.timeline.matrix}
+      onScroll={handleScroll}
       style={{ '--period-matrix-column-width': `${COLUMN_WIDTH}px` } as CSSProperties}
     >
       <table className="period-matrix__table">
         <caption className="sr-only">{caption}</caption>
         <thead>
           <tr>
-            <th className="period-matrix__corner lens-row__label" scope="col">
+            {/* 左上の隅。ラベル列の**見出し**であって行ではないので、行のセル
+                （lens-row__label = display:flex）は着せない: 表のセルを flex にすると
+                sticky の相手が匿名セルへ変わり、上（top）に貼れなくなる。 */}
+            <th
+              className={`period-matrix__corner ${LENS_FRAME.head} ${LENS_FRAME.corner}`}
+              scope="col"
+            >
               {t('matrix.itemColumn')}
             </th>
             {columns.map((column, index) => (
-              <th className="period-matrix__value" scope="col" key={column.key}>
+              <th
+                className={`period-matrix__value ${LENS_FRAME.head} ${LENS_FRAME.pane}`}
+                scope="col"
+                key={column.key}
+              >
                 {column.month === undefined ? (
                   // 年ズーム: 年をタップ → その年を月ズームで見る（ヘッダーの日付は変えない）。
                   <button
@@ -188,7 +198,7 @@ export function PeriodMatrixTable({
           ))}
         </tbody>
       </table>
-    </div>
+    </LensFrame>
   );
 }
 
@@ -219,7 +229,11 @@ function MatrixRow({
         <LensRowLabel row={row} onToggle={onToggleRow} onCheckChange={onCheckRow} />
       </th>
       {Array.from({ length: columnCount }, (_unused, index) => (
-        <td className="period-matrix__value" data-ui={UI.timeline.matrixCell} key={index}>
+        <td
+          className={`period-matrix__value ${LENS_FRAME.pane}`}
+          data-ui={UI.timeline.matrixCell}
+          key={index}
+        >
           {values === undefined ? null : (
             <Money
               amount={values[index] ?? 0}

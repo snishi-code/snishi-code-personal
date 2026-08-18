@@ -285,6 +285,58 @@
   }
 }
 
+/* ── 3 レンズ共通の枠（v13.7 I1） ──
+   線分 / 数値 / グラフのどれでも「左のラベル列 × 上の目盛り行 × 中の描画部」は同じ枠に載る。
+   役割の名乗りは JS 側の LENS_FRAME（components/LensFrame.tsx）で、ここが唯一の規則。
+
+   窓は**縦横 2 次元**にする。position: sticky の相手は最も近いスクロールポートで、枠は横
+   スクロールのために既にスクロールポートになっているため、枠の中で縦が閉じていないと
+   目盛り行の top は効きようがない（＝ページ側の縦スクロールでは貼れない）。
+   高さは画面の残りで止める。**ページを一番下まで送ったとき枠の上端が app-header の実高
+   （--sticky-top）の下に来る**高さが正解で、それは 100dvh から「ヘッダー実高」と
+   「.app-main の下 padding（--space-6 + --bottom-inset）」を引いた分。ここを大きくすると
+   一番下まで送ったときに枠の上端＝目盛り行がヘッダーの裏へ潜る（既存の額縁 sticky と同じ
+   数え方に揃える）。 */
+.lens-frame {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  max-height: calc(100dvh - var(--sticky-top) - var(--space-6) - var(--bottom-inset));
+  overflow: auto;
+  /* 横は枠で止める（ページを揺らさない）。縦は行き止まりでページへ渡す
+     （＝ラベル列を送り続ければ画面全体が動く）。 */
+  overscroll-behavior-inline: contain;
+  overscroll-behavior-block: auto;
+}
+/* 軸ロック。touch-action は**祖先と交差**するので枠そのものには置かない
+   （枠に pan-x を置くとラベル列の pan-y と交差して none になり、どちらも動かなくなる）。
+   指で触れた場所が軸を決める: 描画部 = 横だけ / ラベル列と隅 = 縦だけ。
+   ホイール（マウス）は touch-action の対象外なので従来どおり素直に動く
+   ＝斜め移動の使いづらさが出るのは指のときだけで、そこだけを塞ぐ。
+
+   役割の class は**枠の中でだけ**意味を持つので子孫セレクタで書く。ラベル列（.lens-row__label）
+   と同じ要素に載ることがあり（隅）、そのときは枠の規則が勝つ必要がある。 */
+.lens-frame .lens-frame__pane {
+  touch-action: pan-x;
+}
+.lens-frame .lens-row__label,
+.lens-frame .lens-frame__corner {
+  touch-action: pan-y;
+}
+/* 上に貼る目盛り行。中身（年月日の帯・月列ボタン・グラフの目盛り）はレンズが持つ。 */
+.lens-frame .lens-frame__head {
+  position: sticky;
+  top: 0;
+  z-index: 7;
+}
+/* 左に貼る隅。目盛り行（.lens-frame__head）と併せ持つと左上の隅になり、
+   縦にも横にも送られない唯一の点になる。z はラベル列(6) < 目盛り行(7) < 隅(9)。 */
+.lens-frame .lens-frame__corner {
+  position: sticky;
+  left: 0;
+  z-index: 9;
+}
+
 /* ── 3 レンズ共通のラベル列（v13.6 H3） ──
    線分 / 数値 / グラフのどのレンズでも同じ見た目・同じ操作になるよう、器の種類
    （div / th）によらず 1 つの規則で描く。幅の正本は JS（LensRowTree の LENS_LABEL_WIDTH）で、
@@ -363,14 +415,8 @@
 
 /* ── 期間マトリクス（時間平面の数値レンズ。旧「年間・全体」画面の表） ──
    列幅とラベル列幅の正本は JS（PeriodMatrixTable）。可視範囲の計算と同じ値を使うため、
-   custom property で受け取る（2 か所に生値を置かない）。 */
-.period-matrix__scroll {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
-}
+   custom property で受け取る（2 か所に生値を置かない）。
+   窓（スクロール・sticky・軸ロック）は 3 レンズ共通の .lens-frame が持つ。 */
 .period-matrix__table {
   width: max-content;
   min-width: 100%;
@@ -390,10 +436,17 @@
 .period-matrix__table tbody tr:last-child td {
   border-bottom: none;
 }
-/* 隅（項目見出し）はラベル列と同じ幅・同じ sticky。中身は文字だけ。 */
+/* 隅（項目見出し）はラベル列と同じ幅。左右と上下の両方に貼る（.lens-frame__corner +
+   .lens-frame__head）。行のセル（.lens-row__label）は着せないので幅はここが持つ
+   ＝ 左端の 4px は行の色罫と同じぶんを透明で空け、文字の頭を行と揃える。 */
 .period-matrix__corner {
-  z-index: 2;
-  padding: var(--space-2) var(--space-3);
+  box-sizing: border-box;
+  width: var(--lens-label-width);
+  min-width: var(--lens-label-width);
+  max-width: var(--lens-label-width);
+  padding: var(--space-2) var(--space-2);
+  border-left: 4px solid transparent;
+  text-align: left;
 }
 /* 列見出しのタップ導線。表の密度を保つため見た目は文字のまま、点線下線で押せることだけ示す。 */
 .period-matrix__col-btn {
@@ -435,19 +488,46 @@
 }
 
 /* ── グラフレンズ（時間平面のストック 4 系列） ──
-   数値レンズと同じ「ラベル列は sticky・横スクロールは枠の中だけ」。ラベル列そのものは
+   窓（スクロール・sticky・軸ロック）は 3 レンズ共通の .lens-frame が持つ。ラベル列そのものも
    3 レンズ共通（LensRowTree）で、チェックボックスが凡例を兼ねる。幅の正本は JS。 */
 .timeline-chart {
   margin: 0;
   min-width: 0;
 }
-.timeline-chart__viewport {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  overscroll-behavior-inline: contain;
+/* 目盛り行（年月日）。線分・数値と同じく**上に貼る**ので、SVG の中ではなくここに置く
+   （SVG の中だと縦に送ったとき一緒に流れる）。 */
+.timeline-chart__head {
+  display: flex;
+  align-items: stretch;
+  width: max-content;
+  min-width: 100%;
+}
+.timeline-chart__head-corner {
+  flex: none;
+  box-sizing: border-box;
+  width: var(--lens-label-width);
+  min-height: 28px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.timeline-chart__ticks {
+  position: relative;
+  flex: none;
+  min-height: 28px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.timeline-chart__tick-label {
+  position: absolute;
+  top: 0;
+  padding: 0 var(--space-1);
+  line-height: 28px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .timeline-chart__canvas {
   display: flex;
@@ -481,11 +561,6 @@
   stroke-width: 1;
   opacity: 0.4;
 }
-.timeline-chart__tick {
-  fill: var(--muted);
-  font-size: 9px;
-  font-variant-numeric: tabular-nums;
-}
 .timeline-chart__line {
   fill: none;
   stroke: var(--lens-accent, var(--primary));
@@ -497,6 +572,31 @@
 /* ── タイムラインカレンダー ── */
 .timeline-calendar {
   min-width: 0;
+}
+/* タイトル行。右の空きに「基準日へ戻る」を置く（月割り台帳の見出し行と同型）。
+   ボタンは基準日が可視範囲の外にあるときだけ現れるので、無いときは h1 だけの行になる。 */
+.timeline-calendar__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  /* h1 が持っていた下余白を行が引き取る（見出しの下の間は変えない）。 */
+  margin-bottom: var(--space-4);
+}
+.timeline-calendar__title-row .screen-title {
+  margin-bottom: 0;
+}
+/* 「いま見ている位置が基準日から離れている」の警告灯。ヘッダーの「今日」と同じ色域で名乗り、
+   タップ領域は 44px（AGENTS.md の不変条件）。日付を含むので狭幅では折り返さず縮める。 */
+.timeline-calendar__back-to-basis {
+  flex: none;
+  min-height: var(--tap);
+  padding: 0 var(--space-2);
+  color: var(--primary-strong);
+  background: var(--primary-light);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 .timeline-calendar__controls {
   display: flex;
@@ -520,14 +620,7 @@
   min-height: var(--tap);
   margin-bottom: var(--space-3);
 }
-.timeline-calendar__viewport {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  overflow-x: auto;
-  overflow-y: visible;
-  overscroll-behavior-inline: contain;
-}
+/* 窓（スクロール・sticky・軸ロック）は 3 レンズ共通の .lens-frame が持つ。 */
 .timeline-calendar__canvas {
   position: relative;
   width: max-content;
@@ -561,10 +654,9 @@
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
+/* 左上の隅（年/月/日 の 3 行ぶん）。左に貼るのは .lens-frame__corner・上に貼るのは
+   目盛り行の器（.timeline-calendar__header）が持つ。 */
 .timeline-calendar__header-label {
-  position: sticky;
-  left: 0;
-  z-index: 8;
   box-shadow: 1px 0 0 var(--border);
 }
 .timeline-calendar__header-cell {

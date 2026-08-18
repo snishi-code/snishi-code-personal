@@ -43,6 +43,7 @@ import {
   lensRowLabelProps,
   type LensRowView,
 } from '../components/LensRowTree';
+import { LENS_FRAME, LensFrame } from '../components/LensFrame';
 import { effectiveRecurringRuleStartDate } from '../../domain/accountLifetime';
 import { todayLocal } from '../../util/time';
 import { formatMoney } from '../../util/format';
@@ -270,6 +271,15 @@ function daysBetween(from: string, to: string): number {
 
 function midpoint(from: string, to: string): string {
   return addDays(from, Math.floor(daysBetween(from, to) / 2));
+}
+
+/**
+ * ヘッダーが名乗っている**基準日**（= App の日付チップと同じ規則）。
+ * 窓の初期中心（`centerOfPeriod`）とは役割が違う: あちらは「どこを中心に窓を開くか」で、
+ * こちらは「ヘッダーがいま指している日」。画面側のジャンプ（v13.7 I2）はこちらへ戻す。
+ */
+function basisDateOf(period: ReportPeriod, today: string): string {
+  return clampTimelineDate(period.mode === 'date' ? period.date : today);
 }
 
 function centerOfPeriod(period: ReportPeriod, today: string): string {
@@ -825,14 +835,12 @@ export function TimelineCalendarView({
           {t('timeline.empty')}
         </p>
       )}
-      <div
-        ref={viewportRef}
+      <LensFrame
+        viewportRef={viewportRef}
         className="timeline-calendar__viewport card"
-        role="region"
-        tabIndex={0}
-        aria-label={t('timeline.title')}
-        data-ui={UI.timeline.viewport}
-        onScroll={(event) => handleScroll(event.currentTarget)}
+        label={t('timeline.title')}
+        dataUi={UI.timeline.viewport}
+        onScroll={handleScroll}
       >
         <div
           className="timeline-calendar__canvas"
@@ -848,7 +856,9 @@ export function TimelineCalendarView({
             {todayX !== undefined ? (
               <div
                 className="timeline-calendar__today-line"
-                style={{ left: `calc(var(--timeline-label-width) + ${todayX}px)` }}
+                // ラベル列の幅の正本は --lens-label-width（3 レンズ共通）。別名を書くと
+                // 未定義変数になり calc ごと無効 = 今日の線が軌道の左端へ寄る。
+                style={{ left: `calc(var(--lens-label-width) + ${todayX}px)` }}
                 title={t('timeline.today')}
                 aria-hidden="true"
               />
@@ -891,7 +901,7 @@ export function TimelineCalendarView({
             ))}
           </div>
         </div>
-      </div>
+      </LensFrame>
     </>
   );
 }
@@ -910,13 +920,15 @@ function TimelineHeader({ buckets, zoom }: { buckets: TimelineBucketView[]; zoom
     { label: t('zoom.day'), groups: dayGroups },
   ];
   return (
-    <div>
+    // 年月日の 3 行がまとまって枠の上端に貼りつく（3 レンズ共通の目盛り行）。
+    // 貼るのは器のほうで、中の隅（年/月/日 の見出し）は左に貼るだけ。
+    <div className={`timeline-calendar__header ${LENS_FRAME.head}`}>
       {rows.map((row) => (
         <div className="timeline-calendar__header-row" key={row.label}>
-          <div className="timeline-calendar__header-label">{row.label}</div>
+          <div className={`timeline-calendar__header-label ${LENS_FRAME.corner}`}>{row.label}</div>
           {row.groups.map((group) => (
             <div
-              className="timeline-calendar__header-cell"
+              className={`timeline-calendar__header-cell ${LENS_FRAME.pane}`}
               key={group.key}
               style={{ gridColumn: `${group.start + 2} / span ${group.count}` }}
               aria-hidden={group.label === '' ? 'true' : undefined}
@@ -985,7 +997,7 @@ function TimelineRow({
       <div {...labelProps} style={{ ...labelProps.style, ...rowStyle }}>
         <LensRowLabel row={row} onToggle={onToggleRow} onCheckChange={onCheckRow} />
       </div>
-      <div className="timeline-calendar__track" onClick={() => onSelect(null)}>
+      <div className={`timeline-calendar__track ${LENS_FRAME.pane}`} onClick={() => onSelect(null)}>
         {data.spans.map((span, index) => {
           const style = bandStyle(span, buckets, bucketWidth);
           return style ? (
@@ -1405,15 +1417,23 @@ export function TimelineCalendar({
 }: TimelineCalendarProps) {
   const { ledger } = useLedger();
   const today = todayLocal();
-  const [center, setCenter] = useState(() => centerOfPeriod(period, today));
+  /**
+   * 窓の中心と、**何回目の送り直しか**。同じ日付へもう一度送ることがある
+   * （基準日へ戻る = スクロールで離れたが中心の日付は変わっていない）ので、日付だけでは
+   * 「送り直した」を名乗れない。回数を鍵に含めて、同じ日付への送り直しも 1 回として数える。
+   */
+  const [focus, setFocus] = useState(() => ({ date: centerOfPeriod(period, today), sent: 0 }));
+  const center = focus.date;
+  /** 窓を（もう一度）その日付へ送る。スクロール位置だけが動き、断面（period）は触らない。 */
+  const sendWindowTo = (date: string) => setFocus((current) => ({ date, sent: current.sent + 1 }));
   const [showEnded, setShowEnded] = useState(false);
   const baseRange = useMemo(() => rangeAround(center, zoom), [center, zoom]);
   /**
-   * 窓の同一性 = **送り直したか**（ズーム変更・左右ボタン・年列ドリル）。連続スクロールの
-   * 継ぎ足しでは変えない: これが変わると各レンズが中心へスクロールし直すので、
+   * 窓の同一性 = **送り直したか**（ズーム変更・左右ボタン・年列ドリル・基準日へ戻る）。
+   * 連続スクロールの継ぎ足しでは変えない: これが変わると各レンズが中心へスクロールし直すので、
    * 伸ばすたびに画面が飛ぶ。範囲そのもの（from/to）を鍵にしてはいけないのはそのため。
    */
-  const anchorKey = `${zoom}:${center}`;
+  const anchorKey = `${zoom}:${center}:${focus.sent}`;
   /** 数値レンズだけでなく**全レンズ**の左の下限（= データのある最初の年）。 */
   const floorDate = useMemo(() => matrixFloorDate(ledger, today), [ledger, today]);
   const [growth, setGrowth] = useState<WindowGrowth>(() => ({ ...NO_GROWTH, key: anchorKey }));
@@ -1457,6 +1477,12 @@ export function TimelineCalendar({
     visibleWindow.key === anchorKey
       ? { from: visibleWindow.from, to: visibleWindow.to }
       : { from: range.from, to: range.to };
+  /**
+   * 基準日（ヘッダーの断面日付）が可視範囲の外にあるか。ジャンプのボタンは**このときだけ**
+   * 出す（常時表示ではなく警告灯型 = ヘッダーの「今日」と同じ既存規約）。
+   */
+  const basisDate = basisDateOf(period, today);
+  const basisOutOfView = basisDate < visibleRange.from || visibleRange.to < basisDate;
   const updateVisibleRange = useCallback(
     (next: { from: string; to: string }) => {
       setVisibleWindow((current) =>
@@ -1476,7 +1502,7 @@ export function TimelineCalendar({
   const [trackedZoom, setTrackedZoom] = useState(zoom);
   if (trackedZoom !== zoom) {
     setTrackedZoom(zoom);
-    setCenter(pendingZoomFocus ?? visibleCenter);
+    sendWindowTo(pendingZoomFocus ?? visibleCenter);
     if (pendingZoomFocus !== null) setPendingZoomFocus(null);
   }
   const displayBuckets = useMemo(
@@ -1636,12 +1662,12 @@ export function TimelineCalendar({
   // 年列タップ = その年を月ズームで見る（旧「全体 → その年の年間表示へ」のドリルの後継）。
   // ズームは App が持つので、行き先の中心を預けてから切り替える（同じ 1 回の更新で届く）。
   const openMatrixYear = (year: number) => {
-    const focus = clampTimelineDate(`${String(year).padStart(4, '0')}-07-01`);
+    const target = clampTimelineDate(`${String(year).padStart(4, '0')}-07-01`);
     if (zoom === 'month') {
-      setCenter(focus);
+      sendWindowTo(target);
       return;
     }
-    setPendingZoomFocus(focus);
+    setPendingZoomFocus(target);
     onZoomChange('month');
   };
 
@@ -1674,9 +1700,29 @@ export function TimelineCalendar({
       aria-labelledby="timeline-calendar-title"
       data-ui={UI.timeline.view}
     >
-      <h1 className="screen-title" id="timeline-calendar-title">
-        {t('timeline.title')}
-      </h1>
+      {/* タイトル行の右は空いているので、窓の「現在地」を戻す導線をここへ置く。
+          ヘッダーの「今日」（断面そのものを動かす）とは別物なので、ヘッダーには足さない。 */}
+      <div className="timeline-calendar__title-row">
+        <h1 className="screen-title" id="timeline-calendar-title">
+          {t('timeline.title')}
+        </h1>
+        {basisOutOfView ? (
+          <>
+            <button
+              type="button"
+              className="btn btn--ghost timeline-calendar__back-to-basis"
+              aria-describedby="timeline-back-to-basis-hint"
+              onClick={() => sendWindowTo(basisDate)}
+              data-ui={UI.timeline.backToBasis}
+            >
+              {t('timeline.backToBasis', { date: basisDate })}
+            </button>
+            <span className="sr-only" id="timeline-back-to-basis-hint">
+              {t('timeline.backToBasisHint', { date: basisDate })}
+            </span>
+          </>
+        ) : null}
+      </div>
       <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
         {t('timeline.intro')}
       </p>
@@ -1710,7 +1756,7 @@ export function TimelineCalendar({
             type="button"
             className="btn btn--ghost timeline-calendar__range-button"
             aria-label={t('timeline.previous')}
-            onClick={() => setCenter(shiftCenter(visibleCenter, zoom, -1))}
+            onClick={() => sendWindowTo(shiftCenter(visibleCenter, zoom, -1))}
             data-ui={UI.timeline.previous}
           >
             <span aria-hidden="true">←</span>
@@ -1719,7 +1765,7 @@ export function TimelineCalendar({
             type="button"
             className="btn btn--ghost timeline-calendar__range-button"
             aria-label={t('timeline.next')}
-            onClick={() => setCenter(shiftCenter(visibleCenter, zoom, 1))}
+            onClick={() => sendWindowTo(shiftCenter(visibleCenter, zoom, 1))}
             data-ui={UI.timeline.next}
           >
             <span aria-hidden="true">→</span>

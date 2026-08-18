@@ -785,3 +785,142 @@ test('375px で 3 レンズのラベル列が同一（行・順序・名前・�
     fullPage: true,
   });
 });
+
+/** レンズごとの枠（縦横 2 次元の窓）の data-ui。 */
+const LENS_FRAMES = [
+  { lens: 'timeline.lens.segment', frame: 'timeline.viewport' },
+  { lens: 'timeline.lens.matrix', frame: 'timeline.matrix' },
+  { lens: 'timeline.lens.chart', frame: 'timeline.chart.viewport' },
+] as const;
+
+/**
+ * v13.7 I1: **枠も 3 レンズ共通**。ラベル列は左・目盛り行は上・左上の隅は両方に貼りつき、
+ * 描画部だけが縦横に流れる。jsdom は sticky を評価しないので実ブラウザで測るしかない。
+ * かつて数値レンズだけ器の sticky が共通化から漏れていたので、パリティとして固定する。
+ */
+test('3 レンズとも ラベル列・目盛り行・左上の隅が枠に貼りつく (375x667)', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
+  await page.goto('./?fixture=sample');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.timeline')).click();
+  await expect(page.locator(ui('timeline.view'))).toBeVisible();
+
+  // 縦に送れる高さを作る（箱をすべて開いて行を増やす）。3 レンズで行は共通なので 1 回でよい。
+  for (const toggle of await page.locator(ui('timeline.row.toggle')).all()) {
+    await toggle.click();
+  }
+
+  for (const { lens, frame } of LENS_FRAMES) {
+    await page.locator(ui(lens)).click();
+    const viewport = page.locator(ui(frame));
+    await expect(viewport).toBeVisible();
+
+    const measured = await viewport.evaluate((el) => {
+      const box = (node: Element | null) => {
+        if (!node) return null;
+        const rect = node.getBoundingClientRect();
+        return { top: Math.round(rect.top), left: Math.round(rect.left) };
+      };
+      // 隅は目盛り行を兼ねることがある（数値レンズの「項目」セル）。目盛り行そのものの
+      // 貼りつきを見たいので、隅ではない方を選ぶ。
+      const head = el.querySelector('.lens-frame__head:not(.lens-frame__corner)');
+      const corner = el.querySelector('.lens-frame__corner');
+      const label = el.querySelector('[data-ui="timeline.row.label"]');
+      const pane = el.querySelector('.lens-frame__pane');
+      el.scrollTop = 0;
+      el.scrollLeft = 0;
+      const before = { head: box(head), corner: box(corner), label: box(label), pane: box(pane) };
+      el.scrollTop = 200;
+      el.scrollLeft = 300;
+      return {
+        scrollable: { y: el.scrollHeight - el.clientHeight, x: el.scrollWidth - el.clientWidth },
+        moved: { y: el.scrollTop, x: el.scrollLeft },
+        before,
+        after: { head: box(head), corner: box(corner), label: box(label), pane: box(pane) },
+      };
+    });
+
+    // 前提: 枠の中で縦にも横にも送れている（送れていなければ貼りつきを測ったことにならない）。
+    expect(measured.scrollable.y, `${lens}: 枠が縦に送れない`).toBeGreaterThan(0);
+    expect(measured.moved.y, `${lens}: 縦に動いていない`).toBeGreaterThan(0);
+    expect(measured.moved.x, `${lens}: 横に動いていない`).toBeGreaterThan(0);
+
+    // 目盛り行は上に貼る（縦に送っても消えない）が、横には一緒に流れる。
+    expect(measured.after.head!.top, `${lens}: 目盛り行が上に貼りついていない`).toBe(
+      measured.before.head!.top,
+    );
+    expect(measured.after.head!.left, `${lens}: 目盛り行が横に流れていない`).toBeLessThan(
+      measured.before.head!.left,
+    );
+    // ラベル列は左に貼る（横に送っても消えない）が、縦には一緒に流れる。
+    expect(measured.after.label!.left, `${lens}: ラベル列が左に貼りついていない`).toBe(
+      measured.before.label!.left,
+    );
+    expect(measured.after.label!.top, `${lens}: ラベル列が縦に流れていない`).toBeLessThan(
+      measured.before.label!.top,
+    );
+    // 左上の隅はどちらへ送っても動かない唯一の点。
+    expect(measured.after.corner, `${lens}: 左上の隅が動いた`).toEqual(measured.before.corner);
+    // 描画部は横に流れる（貼りついていたら中身が見えない）。
+    expect(measured.after.pane!.left, `${lens}: 描画部が横に流れていない`).toBeLessThan(
+      measured.before.pane!.left,
+    );
+
+    // 軸ロック: 指で触れた場所が軸を決める（描画部 = 横だけ / ラベル列 = 縦だけ）。
+    const touch = await viewport.evaluate((el) => ({
+      pane: getComputedStyle(el.querySelector('.lens-frame__pane')!).touchAction,
+      label: getComputedStyle(el.querySelector('[data-ui="timeline.row.label"]')!).touchAction,
+    }));
+    expect(touch.pane, `${lens}: 描画部の軸ロックが無い`).toBe('pan-x');
+    expect(touch.label, `${lens}: ラベル列の軸ロックが無い`).toBe('pan-y');
+
+    await expectNoHorizontalScroll(page, `lens frame ${lens} 375x667`);
+  }
+
+  await page.screenshot({
+    path: 'test-results/screenshots/ledger-timeline-lens-frame-375x667.png',
+  });
+});
+
+/**
+ * v13.7 I2: 窓を送って基準日を見失ったときだけ現れる「{基準日} へ戻る」。
+ * 押すと**見ている位置だけ**が基準日へ戻り、ヘッダーの断面日付は動かない。
+ */
+test('基準日が見えなくなったときだけ「戻る」が出て、押しても断面は動かない (375x667)', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
+  await page.goto('./?fixture=sample');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+
+  const headerDate = await page.locator('.period-context__text').textContent();
+
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.timeline')).click();
+  await expect(page.locator(ui('timeline.view'))).toBeVisible();
+
+  const jump = page.locator(ui('timeline.backToBasis'));
+  await expect(jump, '開いた直後は基準日が見えているので出ない').toHaveCount(0);
+
+  // 窓を送って基準日を可視範囲の外へ出す。
+  await page.locator(ui('timeline.range.next')).click();
+  await page.locator(ui('timeline.range.next')).click();
+  await expect(jump).toBeVisible();
+  await expect(jump).toHaveText(new RegExp(headerDate!.trim()));
+  const box = (await jump.boundingBox())!;
+  expect(box.height, '「戻る」のタップ領域が 44px 未満').toBeGreaterThanOrEqual(44);
+
+  await jump.click();
+  await expect(jump, '基準日が見える位置へ戻ったのにボタンが残っている').toHaveCount(0);
+  // 断面（ヘッダーの日付）は動かさない = ここが「今日」ボタンとの違い。
+  expect(await page.locator('.period-context__text').textContent()).toBe(headerDate);
+
+  await expectNoHorizontalScroll(page, 'timeline back-to-basis 375x667');
+  await page.screenshot({
+    path: 'test-results/screenshots/ledger-timeline-back-to-basis-375x667.png',
+  });
+});

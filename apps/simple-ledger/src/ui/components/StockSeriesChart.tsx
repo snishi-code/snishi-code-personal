@@ -9,6 +9,8 @@
  * - 系列 = **チェックされたストックの行**（箱 = その箱の科目の合算 / 科目 = 単独 /
  *   恒等行の純資産）。フロー行（収入・支出・収支）は描き方が決まるまで対象外で、
  *   チェックボックス自体が disabled（理由は読み上げる）。
+ * - 枠は 3 レンズ共通（`LensFrame`）。**目盛り行（年月日）は枠の上端に貼る**ので SVG の
+ *   中には持たない（中に置くと縦に送ったとき目盛りが流れる）。SVG は縦罫だけを描く。
  * - 線は**階段**（値はバケット末断面のストックなので、そのバケットの幅ぶん水平に引く）。
  * - 符号は自然符号（負債は借金の大きさがそのまま上へ伸びる）。0 の線は必ず軸に含める。
  * - 色は行の色（箱のアクセント = ラベル列と同じ）。同じ箱の科目どうしは色が同じになるので、
@@ -25,13 +27,14 @@ import { useMoneyDigits } from '../money';
 import { visibleIndexRange, type ScrollEdge } from '../scrollWindow';
 import { useHorizonScroll } from '../horizonScroll';
 import { LensRowLabel, lensLabelWidth, lensRowLabelProps, type LensRowView } from './LensRowTree';
+import { LENS_FRAME, LensFrame } from './LensFrame';
 
 /** ラベル列 1 行の高さ（px）= タップ規約の 44px。CSS と同じ値をここでも使う。 */
 const ROW_HEIGHT = 44;
 const MIN_CHART_HEIGHT = 200;
 const PLOT_TOP = 12;
-/** 目盛りのラベル帯の高さ（グラフの下端からこのぶん上がプロット領域）。 */
-const TICK_BAND = 32;
+/** プロット下端の余白（目盛りの文字は枠の上端へ移したので、ここは息継ぎだけ）。 */
+const PLOT_BOTTOM_PAD = 12;
 
 /**
  * 線種（色以外の識別子）。同じ箱の科目は色が同じなので、**マスタ順**に順番へ割り当てる
@@ -158,7 +161,7 @@ export function StockSeriesChart({
   const bottom = shownValues.reduce((minimum, value) => Math.min(minimum, value), 0);
   const span = top - bottom || 1;
   const chartHeight = Math.max(MIN_CHART_HEIGHT, rows.length * ROW_HEIGHT);
-  const plotBottom = chartHeight - TICK_BAND;
+  const plotBottom = chartHeight - PLOT_BOTTOM_PAD;
   const plotHeight = plotBottom - PLOT_TOP;
   const yOf = (value: number): number => PLOT_TOP + ((top - value) / span) * plotHeight;
   const width = Math.max(bucketWidth, buckets.length * bucketWidth);
@@ -193,15 +196,29 @@ export function StockSeriesChart({
   return (
     <figure className="timeline-chart" data-ui={UI.timeline.chart}>
       <figcaption className="sr-only">{caption}</figcaption>
-      <div
-        ref={viewportRef}
+      <LensFrame
+        viewportRef={viewportRef}
         className="timeline-chart__viewport card"
-        role="region"
-        tabIndex={0}
-        aria-label={caption}
-        data-ui={UI.timeline.chartViewport}
-        onScroll={(event) => handleScroll(event.currentTarget)}
+        label={caption}
+        dataUi={UI.timeline.chartViewport}
+        onScroll={handleScroll}
       >
+        {/* 目盛り行は 3 レンズ共通で**上に貼る**。SVG の中に置くと縦に送ったとき流れる。 */}
+        <div className={`timeline-chart__head ${LENS_FRAME.head}`} data-ui={UI.timeline.chartHead}>
+          <div className={`timeline-chart__head-corner ${LENS_FRAME.corner}`} aria-hidden="true" />
+          <div
+            className={`timeline-chart__ticks ${LENS_FRAME.pane}`}
+            style={{ width }}
+            aria-hidden="true"
+          >
+            {ticks.map((tick) => (
+              <span className="timeline-chart__tick-label" key={tick.key} style={{ left: tick.x }}>
+                {tick.label}
+              </span>
+            ))}
+          </div>
+        </div>
+
         <div className="timeline-chart__canvas">
           {/* ラベル列は 3 レンズ共通（チェックボックスが凡例を兼ねる）。 */}
           <div className="timeline-chart__rows" role="group" aria-label={t('lens.rowTree')}>
@@ -215,7 +232,7 @@ export function StockSeriesChart({
             })}
           </div>
 
-          <div className="timeline-chart__plot">
+          <div className={`timeline-chart__plot ${LENS_FRAME.pane}`}>
             <svg
               className="timeline-chart__svg"
               width={width}
@@ -224,19 +241,16 @@ export function StockSeriesChart({
               aria-hidden="true"
               focusable="false"
             >
+              {/* 目盛りの**文字**は枠の上端（timeline-chart__head）が持つ。ここは縦罫だけ。 */}
               {ticks.map((tick) => (
-                <g key={tick.key}>
-                  <line
-                    className="timeline-chart__gridline"
-                    x1={tick.x}
-                    x2={tick.x}
-                    y1={PLOT_TOP}
-                    y2={plotBottom}
-                  />
-                  <text className="timeline-chart__tick" x={tick.x + 2} y={chartHeight - 8}>
-                    {tick.label}
-                  </text>
-                </g>
+                <line
+                  className="timeline-chart__gridline"
+                  key={tick.key}
+                  x1={tick.x}
+                  x2={tick.x}
+                  y1={PLOT_TOP}
+                  y2={plotBottom}
+                />
               ))}
               <line className="timeline-chart__zero" x1={0} x2={width} y1={yOf(0)} y2={yOf(0)} />
               {plotted.map((candidate) => {
@@ -256,7 +270,7 @@ export function StockSeriesChart({
             </svg>
           </div>
         </div>
-      </div>
+      </LensFrame>
       {plotted.length === 0 ? (
         <p className="field__hint" data-ui={UI.timeline.chartNoSeries}>
           {t('chart.noSeries')}
