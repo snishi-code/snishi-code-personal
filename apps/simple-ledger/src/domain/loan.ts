@@ -38,6 +38,20 @@ export function isLoanRule(
 }
 
 /**
+ * 金額の並び替えに使う符号付きの額（v13.7 I4・作者確定 2026-08-18）。
+ * ローン（計上先が負債のルール）の額は**負**として比べる: 数直線の規約
+ * （accounting の debitSignedBalance = 負債は借方の逆向き）と概念を揃える。
+ * 昇順なら返済 4,167 は 3,300 の支出より前（−4,167）に来る。
+ * **表示は変えない**（絶対値 + 負債色のまま。符号は付けない）。持ち物・通常ルールは素の額。
+ */
+export function loanSortAmount(
+  rule: Pick<RecurringRule, 'amount' | 'spreadExpenseAccountId'>,
+  roleOf: (id: string) => AccountRole | undefined,
+): number {
+  return isLoanRule(rule, roleOf) ? -rule.amount : rule.amount;
+}
+
+/**
  * その負債科目を計上先に持つルール（= 月割り台帳の該当行）。
  * 複数あれば最初の 1 件（資金繰りの行タップの着地点は 1 つでよい）。
  */

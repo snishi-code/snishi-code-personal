@@ -70,7 +70,12 @@ import {
   ruleExistsAt as recurringRuleExistsAt,
 } from '../../domain/accountLifetime';
 import { cardTapProps, rowActionClick } from '../cardTap';
-import { isLoanRule, loanRemainingInstallments, loanRuleForLiability } from '../../domain/loan';
+import {
+  isLoanRule,
+  loanRemainingInstallments,
+  loanRuleForLiability,
+  loanSortAmount,
+} from '../../domain/loan';
 import { quickSpanEndDate } from '../ccQuickSpan';
 import {
   exactDigitsFor,
@@ -250,7 +255,12 @@ export function Allocations({
           return a.name.localeCompare(b.name, 'ja');
         }
       : sort.key === 'amount'
-        ? (a: RecurringRule, b: RecurringRule) => (a.amount - b.amount) * dir
+        ? // ローンの額は負として比べる（v13.7 I4）。昇順で −4,167 が 3,300 より前に来る
+          // ＝返済と支出が絶対値で混ざらない。表示は絶対値 + 負債色のまま（loanSortAmount）。
+          (a: RecurringRule, b: RecurringRule) =>
+            (loanSortAmount(a, (id) => accountsMap.get(id)?.role) -
+              loanSortAmount(b, (id) => accountsMap.get(id)?.role)) *
+            dir
         : (a: RecurringRule, b: RecurringRule) => a.name.localeCompare(b.name, 'ja') * dir;
   // loadLedger は終了が近い順で返すが、編集直後の state 由来でも順序が崩れないよう再ソートする。
   // この基準順は金額・名称の軸で同値になった行の相対順（applySort は安定ソート）も決める。
