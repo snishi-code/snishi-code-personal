@@ -178,19 +178,21 @@ export const UI = {
       reversalOverWarning: 'journal.entry.reversal.overWarning',
       detailToggle: 'journal.entry.detailToggle',
       manualSwitch: 'journal.entry.manualSwitch',
-      monthlyizeRepayToggle: 'journal.entry.monthlyizeRepayToggle',
-      monthlyizeRepayAccount: 'journal.entry.monthlyizeRepayAccount',
-      monthlyizeRepayCount: 'journal.entry.monthlyizeRepayCount',
-      monthlyizeRepayStart: 'journal.entry.monthlyizeRepayStart',
       ccToggle: 'journal.entry.ccToggle',
       ccName: 'journal.entry.ccName',
       ccCategory: 'journal.entry.ccCategory',
       ccEndDate: 'journal.entry.ccEndDate',
+      // ローンで払う（v13.6 H4）。持ち物と同じ片側切替で、押すと支払い元が
+      // 「新しいローンの名前」に変わる（既存ローンへ足す導線は無い）。
       loanArrange: 'journal.entry.loanArrange',
-      liabilityCreate: 'journal.entry.liabilityCreate',
-      liabilityCreateName: 'journal.entry.liabilityCreate.name',
-      liabilityCreateRole: 'journal.entry.liabilityCreate.role',
-      liabilityCreateSave: 'journal.entry.liabilityCreate.save',
+      loanArrangeBack: 'journal.entry.loanArrangeBack',
+      loanName: 'journal.entry.loanName',
+      loanPanel: 'journal.entry.loanPanel',
+      loanEndDate: 'journal.entry.loanEndDate',
+      loanQuickSpan: 'journal.entry.loanQuickSpan',
+      loanFrom: 'journal.entry.loanFrom',
+      loanPreview: 'journal.entry.loanPreview',
+      loanRemainder: 'journal.entry.loanRemainder',
       date: 'journal.entry.date',
       description: 'journal.entry.description',
       item: 'journal.entry.item',
@@ -347,19 +349,9 @@ export const UI = {
     archiveRemainderSpread: 'allocations.archive.remainder.spread',
     archiveRemainderExpense: 'allocations.archive.remainder.expense',
     archiveConfirm: 'allocations.archive.confirm',
-    // 支払用負債（v13.4 ④ で資金繰りから移設）。行 = 基準日断面で残高 ≠ 0 のカード・ローン。
-    // 資金繰りの負債行タップ（liabilityAccountId）はこの行へ着地する。
-    liabilityList: 'allocations.liability.list',
-    liabilityRow: 'allocations.liability.row',
-    // 返済計画づくり（負債行の tonal ボタンから開く）
-    repayAdd: 'allocations.repay.add',
-    repaySheet: 'allocations.repay.sheet',
-    repayAmount: 'allocations.repay.amount',
-    repayDate: 'allocations.repay.date',
-    repayFrom: 'allocations.repay.from',
-    repayCount: 'allocations.repay.count',
-    repayPerMonth: 'allocations.repay.perMonth',
-    repaySave: 'allocations.repay.save',
+    // ローン行（= 計上先が負債のルール）の残回数。行そのものは recurring.list に混ざる
+    // （v13.6 H4 で「支払用負債」セクションと返済シートは撤去した）。
+    loanRemaining: 'allocations.loan.remaining',
     // 負債行の展開 = 登録済みの返済（基準日より後の保存仕訳）。タップで仕訳の編集シートへ
     repaymentsToggle: 'allocations.repayments.toggle',
     repaymentsList: 'allocations.repayments.list',

@@ -374,32 +374,6 @@ describe('打ち消しの額は表示桁 0 でも丸めない', () => {
     // 残高ちょうど。丸めると科目の終了が保存側（残高 0 の要求）で弾かれる。
     expect(saved!.amount).toBe(ODD);
   });
-
-  // v13.4 ④: 返済シートは資金繰りではなく**月割り台帳の「支払用負債」**から開く。
-  it('返済計画の「全額」既定: 表示桁 0 でも負債残高の端数を落とさない', async () => {
-    await setDigits(0);
-    const ledger = await loadLedger();
-    const liability = ledger.accounts.find((a) => a.role === 'payment-liability')!;
-    await createOpening({ accountId: liability.id, amount: ODD, date: '2026-01-01' });
-
-    render(
-      <Providers>
-        <Ready>
-          <Allocations
-            period={{ mode: 'date', date: todayLocal() }}
-            onEditEntry={() => undefined}
-          />
-        </Ready>
-      </Providers>,
-    );
-    await waitFor(() => expect(q(UI.allocations.repayAdd)).toBeInTheDocument());
-    fireEvent.click(q(UI.allocations.repayAdd)!);
-    await waitFor(() => expect(q(UI.allocations.repaySheet)).toBeInTheDocument());
-
-    const amount = q(UI.allocations.repayAmount) as HTMLInputElement;
-    expect(amount.value).toBe('123.45');
-    expect(amount.inputMode).toBe('decimal');
-  });
 });
 
 /*

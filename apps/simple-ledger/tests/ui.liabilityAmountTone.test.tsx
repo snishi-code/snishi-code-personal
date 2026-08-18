@@ -1,22 +1,28 @@
 /*
  * 負債の自然符号ソートと数字色（C-2）。
- *  - 金額ソートの比較は自然符号（貸方残高は負）。月割り台帳の負債セクションにも効き、
- *    昇順ではローン（最も大きな負債）が先頭・降順では末尾に来る。
- *  - 表示は絶対値のまま（マイナス記号は付けない）。負債残高の数字だけ専用トークンの
- *    クラス（amount--liability）が付く。適用箇所 = 月割り台帳の負債セクション・
- *    資金繰りの負債行・勘定科目一覧の負債残高。
+ *  - 金額ソートの比較は自然符号（貸方残高は負）＝資産と負債を 1 本の数直線へ並べる規約。
+ *  - 表示は絶対値のまま（マイナス記号は付けない）。負債の数字だけ専用トークンの
+ *    クラス（amount--liability）が付く。適用箇所 = 月割り台帳の**ローン行**（v13.6 H4:
+ *    計上先が負債のルール。旧「支払用負債」セクションは撤去）・資金繰りの負債行・
+ *    勘定科目一覧の負債残高。
  *  - 振替（投資積立など）・資産の残高には付けない。
  */
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { cleanup, render, waitFor } from '@testing-library/react';
 import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { Allocations } from '../src/ui/screens/Allocations';
 import { Accounts } from '../src/ui/screens/Accounts';
 import { Cashflow } from '../src/ui/screens/Cashflow';
-import { createOpenings, loadLedger, upsertAccount } from '../src/data/repository';
+import {
+  createOpenings,
+  createRecurringRule,
+  loadLedger,
+  upsertAccount,
+} from '../src/data/repository';
 import { debitSignedBalance } from '../src/domain/accounting';
+import { monthOf } from '../src/domain/allocation';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { todayLocal } from '../src/util/time';
@@ -84,53 +90,35 @@ describe('自然符号の金額ソート', () => {
     expect(debitSignedBalance('revenue', 1000)).toBe(-1000);
     expect(debitSignedBalance('equity', 1000)).toBe(-1000);
   });
-
-  it.each([
-    { direction: 'asc' as const, dataUi: UI.allocations.sortAsc, first: '住宅ローン' },
-    { direction: 'desc' as const, dataUi: UI.allocations.sortDesc, first: 'カード' },
-  ])('月割り台帳の金額ソートは負債セクションに効く（$direction）', async ({ dataUi, first }) => {
-    await seed();
-    render(
-      <View>
-        <Allocations period={period} onEditEntry={() => undefined} target={null} />
-      </View>,
-    );
-    await waitFor(() => {
-      expect(all(UI.allocations.liabilityRow)).toHaveLength(2);
-    });
-
-    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.sortByAmount}"]`)!);
-    fireEvent.click(document.querySelector(`[data-ui="${dataUi}"]`)!);
-
-    const names = all(UI.allocations.liabilityRow).map(
-      (row) => row.querySelector('.list__title')?.textContent ?? '',
-    );
-    expect(names).toHaveLength(2);
-    expect(names[0]).toContain(first);
-  });
 });
 
 describe('負債残高の数字色', () => {
-  it('月割り台帳の負債行の残高に専用クラスが付く（絶対値のまま・記号なし）', async () => {
-    await seed();
+  it('月割り台帳のローン行（計上先が負債のルール）の月額に専用クラスが付く', async () => {
+    const { cash } = await seed();
+    // ローン = 計上先が負債科目のルール（返済）。行は他のルールと同じ一覧に混ざる。
+    await createRecurringRule({
+      name: '住宅ローンの返済',
+      amount: 5000000,
+      dayOfMonth: 10,
+      debitAccountId: LOAN.id,
+      creditAccountId: cash.id,
+      startMonth: monthOf(todayLocal()),
+      startDate: todayLocal(),
+    });
     render(
       <View>
         <Allocations period={period} onEditEntry={() => undefined} target={null} />
       </View>,
     );
     await waitFor(() => {
-      expect(all(UI.allocations.liabilityRow)).toHaveLength(2);
+      expect(all(UI.allocations.recurringList)).toHaveLength(1);
     });
-    const amounts = all(UI.allocations.liabilityRow).map((row) =>
-      row.querySelector('.row-trailing .list__amount span'),
+    const amount = document.querySelector(
+      `[data-ui="${UI.allocations.recurringList}"] .row-trailing .list__amount span`,
     );
-    for (const amount of amounts) {
-      expect(amount).toHaveClass('amount--liability');
-      expect(amount?.textContent ?? '').not.toContain('-');
-    }
-    expect(amounts.map((a) => a?.textContent)).toEqual(
-      expect.arrayContaining([expect.stringContaining('200,000')]),
-    );
+    expect(amount).toHaveClass('amount--liability');
+    expect(amount?.textContent ?? '').not.toContain('-');
+    expect(amount?.textContent ?? '').toContain('50,000');
   });
 
   it('資金繰りの負債行の残高に専用クラスが付く', async () => {

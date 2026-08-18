@@ -2,19 +2,20 @@
  * 資金繰り（将来CF）。**ヘッダーの日付（基準日）を起点に**「自由に動かせるお金」の推移を
  * 投影し、負債の残高と返済予定を**見る**（確認専用）。
  *
- * v13.4 ④（作者決定 2026-08-17）:
- *  - 返済予定の登録・編集（RepaymentScheduleSheet と「返済を登録」導線）は**月割り台帳の
- *    「支払用負債」セクションへ移設**した。この画面の負債行は表示オンリーで、タップは
- *    台帳の該当負債へ遷移するだけ（onOpenAllocations({ liabilityAccountId })）。
+ * v13.6 H4（作者確定 2026-08-18）:
+ *  - 負債行は表示オンリーのまま、タップ先を**ルールの有無**で振り分ける:
+ *    返済ルールを持つローン → 月割り台帳の該当行 / それ以外（クレカ等）→ 勘定科目。
+ *  - 返済の正本は台帳のルール。この画面から返済を書き込む経路は無い（v13.4 ④ の
+ *    「支払用負債」セクションと返済シートは v13.6 H4 で撤去した）。
  *
  * v13.4 ③（作者決定 2026-08-17）:
  *  - 起点は today ではなく period（ヘッダーの日付）。資金繰りもタイムスリップに追従する。
- *    この画面に「今日」は残らない（返済シートの日付**既定値**だけが today 規約 (a) の例外）。
+ *    この画面に「今日」は残らない。
  *  - 表示終了日の入力欄・設定の既定期間は引退。範囲は右方向の横スクロールで見る
  *    （「さらに先へ」で +12 ヶ月ずつ・上限 = 展開の地平 CONTINUOUS_COST_HARD_CAP）。
  *  - 最低点の金額カードではなく「基準日以降で最初に 0 を下回る日」を出す。
  *  - 負債一覧は基準日断面で残高を持つものだけ（未来に始まるローンは基準日を進めれば現れ、
- *    完済済みは消える）。台帳の「支払用負債」も同じ断面・同じ絞り込みで並ぶ。
+ *    完済済みは消える）。
  */
 import { useMemo, useState } from 'react';
 import { Icon } from '@snishi/foundation/ui/Icon';
@@ -37,6 +38,7 @@ import type { ReportPeriod } from '../../domain/reportPeriod';
 import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
 import { addMonths, monthOf, monthsBetween } from '../../domain/allocation';
+import { loanRuleForLiability } from '../../domain/loan';
 import { todayLocal } from '../../util/time';
 import { entryOpenPlan } from '../entryOpen';
 import type { AllocationsTarget } from './Allocations';
@@ -205,7 +207,8 @@ export function Cashflow({
 
   /*
    * 負債一覧は**基準日断面**で導出残高 ≠ 0 のものだけ（domain の単一正本
-   * liabilityScheduleRows。月割り台帳の「支払用負債」と同じ行集合が並ぶ）。
+   * liabilityScheduleRows）。ここには**ルールを持たない負債も出る**（クレカ・手動返済
+   * だけの既存ローン）。台帳に出るのはルールを持つものだけ、という区別との違いが要点。
    */
   const liabilitySummary = useMemo(
     () =>
@@ -285,41 +288,52 @@ export function Cashflow({
         <div className="card card--pad empty">{t('repay.none')}</div>
       ) : (
         <ul className="card list" data-ui={UI.cashflow.liabilityList}>
-          {liabilitySummary.map((l) => (
-            <li key={l.id} className="list__row">
-              {/*
-               * 行は**表示オンリー**（v13.4 ④）。タップ = 月割り台帳の同じ負債へ移動するだけで、
-               * この画面から返済を書き込む経路は無い（読み上げ名も行き先を名乗る）。
-               * 高さは .list__row-btn の min-height = var(--tap)（44px）。
-               */}
-              <button
-                type="button"
-                className="list__row-btn"
-                onClick={() => onOpenAllocations({ liabilityAccountId: l.id })}
-                aria-label={t('cashflow.debtOpenInAllocations', { name: l.name })}
-                data-ui={UI.cashflow.liabilityRow}
-              >
-                <div className="list__main">
-                  <div className="list__title">{l.name}</div>
-                  <div className="list__sub">
-                    {/* 負債残高は専用トークンの色（C-2）。絶対値表示のままで符号は付けない。 */}
-                    {t('repay.balance')}:{' '}
-                    <Money amount={l.balance} currency={currency} tone="liability" />
-                  </div>
-                  {l.count > 0 ? (
-                    <div className="list__sub">
-                      {t('repay.nextDue')}: {l.nextDue ?? '—'}・
-                      {t('repay.installmentsLeft', { count: l.count })}・{t('repay.balance')}{' '}
-                      <Money amount={l.remaining} currency={currency} />
-                    </div>
-                  ) : (
-                    <div className="list__sub amount--neg">{t('cashflow.debtNoPlan')}</div>
+          {liabilitySummary.map((l) => {
+            /*
+             * 行は**表示オンリー**（v13.4 ④）。タップ先は v13.6 H4 で振り分ける:
+             *  - 返済ルールを持つローン → 月割り台帳の**その行**（返済の正本はルール）
+             *  - ルールを持たない負債（クレカ等）→ **勘定科目**のその科目
+             *    （台帳に居ないものを台帳へ送らない = 空振りする導線を作らない）
+             * 高さは .list__row-btn の min-height = var(--tap)（44px）。
+             */
+            const loanRule = loanRuleForLiability(ledger?.recurringRules ?? [], l.id);
+            return (
+              <li key={l.id} className="list__row">
+                <button
+                  type="button"
+                  className="list__row-btn"
+                  onClick={() =>
+                    loanRule ? onOpenAllocations({ liabilityAccountId: l.id }) : onOpenAccount(l.id)
+                  }
+                  aria-label={t(
+                    loanRule ? 'cashflow.debtOpenInAllocations' : 'cashflow.debtOpenInAccounts',
+                    { name: l.name },
                   )}
-                </div>
-                <Icon name="chevronRight" size={18} />
-              </button>
-            </li>
-          ))}
+                  data-ui={UI.cashflow.liabilityRow}
+                  data-account-id={l.id}
+                >
+                  <div className="list__main">
+                    <div className="list__title">{l.name}</div>
+                    <div className="list__sub">
+                      {/* 負債残高は専用トークンの色（C-2）。絶対値表示のままで符号は付けない。 */}
+                      {t('repay.balance')}:{' '}
+                      <Money amount={l.balance} currency={currency} tone="liability" />
+                    </div>
+                    {l.count > 0 ? (
+                      <div className="list__sub">
+                        {t('repay.nextDue')}: {l.nextDue ?? '—'}・
+                        {t('repay.installmentsLeft', { count: l.count })}・{t('repay.balance')}{' '}
+                        <Money amount={l.remaining} currency={currency} />
+                      </div>
+                    ) : loanRule ? null : (
+                      <div className="list__sub amount--neg">{t('cashflow.debtNoPlan')}</div>
+                    )}
+                  </div>
+                  <Icon name="chevronRight" size={18} />
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
 

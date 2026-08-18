@@ -5,9 +5,10 @@
  *  - 負債一覧は基準日断面で残高を持つものだけ（開始前は出ない・完済後は消える）。
  *  - 最低点の金額ではなく「最初に 0 を下回る日」を出し、無ければ静かな 1 行。
  *  - グラフの窓は「さらに先へ」で +12 ヶ月ずつ伸び、未来一覧の範囲もそれに従う。
- *  - **負債行は表示オンリー**（v13.4 ④）。返済の登録・編集はこの画面から消え、行タップは
- *    月割り台帳の該当負債への遷移（onOpenAllocations({ liabilityAccountId })）だけになった。
- *    登録・編集そのものの試験は ui.allocationsLiabilities.test.tsx が持つ。
+ *  - **負債行は表示オンリー**（v13.4 ④）。行タップは遷移だけで、行き先は v13.6 H4 で
+ *    **ルールの有無**に振り分かる: 返済ルールを持つローン → 月割り台帳の該当行
+ *    （onOpenAllocations({ liabilityAccountId })）/ 持たない負債 → 勘定科目（onOpenAccount）。
+ *    台帳側の出し分けは ui.allocationsLoans.test.tsx が持つ。
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -16,6 +17,7 @@ import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider } from '../src/state/store';
 import { Cashflow } from '../src/ui/screens/Cashflow';
 import {
+  createLoanPurchase,
   createOpenings,
   createRepaymentEntries,
   loadLedger,
@@ -177,7 +179,7 @@ describe('資金繰り', () => {
     expect(ui(UI.cashflow.liabilityRow)).not.toBeInTheDocument();
   });
 
-  it('負債行は表示オンリー: タップで月割り台帳の該当負債へ渡すだけ（返済シートは無い）', async () => {
+  it('ルールを持たない負債（クレカ）はタップで勘定科目へ渡す', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
     const card = ledger.accounts.find((a) => a.role === 'payment-liability')!;
@@ -186,6 +188,7 @@ describe('資金繰り', () => {
       { accountId: card.id, amount: 3000000, date: '2000-01-01' },
     ]);
     const firstDate = addMonthsToDate(todayLocal(), 1);
+    // 手動の返済（未来日付の実仕訳）だけを持つ負債 = 既存データと同じ形。
     await createRepaymentEntries({
       liabilityAccountId: card.id,
       fromAccountId: cash.id,
@@ -197,7 +200,8 @@ describe('資金繰り', () => {
 
     const onEditEntry = vi.fn();
     const onOpenAllocations = vi.fn();
-    render(view(onEditEntry, { onOpenAllocations }));
+    const onOpenAccount = vi.fn();
+    render(view(onEditEntry, { onOpenAllocations, onOpenAccount }));
 
     const row = await waitFor(() => {
       const found = ui(UI.cashflow.liabilityRow);
@@ -209,16 +213,46 @@ describe('資金繰り', () => {
     expect(row).toHaveTextContent(`次回支払日: ${firstDate}`);
     expect(row).toHaveTextContent('残り 3 回');
     // 読み上げ名は行き先を名乗る。タップ目標は 44px（.list__row-btn の min-height）。
-    expect(row).toHaveAttribute('aria-label', `${card.name} を月割り台帳で開く`);
+    expect(row).toHaveAttribute('aria-label', `${card.name} を勘定科目で開く`);
 
     fireEvent.click(row);
-    expect(onOpenAllocations).toHaveBeenCalledTimes(1);
-    expect(onOpenAllocations).toHaveBeenCalledWith({ liabilityAccountId: card.id });
+    expect(onOpenAccount).toHaveBeenCalledWith(card.id);
+    expect(onOpenAllocations).not.toHaveBeenCalled();
     // 遷移だけ。この画面は書込フォームを開かない（返済シート・展開トグルは撤去済み）。
     expect(onEditEntry).not.toHaveBeenCalled();
     expect(document.querySelector('[data-ui="allocations.repay.sheet"]')).toBeNull();
-    expect(document.querySelector('[data-ui="cashflow.repayments.toggle"]')).toBeNull();
     expect(screen.queryByText('登録済みの返済')).not.toBeInTheDocument();
+  });
+
+  it('返済ルールを持つローンはタップで月割り台帳の該当行へ渡す', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    await createOpenings([{ accountId: cash.id, amount: 100000000, date: '2000-01-01' }]);
+    const { liability } = await createLoanPurchase({
+      loanName: '自動車ローン',
+      date: todayLocal(),
+      description: '自動車',
+      amount: 12000000,
+      expenseAccountId: ledger.accounts.find((a) => a.role === 'expense-category')!.id,
+      repaymentFromAccountId: cash.id,
+      repaymentEndDate: addMonthsToDate(todayLocal(), 13),
+    });
+
+    const onOpenAllocations = vi.fn();
+    const onOpenAccount = vi.fn();
+    render(view(() => undefined, { onOpenAllocations, onOpenAccount }));
+
+    const row = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>(
+        `[data-ui="${UI.cashflow.liabilityRow}"][data-account-id="${liability.id}"]`,
+      );
+      expect(found).toBeInTheDocument();
+      return found!;
+    });
+    expect(row).toHaveAttribute('aria-label', '自動車ローン を月割り台帳で開く');
+    fireEvent.click(row);
+    expect(onOpenAllocations).toHaveBeenCalledWith({ liabilityAccountId: liability.id });
+    expect(onOpenAccount).not.toHaveBeenCalled();
   });
 });
 

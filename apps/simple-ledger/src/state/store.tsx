@@ -15,7 +15,11 @@ import type {
 import { buildSimpleEntry, type SimpleEntryInput } from '../domain/entry';
 import * as repo from '../data/repository';
 import { isDefaultSeedAccounts, isDefaultSettings } from '../data/seed';
-import type { ContinuousCostInput, MonthlyCostArchiveInput } from '../data/repository';
+import type {
+  ContinuousCostInput,
+  LoanPurchaseInput,
+  MonthlyCostArchiveInput,
+} from '../data/repository';
 import {
   exportFileName,
   exportToJsonText,
@@ -67,7 +71,8 @@ interface LedgerContextValue {
   removeEntry: (id: string, description: string) => Promise<void>;
   /** 継続コスト資産の登録（購入の仕訳 + item を 1 tx で。creditAccountId 未指定 = 持ち込み）。 */
   createContinuousCost: (input: ContinuousCostInput) => Promise<void>;
-  createRepaymentEntries: (input: repo.RepaymentPlanInput) => Promise<void>;
+  /** ローンで払う（負債科目 + 購入の仕訳 + 返済ルール、任意で持ち物を 1 tx で）。 */
+  createLoanPurchase: (input: LoanPurchaseInput) => Promise<void>;
   saveMonthlyCost: (item: MonthlyCostItem) => Promise<void>;
   removeMonthlyCost: (id: string) => Promise<void>;
   /** アーカイブ = 終了日の設定（+ 残存価値の回収の振替を同一 tx で任意に）。 */
@@ -242,10 +247,10 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [refresh, toast],
   );
 
-  const createRepaymentEntries = useCallback<LedgerContextValue['createRepaymentEntries']>(
+  const createLoanPurchase = useCallback<LedgerContextValue['createLoanPurchase']>(
     async (input) => {
       try {
-        await repo.createRepaymentEntries(input);
+        await repo.createLoanPurchase(input);
         await refresh();
         toast.show(t('toast.saved'), 'success');
       } catch (e) {
@@ -593,7 +598,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveEntry,
       removeEntry,
       createContinuousCost,
-      createRepaymentEntries,
+      createLoanPurchase,
       saveMonthlyCost,
       removeMonthlyCost,
       archiveMonthlyCost,
@@ -629,7 +634,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveEntry,
       removeEntry,
       createContinuousCost,
-      createRepaymentEntries,
+      createLoanPurchase,
       saveMonthlyCost,
       removeMonthlyCost,
       archiveMonthlyCost,

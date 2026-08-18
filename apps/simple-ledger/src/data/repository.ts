@@ -72,6 +72,13 @@ import {
 } from '../domain/allocation';
 import { compareMonthlyCostItems } from '../domain/monthlyCost';
 import {
+  loanDayOfMonth,
+  loanFirstRepaymentDate,
+  loanInstallmentCount,
+  loanMonthlyAmount,
+  loanStartMonth,
+} from '../domain/loan';
+import {
   buildAdjustmentEntry,
   counterpartName,
   counterpartRole,
@@ -2770,6 +2777,195 @@ async function createContinuousCostUnlocked(input: ContinuousCostInput): Promise
   return item;
 }
 
+/* ── ローン（= 台帳のルール・v13.6 H4） ── */
+
+export interface LoanPurchaseInput {
+  /** ローンの名前。負債科目名と返済ルールの摘要になる（摘要から自動で入る）。 */
+  loanName: string;
+  /** 購入の仕訳の日付（= ローンが発生する日）。 */
+  date: string;
+  /** 購入の仕訳の摘要。 */
+  description: string;
+  /** 借入総額 = 購入額（利息込み。利息は分けない）。 */
+  amount: number;
+  /** 購入の借方（費用カテゴリ等）。持ち物にする場合は item の計上先になる。 */
+  expenseAccountId: string;
+  /** 返済元（源泉）。**全科目から選べる**（自由に動かせるお金には限定しない）。 */
+  repaymentFromAccountId: string;
+  /** 返済ルールの排他的終了日（**終了日が正**。残回数・月額はここから導出）。 */
+  repaymentEndDate: string;
+  /** 持ち物としても登録する場合（費用化 = 持ち物・返済 = ローン、が両立する）。 */
+  continuousCost?: { name: string; endDate?: string };
+  memo?: string;
+}
+
+export interface LoanPurchaseResult {
+  liability: Account;
+  purchase: JournalEntry;
+  rule: RecurringRule;
+  item?: MonthlyCostItem;
+}
+
+/**
+ * 支出の「ローンで払う」を **1 トランザクション**で登録する（v13.6 H4）。
+ *
+ * 同時に作るのは 3〜4 レコード:
+ *  1. **負債科目**（role = other-liability。新しいフラグ・role は作らない）
+ *  2. **購入の仕訳**: `借方 費用カテゴリ（持ち物なら月割り台帳）/ 貸方 その負債`
+ *  3. **返済ルール**: 既存の定期ルールそのもの（計上先 = 負債・源泉 = 返済元・毎月・
+ *     終了日が正）。導出すると `借方 負債 / 貸方 返済元` の月次刻みになる。
+ *  4. 持ち物にした場合の item（費用化）。
+ *
+ * 「既存ローンへ足す」導線は作らない = ここは常に新しい負債を作る。
+ * 途中で失敗したら**何も残さない**（fail-closed。負債だけできて返済が無い状態を作らない）。
+ */
+async function createLoanPurchaseUnlocked(input: LoanPurchaseInput): Promise<LoanPurchaseResult> {
+  const loanName = input.loanName.trim();
+  if (loanName === '') throw new LedgerError('error.common.nameRequired');
+  if (!Number.isInteger(input.amount) || input.amount <= 0)
+    throw new LedgerError('error.common.amountInvalid');
+  if (!isValidIsoDate(input.date)) throw new LedgerError('error.monthlyCost.dateRequired');
+  if (!isValidIsoDate(input.repaymentEndDate))
+    throw new LedgerError('error.monthlyCost.dateRequired');
+
+  const firstRepayment = loanFirstRepaymentDate(input.date);
+  const count = loanInstallmentCount(firstRepayment, input.repaymentEndDate);
+  // 起票ゼロのルールは保存しない（v13.3 の不変則）。UI は保存前に同じ式で弾く。
+  if (count < 1) throw new LedgerError('error.loan.noRepayment');
+
+  const [ctx, accounts, currentEntries, currentItems, recurringRules] = await Promise.all([
+    loadSaveContext(),
+    getAll<Account>(STORE.accounts),
+    getAll<JournalEntry>(STORE.journalEntries),
+    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
+    getAll<RecurringRule>(STORE.recurringRules),
+  ]);
+  const ts = nowIso();
+
+  // 1. 負債科目。端点は書かない（§A 案1: startDate 未設定 = 過去へ開いた線分）。
+  const liability: Account = {
+    id: newId(),
+    name: loanName,
+    type: 'liability',
+    role: 'other-liability',
+    archived: false,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+  const parsedLiability = accountSchema.safeParse(liability);
+  if (!parsedLiability.success) throw new LedgerError('error.account.periodInvalid');
+  const renamedArchived = resolveAccountNameConflicts(accounts, liability.name, liability.id);
+
+  const accountsToPut = new Map<string, Account>();
+  for (const renamed of renamedArchived) accountsToPut.set(renamed.id, renamed);
+  accountsToPut.set(liability.id, liability);
+
+  const validationCtx: SaveContext = { byId: new Map(ctx.byId) };
+  for (const renamed of renamedArchived) validationCtx.byId.set(renamed.id, renamed);
+  validationCtx.byId.set(liability.id, liability);
+
+  // 借方は月割り台帳（持ち物にするとき）か、利用者が選んだ費用カテゴリ。
+  const { account: ledgerAccount, writeNeeded: ledgerWriteNeeded } =
+    findOrCreateContinuousCostLedgerAccount(validationCtx, ts, input.date);
+  validationCtx.byId.set(ledgerAccount.id, ledgerAccount);
+  if (ledgerWriteNeeded) accountsToPut.set(ledgerAccount.id, ledgerAccount);
+
+  const expense = validationCtx.byId.get(input.expenseAccountId);
+  if (!expense || !isRecurringPostableRole(expense.role))
+    throw new LedgerError('error.monthlyCost.expenseCategory');
+
+  // 2/4. 購入の仕訳（+ 持ち物）。持ち物との併用 = 費用化は item・返済はルール、で両立する。
+  let item: MonthlyCostItem | undefined;
+  if (input.continuousCost !== undefined) {
+    const ccName = input.continuousCost.name.trim();
+    if (ccName === '') throw new LedgerError('error.common.nameRequired');
+    if (input.continuousCost.endDate !== undefined && input.continuousCost.endDate < input.date)
+      throw new LedgerError('error.monthlyCost.endBeforeStart');
+    item = assertMonthlyCostItemSavable(
+      {
+        id: newId(),
+        name: ccName,
+        amount: input.amount,
+        startDate: input.date,
+        ...(input.continuousCost.endDate !== undefined
+          ? { endDate: input.continuousCost.endDate }
+          : {}),
+        expenseAccountId: input.expenseAccountId,
+        createdAt: ts,
+        updatedAt: ts,
+      },
+      validationCtx,
+    );
+  }
+  const debitAccountId = item !== undefined ? ledgerAccount.id : input.expenseAccountId;
+  const purchase = assertEntrySavable(
+    {
+      id: newId(),
+      date: input.date,
+      description: input.description.trim() === '' ? loanName : input.description.trim(),
+      kind: 'normal',
+      lines: [
+        { accountId: debitAccountId, side: 'debit', amount: input.amount },
+        { accountId: liability.id, side: 'credit', amount: input.amount },
+      ],
+      metadata: {
+        inputMode: 'expense',
+        ...(item !== undefined ? { monthlyCostId: item.id } : {}),
+      },
+      ...(input.memo !== undefined && input.memo.trim() !== '' ? { memo: input.memo.trim() } : {}),
+      createdAt: ts,
+      updatedAt: ts,
+    },
+    validationCtx,
+  );
+
+  // 3. 返済ルール（既存 schema のまま。計上先 = 負債 / 源泉 = 返済元 / 借方 = 台帳）。
+  const rule: RecurringRule = {
+    id: newId(),
+    name: loanName,
+    amount: loanMonthlyAmount(input.amount, count),
+    dayOfMonth: loanDayOfMonth(firstRepayment),
+    everyMonths: 1,
+    spreadExpenseAccountId: liability.id,
+    debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+    creditAccountId: input.repaymentFromAccountId,
+    // 位相の基点は初回返済月。存在期間は**借りた日**から始まる（購入日にローンは生まれる）
+    // ＝ 台帳の一覧にも購入日から並ぶ（未来開始のルールとして隠れない）。
+    startMonth: loanStartMonth(firstRepayment),
+    startDate: input.date,
+    endDate: input.repaymentEndDate,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+  // 台帳の線分は返済の起点までしか無い可能性がある（購入日で作った直後）。
+  const ruleReferenceStart = recurringRuleReferenceStartDate(rule);
+  const { account: ruleLedgerAccount, writeNeeded: ruleLedgerWriteNeeded } =
+    findOrCreateContinuousCostLedgerAccount(validationCtx, ts, ruleReferenceStart);
+  validationCtx.byId.set(ruleLedgerAccount.id, ruleLedgerAccount);
+  if (ruleLedgerWriteNeeded) accountsToPut.set(ruleLedgerAccount.id, ruleLedgerAccount);
+  assertRecurringRuleSavable(rule, validationCtx);
+  assertRecurringLineagesSavable([...recurringRules, rule]);
+
+  assertEndedAssetLiabilityBalances({
+    accounts: [...validationCtx.byId.values()],
+    journalEntries: [...currentEntries, purchase],
+    monthlyCostItems: item !== undefined ? [...currentItems, item] : currentItems,
+    recurringRules: [...recurringRules, rule],
+  });
+
+  await writeWithRevision(
+    [STORE.accounts, STORE.journalEntries, STORE.monthlyCostItems, STORE.recurringRules],
+    (t) => {
+      const aStore = t.objectStore(STORE.accounts);
+      for (const account of accountsToPut.values()) aStore.put(account);
+      t.objectStore(STORE.journalEntries).put(purchase);
+      if (item !== undefined) t.objectStore(STORE.monthlyCostItems).put(item);
+      t.objectStore(STORE.recurringRules).put(rule);
+    },
+  );
+  return { liability, purchase, rule, ...(item !== undefined ? { item } : {}) };
+}
+
 /**
  * 継続コスト資産の更新（後編集）。保存境界で fail-closed に検証し、購入の仕訳を
  * 同じトランザクションで整合させる。
@@ -3196,6 +3392,7 @@ export const createOpening = serializeMutation(createOpeningUnlocked);
 export const updateOpening = serializeMutation(updateOpeningUnlocked);
 export const deleteOpening = serializeMutation(deleteOpeningUnlocked);
 export const createContinuousCost = serializeMutation(createContinuousCostUnlocked);
+export const createLoanPurchase = serializeMutation(createLoanPurchaseUnlocked);
 export const upsertMonthlyCost = serializeMutation(upsertMonthlyCostUnlocked);
 export const archiveMonthlyCost = serializeMutation(archiveMonthlyCostUnlocked);
 export const deleteMonthlyCost = serializeMutation(deleteMonthlyCostUnlocked);

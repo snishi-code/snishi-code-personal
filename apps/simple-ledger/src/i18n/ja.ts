@@ -171,9 +171,11 @@ export const ja = {
   'cashflow.debtTitle': '支払用負債・返済予定',
   // v13.4 ④: 資金繰りの負債行は表示オンリー。タップ = 月割り台帳の同じ負債へ移動。
   'cashflow.debtIntro':
-    'ヘッダーの日付の時点で残高がある負債だけを、残りの支払予定・次回支払日・残回数とともに出します。行をタップすると月割り台帳の同じ負債へ移動し、そこで返済予定を登録・編集できます。',
+    'ヘッダーの日付の時点で残高がある負債だけを、残りの支払予定・次回支払日・残回数とともに出します。返済のルールを持つローンは月割り台帳の該当行へ、持たない負債は勘定科目へ移動します。',
   'cashflow.debtOpenInAllocations': '{name} を月割り台帳で開く',
-  'cashflow.debtNoPlan': '返済予定がありません（月割り台帳で登録できます）。',
+  // ルールを持たない負債（クレカ等）は台帳に居ない = 勘定科目へ送る。
+  'cashflow.debtOpenInAccounts': '{name} を勘定科目で開く',
+  'cashflow.debtNoPlan': '返済予定がありません（ホームの入力で先の日付を選ぶと登録できます）。',
   'cashflow.futureTitle': '先の入出金・振替予定',
   'cashflow.futureIntro':
     'グラフに出している範囲（{from} 〜 {to}）の予定です。ホームの 収入 / 支出 / 振替 で先の日付を選ぶと、ここに表示され資金繰りに反映されます。',
@@ -183,17 +185,6 @@ export const ja = {
   'cashflow.futureInflow': '入金',
   'cashflow.futureOutflow': '出金',
   'cashflow.futureNoChange': '自由に動かせるお金は増減なし',
-
-  // 負債の新規作成（支出の支払い方法 / 振替の源泉・行き先から）
-  'liability.form.title': '新しい負債を作る',
-  'liability.form.intro':
-    'クレジットカードやローンなどの負債科目を作ります。残高や返済は通常の入力（振替・支出）で動かします。',
-  'liability.name': '名称',
-  'liability.namePlaceholder': '例: 楽天カード / 自動車ローン',
-  'liability.kind': '種類',
-  'liability.role.card': 'クレジットカード等',
-  'liability.role.loan': '借入・ローン',
-  'liability.error.name': '名称を入力してください。',
 
   'adjust.intro': '実際の残高との差額を、任意の日に補正します（「締め」はありません）。',
   'adjust.account': '対象科目（資産・負債・費用・収入）',
@@ -305,9 +296,9 @@ export const ja = {
   'entry.ccCategory': '計上先',
   'entry.error.loanNotExpense':
     'ローン（その他負債）は通常の支出の支払い元にできません。持ち物として登録するか、借入として振替で実行してください。',
-  // 返済を資金繰りに入れるトグル ON 時の必須検証（口座・回数が無いと CF が作られないため fail closed）。
-  'entry.error.repayAccount': '返済元の口座を選んでください。',
-  'entry.error.repayCount': '返済回数は 1〜{max} の整数で入力してください。',
+  // ローンの必須検証（保存境界 createLoanPurchase と同じ条件を先に示す）。
+  'entry.error.loanFrom': '返済元の科目を選んでください。',
+  'entry.error.loanEndDate': '1 回以上返済できる終了日を入れてください。',
   'entry.source.manual': '左側（貸方）',
   'entry.destination.manual': '右側（借方）',
   'entry.detailToggle': '詳細（メモ）',
@@ -321,21 +312,19 @@ export const ja = {
   'entry.reversal.reversedSoFar': '取消済み: {reversed} / 残り: {remaining}',
   // 残りを超えても保存はできる（過剰返金・補償はありうる）。止めずに気づかせるだけ。
   'entry.reversal.overWarning': '取消済みと合わせて元の金額を超えます（このまま保存できます）。',
-  'entry.monthlyizeRepayToggle': '分割・後日引落を資金繰りに入れる',
-  'entry.monthlyizeRepayNote':
-    '支払い元が負債のため、返済を未来日付の振替仕訳としてまとめて登録できます（仕訳一覧・資金繰りに反映）。',
-  'entry.monthlyizeRepayAccount': '引落口座',
-  'entry.monthlyizeRepayCount': '返済回数',
-  'entry.monthlyizeRepayCountHint': '一度に登録できる上限は {max} 回です。',
-  'entry.monthlyizeRepayStart': '初回引落日',
-  'entry.monthlyizeRepayStartHint': '購入日とは別に、最初に現金が引き落とされる日を入れます。',
   'entry.error.category-required': '計上先を選んでください。',
-  // 支出の支払い元（左辺）のローン導線。「ローンを組む」で既存ローン選択＋新規ローン作成へ切り替える。
-  'entry.loanArrange': 'ローンを組む',
-  'entry.loanArrangePick': '組むローンを選ぶ',
-  'entry.loanArrangeEmpty': 'ローンがありません。「新しいローンを作成」で追加できます。',
-  'entry.loanArrangeCreate': '新しいローンを作成',
+  // 支出の支払い元（左辺）のローン導線（v13.6 H4）。押すと支払い元が「新しいローンの名前」に
+  // 変わる（持ち物として登録すると同じ片側切替）。既存ローンへ足す導線は作らない。
+  'entry.loanArrange': 'ローンで払う',
   'entry.loanArrangeBack': 'ローンをやめる',
+  'entry.loanName': 'ローンの名前',
+  'entry.loanNamePlaceholder': '例: 自動車ローン',
+  'entry.loanNameHint': 'この名前で負債の科目と返済のルールを作ります。',
+  'entry.loanEndDate': '返済の終了日',
+  'entry.loanEndDateHint': '初回の返済は {date} です。終了日から回数と月額が決まります。',
+  'entry.loanFrom': '返済元',
+  'entry.loanPreview': '毎月 {amount} × {count} 回（合計 {total}）',
+  'entry.loanRemainder': '借入額との差 {diff} は最後に残ります（手仕訳や補正で調整できます）。',
 
   'journal.reverseAction': '取消/返金を記録',
   // 行ボタンは短い動詞（v13.2: 記号は伝わらない。既存タグ「取消/返金」と同じ語）。
@@ -710,34 +699,11 @@ export const ja = {
   'error.account.returnInvalid': '想定利回りは -99.99〜1000%（小数第2位まで）で入力してください。',
   'error.account.projectionPair': '想定利回りと投影の計上先はセットで設定してください。',
   'error.account.projectionAccountInvalid': '投影の計上先には既存の収入科目を選んでください。',
-  // 支払用負債・返済予定（v13.4 ④ で資金繰りから月割り台帳へ移設。文言は画面をまたいで共有する）
-  'repay.sectionTitle': '支払用負債',
-  'repay.sectionIntro':
-    'ヘッダーの日付の時点で残高があるカード・ローンです。返済予定の登録・編集はここで行います（資金繰りには登録した予定が反映されます）。',
+  // 負債の残高・返済（資金繰りの負債行と、台帳のローン行が共有する文言）。
   'repay.none': 'この日の時点で残高のある負債はありません。',
   'repay.balance': '残高',
   'repay.nextDue': '次回支払日',
   'repay.installmentsLeft': '残り {count} 回',
-  'repay.noPlanHint': '返済予定がありません。「返済を登録」から登録できます。',
-  'repay.noPlanTag': '返済予定なし',
-  // 負債行の展開 = 登録済みの返済（基準日より後の保存仕訳）。タップで仕訳の編集シートへ。
-  'repay.registered': '登録済みの返済',
-  'repay.add': '返済を登録',
-  'repay.title': '返済予定を追加',
-  'repay.intro':
-    '返済口座から「{name}」への返済を、支払日の振替仕訳としてそのまま登録します（仕訳一覧・資金繰りに反映）。',
-  'repay.amount': '返済額',
-  'repay.amountHint': '既定はいまの残高（全額）です。請求額に合わせて変更できます。',
-  'repay.from': '返済口座',
-  'repay.date': '支払日',
-  'repay.settingsHint':
-    '勘定科目（カード・ローン）の編集で返済口座と毎月の返済日を設定すると、ここに既定値が入ります。',
-  'repay.settingsLine': '返済口座: {account}・毎月{day}日',
-  'repay.scheduleTitle': '{name}の返済',
-  'repay.count': '返済回数',
-  'repay.countHint':
-    '1 = カードの次回引落などの単発。毎月同額のローンは {max} 回までまとめて登録できます（合計は返済額に一致）。',
-  'repay.perMonth': '月あたり約 {amount} × {count} 回',
   'error.repay.countInvalid': '返済回数は 1〜{max} の整数で入力してください。',
   'error.settings.invalid':
     '台帳の設定を保存できませんでした（名前は 1〜120 文字・単位は 1〜8 文字で入力してください）。',
@@ -747,6 +713,8 @@ export const ja = {
   'error.amount.overflow': '金額の合計が扱える範囲を超えました。',
   'error.repay.totalTooSmall': '返済総額が回数より少なく、金額 0 の回ができるため登録できません。',
   'error.repay.liabilityRequired': '返済先はカード・未払 / ローンの負債科目を選んでください。',
+  'error.loan.noRepayment':
+    '返済が 1 回も起きない終了日です。初回の返済日より後の終了日を選んでください。',
 
   // 月割り台帳（くり返し記帳 = 実仕訳の自動起票 / 継続コスト資産 = 月割りの導出）
   'monthly.title': '月割り台帳',
@@ -757,7 +725,7 @@ export const ja = {
   'monthly.pick.asset': 'いま持っているものを登録',
   'monthly.searchPlaceholder': '項目名・科目名で検索',
   'monthly.searchEmpty': '該当する項目がありません。',
-  'monthly.searchCount': 'くり返し記帳 {rules} 件・持ち物 {items} 件・支払用負債 {liabilities} 件',
+  'monthly.searchCount': 'くり返し記帳 {rules} 件・持ち物 {items} 件',
 
   'recurring.sectionTitle': 'くり返し記帳',
   'recurring.sectionIntro':
@@ -768,6 +736,8 @@ export const ja = {
   'recurring.kind.income': '収入（給与など）',
   'recurring.kind.transfer': '振替（積立など）',
   'recurring.kind.manual': '簿記編集（科目を直接指定）',
+  // 計上先が負債科目のルール = ローン（返済）。新しいフラグではなく形からの導出。
+  'recurring.kind.loan': 'ローン（返済）',
   'recurring.name': '摘要',
   'recurring.nameHint': '起票される仕訳の名前（例: NISA積立 / 給与 / Netflix）。',
   'recurring.amount': '金額',

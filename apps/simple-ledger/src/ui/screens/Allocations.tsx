@@ -4,9 +4,10 @@
  *    貸方・借方を簿記編集で直接指定し、行き先が費用なら自動で継続コスト台帳を経由する。
  *  - 継続コスト資産: 項目名・金額・開始日・終了日の4項目。終了日までの月割りは導出で、
  *    終了日を過ぎたら一覧から消える（アーカイブ = 終了日の設定）。
- *  - 支払用負債（v13.4 ④ で資金繰りから移設）: カード・ローンの返済予定を登録・編集する。
- *    行は**基準日断面で残高 ≠ 0**（資金繰りと同じ domain の liabilityScheduleRows）。
- *    資金繰りの負債行タップ（target.liabilityAccountId）がここへ着地する。
+ *  - ローン（v13.6 H4）: 専用セクションは持たない。**計上先が負債科目のルール**が
+ *    そのままローンで、持ち物・定期と同じ一覧に混在して並ぶ（検索・並び替えが一体で効く）。
+ *    ルールを持たない負債（クレカ等）はここに出ない＝区別はルールの有無だけ。
+ *    資金繰りの負債行タップ（target.liabilityAccountId）は該当ルール行へ着地する。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from '../overlays';
@@ -47,9 +48,6 @@ import {
   monthlyAllocationAccountOptions,
 } from '../accountOptions';
 import { monthlyAmounts, monthOf } from '../../domain/allocation';
-import { debitSignedBalance, deriveBalanceSheet } from '../../domain/accounting';
-import { liabilityScheduleRows, repaymentEntryAmount } from '../../domain/cashflow';
-import { RepaymentScheduleSheet } from '../RepaymentScheduleSheet';
 import { isValidIsoDate } from '../../domain/calendar';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
 import { nowIso, todayLocal } from '../../util/time';
@@ -63,7 +61,7 @@ import {
   recurringKindOf,
   type RecurringKind,
 } from '../../domain/recurring';
-import { displayEntriesResultForAsOf, reportMonthlyCostItems } from '../../domain/reportEntries';
+import { reportMonthlyCostItems } from '../../domain/reportEntries';
 import {
   accountExistsAt,
   earliestRecurringRuleEndDate,
@@ -72,6 +70,7 @@ import {
   ruleExistsAt as recurringRuleExistsAt,
 } from '../../domain/accountLifetime';
 import { cardTapProps, rowActionClick } from '../cardTap';
+import { isLoanRule, loanRemainingInstallments, loanRuleForLiability } from '../../domain/loan';
 import { quickSpanEndDate } from '../ccQuickSpan';
 import {
   exactDigitsFor,
@@ -86,7 +85,7 @@ import type { MessageKey } from '../../i18n';
 import type { FractionDigits } from '../../util/format';
 import { UI } from '../../ui-contract';
 import type { RecurringRuleSettlementInput } from '../../data/repository';
-import type { Account, JournalEntry, MonthlyCostItem, RecurringRule } from '../../domain/types';
+import type { JournalEntry, MonthlyCostItem, RecurringRule } from '../../domain/types';
 import { ScrollTopButton } from '../ScrollTopButton';
 
 /** 仕訳一覧から「この行はどこから来たか」で遷移してくるときの対象。 */
@@ -94,8 +93,9 @@ export interface AllocationsTarget {
   itemId?: string;
   ruleId?: string;
   /**
-   * 支払用負債の行（資金繰りの負債行タップ）。item / rule と違ってシートは開かず、
-   * 該当行へスクロールして登録済みの返済を展開する（見に来た人の目的地は行そのもの）。
+   * 負債の科目（資金繰りの負債行タップ）。**その負債を計上先に持つルール行**へ着地する。
+   * item / rule と違ってシートは開かず、該当行へスクロールする（目的地は行そのもの）。
+   * ルールが無い負債（クレカ等）は台帳に居ないので、資金繰り側が勘定科目へ振り分ける。
    */
   liabilityAccountId?: string;
 }
@@ -147,11 +147,9 @@ export function Allocations({
   const [archiving, setArchiving] = useState<MonthlyCostItem | null>(null);
   const [chooserOpen, setChooserOpen] = useState(false);
   const [ruleSheet, setRuleSheet] = useState<{ existing?: RecurringRule } | null>(null);
-  // 支払用負債（v13.4 ④）: 返済シート・登録済み返済の展開・資金繰りから来た行の着地点。
-  const [repayFor, setRepayFor] = useState<{ account: Account; balance: number } | null>(null);
-  const [openRepayments, setOpenRepayments] = useState<ReadonlySet<string>>(new Set());
-  const [focusedLiabilityId, setFocusedLiabilityId] = useState<string | null>(null);
-  const focusedLiabilityRef = useRef<HTMLLIElement | null>(null);
+  // 資金繰りから来た負債行の着地点（該当ルール行までスクロールする）。
+  const [focusedRuleId, setFocusedRuleId] = useState<string | null>(null);
+  const focusedRuleRef = useRef<HTMLLIElement | null>(null);
   // 状態を変える操作は必ず確認を挟む（2026-08-15 作者合意）: 終了は終了日シート。
   const [endingRule, setEndingRule] = useState<RecurringRule | null>(null);
   // 切り替え = この日から別の線分（シートそのものが確認面なので前置きの確認は無い）。
@@ -213,33 +211,16 @@ export function Allocations({
     [ledger],
   );
   const startedRules = allRules.filter((r) => effectiveRecurringRuleStartDate(r) <= asOf);
-  /*
-   * 支払用負債（v13.4 ④）。行集合は資金繰りと同じ domain の単一正本を通す
-   * （基準日断面で導出残高 ≠ 0 の payment/other-liability だけ）。
-   * 残高は「その断面までの導出込み仕訳」から求める。断面より後の仕訳は残高に効かないので、
-   * 資金繰りが地平まで展開して同じ日で切った結果と一致する（reportEntries.ts の不変則）。
-   * 返済予定そのものは**保存された実仕訳**から引く（導出行は数えない）。
-   */
-  const liabilities = useMemo(() => {
-    if (!ledger) return [];
-    const entries = displayEntriesResultForAsOf(ledger, asOf).entries;
-    const bs = deriveBalanceSheet(ledger.accounts, entries, asOf);
-    return liabilityScheduleRows({
-      accounts: ledger.accounts,
-      storedEntries: ledger.journalEntries,
-      balanceById: new Map(bs.liabilities.map((l) => [l.account.id, l.balance] as const)),
-      asOf,
-    });
-  }, [ledger, asOf]);
+  // ローン判定（計上先が負債科目のルール）。行の色・残回数・資金繰りからの着地に使う。
+  const ruleIsLoan = (r: RecurringRule): boolean =>
+    isLoanRule(r, (id) => accountsMap.get(id)?.role);
   // 「終了分も表示」の出現条件は検索前の全件で判定する（検索で 0 件になっても、
   // 母集合を変える唯一のコントロールを消さない）。
   const hasEndedAtAsOf =
     startedRules.some((r) => !recurringRuleExistsAt(r, asOf)) ||
     startedItems.some((m) => isArchived(m, asOf));
-  // 額縁（検索・並び替え）は「この画面に出す行が 1 つでもあるか」で決める。支払用負債も
-  // 検索の対象なので母集合に数える（負債しか無い台帳でも検索欄が消えない）。
-  const hasAnyStarted =
-    startedRules.length > 0 || startedItems.length > 0 || liabilities.length > 0;
+  // 額縁（検索・並び替え）は「この画面に出す行が 1 つでもあるか」で決める。
+  const hasAnyStarted = startedRules.length > 0 || startedItems.length > 0;
 
   // 検索: 1 つの検索欄が全セクションに効く（「終了分も表示」と同じ単一 state の型）。
   // 対象 = 名前 + 関係する科目名（Journal と同じ範囲。金額・日付・種別タグは対象外）。
@@ -320,36 +301,14 @@ export function Allocations({
       ? t('recurring.everyNMonthsDay', { n: r.everyMonths, day: r.dayOfMonth })
       : t('recurring.everyMonthDay', { day: r.dayOfMonth });
 
-  // 検索は 1 つの欄が全セクションに効く（負債は科目名で当てる）。
-  // 金額軸だけは負債セクションにも効かせる（C-2）。比較は**自然符号**（貸方残高は負）で
-  // 行うので、昇順ではローン（最も大きな負債）が先頭に来る。表示は絶対値のまま。
-  // 日付軸（次回返済日）・名称軸は導入せず、従来どおり科目順（sortAccounts）を保つ。
-  const shownLiabilities = applySort(
-    liabilities.filter((l) => matchesQuery([l.name], query)),
-    sort.key === 'amount'
-      ? (a, b) =>
-          (debitSignedBalance(a.account.type, a.balance) -
-            debitSignedBalance(b.account.type, b.balance)) *
-          dir
-      : null,
-  );
-  // 検索でどのセクションも 0 件（データが無いのではなく絞り込みで消えた）。
-  const searchMissed =
-    query !== '' && rules.length === 0 && items.length === 0 && shownLiabilities.length === 0;
-
-  const toggleRepayments = (id: string) =>
-    setOpenRepayments((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  // 検索でどちらのセクションも 0 件（データが無いのではなく絞り込みで消えた）。
+  const searchMissed = query !== '' && rules.length === 0 && items.length === 0;
 
   // 資金繰りから来た負債行を画面内へ運ぶ（消費は下の target 解決・スクロールは描画後）。
   useEffect(() => {
-    if (focusedLiabilityId === null) return;
-    focusedLiabilityRef.current?.scrollIntoView?.({ block: 'center' });
-  }, [focusedLiabilityId]);
+    if (focusedRuleId === null) return;
+    focusedRuleRef.current?.scrollIntoView?.({ block: 'center' });
+  }, [focusedRuleId]);
 
   // 仕訳一覧の計算で生まれた行タップからの遷移: 対象のシートを開く。
   // effect ではなく「render 中の派生調整」パターン（同一 target は 1 回だけ消費する）。
@@ -363,18 +322,15 @@ export function Allocations({
       target.itemId !== undefined ? allItems.find((m) => m.id === target.itemId) : undefined;
     const targetRule =
       target.ruleId !== undefined ? allRules.find((r) => r.id === target.ruleId) : undefined;
-    // 負債は「行そのもの」が目的地。シートは開かず、該当行を展開して視界へ入れる
-    // （断面で残高 0 になっていて行が無ければ、何も起きない = fail-closed）。
-    const targetLiability =
+    // 負債は「行そのもの」が目的地。シートは開かず、該当ルール行を視界へ入れる
+    // （ルールが無ければ何も起きない = fail-closed。資金繰り側が勘定科目へ振り分ける）。
+    const targetLoanRule =
       target.liabilityAccountId !== undefined
-        ? liabilities.find((l) => l.id === target.liabilityAccountId)
+        ? loanRuleForLiability(allRules, target.liabilityAccountId)
         : undefined;
     if (targetItem) setItemSheet({ existing: targetItem });
     else if (targetRule) setRuleSheet({ existing: targetRule });
-    else if (targetLiability) {
-      setFocusedLiabilityId(targetLiability.id);
-      setOpenRepayments((prev) => new Set(prev).add(targetLiability.id));
-    }
+    else if (targetLoanRule) setFocusedRuleId(targetLoanRule.id);
   }
 
   return (
@@ -463,11 +419,7 @@ export function Allocations({
           <p className="sr-only" role="status" data-ui={UI.allocations.searchCount}>
             {query === ''
               ? ''
-              : t('monthly.searchCount', {
-                  rules: rules.length,
-                  items: items.length,
-                  liabilities: shownLiabilities.length,
-                })}
+              : t('monthly.searchCount', { rules: rules.length, items: items.length })}
           </p>
         </div>
       ) : null}
@@ -521,12 +473,20 @@ export function Allocations({
                   : activeToday
                     ? { label: t('recurring.ruleNoEnd'), tone: 'neutral' }
                     : { label: t('recurring.statusNotStarted'), tone: 'neutral' };
+              // ローン（計上先が負債のルール）は残回数を名乗り、金額を負債の色で出す
+              // （v13.5 その3 の規約。表示は絶対値のままで符号は付けない）。
+              const loan = ruleIsLoan(r);
+              const remaining = loan ? loanRemainingInstallments(r, asOf) : undefined;
               return (
                 // 行そのものをタップ = そのルールの編集シート（カードタップ = 編集の単一正本）。
                 // 行の中に終了・切替のボタンが残るため <button> にはできない（入れ子不正）。
                 // 削除・解除は編集シート最下部（動詞体系 v13.1）・再開は撤去
                 //（実体は新規登録と同じで「終了の Undo」と誤読させるため）。
-                <li key={r.id}>
+                <li
+                  key={r.id}
+                  ref={focusedRuleId === r.id ? focusedRuleRef : undefined}
+                  {...(loan ? { 'data-account-id': r.spreadExpenseAccountId } : {})}
+                >
                   <div
                     className="list__item"
                     {...cardTapProps(`${t('common.edit')}: ${r.name}`, () =>
@@ -552,6 +512,11 @@ export function Allocations({
                           currency={currency}
                         />
                       </div>
+                      {remaining !== undefined ? (
+                        <div className="list__sub" data-ui={UI.allocations.loanRemaining}>
+                          {t('repay.installmentsLeft', { count: remaining })}
+                        </div>
+                      ) : null}
                       {ruleRefBroken(r) ? (
                         <div className="field__error" role="alert">
                           {t('recurring.refBroken')}
@@ -561,7 +526,11 @@ export function Allocations({
                     {/* 右列 = 上段 金額 / 下段 操作（または状態）。行をまたいで縦に揃う。 */}
                     <div className="row-trailing">
                       <span className="list__amount">
-                        <Money amount={r.amount} currency={currency} />
+                        <Money
+                          amount={r.amount}
+                          currency={currency}
+                          {...(loan ? { tone: 'liability' as const } : {})}
+                        />
                       </span>
                       {/* 一等地の動詞は tonal ボタン（v13.2: 押せる面を持たせる）。 */}
                       {canEndToday ? (
@@ -717,119 +686,6 @@ export function Allocations({
         </>
       )}
 
-      {/*
-       * 支払用負債（v13.4 ④ で資金繰りから移設）。行の設計図はルール行と同じで、
-       * 左 = 名前と予定 / 右列 = 上段 残高・下段 操作（返済を登録）。行そのものはタップ対象に
-       * しない（この行の「編集」= 返済予定の登録で、それが下段のボタンそのもの）。
-       * 検索で 0 件になったセクションは丸ごと出さない（他セクションと同じ規則）。
-       */}
-      {shownLiabilities.length === 0 ? null : (
-        <>
-          <p className="section-label" style={{ marginTop: 'var(--space-3)' }}>
-            {t('repay.sectionTitle')}
-          </p>
-          <p className="field__hint" style={{ marginBottom: 'var(--space-2)' }}>
-            {t('repay.sectionIntro')}
-          </p>
-          <ul
-            className="card list"
-            style={{ marginBottom: 'var(--space-4)' }}
-            data-ui={UI.allocations.liabilityList}
-          >
-            {shownLiabilities.map((l) => (
-              <li
-                key={l.id}
-                ref={focusedLiabilityId === l.id ? focusedLiabilityRef : undefined}
-                data-account-id={l.id}
-              >
-                <div className="list__item" data-ui={UI.allocations.liabilityRow}>
-                  <div className="list__main">
-                    <div className="list__title">{l.name}</div>
-                    {l.account.repaymentAccountId !== undefined &&
-                    l.account.repaymentDay !== undefined ? (
-                      <div className="list__sub">
-                        {t('repay.settingsLine', {
-                          account: name(l.account.repaymentAccountId),
-                          day: l.account.repaymentDay,
-                        })}
-                      </div>
-                    ) : null}
-                    {l.count > 0 ? (
-                      <div className="list__sub">
-                        {t('repay.nextDue')}: {l.nextDue ?? '—'}・
-                        {t('repay.installmentsLeft', { count: l.count })}・{t('repay.balance')}{' '}
-                        <Money amount={l.remaining} currency={currency} />
-                      </div>
-                    ) : (
-                      <div className="list__sub">{t('repay.noPlanHint')}</div>
-                    )}
-                  </div>
-                  {/* 右列 = 上段 残高 / 下段 動詞（tonal・高さは .btn の var(--tap)）。 */}
-                  <div className="row-trailing">
-                    <span className="list__amount">
-                      {/* 負債残高は専用トークンの色（C-2）。絶対値表示のままで符号は付けない。 */}
-                      <Money amount={l.balance} currency={currency} tone="liability" />
-                    </span>
-                    <button
-                      type="button"
-                      className="btn btn--tonal"
-                      onClick={() => setRepayFor({ account: l.account, balance: l.balance })}
-                      aria-label={`${t('repay.add')}: ${l.name}`}
-                      data-ui={UI.allocations.repayAdd}
-                    >
-                      {t('repay.add')}
-                    </button>
-                  </div>
-                </div>
-                {/* 展開 = 登録済みの返済（基準日より後の保存仕訳・借方 = この負債）。タップで編集。 */}
-                {l.repayments.length > 0 ? (
-                  <div style={{ padding: '0 var(--space-4) var(--space-3)' }}>
-                    <button
-                      type="button"
-                      className="collapse-toggle"
-                      aria-expanded={openRepayments.has(l.id)}
-                      onClick={() => toggleRepayments(l.id)}
-                      data-ui={UI.allocations.repaymentsToggle}
-                    >
-                      <Icon name={openRepayments.has(l.id) ? 'expand' : 'chevronRight'} size={16} />
-                      {t('repay.registered')}
-                    </button>
-                    {openRepayments.has(l.id) ? (
-                      <ul className="list" data-ui={UI.allocations.repaymentsList}>
-                        {l.repayments.map((e) => (
-                          <li key={e.id}>
-                            <button
-                              type="button"
-                              className="list__row-btn"
-                              onClick={() => onEditEntry(e)}
-                              aria-label={`${t('common.edit')}: ${e.date} ${e.description}`}
-                              data-ui={UI.allocations.repaymentRow}
-                            >
-                              <span>{e.date}</span>
-                              <span className="list__amount">
-                                <Money amount={repaymentEntryAmount(e, l.id)} currency={currency} />
-                              </span>
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-
-      {repayFor ? (
-        <RepaymentScheduleSheet
-          account={repayFor.account}
-          balance={repayFor.balance}
-          onClose={() => setRepayFor(null)}
-        />
-      ) : null}
-
       {itemSheet ? (
         <ContinuousCostItemSheet
           {...(itemSheet.existing !== undefined ? { existing: itemSheet.existing } : {})}
@@ -919,16 +775,19 @@ function AddChooserSheet({
 }
 
 /** 一覧で導出表示する種別。保存フィールドではない。 */
-type SheetKind = RecurringKind | 'manual';
+type SheetKind = RecurringKind | 'manual' | 'loan';
 
 /**
  * ルールの表示・編集用の種別（保存しない）。利用者が指定した論理的な行き先と
  * 源泉の role から導出する（費用ルールの保存上の借方=内部台帳は判定に使わない）。
+ * 計上先が負債科目なら**ローン**（返済ルール）。新しいフラグは持たず、ここでも
+ * 判定の正本は domain/loan.ts の isLoanRule に委ねる。
  */
 function sheetKindForRule(
   rule: RecurringRule,
   roleOf: (id: string) => AccountRole | undefined,
 ): SheetKind {
+  if (isLoanRule(rule, roleOf)) return 'loan';
   return (
     recurringKindOf(roleOf(recurringDestinationAccountId(rule)), roleOf(rule.creditAccountId)) ??
     'manual'
