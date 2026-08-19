@@ -33,7 +33,7 @@ import {
   ruleExistsAt,
 } from './accountLifetime';
 import { accountEndingBalanceViolations } from './accountEnding';
-import { isValidIsoDate, isValidIsoMonth } from './calendar';
+import { isValidIsoDate, isValidIsoMonth, MAX_LEDGER_DATE } from './calendar';
 import { ANNUAL_RETURN_BP_MAX, ANNUAL_RETURN_BP_MIN } from './investmentProjection';
 import { CATCH_UP_HARD_CAP_MONTHS, clampDayToMonth, isRecurringPostableRole } from './recurring';
 import { parseRuleEntryId, parseRuleItemId } from './recurringIds';
@@ -41,7 +41,13 @@ import { parseRuleEntryId, parseRuleItemId } from './recurringIds';
 const isoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, '日付は YYYY-MM-DD 形式である必要があります')
-  .refine(isValidIsoDate, '暦として正しい日付を指定してください');
+  .refine(isValidIsoDate, '暦として正しい日付を指定してください')
+  // 遠未来の日付は 1 つで導出（月次展開）を数万月ぶん走らせるため、導出側の clamp ではなく
+  // 保存・import の入口で一律拒否する（clamp は pin の残高保証を壊す。v13.8 監査 E）。
+  .refine(
+    (value) => value <= MAX_LEDGER_DATE,
+    `日付は ${MAX_LEDGER_DATE} 以前である必要があります`,
+  );
 
 const monthSchema = z
   .string()

@@ -11,7 +11,9 @@ import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../state/store';
 import { ADJUSTABLE_ACCOUNT_ROLES } from '../domain/accountRoles';
 import { isAdjustableAccountType } from '../domain/adjustment';
-import { isValidIsoDate } from '../domain/calendar';
+// isLedgerDate = 暦 + 上限（2100 年）。上限超えの日付で理論残高のライブ導出を走らせない
+// （遠未来の pin 候補は月次展開を数万月ぶん走らせ、保存前にシートが固まる。v13.8 監査 E）。
+import { isLedgerDate, MAX_LEDGER_DATE } from '../domain/calendar';
 // 理論残高は「この pin を置いたあとの世界での pin 直前残高」（v13.5 C-3）。
 // repository の保存側（createAdjustment / updateAdjustment）と**同じヘルパ**を通す
 // ——ずれると、シートが見せた差分と実際に按分されるスライス合計が食い違う。
@@ -44,7 +46,7 @@ export function AdjustmentCreateSheet({
   const [submitting, setSubmitting] = useState(false);
 
   const expected = useMemo(() => {
-    if (!ledger || !isValidIsoDate(date)) return 0;
+    if (!ledger || !isLedgerDate(date)) return 0;
     return adjustmentPinExpectedBalanceForLedger(ledger, { accountId: account.id, date });
   }, [account.id, ledger, date]);
   const digits = useMoneyDigits();
@@ -115,6 +117,7 @@ export function AdjustmentCreateSheet({
           type="date"
           value={date}
           onChange={setDate}
+          max={MAX_LEDGER_DATE}
           dataUi={UI.adjustments.date}
         />
         <TextInput
@@ -179,7 +182,7 @@ export function AdjustmentEditSheet({
   // adjustable は「科目が引けて、かつ補正できる type」を含意する（isAdjustableAccountType は
   // undefined を false にする）ので、target そのものは依存に取らない。
   const expected = useMemo(() => {
-    if (!ledger || !adjustable || !isValidIsoDate(date)) return 0;
+    if (!ledger || !adjustable || !isLedgerDate(date)) return 0;
     // 編集中の pin は母集合から外し、その id / createdAt を probe に載せる（除かないと
     // 補正が二重に効く。同日に別の pin があるときの走査順は保存後と同じになる）。
     const others = (ledger?.journalEntries ?? []).filter((e) => e.id !== entry.id);
@@ -261,6 +264,7 @@ export function AdjustmentEditSheet({
             type="date"
             value={date}
             onChange={setDate}
+            max={MAX_LEDGER_DATE}
             dataUi={UI.adjustments.editDate}
           />
           <TextInput

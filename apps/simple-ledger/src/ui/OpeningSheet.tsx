@@ -12,6 +12,7 @@ import { TextInput } from '@snishi/foundation/ui/Field';
 import { useLedger } from '../state/store';
 import { formatMinorForInput, parseAmountToMinor, sanitizeSignedAmountText } from './amountText';
 import { useMoneyDigits } from './money';
+import { MAX_LEDGER_DATE } from '../domain/calendar';
 import { todayLocal } from '../util/time';
 import type { Account, JournalEntry } from '../domain/types';
 import { t } from '../i18n';
@@ -102,6 +103,7 @@ export function OpeningRegisterSheet({
           type="date"
           value={date}
           onChange={setDate}
+          max={MAX_LEDGER_DATE}
           dataUi={UI.adjustments.openingRegisterDate}
         />
       </div>
@@ -194,6 +196,7 @@ export function OpeningEditSheet({ entry, onClose }: { entry: JournalEntry; onCl
             type="date"
             value={date}
             onChange={setDate}
+            max={MAX_LEDGER_DATE}
             dataUi={UI.adjustments.openingEditDate}
           />
           {/* 破壊的なほど下（動詞体系 v13.1）。行アクションには削除を置かない。 */}

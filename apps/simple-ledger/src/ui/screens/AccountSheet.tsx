@@ -22,6 +22,7 @@ import {
   parseAnnualReturnPercentText,
 } from '../../domain/investmentProjection';
 import { newId } from '../../domain/ids';
+import { MAX_LEDGER_DATE } from '../../domain/calendar';
 import { nowIso, todayLocal } from '../../util/time';
 import { boxForAccount, type AccountBox } from '../accountBoxes';
 import { errorText, t } from '../../i18n';
@@ -328,6 +329,7 @@ export function AccountSheet({
               label={t('ccItem.startDate')}
               type="date"
               value={startDate}
+              max={MAX_LEDGER_DATE}
               onChange={(value) => {
                 setStartDate(value);
                 setError(undefined);
@@ -339,6 +341,7 @@ export function AccountSheet({
               label={t('ccItem.endDate')}
               type="date"
               value={endDate}
+              max={MAX_LEDGER_DATE}
               onChange={(value) => {
                 setEndDate(value);
                 setError(undefined);
@@ -414,6 +417,7 @@ export function AccountSheet({
                 label={t('accounts.openingDate')}
                 type="date"
                 value={openingDate}
+                max={MAX_LEDGER_DATE}
                 onChange={setOpeningDate}
                 dataUi={UI.accounts.openingDate}
               />
