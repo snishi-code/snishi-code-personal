@@ -69,6 +69,8 @@ interface LedgerContextValue {
     existing?: { id: string; createdAt: string },
   ) => Promise<void>;
   removeEntry: (id: string, description: string) => Promise<void>;
+  /** 貼り付け一括登録（全行を 1 tx で保存。1 行でも失敗したら 1 件も入れない）。 */
+  createEntries: (inputs: SimpleEntryInput[]) => Promise<void>;
   /** 継続コスト資産の登録（購入の仕訳 + item を 1 tx で。creditAccountId 未指定 = 持ち込み）。 */
   createContinuousCost: (input: ContinuousCostInput) => Promise<void>;
   /** ローンで払う（負債科目 + 購入の仕訳 + 返済ルール、任意で持ち物を 1 tx で）。 */
@@ -218,6 +220,17 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         const entry = buildSimpleEntry(input, existing);
         return repo.upsertEntry(entry);
       });
+    },
+    [runMutation],
+  );
+
+  const createEntries = useCallback<LedgerContextValue['createEntries']>(
+    async (inputs) => {
+      await runMutation(
+        // 組み立て失敗（検証）も「未保存」として同じ経路で通知する（saveEntry と同じ契約）。
+        () => repo.createEntries(inputs.map((input) => buildSimpleEntry(input))),
+        () => ({ message: t('pasteImport.success', { count: inputs.length }) }),
+      );
     },
     [runMutation],
   );
@@ -513,6 +526,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       refresh,
       saveEntry,
       removeEntry,
+      createEntries,
       createContinuousCost,
       createLoanPurchase,
       saveMonthlyCost,
@@ -549,6 +563,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       refresh,
       saveEntry,
       removeEntry,
+      createEntries,
       createContinuousCost,
       createLoanPurchase,
       saveMonthlyCost,

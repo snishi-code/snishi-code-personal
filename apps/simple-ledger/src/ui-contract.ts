@@ -420,6 +420,13 @@ export const UI = {
     futureRow: 'cashflow.future.row',
     summary: 'cashflow.summary',
   },
+  // 仕訳の貼り付け一括登録（v13.10・メニューから。テキスト受け口 = ファイル取込ではない）
+  pasteImport: {
+    view: 'pasteImport.view',
+    text: 'pasteImport.text',
+    submit: 'pasteImport.submit',
+    errors: 'pasteImport.errors',
+  },
   settings: {
     view: 'settings.view',
     fractionDigits: 'settings.fractionDigits',

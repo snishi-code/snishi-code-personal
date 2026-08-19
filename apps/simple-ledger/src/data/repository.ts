@@ -1201,6 +1201,75 @@ async function deleteEntryUnlocked(id: string): Promise<void> {
   });
 }
 
+/**
+ * 貼り付け一括登録（v13.10）: **新規の通常仕訳だけ**を単一トランザクションで保存する。
+ * 1 行でも保存境界を通らなければ 1 件も書かない（fail-closed・部分取込を作らない）。
+ *
+ * upsertEntry の通常経路と同じ検証を全行に適用する: 由来メタ（ルール・補正・継続コスト）の
+ * 持ち込み拒否・assertEntrySavable（構造 zod / 参照科目 / 期間 / 台帳仕訳の禁止）・
+ * 終了残高ガード。新規専用なので既存 ID・バッチ内重複 ID は拒否する（編集は upsertEntry の
+ * 専用保護を通る唯一の経路のまま）。
+ */
+async function createEntriesUnlocked(entries: JournalEntry[]): Promise<void> {
+  if (entries.length === 0) return;
+  const stored = await getAll<JournalEntry>(STORE.journalEntries);
+  const existingIds = new Set(stored.map((entry) => entry.id));
+  const ctx = await loadSaveContext();
+  const ts = nowIso();
+  const accountUpdates = new Map<string, Account>();
+  const savables: JournalEntry[] = [];
+  const affectedAccountIds = new Set<string>();
+  const batchIds = new Set<string>();
+  for (const entry of entries) {
+    if (existingIds.has(entry.id) || batchIds.has(entry.id)) {
+      throw new LedgerError('error.entry.invalidStructure');
+    }
+    batchIds.add(entry.id);
+    if (parseRuleEntryId(entry.id) !== undefined) {
+      throw new LedgerError('error.recurring.generatedReadOnly');
+    }
+    if (
+      entry.metadata?.recurringRuleId !== undefined ||
+      entry.metadata?.recurringMonth !== undefined
+    ) {
+      throw new LedgerError('error.recurring.invalidStructure');
+    }
+    if (entry.metadata?.adjustment) throw new LedgerError('error.entry.adjustment');
+    if (entry.metadata?.monthlyCostId !== undefined || entry.metadata?.monthlyCostRecovery) {
+      throw new LedgerError('error.entry.monthlyCost');
+    }
+    for (const [accountId, account] of extendSystemStartsForReferences(
+      ctx,
+      entryAccountReferences(entry),
+      ts,
+    )) {
+      accountUpdates.set(accountId, account);
+    }
+    const savable = assertEntrySavable(entry, ctx);
+    savables.push(savable);
+    for (const line of savable.lines) affectedAccountIds.add(line.accountId);
+  }
+  const [monthlyCostItems, recurringRules] = await Promise.all([
+    getAll<MonthlyCostItem>(STORE.monthlyCostItems),
+    getAll<RecurringRule>(STORE.recurringRules),
+  ]);
+  assertEndedAssetLiabilityBalances(
+    {
+      accounts: [...ctx.byId.values()],
+      journalEntries: [...stored, ...savables],
+      monthlyCostItems,
+      recurringRules,
+    },
+    affectedAccountIds,
+  );
+  await writeWithRevision([STORE.accounts, STORE.journalEntries], (t) => {
+    const accountStore = t.objectStore(STORE.accounts);
+    for (const account of accountUpdates.values()) accountStore.put(account);
+    const entryStore = t.objectStore(STORE.journalEntries);
+    for (const savable of savables) entryStore.put(savable);
+  });
+}
+
 export interface RepaymentPlanInput {
   /** 返す負債（payment-liability | other-liability）。 */
   liabilityAccountId: string;
@@ -3443,6 +3512,7 @@ export const reorderAccounts = serializeMutation(reorderAccountsUnlocked);
 export const deleteAccount = serializeMutation(deleteAccountUnlocked);
 export const archiveAccount = serializeMutation(archiveAccountUnlocked);
 export const upsertEntry = serializeMutation(upsertEntryUnlocked);
+export const createEntries = serializeMutation(createEntriesUnlocked);
 export const deleteEntry = serializeMutation(deleteEntryUnlocked);
 export const createRepaymentEntries = serializeMutation(createRepaymentEntriesUnlocked);
 export const updateSettings = serializeMutation(updateSettingsUnlocked);

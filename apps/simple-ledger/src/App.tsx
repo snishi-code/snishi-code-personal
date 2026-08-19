@@ -32,6 +32,7 @@ import { Allocations, type AllocationsTarget } from './ui/screens/Allocations';
 import { Cashflow } from './ui/screens/Cashflow';
 import { Accounts } from './ui/screens/Accounts';
 import { Settings } from './ui/screens/Settings';
+import { PasteImport } from './ui/screens/PasteImport';
 import { Help } from './ui/screens/Help';
 import { EntrySheet, type EntryInit } from './ui/screens/EntrySheet';
 import { OnboardingSheet } from './ui/OnboardingSheet';
@@ -448,6 +449,10 @@ export function App() {
           />
         ) : null}
         {screen === 'accounts' ? <Accounts period={period} target={accountsTarget} /> : null}
+        {screen === 'pasteImport' ? (
+          // 成功したら仕訳一覧へ（入ったものをその場で確認・手直しできる位置に着地する）。
+          <PasteImport onDone={() => go('journal')} />
+        ) : null}
         {screen === 'settings' ? (
           <Settings onOpenOnboarding={() => setOnboardingManualOpen(true)} />
         ) : null}
