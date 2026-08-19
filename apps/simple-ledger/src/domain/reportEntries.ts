@@ -34,7 +34,7 @@ export interface ReportEntriesResult {
 
 /** 全地平ぶんの導出（キャッシュの中身・断面はここから切り出す）。 */
 interface FullDerivation {
-  /** 導出行（`cached` 側は日付昇順、直接導出は合流順）。 */
+  /** 導出行（合流順のまま。公開面へ出す側がソートする）。 */
   entries: JournalEntry[];
   /** 全地平ぶんの打ち切り診断（断面ごとに `truncationVisibleAt` で切る）。 */
   truncations: InvestmentProjectionTruncation[];
@@ -174,7 +174,10 @@ export function reportEntriesResultForAsOfUncached(
 ): ReportEntriesResult {
   const full = deriveAll(ledger, asOf);
   return {
-    entries: full.entries.filter((entry) => entry.date <= asOf),
+    // 公開契約は**日付昇順**（キャッシュ経路と同じ）。合流順のまま返すと、地平外の断面
+    // だけ並びが変わり契約が破れる（v13.8 監査・機構 2。sort は stable なので同日の中は
+    // 合流順 = キャッシュ経路と同一）。
+    entries: full.entries.filter((entry) => entry.date <= asOf).sort(byDate),
     investmentProjectionTruncations: full.truncations,
     unspreadAdjustments: full.unspreadAdjustments.filter((entry) => entry.date <= asOf),
   };
