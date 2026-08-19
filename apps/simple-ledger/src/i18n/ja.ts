@@ -567,8 +567,8 @@ export const ja = {
     '旧版データのままでは JSON の読み込みもできません。手順: ①「DB を初期化して再起動」で初期化 → ②起動後に設定から、現行版へ変換済みの JSON を読み込んでください。',
 
   'toast.saved': '保存しました。',
-  'toast.recurringSavedFollowupFailed':
-    'ルールは保存しましたが、画面の再読込に失敗しました。画面を開き直してください。',
+  'toast.savedFollowupFailed':
+    '操作は完了しましたが、画面の再読込に失敗しました。画面を開き直してください。',
   'toast.deleted': '削除しました。',
   'toast.exported': '書き出しました。',
   'toast.restored': '復元しました。',

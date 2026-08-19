@@ -1317,8 +1317,13 @@ function RecurringRuleSheet({
           danger
           onCancel={() => setPendingDelete(false)}
           onConfirm={async () => {
+            try {
+              await removeRecurringRule(existing.id);
+            } catch {
+              // 失敗 = 未保存: 閉じない（エラーは store が toast 済み・確定中状態は ConfirmDialog が解く）。
+              return;
+            }
             setPendingDelete(false);
-            await removeRecurringRule(existing.id).catch(() => undefined);
             onClose();
           }}
         />
@@ -1675,8 +1680,13 @@ function ContinuousCostItemSheet({
           danger
           onCancel={() => setPendingDelete(false)}
           onConfirm={async () => {
+            try {
+              await removeMonthlyCost(existing.id);
+            } catch {
+              // 失敗 = 未保存: 閉じない（エラーは store が toast 済み・確定中状態は ConfirmDialog が解く）。
+              return;
+            }
             setPendingDelete(false);
-            await removeMonthlyCost(existing.id).catch(() => undefined);
             onClose();
           }}
         />

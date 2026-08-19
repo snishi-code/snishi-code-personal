@@ -458,8 +458,13 @@ export function AccountSheet({
           dataUi={UI.accounts.deleteConfirm}
           onCancel={() => setPendingDelete(false)}
           onConfirm={async () => {
+            try {
+              await removeAccount(existing.id);
+            } catch {
+              // 失敗 = 未保存: 閉じない（エラーは store が toast 済み・確定中状態は ConfirmDialog が解く）。
+              return;
+            }
             setPendingDelete(false);
-            await removeAccount(existing.id).catch(() => undefined);
             onClose();
           }}
         />

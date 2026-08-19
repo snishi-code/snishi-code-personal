@@ -318,8 +318,13 @@ export function AdjustmentEditSheet({
           dataUi={UI.adjustments.deleteConfirm}
           onCancel={() => setPendingDelete(false)}
           onConfirm={async () => {
+            try {
+              await deleteAdjustment(entry.id);
+            } catch {
+              // 失敗 = 未保存: 閉じない（エラーは store が toast 済み・確定中状態は ConfirmDialog が解く）。
+              return;
+            }
             setPendingDelete(false);
-            await deleteAdjustment(entry.id).catch(() => undefined);
             onClose();
           }}
         />

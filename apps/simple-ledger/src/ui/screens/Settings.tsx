@@ -419,9 +419,13 @@ export function Settings({
           confirmLabel={t('snapshot.restore')}
           onCancel={() => setPendingRestore(null)}
           onConfirm={async () => {
-            const snap = pendingRestore;
+            try {
+              await restoreSnapshot(pendingRestore);
+            } catch {
+              // 失敗 = 未保存: 閉じない（エラーは store が toast 済み・確定中状態は ConfirmDialog が解く）。
+              return;
+            }
             setPendingRestore(null);
-            await restoreSnapshot(snap).catch(() => undefined);
             refreshSnapshots();
           }}
         />
@@ -435,9 +439,13 @@ export function Settings({
           danger
           onCancel={() => setPendingDeleteSnap(null)}
           onConfirm={async () => {
-            const snap = pendingDeleteSnap;
+            try {
+              await deleteSnapshot(pendingDeleteSnap.id);
+            } catch {
+              // 失敗 = 未保存: 閉じない（エラーは store が toast 済み・確定中状態は ConfirmDialog が解く）。
+              return;
+            }
             setPendingDeleteSnap(null);
-            await deleteSnapshot(snap.id).catch(() => undefined);
             refreshSnapshots();
           }}
         />
@@ -452,8 +460,13 @@ export function Settings({
           requireKeyword={t('reset.keyword')}
           onCancel={() => setConfirmReset(false)}
           onConfirm={async () => {
+            try {
+              await resetAll();
+            } catch {
+              // 失敗 = 未保存: 閉じない（エラーは store が toast 済み・確定中状態は ConfirmDialog が解く）。
+              return;
+            }
             setConfirmReset(false);
-            await resetAll().catch(() => undefined);
             refreshSnapshots();
           }}
         />

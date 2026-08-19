@@ -1249,8 +1249,13 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           danger
           onCancel={() => setPendingDelete(false)}
           onConfirm={async () => {
+            try {
+              await removeEntry(init.entry.id, init.entry.description);
+            } catch {
+              // 失敗 = 未保存: 閉じない（エラーは store が toast 済み・確定中状態は ConfirmDialog が解く）。
+              return;
+            }
             setPendingDelete(false);
-            await removeEntry(init.entry.id, init.entry.description).catch(() => undefined);
             onClose();
           }}
         />

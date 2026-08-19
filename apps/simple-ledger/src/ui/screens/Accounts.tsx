@@ -135,8 +135,8 @@ export function Accounts({
       endDate: undefined,
       updatedAt: nowIso(),
     };
-    // エラーは store が toast 済み（握り潰さず、ここでは未処理拒否だけ防ぐ）。
-    await saveAccount(restored).catch(() => undefined);
+    // 失敗は throw のまま呼び出し側（確認ダイアログ）へ返す = 成功したときだけ閉じる。
+    await saveAccount(restored);
   }
 
   // 箱内の非アーカイブ内訳を 1 つ上/下と入れ替え、その並びを sortIndex として保存する
@@ -427,9 +427,13 @@ export function Accounts({
           dataUi={UI.accounts.archiveConfirm}
           onCancel={() => setPendingArchive(null)}
           onConfirm={async () => {
-            const account = pendingArchive;
+            try {
+              await archiveAccount(pendingArchive.id);
+            } catch {
+              // 失敗 = 未保存: 閉じない（エラーは store が toast 済み・確定中状態は ConfirmDialog が解く）。
+              return;
+            }
             setPendingArchive(null);
-            await archiveAccount(account.id).catch(() => undefined);
           }}
         />
       ) : null}
@@ -442,9 +446,13 @@ export function Accounts({
           dataUi={UI.accounts.unarchiveConfirm}
           onCancel={() => setPendingUnarchive(null)}
           onConfirm={async () => {
-            const account = pendingUnarchive;
+            try {
+              await unarchive(pendingUnarchive);
+            } catch {
+              // 失敗 = 未保存: 閉じない（エラーは store が toast 済み・確定中状態は ConfirmDialog が解く）。
+              return;
+            }
             setPendingUnarchive(null);
-            await unarchive(account);
           }}
         />
       ) : null}
