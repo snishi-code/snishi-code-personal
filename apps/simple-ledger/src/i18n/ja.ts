@@ -636,6 +636,8 @@ export const ja = {
   'error.entry.ledgerAccount': '月割り台帳の科目は持ち物の登録からだけ使えます。',
   'error.account.archiveBalance':
     '残高が残っている科目は終了できません。先に振替で残高を 0 にしてください。',
+  'error.account.projectionDependents':
+    'この科目は終了済み投資科目「{name}」の投影計上先です。この操作で「{name}」の終了点残高が 0 でなくなるため実行できません。先に投資科目側の利回り設定や残高を調整してください。',
   'error.recurring.everyMonthsInvalid': '周期は 1〜1200 か月の整数で入力してください。',
   'error.recurring.dayOfMonthInvalid': '起票日は 1〜31 日の整数で入力してください。',
   'error.recurring.periodInvalid': 'ルールの開始日・終了日を確認してください。',
