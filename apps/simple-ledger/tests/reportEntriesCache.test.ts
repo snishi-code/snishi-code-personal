@@ -331,6 +331,28 @@ describe('導出キャッシュ: 切り出し === 直接導出', () => {
   });
 });
 
+describe('導出キャッシュ: 凍結（機構 2-2）', () => {
+  it('キャッシュされた行・明細は凍結されていて、書き換えは fail-fast に落ちる', () => {
+    // キャッシュは全断面へ配られる共有物。書き換えできると以後の全断面が静かに汚染される。
+    const source = fullSource();
+    const first = reportEntriesResultForAsOf(source, '2030-12-31').entries;
+    const stored = first.find((entry) => entry.metadata?.virtual === undefined)!;
+    const derived = first.find((entry) => entry.metadata?.virtual === true)!;
+    for (const target of [stored, derived]) {
+      expect(() => {
+        (target as { date: string }).date = '1999-01-01';
+      }).toThrow(TypeError);
+      expect(() => {
+        target.lines[0]!.amount = 1;
+      }).toThrow(TypeError);
+    }
+    // 書き換えが弾かれたので、再切り出しは同じ中身のまま。
+    expect(normalize(reportEntriesResultForAsOf(source, '2030-12-31').entries)).toEqual(
+      normalize(first),
+    );
+  });
+});
+
 describe('導出キャッシュ: 二分探索の境界', () => {
   const source = plainSource();
 

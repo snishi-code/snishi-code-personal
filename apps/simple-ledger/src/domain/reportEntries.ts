@@ -100,6 +100,22 @@ function truncationVisibleAt(
 }
 
 /**
+ * キャッシュに載せる行を凍結する（v13.8 監査・機構 2-2）。
+ * キャッシュは ledger の寿命じゅう全断面へ配られる共有物なので、消費側のうっかり書き換えは
+ * 「以後の全断面が静かに汚染される」事故になる。strict mode では書き換えが TypeError で
+ * 即座に落ちる = fail-fast（黙って汚染されるより早く割れる方を選ぶ）。
+ */
+function freezeEntry(entry: JournalEntry): void {
+  for (const line of entry.lines) Object.freeze(line);
+  Object.freeze(entry.lines);
+  if (entry.metadata !== undefined) {
+    if (entry.metadata.adjustment !== undefined) Object.freeze(entry.metadata.adjustment);
+    Object.freeze(entry.metadata);
+  }
+  Object.freeze(entry);
+}
+
+/**
  * 全地平（`CONTINUOUS_COST_HARD_CAP`）まで 1 回導出して日付昇順に並べたもの。
  * 同じ ledger オブジェクトで 2 回目以降はここを使い回す。
  */
@@ -110,6 +126,12 @@ function cachedDerivation(ledger: ReportEntrySource): FullDerivation {
   // sort は stable なので、同日の中では合流順（実仕訳 → 継続コスト → ルール導出 →
   // 按分スライス → 利回り）がそのまま残る。
   full.entries.sort(byDate);
+  for (const entry of full.entries) freezeEntry(entry);
+  for (const entry of full.unspreadAdjustments) freezeEntry(entry);
+  for (const truncation of full.truncations) Object.freeze(truncation);
+  Object.freeze(full.entries);
+  Object.freeze(full.unspreadAdjustments);
+  Object.freeze(full.truncations);
   derivationCache.set(ledger, full);
   return full;
 }
