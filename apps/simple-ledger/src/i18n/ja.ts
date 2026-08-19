@@ -397,6 +397,8 @@ export const ja = {
   // 桁あふれで投影を打ち切った科目の注記（アプリ都合の端点を名乗る・仮の数字が本物の顔をしない）。
   'projection.truncatedNotice':
     '「{name}」の投影は金額が計算上限を超えるため {month} で打ち切りました。それ以降の投影は表示に含まれません。',
+  'adjust.unspreadNotice':
+    '補正「{description}」（{date}）は計上先が見つからないため按分できず、記録どおりの仕訳のまま集計しています（復旧表示）。科目を復元するか、補正を削除して作り直してください。',
   'matrix.monthLabel': '{month}月',
   // 年をまたぐ窓なので、年の変わり目の列だけ年を名乗る（読み上げは常に年つき）。
   'matrix.monthLabelWithYear': '{year}年{month}月',

@@ -109,8 +109,9 @@ interface CollectedPins {
   /** 科目 ID → その科目の pin（走査順 = comparePins）。 */
   pinsByAccount: Map<string, JournalEntry[]>;
   /**
-   * 按分できなかった pin（対象科目が科目一覧に無い等の破損データ）。
+   * 按分できなかった pin（**完全整合性を欠く**破損データ）。
    * **stored のまま集計へ戻す**: 除外だけして置き換えないと差額が黙って消える。
+   * 戻した行は gap 算定の母集合にも入る（adjustmentSpread 側）= 足し戻しと算定が一致する。
    */
   unspread: JournalEntry[];
 }
@@ -119,6 +120,13 @@ interface CollectedPins {
  * **pin の読み方の単一正本**（対象科目 = metadata.adjustment.accountId・順序 = comparePins）。
  * 按分（adjustmentSpread）と投資の複利起点（lastAdjustmentAnchors）が同じ解釈を共有する。
  * 仕訳の行から対象科目を推測しない——metadata が正本。
+ *
+ * 按分できる pin の条件は**完全整合性**（v13.8 監査 H）:
+ *  1. 対象科目が引けて、補正できる type であること
+ *  2. 実効計上先（投資は投影計上先・それ以外は記録された相手科目）が引けて、
+ *     対象科目と別であること——欠けたまま按分すると、存在しない科目へのスライスや
+ *     自己相殺スキップで pin の残高保証が黙って壊れる
+ * どれか欠ける pin は unspread（stored のまま集計へ戻す = 復旧表示）。
  */
 function collectPins(
   accounts: readonly Account[],
@@ -130,8 +138,20 @@ function collectPins(
   for (const pin of adjustments) {
     const accountId = pin.metadata?.adjustment?.accountId;
     const target = accountId === undefined ? undefined : byId.get(accountId);
-    // 対象科目が引けない / 補正できない type の破損データは按分せず stored のまま戻す。
     if (accountId === undefined || !target || !isAdjustableAccountType(target.type)) {
+      unspread.push(pin);
+      continue;
+    }
+    // 実効計上先 = counterpartFor と同じ解決（投資の宣言が有効なら投影計上先へ寄る。
+    // 宣言の無い科目は記録された相手科目そのもの）。存在しない・対象と同一なら按分不能。
+    const declared = investmentReturnDeclaration(target, byId)?.projectionAccountId;
+    const storedCounterpartId = pin.metadata?.adjustment?.counterpartAccountId;
+    const effectiveCounterpartId =
+      declared ??
+      (storedCounterpartId !== undefined && byId.has(storedCounterpartId)
+        ? storedCounterpartId
+        : undefined);
+    if (effectiveCounterpartId === undefined || effectiveCounterpartId === accountId) {
       unspread.push(pin);
       continue;
     }
@@ -285,11 +305,15 @@ export function adjustmentPinExpectedBalance(
     createdAt: probe.createdAt ?? PROBE_SORT_KEY,
     updatedAt: probe.createdAt ?? PROBE_SORT_KEY,
   };
-  const pins = [
-    ...(collectPins(accounts, adjustments).pinsByAccount.get(probe.accountId) ?? []),
-    probePin,
-  ].sort(comparePins);
-  for (const step of walkPins(account, pins, touchingEntries(baseEntries, probe.accountId))) {
+  const collected = collectPins(accounts, adjustments);
+  const pins = [...(collected.pinsByAccount.get(probe.accountId) ?? []), probePin].sort(
+    comparePins,
+  );
+  // 按分されない pin（unspread）は stored のまま集計に残る = 理論残高の母集合にも含める
+  // （adjustmentSpread の gap 算定と同じ世界を見る。監査 H）。
+  const effectiveBase =
+    collected.unspread.length === 0 ? baseEntries : [...baseEntries, ...collected.unspread];
+  for (const step of walkPins(account, pins, touchingEntries(effectiveBase, probe.accountId))) {
     if (step.pin === probePin) return step.expected;
   }
   return 0;
@@ -310,6 +334,10 @@ export function adjustmentSpread(
   if (adjustments.length === 0) return { entries: [], unspread: [] };
   const byId = new Map(accounts.map((account) => [account.id, account] as const));
   const { pinsByAccount, unspread } = collectPins(accounts, adjustments);
+  // unspread の stored 行は最終的に集計へ足し戻される（reportEntries の合流）。gap の算定
+  // 母集合からだけ除くと、破損 pin の行が正常 pin の対象科目を動かしたとき、pin 日の残高が
+  // actualBalance + その増減 になって残高保証が破れる（監査 H）。算定も同じ世界で行う。
+  const effectiveBase = unspread.length === 0 ? baseEntries : [...baseEntries, ...unspread];
 
   const entries: JournalEntry[] = [];
   for (const [accountId, pins] of pinsByAccount) {
@@ -317,7 +345,7 @@ export function adjustmentSpread(
     for (const { pin, anchor, gap } of walkPins(
       account,
       pins,
-      touchingEntries(baseEntries, accountId),
+      touchingEntries(effectiveBase, accountId),
     )) {
       if (gap === 0) continue;
 

@@ -32,6 +32,7 @@ import type { MessageKey } from '../../i18n';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { assertSafeAmount } from '../../domain/safeSum';
 import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
+import { AdjustmentUnspreadNotice } from '../components/AdjustmentUnspreadNotice';
 
 /** ホームの仕訳一覧の 1 ページぶん（「さらに表示」で足す刻み）。 */
 const HOME_ENTRY_PAGE = 50;
@@ -148,21 +149,23 @@ export function Dashboard({
     });
   };
 
-  const { pl, bs, livingTotal, investmentProjectionTruncations } = useMemo(() => {
-    const accounts = ledger?.accounts ?? [];
-    // 導出込み（継続コスト・定期ルール・補正の按分・投資の利回り）。v13.4 ② 以降、
-    // 利回りは最後の補正より後の全断面に効く（未来だけでなく過去の断面にも現れる）。
-    const display = ledger ? displayEntriesResultForAsOf(ledger, basis.asOf) : null;
-    const entries = display?.entries ?? [];
-    const breakdown = livingCostBreakdownForRange(accounts, entries, range);
-    return {
-      pl: deriveProfitAndLoss(accounts, entries, range),
-      bs: deriveBalanceSheet(accounts, entries, basis.asOf),
-      // 支出合計・純益は domain の値をそのまま使う（UI で式を再実装しない）。
-      livingTotal: breakdown.total,
-      investmentProjectionTruncations: display?.investmentProjectionTruncations ?? [],
-    };
-  }, [basis.asOf, ledger, range]);
+  const { pl, bs, livingTotal, investmentProjectionTruncations, unspreadAdjustments } =
+    useMemo(() => {
+      const accounts = ledger?.accounts ?? [];
+      // 導出込み（継続コスト・定期ルール・補正の按分・投資の利回り）。v13.4 ② 以降、
+      // 利回りは最後の補正より後の全断面に効く（未来だけでなく過去の断面にも現れる）。
+      const display = ledger ? displayEntriesResultForAsOf(ledger, basis.asOf) : null;
+      const entries = display?.entries ?? [];
+      const breakdown = livingCostBreakdownForRange(accounts, entries, range);
+      return {
+        pl: deriveProfitAndLoss(accounts, entries, range),
+        bs: deriveBalanceSheet(accounts, entries, basis.asOf),
+        // 支出合計・純益は domain の値をそのまま使う（UI で式を再実装しない）。
+        livingTotal: breakdown.total,
+        investmentProjectionTruncations: display?.investmentProjectionTruncations ?? [],
+        unspreadAdjustments: display?.unspreadAdjustments ?? [],
+      };
+    }, [basis.asOf, ledger, range]);
 
   // 6 分類の金額。値は domain の導出をそのまま使い、恒等行だけ式で作る（UI で式を再実装しない）。
   const sectionAmounts: Record<DisplaySectionKey, number> = {
@@ -191,6 +194,7 @@ export function Dashboard({
           truncations={visibleProjectionTruncations}
           accounts={ledger?.accounts ?? []}
         />
+        <AdjustmentUnspreadNotice unspread={unspreadAdjustments} />
 
         {/* 額縁: 収支 + 財政状態の 6 枠を sticky 固定し、下の仕訳だけが流れる
             （実ユーズ④・作者決定 2026-08-12「6枠を固定」）。 */}

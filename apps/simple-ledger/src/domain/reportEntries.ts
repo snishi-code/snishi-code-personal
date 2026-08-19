@@ -25,6 +25,11 @@ export interface ReportEntriesResult {
    * 「導出を含む」と言い続けず、止まった事実を名乗る（数字が黙って横ばいの顔をしない）。
    */
   investmentProjectionTruncations: InvestmentProjectionTruncation[];
+  /**
+   * 按分できず stored のまま集計へ戻した補正 pin（完全整合性を欠く破損データ・監査 H）。
+   * これは**復旧処理**なので、画面は黙って通常表示に混ぜず「復旧表示」と名乗る。
+   */
+  unspreadAdjustments: JournalEntry[];
 }
 
 /** 全地平ぶんの導出（キャッシュの中身・断面はここから切り出す）。 */
@@ -37,6 +42,8 @@ interface FullDerivation {
   horizon: string;
   /** 補正（pin）の最遠日。`opening` 打ち切りが見え始める断面の判定に使う。 */
   maxAdjustmentDate: string | undefined;
+  /** 按分できず stored のまま戻した補正 pin（断面では日付で切って見せる）。 */
+  unspreadAdjustments: JournalEntry[];
 }
 
 /**
@@ -151,6 +158,7 @@ export function reportEntriesResultForAsOf(
     investmentProjectionTruncations: cached.truncations.filter((truncation) =>
       truncationVisibleAt(truncation, asOf, cached.maxAdjustmentDate),
     ),
+    unspreadAdjustments: cached.unspreadAdjustments.filter((entry) => entry.date <= asOf),
   };
 }
 
@@ -168,6 +176,7 @@ export function reportEntriesResultForAsOfUncached(
   return {
     entries: full.entries.filter((entry) => entry.date <= asOf),
     investmentProjectionTruncations: full.truncations,
+    unspreadAdjustments: full.unspreadAdjustments.filter((entry) => entry.date <= asOf),
   };
 }
 
@@ -259,6 +268,7 @@ function deriveAll(ledger: ReportEntrySource, asOf: string): FullDerivation {
     truncations: projection.truncations,
     horizon,
     maxAdjustmentDate,
+    unspreadAdjustments: spread.unspread,
   };
 }
 
