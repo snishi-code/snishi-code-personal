@@ -285,6 +285,37 @@ export const monthlyCostItemSchema = z
     }
   });
 
+/** 導出専用メタのキー（reportEntries の結果にだけ現れる印。保存・wire には決して入れない）。 */
+const DERIVED_ONLY_METADATA_KEYS = [
+  'virtual',
+  'ccKind',
+  'continuousCostId',
+  'adjustmentSliceOf',
+  'investmentProjectionOf',
+] as const;
+
+/**
+ * 保存できる仕訳メタ = entryMetadataSchema + **導出専用メタの明示拒否**（v13.8 監査 機構3）。
+ * 未知キーの strip（自己修復）に任せると、導出行（按分スライス・利回り投影・月割り行）が
+ * **実仕訳として**取り込まれて二重計上になる。rec- / recurringRuleId の明示拒否
+ * （パッケージ superRefine）と同じ扱いに揃える。strip は superRefine の後に走るため、
+ * 生のキーを先に見る record 段を挟む。
+ */
+const storableEntryMetadataSchema = z
+  .record(z.string(), z.unknown())
+  .superRefine((meta, ctx) => {
+    for (const key of DERIVED_ONLY_METADATA_KEYS) {
+      if (meta[key] !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `導出専用メタ(${key})を持つ仕訳は保存されません（表示時に導出されます）`,
+          path: [key],
+        });
+      }
+    }
+  })
+  .pipe(entryMetadataSchema);
+
 export const journalEntrySchema = z
   .object({
     id: z.string().min(1),
@@ -293,7 +324,7 @@ export const journalEntrySchema = z
     lines: z.array(journalLineSchema).min(2),
     memo: z.string().max(1000).optional(),
     kind: z.enum(['normal', 'opening']),
-    metadata: entryMetadataSchema.optional(),
+    metadata: storableEntryMetadataSchema.optional(),
     // 諸口のグループ ID。v12 は**予約のみ**（UI・集計は未実装）なので形式だけを見る。
     // 相互参照（同 groupId の仕訳が何本あるか等）は検証しない = グループに件数の
     // 不変条件を持たせない設計（1 本に減ったら普通の仕訳に退化する）。

@@ -1502,6 +1502,8 @@ describe('保存境界の fail-closed（構造・参照検証 + i18n エラー�
       { virtual: true },
       { continuousCostId: 'cc-1' },
       { ccKind: 'monthly-allocation' },
+      { adjustmentSliceOf: 'pin-1' },
+      { investmentProjectionOf: 'invest-1' },
     ];
     for (const [index, metadata] of forbidden.entries()) {
       const entry = buildSimpleEntry({

@@ -585,6 +585,29 @@ describe('勘定科目の存在期間（schema/import）', () => {
   });
 });
 
+describe('導出専用メタの wire 拒否（v13.8 監査 機構3）', () => {
+  // strip（自己修復）に任せると導出行が実仕訳として取り込まれ二重計上になるため、
+  // rec- / recurringRuleId と同じく明示拒否する（保存境界 assertEntrySavable と対称）。
+  it.each([
+    ['virtual', { virtual: true }],
+    ['ccKind', { ccKind: 'monthly-allocation' }],
+    ['continuousCostId', { continuousCostId: 'cc-1' }],
+    ['adjustmentSliceOf', { adjustmentSliceOf: 'pin-1' }],
+    ['investmentProjectionOf', { investmentProjectionOf: 'invest-1' }],
+  ])('%s を持つ仕訳を拒否する', (_key, metadata) => {
+    expect(journalEntrySchema.safeParse({ ...validEntry, metadata }).success).toBe(false);
+  });
+
+  it('導出専用メタの無い仕訳は従来どおり受け入れ、未知キーは strip する', () => {
+    const parsed = journalEntrySchema.safeParse({
+      ...validEntry,
+      metadata: { inputMode: 'expense', legacyRemovedKey: 'x' },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.metadata).toEqual({ inputMode: 'expense' });
+  });
+});
+
 describe('entry metadata', () => {
   it('metadata なしの仕訳も有効', () => {
     expect(journalEntrySchema.safeParse(validEntry).success).toBe(true);

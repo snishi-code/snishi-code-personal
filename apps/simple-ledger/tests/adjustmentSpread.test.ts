@@ -609,8 +609,9 @@ describe('asOf からの独立と壊れた入力', () => {
 });
 
 describe('保存境界（wire 非接触）', () => {
-  it('adjustmentSliceOf は stored 仕訳のメタに残らない（投影行と同じ扱い）', () => {
-    const parsed = journalEntrySchema.parse({
+  it('adjustmentSliceOf を名乗る仕訳は wire で拒否する（strip の自己修復に任せない・機構3）', () => {
+    // strip すると導出行が実仕訳として取り込まれ二重計上になるため、明示拒否へ変更（v13.8）。
+    const result = journalEntrySchema.safeParse({
       id: 'e1',
       date: '2026-04-10',
       description: 'x',
@@ -623,7 +624,7 @@ describe('保存境界（wire 非接触）', () => {
       createdAt: TS,
       updatedAt: TS,
     });
-    expect(parsed.metadata).toEqual({ inputMode: 'manual' });
+    expect(result.success).toBe(false);
   });
 });
 

@@ -369,7 +369,10 @@ function assertEntrySavable(entry: JournalEntry, ctx: SaveContext): JournalEntry
   if (
     entry.metadata?.virtual !== undefined ||
     entry.metadata?.ccKind !== undefined ||
-    entry.metadata?.continuousCostId !== undefined
+    entry.metadata?.continuousCostId !== undefined ||
+    // 按分スライス・利回り投影の印も導出専用（wire の明示拒否と対称・v13.8 監査 機構3）。
+    entry.metadata?.adjustmentSliceOf !== undefined ||
+    entry.metadata?.investmentProjectionOf !== undefined
   ) {
     throw new LedgerError('error.entry.virtual');
   }
