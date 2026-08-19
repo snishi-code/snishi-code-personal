@@ -325,6 +325,15 @@ describe('時間平面の数値レンズ', () => {
       expect(within(matrixEl()).queryByRole('rowheader', { name: /食費/ })).toBeNull();
     });
 
+    it('フローとストックの段の切り替わりに区切り線を引く（stock 性の変化で判定・監査 C）', () => {
+      renderTimeline({ mode: 'date', date: '2026-07-15' });
+      const sectionRows = [...matrixEl().querySelectorAll('.period-matrix__row--section')].map(
+        (row) => row.getAttribute('data-row-key'),
+      );
+      // ストック（資産〜純資産） → フロー（収入）と、フロー（収支） → ストック（純資産の箱）。
+      expect(sectionRows).toEqual(['box:income', 'box:equity']);
+    });
+
     it('箱のタップで科目を開き、もう一度で閉じる（aria-expanded が名乗る）', () => {
       renderTimeline({ mode: 'date', date: '2026-07-15' });
 

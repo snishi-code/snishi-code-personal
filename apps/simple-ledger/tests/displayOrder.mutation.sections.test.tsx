@@ -22,8 +22,6 @@ vi.mock('../src/domain/displayOrder', async () => {
     ...actual,
     DISPLAY_SECTION_GROUPS: groups,
     DISPLAY_SECTION_KEYS: keys,
-    isDisplaySectionGroupStart: (key: DisplaySectionKey) =>
-      groups.some((group, index) => index > 0 && group.sections[0] === key),
   };
 });
 

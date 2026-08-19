@@ -18,7 +18,6 @@ import {
   accountsInDisplayBox,
   compareAccountOrder,
   displayBoxOf,
-  isDisplaySectionGroupStart,
   isIdentitySection,
   orderedDisplayBoxes,
 } from '../src/domain/displayOrder';
@@ -125,8 +124,7 @@ describe('表示順マスタ（6 分類）', () => {
     expect(DISPLAY_SECTION_GROUPS.flatMap((group) => group.sections)).toEqual([
       ...DISPLAY_SECTION_KEYS,
     ]);
-    // 区切り線は 2 段目の先頭にだけ立つ。
-    expect(DISPLAY_SECTION_KEYS.filter(isDisplaySectionGroupStart)).toEqual(['totalAssets']);
+    // 区切り線は行の stock 性の変化から引く（PeriodMatrixTable 側・v13.8 監査 C）。
   });
 
   it('3 レンズ共通の木は箱の並び + 恒等行の自動配置（式の右辺の最後の箱の直後）', () => {
