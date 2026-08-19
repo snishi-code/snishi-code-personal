@@ -233,6 +233,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [loanFromAccountId, setLoanFromAccountId] = useState('');
   const [loanNameError, setLoanNameError] = useState(false);
   const [loanEndDateError, setLoanEndDateError] = useState(false);
+  const [loanMonthlyError, setLoanMonthlyError] = useState(false);
   const [loanFromError, setLoanFromError] = useState(false);
   const loanActive = canArrangeLoan && loanMode;
   const enableLoanMode = () => {
@@ -343,10 +344,13 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     const fromBad = loanFromAccountId === '';
     const endBad =
       loanEndDate.trim() === '' || loanCount < 1 || loanCount > MONTHLY_AMOUNTS_HARD_CAP;
+    // 月額は切り捨て（監査 D）: 月額 1 未満（回数 > 総額）は保存境界が拒否するので先に示す。
+    const monthlyBad = !endBad && form.amount >= 1 && loanMonthly < 1;
     setLoanNameError(nameBad);
     setLoanFromError(fromBad);
     setLoanEndDateError(endBad);
-    return !nameBad && !fromBad && !endBad;
+    setLoanMonthlyError(monthlyBad);
+    return !nameBad && !fromBad && !endBad && !monthlyBad;
   }
 
   async function onSave() {
@@ -984,8 +988,15 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         onChange={(v) => {
           setLoanEndDate(v);
           setLoanEndDateError(false);
+          setLoanMonthlyError(false);
         }}
-        error={loanEndDateError ? t('entry.error.loanEndDate') : undefined}
+        error={
+          loanEndDateError
+            ? t('entry.error.loanEndDate')
+            : loanMonthlyError
+              ? t('entry.error.loanMonthlyZero')
+              : undefined
+        }
         dataUi={UI.journal.entry.loanEndDate}
       />
       <div className="row-actions">
@@ -998,6 +1009,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             onClick={() => {
               setLoanEndDate(loanRuleEndDate(loanFirstDate, years * 12));
               setLoanEndDateError(false);
+              setLoanMonthlyError(false);
             }}
             data-ui={UI.journal.entry.loanQuickSpan}
           >
@@ -1022,7 +1034,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         error={loanFromError ? t('entry.error.loanFrom') : undefined}
         dataUi={UI.journal.entry.loanFrom}
       />
-      {loanCount >= 1 && form.amount >= 1 ? (
+      {loanCount >= 1 && form.amount >= 1 && loanMonthly >= 1 ? (
         <>
           <p className="field__hint" data-ui={UI.journal.entry.loanPreview}>
             {t('entry.loanPreview', {

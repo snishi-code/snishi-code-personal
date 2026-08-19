@@ -93,18 +93,35 @@ describe('月額の導出', () => {
     expect(loanMonthlyAmount(3600000, 36)).toBe(100000);
   });
 
-  it('割り切れないときは四捨五入し、差は残高に残る（丸めて消さない）', () => {
+  it('割り切れないときは切り捨て、正の端数が残高に残る（過返済にしない・監査 D）', () => {
     const monthly = loanMonthlyAmount(1000000, 60);
-    expect(monthly).toBe(16667);
-    expect(loanScheduledTotal(monthly, 60)).toBe(1000020);
-    // 差が出たことを画面が示せる（借入額 − 予定合計）。
-    expect(1000000 - loanScheduledTotal(monthly, 60)).toBe(-20);
+    expect(monthly).toBe(16666);
+    expect(loanScheduledTotal(monthly, 60)).toBe(999960);
+    // 差（借入額 − 予定合計）は常に 0 以上 = 返済し切った負債がマイナス残高にならない。
+    expect(1000000 - loanScheduledTotal(monthly, 60)).toBe(40);
+    // 監査 D の具体例: 四捨五入だと 1,667×6 = 10,002 > 10,000（過返済）になっていた。
+    expect(loanMonthlyAmount(10000, 6)).toBe(1666);
+    expect(10000 - loanScheduledTotal(1666, 6)).toBe(4);
   });
 
-  it('不正な入力は 0（保存境界が拒む値をそのまま渡す・UI 側で先に弾く）', () => {
+  it('月額 × 回数 ≤ 総額（floor の普遍性: どの total/count でも過返済にならない）', () => {
+    for (const [total, count] of [
+      [1, 1],
+      [7, 3],
+      [10000, 6],
+      [999999, 7],
+      [5, 10],
+    ] as const) {
+      expect(loanScheduledTotal(loanMonthlyAmount(total, count), count)).toBeLessThanOrEqual(total);
+    }
+  });
+
+  it('不正な入力と回数 > 総額（月額 1 未満）は 0（保存境界が拒否する値）', () => {
     expect(loanMonthlyAmount(0, 12)).toBe(0);
     expect(loanMonthlyAmount(12000, 0)).toBe(0);
     expect(loanMonthlyAmount(1.5, 12)).toBe(0);
+    // 回数 > 総額: 旧実装は Math.max(1, …) で月額 1 に持ち上げ、1×count > total の過返済を許した。
+    expect(loanMonthlyAmount(5, 10)).toBe(0);
   });
 });
 

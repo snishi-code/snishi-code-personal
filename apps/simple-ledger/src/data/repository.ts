@@ -2832,6 +2832,10 @@ async function createLoanPurchaseUnlocked(input: LoanPurchaseInput): Promise<Loa
   const count = loanInstallmentCount(firstRepayment, input.repaymentEndDate);
   // 起票ゼロのルールは保存しない（v13.3 の不変則）。UI は保存前に同じ式で弾く。
   if (count < 1) throw new LedgerError('error.loan.noRepayment');
+  // 月額は切り捨て（監査 D）。月額 1 未満（回数 > 総額）は返済として成立しない =
+  // 「月額 × 回数 ≤ 総額」（過返済でマイナス残高を作らない）を保存境界で固定する。
+  const monthly = loanMonthlyAmount(input.amount, count);
+  if (monthly < 1) throw new LedgerError('error.loan.monthlyTooSmall');
 
   const [ctx, accounts, currentEntries, currentItems, recurringRules] = await Promise.all([
     loadSaveContext(),
@@ -2923,7 +2927,7 @@ async function createLoanPurchaseUnlocked(input: LoanPurchaseInput): Promise<Loa
   const rule: RecurringRule = {
     id: newId(),
     name: loanName,
-    amount: loanMonthlyAmount(input.amount, count),
+    amount: monthly,
     dayOfMonth: loanDayOfMonth(firstRepayment),
     everyMonths: 1,
     spreadExpenseAccountId: liability.id,
