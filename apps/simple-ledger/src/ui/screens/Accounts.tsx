@@ -80,11 +80,11 @@ export function Accounts({
   const today = todayLocal();
   const basis = reportBasis(period, today);
   const asOf = basis.asOf;
-  const display = ledger ? displayEntriesResultForAsOf(ledger, asOf, today) : null;
+  const display = ledger ? displayEntriesResultForAsOf(ledger, asOf) : null;
   const entries = filterByDateRange(display?.entries ?? [], undefined, asOf);
   // 費用・収入の発生額はホームと同じ期間（flowRange）で数える（C-1。導出＝統一エンジン）。
   const flowEntries = filterByDateRange(entries, basis.flowRange.from, basis.flowRange.to);
-  const todayDisplay = ledger ? displayEntriesResultForAsOf(ledger, today, today) : null;
+  const todayDisplay = ledger ? displayEntriesResultForAsOf(ledger, today) : null;
   const todayEntries = filterByDateRange(todayDisplay?.entries ?? [], undefined, today);
   const currency = ledger?.settings.currency ?? '';
 
@@ -256,14 +256,6 @@ export function Accounts({
                           <div className="list__main">
                             <div className="list__title account-list__title">
                               <span>{account.name}</span>
-                              {isSystemManaged ? (
-                                <span
-                                  className="tag tag--neutral"
-                                  data-ui={UI.accounts.systemBadge}
-                                >
-                                  {t('accounts.autoBadge')}
-                                </span>
-                              ) : null}
                               {usedIds.has(account.id) ? (
                                 <span className="tag tag--teal">{t('accounts.inUse')}</span>
                               ) : null}
@@ -273,86 +265,102 @@ export function Accounts({
                                 </span>
                               ) : null}
                             </div>
+                            {/* 金額は右列へ移したので、ここは何の額かのラベルだけを残す。 */}
                             <div className="list__sub">
-                              {isFlowBox ? (
-                                <>
-                                  {t('accounts.periodAmount', { period: periodLabel(period) })}:{' '}
-                                  <Money
-                                    amount={
-                                      summarizeEntriesForAccount(account, flowEntries, () => true)
-                                        .total
-                                    }
-                                    currency={currency}
-                                  />
-                                </>
-                              ) : (
-                                <>
-                                  {t('accounts.balance')}:{' '}
-                                  <Money
-                                    amount={accountBalance(account.id, account.type, entries)}
-                                    currency={currency}
-                                  />
-                                </>
-                              )}
+                              {isFlowBox
+                                ? t('accounts.periodAmount', { period: periodLabel(period) })
+                                : t('accounts.balance')}
                             </div>
                           </div>
-                          {isSystemManaged ? null : reordering ? (
-                            orderIndex >= 0 ? (
+                          {/* 右列 = 上段 金額 / 下段 操作（または状態）。月割り台帳の行と同じ設計図。 */}
+                          <div className="row-trailing">
+                            <span className="list__amount">
+                              {isFlowBox ? (
+                                <Money
+                                  amount={
+                                    summarizeEntriesForAccount(account, flowEntries, () => true)
+                                      .total
+                                  }
+                                  currency={currency}
+                                />
+                              ) : (
+                                // 負債の箱の残高だけ専用トークンの色（C-2）。表示は絶対値の
+                                // ままで符号は付けない（箱の見出しが色以外の手がかり）。
+                                <Money
+                                  amount={accountBalance(account.id, account.type, entries)}
+                                  currency={currency}
+                                  {...(box.type === 'liability'
+                                    ? { tone: 'liability' as const }
+                                    : {})}
+                                />
+                              )}
+                            </span>
+                            {isSystemManaged /* 残高調整科目は表示だけ。操作の代わりに「自動」を
+                                 同じ位置へ置く（縦揃えを崩さず、操作が無い理由も読める）。 */ ? (
+                              <span className="tag tag--neutral" data-ui={UI.accounts.systemBadge}>
+                                {t('accounts.autoBadge')}
+                              </span>
+                            ) : reordering ? (
+                              orderIndex >= 0 ? (
+                                <div className="row-actions">
+                                  <button
+                                    type="button"
+                                    className="icon-btn"
+                                    disabled={orderIndex === 0}
+                                    onClick={() => moveAccount(orderable, orderIndex, 'up')}
+                                    aria-label={`${t('accounts.moveUp')}: ${account.name}`}
+                                    data-ui={UI.accounts.moveUp}
+                                  >
+                                    <span aria-hidden="true" style={{ fontSize: 16 }}>
+                                      ↑
+                                    </span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="icon-btn"
+                                    disabled={orderIndex === orderable.length - 1}
+                                    onClick={() => moveAccount(orderable, orderIndex, 'down')}
+                                    aria-label={`${t('accounts.moveDown')}: ${account.name}`}
+                                    data-ui={UI.accounts.moveDown}
+                                  >
+                                    <span aria-hidden="true" style={{ fontSize: 16 }}>
+                                      ↓
+                                    </span>
+                                  </button>
+                                </div>
+                              ) : null
+                            ) : (
                               <div className="row-actions">
+                                {canAdjust ? (
+                                  <button
+                                    type="button"
+                                    className="btn btn--tonal"
+                                    onClick={rowActionClick(() => setAdjustingAccount(account))}
+                                    aria-label={`${t('adjust.rowAction')}: ${account.name}`}
+                                    data-ui={UI.accounts.adjust}
+                                  >
+                                    {t('adjust.rowAction')}
+                                  </button>
+                                ) : null}
+                                {/* 動詞は「終了 / 終了を解除」の文字ボタン（v13.2: アイコンを撤去）。 */}
                                 <button
                                   type="button"
-                                  className="icon-btn"
-                                  disabled={orderIndex === 0}
-                                  onClick={() => moveAccount(orderable, orderIndex, 'up')}
-                                  aria-label={`${t('accounts.moveUp')}: ${account.name}`}
-                                  data-ui={UI.accounts.moveUp}
+                                  className="btn btn--tonal"
+                                  onClick={rowActionClick(() => toggleArchive(account))}
+                                  aria-label={`${
+                                    account.archived
+                                      ? t('accounts.unarchive')
+                                      : t('accounts.archive')
+                                  }: ${account.name}`}
+                                  data-ui={UI.accounts.archiveToggle}
                                 >
-                                  <span aria-hidden="true" style={{ fontSize: 16 }}>
-                                    ↑
-                                  </span>
-                                </button>
-                                <button
-                                  type="button"
-                                  className="icon-btn"
-                                  disabled={orderIndex === orderable.length - 1}
-                                  onClick={() => moveAccount(orderable, orderIndex, 'down')}
-                                  aria-label={`${t('accounts.moveDown')}: ${account.name}`}
-                                  data-ui={UI.accounts.moveDown}
-                                >
-                                  <span aria-hidden="true" style={{ fontSize: 16 }}>
-                                    ↓
-                                  </span>
+                                  {account.archived
+                                    ? t('accounts.unarchive')
+                                    : t('accounts.archive')}
                                 </button>
                               </div>
-                            ) : null
-                          ) : (
-                            <div className="row-actions">
-                              {canAdjust ? (
-                                <button
-                                  type="button"
-                                  className="btn btn--ghost"
-                                  style={{ minHeight: 'var(--tap)' }}
-                                  onClick={rowActionClick(() => setAdjustingAccount(account))}
-                                  aria-label={`${t('adjust.rowAction')}: ${account.name}`}
-                                  data-ui={UI.accounts.adjust}
-                                >
-                                  <Icon name="adjust" size={16} />
-                                  {t('adjust.rowAction')}
-                                </button>
-                              ) : null}
-                              <button
-                                type="button"
-                                className="icon-btn"
-                                onClick={rowActionClick(() => toggleArchive(account))}
-                                aria-label={`${
-                                  account.archived ? t('accounts.unarchive') : t('accounts.archive')
-                                }: ${account.name}`}
-                                data-ui={UI.accounts.archiveToggle}
-                              >
-                                <Icon name={account.archived ? 'restore' : 'archive'} size={18} />
-                              </button>
-                            </div>
-                          )}
+                            )}
+                          </div>
                         </div>
                       </li>
                     );

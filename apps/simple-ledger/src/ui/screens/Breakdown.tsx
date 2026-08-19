@@ -5,7 +5,7 @@
  *  - revenue（収入・フロー）: 期間の収入科目内訳 + 収入の推移（bar）。
  *  - asset（資産・ストック）: 期間末時点の資産内訳を 4 枠で表示 + 資産の推移（line）。
  *    枠 = 自由に動かせるお金 / 自由に動かせないお金 / 投資 / 継続コスト台帳（1 行 = 残存価値
- *    合計・タップで「毎月のもの」へ）。各枠に小計・最後に全体合計。
+ *    合計・タップで「月割り台帳」へ）。各枠に小計・最後に全体合計。
  *  - liability（負債・ストック）: 同上 + 資金繰り/返済計画への導線。
  *  - equity（純資産・ストック）: 元手 + 今期の損益 + 純資産の推移（line）。
  */
@@ -26,7 +26,14 @@ import type { AccountBalance } from '../../domain/types';
 import type { MessageKey } from '../../i18n';
 import type { Screen } from '../navigation';
 import type { JournalFilter } from './Journal';
-import { ACCOUNT_ACCENTS, boxByKey, type AccountAccent } from '../accountBoxes';
+import { ACCOUNT_ACCENTS, boxByKey, displayBoxLook, type AccountAccent } from '../accountBoxes';
+import {
+  ASSET_GROUP_KEYS,
+  displayBoxIncludes,
+  orderedDisplayBoxes,
+  type DisplayBoxKey,
+} from '../../domain/displayOrder';
+import { ASSET_GROUP_LABEL_KEYS, assetGroupOf, type AssetGroupKey } from '../../domain/assetGroups';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { sumAmounts } from '../../domain/safeSum';
 import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
@@ -52,7 +59,7 @@ interface BreakdownFrame {
   rows: AccountBalance[];
   subtotalUi: string;
   accent: AccountAccent;
-  /** 継続コスト台帳だけは複数科目を見せず、残存価値合計の1行として毎月のものへ遷移する。 */
+  /** 継続コスト台帳だけは複数科目を見せず、残存価値合計の1行として月割り台帳へ遷移する。 */
   aggregateLedger?: boolean;
 }
 
@@ -107,6 +114,31 @@ const CONFIG: Record<BreakdownSection, SectionConfig> = {
   },
 };
 
+/** 資産の 4 枠の見た目（分類そのものは domain/assetGroups が正本）。 */
+const ASSET_FRAME_SUBTOTAL_UI: Record<AssetGroupKey, string> = {
+  free: UI.assetsBreakdown.freeSubtotal,
+  fixed: UI.assetsBreakdown.fixedSubtotal,
+  investment: UI.assetsBreakdown.investmentSubtotal,
+  ledger: UI.assetsBreakdown.ledgerSubtotal,
+};
+
+const ASSET_FRAME_ACCENTS: Record<AssetGroupKey, AccountAccent> = {
+  free: ACCOUNT_ACCENTS.assetFree,
+  fixed: ACCOUNT_ACCENTS.assetFixed,
+  investment: boxByKey('investment').accent,
+  ledger: ACCOUNT_ACCENTS.continuingCost,
+};
+
+/** 負債の 2 枠。並びは持たず、表示順マスタから箱を切り出す（下の orderedDisplayBoxes）。 */
+type LiabilityFrameKey = Extract<DisplayBoxKey, 'shortTermDebt' | 'longTermDebt'>;
+
+const LIABILITY_FRAME_KEYS: readonly LiabilityFrameKey[] = ['shortTermDebt', 'longTermDebt'];
+
+const LIABILITY_FRAME_SUBTOTAL_UI: Record<LiabilityFrameKey, string> = {
+  shortTermDebt: UI.liabilitiesBreakdown.shortTermSubtotal,
+  longTermDebt: UI.liabilitiesBreakdown.longTermSubtotal,
+};
+
 function Row({
   b,
   currency,
@@ -155,8 +187,8 @@ export function Breakdown({
   const range = basis.flowRange;
   const asOf = basis.asOf;
   const reportDisplay = useMemo(
-    () => (ledger ? displayEntriesResultForAsOf(ledger, asOf, today) : null),
-    [asOf, ledger, today],
+    () => (ledger ? displayEntriesResultForAsOf(ledger, asOf) : null),
+    [asOf, ledger],
   );
   const reportEntries = useMemo(() => reportDisplay?.entries ?? [], [reportDisplay]);
 
@@ -178,66 +210,33 @@ export function Breakdown({
   const visibleProjectionTruncations =
     trends?.investmentProjectionTruncations ?? reportDisplay?.investmentProjectionTruncations ?? [];
 
-  const drill = (accountId: string) =>
-    cfg.kind === 'flow'
-      ? onDrillDown({ accountId, ...range })
-      : onDrillDown({ accountId, to: asOf });
+  // ドリルの窓はフロー・ストックで同じ（reportBasis の flowRange = 月初〜断面、
+  // 休眠モード（year/all）もフローと同じ range）。ストックだけ from を落とすと、
+  // 「いま見ている期間」の画面から全期間の仕訳一覧へ落ちる = 窓が黙って変わる。
+  // 期間を外して見たい人は仕訳一覧側でフィルタを外せる（現行挙動のまま）。
+  const drill = (accountId: string) => onDrillDown({ accountId, ...range });
 
   // 資産は4枠、負債はカード/未払とローンの2枠。同じ描画構造と色の正本を共有する。
+  // 資産の枠分けは domain/assetGroups が正本（時間平面の数値レンズの資産行の展開と共有）。
   const frames: BreakdownFrame[] | null =
     section === 'asset'
-      ? [
-          {
-            key: 'free',
-            labelKey: 'assets.frame.free',
-            rows: rows.filter(
-              (b) => b.account.role === 'daily-asset' && b.account.movable !== false,
-            ),
-            subtotalUi: UI.assetsBreakdown.freeSubtotal,
-            accent: ACCOUNT_ACCENTS.assetFree,
-          },
-          {
-            key: 'fixed',
-            labelKey: 'assets.frame.fixed',
-            rows: rows.filter(
-              (b) => b.account.role === 'daily-asset' && b.account.movable === false,
-            ),
-            subtotalUi: UI.assetsBreakdown.fixedSubtotal,
-            accent: ACCOUNT_ACCENTS.assetFixed,
-          },
-          {
-            key: 'investment',
-            labelKey: 'assets.frame.investment',
-            rows: rows.filter((b) => b.account.role === 'investment-asset'),
-            subtotalUi: UI.assetsBreakdown.investmentSubtotal,
-            accent: boxByKey('investment').accent,
-          },
-          {
-            key: 'ledger',
-            labelKey: 'assets.frame.ledger',
-            rows: rows.filter((b) => b.account.role === 'continuing-cost-asset'),
-            subtotalUi: UI.assetsBreakdown.ledgerSubtotal,
-            accent: ACCOUNT_ACCENTS.continuingCost,
-            aggregateLedger: true,
-          },
-        ]
+      ? ASSET_GROUP_KEYS.map((key) => ({
+          key,
+          labelKey: ASSET_GROUP_LABEL_KEYS[key],
+          rows: rows.filter((b) => assetGroupOf(b.account) === key),
+          subtotalUi: ASSET_FRAME_SUBTOTAL_UI[key],
+          accent: ASSET_FRAME_ACCENTS[key],
+          // 継続コスト台帳だけは科目を並べず、残存価値合計の 1 行にする。
+          ...(key === 'ledger' ? { aggregateLedger: true } : {}),
+        }))
       : section === 'liability'
-        ? [
-            {
-              key: 'shortTermDebt',
-              labelKey: 'box.shortTermDebt',
-              rows: rows.filter((b) => b.account.role === 'payment-liability'),
-              subtotalUi: UI.liabilitiesBreakdown.shortTermSubtotal,
-              accent: boxByKey('shortTermDebt').accent,
-            },
-            {
-              key: 'longTermDebt',
-              labelKey: 'box.longTermDebt',
-              rows: rows.filter((b) => b.account.role === 'other-liability'),
-              subtotalUi: UI.liabilitiesBreakdown.longTermSubtotal,
-              accent: boxByKey('longTermDebt').accent,
-            },
-          ]
+        ? orderedDisplayBoxes(LIABILITY_FRAME_KEYS).map((key) => ({
+            key,
+            labelKey: displayBoxLook(key).labelKey,
+            rows: rows.filter((b) => displayBoxIncludes(key, b.account)),
+            subtotalUi: LIABILITY_FRAME_SUBTOTAL_UI[key],
+            accent: displayBoxLook(key).accent,
+          }))
         : null;
 
   return (

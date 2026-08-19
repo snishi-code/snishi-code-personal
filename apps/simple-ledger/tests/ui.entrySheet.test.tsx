@@ -11,7 +11,7 @@ import { EntrySheet } from '../src/ui/screens/EntrySheet';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
-import { loadLedger, upsertEntry } from '../src/data/repository';
+import { createContinuousCost, loadLedger, upsertEntry } from '../src/data/repository';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { todayLocal } from '../src/util/time';
@@ -198,5 +198,88 @@ describe('EntrySheet — 反対仕訳の取消済み / 残り', () => {
       );
       expect(saved.map((e) => e.lines[0]!.amount).sort((a, b) => a - b)).toEqual([FIRST, 250000]);
     });
+  });
+});
+
+/*
+ * 動詞体系（v13.1・作者確定 2026-08-16）: 削除は編集シート最下部（赤・注意文つき）+
+ * 確認ダイアログの 2 段防御。仕訳一覧の行アクションからは削除を撤去した。
+ */
+describe('EntrySheet — 削除（編集シート最下部）', () => {
+  it('通常の仕訳は削除ボタン → 確認で消え、シートが閉じる', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    const entry: JournalEntry = {
+      id: 'delete-target-entry',
+      date: todayLocal(),
+      description: '消される支出',
+      kind: 'normal',
+      lines: [
+        { accountId: expense.id, side: 'debit', amount: 1200 },
+        { accountId: cash.id, side: 'credit', amount: 1200 },
+      ],
+      metadata: { inputMode: 'expense' },
+      createdAt: '2026-08-15T00:00:00.000Z',
+      updatedAt: '2026-08-15T00:00:00.000Z',
+    };
+    await upsertEntry(entry);
+    const onClose = vi.fn();
+    render(
+      <Providers>
+        <Ready>
+          <EntrySheet init={{ kind: 'edit', entry }} onClose={onClose} />
+        </Ready>
+      </Providers>,
+    );
+
+    await waitFor(() => {
+      expect(q(UI.journal.entry.delete)).toBeInTheDocument();
+    });
+    const deleteBtn = q(UI.journal.entry.delete)!;
+    expect(deleteBtn).toBeEnabled();
+    fireEvent.click(deleteBtn);
+    // 確認ダイアログを挟む（2 段防御）。確定で削除・onClose。
+    const confirm = await screen.findByRole('dialog', { name: '仕訳を削除しますか？' });
+    fireEvent.click(confirm.querySelector(`[data-ui="${UI.dialog.confirm}"]`)!);
+    await waitFor(async () => {
+      expect((await loadLedger()).journalEntries.find((e) => e.id === entry.id)).toBeUndefined();
+    });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('購入の仕訳（持ち物と 1:1）は削除を理由つきで不活性にする', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    const item = await createContinuousCost({
+      name: '削除できない購入',
+      amount: 50000,
+      startDate: todayLocal(),
+      expenseAccountId: expense.id,
+      creditAccountId: cash.id,
+    });
+    const purchase = (await loadLedger()).journalEntries.find(
+      (e) => e.metadata?.monthlyCostId === item.id && e.metadata.monthlyCostRecovery !== true,
+    )!;
+    render(
+      <Providers>
+        <Ready>
+          <EntrySheet init={{ kind: 'edit', entry: purchase }} onClose={() => undefined} />
+        </Ready>
+      </Providers>,
+    );
+
+    await waitFor(() => {
+      expect(q(UI.journal.entry.delete)).toBeInTheDocument();
+    });
+    const deleteBtn = q(UI.journal.entry.delete)!;
+    expect(deleteBtn).toBeDisabled();
+    // fail-closed の理由を見せる（持ち物側の削除に同乗する）。
+    expect(
+      screen.getByText(
+        '購入の仕訳は削除できません。持ち物の項目（月割り台帳）を削除すると一緒に消えます。',
+      ),
+    ).toBeInTheDocument();
   });
 });

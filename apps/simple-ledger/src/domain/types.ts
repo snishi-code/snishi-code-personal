@@ -90,27 +90,6 @@ export interface JournalLine {
 }
 
 /**
- * @deprecated タグ機能は 2026-08-15 に撤去した（実ユーズ 0 件・作者決定）。
- * 型は交換フォーマット v12 の形を保つためだけに残る「受理のみ」の存在で、
- * 作る経路（画面・保存 API）は無い。import されたタグは黙って保持し export へ素通しする。
- * フィールドごとの削除は v13 の版上げに同乗させる。
- */
-export type TagScope = 'entry';
-
-/** @deprecated 撤去済み（受理のみ・v13 でフィールドごと削除）。TagScope を参照。 */
-export interface Tag {
-  id: string;
-  name: string;
-  /** 常に 'entry'（仕訳全体タグ）。互換のためフィールドは残す。 */
-  scope: TagScope;
-  /** 表示色（CSS トークン名など）。任意。 */
-  color?: string;
-  archived: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
  * 仕訳。MVP では「1 借方・1 貸方・同額」のみ（lines.length === 2）。
  * 型としては複数行を許し、将来の複合仕訳へ拡張できる。
  */
@@ -153,11 +132,18 @@ export interface EntryMetadata {
   /** 仮想仕訳の種別。funding=資産化（支払元→対象資産）/ monthly-allocation=月割り（対象資産→月割り先）。 */
   ccKind?: 'funding' | 'monthly-allocation';
   /**
-   * 投資利回り投影の仮想仕訳の印（対象の投資科目 ID）。保存されない導出専用で、
-   * `displayEntriesForAsOf` の結果にのみ現れる（保存不変条件用の `reportEntriesForAsOf`
-   * には決して合流しない）。実仕訳・保存系・export には入れない。
+   * 投資の利回り導出の仮想仕訳の印（対象の投資科目 ID）。保存されない導出専用で、
+   * `reportEntriesForAsOf` の結果にのみ現れる（v13.4 ② で保存不変条件へ合流した。
+   * 利回りは仮の数字ではなく作者の宣言）。実仕訳・保存系・export には入れない。
    */
   investmentProjectionOf?: string;
+  /**
+   * 残高補正の按分スライスの印（宣言した補正仕訳＝ pin の ID）。保存されない導出専用で、
+   * `reportEntriesForAsOf` の結果にのみ現れる（実仕訳・保存系・export には入れない。
+   * `investmentProjectionOf` と同じく schema の entryMetadata に無い＝保存境界で剥がれる）。
+   * 補正の stored 仕訳は集計から外れ、代わりにこの印を持つスライスが区間へ並ぶ。
+   */
+  adjustmentSliceOf?: string;
   /**
    * 定期ルールから自動起票された仕訳の由来（recurringMonth とペア）。
    * 起票後は通常の仕訳として編集・削除できる。ルール削除時はこのメタデータを剥がして
@@ -217,6 +203,12 @@ export interface MonthlyCostItem {
  * 行き先が費用または収入（差引形 = 給与から差し引く形）なら起票時に継続コスト item を作り、
  * ルール自体は費用/収入減を直接作らない。それ以外（収入・振替・積立）は行き先へ直接起票する。
  */
+/** ルール由来 item の清算（早期終了の上書き）。month はそのルールが導出する起票月。 */
+export interface RuleSettlement {
+  month: string;
+  endDate: string;
+}
+
 export interface RecurringRule {
   id: string;
   /** 摘要（起票される仕訳の description）。 */
@@ -228,13 +220,12 @@ export interface RecurringRule {
   /** 何か月ごとに起票するか（必須。1 = 毎月）。位相の基点は startMonth。 */
   everyMonths: number;
   /**
-   * 正規化済みの計上先（任意）。行き先 role が費用または収入（差引形）なら必ず継続コスト化し、
-   * 起票のたびに item（id = `ccr-{ruleId}-{month}`・endDate = 周期末）を同一 tx で自動生成し、
-   * 購入の仕訳の借方は継続コスト台帳に固定される。v7 の費用・差引形ルールはこの
-   * 正規形だけを保存する。
+   * 正規化済みの計上先（必須・v13.1 の c 案で直接形を廃止）。全ルールが台帳経由で、
+   * 起票のたびに item（id = `ccr-{ruleId}-{month}`・endDate = 周期末）を導出し、
+   * 購入の仕訳の借方は継続コスト台帳に固定される。
    */
-  spreadExpenseAccountId?: string;
-  /** 保存上の借方（月割りルールでは継続コスト台帳、それ以外では論理的な行き先）。 */
+  spreadExpenseAccountId: string;
+  /** 保存上の借方（常に継続コスト台帳）。 */
   debitAccountId: string;
   /** 源泉（資金 / カード / 収入カテゴリ）。 */
   creditAccountId: string;
@@ -250,10 +241,11 @@ export interface RecurringRule {
    */
   endDate?: string;
   /**
-   * 起票済みカーソル（この月まで処理済み）。キャッチアップが管理する。
-   * 起票済み仕訳をユーザーが削除しても再起票しない（スキップの尊重）。
+   * 清算（v13）: ルール由来 item の早期終了の上書き。month の起票が作る item の endDate を
+   * 既定（次回起票日）から置き換える。解約・プラン切り替えの「切り替え日で終える」の保存形。
+   * 回収の振替は従来どおり実仕訳（monthlyCostRecovery + 導出 item の決定的 ID 参照）。
    */
-  postedThroughMonth?: string;
+  settlements?: RuleSettlement[];
   createdAt: string;
   updatedAt: string;
 }
@@ -269,11 +261,6 @@ export interface JournalEntry {
   kind: JournalEntryKind;
   /** 付帯情報（入力方法・逆仕訳リンク・自動生成の由来など）。任意。 */
   metadata?: EntryMetadata;
-  /**
-   * @deprecated タグ機能は撤去済み（2026-08-15）。新規に付く経路は無いが、import 済み
-   * データの値は黙って保持し export へ素通しする（v13 でフィールドごと削除）。
-   */
-  tagIds?: string[];
   /**
    * 諸口（複数フロー行の束）のグループ ID。v12 で**予約のみ**（2026-08-11 設計合意・
    * グループ ID 方式）。UI・集計は未実装で、検証は形式のみ。グループに「2 行以上」等の
@@ -333,7 +320,6 @@ export interface LedgerExportPackage {
   revision: number;
   accounts: Account[];
   journalEntries: JournalEntry[];
-  tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   /** 定期ルール。交換 JSON では必須（旧形式はリポジトリ外で一度だけ変換する）。 */
   recurringRules: RecurringRule[];
@@ -384,7 +370,6 @@ export interface Ledger {
   accounts: Account[];
   /** 実仕訳（保存される正本）。保存系・export・残高チェックはこれだけを見る。 */
   journalEntries: JournalEntry[];
-  tags: Tag[];
   monthlyCostItems: MonthlyCostItem[];
   recurringRules: RecurringRule[];
 }

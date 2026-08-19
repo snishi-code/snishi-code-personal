@@ -156,7 +156,7 @@ describe('カードタップ = 編集', () => {
     await renderAllocations();
     await screen.findByText(item.name);
 
-    fireEvent.click(await screen.findByRole('button', { name: `アーカイブ: ${item.name}` }));
+    fireEvent.click(await screen.findByRole('button', { name: `終了: ${item.name}` }));
 
     // 押した操作（アーカイブのダイアログ）だけが起き、編集シートは開かない。
     await waitFor(() => {

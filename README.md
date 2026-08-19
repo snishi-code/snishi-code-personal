@@ -8,7 +8,7 @@
 
 ## アプリ
 
-- `apps/simple-ledger` — 個人利用向けのローカル家計簿 PWA。仕訳・継続コスト・資金繰りを
+- `apps/simple-ledger` — 個人利用向けのローカル家計簿 PWA。仕訳・持ち物の月割り・資金繰りを
   端末内（IndexedDB / localStorage）のデータとして扱い、外部送信は行いません。
   バックアップや端末移行は JSON export/import で行います。
 - `apps/template-memo` — 決まった型で繰り返し書くメモのための PWA。場所を定める「フレーム」と

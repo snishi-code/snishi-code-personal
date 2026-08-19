@@ -1,25 +1,45 @@
 /*
- * 年間・全体マトリクスの集計。
+ * 時間平面の**値**（数値レンズの表・グラフレンズの折れ線が共有する集計）。
  *
  * `displayEntriesForAsOf` で実仕訳と導出仕訳を一度だけ展開した配列を受け取り、
- * 日付順の単一走査でフロー（PL）と列末のストック（BS）を同時に作る。
+ * 日付順の単一走査でフロー（期間の発生額）と列末のストック（残高の断面）を同時に作る。
  * この関数内では導出仕訳を再展開しない。
+ *
+ * 列は「見せたい窓」を呼び出し側が渡す:
+ *   - 数値レンズ = 月の並び（年をまたぐ）または年の並び
+ *   - グラフレンズ = 線分レンズと同じバケット（日 / 月 / 年）
+ * 全期間を常に全列 DOM 化しないための可視範囲 + 前後バッファは呼び出し側の責務。
+ *
+ * 行は**共通ラベル列の木**（`domain/lensRows`）と同じ id で返す（v13.6 H3）。
+ * レンズごとの独自の行集合・独自の階層はここには無い:
+ *   `box:<箱>` = その箱の科目の合計 / `account:<id>` = 科目単独 /
+ *   `identity:net` = 収入 − 支出 / `identity:netAssets` = 資産 − 負債。
+ *
+ * **親子の整合**: 箱の行の値は、必ず「その箱に属する科目の値の列ごとの合計」に一致する。
+ * 値は minor unit の整数で、途中の丸めを一切しない。
+ *
+ * **符号**: すべて自然符号（負債・純資産は貸方正）。数直線上で反転させたいレンズは
+ * `debitSignedBalance` を描画側で掛ける（集計側は 1 つの規約だけを持つ）。
  */
-import { compareAccountOrder } from './accountOrder';
+import { DISPLAY_BOX_KEYS, displayBoxIncludes } from './displayOrder';
+import { lensRowId } from './lensRows';
 import { naturalDelta } from './accounting';
-import { isContinuousCostMonthlyAllocationEntry } from './livingCost';
 import type { Account, JournalEntry } from './types';
 import { assertSafeAmount } from './safeSum';
 
 export type PeriodMatrixScope =
-  | { mode: 'year'; year: number }
-  | { mode: 'all'; years: readonly number[] };
+  /** 月ズーム。'YYYY-MM' の並び（年をまたいでよい・順不同/重複は正規化する）。 */
+  | { mode: 'months'; months: readonly string[] }
+  /** 年ズーム。年の並び（順不同/重複は正規化する）。 */
+  | { mode: 'all'; years: readonly number[] }
+  /** 任意のバケット（グラフレンズ = 線分レンズと同じ窓。昇順・重ならないこと）。 */
+  | { mode: 'buckets'; buckets: readonly { key: string; from: string; to: string }[] };
 
 export interface PeriodMatrixColumn {
-  /** 年間は YYYY-MM、全体は YYYY。 */
+  /** 月ズームは YYYY-MM、年ズームは YYYY、バケットは呼び出し側のキー。 */
   key: string;
   year: number;
-  /** 年間列だけが持つ 1〜12 の月。 */
+  /** 月ズームの列だけが持つ 1〜12 の月。 */
   month?: number;
   /** 列の暦上の開始日。 */
   from: string;
@@ -31,28 +51,13 @@ export interface PeriodMatrixColumn {
 
 export type PeriodMatrixValue = number;
 
-export type PeriodMatrixRowKey =
-  | 'revenue'
-  | 'expense'
-  | 'net'
-  | 'monthlyCost'
-  | 'totalAssets'
-  | 'netAssets';
-
-/** 固定行。配列の添字は columns と一致する。 */
-export type PeriodMatrixRows = Record<PeriodMatrixRowKey, PeriodMatrixValue[]>;
-
-export interface PeriodMatrixExpenseCategory {
-  account: Account;
-  /** 配列の添字は columns と一致する。 */
-  values: PeriodMatrixValue[];
-}
-
 export interface PeriodMatrix {
   columns: PeriodMatrixColumn[];
-  rows: PeriodMatrixRows;
-  /** 表示列のいずれかが 0 ではない費用科目だけを、科目の正本順で返す。 */
-  expenseCategories: PeriodMatrixExpenseCategory[];
+  /**
+   * 共通ラベル列の行 id → 列ごとの値（配列の添字は `columns` と一致する）。
+   * 値を持たない行（線分レンズだけの月割り項目など）は入らない。
+   */
+  values: ReadonlyMap<string, PeriodMatrixValue[]>;
 }
 
 function pad2(value: number): string {
@@ -68,23 +73,37 @@ function validYear(year: number): boolean {
   return Number.isInteger(year) && year > 0 && year <= 9999;
 }
 
-function columnsFor(scope: PeriodMatrixScope): PeriodMatrixColumn[] {
-  if (scope.mode === 'year') {
-    if (!validYear(scope.year)) return [];
-    return Array.from({ length: 12 }, (_, index) => {
-      const month = index + 1;
-      const key = `${scope.year}-${pad2(month)}`;
-      const from = `${key}-01`;
-      const to = monthEnd(scope.year, month);
-      return {
-        key,
-        year: scope.year,
-        month,
-        from,
-        to,
-        asOf: to,
-      };
+/** 'YYYY-MM' を [年, 月] へ。形式・範囲が壊れていれば undefined（列を作らない）。 */
+function parseMonthKey(key: string): [number, number] | undefined {
+  if (!/^\d{4}-\d{2}$/.test(key)) return undefined;
+  const year = Number.parseInt(key.slice(0, 4), 10);
+  const month = Number.parseInt(key.slice(5, 7), 10);
+  if (!validYear(year) || month < 1 || month > 12) return undefined;
+  return [year, month];
+}
+
+/** 月ズームの列。順不同・重複を正規化して昇順に並べる（年ズームの years と同じ作法）。 */
+function monthColumns(months: readonly string[]): PeriodMatrixColumn[] {
+  return Array.from(new Set(months))
+    .filter((key) => parseMonthKey(key) !== undefined)
+    .sort()
+    .map((key) => {
+      const [year, month] = parseMonthKey(key)!;
+      const to = monthEnd(year, month);
+      return { key, year, month, from: `${key}-01`, to, asOf: to };
     });
+}
+
+function columnsFor(scope: PeriodMatrixScope): PeriodMatrixColumn[] {
+  if (scope.mode === 'months') return monthColumns(scope.months);
+  if (scope.mode === 'buckets') {
+    return scope.buckets.map((bucket) => ({
+      key: bucket.key,
+      year: Number.parseInt(bucket.from.slice(0, 4), 10),
+      from: bucket.from,
+      to: bucket.to,
+      asOf: bucket.to,
+    }));
   }
 
   const years = Array.from(new Set(scope.years.filter(validYear))).sort((a, b) => a - b);
@@ -102,21 +121,21 @@ function columnsFor(scope: PeriodMatrixScope): PeriodMatrixColumn[] {
 }
 
 /**
- * UI が導出仕訳を一度だけ展開するときの最大基準日。
- * 年間は年末、全体は最終列の年末。現在・未来も同じ地図として列末まで展開する。
- * 全体の有効年が空なら、呼び出し側が安全に空表示できるよう today を返す。
+ * UI が導出仕訳を一度だけ展開するときの最大基準日 = 最終列の暦上の終了日。
+ * 現在・未来も同じ地図として列末まで展開する。
+ * 有効な列が 1 つも無ければ、呼び出し側が安全に空表示できるよう today を返す。
  */
 export function periodMatrixAsOf(scope: PeriodMatrixScope, today: string): string {
-  if (scope.mode === 'year') {
-    return validYear(scope.year) ? `${scope.year}-12-31` : today;
-  }
-  const years = Array.from(new Set(scope.years.filter(validYear))).sort((a, b) => a - b);
-  const last = years.at(-1);
-  return last === undefined ? today : `${last}-12-31`;
+  return columnsFor(scope).at(-1)?.asOf ?? today;
 }
 
-function blankValues(columns: PeriodMatrixColumn[]): PeriodMatrixValue[] {
-  return columns.map(() => 0);
+/** 行 id の列値。値を持たない行は 0 埋め（呼び出し側で `??` を書かないため）。 */
+export function periodMatrixRow(matrix: PeriodMatrix, rowId: string): PeriodMatrixValue[] {
+  return matrix.values.get(rowId) ?? matrix.columns.map(() => 0);
+}
+
+function blankValues(count: number): PeriodMatrixValue[] {
+  return Array.from({ length: count }, () => 0);
 }
 
 function addValue(values: PeriodMatrixValue[], index: number, amount: number): void {
@@ -125,13 +144,35 @@ function addValue(values: PeriodMatrixValue[], index: number, amount: number): v
   if (current !== undefined) values[index] = assertSafeAmount(current + amount);
 }
 
+/** 列ごとの合計（親の値は必ずこれで作る = 子の合計と一致させる）。 */
+function sumValues(count: number, rows: readonly (readonly PeriodMatrixValue[])[]) {
+  const total = blankValues(count);
+  for (const values of rows) {
+    values.forEach((value, index) => addValue(total, index, value));
+  }
+  return total;
+}
+
+/** 列ごとの差（恒等行。収支 = 収入 − 支出 / 純資産 = 資産 − 負債）。 */
+function subtractValues(
+  left: readonly PeriodMatrixValue[],
+  right: readonly PeriodMatrixValue[],
+): PeriodMatrixValue[] {
+  return left.map((value, index) => assertSafeAmount(value - (right[index] ?? 0)));
+}
+
+/** その科目が期間の発生額（フロー）で見るものか。残りは断面の残高（ストック）。 */
+function isFlowAccount(account: Account): boolean {
+  return account.type === 'revenue' || account.type === 'expense';
+}
+
 /**
- * 展開済み仕訳から年間（月12列）または全体（年列）のマトリクスを作る。
+ * 展開済み仕訳から、共通ラベル列の行 id ごとの列値を作る。
  *
  * - entries は最大基準日まで `displayEntriesForAsOf` した結果を渡す。
  * - 入力配列は変更しない。
  * - 現在・未来を問わず、列末時点の投影値を数値で返す。
- * - PL、継続コスト、費用カテゴリ、BS のために仕訳を複数回走査しない。
+ * - フロー・ストック・科目別・箱別のために仕訳を複数回走査しない。
  */
 export function buildPeriodMatrix(
   accounts: readonly Account[],
@@ -139,89 +180,97 @@ export function buildPeriodMatrix(
   scope: PeriodMatrixScope,
 ): PeriodMatrix {
   const columns = columnsFor(scope);
-  const revenue = blankValues(columns);
-  const expense = blankValues(columns);
-  const monthlyCost = blankValues(columns);
-  const totalAssets = blankValues(columns);
-  const netAssets = blankValues(columns);
+  const count = columns.length;
+  const values = new Map<string, PeriodMatrixValue[]>();
+  /** 科目ごとの列値（フローは期間の発生額・ストックは列末の残高）。 */
+  const byAccount = new Map<string, PeriodMatrixValue[]>(
+    accounts.map((account) => [account.id, blankValues(count)] as const),
+  );
+  if (count === 0) return { columns, values };
+
   const accountById = new Map(accounts.map((account) => [account.id, account] as const));
-  const expenseValuesById = new Map<string, PeriodMatrixValue[]>(
-    accounts
-      .filter((account) => account.type === 'expense')
-      .map((account) => [account.id, blankValues(columns)]),
+  const stockBalanceById = new Map<string, number>(
+    accounts.filter((account) => !isFlowAccount(account)).map((account) => [account.id, 0]),
   );
 
-  const flowColumnByKey = new Map(columns.map((column, index) => [column.key, index] as const));
-  const orderedEntries = [...entries].sort((a, b) => {
+  /** `beforeDate` より前に締まる列へ、いまの残高を焼き付ける。 */
+  let boundary = 0;
+  const snapshotThrough = (beforeDate?: string) => {
+    while (boundary < count) {
+      const column = columns[boundary];
+      if (!column || (beforeDate !== undefined && column.asOf >= beforeDate)) break;
+      for (const [accountId, balance] of stockBalanceById) {
+        byAccount.get(accountId)![boundary] = balance;
+      }
+      boundary += 1;
+    }
+  };
+
+  const maximumAsOf = columns.at(-1)!.asOf;
+  const ordered = [...entries].sort((a, b) => {
     const date = a.date.localeCompare(b.date);
     return date !== 0 ? date : a.id.localeCompare(b.id);
   });
-  const activeBoundaries = columns.map((column, index) => ({ index, asOf: column.asOf }));
-  const maximumAsOf = activeBoundaries.at(-1)?.asOf;
+  /** フローを足す列。列は昇順・重ならないので、日付順の走査で前へ戻らない。 */
+  let flowIndex = 0;
+  for (const entry of ordered) {
+    if (entry.date > maximumAsOf) break;
+    snapshotThrough(entry.date);
+    while (flowIndex < count && columns[flowIndex]!.to < entry.date) flowIndex += 1;
+    // 列と列の隙間（年を飛ばした窓など）に落ちた仕訳はどの列にも足さない。
+    const flowColumn =
+      flowIndex < count && columns[flowIndex]!.from <= entry.date ? flowIndex : undefined;
 
-  let boundaryIndex = 0;
-  let assetsBalance = 0;
-  let liabilitiesBalance = 0;
-  const snapshotThrough = (beforeDate?: string) => {
-    while (boundaryIndex < activeBoundaries.length) {
-      const boundary = activeBoundaries[boundaryIndex];
-      if (!boundary || (beforeDate !== undefined && boundary.asOf >= beforeDate)) break;
-      totalAssets[boundary.index] = assetsBalance;
-      netAssets[boundary.index] = assertSafeAmount(assetsBalance - liabilitiesBalance);
-      boundaryIndex += 1;
-    }
-  };
-
-  if (maximumAsOf !== undefined) {
-    for (const entry of orderedEntries) {
-      if (entry.date > maximumAsOf) break;
-      snapshotThrough(entry.date);
-
-      const flowKey = scope.mode === 'year' ? entry.date.slice(0, 7) : entry.date.slice(0, 4);
-      const flowColumnIndex = flowColumnByKey.get(flowKey);
-      const monthlyAllocation = isContinuousCostMonthlyAllocationEntry(entry);
-
-      for (const line of entry.lines) {
-        const account = accountById.get(line.accountId);
-        if (!account) continue;
-        const delta = naturalDelta(account, line.side, line.amount);
-
-        if (account.type === 'asset') assetsBalance = assertSafeAmount(assetsBalance + delta);
-        if (account.type === 'liability')
-          liabilitiesBalance = assertSafeAmount(liabilitiesBalance + delta);
-        if (flowColumnIndex === undefined) continue;
-
-        if (account.type === 'revenue') addValue(revenue, flowColumnIndex, delta);
-        if (account.type === 'expense') {
-          addValue(expense, flowColumnIndex, delta);
-          const categoryValues = expenseValuesById.get(account.id);
-          if (categoryValues) addValue(categoryValues, flowColumnIndex, delta);
-          if (monthlyAllocation) addValue(monthlyCost, flowColumnIndex, delta);
-        }
+    for (const line of entry.lines) {
+      const account = accountById.get(line.accountId);
+      if (!account) continue;
+      const delta = naturalDelta(account, line.side, line.amount);
+      if (!isFlowAccount(account)) {
+        stockBalanceById.set(
+          account.id,
+          assertSafeAmount((stockBalanceById.get(account.id) ?? 0) + delta),
+        );
+        continue;
       }
+      if (flowColumn !== undefined) addValue(byAccount.get(account.id)!, flowColumn, delta);
     }
-    snapshotThrough();
+  }
+  snapshotThrough();
+
+  for (const [accountId, row] of byAccount) values.set(lensRowId.account(accountId), row);
+
+  // 箱の値 = その箱に属する科目の合計（所属の正本は表示順マスタ）。
+  for (const boxKey of DISPLAY_BOX_KEYS) {
+    const members = accounts.filter((account) => displayBoxIncludes(boxKey, account));
+    values.set(
+      lensRowId.box(boxKey),
+      sumValues(
+        count,
+        members.map((account) => byAccount.get(account.id)!),
+      ),
+    );
   }
 
-  const net = revenue.map((value, index) => {
-    const expenseValue = expense[index];
-    return assertSafeAmount(value - (expenseValue ?? 0));
-  });
-  const expenseCategories = accounts
-    .filter((account) => account.type === 'expense')
-    .filter((account) => {
-      const values = expenseValuesById.get(account.id);
-      return values?.some((value) => value !== 0) === true;
-    })
-    .sort(compareAccountOrder)
-    .map((account) => ({
-      account,
-      values: expenseValuesById.get(account.id) ?? blankValues(columns),
-    }));
+  // 恒等行。会計 type で括る（箱の合計ではなく型の合計 = 箱に漏れがあっても式が崩れない）。
+  const totalOf = (predicate: (account: Account) => boolean) =>
+    sumValues(
+      count,
+      accounts.filter(predicate).map((account) => byAccount.get(account.id)!),
+    );
+  values.set(
+    lensRowId.identity('net'),
+    subtractValues(
+      totalOf((account) => account.type === 'revenue'),
+      totalOf((account) => account.type === 'expense'),
+    ),
+  );
+  values.set(
+    lensRowId.identity('netAssets'),
+    subtractValues(
+      totalOf((account) => account.type === 'asset'),
+      totalOf((account) => account.type === 'liability'),
+    ),
+  );
 
-  return {
-    columns,
-    rows: { revenue, expense, net, monthlyCost, totalAssets, netAssets },
-    expenseCategories,
-  };
+  return { columns, values };
 }

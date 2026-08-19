@@ -1,10 +1,9 @@
 /*
- * 「継続コスト台帳を経由して月割りする」明示トグル（作者哲学: 勘定科目で動作を変えない）:
- *  - 既定は行き先 role の提案だけ（費用 = ON・資産 = OFF）で、触るまで行き先変更に追従する
- *  - 一度触ったら固定される（行き先を変えても既定へ戻らない）
- *  - 手動 OFF で保存した費用行きは直接形（spread なし・借方 = 費用）で保存される
- *  - 編集シートの初期値は保存済みの形（spread の有無）
- *  - 終了 → 再開（restart）でも月割りの有無が引き継がれる
+ * 全ルール台帳経由（v13.1 の c 案・直接形の廃止）の UI 側の回帰:
+ *  - 旧「月割りトグル」が既定 OFF だった行き先（資産）でも、シートから作ったルールの保存形は
+ *    台帳経由（借方 = 継続コスト台帳・spreadExpenseAccountId = その資産）になる
+ *  - シート内に月割りトグルの checkbox が存在しない（勘定科目でも操作でも動作を変えない）
+ *  - 終了 → 再開（restart）でも台帳経由の保存形が引き継がれる
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
@@ -59,13 +58,13 @@ async function renderReady(period: ReportPeriod = { mode: 'all' }) {
   });
 }
 
-function toggle(): HTMLInputElement {
-  const el = document.querySelector(`[data-ui="${UI.allocations.recurringSpreadToggle}"]`);
-  expect(el, '月割りトグルはシート内に常設であること').not.toBeNull();
-  return el as HTMLInputElement;
+function sheet(): HTMLElement {
+  const el = document.querySelector<HTMLElement>(`[data-ui="${UI.allocations.recurringSheet}"]`);
+  expect(el, '定期ルールシートが開いていること').not.toBeNull();
+  return el!;
 }
 
-/** 行き先（借方）チップを名前で選ぶ。 */
+/** 行き先（計上先）チップを名前で選ぶ。 */
 function chooseDestination(name: string) {
   fireEvent.click(
     within(document.querySelector(`[data-ui="${UI.allocations.recurringTo}"]`)!).getByRole(
@@ -93,55 +92,21 @@ async function openCreateSheet() {
   expect(document.querySelector(`[data-ui="${UI.allocations.recurringSheet}"]`)).not.toBeNull();
 }
 
-describe('継続コスト台帳経由の明示トグル', () => {
-  it('既定は行き先 role の提案（費用 = ON・資産 = OFF）で、触るまで行き先変更に追従する', async () => {
-    await openCreateSheet();
-    chooseSource('預金');
-
-    chooseDestination('固定費');
-    expect(toggle().checked).toBe(true);
-
-    // 資産（積立先）へ変えると既定は OFF へ追従する。
-    chooseDestination('投資');
-    expect(toggle().checked).toBe(false);
-
-    // 費用へ戻せば ON へ戻る（まだ誰も触っていないので既定のまま）。
-    chooseDestination('固定費');
-    expect(toggle().checked).toBe(true);
-  });
-
-  it('一度トグルを触ったら固定され、行き先を変えても既定へ戻らない', async () => {
-    await openCreateSheet();
-    chooseSource('預金');
-    chooseDestination('固定費');
-    expect(toggle().checked).toBe(true);
-
-    // 手動 OFF。
-    fireEvent.click(toggle());
-    expect(toggle().checked).toBe(false);
-
-    // 行き先を変えても手動の選択を尊重する（費用でも OFF のまま）。
-    chooseDestination('投資');
-    expect(toggle().checked).toBe(false);
-    chooseDestination('固定費');
-    expect(toggle().checked).toBe(false);
-  });
-
-  it('費用行きでも手動 OFF で保存すると直接形（spread なし・借方 = 費用）になる', async () => {
-    const ledgerBefore = await loadLedger();
-    const fixed = ledgerBefore.accounts.find((a) => a.name === '固定費')!;
-    const bank = ledgerBefore.accounts.find((a) => a.name === '預金')!;
+describe('全ルール台帳経由（月割りトグルの廃止）', () => {
+  it('資産行き（旧・既定 OFF）でも保存形は台帳経由になる', async () => {
+    const before = await loadLedger();
+    const invest = before.accounts.find((a) => a.name === '投資')!;
+    const bank = before.accounts.find((a) => a.name === '預金')!;
 
     await openCreateSheet();
     fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringName}"]`)!, {
-      target: { value: '直接記帳の家賃' },
+      target: { value: 'クレカ積立' },
     });
     fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.recurringAmount}"]`)!, {
-      target: { value: '80000' },
+      target: { value: '60000' },
     });
     chooseSource('預金');
-    chooseDestination('固定費');
-    fireEvent.click(toggle());
+    chooseDestination('投資');
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.recurringSave}"]`)!);
 
     await waitFor(() => {
@@ -149,38 +114,40 @@ describe('継続コスト台帳経由の明示トグル', () => {
         document.querySelector(`[data-ui="${UI.allocations.recurringSheet}"]`),
       ).not.toBeInTheDocument();
     });
-    const saved = (await loadLedger()).recurringRules.find((r) => r.name === '直接記帳の家賃')!;
-    expect(saved.spreadExpenseAccountId).toBeUndefined();
-    expect(saved.debitAccountId).toBe(fixed.id);
+    const saved = (await loadLedger()).recurringRules.find((r) => r.name === 'クレカ積立')!;
+    expect(saved.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+    expect(saved.spreadExpenseAccountId).toBe(invest.id);
     expect(saved.creditAccountId).toBe(bank.id);
   });
 
-  it('編集シートの初期値は保存済みの形（spread の有無）に一致する', async () => {
+  it('新規シートにも編集シートにも月割りトグルの checkbox が無い', async () => {
     const ledger = await loadLedger();
     const bank = ledger.accounts.find((a) => a.name === '預金')!;
     const fixed = ledger.accounts.find((a) => a.name === '固定費')!;
+
+    await openCreateSheet();
+    expect(within(sheet()).queryAllByRole('checkbox')).toEqual([]);
+    cleanup();
+    _resetOverlaysForTests();
+
     await createRecurringRule({
-      name: '直接形の家賃',
+      name: '家賃',
       amount: 80000,
       dayOfMonth: 20,
       debitAccountId: fixed.id,
       creditAccountId: bank.id,
-      spreadViaLedger: false,
       startMonth: '2026-04',
       startDate: '2026-04-12',
     });
-
     await renderReady();
     fireEvent.click(await waitFor(() => firstRuleRow()!));
-    // 費用行きでも保存形が直接形なら OFF で開く（role から再導出しない）。
-    expect(toggle().checked).toBe(false);
+    expect(within(sheet()).queryAllByRole('checkbox')).toEqual([]);
   });
 
-  it('終了 → 再開（restart）でも月割りの有無が引き継がれる', async () => {
+  it('終了 → 解除（clearEndDate）で同じ台帳経由の線分が継続中へ戻る', async () => {
     const ledger = await loadLedger();
     const bank = ledger.accounts.find((a) => a.name === '預金')!;
     const invest = ledger.accounts.find((a) => a.name === '投資')!;
-    // 資産行き + トグル ON = role 既定では生まれない形。再開が role を再導出したら落ちる。
     const original = await createRecurringRule({
       name: 'クレカ積立',
       amount: 60000,
@@ -188,11 +155,13 @@ describe('継続コスト台帳経由の明示トグル', () => {
       everyMonths: 12,
       debitAccountId: invest.id,
       creditAccountId: bank.id,
-      spreadViaLedger: true,
       startMonth: '2026-04',
       startDate: '2026-04-12',
     });
 
+    // 起票を 1 回済ませてから終了する（v13.3: 起票ゼロになる終了は保存境界が拒否し、
+    // 削除へ誘導する。ここで見たいのは終了 → 解除の往復なので起票済みの線分を使う）。
+    clock.today = '2026-04-21';
     await renderReady();
     // 終了は終了日シート経由（無確認では実行しない）。
     fireEvent.click(
@@ -206,32 +175,36 @@ describe('継続コスト台帳経由の明示トグル', () => {
     await waitFor(async () => {
       expect(
         (await loadLedger()).recurringRules.find((rule) => rule.id === original.id)?.endDate,
-      ).toBe('2026-04-18');
+      ).toBe('2026-04-21');
     });
 
     fireEvent.click(
       await waitFor(() => document.querySelector(`[data-ui="${UI.allocations.showCompleted}"]`)!),
     );
-    // 再開も確認ダイアログ経由。
+    // 「再開」は撤去済み。終了の Undo = 編集シート下部の「終了日を解除」（確認つき）。
+    fireEvent.click(await waitFor(() => firstRuleRow()!));
     fireEvent.click(
       await waitFor(
-        () => document.querySelector(`[data-ui="${UI.allocations.recurringRestart}"]`)!,
+        () => document.querySelector(`[data-ui="${UI.allocations.recurringClearEndDate}"]`)!,
       ),
     );
     fireEvent.click(
       await waitFor(
         () =>
           document.querySelector(
-            `[data-ui="${UI.allocations.recurringRestartConfirm}"] [data-ui="${UI.dialog.confirm}"]`,
+            `[data-ui="${UI.allocations.recurringClearEndDateConfirm}"] [data-ui="${UI.dialog.confirm}"]`,
           )!,
       ),
     );
+    // 新しいルールは増えず、同じ線分の終了点だけが消える（保存形は台帳経由のまま）。
     await waitFor(async () => {
-      expect((await loadLedger()).recurringRules).toHaveLength(2);
+      const after = await loadLedger();
+      expect(after.recurringRules).toHaveLength(1);
+      expect(after.recurringRules[0]!.endDate).toBeUndefined();
     });
-
-    const restarted = (await loadLedger()).recurringRules.find((r) => r.id !== original.id)!;
-    expect(restarted.spreadExpenseAccountId).toBe(invest.id);
-    expect(restarted.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
+    const restored = (await loadLedger()).recurringRules[0]!;
+    expect(restored.id).toBe(original.id);
+    expect(restored.spreadExpenseAccountId).toBe(invest.id);
+    expect(restored.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
   });
 });

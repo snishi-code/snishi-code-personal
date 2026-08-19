@@ -85,16 +85,19 @@ async function seed() {
     startDate: '2026-01-01',
     expenseAccountId: expense.id,
   });
-  // 定期ルール（振替 = item を生まない）。開始日を変えて日付軸の順を確かめられるようにする
+  // 定期ルール。v13.1（c 案）で全ルールが台帳経由になり、起票が到来すると導出 item が
+  // item セクションへ並んでしまうため、位相（startMonth）を翌月に置いて起票を未到来にする
+  // ＝この fixture の item セクションは継続コスト資産 3 件だけになる。
+  // 開始日を変えて日付軸の順を確かめられるようにする
   // （さきの積立 = 3ヶ月前 → あとの積立 = 今日。名称順・金額順とは別の並びになる）。
-  const month = today.slice(0, 7);
+  const nextMonth = addMonthsToDate(today, 1).slice(0, 7);
   await createRecurringRule({
     name: 'さきの積立',
     amount: 200,
     dayOfMonth: 1,
     debitAccountId: invest.id,
     creditAccountId: bank.id,
-    startMonth: month,
+    startMonth: nextMonth,
     startDate: addMonthsToDate(today, -3),
   });
   await createRecurringRule({
@@ -103,16 +106,20 @@ async function seed() {
     dayOfMonth: 1,
     debitAccountId: invest.id,
     creditAccountId: bank.id,
-    startMonth: month,
+    startMonth: nextMonth,
     startDate: today,
   });
   return { expense, bank, invest };
 }
 
 function itemNames(): string[] {
-  return [...document.querySelectorAll(`[data-ui="${UI.allocations.item}"] .list__title`)].map(
-    (el) => (el.textContent ?? '').trim(),
-  );
+  // タイトルバーには「終了」の文字ボタン（v13.1 のテキスト行アクション）も並ぶため、
+  // 名前部分（先頭の span）だけを読む。
+  return [
+    ...document.querySelectorAll(
+      `[data-ui="${UI.allocations.item}"] .list__title > span:first-child`,
+    ),
+  ].map((el) => (el.textContent ?? '').trim());
 }
 
 function ruleNames(): string[] {

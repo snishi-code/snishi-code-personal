@@ -1,12 +1,30 @@
 /*
- * 勘定科目の並び替え: compareAccountOrder（type → role → sortIndex → 名前）と
- * reorderAccounts（配列順を sortIndex として保存）・箱グルーピングへの反映。
+ * 表示順マスタ（domain/displayOrder）:
+ *  - 科目の並び: compareAccountOrder（type → role → sortIndex → 名前）と
+ *    reorderAccounts（配列順を sortIndex として保存）・箱グルーピングへの反映。
+ *  - 箱の並び: DISPLAY_BOX_KEYS が唯一の正本で、各画面の箱・枠・グループはその射影であること。
+ *  - 6 分類の並び: 恒等式の行（収支・純資産）が式の後ろへ自動で入ること。
+ *
+ * 「マスタを差し替えると全画面が追従する」ことは displayOrder.mutation.*.test.tsx が見る。
  */
 import { describe, expect, it } from 'vitest';
 import './setup';
 import { loadLedger, reorderAccounts, upsertAccount } from '../src/data/repository';
-import { compareAccountOrder } from '../src/domain/accountOrder';
+import {
+  ASSET_GROUP_KEYS,
+  DISPLAY_BOX_KEYS,
+  DISPLAY_SECTION_GROUPS,
+  DISPLAY_SECTION_KEYS,
+  accountsInDisplayBox,
+  compareAccountOrder,
+  displayBoxOf,
+  isDisplaySectionGroupStart,
+  isIdentitySection,
+  orderedDisplayBoxes,
+} from '../src/domain/displayOrder';
+import { buildLensRowTree } from '../src/domain/lensRows';
 import { ACCOUNT_BOXES, groupAccountsByBox, timelineBoxForAccount } from '../src/ui/accountBoxes';
+import { TIMELINE_ACCOUNT_BOXES } from '../src/ui/accountBoxes';
 import { ledgerExportPackageSchema } from '../src/domain/schema';
 import { buildExportPackage } from '../src/data/exportImport';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
@@ -42,6 +60,99 @@ function roleAcc(
     updatedAt: 't',
   };
 }
+
+describe('表示順マスタ（箱）', () => {
+  it('箱の並びは現状のコード定数で固定（ユーザー並び替えなし）', () => {
+    expect([...DISPLAY_BOX_KEYS]).toEqual([
+      'assetFree',
+      'assetFixed',
+      'investment',
+      'continuingCost',
+      'shortTermDebt',
+      'longTermDebt',
+      'income',
+      'expense',
+      'equity',
+    ]);
+  });
+
+  it('タイムラインの箱・勘定科目画面の箱・資産 4 グループはすべてマスタの射影', () => {
+    // タイムラインは 9 箱そのまま。
+    expect(TIMELINE_ACCOUNT_BOXES.map((box) => box.key)).toEqual([...DISPLAY_BOX_KEYS]);
+    // 勘定科目画面は聖域（継続コスト台帳・純資産）を除いた部分集合で、相対順はマスタと一致。
+    expect(ACCOUNT_BOXES.map((box) => box.box)).toEqual(
+      orderedDisplayBoxes(ACCOUNT_BOXES.map((box) => box.box)),
+    );
+    // 資産 4 グループの並びも箱の並びから導出される。
+    expect([...ASSET_GROUP_KEYS]).toEqual(['free', 'fixed', 'investment', 'ledger']);
+  });
+
+  it('箱 → 所属科目は科目の正本順で返る（accountsInDisplayBox）', () => {
+    const accounts = [
+      roleAcc('現金B', 'asset', 'daily-asset', 1),
+      roleAcc('現金A', 'asset', 'daily-asset', 0),
+      roleAcc('投資', 'asset', 'investment-asset', 0),
+    ];
+    expect(accountsInDisplayBox('assetFree', accounts).map((a) => a.id)).toEqual([
+      '現金A',
+      '現金B',
+    ]);
+    expect(accountsInDisplayBox('investment', accounts).map((a) => a.id)).toEqual(['投資']);
+  });
+
+  it('資産はどの箱にも入らないことがない（箱の合計 = 総資産を壊さない）', () => {
+    const stray = { ...roleAcc('謎資産', 'asset', 'daily-asset'), movable: true };
+    expect(displayBoxOf(stray)).toBe('assetFree');
+  });
+});
+
+describe('表示順マスタ（6 分類）', () => {
+  it('恒等式の行は式の後ろへ自動で入る（収支 = 支出の後・純資産 = 負債の後）', () => {
+    expect([...DISPLAY_SECTION_KEYS]).toEqual([
+      'revenue',
+      'expense',
+      'net',
+      'totalAssets',
+      'totalLiabilities',
+      'netAssets',
+    ]);
+    expect(isIdentitySection('net')).toBe(true);
+    expect(isIdentitySection('netAssets')).toBe(true);
+    expect(isIdentitySection('revenue')).toBe(false);
+  });
+
+  it('ホームの段（フロー / ストック）を平坦にしたものが 6 分類の並び', () => {
+    expect(DISPLAY_SECTION_GROUPS.flatMap((group) => group.sections)).toEqual([
+      ...DISPLAY_SECTION_KEYS,
+    ]);
+    // 区切り線は 2 段目の先頭にだけ立つ。
+    expect(DISPLAY_SECTION_KEYS.filter(isDisplaySectionGroupStart)).toEqual(['totalAssets']);
+  });
+
+  it('3 レンズ共通の木は箱の並び + 恒等行の自動配置（式の右辺の最後の箱の直後）', () => {
+    expect(buildLensRowTree([]).map((row) => row.id)).toEqual([
+      'box:assetFree',
+      'box:assetFixed',
+      'box:investment',
+      'box:continuingCost',
+      'box:shortTermDebt',
+      'box:longTermDebt',
+      // 純資産 = 資産 − 負債 → 負債の最後の箱の直後。
+      'identity:netAssets',
+      'box:income',
+      'box:expense',
+      // 収支 = 収入 − 支出 → 支出の箱の直後。
+      'identity:net',
+      'box:equity',
+    ]);
+    // フロー（期間の発生額）はグラフに描けない行。ストック性はマスタの段から導く。
+    expect(
+      buildLensRowTree([])
+        .filter((row) => !row.stock)
+        .map((row) => row.id),
+    ).toEqual(['box:income', 'box:expense', 'identity:net']);
+  });
+});
 
 describe('compareAccountOrder', () => {
   it('同じ role では sortIndex 昇順を優先し、未設定は名前順で末尾に置く', () => {

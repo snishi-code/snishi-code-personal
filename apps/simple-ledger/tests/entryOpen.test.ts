@@ -43,7 +43,18 @@ describe('entryOpenPlan', () => {
           },
         }),
       ),
-    ).toEqual({ kind: 'adjustment' });
+    ).toEqual({ kind: 'adjustment', entryId: 'e' });
+  });
+
+  it('補正の按分スライスは宣言した stored の補正へ（自分の ID ではない・v13.4 ①）', () => {
+    expect(
+      entryOpenPlan(
+        base({
+          id: 'adj-slice-pin1-2026-03',
+          metadata: { virtual: true, adjustmentSliceOf: 'pin1' },
+        }),
+      ),
+    ).toEqual({ kind: 'adjustment', entryId: 'pin1' });
   });
 
   it('導出行は由来へ（ルール・継続コスト・投資科目）、名乗らないものは開かない', () => {

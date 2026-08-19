@@ -329,8 +329,10 @@ describe('export package 形状', () => {
     const ledger = await seedWithEntry();
     const pkg = buildExportPackage(ledger);
     expect(pkg.schemaVersion).toBe(SCHEMA_VERSION);
-    expect(pkg.schemaVersion).toBe(12);
+    expect(pkg.schemaVersion).toBe(13);
     expect(pkg).not.toHaveProperty('cashflowSchedules');
+    // v13 で撤去したタグも含まない。
+    expect(pkg).not.toHaveProperty('tags');
     // v10 で撤去した CSV 取込の 3 配列も含まない。
     expect(pkg).not.toHaveProperty('importProfiles');
     expect(pkg).not.toHaveProperty('profileBindings');
@@ -338,6 +340,7 @@ describe('export package 形状', () => {
     // 文字列化した export JSON にも痕跡が残らない。
     const parsed = JSON.parse(exportToJsonText(ledger)) as Record<string, unknown>;
     expect(Object.keys(parsed)).not.toContain('cashflowSchedules');
+    expect(Object.keys(parsed)).not.toContain('tags');
     expect(Object.keys(parsed)).not.toContain('importProfiles');
     expect(Object.keys(parsed)).not.toContain('profileBindings');
     expect(Object.keys(parsed)).not.toContain('importDecisions');
@@ -353,7 +356,6 @@ describe('テスト用フィクスチャ（loadSampleFixture）', () => {
     // sample.json の中身が IndexedDB 正本として入る。
     expect(after.journalEntries.length).toBeGreaterThanOrEqual(15);
     expect(after.monthlyCostItems.length).toBeGreaterThanOrEqual(1);
-    expect(after.tags.length).toBeGreaterThanOrEqual(1);
     // 再読込しても永続化されている。
     const reloaded = await loadLedger();
     expect(reloaded.journalEntries.length).toBe(after.journalEntries.length);

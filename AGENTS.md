@@ -1,7 +1,23 @@
 # AGENTS.md — このリポジトリの不変条件
 
 このリポジトリ（同梱の `packages/foundation` を含む）を編集するときに、人間・AI を問わず
-守る基本方針をまとめる。設計の詳細は `docs/` を参照。
+守る基本方針をまとめる。
+
+## AI がまず読むもの（セッションの入口）
+
+<!-- prettier-ignore -->
+@~/workspace/_workspace-management/tasks/README.md
+
+上の import で、**リポジトリ外**にある計画・現状の索引が自動で読み込まれる
+（`workspace/` 直下・各 repo と兄弟の位置。git 管理外なので clone しても付いてこない。
+`~/workspace/` に置いていない環境ではこの 1 行を直す）。
+
+- **`docs/` = 今どうなっているか**の仕様。日付・進捗・優先順位は書かない
+- **`_workspace-management/tasks/` = 時間軸**。計画・優先順位・未実施・監査待ち・実データの状態
+- **「次に何をやるか」はこのリポジトリの中には無い。** 上の索引から辿る
+- `docs/` は **simple-ledger 専用**。template-memo の設計正本は無く、語彙の定義は
+  `apps/template-memo/src/domain/types.ts` の冒頭コメントが事実上の正本
+  （識別子は medical 由来のまま: `Patient` = ページ / `PlaceDef` = グループ）
 
 ## 不変条件（壊してはいけないもの）
 

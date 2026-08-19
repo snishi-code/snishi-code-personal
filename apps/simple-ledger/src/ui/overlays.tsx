@@ -71,10 +71,18 @@ export function OverlayBinding({ onClose }: { onClose: () => void }): null {
   return null;
 }
 
-/** Modal + 登録。Back は onClose (dirty guard 併用時は requestClose) を呼ぶ。 */
-export function Modal(props: ComponentProps<typeof FoundationModal>) {
+/**
+ * Modal + 登録。Back は onClose (dirty guard 併用時は requestClose) を呼ぶ。
+ *
+ * v13.1 その5（モーダル統一・作者確定 2026-08-16）: せり上がり（bottom sheet）と
+ * ポップアップの 2 様式を廃し、**全て中央ポップアップ 1 様式**に固定する（応答的:
+ * 小画面では高さを広げ、中でスクロール）。foundation は medical からの一方向ミラーなので
+ * foundation 側の variant は触らず、このラッパーが variant を受け取らないことで
+ * アプリ内の単一正本にする。
+ */
+export function Modal(props: Omit<ComponentProps<typeof FoundationModal>, 'variant'>) {
   useRegisterOverlay(props.onClose);
-  return <FoundationModal {...props} />;
+  return <FoundationModal {...props} variant="dialog" />;
 }
 
 /** Popup + 登録。 */

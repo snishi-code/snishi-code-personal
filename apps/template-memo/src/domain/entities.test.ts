@@ -140,6 +140,24 @@ describe('永続化エンティティの正規化', () => {
     ]);
   });
 
+  it('decimal の項目は種類を保ち、単位も正常文も残す', () => {
+    const restored = normalizeFormat({
+      ...format,
+      items: [{ id: 'i1', label: 'BT', kind: 'decimal', unit: '℃', normal: '37.0未満' }],
+    });
+    expect(restored?.items).toEqual([
+      { id: 'i1', label: 'BT', kind: 'decimal', unit: '℃', normal: '37.0未満' },
+    ]);
+  });
+
+  it('旧 number を decimal へ格上げしない（既存 BP が "/" を打てなくなるのを防ぐ）', () => {
+    const restored = normalizeFormat({
+      ...format,
+      items: [{ id: 'i1', label: 'SpO2', kind: 'number', unit: '%' }],
+    });
+    expect(restored?.items[0]?.kind).toBe('text');
+  });
+
   it('プリセットは正規化の恒等（seed が normalize で欠けない）', () => {
     for (const preset of [buildRoundPreset(1000), buildDailyReportPreset(1000)]) {
       expect(normalizeFrame(preset.frame)).toEqual(preset.frame);

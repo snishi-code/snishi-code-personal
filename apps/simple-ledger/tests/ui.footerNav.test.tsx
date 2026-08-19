@@ -7,7 +7,7 @@
  *  2. 戻るは window.history.back() を**呼ぶだけ**。overlay を閉じる → dirty guard → 画面履歴 →
  *     終了確認、の順序は useAppHistory の中央制御が持つ（app 側に分岐を複製しない）。
  *  3. ホーム = フッター中央 / 設定 = メニュー内 / ハンバーガー = フッター右、が**唯一の置き場所**。
- *     ヘッダーは時間（日付 + 年間/全体の粒度）だけに徹する（同じ意味のボタンを 2 つ出さない）。
+ *     ヘッダーは時間（日付 + 日/月/年のズーム）だけに徹する（同じ意味のボタンを 2 つ出さない）。
  */
 import { describe, it, expect, afterEach, beforeAll, beforeEach, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
@@ -142,20 +142,18 @@ describe('フッターナビ', () => {
     await waitFor(() => expect(q(UI.dashboard.view)).toBeInTheDocument());
   });
 
-  it('ヘッダーの粒度セグメントで年間・全体画面へ入れる（設定はメニュー内が唯一）', async () => {
+  it('ヘッダーのズームで時間平面へ入れる（設定はメニュー内が唯一）', async () => {
     await renderApp();
 
-    fireEvent.click(q(UI.yearlyOverview.modeYear)!);
-    await waitFor(() => expect(q(UI.yearlyOverview.view)).toBeInTheDocument());
-    expect(q(UI.yearlyOverview.modeYear)).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(q(UI.period.zoomYear)!);
+    await waitFor(() => expect(q(UI.timeline.view)).toBeInTheDocument());
+    expect(q(UI.period.zoomYear)).toHaveAttribute('aria-pressed', 'true');
 
-    // 既に年間・全体画面なら粒度だけ替わる（画面は動かない）。
-    fireEvent.click(q(UI.yearlyOverview.modeAll)!);
-    await waitFor(() =>
-      expect(q(UI.yearlyOverview.modeAll)).toHaveAttribute('aria-pressed', 'true'),
-    );
-    expect(q(UI.yearlyOverview.view)).toBeInTheDocument();
-    expect(q(UI.yearlyOverview.modeYear)).toHaveAttribute('aria-pressed', 'false');
+    // 既に時間平面なら目盛りだけ替わる（画面は動かない）。
+    fireEvent.click(q(UI.period.zoomMonth)!);
+    await waitFor(() => expect(q(UI.period.zoomMonth)).toHaveAttribute('aria-pressed', 'true'));
+    expect(q(UI.timeline.view)).toBeInTheDocument();
+    expect(q(UI.period.zoomYear)).toHaveAttribute('aria-pressed', 'false');
 
     // ヘッダーにはホームも設定も無い（フッター中央とメニュー内が唯一の置き場所）。
     expect(document.querySelector('[data-ui="nav.settings.button"]')).toBeNull();

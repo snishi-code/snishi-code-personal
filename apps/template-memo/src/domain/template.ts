@@ -24,14 +24,23 @@ import type { FormValues, Patient } from './types';
 // ============================
 
 /**
- * 小項目の種類。入力の形は 2 つだけに畳んである:
- *   text   = 自分で書く。正常文 (normal) を登録すれば長押しチェックのワンタップでも入る。
- *   select = 用意した選択肢から選ぶ。
- * 文字種の制約（旧 number / fraction の数字限定キーボード）は持たない。端末のキーボードを
- * 狭めても打てない文字が生まれるだけで（iOS の数字キーパッドには "." も "/" も無い）、
- * 入力を助けないため撤去した。旧 number / fraction は normalizeItem が text へ引き取る。
+ * 小項目の種類:
+ *   text    = 自分で書く。端末の通常キーボード。正常文 (normal) を登録すれば
+ *             長押しチェックのワンタップでも入る。
+ *   decimal = 保存も合成も text と全く同じで、ソフトキーボードだけ数字寄りにする。
+ *   select  = 用意した選択肢から選ぶ。
+ *
+ * decimal は入力できる文字を狭めない (pattern も maxLength も付けない。type は text のまま)。
+ * inputMode は端末へのヒントでしかなく、貼り付け・外付けキーボード・PC からの入力は
+ * 一切制限しない。狙いは BT → SpO2 と数字項目を続けて打つとき、欄を移るたびに
+ * かなへ戻る手間を省くことだけ。iOS の decimal パッドは "." を持つので 36.5 は打てるが
+ * "/" は無いので、120/80 のような項目は text のままにする (選ぶのは作った人)。
+ *
+ * 旧 number / fraction とは別リテラルにしてある。旧 kind は normalizeItem が今も text へ
+ * 引き取るため (read-side 移行)、リテラルを使い回すと既存データの BP が decimal へ化けて
+ * "/" を打てなくなる。それを避けるための分離。
  */
-export type ItemKind = 'text' | 'select';
+export type ItemKind = 'text' | 'decimal' | 'select';
 
 /** 配置方法。always = 展開 / oncall = 呼び出し / menu = メニュー。値はいずれも保存する。 */
 export type PlacementDisplay = 'always' | 'oncall' | 'menu';
@@ -246,13 +255,15 @@ export function normalizeItem(raw: unknown): TemplateItem | null {
   // 旧 kind（number / fraction）は text へ引き取り、単位も持ち越す（read-side 移行）。
   // これにより既存フォーマット・受信済み共有QR・取り込み JSON の項目が消えず、
   // 保存値 { value, note? } も formValues.readTextValue がそのまま読む。
-  const kind: ItemKind = r.kind === 'select' ? 'select' : 'text';
+  // decimal だけは明示リテラルとして通す（旧 number を decimal へ格上げはしない。
+  // 既存の BP が decimal 化して "/" を打てなくなるのを避けるため）。
+  const kind: ItemKind = r.kind === 'select' ? 'select' : r.kind === 'decimal' ? 'decimal' : 'text';
   const item: TemplateItem = {
     id: str(r.id) || newId('itm'),
     label: str(r.label),
     kind,
   };
-  if (kind === 'text') {
+  if (kind !== 'select') {
     const unit = str(r.unit);
     if (unit !== '') item.unit = unit;
     const normal = str(r.normal);

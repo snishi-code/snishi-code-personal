@@ -121,17 +121,14 @@ export function recurringRuleItemEndDate(
 }
 
 /**
- * カーソルより後に、周期位相と存在期間が一致する最初の未起票日。
- *
- * ルールの startMonth は位相の基準であって、起票済みの過去まで現在の参照科目へ要求する
- * 境界ではない。既に生まれた item は生成時点の事実として確定しており、次回起票を抑止しない。
+ * 周期位相と存在期間が一致する最初の起票日（= ルールが科目を参照し始める日）。
+ * v13: ルール由来は全期間を導出するため、参照区間も存在期間の先頭から始まる。
  */
 export function recurringRuleReferenceStartDate(rule: RecurringRule): string | undefined {
   const start = monthIndex(rule.startMonth);
   const step = Math.max(1, rule.everyMonths);
-  const after =
-    rule.postedThroughMonth === undefined ? start - 1 : monthIndex(rule.postedThroughMonth);
-  let phase = Math.max(0, Math.floor((after - start) / step) + 1);
+  // v13: カーソルは存在しない。参照開始 = 存在期間内で位相に乗る最初の起票日。
+  let phase = 0;
 
   // 明示された存在開始より前の周期日は飛ばす。年月だけで位相を合わせ、同月内の日付差は
   // 最後に 1 周期進めることで 4/22 開始・毎月20日のような境界を正しく扱う。
@@ -173,14 +170,11 @@ function recurringRuleLastPostingMonth(rule: RecurringRule): string | undefined 
 
 /**
  * 定期ルールが科目を参照し得る終端（含む）。
- * 費用ルールは存在期間内の最後の起票が作る item の配分終端まで科目を使う。
+ * 全ルールが台帳経由なので、存在期間内の最後の起票が作る item の配分終端まで科目を使う。
  */
-export function recurringRuleReferenceEndDate(
-  rule: RecurringRule,
-  spreadsExpense: boolean,
-): string | undefined {
+export function recurringRuleReferenceEndDate(rule: RecurringRule): string | undefined {
   const lastExistingDate = recurringRuleLastExistingDate(rule);
-  if (lastExistingDate === undefined || !spreadsExpense) return lastExistingDate;
+  if (lastExistingDate === undefined) return lastExistingDate;
   const lastPostingMonth = recurringRuleLastPostingMonth(rule);
   if (lastPostingMonth === undefined) return lastExistingDate;
   const itemEnd = recurringRuleItemEndDate(lastPostingMonth, rule.everyMonths, rule.dayOfMonth);
@@ -330,10 +324,7 @@ export function accountReferenceIntervals(
     ) {
       const referenceStart = recurringRuleReferenceStartDate(rule);
       if (referenceStart === undefined) continue;
-      const referenceEnd = recurringRuleReferenceEndDate(
-        rule,
-        rule.spreadExpenseAccountId !== undefined,
-      );
+      const referenceEnd = recurringRuleReferenceEndDate(rule);
       intervals.push({
         kind: 'recurringRule',
         from: referenceStart,

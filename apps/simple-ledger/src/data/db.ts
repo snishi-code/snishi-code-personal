@@ -16,7 +16,6 @@ export const STORE = {
   kv: 'kv', // meta / settings の単一レコード置き場（out-of-line key）
   accounts: 'accounts',
   journalEntries: 'journalEntries',
-  tags: 'tags', // タグ機能は撤去済み（2026-08-15）。受理のみ = 旧ストア温存の方針で残す
   monthlyCostItems: 'monthlyCostItems',
   recurringRules: 'recurringRules', // 定期ルール（v2 で追加）
   snapshots: 'snapshots',
@@ -35,8 +34,8 @@ export const db = createDatabase({
     // 後方互換を持たない＝旧版 DB は repository の assertSchemaVersionCurrent が
     // 復旧面へ送り、旧版データは復旧面の「DB 初期化」（wipeDatabase = deleteDatabase）
     // でのみ消える。upgrade が先にストアを消すと、復旧面に着く前にデータが失われる
-    // （「黙って削除しない」原則違反・監査 P1-1）。v10 で撤去した CSV 取込の旧 3 ストアも
-    // 同じ方針で温存する。
+    // （「黙って削除しない」原則違反・監査 P1-1）。v10 で撤去した CSV 取込の旧 3 ストアも、
+    // v13 で受理を終了した tags ストアも、同じ方針で温存する（新規 DB では作らない）。
     if (!idb.objectStoreNames.contains(STORE.kv)) idb.createObjectStore(STORE.kv);
     if (!idb.objectStoreNames.contains(STORE.accounts)) {
       idb.createObjectStore(STORE.accounts, { keyPath: 'id' });
@@ -44,9 +43,6 @@ export const db = createDatabase({
     if (!idb.objectStoreNames.contains(STORE.journalEntries)) {
       const s = idb.createObjectStore(STORE.journalEntries, { keyPath: 'id' });
       s.createIndex('date', 'date', { unique: false });
-    }
-    if (!idb.objectStoreNames.contains(STORE.tags)) {
-      idb.createObjectStore(STORE.tags, { keyPath: 'id' });
     }
     if (!idb.objectStoreNames.contains(STORE.monthlyCostItems)) {
       idb.createObjectStore(STORE.monthlyCostItems, { keyPath: 'id' });

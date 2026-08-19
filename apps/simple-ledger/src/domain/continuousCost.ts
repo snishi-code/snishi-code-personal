@@ -76,7 +76,7 @@ export function recoveredAmountsByItem(entries: JournalEntry[]): Map<string, num
 
 /**
  * 割り振る総額 = 取得額 − 回収済み額（負でよい = 過去にわたる費用減）。
- * 導出（continuousCostEntries）と画面（毎月のもの）で同じ式を使うための単一正本。
+ * 導出（continuousCostEntries）と画面（月割り台帳）で同じ式を使うための単一正本。
  */
 export function spreadTotalOf(
   item: MonthlyCostItem,

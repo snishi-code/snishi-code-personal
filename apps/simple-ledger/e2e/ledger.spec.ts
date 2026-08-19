@@ -224,3 +224,64 @@ test('表示桁数 0 で小数点を貼り付けても逐次入力しても 100 
   });
   expect(storedAmount, '12.34 を表示桁 0 で打つと 12（=1200 minor）。1234 ではない').toBe(1200);
 });
+
+test('ローンで払う → 台帳にルールとして並び、資金繰りの負債行から台帳へ戻る (v13.6 H4)', async ({
+  page,
+}) => {
+  await boot(page);
+
+  // ① 支出の 1 ページ目 →「ローンで払う」は**選択だけ**（v13.7 I3）。支払い元は消え、
+  //    ローンの入力欄はまだ出ない。主ボタンが「ローンを入力する」に変わる。
+  await page.locator(ui('dashboard.entry.expense')).click();
+  await page.locator(ui('journal.entry.item')).fill('E2E自動車');
+  await page.locator(ui('journal.entry.amount')).fill('1200000');
+  await page
+    .locator(`${ui('journal.entry.flow.destination')} label.chip`)
+    .first()
+    .click();
+  await page.locator(ui('journal.entry.loanArrange')).click();
+  await expect(page.locator(ui('journal.entry.flow.source'))).toBeHidden();
+  await expect(page.locator(ui('journal.entry.loanSelected'))).toBeVisible();
+  await expect(page.locator(ui('journal.entry.loanEndDate'))).toBeHidden();
+  await expect(page.locator(ui('journal.entry.next'))).toContainText('ローンを入力する');
+
+  // ② 2 ページ目 = ローンの入力。摘要が名前へ自動で入り、終了日は 1/3/5 年チップ。
+  //    回数と月額はその場で導出して見せる。
+  await page.locator(ui('journal.entry.next')).click();
+  await expect(page.locator(ui('journal.entry.loanName'))).toHaveValue('E2E自動車');
+  await page.locator(ui('journal.entry.loanQuickSpan')).first().click();
+  await expect(page.locator(ui('journal.entry.loanPreview'))).toContainText('12 回');
+  await page
+    .locator(`${ui('journal.entry.loanFrom')} label.chip`)
+    .first()
+    .click();
+  // 「戻る」で 1 ページ目へ戻っても入力は残る（前後しても書き直させない）。
+  await page.locator(ui('journal.entry.stepBack')).click();
+  await expect(page.locator(ui('journal.entry.item'))).toHaveValue('E2E自動車');
+  await page.locator(ui('journal.entry.next')).click();
+  await expect(page.locator(ui('journal.entry.loanPreview'))).toContainText('12 回');
+  await page.locator(ui('journal.entry.save')).click();
+  await expect(page.locator(ui('journal.entry.save'))).toBeHidden();
+
+  // ③ 月割り台帳: 専用セクションではなく、くり返し記帳の一覧に混ざって並ぶ。
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.allocations')).click();
+  await expect(page.locator(ui('allocations.view'))).toBeVisible();
+  const loanRow = page.locator(`${ui('allocations.recurring.list')} li`).first();
+  await expect(loanRow).toContainText('E2E自動車');
+  await expect(page.locator(ui('allocations.loan.remaining'))).toContainText('12');
+  // 旧「支払用負債」セクションは撤去済み。
+  await expect(page.locator('[data-ui="allocations.liability.list"]')).toHaveCount(0);
+
+  // ④ 資金繰り: 負債行に残高が出て、タップで台帳の該当行へ戻る。
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.cashflow')).click();
+  await expect(page.locator(ui('cashflow.view'))).toBeVisible();
+  const debtRow = page.locator(ui('cashflow.liability.row')).first();
+  await expect(debtRow).toContainText('E2E自動車');
+  await debtRow.click();
+  await expect(page.locator(ui('allocations.view'))).toBeVisible();
+  await expect(page.locator(`${ui('allocations.recurring.list')} li`).first()).toContainText(
+    'E2E自動車',
+  );
+});

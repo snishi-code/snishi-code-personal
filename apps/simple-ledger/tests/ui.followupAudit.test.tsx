@@ -75,7 +75,6 @@ describe('追補監査の画面回帰', () => {
       ],
       metadata: {
         adjustment: {
-          kind: 'unknown-balance',
           accountId: cash.id,
           expectedBalance: 0,
           actualBalance: 100,
@@ -286,9 +285,10 @@ describe('追補監査の画面回帰', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: '終了分も表示' }));
     expect(await screen.findByText(ended.name)).toBeInTheDocument();
 
-    // 終了済みの行にもアーカイブ（終了日の変更 = 復元も同じ 1 操作）・編集・削除が出る。
-    expect(screen.getByRole('button', { name: `アーカイブ: ${ended.name}` })).toBeInTheDocument();
+    // 終了済みの行にもアーカイブ（終了日の変更 = 復元も同じ 1 操作）・編集が出る。
+    // 削除は行アクションではなく編集シート最下部（動詞体系 v13.1）。
+    expect(screen.getByRole('button', { name: `終了: ${ended.name}` })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: `編集: ${ended.name}` })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: `削除: ${ended.name}` })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: `削除: ${ended.name}` })).not.toBeInTheDocument();
   });
 });

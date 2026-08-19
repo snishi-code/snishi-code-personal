@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  catchUpRecurringRules,
   createContinuousCost,
   createOpening,
   createRecurringRule,
@@ -10,6 +9,7 @@ import {
   upsertRecurringRule,
 } from '../src/data/repository';
 import { buildSimpleEntry } from '../src/domain/entry';
+import { deriveRecurringOutputs } from '../src/domain/recurring';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import './setup';
 
@@ -118,7 +118,7 @@ describe('勘定科目の存在期間（保存境界）', () => {
     ).rejects.toMatchObject({ code: 'error.account.referenceOutsidePeriod' });
   });
 
-  it('費用ルール編集はitem被覆で抑止せず、カーソル後の次回日から新しい科目を使う', async () => {
+  it('費用ルール編集はitem被覆で抑止せず、全期間を新しい科目で引き直す', async () => {
     let ledger = await loadLedger();
     const cash = ledger.accounts.find((account) => account.name === '預金')!;
     const fixed = ledger.accounts.find((account) => account.name === '固定費')!;
@@ -132,7 +132,11 @@ describe('勘定科目の存在期間（保存境界）', () => {
       startMonth: '2026-01',
       startDate: '2026-01-01',
     });
-    expect(await catchUpRecurringRules('2026-01-15')).toBe(1);
+    ledger = await loadLedger();
+    // 年払いのまま: 2026-01-01 の 1 本だけが導出される。
+    expect(
+      deriveRecurringOutputs(ledger.recurringRules, ledger.accounts, '2026-01-15').entries,
+    ).toHaveLength(1);
 
     const futureCash = {
       id: 'future-rule-cash',
@@ -159,17 +163,25 @@ describe('勘定科目の存在期間（保存境界）', () => {
     expect(
       ledger.accounts.find((account) => account.id === futureCash.id)?.startDate,
     ).toBeUndefined();
-    expect(await catchUpRecurringRules('2026-12-31')).toBe(11);
-    expect(await catchUpRecurringRules('2027-01-01')).toBe(1);
 
-    ledger = await loadLedger();
-    const nextPurchase = ledger.journalEntries.find(
-      (entry) => entry.id === `rec-${rule.id}-2027-01`,
-    );
+    // v13: 編集は全期間を現在のルール値で引き直す。毎月化した線分は 2026-01〜2026-12 で 12 本、
+    // 2027-01 まで伸ばすと 13 本になる（「カーソルの続きから」という段階は存在しない）。
+    expect(
+      deriveRecurringOutputs(ledger.recurringRules, ledger.accounts, '2026-12-31').entries,
+    ).toHaveLength(12);
+    const derived = deriveRecurringOutputs(ledger.recurringRules, ledger.accounts, '2027-01-01');
+    expect(derived.entries).toHaveLength(13);
+    const nextPurchase = derived.entries.find((entry) => entry.id === `rec-${rule.id}-2027-01`);
     expect(nextPurchase?.lines.find((line) => line.side === 'credit')?.accountId).toBe(
       futureCash.id,
     );
-    expect(ledger.monthlyCostItems.some((item) => item.id === `ccr-${rule.id}-2027-01`)).toBe(true);
+    // 引き直しなので過去の回も新しい支払口座を使う。
+    expect(
+      derived.entries.every(
+        (entry) => entry.lines.find((line) => line.side === 'credit')?.accountId === futureCash.id,
+      ),
+    ).toBe(true);
+    expect(derived.items.some((item) => item.id === `ccr-${rule.id}-2027-01`)).toBe(true);
   });
 
   // ── §A 案1（2026-08-11）: 開始日未設定 = 過去へ開いた線分。暗黙開始日（createdAt 代用）の廃止 ──

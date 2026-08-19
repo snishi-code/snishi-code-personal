@@ -8,7 +8,7 @@
 import { useState } from 'react';
 import { TextInput } from '@snishi/foundation/ui/Field';
 import { Modal, useDirtyGuard } from './overlays';
-import { sortAccounts } from '../domain/accountOrder';
+import { sortAccounts } from '../domain/displayOrder';
 import { useLedger } from '../state/store';
 import { todayLocal } from '../util/time';
 import { t } from '../i18n';

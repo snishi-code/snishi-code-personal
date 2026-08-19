@@ -44,14 +44,16 @@ const costLedger = {
   updatedAt: 'x',
 };
 
-function directRule(overrides: Partial<RecurringRule> = {}): RecurringRule {
+/** v13.1（c 案）: 保存形は一形だけ — 借方 = 継続コスト台帳 + 計上先 = spread。 */
+function baseRule(overrides: Partial<RecurringRule> = {}): RecurringRule {
   return {
     id: 'rule',
     name: '積立',
     amount: 1000,
     dayOfMonth: 20,
     everyMonths: 1,
-    debitAccountId: investment.id,
+    debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+    spreadExpenseAccountId: investment.id,
     creditAccountId: cash.id,
     startMonth: '2026-04',
     startDate: '2026-04-18',
@@ -92,7 +94,6 @@ function pkg(
     revision: 0,
     accounts: [cash, investment, expense, costLedger],
     journalEntries,
-    tags: [],
     monthlyCostItems,
     recurringRules: [rule],
     settings: { ledgerName: '家計簿', currency: 'JPY', displayFractionDigits: 0 },
@@ -101,44 +102,37 @@ function pkg(
 
 describe('定期ルール存在期間のschema検証', () => {
   it('startDate欠落と空・逆転区間を拒否し、終了点省略の半開区間を受理する', () => {
-    const missingStartDate = { ...directRule() } as Record<string, unknown>;
+    const missingStartDate = { ...baseRule() } as Record<string, unknown>;
     delete missingStartDate.startDate;
     expect(recurringRuleSchema.safeParse(missingStartDate).success).toBe(false);
-    expect(recurringRuleSchema.safeParse(directRule({ endDate: undefined })).success).toBe(true);
-    expect(recurringRuleSchema.safeParse(directRule()).success).toBe(true);
-    expect(recurringRuleSchema.safeParse(directRule({ endDate: '2026-04-18' })).success).toBe(
-      false,
-    );
-    expect(recurringRuleSchema.safeParse(directRule({ endDate: '2026-04-17' })).success).toBe(
-      false,
-    );
+    expect(recurringRuleSchema.safeParse(baseRule({ endDate: undefined })).success).toBe(true);
+    expect(recurringRuleSchema.safeParse(baseRule()).success).toBe(true);
+    expect(recurringRuleSchema.safeParse(baseRule({ endDate: '2026-04-18' })).success).toBe(false);
+    expect(recurringRuleSchema.safeParse(baseRule({ endDate: '2026-04-17' })).success).toBe(false);
     expect(
-      recurringRuleSchema.safeParse(directRule({ postedThroughMonth: '2026-06' })).success,
+      recurringRuleSchema.safeParse(
+        baseRule({ postedThroughMonth: '2026-06' } as Partial<RecurringRule> & {
+          postedThroughMonth?: string;
+        }),
+      ).success,
     ).toBe(true);
     expect(
-      recurringRuleSchema.safeParse(directRule({ postedThroughMonth: '2026-05' })).success,
+      recurringRuleSchema.safeParse(
+        baseRule({ postedThroughMonth: '2026-05' } as Partial<RecurringRule> & {
+          postedThroughMonth?: string;
+        }),
+      ).success,
     ).toBe(true);
   });
 
-  it('linked仕訳は存在期間内かつ recurringMonth が日付の月と一致する', () => {
-    const rule = directRule();
+  it('ルール由来の保存仕訳（rec- ID / 由来メタ）は wire で拒否する（v13: 完全導出）', () => {
+    const rule = baseRule();
+    // v12 の正規形（決定的 ID + 由来メタ）そのものも保存はできない＝導出が唯一の姿。
     expect(
       ledgerExportPackageSchema.safeParse(pkg(rule, [entry(rule, '2026-04-20', '2026-04')]))
         .success,
-    ).toBe(true);
-    expect(
-      ledgerExportPackageSchema.safeParse(pkg(rule, [entry(rule, '2026-04-17', '2026-04')]))
-        .success,
     ).toBe(false);
-    // endDate は排他的なので、同日の仕訳は含まない。
-    expect(
-      ledgerExportPackageSchema.safeParse(pkg(rule, [entry(rule, '2026-05-01', '2026-05')]))
-        .success,
-    ).toBe(false);
-    expect(
-      ledgerExportPackageSchema.safeParse(pkg(rule, [entry(rule, '2026-04-20', '2026-05')]))
-        .success,
-    ).toBe(false);
+    // 由来メタだけ（任意 ID）でも拒否する。
     expect(
       ledgerExportPackageSchema.safeParse(
         pkg(rule, [{ ...entry(rule, '2026-04-20', '2026-04'), id: 'arbitrary-id' }]),
@@ -146,9 +140,22 @@ describe('定期ルール存在期間のschema検証', () => {
     ).toBe(false);
   });
 
+  it('rec- の決定的 ID は由来メタが無くても・ルールが無くても拒否する（名乗り = 由来）', () => {
+    const rule = baseRule();
+    const reserved = entry(rule, '2026-04-20', '2026-04');
+    delete reserved.metadata;
+    expect(ledgerExportPackageSchema.safeParse(pkg(rule, [reserved])).success).toBe(false);
+    // 存在しないルールの rec- ID も fail-closed に拒否（v12 は通常仕訳として受理していた）。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg(rule, [{ ...reserved, id: 'rec-unrelated-rule-2026-04' }]),
+      ).success,
+    ).toBe(false);
+  });
+
   it('同一系譜の半開区間の重なりだけを拒否する', () => {
-    const predecessor = directRule({ endDate: '2026-04-22' });
-    const successor = directRule({
+    const predecessor = baseRule({ endDate: '2026-04-22' });
+    const successor = baseRule({
       id: 'successor',
       startDate: '2026-04-22',
       endDate: '2026-05-10',
@@ -206,47 +213,9 @@ describe('定期ルール存在期間のschema検証', () => {
     ).toBe(false);
   });
 
-  it('現存ルールの決定的entry IDは、由来metadataなしの通常仕訳に使えない', () => {
-    const rule = directRule();
-    const reserved = entry(rule, '2026-04-20', '2026-04');
-    delete reserved.metadata;
-    expect(ledgerExportPackageSchema.safeParse(pkg(rule, [reserved])).success).toBe(false);
-    expect(
-      ledgerExportPackageSchema.safeParse(
-        pkg(rule, [{ ...reserved, id: 'rec-unrelated-rule-2026-04' }]),
-      ).success,
-    ).toBe(true);
-  });
-
-  it('回収の仕訳をルールの自動起票実績として偽装できない', () => {
-    const rule = directRule({
-      debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
-      spreadExpenseAccountId: expense.id,
-      endDate: undefined,
-    });
-    const item: MonthlyCostItem = {
-      id: `ccr-${rule.id}-2026-04`,
-      name: rule.name,
-      amount: 1000,
-      startDate: '2026-04-20',
-      endDate: '2026-04-30',
-      expenseAccountId: expense.id,
-      createdAt: 'x',
-      updatedAt: 'x',
-    };
-    const purchase: JournalEntry = {
-      ...entry(rule, item.startDate, '2026-04'),
-      lines: [
-        { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: item.amount },
-        { accountId: cash.id, side: 'credit', amount: item.amount },
-      ],
-      metadata: {
-        monthlyCostId: item.id,
-        recurringRuleId: rule.id,
-        recurringMonth: '2026-04',
-      },
-    };
-    const invalidRecovery: JournalEntry = {
+  it('回収の振替は導出 item（ccr-）を参照でき、由来メタの偽装・導出できない月は拒否する', () => {
+    const rule = baseRule({ spreadExpenseAccountId: expense.id, endDate: undefined });
+    const recovery = (overrides: Partial<JournalEntry> = {}): JournalEntry => ({
       id: 'recovery',
       date: '2026-05-20',
       description: '回収',
@@ -255,103 +224,84 @@ describe('定期ルール存在期間のschema検証', () => {
         { accountId: cash.id, side: 'debit', amount: 100 },
         { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'credit', amount: 100 },
       ],
-      metadata: {
-        monthlyCostId: item.id,
-        monthlyCostRecovery: true as const,
-        recurringRuleId: rule.id,
-        recurringMonth: '2026-05',
-      },
+      metadata: { monthlyCostId: `ccr-${rule.id}-2026-04`, monthlyCostRecovery: true as const },
       createdAt: 'x',
       updatedAt: 'x',
-    };
-    const result = ledgerExportPackageSchema.safeParse(
-      pkg(rule, [purchase, invalidRecovery], [item]),
-    );
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.some((issue) => issue.message.includes('回収の仕訳'))).toBe(true);
-    }
-  });
-
-  it('ルール由来itemは作成日だけを存在期間へ照合し、itemの配分終了日は独立してよい', () => {
-    const rule = directRule({
-      debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      ...overrides,
+    });
+    // 保存 item が無くても、そのルールが 2026-04 を導出できるなら回収は valid（v13 の新しい正）。
+    expect(ledgerExportPackageSchema.safeParse(pkg(rule, [recovery()])).success).toBe(true);
+    // 由来メタを重ねた偽装は拒否。
+    const forged = recovery();
+    forged.metadata = { ...forged.metadata, recurringRuleId: rule.id, recurringMonth: '2026-05' };
+    const forgedResult = ledgerExportPackageSchema.safeParse(pkg(rule, [forged]));
+    expect(forgedResult.success).toBe(false);
+    // 導出起票日（4/20）より前の回収は拒否（導出 item の開始日で検証する）。
+    expect(
+      ledgerExportPackageSchema.safeParse(pkg(rule, [recovery({ date: '2026-04-19' })])).success,
+    ).toBe(false);
+    // 位相に乗らない月（everyMonths 12 の 5 月）への参照は「導出 item が無い」ので拒否。
+    const yearly = baseRule({
+      id: 'yearly',
       spreadExpenseAccountId: expense.id,
       everyMonths: 12,
+      endDate: undefined,
     });
-    const item: MonthlyCostItem = {
-      id: `ccr-${rule.id}-2026-04`,
-      name: rule.name,
-      amount: rule.amount,
-      startDate: '2026-04-20',
-      // ルールは5/1で終了しても、4/20に生まれた資産の配分期間は翌年まで独立して続く。
-      endDate: '2027-03-31',
-      expenseAccountId: expense.id,
-      createdAt: 'x',
-      updatedAt: 'x',
-    };
-    const purchase: JournalEntry = {
-      id: `rec-${rule.id}-2026-04`,
-      date: item.startDate,
-      description: item.name,
-      kind: 'normal',
-      lines: [
-        { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: item.amount },
-        { accountId: cash.id, side: 'credit', amount: item.amount },
-      ],
-      metadata: {
-        monthlyCostId: item.id,
-        recurringRuleId: rule.id,
-        recurringMonth: '2026-04',
-      },
-      createdAt: 'x',
-      updatedAt: 'x',
-    };
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        pkg(yearly, [
+          recovery({
+            metadata: { monthlyCostId: 'ccr-yearly-2026-05', monthlyCostRecovery: true },
+          }),
+        ]),
+      ).success,
+    ).toBe(false);
+  });
 
-    expect(ledgerExportPackageSchema.safeParse(pkg(rule, [purchase], [item])).success).toBe(true);
+  it('清算（settlements）は導出する月・起票日〜既定終了日の範囲だけを受理する', () => {
+    const rule = baseRule({ spreadExpenseAccountId: expense.id, endDate: undefined });
+    const withSettlements = (settlements: { month: string; endDate: string }[]) =>
+      pkg({ ...rule, settlements }, []);
+    // 4/20 起票の item（既定終了 5/20）を 5/1 で早期終了 = valid。
     expect(
       ledgerExportPackageSchema.safeParse(
-        pkg(
-          rule,
-          [
-            {
-              ...purchase,
-              metadata: { monthlyCostId: item.id },
-            },
-          ],
-          [item],
-        ),
+        withSettlements([{ month: '2026-04', endDate: '2026-05-01' }]),
       ).success,
-    ).toBe(false);
-    const neutralItem = { ...item, id: 'neutral-item' };
+    ).toBe(true);
+    // 起票日当日 = valid（同日通過 0 回 → 終了日に全額の意味論）。既定終了日ちょうども valid。
     expect(
       ledgerExportPackageSchema.safeParse(
-        pkg(
-          rule,
-          [
-            {
-              ...purchase,
-              id: 'neutral-purchase',
-              metadata: {
-                ...purchase.metadata,
-                monthlyCostId: neutralItem.id,
-              },
-            },
-          ],
-          [neutralItem],
-        ),
+        withSettlements([{ month: '2026-04', endDate: '2026-04-20' }]),
+      ).success,
+    ).toBe(true);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        withSettlements([{ month: '2026-04', endDate: '2026-05-20' }]),
+      ).success,
+    ).toBe(true);
+    // 起票日より前・既定終了日より後は拒否。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        withSettlements([{ month: '2026-04', endDate: '2026-04-19' }]),
       ).success,
     ).toBe(false);
     expect(
-      ledgerExportPackageSchema.safeParse({
-        ...pkg(rule, [purchase], [item]),
-        recurringRules: [],
-      }).success,
+      ledgerExportPackageSchema.safeParse(
+        withSettlements([{ month: '2026-04', endDate: '2026-05-21' }]),
+      ).success,
     ).toBe(false);
-    const outside = { ...item, startDate: '2026-04-17' };
+    // 導出しない月（存在期間前）・清算月の重複は拒否。
     expect(
       ledgerExportPackageSchema.safeParse(
-        pkg(rule, [{ ...purchase, date: outside.startDate }], [outside]),
+        withSettlements([{ month: '2026-03', endDate: '2026-04-01' }]),
+      ).success,
+    ).toBe(false);
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        withSettlements([
+          { month: '2026-04', endDate: '2026-05-01' },
+          { month: '2026-04', endDate: '2026-05-02' },
+        ]),
       ).success,
     ).toBe(false);
   });

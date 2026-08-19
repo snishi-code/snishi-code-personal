@@ -16,7 +16,9 @@ export type DerivedEntryOrigin =
   /** 継続コストの月割り行 → その項目。 */
   | { kind: 'monthlyCost'; monthlyCostId: string }
   /** 投資の利回り投影 → その利回りを宣言した投資科目。 */
-  | { kind: 'investmentAccount'; accountId: string };
+  | { kind: 'investmentAccount'; accountId: string }
+  /** 残高補正の按分スライス → その差額を宣言した補正仕訳（stored・一覧には出ない）。 */
+  | { kind: 'adjustmentEntry'; entryId: string };
 
 /**
  * 導出行の起票元。実仕訳（virtual でない）と、由来を名乗らない導出行は undefined。
@@ -33,6 +35,9 @@ export function derivedEntryOrigin(entry: JournalEntry): DerivedEntryOrigin | un
   }
   if (metadata.investmentProjectionOf !== undefined) {
     return { kind: 'investmentAccount', accountId: metadata.investmentProjectionOf };
+  }
+  if (metadata.adjustmentSliceOf !== undefined) {
+    return { kind: 'adjustmentEntry', entryId: metadata.adjustmentSliceOf };
   }
   return undefined;
 }

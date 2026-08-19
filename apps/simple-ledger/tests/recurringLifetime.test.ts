@@ -6,13 +6,14 @@ import {
   ruleExistsAt,
 } from '../src/domain/accountLifetime';
 import {
+  deriveRecurringOutputs,
   parseRuleItemId,
-  recurringCursorAfter,
   recurringPostingsDue,
-  recurringProjectionEntries,
 } from '../src/domain/recurring';
+import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import type { Account, RecurringRule } from '../src/domain/types';
 
+/** v13.1（c 案）: 保存形は一形だけ — 借方 = 継続コスト台帳 + 計上先 = spread。 */
 function rule(overrides: Partial<RecurringRule> = {}): RecurringRule {
   return {
     id: 'rule',
@@ -20,7 +21,8 @@ function rule(overrides: Partial<RecurringRule> = {}): RecurringRule {
     amount: 1000,
     dayOfMonth: 20,
     everyMonths: 1,
-    debitAccountId: 'expense',
+    debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+    spreadExpenseAccountId: 'expense',
     creditAccountId: 'cash',
     startMonth: '2026-04',
     startDate: '2026-04-12',
@@ -56,6 +58,16 @@ const accounts: Account[] = [
     name: '預金',
     type: 'asset',
     role: 'daily-asset',
+    archived: false,
+    startDate: '2026-01-01',
+    createdAt: 'x',
+    updatedAt: 'x',
+  },
+  {
+    id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+    name: '継続コスト台帳',
+    type: 'asset',
+    role: 'continuing-cost-asset',
     archived: false,
     startDate: '2026-01-01',
     createdAt: 'x',
@@ -117,19 +129,11 @@ describe('定期ルールの存在期間（半開区間）', () => {
     ]);
   });
 
-  it('終了済みルールのカーソルは存在期間内で起票日が来た最後の月までに限る', () => {
-    const ended = rule({ endDate: '2026-04-18' });
-    // 4/20 は終了後なので、4月を処理済みにしない。
-    expect(recurringCursorAfter(ended, '2030-12-31')).toBeUndefined();
-    // 4/20 を含む形で4/30まで存在した場合は4月まで閉じる。
-    expect(recurringCursorAfter(rule({ endDate: '2026-05-01' }), '2030-12-31')).toBe('2026-04');
-  });
-
-  it('未来投影も存在期間外の予定を作らない', () => {
-    const entries = recurringProjectionEntries(
+  it('導出も存在期間外の起票を作らない', () => {
+    const { entries } = deriveRecurringOutputs(
       [
         rule({
-          debitAccountId: 'investment',
+          spreadExpenseAccountId: 'investment',
           startDate: '2026-04-22',
           endDate: '2026-06-01',
         }),
@@ -138,19 +142,22 @@ describe('定期ルールの存在期間（半開区間）', () => {
       '2026-07-31',
     );
 
+    // 4/20 は開始前・6/20 は排他的終了日の後なので、断面をどれだけ先へ伸ばしても 5/20 だけ。
     expect(entries.map((entry) => entry.date)).toEqual(['2026-05-20']);
   });
 
-  it('科目参照は次の起票日から排他的終了日の前日までの有限区間になる', () => {
+  it('科目参照は次の起票日から最後の起票が作る item の配分終端までの有限区間になる', () => {
     const subject = rule({ endDate: '2026-06-15' });
     expect(recurringRuleReferenceStartDate(subject)).toBe('2026-04-20');
+    // 存在期間の最終日は 6/14 だが、全ルールが台帳経由なので最後の起票（5/20）が作る
+    // item の終端（= 次回起票日 6/20）まで科目を参照する。
     expect(
       accountReferenceIntervals('cash', {
         entries: [],
         monthlyCostItems: [],
         recurringRules: [subject],
       }),
-    ).toEqual([{ kind: 'recurringRule', from: '2026-04-20', to: '2026-06-14' }]);
+    ).toEqual([{ kind: 'recurringRule', from: '2026-04-20', to: '2026-06-20' }]);
   });
 
   it('存在終了日までに次の周期日がなければ将来参照もない', () => {

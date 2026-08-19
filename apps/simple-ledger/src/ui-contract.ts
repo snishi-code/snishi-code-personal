@@ -11,8 +11,13 @@ export const UI = {
     // ヘッダーの日付チップ（透明な date input を重ねた 1 タップ選択）
     dateTrigger: 'period.date.trigger',
     dateInput: 'period.date.input',
-    // タイムスリップ中だけ現れる「今日」ボタン（日付だけを今日へ戻す・画面と粒度は不変）
+    // タイムスリップ中だけ現れる「今日」ボタン（日付だけを今日へ戻す・画面とズームは不変）
     today: 'period.today',
+    // 時間平面のズーム（日/月/年）。点灯 = ウィンドウ世界の名乗り（ズーム対応画面に居るときだけ）。
+    // 断面画面では消灯し、押すと時間平面へ移動してそのズームで点灯する。
+    zoomDay: 'period.zoom.day',
+    zoomMonth: 'period.zoom.month',
+    zoomYear: 'period.zoom.year',
     // 年・全期間はロジックを維持するが、現在は UI から到達させない。
     yearPicker: 'period.year.picker',
     yearRow: 'period.year.row',
@@ -65,7 +70,7 @@ export const UI = {
     expense: 'netIncome.expense',
     result: 'netIncome.result',
   },
-  // 資産の内訳（4 枠: 自由に動かせるお金 / 自由に動かせないお金 / 投資 / 継続コスト台帳）
+  // 資産の内訳（4 枠: 自由に動かせるお金 / 自由に動かせないお金 / 投資 / 月割り台帳）
   assetsBreakdown: {
     view: 'assetsBreakdown.view',
     row: 'assetsBreakdown.row',
@@ -75,7 +80,7 @@ export const UI = {
     investmentSubtotal: 'assetsBreakdown.subtotal.investment',
     ledgerSubtotal: 'assetsBreakdown.subtotal.ledger',
     frame: 'assetsBreakdown.frame',
-    // 継続コスト台帳の 1 行（残存価値合計・タップで「毎月のもの」へ）
+    // 月割り台帳の 1 行（残存価値合計・タップで「月割り台帳」へ）
     ledgerRow: 'assetsBreakdown.ledgerRow',
   },
   // 負債の内訳
@@ -94,36 +99,29 @@ export const UI = {
     row: 'netAssets.row',
     total: 'netAssets.total',
   },
-  // 年間・全体（年別の月次表 / 全期間の年次表）
-  yearlyOverview: {
-    view: 'yearlyOverview.view',
-    // 2026-08-14 に画面内からヘッダーの粒度セグメントへ移設（値は据え置き）。
-    modeYear: 'yearlyOverview.mode.year',
-    modeAll: 'yearlyOverview.mode.all',
-    horizonActual: 'yearlyOverview.horizon.actual',
-    horizonPlus30: 'yearlyOverview.horizon.plus30',
-    horizonHardCap: 'yearlyOverview.horizon.hardCap',
-    prevYear: 'yearlyOverview.year.previous',
-    nextYear: 'yearlyOverview.year.next',
-    matrix: 'yearlyOverview.matrix',
-    projectionNote: 'yearlyOverview.projectionNote',
-    projectionTruncatedNote: 'yearlyOverview.projectionTruncatedNote',
-    // 列見出しのタップ（年間 = 月末の基準日でホームへ / 全体 = その年の年間表示へ）
-    monthColumn: 'yearlyOverview.monthColumn',
-    yearColumn: 'yearlyOverview.yearColumn',
-  },
-  // 横軸=時間、縦軸=勘定科目の箱。保存データを変更しない閲覧専用の地図。
+  // 時間平面。横軸=時間、縦軸=勘定科目の箱。保存データを変更しない閲覧専用の地図。
+  // ズーム（日/月/年）はヘッダー（period.zoom.*）が持ち、この画面はレンズ（線分/数値）を持つ。
   timeline: {
     view: 'timeline.view',
-    zoomDay: 'timeline.zoom.day',
-    zoomMonth: 'timeline.zoom.month',
-    zoomYear: 'timeline.zoom.year',
+    // レンズ = 同じ時間平面の見え方（線分 = 帯とポッチ / 数値 = 表。旧「年間・全体」画面 /
+    // グラフ = ストック 4 系列の折れ線）
+    lensSegment: 'timeline.lens.segment',
+    lensMatrix: 'timeline.lens.matrix',
+    lensChart: 'timeline.lens.chart',
     previous: 'timeline.range.previous',
     next: 'timeline.range.next',
+    // 基準日が可視範囲の外にあるときだけ現れる、表示位置だけを戻すボタン（v13.7 I2）。
+    // ヘッダーの period.today（= 断面そのものを今日へ戻す）とは別物。
+    backToBasis: 'timeline.backToBasis',
     showEnded: 'timeline.showEnded',
+    // 3 レンズ共通のラベル列（v13.6 H3）。行の識別は data-row-key = 共通木のノード id
+    // （box:<箱> / account:<科目 id> / identity:<分類> / rule: / item:）。
+    // rowCheck = その行を右ペインへ出すか（グラフでは系列選択を兼ねる）。
+    rowLabel: 'timeline.row.label',
+    rowToggle: 'timeline.row.toggle',
+    rowCheck: 'timeline.row.check',
     viewport: 'timeline.viewport',
     boxRow: 'timeline.box.row',
-    boxToggle: 'timeline.box.toggle',
     detailRow: 'timeline.detail.row',
     band: 'timeline.band',
     flowDot: 'timeline.dot.flow',
@@ -131,6 +129,29 @@ export const UI = {
     popover: 'timeline.popover',
     flowList: 'timeline.popover.flows',
     open: 'timeline.popover.open',
+    // 桁あふれで投影を打ち切った科目の注記（レンズによらず画面の頭で名乗る）
+    truncatedNote: 'timeline.projectionTruncatedNote',
+    // 数値レンズの表（月ズーム = 月列 / 年ズーム = 年列）。横スクロールは表の枠の中だけ。
+    matrix: 'timeline.matrix',
+    matrixNote: 'timeline.matrix.projectionNote',
+    // 列見出しのタップ（月 = 月末の基準日でホームへ / 年 = その年を月ズームで見る）
+    matrixMonthColumn: 'timeline.matrix.monthColumn',
+    matrixYearColumn: 'timeline.matrix.yearColumn',
+    // 共通木の行（data-row-key で識別）。値のセルは matrixCell。
+    matrixRow: 'timeline.matrix.row',
+    matrixCell: 'timeline.matrix.cell',
+    // グラフレンズ。系列 = チェックされたストック行（箱 = 合算 / 科目 = 単独）。
+    // 横スクロールはこの枠の中だけ。値は各バケット末断面のストック（階段折れ線）。
+    chart: 'timeline.chart',
+    chartViewport: 'timeline.chart.viewport',
+    // グラフレンズの目盛り行（枠の上端に貼る。線分の年月日行・数値の列見出しと同じ役割）
+    chartHead: 'timeline.chart.head',
+    // 未来の断面が混ざることの名乗り（数値レンズの matrixNote と同じ文言・別の器）
+    chartNote: 'timeline.chart.projectionNote',
+    // 描かれている 1 系列の折れ線（ON の行のぶんだけ存在する・data-row-key で識別）
+    chartLine: 'timeline.chart.line',
+    // 系列が 1 本も無いときだけ出る案内（グラフの下・空表示の代わり）
+    chartNoSeries: 'timeline.chart.noSeries',
   },
   journal: {
     view: 'journal.view',
@@ -144,14 +165,14 @@ export const UI = {
     // 表示専用の並び替え（C-4）と抽出結果の件数+合計（C-3）。
     sortByDate: 'journal.sort.date',
     sortByAmount: 'journal.sort.amount',
-    // 名称軸 = 摘要の五十音順（毎月のものの「名称」と同じ語彙・同じ正本 LIST_SORT_AXES）。
+    // 名称軸 = 摘要の五十音順（月割り台帳の「名称」と同じ語彙・同じ正本 LIST_SORT_AXES）。
     sortByName: 'journal.sort.name',
     sortDesc: 'journal.sort.desc',
     sortAsc: 'journal.sort.asc',
     summary: 'journal.summary',
     entry: {
       save: 'journal.entry.save',
-      // 固定額振替の「振替せずに実行」（費用・収入のアーカイブのみ）
+      // 固定額振替の「振替せずに実行」（費用・収入の終了のみ）
       transferSkip: 'journal.entry.transferSkip',
       cancel: 'journal.entry.cancel',
       delete: 'journal.entry.delete',
@@ -162,19 +183,30 @@ export const UI = {
       reversalOverWarning: 'journal.entry.reversal.overWarning',
       detailToggle: 'journal.entry.detailToggle',
       manualSwitch: 'journal.entry.manualSwitch',
-      monthlyizeRepayToggle: 'journal.entry.monthlyizeRepayToggle',
-      monthlyizeRepayAccount: 'journal.entry.monthlyizeRepayAccount',
-      monthlyizeRepayCount: 'journal.entry.monthlyizeRepayCount',
-      monthlyizeRepayStart: 'journal.entry.monthlyizeRepayStart',
+      // マルチステップ登録（v13.7 I3）。ローン・持ち物を選ぶとページが足され、
+      // 主ボタンは最後のページだけ save・手前は next（= 進む）を名乗る。
+      step: 'journal.entry.step',
+      stepBack: 'journal.entry.stepBack',
+      next: 'journal.entry.next',
+      // 基本の画面での「選んだ」表示（中身の入力は次のページ）。
+      loanSelected: 'journal.entry.loanSelected',
+      ccSelected: 'journal.entry.ccSelected',
       ccToggle: 'journal.entry.ccToggle',
+      ccBackToCategory: 'journal.entry.ccBackToCategory',
       ccName: 'journal.entry.ccName',
       ccCategory: 'journal.entry.ccCategory',
       ccEndDate: 'journal.entry.ccEndDate',
+      // ローンで払う（v13.6 H4）。持ち物と同じ片側切替で、押すと支払い元が
+      // 「新しいローンの名前」に変わる（既存ローンへ足す導線は無い）。
       loanArrange: 'journal.entry.loanArrange',
-      liabilityCreate: 'journal.entry.liabilityCreate',
-      liabilityCreateName: 'journal.entry.liabilityCreate.name',
-      liabilityCreateRole: 'journal.entry.liabilityCreate.role',
-      liabilityCreateSave: 'journal.entry.liabilityCreate.save',
+      loanArrangeBack: 'journal.entry.loanArrangeBack',
+      loanName: 'journal.entry.loanName',
+      loanPanel: 'journal.entry.loanPanel',
+      loanEndDate: 'journal.entry.loanEndDate',
+      loanQuickSpan: 'journal.entry.loanQuickSpan',
+      loanFrom: 'journal.entry.loanFrom',
+      loanPreview: 'journal.entry.loanPreview',
+      loanRemainder: 'journal.entry.loanRemainder',
       date: 'journal.entry.date',
       description: 'journal.entry.description',
       item: 'journal.entry.item',
@@ -197,11 +229,14 @@ export const UI = {
     // 残高調整科目（system-adjustment）の「自動」バッジ。表示のみ＝管理操作は出さない
     systemBadge: 'accounts.systemBadge',
     adjust: 'accounts.adjust',
-    // アーカイブ/解除ボタン。残高が残る資産・負債は振替シート（EntrySheet transfer 再利用）を経由する
+    // 終了/解除ボタン（tonal の文字ボタン・v13.2）。残高が残る資産・負債は振替シート（EntrySheet transfer 再利用）を経由する
     archiveToggle: 'accounts.archiveToggle',
-    // 残高 0 のアーカイブ / 解除の確認（残高が残る科目は振替シートが確認を兼ねる）
+    // 残高 0 の終了 / 解除の確認（残高が残る科目は振替シートが確認を兼ねる）
     archiveConfirm: 'accounts.archiveConfirm',
     unarchiveConfirm: 'accounts.unarchiveConfirm',
+    // 削除は編集シート最下部（動詞体系 v13.1）: 未使用なら活性・使用中は件数つきで不活性
+    delete: 'accounts.delete',
+    deleteConfirm: 'accounts.deleteConfirm',
     openingAmount: 'accounts.openingAmount',
     openingDate: 'accounts.openingDate',
     startDate: 'accounts.startDate',
@@ -248,11 +283,13 @@ export const UI = {
     recurringEvery: 'allocations.recurring.every',
     recurringFirstPostingDate: 'allocations.recurring.firstPostingDate',
     recurringFlow: 'allocations.recurring.flow',
-    // 継続コスト台帳を経由して月割りするか（明示トグル。勘定科目の role では決めない）
-    recurringSpreadToggle: 'allocations.recurring.spreadToggle',
     recurringFirstPosting: 'allocations.recurring.firstPosting',
     recurringFirstPostingStatus: 'allocations.recurring.firstPostingStatus',
     recurringStartDate: 'allocations.recurring.startDate',
+    // 編集 = 全期間の引き直しの予告（過去の起票数つき・編集時のみ）
+    recurringEditRetroactiveNote: 'allocations.recurring.editRetroactiveNote',
+    // 存在期間（開始日・終了日）の折りたたみ（編集時のみ・新規は開始 = 初回起票日で自動)
+    recurringDetailsToggle: 'allocations.recurring.detailsToggle',
     recurringEndDate: 'allocations.recurring.endDate',
     // ルールの終了日の解除（iOS date input にクリア手段が無いための明示ボタン）
     recurringEndDateClear: 'allocations.recurring.endDateClear',
@@ -267,11 +304,35 @@ export const UI = {
     // 終了 = 排他的終点を打つ。同じ設定で新しく始める = 系譜なしの独立ルール作成。
     // どちらも無確認では実行しない（終了は終了日シート・再開は確認ダイアログ）。
     recurringEnd: 'allocations.recurring.end',
+    // 操作ボタンが出ない行の状態チップ（同じ位置・縦揃えを崩さない）
+    recurringStatus: 'allocations.recurring.status',
     recurringEndSheet: 'allocations.recurring.endSheet',
     recurringEndSheetDate: 'allocations.recurring.endSheet.date',
     recurringEndSheetConfirm: 'allocations.recurring.endSheet.confirm',
-    recurringRestart: 'allocations.recurring.restart',
-    recurringRestartConfirm: 'allocations.recurring.restart.confirm',
+    // 切り替え = この日から別の線分（編集 = 全期間の引き直しとは別の動詞）。
+    // シートそのものが確認面なので前置きの確認ダイアログは無い。
+    recurringSwitch: 'allocations.recurring.switch',
+    recurringSwitchSheet: 'allocations.recurring.switchSheet',
+    recurringSwitchDate: 'allocations.recurring.switchSheet.date',
+    recurringSwitchAmount: 'allocations.recurring.switchSheet.amount',
+    recurringSwitchDayOfMonth: 'allocations.recurring.switchSheet.dayOfMonth',
+    recurringSwitchEvery: 'allocations.recurring.switchSheet.every',
+    recurringSwitchPreview: 'allocations.recurring.switchSheet.preview',
+    recurringSwitchConfirm: 'allocations.recurring.switchSheet.confirm',
+    // 配分中 item の清算パネル（切り替えシート・終了シートで共通）。
+    // item 行は data-item-id で個別に引く（同じ data-ui が item のぶんだけ並ぶ）。
+    recurringSettlement: 'allocations.recurring.settlement',
+    recurringSettlementItem: 'allocations.recurring.settlement.item',
+    recurringSettlementKeep: 'allocations.recurring.settlement.keep',
+    recurringSettlementEnd: 'allocations.recurring.settlement.end',
+    recurringSettlementRecoveryAmount: 'allocations.recurring.settlement.recoveryAmount',
+    recurringSettlementRecoveryTo: 'allocations.recurring.settlement.recoveryTo',
+    recurringSettlementRemainder: 'allocations.recurring.settlement.remainder',
+    recurringSettlementRemainderSpread: 'allocations.recurring.settlement.remainder.spread',
+    recurringSettlementRemainderExpense: 'allocations.recurring.settlement.remainder.expense',
+    // 終了の Undo（編集シート下部・終了済みのときだけ表示）。
+    recurringClearEndDate: 'allocations.recurring.clearEndDate',
+    recurringClearEndDateConfirm: 'allocations.recurring.clearEndDate.confirm',
     // 削除はカスケード（ルール + 起票済みの仕訳・持ち物）。確認に起票回数を出す。
     recurringDelete: 'allocations.recurring.delete',
     // 継続コスト資産シート（登録＝編集の 1 コンポーネント）。
@@ -288,7 +349,9 @@ export const UI = {
     editExpense: 'allocations.edit.expense',
     editSave: 'allocations.edit.save',
     editImpactWarning: 'allocations.edit.impactWarning',
-    // アーカイブ = 終了日の設定 + 残存価値の始末を 1 枚で決めるシート（シート自体が確認面）。
+    // 削除は編集シート最下部（動詞体系 v13.1）。行アクションには置かない。
+    editDelete: 'allocations.edit.delete',
+    // 終了 = 終了日の設定 + 残存価値の始末を 1 枚で決めるシート（シート自体が確認面）。
     archive: 'allocations.archive',
     archiveDialog: 'allocations.archiveDialog',
     archiveDate: 'allocations.archive.date',
@@ -300,6 +363,13 @@ export const UI = {
     archiveRemainderSpread: 'allocations.archive.remainder.spread',
     archiveRemainderExpense: 'allocations.archive.remainder.expense',
     archiveConfirm: 'allocations.archive.confirm',
+    // ローン行（= 計上先が負債のルール）の残回数。行そのものは recurring.list に混ざる
+    // （v13.6 H4 で「支払用負債」セクションと返済シートは撤去した）。
+    loanRemaining: 'allocations.loan.remaining',
+    // 負債行の展開 = 登録済みの返済（基準日より後の保存仕訳）。タップで仕訳の編集シートへ
+    repaymentsToggle: 'allocations.repayments.toggle',
+    repaymentsList: 'allocations.repayments.list',
+    repaymentRow: 'allocations.repayments.row',
   },
   // 残高補正・初期残高のシート（勘定科目の内訳行・仕訳一覧から開く）。
   adjustments: {
@@ -314,50 +384,45 @@ export const UI = {
     openingRegisterDate: 'adjustments.openingRegister.date',
     openingRegisterSave: 'adjustments.openingRegister.save',
     rowEdit: 'adjustments.row.edit',
-    rowDelete: 'adjustments.row.delete',
     editDialog: 'adjustments.editDialog',
     editAccount: 'adjustments.edit.account',
     editDate: 'adjustments.edit.date',
     editActual: 'adjustments.edit.actual',
     editSave: 'adjustments.edit.save',
+    // 削除は編集シート最下部（動詞体系 v13.1）。行アクションには置かない。
+    editDelete: 'adjustments.edit.delete',
     deleteConfirm: 'adjustments.deleteConfirm',
     openingRowEdit: 'opening.row.edit',
-    openingRowDelete: 'opening.row.delete',
     openingEditDialog: 'opening.editDialog',
     openingEditAmount: 'opening.edit.amount',
     openingEditDate: 'opening.edit.date',
     openingEditSave: 'opening.edit.save',
+    openingEditDelete: 'opening.edit.delete',
     openingDeleteConfirm: 'opening.deleteConfirm',
   },
   cashflow: {
     view: 'cashflow.view',
-    until: 'cashflow.until',
     liabilityList: 'cashflow.liability.list',
-    // カード・ローンの返済計画づくり（負債行から開く）
-    repayAdd: 'cashflow.repay.add',
+    // 負債行は表示オンリー（v13.4 ④）。タップ = 月割り台帳の該当負債へ遷移するだけで、
+    // 返済の登録・編集は台帳（allocations.repay.*）が持つ。
     liabilityRow: 'cashflow.liability.row',
-    repaySheet: 'cashflow.repay.sheet',
-    repayAmount: 'cashflow.repay.amount',
-    repayDate: 'cashflow.repay.date',
-    repayFrom: 'cashflow.repay.from',
-    repayCount: 'cashflow.repay.count',
-    repayPerMonth: 'cashflow.repay.perMonth',
-    repaySave: 'cashflow.repay.save',
+    // 自由に動かせるお金の折れ線（基準日起点・右へ横スクロール）と、窓を 1 段伸ばす操作。
+    // 点の粒度はヘッダーのズームに追従する（日 = 日次 / 月 = 月末 / 年 = 年末・v13.5 F）。
     freeTrend: 'cashflow.freeTrend',
+    chartViewport: 'cashflow.chart.viewport',
+    chartExtend: 'cashflow.chart.extend',
+    // グラフの読み上げ本文（SVG は aria-hidden。月ズームの純増減の副表示もここに出る）
+    chartSummary: 'cashflow.chart.summary',
+    // 基準日以降で最初に 0 を下回る日（下回りが無いときは静かな 1 行が同じ場所に出る）
+    shortfall: 'cashflow.shortfall',
     futureList: 'cashflow.future.list',
     // 将来行（タップで編集 or 由来へ・entryOpenPlan 消費）
     futureRow: 'cashflow.future.row',
     summary: 'cashflow.summary',
-    // 負債行の展開 = 登録済みの返済（未来日付の保存仕訳）。タップで仕訳の編集シートへ
-    repaymentsToggle: 'cashflow.repayments.toggle',
-    repaymentsList: 'cashflow.repayments.list',
-    repaymentRow: 'cashflow.repayments.row',
   },
   settings: {
     view: 'settings.view',
     fractionDigits: 'settings.fractionDigits',
-    // 資金繰りの既定表示期間（端末設定・ヶ月）
-    cashflowHorizon: 'settings.cashflowHorizon',
     exportJson: 'settings.exportJson',
     importJson: 'settings.importJson',
     importFile: 'settings.importFile',

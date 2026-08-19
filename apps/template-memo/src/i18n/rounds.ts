@@ -267,7 +267,12 @@ export const s = {
     itemLabel: 'ラベル（例 肺音）',
     itemKind: '種類',
     itemKindText: '入力',
+    itemKindDecimal: '数字',
     itemKindSelect: '選択',
+    // 「数字」は打てる文字を狭めるのではなく、出るキーボードを寄せるだけ。
+    // "/" が要る項目 (血圧など) は「入力」のままにする必要があるので、選んだときだけ出す。
+    itemKindDecimalHint:
+      '数字のキーボードを優先して出します。「/」は打てないので、120/80 のような項目は「入力」にしてください。',
     itemUnit: '単位（例 mmHg・℃）',
     itemNormal: '正常文（例 明らかなラ音なし）',
     itemOptions: '選択肢',
@@ -531,6 +536,8 @@ export const s = {
       section: 'フレーム',
       add: 'フレームを作る',
       usage: (n: number) => `テンプレート ${n}件で使用`,
+      // 行そのものが編集ボタン (鉛筆は廃止)。読み上げでは名前と用途が要る。
+      editAria: (name: string) => `${name} を編集`,
       deleteConfirmTitle: 'フレームを削除しますか？',
       deleteConfirmBody: (name: string) => `「${name}」を削除します。`,
     },
@@ -538,6 +545,8 @@ export const s = {
       section: 'フォーマット',
       add: 'フォーマットを作る',
       usage: (n: number) => `テンプレート ${n}件で使用`,
+      // 行そのものが編集ボタン (鉛筆は廃止)。読み上げでは名前と用途が要る。
+      editAria: (name: string) => `${name} を編集`,
       deleteConfirmTitle: 'フォーマットを削除しますか？',
       deleteConfirmBody: (name: string) => `「${name}」を削除します。`,
     },

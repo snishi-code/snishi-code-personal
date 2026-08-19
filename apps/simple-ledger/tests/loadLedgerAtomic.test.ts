@@ -30,7 +30,6 @@ describe('loadLedger の原子的読取り', () => {
         STORE.kv,
         STORE.accounts,
         STORE.journalEntries,
-        STORE.tags,
         STORE.monthlyCostItems,
         STORE.recurringRules,
       ]),

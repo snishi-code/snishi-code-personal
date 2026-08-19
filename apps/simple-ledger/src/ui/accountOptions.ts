@@ -1,6 +1,6 @@
 import { ACCOUNT_TYPES, type Account, type AccountType } from '../domain/types';
 import type { AccountRole } from '../domain/accountRoles';
-import { compareAccountOrder } from '../domain/accountOrder';
+import { compareAccountOrder } from '../domain/displayOrder';
 import { RECURRING_POSTABLE_ROLES } from '../domain/recurring';
 import { accountExistsAt } from '../domain/accountLifetime';
 import { t } from '../i18n';

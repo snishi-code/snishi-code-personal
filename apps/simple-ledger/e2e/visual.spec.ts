@@ -111,22 +111,62 @@ for (const vp of VIEWPORTS) {
       fullPage: true,
     });
 
-    // 年間・全体（ページ全体ではなく表のコンテナだけを横スクロール）。
-    // 入口はヘッダーの粒度セグメント（メニューからは撤去済み）。
-    await page.locator(ui('yearlyOverview.mode.year')).click();
-    await expect(page.locator(ui('yearlyOverview.view'))).toBeVisible();
-    await expect(page.locator(ui('yearlyOverview.matrix'))).toBeVisible();
-    await expectNoHorizontalScroll(page, `yearlyOverview ${vp.name}`);
+    // 時間平面の数値レンズ（旧「年間・全体」画面）。ページ全体ではなく表のコンテナだけを
+    // 横スクロールする。入口はヘッダーのズーム（断面画面から押すと時間平面へ移動する）+
+    // 画面内のレンズセレクタ。
+    await page.locator(ui('period.zoom.month')).click();
+    await expect(page.locator(ui('timeline.view'))).toBeVisible();
+    await expect(page.locator(ui('period.zoom.month'))).toHaveAttribute('aria-pressed', 'true');
+    await page.locator(ui('timeline.lens.matrix')).click();
+    await expect(page.locator(ui('timeline.matrix'))).toBeVisible();
+    // 数値レンズに日の列は無い = ヘッダーの「日」は押せない。
+    await expect(page.locator(ui('period.zoom.day'))).toBeDisabled();
+    await expectNoHorizontalScroll(page, `timelineMatrix ${vp.name}`);
     if (vp.width === 390) {
-      const matrixScrolls = await page.locator(ui('yearlyOverview.matrix')).evaluate((element) => {
+      const matrixScrolls = await page.locator(ui('timeline.matrix')).evaluate((element) => {
         return element.scrollWidth > element.clientWidth;
       });
-      expect(matrixScrolls, 'mobile: 年間表のコンテナ内で横スクロールできる').toBe(true);
+      expect(matrixScrolls, 'mobile: 数値レンズの表のコンテナ内で横スクロールできる').toBe(true);
     }
     await page.screenshot({
-      path: `test-results/screenshots/ledger-yearly-overview-${vp.name}.png`,
+      path: `test-results/screenshots/ledger-timeline-matrix-${vp.name}.png`,
       fullPage: true,
     });
+    // グラフレンズ。ラベル列は 3 レンズ共通で、チェックボックスが系列選択を兼ねる。
+    await page.locator(ui('timeline.lens.chart')).click();
+    await expect(page.locator(ui('timeline.chart'))).toBeVisible();
+    // 数値レンズと違い、グラフには日のバケットがある = ヘッダーの「日」が押せる。
+    await expect(page.locator(ui('period.zoom.day'))).toBeEnabled();
+    await expectNoHorizontalScroll(page, `timelineChart ${vp.name}`);
+    // 既定は全 ON。ラベル列の 1 行は 44px のタップ領域。
+    const netAssetsRow = page.locator(
+      `${ui('timeline.row.label')}[data-row-key="identity:netAssets"]`,
+    );
+    const netAssetsCheck = page.locator(
+      `${ui('timeline.row.check')}[data-row-key="identity:netAssets"]`,
+    );
+    await expect(netAssetsCheck).toBeChecked();
+    const rowBox = await netAssetsRow.boundingBox();
+    expect(rowBox?.height ?? 0, `共通ラベル列のタップ領域 ${vp.name}`).toBeGreaterThanOrEqual(44);
+    // フローの行はグラフでは選べない（描き方が決まるまで）。
+    await expect(
+      page.locator(`${ui('timeline.row.check')}[data-row-key="box:expense"]`),
+    ).toBeDisabled();
+    await page.screenshot({
+      path: `test-results/screenshots/ledger-timeline-chart-${vp.name}.png`,
+      fullPage: true,
+    });
+    // チェックを外すと線が消える（描画の正本がチェックであることを実ブラウザでも見る）。
+    await netAssetsCheck.click();
+    await expect(netAssetsCheck).not.toBeChecked();
+    await expect(
+      page.locator(`${ui('timeline.chart.line')}[data-row-key="identity:netAssets"]`),
+    ).toHaveCount(0);
+    await netAssetsCheck.click();
+
+    // 線分レンズへ戻す（以降のシナリオは既定のレンズで進める）。
+    await page.locator(ui('timeline.lens.segment')).click();
+    await expect(page.locator(ui('timeline.viewport'))).toBeVisible();
 
     // 毎月のもの → くり返し記帳シート: flat 2 列でもシート内に横スクロールが出ない（実ユーズ②）。
     await page.locator(ui('nav.menu.button')).click();
@@ -175,6 +215,38 @@ test('タイムラインは 390px でページを横にはみ出さず、表示�
   expect(viewportScrolls, 'mobile: タイムラインの表示領域内で横スクロールできる').toBe(true);
   await page.screenshot({
     path: 'test-results/screenshots/ledger-timeline-mobile-390x844.png',
+    fullPage: true,
+  });
+});
+
+test('資金繰りのグラフは 390px でページを横にはみ出さず、表示領域内だけを横スクロールできる', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
+  await page.goto('./?fixture=sample');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.cashflow')).click();
+  await expect(page.locator(ui('cashflow.view'))).toBeVisible();
+
+  // グラフの幅は「窓の日数 × 1 日あたりの px」なので、必ず実機幅より広くなる。
+  // はみ出す先は viewport の中だけ = ページ本体は横スクロールしない。
+  const viewport = page.locator(ui('cashflow.chart.viewport'));
+  await expect(viewport).toBeVisible();
+  await expectNoHorizontalScroll(page, 'cashflow mobile-390x844');
+  const widthBefore = await viewport.evaluate((el) => el.scrollWidth);
+  expect(widthBefore, 'mobile: グラフの表示領域内で横スクロールできる').toBeGreaterThan(
+    await viewport.evaluate((el) => el.clientWidth),
+  );
+
+  // 「さらに先へ」で窓が伸びても、はみ出しは viewport の中に留まる。
+  await page.locator(ui('cashflow.chart.extend')).click();
+  await expect.poll(() => viewport.evaluate((el) => el.scrollWidth)).toBeGreaterThan(widthBefore);
+  await expectNoHorizontalScroll(page, 'cashflow extended mobile-390x844');
+  await page.screenshot({
+    path: 'test-results/screenshots/ledger-cashflow-mobile-390x844.png',
     fullPage: true,
   });
 });
@@ -503,4 +575,352 @@ test('フッターナビは全画面に常設され、下端のコンテンツ�
   await expect(page.locator(ui('dashboard.view'))).toBeVisible();
 
   await page.screenshot({ path: 'test-results/screenshots/ledger-footer-nav-375x667.png' });
+});
+
+test('ヘッダーの日/月/年と「今日」は 375px でも 44px のタップ領域を保つ (v13.6 H2-1)', async ({
+  page,
+}) => {
+  // 実機で一番狭い側。ここで 44px を割らないなら、どの幅でも割らない。
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
+  await page.goto('./?fixture=sample');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+
+  const zoomButtons = ['period.zoom.day', 'period.zoom.month', 'period.zoom.year'];
+  for (const name of zoomButtons) {
+    const box = (await page.locator(ui(name)).boundingBox())!;
+    expect(box.height, `${name} の高さが 44px 未満`).toBeGreaterThanOrEqual(44);
+    expect(box.width, `${name} の幅が 44px 未満`).toBeGreaterThanOrEqual(44);
+  }
+
+  // タイムスリップさせて「今日」を出す（普段は出ない = 別途測るしかない）。
+  // React は value プロパティを差し替えるので、素の setter を通さないと onChange が起きない。
+  await page.locator(ui('period.date.input')).evaluate((el) => {
+    const input = el as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(input, '2020-01-15');
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await expect(page.locator(ui('period.today'))).toBeVisible();
+  const todayBox = (await page.locator(ui('period.today')).boundingBox())!;
+  expect(todayBox.height, '「今日」の高さが 44px 未満').toBeGreaterThanOrEqual(44);
+  expect(todayBox.width, '「今日」の幅が 44px 未満').toBeGreaterThanOrEqual(44);
+
+  // 44px にしてもヘッダーの実高（--sticky-top = 57px）は変わらない（sticky の相手が動かない）。
+  const headerBox = (await page.locator('.app-header').boundingBox())!;
+  expect(Math.round(headerBox.height), 'ヘッダーの実高が 57px から動いた').toBe(57);
+
+  // 1 行に収まり、ページ本体は横へはみ出さない。
+  await expectNoHorizontalScroll(page, 'header zoom 375x667');
+
+  // レンズセレクタ（タイムライン）も同じ規約を満たす。
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.timeline')).click();
+  await expect(page.locator(ui('timeline.view'))).toBeVisible();
+  for (const name of ['timeline.lens.segment', 'timeline.lens.matrix', 'timeline.lens.chart']) {
+    const box = (await page.locator(ui(name)).boundingBox())!;
+    expect(box.height, `${name} のタップ領域が 44px 未満`).toBeGreaterThanOrEqual(44);
+  }
+
+  await page.screenshot({ path: 'test-results/screenshots/ledger-header-zoom-375x667.png' });
+});
+
+/**
+ * 連続スクロール（v13.6 H2-3）。jsdom は clientWidth / scrollWidth を 0 にするため
+ * **端に近づいたら伸びる**ことは実ブラウザでしか見られない（unit 側は配線だけを見る）。
+ * 3 レンズとも同じ機構なので、線分レンズで幾何まで測り、数値レンズで「同じ機構が効く」を見る。
+ */
+
+/**
+ * 枠を `scrollLeft` へ動かし、窓が伸びるまで待って**伸びた量と scrollLeft の増分**を返す。
+ * 左へ伸びたときは両者が一致する = 見えている中身が動いていない、の機械的な言い方。
+ */
+async function scrollAndAwaitExtend(
+  locator: ReturnType<Page['locator']>,
+  scrollLeft: number | 'end',
+): Promise<{ grew: number; shifted: number } | null> {
+  return locator.evaluate(
+    (el, target) =>
+      new Promise<{ grew: number; shifted: number } | null>((resolve) => {
+        el.scrollLeft = target === 'end' ? el.scrollWidth : target;
+        // 代入直後の実測を起点にする（クランプ後の値を読む）。
+        const width0 = el.scrollWidth;
+        const left0 = el.scrollLeft;
+        const deadline = performance.now() + 3000;
+        const tick = () => {
+          if (el.scrollWidth > width0) {
+            resolve({ grew: el.scrollWidth - width0, shifted: el.scrollLeft - left0 });
+            return;
+          }
+          if (performance.now() > deadline) {
+            resolve(null);
+            return;
+          }
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+    scrollLeft,
+  );
+}
+
+test('タイムラインは端に近づくと窓が自動で伸び、左へ伸びても見えているものが動かない (375x667)', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
+  await page.goto('./?fixture=sample');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.timeline')).click();
+  await expect(page.locator(ui('timeline.view'))).toBeVisible();
+
+  const viewport = page.locator(ui('timeline.viewport'));
+  await expect(viewport).toBeVisible();
+
+  // ── 右端へ寄せると未来側が伸びる（「次へ」を押さなくても先が生える）。
+  const grownRight = await scrollAndAwaitExtend(viewport, 'end');
+  expect(grownRight, '右端に触れても窓が伸びない').not.toBeNull();
+  // 未来側の継ぎ足しは左端を動かさないので、scrollLeft は据え置き = 見ていた位置のまま。
+  expect(grownRight!.shifted, '未来側へ伸ばしたのに表示が飛んだ').toBe(0);
+
+  // ── 左は「データのある最初の年」で止まる。sample の窓は開いた時点でそこへ届いているので、
+  //    左の継ぎ足しを見るには窓を未来へ送っておく（= 下限より後ろから始まる窓にする）。
+  await page.locator(ui('timeline.range.next')).click();
+  await page.locator(ui('timeline.range.next')).click();
+
+  // しきい値の外（端から十分遠い位置）では伸びない。
+  const staysPut = await viewport.evaluate(async (el) => {
+    el.scrollLeft = Math.round((el.scrollWidth - el.clientWidth) / 2);
+    const width = el.scrollWidth;
+    await new Promise((r) => setTimeout(r, 400));
+    return el.scrollWidth === width;
+  });
+  expect(staysPut, '端から遠いのに窓が伸びた（開いた直後から育ち続ける）').toBe(true);
+
+  // 左端へ寄せると過去側が伸び、**伸びたぶんだけ scrollLeft が足される**（見た目が動かない）。
+  const grownLeft = await scrollAndAwaitExtend(viewport, 0);
+  expect(grownLeft, '左端に触れても窓が伸びない').not.toBeNull();
+  expect(grownLeft!.grew, '過去側の継ぎ足しが 0').toBeGreaterThan(0);
+  expect(grownLeft!.shifted, '左へ伸ばしたぶんの scrollLeft 補正が一致しない').toBe(
+    grownLeft!.grew,
+  );
+
+  await expectNoHorizontalScroll(page, 'timeline continuous scroll 375x667');
+
+  // ── 数値レンズでも同じ機構が効く（レンズごとの独自実装ではない）。
+  await page.locator(ui('timeline.lens.matrix')).click();
+  const matrix = page.locator(ui('timeline.matrix'));
+  await expect(matrix).toBeVisible();
+  const grownMatrix = await scrollAndAwaitExtend(matrix, 'end');
+  expect(grownMatrix, '数値レンズが端で伸びない').not.toBeNull();
+  await expectNoHorizontalScroll(page, 'timeline matrix continuous scroll 375x667');
+
+  // ── グラフレンズも同じ（3 レンズ共通の viewport 機構）。
+  await page.locator(ui('timeline.lens.chart')).click();
+  const chart = page.locator(ui('timeline.chart.viewport'));
+  await expect(chart).toBeVisible();
+  const grownChart = await scrollAndAwaitExtend(chart, 'end');
+  expect(grownChart, 'グラフレンズが端で伸びない').not.toBeNull();
+  await expectNoHorizontalScroll(page, 'timeline chart continuous scroll 375x667');
+
+  await page.screenshot({
+    path: 'test-results/screenshots/ledger-timeline-continuous-375x667.png',
+  });
+});
+
+/**
+ * v13.6 H3: **レンズは右ペインの描画を交換するだけ**。左のラベル列（行・順序・名前・
+ * チェック状態・開閉）は 3 レンズで同じ 1 つのものを共有する。
+ * jsdom では「同じに見える」を測れないので、実ブラウザの実幅（375px）で突き合わせる。
+ */
+test('375px で 3 レンズのラベル列が同一（行・順序・名前・幅・チェック状態）', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
+  await page.goto('./?fixture=sample');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.timeline')).click();
+  await expect(page.locator(ui('timeline.view'))).toBeVisible();
+
+  /**
+   * ラベル列のスナップショット（行 id・見えている名前・チェック・列幅）。
+   * 読み上げ専用の補足（グラフでフロー行が選べない理由）はレンズ固有でよいので、
+   * 見えている文字（.lens-row__text）だけを比べる。
+   */
+  const labelColumn = () =>
+    page.locator(ui('timeline.row.label')).evaluateAll((rows) =>
+      rows.map((row) => ({
+        key: row.getAttribute('data-row-key'),
+        text: (row.querySelector('.lens-row__text')?.textContent ?? '').trim(),
+        checked: row.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked ?? null,
+        width: Math.round(row.getBoundingClientRect().width),
+      })),
+    );
+
+  const segment = await labelColumn();
+  expect(segment.length, 'ラベル列の行が 1 つも無い').toBeGreaterThan(0);
+  // 幅は 1 つの正本（--lens-label-width）。行ごとに違えば列が揃わない。
+  expect(new Set(segment.map((row) => row.width)).size, 'ラベル列の幅が行ごとに違う').toBe(1);
+
+  // 箱を 1 つ開き、チェックを 1 つ外した状態で比べる（既定値だけの一致にしない）。
+  await page.locator(`${ui('timeline.row.toggle')}[data-row-key="box:assetFree"]`).click();
+  await page.locator(`${ui('timeline.row.check')}[data-row-key="box:income"]`).click();
+  const opened = await labelColumn();
+  expect(opened.length, '箱を開いても行が増えていない').toBeGreaterThan(segment.length);
+  expect(opened.find((row) => row.key === 'box:income')?.checked).toBe(false);
+
+  for (const lens of ['timeline.lens.matrix', 'timeline.lens.chart']) {
+    await page.locator(ui(lens)).click();
+    await expect(page.locator(ui('timeline.row.label')).first()).toBeVisible();
+    // グラフはフロー行のチェックを disabled にするだけで、行と状態そのものは同じ。
+    expect(await labelColumn(), `${lens} のラベル列が線分レンズと違う`).toEqual(opened);
+    await expectNoHorizontalScroll(page, `lens label column ${lens} 375x667`);
+  }
+
+  await page.screenshot({
+    path: 'test-results/screenshots/ledger-timeline-lens-labels-375x667.png',
+    fullPage: true,
+  });
+});
+
+/** レンズごとの枠（縦横 2 次元の窓）の data-ui。 */
+const LENS_FRAMES = [
+  { lens: 'timeline.lens.segment', frame: 'timeline.viewport' },
+  { lens: 'timeline.lens.matrix', frame: 'timeline.matrix' },
+  { lens: 'timeline.lens.chart', frame: 'timeline.chart.viewport' },
+] as const;
+
+/**
+ * v13.7 I1: **枠も 3 レンズ共通**。ラベル列は左・目盛り行は上・左上の隅は両方に貼りつき、
+ * 描画部だけが縦横に流れる。jsdom は sticky を評価しないので実ブラウザで測るしかない。
+ * かつて数値レンズだけ器の sticky が共通化から漏れていたので、パリティとして固定する。
+ */
+test('3 レンズとも ラベル列・目盛り行・左上の隅が枠に貼りつく (375x667)', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
+  await page.goto('./?fixture=sample');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.timeline')).click();
+  await expect(page.locator(ui('timeline.view'))).toBeVisible();
+
+  // 縦に送れる高さを作る（箱をすべて開いて行を増やす）。3 レンズで行は共通なので 1 回でよい。
+  for (const toggle of await page.locator(ui('timeline.row.toggle')).all()) {
+    await toggle.click();
+  }
+
+  for (const { lens, frame } of LENS_FRAMES) {
+    await page.locator(ui(lens)).click();
+    const viewport = page.locator(ui(frame));
+    await expect(viewport).toBeVisible();
+
+    const measured = await viewport.evaluate((el) => {
+      const box = (node: Element | null) => {
+        if (!node) return null;
+        const rect = node.getBoundingClientRect();
+        return { top: Math.round(rect.top), left: Math.round(rect.left) };
+      };
+      // 隅は目盛り行を兼ねることがある（数値レンズの「項目」セル）。目盛り行そのものの
+      // 貼りつきを見たいので、隅ではない方を選ぶ。
+      const head = el.querySelector('.lens-frame__head:not(.lens-frame__corner)');
+      const corner = el.querySelector('.lens-frame__corner');
+      const label = el.querySelector('[data-ui="timeline.row.label"]');
+      const pane = el.querySelector('.lens-frame__pane');
+      el.scrollTop = 0;
+      el.scrollLeft = 0;
+      const before = { head: box(head), corner: box(corner), label: box(label), pane: box(pane) };
+      el.scrollTop = 200;
+      el.scrollLeft = 300;
+      return {
+        scrollable: { y: el.scrollHeight - el.clientHeight, x: el.scrollWidth - el.clientWidth },
+        moved: { y: el.scrollTop, x: el.scrollLeft },
+        before,
+        after: { head: box(head), corner: box(corner), label: box(label), pane: box(pane) },
+      };
+    });
+
+    // 前提: 枠の中で縦にも横にも送れている（送れていなければ貼りつきを測ったことにならない）。
+    expect(measured.scrollable.y, `${lens}: 枠が縦に送れない`).toBeGreaterThan(0);
+    expect(measured.moved.y, `${lens}: 縦に動いていない`).toBeGreaterThan(0);
+    expect(measured.moved.x, `${lens}: 横に動いていない`).toBeGreaterThan(0);
+
+    // 目盛り行は上に貼る（縦に送っても消えない）が、横には一緒に流れる。
+    expect(measured.after.head!.top, `${lens}: 目盛り行が上に貼りついていない`).toBe(
+      measured.before.head!.top,
+    );
+    expect(measured.after.head!.left, `${lens}: 目盛り行が横に流れていない`).toBeLessThan(
+      measured.before.head!.left,
+    );
+    // ラベル列は左に貼る（横に送っても消えない）が、縦には一緒に流れる。
+    expect(measured.after.label!.left, `${lens}: ラベル列が左に貼りついていない`).toBe(
+      measured.before.label!.left,
+    );
+    expect(measured.after.label!.top, `${lens}: ラベル列が縦に流れていない`).toBeLessThan(
+      measured.before.label!.top,
+    );
+    // 左上の隅はどちらへ送っても動かない唯一の点。
+    expect(measured.after.corner, `${lens}: 左上の隅が動いた`).toEqual(measured.before.corner);
+    // 描画部は横に流れる（貼りついていたら中身が見えない）。
+    expect(measured.after.pane!.left, `${lens}: 描画部が横に流れていない`).toBeLessThan(
+      measured.before.pane!.left,
+    );
+
+    // 軸ロック: 指で触れた場所が軸を決める（描画部 = 横だけ / ラベル列 = 縦だけ）。
+    const touch = await viewport.evaluate((el) => ({
+      pane: getComputedStyle(el.querySelector('.lens-frame__pane')!).touchAction,
+      label: getComputedStyle(el.querySelector('[data-ui="timeline.row.label"]')!).touchAction,
+    }));
+    expect(touch.pane, `${lens}: 描画部の軸ロックが無い`).toBe('pan-x');
+    expect(touch.label, `${lens}: ラベル列の軸ロックが無い`).toBe('pan-y');
+
+    await expectNoHorizontalScroll(page, `lens frame ${lens} 375x667`);
+  }
+
+  await page.screenshot({
+    path: 'test-results/screenshots/ledger-timeline-lens-frame-375x667.png',
+  });
+});
+
+/**
+ * v13.7 I2: 窓を送って基準日を見失ったときだけ現れる「{基準日} へ戻る」。
+ * 押すと**見ている位置だけ**が基準日へ戻り、ヘッダーの断面日付は動かない。
+ */
+test('基準日が見えなくなったときだけ「戻る」が出て、押しても断面は動かない (375x667)', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
+  await page.goto('./?fixture=sample');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+
+  const headerDate = await page.locator('.period-context__text').textContent();
+
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.timeline')).click();
+  await expect(page.locator(ui('timeline.view'))).toBeVisible();
+
+  const jump = page.locator(ui('timeline.backToBasis'));
+  await expect(jump, '開いた直後は基準日が見えているので出ない').toHaveCount(0);
+
+  // 窓を送って基準日を可視範囲の外へ出す。
+  await page.locator(ui('timeline.range.next')).click();
+  await page.locator(ui('timeline.range.next')).click();
+  await expect(jump).toBeVisible();
+  await expect(jump).toHaveText(new RegExp(headerDate!.trim()));
+  const box = (await jump.boundingBox())!;
+  expect(box.height, '「戻る」のタップ領域が 44px 未満').toBeGreaterThanOrEqual(44);
+
+  await jump.click();
+  await expect(jump, '基準日が見える位置へ戻ったのにボタンが残っている').toHaveCount(0);
+  // 断面（ヘッダーの日付）は動かさない = ここが「今日」ボタンとの違い。
+  expect(await page.locator('.period-context__text').textContent()).toBe(headerDate);
+
+  await expectNoHorizontalScroll(page, 'timeline back-to-basis 375x667');
+  await page.screenshot({
+    path: 'test-results/screenshots/ledger-timeline-back-to-basis-375x667.png',
+  });
 });

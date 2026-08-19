@@ -2,8 +2,10 @@
  * 入力カードの行 (ItemRow) と配置 (PlacementRows) の DOM テスト。
  *
  * 固定したいこと:
- *   - 入力欄に文字種の制約 (inputMode / pattern) を付けない。
- *     iOS の数字キーパッドには "." も "/" も無く、36.5 も 120/80 も入力不能になるため。
+ *   - text の入力欄に文字種の制約 (inputMode / pattern) を付けない。
+ *     iOS の numeric パッドには "." も "/" も無く、36.5 も 120/80 も入力不能になるため。
+ *   - decimal の入力欄は inputMode だけ decimal にし、type / pattern では狭めない
+ *     (出るキーボードを寄せるだけで、打てる文字も貼り付けも制限しない)。
  *   - 旧 number / fraction の保存形 { value, note? } を値として読み、編集しても note を捨てない。
  *   - フォーマット名の見出しを出す条件 (showName / シート内 / ラベル列なし配置)。
  */
@@ -47,6 +49,20 @@ function placed(over: Partial<PlacedFormat>): PlacedFormat {
 }
 
 describe('ItemRow の入力欄', () => {
+  it('数字項目は inputMode だけ decimal にし、type / pattern では狭めない', () => {
+    renderItem({ id: 'a', label: 'BT', kind: 'decimal', unit: '℃' }, '');
+    const input = screen.getByRole('textbox');
+    expect(input).toHaveAttribute('inputmode', 'decimal');
+    expect(input).not.toHaveAttribute('pattern');
+    expect(input).toHaveAttribute('type', 'text');
+  });
+
+  it('数字項目でも打った文字はそのまま保存する', () => {
+    const onWrite = renderItem({ id: 'a', label: 'BT', kind: 'decimal', unit: '℃' }, '');
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '36.5' } });
+    expect(onWrite).toHaveBeenLastCalledWith({ value: '36.5', source: 'manual' });
+  });
+
   it('文字種を狭めない（inputMode / pattern を持たない）', () => {
     renderItem({ id: 'a', label: 'BT', kind: 'text', unit: '℃' }, '');
     const input = screen.getByRole('textbox');

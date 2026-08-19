@@ -5,26 +5,26 @@
  * 費用・収入の「実残高」はその日までの実際の累計額（accountBalance が type で符号を決める）。
  */
 import { useMemo, useState } from 'react';
-import { Modal } from './overlays';
+import { ConfirmDialog, Modal } from './overlays';
 import { TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { useLedger } from '../state/store';
-import { accountBalance, filterByDateRange } from '../domain/accounting';
 import { ADJUSTABLE_ACCOUNT_ROLES } from '../domain/accountRoles';
 import { isAdjustableAccountType } from '../domain/adjustment';
 import { isValidIsoDate } from '../domain/calendar';
-// 理論残高は意図的に reportEntriesForAsOf（投影なし）を使う: repository の保存側
-// （createAdjustment / updateAdjustment）と同じ算定でなければ expectedBalance がずれる。
-// 投資利回りの投影（displayEntriesForAsOf）は仮の数字であり、補正の基準（現実アンカー）に
-// 混ぜない（§D・Codex 指摘）。
-import { reportEntriesForAsOf } from '../domain/reportEntries';
+// 理論残高は「この pin を置いたあとの世界での pin 直前残高」（v13.5 C-3）。
+// repository の保存側（createAdjustment / updateAdjustment）と**同じヘルパ**を通す
+// ——ずれると、シートが見せた差分と実際に按分されるスライス合計が食い違う。
+// 投資科目では、pin を置いた区間の月次複利は按分に置き換わるので理論残高に含めない
+// （利回りの起点は最後の pin。adjustmentSpread.ts が値の正本）。
+import { adjustmentPinExpectedBalanceForLedger } from '../domain/reportEntries';
 import { formatMinorForInput, parseAmountToMinor, sanitizeSignedAmountText } from './amountText';
 import { useMoneyDigits } from './money';
 import { groupedAccountsByRole } from './accountOptions';
 import { AccountPicker } from './AccountPicker';
 import { Money } from './money';
 import { todayLocal } from '../util/time';
-import type { Account, AccountType, JournalEntry } from '../domain/types';
+import type { Account, JournalEntry } from '../domain/types';
 import { t } from '../i18n';
 import { UI } from '../ui-contract';
 
@@ -43,15 +43,10 @@ export function AdjustmentCreateSheet({
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
-  const type = account.type as AccountType;
   const expected = useMemo(() => {
     if (!ledger || !isValidIsoDate(date)) return 0;
-    return accountBalance(
-      account.id,
-      type,
-      filterByDateRange(reportEntriesForAsOf(ledger, date), undefined, date),
-    );
-  }, [account.id, type, ledger, date]);
+    return adjustmentPinExpectedBalanceForLedger(ledger, { accountId: account.id, date });
+  }, [account.id, ledger, date]);
   const digits = useMoneyDigits();
   const actual = parseAmountToMinor(actualText);
   // 表示専用の差分。入力途中の異常値（17 桁など）で render から throw するとアプリ全体が
@@ -158,7 +153,9 @@ export function AdjustmentEditSheet({
   entry: JournalEntry;
   onClose: () => void;
 }) {
-  const { ledger, updateAdjustment } = useLedger();
+  const { ledger, updateAdjustment, deleteAdjustment } = useLedger();
+  // 破壊的操作は編集シート最下部（動詞体系 v13.1）。行アクションには置かない。
+  const [pendingDelete, setPendingDelete] = useState(false);
   const accounts = ledger?.accounts ?? [];
   const currency = ledger?.settings.currency ?? '';
   const adj = entry.metadata!.adjustment!;
@@ -179,12 +176,18 @@ export function AdjustmentEditSheet({
   const target = accounts.find((a: Account) => a.id === accountId);
   const adjustable = isAdjustableAccountType(target?.type);
 
+  // adjustable は「科目が引けて、かつ補正できる type」を含意する（isAdjustableAccountType は
+  // undefined を false にする）ので、target そのものは依存に取らない。
   const expected = useMemo(() => {
-    if (!ledger || !target || !adjustable || !isValidIsoDate(date)) return 0;
+    if (!ledger || !adjustable || !isValidIsoDate(date)) return 0;
+    // 編集中の pin は母集合から外し、その id / createdAt を probe に載せる（除かないと
+    // 補正が二重に効く。同日に別の pin があるときの走査順は保存後と同じになる）。
     const others = (ledger?.journalEntries ?? []).filter((e) => e.id !== entry.id);
-    const entries = reportEntriesForAsOf({ ...ledger, journalEntries: others }, date);
-    return accountBalance(accountId, target.type, filterByDateRange(entries, undefined, date));
-  }, [accountId, target, adjustable, ledger, date, entry.id]);
+    return adjustmentPinExpectedBalanceForLedger(
+      { ...ledger, journalEntries: others },
+      { accountId, date, id: entry.id, createdAt: entry.createdAt },
+    );
+  }, [accountId, adjustable, ledger, date, entry.id, entry.createdAt]);
 
   // 金額欄を触っていない保存では、粗い表示桁で隠れた minor を失わない。
   const actual = actualDirty ? parseAmountToMinor(actualText) : adj.actualBalance;
@@ -213,79 +216,110 @@ export function AdjustmentEditSheet({
   }
 
   return (
-    <Modal
-      title={t('adjust.editTitle')}
-      onClose={onClose}
-      dismissMode="if-clean"
-      footer={
-        <>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={submit}
-            disabled={submitting || date.trim() === ''}
-            data-ui={UI.adjustments.editSave}
-          >
-            {t('adjust.update')}
-          </button>
-        </>
-      }
-    >
-      <div className="stack" data-ui={UI.adjustments.editDialog}>
-        <p className="field__hint">{t('adjust.editIntro')}</p>
-        {error ? (
-          <div className="field__error" role="alert">
-            <Icon name="alert" size={14} />
-            {error}
+    <>
+      <Modal
+        title={t('adjust.editTitle')}
+        onClose={onClose}
+        dismissMode="if-clean"
+        footer={
+          <>
+            <button type="button" className="btn btn--ghost" onClick={onClose}>
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={submit}
+              disabled={submitting || date.trim() === ''}
+              data-ui={UI.adjustments.editSave}
+            >
+              {t('adjust.update')}
+            </button>
+          </>
+        }
+      >
+        <div className="stack" data-ui={UI.adjustments.editDialog}>
+          <p className="field__hint">{t('adjust.editIntro')}</p>
+          {error ? (
+            <div className="field__error" role="alert">
+              <Icon name="alert" size={14} />
+              {error}
+            </div>
+          ) : null}
+          <AccountPicker
+            label={t('adjust.account')}
+            required
+            value={accountId}
+            groups={groups}
+            onChange={setAccountId}
+            emptyText={t('adjust.noAccounts')}
+            dataUi={UI.adjustments.editAccount}
+          />
+          <TextInput
+            label={t('adjust.date')}
+            required
+            type="date"
+            value={date}
+            onChange={setDate}
+            dataUi={UI.adjustments.editDate}
+          />
+          <TextInput
+            label={t('adjust.actual')}
+            required
+            value={actualText}
+            // 符号付きの欄は inputMode を指定しない: numeric / decimal のソフトキーボードには
+            // '-' キーが無く、hint（マイナスは先頭に -）どおりの入力ができなくなる。
+            // 「表示桁が inputMode を決める」規約の明示的な例外（AccountSheet の想定利回り欄と同じ趣旨）。
+            onChange={(v) => {
+              setActualText(sanitizeSignedAmountText(v, digits, actualText));
+            }}
+            hint={t('common.signedAmountHint')}
+            dataUi={UI.adjustments.editActual}
+          />
+          <div className="kv">
+            <span className="muted">{t('adjust.expected')}</span>
+            <span>
+              <Money amount={expected} currency={currency} />
+            </span>
           </div>
-        ) : null}
-        <AccountPicker
-          label={t('adjust.account')}
-          required
-          value={accountId}
-          groups={groups}
-          onChange={setAccountId}
-          emptyText={t('adjust.noAccounts')}
-          dataUi={UI.adjustments.editAccount}
-        />
-        <TextInput
-          label={t('adjust.date')}
-          required
-          type="date"
-          value={date}
-          onChange={setDate}
-          dataUi={UI.adjustments.editDate}
-        />
-        <TextInput
-          label={t('adjust.actual')}
-          required
-          value={actualText}
-          // 符号付きの欄は inputMode を指定しない: numeric / decimal のソフトキーボードには
-          // '-' キーが無く、hint（マイナスは先頭に -）どおりの入力ができなくなる。
-          // 「表示桁が inputMode を決める」規約の明示的な例外（AccountSheet の想定利回り欄と同じ趣旨）。
-          onChange={(v) => {
-            setActualText(sanitizeSignedAmountText(v, digits, actualText));
+          <div className="kv">
+            <span className="muted">{t('adjust.delta')}</span>
+            <span>
+              <Money amount={delta} currency={currency} signed />
+            </span>
+          </div>
+          <p className="field__hint">{t('adjust.deltaHint')}</p>
+          {/* 破壊的なほど下（動詞体系 v13.1）。行アクションには削除を置かない。 */}
+          <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
+            <button
+              type="button"
+              className="btn btn--danger"
+              style={{ minHeight: 'var(--tap)' }}
+              disabled={submitting}
+              onClick={() => setPendingDelete(true)}
+              data-ui={UI.adjustments.editDelete}
+            >
+              {t('adjust.deleteAction')}
+            </button>
+            <p className="field__hint">{t('adjust.deleteDangerHint')}</p>
+          </div>
+        </div>
+      </Modal>
+      {pendingDelete ? (
+        <ConfirmDialog
+          title={t('adjust.deleteConfirmTitle')}
+          body={t('adjust.deleteConfirmBody')}
+          confirmLabel={t('common.delete')}
+          danger
+          dataUi={UI.adjustments.deleteConfirm}
+          onCancel={() => setPendingDelete(false)}
+          onConfirm={async () => {
+            setPendingDelete(false);
+            await deleteAdjustment(entry.id).catch(() => undefined);
+            onClose();
           }}
-          hint={t('common.signedAmountHint')}
-          dataUi={UI.adjustments.editActual}
         />
-        <div className="kv">
-          <span className="muted">{t('adjust.expected')}</span>
-          <span>
-            <Money amount={expected} currency={currency} />
-          </span>
-        </div>
-        <div className="kv">
-          <span className="muted">{t('adjust.delta')}</span>
-          <span>
-            <Money amount={delta} currency={currency} signed />
-          </span>
-        </div>
-        <p className="field__hint">{t('adjust.deltaHint')}</p>
-      </div>
-    </Modal>
+      ) : null}
+    </>
   );
 }

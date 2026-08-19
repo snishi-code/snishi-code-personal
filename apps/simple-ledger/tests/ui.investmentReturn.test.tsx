@@ -192,7 +192,7 @@ describe('投資科目の想定利回り編集', () => {
     );
     await openEdit('投資');
     expect(projectionSelect()!.value).toBe(gainId);
-    await screen.findByText(/計上先はアーカイブ済みのため、投影は生成されません/);
+    await screen.findByText(/計上先は終了済みのため、投影は生成されません/);
   });
 
   it('投資以外（現金）の編集には利回り欄が出ない', async () => {

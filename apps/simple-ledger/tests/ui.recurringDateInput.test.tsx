@@ -4,7 +4,7 @@ import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { createRecurringRule, loadLedger } from '../src/data/repository';
 import { addMonths } from '../src/domain/allocation';
-import { clampDayToMonth } from '../src/domain/recurring';
+import { clampDayToMonth, deriveRecurringOutputs } from '../src/domain/recurring';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { UI } from '../src/ui-contract';
 import { firstRuleRow } from './tapTargets';
@@ -58,11 +58,12 @@ describe('定期ルールの初回起票日', () => {
     const firstDate = document.querySelector(
       `[data-ui="${UI.allocations.recurringFirstPostingDate}"]`,
     ) as HTMLInputElement;
-    const ruleStartDate = document.querySelector(
-      `[data-ui="${UI.allocations.recurringStartDate}"]`,
-    ) as HTMLInputElement;
     expect(firstDate.type).toBe('date');
-    expect(ruleStartDate).toHaveValue(todayLocal());
+    // 新規作成に存在期間の欄は無い（開始 = 初回の起票日で自動・v13.1 その4）。
+    expect(document.querySelector(`[data-ui="${UI.allocations.recurringStartDate}"]`)).toBeNull();
+    expect(
+      document.querySelector(`[data-ui="${UI.allocations.recurringDetailsToggle}"]`),
+    ).toBeNull();
 
     fireEvent.change(name, { target: { value: '未来の定期支出' } });
     fireEvent.change(amount, { target: { value: '1500' } });
@@ -88,7 +89,8 @@ describe('定期ルールの初回起票日', () => {
     expect(saved).toMatchObject({
       startMonth: '2031-03',
       dayOfMonth: 31,
-      startDate: todayLocal(),
+      // 開始 = 初回の起票日で自動（v13.1 その4）。
+      startDate: '2031-03-31',
     });
   });
 
@@ -243,8 +245,10 @@ describe('費用行きルール', () => {
     const spread = ledger.accounts.find((account) => account.id === saved!.spreadExpenseAccountId);
     expect(saved).toMatchObject({ everyMonths: 12, debitAccountId: ledgerAccount.id });
     expect(spread?.role).toBe('expense-category');
-    // 起票済みぶんの item（継続コスト資産）が決定的 ID で生まれている。
-    const item = ledger.monthlyCostItems.find((m) => m.id.startsWith(`ccr-${saved!.id}-`));
+    // v13: item（継続コスト資産）は保存せず、決定的 ID で導出される。
+    expect(ledger.monthlyCostItems).toHaveLength(0);
+    const derived = deriveRecurringOutputs(ledger.recurringRules, ledger.accounts, todayLocal());
+    const item = derived.items.find((m) => m.id.startsWith(`ccr-${saved!.id}-`));
     expect(item).toMatchObject({
       name: '年払い保険',
       amount: 6000000,
@@ -294,12 +298,14 @@ describe('費用行きルール', () => {
     // 費用行きなので台帳経由（借方 = 台帳・費用の行き先 = 支出カテゴリ）。
     expect(saved).toMatchObject({ debitAccountId: ledgerAccount.id });
     expect(spread?.role).toBe('expense-category');
-    // 起票済みぶんの item は起票日開始・次回起票日終了で毎月生まれて消える。
+    // 導出される item は起票日開始・次回起票日終了で毎月生まれて消える。
     // 新規ルールの dayOfMonth は初回起票日（= 今日）の日そのもの。
     const today = todayLocal();
     const dayOfMonth = Number.parseInt(today.slice(8, 10), 10);
     expect(saved!.dayOfMonth).toBe(dayOfMonth);
-    const item = ledger.monthlyCostItems.find((m) => m.id.startsWith(`ccr-${saved!.id}-`));
+    expect(ledger.monthlyCostItems).toHaveLength(0);
+    const derived = deriveRecurringOutputs(ledger.recurringRules, ledger.accounts, today);
+    const item = derived.items.find((m) => m.id.startsWith(`ccr-${saved!.id}-`));
     expect(item).toMatchObject({ name: '毎月サブスク', amount: 100000, startDate: today });
     // endDate = 起票月 + everyMonths(1) を dayOfMonth でクランプ = 次回起票日と同日。
     expect(item!.endDate).toBe(clampDayToMonth(addMonths(today.slice(0, 7), 1), dayOfMonth));

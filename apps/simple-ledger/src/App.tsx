@@ -23,8 +23,11 @@ import { Breakdown } from './ui/screens/Breakdown';
 import { ExpenseBreakdown } from './ui/screens/ExpenseBreakdown';
 import { NetIncome } from './ui/screens/NetIncome';
 import { Journal, type JournalFilter } from './ui/screens/Journal';
-import { YearlyOverview, type OverviewMode } from './ui/screens/YearlyOverview';
-import { TimelineCalendar } from './ui/screens/TimelineCalendar';
+import {
+  TimelineCalendar,
+  type TimelineLens,
+  type TimelineZoom,
+} from './ui/screens/TimelineCalendar';
 import { Allocations, type AllocationsTarget } from './ui/screens/Allocations';
 import { Cashflow } from './ui/screens/Cashflow';
 import { Accounts } from './ui/screens/Accounts';
@@ -33,7 +36,7 @@ import { Help } from './ui/screens/Help';
 import { EntrySheet, type EntryInit } from './ui/screens/EntrySheet';
 import { OnboardingSheet } from './ui/OnboardingSheet';
 import { CONTINUOUS_COST_HARD_CAP } from './domain/continuousCost';
-import { NAV_ITEMS } from './ui/navigation';
+import { NAV_ITEMS, TIME_PLANE_SCREEN, supportsTimeZoom } from './ui/navigation';
 import { entryOpenPlan } from './ui/entryOpen';
 import { t } from './i18n';
 import { todayLocal } from './util/time';
@@ -50,7 +53,7 @@ export function App() {
   const [entryInit, setEntryInit] = useState<EntryInit | null>(null);
   const [journalFilter, setJournalFilter] = useState<JournalFilter | null>(null);
   const [journalTargetEntryId, setJournalTargetEntryId] = useState<string | null>(null);
-  // 仕訳一覧の計算で生まれた行タップ → 「毎月のもの」で開くシートの対象（1 回で消費）。
+  // 仕訳一覧の計算で生まれた行タップ → 「月割り台帳」で開くシートの対象（1 回で消費）。
   const [allocationsTarget, setAllocationsTarget] = useState<AllocationsTarget | null>(null);
   // 投資利回りの投影行タップ → 勘定科目で開く編集シートの対象（1 回で消費）。
   const [accountsTarget, setAccountsTarget] = useState<{ accountId: string } | null>(null);
@@ -63,9 +66,13 @@ export function App() {
     mode: 'date',
     date: todayLocal(),
   }));
-  // 年間/全体（時間の粒度）。ヘッダーのセグメントが正本で、年間・全体画面はこれを表示する。
+  // 時間平面のズーム（日/月/年）。ヘッダーのセグメントが正本で、ウィンドウ世界の画面が従う。
   // ボタンは**日付を変えない**（タイムスリップはヘッダーの日付のみ。ズームは目盛りを変えるだけ）。
-  const [overviewMode, setOverviewMode] = useState<OverviewMode>('year');
+  const [timeZoom, setTimeZoom] = useState<TimelineZoom>('month');
+  // 時間平面のレンズ（線分/数値/グラフ）。セレクタは時間平面の画面内にあるが、状態は App が持つ:
+  // 「数値レンズに日の列は無い」＝ヘッダーの「日」の可否がレンズに依存するため
+  // （旧 overviewMode がヘッダーのために App に居たのと同じ理由）。
+  const [timelineLens, setTimelineLens] = useState<TimelineLens>('segment');
 
   // 端末/ブラウザ Back の中央制御。overlay → (overlay 側 dirty guard) → 画面履歴 → 終了確認。
   const { view, navigate, beginExit } = useAppHistory({
@@ -83,17 +90,41 @@ export function App() {
     if (typeof window.scrollTo === 'function') window.scrollTo(0, 0);
   }, [screen]);
 
+  /*
+   * 不変則「**タイムラインの**数値レンズに日の列は無い」の唯一の強制点（v13.5 F）。
+   *
+   * レンズはタイムラインの見え方でしかないので、効かせるのも**タイムラインに居るとき
+   * （これから行くとき）だけ**にする。資金繰りはレンズを持たないウィンドウ世界なので、
+   * 日/月/年のすべてを押せる（v13.5 D で「数値レンズのまま資金繰りへ行くと日が押せない」
+   * という取り違えが出ていた）。グラフレンズには日のバケットがあるので丸めない。
+   */
+  const enforceLensZoom = (
+    destination: Screen,
+    lens: TimelineLens,
+    zoom: TimelineZoom,
+  ): TimelineZoom =>
+    destination === TIME_PLANE_SCREEN && lens === 'matrix' && zoom === 'day' ? 'month' : zoom;
+
   const go = (s: Screen) => {
     setJournalFilter(null);
     setJournalTargetEntryId(null);
     setAllocationsTarget(null);
     setAccountsTarget(null);
+    // 資金繰りで「日」を選んだままタイムライン（数値レンズ）へ戻る経路でも不変則を保つ。
+    setTimeZoom((current) => enforceLensZoom(s, timelineLens, current));
     navigate(s);
   };
-  // ヘッダーの粒度セグメント → 年間・全体画面へ（既にその画面なら粒度だけ切り替える）。
-  const openOverview = (mode: OverviewMode) => {
-    setOverviewMode(mode);
-    if (screen !== 'yearlyOverview') go('yearlyOverview');
+  // ヘッダーのズーム = ウィンドウ世界の名乗り。ズーム対応画面なら目盛りだけを変え、
+  // 断面画面なら時間平面へ移動してそのズームで点灯する（旧 openOverview の一般化）。
+  const changeZoom = (zoom: TimelineZoom) => {
+    const destination = supportsTimeZoom(screen) ? screen : TIME_PLANE_SCREEN;
+    setTimeZoom(enforceLensZoom(destination, timelineLens, zoom));
+    if (destination !== screen) go(destination);
+  };
+  // レンズの切替。数値レンズに日の列は無いので、日ズームのまま切り替えたら月へ丸める。
+  const changeLens = (lens: TimelineLens) => {
+    setTimelineLens(lens);
+    setTimeZoom((current) => enforceLensZoom(screen, lens, current));
   };
   // ヘッダーの日付を変えたら明示フィルターより日付を優先する（フィルターが居座らない）。
   const changePeriod = (next: ReportPeriod) => {
@@ -175,7 +206,7 @@ export function App() {
     setJournalFilter(filter);
   };
 
-  // 仕訳一覧 → 毎月のもの（計算で生まれた行の由来を開く）。
+  // 仕訳一覧 → 月割り台帳（計算で生まれた行の由来を開く）。
   const goAllocationsFor = (target: AllocationsTarget) => {
     navigate('allocations');
     setAllocationsTarget(target);
@@ -202,7 +233,9 @@ export function App() {
     navigate('journal');
     setJournalFilter(null);
     // 初期残高・残高補正は専用シートが要る = 仕訳一覧の既存 resolver へ ID を渡す。
-    if (plan.kind === 'opening' || plan.kind === 'adjustment') setJournalTargetEntryId(entryId);
+    // 補正は plan が指す宣言（stored の pin）を開く（按分スライスからの遷移でも親へ着く）。
+    if (plan.kind === 'adjustment') setJournalTargetEntryId(plan.entryId);
+    else if (plan.kind === 'opening') setJournalTargetEntryId(entryId);
     else {
       setJournalTargetEntryId(null);
       openEdit(entry);
@@ -257,7 +290,7 @@ export function App() {
       </span>
       {/* 「今」へ戻る。タイムスリップ中（ヘッダーの日付 ≠ 今日）だけ現れる＝警告灯を兼ねる
           （iOS カレンダーの「今日」・マップの現在地ボタンと同型）。日付だけを戻し、
-          画面も粒度も動かさない（動作であって状態ではないので、粒度セグメントに混ぜない）。 */}
+          画面もズームも動かさない（動作であって状態ではないので、ズームに混ぜない）。 */}
       {timeSlipped ? (
         <button
           type="button"
@@ -268,28 +301,38 @@ export function App() {
           {t('period.today')}
         </button>
       ) : null}
-      {/* 時間の粒度（年間/全体）。ヘッダー = 時間、の「時間」には目盛りも含まれる
-          （写真 App の 年別/月別/日別/すべて と同型・作者決定 2026-08-14）。
-          押してもヘッダーの日付は変えない。年間の対象年は日付から導かれる。 */}
-      <div className="period-zoom" role="group" aria-label={t('yearlyOverview.title')}>
-        <button
-          type="button"
-          className="period-zoom__btn"
-          aria-pressed={screen === 'yearlyOverview' && overviewMode === 'year'}
-          onClick={() => openOverview('year')}
-          data-ui={UI.yearlyOverview.modeYear}
-        >
-          {t('yearlyOverview.modeYear')}
-        </button>
-        <button
-          type="button"
-          className="period-zoom__btn"
-          aria-pressed={screen === 'yearlyOverview' && overviewMode === 'all'}
-          onClick={() => openOverview('all')}
-          data-ui={UI.yearlyOverview.modeAll}
-        >
-          {t('yearlyOverview.modeAll')}
-        </button>
+      {/* 時間の単位（日/月/年 = 時間平面のズーム）。ヘッダー = 時間、の「時間」には目盛りも
+          含まれる（写真 App の 年別/月別/日別 と同型・作者決定 2026-08-14 / 2026-08-18）。
+          押してもヘッダーの日付は変えない。**点灯 = ウィンドウ世界の名乗り**:
+          ズーム対応画面に居るときだけ現在ズームが点灯し、断面画面ではすべて消灯する
+          （押すと時間平面へ移動してそこで点灯する）。 */}
+      <div className="period-zoom" role="group" aria-label={t('zoom.group')}>
+        {(
+          [
+            ['day', 'zoom.day', UI.period.zoomDay],
+            ['month', 'zoom.month', UI.period.zoomMonth],
+            ['year', 'zoom.year', UI.period.zoomYear],
+          ] as const
+        ).map(([zoom, labelKey, dataUi]) => {
+          // タイムラインの数値レンズには日の列が無い。押せないことと**理由**を読み上げにも出す。
+          // 資金繰り（レンズを持たないウィンドウ世界）では日も押せる（v13.5 F）。
+          const unavailable =
+            zoom === 'day' && timelineLens === 'matrix' && screen === TIME_PLANE_SCREEN;
+          return (
+            <button
+              key={zoom}
+              type="button"
+              className="period-zoom__btn"
+              aria-pressed={supportsTimeZoom(screen) && timeZoom === zoom}
+              disabled={unavailable}
+              {...(unavailable ? { 'aria-label': t('zoom.dayUnavailable') } : {})}
+              onClick={() => changeZoom(zoom)}
+              data-ui={dataUi}
+            >
+              {t(labelKey)}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -380,18 +423,15 @@ export function App() {
         {screen === 'timeline' ? (
           <TimelineCalendar
             period={period}
+            zoom={timeZoom}
+            onZoomChange={setTimeZoom}
+            lens={timelineLens}
+            onLensChange={changeLens}
+            onPeriodChange={changePeriod}
+            onNavigate={go}
             onOpenEntry={goJournalEntry}
             onOpenAllocations={goAllocationsFor}
             onOpenAccount={goAccountFor}
-          />
-        ) : null}
-        {screen === 'yearlyOverview' ? (
-          <YearlyOverview
-            period={period}
-            mode={overviewMode}
-            onModeChange={setOverviewMode}
-            onPeriodChange={changePeriod}
-            onNavigate={go}
           />
         ) : null}
         {screen === 'allocations' ? (
@@ -399,6 +439,8 @@ export function App() {
         ) : null}
         {screen === 'cashflow' ? (
           <Cashflow
+            period={period}
+            zoom={timeZoom}
             onEditEntry={openEdit}
             onOpenAllocations={goAllocationsFor}
             onOpenAccount={goAccountFor}

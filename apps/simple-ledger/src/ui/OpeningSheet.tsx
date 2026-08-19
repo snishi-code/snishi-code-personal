@@ -7,7 +7,7 @@
  * 通常の仕訳編集で opening を壊さない（opening は開始時点の残高設定、補正とは会計的に別物）。
  */
 import { useState } from 'react';
-import { Modal } from './overlays';
+import { ConfirmDialog, Modal } from './overlays';
 import { TextInput } from '@snishi/foundation/ui/Field';
 import { useLedger } from '../state/store';
 import { formatMinorForInput, parseAmountToMinor, sanitizeSignedAmountText } from './amountText';
@@ -110,7 +110,9 @@ export function OpeningRegisterSheet({
 }
 
 export function OpeningEditSheet({ entry, onClose }: { entry: JournalEntry; onClose: () => void }) {
-  const { ledger, updateOpening } = useLedger();
+  const { ledger, updateOpening, deleteOpening } = useLedger();
+  // 破壊的操作は編集シート最下部（動詞体系 v13.1）。行アクションには置かない。
+  const [pendingDelete, setPendingDelete] = useState(false);
   const accounts = ledger?.accounts ?? [];
   const byId = new Map(accounts.map((a) => [a.id, a] as const));
   const tgt = openingTarget(entry, byId);
@@ -146,54 +148,85 @@ export function OpeningEditSheet({ entry, onClose }: { entry: JournalEntry; onCl
   }
 
   return (
-    <Modal
-      title={t('opening.editTitle')}
-      onClose={onClose}
-      dismissMode="if-clean"
-      footer={
-        <>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={submit}
-            disabled={submitting || amount === null || amount === 0 || date.trim() === ''}
-            data-ui={UI.adjustments.openingEditSave}
-          >
-            {t('opening.update')}
-          </button>
-        </>
-      }
-    >
-      <div className="stack" data-ui={UI.adjustments.openingEditDialog}>
-        <div className="kv">
-          <span className="muted">{t('opening.account')}</span>
-          <span>{tgt?.account.name ?? '—'}</span>
+    <>
+      <Modal
+        title={t('opening.editTitle')}
+        onClose={onClose}
+        dismissMode="if-clean"
+        footer={
+          <>
+            <button type="button" className="btn btn--ghost" onClick={onClose}>
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={submit}
+              disabled={submitting || amount === null || amount === 0 || date.trim() === ''}
+              data-ui={UI.adjustments.openingEditSave}
+            >
+              {t('opening.update')}
+            </button>
+          </>
+        }
+      >
+        <div className="stack" data-ui={UI.adjustments.openingEditDialog}>
+          <div className="kv">
+            <span className="muted">{t('opening.account')}</span>
+            <span>{tgt?.account.name ?? '—'}</span>
+          </div>
+          <TextInput
+            label={t('opening.amount')}
+            required
+            value={amountText}
+            // 符号付きの欄は inputMode を指定しない: numeric / decimal のソフトキーボードには
+            // '-' キーが無く、hint（マイナスは先頭に -）どおりの入力ができなくなる。
+            // 「表示桁が inputMode を決める」規約の明示的な例外（AccountSheet の想定利回り欄と同じ趣旨）。
+            onChange={(v) => {
+              setAmountText(sanitizeSignedAmountText(v, digits, amountText));
+            }}
+            hint={t('common.signedAmountHint')}
+            dataUi={UI.adjustments.openingEditAmount}
+          />
+          <TextInput
+            label={t('opening.date')}
+            required
+            type="date"
+            value={date}
+            onChange={setDate}
+            dataUi={UI.adjustments.openingEditDate}
+          />
+          {/* 破壊的なほど下（動詞体系 v13.1）。行アクションには削除を置かない。 */}
+          <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
+            <button
+              type="button"
+              className="btn btn--danger"
+              style={{ minHeight: 'var(--tap)' }}
+              disabled={submitting}
+              onClick={() => setPendingDelete(true)}
+              data-ui={UI.adjustments.openingEditDelete}
+            >
+              {t('opening.deleteAction')}
+            </button>
+            <p className="field__hint">{t('opening.deleteDangerHint')}</p>
+          </div>
         </div>
-        <TextInput
-          label={t('opening.amount')}
-          required
-          value={amountText}
-          // 符号付きの欄は inputMode を指定しない: numeric / decimal のソフトキーボードには
-          // '-' キーが無く、hint（マイナスは先頭に -）どおりの入力ができなくなる。
-          // 「表示桁が inputMode を決める」規約の明示的な例外（AccountSheet の想定利回り欄と同じ趣旨）。
-          onChange={(v) => {
-            setAmountText(sanitizeSignedAmountText(v, digits, amountText));
+      </Modal>
+      {pendingDelete ? (
+        <ConfirmDialog
+          title={t('opening.deleteConfirmTitle')}
+          body={t('opening.deleteConfirmBody')}
+          confirmLabel={t('common.delete')}
+          danger
+          dataUi={UI.adjustments.openingDeleteConfirm}
+          onCancel={() => setPendingDelete(false)}
+          onConfirm={async () => {
+            setPendingDelete(false);
+            await deleteOpening(entry.id).catch(() => undefined);
+            onClose();
           }}
-          hint={t('common.signedAmountHint')}
-          dataUi={UI.adjustments.openingEditAmount}
         />
-        <TextInput
-          label={t('opening.date')}
-          required
-          type="date"
-          value={date}
-          onChange={setDate}
-          dataUi={UI.adjustments.openingEditDate}
-        />
-      </div>
-    </Modal>
+      ) : null}
+    </>
   );
 }

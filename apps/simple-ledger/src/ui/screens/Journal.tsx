@@ -1,7 +1,7 @@
 /*
  * 仕訳一覧。保存される仕訳と計算で生まれる仕訳（継続コスト資産の費用行・定期ルール・
- * 投資利回りの投影）を**区別せず全部**日付順で出す（displayEntriesForAsOf が単一の正本。
- * export には混ぜない）。
+ * 残高補正の按分スライス・投資の利回り導出）を**区別せず全部**日付順で出す
+ * （displayEntriesForAsOf が単一の正本。export には混ぜない）。
  * 並び替え（日付/金額 × 昇/降・既定 = 日付降順）は表示専用。抽出結果には件数と合計を出し、
  * 合計の対象 = 表示している行の集合（科目タップ抽出 = 方向つき和 / それ以外 = 単純和）。
  * 展開範囲 = いま表示している範囲（to → 今日 or 保存仕訳の最も遠い日付。上限 2100-12-31）。
@@ -20,7 +20,6 @@ import {
   type ListSortAxisKey,
 } from '../ListSearchSort';
 import { applySort, directionSign, matchesQuery, type SortDirection } from '../listQuery';
-import { ConfirmDialog } from '../overlays';
 import { useLedger } from '../../state/store';
 import { AdjustmentEditSheet } from '../AdjustmentSheet';
 import { OpeningEditSheet } from '../OpeningSheet';
@@ -63,7 +62,7 @@ const SORT_AXIS_DATA_UI: Record<ListSortAxisKey, string> = {
 
 /**
  * 軸ごとの既定方向（日付 = 新しい順 = 従来の既定 / 金額 = 大きい順 / 名称 = 五十音順）。
- * 軸を切り替えたらここへ戻す（毎月のものと同じ規約。日付軸の向きだけ意味が違うため
+ * 軸を切り替えたらここへ戻す（月割り台帳と同じ規約。日付軸の向きだけ意味が違うため
  * 値自体は画面ごとに持つ）。
  */
 const SORT_DEFAULT_DIRECTION: Record<ListSortAxisKey, SortDirection> = {
@@ -113,7 +112,7 @@ export function Journal({
 }: {
   onEditEntry: (entry: JournalEntry) => void;
   onReverse: (entry: JournalEntry) => void;
-  /** 計算で生まれた行のタップ: 「毎月のもの」へ遷移し、元の項目/ルールのシートを開く。 */
+  /** 計算で生まれた行のタップ: 「月割り台帳」へ遷移し、元の項目/ルールのシートを開く。 */
   onOpenAllocations: (target: AllocationsTarget) => void;
   /** 投資利回りの投影行のタップ: 勘定科目へ遷移し、その投資科目の編集シートを開く。 */
   onOpenAccount: (accountId: string) => void;
@@ -123,7 +122,7 @@ export function Journal({
   targetEntryId?: string | null;
   onClearFilter: () => void;
 }) {
-  const { ledger, removeEntry, deleteOpening, deleteAdjustment } = useLedger();
+  const { ledger } = useLedger();
   const [query, setQuery] = useState('');
   // 明示フィルターで開いた場合はその範囲を優先し、メニューから直接開いた場合は
   // 初回描画から共有期間を反映する。period effect は明示フィルターを上書きしないよう初回を飛ばす。
@@ -137,18 +136,15 @@ export function Journal({
   // 表示専用の並び替え（既定 = 日付降順・従来の並びそのもの）。データ・保存には影響しない。
   const [sortKey, setSortKey] = useState<ListSortAxisKey>('date');
   const [sortDirection, setSortDirection] = useState<SortDirection>(SORT_DEFAULT_DIRECTION.date);
-  const [pendingDelete, setPendingDelete] = useState<JournalEntry | null>(null);
   const initialTarget = targetEntryId
     ? (ledger?.journalEntries.find((entry) => entry.id === targetEntryId) ?? null)
     : null;
   const [editingOpening, setEditingOpening] = useState<JournalEntry | null>(() =>
     initialTarget?.kind === 'opening' ? initialTarget : null,
   );
-  const [pendingOpeningDelete, setPendingOpeningDelete] = useState<JournalEntry | null>(null);
   const [editingAdjustment, setEditingAdjustment] = useState<JournalEntry | null>(() =>
     initialTarget?.metadata?.adjustment ? initialTarget : null,
   );
-  const [pendingAdjustmentDelete, setPendingAdjustmentDelete] = useState<JournalEntry | null>(null);
 
   useEffect(() => {
     if (!filter) return;
@@ -172,6 +168,11 @@ export function Journal({
   const accountFilterId = filter?.accountId;
   const normalExpenseOnly = filter?.expenseKind === 'normal';
   const map = useMemo(() => new Map((ledger?.accounts ?? []).map((a) => [a.id, a])), [ledger]);
+  // 導出行から宣言（stored 仕訳）へ戻る引き当て表。補正の按分スライスが親の pin を開く。
+  const storedById = useMemo(
+    () => new Map((ledger?.journalEntries ?? []).map((e) => [e.id, e])),
+    [ledger],
+  );
   const currency = ledger?.settings.currency ?? '';
   const digits = useMoneyDigits();
   const filterAccount = accountFilterId ? map.get(accountFilterId) : undefined;
@@ -191,7 +192,7 @@ export function Journal({
   // 保存される仕訳 + 計算で生まれる仕訳（分けない）。混合後に必ずソートし直す。
   const sourceDisplay = useMemo(() => {
     if (!ledger) return null;
-    const display = displayEntriesResultForAsOf(ledger, expandTo, today);
+    const display = displayEntriesResultForAsOf(ledger, expandTo);
     return {
       ...display,
       entries: display.entries.sort((a, b) => {
@@ -200,7 +201,7 @@ export function Journal({
         return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
       }),
     };
-  }, [ledger, expandTo, today]);
+  }, [ledger, expandTo]);
   const source = useMemo(() => sourceDisplay?.entries ?? [], [sourceDisplay]);
 
   const filtered = useMemo(() => {
@@ -210,7 +211,7 @@ export function Journal({
       if (from && e.date < from) return false;
       if (to && e.date > to) return false;
       // 検索対象 = 摘要・メモ + 借方/貸方の勘定科目名（「食費」で検索 → 食費が絡む仕訳が出る）。
-      // 正規化は listQuery.matchesQuery が唯一の正本（毎月のもの画面と同じ規則）。
+      // 正規化は listQuery.matchesQuery が唯一の正本（月割り台帳画面と同じ規則）。
       const accountNames = e.lines.map((l) => map.get(l.accountId)?.name ?? '').join(' ');
       return matchesQuery([e.description, e.memo, accountNames], query);
     });
@@ -219,7 +220,7 @@ export function Journal({
   // 表示専用の並び替え（C-4）。filtered は基準順（日付降順・同日は登録の新しい順・同時刻は
   // id 昇順）なので、安定ソートにより同値（同日・同額・同摘要）の並びは必ず基準順を保つ。
   // 既定（日付降順）は applySort が compare=null を素通しする＝基準順そのもの。
-  // 名称軸 = 摘要の五十音順（毎月のものの項目名と同じ localeCompare(…, 'ja')）。
+  // 名称軸 = 摘要の五十音順（月割り台帳の項目名と同じ localeCompare(…, 'ja')）。
   const sorted = useMemo(() => {
     const direction = directionSign(sortDirection);
     const compare =
@@ -411,7 +412,9 @@ export function Journal({
               md?.monthlyCostId !== undefined ||
               md?.continuousCostId !== undefined ||
               isContinuousCostMonthlyAllocationEntry(entry);
-            const isAdjustment = !!md?.adjustment;
+            // 補正の stored 仕訳は集計から外れて一覧に出ない。並ぶのは按分スライスなので、
+            // タグも操作の抑止もスライス側で名乗る（v13.4 ①）。
+            const isAdjustment = !!md?.adjustment || md?.adjustmentSliceOf !== undefined;
             // くり返し記帳から生まれた仕訳は読み取り専用（作者決定 2026-08-15）。
             // 編集・削除・反対仕訳はどれも出さず、タップは由来ルールへ（entryOpenPlan が担う）。
             const isRuleGenerated = generatedEntryRuleId(entry) !== undefined;
@@ -444,6 +447,10 @@ export function Journal({
             // ルール投影 = そのルール / 月割り = その項目 / 投資利回りの投影 = その投資科目。
             // 何を開くかは entryOpenPlan（単一正本）が決める。ここは計画の実行だけ。
             const plan = entryOpenPlan(entry);
+            // 補正は宣言した stored の pin を開く（並んでいるのは按分スライス）。
+            // pin が引けない壊れたデータでは押せなくする（空のシートを開かない）。
+            const adjustmentPin =
+              plan.kind === 'adjustment' ? (storedById.get(plan.entryId) ?? null) : null;
             const onRowTap =
               plan.kind === 'none'
                 ? undefined
@@ -454,13 +461,18 @@ export function Journal({
                     : plan.kind === 'account'
                       ? () => onOpenAccount(plan.accountId)
                       : plan.kind === 'adjustment'
-                        ? () => setEditingAdjustment(entry)
+                        ? adjustmentPin
+                          ? () => setEditingAdjustment(adjustmentPin)
+                          : undefined
                         : plan.kind === 'opening'
                           ? () => setEditingOpening(entry)
                           : () => onEditEntry(entry);
+            // バッジは摘要の後ろ（v13.1 その6・実ユーズ指摘）: 行の読み出しは摘要から始まり、
+            // バッジ・ボタンは摘要と金額の間に並ぶ（「月割り台帳」の種別タグと同位置）。
             const title = (
               <>
                 <div className="list__title">
+                  {entry.description}{' '}
                   {entry.kind === 'opening' ? (
                     <span className="tag tag--neutral">{t('journal.opening')}</span>
                   ) : null}
@@ -470,10 +482,9 @@ export function Journal({
                   {isMonthlyCost ? (
                     <span className="tag tag--teal">{t('journal.monthlyCostTag')}</span>
                   ) : null}
-                  {entry.metadata?.adjustment ? (
+                  {isAdjustment ? (
                     <span className="tag tag--neutral">{t('journal.adjustmentTag')}</span>
-                  ) : null}{' '}
-                  {entry.description}
+                  ) : null}
                 </div>
                 <div className="list__sub">
                   {entry.date}・{flowText(map, entry)}
@@ -498,114 +509,47 @@ export function Journal({
                     {title}
                   </button>
                 )}
-                <span
-                  className={`list__amount ${balanceChangeClass}`.trim()}
-                  aria-label={balanceChangeLabel}
-                >
-                  <Money amount={displayedAmount} currency={currency} />
-                </span>
-                {isVirtual || isPurchase || isRuleGenerated ? null : isAdjustment ? (
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    onClick={() => setPendingAdjustmentDelete(entry)}
-                    aria-label={`${t('common.delete')}: ${entry.description}`}
-                    data-ui={UI.adjustments.rowDelete}
+                {/* 右列 = 上段 金額 / 下段 操作。月割り台帳・勘定科目と同じ行の設計図
+                    （v13.3: 金額の桁数でボタンの位置がずれない = 両方が縦に揃う）。
+                    行アクションは「現実の変化を記す」動詞（反対仕訳）だけ。削除は各編集シートの
+                    最下部（動詞体系 v13.1）。回収の振替の逆仕訳は台帳の不変条件（⑧）で
+                    保存できないため出さない。操作の無い行は読み取り専用だが、その理由は
+                    摘要の後ろのタグ（月割り・取消/返金・補正・初期残高）が既に名乗っている。 */}
+                <div className="row-trailing">
+                  <span
+                    className={`list__amount ${balanceChangeClass}`.trim()}
+                    aria-label={balanceChangeLabel}
                   >
-                    <Icon name="delete" size={18} />
-                  </button>
-                ) : isOpening ? (
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    onClick={() => setPendingOpeningDelete(entry)}
-                    aria-label={`${t('common.delete')}: ${entry.description}`}
-                    data-ui={UI.adjustments.openingRowDelete}
-                  >
-                    <Icon name="delete" size={18} />
-                  </button>
-                ) : (
-                  <>
-                    {/* 回収の振替の逆仕訳は台帳の不変条件（⑧）で保存できないため出さない。 */}
-                    {isRecovery ? null : (
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        onClick={() => onReverse(entry)}
-                        aria-label={`${t('journal.reverseAction')}: ${entry.description}`}
-                        data-ui={UI.journal.entry.reverse}
-                      >
-                        <Icon name="reverse" size={18} />
-                      </button>
-                    )}
+                    <Money amount={displayedAmount} currency={currency} />
+                  </span>
+                  {isVirtual ||
+                  isPurchase ||
+                  isRuleGenerated ||
+                  isAdjustment ||
+                  isOpening ? null : isRecovery ? null : (
                     <button
                       type="button"
-                      className="icon-btn"
-                      onClick={() => setPendingDelete(entry)}
-                      aria-label={`${t('common.delete')}: ${entry.description}`}
-                      data-ui={UI.journal.entry.delete}
+                      className="btn btn--tonal"
+                      onClick={() => onReverse(entry)}
+                      aria-label={`${t('journal.reverseAction')}: ${entry.description}`}
+                      data-ui={UI.journal.entry.reverse}
                     >
-                      <Icon name="delete" size={18} />
+                      {t('journal.reverseShort')}
                     </button>
-                  </>
-                )}
+                  )}
+                </div>
               </li>
             );
           })}
         </ul>
       )}
 
-      {pendingDelete ? (
-        <ConfirmDialog
-          title={t('journal.deleteConfirmTitle')}
-          body={t('journal.deleteConfirmBody', { description: pendingDelete.description })}
-          confirmLabel={t('common.delete')}
-          danger
-          onCancel={() => setPendingDelete(null)}
-          onConfirm={async () => {
-            const target = pendingDelete;
-            setPendingDelete(null);
-            await removeEntry(target.id, target.description).catch(() => undefined);
-          }}
-        />
-      ) : null}
-
       {editingOpening ? (
         <OpeningEditSheet entry={editingOpening} onClose={() => setEditingOpening(null)} />
-      ) : null}
-      {pendingOpeningDelete ? (
-        <ConfirmDialog
-          title={t('opening.deleteConfirmTitle')}
-          body={t('opening.deleteConfirmBody')}
-          confirmLabel={t('common.delete')}
-          danger
-          dataUi={UI.adjustments.openingDeleteConfirm}
-          onCancel={() => setPendingOpeningDelete(null)}
-          onConfirm={async () => {
-            const target = pendingOpeningDelete;
-            setPendingOpeningDelete(null);
-            await deleteOpening(target.id).catch(() => undefined);
-          }}
-        />
       ) : null}
 
       {editingAdjustment ? (
         <AdjustmentEditSheet entry={editingAdjustment} onClose={() => setEditingAdjustment(null)} />
-      ) : null}
-      {pendingAdjustmentDelete ? (
-        <ConfirmDialog
-          title={t('adjust.deleteConfirmTitle')}
-          body={t('adjust.deleteConfirmBody')}
-          confirmLabel={t('common.delete')}
-          danger
-          dataUi={UI.adjustments.deleteConfirm}
-          onCancel={() => setPendingAdjustmentDelete(null)}
-          onConfirm={async () => {
-            const target = pendingAdjustmentDelete;
-            setPendingAdjustmentDelete(null);
-            await deleteAdjustment(target.id).catch(() => undefined);
-          }}
-        />
       ) : null}
       <ScrollTopButton />
     </section>

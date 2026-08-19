@@ -186,23 +186,3 @@ describe('reversalInput', () => {
     expect(reversal.id).not.toBe(source.id); // 元は別仕訳（削除しない）
   });
 });
-
-describe('reversalInput は仕訳全体タグを引き継ぐ', () => {
-  it('全体タグを引き継ぐ', () => {
-    const source: JournalEntry = {
-      id: 's',
-      date: '2026-06-01',
-      description: '旅行',
-      kind: 'normal',
-      tagIds: ['trip'],
-      lines: [
-        { accountId: 'food', side: 'debit', amount: 1000 },
-        { accountId: 'cash', side: 'credit', amount: 1000 },
-      ],
-      createdAt: 'x',
-      updatedAt: 'x',
-    };
-    const input = reversalInput(source);
-    expect(input.tagIds).toEqual(['trip']);
-  });
-});

@@ -20,7 +20,9 @@ import {
   summarizeEntries,
   summarizeEntriesForAccount,
 } from '../src/domain/accounting';
-import { buildPeriodMatrix } from '../src/domain/periodMatrix';
+import { buildPeriodMatrix, periodMatrixRow } from '../src/domain/periodMatrix';
+import { lensRowId } from '../src/domain/lensRows';
+import type { DisplayBoxKey, DisplaySectionKey } from '../src/domain/displayOrder';
 import { displayEntriesForAsOf } from '../src/domain/reportEntries';
 import {
   CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
@@ -130,8 +132,6 @@ const accounts = [
 
 const FIXTURE_YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026] as const;
 const FIXTURE_AS_OF = '2026-12-31';
-/** 投影の起点（固定値・決定的）。2026-07-01〜12-01 に利回り投影行が生まれる。 */
-const FIXTURE_TODAY = '2026-06-15';
 
 /** seed 固定の擬似乱数（Park–Miller LCG）。再現性のため Math.random は使わない。 */
 function createRandom(seed: number): () => number {
@@ -252,15 +252,17 @@ function buildFixtureSource(): {
 
 const fixtureSource = buildFixtureSource();
 // 表示用の導出込み仕訳 = 実仕訳 + 月割り + ルール投影 + 投資利回り投影（displayEntries）。
-const expandedEntries = displayEntriesForAsOf(fixtureSource, FIXTURE_AS_OF, FIXTURE_TODAY);
+const expandedEntries = displayEntriesForAsOf(fixtureSource, FIXTURE_AS_OF);
 
 describe('恒等式: Δ純資産 = 収支 + equity自然増減', () => {
-  it('生成データが実データ規模で、導出行（月割り・ルール投影・利回り投影）を含む', () => {
+  it('生成データが実データ規模で、導出行（月割り・ルール導出・利回り投影）を含む', () => {
     expect(fixtureSource.journalEntries.length).toBeGreaterThan(3_000);
     expect(expandedEntries.length).toBeGreaterThan(fixtureSource.journalEntries.length);
     expect(expandedEntries.some((e) => e.id.startsWith('cc-alloc-'))).toBe(true);
-    expect(expandedEntries.some((e) => e.id.startsWith('cc-allocp-'))).toBe(true);
-    expect(expandedEntries.some((e) => e.id.startsWith('rec-proj-'))).toBe(true);
+    // v13: ルール由来の購入行は rec-（保存時代と同 ID）の導出行として出る。
+    expect(
+      expandedEntries.some((e) => e.id.startsWith('rec-') && e.metadata?.virtual === true),
+    ).toBe(true);
     expect(expandedEntries.some((e) => e.id.startsWith('inv-proj-'))).toBe(true);
     expect(expandedEntries.some((e) => e.kind === 'opening')).toBe(true);
   });
@@ -286,6 +288,38 @@ describe('恒等式: Δ純資産 = 収支 + equity自然増減', () => {
   });
 });
 
+/*
+ * v13.6 H3: 数値レンズの行は共通ラベル列と同じ id（box: / identity:）。
+ * 総資産・総負債は箱ではないので、箱を足して accounting 系と突き合わせる
+ * （= 箱の合計が BS の総額と一致することも同時に固定される）。
+ */
+const ASSET_BOXES: DisplayBoxKey[] = ['assetFree', 'assetFixed', 'investment', 'continuingCost'];
+const LIABILITY_BOXES: DisplayBoxKey[] = ['shortTermDebt', 'longTermDebt'];
+function boxSum(
+  matrix: ReturnType<typeof buildPeriodMatrix>,
+  keys: readonly DisplayBoxKey[],
+  index: number,
+): number {
+  return keys.reduce(
+    (total, key) => total + (periodMatrixRow(matrix, lensRowId.box(key))[index] ?? 0),
+    0,
+  );
+}
+function boxValue(
+  matrix: ReturnType<typeof buildPeriodMatrix>,
+  key: DisplayBoxKey,
+  index: number,
+): number {
+  return periodMatrixRow(matrix, lensRowId.box(key))[index] ?? 0;
+}
+function identityValue(
+  matrix: ReturnType<typeof buildPeriodMatrix>,
+  key: DisplaySectionKey,
+  index: number,
+): number {
+  return periodMatrixRow(matrix, lensRowId.identity(key))[index] ?? 0;
+}
+
 describe('エンジン一致: accounting 系と periodMatrix 系', () => {
   it('mode: all の各年列が deriveProfitAndLoss / deriveBalanceSheet と一致する', () => {
     const matrix = buildPeriodMatrix(accounts, expandedEntries, {
@@ -299,26 +333,33 @@ describe('エンジン一致: accounting 系と periodMatrix 系', () => {
         to: `${year}-12-31`,
       });
       const bs = deriveBalanceSheet(accounts, expandedEntries, `${year}-12-31`);
-      expect(matrix.rows.revenue[index]).toBe(pl.totalRevenue);
-      expect(matrix.rows.expense[index]).toBe(pl.totalExpense);
-      expect(matrix.rows.net[index]).toBe(pl.netIncome);
-      expect(matrix.rows.netAssets[index]).toBe(bs.netAssets);
+      expect(boxValue(matrix, 'income', index)).toBe(pl.totalRevenue);
+      expect(boxValue(matrix, 'expense', index)).toBe(pl.totalExpense);
+      expect(identityValue(matrix, 'net', index)).toBe(pl.netIncome);
+      expect(boxSum(matrix, ASSET_BOXES, index)).toBe(bs.totalAssets);
+      expect(boxSum(matrix, LIABILITY_BOXES, index)).toBe(bs.totalLiabilities);
+      expect(identityValue(matrix, 'netAssets', index)).toBe(bs.netAssets);
     });
   });
 
-  it('mode: year の各月列が deriveProfitAndLoss / deriveBalanceSheet と一致する', () => {
+  it('mode: months の各月列が deriveProfitAndLoss / deriveBalanceSheet と一致する', () => {
     // 2021 = 回収の再配分がある年、2025 = ルール投影・終了日なし item がある年。
     for (const year of [2021, 2025]) {
-      const matrix = buildPeriodMatrix(accounts, expandedEntries, { mode: 'year', year });
+      const matrix = buildPeriodMatrix(accounts, expandedEntries, {
+        mode: 'months',
+        months: Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`),
+      });
       for (let month = 1; month <= 12; month++) {
         const { from, to } = monthRange(year, month);
         const pl = deriveProfitAndLoss(accounts, expandedEntries, { from, to });
         const bs = deriveBalanceSheet(accounts, expandedEntries, to);
         const index = month - 1;
-        expect(matrix.rows.revenue[index]).toBe(pl.totalRevenue);
-        expect(matrix.rows.expense[index]).toBe(pl.totalExpense);
-        expect(matrix.rows.net[index]).toBe(pl.netIncome);
-        expect(matrix.rows.netAssets[index]).toBe(bs.netAssets);
+        expect(boxValue(matrix, 'income', index)).toBe(pl.totalRevenue);
+        expect(boxValue(matrix, 'expense', index)).toBe(pl.totalExpense);
+        expect(identityValue(matrix, 'net', index)).toBe(pl.netIncome);
+        expect(boxSum(matrix, ASSET_BOXES, index)).toBe(bs.totalAssets);
+        expect(boxSum(matrix, LIABILITY_BOXES, index)).toBe(bs.totalLiabilities);
+        expect(identityValue(matrix, 'netAssets', index)).toBe(bs.netAssets);
       }
     }
   });

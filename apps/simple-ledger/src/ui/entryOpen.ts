@@ -18,11 +18,14 @@ export type EntryOpenPlan =
   | { kind: 'edit' }
   /** 初期残高 → 専用シート（通常の編集シートでは不変条件を守れない）。 */
   | { kind: 'opening' }
-  /** 残高補正 → 専用シート。 */
-  | { kind: 'adjustment' }
-  /** 定期ルールの投影・**および起票済みの実仕訳** → そのルール（毎月のもの）。 */
+  /**
+   * 残高補正 → 専用シート。`entryId` は**宣言した stored 仕訳**の ID。
+   * 按分スライス（一覧に並ぶのはこちら）は自分の ID ではなく親の pin を指す。
+   */
+  | { kind: 'adjustment'; entryId: string }
+  /** 定期ルールの投影・**および起票済みの実仕訳** → そのルール（月割り台帳）。 */
   | { kind: 'rule'; ruleId: string }
-  /** 継続コストの月割り・購入投影 → その項目（毎月のもの）。 */
+  /** 継続コストの月割り・購入投影 → その項目（月割り台帳）。 */
   | { kind: 'item'; itemId: string }
   /** 投資の利回り投影 → 利回りを宣言した科目（勘定科目）。 */
   | { kind: 'account'; accountId: string }
@@ -33,11 +36,19 @@ export function entryOpenPlan(entry: JournalEntry): EntryOpenPlan {
   if (entry.metadata?.virtual === true) {
     const origin = derivedEntryOrigin(entry);
     if (origin === undefined) return { kind: 'none' };
-    if (origin.kind === 'recurringRule') return { kind: 'rule', ruleId: origin.recurringRuleId };
-    if (origin.kind === 'monthlyCost') return { kind: 'item', itemId: origin.monthlyCostId };
-    return { kind: 'account', accountId: origin.accountId };
+    // switch で網羅する（derivedOrigin に種類が増えたらここが型で落ちる）。
+    switch (origin.kind) {
+      case 'recurringRule':
+        return { kind: 'rule', ruleId: origin.recurringRuleId };
+      case 'monthlyCost':
+        return { kind: 'item', itemId: origin.monthlyCostId };
+      case 'investmentAccount':
+        return { kind: 'account', accountId: origin.accountId };
+      case 'adjustmentEntry':
+        return { kind: 'adjustment', entryId: origin.entryId };
+    }
   }
-  if (entry.metadata?.adjustment !== undefined) return { kind: 'adjustment' };
+  if (entry.metadata?.adjustment !== undefined) return { kind: 'adjustment', entryId: entry.id };
   // くり返し記帳から生まれた**保存済み**仕訳は、未起票の投影とまったく同じ扱い
   // （作者決定 2026-08-15: 生まれたものへの個別操作は不可・調整はルール側で）。
   // 導出行と実仕訳で行き先が変わらない＝利用者から見て 1 種類の行になる。

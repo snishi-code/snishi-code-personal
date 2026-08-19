@@ -65,9 +65,11 @@ function labelWithUnit(label: string, unit?: string): string {
  * (TextEntry / 旧 number・fraction の { value, note? } / legacy 文字列 / undefined)。
  * 書き込みは onWrite (write-through)。
  *
- * text の入力欄には inputMode を与えない。文字種を狭めても打てない文字が生まれるだけで
- * (iOS の数字キーパッドには "." も "/" も無く、36.5 や 120/80 が入力不能になる)、
- * 端末の通常キーボードなら数字も記号も同じ場所から打てるため。
+ * inputMode を与えるのは decimal 項目だけ。text へ付けると打てない文字が生まれる
+ * (iOS の numeric パッドには "." も "/" も無く、36.5 も 120/80 も入力不能になる)。
+ * decimal パッドは "." を持つので 36.5 は打てる。どちらの場合も入力できる文字自体は
+ * 狭めない (type は常に text。inputMode はソフトキーボードへのヒントでしかなく、
+ * 貼り付けや外付けキーボードは素通しする)。
  */
 export function ItemRow({
   item,
@@ -164,6 +166,7 @@ export function ItemRow({
         ref={inputRef}
         className="input"
         type="text"
+        inputMode={item.kind === 'decimal' ? 'decimal' : undefined}
         value={value}
         aria-label={label || item.normal || s.detail.noteInput}
         data-ui={UI.projection.field}
@@ -189,7 +192,7 @@ export function PlacementRows({
 }) {
   const hasLabelCol = placement.items.some((item) => item.label.trim() !== '');
   const hasNormalCol = placement.items.some(
-    (item) => item.kind === 'text' && item.normal !== undefined,
+    (item) => item.kind !== 'select' && item.normal !== undefined,
   );
   // 見出しを出す条件:
   //   showHead    シートの中では常に false (Modal title が名前を出すので二重になる)

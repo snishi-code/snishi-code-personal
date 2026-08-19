@@ -91,7 +91,7 @@ describe('Settings スモーク', () => {
   it('data-ui=settings があり、エクスポートボタンが表示される', async () => {
     render(
       <Providers>
-        <Settings onNavigate={() => undefined} onOpenOnboarding={() => undefined} />
+        <Settings onOpenOnboarding={() => undefined} />
       </Providers>,
     );
     await waitFor(() => {
@@ -105,7 +105,7 @@ describe('Settings スモーク', () => {
     const before = await loadLedger();
     render(
       <Providers>
-        <Settings onNavigate={() => undefined} onOpenOnboarding={() => undefined} />
+        <Settings onOpenOnboarding={() => undefined} />
       </Providers>,
     );
 
@@ -136,7 +136,7 @@ describe('Settings スモーク', () => {
     );
     render(
       <Providers>
-        <Settings onNavigate={() => undefined} onOpenOnboarding={() => undefined} />
+        <Settings onOpenOnboarding={() => undefined} />
       </Providers>,
     );
 

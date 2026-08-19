@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import {
   buildTimelineBuckets,
   buildTimelineCalendar,
@@ -60,14 +61,19 @@ function entry(
 const accounts: Account[] = [
   account('cash-a', 'asset', 'daily-asset', '2025-01-01'),
   account('cash-b', 'asset', 'daily-asset', '2025-01-01'),
-  account('ledger', 'asset', 'continuing-cost-asset', '2025-01-01'),
+  // 月割りルールの導出は継続コスト台帳を実 ID で引く（保存された正規形と同じ形）。
+  account(CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 'asset', 'continuing-cost-asset', '2025-01-01'),
   account('expense', 'expense', 'expense-category', '2025-01-01'),
   account('income', 'revenue', 'income-category', '2025-01-01'),
 ];
 
 const boxes: TimelineBoxDefinition[] = [
   { key: 'assetFree', accountIds: ['cash-a', 'cash-b'] },
-  { key: 'continuingCost', accountIds: ['ledger'], kind: 'continuousCost' },
+  {
+    key: 'continuingCost',
+    accountIds: [CONTINUOUS_COST_LEDGER_ACCOUNT_ID],
+    kind: 'continuousCost',
+  },
   { key: 'income', accountIds: ['income'] },
   { key: 'expense', accountIds: ['expense'] },
 ];
@@ -202,7 +208,7 @@ describe('buildTimelineCalendar', () => {
       monthlyCostItems: [item],
       entries: [
         entry('real', '2026-01-05', 'expense', 'cash-a', 20),
-        entry('allocation', '2026-01-06', 'expense', 'ledger', 10, {
+        entry('allocation', '2026-01-06', 'expense', CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 10, {
           virtual: true,
           continuousCostId: item.id,
           ccKind: 'monthly-allocation',
@@ -264,7 +270,7 @@ describe('buildTimelineCalendar', () => {
     const datedAccounts = [
       account('past', 'asset', 'daily-asset', '2020-01-01', '2024-12-31'),
       account('current', 'asset', 'daily-asset', '2026-01-01'),
-      account('ledger', 'asset', 'continuing-cost-asset', '2020-01-01'),
+      account(CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 'asset', 'continuing-cost-asset', '2020-01-01'),
       account('expense', 'expense', 'expense-category', '2020-01-01'),
     ];
     const items: MonthlyCostItem[] = [
@@ -291,7 +297,11 @@ describe('buildTimelineCalendar', () => {
     ];
     const customBoxes: TimelineBoxDefinition[] = [
       { key: 'assetFree', accountIds: ['past', 'current'] },
-      { key: 'continuingCost', accountIds: ['ledger'], kind: 'continuousCost' },
+      {
+        key: 'continuingCost',
+        accountIds: [CONTINUOUS_COST_LEDGER_ACCOUNT_ID],
+        kind: 'continuousCost',
+      },
       { key: 'expense', accountIds: ['expense'] },
     ];
 
@@ -385,7 +395,9 @@ describe('buildTimelineCalendar', () => {
     expect(adjustmentRow?.dots[0]?.netChange).toBe(50);
   });
 
-  it('費用ルールの帯へ実itemを束ね、未起票月のitemと生成ポッチを未来投影する', () => {
+  it('費用ルールの帯へ導出itemを束ね、範囲内の起票日に生成ポッチを立てる', () => {
+    // v13: ルール由来 item は保存されない。buildTimelineCalendar が範囲末日を断面として
+    // 毎回導出するので、渡すのはルールだけ（保存 ccr- を混ぜても読まれない）。
     const rule: RecurringRule = {
       id: 'rent-rule',
       name: 'rent',
@@ -393,21 +405,10 @@ describe('buildTimelineCalendar', () => {
       dayOfMonth: 20,
       everyMonths: 1,
       spreadExpenseAccountId: 'expense',
-      debitAccountId: 'ledger',
+      debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
       creditAccountId: 'cash-a',
       startMonth: '2026-01',
       startDate: '2026-01-01',
-      postedThroughMonth: '2026-01',
-      createdAt: ts,
-      updatedAt: ts,
-    };
-    const realItem: MonthlyCostItem = {
-      id: 'ccr-rent-rule-2026-01',
-      name: 'rent',
-      amount: 120,
-      startDate: '2026-01-20',
-      endDate: '2026-01-31',
-      expenseAccountId: 'expense',
       createdAt: ts,
       updatedAt: ts,
     };
@@ -415,15 +416,18 @@ describe('buildTimelineCalendar', () => {
       range: { start: '2026-02-01', end: '2026-02-28' },
       zoom: 'month',
       recurringRules: [rule],
-      monthlyCostItems: [realItem],
     });
     const group = model.boxes.find((box) => box.key === 'continuingCost')?.continuousCost
       ?.ruleGroups[0];
     expect(group?.rule.id).toBe('rent-rule');
-    expect(group?.items).toHaveLength(1);
-    expect(group?.items[0]).toMatchObject({ projected: true, originRuleId: 'rent-rule' });
-    expect(group?.items[0]?.item.startDate).toBe('2026-02-20');
+    // 1 月起票ぶんの item は [1/20, 2/20]（終了日 = 次回起票日）なので 2 月とも交差する。
+    expect(group?.items.map((row) => row.item.startDate)).toEqual(['2026-01-20', '2026-02-20']);
+    expect(group?.items[0]).toMatchObject({ ruleDerived: true, originRuleId: 'rent-rule' });
+    expect(group?.items[1]).toMatchObject({ ruleDerived: true, originRuleId: 'rent-rule' });
+    // 生成ポッチは起票日が範囲内の回だけ（1 月の起票日は範囲外）。
     expect(group?.generationDots).toHaveLength(1);
+    expect(group?.generationDots[0]?.date).toBe('2026-02-20');
+    expect(group?.generationDots[0]?.items[0]).toMatchObject({ ruleDerived: true });
     expect(group?.generationDots[0]?.items[0]?.target).toEqual({
       kind: 'recurringRule',
       recurringRuleId: 'rent-rule',

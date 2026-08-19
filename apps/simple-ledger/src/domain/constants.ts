@@ -13,4 +13,4 @@ export { APP_ID, MAX_LEDGER_REVISION, SCHEMA_VERSION } from '../data/constants';
  * 勘定科目管理 UI には出さず、BS / 資産内訳には 1 行で表示する。
  */
 export const CONTINUOUS_COST_LEDGER_ACCOUNT_ID = 'continuing-cost-ledger' as const;
-export const CONTINUOUS_COST_LEDGER_ACCOUNT_NAME = '継続コスト台帳' as const;
+export const CONTINUOUS_COST_LEDGER_ACCOUNT_NAME = '月割り台帳' as const;

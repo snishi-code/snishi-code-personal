@@ -1,6 +1,6 @@
 {
   "appId": "snishi-code.simple-ledger-v2",
-  "schemaVersion": 12,
+  "schemaVersion": 13,
   "ledgerId": "sample-ledger",
   "exportedAt": "2026-04-01T00:00:00.000Z",
   "deviceId": "sample-device",
@@ -158,7 +158,7 @@
     },
     {
       "id": "continuing-cost-ledger",
-      "name": "継続コスト台帳",
+      "name": "月割り台帳",
       "type": "asset",
       "role": "continuing-cost-asset",
       "archived": false,
@@ -486,7 +486,6 @@
       "metadata": {
         "inputMode": "expense"
       },
-      "tagIds": ["tag-work"],
       "createdAt": "2026-01-30T00:00:00.000Z",
       "updatedAt": "2026-01-30T00:00:00.000Z"
     },
@@ -671,7 +670,6 @@
       "metadata": {
         "inputMode": "expense"
       },
-      "tagIds": ["tag-travel"],
       "createdAt": "2026-03-18T00:00:00.000Z",
       "updatedAt": "2026-03-18T00:00:00.000Z"
     },
@@ -814,24 +812,6 @@
       },
       "createdAt": "2026-03-01T00:00:00.000Z",
       "updatedAt": "2026-03-01T00:00:00.000Z"
-    }
-  ],
-  "tags": [
-    {
-      "id": "tag-travel",
-      "name": "旅行",
-      "scope": "entry",
-      "archived": false,
-      "createdAt": "2026-01-01T00:00:00.000Z",
-      "updatedAt": "2026-01-01T00:00:00.000Z"
-    },
-    {
-      "id": "tag-work",
-      "name": "仕事",
-      "scope": "entry",
-      "archived": false,
-      "createdAt": "2026-01-01T00:00:00.000Z",
-      "updatedAt": "2026-01-01T00:00:00.000Z"
     }
   ],
   "monthlyCostItems": [

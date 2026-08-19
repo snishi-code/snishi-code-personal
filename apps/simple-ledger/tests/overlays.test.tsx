@@ -101,6 +101,19 @@ describe('オーバーレイ登録簿', () => {
     });
     expect(screen.queryByText('テストシート')).not.toBeInTheDocument();
   });
+
+  it('Modal ラッパーは常に中央ポップアップ 1 様式（v13.1 その5・モーダル統一）', () => {
+    // せり上がり（bottom sheet）様式は廃止。variant を受け取らず dialog に固定するのが
+    // 単一正本（overlays.tsx）。DOM では `sheet dialog` の両クラスが付く。
+    render(
+      <Modal title="統一様式" onClose={() => undefined}>
+        <p>body</p>
+      </Modal>,
+    );
+    const dialog = document.querySelector('dialog.sheet');
+    expect(dialog).not.toBeNull();
+    expect(dialog!.classList.contains('dialog')).toBe(true);
+  });
 });
 
 describe('useDirtyGuard（登録簿対応版）', () => {

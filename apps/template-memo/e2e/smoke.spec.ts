@@ -188,7 +188,7 @@ test('freeText を外した場所には自由入力欄が出ない', async ({ pa
   await frameSection
     .locator('.formatListRow', { hasText: 'SOAP' })
     .first()
-    .getByRole('button', { name: '編集', exact: true })
+    .getByRole('button', { name: /を編集$/ })
     .click();
   // 先頭の場所 (S) の「自由本文欄を持つ」を外す。
   await page.getByRole('checkbox', { name: '自由本文欄を持つ' }).first().uncheck();
@@ -265,7 +265,7 @@ test('フォーマット編集で選択項目を作り、チップで単一選�
   await openSettings(page);
   const formatSection = page.locator(ui(UI.settings.formatSection));
   const formatRow = formatSection.locator('.formatListRow', { hasText: 'バイタル' });
-  await formatRow.getByRole('button', { name: '編集', exact: true }).click();
+  await formatRow.getByRole('button', { name: /を編集$/ }).click();
 
   // 「種類」と kind 別フィールドが同じ行に並ぶ (先頭項目は SpO2 = 入力なので「種類」+「単位」)。
   const firstKindRow = page.locator('.templateEditKindRow').first();
@@ -331,7 +331,10 @@ test('フォーマット単独QRを受け取り、同じIDはコピーとして�
   await openSettings(page);
   const pages = await page.evaluate(async () => {
     // Vite がブラウザへ配信する実モジュールを使い、UI と同じ C1/FMT wire を作る。
-    const wire = await import('/src/domain/templateWire.ts');
+    // モジュール指定子はブラウザ側の URL パスで、tsc のモジュール解決対象ではないため、
+    // 文字列リテラルのまま import() へ渡さない（変数越しにして静的解決を避ける）。
+    const wireModulePath = '/src/domain/templateWire.ts';
+    const wire = await import(wireModulePath);
     return wire.encodeShareWirePages(
       {
         kind: wire.FORMAT_WIRE_KIND,
@@ -473,7 +476,7 @@ test('複製してから編集すれば、元のフォーマットを使うテ�
   await expect(copyRow).toBeVisible();
 
   // コピー側の先頭項目 (肺音) を書き換えて保存しても、回診は元の身体所見を参照したまま。
-  await copyRow.getByRole('button', { name: '編集', exact: true }).click();
+  await copyRow.getByRole('button', { name: /を編集$/ }).click();
   await page.getByLabel('ラベル（例 肺音）').first().fill('肺音改');
   await page.locator(ui(UI.formatEdit.save)).click();
   await page.locator(ui(UI.settings.homeBottom)).click();

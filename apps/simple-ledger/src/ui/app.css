@@ -49,16 +49,26 @@
   scroll-padding-top: var(--sticky-top);
 }
 
-/* ── ヘッダーの時間の粒度（年間/全体）セグメント ──
+/* ── ヘッダーの時間の単位（日/月/年 = 時間平面のズーム）セグメント ──
    ヘッダー = 時間、の「時間」には目盛りも含まれる（日付チップの隣に置く理由）。
-   375px 幅に収めるため Segmented より詰めた専用スタイル。押下中（= 年間・全体画面に
-   いる間の現在粒度）は aria-pressed で示し、色 + 面の両方で手掛かりを持つ。 */
+   押下中（= ズーム対応画面にいる間の現在ズーム）は aria-pressed で示し、色 + 面の
+   両方で手掛かりを持つ。
+
+   タップ領域は 44×44px（AGENTS.md の不変条件・v13.6 H2-1 で 32px から是正）。
+   高さは .app-header__inner（min-height 56px・padding 4px）の中身 48px に収まるので、
+   ヘッダーの実高（--sticky-top = 57px）は変わらない。文字は 12px のままだと 44px の面の
+   中で迷子になるので 13px へ上げ、横は min-width で 44px を確保する（375px でも
+   日付チップ + 今日 + 3 ボタンが 1 行に収まる幅）。 */
 /* タイムスリップ中だけ現れる「今日」。強めの色 = 「時間がずれている」の警告灯を兼ねる。 */
 .period-today {
   flex-shrink: 0;
-  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  min-width: var(--tap);
   padding: 0 var(--space-2);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--primary-strong);
   background: var(--primary-light);
@@ -74,9 +84,13 @@
   flex-shrink: 0;
 }
 .period-zoom__btn {
-  min-height: 32px;
-  padding: 0 var(--space-2);
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  min-width: var(--tap);
+  padding: 0 var(--space-1);
+  font-size: 13px;
   font-weight: 600;
   color: var(--muted);
   background: transparent;
@@ -88,6 +102,10 @@
 .period-zoom__btn[aria-pressed='true'] {
   color: var(--primary-strong);
   background: var(--primary-light);
+}
+/* 数値レンズには日の列が無い = 「日」は押せない。理由はアクセシブル名で名乗る。 */
+.period-zoom__btn:disabled {
+  opacity: 0.4;
 }
 
 /* ── Summary card (tappable: ホームの損益/資産負債サマリー) ── */
@@ -147,6 +165,11 @@
   grid-template-columns: repeat(3, 1fr);
   gap: var(--space-2);
 }
+/* 値が 1 つだけの stat-grid（資金繰りの「自由に動かせるお金」）。3 列のままだと
+   1/3 幅に押し込まれてラベルも金額も折り返す。 */
+.stat-grid--single {
+  grid-template-columns: 1fr;
+}
 .stat {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -189,15 +212,19 @@
 .amount--neg {
   color: var(--neg);
 }
+/* 負債残高（絶対値表示のまま「性質が負」だと読める色。C-2） */
+.amount--liability {
+  color: var(--amount-liability);
+}
 
 /* ── 一覧の並び替えトグル（共通部品 SortControls が常に .list-sort を付ける） ── */
 /* foundation の Segmented は既定 38px。ソート UI でも 44px のタップ領域を保証する（監査 P1-4）。
-   仕訳一覧・毎月のもの共通。yearly-overview / timeline-calendar の同種上書きは別部品のため残す。 */
+   仕訳一覧・月割り台帳共通。timeline-calendar の同種上書きは別部品のため残す。 */
 .list-sort .segmented__btn {
   min-height: var(--tap);
 }
 
-/* ── 一覧の絞り込み額縁（仕訳一覧・毎月のもの） ──
+/* ── 一覧の絞り込み額縁（仕訳一覧・月割り台帳） ──
    ホームの .dashboard__frame と同型（作者合意 2026-08-15）。検索・並び替え・絞り込みを
    sticky で上端に貼り、下のカードだけが流れる。画面タイトル(h1)は額縁に含めない
    （スクロールで流れてよい = ホームと同じ扱い）。
@@ -227,7 +254,9 @@
    --list-filter-frame-h は画面ごとの実測値（折り返しでズレても影響はフォーカス位置だけ）。 */
 .list-filter-frame ~ *,
 .list-filter-frame ~ * * {
-  scroll-margin-top: var(--list-filter-frame-h, 0px);
+  /* 実測高は小数になりうる（行の高さが変わると sticky の bottom が 0.5px 単位でずれる）。
+     ぴったりだとフォーカスが額縁の裏へ 1px 未満だけ潜るので、丸め余白を 1px 足す。 */
+  scroll-margin-top: calc(var(--list-filter-frame-h, 0px) + 1px);
 }
 /* 額縁の実測高（@2026-08-15・?fixture=sample）。折り返しで変わるので画面ごとに持つ。 */
 .journal {
@@ -240,46 +269,155 @@
   --list-filter-frame-h: 113px;
 }
 
-/* ── 年間・全体マトリクス ── */
-.yearly-overview__intro {
-  margin-bottom: var(--space-3);
+/* ラベル列の幅の正本。CSS と JS（LensRowTree の LENS_LABEL_WIDTH / lensLabelWidth）は
+   同じ値・同じ境界を持つ: CSS が実際の描画幅、JS が可視範囲の計算に使う。
+   3 レンズで同じ器に載るので、どのレンズでもラベル列の幅は 1 つ。 */
+.timeline-calendar__canvas,
+.period-matrix__scroll,
+.timeline-chart__viewport {
+  --lens-label-width: 156px;
 }
-.yearly-overview__controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-3);
+@media (max-width: 480px) {
+  .timeline-calendar__canvas,
+  .period-matrix__scroll,
+  .timeline-chart__viewport {
+    --lens-label-width: 144px;
+  }
 }
-/* foundation の Segmented は既定 38px。分析画面でも 44px のタップ領域を保証する。 */
-.yearly-overview__mode .segmented__btn,
-.yearly-overview__horizon .segmented__btn {
-  min-height: var(--tap);
-}
-.yearly-overview__year-nav {
-  display: grid;
-  grid-template-columns: var(--tap) minmax(88px, auto) var(--tap);
-  align-items: center;
-  gap: var(--space-1);
-}
-.yearly-overview__year-button {
-  min-width: var(--tap);
-  padding: 0;
-  font-size: 18px;
-}
-.yearly-overview__year {
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-.yearly-overview__scroll {
+
+/* ── 3 レンズ共通の枠（v13.7 I1） ──
+   線分 / 数値 / グラフのどれでも「左のラベル列 × 上の目盛り行 × 中の描画部」は同じ枠に載る。
+   役割の名乗りは JS 側の LENS_FRAME（components/LensFrame.tsx）で、ここが唯一の規則。
+
+   窓は**縦横 2 次元**にする。position: sticky の相手は最も近いスクロールポートで、枠は横
+   スクロールのために既にスクロールポートになっているため、枠の中で縦が閉じていないと
+   目盛り行の top は効きようがない（＝ページ側の縦スクロールでは貼れない）。
+   高さは画面の残りで止める。**ページを一番下まで送ったとき枠の上端が app-header の実高
+   （--sticky-top）の下に来る**高さが正解で、それは 100dvh から「ヘッダー実高」と
+   「.app-main の下 padding（--space-6 + --bottom-inset）」を引いた分。ここを大きくすると
+   一番下まで送ったときに枠の上端＝目盛り行がヘッダーの裏へ潜る（既存の額縁 sticky と同じ
+   数え方に揃える）。 */
+.lens-frame {
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  overflow-x: auto;
+  max-height: calc(100dvh - var(--sticky-top) - var(--space-6) - var(--bottom-inset));
+  overflow: auto;
+  /* 横は枠で止める（ページを揺らさない）。縦は行き止まりでページへ渡す
+     （＝ラベル列を送り続ければ画面全体が動く）。 */
   overscroll-behavior-inline: contain;
+  overscroll-behavior-block: auto;
 }
-.yearly-overview__table {
+/* 軸ロック。touch-action は**祖先と交差**するので枠そのものには置かない
+   （枠に pan-x を置くとラベル列の pan-y と交差して none になり、どちらも動かなくなる）。
+   指で触れた場所が軸を決める: 描画部 = 横だけ / ラベル列と隅 = 縦だけ。
+   ホイール（マウス）は touch-action の対象外なので従来どおり素直に動く
+   ＝斜め移動の使いづらさが出るのは指のときだけで、そこだけを塞ぐ。
+
+   役割の class は**枠の中でだけ**意味を持つので子孫セレクタで書く。ラベル列（.lens-row__label）
+   と同じ要素に載ることがあり（隅）、そのときは枠の規則が勝つ必要がある。 */
+.lens-frame .lens-frame__pane {
+  touch-action: pan-x;
+}
+.lens-frame .lens-row__label,
+.lens-frame .lens-frame__corner {
+  touch-action: pan-y;
+}
+/* 上に貼る目盛り行。中身（年月日の帯・月列ボタン・グラフの目盛り）はレンズが持つ。 */
+.lens-frame .lens-frame__head {
+  position: sticky;
+  top: 0;
+  z-index: 7;
+}
+/* 左に貼る隅。目盛り行（.lens-frame__head）と併せ持つと左上の隅になり、
+   縦にも横にも送られない唯一の点になる。z はラベル列(6) < 目盛り行(7) < 隅(9)。 */
+.lens-frame .lens-frame__corner {
+  position: sticky;
+  left: 0;
+  z-index: 9;
+}
+
+/* ── 3 レンズ共通のラベル列（v13.6 H3） ──
+   線分 / 数値 / グラフのどのレンズでも同じ見た目・同じ操作になるよう、器の種類
+   （div / th）によらず 1 つの規則で描く。幅の正本は JS（LensRowTree の LENS_LABEL_WIDTH）で、
+   可視範囲の計算と同じ値を custom property で受け取る。 */
+.lens-row__label {
+  position: sticky;
+  left: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  box-sizing: border-box;
+  width: var(--lens-label-width);
+  min-width: var(--lens-label-width);
+  max-width: var(--lens-label-width);
+  min-height: var(--tap);
+  /* 深さぶんの字下げ（箱 → 科目 → 月割り項目）。深さは JS が渡す。 */
+  padding: 0 var(--space-2) 0 calc(var(--space-2) + var(--lens-depth, 0) * var(--space-3));
+  color: var(--text);
+  font: inherit;
+  font-weight: 400;
+  text-align: left;
+  background: var(--surface);
+  border: 0;
+  border-left: 4px solid var(--lens-accent, var(--border));
+  box-shadow: 1px 0 0 var(--border);
+}
+.lens-row__label--detail {
+  color: var(--muted);
+}
+.lens-row__label--emphasis {
+  font-weight: 700;
+  color: var(--text);
+}
+/* チェックが外れている行 = 右ペインに出ていない。行は残るので、薄くして違いを見せる
+   （読み上げの正本はチェックボックスの checked）。 */
+.lens-row__label--off .lens-row__toggle,
+.lens-row__label--off .lens-row__text {
+  opacity: 0.45;
+}
+.lens-row__check {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+}
+.lens-row__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap);
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.lens-row__text {
+  /* 狭幅で「自由に動かせるお金/動かせないお金」が同じ見出しに切れないよう、
+     1 行省略ではなく 2 行までの折返しで見分けを保つ。 */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  min-width: 0;
+  overflow: hidden;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.lens-row__text--leaf {
+  flex: 1;
+}
+
+/* ── 期間マトリクス（時間平面の数値レンズ。旧「年間・全体」画面の表） ──
+   列幅とラベル列幅の正本は JS（PeriodMatrixTable）。可視範囲の計算と同じ値を使うため、
+   custom property で受け取る（2 か所に生値を置かない）。
+   窓（スクロール・sticky・軸ロック）は 3 レンズ共通の .lens-frame が持つ。 */
+.period-matrix__table {
   width: max-content;
   min-width: 100%;
   border-collapse: separate;
@@ -287,33 +425,31 @@
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
-.yearly-overview__table th,
-.yearly-overview__table td {
+.period-matrix__table th,
+.period-matrix__table td {
   height: var(--tap);
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
-.yearly-overview__table tbody tr:last-child th,
-.yearly-overview__table tbody tr:last-child td {
+.period-matrix__table tbody tr:last-child th,
+.period-matrix__table tbody tr:last-child td {
   border-bottom: none;
 }
-.yearly-overview__label {
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  width: 112px;
-  min-width: 112px;
-  max-width: 112px;
+/* 隅（項目見出し）はラベル列と同じ幅。左右と上下の両方に貼る（.lens-frame__corner +
+   .lens-frame__head）。行のセル（.lens-row__label）は着せないので幅はここが持つ
+   ＝ 左端の 4px は行の色罫と同じぶんを透明で空け、文字の頭を行と揃える。 */
+.period-matrix__corner {
+  box-sizing: border-box;
+  width: var(--lens-label-width);
+  min-width: var(--lens-label-width);
+  max-width: var(--lens-label-width);
+  padding: var(--space-2) var(--space-2);
+  border-left: 4px solid transparent;
   text-align: left;
-  overflow-wrap: anywhere;
-  box-shadow: 1px 0 0 var(--border);
-}
-.yearly-overview__corner {
-  z-index: 2;
 }
 /* 列見出しのタップ導線。表の密度を保つため見た目は文字のまま、点線下線で押せることだけ示す。 */
-.yearly-overview__col-btn {
+.period-matrix__col-btn {
   display: block;
   width: 100%;
   min-height: 28px;
@@ -325,39 +461,142 @@
   text-decoration: underline dotted;
   text-underline-offset: 3px;
 }
-.yearly-overview__value {
-  width: 112px;
-  min-width: 112px;
+.period-matrix__value {
+  width: var(--period-matrix-column-width);
+  min-width: var(--period-matrix-column-width);
+  max-width: var(--period-matrix-column-width);
   text-align: right;
   white-space: nowrap;
 }
-.yearly-overview__table thead th {
+.period-matrix__table thead th {
   color: var(--muted);
   font-weight: 700;
   background: var(--bg);
 }
-.yearly-overview__row--emphasis th,
-.yearly-overview__row--emphasis td {
+.period-matrix__row--emphasis th,
+.period-matrix__row--emphasis td {
   font-weight: 700;
   background: var(--bg);
 }
-.yearly-overview__row--category th {
-  padding-left: var(--space-5);
-  color: var(--muted);
-  font-weight: 500;
+/* 表のセル余白はラベル列（.lens-row__label）が自前で持つ。 */
+.period-matrix__table th.lens-row__label {
+  padding: 0;
 }
-.yearly-overview__row--section th,
-.yearly-overview__row--section td {
-  border-top: 2px solid var(--border);
-}
-.yearly-overview__empty {
+.period-matrix__empty {
   padding: var(--space-5) 0;
   text-align: center;
+}
+
+/* ── グラフレンズ（時間平面のストック 4 系列） ──
+   窓（スクロール・sticky・軸ロック）は 3 レンズ共通の .lens-frame が持つ。ラベル列そのものも
+   3 レンズ共通（LensRowTree）で、チェックボックスが凡例を兼ねる。幅の正本は JS。 */
+.timeline-chart {
+  margin: 0;
+  min-width: 0;
+}
+/* 目盛り行（年月日）。線分・数値と同じく**上に貼る**ので、SVG の中ではなくここに置く
+   （SVG の中だと縦に送ったとき一緒に流れる）。 */
+.timeline-chart__head {
+  display: flex;
+  align-items: stretch;
+  width: max-content;
+  min-width: 100%;
+}
+.timeline-chart__head-corner {
+  flex: none;
+  box-sizing: border-box;
+  width: var(--lens-label-width);
+  min-height: 28px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.timeline-chart__ticks {
+  position: relative;
+  flex: none;
+  min-height: 28px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.timeline-chart__tick-label {
+  position: absolute;
+  top: 0;
+  padding: 0 var(--space-1);
+  line-height: 28px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.timeline-chart__canvas {
+  display: flex;
+  align-items: flex-start;
+  width: max-content;
+  min-width: 100%;
+}
+/* ラベル列は 3 レンズ共通（.lens-row__*）。ここは縦に積む器だけを持つ。 */
+.timeline-chart__rows {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  width: var(--lens-label-width);
+  background: var(--surface);
+}
+.timeline-chart__plot {
+  flex: none;
+}
+.timeline-chart__svg {
+  display: block;
+}
+.timeline-chart__zero {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.timeline-chart__gridline {
+  stroke: var(--border);
+  stroke-width: 1;
+  opacity: 0.4;
+}
+.timeline-chart__line {
+  fill: none;
+  stroke: var(--lens-accent, var(--primary));
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: butt;
 }
 
 /* ── タイムラインカレンダー ── */
 .timeline-calendar {
   min-width: 0;
+}
+/* タイトル行。右の空きに「基準日へ戻る」を置く（月割り台帳の見出し行と同型）。
+   ボタンは基準日が可視範囲の外にあるときだけ現れるので、無いときは h1 だけの行になる。 */
+.timeline-calendar__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  /* h1 が持っていた下余白を行が引き取る（見出しの下の間は変えない）。 */
+  margin-bottom: var(--space-4);
+}
+.timeline-calendar__title-row .screen-title {
+  margin-bottom: 0;
+}
+/* 「いま見ている位置が基準日から離れている」の警告灯。ヘッダーの「今日」と同じ色域で名乗り、
+   タップ領域は 44px（AGENTS.md の不変条件）。日付を含むので狭幅では折り返さず縮める。 */
+.timeline-calendar__back-to-basis {
+  flex: none;
+  min-height: var(--tap);
+  padding: 0 var(--space-2);
+  color: var(--primary-strong);
+  background: var(--primary-light);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 .timeline-calendar__controls {
   display: flex;
@@ -366,7 +605,7 @@
   gap: var(--space-2);
   flex-wrap: wrap;
 }
-.timeline-calendar__zoom .segmented__btn {
+.timeline-calendar__lens .segmented__btn {
   min-height: var(--tap);
 }
 .timeline-calendar__range-button {
@@ -381,28 +620,20 @@
   min-height: var(--tap);
   margin-bottom: var(--space-3);
 }
-.timeline-calendar__viewport {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  overflow-x: auto;
-  overflow-y: visible;
-  overscroll-behavior-inline: contain;
-}
+/* 窓（スクロール・sticky・軸ロック）は 3 レンズ共通の .lens-frame が持つ。 */
 .timeline-calendar__canvas {
   position: relative;
   width: max-content;
   min-width: 100%;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-  --timeline-label-width: 132px;
   --timeline-row-height: 52px;
 }
 .timeline-calendar__header-row,
 .timeline-calendar__row {
   display: grid;
   grid-template-columns:
-    var(--timeline-label-width)
+    var(--lens-label-width)
     repeat(var(--timeline-bucket-count), var(--timeline-bucket-width));
   width: max-content;
   min-width: 100%;
@@ -423,10 +654,9 @@
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
+/* 左上の隅（年/月/日 の 3 行ぶん）。左に貼るのは .lens-frame__corner・上に貼るのは
+   目盛り行の器（.timeline-calendar__header）が持つ。 */
 .timeline-calendar__header-label {
-  position: sticky;
-  left: 0;
-  z-index: 8;
   box-shadow: 1px 0 0 var(--border);
 }
 .timeline-calendar__header-cell {
@@ -454,45 +684,8 @@
 .timeline-calendar__row--dimmed {
   opacity: 0.3;
 }
-.timeline-calendar__row-label {
-  position: sticky;
-  left: 0;
-  z-index: 6;
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  width: 100%;
-  min-width: 0;
+.timeline-calendar__row .lens-row__label {
   min-height: var(--timeline-row-height);
-  padding: 0 var(--space-2);
-  color: var(--text);
-  text-align: left;
-  background: var(--surface);
-  border: 0;
-  border-left: 4px solid var(--timeline-accent, var(--border));
-  box-shadow: 1px 0 0 var(--border);
-  font: inherit;
-}
-button.timeline-calendar__row-label {
-  cursor: pointer;
-}
-.timeline-calendar__row-label--detail {
-  padding-left: var(--space-4);
-  color: var(--muted);
-}
-.timeline-calendar__row-label--item {
-  padding-left: var(--space-6);
-}
-.timeline-calendar__row-label-text {
-  /* 狭幅で「自由に動かせるお金/動かせないお金」が同じ見出しに切れないよう、
-     1 行省略ではなく 2 行までの折返しで見分けを保つ。 */
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  min-width: 0;
-  overflow: hidden;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
 }
 .timeline-calendar__track {
   position: relative;
@@ -571,7 +764,7 @@ button.timeline-calendar__row-label {
 .timeline-calendar__connector {
   position: absolute;
   top: 0;
-  left: var(--timeline-label-width);
+  left: var(--lens-label-width);
   z-index: 4;
   overflow: visible;
   pointer-events: none;
@@ -645,34 +838,8 @@ button.timeline-calendar__row-label {
   justify-content: flex-end;
   margin-top: var(--space-2);
 }
-.timeline-calendar__empty {
-  position: sticky;
-  left: 0;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: min(100vw, 360px);
-  min-height: var(--timeline-row-height);
-  padding: var(--space-5);
-  color: var(--muted);
-  text-align: center;
-  background: var(--surface);
-}
 
 @media (max-width: 480px) {
-  .timeline-calendar__canvas {
-    --timeline-label-width: 116px;
-  }
-  .timeline-calendar__row-label {
-    padding-inline: var(--space-1);
-  }
-  .timeline-calendar__row-label--detail {
-    padding-left: var(--space-3);
-  }
-  .timeline-calendar__row-label--item {
-    padding-left: var(--space-5);
-  }
 }
 
 /* ── Statement rows ── */
@@ -770,7 +937,12 @@ button.timeline-calendar__row-label {
   align-items: center;
   gap: var(--space-1);
   min-height: var(--tap);
-  padding: 0 var(--space-2);
+  /* 375px で「今日」まで並ぶと 1 行が溢れる。**縮むのは日付チップ**（中の
+     .period-context__text が ellipsis を持つ）で、44px を確保したボタン側は縮ませない
+     （タップ領域の規約が先。flex は既定で min-width:auto = 縮まないので明示する）。 */
+  min-width: 0;
+  /* 44px のボタンが 4 つ並ぶぶん、チップ側の余白は詰める（日付の文字そのものを優先する）。 */
+  padding: 0 var(--space-1);
   background: transparent;
   border: none;
   border-radius: var(--radius-sm);
@@ -814,6 +986,76 @@ button.timeline-calendar__row-label {
 }
 .period-context__sep {
   color: var(--muted);
+}
+
+/* ── 資金繰りのグラフ（基準日起点・右へ伸ばす日次折れ線） ──
+   TrendChart（固定幅 320x140・バケット数で横位置が決まる）とは別物。ここは横位置が
+   **日数**に比例し、幅が窓の長さで伸びるため viewport でスクロールさせる。 */
+.cashflow-chart {
+  margin: var(--space-3) 0 var(--space-2);
+  min-width: 0;
+}
+.cashflow-chart__viewport {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.cashflow-chart__svg {
+  display: block;
+}
+.cashflow-chart__zero {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.cashflow-chart__gridline {
+  stroke: var(--border);
+  stroke-width: 1;
+  opacity: 0.4;
+}
+.cashflow-chart__tick {
+  fill: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.cashflow-chart__line {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+/* 月次純増減の副表示（月ズームのみ）。符号を必ず付けるので色だけの手がかりにしない。 */
+.cashflow-chart__delta {
+  fill: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.cashflow-chart__delta--pos {
+  fill: var(--pos);
+}
+.cashflow-chart__delta--neg {
+  fill: var(--neg);
+}
+.cashflow-chart__shortfall {
+  stroke: var(--neg);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+.cashflow-chart__shortfall-dot {
+  fill: var(--neg);
+}
+.cashflow-chart__end {
+  margin: var(--space-1) 0 0;
+  font-size: 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── トレンドチャート（自前 SVG） ── */
@@ -1069,7 +1311,7 @@ button.stmt-row:hover {
   --home-frame-h: 215px;
 }
 /* ホームの額縁: 収支 + 財政状態の 6 枠を sticky 固定し、下の仕訳だけが流れる（実ユーズ④）。
-   z は同一スクロール内の前後関係のみ（yearly-overview__label と同じ生数値運用）。
+   z は同一スクロール内の前後関係のみ（period-matrix__label と同じ生数値運用）。
    border-bottom は app-main の左右 padding ぶん全幅より狭い（ヘッダー境界線と幅が違う）が、
    額縁とその下の行の区切りとして意図的に引く。 */
 .dashboard__frame {
@@ -1221,7 +1463,7 @@ button.stmt-row:hover {
   background: var(--bg);
 }
 
-/* 終了まで1ヶ月以内の継続コスト資産（毎月のもの）。色だけ変える（バッジ・文言は足さない）。
+/* 終了まで1ヶ月以内の継続コスト資産（月割り台帳）。色だけ変える（バッジ・文言は足さない）。
    --warning-light(#fffbeb) は白背景とほぼ区別がつかないため、視認できるアンバー + 左ボーダー。 */
 .card--ending {
   background: #fdf3d8;
@@ -1257,7 +1499,7 @@ button.stmt-row:hover {
      = ホームの額縁より高いので、ホームで貼らない高さならこちらも貼らない。
      必要高 = ヘッダー 57 + 額縁 194 + 仕訳 2 行 134 + フッター 53 ≒ 438、横向き実機（高さ 375〜430）
      では 1 行しか残らない。
-     「毎月のもの」は額縁 113px（幅によらず一定）で、高さ 375 でも一覧が 150px 残るため貼ったまま
+     「月割り台帳」は額縁 113px（幅によらず一定）で、高さ 375 でも一覧が 150px 残るため貼ったまま
      にする（＝この境界を共有しない。額縁の高さが違えば逃す高さも違う）。 */
   .journal .list-filter-frame {
     position: static;
@@ -1266,4 +1508,66 @@ button.stmt-row:hover {
   .journal {
     --list-filter-frame-h: 0px;
   }
+}
+
+/* ── モーダル統一（v13.1 その5・作者確定 2026-08-16）──
+   せり上がり（bottom sheet）とポップアップの 2 様式を廃し、全モーダルを中央ポップアップの
+   1 様式に固定する（単一正本は overlays.tsx の Modal ラッパー = variant を受け取らない）。
+   応答的の中身: 内容が長いときは高さを 92dvh（foundation の既定）まで広げ、sticky の
+   ヘッダー/フッターを残して中身だけがスクロールする。小画面では横の余白を狭めて
+   入力フォームの実効幅を確保する。 */
+@media (max-width: 599px) {
+  dialog.sheet.dialog {
+    width: calc(100% - var(--space-2) * 2);
+  }
+}
+
+/* ── フィールドラベルの当たり判定（v13.1 その6・実ユーズ指摘）──
+   .field は縦 flex で label が既定 stretch のまま全幅へ伸び、文字の右の透明な余白を
+   タップしても input が作動する（date input では OS カレンダーが開いて驚かせる）。
+   ラベルの当たり判定を見た目（文字ぶんの幅）に一致させる。 */
+.field > .field__label {
+  align-self: flex-start;
+}
+
+/* ── 行の設計図（v13.2・作者確定 2026-08-16）──
+   一覧の行は「左 = 名前と説明 / 右 = 固定列」の 2 分割。右列は上段に金額、下段に操作
+   （または状態）を積み、行をまたいで**金額とボタンが縦に揃う**のを原則にする。
+   v13.1 までは [main][金額][操作] の横並びで、操作がある行だけ金額が内側へ押されていた。
+   数字は tabular-nums で桁位置も揃える（金融アプリの通例）。 */
+.row-trailing {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+.list__amount {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+}
+/* kv の値（右側）も同じ桁揃えに乗せる。 */
+.kv > :last-child {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 行アクションのボタン様式（v13.2）──
+   一等地の動詞は「押せる面」を持つ: 薄い地 + 細い枠 + カプセル形
+   （App Store の「入手」・Material 3 の tonal と同型）。btn--ghost は地も枠も透明で
+   文字が置いてあるだけに見えるため、行内の動詞には使わない（シート内の副次動作専用）。
+   高さは .btn の min-height = var(--tap) を継承する（44px のタップ目標を守る）。 */
+.btn--tonal {
+  background: var(--primary-light);
+  border-color: var(--primary-border);
+  color: var(--primary-strong);
+  border-radius: var(--radius-pill);
+  /* 2 文字の動詞でも円に見えないよう横に伸ばす（.btn 既定の 16px より狭め・
+     2 つ並べても 375px 幅に収まる 14px）。 */
+  padding: 0 14px;
+}
+.btn--tonal:hover {
+  background: var(--primary-border);
 }

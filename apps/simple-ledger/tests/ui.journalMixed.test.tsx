@@ -1,9 +1,10 @@
 /*
  * 仕訳一覧の混合表示（§8）:
- *  - 保存される仕訳と計算で生まれる仕訳（費用行・ルール投影）を同じ一覧に日付順で出す
+ *  - 保存される仕訳と計算で生まれる仕訳（費用行・ルール由来の行）を同じ一覧に日付順で出す
  *  - 計算で生まれた行のタップは「毎月のもの」の元の項目 / ルールへ遷移する
  *  - 購入の仕訳はタップで編集（削除ボタンは出さない）
- *  - くり返し記帳が起票した実仕訳は読み取り専用（row-action なし・タップは由来ルール）
+ *  - くり返し記帳の行は v13 ではすべて導出行。読み取り専用（row-action なし・
+ *    タップは由来ルール）で、過去の回も未来の回も同じ見た目になる
  *  - from/to には展開上限（2100-12-31）の max が付く
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -13,8 +14,9 @@ import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { LedgerProvider, useLedger } from '../src/state/store';
 import { Journal, type JournalFilter } from '../src/ui/screens/Journal';
 import {
-  catchUpRecurringRules,
+  createAdjustment,
   createContinuousCost,
+  createOpenings,
   createRecurringRule,
   loadLedger,
   upsertAccount,
@@ -168,19 +170,24 @@ describe('仕訳一覧の混合表示', () => {
     // 先頭（日付降順で最新）の行をタップ → 「毎月のもの」の item へ。
     const list = document.querySelector(`[data-ui="${UI.journal.list}"]`)!;
     const buttons = Array.from(list.querySelectorAll('button.list__main'));
+    // 「月割り」バッジは摘要（fixture 名）と字面が重なるため、タグ要素そのもので絞る。
     const virtualRow = buttons.find(
-      (b) => b.textContent?.includes('月割り対象') && b.textContent.includes('継続コスト'),
+      (b) =>
+        b.textContent?.includes('月割り対象') &&
+        Array.from(b.querySelectorAll('.list__title .tag')).some(
+          (tag) => tag.textContent === '月割り',
+        ),
     );
     expect(virtualRow).toBeDefined();
     fireEvent.click(virtualRow!);
     expect(onOpenAllocations).toHaveBeenCalledWith({ itemId: item.id });
   });
 
-  it('未来の to を選ぶとルール投影の行が出て、タップでルールへ遷移する', async () => {
+  it('未来の to を選ぶとルール由来の行が出て、タップでルールへ遷移する', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
-    // 未来開始のルール（catchUp では起票されない = 投影だけが出る）。
+    // 未来開始のルール（断面を延ばして初めて導出される）。
     const futureMonth = addMonths(monthOf(todayLocal()), 2);
     const rule = await createRecurringRule({
       name: '未来の定期支出',
@@ -211,32 +218,32 @@ describe('仕訳一覧の混合表示', () => {
     expect(onOpenAllocations).toHaveBeenCalledWith({ ruleId: rule.id });
   });
 
-  it('くり返し記帳が起票した実仕訳は読み取り専用（row-action なし・タップは由来ルール）', async () => {
+  it('くり返し記帳の行（今日ぶんの導出行）は読み取り専用（row-action なし・タップは由来ルール）', async () => {
     // 作者決定 2026-08-15: ルールは定期起票するだけの軽い道具。生まれたものへの個別操作
     // （編集・削除・反対仕訳）は持たず、調整はルール側で行う。
+    // v13: 保存 rec- は無くなり、今日ぶんの回も未来の回と同じ導出行として出る。
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
     const invest = ledger.accounts.find((a) => a.role === 'investment-asset')!;
     const today = todayLocal();
     const rule = await createRecurringRule({
-      name: '起票済みの積立',
+      name: '今日ぶんの積立',
       amount: 1500,
       dayOfMonth: Number.parseInt(today.slice(8, 10), 10),
       debitAccountId: invest.id,
-      spreadViaLedger: false,
       creditAccountId: cash.id,
       startMonth: monthOf(today),
       startDate: today,
     });
-    // Provider 初期化時の catch-up が今日ぶんを起票する。
-    await catchUpRecurringRules(today);
+    // 起票は保存しない: 今日が周期日なので、既定の断面（今日まで）でこの回が導出される。
+    expect((await loadLedger()).journalEntries).toHaveLength(0);
 
     const onEditEntry = vi.fn();
     const onOpenAllocations = vi.fn();
     render(<View onEditEntry={onEditEntry} onOpenAllocations={onOpenAllocations} />);
-    const row = (await screen.findByText('起票済みの積立')).closest('li')!;
+    const row = (await screen.findByText('今日ぶんの積立')).closest('li')!;
 
-    // 削除・反対仕訳の row-action は出ない（未起票の投影行とまったく同じ見た目）。
+    // 削除・反対仕訳の row-action は出ない（未来の回とまったく同じ見た目）。
     expect(row.querySelector(`[data-ui="${UI.journal.entry.delete}"]`)).toBeNull();
     expect(row.querySelector(`[data-ui="${UI.journal.entry.reverse}"]`)).toBeNull();
 
@@ -281,7 +288,8 @@ describe('仕訳一覧の混合表示', () => {
     });
 
     const toInput = document.querySelector('#journal-to') as HTMLInputElement;
-    fireEvent.change(toInput, { target: { value: `${addMonths(monthOf(today), 1)}-15` } });
+    // v13.4 ②: 刻みは起点（この仕訳の日）の同日刻みなので、月初ではなく同日で範囲を取る。
+    fireEvent.change(toInput, { target: { value: addMonthsToDate(today, 2) } });
 
     const rows = await screen.findAllByText(`投影: ${invest.name}`);
     fireEvent.click(rows[0]!.closest('button')!);
@@ -433,5 +441,171 @@ describe('仕訳一覧の混合表示', () => {
     expect(amount).not.toHaveClass('amount--pos');
     expect(amount).not.toHaveClass('amount--neg');
     expect(amount).not.toHaveAttribute('aria-label');
+  });
+});
+
+/*
+ * 行レイアウト（v13.1 その6・実ユーズ指摘）:
+ *  - 金額は行の右端ライン（li の最終要素）に固定する
+ *  - バッジ（継続コスト等）は摘要の後ろに置く（バッジ・ボタンは摘要と金額の間）
+ */
+describe('仕訳一覧の行レイアウト', () => {
+  it('金額とボタンが右列に縦積みされ、バッジは摘要の後ろに来る', async () => {
+    const ledger = await loadLedger();
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const today = todayLocal();
+    await createContinuousCost({
+      name: 'レイアウト確認',
+      amount: 60000,
+      startDate: addMonthsToDate(today, -2),
+      endDate: addMonthsToDate(today, 4),
+      expenseAccountId: expense.id,
+    });
+    // 反対仕訳ボタンつきの通常仕訳も混ぜる（ボタンが金額より前に来ることを見る）。
+    await upsertEntry({
+      id: 'layout-normal-entry',
+      date: today,
+      description: '通常の支出行',
+      kind: 'normal',
+      lines: [
+        { accountId: expense.id, side: 'debit', amount: 700 },
+        { accountId: cash.id, side: 'credit', amount: 700 },
+      ],
+      metadata: { inputMode: 'expense' },
+      createdAt: '2026-08-16T00:00:00.000Z',
+      updatedAt: '2026-08-16T00:00:00.000Z',
+    });
+    render(<View />);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.journal.view}"]`)).toBeInTheDocument();
+    });
+    await screen.findAllByText('レイアウト確認');
+    const list = document.querySelector(`[data-ui="${UI.journal.list}"]`)!;
+    const rows = Array.from(list.querySelectorAll('li.list__item'));
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      // 右列（.row-trailing）= 上段 金額 / 下段 操作。行の最終要素はその列
+      //（v13.3: 金額の桁数でボタンの位置がずれない = 金額もボタンも縦に揃う）。
+      const trailing = row.lastElementChild!;
+      expect(trailing.classList.contains('row-trailing')).toBe(true);
+      expect(trailing.firstElementChild!.classList.contains('list__amount')).toBe(true);
+    }
+    // 反対仕訳ボタンを持つ行では、ボタンが右列の下段に入る。
+    const normalRow = rows.find((row) => row.textContent?.includes('通常の支出行'))!;
+    const normalTrailing = normalRow.lastElementChild!;
+    expect(normalTrailing.querySelector(`[data-ui="${UI.journal.entry.reverse}"]`)).not.toBeNull();
+    expect(normalTrailing.children.length).toBe(2);
+    expect(normalTrailing.firstElementChild!.classList.contains('list__amount')).toBe(true);
+    // バッジは摘要の後ろ（タイトル内で description が先・tag が後）。
+    const title = rows
+      .map((row) => row.querySelector('.list__title'))
+      .find((el) => el?.textContent?.includes('月割り'))!;
+    expect(title).toBeDefined();
+    const text = title.textContent ?? '';
+    expect(text.indexOf('レイアウト確認')).toBeLessThan(text.indexOf('月割り'));
+  });
+});
+
+/*
+ * 行アクションの文字化（v13.2・実ユーズ指摘「記号だと伝わりづらい」）:
+ * 反対仕訳は reverse アイコンではなく tonal の「取消」ボタン。読み上げ名は
+ * 従来の「取消/返金を記録: 摘要」を維持する（動詞: 対象 の型）。
+ */
+describe('仕訳一覧の反対仕訳ボタン', () => {
+  it('アイコンではなく tonal の「取消」文字ボタンになる', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    await upsertEntry({
+      id: 'reverse-label-entry',
+      date: todayLocal(),
+      description: '取り消せる支出',
+      kind: 'normal',
+      lines: [
+        { accountId: expense.id, side: 'debit', amount: 500 },
+        { accountId: cash.id, side: 'credit', amount: 500 },
+      ],
+      metadata: { inputMode: 'expense' },
+      createdAt: '2026-08-16T00:00:00.000Z',
+      updatedAt: '2026-08-16T00:00:00.000Z',
+    });
+    render(<View />);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.journal.view}"]`)).toBeInTheDocument();
+    });
+    await screen.findAllByText('取り消せる支出');
+
+    const button = screen.getByRole('button', { name: '取消/返金を記録: 取り消せる支出' });
+    expect(button).toHaveTextContent('取消');
+    expect(button.classList.contains('btn--tonal')).toBe(true);
+    expect(button.classList.contains('icon-btn')).toBe(false);
+    expect(button.querySelector('svg')).toBeNull();
+  });
+});
+
+/*
+ * 残高補正の按分（v13.4 ①）: 一覧に並ぶのは宣言（stored の補正仕訳）ではなく、
+ * 区間へ月割りした按分スライス。タップは親の宣言へ解決し、既存の補正編集シートが開く。
+ */
+describe('仕訳一覧の残高補正（按分スライス）', () => {
+  async function seedAdjustment() {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const today = todayLocal();
+    await createOpenings([
+      { accountId: cash.id, amount: 10_000, date: addMonthsToDate(today, -5) },
+    ]);
+    const pin = await createAdjustment({
+      accountId: cash.id,
+      date: today,
+      actualBalance: 8_800,
+    });
+    return { cash, pin: pin! };
+  }
+
+  function adjustmentRows(): HTMLElement[] {
+    const list = document.querySelector(`[data-ui="${UI.journal.list}"]`)!;
+    return Array.from(list.querySelectorAll('button.list__main')).filter((button) =>
+      Array.from(button.querySelectorAll('.list__title .tag')).some(
+        (tag) => tag.textContent === '補正',
+      ),
+    ) as HTMLElement[];
+  }
+
+  it('宣言 1 本ではなく区間の刻みぶん並び、合計は差額に一致する', async () => {
+    await seedAdjustment();
+    render(<View />);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.journal.view}"]`)).toBeInTheDocument();
+    });
+    await waitFor(() => expect(adjustmentRows().length).toBeGreaterThan(0));
+    // 実効開始（5 ヶ月前の初期残高）から今日までの同日通過 = 5 刻み。
+    const rows = adjustmentRows();
+    expect(rows).toHaveLength(5);
+    // 摘要は宣言のもの（1 本 1 本が「どの補正から生まれたか」を名乗る）。
+    for (const row of rows) {
+      expect(row.textContent).toContain('残高補正');
+    }
+  });
+
+  it('スライスのタップで宣言（親の補正）の編集シートが開く', async () => {
+    await seedAdjustment();
+    render(<View />);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.journal.view}"]`)).toBeInTheDocument();
+    });
+    await waitFor(() => expect(adjustmentRows().length).toBeGreaterThan(0));
+    fireEvent.click(adjustmentRows()[0]!);
+    await waitFor(() => {
+      expect(
+        document.querySelector(`[data-ui="${UI.adjustments.editDialog}"]`),
+      ).toBeInTheDocument();
+    });
+    // 開いたのは宣言そのもの = 実額の欄に actualBalance が入っている。
+    const actual = document.querySelector(
+      `[data-ui="${UI.adjustments.editActual}"]`,
+    ) as HTMLInputElement;
+    expect(actual.value).toBe('88');
   });
 });

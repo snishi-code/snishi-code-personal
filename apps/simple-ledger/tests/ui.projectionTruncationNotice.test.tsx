@@ -55,7 +55,6 @@ function fixtureLedger(): Ledger {
     settings: { ledgerName: 'test', currency: '円', displayFractionDigits: 0 },
     accounts,
     journalEntries: [opening],
-    tags: [],
     monthlyCostItems: [],
     recurringRules: [],
   };
@@ -79,8 +78,8 @@ describe('投資投影の打ち切り通知', () => {
     render(
       <InvestmentProjectionTruncationNotice
         truncations={[
-          { accountId: 'investment', month: '2026-10' },
-          { accountId: 'investment', month: '2026-09' },
+          { accountId: 'investment', month: '2026-10', date: '2026-10-01', at: 'step' },
+          { accountId: 'investment', month: '2026-09', date: '2026-09-01', at: 'step' },
         ]}
         accounts={ledgerState.ledger!.accounts}
       />,
@@ -97,7 +96,9 @@ describe('投資投影の打ち切り通知', () => {
     const ledger = ledgerState.ledger!;
     const expand = vi.spyOn(reportEntriesModule, 'displayEntriesResultForAsOf').mockReturnValue({
       entries: ledger.journalEntries,
-      investmentProjectionTruncations: [{ accountId: 'investment', month: '2026-09' }],
+      investmentProjectionTruncations: [
+        { accountId: 'investment', month: '2026-09', date: '2026-09-01', at: 'step' },
+      ],
     });
 
     render(
@@ -112,7 +113,7 @@ describe('投資投影の打ち切り通知', () => {
       />,
     );
 
-    expect(expand).toHaveBeenCalledWith(ledger, '2026-12-31', '2026-07-15');
+    expect(expand).toHaveBeenCalledWith(ledger, '2026-12-31');
     expect(screen.getByRole('note')).toHaveTextContent('「投資」の投影');
     expect(screen.getByRole('note')).toHaveTextContent('2026-09');
   });

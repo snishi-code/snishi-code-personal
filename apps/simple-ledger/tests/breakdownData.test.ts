@@ -73,7 +73,6 @@ function ledgerOf(journalEntries: JournalEntry[]): Ledger {
     settings: { ledgerName: 'test', currency: 'JPY', displayFractionDigits: 0 },
     accounts,
     journalEntries,
-    tags: [],
     monthlyCostItems: [],
     recurringRules: [],
   };
@@ -87,7 +86,7 @@ describe('buildSectionTrends（画面サマリーと同じ期間基準）', () =
 
   it('当月の資産サマリーと年推移の当月ストック点が一致する', () => {
     const basis = reportBasis({ mode: 'date', date: today }, today);
-    const entries = reportEntriesForAsOf(ledger, basis.asOf, today);
+    const entries = reportEntriesForAsOf(ledger, basis.asOf);
     const summary = deriveBalanceSheet(accounts, entries, basis.asOf);
     const trends = buildSectionTrends({ mode: 'year', year: 2026 }, ledger, today);
     const july = trends?.assets.find((point) => point.key === '2026-07');
@@ -116,25 +115,26 @@ describe('buildSectionTrends（画面サマリーと同じ期間基準）', () =
       ...ledgerOf([]),
       accounts: [...accounts, investment, gain],
       journalEntries: [
-        entry('investment-opening', '2026-01-01', 'investment', 'opening', 3_500_000_000_000_000),
+        // 実効開始 2026-01-01 起点の複利が、today(7/27) までは安全域・8 月刻みで超える額。
+        entry('investment-opening', '2026-01-01', 'investment', 'opening', 1_200_000_000_000_000),
       ],
     };
 
     // reportBasis(current year) の本体 asOf=today だけなら、まだ打ち切りは起きない。
-    expect(
-      displayEntriesResultForAsOf(hugeLedger, today, today).investmentProjectionTruncations,
-    ).toEqual([]);
+    expect(displayEntriesResultForAsOf(hugeLedger, today).investmentProjectionTruncations).toEqual(
+      [],
+    );
 
     // 推移は12月末まで表示するため、その最大地平で起きる打ち切りを画面へ返す。
     const trends = buildSectionTrends({ mode: 'year', year: 2026 }, hugeLedger, today);
     expect(trends?.investmentProjectionTruncations).toEqual([
-      { accountId: 'investment', month: '2026-09' },
+      { accountId: 'investment', month: '2026-08', date: '2026-08-01', at: 'step' },
     ]);
   });
 
   it('当期フローだけを今日で止め、初期残高−支出と純資産を一致させる', () => {
     const basis = reportBasis({ mode: 'date', date: today }, today);
-    const entries = reportEntriesForAsOf(ledger, basis.asOf, today);
+    const entries = reportEntriesForAsOf(ledger, basis.asOf);
     const pl = deriveProfitAndLoss(accounts, entries, basis.flowRange);
     const bs = deriveBalanceSheet(accounts, entries, basis.asOf);
 
@@ -154,7 +154,7 @@ describe('buildSectionTrends（画面サマリーと同じ期間基準）', () =
       futureExpense,
     ]);
     const basis = reportBasis(period, today);
-    const entries = reportEntriesForAsOf(pastLedger, basis.asOf, today);
+    const entries = reportEntriesForAsOf(pastLedger, basis.asOf);
     const pl = deriveProfitAndLoss(accounts, entries, basis.flowRange);
     const bs = deriveBalanceSheet(accounts, entries, basis.asOf);
 

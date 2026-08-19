@@ -1034,6 +1034,123 @@ describe('残高補正の編集・削除（updateAdjustment / deleteAdjustment�
   });
 });
 
+/*
+ * 按分（v13.4 ①）の保存側の波及。集計が「pin → スライス」に変わっても、理論残高の
+ * 算定ロジック（自身除外・その日までの累計）はそのまま効き続けることを固定する。
+ */
+describe('残高補正の按分と保存側の理論残高', () => {
+  async function seedCash(amount: number) {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    await createOpenings([{ accountId: cash.id, amount, date: '2026-01-10' }]);
+    return cash;
+  }
+
+  async function derivedBalance(accountId: string, asOf: string) {
+    const ledger = await loadLedger();
+    return accountBalance(accountId, 'asset', reportEntriesForAsOf(ledger, asOf));
+  }
+
+  it('補正日の集計残高は実額・手前は按分ぶんだけ動く（補正月に跳ねない）', async () => {
+    const cash = await seedCash(10_000);
+    await createAdjustment({ accountId: cash.id, date: '2026-07-10', actualBalance: 8_800 });
+    // 実効開始 2026-01-10 → 6 刻み × 200。
+    expect(await derivedBalance(cash.id, '2026-01-10')).toBe(10_000);
+    expect(await derivedBalance(cash.id, '2026-04-10')).toBe(9_400);
+    expect(await derivedBalance(cash.id, '2026-07-10')).toBe(8_800);
+    // 補正日以降は按分前と完全一致（不変条件）。
+    expect(await derivedBalance(cash.id, '2027-01-01')).toBe(8_800);
+  });
+
+  it('2 本目の理論残高は 1 本目の宣言を織り込む（差額の二重計上をしない）', async () => {
+    const cash = await seedCash(10_000);
+    await createAdjustment({ accountId: cash.id, date: '2026-04-10', actualBalance: 9_700 });
+    const second = await createAdjustment({
+      accountId: cash.id,
+      date: '2026-07-10',
+      actualBalance: 9_400,
+    });
+    expect(second!.metadata?.adjustment?.expectedBalance).toBe(9_700);
+    expect(await derivedBalance(cash.id, '2026-04-10')).toBe(9_700);
+    expect(await derivedBalance(cash.id, '2026-07-10')).toBe(9_400);
+  });
+
+  it('編集の理論残高は「その pin が居る世界」で測る（後ろの pin の按分を先取りしない・C-3）', async () => {
+    const cash = await seedCash(10_000);
+    const first = await createAdjustment({
+      accountId: cash.id,
+      date: '2026-04-10',
+      actualBalance: 9_700,
+    });
+    await createAdjustment({ accountId: cash.id, date: '2026-07-10', actualBalance: 9_400 });
+    // 編集後の世界では 1 本目の区間は (2026-01-10, 2026-04-10]。そこに後ろの pin の
+    // スライスは 1 本も入らないので、理論残高は非補正フローそのもの = 10,000。
+    // 旧: 自分を除いた世界（2 本目の区間が 01-10 まで伸びる）で測って 9,700 だったが、
+    // その差分（−100）は実際に按分されるスライス合計（−400）と食い違っていた。
+    const updated = await updateAdjustment({
+      id: first!.id,
+      accountId: cash.id,
+      date: '2026-04-10',
+      actualBalance: 9_600,
+    });
+    expect(updated!.metadata?.adjustment?.expectedBalance).toBe(10_000);
+    expect(updated!.metadata?.adjustment?.delta).toBe(-400);
+    // 保存後は両方の宣言が生き、それぞれの日で実額に着地する。
+    expect(await derivedBalance(cash.id, '2026-04-10')).toBe(9_600);
+    expect(await derivedBalance(cash.id, '2026-07-10')).toBe(9_400);
+  });
+
+  it('宣言を削除すると区間が結合され、残る宣言の按分が計算し直される', async () => {
+    const cash = await seedCash(10_000);
+    const first = await createAdjustment({
+      accountId: cash.id,
+      date: '2026-04-10',
+      actualBalance: 9_700,
+    });
+    await createAdjustment({ accountId: cash.id, date: '2026-07-10', actualBalance: 9_400 });
+    await deleteAdjustment(first!.id);
+    // 残るのは 1 本。2026-07-10 は実額のまま、4/10 は按分の途中になる。
+    expect(await derivedBalance(cash.id, '2026-07-10')).toBe(9_400);
+    expect(await derivedBalance(cash.id, '2026-04-10')).toBe(9_700);
+    await deleteAdjustment(
+      (await loadLedger()).journalEntries.find((e) => e.metadata?.adjustment)!.id,
+    );
+    expect(await derivedBalance(cash.id, '2026-07-10')).toBe(10_000);
+  });
+
+  /** 補正済みの現金から `amount` を引き出す（終了残高 0 検証の材料）。 */
+  async function seedAdjustedThenWithdraw(amount: number) {
+    const cash = await seedCash(10_000);
+    await createAdjustment({ accountId: cash.id, date: '2026-07-10', actualBalance: 8_800 });
+    const equity = (await loadLedger()).accounts.find((a) => a.name === '初期残高')!;
+    await upsertEntry(
+      buildSimpleEntry({
+        date: '2026-08-01',
+        description: '引き出し',
+        debitAccountId: equity.id,
+        creditAccountId: cash.id,
+        amount,
+      }),
+    );
+    return (await loadLedger()).accounts.find((a) => a.id === cash.id)!;
+  }
+
+  it('終了残高 0 検証は按分後の残高で判定する（スライスは区間内に収まる）', async () => {
+    const target = await seedAdjustedThenWithdraw(8_800);
+    await upsertAccount({ ...target, archived: true, endDate: '2026-08-31' });
+    expect((await loadLedger()).accounts.find((a) => a.id === target.id)?.endDate).toBe(
+      '2026-08-31',
+    );
+  });
+
+  it('按分ぶんを無視した額しか引き出していなければ終了点を置けない（fail-closed）', async () => {
+    const target = await seedAdjustedThenWithdraw(10_000);
+    await expect(
+      upsertAccount({ ...target, archived: true, endDate: '2026-08-31' }),
+    ).rejects.toMatchObject({ code: 'error.account.archiveBalance' });
+  });
+});
+
 describe('継続コスト資産の後編集で過去集計が再計算される（導出＝遡及処理なし）', () => {
   async function setupContinuous() {
     const ledger = await loadLedger();
@@ -2179,7 +2296,6 @@ describe('M2 保存境界の回帰（不正日付・導出残高・MonthlyCostIt
       settings: ledger.settings,
       accounts: ledger.accounts,
       journalEntries: ledger.journalEntries,
-      tags: ledger.tags,
       monthlyCostItems: ledger.monthlyCostItems,
       recurringRules: ledger.recurringRules,
     };

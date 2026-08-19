@@ -102,7 +102,8 @@ describe('年月の暦検証', () => {
     amount: 100000,
     dayOfMonth: 27,
     everyMonths: 1,
-    debitAccountId: 'expense',
+    debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+    spreadExpenseAccountId: 'expense',
     creditAccountId: 'bank',
     startMonth: '2026-12',
     startDate: '2026-12-01',
@@ -118,9 +119,13 @@ describe('年月の暦検証', () => {
     delete missingStartDate.startDate;
     expect(recurringRuleSchema.safeParse(missingStartDate).success).toBe(false);
     expect(recurringRuleSchema.safeParse({ ...rule, startMonth: '2026-99' }).success).toBe(false);
-    expect(recurringRuleSchema.safeParse({ ...rule, postedThroughMonth: '2026-00' }).success).toBe(
-      false,
-    );
+    // v13: 清算（settlements）の月も同じ暦検証を通る。
+    expect(
+      recurringRuleSchema.safeParse({
+        ...rule,
+        settlements: [{ month: '2026-00', endDate: '2026-05-01' }],
+      }).success,
+    ).toBe(false);
   });
 });
 
@@ -895,92 +900,6 @@ describe('journalEntrySchema 行数ルール（MVP: 1 借方・1 貸方）', () 
   });
 });
 
-describe('タグ(tags) の scope・参照検証（package）', () => {
-  const acc = (id: string, type: string) => ({
-    id,
-    name: id,
-    type,
-    role: type === 'asset' ? 'daily-asset' : type === 'expense' ? 'expense-category' : 'equity',
-    archived: false,
-    createdAt: 'x',
-    updatedAt: 'x',
-  });
-  function tagPkg(over: Record<string, unknown> = {}) {
-    return {
-      appId: APP_ID,
-      schemaVersion: SCHEMA_VERSION,
-      ledgerId: 'ledger',
-      exportedAt: '2026-06-01T00:00:00.000Z',
-      deviceId: 'd',
-      revision: 0,
-      accounts: [acc('food', 'expense'), acc('cash', 'asset')],
-      journalEntries: [
-        {
-          id: 'e1',
-          date: '2026-06-01',
-          description: 'x',
-          kind: 'normal',
-          tagIds: ['trip'],
-          lines: [
-            { accountId: 'food', side: 'debit', amount: 1000 },
-            { accountId: 'cash', side: 'credit', amount: 1000 },
-          ],
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-      tags: [
-        {
-          id: 'trip',
-          name: '旅行',
-          scope: 'entry',
-          archived: false,
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-      monthlyCostItems: [],
-      recurringRules: [],
-      settings: { ledgerName: '家計簿', currency: 'JPY', displayFractionDigits: 0 },
-      ...over,
-    };
-  }
-
-  it('仕訳全体タグの付与は valid', () => {
-    expect(ledgerExportPackageSchema.safeParse(tagPkg()).success).toBe(true);
-  });
-  it('存在しないタグ参照は invalid', () => {
-    const bad = tagPkg({
-      journalEntries: [
-        {
-          id: 'e1',
-          date: '2026-06-01',
-          description: 'x',
-          kind: 'normal',
-          tagIds: ['nope'],
-          lines: [
-            { accountId: 'food', side: 'debit', amount: 1000 },
-            { accountId: 'cash', side: 'credit', amount: 1000 },
-          ],
-          createdAt: 'x',
-          updatedAt: 'x',
-        },
-      ],
-    });
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
-  });
-  it('有効な同名タグの重複は invalid', () => {
-    const bad = tagPkg({
-      tags: [
-        { id: 't1', name: '旅行', scope: 'entry', archived: false, createdAt: 'x', updatedAt: 'x' },
-        { id: 't2', name: '旅行', scope: 'entry', archived: false, createdAt: 'x', updatedAt: 'x' },
-      ],
-      journalEntries: [],
-    });
-    expect(ledgerExportPackageSchema.safeParse(bad).success).toBe(false);
-  });
-});
-
 describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証（⑥⑦⑧⑨）', () => {
   const cash = {
     id: 'cash',
@@ -1245,17 +1164,7 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
       ).success,
     ).toBe(false);
   });
-  it('同一ルール由来の item は生成後に独立し、月区間が重なっても valid', () => {
-    const cycle = (month: string, startDate: string, endDate: string) => ({
-      id: `ccr-rule1-${month}`,
-      name: '火災保険',
-      amount: 60000,
-      startDate,
-      endDate,
-      expenseAccountId: 'food',
-      createdAt: 'x',
-      updatedAt: 'x',
-    });
+  it('ルール由来の保存 item（ccr-）と保存仕訳（rec-）は wire で拒否する（v13: 完全導出）', () => {
     const rule = {
       id: 'rule1',
       name: '火災保険',
@@ -1270,42 +1179,51 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
       createdAt: 'x',
       updatedAt: 'x',
     };
-    const rulePkg = (items: Record<string, unknown>[]) => ({
+    const item = {
+      id: 'ccr-rule1-2026-04',
+      name: '火災保険',
+      amount: 60000,
+      startDate: '2026-04-25',
+      endDate: '2027-03-31',
+      expenseAccountId: 'food',
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    const itemResult = ledgerExportPackageSchema.safeParse({
+      ...mcPkg([item], []),
+      recurringRules: [rule],
+    });
+    expect(itemResult.success).toBe(false);
+    expect(
+      itemResult.success
+        ? []
+        : itemResult.error.issues.filter((issue) => issue.message.includes('ccr-')),
+    ).not.toHaveLength(0);
+    const entryResult = ledgerExportPackageSchema.safeParse({
       ...mcPkg(
-        items,
-        items.map((item) => {
-          const month = (item.id as string).slice(-7);
-          return purchaseOf(item, {
-            id: `rec-${rule.id}-${month}`,
-            metadata: {
-              inputMode: 'expense',
-              monthlyCostId: item.id,
-              recurringRuleId: rule.id,
-              recurringMonth: month,
-            },
-          });
-        }),
+        [],
+        [
+          {
+            id: 'rec-rule1-2026-04',
+            date: '2026-04-25',
+            description: '火災保険',
+            kind: 'normal',
+            lines: [
+              { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: 60000 },
+              { accountId: 'cash', side: 'credit', amount: 60000 },
+            ],
+            createdAt: 'x',
+            updatedAt: 'x',
+          },
+        ],
       ),
       recurringRules: [rule],
     });
-    const a = cycle('2026-04', '2026-04-25', '2027-03-31');
-    const b = cycle('2027-04', '2027-04-25', '2028-03-31');
-    expect(ledgerExportPackageSchema.safeParse(rulePkg([a, b])).success).toBe(true);
-    // a の終了日を伸ばして 2027-04 と重ねても、それぞれの生成事実を保つ。
-    const overlapped = { ...a, endDate: '2027-04-30' };
-    const pkg = rulePkg([overlapped, b]);
-    expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(true);
-    // ccr- item の唯一の縛り = ルール存在期間内の誕生（P1-2 決着の裏面・既存検証の固定）:
-    // startDate がルールの存在期間（2026-04-01〜）より前の item は invalid。
-    const outside = cycle('2026-03', '2026-03-25', '2027-02-28');
-    const outsideResult = ledgerExportPackageSchema.safeParse(rulePkg([outside]));
-    expect(outsideResult.success).toBe(false);
+    expect(entryResult.success).toBe(false);
     expect(
-      outsideResult.success
+      entryResult.success
         ? []
-        : outsideResult.error.issues.filter((issue) =>
-            issue.message.includes('定期ルールの存在期間外'),
-          ),
+        : entryResult.error.issues.filter((issue) => issue.message.includes('rec-')),
     ).not.toHaveLength(0);
   });
   it('仕訳の monthlyCostId が存在しないと invalid', () => {
@@ -1569,8 +1487,8 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
       ).success,
     ).toBe(false);
   });
-  it('package: 月割りトグル OFF の費用・収入行き（直接形）も valid', () => {
-    // 費用行きの直接形 = トグル OFF の保存形（role では動作を決めない）。
+  it('package: 直接形（台帳を経由しない保存形）は invalid（v13.1: 全ルール台帳経由）', () => {
+    // 計上先が無い直接形（費用行き）は wire で拒否する。
     expect(
       ledgerExportPackageSchema.safeParse(
         rulePkg({
@@ -1579,8 +1497,8 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
           debitAccountId: 'fixed',
         }),
       ).success,
-    ).toBe(true);
-    // 差引形（借方 = 収入カテゴリ）の直接形も同様。
+    ).toBe(false);
+    // 差引形（借方 = 収入カテゴリ）の直接形も同様に拒否。
     expect(
       ledgerExportPackageSchema.safeParse(
         rulePkg({
@@ -1589,7 +1507,17 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
           debitAccountId: 'salary',
         }),
       ).success,
-    ).toBe(true);
+    ).toBe(false);
+    // 計上先を持っていても、借方が台帳以外なら拒否（保存形は一形だけ）。
+    expect(
+      ledgerExportPackageSchema.safeParse(rulePkg({ ...spreadRule, debitAccountId: 'fixed' }))
+        .success,
+    ).toBe(false);
+    // 空文字の計上先も拒否（min(1)）。
+    expect(
+      ledgerExportPackageSchema.safeParse(rulePkg({ ...spreadRule, spreadExpenseAccountId: '' }))
+        .success,
+    ).toBe(false);
   });
   it('package: 源泉・費用の行き先とも残高調整科目（system-adjustment）は invalid', () => {
     expect(

@@ -16,6 +16,7 @@ function rule(
     id: 'rule-1',
     name: 'テスト',
     amount: 1000,
+    spreadExpenseAccountId: 'debit',
     debitAccountId: 'debit',
     creditAccountId: 'credit',
     createdAt: '2026-01-01T00:00:00.000Z',

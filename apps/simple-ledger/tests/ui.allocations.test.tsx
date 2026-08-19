@@ -13,7 +13,6 @@ import { LedgerProvider, useLedger } from '../src/state/store';
 import { Allocations } from '../src/ui/screens/Allocations';
 import {
   archiveMonthlyCost,
-  catchUpRecurringRules,
   createContinuousCost,
   createRecurringRule,
   loadLedger,
@@ -123,8 +122,9 @@ describe('定期ルールの継続コスト化（月割り）', () => {
     const rule = (await loadLedger()).recurringRules.find((r) => r.name === '給与振込');
     expect(rule).toBeDefined();
     expect(rule!.everyMonths).toBe(1);
-    expect(rule!.spreadExpenseAccountId).toBeUndefined();
-    expect(rule!.debitAccountId).toBe(bank.id);
+    // v13.1（c 案）: 収入ルールも保存形は台帳経由（計上先 = 利用者が選んだ行き先）。
+    expect(rule!.spreadExpenseAccountId).toBe(bank.id);
+    expect(rule!.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
     expect(rule!.creditAccountId).toBe(salary.id);
 
     const editButton = await waitFor(() => {
@@ -517,7 +517,7 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
     //（同日刻み 2024-02-01〜06-01 の 5 本 × 1,200 のうち、5月末までに 4 本ぶん済み）。
     expect(within(card).getByText('残存価値').closest('.kv')).toHaveTextContent('1,200');
 
-    fireEvent.click(screen.getByRole('button', { name: `アーカイブ: ${item.name}` }));
+    fireEvent.click(screen.getByRole('button', { name: `終了: ${item.name}` }));
     const dialog = document.querySelector(
       `[data-ui="${UI.allocations.archiveDialog}"]`,
     ) as HTMLElement;
@@ -539,12 +539,12 @@ describe('ヘッダー日付に追従する一覧と金額', () => {
   });
 });
 
-describe('導出 item カード（未起票周期・表示専用）', () => {
+describe('ルール由来の item カード（導出・読み取り専用）', () => {
   it('未来断面にその日の周期の item がカードで出る。区別タグは付けず、編集はルールを開く', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
-    // 未来開始のルール = catch-up が一切走らない（起票済みゼロ・全周期が未起票）。
+    // 未来開始のルール（保存される item は無く、断面ごとに導出されるだけ）。
     await createRecurringRule({
       name: '未来のサブスク',
       amount: 3000,
@@ -554,7 +554,7 @@ describe('導出 item カード（未起票周期・表示専用）', () => {
       startMonth: '2031-02',
     });
 
-    // 断面 2031-04-30: 起票済みは無く、未起票周期 2/5・3/5・4/5 のうち
+    // 断面 2031-04-30: 導出される周期 2/5・3/5・4/5 のうち
     // [2/5,3/5]（終了 3/5 < 断面）と [3/5,4/5]（終了 4/5 < 断面）はアーカイブ済みで隠れ、
     // [4/5,5/5] だけがその日の状態として見える（同日刻み・endDate = 次回起票日）。
     await renderReady({ mode: 'date', date: '2031-04-30' });
@@ -578,13 +578,13 @@ describe('導出 item カード（未起票周期・表示専用）', () => {
     });
   });
 
-  it('起票済みの周期は実 item が出て、導出カードと二重にならない', async () => {
+  it('過去の周期も未来の周期も 1 枚ずつ出る（同じ周期が二重にならない）', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
     const today = todayLocal();
-    // 今日始まりの毎月ルール: 今日ぶんは catch-up が実 item を起票し、
-    // 未来の周期だけが導出カードになる。
+    // 今日始まりの毎月ルール。v13 では今日ぶんも来月ぶんも同じ導出カードで、
+    // 「起票済み / 未起票」の区別は無い。
     await createRecurringRule({
       name: '今日始まりのサブスク',
       amount: 3000,
@@ -593,7 +593,7 @@ describe('導出 item カード（未起票周期・表示専用）', () => {
       creditAccountId: cash.id,
       startMonth: today.slice(0, 7),
     });
-    await catchUpRecurringRules();
+    expect((await loadLedger()).monthlyCostItems).toHaveLength(0);
 
     const nextMonth = addMonthsToDate(today, 1);
     await renderReady({ mode: 'date', date: nextMonth });
@@ -601,10 +601,12 @@ describe('導出 item カード（未起票周期・表示専用）', () => {
     const cards = [...document.querySelectorAll(`[data-ui="${UI.allocations.item}"]`)].filter(
       (el) => el.textContent?.includes('今日始まりのサブスク'),
     );
-    // 実 item（今日起票・終了 = 来月同日）と導出カード（来月周期）の 2 枚だけ。
-    // 同じ周期が実 item と導出カードで二重に出ない。
+    // 今日の周期 [今日, 来月同日] と来月の周期 [来月同日, 再来月同日] の 2 枚だけ。
     expect(cards).toHaveLength(2);
-    expect(cards.filter((el) => el.hasAttribute('data-derived-rule'))).toHaveLength(1);
+    expect(cards[0]).toHaveTextContent(`${today} 〜 ${nextMonth}`);
+    expect(cards[1]).toHaveTextContent(`${nextMonth} 〜 ${addMonthsToDate(today, 2)}`);
+    // data-derived-rule はルール由来の全カードに付く（保存の有無で見た目が割れない）。
+    expect(cards.filter((el) => el.hasAttribute('data-derived-rule'))).toHaveLength(2);
     expect(names.length).toBeGreaterThanOrEqual(2);
   });
 });
@@ -649,7 +651,7 @@ describe('アーカイブシート', () => {
     return document.querySelector(`[data-ui="${dataUi}"]`) as HTMLInputElement;
   }
   async function openSheet(name: string) {
-    fireEvent.click(await screen.findByRole('button', { name: `アーカイブ: ${name}` }));
+    fireEvent.click(await screen.findByRole('button', { name: `終了: ${name}` }));
     await waitFor(() => expect(sheet()).toBeInTheDocument());
   }
   function save() {
@@ -815,5 +817,153 @@ describe('アーカイブシート', () => {
       expect(await recoveriesOf(item.id)).toHaveLength(1);
     });
     expect((await recoveriesOf(item.id))[0]!.lines[0]!.amount).toBe(900000);
+  });
+});
+
+/*
+ * 行の設計図（v13.2・作者確定 2026-08-16）:
+ *  - 一覧の行は「左 = 名前と説明 / 右 = 固定列」。右列は上段に金額、下段に操作（または状態）。
+ *    金額とボタンが行をまたいで縦に揃う（v13.1 までは操作がある行だけ金額が内側へ押されていた）
+ *  - 一等地の動詞は tonal ボタン（btn--ghost は地も枠も透明でボタンに見えない）
+ *  - 操作が出ない行も同じ位置を状態チップで埋める（空白にしない）
+ */
+describe('行の設計図（右端列・tonal ボタン・状態チップ）', () => {
+  async function seedRules() {
+    const ledger = await loadLedger();
+    const bank = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    // 継続中（操作あり）・終了予定（未来の終了点）・終了済み（過去の終了点）の 3 状態。
+    await createRecurringRule({
+      name: '継続中ルール',
+      amount: 1000,
+      dayOfMonth: 5,
+      everyMonths: 1,
+      debitAccountId: expense.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-01',
+      startDate: '2026-01-05',
+    });
+    await createRecurringRule({
+      name: '終了予定ルール',
+      amount: 2000,
+      dayOfMonth: 6,
+      everyMonths: 1,
+      debitAccountId: expense.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-01',
+      startDate: '2026-01-06',
+      endDate: '2030-01-01',
+    });
+    await createRecurringRule({
+      name: '終了済みルール',
+      amount: 3000,
+      dayOfMonth: 7,
+      everyMonths: 1,
+      debitAccountId: expense.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-01',
+      startDate: '2026-01-07',
+      endDate: '2026-02-01',
+    });
+  }
+
+  it('ルール行は右列に金額・操作を積み、全行の右端が揃う', async () => {
+    await seedRules();
+    render(<View period={{ mode: 'all' }} />);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.allocations.recurringList}"]`)).not.toBeNull();
+    });
+    // 「終了分も表示」で 3 行そろえる。
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.showCompleted}"]`)!);
+
+    const rows = [
+      ...document.querySelectorAll(`[data-ui="${UI.allocations.recurringList}"] .list__item`),
+    ];
+    expect(rows.length).toBe(3);
+    for (const row of rows) {
+      // 金額と操作/状態は同じ右列（.row-trailing）の中にあり、行の最終要素はその列。
+      const trailing = row.lastElementChild!;
+      expect(trailing.classList.contains('row-trailing')).toBe(true);
+      expect(trailing.querySelector('.list__amount')).not.toBeNull();
+      // 操作が無い行も空にしない（状態チップで埋める）。
+      expect(trailing.children.length).toBe(2);
+    }
+  });
+
+  it('継続中は tonal ボタン、終了予定・終了済みは状態チップを同じ位置に出す', async () => {
+    await seedRules();
+    render(<View period={{ mode: 'all' }} />);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.allocations.recurringList}"]`)).not.toBeNull();
+    });
+    fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.showCompleted}"]`)!);
+
+    const rowOf = (name: string) =>
+      [
+        ...document.querySelectorAll(`[data-ui="${UI.allocations.recurringList}"] .list__item`),
+      ].find((row) => row.textContent?.includes(name))!;
+
+    // 継続中: 切替・終了が tonal ボタン（btn--ghost ではない = 押せる面を持つ）。
+    const active = rowOf('継続中ルール');
+    const switchBtn = active.querySelector(`[data-ui="${UI.allocations.recurringSwitch}"]`)!;
+    const endBtn = active.querySelector(`[data-ui="${UI.allocations.recurringEnd}"]`)!;
+    expect(switchBtn.classList.contains('btn--tonal')).toBe(true);
+    expect(endBtn.classList.contains('btn--tonal')).toBe(true);
+    expect(switchBtn.classList.contains('btn--ghost')).toBe(false);
+    expect(active.querySelector(`[data-ui="${UI.allocations.recurringStatus}"]`)).toBeNull();
+
+    // 終了予定・終了済み: 操作は出さず、同じ右列に状態チップ。
+    // 終了予定は「いつまで動くか」を日付で名乗る（v13.3: 終了済みとの違いが読める）。
+    // 日付 = 排他的終了点 2030-01-01 の前日。
+    const scheduled = rowOf('終了予定ルール');
+    expect(scheduled.querySelector(`[data-ui="${UI.allocations.recurringEnd}"]`)).toBeNull();
+    expect(
+      scheduled.querySelector(`[data-ui="${UI.allocations.recurringStatus}"]`),
+    ).toHaveTextContent('2029-12-31 まで');
+    const ended = rowOf('終了済みルール');
+    expect(ended.querySelector(`[data-ui="${UI.allocations.recurringStatus}"]`)).toHaveTextContent(
+      '終了済み',
+    );
+  });
+
+  it('持ち物カードも右列に金額を積み、ルール由来は終了ボタンの位置に由来チップを出す', async () => {
+    const ledger = await loadLedger();
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    const bank = ledger.accounts.find((a) => a.role === 'daily-asset')!;
+    await createContinuousCost({
+      name: '手で登録した持ち物',
+      amount: 120_000,
+      startDate: '2026-01-01',
+      endDate: '2027-01-01',
+      expenseAccountId: expense.id,
+      creditAccountId: bank.id,
+    });
+    await createRecurringRule({
+      name: 'ルール由来の持ち物',
+      amount: 1000,
+      dayOfMonth: 5,
+      everyMonths: 1,
+      debitAccountId: expense.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-01',
+      startDate: '2026-01-05',
+    });
+    render(<View period={{ mode: 'all' }} />);
+    await waitFor(() => {
+      expect(document.querySelector(`[data-ui="${UI.allocations.item}"]`)).not.toBeNull();
+    });
+
+    const cards = [...document.querySelectorAll(`[data-ui="${UI.allocations.item}"]`)];
+    const manual = cards.find((c) => c.textContent?.includes('手で登録した持ち物'))!;
+    const derived = cards.find((c) => c.textContent?.includes('ルール由来の持ち物'))!;
+    for (const card of [manual, derived]) {
+      const trailing = card.querySelector('.row-trailing')!;
+      expect(trailing.querySelector('.list__amount')).not.toBeNull();
+      expect(trailing.children.length).toBe(2);
+    }
+    // 手動 item は終了ボタン、ルール由来は同じ位置に由来チップ（読み取り専用の理由が読める）。
+    expect(manual.querySelector(`[data-ui="${UI.allocations.archive}"]`)).not.toBeNull();
+    expect(derived.querySelector(`[data-ui="${UI.allocations.archive}"]`)).toBeNull();
+    expect(derived.querySelector('.row-trailing .tag')).toHaveTextContent('くり返し記帳から');
   });
 });
