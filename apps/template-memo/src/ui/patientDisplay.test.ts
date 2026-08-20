@@ -11,6 +11,7 @@ import {
   formatPatientLabel,
   patientLabelParts,
   patientRoomCompare,
+  roomColumnCh,
   sanitizeRoomInput,
 } from './patientDisplay';
 import { STATUS, type Patient } from '../domain/types';
@@ -70,6 +71,23 @@ describe('patientLabelParts / formatPatientLabel', () => {
     const p = { ...patient('p1', '101'), name: '' };
     expect(patientLabelParts(p, '7')).toEqual({ room: '101', name: '7' });
     expect(patientLabelParts(null, '7')).toEqual({ room: '', name: '7' });
+  });
+});
+
+describe('roomColumnCh', () => {
+  it('最長の位置の文字数を返す（1 と 100 なら 3）', () => {
+    expect(roomColumnCh([patient('a', '1'), patient('b', '100')])).toBe(3);
+    expect(roomColumnCh([patient('a', 'A012')])).toBe(4);
+  });
+
+  it('位置が 1 件も無ければ 0（列を作らない）', () => {
+    expect(roomColumnCh([])).toBe(0);
+    expect(roomColumnCh([patient('a', ''), patient('b', '  ')])).toBe(0);
+  });
+
+  it('全角文字は 2ch で数え、前後空白は数えない', () => {
+    expect(roomColumnCh([patient('a', '３階')])).toBe(4);
+    expect(roomColumnCh([patient('a', ' 101 ')])).toBe(3);
   });
 });
 
