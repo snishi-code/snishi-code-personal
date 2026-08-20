@@ -7,6 +7,8 @@
  * 食い違い、(3) 読み上げに単位が付かない、の 3 つが同時に起きていた。
  * 整形の正本は format.ts 一つ、を固定する。
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
 import { TrendChart } from '../src/ui/components/TrendChart';
@@ -64,5 +66,13 @@ describe('推移チャートの整形', () => {
     expect(negative).toContain('円');
     expect(negative).toContain('-200');
     expect(negative).not.toContain('−'); // U+2212 は使わない
+  });
+});
+
+describe('期間選択ボタンのタップ領域（v13.9 項目 7・監査 9.2）', () => {
+  it('.trend-x__btn の min-height は 44px トークン（var(--tap)）を使う', () => {
+    const css = readFileSync(join(process.cwd(), 'src/ui/app.css'), 'utf8');
+    const rule = css.slice(css.indexOf('.trend-x__btn {'), css.indexOf('.trend-x__btn:hover'));
+    expect(rule).toContain('min-height: var(--tap)');
   });
 });

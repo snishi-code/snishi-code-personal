@@ -1119,7 +1119,8 @@
   white-space: nowrap;
 }
 .trend-x__btn {
-  min-height: 32px;
+  /* タップ領域 44px（AGENTS.md の最小要件・v13.9 監査 9.2）。 */
+  min-height: var(--tap);
   border: none;
   background: transparent;
   border-radius: var(--radius-sm);
