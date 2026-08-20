@@ -423,3 +423,50 @@ describe('清算を持つルールの保存境界（v13.9 項目 2・監査 #2�
     expect(after.settlements).toEqual([{ month: '2026-09', endDate: '2026-09-15' }]);
   });
 });
+
+describe('起票ゼロ線分への切り替え = 編集として処理（v13.9 項目 4・監査 #1）', () => {
+  it('切り替え日までに起票が無ければ線を切らず、同じルールへ全期間引き直しで保存する', async () => {
+    // startDate 8/01・初回起票 8/02。8/02 で切ると旧線分 [8/01, 8/02) は起票ゼロ。
+    const rule = await seedRule();
+    await switchRecurringRule({
+      ruleId: rule.id,
+      effectiveDate: '2026-08-02',
+      successor: { amount: 500_000, dayOfMonth: 15, everyMonths: 1 },
+    });
+
+    const after = await loadLedger();
+    // 残骸線分（起票ゼロの旧線分）を作らない: ルールは 1 本のまま・ID も変わらない。
+    expect(after.recurringRules).toHaveLength(1);
+    const edited = after.recurringRules[0]!;
+    expect(edited.id).toBe(rule.id);
+    expect(edited.amount).toBe(500_000);
+    expect(edited.dayOfMonth).toBe(15);
+    // 開始日はそのまま（編集 = 全期間引き直し）・終了点も系譜参照も付かない。
+    expect(edited.startDate).toBe('2026-08-01');
+    expect(edited.endDate).toBeUndefined();
+    expect(edited.splitFromRuleId).toBeUndefined();
+    // 導出は新条件で全期間引き直される（8/15 起票）。
+    expect(postings(after.recurringRules, after.accounts, '2026-08-31')).toEqual([
+      '2026-08-15:500000',
+    ]);
+  });
+
+  it('起票済みの線分への切り替えは従来どおり分割する（回帰）', async () => {
+    const rule = await seedRule();
+    await switchRecurringRule({
+      ruleId: rule.id,
+      effectiveDate: '2026-08-10',
+      successor: { amount: 500_000, dayOfMonth: 15, everyMonths: 1 },
+    });
+    expect((await loadLedger()).recurringRules).toHaveLength(2);
+  });
+
+  it('終了（successor = null）は起票ゼロなら従来どおり拒否する（削除へ誘導）', async () => {
+    const rule = await seedRule();
+    expect(
+      await errorCodeOf(() =>
+        switchRecurringRule({ ruleId: rule.id, effectiveDate: '2026-08-02', successor: null }),
+      ),
+    ).toBe('error.recurring.neverPosts');
+  });
+});

@@ -424,3 +424,17 @@ describe('清算を持つルールの編集ロック（v13.9 項目 2）', () =>
     expect(input(UI.allocations.recurringAmount).disabled).toBe(false);
   });
 });
+
+describe('起票ゼロ線分への切り替えの案内（v13.9 項目 4）', () => {
+  it('切り替え日までに起票が無いときだけ「編集として保存される」の 1 行が出る', async () => {
+    await seedRule();
+    await openSwitchSheet();
+    // 既定（今日 = 8/16）は 8/02 の起票済み = 通常の切り替えプレビュー。
+    expect(q(UI.allocations.recurringSwitchAsEditNote)).toBeNull();
+    // 初回起票（8/02）より前の切り替え日にすると、編集として扱われる案内に替わる。
+    setValue(UI.allocations.recurringSwitchDate, '2026-08-02');
+    await waitFor(() => {
+      expect(q(UI.allocations.recurringSwitchAsEditNote)).toBeTruthy();
+    });
+  });
+});

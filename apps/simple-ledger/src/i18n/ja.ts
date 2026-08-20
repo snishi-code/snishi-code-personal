@@ -866,6 +866,9 @@ export const ja = {
     '毎回の起票日（1〜31。その日が無い月は月末へ寄せます）。周期の位相は現在のルールから引き継ぎます。',
   'recurring.switchPreview': '起票プレビュー',
   'recurring.switchPreviewPredecessor': '現在のルールは {date} より前までです。',
+  // 起票ゼロの旧線分への切り替えは編集として処理される（v13.9 項目 4）。
+  'recurring.switchAsEditNote':
+    'この日までに起票がないため、切り替えではなく編集（全期間の引き直し）として保存されます。',
   'recurring.switchPreviewSuccessor': '新しい条件の初回の起票は {date} です。',
   'recurring.switchPreviewSuccessorNone': '新しい条件では起票されません。',
   'recurring.switchConfirm': '切り替える',

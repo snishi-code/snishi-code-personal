@@ -1954,6 +1954,10 @@ function lineageRuleIds(rules: readonly RecurringRule[], ruleId: string): Set<st
  * 「生まれた線は自分の寿命を持つ」の唯一の調整口: 選ばれた item の endDate だけを
  * ルール側の settlements で上書きし、回収は実仕訳（回収の振替）として保存する。
  * どちらも選ばなければ既存 item は自分の終了日まで走り切る（そのまま使い切る）。
+ *
+ * 例外（v13.9 項目 4・監査 #1・作者決定 2026-08-20）: 切り替え日までに旧線分が **1 回も
+ * 起票していない**なら、線を切らず**ルール編集（開始日そのまま・全期間引き直し）**として
+ * 同じルールへ新条件を保存する。起票ゼロの残骸線分を新規に作らないための根本対応。
  */
 async function switchRecurringRuleUnlocked(input: RecurringRuleSwitchInput): Promise<void> {
   const { effectiveDate } = input;
@@ -2058,31 +2062,53 @@ async function switchRecurringRuleUnlocked(input: RecurringRuleSwitchInput): Pro
 
   // 旧線分の終了（清算で更新済みならその姿の上へ）。
   const predecessorBase = ruleFor(existing.id) ?? existing;
-  const predecessor: RecurringRule = { ...predecessorBase, endDate: effectiveDate, updatedAt: ts };
-  updatedById.set(predecessor.id, predecessor);
-
-  // 後継（切り替えのみ。終了は successor = null）。
+  // 起票ゼロ判定（v13.9 項目 4・監査 #1）: 切り替え日で閉じた旧線分が 1 回も起票しないなら、
+  // 切り替え（分割）ではなく**ルール編集（開始日そのまま・全期間引き直し）**として処理する。
+  // 残骸線分（起票ゼロの旧線分）をそもそも作らない = residualOfSwitch の新規発生経路を塞ぐ
+  //（保存時の許容そのものは既存データ互換のため残す）。
+  const zeroPostingPredecessor =
+    input.successor !== null &&
+    recurringRuleReferenceStartDate({ ...predecessorBase, endDate: effectiveDate }) === undefined;
   let successor: RecurringRule | undefined;
-  if (input.successor !== null) {
-    successor = {
-      ...existing,
-      id: newId(),
+  if (zeroPostingPredecessor && input.successor !== null) {
+    const edited: RecurringRule = {
+      ...predecessorBase,
       amount: input.successor.amount,
       dayOfMonth: input.successor.dayOfMonth,
       everyMonths: input.successor.everyMonths,
-      // 位相 anchor は旧線分から引き継ぐ（split と同じ規則）。
-      startMonth: existing.startMonth,
-      startDate: effectiveDate,
-      splitFromRuleId: existing.id,
-      createdAt: ts,
       updatedAt: ts,
     };
-    delete successor.endDate;
-    delete successor.settlements;
+    updatedById.set(edited.id, edited);
+  } else {
+    const predecessor: RecurringRule = {
+      ...predecessorBase,
+      endDate: effectiveDate,
+      updatedAt: ts,
+    };
+    updatedById.set(predecessor.id, predecessor);
+
+    // 後継（切り替えのみ。終了は successor = null）。
+    if (input.successor !== null) {
+      successor = {
+        ...existing,
+        id: newId(),
+        amount: input.successor.amount,
+        dayOfMonth: input.successor.dayOfMonth,
+        everyMonths: input.successor.everyMonths,
+        // 位相 anchor は旧線分から引き継ぐ（split と同じ規則）。
+        startMonth: existing.startMonth,
+        startDate: effectiveDate,
+        splitFromRuleId: existing.id,
+        createdAt: ts,
+        updatedAt: ts,
+      };
+      delete successor.endDate;
+      delete successor.settlements;
+    }
   }
 
   const { validationCtx, accountsToPut } = prepareRecurringRuleAccountsForSave(
-    successor ?? predecessor,
+    successor ?? updatedById.get(existing.id)!,
     ctx,
     ts,
   );

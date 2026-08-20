@@ -318,6 +318,7 @@ export const UI = {
     recurringSwitchDayOfMonth: 'allocations.recurring.switchSheet.dayOfMonth',
     recurringSwitchEvery: 'allocations.recurring.switchSheet.every',
     recurringSwitchPreview: 'allocations.recurring.switchSheet.preview',
+    recurringSwitchAsEditNote: 'allocations.recurring.switchSheet.asEditNote',
     recurringSwitchConfirm: 'allocations.recurring.switchSheet.confirm',
     // 配分中 item の清算パネル（切り替えシート・終了シートで共通）。
     // item 行は data-item-id で個別に引く（同じ data-ui が item のぶんだけ並ぶ）。

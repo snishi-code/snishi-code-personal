@@ -2159,6 +2159,18 @@ function RecurringRuleSwitchSheet({ rule, onClose }: { rule: RecurringRule; onCl
         startDate: effectiveDate,
       })
     : null;
+  // 切り替え日までに旧線分が 1 回も起票していないなら、保存境界は切り替えを
+  // **編集（全期間の引き直し）**として処理する（v13.9 項目 4）。透過的に扱うが、
+  // 「旧線分が残る」プレビューは事実と違うので 1 行だけ言い換える。
+  const predecessorZeroPosting =
+    dateValid &&
+    firstRecurringPostingDate({
+      startMonth: rule.startMonth,
+      dayOfMonth: rule.dayOfMonth,
+      everyMonths: rule.everyMonths,
+      startDate: effectiveRecurringRuleStartDate(rule),
+      endDate: effectiveDate,
+    }) === null;
 
   async function submit(): Promise<void> {
     if (submittingRef.current) return;
@@ -2280,9 +2292,15 @@ function RecurringRuleSwitchSheet({ rule, onClose }: { rule: RecurringRule; onCl
         {dateValid ? (
           <div className="field" data-ui={UI.allocations.recurringSwitchPreview}>
             <span className="field__label">{t('recurring.switchPreview')}</span>
-            <p className="field__hint">
-              {t('recurring.switchPreviewPredecessor', { date: effectiveDate })}
-            </p>
+            {predecessorZeroPosting ? (
+              <p className="field__hint" data-ui={UI.allocations.recurringSwitchAsEditNote}>
+                {t('recurring.switchAsEditNote')}
+              </p>
+            ) : (
+              <p className="field__hint">
+                {t('recurring.switchPreviewPredecessor', { date: effectiveDate })}
+              </p>
+            )}
             {previewValid ? (
               <p className="field__hint">
                 {firstPosting !== null
