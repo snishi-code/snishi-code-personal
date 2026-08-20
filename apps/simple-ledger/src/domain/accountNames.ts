@@ -9,7 +9,31 @@
  */
 import { todayLocal } from '../util/time';
 import { accountIsRetiredAt } from './accountLifetime';
-import type { Account } from './types';
+import type { Account, JournalEntry } from './types';
+
+/*
+ * 「未記入」科目（振り分け前の受け皿。seed の費用科目のひとつ）。
+ * まとめて登録の借方を一律ここへ入れ、後から仕訳一覧で振り分ける運用（2026-08-20 作者決定）。
+ * 専用フラグ・role は持たず**名前の完全一致（trim 後）だけ**で判定する——
+ * 科目を改名すれば未記入扱いから外れる（= 仕様）。判定の正本はこの 2 関数のみ。
+ */
+export const UNFILLED_ACCOUNT_NAME = '未記入';
+
+/** 科目名が「未記入」か（trim 後の完全一致。部分一致にはしない）。 */
+export function isUnfilledAccountName(name: string): boolean {
+  return name.trim() === UNFILLED_ACCOUNT_NAME;
+}
+
+/** 仕訳の借方または貸方に「未記入」科目が含まれるか（一覧・カードの注意表示に使う）。 */
+export function entryHasUnfilledAccount(
+  entry: JournalEntry,
+  accountsById: Map<string, Account>,
+): boolean {
+  return entry.lines.some((line) => {
+    const name = accountsById.get(line.accountId)?.name;
+    return name !== undefined && isUnfilledAccountName(name);
+  });
+}
 
 export interface AccountNameConflicts {
   /** 基準日にまだ終了していない同名科目。存在すれば保存不可。 */

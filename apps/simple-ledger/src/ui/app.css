@@ -1442,6 +1442,17 @@ button.stmt-row:hover {
   background: var(--account-asset-muted-bg);
   border-color: var(--account-asset-muted-border);
 }
+/* 「未記入」科目を含む仕訳（振り分け前）。行の面も同じ淡色で塗るため、チップは枠線で
+   面から浮かせる（色だけに頼らない a11y はチップの文字「未記入」が担う）。 */
+.tag--unfilled {
+  color: var(--unfilled-text);
+  background: var(--unfilled-bg);
+  border: 1px solid var(--unfilled-border);
+}
+.list__item--unfilled {
+  background: var(--unfilled-bg);
+  box-shadow: inset 3px 0 0 var(--unfilled-border);
+}
 .account-list__title {
   display: flex;
   flex-wrap: wrap;

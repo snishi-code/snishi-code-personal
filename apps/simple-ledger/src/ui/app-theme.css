@@ -51,4 +51,10 @@
   --account-asset-muted-bg: #eff6ff; /* blue-50 */
   --account-asset-muted-border: #93c5fd; /* blue-300 */
   --account-asset-muted-text: #1e40af; /* blue-800 */
+
+  /* 「未記入」科目が借方/貸方にある仕訳（振り分け前）の注意色。箱色（青/藍/teal/赤/緑/琥珀/
+     スレート）とも --warning(琥珀)/--danger(赤) とも紛れない fuchsia 系を使う。 */
+  --unfilled-text: #a21caf; /* fuchsia-700（白地で 6.0:1） */
+  --unfilled-bg: #fdf4ff; /* fuchsia-50 */
+  --unfilled-border: #f0abfc; /* fuchsia-300 */
 }

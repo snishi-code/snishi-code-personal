@@ -84,6 +84,11 @@
       "name": "その他支出",
       "type": "expense",
       "role": "expense-category"
+    },
+    {
+      "name": "未記入",
+      "type": "expense",
+      "role": "expense-category"
     }
   ]
 }

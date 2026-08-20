@@ -373,6 +373,8 @@ export const ja = {
   // 行ボタンは短い動詞（v13.2: 記号は伝わらない。既存タグ「取消/返金」と同じ語）。
   'journal.reverseShort': '取消',
   'journal.reversalTag': '取消/返金',
+  // 借方または貸方が「未記入」科目の仕訳（振り分け前）。色だけに頼らないためのチップ。
+  'journal.unfilledTag': '未記入',
   'journal.filteredByAccount': '「{name}」で絞り込み中',
   'journal.clearAccountFilter': '科目の絞り込みを解除',
   'journal.filteredByNormalExpense': '通常支出のみ',

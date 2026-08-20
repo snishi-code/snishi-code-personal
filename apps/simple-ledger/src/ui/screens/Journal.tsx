@@ -43,6 +43,7 @@ import {
   isContinuousCostMonthlyAllocationEntry,
   isNormalExpenseEntry,
 } from '../../domain/livingCost';
+import { entryHasUnfilledAccount } from '../../domain/accountNames';
 import type { AllocationsTarget } from './Allocations';
 import type { Account, JournalEntry } from '../../domain/types';
 import { formatMoney } from '../../util/format';
@@ -420,6 +421,8 @@ export function Journal({
             // くり返し記帳から生まれた仕訳は読み取り専用（作者決定 2026-08-15）。
             // 編集・削除・反対仕訳はどれも出さず、タップは由来ルールへ（entryOpenPlan が担う）。
             const isRuleGenerated = generatedEntryRuleId(entry) !== undefined;
+            // 借方/貸方が「未記入」科目のまま（振り分け前）。行の淡色 + チップで目立たせる。
+            const isUnfilled = entryHasUnfilledAccount(entry, map);
             // 仕訳の代表額は domain が正本（式を UI で書き直さない）。render から呼ぶので
             // checked sum を通さない representativeEntryAmount を使う（表示中に投げない）。
             const displayedAmount = representativeEntryAmount(entry);
@@ -487,6 +490,9 @@ export function Journal({
                   {isAdjustment ? (
                     <span className="tag tag--neutral">{t('journal.adjustmentTag')}</span>
                   ) : null}
+                  {isUnfilled ? (
+                    <span className="tag tag--unfilled">{t('journal.unfilledTag')}</span>
+                  ) : null}
                 </div>
                 <div className="list__sub">
                   {entry.date}・{flowText(map, entry)}
@@ -494,7 +500,10 @@ export function Journal({
               </>
             );
             return (
-              <li key={entry.id} className="list__item">
+              <li
+                key={entry.id}
+                className={`list__item${isUnfilled ? ' list__item--unfilled' : ''}`}
+              >
                 {onRowTap === undefined ? (
                   // 開く先の無い導出行: ボタンにしない（押せるのに何も起きない/誤遷移する UI を作らない）。
                   <div className="list__main" style={{ textAlign: 'left' }}>

@@ -4,6 +4,7 @@
 import { useMemo } from 'react';
 import type { Account, JournalEntry } from '../domain/types';
 import { representativeEntryAmount } from '../domain/accounting';
+import { entryHasUnfilledAccount } from '../domain/accountNames';
 import { Money } from './money';
 import { t } from '../i18n';
 
@@ -33,6 +34,10 @@ export function EntryListItem({
     debit?.accountId ?? '',
   )}`;
 
+  // 借方/貸方が「未記入」科目のまま（振り分け前）。仕訳一覧と同じ淡色 + チップ。
+  const isUnfilled = entryHasUnfilledAccount(entry, map);
+  const itemClass = `list__item${isUnfilled ? ' list__item--unfilled' : ''}`;
+
   const content = (
     <>
       <div className="list__main">
@@ -40,7 +45,10 @@ export function EntryListItem({
           {entry.kind === 'opening' ? (
             <span className="tag tag--neutral">{t('journal.opening')}</span>
           ) : null}{' '}
-          {entry.description}
+          {entry.description}{' '}
+          {isUnfilled ? (
+            <span className="tag tag--unfilled">{t('journal.unfilledTag')}</span>
+          ) : null}
         </div>
         <div className="list__sub">
           {entry.date}・{flow}
@@ -55,11 +63,11 @@ export function EntryListItem({
   if (onClick) {
     return (
       <li>
-        <button type="button" className="list__item" onClick={onClick} style={{ width: '100%' }}>
+        <button type="button" className={itemClass} onClick={onClick} style={{ width: '100%' }}>
           {content}
         </button>
       </li>
     );
   }
-  return <li className="list__item">{content}</li>;
+  return <li className={itemClass}>{content}</li>;
 }

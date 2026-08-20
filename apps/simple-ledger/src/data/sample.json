@@ -157,6 +157,15 @@
       "updatedAt": "2026-01-01T00:00:00.000Z"
     },
     {
+      "id": "acc-unfilled",
+      "name": "未記入",
+      "type": "expense",
+      "role": "expense-category",
+      "archived": false,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
       "id": "continuing-cost-ledger",
       "name": "月割り台帳",
       "type": "asset",
@@ -274,6 +283,29 @@
           "accountId": "acc-bank",
           "side": "credit",
           "amount": 700000
+        }
+      ],
+      "metadata": {
+        "inputMode": "expense"
+      },
+      "createdAt": "2026-01-05T00:00:00.000Z",
+      "updatedAt": "2026-01-05T00:00:00.000Z"
+    },
+    {
+      "id": "ent-unfilled-card",
+      "date": "2026-01-05",
+      "description": "カード決済（振り分け前）",
+      "kind": "normal",
+      "lines": [
+        {
+          "accountId": "acc-unfilled",
+          "side": "debit",
+          "amount": 320000
+        },
+        {
+          "accountId": "acc-card",
+          "side": "credit",
+          "amount": 320000
         }
       ],
       "metadata": {
