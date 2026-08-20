@@ -29,7 +29,10 @@ import {
   recurringRuleReferenceStartDate,
   type AccountReferenceInterval,
 } from '../domain/accountLifetime';
-import { accountEndingBalanceViolations } from '../domain/accountEnding';
+import {
+  accountEndingBalanceViolations,
+  ledgerAmountCapacityExceeded,
+} from '../domain/accountEnding';
 import { findAccountNameConflicts, planArchiveRenames } from '../domain/accountNames';
 import { LedgerError } from '../domain/errors';
 import { isValidIsoDate } from '../domain/calendar';
@@ -438,6 +441,12 @@ function assertEndedAssetLiabilityBalances(
   },
   accountIds?: ReadonlySet<string>,
 ): void {
+  // 容量検査（v13.9 項目 6・監査 #5）: 終了日の無い科目を含む累計が安全整数域を出る保存を
+  // 全変更経路の共通検証で拒否し、Dashboard の集計（checked sum）が render 中に落ちる
+  // 経路に到達させない。accountIds の絞り込みに関係なく台帳全体で判定する（累計は全体量）。
+  if (ledgerAmountCapacityExceeded(source)) {
+    throw new LedgerError('error.amount.overflow');
+  }
   if (accountEndingBalanceViolations(source, accountIds).length > 0) {
     throw new LedgerError('error.account.archiveBalance');
   }
