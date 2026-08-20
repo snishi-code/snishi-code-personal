@@ -17,6 +17,8 @@ export const UI = {
   },
   patient: {
     card: 'patient.card',
+    cardRoom: 'patient.card.room', // ホーム患者行の番号 (位置) スパン
+    cardName: 'patient.card.name', // ホーム患者行の名前スパン
     statusOption: 'patient.status.option',
     statusPopup: 'patient.statusPopup', // ホームのステータス変更ポップアップ
     move: 'patient.move',

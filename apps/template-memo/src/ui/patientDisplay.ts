@@ -45,10 +45,23 @@ export function getStatusOptions(): StatusOption[] {
   }));
 }
 
-/** 「部屋 氏名」表示。 */
+/**
+ * 「部屋」「氏名」の表示 2 部品。ホーム名簿は番号列と名前列を別スパンで描くため
+ * (間隔と縦揃えは CSS 側)、結合前の部品を返す。氏名未入力は fallback (通し番号) へ倒す。
+ */
+export function patientLabelParts(
+  p: Patient | null | undefined,
+  fallback: string,
+): { room: string; name: string } {
+  return {
+    room: String(p?.room ?? '').trim(),
+    name: p && p.name ? p.name : fallback || '',
+  };
+}
+
+/** 「部屋 氏名」の 1 行表示 (aria-label・QR ダイアログ等の文字列文脈用)。 */
 export function formatPatientLabel(p: Patient | null | undefined, fallback: string): string {
-  const name = p && p.name ? p.name : fallback || '';
-  const room = String(p?.room ?? '').trim();
+  const { room, name } = patientLabelParts(p, fallback);
   return room ? `${room} ${name}` : name;
 }
 
