@@ -565,11 +565,7 @@ function ResetConfirmDialog({
           <p className="field__hint">{t('reset.exportDone')}</p>
         ) : (
           // エクスポート未実施なら削除は disabled + 理由を明示する（fail-closed）。
-          <p
-            className="field__hint"
-            role="note"
-            data-ui={UI.settings.resetConfirmExportRequired}
-          >
+          <p className="field__hint" role="note" data-ui={UI.settings.resetConfirmExportRequired}>
             {t('reset.exportRequired')}
           </p>
         )}

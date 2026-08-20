@@ -86,9 +86,9 @@ describe('日付の導出', () => {
     expect(loanInstallmentCount('2000-02-15', addMonthsToDate('2000-02-15', 1200))).toBe(1200);
     // 超過は 1,200 に丸めず「上限 + 1」で可視化する（旧実装は 1,200 へ黙って飽和し、
     // 月額の分母 < 実起票回数となって過返済が起きた）。
-    expect(
-      loanInstallmentCount('2000-02-15', addMonthsToDate('2000-02-15', 1201)),
-    ).toBeGreaterThan(1200);
+    expect(loanInstallmentCount('2000-02-15', addMonthsToDate('2000-02-15', 1201))).toBeGreaterThan(
+      1200,
+    );
     expect(loanInstallmentCount('2000-02-15', '2100-12-31')).toBeGreaterThan(1200);
   });
 

@@ -44,10 +44,7 @@ const isoDate = z
   .refine(isValidIsoDate, '暦として正しい日付を指定してください')
   // 遠未来の日付は 1 つで導出（月次展開）を数万月ぶん走らせるため、導出側の clamp ではなく
   // 保存・import の入口で一律拒否する（clamp は pin の残高保証を壊す。v13.8 監査 E）。
-  .refine(
-    (value) => value <= MAX_LEDGER_DATE,
-    `日付は ${MAX_LEDGER_DATE} 以前である必要があります`,
-  )
+  .refine((value) => value <= MAX_LEDGER_DATE, `日付は ${MAX_LEDGER_DATE} 以前である必要があります`)
   // 下限も上限と対称（v13.9 項目 8）。アプリが扱う期間 = [MIN, MAX] の外は入口で一律拒否する。
   .refine(
     (value) => value >= MIN_LEDGER_DATE,

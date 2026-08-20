@@ -86,8 +86,7 @@ export function isExportedLedgerVersionCurrent(version: {
   deviceId: string;
   revision: number;
 }): boolean {
-  const value =
-    memory.get(LAST_EXPORT_VERSION_KEY) ?? lsGet(LAST_EXPORT_VERSION_KEY) ?? undefined;
+  const value = memory.get(LAST_EXPORT_VERSION_KEY) ?? lsGet(LAST_EXPORT_VERSION_KEY) ?? undefined;
   return value === `${version.deviceId}:${version.revision}`;
 }
 

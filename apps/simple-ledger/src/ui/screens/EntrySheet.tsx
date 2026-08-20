@@ -1040,7 +1040,10 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         error={loanFromError ? t('entry.error.loanFrom') : undefined}
         dataUi={UI.journal.entry.loanFrom}
       />
-      {loanCount >= 1 && loanCount <= MONTHLY_AMOUNTS_HARD_CAP && form.amount >= 1 && loanMonthly >= 1 ? (
+      {loanCount >= 1 &&
+      loanCount <= MONTHLY_AMOUNTS_HARD_CAP &&
+      form.amount >= 1 &&
+      loanMonthly >= 1 ? (
         <>
           <p className="field__hint" data-ui={UI.journal.entry.loanPreview}>
             {t('entry.loanPreview', {

@@ -355,9 +355,7 @@ describe('ルール参照の役割別終端（保存境界・v13.9 項目 3）',
       endDate: '2026-01-15',
       archived: true,
     });
-    expect(
-      (await loadLedger()).accounts.find((a) => a.id === cash.id)?.endDate,
-    ).toBe('2026-01-15');
+    expect((await loadLedger()).accounts.find((a) => a.id === cash.id)?.endDate).toBe('2026-01-15');
   });
 
   it('受け口（計上先）は最終 item の配分終端（50 年後）まで終了できない', async () => {
@@ -375,9 +373,9 @@ describe('ルール参照の役割別終端（保存境界・v13.9 項目 3）',
       endDate: '2076-01-15',
       archived: true,
     });
-    expect(
-      (await loadLedger()).accounts.find((a) => a.id === fixed.id)?.endDate,
-    ).toBe('2076-01-15');
+    expect((await loadLedger()).accounts.find((a) => a.id === fixed.id)?.endDate).toBe(
+      '2076-01-15',
+    );
   });
 
   it('ルール存続中（終了日なし）は、どの参照科目も従来どおり終了できない', async () => {

@@ -81,12 +81,9 @@ describe('Settings — importErrorMessage カバレッジ確認', () => {
     'error.common.staleData',
     'error.common.revisionExhausted',
     'error.import.requiresEmpty',
-  ] as const)(
-    'storage-error の既知コード %s を利用者向け文言へ変換する',
-    (detail) => {
-      expect(importErrorMessage({ kind: 'storage-error', detail })).toBe(t(detail));
-    },
-  );
+  ] as const)('storage-error の既知コード %s を利用者向け文言へ変換する', (detail) => {
+    expect(importErrorMessage({ kind: 'storage-error', detail })).toBe(t(detail));
+  });
 
   it('storage-error の未知 detail は診断情報としてそのまま表示する', () => {
     expect(importErrorMessage({ kind: 'storage-error', detail: 'IndexedDB error' })).toBe(
@@ -190,9 +187,7 @@ describe('Settings — 全削除はエクスポート実行済みが前提（v13
     fireEvent.change(document.querySelector('#reset-confirm-keyword')!, {
       target: { value: t('reset.keyword') },
     });
-    fireEvent.click(
-      document.querySelector(`[data-ui="${UI.settings.resetConfirmExport}"]`)!,
-    );
+    fireEvent.click(document.querySelector(`[data-ui="${UI.settings.resetConfirmExport}"]`)!);
     await waitFor(() => {
       expect(deleteButton().disabled).toBe(false);
     });
@@ -206,9 +201,7 @@ describe('Settings — 全削除はエクスポート実行済みが前提（v13
     stubObjectUrl();
     await seedEntry();
     await openResetDialog();
-    fireEvent.click(
-      document.querySelector(`[data-ui="${UI.settings.resetConfirmExport}"]`)!,
-    );
+    fireEvent.click(document.querySelector(`[data-ui="${UI.settings.resetConfirmExport}"]`)!);
     fireEvent.change(document.querySelector('#reset-confirm-keyword')!, {
       target: { value: t('reset.keyword') },
     });

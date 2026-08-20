@@ -88,9 +88,7 @@ describe('保存境界（repository）での拒否', () => {
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
     const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
     // 2,000 件（合計 8×10^15 = 上界の内側）は保存できる。
-    await createEntries(
-      Array.from({ length: 2_000 }, (_, i) => bigEntry(i, expense.id, cash.id)),
-    );
+    await createEntries(Array.from({ length: 2_000 }, (_, i) => bigEntry(i, expense.id, cash.id)));
     expect((await loadLedger()).journalEntries).toHaveLength(2_000);
     // さらに 300 件を足すと上界（安全整数域）を出る → 保存時に拒否・1 件も入らない。
     await expect(

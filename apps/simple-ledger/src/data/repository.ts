@@ -1577,7 +1577,11 @@ function assertRecurringRuleSavable(
     if (span < 0 || span % Math.max(1, rule.everyMonths) !== 0 || !insideRule) {
       throw new LedgerError('error.recurring.settlementInvalid');
     }
-    const defaultEnd = recurringRuleItemEndDate(settlement.month, rule.everyMonths, rule.dayOfMonth);
+    const defaultEnd = recurringRuleItemEndDate(
+      settlement.month,
+      rule.everyMonths,
+      rule.dayOfMonth,
+    );
     if (settlement.endDate < postingDate || settlement.endDate > defaultEnd) {
       throw new LedgerError('error.recurring.settlementInvalid');
     }

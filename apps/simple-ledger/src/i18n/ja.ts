@@ -340,7 +340,8 @@ export const ja = {
   // ローンの必須検証（保存境界 createLoanPurchase と同じ条件を先に示す）。
   'entry.error.loanFrom': '返済元の科目を選んでください。',
   'entry.error.loanEndDate': '1 回以上返済できる終了日を入れてください。',
-  'entry.error.loanTermTooLong': '返済回数が上限（{max} 回）を超えています。終了日を近づけてください。',
+  'entry.error.loanTermTooLong':
+    '返済回数が上限（{max} 回）を超えています。終了日を近づけてください。',
   'entry.error.loanMonthlyZero':
     '毎月の返済額が 0 になります。終了日を近づけて回数を減らしてください。',
   'entry.source.manual': '左側（貸方）',

@@ -48,7 +48,12 @@ import {
   monthlyAllocationAccountOptions,
 } from '../accountOptions';
 import { monthlyAmounts, monthOf } from '../../domain/allocation';
-import { isLedgerDate, isValidIsoDate, MAX_LEDGER_DATE, MIN_LEDGER_DATE } from '../../domain/calendar';
+import {
+  isLedgerDate,
+  isValidIsoDate,
+  MAX_LEDGER_DATE,
+  MIN_LEDGER_DATE,
+} from '../../domain/calendar';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
 import { nowIso, todayLocal } from '../../util/time';
 import {
