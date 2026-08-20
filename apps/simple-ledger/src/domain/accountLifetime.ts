@@ -65,7 +65,7 @@ export function recurringRuleLastExistingDate(rule: RecurringRule): string | und
 }
 
 /** 有効な ISO 日付の翌日。排他的終了日を「その日まで有効」から作るのに使う。 */
-function nextDate(date: string): string {
+export function nextDate(date: string): string {
   const [year, month, day] = date.split('-').map(Number);
   const value = new Date(Date.UTC(2000, (month ?? 1) - 1, day ?? 1));
   value.setUTCFullYear(year ?? 0);

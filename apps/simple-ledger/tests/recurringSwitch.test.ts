@@ -20,7 +20,7 @@ import {
 } from '../src/data/repository';
 import { LedgerError } from '../src/domain/errors';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
-import { deriveRecurringOutputs } from '../src/domain/recurring';
+import { deriveRecurringOutputs, minRecurringRuleCloseDate } from '../src/domain/recurring';
 import { ruleItemId } from '../src/domain/recurringIds';
 import {
   continuousCostEntriesForItem,
@@ -468,5 +468,45 @@ describe('起票ゼロ線分への切り替え = 編集として処理（v13.9 �
         switchRecurringRule({ ruleId: rule.id, effectiveDate: '2026-08-02', successor: null }),
       ),
     ).toBe('error.recurring.neverPosts');
+  });
+});
+
+describe('清算前の切り替え/終了の下限（v13.12 項目 3）', () => {
+  it('minRecurringRuleCloseDate = 清算済みの最終起票日の翌日（清算なしは undefined）', async () => {
+    const rule = await seedRule();
+    expect(minRecurringRuleCloseDate(rule)).toBeUndefined();
+    const settled: RecurringRule = {
+      ...rule,
+      settlements: [
+        { month: '2026-08', endDate: '2026-08-10' },
+        { month: '2026-09', endDate: '2026-09-05' },
+      ],
+    };
+    // 最終の清算月 2026-09 の起票日 9/02 の翌日。
+    expect(minRecurringRuleCloseDate(settled)).toBe('2026-09-03');
+  });
+
+  it('バックストップ: 下限より前で閉じる切り替え/終了は保存境界が拒否する（UI の min をすり抜けても落ちる）', async () => {
+    // 生きているのに清算を持つルール（import 等が作りうる形・schema 上は正当）。
+    const rule = await seedRule();
+    await upsertRecurringRule({
+      ...rule,
+      settlements: [{ month: '2026-09', endDate: '2026-09-05' }],
+    });
+    const stored = (await loadLedger()).recurringRules.find((r) => r.id === rule.id)!;
+    expect(stored.endDate).toBeUndefined();
+
+    // 清算済みの最終起票日（9/02）当日以前で閉じると、清算の指す月が半開区間の外へ出る。
+    expect(
+      await errorCodeOf(() =>
+        switchRecurringRule({ ruleId: stored.id, effectiveDate: '2026-09-02', successor: null }),
+      ),
+    ).toBe('error.recurring.settlementInvalid');
+
+    // 下限（翌日 9/03）ちょうどは通る = UI の min と保存境界が同じ線で一致している。
+    await switchRecurringRule({ ruleId: stored.id, effectiveDate: '2026-09-03', successor: null });
+    const after = (await loadLedger()).recurringRules.find((r) => r.id === rule.id)!;
+    expect(after.endDate).toBe('2026-09-03');
+    expect(after.settlements).toEqual([{ month: '2026-09', endDate: '2026-09-05' }]);
   });
 });

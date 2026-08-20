@@ -62,6 +62,7 @@ import {
   clampDayToMonth,
   deriveRecurringOutputs,
   firstRecurringPostingDate,
+  minRecurringRuleCloseDate,
   recurringDestinationAccountId,
   recurringKindOf,
   type RecurringKind,
@@ -2133,7 +2134,14 @@ function RecurringSettlementPanel({
 function RecurringRuleSwitchSheet({ rule, onClose }: { rule: RecurringRule; onClose: () => void }) {
   const { switchRecurringRule } = useLedger();
   const fractionDigits = useMoneyDigits();
-  const [effectiveDate, setEffectiveDate] = useState(() => todayLocal());
+  // 清算済みの月より前で線分を閉じる操作は保存境界（settlementInvalid）が拒否する
+  // （v13.9 項目 2 の副作用 = バックストップとして維持）。UI は無効な日付を最初から
+  // 選べなくする（v13.12 項目 3）: min = 清算済みの最終起票日の翌日・既定日もクランプ。
+  const minEffectiveDate = minRecurringRuleCloseDate(rule) ?? MIN_LEDGER_DATE;
+  const [effectiveDate, setEffectiveDate] = useState(() => {
+    const today = todayLocal();
+    return today < minEffectiveDate ? minEffectiveDate : today;
+  });
   const initialAmountText = formatMinorForInput(rule.amount, fractionDigits);
   const [amountText, setAmountText] = useState(initialAmountText);
   // 変更判定はフラグではなく値（初期表示と同じ文字列に戻れば無変更 = 保存済み minor を保持）。
@@ -2266,7 +2274,7 @@ function RecurringRuleSwitchSheet({ rule, onClose }: { rule: RecurringRule; onCl
           type="date"
           required
           value={effectiveDate}
-          min={MIN_LEDGER_DATE}
+          min={minEffectiveDate}
           max={MAX_LEDGER_DATE}
           onChange={setEffectiveDate}
           hint={t('recurring.switchDateHint')}
@@ -2338,13 +2346,17 @@ function RecurringRuleSwitchSheet({ rule, onClose }: { rule: RecurringRule; onCl
  */
 function RecurringRuleEndSheet({ rule, onClose }: { rule: RecurringRule; onClose: () => void }) {
   const { ledger, switchRecurringRule } = useLedger();
-  const [endDate, setEndDate] = useState(() =>
-    earliestRecurringRuleEndDate(
+  // 清算済みの月より前で閉じる終了は保存境界（settlementInvalid）が拒否する（バックストップ）。
+  // UI は最初から選べなくする（v13.12 項目 3）: min = 清算済みの最終起票日の翌日。
+  const minEndDate = minRecurringRuleCloseDate(rule) ?? MIN_LEDGER_DATE;
+  const [endDate, setEndDate] = useState(() => {
+    const earliest = earliestRecurringRuleEndDate(
       rule,
       deriveRecurringOutputs([rule], ledger?.accounts ?? [], todayLocal()).entries,
       todayLocal(),
-    ),
-  );
+    );
+    return earliest < minEndDate ? minEndDate : earliest;
+  });
   const [error, setError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
@@ -2406,7 +2418,7 @@ function RecurringRuleEndSheet({ rule, onClose }: { rule: RecurringRule; onClose
           required
           value={endDate}
           onChange={setEndDate}
-          min={MIN_LEDGER_DATE}
+          min={minEndDate}
           max={MAX_LEDGER_DATE}
           hint={t('recurring.endSheetBody')}
           dataUi={UI.allocations.recurringEndSheetDate}

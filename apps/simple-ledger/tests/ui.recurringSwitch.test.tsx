@@ -13,6 +13,7 @@ import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/re
 import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { createRecurringRule, loadLedger } from '../src/data/repository';
+import { MIN_LEDGER_DATE } from '../src/domain/calendar';
 import * as repository from '../src/data/repository';
 import { deriveRecurringOutputs } from '../src/domain/recurring';
 import { ruleItemId } from '../src/domain/recurringIds';
@@ -436,5 +437,47 @@ describe('起票ゼロ線分への切り替えの案内（v13.9 項目 4）', ()
     await waitFor(() => {
       expect(q(UI.allocations.recurringSwitchAsEditNote)).toBeTruthy();
     });
+  });
+});
+
+describe('清算前の切り替え/終了は UI で予防（v13.12 項目 3）', () => {
+  /**
+   * 生きているのに清算を持つルール（import 等が作りうる形・schema 上は正当）。
+   * 9 月分（起票 9/02）を 9/05 で清算済み → 閉じられる最小の日 = 9/03。
+   */
+  async function seedSettledAliveRule(): Promise<RecurringRule> {
+    const rule = await seedRule();
+    await repository.upsertRecurringRule({
+      ...rule,
+      settlements: [{ month: '2026-09', endDate: '2026-09-05' }],
+    });
+    return (await loadLedger()).recurringRules.find((r) => r.id === rule.id)!;
+  }
+
+  it('切り替えシート: min = 清算済みの最終起票日の翌日・既定日もそこへクランプ', async () => {
+    await seedSettledAliveRule();
+    await openSwitchSheet();
+    const date = input(UI.allocations.recurringSwitchDate);
+    expect(date).toHaveAttribute('min', '2026-09-03');
+    // 既定（今日 = 8/16）は下限より前なので、操作可能な最小の日で開く。
+    expect(date).toHaveValue('2026-09-03');
+  });
+
+  it('終了シート: min と既定日が下限に揃う', async () => {
+    await seedSettledAliveRule();
+    render(<View />);
+    fireEvent.click(await find(UI.allocations.recurringEnd));
+    await find(UI.allocations.recurringEndSheet);
+    const date = input(UI.allocations.recurringEndSheetDate);
+    expect(date).toHaveAttribute('min', '2026-09-03');
+    expect(date).toHaveValue('2026-09-03');
+  });
+
+  it('清算が無ければ min は台帳の下限・既定は今日のまま', async () => {
+    await seedRule();
+    await openSwitchSheet();
+    const date = input(UI.allocations.recurringSwitchDate);
+    expect(date).toHaveAttribute('min', MIN_LEDGER_DATE);
+    expect(date).toHaveValue('2026-08-16');
   });
 });

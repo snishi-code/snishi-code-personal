@@ -19,6 +19,7 @@ import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from './constants';
 import { ruleEntryId, ruleItemId } from './recurringIds';
 import {
   accountExistsAt,
+  nextDate,
   recurringRuleItemEndDate,
   recurringRuleItemEndDateFor,
   recurringRuleLastExistingDate,
@@ -101,6 +102,24 @@ export function recurringKindOf(
   )
     return 'transfer';
   return null;
+}
+
+/**
+ * 清算（settlements）が課す「この線分を閉じられる最小の日」（切り替え/終了の effectiveDate の下限）。
+ * 清算は「対象月の起票が線分の半開区間の内側にある」ことを前提に記録されるため、閉じる日
+ * （排他的終了点）が清算済みの最終起票日以前だと保存境界（settlementInvalid）が拒否する。
+ * その下限 = 清算済みの最終起票日の翌日。清算が無ければ undefined（下限なし）。
+ * UI（切り替え/終了シート）の日付入力の min と既定値のクランプが使う（v13.12 項目 3）。
+ */
+export function minRecurringRuleCloseDate(rule: RecurringRule): string | undefined {
+  let latestSettledPosting: string | undefined;
+  for (const settlement of rule.settlements ?? []) {
+    const postingDate = clampDayToMonth(settlement.month, rule.dayOfMonth);
+    if (latestSettledPosting === undefined || postingDate > latestSettledPosting) {
+      latestSettledPosting = postingDate;
+    }
+  }
+  return latestSettledPosting === undefined ? undefined : nextDate(latestSettledPosting);
 }
 
 /** 「毎月 day 日」を月内へクランプした日付（31 → 2月なら月末）。 */
