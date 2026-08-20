@@ -577,6 +577,55 @@ test('フッターナビは全画面に常設され、下端のコンテンツ�
   await page.screenshot({ path: 'test-results/screenshots/ledger-footer-nav-375x667.png' });
 });
 
+test('下端の浮動層（トースト・一番上へ）は最下部の「すべてのデータを削除」を覆わない (2026-08-20 実ユーズ)', async ({
+  page,
+}) => {
+  // 実ユーズ報告: 書き出し直後（成功トースト表示中）に最下部の削除ボタンをタップすると、
+  // 1 回目がトースト（タップで消える・z-toast 60）に食われ「二度タップしないと開かない」。
+  // トーストと「一番上へ」は fixed の浮動層なので、toBeInViewport では検証にならない。
+  // 実座標で「最下部までスクロールしても最終ボタンが浮動層の帯に届かない」ことを見る。
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.addInitScript(() => localStorage.setItem('slv2.onboardingDone', '1'));
+  await page.goto('./?fixture=sample');
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible({ timeout: 15_000 });
+
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.settings')).click();
+  await expect(page.locator(ui('settings.view'))).toBeVisible();
+
+  // 削除ダイアログ本文が勧める実フローどおり、先に JSON を書き出す（成功トースト 3.5s）。
+  const download = page.waitForEvent('download');
+  await page.locator(ui('settings.exportJson')).click();
+  await download;
+
+  // トーストが出ている間に最下部へ（実ユーズの体感速度はこれより速い）。
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  const resetBox = (await page.locator(ui('settings.resetAll')).boundingBox())!;
+  const resetBottom = resetBox.y + resetBox.height;
+
+  // トーストはボタンの下端より下（重なり 0）。
+  const toast = page.locator('.toast');
+  await expect(toast).toBeVisible();
+  const toastBox = (await toast.boundingBox())!;
+  expect(
+    toastBox.y,
+    'トーストが「すべてのデータを削除」の下端に重なっている',
+  ).toBeGreaterThanOrEqual(resetBottom);
+
+  // 「一番上へ」浮動ボタンも重ならない（右下角のタップ泥棒だった）。
+  const scrollTop = page.locator('.scroll-top');
+  await expect(scrollTop).toBeVisible();
+  const scrollTopBox = (await scrollTop.boundingBox())!;
+  expect(
+    scrollTopBox.y,
+    '「一番上へ」が「すべてのデータを削除」の下端に重なっている',
+  ).toBeGreaterThanOrEqual(resetBottom);
+
+  // 指が落ちやすいボタン下端ぎわを 1 クリック → 全削除の確認面（v13.9 専用面）が 1 回で開く。
+  await page.mouse.click(resetBox.x + resetBox.width / 2, resetBottom - 6);
+  await expect(page.locator(ui('settings.resetConfirm'))).toBeVisible();
+});
+
 test('ヘッダーの日/月/年と「今日」は 375px でも 44px のタップ領域を保つ (v13.6 H2-1)', async ({
   page,
 }) => {

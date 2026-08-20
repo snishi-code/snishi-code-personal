@@ -1493,9 +1493,16 @@ button.stmt-row:hover {
    セレクタの特異度も同値なので後勝ちする。foundation は medical からの一方向ミラーで
    編集しないため、上書きはここに置く。 */
 /* .app-main は foundation 側が padding ショートハンドで env を足している。ロングハンドで
-   上書きして env の登場を --bottom-inset の 1 回に戻す（safe-area の二重計上を消す）。 */
+   上書きして env の登場を --bottom-inset の 1 回に戻す（safe-area の二重計上を消す）。
+
+   余白の高さは「下端の浮動層」を基準にする（2026-08-20・実ユーズ報告）: トースト
+   （タップで消える・z-toast 60）と「一番上へ」ボタンは --scroll-top-bottom を下端とする
+   高さ --tap 級の帯に浮く。以前の --space-6 だけでは、最下部までスクロールした時に
+   最終ボタン（設定の「すべてのデータを削除」）の下端がこの帯へ 7〜9px 潜り、
+   1 タップ目が浮動層に食われて「二度タップしないと開かない」症状になっていた。
+   1 行トースト（実測 約46px）もこの余白内に収まる。 */
 .app-main {
-  padding-bottom: calc(var(--space-6) + var(--bottom-inset));
+  padding-bottom: calc(var(--scroll-top-bottom) + var(--tap) + var(--space-3));
 }
 /* トーストは --z-toast(60) でフッターより前面に出るため、常設ナビを覆わないよう上へ逃がす
    （ホームで記帳バーと重なるのは従来どおり＝一時通知を隠さない既存の判断を維持）。 */
