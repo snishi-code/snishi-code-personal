@@ -284,12 +284,12 @@ describe('持ち込み登録（継続コスト資産シート）', () => {
     fireEvent.change(document.querySelector(`[data-ui="${UI.allocations.editAmount}"]`)!, {
       target: { value: '240000' },
     });
-    // 過去日で普通に登録できる（min 制約なし・警告なし）。
+    // 過去日で普通に登録できる（警告なし）。下限は台帳の期間（v13.9 項目 8）のみ。
     const startInput = document.querySelector(
       `[data-ui="${UI.allocations.editStartDate}"]`,
     ) as HTMLInputElement;
     expect(startInput.type).toBe('date');
-    expect(startInput.min).toBe('');
+    expect(startInput.min).toBe('2000-01-01');
     fireEvent.change(startInput, { target: { value: '2023-04-15' } });
     fireEvent.click(document.querySelector(`[data-ui="${UI.allocations.editSave}"]`)!);
 
