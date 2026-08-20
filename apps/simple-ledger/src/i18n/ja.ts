@@ -340,6 +340,7 @@ export const ja = {
   // ローンの必須検証（保存境界 createLoanPurchase と同じ条件を先に示す）。
   'entry.error.loanFrom': '返済元の科目を選んでください。',
   'entry.error.loanEndDate': '1 回以上返済できる終了日を入れてください。',
+  'entry.error.loanTermTooLong': '返済回数が上限（{max} 回）を超えています。終了日を近づけてください。',
   'entry.error.loanMonthlyZero':
     '毎月の返済額が 0 になります。終了日を近づけて回数を減らしてください。',
   'entry.source.manual': '左側（貸方）',
@@ -766,6 +767,8 @@ export const ja = {
     '返済が 1 回も起きない終了日です。初回の返済日より後の終了日を選んでください。',
   'error.loan.monthlyTooSmall':
     '借入額が返済回数より少なく、毎月の返済額が 0 になるため登録できません。終了日を近づけて回数を減らしてください。',
+  'error.loan.termTooLong':
+    '返済回数が上限（{max} 回）を超えるため登録できません。終了日を近づけてください。',
 
   // 月割り台帳（くり返し記帳 = 実仕訳の自動起票 / 継続コスト資産 = 月割りの導出）
   'monthly.title': '月割り台帳',

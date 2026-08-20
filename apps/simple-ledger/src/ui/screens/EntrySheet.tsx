@@ -995,7 +995,10 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         }}
         error={
           loanEndDateError
-            ? t('entry.error.loanEndDate')
+            ? loanCount > MONTHLY_AMOUNTS_HARD_CAP
+              ? // 上限超過は「短すぎ」と別の理由（v13.9 監査 #4）。黙って飽和せず理由を名乗る。
+                t('entry.error.loanTermTooLong', { max: MONTHLY_AMOUNTS_HARD_CAP })
+              : t('entry.error.loanEndDate')
             : loanMonthlyError
               ? t('entry.error.loanMonthlyZero')
               : undefined
@@ -1037,7 +1040,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         error={loanFromError ? t('entry.error.loanFrom') : undefined}
         dataUi={UI.journal.entry.loanFrom}
       />
-      {loanCount >= 1 && form.amount >= 1 && loanMonthly >= 1 ? (
+      {loanCount >= 1 && loanCount <= MONTHLY_AMOUNTS_HARD_CAP && form.amount >= 1 && loanMonthly >= 1 ? (
         <>
           <p className="field__hint" data-ui={UI.journal.entry.loanPreview}>
             {t('entry.loanPreview', {

@@ -82,10 +82,17 @@ export function loanRuleEndDate(firstRepaymentDate: string, count: number): stri
  * 終了日（排他）から返済回数を導出する。**終了日が正**の側の計算で、UI のプレビューと
  * 保存境界が同じ式を使う（月額の分母を二重実装しない）。
  * 初回返済日が終了日以降なら 0（= 起票ゼロ。保存境界が拒否する）。
+ *
+ * 上限（CATCH_UP_HARD_CAP_MONTHS）で**飽和しない**（v13.9 監査 #4）: 飽和すると月額の分母が
+ * 実際の起票回数より小さくなり、導出（上限なし）と乖離して元本超過の過返済が起きる。
+ * 上限を超えるときは「上限 + 1」を返して超過を可視にし、拒否は UI（フォーム検証）と
+ * 保存境界が `> CATCH_UP_HARD_CAP_MONTHS` の比較で行う（render 中に throw しない分担。
+ * 上限 + 1 で走査を打ち切るのは計算量の上界であって、値の飽和ではない —
+ * 超過はどの経路でも保存に到達しない）。
  */
 export function loanInstallmentCount(firstRepaymentDate: string, endDateExclusive: string): number {
   let count = 0;
-  while (count < CATCH_UP_HARD_CAP_MONTHS) {
+  while (count <= CATCH_UP_HARD_CAP_MONTHS) {
     if (addMonthsToDate(firstRepaymentDate, count) >= endDateExclusive) break;
     count++;
   }

@@ -14,6 +14,7 @@ import {
   loanScheduledTotal,
   loanStartMonth,
 } from '../src/domain/loan';
+import { addMonthsToDate } from '../src/domain/allocation';
 import type { RecurringRule } from '../src/domain/types';
 
 const rule = (over: Partial<RecurringRule> = {}): RecurringRule => ({
@@ -78,6 +79,17 @@ describe('日付の導出', () => {
     // 端数の月でも「起票日 < 終了日」だけで決まる。
     expect(loanInstallmentCount('2026-09-18', '2026-10-17')).toBe(1);
     expect(loanInstallmentCount('2026-09-18', '2026-10-19')).toBe(2);
+  });
+
+  it('上限（1,200 回 = 100 年）は飽和せず超過が見える（v13.9 監査 #4）', () => {
+    // ちょうど上限 = 有効。導出（上限なし）と月額の分母が一致する。
+    expect(loanInstallmentCount('2000-02-15', addMonthsToDate('2000-02-15', 1200))).toBe(1200);
+    // 超過は 1,200 に丸めず「上限 + 1」で可視化する（旧実装は 1,200 へ黙って飽和し、
+    // 月額の分母 < 実起票回数となって過返済が起きた）。
+    expect(
+      loanInstallmentCount('2000-02-15', addMonthsToDate('2000-02-15', 1201)),
+    ).toBeGreaterThan(1200);
+    expect(loanInstallmentCount('2000-02-15', '2100-12-31')).toBeGreaterThan(1200);
   });
 
   it('位相の基点と返済日は初回返済日が決める', () => {

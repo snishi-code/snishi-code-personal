@@ -2963,6 +2963,11 @@ async function createLoanPurchaseUnlocked(input: LoanPurchaseInput): Promise<Loa
   const count = loanInstallmentCount(firstRepayment, input.repaymentEndDate);
   // 起票ゼロのルールは保存しない（v13.3 の不変則）。UI は保存前に同じ式で弾く。
   if (count < 1) throw new LedgerError('error.loan.noRepayment');
+  // 上限超過は黙って飽和せずエラー（v13.9 監査 #4）。飽和すると月額の分母 < 実起票回数と
+  // なり元本超過の過返済が起きる。上限はアプリが扱う期間幅の正本（100 年）を単一参照する。
+  if (count > MONTHLY_AMOUNTS_HARD_CAP) {
+    throw new LedgerError('error.loan.termTooLong', { max: MONTHLY_AMOUNTS_HARD_CAP });
+  }
   // 月額は切り捨て（監査 D）。月額 1 未満（回数 > 総額）は返済として成立しない =
   // 「月額 × 回数 ≤ 総額」（過返済でマイナス残高を作らない）を保存境界で固定する。
   const monthly = loanMonthlyAmount(input.amount, count);

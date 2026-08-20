@@ -58,4 +58,34 @@ describe('ローンの月額（保存境界・監査 D）', () => {
     expect(after.journalEntries).toHaveLength(before.journalEntries.length);
     expect(after.recurringRules).toHaveLength(0);
   });
+
+  it('返済回数が上限（1,200 回）を超える終了日は拒否し、何も書かない（v13.9 監査 #4）', async () => {
+    const { cash, expense } = await seed();
+    const before = await loadLedger();
+    await expect(
+      createLoanPurchase({
+        loanName: '超長期ローン',
+        date: '2000-01-15', // 初回返済 2000-02-15 → 2100-12-31 まで 1,211 回 > 1,200
+        description: '超長期',
+        amount: 12_000_000,
+        expenseAccountId: expense.id,
+        repaymentFromAccountId: cash.id,
+        repaymentEndDate: '2100-12-31',
+      }),
+    ).rejects.toThrow('error.loan.termTooLong');
+    // 旧実装は 1,200 回へ黙って飽和し、月額の分母 < 実起票回数（導出は上限なし）で
+    // 過返済が起きた。ちょうど上限（1,200 回）は従来どおり登録できる。
+    const after = await loadLedger();
+    expect(after.recurringRules).toHaveLength(before.recurringRules.length);
+    const { rule } = await createLoanPurchase({
+      loanName: '上限ちょうどローン',
+      date: '2000-01-15',
+      description: '上限ちょうど',
+      amount: 12_000_000,
+      expenseAccountId: expense.id,
+      repaymentFromAccountId: cash.id,
+      repaymentEndDate: addMonthsToDate('2000-02-15', 1200),
+    });
+    expect(rule.amount).toBe(10_000); // 12,000,000 ÷ 1,200
+  });
 });
