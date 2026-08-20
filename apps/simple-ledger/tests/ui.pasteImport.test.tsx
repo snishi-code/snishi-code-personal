@@ -8,9 +8,12 @@ import { render, cleanup, fireEvent, waitFor, within } from '@testing-library/re
 import { ToastProvider } from '@snishi/foundation/ui/toast';
 import { patchDialogIfNeeded } from '@snishi/foundation/ui/test-utils';
 import { PasteImport } from '../src/ui/screens/PasteImport';
+import { App } from '../src/App';
 import { LedgerProvider } from '../src/state/store';
 import { loadLedger } from '../src/data/repository';
+import { clearOnboardingDone, markOnboardingDone } from '../src/data/localFlags';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
+import { UI } from '../src/ui-contract';
 import './setup';
 
 beforeAll(() => {
@@ -112,5 +115,52 @@ describe('貼り付け一括登録の画面', () => {
       expect(q('pasteImport.errors')).not.toBeNull();
     });
     expect(q('dialog.confirm')).toBeNull();
+  });
+});
+
+describe('成功後の遷移（App 結線・v13.12 項目 2）', () => {
+  it('登録成功でホーム（dashboard）へ着地する', async () => {
+    markOnboardingDone();
+    const backSpy = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+    try {
+      render(
+        <ToastProvider>
+          <LedgerProvider>
+            <App />
+          </LedgerProvider>
+        </ToastProvider>,
+      );
+      await waitFor(() => {
+        expect(q(UI.dashboard.view)).not.toBeNull();
+      });
+      fireEvent.click(q(UI.nav.menuButton)!);
+      fireEvent.click(await waitFor(() => q('nav.pasteImport')!));
+      await waitFor(() => {
+        expect(q('pasteImport.view')).not.toBeNull();
+        expect((q('pasteImport.submit') as HTMLButtonElement).disabled).toBe(false);
+      });
+
+      fireEvent.change(q('pasteImport.text') as HTMLTextAreaElement, {
+        target: { value: '2026-08-19,ランチ,800,現金,変動費' },
+      });
+      fireEvent.click(q('pasteImport.submit')!);
+      const dialog = await waitFor(() => {
+        const el = q('dialog.confirm');
+        expect(el).not.toBeNull();
+        return el!;
+      });
+      fireEvent.click(within(dialog).getByRole('button', { name: '登録' }));
+
+      // 着地はホーム（作者決定 2026-08-20）。仕訳一覧ではない。
+      await waitFor(() => {
+        expect(q(UI.dashboard.view)).not.toBeNull();
+      });
+      expect(q('pasteImport.view')).toBeNull();
+      expect(q(UI.journal.view)).toBeNull();
+      expect((await loadLedger()).journalEntries).toHaveLength(1);
+    } finally {
+      clearOnboardingDone();
+      backSpy.mockRestore();
+    }
   });
 });

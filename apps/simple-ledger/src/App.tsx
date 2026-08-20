@@ -450,8 +450,9 @@ export function App() {
         ) : null}
         {screen === 'accounts' ? <Accounts period={period} target={accountsTarget} /> : null}
         {screen === 'pasteImport' ? (
-          // 成功したら仕訳一覧へ（入ったものをその場で確認・手直しできる位置に着地する）。
-          <PasteImport onDone={() => go('journal')} />
+          // 成功したらホームへ（作者決定 2026-08-20・v13.12 項目 2）。個別の手直しは
+          // 仕訳一覧の通常編集でいつでもできるので、着地は全体が見える面にする。
+          <PasteImport onDone={() => go('dashboard')} />
         ) : null}
         {screen === 'settings' ? (
           <Settings onOpenOnboarding={() => setOnboardingManualOpen(true)} />

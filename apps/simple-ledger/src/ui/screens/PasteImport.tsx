@@ -7,7 +7,7 @@
  *
  * 流れ: 貼り付け → 登録 → 件数の確認ダイアログ → 全行を単一 tx で保存（1 行でも
  * エラーなら行番号付きで全部列挙し、1 件も登録しない）→ 成功でテキストを消して
- * 仕訳一覧へ（onDone）。個別の手直しは仕訳一覧の通常編集で行う。
+ * ホームへ（onDone・作者決定 2026-08-20）。個別の手直しは仕訳一覧の通常編集で行う。
  */
 import { useState } from 'react';
 import { TextArea } from '@snishi/foundation/ui/Field';
