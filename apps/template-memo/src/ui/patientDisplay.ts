@@ -59,6 +59,25 @@ export function patientLabelParts(
   };
 }
 
+/**
+ * 名簿の番号 (位置) 列の幅 [ch 単位の数値]。一覧で最長の位置に合わせた共通 min-width を
+ * 全行へ与え、桁数が違っても (1 と 100) 番号の頭と名前の頭がそれぞれ縦に揃うようにする。
+ * 位置が 1 件も無ければ 0 = 列を作らない。
+ *
+ * ch は「0」の advance 幅なので、数字だけの位置なら揃いは正確 (数字は 0 と同幅以下)。
+ * 全角文字は 2ch で数える近似。英字などで実幅が min-width を超える行は、その行の
+ * 名前だけが右へ逃げる graceful degradation (他の行の揃えは崩れない)。
+ */
+export function roomColumnCh(patients: readonly Patient[]): number {
+  let max = 0;
+  for (const p of patients) {
+    let len = 0;
+    for (const c of String(p.room ?? '').trim()) len += (c.codePointAt(0) ?? 0) > 0xff ? 2 : 1;
+    if (len > max) max = len;
+  }
+  return max;
+}
+
 /** 「部屋 氏名」の 1 行表示 (aria-label・QR ダイアログ等の文字列文脈用)。 */
 export function formatPatientLabel(p: Patient | null | undefined, fallback: string): string {
   const { room, name } = patientLabelParts(p, fallback);

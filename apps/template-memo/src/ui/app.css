@@ -744,9 +744,12 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   padding: var(--space-2) var(--space-3);
 }
 
-/* 名簿の番号 (位置) スパン。名前が折り返しても番号列は縮めない */
+/* 名簿の番号 (位置) スパン。名前が折り返しても番号列は縮めない。
+   min-width = 一覧で最長の位置 (--room-col。HomeView が .grid へ与える) — 桁数が
+   違っても全行が同じ列幅になり、番号の頭と名前の頭がそれぞれ縦に揃う */
 .patientBtnRoom {
   flex: 0 0 auto;
+  min-width: var(--room-col, auto);
 }
 
 /* 名簿の名前スパン。長い名前はここだけで折り返す */
