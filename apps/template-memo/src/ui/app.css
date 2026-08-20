@@ -738,7 +738,21 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   overflow-wrap: anywhere;
   word-break: break-word;
   text-align: left;
+  /* 番号スパンと名前スパンの間隔。半角スペース 1 個 (≒0.25em) では詰まって見える
+     (作者レビュー 2026-08-20)。detailMetaBtn は自前の gap で上書きする */
+  column-gap: 0.6em;
   padding: var(--space-2) var(--space-3);
+}
+
+/* 名簿の番号 (位置) スパン。名前が折り返しても番号列は縮めない */
+.patientBtnRoom {
+  flex: 0 0 auto;
+}
+
+/* 名簿の名前スパン。長い名前はここだけで折り返す */
+.patientBtnName {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 /* ── ホーム患者カード行: [ステータスボタン][患者ボタン][QR ボタン] の 3 ボタン構成 ──

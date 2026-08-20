@@ -200,7 +200,7 @@ test('freeText を外した場所には自由入力欄が出ない', async ({ pa
   await expect(projectionCard.locator(ui(UI.projection.freeText))).toHaveCount(3);
 });
 
-// ── 名簿の見た目 (作者レビュー 2026-08-20): 左揃え ──
+// ── 名簿の見た目 (作者レビュー 2026-08-20): 左揃え・番号と名前の間隔 ──
 
 test('名簿の行は左揃えで表示される', async ({ page }) => {
   await addPatient(page, '101', '検証対象A');
@@ -208,6 +208,22 @@ test('名簿の行は左揃えで表示される', async ({ page }) => {
   // 中央揃えへの回帰を防ぐ (名簿として見づらい・作者レビュー)。
   await expect(card).toHaveCSS('justify-content', 'flex-start');
   await expect(card).toHaveCSS('text-align', 'left');
+});
+
+test('名簿の番号と名前は半角スペース 1 個より広い間隔で並ぶ', async ({ page }) => {
+  await addPatient(page, '101', '検証対象A');
+  const card = page.locator(ui(UI.patient.card), { hasText: '101 検証対象A' });
+  const room = card.locator(ui(UI.patient.cardRoom));
+  const name = card.locator(ui(UI.patient.cardName));
+  await expect(room).toHaveText('101');
+  await expect(name).toHaveText('検証対象A');
+  // 番号スパン右端と名前スパン左端の実間隔が「半角スペース 1 個 (≒0.25em)」を超えること。
+  const roomBox = await room.boundingBox();
+  const nameBox = await name.boundingBox();
+  const fontSize = await card.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  expect(roomBox && nameBox && fontSize).toBeTruthy();
+  const gap = (nameBox?.x ?? 0) - ((roomBox?.x ?? 0) + (roomBox?.width ?? 0));
+  expect(gap).toBeGreaterThan(0.25 * fontSize);
 });
 
 test('ホームの縦位置は詳細から戻っても保たれ、一番上へ戻るボタンで先頭へ返れる', async ({
