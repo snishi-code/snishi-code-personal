@@ -15,6 +15,7 @@ import {
   createRecurringRule,
   loadLedger,
   switchRecurringRule,
+  upsertRecurringRule,
   type RecurringRuleInput,
 } from '../src/data/repository';
 import { LedgerError } from '../src/domain/errors';
@@ -377,5 +378,48 @@ describe('実ユーズ（Claude のプラン切り替え）', () => {
     expect(recoveries).toHaveLength(1);
     expect(recoveries[0]!.date).toBe('2026-08-10');
     expect(recoveries[0]!.metadata?.monthlyCostId).toBe(ruleItemId(rule.id, '2026-08'));
+  });
+});
+
+describe('清算を持つルールの保存境界（v13.9 項目 2・監査 #2）', () => {
+  /** 8/02・9/02 の 2 回起票して 9/15 で終了・9 月ぶんの清算を持つ旧線分を作る。 */
+  async function seedSettledRule(): Promise<RecurringRule> {
+    const rule = await seedRule();
+    await switchRecurringRule({
+      ruleId: rule.id,
+      effectiveDate: '2026-09-15',
+      successor: null,
+      settlements: [{ ruleId: rule.id, month: '2026-09' }],
+    });
+    return (await loadLedger()).recurringRules.find((r) => r.id === rule.id)!;
+  }
+
+  it('清算の指す月が位相から外れる周期変更は保存で拒否する', async () => {
+    const stored = await seedSettledRule();
+    expect(stored.settlements).toEqual([{ month: '2026-09', endDate: '2026-09-15' }]);
+    // 2 か月ごと（anchor 2026-08）にすると 8/02 は起票するが 2026-09 は位相から外れる
+    // = 清算の指す先が導出されなくなる（監査 #2 の経路）。UI ロックをすり抜けても
+    // 保存境界で fail-closed。
+    expect(await errorCodeOf(() => upsertRecurringRule({ ...stored, everyMonths: 2 }))).toBe(
+      'error.recurring.settlementInvalid',
+    );
+  });
+
+  it('清算の終了日が新しい起票日より前になる起票日変更は保存で拒否する', async () => {
+    const stored = await seedSettledRule();
+    // 起票日を 16 日にすると 9/16 起票 ≥ 存在期間の排他的終端 9/15 = 期間外で、
+    // 清算の指す 2026-09 が導出されなくなる。8/16 は起票するのでルール自体は生きる
+    //（neverPosts ではなく settlement 違反として落ちることまで確かめる）。
+    expect(await errorCodeOf(() => upsertRecurringRule({ ...stored, dayOfMonth: 16 }))).toBe(
+      'error.recurring.settlementInvalid',
+    );
+  });
+
+  it('清算の前提を変えない保存（名前だけ）は通る', async () => {
+    const stored = await seedSettledRule();
+    await upsertRecurringRule({ ...stored, name: 'Claude Pro' });
+    const after = (await loadLedger()).recurringRules.find((r) => r.id === stored.id)!;
+    expect(after.name).toBe('Claude Pro');
+    expect(after.settlements).toEqual([{ month: '2026-09', endDate: '2026-09-15' }]);
   });
 });

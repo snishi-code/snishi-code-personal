@@ -333,6 +333,9 @@ export const UI = {
     // 終了の Undo（編集シート下部・終了済みのときだけ表示）。
     recurringClearEndDate: 'allocations.recurring.clearEndDate',
     recurringClearEndDateConfirm: 'allocations.recurring.clearEndDate.confirm',
+    recurringSettlementLockNote: 'allocations.recurring.settlementLockNote',
+    recurringClearSettlements: 'allocations.recurring.clearSettlements',
+    recurringClearSettlementsConfirm: 'allocations.recurring.clearSettlements.confirm',
     // 削除はカスケード（ルール + 起票済みの仕訳・持ち物）。確認に起票回数を出す。
     recurringDelete: 'allocations.recurring.delete',
     // 継続コスト資産シート（登録＝編集の 1 コンポーネント）。

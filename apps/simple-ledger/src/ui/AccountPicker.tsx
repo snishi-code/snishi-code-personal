@@ -19,6 +19,7 @@ export function AccountPicker({
   dataUi,
   emptyText,
   flat,
+  disabled,
 }: {
   label: string;
   groups: AccountGroup[];
@@ -30,6 +31,8 @@ export function AccountPicker({
   dataUi?: string;
   emptyText?: string;
   flat?: boolean;
+  /** 全候補を選択不可にする（編集ロック時。fieldset の native disabled で radio ごと止める）。 */
+  disabled?: boolean;
 }) {
   const name = useId();
   const errId = `${name}-err`;
@@ -39,6 +42,7 @@ export function AccountPicker({
   return (
     <fieldset
       className="field picker"
+      disabled={disabled}
       data-ui={dataUi}
       aria-invalid={error ? true : undefined}
       aria-describedby={error ? errId : undefined}

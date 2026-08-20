@@ -901,6 +901,12 @@ function RecurringRuleSheet({
   const [pendingDelete, setPendingDelete] = useState(false);
   // 終了の Undo。削除と違い取り消し可能（解除 ⇄ 終了）だが、状態を変えるので確認は挟む。
   const [pendingClearEnd, setPendingClearEnd] = useState(false);
+  // 清算を持つルールは編集ロック（v13.9 項目 2・監査 #2）: 周期・起票日・金額・存在期間・
+  // 科目は清算（記録済みの起票月と前倒し終了日）の前提なので、すべて解除するまで変更不可。
+  // 保存境界（assertRecurringRuleSavable）も同じ規則で fail-closed に守る。
+  const settlementCount = existing?.settlements?.length ?? 0;
+  const settlementLocked = settlementCount > 0;
+  const [pendingClearSettlements, setPendingClearSettlements] = useState(false);
   // 保存済みルールが今日までに立てている起票数。編集の引き直し予告と、カスケード削除の
   // 確認の両方が同じ数を使う（v13: 数える対象 = 今日までに導出される起票）。
   const pastPostings = useMemo(
@@ -1109,10 +1115,20 @@ function RecurringRuleSheet({
           ) : null}
           {/* 並び（v13.1 その4・作者確定）: 初回の起票日 → 周期 → 摘要 → 金額 →
               貸方（支払い元）→ 借方（計上先）→ プレビュー → 詳細（存在期間・編集のみ）。 */}
+          {settlementLocked ? (
+            <p
+              className="field__hint"
+              role="note"
+              data-ui={UI.allocations.recurringSettlementLockNote}
+            >
+              {t('recurring.settlementLockNote', { count: settlementCount })}
+            </p>
+          ) : null}
           <TextInput
             label={t('recurring.firstPostingDate')}
             type="date"
             required
+            disabled={settlementLocked}
             value={firstPostingDate}
             min={MIN_LEDGER_DATE}
             max={MAX_LEDGER_DATE}
@@ -1123,6 +1139,7 @@ function RecurringRuleSheet({
           <TextInput
             label={t('recurring.intervalMonths')}
             required
+            disabled={settlementLocked}
             inputMode="numeric"
             value={everyText}
             onChange={(v) => setEveryText(v.replace(/[^\d]/g, ''))}
@@ -1139,6 +1156,7 @@ function RecurringRuleSheet({
           <TextInput
             label={t('recurring.amount')}
             required
+            disabled={settlementLocked}
             inputMode={fractionDigits === 0 ? 'numeric' : 'decimal'}
             value={amountText}
             onChange={(v) => {
@@ -1157,6 +1175,7 @@ function RecurringRuleSheet({
                 flat
                 label={t('recurring.from.manual')}
                 required
+                disabled={settlementLocked}
                 value={creditAccountId}
                 onChange={(id) => {
                   setCreditAccountId(id);
@@ -1172,6 +1191,7 @@ function RecurringRuleSheet({
                 // 全ルールが台帳経由なので行き先の意味は常に「計上先」。
                 label={t('monthlyCost.expenseCategory')}
                 required
+                disabled={settlementLocked}
                 value={debitAccountId}
                 onChange={setDebitAccountId}
                 groups={toGroups}
@@ -1224,6 +1244,7 @@ function RecurringRuleSheet({
                     label={t('recurring.ruleStartDate')}
                     type="date"
                     required
+                    disabled={settlementLocked}
                     value={startDate}
                     min={MIN_LEDGER_DATE}
                     max={MAX_LEDGER_DATE}
@@ -1234,6 +1255,7 @@ function RecurringRuleSheet({
                   <TextInput
                     label={t('recurring.ruleEndDate')}
                     type="date"
+                    disabled={settlementLocked}
                     value={endDate}
                     min={MIN_LEDGER_DATE}
                     max={MAX_LEDGER_DATE}
@@ -1248,6 +1270,7 @@ function RecurringRuleSheet({
                         type="button"
                         className="btn btn--ghost"
                         style={{ minHeight: 'var(--tap)' }}
+                        disabled={settlementLocked}
                         onClick={() => setEndDate('')}
                         data-ui={UI.allocations.recurringEndDateClear}
                       >
@@ -1263,12 +1286,24 @@ function RecurringRuleSheet({
               [終了日を解除（終了済みのみ）] → [このルールを削除…]。 */}
           {existing ? (
             <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
-              {existing.endDate !== undefined ? (
+              {settlementLocked ? (
                 <button
                   type="button"
                   className="btn btn--ghost"
                   style={{ minHeight: 'var(--tap)' }}
                   disabled={submitting}
+                  onClick={() => setPendingClearSettlements(true)}
+                  data-ui={UI.allocations.recurringClearSettlements}
+                >
+                  {t('recurring.clearSettlements')}
+                </button>
+              ) : null}
+              {existing.endDate !== undefined ? (
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  style={{ minHeight: 'var(--tap)' }}
+                  disabled={submitting || settlementLocked}
                   onClick={() => setPendingClearEnd(true)}
                   data-ui={UI.allocations.recurringClearEndDate}
                 >
@@ -1290,6 +1325,27 @@ function RecurringRuleSheet({
           ) : null}
         </div>
       </Modal>
+      {pendingClearSettlements && existing ? (
+        <ConfirmDialog
+          title={t('recurring.clearSettlementsConfirmTitle')}
+          body={t('recurring.clearSettlementsConfirmBody', {
+            name: existing.name,
+            count: settlementCount,
+          })}
+          confirmLabel={t('recurring.clearSettlements')}
+          danger
+          dataUi={UI.allocations.recurringClearSettlementsConfirm}
+          onCancel={() => setPendingClearSettlements(false)}
+          onConfirm={async () => {
+            setPendingClearSettlements(false);
+            // 全解除 = settlements を消して保存（各回の月割りは既定の期間へ戻る）。
+            // 回収の振替は実仕訳なので消えない（必要なら仕訳一覧から個別に削除する）。
+            const next: RecurringRule = { ...existing, updatedAt: nowIso() };
+            delete next.settlements;
+            await persistExisting(next);
+          }}
+        />
+      ) : null}
       {pendingClearEnd && existing ? (
         <ConfirmDialog
           title={t('recurring.clearEndDateConfirmTitle')}

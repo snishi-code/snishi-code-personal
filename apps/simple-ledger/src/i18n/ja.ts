@@ -878,6 +878,13 @@ export const ja = {
   'recurring.settlementEnd': 'この日で終える',
   // 動詞体系（v13.1）: 「再開」は撤去（実体は新規登録と同じで「終了の Undo」と誤読させる。
   // 再契約 = 新規登録・終了の間違い = 解除）。終了の Undo = 「終了日を解除」（編集シート下部）。
+  // 清算を持つルールの編集ロック（v13.9 項目 2）。
+  'recurring.settlementLockNote':
+    '清算が {count} 件記録されているため、金額・周期・起票日・期間・科目は変更できません。変更するには先に「清算をすべて解除する」を実行してください。',
+  'recurring.clearSettlements': '清算をすべて解除する',
+  'recurring.clearSettlementsConfirmTitle': '清算をすべて解除しますか？',
+  'recurring.clearSettlementsConfirmBody':
+    '「{name}」に記録された清算（{count} 件）を削除し、各回の月割りを既定の期間へ戻します。回収の振替（実仕訳）は削除されません。',
   'recurring.clearEndDate': '終了日を解除',
   'recurring.clearEndDateConfirmTitle': '終了日を解除しますか？',
   'recurring.clearEndDateConfirmBody':

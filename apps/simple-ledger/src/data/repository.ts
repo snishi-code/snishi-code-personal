@@ -1564,6 +1564,24 @@ function assertRecurringRuleSavable(
       assertReferenceInsideAccount(ctx.byId.get(accountId), spreadReference);
     }
   }
+  // 清算（settlements）は、そのルールが**現在の周期・起票日・存在期間で導出する起票月**を
+  // 指していなければならない（v13.9 項目 2・監査 #2）。wire（パッケージ superRefine）だけでなく
+  // アプリ内の全保存経路でも検証する = UI の編集ロックをすり抜けて周期等を変え、清算の指す先が
+  // 導出されなくなる経路への fail-closed。規則は schema / switchRecurringRule と同一。
+  for (const settlement of rule.settlements ?? []) {
+    const span = monthsBetween(rule.startMonth, settlement.month);
+    const postingDate = clampDayToMonth(settlement.month, rule.dayOfMonth);
+    const insideRule =
+      postingDate >= effectiveRecurringRuleStartDate(rule) &&
+      (rule.endDate === undefined || postingDate < rule.endDate);
+    if (span < 0 || span % Math.max(1, rule.everyMonths) !== 0 || !insideRule) {
+      throw new LedgerError('error.recurring.settlementInvalid');
+    }
+    const defaultEnd = recurringRuleItemEndDate(settlement.month, rule.everyMonths, rule.dayOfMonth);
+    if (settlement.endDate < postingDate || settlement.endDate > defaultEnd) {
+      throw new LedgerError('error.recurring.settlementInvalid');
+    }
+  }
   // 全ルールの保存形: 借方 = 継続コスト台帳、spread = 計上先。
   // 計上先は自動起票できる全 role を許す（クレカ積立・税金なども同じ仕組みに乗せる）。
   const spreadAccount = ctx.byId.get(rule.spreadExpenseAccountId);

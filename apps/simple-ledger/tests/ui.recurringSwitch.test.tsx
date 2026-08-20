@@ -356,3 +356,71 @@ describe('終了シートの清算', () => {
     ]);
   });
 });
+
+describe('清算を持つルールの編集ロック（v13.9 項目 2）', () => {
+  /** 8/16 で終了 + 8 月ぶんの清算を持つルールを作り、編集シートを開く。 */
+  async function openLockedSheet(): Promise<RecurringRule> {
+    const rule = await seedRule();
+    await repository.switchRecurringRule({
+      ruleId: rule.id,
+      effectiveDate: '2026-08-16',
+      successor: null,
+      settlements: [{ ruleId: rule.id, month: '2026-08' }],
+    });
+    render(<View />);
+    fireEvent.click(
+      await waitFor(() => {
+        const row = document.querySelector<HTMLElement>(`[aria-label="編集: ${rule.name}"]`);
+        expect(row).toBeTruthy();
+        return row!;
+      }),
+    );
+    await find(UI.allocations.recurringSheet);
+    return rule;
+  }
+
+  it('金額・周期・起票日・期間・科目が disabled になり、ロック理由が出る', async () => {
+    await openLockedSheet();
+    expect(q(UI.allocations.recurringSettlementLockNote)).toBeTruthy();
+    for (const dataUi of [
+      UI.allocations.recurringAmount,
+      UI.allocations.recurringEvery,
+      UI.allocations.recurringFirstPostingDate,
+    ]) {
+      expect(input(dataUi).disabled).toBe(true);
+    }
+    // 科目ピッカーは fieldset の native disabled（中の radio ごと止まる）。
+    for (const dataUi of [UI.allocations.recurringFrom, UI.allocations.recurringTo]) {
+      expect((q(dataUi) as HTMLFieldSetElement).disabled).toBe(true);
+    }
+    // 存在期間（詳細）も同様にロック。
+    fireEvent.click(q(UI.allocations.recurringDetailsToggle)!);
+    expect(input(UI.allocations.recurringStartDate).disabled).toBe(true);
+    expect(input(UI.allocations.recurringEndDate).disabled).toBe(true);
+    // 終了日の解除もロック（清算は存在期間の内側を前提に検証されるため）。
+    expect((q(UI.allocations.recurringClearEndDate) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('「清算をすべて解除する」で settlements が消え、以後は通常編集に戻る', async () => {
+    const rule = await openLockedSheet();
+    fireEvent.click(q(UI.allocations.recurringClearSettlements)!);
+    await find(UI.allocations.recurringClearSettlementsConfirm);
+    fireEvent.click(
+      document.querySelector<HTMLElement>(
+        `[data-ui="${UI.allocations.recurringClearSettlementsConfirm}"] [data-ui="dialog.confirm"]`,
+      )!,
+    );
+    await waitFor(async () => {
+      const after = await loadLedger();
+      expect(after.recurringRules.find((r) => r.id === rule.id)!.settlements).toBeUndefined();
+    });
+    // 保存後にシートは閉じ、開き直すとロックは無い。
+    await waitFor(() => {
+      expect(q(UI.allocations.recurringSheet)).toBeNull();
+    });
+    fireEvent.click(document.querySelector<HTMLElement>(`[aria-label="編集: ${rule.name}"]`)!);
+    await find(UI.allocations.recurringSheet);
+    expect(q(UI.allocations.recurringSettlementLockNote)).toBeNull();
+    expect(input(UI.allocations.recurringAmount).disabled).toBe(false);
+  });
+});
