@@ -121,7 +121,11 @@ export interface HrStore {
    * templateId → アプリの defaultTemplateId の順に倒す (参照先が消えていた場合の fail-safe)。
    */
   getTemplateForPatient(patient: Patient): Template | null;
-  /** アプリ全体のデフォルトを変える (設定画面のテンプレート一覧タップ)。 */
+  /**
+   * アプリ全体のフォールバックを変える。UI からの設定手段は 2026-08-20 に廃止
+   * (テンプレート一覧の行タップは編集へ変更)。値自体は getTemplateForPatient の
+   * 最終フォールバック・グループ 0 件時の addPlace・削除時のつなぎ替えで生きている。
+   */
   setDefaultTemplate(templateId: string): Promise<void>;
   /** グループのデフォルトを変える (設定画面のグループ一覧のトグル)。 */
   setPlaceTemplate(placeId: string, templateId: string): Promise<void>;
@@ -383,11 +387,13 @@ export function createHrStore(deps: CreateHrStoreDeps = {}): HrStore {
     getActivePlace: () => activePlace(),
     isArchiveViewActive: () => isArchiveView(),
     async addPlace(name) {
-      // グループを作った時のデフォルトはアプリ全体のデフォルト (作成時に写す)。
+      // 新しいグループのデフォルトは「1 つ上のグループ」(= 一覧末尾に追加されるので既存の
+      // 末尾グループ) から写す (2026-08-20 作者決定)。グループが 1 つも無いときだけ
+      // アプリのフォールバック (defaultTemplateId) を使う。
       const place: PlaceDef = {
         placeId: newId('plc'),
         name: String(name ?? '').trim(),
-        templateId: settings.defaultTemplateId,
+        templateId: places[places.length - 1]?.templateId ?? settings.defaultTemplateId,
       };
       await db.put(STORE_PLACES, place);
       places = [...places, place];

@@ -118,7 +118,6 @@ export const UI = {
     restoreDelete: 'settings.restore.delete',
     wardList: 'settings.wards.list',
     wardRow: 'settings.wards.row',
-    wardRename: 'settings.wards.rename',
     wardDelete: 'settings.wards.delete',
     wardAdd: 'settings.wards.add',
     wardTemplate: 'settings.wards.template', // グループのデフォルトテンプレート切替

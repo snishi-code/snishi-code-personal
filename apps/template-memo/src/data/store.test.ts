@@ -923,19 +923,25 @@ describe('テンプレートの 3 段デフォルト（アプリ / グループ 
     expect(store.listPlaces()[0]!.templateId).toBe(round.id);
   });
 
-  it('グループ作成時はアプリのデフォルトを写し、後からアプリ側を変えても波及しない', async () => {
+  it('グループ作成時は 1 つ上のグループのデフォルトを写し、後から変えても波及しない', async () => {
     const { store } = await setup();
     const [round, daily] = store.getTemplateDefs();
-    const placeA = await store.addPlace('先に作る');
-    expect(placeA.templateId).toBe(round!.id);
+    const seed = store.listPlaces()[0]!;
+    expect(seed.templateId).toBe(round!.id);
 
+    // 1 つ上 = 一覧末尾 (seed)。seed を日報にしてから作ると日報を写す。
+    await store.setPlaceTemplate(seed.placeId, daily!.id);
+    const placeA = await store.addPlace('先に作る');
+    expect(placeA.templateId).toBe(daily!.id);
+
+    // 末尾が placeA になったので、placeA を回診に変えてから作ると回診を写す。
+    // アプリのフォールバック (defaultTemplateId) はグループがある限り使われない。
     await store.setDefaultTemplate(daily!.id);
+    await store.setPlaceTemplate(placeA.placeId, round!.id);
     const placeB = await store.addPlace('後で作る');
-    expect(placeB.templateId).toBe(daily!.id);
+    expect(placeB.templateId).toBe(round!.id);
     // 既存グループは変わらない（作成時に写す方式）。
-    expect(store.listPlaces().find((p) => p.placeId === placeA.placeId)!.templateId).toBe(
-      round!.id,
-    );
+    expect(store.listPlaces().find((p) => p.placeId === seed.placeId)!.templateId).toBe(daily!.id);
   });
 
   it('ページ作成時はグループのデフォルトを写し、reopen 後も保持する', async () => {
