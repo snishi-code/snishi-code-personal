@@ -829,7 +829,6 @@ export const ja = {
   // 分からない」）。日付は排他的終了点の前日 = 実際にルールが存在する最後の日。
   'recurring.statusEndScheduled': '{date} まで',
   'recurring.statusEnded': '終了済み',
-  'recurring.statusNotStarted': '開始前',
   'recurring.postingSchedule': '起票',
   'recurring.amountChangeTitle': '金額の変更方法',
   'recurring.amountChangeBody':

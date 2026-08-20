@@ -164,10 +164,10 @@ export function Allocations({
   const [endingRule, setEndingRule] = useState<RecurringRule | null>(null);
   // 切り替え = この日から別の線分（シートそのものが確認面なので前置きの確認は無い）。
   const [switchingRule, setSwitchingRule] = useState<RecurringRule | null>(null);
-  // 表示だけはヘッダーの断面へ追従する。シート内の書込日・catch-up は period を受け取らず、
-  // 引き続き実際の今日を基準にする（過去/未来表示が durable state を動かさない）。
-  const today = todayLocal();
-  const asOf = reportBasis(period, today).asOf;
+  // 表示も操作可否もヘッダーの断面（asOf）へ追従する（today 規約: 実 today は挙動境界に
+  // しない・v13.12）。実 today を使うのは reportBasis の解決（ヘッダー既定）と、各シートの
+  // 書込みの既定日だけ（ヘッダーは表示のタイムマシンであって書込日ではない）。
+  const asOf = reportBasis(period, todayLocal()).asOf;
   const currentYm = monthOf(asOf);
   const currency = ledger?.settings.currency ?? '';
 
@@ -466,17 +466,17 @@ export function Allocations({
             data-ui={UI.allocations.recurringList}
           >
             {rules.map((r) => {
-              const start = effectiveRecurringRuleStartDate(r);
-              const activeToday = recurringRuleExistsAt(r, today);
+              const activeAtAsOf = recurringRuleExistsAt(r, asOf);
               // 終了点が既に入っているルールは、押しても同じ終了点を書き直すだけなので出さない。
-              // 切り替えの出現条件は終了と同じ（今日存在していて終了点が未設定）。
+              // 切り替えの出現条件は終了と同じ（**断面 asOf の日に存在**していて終了点が未設定。
+              // 半開区間そのままなので開始日 = 断面当日も含む・v13.12 today 規約）。
               // どちらも「この日で旧線分を閉じる」操作で、後継を作るかどうかだけが違う。
-              const canEndToday = activeToday && start < today && r.endDate === undefined;
-              // 操作ボタンが出ない行も、右列の同じ位置を状態チップで埋める（v13.2）。
-              // 空けると縦揃えが崩れ、「なぜボタンが無いか」も読めなくなる。
+              const canClose = activeAtAsOf && r.endDate === undefined;
+              // 操作ボタンが出ない行（= 終了点あり）も、右列の同じ位置を状態チップで埋める
+              // （v13.2）。空けると縦揃えが崩れ、「なぜボタンが無いか」も読めなくなる。
               const status =
                 r.endDate !== undefined
-                  ? activeToday
+                  ? activeAtAsOf
                     ? {
                         // 「いつまで動くか」を日付で名乗る（終了済みとの違いが読める）。
                         label: t('recurring.statusEndScheduled', {
@@ -485,9 +485,8 @@ export function Allocations({
                         tone: 'warning',
                       }
                     : { label: t('recurring.statusEnded'), tone: 'neutral' }
-                  : activeToday
-                    ? { label: t('recurring.ruleNoEnd'), tone: 'neutral' }
-                    : { label: t('recurring.statusNotStarted'), tone: 'neutral' };
+                  : // 終了点なしは canClose 側に必ず入る（startedRules が開始 <= asOf を保証）。
+                    { label: t('recurring.ruleNoEnd'), tone: 'neutral' };
               // ローン（計上先が負債のルール）は残回数を名乗り、金額を負債の色で出す
               // （v13.5 その3 の規約。表示は絶対値のままで符号は付けない）。
               const loan = ruleIsLoan(r);
@@ -548,7 +547,7 @@ export function Allocations({
                         />
                       </span>
                       {/* 一等地の動詞は tonal ボタン（v13.2: 押せる面を持たせる）。 */}
-                      {canEndToday ? (
+                      {canClose ? (
                         <div className="row-actions">
                           <button
                             type="button"
@@ -734,6 +733,7 @@ export function Allocations({
       {ruleSheet ? (
         <RecurringRuleSheet
           {...(ruleSheet.existing !== undefined ? { existing: ruleSheet.existing } : {})}
+          asOf={asOf}
           onClose={() => setRuleSheet(null)}
         />
       ) : null}
@@ -832,9 +832,12 @@ function resolveRuleDayOfMonth(firstPostingDate: string, existing?: RecurringRul
  */
 function RecurringRuleSheet({
   existing,
+  asOf,
   onClose,
 }: {
   existing?: RecurringRule;
+  /** ヘッダー断面。表示（起票数の予告）に使う。書込みの既定日は引き続き実 today。 */
+  asOf: string;
   onClose: () => void;
 }) {
   const { ledger, createRecurringRule, saveRecurringRule, removeRecurringRule } = useLedger();
@@ -912,14 +915,15 @@ function RecurringRuleSheet({
   const settlementCount = existing?.settlements?.length ?? 0;
   const settlementLocked = settlementCount > 0;
   const [pendingClearSettlements, setPendingClearSettlements] = useState(false);
-  // 保存済みルールが今日までに立てている起票数。編集の引き直し予告と、カスケード削除の
-  // 確認の両方が同じ数を使う（v13: 数える対象 = 今日までに導出される起票）。
+  // 保存済みルールがヘッダー断面（asOf）までに立てている起票数。編集の引き直し予告と、
+  // カスケード削除の確認の両方が同じ数を使う（v13.12: 数える対象 = 断面までに導出される
+  // 起票。実 today を挙動境界にしない today 規約に一覧の導出と揃える）。
   const pastPostings = useMemo(
     () =>
       existing !== undefined
-        ? deriveRecurringOutputs([existing], ledger?.accounts ?? [], todayLocal()).entries.length
+        ? deriveRecurringOutputs([existing], ledger?.accounts ?? [], asOf).entries.length
         : 0,
-    [existing, ledger],
+    [existing, ledger, asOf],
   );
   const canSplitAtEffectiveDate =
     pendingAmountChange !== null &&
