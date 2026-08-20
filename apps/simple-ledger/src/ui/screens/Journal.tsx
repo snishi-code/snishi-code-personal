@@ -49,6 +49,7 @@ import { formatMoney } from '../../util/format';
 import { useMoneyDigits } from '../money';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
+import { AdjustmentUnspreadNotice } from '../components/AdjustmentUnspreadNotice';
 import { assertSafeAmount } from '../../domain/safeSum';
 
 /**
@@ -259,6 +260,7 @@ export function Journal({
         truncations={sourceDisplay?.investmentProjectionTruncations ?? []}
         accounts={ledger?.accounts ?? []}
       />
+      <AdjustmentUnspreadNotice unspread={sourceDisplay?.unspreadAdjustments ?? []} />
 
       {/* 絞り込み額縁: 検索・期間・タグ・並び替え・件数を sticky で上端に固定し、
           仕訳カードだけが下を流れる（作者合意 2026-08-15・ホームの額縁と同型）。

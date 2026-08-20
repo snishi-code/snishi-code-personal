@@ -70,6 +70,8 @@ export function TextInput({
   dataUi,
   inputMode,
   disabled,
+  min,
+  max,
 }: BaseProps & {
   value: string;
   onChange: (v: string) => void;
@@ -77,6 +79,9 @@ export function TextInput({
   placeholder?: string;
   inputMode?: 'numeric' | 'decimal';
   disabled?: boolean;
+  /** date / number 入力の範囲（native の min/max 属性へそのまま渡す）。 */
+  min?: string;
+  max?: string;
 }) {
   const id = useId();
   return (
@@ -89,6 +94,8 @@ export function TextInput({
         placeholder={placeholder}
         inputMode={inputMode}
         disabled={disabled}
+        min={min}
+        max={max}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? `${id}-err` : hint ? `${id}-hint` : undefined}
         onChange={(e) => onChange(e.target.value)}

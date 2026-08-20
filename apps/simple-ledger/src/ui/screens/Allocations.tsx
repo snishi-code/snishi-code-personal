@@ -48,7 +48,7 @@ import {
   monthlyAllocationAccountOptions,
 } from '../accountOptions';
 import { monthlyAmounts, monthOf } from '../../domain/allocation';
-import { isValidIsoDate } from '../../domain/calendar';
+import { isLedgerDate, isValidIsoDate, MAX_LEDGER_DATE } from '../../domain/calendar';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
 import { nowIso, todayLocal } from '../../util/time';
 import {
@@ -1114,6 +1114,7 @@ function RecurringRuleSheet({
             type="date"
             required
             value={firstPostingDate}
+            max={MAX_LEDGER_DATE}
             onChange={setFirstPostingDate}
             hint={t('recurring.firstPostingDateHint')}
             dataUi={UI.allocations.recurringFirstPostingDate}
@@ -1223,6 +1224,7 @@ function RecurringRuleSheet({
                     type="date"
                     required
                     value={startDate}
+                    max={MAX_LEDGER_DATE}
                     onChange={setStartDate}
                     hint={t('recurring.ruleStartDateHint')}
                     dataUi={UI.allocations.recurringStartDate}
@@ -1231,6 +1233,7 @@ function RecurringRuleSheet({
                     label={t('recurring.ruleEndDate')}
                     type="date"
                     value={endDate}
+                    max={MAX_LEDGER_DATE}
                     onChange={setEndDate}
                     hint={t('recurring.ruleEndDateHint')}
                     dataUi={UI.allocations.recurringEndDate}
@@ -1314,8 +1317,13 @@ function RecurringRuleSheet({
           danger
           onCancel={() => setPendingDelete(false)}
           onConfirm={async () => {
+            try {
+              await removeRecurringRule(existing.id);
+            } catch {
+              // 失敗 = 未保存: 閉じない（エラーは store が toast 済み・確定中状態は ConfirmDialog が解く）。
+              return;
+            }
             setPendingDelete(false);
-            await removeRecurringRule(existing.id).catch(() => undefined);
             onClose();
           }}
         />
@@ -1600,6 +1608,7 @@ function ContinuousCostItemSheet({
               type="date"
               required
               value={startDate}
+              max={MAX_LEDGER_DATE}
               onChange={setStartDate}
               dataUi={UI.allocations.editStartDate}
             />
@@ -1609,6 +1618,7 @@ function ContinuousCostItemSheet({
             type="date"
             value={endDate}
             onChange={setEndDate}
+            max={MAX_LEDGER_DATE}
             dataUi={UI.allocations.editEndDate}
           />
           <div className="row-actions" data-ui={UI.allocations.editQuickSpan}>
@@ -1670,8 +1680,13 @@ function ContinuousCostItemSheet({
           danger
           onCancel={() => setPendingDelete(false)}
           onConfirm={async () => {
+            try {
+              await removeMonthlyCost(existing.id);
+            } catch {
+              // 失敗 = 未保存: 閉じない（エラーは store が toast 済み・確定中状態は ConfirmDialog が解く）。
+              return;
+            }
             setPendingDelete(false);
-            await removeMonthlyCost(existing.id).catch(() => undefined);
             onClose();
           }}
         />
@@ -1758,17 +1773,21 @@ function useRecurringSettlements(
 ): RecurringSettlementState {
   const { ledger } = useLedger();
   const displayDigits = useMoneyDigits();
-  const today = todayLocal();
-  const dateValid = isValidIsoDate(effectiveDate);
+  // 上限（2100 年）超えの切り替え日で導出を走らせない（E の無制限展開をこの経路へ
+  // 持ち込まない。上限内なら展開は高々 2100 年まで = 有界）。
+  const dateValid = isLedgerDate(effectiveDate);
   const recovered = useMemo(() => recoveredAmountsByItem(ledger?.journalEntries ?? []), [ledger]);
 
   const candidates = useMemo<SettlementCandidate[]>(() => {
     // 台帳を経由しないルールは item を生まない = 清算する対象がそもそも無い。
     if (rule.spreadExpenseAccountId === undefined || !dateValid) return [];
+    // 地平は today ではなく**切り替え日**（宣言された日付）。today で切ると、未来の
+    // 切り替え日に対して today〜切り替え日の間に起票される item が候補から漏れ、
+    // 古い終了日のまま走り続ける（v13.4 の today 規約 = 導出は宣言日だけで決まる。監査 B）。
     const { items } = deriveRecurringOutputs(
       lineageRules(ledger?.recurringRules ?? [], rule.id),
       ledger?.accounts ?? [],
-      today,
+      effectiveDate,
     );
     return items
       .filter(
@@ -1796,7 +1815,7 @@ function useRecurringSettlements(
         ];
       })
       .sort((a, b) => (a.item.startDate < b.item.startDate ? -1 : 1));
-  }, [ledger, rule, effectiveDate, dateValid, recovered, displayDigits, today]);
+  }, [ledger, rule, effectiveDate, dateValid, recovered, displayDigits]);
 
   const [drafts, setDrafts] = useState<Record<string, SettlementDraft>>({});
   // 回収額の既定は切り替え日に追従する。既定のままなら追従し、手で直してあればその値を
@@ -2061,7 +2080,8 @@ function RecurringRuleSwitchSheet({ rule, onClose }: { rule: RecurringRule; onCl
   // そのまま画面に出る。どれかの入力が不正な間は行ごと出さない（fail-closed）。
   const previewDay = dayText === '' ? Number.NaN : Number.parseInt(dayText, 10);
   const previewEvery = everyText === '' ? Number.NaN : Number.parseInt(everyText, 10);
-  const dateValid = isValidIsoDate(effectiveDate);
+  // 上限（2100 年）超えは保存境界（schema）でも拒否される。入口で不正扱いにして早く止める。
+  const dateValid = isLedgerDate(effectiveDate);
   const previewValid =
     dateValid &&
     Number.isInteger(previewDay) &&
@@ -2164,6 +2184,7 @@ function RecurringRuleSwitchSheet({ rule, onClose }: { rule: RecurringRule; onCl
           type="date"
           required
           value={effectiveDate}
+          max={MAX_LEDGER_DATE}
           onChange={setEffectiveDate}
           hint={t('recurring.switchDateHint')}
           dataUi={UI.allocations.recurringSwitchDate}
@@ -2296,6 +2317,7 @@ function RecurringRuleEndSheet({ rule, onClose }: { rule: RecurringRule; onClose
           required
           value={endDate}
           onChange={setEndDate}
+          max={MAX_LEDGER_DATE}
           hint={t('recurring.endSheetBody')}
           dataUi={UI.allocations.recurringEndSheetDate}
         />
@@ -2346,7 +2368,8 @@ function MonthlyCostArchiveSheet({
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
 
-  const dateValid = isValidIsoDate(endDate);
+  // 上限（2100 年）超えの終了日で割り振りの走査を伸ばさない（保存境界でも拒否される）。
+  const dateValid = isLedgerDate(endDate);
   // 変更前の item の割り振りで「その日までに費用になっていない残り」。
   // remainingValue が回収済みを織り込んだ単一正本（spreadTotal − 月割り済み）なので、
   // ここで回収額をもう一度引かない（一覧と同じ値になる・監査 P2-1）。
@@ -2445,6 +2468,7 @@ function MonthlyCostArchiveSheet({
           required
           value={endDate}
           onChange={setEndDate}
+          max={MAX_LEDGER_DATE}
           hint={t('ccItem.archiveDateHint')}
           dataUi={UI.allocations.archiveDate}
         />

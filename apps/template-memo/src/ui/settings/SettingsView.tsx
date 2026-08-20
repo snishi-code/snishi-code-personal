@@ -1,5 +1,5 @@
 // 設定画面 (コピー元: hospital-workspace/rounds/ui/settings/SettingsView.tsx)。
-//   タグ管理 / テンプレート (有効切替・編集・プリセット/空テンプレ追加・パッケージQR送受信・削除) /
+//   タグ管理 / テンプレート (編集・複製・プリセット/空テンプレ追加・パッケージQR送受信・削除) /
 //   フレーム (一覧・編集・複製・QR送信・削除) / フォーマット (同) / QR出力 (改行) /
 //   場所の管理 / バックアップ (JSON 書出・復元) / 巻き戻し / 全削除 /
 //   操作ガイド (準備中プレースホルダ)
@@ -271,7 +271,9 @@ function SectionHead({ title, children }: { title: string; children: ReactNode }
 }
 
 // ============================
-// テンプレート (有効切替 / 編集 / 複製 / プリセット・空テンプレ追加 / QR送受信 / 削除)。
+// テンプレート (編集 / 複製 / プリセット・空テンプレ追加 / QR送受信 / 削除)。
+// 行タップ = 編集 (2026-08-20 作者決定で全一覧共通へ。アプリのデフォルト切替 UI は廃止 —
+// defaultTemplateId は解決チェーンの内部フォールバックとしてだけ残る)。
 // 編集は TemplateEditView (設定画面のローカル state で切替・ルートは増やさない)。
 // 追加は ＋ 1 個に集約し、プリセット (回診 / 日報) と空テンプレはメニューで選ばせる。
 // ============================
@@ -324,25 +326,11 @@ function TemplateSection({
   useRevision(runtime);
   const { store } = runtime;
   const templates = store.getTemplateDefs();
-  const activeId = store.getSettings().defaultTemplateId;
+  const places = store.listPlaces();
   const [sendTarget, setSendTarget] = useState<ShareWirePayload | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TemplateDef | null>(null);
   const [busy, setBusy] = useState(false);
-
-  async function activate(templateId: string): Promise<void> {
-    if (busy || templateId === activeId) return;
-    setBusy(true);
-    try {
-      await store.setDefaultTemplate(templateId);
-      runtime.bump();
-    } catch (e) {
-      console.error('template activate failed:', e);
-      toast.show(errorText(e, s.toast.saveFailed), 'error');
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function runDelete(target: TemplateDef): Promise<void> {
     if (busy) return;
@@ -415,24 +403,20 @@ function TemplateSection({
       </SectionHead>
       <div>
         {templates.map((tpl) => {
-          const isActive = tpl.id === activeId;
+          const usageCount = places.filter((place) => place.templateId === tpl.id).length;
           return (
-            <div key={tpl.id} className={`formatListRow${isActive ? ' activeRow' : ''}`}>
+            <div key={tpl.id} className="formatListRow">
+              {/* 行そのものが編集への入口 (フレーム / フォーマットと同じ「行タップ = 編集」)。 */}
               <button
                 type="button"
                 className="pickerRowMain"
-                disabled={busy || isActive}
-                onClick={() => void activate(tpl.id)}
+                aria-label={s.settings.template.editAria(tpl.name || s.common.untitled)}
+                onClick={() => onEdit(tpl)}
               >
                 <span className="pickerRowLabel">{tpl.name || s.common.untitled}</span>
-                <span className="pickerRowMeta">
-                  {isActive ? s.settings.template.active : s.settings.template.use}
-                </span>
+                <span className="pickerRowMeta">{s.settings.template.usage(usageCount)}</span>
               </button>
               <span className="formatListActions">
-                <IconButton label={s.common.edit} onClick={() => onEdit(tpl)}>
-                  <Icon name="edit" size={16} />
-                </IconButton>
                 <IconButton
                   label={s.common.duplicate}
                   disabled={busy}
@@ -568,9 +552,7 @@ function FrameSettingsSection({
         const usageCount = templates.filter((template) => template.frameId === frame.id).length;
         return (
           <div key={frame.id} className="formatListRow">
-            {/* 行そのものが編集への入口 (家計簿と同じ「カードタップ = 編集」)。
-                編集アイコンは、行タップに別の操作が載っているもの
-                (テンプレート = デフォルト切替 / グループ = 切替) にだけ残す。 */}
+            {/* 行そのものが編集への入口 (家計簿と同じ「カードタップ = 編集」・全一覧共通)。 */}
             <button
               type="button"
               className="pickerRowMain"
@@ -697,9 +679,7 @@ function FormatSettingsSection({
         ).length;
         return (
           <div key={format.id} className="formatListRow">
-            {/* 行そのものが編集への入口 (家計簿と同じ「カードタップ = 編集」)。
-                編集アイコンは、行タップに別の操作が載っているもの
-                (テンプレート = デフォルト切替 / グループ = 切替) にだけ残す。 */}
+            {/* 行そのものが編集への入口 (家計簿と同じ「カードタップ = 編集」・全一覧共通)。 */}
             <button
               type="button"
               className="pickerRowMain"
@@ -845,20 +825,6 @@ function PlaceSection({ runtime }: { runtime: AppRuntime }) {
     }
   }
 
-  async function switchTo(id: string): Promise<void> {
-    if (busy || id === activeId) return;
-    setBusy(true);
-    try {
-      await store.switchPlace(id); // fail-closed (保存できなければ切替しない)
-      runtime.bump();
-    } catch (e) {
-      console.error('place switch failed:', e);
-      toast.show(s.io.ws.switch.failed, 'error');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function commitRename(placeId: string, current: string): Promise<void> {
     const next = renameDraft.trim();
     setRenamingId(null);
@@ -943,11 +909,17 @@ function PlaceSection({ runtime }: { runtime: AppRuntime }) {
                 />
               ) : (
                 <>
+                  {/* 行タップ = 名前の編集 (2026-08-20 作者決定で全一覧共通へ。
+                      グループの切替はホームのヘッダー (WsPicker) が担う)。 */}
                   <button
                     type="button"
                     className="pickerRowMain"
-                    disabled={busy || isCurrent}
-                    onClick={() => void switchTo(w.placeId)}
+                    disabled={busy}
+                    aria-label={s.settings.ward.renameAria(w.name || s.io.ws.untitled)}
+                    onClick={() => {
+                      setRenamingId(w.placeId);
+                      setRenameDraft(w.name);
+                    }}
                   >
                     <span className="pickerRowLabel">{w.name || s.io.ws.untitled}</span>
                     <span className="pickerRowMeta">
@@ -956,8 +928,7 @@ function PlaceSection({ runtime }: { runtime: AppRuntime }) {
                     </span>
                   </button>
                   <span className="formatListActions">
-                    {/* グループのデフォルトテンプレート (新しいページ作成時に写すもの)。
-                        鉛筆の左に置く (実ユーズレビュー 2026-08-14)。 */}
+                    {/* グループのデフォルトテンプレート (新しいページ作成時に写すもの)。 */}
                     <select
                       className="select wardTemplateSelect"
                       value={w.templateId}
@@ -972,16 +943,6 @@ function PlaceSection({ runtime }: { runtime: AppRuntime }) {
                         </option>
                       ))}
                     </select>
-                    <IconButton
-                      label={s.io.ws.rename.title}
-                      dataUi={UI.settings.wardRename}
-                      onClick={() => {
-                        setRenamingId(w.placeId);
-                        setRenameDraft(w.name);
-                      }}
-                    >
-                      <Icon name="edit" size={16} />
-                    </IconButton>
                     {/* active place は削除不可。所属患者が居る place は store 側が fail-closed で弾く。 */}
                     {!isCurrent ? (
                       <IconButton

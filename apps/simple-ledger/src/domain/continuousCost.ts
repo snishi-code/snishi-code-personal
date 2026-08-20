@@ -15,13 +15,14 @@
  *    結果だけに現れ、実仕訳・保存系・export には混ぜない。
  */
 import { monthOf } from './allocation';
+import { MAX_LEDGER_DATE } from './calendar';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from './constants';
 import { allocationSchedule } from './monthlyCost';
 import type { JournalEntry, MonthlyCostItem } from './types';
 import { assertSafeAmount } from './safeSum';
 
-/** 仮想展開の上限（無限ループ防止・極端な未来クエリの安全弁）。 */
-export const CONTINUOUS_COST_HARD_CAP = '2100-12-31';
+/** 仮想展開の上限（無限ループ防止・極端な未来クエリの安全弁）。保存日付の上限と同じ正本。 */
+export const CONTINUOUS_COST_HARD_CAP = MAX_LEDGER_DATE;
 
 /**
  * 1 つの item を upTo までの費用行（計算で生まれる仕訳）に展開する。

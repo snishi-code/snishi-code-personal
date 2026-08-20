@@ -241,7 +241,7 @@ test('呼び出しフォーマットを保存すると入力カードへ昇格�
   await page
     .locator('.formatListRow', { hasText: '回診' })
     .first()
-    .getByRole('button', { name: '編集', exact: true })
+    .getByRole('button', { name: '回診 を編集' })
     .click();
   await page
     .locator(ui(UI.templateEdit.placement), { hasText: '身体所見' })
@@ -312,7 +312,7 @@ test('メニュー配置からフォーマットを開いて保存できる', as
   await addPatient(page, '207', 'メニュー確認');
   await openSettings(page);
   const templateRow = page.locator('.formatListRow', { hasText: '回診' }).first();
-  await templateRow.getByRole('button', { name: '編集', exact: true }).click();
+  await templateRow.getByRole('button', { name: '回診 を編集' }).click();
 
   const placement = page.locator(ui(UI.templateEdit.placement), { hasText: '身体所見' }).first();
   await placement.locator(ui(UI.templateEdit.display)).selectOption('menu');
@@ -389,7 +389,7 @@ test('フォーマット単独QRを受け取り、同じIDはコピーとして�
 test('テンプレートはグループとページで切り替えられる（作成時にデフォルトを写す）', async ({
   page,
 }) => {
-  // グループのデフォルトを日報へ変える (設定のグループ一覧・鉛筆の左のプルダウン)。
+  // グループのデフォルトを日報へ変える (設定のグループ一覧のプルダウン)。
   await openSettings(page);
   const wardRow = page.locator(ui(UI.settings.wardRow)).first();
   await wardRow.locator(ui(UI.settings.wardTemplate)).selectOption({ label: '日報' });
@@ -442,13 +442,28 @@ test('テンプレートはグループとページで切り替えられる（�
   await openDetail(page, '501 日報ページ');
   await expect(page.locator(ui(UI.projection.card))).toContainText('(S)');
 
-  // アプリのデフォルト (設定のテンプレート一覧タップ) は表示が「デフォルト」に変わる。
+  // テンプレート一覧の行タップは編集 (2026-08-20 に全一覧共通の「行タップ = 編集」へ)。
   await page.locator(ui(UI.detail.home)).click();
   await openSettings(page);
   const dailyRow = page.locator('.formatListRow', { hasText: '日報' }).first();
-  await dailyRow.getByRole('button', { name: /デフォルトにする/ }).click();
-  // 「デフォルトにする」も『デフォルト』を含むので、メタ表記の完全一致で確かめる。
-  await expect(dailyRow.locator('.pickerRowMeta')).toHaveText('デフォルト');
+  // グループのデフォルトを日報へ変えたので、メタ表記は使用グループ数を示す。
+  await expect(dailyRow.locator('.pickerRowMeta')).toHaveText('グループ 1件で使用');
+  await dailyRow.getByRole('button', { name: '日報 を編集' }).click();
+  await expect(page.locator(ui(UI.templateEdit.view))).toBeVisible();
+});
+
+test('新しいグループは 1 つ上のグループのデフォルトテンプレートを写す', async ({ page }) => {
+  // 既存グループ (グループ1) のデフォルトを日報へ変えてからグループを追加する。
+  await openSettings(page);
+  const wardRow = page.locator(ui(UI.settings.wardRow)).first();
+  await wardRow.locator(ui(UI.settings.wardTemplate)).selectOption({ label: '日報' });
+  await page.locator(ui(UI.settings.wardAdd)).click();
+  await page.getByLabel('グループを追加').fill('グループ2');
+  await page.keyboard.press('Enter');
+  const newRow = page.locator(ui(UI.settings.wardRow), { hasText: 'グループ2' });
+  await expect(newRow.locator(ui(UI.settings.wardTemplate))).toHaveValue(
+    await wardRow.locator(ui(UI.settings.wardTemplate)).inputValue(),
+  );
 });
 
 test('使用中フォーマットは参照テンプレート名を示して削除を拒否する', async ({ page }) => {

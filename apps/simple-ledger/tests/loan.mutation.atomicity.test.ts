@@ -12,8 +12,10 @@ vi.mock('../src/domain/loan', async () => {
   const actual = await vi.importActual<typeof import('../src/domain/loan')>('../src/domain/loan');
   return {
     ...actual,
-    // 反転: 月額が 0（amountSchema が拒む）＝ルールの保存だけが必ず失敗する。
-    loanMonthlyAmount: () => 0,
+    // 反転: 月額が上限超え（amountSchema の max が拒む）＝ルールの検証（最終工程）だけが
+    // 必ず失敗する。0 にしない: 月額 < 1 は v13.8 監査 D の早期ガードで工程の頭で
+    // 弾かれるようになり、「最後の工程で失敗しても何も残らない」の検証にならない。
+    loanMonthlyAmount: () => 10 ** 12 + 1,
   };
 });
 

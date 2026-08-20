@@ -473,6 +473,11 @@
   font-weight: 700;
   background: var(--bg);
 }
+/* 段の切り替わり（フロー ⇄ ストック）の区切り線（v13.8 監査 C で復活）。 */
+.period-matrix__row--section th,
+.period-matrix__row--section td {
+  border-top: 2px solid var(--border);
+}
 .period-matrix__row--emphasis th,
 .period-matrix__row--emphasis td {
   font-weight: 700;

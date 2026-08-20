@@ -293,11 +293,3 @@ const SECTION_BY_BOX: Record<DisplayBoxKey, DisplaySectionKey | undefined> = {
 export function displaySectionOfBox(key: DisplayBoxKey): DisplaySectionKey | undefined {
   return SECTION_BY_BOX[key];
 }
-
-/**
- * その分類が段の切り替わりか（数値レンズがフローとストックの間に引く区切り線）。
- * 最初の段の先頭には引かない。
- */
-export function isDisplaySectionGroupStart(key: DisplaySectionKey): boolean {
-  return DISPLAY_SECTION_GROUPS.some((group, index) => index > 0 && group.sections[0] === key);
-}

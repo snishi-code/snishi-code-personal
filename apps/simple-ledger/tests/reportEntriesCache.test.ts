@@ -305,6 +305,52 @@ describe('導出キャッシュ: 切り出し === 直接導出', () => {
       expect(entries[i]!.date >= entries[i - 1]!.date).toBe(true);
     }
   });
+
+  it('直接導出（uncached）も日付昇順 — 地平外の断面で公開契約が破れない（機構 2）', () => {
+    // 保存配列は日付の逆順（loadLedger の日付降順と同じ形）。合流順のまま返すと
+    // ここで並びが崩れる。normalize せずに**生の並び**を見る。
+    const source = fullSource();
+    source.journalEntries = [...source.journalEntries].sort((a, b) =>
+      a.date < b.date ? 1 : a.date > b.date ? -1 : 0,
+    );
+    for (const asOf of ['2030-12-31', '2101-01-01', '2150-12-31']) {
+      const direct = reportEntriesResultForAsOfUncached(source, asOf).entries;
+      expect(direct.length).toBeGreaterThan(1);
+      for (let i = 1; i < direct.length; i += 1) {
+        expect(
+          direct[i]!.date >= direct[i - 1]!.date,
+          `uncached @ ${asOf}: ${direct[i - 1]!.date} -> ${direct[i]!.date}`,
+        ).toBe(true);
+      }
+    }
+    // 公開入口（reportEntriesResultForAsOf）から地平外を要求しても同じ。
+    const viaPublic = reportEntriesResultForAsOf(source, '2101-01-01').entries;
+    for (let i = 1; i < viaPublic.length; i += 1) {
+      expect(viaPublic[i]!.date >= viaPublic[i - 1]!.date).toBe(true);
+    }
+  });
+});
+
+describe('導出キャッシュ: 凍結（機構 2-2）', () => {
+  it('キャッシュされた行・明細は凍結されていて、書き換えは fail-fast に落ちる', () => {
+    // キャッシュは全断面へ配られる共有物。書き換えできると以後の全断面が静かに汚染される。
+    const source = fullSource();
+    const first = reportEntriesResultForAsOf(source, '2030-12-31').entries;
+    const stored = first.find((entry) => entry.metadata?.virtual === undefined)!;
+    const derived = first.find((entry) => entry.metadata?.virtual === true)!;
+    for (const target of [stored, derived]) {
+      expect(() => {
+        (target as { date: string }).date = '1999-01-01';
+      }).toThrow(TypeError);
+      expect(() => {
+        target.lines[0]!.amount = 1;
+      }).toThrow(TypeError);
+    }
+    // 書き換えが弾かれたので、再切り出しは同じ中身のまま。
+    expect(normalize(reportEntriesResultForAsOf(source, '2030-12-31').entries)).toEqual(
+      normalize(first),
+    );
+  });
 });
 
 describe('導出キャッシュ: 二分探索の境界', () => {

@@ -52,6 +52,7 @@ import type { AccountRole } from '../../domain/accountRoles';
 import { RECURRING_POSTABLE_ROLES, isRecurringPostableRole } from '../../domain/recurring';
 import { t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
+import { MAX_LEDGER_DATE } from '../../domain/calendar';
 import { todayLocal } from '../../util/time';
 import { UI } from '../../ui-contract';
 
@@ -232,6 +233,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [loanFromAccountId, setLoanFromAccountId] = useState('');
   const [loanNameError, setLoanNameError] = useState(false);
   const [loanEndDateError, setLoanEndDateError] = useState(false);
+  const [loanMonthlyError, setLoanMonthlyError] = useState(false);
   const [loanFromError, setLoanFromError] = useState(false);
   const loanActive = canArrangeLoan && loanMode;
   const enableLoanMode = () => {
@@ -342,10 +344,13 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     const fromBad = loanFromAccountId === '';
     const endBad =
       loanEndDate.trim() === '' || loanCount < 1 || loanCount > MONTHLY_AMOUNTS_HARD_CAP;
+    // 月額は切り捨て（監査 D）: 月額 1 未満（回数 > 総額）は保存境界が拒否するので先に示す。
+    const monthlyBad = !endBad && form.amount >= 1 && loanMonthly < 1;
     setLoanNameError(nameBad);
     setLoanFromError(fromBad);
     setLoanEndDateError(endBad);
-    return !nameBad && !fromBad && !endBad;
+    setLoanMonthlyError(monthlyBad);
+    return !nameBad && !fromBad && !endBad && !monthlyBad;
   }
 
   async function onSave() {
@@ -548,6 +553,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         type="date"
         required
         value={form.date}
+        max={MAX_LEDGER_DATE}
         onChange={(v) => setForm((f) => ({ ...f, date: v }))}
         error={errorText(errors, 'date-required')}
         dataUi={UI.journal.entry.date}
@@ -937,6 +943,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           type="date"
           value={ccEndDate}
           onChange={setCcEndDate}
+          max={MAX_LEDGER_DATE}
           dataUi={UI.journal.entry.ccEndDate}
         />
         <div className="row-actions">
@@ -976,12 +983,20 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         type="date"
         required
         value={loanEndDate}
+        max={MAX_LEDGER_DATE}
         hint={t('entry.loanEndDateHint', { date: loanFirstDate })}
         onChange={(v) => {
           setLoanEndDate(v);
           setLoanEndDateError(false);
+          setLoanMonthlyError(false);
         }}
-        error={loanEndDateError ? t('entry.error.loanEndDate') : undefined}
+        error={
+          loanEndDateError
+            ? t('entry.error.loanEndDate')
+            : loanMonthlyError
+              ? t('entry.error.loanMonthlyZero')
+              : undefined
+        }
         dataUi={UI.journal.entry.loanEndDate}
       />
       <div className="row-actions">
@@ -994,6 +1009,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             onClick={() => {
               setLoanEndDate(loanRuleEndDate(loanFirstDate, years * 12));
               setLoanEndDateError(false);
+              setLoanMonthlyError(false);
             }}
             data-ui={UI.journal.entry.loanQuickSpan}
           >
@@ -1018,7 +1034,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         error={loanFromError ? t('entry.error.loanFrom') : undefined}
         dataUi={UI.journal.entry.loanFrom}
       />
-      {loanCount >= 1 && form.amount >= 1 ? (
+      {loanCount >= 1 && form.amount >= 1 && loanMonthly >= 1 ? (
         <>
           <p className="field__hint" data-ui={UI.journal.entry.loanPreview}>
             {t('entry.loanPreview', {
@@ -1245,8 +1261,13 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           danger
           onCancel={() => setPendingDelete(false)}
           onConfirm={async () => {
+            try {
+              await removeEntry(init.entry.id, init.entry.description);
+            } catch {
+              // 失敗 = 未保存: 閉じない（エラーは store が toast 済み・確定中状態は ConfirmDialog が解く）。
+              return;
+            }
             setPendingDelete(false);
-            await removeEntry(init.entry.id, init.entry.description).catch(() => undefined);
             onClose();
           }}
         />

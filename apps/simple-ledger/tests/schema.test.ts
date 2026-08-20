@@ -95,6 +95,70 @@ describe('journalEntrySchema', () => {
   });
 });
 
+describe('日付上限（MAX_LEDGER_DATE = 2100-12-31・v13.8 監査 E）', () => {
+  // 遠未来の日付（9999-12-31 の pin 等）は 1 つで月次展開を数万月ぶん走らせる。
+  // 導出側の clamp は pin の残高保証を壊すため、入口（schema）で一律拒否する。
+  it('仕訳の日付は 2100-12-31 まで受け入れ、2101 年以降を拒否する', () => {
+    expect(journalEntrySchema.safeParse({ ...validEntry, date: '2100-12-31' }).success).toBe(true);
+    for (const date of ['2101-01-01', '9999-12-31']) {
+      expect(journalEntrySchema.safeParse({ ...validEntry, date }).success).toBe(false);
+    }
+  });
+  it('勘定科目の開始日・終了日も同じ上限を通す', () => {
+    const account = {
+      id: 'a1',
+      name: '銀行',
+      type: 'asset',
+      role: 'daily-asset',
+      archived: false,
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    expect(accountSchema.safeParse({ ...account, startDate: '2100-12-31' }).success).toBe(true);
+    expect(accountSchema.safeParse({ ...account, startDate: '2101-01-01' }).success).toBe(false);
+    expect(
+      accountSchema.safeParse({ ...account, archived: true, endDate: '9999-12-31' }).success,
+    ).toBe(false);
+  });
+  it('定期ルールの存在期間・清算日と持ち物の期間も同じ上限を通す', () => {
+    const rule = {
+      id: 'r1',
+      name: '家賃',
+      amount: 100000,
+      dayOfMonth: 1,
+      everyMonths: 1,
+      debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      spreadExpenseAccountId: 'expense',
+      creditAccountId: 'bank',
+      startMonth: '2101-01',
+      startDate: '2101-01-01',
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    expect(recurringRuleSchema.safeParse(rule).success).toBe(false);
+    expect(
+      recurringRuleSchema.safeParse({
+        ...rule,
+        startMonth: '2026-01',
+        startDate: '2026-01-01',
+        endDate: '2101-01-01',
+      }).success,
+    ).toBe(false);
+    const item = {
+      id: 'm1',
+      name: '家電',
+      amount: 120000,
+      startDate: '2026-01-01',
+      endDate: '2101-01-01',
+      expenseAccountId: 'expense',
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
+    expect(monthlyCostItemSchema.safeParse(item).success).toBe(false);
+    expect(monthlyCostItemSchema.safeParse({ ...item, endDate: '2027-01-01' }).success).toBe(true);
+  });
+});
+
 describe('年月の暦検証', () => {
   const rule = {
     id: 'r1',
@@ -518,6 +582,29 @@ describe('勘定科目の存在期間（schema/import）', () => {
         }),
       ).success,
     ).toBe(false);
+  });
+});
+
+describe('導出専用メタの wire 拒否（v13.8 監査 機構3）', () => {
+  // strip（自己修復）に任せると導出行が実仕訳として取り込まれ二重計上になるため、
+  // rec- / recurringRuleId と同じく明示拒否する（保存境界 assertEntrySavable と対称）。
+  it.each([
+    ['virtual', { virtual: true }],
+    ['ccKind', { ccKind: 'monthly-allocation' }],
+    ['continuousCostId', { continuousCostId: 'cc-1' }],
+    ['adjustmentSliceOf', { adjustmentSliceOf: 'pin-1' }],
+    ['investmentProjectionOf', { investmentProjectionOf: 'invest-1' }],
+  ])('%s を持つ仕訳を拒否する', (_key, metadata) => {
+    expect(journalEntrySchema.safeParse({ ...validEntry, metadata }).success).toBe(false);
+  });
+
+  it('導出専用メタの無い仕訳は従来どおり受け入れ、未知キーは strip する', () => {
+    const parsed = journalEntrySchema.safeParse({
+      ...validEntry,
+      metadata: { inputMode: 'expense', legacyRemovedKey: 'x' },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.metadata).toEqual({ inputMode: 'expense' });
   });
 });
 
@@ -987,24 +1074,29 @@ describe('継続コスト資産(monthlyCostItems)の参照・不変条件検証�
     };
     expect(ledgerExportPackageSchema.safeParse(invalid).success).toBe(false);
   });
+  // 1200 ヶ月境界の検証は、日付上限（2100-12-31・v13.8 監査 E）にかからないよう
+  // 過去起点の item で行う（2000-06 〜 2100-05 = ちょうど 1200 ヶ月）。
+  const longSpread = { ...base, startDate: '2000-06-15', endDate: '2100-05-31' };
   it('endDate < startDate / 暦にない日付 / 1200ヶ月超は item schema で invalid', () => {
     expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2026-06-14' }).success).toBe(false);
     expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2027-02-30' }).success).toBe(false);
     expect(monthlyCostItemSchema.safeParse({ ...base, startDate: '2026/06/15' }).success).toBe(
       false,
     );
-    expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2126-06-30' }).success).toBe(false);
-    // ちょうど 1200ヶ月（2026-06 〜 2126-05）は valid。
-    expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2126-05-31' }).success).toBe(true);
+    expect(monthlyCostItemSchema.safeParse({ ...longSpread, endDate: '2100-06-30' }).success).toBe(
+      false,
+    );
+    // ちょうど 1200ヶ月（2000-06 〜 2100-05）は valid。
+    expect(monthlyCostItemSchema.safeParse(longSpread).success).toBe(true);
   });
   it('配分月数の上限は購入月〜終了月で数える（実際の等分数と同じ基準）', () => {
-    // 購入月（2026-06）からちょうど 1200 ヶ月（2126-05）までは valid。
-    expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2126-05-31' }).success).toBe(true);
-    expect(
-      ledgerExportPackageSchema.safeParse(mcPkg([{ ...base, endDate: '2126-05-31' }])).success,
-    ).toBe(true);
+    // 購入月（2000-06）からちょうど 1200 ヶ月（2100-05）までは valid。
+    expect(monthlyCostItemSchema.safeParse(longSpread).success).toBe(true);
+    expect(ledgerExportPackageSchema.safeParse(mcPkg([longSpread])).success).toBe(true);
     // 1201 ヶ月目に入ると invalid。
-    expect(monthlyCostItemSchema.safeParse({ ...base, endDate: '2126-06-01' }).success).toBe(false);
+    expect(monthlyCostItemSchema.safeParse({ ...longSpread, endDate: '2100-06-01' }).success).toBe(
+      false,
+    );
   });
   it('存在しない/内部集約の expenseAccountId は package で invalid', () => {
     expect(

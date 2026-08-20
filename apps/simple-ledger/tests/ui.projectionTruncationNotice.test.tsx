@@ -96,6 +96,7 @@ describe('投資投影の打ち切り通知', () => {
     const ledger = ledgerState.ledger!;
     const expand = vi.spyOn(reportEntriesModule, 'displayEntriesResultForAsOf').mockReturnValue({
       entries: ledger.journalEntries,
+      unspreadAdjustments: [],
       investmentProjectionTruncations: [
         { accountId: 'investment', month: '2026-09', date: '2026-09-01', at: 'step' },
       ],

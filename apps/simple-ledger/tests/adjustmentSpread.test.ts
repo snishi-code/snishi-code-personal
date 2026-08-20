@@ -11,7 +11,8 @@ import { describe, expect, it } from 'vitest';
 import './setup';
 import { accountBalance } from '../src/domain/accounting';
 import { buildAdjustmentEntry } from '../src/domain/adjustment';
-import { reportEntriesForAsOf } from '../src/domain/reportEntries';
+import { adjustmentPinExpectedBalance, adjustmentSpread } from '../src/domain/adjustmentSpread';
+import { reportEntriesForAsOf, reportEntriesResultForAsOf } from '../src/domain/reportEntries';
 import { journalEntrySchema } from '../src/domain/schema';
 import type { Account, AccountType, JournalEntry, Ledger } from '../src/domain/types';
 
@@ -608,8 +609,9 @@ describe('asOf からの独立と壊れた入力', () => {
 });
 
 describe('保存境界（wire 非接触）', () => {
-  it('adjustmentSliceOf は stored 仕訳のメタに残らない（投影行と同じ扱い）', () => {
-    const parsed = journalEntrySchema.parse({
+  it('adjustmentSliceOf を名乗る仕訳は wire で拒否する（strip の自己修復に任せない・機構3）', () => {
+    // strip すると導出行が実仕訳として取り込まれ二重計上になるため、明示拒否へ変更（v13.8）。
+    const result = journalEntrySchema.safeParse({
       id: 'e1',
       date: '2026-04-10',
       description: 'x',
@@ -622,6 +624,100 @@ describe('保存境界（wire 非接触）', () => {
       createdAt: TS,
       updatedAt: TS,
     });
-    expect(parsed.metadata).toEqual({ inputMode: 'manual' });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('unspread（完全整合性を欠く pin・v13.8 監査 H）', () => {
+  /** 対象科目が消えた破損 pin。stored の行は正常 pin の対象科目（cash）を動かす。 */
+  const brokenPin: JournalEntry = {
+    id: 'broken-pin',
+    date: '2026-02-10',
+    description: '壊れた補正',
+    kind: 'normal',
+    lines: [
+      { accountId: 'cash', side: 'debit', amount: 500 },
+      { accountId: 'adj-rev', side: 'credit', amount: 500 },
+    ],
+    metadata: {
+      adjustment: {
+        accountId: 'ghost',
+        expectedBalance: 0,
+        actualBalance: 500,
+        delta: 500,
+        counterpartAccountId: 'adj-rev',
+      },
+    },
+    createdAt: TS,
+    updatedAt: TS,
+  };
+
+  it('対象科目・実効計上先が引けない / 対象と同一の pin は按分せず stored のまま戻す', () => {
+    const ghostTarget = brokenPin;
+    const ghostCounterpart = pin({
+      id: 'p-ghost-cp',
+      accountId: 'cash',
+      accountType: 'asset',
+      date: '2026-02-10',
+      actual: 700,
+      counterpartAccountId: 'ghost',
+    });
+    const selfCounterpart = pin({
+      id: 'p-self',
+      accountId: 'cash',
+      accountType: 'asset',
+      date: '2026-02-10',
+      actual: 700,
+      counterpartAccountId: 'cash',
+    });
+    for (const broken of [ghostTarget, ghostCounterpart, selfCounterpart]) {
+      const result = adjustmentSpread(
+        ACCOUNTS,
+        [flow('f1', '2026-01-01', 'cash', 'equity', 100)],
+        [broken],
+      );
+      expect(result.entries).toHaveLength(0);
+      expect(result.unspread).toEqual([broken]);
+    }
+  });
+
+  it('破損 pin の stored 行が正常 pin の対象科目を動かしても、pin の残高保証は破れない', () => {
+    // 旧実装: gap は破損 pin を除いた世界で算定し、最後に stored 行を足し戻すため、
+    // 正常 pin 日の残高が actualBalance + 500 になっていた（監査 H の主経路）。
+    const healthy = pin({
+      id: 'p-healthy',
+      accountId: 'cash',
+      accountType: 'asset',
+      date: '2026-03-15',
+      actual: 12000,
+    });
+    const src = source([flow('f1', '2026-01-01', 'cash', 'equity', 10000), brokenPin, healthy]);
+    expect(balanceAt(src, 'cash', 'asset', '2026-03-15')).toBe(12000);
+    expect(balanceAt(src, 'cash', 'asset', '2026-04-30')).toBe(12000);
+  });
+
+  it('予定 pin の理論残高も unspread の stored 行を含む同じ世界を見る', () => {
+    const base = [flow('f1', '2026-01-01', 'cash', 'equity', 10000)];
+    const expected = adjustmentPinExpectedBalance(ACCOUNTS, base, [brokenPin], {
+      accountId: 'cash',
+      date: '2026-03-15',
+    });
+    // 非補正フロー 10,000 + 破損 pin の stored 行 +500。
+    expect(expected).toBe(10500);
+  });
+
+  it('unspread は復旧診断として結果に載り、断面の日付で切られる', () => {
+    const healthy = pin({
+      id: 'p-healthy',
+      accountId: 'cash',
+      accountType: 'asset',
+      date: '2026-03-15',
+      actual: 12000,
+    });
+    const src = source([flow('f1', '2026-01-01', 'cash', 'equity', 10000), brokenPin, healthy]);
+    expect(
+      reportEntriesResultForAsOf(src, '2026-04-30').unspreadAdjustments.map((e) => e.id),
+    ).toEqual(['broken-pin']);
+    expect(reportEntriesResultForAsOf(src, '2026-02-01').unspreadAdjustments).toEqual([]);
   });
 });

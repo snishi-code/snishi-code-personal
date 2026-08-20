@@ -14,6 +14,7 @@ export type Screen =
   | 'allocations'
   | 'cashflow'
   | 'accounts'
+  | 'pasteImport'
   | 'settings';
 
 /**
@@ -45,5 +46,7 @@ export const NAV_ITEMS: NavItem[] = [
   { screen: 'allocations', labelKey: 'nav.allocations', icon: 'calendar' },
   { screen: 'cashflow', labelKey: 'nav.cashflow', icon: 'trending' },
   { screen: 'accounts', labelKey: 'nav.accounts', icon: 'wallet' },
+  // 貼り付け一括登録（v13.10）。ファイル取込ではないテキスト受け口（CSV 取込の再実装ではない）。
+  { screen: 'pasteImport', labelKey: 'nav.pasteImport', icon: 'upload' },
   { screen: 'settings', labelKey: 'nav.settings', icon: 'settings' },
 ];

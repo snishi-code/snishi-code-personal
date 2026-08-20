@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isValidIsoDate, isValidIsoMonth } from '../src/domain/calendar';
+import {
+  isLedgerDate,
+  isValidIsoDate,
+  isValidIsoMonth,
+  MAX_LEDGER_DATE,
+} from '../src/domain/calendar';
 
 describe('isValidIsoMonth', () => {
   it.each(['2026-01', '2026-12'])('%s を受け入れる', (month) => {
@@ -27,5 +32,17 @@ describe('isValidIsoDate', () => {
     '2026/01/01',
   ])('%s を拒否する', (date) => {
     expect(isValidIsoDate(date)).toBe(false);
+  });
+});
+
+describe('isLedgerDate（暦 + 上限 2100-12-31・v13.8 監査 E）', () => {
+  it('上限と同じ日付までを受け入れる', () => {
+    expect(MAX_LEDGER_DATE).toBe('2100-12-31');
+    expect(isLedgerDate('2100-12-31')).toBe(true);
+    expect(isLedgerDate('2026-08-19')).toBe(true);
+  });
+
+  it.each(['2101-01-01', '9999-12-31', '2026-02-31', '2026/01/01'])('%s を拒否する', (date) => {
+    expect(isLedgerDate(date)).toBe(false);
   });
 });

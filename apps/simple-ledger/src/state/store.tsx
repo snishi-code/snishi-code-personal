@@ -69,6 +69,8 @@ interface LedgerContextValue {
     existing?: { id: string; createdAt: string },
   ) => Promise<void>;
   removeEntry: (id: string, description: string) => Promise<void>;
+  /** 貼り付け一括登録（全行を 1 tx で保存。1 行でも失敗したら 1 件も入れない）。 */
+  createEntries: (inputs: SimpleEntryInput[]) => Promise<void>;
   /** 継続コスト資産の登録（購入の仕訳 + item を 1 tx で。creditAccountId 未指定 = 持ち込み）。 */
   createContinuousCost: (input: ContinuousCostInput) => Promise<void>;
   /** ローンで払う（負債科目 + 購入の仕訳 + 返済ルール、任意で持ち物を 1 tx で）。 */
@@ -176,342 +178,260 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     };
   }, [toast]);
 
-  const saveEntry = useCallback<LedgerContextValue['saveEntry']>(
-    async (input, existing) => {
+  /**
+   * mutation → refresh → 通知の共通経路（fail-closed の単一実装・監査 A）。
+   *  - 保存境界そのものの失敗 = 「未保存」: error toast + throw。呼び出し側（確認ダイアログ /
+   *    シート）は**閉じずに**再試行できる。
+   *  - durable 境界の後の refresh 失敗 = 「保存済み・表示が古いだけ」: 警告 toast のみで
+   *    throw しない（「未保存」に見せると再送 = 二重実行を誘発する）。
+   * success が null を返す操作は成功 toast を出さない（並び替えなど連続操作を妨げない）。
+   */
+  const runMutation = useCallback(
+    async <T,>(
+      mutate: () => Promise<T>,
+      success: (result: T) => { message: string; kind?: 'success' | 'info' } | null = () => ({
+        message: t('toast.saved'),
+      }),
+    ): Promise<T> => {
+      let result: T;
       try {
-        const entry = buildSimpleEntry(input, existing);
-        await repo.upsertEntry(entry);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
+        result = await mutate();
       } catch (e) {
         toast.show(errorText(e), 'error');
         throw e;
       }
+      try {
+        await refresh();
+      } catch {
+        toast.show(t('toast.savedFollowupFailed'), 'error');
+        return result;
+      }
+      const notice = success(result);
+      if (notice) toast.show(notice.message, notice.kind ?? 'success');
+      return result;
     },
     [refresh, toast],
+  );
+
+  const saveEntry = useCallback<LedgerContextValue['saveEntry']>(
+    async (input, existing) => {
+      await runMutation(() => {
+        // 入力の組み立て失敗（検証）も「未保存」として同じ経路で通知する。
+        const entry = buildSimpleEntry(input, existing);
+        return repo.upsertEntry(entry);
+      });
+    },
+    [runMutation],
+  );
+
+  const createEntries = useCallback<LedgerContextValue['createEntries']>(
+    async (inputs) => {
+      await runMutation(
+        // 組み立て失敗（検証）も「未保存」として同じ経路で通知する（saveEntry と同じ契約）。
+        () => repo.createEntries(inputs.map((input) => buildSimpleEntry(input))),
+        () => ({ message: t('pasteImport.success', { count: inputs.length }) }),
+      );
+    },
+    [runMutation],
   );
 
   const removeEntry = useCallback<LedgerContextValue['removeEntry']>(
     async (id) => {
-      try {
-        await repo.deleteEntry(id);
-        await refresh();
-        toast.show(t('toast.deleted'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
+      await runMutation(
+        () => repo.deleteEntry(id),
+        () => ({ message: t('toast.deleted') }),
+      );
     },
-    [refresh, toast],
+    [runMutation],
   );
 
   const saveMonthlyCost = useCallback<LedgerContextValue['saveMonthlyCost']>(
     async (item) => {
-      try {
-        await repo.upsertMonthlyCost(item);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
+      await runMutation(() => repo.upsertMonthlyCost(item));
     },
-    [refresh, toast],
+    [runMutation],
   );
 
   const removeMonthlyCost = useCallback<LedgerContextValue['removeMonthlyCost']>(
     async (id) => {
-      try {
-        await repo.deleteMonthlyCost(id);
-        await refresh();
-        toast.show(t('toast.deleted'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
+      await runMutation(
+        () => repo.deleteMonthlyCost(id),
+        () => ({ message: t('toast.deleted') }),
+      );
     },
-    [refresh, toast],
+    [runMutation],
   );
 
   const createContinuousCost = useCallback<LedgerContextValue['createContinuousCost']>(
     async (input) => {
-      try {
-        await repo.createContinuousCost(input);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
+      await runMutation(() => repo.createContinuousCost(input));
     },
-    [refresh, toast],
+    [runMutation],
   );
 
   const createLoanPurchase = useCallback<LedgerContextValue['createLoanPurchase']>(
     async (input) => {
-      try {
-        await repo.createLoanPurchase(input);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
+      await runMutation(() => repo.createLoanPurchase(input));
     },
-    [refresh, toast],
+    [runMutation],
   );
 
   const archiveMonthlyCost = useCallback<LedgerContextValue['archiveMonthlyCost']>(
     async (input) => {
-      try {
-        await repo.archiveMonthlyCost(input);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
+      await runMutation(() => repo.archiveMonthlyCost(input));
     },
-    [refresh, toast],
+    [runMutation],
   );
-
-  const finishRecurringMutation = useCallback(async () => {
-    // ルール本体の保存後に再読込だけが失敗しても、再送可能な「未保存」扱いに戻さない。
-    // 新規では別 ID の同一ルール、分割では追加 segment を重複保存し得るため、
-    // durable 境界の後は警告だけで完了する。
-    let followupError: unknown;
-    try {
-      await refresh();
-    } catch (e) {
-      followupError = e;
-    }
-    if (followupError !== undefined) {
-      toast.show(t('toast.recurringSavedFollowupFailed'), 'error');
-    } else {
-      toast.show(t('toast.saved'), 'success');
-    }
-  }, [refresh, toast]);
 
   const createRecurringRule = useCallback<LedgerContextValue['createRecurringRule']>(
     async (input) => {
-      try {
-        await repo.createRecurringRule(input);
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-      await finishRecurringMutation();
+      await runMutation(() => repo.createRecurringRule(input));
     },
-    [finishRecurringMutation, toast],
+    [runMutation],
   );
 
   const saveRecurringRule = useCallback<LedgerContextValue['saveRecurringRule']>(
     async (rule, options) => {
-      try {
-        await repo.upsertRecurringRule(rule, options);
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-      await finishRecurringMutation();
+      await runMutation(() => repo.upsertRecurringRule(rule, options));
     },
-    [finishRecurringMutation, toast],
+    [runMutation],
   );
 
   const removeRecurringRule = useCallback<LedgerContextValue['removeRecurringRule']>(
     async (id) => {
-      try {
-        await repo.deleteRecurringRule(id);
-        await refresh();
-        toast.show(t('toast.deleted'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
+      await runMutation(
+        () => repo.deleteRecurringRule(id),
+        () => ({ message: t('toast.deleted') }),
+      );
     },
-    [refresh, toast],
+    [runMutation],
   );
 
   const switchRecurringRule = useCallback<LedgerContextValue['switchRecurringRule']>(
     async (input) => {
-      try {
-        await repo.switchRecurringRule(input);
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
-      await finishRecurringMutation();
+      await runMutation(() => repo.switchRecurringRule(input));
     },
-    [finishRecurringMutation, toast],
+    [runMutation],
   );
   const createAdjustment = useCallback<LedgerContextValue['createAdjustment']>(
     async (input) => {
-      try {
-        const entry = await repo.createAdjustment(input);
-        await refresh();
-        if (entry) toast.show(t('toast.saved'), 'success');
-        else toast.show(t('adjust.noChange'), 'info');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
+      await runMutation(
+        () => repo.createAdjustment(input),
+        (entry) =>
+          entry ? { message: t('toast.saved') } : { message: t('adjust.noChange'), kind: 'info' },
+      );
     },
-    [refresh, toast],
+    [runMutation],
   );
 
   const updateAdjustment = useCallback<LedgerContextValue['updateAdjustment']>(
     async (input) => {
-      try {
-        const entry = await repo.updateAdjustment(input);
-        await refresh();
-        if (entry) toast.show(t('toast.saved'), 'success');
-        else toast.show(t('adjust.removedZero'), 'info');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
+      await runMutation(
+        () => repo.updateAdjustment(input),
+        (entry) =>
+          entry
+            ? { message: t('toast.saved') }
+            : { message: t('adjust.removedZero'), kind: 'info' },
+      );
     },
-    [refresh, toast],
+    [runMutation],
   );
 
   const deleteAdjustment = useCallback<LedgerContextValue['deleteAdjustment']>(
     async (id) => {
-      try {
-        await repo.deleteAdjustment(id);
-        await refresh();
-        toast.show(t('adjust.deleted'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
+      await runMutation(
+        () => repo.deleteAdjustment(id),
+        () => ({ message: t('adjust.deleted') }),
+      );
     },
-    [refresh, toast],
+    [runMutation],
   );
 
   const createOpening = useCallback<LedgerContextValue['createOpening']>(
     async (input) => {
-      try {
-        await repo.createOpening(input);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
+      await runMutation(() => repo.createOpening(input));
     },
-    [refresh, toast],
+    [runMutation],
   );
 
   const createOpenings = useCallback<LedgerContextValue['createOpenings']>(
     async (inputs) => {
       try {
         await repo.createOpenings(inputs);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
       } catch (e) {
-        await refresh();
+        // 一括登録は途中まで保存され得るので、失敗時も表示を最新へ寄せる（best-effort）。
+        await refresh().catch(() => undefined);
         toast.show(errorText(e), 'error');
         throw e;
       }
+      try {
+        await refresh();
+      } catch {
+        toast.show(t('toast.savedFollowupFailed'), 'error');
+        return;
+      }
+      toast.show(t('toast.saved'), 'success');
     },
     [refresh, toast],
   );
 
   const updateOpening = useCallback<LedgerContextValue['updateOpening']>(
     async (input) => {
-      try {
-        await repo.updateOpening(input);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
+      await runMutation(() => repo.updateOpening(input));
     },
-    [refresh, toast],
+    [runMutation],
   );
 
   const deleteOpening = useCallback<LedgerContextValue['deleteOpening']>(
     async (id) => {
-      try {
-        await repo.deleteOpening(id);
-        await refresh();
-        toast.show(t('opening.deleted'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
+      await runMutation(
+        () => repo.deleteOpening(id),
+        () => ({ message: t('opening.deleted') }),
+      );
     },
-    [refresh, toast],
+    [runMutation],
   );
 
   const saveAccount = useCallback<LedgerContextValue['saveAccount']>(
     async (account, opts) => {
-      try {
-        await repo.upsertAccount(account, opts);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
+      await runMutation(() => repo.upsertAccount(account, opts));
     },
-    [refresh, toast],
+    [runMutation],
   );
 
   const archiveAccount = useCallback<LedgerContextValue['archiveAccount']>(
     async (id, transferEntry) => {
-      try {
-        await repo.archiveAccount(id, transferEntry);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
+      await runMutation(() => repo.archiveAccount(id, transferEntry));
     },
-    [refresh, toast],
+    [runMutation],
   );
 
   const reorderAccounts = useCallback<LedgerContextValue['reorderAccounts']>(
     async (ids) => {
-      try {
-        await repo.reorderAccounts(ids);
-        await refresh();
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
+      // toast は出さない＝連続操作を妨げない（成功通知なしは従来どおり）。
+      await runMutation(
+        () => repo.reorderAccounts(ids),
+        () => null,
+      );
     },
-    [refresh, toast],
+    [runMutation],
   );
 
   const removeAccount = useCallback<LedgerContextValue['removeAccount']>(
     async (id) => {
-      try {
-        await repo.deleteAccount(id);
-        await refresh();
-        toast.show(t('toast.deleted'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
+      await runMutation(
+        () => repo.deleteAccount(id),
+        () => ({ message: t('toast.deleted') }),
+      );
     },
-    [refresh, toast],
+    [runMutation],
   );
 
   const saveSettings = useCallback<LedgerContextValue['saveSettings']>(
     async (settings) => {
-      try {
-        await repo.updateSettings(settings);
-        await refresh();
-        toast.show(t('toast.saved'), 'success');
-      } catch (e) {
-        toast.show(errorText(e), 'error');
-        throw e;
-      }
+      await runMutation(() => repo.updateSettings(settings));
     },
-    [refresh, toast],
+    [runMutation],
   );
 
   const exportJson = useCallback<LedgerContextValue['exportJson']>(() => {
@@ -571,22 +491,31 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [applyRecoveredLedger, toast],
   );
 
-  const deleteSnapshot = useCallback<LedgerContextValue['deleteSnapshot']>(async (id) => {
-    await repo.deleteSnapshot(id);
-  }, []);
+  const deleteSnapshot = useCallback<LedgerContextValue['deleteSnapshot']>(
+    async (id) => {
+      // ledger 本体は変わらないので refresh は不要（一覧は呼び出し側が読み直す）。
+      // 失敗の無通知（監査 A で唯一の toast なし箇所）をここで塞ぐ。
+      try {
+        await repo.deleteSnapshot(id);
+      } catch (e) {
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
+      toast.show(t('toast.deleted'), 'success');
+    },
+    [toast],
+  );
 
   const resetAll = useCallback<LedgerContextValue['resetAll']>(async () => {
-    try {
-      await repo.resetAll();
-      // 初期状態へ戻すので、オンボーディング既読フラグも消す（次回起動で再表示）。
-      clearOnboardingDone();
-      await refresh();
-      toast.show(t('toast.reset'), 'success');
-    } catch (e) {
-      toast.show(errorText(e), 'error');
-      throw e;
-    }
-  }, [refresh, toast]);
+    await runMutation(
+      async () => {
+        await repo.resetAll();
+        // 初期状態へ戻すので、オンボーディング既読フラグも消す（次回起動で再表示）。
+        clearOnboardingDone();
+      },
+      () => ({ message: t('toast.reset') }),
+    );
+  }, [runMutation]);
 
   const value = useMemo<LedgerContextValue>(
     () => ({
@@ -597,6 +526,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       refresh,
       saveEntry,
       removeEntry,
+      createEntries,
       createContinuousCost,
       createLoanPurchase,
       saveMonthlyCost,
@@ -633,6 +563,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       refresh,
       saveEntry,
       removeEntry,
+      createEntries,
       createContinuousCost,
       createLoanPurchase,
       saveMonthlyCost,

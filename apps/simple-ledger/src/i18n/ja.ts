@@ -9,8 +9,35 @@ export const ja = {
   'nav.allocations': '月割り台帳',
   'nav.cashflow': '資金繰り',
   'nav.timeline': 'タイムライン',
+  'nav.pasteImport': 'まとめて登録',
   'nav.settings': '設定',
   'nav.help': 'ヘルプ',
+
+  // 仕訳の貼り付け一括登録（v13.10）
+  'pasteImport.title': 'まとめて登録',
+  'pasteImport.desc':
+    'AI などで作った仕訳テキストを貼り付けて、一度に登録します。1 行 = 1 仕訳。登録後は仕訳一覧で 1 件ずつ編集できます。',
+  'pasteImport.format': '形式: 日付,摘要,金額,貸方,借方（カンマ区切り・この順・5 項目ちょうど）',
+  'pasteImport.example': '例: 2026-08-19,ランチ,800,現金,食費',
+  'pasteImport.nameHint':
+    '貸方・借方は勘定科目の名前と完全一致で照合します（「未記入」のような仮の借方を使うときは、その名前の科目を先に作っておきます）。',
+  'pasteImport.textLabel': '仕訳テキスト',
+  'pasteImport.submit': '登録',
+  'pasteImport.confirmTitle': 'まとめて登録',
+  'pasteImport.confirmBody': '{count} 件の仕訳を登録します。',
+  'pasteImport.success': '{count} 件の仕訳を登録しました。',
+  'pasteImport.error.empty': '登録できる行がありません。',
+  'pasteImport.error.tooMany': '一度に登録できるのは {max} 行までです（{count} 行あります）。',
+  'pasteImport.error.fieldCount': '{line} 行目: 5 項目（日付,摘要,金額,貸方,借方）ではありません。',
+  'pasteImport.error.date': '{line} 行目: 日付が不正です（YYYY-MM-DD）。',
+  'pasteImport.error.description': '{line} 行目: 摘要が空か、200 文字を超えています。',
+  'pasteImport.error.amount': '{line} 行目: 金額が不正です（正の数・小数 2 桁まで）。',
+  'pasteImport.error.unknownAccount': '{line} 行目: 科目「{name}」が見つかりません。',
+  'pasteImport.error.ambiguousAccount':
+    '{line} 行目: 科目「{name}」が同名で複数あり、特定できません。',
+  'pasteImport.error.accountPeriod':
+    '{line} 行目: 科目「{name}」はこの日付では使えません（開始前・終了後）。',
+  'pasteImport.error.sameAccount': '{line} 行目: 貸方と借方が同じ科目です。',
 
   'common.cancel': 'キャンセル',
   'common.save': '保存',
@@ -313,6 +340,8 @@ export const ja = {
   // ローンの必須検証（保存境界 createLoanPurchase と同じ条件を先に示す）。
   'entry.error.loanFrom': '返済元の科目を選んでください。',
   'entry.error.loanEndDate': '1 回以上返済できる終了日を入れてください。',
+  'entry.error.loanMonthlyZero':
+    '毎月の返済額が 0 になります。終了日を近づけて回数を減らしてください。',
   'entry.source.manual': '左側（貸方）',
   'entry.destination.manual': '右側（借方）',
   'entry.detailToggle': '詳細（メモ）',
@@ -395,6 +424,8 @@ export const ja = {
   // 桁あふれで投影を打ち切った科目の注記（アプリ都合の端点を名乗る・仮の数字が本物の顔をしない）。
   'projection.truncatedNotice':
     '「{name}」の投影は金額が計算上限を超えるため {month} で打ち切りました。それ以降の投影は表示に含まれません。',
+  'adjust.unspreadNotice':
+    '補正「{description}」（{date}）は計上先が見つからないため按分できず、記録どおりの仕訳のまま集計しています（復旧表示）。科目を復元するか、補正を削除して作り直してください。',
   'matrix.monthLabel': '{month}月',
   // 年をまたぐ窓なので、年の変わり目の列だけ年を名乗る（読み上げは常に年つき）。
   'matrix.monthLabelWithYear': '{year}年{month}月',
@@ -567,8 +598,8 @@ export const ja = {
     '旧版データのままでは JSON の読み込みもできません。手順: ①「DB を初期化して再起動」で初期化 → ②起動後に設定から、現行版へ変換済みの JSON を読み込んでください。',
 
   'toast.saved': '保存しました。',
-  'toast.recurringSavedFollowupFailed':
-    'ルールは保存しましたが、画面の再読込に失敗しました。画面を開き直してください。',
+  'toast.savedFollowupFailed':
+    '操作は完了しましたが、画面の再読込に失敗しました。画面を開き直してください。',
   'toast.deleted': '削除しました。',
   'toast.exported': '書き出しました。',
   'toast.restored': '復元しました。',
@@ -634,6 +665,8 @@ export const ja = {
   'error.entry.ledgerAccount': '月割り台帳の科目は持ち物の登録からだけ使えます。',
   'error.account.archiveBalance':
     '残高が残っている科目は終了できません。先に振替で残高を 0 にしてください。',
+  'error.account.projectionDependents':
+    'この科目は終了済み投資科目「{name}」の投影計上先です。この操作で「{name}」の終了点残高が 0 でなくなるため実行できません。先に投資科目側の利回り設定や残高を調整してください。',
   'error.recurring.everyMonthsInvalid': '周期は 1〜1200 か月の整数で入力してください。',
   'error.recurring.dayOfMonthInvalid': '起票日は 1〜31 日の整数で入力してください。',
   'error.recurring.periodInvalid': 'ルールの開始日・終了日を確認してください。',
@@ -729,6 +762,8 @@ export const ja = {
   'error.repay.liabilityRequired': '返済先はカード・未払 / ローンの負債科目を選んでください。',
   'error.loan.noRepayment':
     '返済が 1 回も起きない終了日です。初回の返済日より後の終了日を選んでください。',
+  'error.loan.monthlyTooSmall':
+    '借入額が返済回数より少なく、毎月の返済額が 0 になるため登録できません。終了日を近づけて回数を減らしてください。',
 
   // 月割り台帳（くり返し記帳 = 実仕訳の自動起票 / 継続コスト資産 = 月割りの導出）
   'monthly.title': '月割り台帳',

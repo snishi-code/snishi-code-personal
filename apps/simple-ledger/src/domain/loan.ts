@@ -93,13 +93,16 @@ export function loanInstallmentCount(firstRepaymentDate: string, endDateExclusiv
 }
 
 /**
- * 1 回あたりの返済額 = 総額 ÷ 回数（四捨五入）。
- * 端数は最後まで割り切れないので**負債の残高に残る**（丸めて消さない・利息を分けないのと同じ
- * 割り切り。作者が手仕訳か補正で始末する）。UI は差額を明示する。
+ * 1 回あたりの返済額 = 総額 ÷ 回数（**切り捨て**・監査 D）。
+ * 四捨五入だと 月額 × 回数 > 総額 になり得て（10,000÷6 = 1,667×6 = 10,002）、返済し切った
+ * 負債がマイナス残高（過返済）になる。切り捨てなら端数（総額 − 月額×回数）は**正の負債残高
+ * として最後に残る**——利息を分けないのと同じ割り切りで、作者が手仕訳か補正で始末する。
+ * UI は差額を明示する。
+ * 回数 > 総額（月額 1 未満）は返済として成立しないので 0 を返し、保存境界が拒否する。
  */
 export function loanMonthlyAmount(total: number, count: number): number {
   if (!Number.isInteger(total) || total < 1 || !Number.isInteger(count) || count < 1) return 0;
-  return Math.max(1, Math.round(total / count));
+  return Math.floor(total / count);
 }
 
 /** 月額 × 回数（借入額との差 = 最後に残る額）。 */

@@ -25,11 +25,16 @@ export interface ReportEntriesResult {
    * 「導出を含む」と言い続けず、止まった事実を名乗る（数字が黙って横ばいの顔をしない）。
    */
   investmentProjectionTruncations: InvestmentProjectionTruncation[];
+  /**
+   * 按分できず stored のまま集計へ戻した補正 pin（完全整合性を欠く破損データ・監査 H）。
+   * これは**復旧処理**なので、画面は黙って通常表示に混ぜず「復旧表示」と名乗る。
+   */
+  unspreadAdjustments: JournalEntry[];
 }
 
 /** 全地平ぶんの導出（キャッシュの中身・断面はここから切り出す）。 */
 interface FullDerivation {
-  /** 導出行（`cached` 側は日付昇順、直接導出は合流順）。 */
+  /** 導出行（合流順のまま。公開面へ出す側がソートする）。 */
   entries: JournalEntry[];
   /** 全地平ぶんの打ち切り診断（断面ごとに `truncationVisibleAt` で切る）。 */
   truncations: InvestmentProjectionTruncation[];
@@ -37,6 +42,8 @@ interface FullDerivation {
   horizon: string;
   /** 補正（pin）の最遠日。`opening` 打ち切りが見え始める断面の判定に使う。 */
   maxAdjustmentDate: string | undefined;
+  /** 按分できず stored のまま戻した補正 pin（断面では日付で切って見せる）。 */
+  unspreadAdjustments: JournalEntry[];
 }
 
 /**
@@ -93,6 +100,22 @@ function truncationVisibleAt(
 }
 
 /**
+ * キャッシュに載せる行を凍結する（v13.8 監査・機構 2-2）。
+ * キャッシュは ledger の寿命じゅう全断面へ配られる共有物なので、消費側のうっかり書き換えは
+ * 「以後の全断面が静かに汚染される」事故になる。strict mode では書き換えが TypeError で
+ * 即座に落ちる = fail-fast（黙って汚染されるより早く割れる方を選ぶ）。
+ */
+function freezeEntry(entry: JournalEntry): void {
+  for (const line of entry.lines) Object.freeze(line);
+  Object.freeze(entry.lines);
+  if (entry.metadata !== undefined) {
+    if (entry.metadata.adjustment !== undefined) Object.freeze(entry.metadata.adjustment);
+    Object.freeze(entry.metadata);
+  }
+  Object.freeze(entry);
+}
+
+/**
  * 全地平（`CONTINUOUS_COST_HARD_CAP`）まで 1 回導出して日付昇順に並べたもの。
  * 同じ ledger オブジェクトで 2 回目以降はここを使い回す。
  */
@@ -103,6 +126,12 @@ function cachedDerivation(ledger: ReportEntrySource): FullDerivation {
   // sort は stable なので、同日の中では合流順（実仕訳 → 継続コスト → ルール導出 →
   // 按分スライス → 利回り）がそのまま残る。
   full.entries.sort(byDate);
+  for (const entry of full.entries) freezeEntry(entry);
+  for (const entry of full.unspreadAdjustments) freezeEntry(entry);
+  for (const truncation of full.truncations) Object.freeze(truncation);
+  Object.freeze(full.entries);
+  Object.freeze(full.unspreadAdjustments);
+  Object.freeze(full.truncations);
   derivationCache.set(ledger, full);
   return full;
 }
@@ -151,6 +180,7 @@ export function reportEntriesResultForAsOf(
     investmentProjectionTruncations: cached.truncations.filter((truncation) =>
       truncationVisibleAt(truncation, asOf, cached.maxAdjustmentDate),
     ),
+    unspreadAdjustments: cached.unspreadAdjustments.filter((entry) => entry.date <= asOf),
   };
 }
 
@@ -166,8 +196,12 @@ export function reportEntriesResultForAsOfUncached(
 ): ReportEntriesResult {
   const full = deriveAll(ledger, asOf);
   return {
-    entries: full.entries.filter((entry) => entry.date <= asOf),
+    // 公開契約は**日付昇順**（キャッシュ経路と同じ）。合流順のまま返すと、地平外の断面
+    // だけ並びが変わり契約が破れる（v13.8 監査・機構 2。sort は stable なので同日の中は
+    // 合流順 = キャッシュ経路と同一）。
+    entries: full.entries.filter((entry) => entry.date <= asOf).sort(byDate),
     investmentProjectionTruncations: full.truncations,
+    unspreadAdjustments: full.unspreadAdjustments.filter((entry) => entry.date <= asOf),
   };
 }
 
@@ -259,6 +293,7 @@ function deriveAll(ledger: ReportEntrySource, asOf: string): FullDerivation {
     truncations: projection.truncations,
     horizon,
     maxAdjustmentDate,
+    unspreadAdjustments: spread.unspread,
   };
 }
 

@@ -3,12 +3,13 @@ import { t } from '../src/i18n';
 import { NAV_ITEMS, TIME_PLANE_SCREEN, supportsTimeZoom } from '../src/ui/navigation';
 
 describe('ハンバーガーメニューのナビゲーション', () => {
-  it('メニューは 5 項目（年間・全体は時間平面の数値レンズへ吸収済み）', () => {
+  it('メニューは 6 項目（年間・全体は時間平面の数値レンズへ吸収済み・まとめて登録は v13.10）', () => {
     expect(NAV_ITEMS.map(({ screen }) => screen)).toEqual([
       'timeline',
       'allocations',
       'cashflow',
       'accounts',
+      'pasteImport',
       'settings',
     ]);
     // 表示名は i18n から引ける（キーの取り違えを落とす）。

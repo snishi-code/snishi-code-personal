@@ -190,6 +190,23 @@ describe('清算パネル', () => {
     ).toBeNull();
   });
 
+  it('未来の切り替え日では today〜切り替え日に起票される item も候補に出る（監査 B）', async () => {
+    // 導出地平を today で切ると、10/02 起票の item が候補から漏れて古い終了日のまま
+    // 走り続ける。地平は宣言された切り替え日（v13.4 の today 規約）。
+    const rule = await seedRule();
+    await openSwitchSheet();
+    setValue(UI.allocations.recurringSwitchDate, '2026-10-20');
+
+    // 切り替え日をまたぐのは 10/02 起票の item（[10/02, 11/02]・残存価値あり）。
+    expect(settlementRow(ruleItemId(rule.id, '2026-10'))).toBeTruthy();
+    // 8 月の item は 9/02 で終わっている（endDate <= 切り替え日）ので候補に出ない。
+    expect(
+      document.querySelector(
+        `[data-ui="${UI.allocations.recurringSettlementItem}"][data-item-id="${ruleItemId(rule.id, '2026-08')}"]`,
+      ),
+    ).toBeNull();
+  });
+
   it('回収額の既定は切り替え日に追従し、手で直したら追従を止める', async () => {
     // 年払い（12 か月ごと・12,000 円）: item は [8/02, 翌 8/02] の 12 刻みなので、
     // 切り替え日を動かすと残存価値が実際に変わる。

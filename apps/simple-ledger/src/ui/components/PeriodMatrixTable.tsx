@@ -184,10 +184,14 @@ export function PeriodMatrixTable({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
+          {rows.map((row, index) => (
             <MatrixRow
               key={row.id}
               row={row}
+              // 段の切り替わり（フロー ⇄ ストック）に区切り線。行キーの決め打ちではなく
+              // **直前の行と stock 性が変わったか**で判定する（v13.6 H3 の共通ラベル列では
+              // 並びの正本が箱の木なので、境界も木の性質から導く。v13.8 監査 C）。
+              sectionStart={index > 0 && row.node.stock !== rows[index - 1]!.node.stock}
               // チェック OFF の行 / 値を持たない行（月割り項目など）はセルを空にする。
               values={row.checked ? matrix.values.get(row.id) : undefined}
               columnCount={columns.length}
@@ -207,6 +211,7 @@ function MatrixRow({
   values,
   columnCount,
   currency,
+  sectionStart,
   onToggleRow,
   onCheckRow,
 }: {
@@ -214,14 +219,22 @@ function MatrixRow({
   values: readonly number[] | undefined;
   columnCount: number;
   currency: string;
+  /** 段（フロー/ストック）の切り替わりの行 = 上辺に区切り線を引く。 */
+  sectionStart: boolean;
   onToggleRow: (id: string) => void;
   onCheckRow: (id: string, checked: boolean) => void;
 }) {
   const labelProps = lensRowLabelProps(row);
   const tone = rowTone(row);
+  const rowClasses = [
+    row.emphasis ? 'period-matrix__row--emphasis' : '',
+    sectionStart ? 'period-matrix__row--section' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
   return (
     <tr
-      className={row.emphasis ? 'period-matrix__row--emphasis' : undefined}
+      className={rowClasses === '' ? undefined : rowClasses}
       data-ui={UI.timeline.matrixRow}
       data-row-key={row.id}
     >
