@@ -728,7 +728,8 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   box-shadow: var(--shadow);
   display: flex;
   align-items: center;
-  justify-content: center;
+  /* 左揃え (作者レビュー 2026-08-20: 中央揃えは名簿として見づらい) */
+  justify-content: flex-start;
   /* 老眼対策: ボタンの大きさに見合う文字サイズ */
   font-size: 25px;
   font-weight: 800;
@@ -736,7 +737,7 @@ dialog.sheet.dialog[data-ui='qr.dialog'] {
   touch-action: pan-y;
   overflow-wrap: anywhere;
   word-break: break-word;
-  text-align: center;
+  text-align: left;
   padding: var(--space-2) var(--space-3);
 }
 

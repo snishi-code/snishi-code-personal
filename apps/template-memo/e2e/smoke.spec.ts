@@ -200,6 +200,16 @@ test('freeText を外した場所には自由入力欄が出ない', async ({ pa
   await expect(projectionCard.locator(ui(UI.projection.freeText))).toHaveCount(3);
 });
 
+// ── 名簿の見た目 (作者レビュー 2026-08-20): 左揃え ──
+
+test('名簿の行は左揃えで表示される', async ({ page }) => {
+  await addPatient(page, '101', '検証対象A');
+  const card = page.locator(ui(UI.patient.card), { hasText: '101 検証対象A' });
+  // 中央揃えへの回帰を防ぐ (名簿として見づらい・作者レビュー)。
+  await expect(card).toHaveCSS('justify-content', 'flex-start');
+  await expect(card).toHaveCSS('text-align', 'left');
+});
+
 test('ホームの縦位置は詳細から戻っても保たれ、一番上へ戻るボタンで先頭へ返れる', async ({
   page,
 }) => {
