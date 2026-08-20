@@ -104,6 +104,13 @@ describe('日付上限（MAX_LEDGER_DATE = 2100-12-31・v13.8 監査 E）', () =
       expect(journalEntrySchema.safeParse({ ...validEntry, date }).success).toBe(false);
     }
   });
+  // 下限（v13.9 項目 8）: アプリが扱う期間 = [2000-01-01, 2100-12-31]。上限と対称に入口で拒否。
+  it('仕訳の日付は 2000-01-01 から受け入れ、1999 年以前を拒否する', () => {
+    expect(journalEntrySchema.safeParse({ ...validEntry, date: '2000-01-01' }).success).toBe(true);
+    for (const date of ['1999-12-31', '1900-01-01']) {
+      expect(journalEntrySchema.safeParse({ ...validEntry, date }).success).toBe(false);
+    }
+  });
   it('勘定科目の開始日・終了日も同じ上限を通す', () => {
     const account = {
       id: 'a1',

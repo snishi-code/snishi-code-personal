@@ -33,7 +33,7 @@ import {
   ruleExistsAt,
 } from './accountLifetime';
 import { accountEndingBalanceViolations } from './accountEnding';
-import { isValidIsoDate, isValidIsoMonth, MAX_LEDGER_DATE } from './calendar';
+import { isValidIsoDate, isValidIsoMonth, MAX_LEDGER_DATE, MIN_LEDGER_DATE } from './calendar';
 import { ANNUAL_RETURN_BP_MAX, ANNUAL_RETURN_BP_MIN } from './investmentProjection';
 import { CATCH_UP_HARD_CAP_MONTHS, clampDayToMonth, isRecurringPostableRole } from './recurring';
 import { parseRuleEntryId, parseRuleItemId } from './recurringIds';
@@ -47,6 +47,11 @@ const isoDate = z
   .refine(
     (value) => value <= MAX_LEDGER_DATE,
     `日付は ${MAX_LEDGER_DATE} 以前である必要があります`,
+  )
+  // 下限も上限と対称（v13.9 項目 8）。アプリが扱う期間 = [MIN, MAX] の外は入口で一律拒否する。
+  .refine(
+    (value) => value >= MIN_LEDGER_DATE,
+    `日付は ${MIN_LEDGER_DATE} 以降である必要があります`,
   );
 
 const monthSchema = z

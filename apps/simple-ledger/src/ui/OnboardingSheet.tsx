@@ -10,7 +10,7 @@ import { TextInput } from '@snishi/foundation/ui/Field';
 import { Modal, useDirtyGuard } from './overlays';
 import { sortAccounts } from '../domain/displayOrder';
 import { useLedger } from '../state/store';
-import { MAX_LEDGER_DATE } from '../domain/calendar';
+import { MAX_LEDGER_DATE, MIN_LEDGER_DATE } from '../domain/calendar';
 import { todayLocal } from '../util/time';
 import { t } from '../i18n';
 import { parseAmountToMinor, sanitizeAmountText } from './amountText';
@@ -127,6 +127,7 @@ export function OnboardingSheet({ onClose }: { onClose: () => void }) {
             type="date"
             value={date}
             onChange={setDate}
+            min={MIN_LEDGER_DATE}
             max={MAX_LEDGER_DATE}
             required
           />

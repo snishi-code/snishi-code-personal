@@ -52,7 +52,7 @@ import type { AccountRole } from '../../domain/accountRoles';
 import { RECURRING_POSTABLE_ROLES, isRecurringPostableRole } from '../../domain/recurring';
 import { t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
-import { MAX_LEDGER_DATE } from '../../domain/calendar';
+import { MAX_LEDGER_DATE, MIN_LEDGER_DATE } from '../../domain/calendar';
 import { todayLocal } from '../../util/time';
 import { UI } from '../../ui-contract';
 
@@ -553,6 +553,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         type="date"
         required
         value={form.date}
+        min={MIN_LEDGER_DATE}
         max={MAX_LEDGER_DATE}
         onChange={(v) => setForm((f) => ({ ...f, date: v }))}
         error={errorText(errors, 'date-required')}
@@ -943,6 +944,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           type="date"
           value={ccEndDate}
           onChange={setCcEndDate}
+          min={MIN_LEDGER_DATE}
           max={MAX_LEDGER_DATE}
           dataUi={UI.journal.entry.ccEndDate}
         />
@@ -983,6 +985,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         type="date"
         required
         value={loanEndDate}
+        min={MIN_LEDGER_DATE}
         max={MAX_LEDGER_DATE}
         hint={t('entry.loanEndDateHint', { date: loanFirstDate })}
         onChange={(v) => {

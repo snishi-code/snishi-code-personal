@@ -12,7 +12,7 @@ import { TextInput } from '@snishi/foundation/ui/Field';
 import { useLedger } from '../state/store';
 import { formatMinorForInput, parseAmountToMinor, sanitizeSignedAmountText } from './amountText';
 import { useMoneyDigits } from './money';
-import { MAX_LEDGER_DATE } from '../domain/calendar';
+import { MAX_LEDGER_DATE, MIN_LEDGER_DATE } from '../domain/calendar';
 import { todayLocal } from '../util/time';
 import type { Account, JournalEntry } from '../domain/types';
 import { t } from '../i18n';
@@ -103,6 +103,7 @@ export function OpeningRegisterSheet({
           type="date"
           value={date}
           onChange={setDate}
+          min={MIN_LEDGER_DATE}
           max={MAX_LEDGER_DATE}
           dataUi={UI.adjustments.openingRegisterDate}
         />
@@ -196,6 +197,7 @@ export function OpeningEditSheet({ entry, onClose }: { entry: JournalEntry; onCl
             type="date"
             value={date}
             onChange={setDate}
+            min={MIN_LEDGER_DATE}
             max={MAX_LEDGER_DATE}
             dataUi={UI.adjustments.openingEditDate}
           />

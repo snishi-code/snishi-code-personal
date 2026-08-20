@@ -4,6 +4,7 @@ import {
   isValidIsoDate,
   isValidIsoMonth,
   MAX_LEDGER_DATE,
+  MIN_LEDGER_DATE,
 } from '../src/domain/calendar';
 
 describe('isValidIsoMonth', () => {
@@ -43,6 +44,17 @@ describe('isLedgerDate（暦 + 上限 2100-12-31・v13.8 監査 E）', () => {
   });
 
   it.each(['2101-01-01', '9999-12-31', '2026-02-31', '2026/01/01'])('%s を拒否する', (date) => {
+    expect(isLedgerDate(date)).toBe(false);
+  });
+});
+
+describe('isLedgerDate の下限（MIN_LEDGER_DATE = 2000-01-01・v13.9 項目 8）', () => {
+  it('下限と同じ日付から受け入れる', () => {
+    expect(MIN_LEDGER_DATE).toBe('2000-01-01');
+    expect(isLedgerDate('2000-01-01')).toBe(true);
+  });
+
+  it.each(['1999-12-31', '1900-01-01', '0001-01-01'])('%s を拒否する', (date) => {
     expect(isLedgerDate(date)).toBe(false);
   });
 });

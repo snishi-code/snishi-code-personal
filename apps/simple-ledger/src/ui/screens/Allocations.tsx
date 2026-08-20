@@ -48,7 +48,7 @@ import {
   monthlyAllocationAccountOptions,
 } from '../accountOptions';
 import { monthlyAmounts, monthOf } from '../../domain/allocation';
-import { isLedgerDate, isValidIsoDate, MAX_LEDGER_DATE } from '../../domain/calendar';
+import { isLedgerDate, isValidIsoDate, MAX_LEDGER_DATE, MIN_LEDGER_DATE } from '../../domain/calendar';
 import { reportBasis, type ReportPeriod } from '../../domain/reportPeriod';
 import { nowIso, todayLocal } from '../../util/time';
 import {
@@ -1114,6 +1114,7 @@ function RecurringRuleSheet({
             type="date"
             required
             value={firstPostingDate}
+            min={MIN_LEDGER_DATE}
             max={MAX_LEDGER_DATE}
             onChange={setFirstPostingDate}
             hint={t('recurring.firstPostingDateHint')}
@@ -1224,6 +1225,7 @@ function RecurringRuleSheet({
                     type="date"
                     required
                     value={startDate}
+                    min={MIN_LEDGER_DATE}
                     max={MAX_LEDGER_DATE}
                     onChange={setStartDate}
                     hint={t('recurring.ruleStartDateHint')}
@@ -1233,6 +1235,7 @@ function RecurringRuleSheet({
                     label={t('recurring.ruleEndDate')}
                     type="date"
                     value={endDate}
+                    min={MIN_LEDGER_DATE}
                     max={MAX_LEDGER_DATE}
                     onChange={setEndDate}
                     hint={t('recurring.ruleEndDateHint')}
@@ -1608,6 +1611,7 @@ function ContinuousCostItemSheet({
               type="date"
               required
               value={startDate}
+              min={MIN_LEDGER_DATE}
               max={MAX_LEDGER_DATE}
               onChange={setStartDate}
               dataUi={UI.allocations.editStartDate}
@@ -1618,6 +1622,7 @@ function ContinuousCostItemSheet({
             type="date"
             value={endDate}
             onChange={setEndDate}
+            min={MIN_LEDGER_DATE}
             max={MAX_LEDGER_DATE}
             dataUi={UI.allocations.editEndDate}
           />
@@ -2184,6 +2189,7 @@ function RecurringRuleSwitchSheet({ rule, onClose }: { rule: RecurringRule; onCl
           type="date"
           required
           value={effectiveDate}
+          min={MIN_LEDGER_DATE}
           max={MAX_LEDGER_DATE}
           onChange={setEffectiveDate}
           hint={t('recurring.switchDateHint')}
@@ -2317,6 +2323,7 @@ function RecurringRuleEndSheet({ rule, onClose }: { rule: RecurringRule; onClose
           required
           value={endDate}
           onChange={setEndDate}
+          min={MIN_LEDGER_DATE}
           max={MAX_LEDGER_DATE}
           hint={t('recurring.endSheetBody')}
           dataUi={UI.allocations.recurringEndSheetDate}
@@ -2468,6 +2475,7 @@ function MonthlyCostArchiveSheet({
           required
           value={endDate}
           onChange={setEndDate}
+          min={MIN_LEDGER_DATE}
           max={MAX_LEDGER_DATE}
           hint={t('ccItem.archiveDateHint')}
           dataUi={UI.allocations.archiveDate}

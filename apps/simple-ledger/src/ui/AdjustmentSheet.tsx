@@ -13,7 +13,7 @@ import { ADJUSTABLE_ACCOUNT_ROLES } from '../domain/accountRoles';
 import { isAdjustableAccountType } from '../domain/adjustment';
 // isLedgerDate = 暦 + 上限（2100 年）。上限超えの日付で理論残高のライブ導出を走らせない
 // （遠未来の pin 候補は月次展開を数万月ぶん走らせ、保存前にシートが固まる。v13.8 監査 E）。
-import { isLedgerDate, MAX_LEDGER_DATE } from '../domain/calendar';
+import { isLedgerDate, MAX_LEDGER_DATE, MIN_LEDGER_DATE } from '../domain/calendar';
 // 理論残高は「この pin を置いたあとの世界での pin 直前残高」（v13.5 C-3）。
 // repository の保存側（createAdjustment / updateAdjustment）と**同じヘルパ**を通す
 // ——ずれると、シートが見せた差分と実際に按分されるスライス合計が食い違う。
@@ -117,6 +117,7 @@ export function AdjustmentCreateSheet({
           type="date"
           value={date}
           onChange={setDate}
+          min={MIN_LEDGER_DATE}
           max={MAX_LEDGER_DATE}
           dataUi={UI.adjustments.date}
         />
@@ -264,6 +265,7 @@ export function AdjustmentEditSheet({
             type="date"
             value={date}
             onChange={setDate}
+            min={MIN_LEDGER_DATE}
             max={MAX_LEDGER_DATE}
             dataUi={UI.adjustments.editDate}
           />

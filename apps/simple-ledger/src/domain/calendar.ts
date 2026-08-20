@@ -31,7 +31,15 @@ export function isValidIsoMonth(value: string): boolean {
  */
 export const MAX_LEDGER_DATE = '2100-12-31';
 
-/** 台帳に保存できる日付か（暦として正しく、かつ上限以内）。ライブ導出の入口ガードにも使う。 */
+/**
+ * 台帳が受け付ける日付の下限（v13.9 項目 8・作者決定 2026-08-20）。
+ * アプリが扱う期間 = [MIN_LEDGER_DATE, MAX_LEDGER_DATE]。上限側（v13.8-E）と対称に、
+ * 導出側の clamp ではなく入口（UI / repository / schema / import）で一律拒否する。
+ * 幅を広げるときはこの 2 定数（+ 期間幅の CATCH_UP_HARD_CAP_MONTHS）だけを変える。
+ */
+export const MIN_LEDGER_DATE = '2000-01-01';
+
+/** 台帳に保存できる日付か（暦として正しく、かつ上下限の内側）。ライブ導出の入口ガードにも使う。 */
 export function isLedgerDate(value: string): boolean {
-  return isValidIsoDate(value) && value <= MAX_LEDGER_DATE;
+  return isValidIsoDate(value) && MIN_LEDGER_DATE <= value && value <= MAX_LEDGER_DATE;
 }
