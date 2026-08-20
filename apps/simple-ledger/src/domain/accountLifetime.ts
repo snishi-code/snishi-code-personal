@@ -169,16 +169,40 @@ function recurringRuleLastPostingMonth(rule: RecurringRule): string | undefined 
 }
 
 /**
- * 定期ルールが科目を参照し得る終端（含む）。
- * 全ルールが台帳経由なので、存在期間内の最後の起票が作る item の配分終端まで科目を使う。
+ * ルールが month の起票で生む item の配分終端。既定 = 次回起票日（同日刻み）。
+ * その月に清算（settlement）があれば **その上書きが正本**（v13.9 項目 3 で 1 か所に集約。
+ * `deriveRecurringOutputs` の導出と、参照区間・保存境界の検証が同じ規則を共有する）。
  */
-export function recurringRuleReferenceEndDate(rule: RecurringRule): string | undefined {
-  const lastExistingDate = recurringRuleLastExistingDate(rule);
-  if (lastExistingDate === undefined) return lastExistingDate;
+export function recurringRuleItemEndDateFor(rule: RecurringRule, month: string): string {
+  const settlement = rule.settlements?.find((s) => s.month === month);
+  return settlement !== undefined
+    ? settlement.endDate
+    : recurringRuleItemEndDate(month, rule.everyMonths, rule.dayOfMonth);
+}
+
+/*
+ * ルール由来の参照区間の終端は**役割別**（v13.9 項目 3・作者の設計指摘 2026-08-20）。
+ * ルールと勘定科目は別世界で、門番が見るべきは「その科目に実際に触れるフローの終端」:
+ *  - 起票仕訳の両側（源泉 = creditAccountId）: 触れるのは起票日だけ → 終端 = 最終起票日
+ *  - 按分の受け口（spreadExpenseAccountId）と集約台帳（保存形の debitAccountId）:
+ *    月割り行が item の配分期間じゅう触れる → 終端 = 最終 item の配分終端（清算反映）
+ * ルール未終了（endDate 無し）はどちらも開区間（undefined）= 従来どおり終了不可。
+ */
+
+/** 起票仕訳の両側の参照終端 = 存在期間内の最終起票日。未終了ルールは開区間。 */
+export function recurringRulePostingReferenceEndDate(rule: RecurringRule): string | undefined {
+  if (rule.endDate === undefined) return undefined;
   const lastPostingMonth = recurringRuleLastPostingMonth(rule);
-  if (lastPostingMonth === undefined) return lastExistingDate;
-  const itemEnd = recurringRuleItemEndDate(lastPostingMonth, rule.everyMonths, rule.dayOfMonth);
-  return itemEnd > lastExistingDate ? itemEnd : lastExistingDate;
+  if (lastPostingMonth === undefined) return recurringRuleLastExistingDate(rule);
+  return ruleFirstDate(lastPostingMonth, rule.dayOfMonth);
+}
+
+/** 按分の受け口・集約台帳の参照終端 = 最終 item の配分終端（清算があれば前倒し）。 */
+export function recurringRuleSpreadReferenceEndDate(rule: RecurringRule): string | undefined {
+  if (rule.endDate === undefined) return undefined;
+  const lastPostingMonth = recurringRuleLastPostingMonth(rule);
+  if (lastPostingMonth === undefined) return recurringRuleLastExistingDate(rule);
+  return recurringRuleItemEndDateFor(rule, lastPostingMonth);
 }
 
 export interface RecurringLineageViolation {
@@ -317,18 +341,29 @@ export function accountReferenceIntervals(
     }
   }
   for (const rule of collections.recurringRules) {
-    if (
-      rule.debitAccountId === accountId ||
-      rule.creditAccountId === accountId ||
-      rule.spreadExpenseAccountId === accountId
-    ) {
-      const referenceStart = recurringRuleReferenceStartDate(rule);
-      if (referenceStart === undefined) continue;
-      const referenceEnd = recurringRuleReferenceEndDate(rule);
+    // 役割別の終端（v13.9 項目 3）: 源泉（起票の両側）は最終起票日まで、受け口と集約台帳
+    // （保存形の借方 = 台帳）は最終 item の配分終端まで。ルール単位の一律区間を科目へ
+    // 課さない（支払い元が item の配分終端まで拘束される誤りの是正）。
+    const postingSide = rule.creditAccountId === accountId;
+    const spreadSide =
+      rule.spreadExpenseAccountId === accountId || rule.debitAccountId === accountId;
+    if (!postingSide && !spreadSide) continue;
+    const referenceStart = recurringRuleReferenceStartDate(rule);
+    if (referenceStart === undefined) continue;
+    if (postingSide) {
+      const to = recurringRulePostingReferenceEndDate(rule);
       intervals.push({
         kind: 'recurringRule',
         from: referenceStart,
-        ...(referenceEnd !== undefined ? { to: referenceEnd } : {}),
+        ...(to !== undefined ? { to } : {}),
+      });
+    }
+    if (spreadSide) {
+      const to = recurringRuleSpreadReferenceEndDate(rule);
+      intervals.push({
+        kind: 'recurringRule',
+        from: referenceStart,
+        ...(to !== undefined ? { to } : {}),
       });
     }
   }

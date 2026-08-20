@@ -20,6 +20,7 @@ import { ruleEntryId, ruleItemId } from './recurringIds';
 import {
   accountExistsAt,
   recurringRuleItemEndDate,
+  recurringRuleItemEndDateFor,
   recurringRuleLastExistingDate,
   recurringRuleReferenceStartDate,
   ruleExistsAt,
@@ -331,8 +332,9 @@ export function deriveRecurringOutputs(
       });
       // 清算（settlements）: その月の item の endDate を既定（次回起票日）から上書きする。
       // 解約・切り替えの「切り替え日で終える」の導出面（回収の振替は実仕訳のまま）。
-      const settlement = rule.settlements?.find((s) => s.month === posting.month);
-      items.push(settlement !== undefined ? { ...item, endDate: settlement.endDate } : item);
+      // 上書き規則の正本は recurringRuleItemEndDateFor（参照区間・保存境界と同一・v13.9 項目 3）。
+      const endDate = recurringRuleItemEndDateFor(rule, posting.month);
+      items.push(endDate === item.endDate ? item : { ...item, endDate });
     }
   }
   return { entries, items };

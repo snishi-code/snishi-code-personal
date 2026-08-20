@@ -320,3 +320,89 @@ describe('勘定科目の存在期間（保存境界）', () => {
     ).toBe('2025-01-15');
   });
 });
+
+/**
+ * ルール由来の参照区間は役割別（v13.9 項目 3・作者の受け入れ基準 3 シナリオ）。
+ * 源泉（支払い元）は最終起票日まで・受け口（計上先）は最終 item の配分終端まで。
+ */
+describe('ルール参照の役割別終端（保存境界・v13.9 項目 3）', () => {
+  /** 1 回だけ起票して終了済み・item は 600 か月（50 年）配分のルールを組む。 */
+  async function seedLongSpreadRule() {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((account) => account.name === '預金')!;
+    const fixed = ledger.accounts.find((account) => account.name === '固定費')!;
+    // 源泉の残高を起票額と同額にしておく（終了点残高 0 の条件を満たすため）。
+    await createOpening({ accountId: cash.id, amount: 1000, date: '2026-01-01' });
+    await createRecurringRule({
+      name: '50 年配分',
+      amount: 1000,
+      dayOfMonth: 15,
+      everyMonths: 600,
+      debitAccountId: fixed.id,
+      creditAccountId: cash.id,
+      startMonth: '2026-01',
+      startDate: '2026-01-15',
+      endDate: '2026-01-16', // 1/15 の 1 回だけ起票して終了（排他的終端）
+    });
+    return { cash, fixed };
+  }
+
+  it('ルールが終了済みなら、支払い元は残高 0 にして最終起票日で終了できる', async () => {
+    const { cash } = await seedLongSpreadRule();
+    // 旧実装は item の配分終端（2076 年）まで源泉を一律拘束し、この終了を誤って拒否した。
+    await upsertAccount({
+      ...(await loadLedger()).accounts.find((a) => a.id === cash.id)!,
+      endDate: '2026-01-15',
+      archived: true,
+    });
+    expect(
+      (await loadLedger()).accounts.find((a) => a.id === cash.id)?.endDate,
+    ).toBe('2026-01-15');
+  });
+
+  it('受け口（計上先）は最終 item の配分終端（50 年後）まで終了できない', async () => {
+    const { fixed } = await seedLongSpreadRule();
+    await expect(
+      upsertAccount({
+        ...(await loadLedger()).accounts.find((a) => a.id === fixed.id)!,
+        endDate: '2026-01-15',
+        archived: true,
+      }),
+    ).rejects.toMatchObject({ code: 'error.account.referenceOutsidePeriod' });
+    // 配分終端（2026-01 + 600 か月 = 2076-01-15）ちょうどなら終了できる。
+    await upsertAccount({
+      ...(await loadLedger()).accounts.find((a) => a.id === fixed.id)!,
+      endDate: '2076-01-15',
+      archived: true,
+    });
+    expect(
+      (await loadLedger()).accounts.find((a) => a.id === fixed.id)?.endDate,
+    ).toBe('2076-01-15');
+  });
+
+  it('ルール存続中（終了日なし）は、どの参照科目も従来どおり終了できない', async () => {
+    const ledger = await loadLedger();
+    const cash = ledger.accounts.find((account) => account.name === '預金')!;
+    const fixed = ledger.accounts.find((account) => account.name === '固定費')!;
+    await createOpening({ accountId: cash.id, amount: 1000, date: '2026-01-01' });
+    await createRecurringRule({
+      name: '終わらないルール',
+      amount: 1000,
+      dayOfMonth: 15,
+      everyMonths: 1,
+      debitAccountId: fixed.id,
+      creditAccountId: cash.id,
+      startMonth: '2026-01',
+      startDate: '2026-01-15',
+    });
+    for (const target of [cash, fixed]) {
+      await expect(
+        upsertAccount({
+          ...(await loadLedger()).accounts.find((a) => a.id === target.id)!,
+          endDate: '2099-12-31',
+          archived: true,
+        }),
+      ).rejects.toMatchObject({ code: 'error.account.referenceOutsidePeriod' });
+    }
+  });
+});

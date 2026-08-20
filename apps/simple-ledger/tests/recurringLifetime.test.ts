@@ -146,18 +146,51 @@ describe('定期ルールの存在期間（半開区間）', () => {
     expect(entries.map((entry) => entry.date)).toEqual(['2026-05-20']);
   });
 
-  it('科目参照は次の起票日から最後の起票が作る item の配分終端までの有限区間になる', () => {
+  it('科目参照の終端は役割別 — 源泉は最終起票日・受け口と台帳は最終 item の配分終端（v13.9 項目 3）', () => {
     const subject = rule({ endDate: '2026-06-15' });
     expect(recurringRuleReferenceStartDate(subject)).toBe('2026-04-20');
-    // 存在期間の最終日は 6/14 だが、全ルールが台帳経由なので最後の起票（5/20）が作る
-    // item の終端（= 次回起票日 6/20）まで科目を参照する。
-    expect(
-      accountReferenceIntervals('cash', {
-        entries: [],
-        monthlyCostItems: [],
-        recurringRules: [subject],
-      }),
-    ).toEqual([{ kind: 'recurringRule', from: '2026-04-20', to: '2026-06-20' }]);
+    const collections = {
+      entries: [],
+      monthlyCostItems: [],
+      recurringRules: [subject],
+    };
+    // 源泉（起票仕訳の貸方）が触れられるのは起票日だけ → 最終起票日（5/20）で参照が終わる。
+    // 旧実装は item の配分終端（6/20）まで一律に拘束していた（作者指摘の概念エラー）。
+    expect(accountReferenceIntervals('cash', collections)).toEqual([
+      { kind: 'recurringRule', from: '2026-04-20', to: '2026-05-20' },
+    ]);
+    // 受け口（計上先）と集約台帳は、最後の起票（5/20）が作る item の配分終端
+    // （= 次回起票日 6/20）まで月割り行が触れる。
+    for (const accountId of ['expense', CONTINUOUS_COST_LEDGER_ACCOUNT_ID]) {
+      expect(accountReferenceIntervals(accountId, collections)).toEqual([
+        { kind: 'recurringRule', from: '2026-04-20', to: '2026-06-20' },
+      ]);
+    }
+  });
+
+  it('清算で最終 item を前倒しすると受け口側の終端も前倒しされる（旧 #3）', () => {
+    const settled = rule({
+      endDate: '2026-06-15',
+      settlements: [{ month: '2026-05', endDate: '2026-06-01' }],
+    });
+    const collections = { entries: [], monthlyCostItems: [], recurringRules: [settled] };
+    expect(accountReferenceIntervals('expense', collections)).toEqual([
+      { kind: 'recurringRule', from: '2026-04-20', to: '2026-06-01' },
+    ]);
+    // 源泉の終端は起票日のままで、清算に影響されない。
+    expect(accountReferenceIntervals('cash', collections)).toEqual([
+      { kind: 'recurringRule', from: '2026-04-20', to: '2026-05-20' },
+    ]);
+  });
+
+  it('未終了ルールはどの参照科目も開区間のまま（従来どおり終了不可）', () => {
+    const open = rule();
+    const collections = { entries: [], monthlyCostItems: [], recurringRules: [open] };
+    for (const accountId of ['cash', 'expense', CONTINUOUS_COST_LEDGER_ACCOUNT_ID]) {
+      expect(accountReferenceIntervals(accountId, collections)).toEqual([
+        { kind: 'recurringRule', from: '2026-04-20' },
+      ]);
+    }
   });
 
   it('存在終了日までに次の周期日がなければ将来参照もない', () => {

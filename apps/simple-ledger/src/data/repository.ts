@@ -25,8 +25,9 @@ import {
   effectiveRecurringRuleStartDate,
   recurringLineageViolations,
   recurringRuleItemEndDate,
-  recurringRuleReferenceEndDate,
+  recurringRulePostingReferenceEndDate,
   recurringRuleReferenceStartDate,
+  recurringRuleSpreadReferenceEndDate,
   type AccountReferenceInterval,
 } from '../domain/accountLifetime';
 import {
@@ -1544,18 +1545,23 @@ function assertRecurringRuleSavable(
   if (referenceStart === undefined) {
     if (!options.residualOfSwitch) throw new LedgerError('error.recurring.neverPosts');
   } else {
-    const referenceEnd = recurringRuleReferenceEndDate(rule);
-    const reference: AccountReferenceInterval = {
+    // 参照区間は役割別（v13.9 項目 3・accountReferenceIntervals と同じ規則）:
+    // 源泉（起票の両側）= 最終起票日まで / 受け口・集約台帳 = 最終 item の配分終端まで。
+    const postingEnd = recurringRulePostingReferenceEndDate(rule);
+    const postingReference: AccountReferenceInterval = {
       kind: 'recurringRule',
       from: referenceStart,
-      ...(referenceEnd !== undefined ? { to: referenceEnd } : {}),
+      ...(postingEnd !== undefined ? { to: postingEnd } : {}),
     };
-    for (const accountId of new Set([
-      rule.debitAccountId,
-      rule.creditAccountId,
-      rule.spreadExpenseAccountId,
-    ])) {
-      assertReferenceInsideAccount(ctx.byId.get(accountId), reference);
+    assertReferenceInsideAccount(ctx.byId.get(rule.creditAccountId), postingReference);
+    const spreadEnd = recurringRuleSpreadReferenceEndDate(rule);
+    const spreadReference: AccountReferenceInterval = {
+      kind: 'recurringRule',
+      from: referenceStart,
+      ...(spreadEnd !== undefined ? { to: spreadEnd } : {}),
+    };
+    for (const accountId of new Set([rule.debitAccountId, rule.spreadExpenseAccountId])) {
+      assertReferenceInsideAccount(ctx.byId.get(accountId), spreadReference);
     }
   }
   // 全ルールの保存形: 借方 = 継続コスト台帳、spread = 計上先。
