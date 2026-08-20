@@ -65,6 +65,32 @@ export function rememberExpenseCategoryId(id: string): void {
   lsSet(LAST_EXPENSE_CATEGORY_KEY, id);
 }
 
+const LAST_EXPORT_VERSION_KEY = `${LOCAL_PREFIX}lastExportedLedgerVersion`;
+
+/**
+ * 最後に JSON エクスポートを実行した台帳世代（deviceId + revision・v13.9 項目 1）。
+ * 全削除の前提条件「最終変更よりも新しいエクスポートが実行済み」の判定材料。
+ * 端末ローカルでよい（作者決定）: 失っても「もう一度書き出せば削除できる」だけで安全側。
+ */
+export function rememberExportedLedgerVersion(version: {
+  deviceId: string;
+  revision: number;
+}): void {
+  const value = `${version.deviceId}:${version.revision}`;
+  memory.set(LAST_EXPORT_VERSION_KEY, value);
+  lsSet(LAST_EXPORT_VERSION_KEY, value);
+}
+
+/** 記録済みのエクスポート世代が、現在の台帳世代と一致するか（= 最終変更以降に書き出した）。 */
+export function isExportedLedgerVersionCurrent(version: {
+  deviceId: string;
+  revision: number;
+}): boolean {
+  const value =
+    memory.get(LAST_EXPORT_VERSION_KEY) ?? lsGet(LAST_EXPORT_VERSION_KEY) ?? undefined;
+  return value === `${version.deviceId}:${version.revision}`;
+}
+
 /*
  * v13.4 ③ で `${LOCAL_PREFIX}cashflowHorizonMonths` は引退した（資金繰りの範囲は
  * 基準日起点の横スクロールで決まり、既定期間という設定自体が無くなった）。

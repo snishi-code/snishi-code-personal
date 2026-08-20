@@ -29,7 +29,7 @@ import {
   type ImportOutcome,
 } from '../data/exportImport';
 import { useToast } from '@snishi/foundation/ui/toast';
-import { clearOnboardingDone } from '../data/localFlags';
+import { clearOnboardingDone, rememberExportedLedgerVersion } from '../data/localFlags';
 import { errorText, t } from '../i18n';
 import { LedgerError } from '../domain/errors';
 
@@ -118,7 +118,8 @@ interface LedgerContextValue {
   removeAccount: (id: string) => Promise<void>;
   saveSettings: (settings: Settings) => Promise<void>;
   exportJson: () => void;
-  importJson: (text: string, force?: boolean) => Promise<ImportOutcome>;
+  /** JSON 取り込み（空の台帳のみ・v13.9 項目 1。空判定と拒否は exportImport が durable 境界で行う）。 */
+  importJson: (text: string) => Promise<ImportOutcome>;
   listSnapshots: () => Promise<Snapshot[]>;
   restoreSnapshot: (snapshot: Snapshot) => Promise<void>;
   deleteSnapshot: (id: string) => Promise<void>;
@@ -447,6 +448,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+      // 全削除ゲートの判定材料（v13.9 項目 1）: この台帳世代を書き出した事実を端末に記録する。
+      rememberExportedLedgerVersion(ledger.meta);
       toast.show(t('toast.exported'), 'success');
     } catch (e) {
       // export は書き出し前に schema 検証で throw し得る。原因（どの項目が不正か）を出す。
@@ -456,8 +459,16 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   }, [ledger, toast]);
 
   const importJson = useCallback<LedgerContextValue['importJson']>(
-    async (text, force) => {
-      const outcome = await importFromJsonText(text, { force: force ?? false });
+    async (text) => {
+      let outcome: ImportOutcome;
+      try {
+        outcome = await importFromJsonText(text);
+      } catch (e) {
+        // 置換成功後の再読込失敗も含め、durable state に触れた可能性のある失敗を
+        // 無通知にしない（監査 #6・他メソッドと同じ try/catch 対称性）。
+        toast.show(errorText(e), 'error');
+        throw e;
+      }
       if (outcome.kind === 'ok') {
         applyRecoveredLedger(outcome.ledger);
         toast.show(

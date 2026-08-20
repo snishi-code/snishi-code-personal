@@ -1,12 +1,14 @@
 /*
  * import/export の統合テスト（fake-indexeddb 上）。
- * fail-closed・スナップショット・revision 競合の不変条件を検証する。
+ * fail-closed・スナップショット・空台帳ゲート（v13.9 項目 1）の不変条件を検証する。
+ * 取り込みは「全削除 → 空台帳へ読み込み」に一本化された（強制 import = force は撤去）。
  */
 import { describe, expect, it } from 'vitest';
 import './setup';
 import {
   createContinuousCost,
   loadLedger,
+  resetAll,
   upsertEntry,
   listSnapshots,
 } from '../src/data/repository';
@@ -39,9 +41,10 @@ async function seedWithEntry() {
 }
 
 describe('export/import round trip', () => {
-  it('有効な JSON を取り込める（ok）', async () => {
+  it('有効な JSON を空台帳へ取り込める（ok）', async () => {
     const ledger = await seedWithEntry();
     const text = exportToJsonText(ledger);
+    await resetAll(); // 取り込みは空台帳のみ（正規手順 = 全削除 → 読み込み）
     const outcome = await importFromJsonText(text);
     expect(outcome.kind).toBe('ok');
     if (outcome.kind === 'ok') {
@@ -52,6 +55,7 @@ describe('export/import round trip', () => {
   it('取り込み成功時に import 前スナップショットが作られる', async () => {
     const ledger = await seedWithEntry();
     const text = exportToJsonText(ledger);
+    await resetAll();
     await importFromJsonText(text);
     const snaps = await listSnapshots();
     expect(snaps.length).toBeGreaterThan(0);
@@ -66,6 +70,7 @@ describe('export/import round trip', () => {
     const first = exported.journalEntries[0]!;
     first.metadata = { ...first.metadata, [removedLegacyMonthlyCostKey]: true };
 
+    await resetAll();
     const outcome = await importFromJsonText(JSON.stringify(exported));
     expect(outcome.kind).toBe('ok');
     expect((await loadLedger()).journalEntries[0]?.metadata).not.toHaveProperty(
@@ -107,7 +112,8 @@ describe('export/import round trip', () => {
     });
 
     // 3) import で戻ってくる（相互参照検証はしない = 1 行だけのグループも ok）。
-    const outcome = await importFromJsonText(text, { force: true });
+    await resetAll();
+    const outcome = await importFromJsonText(text);
     expect(outcome.kind).toBe('ok');
     const imported = (await loadLedger()).journalEntries.find((e) => e.id === 'grouped-entry');
     expect(imported?.groupId).toBe('grp-2026-06-02');
@@ -194,12 +200,12 @@ describe('fail-closed', () => {
   });
 });
 
-describe('revision 競合', () => {
-  it('封筒 revision が現在と異なると revision-conflict、force で上書き', async () => {
+describe('空台帳ゲート（v13.9 項目 1・強制 import の撤去）', () => {
+  it('取引データのある台帳への取り込みは拒否し、既存データを 1 件も変えない', async () => {
     const ledger = await seedWithEntry();
-    const text = exportToJsonText(ledger); // 封筒 revision = 現在の rev
+    const text = exportToJsonText(ledger);
 
-    // ローカルをさらに編集して rev を進める
+    // ローカルをさらに編集した状態 = 空でない台帳。
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
     const salary = ledger.accounts.find((a) => a.name === '給与')!;
     await upsertEntry(
@@ -212,15 +218,26 @@ describe('revision 競合', () => {
       }),
     );
 
-    const conflict = await importFromJsonText(text);
-    expect(conflict.kind).toBe('revision-conflict');
-
-    const forced = await importFromJsonText(text, { force: true });
-    expect(forced.kind).toBe('ok');
-    // 古い版で上書きされ、給料の仕訳は消えている（自動マージしない）
+    const rejected = await importFromJsonText(text);
+    expect(rejected).toMatchObject({
+      kind: 'storage-error',
+      detail: 'error.import.requiresEmpty',
+    });
+    // 旧・強制 import（force で置換）は存在しない。既存データはそのまま。
     const after = await loadLedger();
-    expect(after.journalEntries.some((e) => e.description === '給料')).toBe(false);
+    expect(after.journalEntries.some((e) => e.description === '給料')).toBe(true);
     expect(after.journalEntries.some((e) => e.description === 'ランチ')).toBe(true);
+  });
+
+  it('全削除で空にすれば、封筒 revision の値に関わらず取り込め、revision は floor+1 へ進む', async () => {
+    const ledger = await seedWithEntry();
+    const pkg = buildExportPackage(ledger);
+    pkg.revision = 57; // 別端末で長く使われた台帳の封筒を想定（世代比較はしない）
+    await resetAll();
+    const outcome = await importFromJsonText(JSON.stringify(pkg));
+    expect(outcome.kind).toBe('ok');
+    // 置換後 revision = max(現行, 封筒) + 1（別タブ CAS の基準が必ず失火する採番規則は不変）。
+    expect((await loadLedger()).meta.revision).toBe(58);
   });
 });
 
@@ -240,6 +257,7 @@ describe('継続コスト資産の export/import', () => {
     const seeded = await loadLedger();
     expect(seeded.monthlyCostItems).toHaveLength(1);
     const text = exportToJsonText(seeded);
+    await resetAll();
     const outcome = await importFromJsonText(text);
     expect(outcome.kind).toBe('ok');
     const reloaded = await loadLedger();

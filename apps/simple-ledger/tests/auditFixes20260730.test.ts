@@ -500,21 +500,21 @@ describe('P2-5: DB 全消去は onsuccess だけを成功扱いにする', () =>
 });
 
 describe('再監査対応: import は全置換後に revision を必ず進める', () => {
-  it('置換後 revision = max(現行, 封筒) + 1。同じ封筒の再取込は conflict になり force で通る', async () => {
+  it('置換後 revision = max(現行, 封筒) + 1。再取込のたびに単調に進む', async () => {
     await loadLedger();
     await upsertAccount(makeAccount({ id: 'acc-rev', name: '再監査' }));
     const ledger = await loadLedger();
     const before = ledger.meta.revision;
     const text = exportToJsonText(ledger);
+    // 科目だけの変更は「空の台帳」（取引データなし・v13.9 項目 1）なので取り込める。
     const outcome = await importFromJsonText(text);
     expect(outcome.kind).toBe('ok');
     // revision が進む = 別タブの CAS（import 前の revision を基準に持つ）が必ず失火する。
     expect((await loadLedger()).meta.revision).toBe(before + 1);
-    // 進んだ結果、同じ封筒はもう古い（事実どおり conflict → force で明示上書き）。
+    // v13.9: 世代比較（revision-conflict → force）は撤去。再取込も同じ規則で単調に進むだけ。
     const second = await importFromJsonText(text);
-    expect(second.kind).toBe('revision-conflict');
-    const forced = await importFromJsonText(text, { force: true });
-    expect(forced.kind).toBe('ok');
+    expect(second.kind).toBe('ok');
+    expect((await loadLedger()).meta.revision).toBe(before + 2);
   });
 
   it('事前snapshot後に別操作が保存されたら、全置換をCASで拒否して更新を残す', async () => {

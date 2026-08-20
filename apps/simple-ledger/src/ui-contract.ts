@@ -438,6 +438,11 @@ export const UI = {
     importJson: 'settings.importJson',
     importFile: 'settings.importFile',
     resetAll: 'settings.resetAll',
+    resetConfirm: 'settings.resetConfirm',
+    resetConfirmExport: 'settings.resetConfirm.export',
+    resetConfirmDelete: 'settings.resetConfirm.delete',
+    resetConfirmExportRequired: 'settings.resetConfirm.exportRequired',
+    importEmptyOnlyNote: 'settings.importEmptyOnlyNote',
     onboardingOpen: 'settings.onboardingOpen',
   },
   nav: {

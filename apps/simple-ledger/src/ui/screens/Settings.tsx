@@ -1,6 +1,12 @@
 /*
  * 設定。JSON export/import、スナップショット、全データ削除、アプリ情報、台帳設定。
- * 破壊的操作(import/全削除/復元)は明示確認・背景タップ無効・fail-closed。
+ * 破壊的操作(全削除/復元)は明示確認・背景タップ無効・fail-closed。
+ *
+ * v13.9 項目 1（監査 #6 の根本対応・作者決定 2026-08-20）:
+ *  - 強制 import（revision 競合を force で上書きして既存台帳を置換する取り込み）は機能ごと撤去。
+ *  - 取り込みは**空の台帳（取引データなし）のときだけ**有効（durable 境界 = exportImport も同判定）。
+ *  - 全削除は「最終変更よりも新しい JSON エクスポートが実行済み」のときだけ実行できる
+ *    （確認ダイアログにエクスポートを同居・未実施なら削除ボタン disabled + 理由表示）。
  *
  * v2 変更点:
  *  - revision-conflict: importRevision（v1 の baseRevision を廃止）
@@ -8,9 +14,9 @@
  *  - useToast: @snishi/foundation/ui/toast
  *  - Icon/ConfirmDialog/TextInput: @snishi/foundation/ui/*
  */
-import { startTransition, useEffect, useRef, useState } from 'react';
+import { startTransition, useEffect, useReducer, useRef, useState } from 'react';
 import { useToast } from '@snishi/foundation/ui/toast';
-import { ConfirmDialog } from '../overlays';
+import { ConfirmDialog, Modal } from '../overlays';
 import { TextInput } from '@snishi/foundation/ui/Field';
 import { Segmented } from '@snishi/foundation/ui/Segmented';
 import { Icon } from '@snishi/foundation/ui/Icon';
@@ -18,15 +24,14 @@ import { useLedger } from '../../state/store';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import { APP_ID } from '../../domain/constants';
-import type { ImportOutcome } from '../../data/exportImport';
-import type { Settings as LedgerSettings, Snapshot } from '../../domain/types';
+import { isImportableEmptyLedger, type ImportOutcome } from '../../data/exportImport';
+import { isExportedLedgerVersionCurrent } from '../../data/localFlags';
+import type { Ledger, Settings as LedgerSettings, Snapshot } from '../../domain/types';
 import { ScrollTopButton } from '../ScrollTopButton';
 
 const APP_VERSION = '0.1.0';
 
-export function importErrorMessage(
-  outcome: Exclude<ImportOutcome, { kind: 'ok' | 'revision-conflict' }>,
-): string {
+export function importErrorMessage(outcome: Exclude<ImportOutcome, { kind: 'ok' }>): string {
   switch (outcome.kind) {
     case 'parse-error':
       return t('import.error.parse');
@@ -42,7 +47,8 @@ export function importErrorMessage(
       // storage error は診断可能な detail をそのまま表示する。
       if (
         outcome.detail === 'error.common.staleData' ||
-        outcome.detail === 'error.common.revisionExhausted'
+        outcome.detail === 'error.common.revisionExhausted' ||
+        outcome.detail === 'error.import.requiresEmpty'
       ) {
         return t(outcome.detail);
       }
@@ -103,9 +109,6 @@ export function Settings({
 
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [snapshotError, setSnapshotError] = useState<string | undefined>(undefined);
-  const [pendingImportText, setPendingImportText] = useState<string | null>(null);
-  // v2: importRevision（v1 の baseRevision を廃止）
-  const [conflict, setConflict] = useState<{ local: number; import: number } | null>(null);
   const [pendingRestore, setPendingRestore] = useState<Snapshot | null>(null);
   const [pendingDeleteSnap, setPendingDeleteSnap] = useState<Snapshot | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -146,16 +149,10 @@ export function Settings({
     }
   }, [ledger]);
 
-  async function runImport(text: string, force: boolean) {
-    const outcome = await importJson(text, force);
+  async function runImport(text: string) {
+    const outcome = await importJson(text);
     if (outcome.kind === 'ok') {
       refreshSnapshots();
-      return;
-    }
-    if (outcome.kind === 'revision-conflict') {
-      setPendingImportText(text);
-      // v2: importRevision（v1 は baseRevision）
-      setConflict({ local: outcome.localRevision, import: outcome.importRevision });
       return;
     }
     toast.show(importErrorMessage(outcome), 'error');
@@ -165,13 +162,21 @@ export function Settings({
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    let text: string;
     try {
-      const text = await file.text();
-      await runImport(text, false);
+      text = await file.text();
     } catch {
       toast.show(t('import.error.parse'), 'error');
+      return;
     }
+    // importJson の例外（置換後の再読込失敗など）は store が toast 済み。二重通知しない。
+    await runImport(text).catch(() => undefined);
   }
+
+  // 取り込みは空の台帳（取引データなし）のときだけ（v13.9 項目 1）。台帳が読めない
+  // 復旧経路（ledger = null）は取り込み自体が復旧手段なので出す。判定の正本は
+  // exportImport（durable 境界でも同じ関数で拒否される）。
+  const canImport = !ledger || isImportableEmptyLedger(ledger);
 
   function saveLedgerSettings() {
     const normalizedLedgerName = ledgerName.trim();
@@ -221,12 +226,23 @@ export function Settings({
           <button
             type="button"
             className="btn btn--block"
+            disabled={!canImport}
             onClick={() => fileRef.current?.click()}
             data-ui={UI.settings.importJson}
           >
             <Icon name="upload" size={18} />
             {t('settings.import')}
           </button>
+          {!canImport ? (
+            <p
+              className="field__hint"
+              role="note"
+              style={{ marginTop: 6 }}
+              data-ui={UI.settings.importEmptyOnlyNote}
+            >
+              {t('settings.importEmptyOnly')}
+            </p>
+          ) : null}
           <input
             ref={fileRef}
             type="file"
@@ -392,26 +408,6 @@ export function Settings({
       </div>
 
       {/* ダイアログ群 */}
-      {conflict && pendingImportText ? (
-        <ConfirmDialog
-          title={t('import.conflictTitle')}
-          body={t('import.conflictBody', { local: conflict.local, base: conflict.import })}
-          confirmLabel={t('common.proceed')}
-          danger
-          dataUi={UI.dialog.confirm}
-          onCancel={() => {
-            setConflict(null);
-            setPendingImportText(null);
-          }}
-          onConfirm={async () => {
-            const text = pendingImportText;
-            setConflict(null);
-            setPendingImportText(null);
-            if (text) await runImport(text, true);
-          }}
-        />
-      ) : null}
-
       {pendingRestore ? (
         <ConfirmDialog
           title={t('snapshot.restoreConfirmTitle')}
@@ -452,18 +448,15 @@ export function Settings({
       ) : null}
 
       {confirmReset ? (
-        <ConfirmDialog
-          title={t('reset.confirmTitle')}
-          body={t('reset.confirmBody')}
-          confirmLabel={t('settings.resetAll')}
-          danger
-          requireKeyword={t('reset.keyword')}
+        <ResetConfirmDialog
+          ledger={ledger}
+          onExport={exportJson}
           onCancel={() => setConfirmReset(false)}
           onConfirm={async () => {
             try {
               await resetAll();
             } catch {
-              // 失敗 = 未保存: 閉じない（エラーは store が toast 済み・確定中状態は ConfirmDialog が解く）。
+              // 失敗 = 未保存: 閉じない（エラーは store が toast 済み）。
               return;
             }
             setConfirmReset(false);
@@ -473,5 +466,126 @@ export function Settings({
       ) : null}
       <ScrollTopButton />
     </section>
+  );
+}
+
+/**
+ * 全削除の確認ダイアログ（v13.9 項目 1・作者決定）。
+ *
+ * ConfirmDialog を使わない専用面: 「JSON をエクスポート」を同居させ、**最終変更よりも新しい
+ * エクスポートが実行済みのときだけ**削除を実行できる。判定は localFlags に記録した
+ * 「最後に書き出した台帳世代（deviceId + revision）」と現在の台帳世代の一致
+ * （端末ローカルでよい・作者決定）。台帳が読めない復旧経路（ledger = null）は
+ * エクスポート自体が不可能なので、このゲートは課さない（復旧を詰ませない）。
+ */
+function ResetConfirmDialog({
+  ledger,
+  onExport,
+  onCancel,
+  onConfirm,
+}: {
+  ledger: Ledger | null;
+  /** JSON エクスポート（成功時に台帳世代が localFlags へ記録される）。 */
+  onExport: () => void;
+  onCancel: () => void;
+  /** 実削除。失敗時は呼び出し側が toast 済みで、ダイアログは開いたまま。 */
+  onConfirm: () => Promise<void>;
+}) {
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  // localFlags は非リアクティブなので、エクスポート実行後に判定を引き直すための tick。
+  const [, bumpExportTick] = useReducer((count: number) => count + 1, 0);
+  const keyword = t('reset.keyword');
+  const keywordOk = typed.trim() === keyword;
+  const exportCurrent = ledger === null || isExportedLedgerVersionCurrent(ledger.meta);
+
+  function runExport(): void {
+    try {
+      onExport();
+    } catch {
+      // エラーは store が toast 済み。記録されていないので判定は変わらない。
+      return;
+    } finally {
+      bumpExportTick();
+    }
+  }
+
+  async function confirm(): Promise<void> {
+    setBusy(true);
+    try {
+      await onConfirm();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={t('reset.confirmTitle')}
+      onClose={busy ? () => undefined : onCancel}
+      dismissMode="never"
+      dataUi={UI.settings.resetConfirm}
+      footer={
+        <>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            disabled={busy}
+            onClick={onCancel}
+            data-ui={UI.dialog.cancel}
+          >
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            className="btn btn--danger"
+            disabled={busy || !keywordOk || !exportCurrent}
+            onClick={confirm}
+            data-ui={UI.settings.resetConfirmDelete}
+          >
+            {t('settings.resetAll')}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <p>{t('reset.confirmBody')}</p>
+        {/* エクスポートを同居させる: 削除の前に必ず「いま」の台帳を書き出せる。 */}
+        <button
+          type="button"
+          className="btn btn--block"
+          disabled={busy}
+          onClick={runExport}
+          data-ui={UI.settings.resetConfirmExport}
+        >
+          <Icon name="download" size={18} />
+          {t('settings.export')}
+        </button>
+        {exportCurrent ? (
+          <p className="field__hint">{t('reset.exportDone')}</p>
+        ) : (
+          // エクスポート未実施なら削除は disabled + 理由を明示する（fail-closed）。
+          <p
+            className="field__hint"
+            role="note"
+            data-ui={UI.settings.resetConfirmExportRequired}
+          >
+            {t('reset.exportRequired')}
+          </p>
+        )}
+        <div className="field">
+          <label className="field__label" htmlFor="reset-confirm-keyword">
+            {t('reset.keywordPrompt', { keyword })}
+          </label>
+          <input
+            id="reset-confirm-keyword"
+            className="input"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            autoComplete="off"
+          />
+        </div>
+      </div>
+    </Modal>
   );
 }

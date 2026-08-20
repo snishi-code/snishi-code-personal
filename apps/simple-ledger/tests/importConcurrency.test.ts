@@ -29,28 +29,45 @@ vi.mock('../src/data/repository', async (importOriginal) => {
 
 import './setup';
 import { exportToJsonText, importFromJsonText } from '../src/data/exportImport';
-import { loadLedger, updateSettings } from '../src/data/repository';
+import { loadLedger, updateSettings, upsertEntry } from '../src/data/repository';
+import { buildSimpleEntry } from '../src/domain/entry';
 
-describe('import の revision 確認から snapshot までの競合', () => {
+describe('import の空判定・snapshot と並行書込みの競合（v13.9: 取り込みは空台帳のみ）', () => {
   beforeEach(() => {
     loadControl.triggerAt = -1;
     loadControl.beforeTriggeredLoad = null;
     loadControl.afterSnapshotSaved = null;
   });
 
-  it('確認直後の別保存を新しい current として採用せず、import を中断して保存を残す', async () => {
+  it('snapshot 用読取りの直前に取引が書かれたら、空でなくなったとして中断し保存を残す', async () => {
     const before = await loadLedger();
     const text = exportToJsonText(before);
+    const cash = before.accounts.find((a) => a.name === '現金')!;
+    const food = before.accounts.find((a) => a.name === '変動費')!;
 
-    // import 内の1回目 = step ⑤ revision確認、2回目 = step ⑥ snapshot用読取り。
-    loadControl.triggerAt = loadControl.count + 2;
-    loadControl.beforeTriggeredLoad = () =>
-      updateSettings({ ...before.settings, ledgerName: '確認後の保存' });
+    // import 内の 1 回目の loadLedger = snapshot 用読取り（空判定と同じ読取り）。
+    loadControl.triggerAt = loadControl.count + 1;
+    loadControl.beforeTriggeredLoad = async () => {
+      await upsertEntry(
+        buildSimpleEntry({
+          date: '2026-06-01',
+          description: '並行の保存',
+          debitAccountId: food.id,
+          creditAccountId: cash.id,
+          amount: 100,
+        }),
+      );
+    };
 
     const outcome = await importFromJsonText(text);
-    expect(outcome.kind).toBe('storage-error');
-    // import が通っていれば封筒側（元の台帳名）へ戻る。中断したので並行保存が残る。
-    expect((await loadLedger()).settings.ledgerName).toBe('確認後の保存');
+    expect(outcome).toMatchObject({
+      kind: 'storage-error',
+      detail: 'error.import.requiresEmpty',
+    });
+    // 中断したので並行保存が残る（置換されていない）。
+    expect((await loadLedger()).journalEntries.some((e) => e.description === '並行の保存')).toBe(
+      true,
+    );
   });
 
   it('snapshot 保存直後の別保存を置換せず、import を中断して保存を残す', async () => {

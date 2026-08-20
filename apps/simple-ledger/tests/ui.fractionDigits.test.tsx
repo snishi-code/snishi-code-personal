@@ -113,7 +113,10 @@ describe('表示桁数の設定', () => {
         e.lines.some((l) => l.amount === 123456),
       ),
     ).toBe(true);
-    const outcome = await importFromJsonText(text, { force: true });
+    // 取り込みは空台帳のみ（v13.9 項目 1）: 全削除 → 読み込みの正規手順で往復する。
+    const { resetAll } = await import('../src/data/repository');
+    await resetAll();
+    const outcome = await importFromJsonText(text);
     expect(outcome.kind).toBe('ok');
     const after = await loadLedger();
     expect(after.journalEntries.find((e) => e.description === '小数往復')?.lines[0]?.amount).toBe(

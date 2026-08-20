@@ -1902,7 +1902,7 @@ describe('起票ゼロの線分は保存できない', () => {
     expect((await derivedFor('2026-06-30')).entries.map((e) => e.date)).toEqual(['2026-04-20']);
   });
 
-  it('切り替え（後継あり）の旧線分は起票ゼロでも通る（後継へ寿命を引き継いだ残余）', async () => {
+  it('起票ゼロ線分への切り替えは残骸を作らず、同じルールの編集として保存される（v13.9 項目 4）', async () => {
     const { bank, invest } = await baseRule();
     const rule = await createRecurringRule({
       name: '切り替える線',
@@ -1913,16 +1913,19 @@ describe('起票ゼロの線分は保存できない', () => {
       startMonth: '2026-04',
       startDate: '2026-04-12',
     });
-    // 旧線分 [4/12, 4/18) は 1 本も起票しないが、宣言は後継が担うので保存できる。
+    // 旧線分 [4/12, 4/18) は 1 本も起票しない = 切り替えではなく編集（全期間引き直し）。
+    // 旧仕様は起票ゼロの残余線分 + 後継の 2 本を保存していた（監査 #1 の残骸の発生源）。
     await switchRecurringRule({
       ruleId: rule.id,
       effectiveDate: '2026-04-18',
       successor: { amount: 1500, dayOfMonth: 20, everyMonths: 1 },
     });
     const ledger = await loadLedger();
-    expect(ledger.recurringRules).toHaveLength(2);
-    const successor = ledger.recurringRules.find((r) => r.splitFromRuleId === rule.id)!;
-    expect(successor.startDate).toBe('2026-04-18');
+    expect(ledger.recurringRules).toHaveLength(1);
+    const edited = ledger.recurringRules[0]!;
+    expect(edited.id).toBe(rule.id);
+    expect(edited.startDate).toBe('2026-04-12');
+    expect(edited.amount).toBe(1500);
     expect((await derivedFor('2026-04-30')).entries.map((e) => e.date)).toEqual(['2026-04-20']);
   });
 });

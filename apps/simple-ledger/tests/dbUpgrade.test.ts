@@ -251,7 +251,7 @@ describe('v10 物理 DB からの v11 移行（指示書v3 §A-5・Codex 指摘�
       recurringRules: [],
       settings: { ledgerName: '家計簿', currency: '円', displayFractionDigits: 0 as const },
     };
-    const outcome = await importFromJsonText(JSON.stringify(converted), { force: true });
+    const outcome = await importFromJsonText(JSON.stringify(converted));
     expect(outcome.kind).toBe('ok');
     const ledger = await loadLedger();
     expect(ledger.journalEntries.find((e) => e.id === 'e-v10')?.lines[0]?.amount).toBe(10000);

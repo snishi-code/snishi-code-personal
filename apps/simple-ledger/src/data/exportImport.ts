@@ -6,7 +6,8 @@
  *  2. schemaVersion を確認し、未対応版は取り込まない（migration チェーンの入口を通す）。
  *  3. import 前に必ずスナップショットを作る。
  *  4. 検証・置換が成功するまで既存 DB を壊さない（置換は単一トランザクションで原子的）。
- *  5. revision 不一致は自動上書きせず、呼び出し側の確認（force）を求める。MVP は自動マージしない。
+ *  5. 取り込みは**空の台帳（取引データなし）だけ**が受け付ける（v13.9 項目 1）。既存台帳の
+ *     上書き置換（旧・強制 import）は撤去した。マージはしない。
  *
  * v2 の封筒は APP_ID('snishi-code.simple-ledger-v2') + SCHEMA_VERSION（現行値は
  * src/domain/constants.ts が正本）。
@@ -84,13 +85,23 @@ export type ImportOutcome =
   | { kind: 'not-our-file'; detail: string }
   | { kind: 'unsupported-version'; detail: string }
   | { kind: 'validation-error'; detail: string }
-  | {
-      kind: 'revision-conflict';
-      detail: string;
-      localRevision: number;
-      importRevision: number;
-    }
   | { kind: 'storage-error'; detail: string };
+
+/**
+ * 取り込みを受け付ける「空の台帳」= 取引データ（仕訳・持ち物・定期ルール）が無いこと
+ * （v13.9 項目 1・作者決定）。科目や設定だけの変更は取り込みを妨げない（どのみち置換される
+ * うえ、失われる取引が無い）。UI の出し分けと durable 境界（下の importFromJsonText）が
+ * 同じ判定を共有する。
+ */
+export function isImportableEmptyLedger(
+  ledger: Pick<Ledger, 'journalEntries' | 'monthlyCostItems' | 'recurringRules'>,
+): boolean {
+  return (
+    ledger.journalEntries.length === 0 &&
+    ledger.monthlyCostItems.length === 0 &&
+    ledger.recurringRules.length === 0
+  );
+}
 
 /** zod 検証を pipeline の validate 形に包む（先頭 issue の path + message を detail にする）。 */
 function validatePackage(
@@ -123,10 +134,6 @@ function versionOf(ledger: Ledger): LedgerVersion {
   return { deviceId: ledger.meta.deviceId, revision: ledger.meta.revision };
 }
 
-function sameVersion(a: LedgerVersion, b: LedgerVersion): boolean {
-  return a.deviceId === b.deviceId && a.revision === b.revision;
-}
-
 async function replaceWithPackage(
   pkg: LedgerExportPackage,
   current: Ledger,
@@ -152,19 +159,22 @@ async function replaceWithPackage(
 }
 
 /**
- * JSON テキストを取り込む。opts.force=true で revision 不一致を上書き承認。
- * 7 段階 fail-closed（parse → 封筒 → migration → 完全検証 → revision → 前スナップショット → 原子置換）
- * は foundation の pipeline が実施し、既存データは「ok を返す直前の置換」まで一切変更しない。
+ * JSON テキストを取り込む（**空の台帳への取り込み専用**・v13.9 項目 1）。
+ *
+ * 旧「強制 import（revision 不一致を force で上書きして既存台帳を置換する取り込み）」は
+ * 機能ごと撤去した。取り込みは「全削除 → 空台帳へ読み込み」に一本化され、revision の
+ * 世代比較は意味を持たない（空台帳と封筒の revision は必ず食い違う）ため、封筒 revision は
+ * 置換時の採番 floor としてだけ使う。空でない台帳への取り込みは snapshotBefore で
+ * fail-closed に拒否する（UI の出し分けをすり抜けた経路も止める）。
+ * 段階は parse → 封筒 → migration → 完全検証 → 前スナップショット（+ 空判定）→ 原子置換で、
+ * 既存データは「ok を返す直前の置換」まで一切変更しない。置換の CAS（スナップショット時点の
+ * 版）が並行書き込みとの競合を守る。
  */
-export async function importFromJsonText(
-  rawText: string,
-  opts: { force?: boolean } = {},
-): Promise<ImportOutcome> {
+export async function importFromJsonText(rawText: string): Promise<ImportOutcome> {
   // pipeline はステートレスだが、snapshotBefore で採番した id を ok 結果へ載せるため
   // 呼び出しごとに closure で組み立てる。
   let snapshotId = '';
   let current: Ledger | null = null;
-  let checkedVersion: LedgerVersion | null = null;
   let expectedVersion: LedgerVersion | null = null;
   const pipeline = createImportPipeline<LedgerExportPackage>({
     appId: APP_ID,
@@ -172,20 +182,16 @@ export async function importFromJsonText(
     migrate: (data, fromVersion) =>
       migrationChain.migrateToVersion(data, fromVersion, SCHEMA_VERSION),
     validate: validatePackage,
-    getCurrentRevision: async () => {
-      const checked = await loadLedger();
-      checkedVersion = versionOf(checked);
-      return checked.meta.revision;
-    },
+    // revision 追跡は使わない（null = pipeline の衝突チェックをスキップ。上の doc コメント）。
+    getCurrentRevision: async () => null,
     // 置換前スナップショット（既存状態を保存してから置換）。throw したら置換に進まない。
     snapshotBefore: async () => {
       const snapshotCurrent = await loadLedger();
-      const snapshotVersion = versionOf(snapshotCurrent);
-      // force なしでは step ⑤で確認した版を固定する。確認後〜snapshot 前の更新を、
-      // 新しい current として黙って採用して上書きしない。force 時は snapshot 時点を基準にする。
-      if (!opts.force && (!checkedVersion || !sameVersion(checkedVersion, snapshotVersion))) {
-        throw new Error('error.common.staleData');
+      // 空台帳ゲート（durable 境界）: 取引データを持つ台帳は置換しない。
+      if (!isImportableEmptyLedger(snapshotCurrent)) {
+        throw new Error('error.import.requiresEmpty');
       }
+      const snapshotVersion = versionOf(snapshotCurrent);
       current = snapshotCurrent;
       expectedVersion = snapshotVersion;
       snapshotId = makeSnapshotId();
@@ -208,7 +214,11 @@ export async function importFromJsonText(
     },
   });
 
-  const outcome = await pipeline.importFromJsonText(rawText, opts);
+  const outcome = await pipeline.importFromJsonText(rawText);
+  // getCurrentRevision が null を返すため revision-conflict は発生しない（型合わせの網羅分岐）。
+  if (outcome.kind === 'revision-conflict') {
+    return { kind: 'storage-error', detail: outcome.detail };
+  }
   if (outcome.kind !== 'ok') return outcome;
   const ledger = await loadLedger();
   return {

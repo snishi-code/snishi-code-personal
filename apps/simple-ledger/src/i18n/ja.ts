@@ -580,18 +580,26 @@ export const ja = {
     '現在のデータは上書きされます（復元前に自動でスナップショットを作成します）。',
   'snapshot.entries': '仕訳 {count} 件',
 
-  'import.conflictTitle': '変更が競合しています',
-  'import.conflictBody':
-    '取り込むファイルは現在の台帳と別の版に基づいています（端末側 rev {local} / ファイル基準 rev {base}）。上書きすると現在のデータはスナップショットに退避され、ファイルの内容で置き換わります。続けますか？',
   'import.success': '{accounts} 科目・{entries} 件の仕訳を取り込みました。',
   'import.error.parse': 'JSON を解析できませんでした。ファイルが壊れている可能性があります。',
   'import.error.notOurFile': 'このアプリの書き出しファイルではありません。',
   'import.error.validation': '形式が正しくありません: {detail}',
   'import.error.unknownVersion': '未対応の版のデータです。',
+  // 取り込みは空の台帳のみ（v13.9 項目 1・強制 import の撤去）。
+  'error.import.requiresEmpty':
+    '取り込みは空の台帳でのみ実行できます。先に「すべてのデータを削除」で空にしてください。',
+  'settings.importEmptyOnly':
+    '仕訳・持ち物・くり返し記帳がある間は取り込みできません。読み込むには、JSON で書き出してから「すべてのデータを削除」で空にします。',
 
   'reset.confirmTitle': 'すべてのデータを削除しますか？',
-  'reset.confirmBody': 'この操作は取り消せません。必要なら先に JSON で書き出してください。',
+  'reset.confirmBody':
+    'この操作は取り消せません。削除の前に、最新のデータを JSON で書き出しておく必要があります。',
   'reset.keyword': '削除',
+  'reset.keywordPrompt': '確認のため「{keyword}」と入力してください',
+  // 全削除ゲート（v13.9 項目 1）: 最終変更より新しいエクスポートがあるときだけ削除できる。
+  'reset.exportRequired':
+    '最後の変更より後の書き出しがありません。上の「JSON で書き出し」を実行すると削除できるようになります。',
+  'reset.exportDone': '最新のデータは書き出し済みです。削除を実行できます。',
 
   // 復旧画面（ErrorBoundary）。DB の版不整合（VersionError）で開けない詰みからの最終手段。
   'recovery.wipe': 'DB を初期化して再起動',

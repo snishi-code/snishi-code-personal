@@ -371,8 +371,8 @@ describe.skipIf(CONVERTER === undefined)('v12→v13 変換（合成フィクス�
       '月割り台帳',
     );
 
-    // 実 import まで通る（v13 アプリの受け入れ）。
-    const outcome = await importFromJsonText(JSON.stringify(out), { force: true });
+    // 実 import まで通る（v13 アプリの受け入れ。空の台帳 = 既定 seed へ読み込む）。
+    const outcome = await importFromJsonText(JSON.stringify(out));
     expect(outcome.kind).toBe('ok');
     const ledger = await loadLedger();
     expect(ledger.recurringRules.length).toBe(pkg.recurringRules.length);
@@ -409,7 +409,7 @@ describe.skipIf(!targetPath)('実データの v13 変換 JSON を検証する（
     if (!parsed.success) {
       throw new Error(`v13 schema が拒否: ${JSON.stringify(parsed.error.issues.slice(0, 5))}`);
     }
-    const outcome = await importFromJsonText(text, { force: true });
+    const outcome = await importFromJsonText(text);
     expect(outcome.kind).toBe('ok');
     const ledger = await loadLedger();
     console.log(
