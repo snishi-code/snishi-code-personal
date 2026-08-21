@@ -35,8 +35,11 @@ afterEach(() => {
 const q = (name: string) => document.querySelector<HTMLElement>(`[data-ui="${name}"]`);
 const qa = (name: string) => [...document.querySelectorAll<HTMLElement>(`[data-ui="${name}"]`)];
 const value = (name: string) => (q(name) as HTMLInputElement | null)?.value;
-const pick = (dataUi: string, name: string) =>
-  fireEvent.click(within(q(dataUi)!).getByRole('radio', { name }));
+const pick = (dataUi: string, name: string) => {
+  // flow ピッカーは v13.16 で checkbox（複数選択）になった。役割に依存せず名前で押す。
+  const scope = within(q(dataUi)!);
+  fireEvent.click(scope.queryByRole('radio', { name }) ?? scope.getByRole('checkbox', { name }));
+};
 
 async function seed() {
   const ledger = await loadLedger();

@@ -373,3 +373,50 @@ test('振替 × ルール → 定期積立（源泉 → 行き先の写像）が
   await page.locator(ui('nav.allocations')).click();
   await expect(page.locator(ui('allocations.recurring.list'))).toContainText('→');
 });
+
+test('諸口: 複数源泉の支出 → 一覧に N 行 + 按分の目印 → 1 本を個別編集 (v13.16)', async ({
+  page,
+}) => {
+  await boot(page);
+
+  // 支出 10 万を 2 源泉（現金 + 預金）へ按分。源泉 2 件目で使い道側は単一ロック。
+  await page.locator(ui('dashboard.entry.expense')).click();
+  await page.locator(ui('journal.entry.item')).fill('E2E按分スマホ');
+  await page.locator(ui('journal.entry.amount')).fill('100000');
+  await page
+    .locator(`${ui('journal.entry.flow.destination')} label.chip`)
+    .first()
+    .click();
+  await page
+    .locator(`${ui('journal.entry.flow.source')} label.chip`)
+    .nth(0)
+    .click();
+  await page
+    .locator(`${ui('journal.entry.flow.source')} label.chip`)
+    .nth(1)
+    .click();
+  // 複数選択中は性質トグルが畳まれ、主ボタンは「振り分けを入力する」。
+  await expect(page.locator(ui('journal.entry.natureFoldedBySplit'))).toBeVisible();
+  await expect(page.locator(ui('journal.entry.next'))).toContainText('振り分けを入力する');
+  await page.locator(ui('journal.entry.next')).click();
+
+  // 振り分けページ: 手入力 1 枠 + 自動計算枠（合計 − 入力）。
+  await page.locator(ui('journal.entry.splitAmount')).fill('30000');
+  await expect(page.locator(ui('journal.entry.splitAuto'))).toContainText('70,000');
+  await page.locator(ui('journal.entry.save')).click();
+  await expect(page.locator(ui('journal.entry.save'))).toBeHidden();
+
+  // 一覧（ホームのプレビュー）: 2 行 + 按分の目印チップ。
+  const preview = page.locator(ui('dashboard.journal.preview'));
+  await expect(preview.locator('li', { hasText: 'E2E按分スマホ' })).toHaveCount(2);
+  await expect(page.locator(ui('journal.groupTag')).first()).toBeVisible();
+
+  // 1 本を個別編集（タップ = 通常編集）: 金額を変えても他の行はそのまま。
+  await preview.locator('li', { hasText: 'E2E按分スマホ' }).first().locator('button').click();
+  await expect(page.locator(ui('journal.entry.amount'))).toBeVisible();
+  await page.locator(ui('journal.entry.amount')).fill('31000');
+  await page.locator(ui('journal.entry.save')).click();
+  await expect(page.locator(ui('journal.entry.save'))).toBeHidden();
+  await expect(preview.locator('li', { hasText: 'E2E按分スマホ' })).toHaveCount(2);
+  await expect(page.locator(ui('journal.groupTag')).first()).toBeVisible();
+});

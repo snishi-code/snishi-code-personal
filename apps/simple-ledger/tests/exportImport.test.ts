@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import './setup';
 import {
   createContinuousCost,
+  createEntries,
   loadLedger,
   resetAll,
   upsertEntry,
@@ -79,25 +80,28 @@ describe('export/import round trip', () => {
   });
 
   /*
-   * 諸口 groupId（v12 で予約のみ）は保存・export・import の各境界を素通しする。
-   * UI は未実装だが、境界のどこかが未知キーとして落とすと将来の実装時に
+   * 諸口 groupId（v13.16 で活性化）は保存・export・import の各境界を素通しする。
+   * グループ化は createEntries（振り分け保存）の瞬間だけ = upsertEntry の通常経路は
+   * groupId を持ち込まない（v13.16 の保存境界）。境界のどこかが未知キーとして落とすと
    * 「保存はできるのに export で消える」型の欠陥を静かに持ち込む。
    */
-  it('groupId（v12 予約フィールド）は保存 → export → import で保持される', async () => {
+  it('groupId は保存（createEntries）→ export → import で保持される', async () => {
     const ledger = await seedWithEntry();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
     const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    await upsertEntry({
-      ...buildSimpleEntry({
-        date: '2026-06-02',
-        description: '諸口の 1 行目',
-        debitAccountId: food.id,
-        creditAccountId: cash.id,
-        amount: 2500,
-      }),
-      id: 'grouped-entry',
-      groupId: 'grp-2026-06-02',
-    });
+    await createEntries([
+      {
+        ...buildSimpleEntry({
+          date: '2026-06-02',
+          description: '諸口の 1 行目',
+          debitAccountId: food.id,
+          creditAccountId: cash.id,
+          amount: 2500,
+          groupId: 'grp-2026-06-02',
+        }),
+        id: 'grouped-entry',
+      },
+    ]);
 
     // 1) 保存境界（schema 経由の parse）で剥がれない。
     const saved = (await loadLedger()).journalEntries.find((e) => e.id === 'grouped-entry');

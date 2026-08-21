@@ -7,6 +7,7 @@ import { representativeEntryAmount } from '../domain/accounting';
 import { entryHasUnfilledAccount } from '../domain/accountNames';
 import { Money } from './money';
 import { t } from '../i18n';
+import { UI } from '../ui-contract';
 
 function accountName(map: Map<string, Account>, id: string): string {
   return map.get(id)?.name ?? '—';
@@ -48,6 +49,14 @@ export function EntryListItem({
           {entry.description}{' '}
           {isUnfilled ? (
             <span className="tag tag--unfilled">{t('journal.unfilledTag')}</span>
+          ) : null}{' '}
+          {entry.groupId !== undefined ? (
+            // 諸口（同一 groupId の束）の目印（v13.16）。色の意味論は増やさない（中立トークン）。
+            // 集計・抽出には一切効かない = ただの目印（グループに不変条件を持たせない合意）。
+            <span className="tag tag--neutral" data-ui={UI.journal.groupTag}>
+              {t('journal.groupTag')}
+              <span className="sr-only">{t('journal.groupTagSr')}</span>
+            </span>
           ) : null}
         </div>
         <div className="list__sub">

@@ -39,6 +39,11 @@ export interface SimpleEntryInput {
   kind?: JournalEntryKind;
   metadata?: EntryMetadata;
   /**
+   * 諸口（v13.16）: 同一 groupId の通常仕訳 N 本の束。createEntries（振り分け保存）だけが
+   * 値を入れる。単一保存では付けない（1 行に減ったら普通の仕訳に退化する設計と対称）。
+   */
+  groupId?: string;
+  /**
    * @deprecated タグ機能は撤去済み（2026-08-15）。UI から値が入る経路は無いが、
    * import 済みデータを編集しても消えないよう素通しだけ残す。
    */
@@ -98,6 +103,7 @@ export function buildSimpleEntry(
     ],
     kind: input.kind ?? 'normal',
     ...(metadata ? { metadata } : {}),
+    ...(input.groupId !== undefined ? { groupId: input.groupId } : {}),
     createdAt: existing?.createdAt ?? ts,
     updatedAt: ts,
   };

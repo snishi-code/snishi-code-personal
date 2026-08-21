@@ -80,9 +80,10 @@ async function openLoanMode(amountText = '1200000') {
   await waitFor(() => expect(q(UI.journal.entry.loanName)).toBeInTheDocument());
 }
 
-/** ピッカーの中から名前でチップ（radio）を選ぶ。 */
+/** ピッカーの中から名前でチップを選ぶ（flow ピッカーは v13.16 で checkbox 化・役割非依存）。 */
 function pick(dataUi: string, name: string) {
-  fireEvent.click(within(q(dataUi)!).getByRole('radio', { name }));
+  const scope = within(q(dataUi)!);
+  fireEvent.click(scope.queryByRole('radio', { name }) ?? scope.getByRole('checkbox', { name }));
 }
 
 describe('ローンで払う（支出シート）', () => {

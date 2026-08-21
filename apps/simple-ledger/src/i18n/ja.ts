@@ -374,6 +374,20 @@ export const ja = {
     '{every} か月ごとに「{name} {amount}」を起票し、そのたびに持ち物（月割り）とローン（毎月 {monthly} の返済）が作られます。',
   'entry.ccFoldedByRule':
     'ルールは毎周期、月割りの持ち物を自動で作ります（持ち物の指定は畳まれます）。',
+  // 諸口（v13.16）: 複数選択と振り分けページ。
+  'entry.stepTitleSplit': '振り分け',
+  'entry.stepNextSplit': '振り分けを入力する',
+  'entry.splitLockedHint': 'もう一方の側で複数選択中は、こちらは 1 つだけ選べます。',
+  'entry.natureFoldedBySplit':
+    '複数選択（諸口）では、ローン・持ち物・ルールは使えません（必要なら 1 件ずつ登録してください）。',
+  'entry.splitAutoHint': '最後の枠は自動計算（合計 − ほかの枠）です。',
+  'entry.splitAutoInvalid':
+    '自動計算の枠が 0 以下になります。金額を減らすか、枠を減らしてください。',
+  'entry.splitAmountInvalid': '1 以上の金額を入れてください。',
+  'entry.splitTotal': '合計',
+  'entry.splitTotalNote': '{count} 本の通常仕訳として保存されます（合計はちょうど一致します）。',
+  'journal.groupTag': '按分',
+  'journal.groupTagSr': 'グループ（諸口）の仕訳',
   'entry.loanArrangeBack': 'ローンをやめる',
   'entry.loanName': 'ローンの名前',
   'entry.loanNamePlaceholder': '例: 自動車ローン',

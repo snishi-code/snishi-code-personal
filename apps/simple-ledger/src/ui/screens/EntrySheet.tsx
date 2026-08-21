@@ -24,6 +24,7 @@ import { quickSpanEndDate } from '../ccQuickSpan';
 import { EntryLoanStep } from '../sheets/EntryLoanStep';
 import { EntryItemStep } from '../sheets/EntryItemStep';
 import { EntryRuleStep } from '../sheets/EntryRuleStep';
+import { EntrySplitStep } from '../sheets/EntrySplitStep';
 import {
   MONTHLY_AMOUNTS_HARD_CAP,
   monthlyAmounts,
@@ -57,6 +58,7 @@ import {
 import type { EntryMetadata, InputMode, JournalEntry } from '../../domain/types';
 import type { AccountRole } from '../../domain/accountRoles';
 import { isRecurringPostableRole } from '../../domain/recurring';
+import { newId } from '../../domain/ids';
 import { t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
 import { isValidIsoDate, MAX_LEDGER_DATE, MIN_LEDGER_DATE } from '../../domain/calendar';
@@ -92,7 +94,7 @@ export interface TransferFixed {
  * 登録のページ（v13.7 I3）。`base` = 支出そのもの（ローン・持ち物は使うかどうかの選択だけ）、
  * `loan` = ローンの入力、`item` = 持ち物の入力。選んだものだけが順に足される。
  */
-type EntryStep = 'base' | 'loan' | 'item' | 'rule';
+type EntryStep = 'base' | 'loan' | 'item' | 'rule' | 'split';
 
 export type EntryInit =
   | { kind: 'create'; mode: FormMode }
@@ -131,6 +133,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     createContinuousCost,
     createLoanPurchase,
     createRecurringRule,
+    createEntries,
     removeEntry,
   } = useLedger();
   const accounts = ledger?.accounts ?? [];
@@ -277,6 +280,24 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     setRuleMode(false);
     setStep('base');
   };
+
+  /*
+   * 諸口（v13.16）: 片側のみ複数選択。配列 = 選択順（末尾 = 振り分けページの自動計算枠）。
+   * form の該当側は常に配列の先頭をミラーする（単一経路の検証・保存がそのまま生きる）。
+   * 有効なのは新規作成の flow ピッカーだけ（編集 = 個別行の通常編集・全モード共通）。
+   */
+  const [creditIds, setCreditIds] = useState<string[]>([]);
+  const [debitIds, setDebitIds] = useState<string[]>([]);
+  const [splitTexts, setSplitTexts] = useState<Record<string, string>>({});
+  const [splitAmountsInvalid, setSplitAmountsInvalid] = useState(false);
+  const [splitAutoInvalid, setSplitAutoInvalid] = useState(false);
+  const setSideIds = (side: 'debit' | 'credit', ids: string[]) => {
+    (side === 'credit' ? setCreditIds : setDebitIds)(ids);
+    setSide(side, ids[0] ?? '');
+    setSplitAmountsInvalid(false);
+    setSplitAutoInvalid(false);
+  };
+  const setSideSingle = (side: 'debit' | 'credit', id: string) => setSideIds(side, [id]);
   /*
    * 完済日（inclusive）から回数・月々の額を導出する（v13.13: 端数は monthlyAmounts の
    * 合計厳密一致に乗るので「差額の明示」は不要になった）。プレビューは保存境界と同じ式
@@ -335,14 +356,31 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
    * 簿記編集（manual）は 1 枚のまま扱う（貸借を直に指定する画面の力を割らない）。
    */
   const [step, setStep] = useState<EntryStep>('base');
+  /*
+   * 諸口の活性（v13.16）: トグルが 1 つでも ON の間は複数選択を出さない（購入仕訳は item と
+   * 1:1 ミラー・ルールは単一フローの宣言 — 排他は作者承認 2026-08-21）。
+   * 片側ロック: 一方で 2 件以上選んだ瞬間にもう一方は単一選択へロックする（UI 層の fail-closed）。
+   */
+  const splitPickersEnabled =
+    init.kind === 'create' && !loanActive && !continuousCostActive && !ruleActive;
+  const splitActive = splitPickersEnabled && (creditIds.length >= 2 || debitIds.length >= 2);
+  const splitSide: 'debit' | 'credit' = creditIds.length >= 2 ? 'credit' : 'debit';
+  const splitIds = splitSide === 'credit' ? creditIds : debitIds;
+  // 自動計算枠（末尾）= 合計 − Σ手入力。検証と表示が同じ式を使う。
+  const splitManualAmounts = splitIds
+    .slice(0, -1)
+    .map((id) => parseAmountToMinor(splitTexts[id] ?? '') ?? 0);
+  const splitAutoAmount = splitManualAmounts.reduce((sum, a) => sum - a, form.amount);
+
   const steps: EntryStep[] =
     mode === 'manual'
-      ? ['base']
+      ? ['base', ...(splitActive ? (['split'] as const) : [])]
       : [
           'base',
           ...(canArrangeLoan && loanMode ? (['loan'] as const) : []),
           ...(canCreateContinuousCost && ccMode && !ruleActive ? (['item'] as const) : []),
           ...(ruleActive ? (['rule'] as const) : []),
+          ...(splitActive ? (['split'] as const) : []),
         ];
   // 選択を外したページに留まらない（steps から消えたら基本の画面へ戻る）。
   const activeStep: EntryStep = steps.includes(step) ? step : 'base';
@@ -372,6 +410,9 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     ruleMode,
     ruleEveryText,
     rulePostingDate,
+    creditIds,
+    debitIds,
+    splitTexts,
   });
   const [initialSnapshot] = useState(snapshot);
   const dirty = snapshot !== initialSnapshot;
@@ -464,6 +505,56 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     }
 
     const ccActive = canCreateContinuousCost && ccMode && !ruleActive;
+
+    /*
+     * 諸口（v13.16 §2.3）: 複数側の科目 × 振り分け額で**通常の 2 行仕訳 N 本 + 同一 groupId**
+     * を単一トランザクションで保存する（経路 = createEntries・新しい保存 API は作らない）。
+     * 自動枠（末尾）= 合計 − Σ手入力。負・0 はエラーで保存不可（0 円の行は作らない）。
+     */
+    if (splitActive) {
+      const amountsBad = splitManualAmounts.some((a) => !Number.isInteger(a) || a < 1);
+      const autoBad = !Number.isInteger(splitAutoAmount) || splitAutoAmount < 1;
+      setSplitAmountsInvalid(amountsBad);
+      setSplitAutoInvalid(!amountsBad && autoBad);
+      if (amountsBad || autoBad) return;
+      // 振替は各ペアの流れも通常保存と同じ規則で検証する（picker の role 制限 + 二重防御）。
+      if (mode === 'transfer') {
+        for (const id of splitIds) {
+          const srcRole = accounts.find(
+            (a) => a.id === (splitSide === 'credit' ? id : toSave.creditAccountId),
+          )?.role;
+          const dstRole = accounts.find(
+            (a) => a.id === (splitSide === 'debit' ? id : toSave.debitAccountId),
+          )?.role;
+          if (!srcRole || !dstRole || !transferFlowValid(srcRole, dstRole)) {
+            setFlowError(t('entry.error.invalid-transfer'));
+            setStep('base');
+            return;
+          }
+        }
+      }
+      const amounts = [...splitManualAmounts, splitAutoAmount];
+      const groupId = newId();
+      setSubmitting(true);
+      try {
+        await createEntries(
+          splitIds.map((id, i) => ({
+            date: toSave.date,
+            description: toSave.description,
+            amount: amounts[i]!,
+            debitAccountId: splitSide === 'debit' ? id : toSave.debitAccountId,
+            creditAccountId: splitSide === 'credit' ? id : toSave.creditAccountId,
+            kind: 'normal' as const,
+            metadata: { inputMode: resolveInputMode() },
+            groupId,
+          })),
+        );
+        onClose();
+      } catch {
+        setSubmitting(false);
+      }
+      return;
+    }
 
     /*
      * ルールにする（v13.15 §2.2）: **ルールだけが保存される**（完全導出 — 単発仕訳は
@@ -908,9 +999,21 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               flat
               label={t(flowDef.source.labelKey)}
               required
-              value={form.creditAccountId}
+              {...(splitPickersEnabled && debitIds.length <= 1
+                ? {
+                    multi: {
+                      values: creditIds,
+                      onValuesChange: (ids) => setSideIds('credit', ids),
+                    },
+                  }
+                : {
+                    value: form.creditAccountId,
+                    onChange: (id) => setSideSingle('credit', id),
+                    ...(splitPickersEnabled && debitIds.length >= 2
+                      ? { hint: t('entry.splitLockedHint') }
+                      : {}),
+                  })}
               groups={srcGroups}
-              onChange={(id) => setSide('credit', id)}
               error={errorText(errors, 'credit-required') ?? sameAccount}
               dataUi={UI.journal.entry.flowSource}
             />
@@ -941,9 +1044,16 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               flat
               label={t(flowDef.destination.labelKey)}
               required
-              value={form.debitAccountId}
+              {...(splitPickersEnabled && creditIds.length <= 1
+                ? { multi: { values: debitIds, onValuesChange: (ids) => setSideIds('debit', ids) } }
+                : {
+                    value: form.debitAccountId,
+                    onChange: (id) => setSideSingle('debit', id),
+                    ...(splitPickersEnabled && creditIds.length >= 2
+                      ? { hint: t('entry.splitLockedHint') }
+                      : {}),
+                  })}
               groups={dstGroups}
-              onChange={(id) => setSide('debit', id)}
               error={errorText(errors, 'debit-required')}
               dataUi={UI.journal.entry.flowDestination}
             />
@@ -978,9 +1088,16 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             flat
             label={t('entry.source.manual')}
             required
-            value={form.creditAccountId}
+            {...(splitPickersEnabled && debitIds.length <= 1
+              ? { multi: { values: creditIds, onValuesChange: (ids) => setSideIds('credit', ids) } }
+              : {
+                  value: form.creditAccountId,
+                  onChange: (id) => setSideSingle('credit', id),
+                  ...(splitPickersEnabled && debitIds.length >= 2
+                    ? { hint: t('entry.splitLockedHint') }
+                    : {}),
+                })}
             groups={srcGroups}
-            onChange={(id) => setSide('credit', id)}
             error={errorText(errors, 'credit-required') ?? sameAccount}
             dataUi={UI.journal.entry.flowSource}
           />
@@ -996,9 +1113,16 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               flat
               label={t('entry.destination.manual')}
               required
-              value={form.debitAccountId}
+              {...(splitPickersEnabled && creditIds.length <= 1
+                ? { multi: { values: debitIds, onValuesChange: (ids) => setSideIds('debit', ids) } }
+                : {
+                    value: form.debitAccountId,
+                    onChange: (id) => setSideSingle('debit', id),
+                    ...(splitPickersEnabled && creditIds.length >= 2
+                      ? { hint: t('entry.splitLockedHint') }
+                      : {}),
+                  })}
               groups={dstGroups}
-              onChange={(id) => setSide('debit', id)}
               error={errorText(errors, 'debit-required')}
               dataUi={UI.journal.entry.flowDestination}
             />
@@ -1103,12 +1227,23 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       <span className="chip__text">{label}</span>
     </label>
   );
+  /*
+   * 性質トグルの相互排他表（宣言的・v13.16 §6-3）。値 = 畳む理由（undefined = 出す）:
+   *  - 'split' = 複数選択（諸口）中は 3 トグルとも畳む（購入仕訳は item と 1:1 ミラー・
+   *    ルールは単一フローの宣言 — 排他は作者承認 2026-08-21）
+   *  - 'rule' = ルール ON は持ち物を畳む（毎周期の item は台帳経由で自動・§2.3）
+   */
+  const toggleFolds: Record<'loan' | 'item' | 'rule', 'split' | 'rule' | undefined> = {
+    loan: splitActive ? 'split' : undefined,
+    item: splitActive ? 'split' : ruleActive ? 'rule' : undefined,
+    rule: splitActive ? 'split' : undefined,
+  };
   const natureSection =
     init.kind === 'create' && !isManual ? (
       <div className="field" data-ui={UI.journal.entry.nature}>
         <span className="field__label">{t('entry.natureLabel')}</span>
         <div className="picker__chips">
-          {canArrangeLoan
+          {canArrangeLoan && toggleFolds.loan === undefined
             ? natureToggle(
                 loanMode,
                 () => (loanMode ? disableLoanMode() : enableLoanMode()),
@@ -1116,7 +1251,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                 UI.journal.entry.loanArrange,
               )
             : null}
-          {canCreateContinuousCost && !ruleActive
+          {canCreateContinuousCost && toggleFolds.item === undefined
             ? natureToggle(
                 ccMode,
                 () => (ccMode ? disableCcMode() : enableCcMode()),
@@ -1124,7 +1259,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                 UI.journal.entry.ccToggle,
               )
             : null}
-          {canMakeRule
+          {canMakeRule && toggleFolds.rule === undefined
             ? natureToggle(
                 ruleMode,
                 () => (ruleMode ? disableRuleMode() : enableRuleMode()),
@@ -1133,12 +1268,18 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               )
             : null}
         </div>
-        {ruleActive && canCreateContinuousCost ? (
+        {toggleFolds.item === 'rule' && canCreateContinuousCost ? (
           <p className="field__hint" data-ui={UI.journal.entry.ccFoldedByRule}>
             {t('entry.ccFoldedByRule')}
           </p>
         ) : null}
-        <p className="field__hint">{t('entry.natureHint')}</p>
+        {splitActive ? (
+          <p className="field__hint" data-ui={UI.journal.entry.natureFoldedBySplit}>
+            {t('entry.natureFoldedBySplit')}
+          </p>
+        ) : (
+          <p className="field__hint">{t('entry.natureHint')}</p>
+        )}
       </div>
     ) : null;
 
@@ -1150,7 +1291,9 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         ? t('entry.stepTitleItem')
         : activeStep === 'rule'
           ? t('entry.stepTitleRule')
-          : title;
+          : activeStep === 'split'
+            ? t('entry.stepTitleSplit')
+            : title;
   const stepIndicator =
     steps.length > 1 ? (
       <p className="field__hint" data-ui={UI.journal.entry.step}>
@@ -1196,9 +1339,11 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                   ? t('entry.stepNextItem')
                   : nextStep === 'rule'
                     ? t('entry.stepNextRule')
-                    : ruleActive
-                      ? t('entry.saveRule')
-                      : t('common.save')}
+                    : nextStep === 'split'
+                      ? t('entry.stepNextSplit')
+                      : ruleActive
+                        ? t('entry.saveRule')
+                        : t('common.save')}
             </button>
           </>
         }
@@ -1223,7 +1368,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           </div>
         ) : null}
 
-        {isManual ? (
+        {isManual && activeStep === 'base' ? (
           <>
             {dateField}
             {canCreateContinuousCost && ccMode ? null : descriptionField}
@@ -1356,6 +1501,30 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                 setRulePostingDateError(false);
               }}
               onDisable={disableRuleMode}
+            />
+          </>
+        ) : activeStep === 'split' ? (
+          // 振り分けページ（v13.16 諸口）: 選択順の枠 + 末尾は自動計算 + まとめカード。
+          <>
+            {stepIndicator}
+            <EntrySplitStep
+              accounts={accounts}
+              currency={currency}
+              fractionDigits={fractionDigits}
+              total={form.amount}
+              ids={splitIds}
+              texts={splitTexts}
+              autoAmount={splitAutoAmount}
+              amountsInvalid={splitAmountsInvalid}
+              autoInvalid={splitAutoInvalid}
+              onTextChange={(id, v) => {
+                setSplitTexts((cur) => ({
+                  ...cur,
+                  [id]: sanitizeAmountText(v, fractionDigits, cur[id] ?? ''),
+                }));
+                setSplitAmountsInvalid(false);
+                setSplitAutoInvalid(false);
+              }}
             />
           </>
         ) : (

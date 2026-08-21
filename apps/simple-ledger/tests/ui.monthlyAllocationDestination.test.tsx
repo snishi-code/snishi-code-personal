@@ -229,11 +229,17 @@ describe('継続コスト資産の費用の行き先候補', () => {
         '給与',
         '固定費',
       ]) {
-        expect(within(picker).getByRole('radio', { name })).toBeInTheDocument();
+        expect(
+          within(picker).queryByRole('radio', { name }) ??
+            within(picker).queryByRole('checkbox', { name }),
+        ).toBeInTheDocument();
       }
     });
     for (const name of ['行き先・アーカイブ済み', '行き先・内部台帳', '行き先・残高調整']) {
-      expect(within(picker).queryByRole('radio', { name })).not.toBeInTheDocument();
+      expect(
+        within(picker).queryByRole('radio', { name }) ??
+          within(picker).queryByRole('checkbox', { name }),
+      ).not.toBeInTheDocument();
     }
   });
 

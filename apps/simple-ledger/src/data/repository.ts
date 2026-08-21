@@ -965,13 +965,20 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
     if (entry.metadata?.loanItemId !== undefined || entry.metadata?.loanSettlement) {
       throw new LedgerError('error.entry.loanLinked');
     }
+    // 諸口の目印（groupId・v13.16）は保存境界で固定する: 編集で剥がれず、通常経路からの
+    // 持ち込みもしない（グループ化は createEntries の保存の瞬間だけ）。
+    const normalized: JournalEntry = {
+      ...entry,
+      ...(existing?.groupId !== undefined ? { groupId: existing.groupId } : {}),
+    };
+    if (existing?.groupId === undefined) delete normalized.groupId;
     const ctx = await loadSaveContext();
     const accountUpdates = extendSystemStartsForReferences(
       ctx,
-      entryAccountReferences(entry),
+      entryAccountReferences(normalized),
       nowIso(),
     );
-    const savable = assertEntrySavable(entry, ctx);
+    const savable = assertEntrySavable(normalized, ctx);
     await assertEndedBalancesAfterEntryChange(ctx, entries, {
       replacement: savable,
       affectedAccountIds: new Set(
@@ -1015,7 +1022,11 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
           ? 'opening'
           : 'normal',
     metadata,
+    // 諸口の目印（groupId・v13.16）は保存境界で固定する: 編集で剥がれず、通常経路からの
+    // 持ち込みもしない（グループ化は createEntries の保存の瞬間だけ）。
+    ...(existing?.groupId !== undefined ? { groupId: existing.groupId } : {}),
   };
+  if (existing?.groupId === undefined) delete candidate.groupId;
   const items = await getAll<MonthlyCostItem>(STORE.monthlyCostItems);
   const linkedItem = items.find((item) => item.id === existingMcId);
   const loanItem = items.find((item) => item.id === existingLoanId);

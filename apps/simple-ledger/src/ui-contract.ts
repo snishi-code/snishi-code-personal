@@ -167,6 +167,8 @@ export const UI = {
     sortDesc: 'journal.sort.desc',
     sortAsc: 'journal.sort.asc',
     summary: 'journal.summary',
+    // 諸口（同一 groupId）の目印チップ（v13.16）。
+    groupTag: 'journal.groupTag',
     entry: {
       save: 'journal.entry.save',
       // 固定額振替の「振替せずに実行」（費用・収入の終了のみ）
@@ -211,6 +213,12 @@ export const UI = {
       rulePostingDate: 'journal.entry.rulePostingDate',
       rulePreview: 'journal.entry.rulePreview',
       ccFoldedByRule: 'journal.entry.ccFoldedByRule',
+      // 諸口（v13.16）: 複数選択の振り分けページと性質トグルの畳み。
+      splitPanel: 'journal.entry.splitPanel',
+      splitAmount: 'journal.entry.splitAmount',
+      splitAuto: 'journal.entry.splitAuto',
+      splitPreview: 'journal.entry.splitPreview',
+      natureFoldedBySplit: 'journal.entry.natureFoldedBySplit',
       loanFrom: 'journal.entry.loanFrom',
       loanPreview: 'journal.entry.loanPreview',
       date: 'journal.entry.date',

@@ -315,10 +315,11 @@ describe('仕訳入力の科目候補', () => {
         const destination = document.querySelector(
           `[data-ui="${UI.journal.entry.flowDestination}"]`,
         ) as HTMLElement;
-        const sourceCandidate = within(source).queryByRole('radio', {
+        // flow ピッカーは v13.16 で checkbox（複数選択）になった。
+        const sourceCandidate = within(source).queryByRole('checkbox', {
           name: '期間限定の支払い元',
         });
-        const destinationCandidate = within(destination).queryByRole('radio', {
+        const destinationCandidate = within(destination).queryByRole('checkbox', {
           name: '期間限定の支出先',
         });
         if (visible) {
