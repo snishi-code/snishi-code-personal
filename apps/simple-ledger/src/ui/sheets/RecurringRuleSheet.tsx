@@ -42,8 +42,8 @@ import {
 import { formatMinorForInput, parseAmountToMinor, sanitizeAmountText } from '../amountText';
 import { useMoneyDigits } from '../money';
 import { Money } from '../money';
+import { RuleEveryMonthsField, RulePostingDateField } from './RuleFields';
 import { errorText, t } from '../../i18n';
-import type {} from '../../i18n';
 import type {} from '../../util/format';
 import { UI } from '../../ui-contract';
 import type {} from '../../data/repository';
@@ -374,25 +374,17 @@ export function RecurringRuleSheet({
               {t('recurring.settlementLockNote', { count: settlementCount })}
             </p>
           ) : null}
-          <TextInput
-            label={t('recurring.firstPostingDate')}
-            type="date"
-            required
-            disabled={settlementLocked}
+          <RulePostingDateField
             value={firstPostingDate}
-            min={MIN_LEDGER_DATE}
-            max={MAX_LEDGER_DATE}
             onChange={setFirstPostingDate}
+            disabled={settlementLocked}
             hint={t('recurring.firstPostingDateHint')}
             dataUi={UI.allocations.recurringFirstPostingDate}
           />
-          <TextInput
-            label={t('recurring.intervalMonths')}
-            required
-            disabled={settlementLocked}
-            inputMode="numeric"
+          <RuleEveryMonthsField
             value={everyText}
-            onChange={(v) => setEveryText(v.replace(/[^\d]/g, ''))}
+            onChange={setEveryText}
+            disabled={settlementLocked}
             dataUi={UI.allocations.recurringEvery}
           />
           <TextInput
