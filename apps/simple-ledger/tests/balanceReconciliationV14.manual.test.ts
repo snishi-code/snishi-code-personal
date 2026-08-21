@@ -110,7 +110,14 @@ function flowTupleCounts(entries: readonly JournalEntry[]): Map<string, number> 
 }
 
 function missingFacts(v13: RawPackage, v14: RawPackage, asOf: string): string[] {
-  const facts = flowTupleCounts(v13.journalEntries.filter((entry) => entry.date <= asOf));
+  // 補正 pin（metadata.adjustment）は v13.4 以降、エンジンが按分スライスへ置き換えるため
+  // 「stored の行そのもの」は導出世界に現れない（設計どおり）。事実保全の対象から除き、
+  // pin の保全は残高照合（想定差分 + 純資産不変）と変換ログの pin 修復列挙が受け持つ。
+  const facts = flowTupleCounts(
+    v13.journalEntries.filter(
+      (entry) => entry.date <= asOf && entry.metadata?.adjustment === undefined,
+    ),
+  );
   const world = flowTupleCounts(reportEntriesForAsOf(v14, asOf));
   const missing: string[] = [];
   for (const [key, count] of facts) {
