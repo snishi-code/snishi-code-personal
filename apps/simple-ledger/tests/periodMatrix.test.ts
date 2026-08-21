@@ -104,7 +104,7 @@ const identityRow = (matrix: PeriodMatrix, key: DisplaySectionKey) =>
   periodMatrixRow(matrix, lensRowId.identity(key));
 
 /** 総資産は箱ではないので、資産の箱を足して作る（表に総資産の行はもう無い）。 */
-const ASSET_BOXES: DisplayBoxKey[] = ['assetFree', 'assetFixed', 'investment', 'continuingCost'];
+const ASSET_BOXES: DisplayBoxKey[] = ['assetFree', 'assetFixed', 'continuingCost'];
 function totalAssets(matrix: PeriodMatrix): number[] {
   return matrix.columns.map((_column, index) =>
     ASSET_BOXES.reduce((total, key) => total + (boxRow(matrix, key)[index] ?? 0), 0),

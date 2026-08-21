@@ -56,7 +56,7 @@ export function App() {
   const [journalTargetEntryId, setJournalTargetEntryId] = useState<string | null>(null);
   // 仕訳一覧の計算で生まれた行タップ → 「月割り台帳」で開くシートの対象（1 回で消費）。
   const [allocationsTarget, setAllocationsTarget] = useState<AllocationsTarget | null>(null);
-  // 投資利回りの投影行タップ → 勘定科目で開く編集シートの対象（1 回で消費）。
+  // 科目行タップ（資金繰りのローン科目など）→ 勘定科目で開く編集シートの対象（1 回で消費）。
   const [accountsTarget, setAccountsTarget] = useState<{ accountId: string } | null>(null);
   const [exitConfirm, setExitConfirm] = useState(false);
   // オンボーディングは「初回状態からの派生 + ユーザー操作の上書き」で開閉する
@@ -213,7 +213,7 @@ export function App() {
     setAllocationsTarget(target);
   };
 
-  // 仕訳一覧・タイムライン → 勘定科目（投資利回りの投影行の由来 = 利回りを宣言した科目を開く）。
+  // 資金繰りなど → 勘定科目（指定の科目の編集シートを開く）。
   const goAccountFor = (accountId: string) => {
     navigate('accounts');
     setAccountsTarget({ accountId });

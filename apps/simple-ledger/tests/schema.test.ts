@@ -1431,10 +1431,21 @@ describe('accountSchema の movable（「自由に動かせる」フラグ）正
     }
   });
   it('daily-asset 以外に付いた movable は剥がす（fail-soft・拒否しない）', () => {
-    const invest = { ...daily, id: 'nisa', name: 'NISA', role: 'investment-asset' };
-    const parsed = accountSchema.safeParse({ ...invest, movable: false });
+    const ledger = {
+      ...daily,
+      id: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
+      name: '継続コスト台帳',
+      role: 'continuing-cost-asset',
+    };
+    const parsed = accountSchema.safeParse({ ...ledger, movable: false });
     expect(parsed.success).toBe(true);
     if (parsed.success) expect('movable' in parsed.data).toBe(false);
+  });
+  it('investment-asset role は受理しない（v13.18 撤去・変換経由でのみ v14 に入る）', () => {
+    expect(
+      accountSchema.safeParse({ ...daily, id: 'nisa', name: 'NISA', role: 'investment-asset' })
+        .success,
+    ).toBe(false);
   });
   it('package を通しても movable: false が保持される', () => {
     const pkg = {
@@ -1458,11 +1469,14 @@ describe('accountSchema の movable（「自由に動かせる」フラグ）正
 });
 
 describe('旧・投資投影フィールドの strip（v13.17 撤去・自己修復）', () => {
+  // 旧 role（investment-asset）は v13.18 で受理面から撤去。残骸 strip の検証は
+  // 付け替え後の形（daily-asset + movable:false）で行う。
   const invest = {
     id: 'nisa',
     name: 'NISA',
     type: 'asset',
-    role: 'investment-asset',
+    role: 'daily-asset',
+    movable: false,
     archived: false,
     createdAt: 'x',
     updatedAt: 'x',
@@ -1562,7 +1576,8 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
     id: 'invest',
     name: '投資',
     type: 'asset',
-    role: 'investment-asset',
+    role: 'daily-asset',
+    movable: false,
     archived: false,
     createdAt: 'x',
     updatedAt: 'x',

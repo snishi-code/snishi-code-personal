@@ -8,7 +8,6 @@
  *
  * 対応表（ユーザー向け大分類）:
  *  - 現預金・決済資産  = daily-asset
- *  - 投資             = investment-asset
  *  - カード・未払      = payment-liability（短期債務）
  *  - ローン           = other-liability（長期債務）
  *  - 収入カテゴリ      = income-category
@@ -36,7 +35,6 @@ import type { MessageKey } from '../i18n';
 export type AccountBoxKey =
   | 'cash'
   | 'cashFixed'
-  | 'investment'
   | 'shortTermDebt'
   | 'longTermDebt'
   | 'income'
@@ -49,7 +47,6 @@ export type AccountBoxKey =
 export const ACCOUNT_ACCENTS = {
   assetFree: 'var(--account-asset-free)',
   assetFixed: 'var(--account-asset-fixed)',
-  investment: 'var(--account-investment)',
   continuingCost: 'var(--account-continuing-cost)',
   shortTermDebt: 'var(--account-liability-short)',
   longTermDebt: 'var(--account-liability-long)',
@@ -61,9 +58,9 @@ export const ACCOUNT_ACCENTS = {
 export type AccountAccent = (typeof ACCOUNT_ACCENTS)[keyof typeof ACCOUNT_ACCENTS];
 
 /**
- * タイムラインで使う 9 個の大きな箱の見た目。
+ * タイムラインで使う 8 個の大きな箱の見た目。
  *
- * 勘定科目管理の 6 箱に、資産内訳で既に使っている「自由に動かせる / 動かせない」
+ * 勘定科目管理の 5 箱に、資産内訳で既に使っている「自由に動かせる / 動かせない」
  * の分割、内部の継続コスト台帳、純資産を合わせたもの。
  * **並びと所属は `domain/displayOrder` が正本**で、ここはラベルと色だけを足す。
  * 残高調整科目は type に基づき収入・費用の箱へ通常の内訳として所属させる（表示だけ普通に）。
@@ -81,7 +78,6 @@ export interface TimelineAccountBox {
 const BOX_LOOK: Record<DisplayBoxKey, { labelKey: MessageKey; accent: AccountAccent }> = {
   assetFree: { labelKey: 'assets.frame.free', accent: ACCOUNT_ACCENTS.assetFree },
   assetFixed: { labelKey: 'assets.frame.fixed', accent: ACCOUNT_ACCENTS.assetFixed },
-  investment: { labelKey: 'assets.frame.investment', accent: ACCOUNT_ACCENTS.investment },
   continuingCost: { labelKey: 'assets.frame.ledger', accent: ACCOUNT_ACCENTS.continuingCost },
   shortTermDebt: { labelKey: 'box.shortTermDebt', accent: ACCOUNT_ACCENTS.shortTermDebt },
   longTermDebt: { labelKey: 'box.longTermDebt', accent: ACCOUNT_ACCENTS.longTermDebt },
@@ -140,8 +136,8 @@ export interface AccountBox {
 }
 
 /**
- * 勘定科目画面の 7 箱。**並びはここでは決めない**（下の sortByDisplayBox が
- * 表示順マスタの並びへ揃える）。9 箱のうち聖域（継続コスト台帳・純資産）を持たないぶんだけ
+ * 勘定科目画面の 6 箱。**並びはここでは決めない**（下の sortByDisplayBox が
+ * 表示順マスタの並びへ揃える）。8 箱のうち聖域（継続コスト台帳・純資産）を持たないぶんだけ
  * 少ない部分集合で、残りの相対順はマスタと必ず一致する。
  */
 const ACCOUNT_BOX_DEFS: readonly AccountBox[] = [
@@ -171,17 +167,6 @@ const ACCOUNT_BOX_DEFS: readonly AccountBox[] = [
     opening: true,
     defaultMovable: false,
     hintKey: 'box.cashFixedHint',
-  },
-  {
-    key: 'investment',
-    box: 'investment',
-    labelKey: 'box.investment',
-    accent: ACCOUNT_ACCENTS.investment,
-    roles: ['investment-asset'],
-    type: 'asset',
-    createRole: 'investment-asset',
-    addLabelKey: 'box.addSubdivision',
-    opening: true,
   },
   {
     key: 'shortTermDebt',

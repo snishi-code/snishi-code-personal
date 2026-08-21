@@ -1,9 +1,8 @@
 /*
- * 資産の内訳の 4 枠表示:
+ * 資産の内訳の 3 枠表示:
  *  ① 自由に動かせるお金（daily-asset・movable ≠ false）
- *  ② 自由に動かせないお金（daily-asset・movable = false）
- *  ③ 投資（investment-asset）
- *  ④ 継続コスト台帳（1 行 = 残存価値合計・タップで「毎月のもの」へ）
+ *  ② 自由に動かせないお金（daily-asset・movable = false。投資もここ・v13.18）
+ *  ③ 継続コスト台帳（1 行 = 残存価値合計・タップで「毎月のもの」へ）
  * 各枠に小計・最後に全体合計（従来の total）。
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -42,7 +41,7 @@ function Providers({ children }: { children: React.ReactNode }) {
 
 const ui = (name: string) => document.querySelector(`[data-ui="${name}"]`);
 
-describe('資産の内訳 4 枠', () => {
+describe('資産の内訳 3 枠', () => {
   it('枠ごとの小計と全体合計を出し、継続コスト台帳は 1 行でタップすると毎月のものへ遷移する', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
@@ -85,12 +84,10 @@ describe('資産の内訳 4 枠', () => {
       expect(ui(UI.assetsBreakdown.freeSubtotal)).toHaveTextContent('380,000');
     });
     expect(screen.getByText('自由に動かせるお金')).toBeInTheDocument();
-    // ② 自由に動かせないお金 = チャージ残高 5,000。
+    // ② 自由に動かせないお金 = チャージ残高 5,000 + 投資 50,000（投資は普通の資産・v13.18）。
     expect(screen.getByText('自由に動かせないお金')).toBeInTheDocument();
-    expect(ui(UI.assetsBreakdown.fixedSubtotal)).toHaveTextContent('5,000');
-    // ③ 投資 = 50,000。
-    expect(ui(UI.assetsBreakdown.investmentSubtotal)).toHaveTextContent('50,000');
-    // ④ 継続コスト台帳は 1 行（残存価値合計 120,000）。
+    expect(ui(UI.assetsBreakdown.fixedSubtotal)).toHaveTextContent('55,000');
+    // ③ 継続コスト台帳は 1 行（残存価値合計 120,000）。
     const ledgerRow = ui(UI.assetsBreakdown.ledgerRow)!;
     expect(ledgerRow).toHaveTextContent('月割り台帳');
     expect(ledgerRow).toHaveTextContent('120,000');
@@ -99,7 +96,7 @@ describe('資産の内訳 4 枠', () => {
     expect(document.querySelectorAll(`[data-ui="${UI.assetsBreakdown.ledgerRow}"]`)).toHaveLength(
       1,
     );
-    // 全体合計（既存 total）= 380,000 + 5,000 + 50,000 + 120,000。
+    // 全体合計（既存 total）= 380,000 + 55,000 + 120,000。
     expect(ui(UI.assetsBreakdown.total)).toHaveTextContent('555,000');
 
     // 台帳行タップ → 毎月のもの（内訳は台帳画面で見る）。
@@ -110,6 +107,9 @@ describe('資産の内訳 4 枠', () => {
   it('自由に動かせないお金・台帳が無ければ、その枠ごと出さない', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    // seed の投資（movable:false）を終了し、「動かせない」枠に科目が無い状態を作る。
+    const invest = ledger.accounts.find((a) => a.name === '投資')!;
+    await upsertAccount({ ...invest, archived: true });
     await createOpenings([{ accountId: cash.id, amount: 1000000, date: '2000-01-01' }]);
 
     render(

@@ -83,7 +83,7 @@ export function recurringExpenseAccountId(
  * 借方/貸方の役割から種別を導出する。許可されない組み合わせは null。
  *  - 支出: 貸方 資金(daily) or カード(payment-liability) → 借方 費用カテゴリ
  *  - 収入: 貸方 収入カテゴリ → 借方 資金(daily)
- *  - 振替: 貸方 資金(daily) → 借方 資金(daily) or 投資（積立）
+ *  - 振替: 貸方 資金(daily) → 借方 資金(daily)
  */
 export function recurringKindOf(
   debitRole: AccountRole | undefined,
@@ -96,11 +96,7 @@ export function recurringKindOf(
   )
     return 'expense';
   if (creditRole === 'income-category' && debitRole === 'daily-asset') return 'income';
-  if (
-    creditRole === 'daily-asset' &&
-    (debitRole === 'daily-asset' || debitRole === 'investment-asset')
-  )
-    return 'transfer';
+  if (creditRole === 'daily-asset' && debitRole === 'daily-asset') return 'transfer';
   return null;
 }
 

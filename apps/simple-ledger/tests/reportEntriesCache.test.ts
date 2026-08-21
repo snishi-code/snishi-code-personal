@@ -105,7 +105,7 @@ const ACCOUNTS: Account[] = [
   account('food', '食費', 'expense', 'expense-category'),
   account('fixed', '固定費', 'expense', 'expense-category'),
   account('salary', '給与', 'revenue', 'income-category'),
-  account('invest', '投資', 'asset', 'investment-asset'),
+  { ...account('invest', '投資', 'asset', 'daily-asset'), movable: false },
   account('gain', '投資益', 'revenue', 'income-category'),
   account('adj-exp', '残高調整費', 'expense', 'system-adjustment'),
   account('adj-rev', '残高調整収入', 'revenue', 'system-adjustment'),

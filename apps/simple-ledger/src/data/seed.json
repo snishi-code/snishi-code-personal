@@ -23,7 +23,8 @@
     {
       "name": "投資",
       "type": "asset",
-      "role": "investment-asset"
+      "role": "daily-asset",
+      "movable": false
     },
     {
       "name": "クレジットカード",

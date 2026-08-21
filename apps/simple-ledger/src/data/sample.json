@@ -43,7 +43,8 @@
       "id": "acc-invest",
       "name": "投資",
       "type": "asset",
-      "role": "investment-asset",
+      "role": "daily-asset",
+      "movable": false,
       "archived": false,
       "createdAt": "2026-01-01T00:00:00.000Z",
       "updatedAt": "2026-01-01T00:00:00.000Z"

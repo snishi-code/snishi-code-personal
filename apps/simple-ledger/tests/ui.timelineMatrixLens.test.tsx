@@ -301,13 +301,12 @@ describe('時間平面の数値レンズ', () => {
     const cellsOf = (key: string) =>
       matrixEl().querySelector(`[data-ui="${UI.timeline.matrixRow}"][data-row-key="${key}"]`)!;
 
-    it('既定は箱 9 つ + 恒等行 2 つ（科目は開くまで出さない）', () => {
+    it('既定は箱 8 つ + 恒等行 2 つ（科目は開くまで出さない）', () => {
       renderTimeline({ mode: 'date', date: '2026-07-15' });
 
       expect(rowKeys()).toEqual([
         'box:assetFree',
         'box:assetFixed',
-        'box:investment',
         'box:continuingCost',
         'box:shortTermDebt',
         'box:longTermDebt',

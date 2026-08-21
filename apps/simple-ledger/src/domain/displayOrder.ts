@@ -15,12 +15,10 @@
  *     収支・純資産は「恒等式の行」で、箱ではないので並べ替え対象にしない（後述）。
  *
  * **箱の並びと科目の並びは別物**であり、片方から他方を導出しない。
- * 例: 科目の並びでは投資資産が継続コスト台帳の後ろ（`ROLE_ORDER`）だが、箱の並びでは
- * 投資が継続コスト台帳の前に来る。前者は平坦な一覧（ピッカー等）の見え方、後者は
- * 箱という枠の並びで、由来が違う。
+ * 前者は平坦な一覧（ピッカー等）の見え方、後者は箱という枠の並びで、由来が違う。
  *
  * **分類（どの箱に属するか）と並び（どの順で出るか）の役割分担**:
- * 資産 4 箱の分類は `domain/assetGroups` が正本（`assetGroupOf`）。ここはそれを 1:1 で
+ * 資産 3 箱の分類は `domain/assetGroups` が正本（`assetGroupOf`）。ここはそれを 1:1 で
  * 箱へ写すだけで、role / movable の条件を書き直さない。資産以外の箱の分類はここにしかない。
  *
  * wire / schema / 保存データには一切触れない（並びは保存しない。科目の `sortIndex` だけが
@@ -48,7 +46,6 @@ const TYPE_ORDER: Record<Account['type'], number> = {
 const ROLE_ORDER: Partial<Record<Account['role'], number>> = {
   'daily-asset': 0,
   'continuing-cost-asset': 2,
-  'investment-asset': 3,
   'payment-liability': 0,
   'other-liability': 1,
   equity: 0,
@@ -92,7 +89,6 @@ export function sortAccounts(accounts: readonly Account[]): Account[] {
 export type DisplayBoxKey =
   | 'assetFree'
   | 'assetFixed'
-  | 'investment'
   | 'continuingCost'
   | 'shortTermDebt'
   | 'longTermDebt'
@@ -102,14 +98,13 @@ export type DisplayBoxKey =
 
 /**
  * 箱の並び（コード定数・単一正本）。**現状の並びをそのまま固定したもの**で、
- * 資産（自由 → 動かせない → 投資 → 月割り台帳）→ 負債（短期 → 長期）→ 収入 → 費用 → 純資産。
- * 箱の部分集合を使う画面（勘定科目画面は 7 箱・内訳の負債は 2 箱）は
+ * 資産（自由 → 動かせない → 月割り台帳）→ 負債（短期 → 長期）→ 収入 → 費用 → 純資産。
+ * 箱の部分集合を使う画面（勘定科目画面は 6 箱・内訳の負債は 2 箱）は
  * `orderedDisplayBoxes` でこの並びから切り出す。
  */
 export const DISPLAY_BOX_KEYS: readonly DisplayBoxKey[] = [
   'assetFree',
   'assetFixed',
-  'investment',
   'continuingCost',
   'shortTermDebt',
   'longTermDebt',
@@ -119,13 +114,12 @@ export const DISPLAY_BOX_KEYS: readonly DisplayBoxKey[] = [
 ];
 
 /**
- * 資産の 4 箱 ↔ `assetGroups` の 4 グループ（1:1）。
+ * 資産の 3 箱 ↔ `assetGroups` の 3 グループ（1:1）。
  * 分類そのものは `assetGroupOf` が正本で、ここでは role / movable を書き直さない。
  */
 const ASSET_GROUP_BY_BOX: Partial<Record<DisplayBoxKey, AssetGroupKey>> = {
   assetFree: 'free',
   assetFixed: 'fixed',
-  investment: 'investment',
   continuingCost: 'ledger',
 };
 
@@ -183,7 +177,7 @@ export function accountsInDisplayBox(key: DisplayBoxKey, accounts: readonly Acco
 }
 
 /**
- * 資産 4 グループの並び（箱の並びから導出）。
+ * 資産 3 グループの並び（箱の並びから導出）。
  * 内訳画面の枠と数値レンズの資産行の展開が同じ順で開く。
  */
 export const ASSET_GROUP_KEYS: readonly AssetGroupKey[] = DISPLAY_BOX_KEYS.map(
@@ -280,7 +274,6 @@ export function identitySectionsAfter(key: DisplaySectionKey): DisplaySectionKey
 const SECTION_BY_BOX: Record<DisplayBoxKey, DisplaySectionKey | undefined> = {
   assetFree: 'totalAssets',
   assetFixed: 'totalAssets',
-  investment: 'totalAssets',
   continuingCost: 'totalAssets',
   shortTermDebt: 'totalLiabilities',
   longTermDebt: 'totalLiabilities',

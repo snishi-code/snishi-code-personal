@@ -55,7 +55,8 @@ describe('isFreeAsset / freeAssetTotal（資金繰りの原資 = 自由に動か
         }),
       ),
     ).toBe(true);
-    expect(isFreeAsset(acc('nisa', 'investment-asset', 'asset'))).toBe(false);
+    // 旧・投資科目は daily-asset + movable:false（v13.18 の付け替え先）= 原資に入らない。
+    expect(isFreeAsset(acc('nisa', 'daily-asset', 'asset', { movable: false }))).toBe(false);
     expect(isFreeAsset(acc('ledger', 'continuing-cost-asset', 'asset'))).toBe(false);
   });
 
@@ -64,7 +65,7 @@ describe('isFreeAsset / freeAssetTotal（資金繰りの原資 = 自由に動か
       bal('cash', 100000),
       bal('bank', 50000),
       bal('suica', 30000, { movable: false }),
-      bal('nisa', 200000, { role: 'investment-asset' }),
+      bal('nisa', 200000, { movable: false }),
       bal('archived', 0, { archived: true }),
       bal('future-end', 25000, { archived: true, endDate: '2026-12-31' }),
     ];

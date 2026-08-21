@@ -3,7 +3,7 @@
  *
  * Account.type は会計分類（asset/liability/equity/revenue/expense）であり、
  * 日常入力（収入/支出/振替）の選択肢制御に直接使うと粒度が粗すぎる
- * （例: 投資資産・残高調整科目はどちらも asset/expense/revenue だが、
+ * （例: 継続コスト台帳・残高調整科目はどれも asset/expense/revenue だが、
  *  通常入力に出してはいけない）。
  *
  * そこで UI 用の役割 AccountRole を type とは別に持つ。type とは整合させる
@@ -13,7 +13,6 @@ import type { AccountType } from './types';
 
 export type AccountRole =
   | 'daily-asset'
-  | 'investment-asset'
   | 'continuing-cost-asset'
   | 'payment-liability'
   | 'other-liability'
@@ -24,7 +23,6 @@ export type AccountRole =
 
 export const ACCOUNT_ROLES: readonly AccountRole[] = [
   'daily-asset',
-  'investment-asset',
   'continuing-cost-asset',
   'payment-liability',
   'other-liability',
@@ -37,7 +35,6 @@ export const ACCOUNT_ROLES: readonly AccountRole[] = [
 /** role が取りうる会計 type（複数可）。schema / 保存時の整合検証に使う。 */
 export const ROLE_TYPES: Record<AccountRole, AccountType[]> = {
   'daily-asset': ['asset'],
-  'investment-asset': ['asset'],
   // 継続コストの集約台帳口座（『継続コスト台帳』・内部集約・自動・ユーザー選択不可）。
   // 品目ごとに作らず単一口座へ残存価値を寄せる。支払いを資産化し、月割りで費消する。
   // 通常入力候補・勘定科目管理 UI に出さない・CF 総資金に含めない。

@@ -389,7 +389,7 @@ describe('金額以外のフィールドの open→save 往復', () => {
 
   it('勘定科目: note・開始日を持つ科目が無変更保存で変わらない', async () => {
     const ledger = await loadLedger();
-    const invest = ledger.accounts.find((a) => a.role === 'investment-asset')!;
+    const invest = ledger.accounts.find((a) => a.name === '投資')!;
     const seeded: Account = {
       ...invest,
       note: '引き継ぐだけのメモ',

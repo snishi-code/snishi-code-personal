@@ -24,7 +24,7 @@ describe('role と type の整合', () => {
   });
   it('rolesForType はその type の role だけを返す（内部ロールは除く）', () => {
     // continuing-cost-asset（継続コスト台帳）は内部ロールなのでユーザー選択肢に出さない。
-    expect(rolesForType('asset')).toEqual(['daily-asset', 'investment-asset']);
+    expect(rolesForType('asset')).toEqual(['daily-asset']);
     expect(rolesForType('asset')).not.toContain('continuing-cost-asset');
     expect(rolesForType('liability')).toEqual(['payment-liability', 'other-liability']);
   });

@@ -20,6 +20,7 @@ import { APP_ID, SCHEMA_VERSION } from '../src/data/constants';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import { importFromJsonText } from '../src/data/exportImport';
 import { accountBalance } from '../src/domain/accounting';
+import { isFreeAsset } from '../src/domain/cashflow';
 import { reportEntriesForAsOf } from '../src/domain/reportEntries';
 import { isLoanItem } from '../src/domain/loan';
 import { ledgerExportPackageSchema } from '../src/domain/schema';
@@ -274,7 +275,7 @@ describe.skipIf(CONVERTER === undefined)('v13→v14 変換（合成フィクス�
     expect(runConverterExpectFail(liabilityItem)).toContain('計上先が負債');
   });
 
-  it('旧・投資投影の宣言を strip し、件数と科目名をログへ報告する（v13.17）', () => {
+  it('旧・投資投影の宣言を strip し、investment-asset を daily-asset + movable:false へ付け替える（v13.17 / v13.18）', () => {
     const base = v13Package() as ReturnType<typeof v13Package> & { accounts: unknown[] };
     base.accounts.push(
       {
@@ -300,6 +301,32 @@ describe.skipIf(CONVERTER === undefined)('v13→v14 変換（合成フィクス�
     expect(stdout).toContain('投資（利回り投影）宣言の strip（v13.17 撤去・1 科目）');
     expect(stdout).toContain('投資（invest）');
     expect(stdout).toContain('annualReturnBp=300');
+    // v13.18: role は daily-asset + movable:false へ付け替え（新規回帰①: 原資に入らない。
+    // mutation (a): スクリプトの movable:false 付与を外すと isFreeAsset が true になり落ちる）。
+    expect(invest.role).toBe('daily-asset');
+    expect(invest.movable).toBe(false);
+    expect(isFreeAsset(invest as unknown as Account)).toBe(false);
+    expect(stdout).toContain('投資 role の付け替え（v13.18 撤去・1 科目）');
+    // 付け替え済みなので v14 schema（investment-asset は enum から撤去済み）を通る。
+    expect(ledgerExportPackageSchema.safeParse(out).success).toBe(true);
+  });
+
+  it('investment-asset のままの JSON は v14 schema が拒否する（変換経由でのみ v14 に入る・v13.18）', () => {
+    const base = v13Package() as ReturnType<typeof v13Package> & { accounts: unknown[] };
+    base.accounts.push({
+      id: 'invest',
+      name: '投資',
+      type: 'asset',
+      role: 'investment-asset',
+      archived: false,
+      createdAt: TS,
+      updatedAt: TS,
+    });
+    const { out } = runConverter(base);
+    // 変換前の形（= 旧 role が残る形）は import 拒否・変換後は受理。
+    expect(ledgerExportPackageSchema.safeParse({ ...out, accounts: base.accounts }).success).toBe(
+      false,
+    );
     expect(ledgerExportPackageSchema.safeParse(out).success).toBe(true);
   });
 

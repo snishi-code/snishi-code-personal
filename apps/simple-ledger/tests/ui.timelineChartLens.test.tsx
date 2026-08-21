@@ -71,7 +71,7 @@ function fixtureLedger(): Ledger {
     settings: { ledgerName: 'test', currency: 'JPY', displayFractionDigits: 0 },
     accounts: [
       account('cash', '預金', 'asset', 'daily-asset'),
-      account('fund', '投資', 'asset', 'investment-asset'),
+      { ...account('fund', '投資', 'asset', 'daily-asset'), movable: false },
       account('loan', 'ローン', 'liability', 'other-liability'),
       account('equity', '元手', 'equity', 'equity'),
     ],
@@ -165,7 +165,6 @@ describe('時間平面のグラフレンズ', () => {
     expect(rowKeys()).toEqual([
       'box:assetFree',
       'box:assetFixed',
-      'box:investment',
       'box:continuingCost',
       'box:shortTermDebt',
       'box:longTermDebt',
@@ -182,7 +181,6 @@ describe('時間平面のグラフレンズ', () => {
     expect(lineKeys()).toEqual([
       'box:assetFree',
       'box:assetFixed',
-      'box:investment',
       'box:continuingCost',
       'box:shortTermDebt',
       'box:longTermDebt',

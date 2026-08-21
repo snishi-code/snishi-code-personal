@@ -21,8 +21,8 @@ import { assertSafeAmount, sumAmounts } from './safeSum';
  * daily-asset かつ movable !== false。有限の終了点を持つ科目は、その終了前後の資金移動を
  * 投影するため候補に残す（終了点残高 0 と期間ガードにより、終了後の残高は増えない）。
  * 旧 archived=true / endDateなしだけは終了点不明のため従来どおり除外する。
- * 継続コスト台帳・投資などの asset や、「自由に動かせない」チェックを外した現預金
- * （Suica・チャージ残高など）は原資に入れない。
+ * 継続コスト台帳などの内部 asset や、「自由に動かせない」現預金
+ * （投資・Suica・チャージ残高など）は原資に入れない。
  */
 export function isFreeAsset(
   account: Pick<Account, 'role' | 'movable' | 'archived' | 'endDate'>,

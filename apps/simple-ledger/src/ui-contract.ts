@@ -70,14 +70,13 @@ export const UI = {
     expense: 'netIncome.expense',
     result: 'netIncome.result',
   },
-  // 資産の内訳（4 枠: 自由に動かせるお金 / 自由に動かせないお金 / 投資 / 月割り台帳）
+  // 資産の内訳（3 枠: 自由に動かせるお金 / 自由に動かせないお金 / 月割り台帳）
   assetsBreakdown: {
     view: 'assetsBreakdown.view',
     row: 'assetsBreakdown.row',
     total: 'assetsBreakdown.total',
     freeSubtotal: 'assetsBreakdown.subtotal.free',
     fixedSubtotal: 'assetsBreakdown.subtotal.fixed',
-    investmentSubtotal: 'assetsBreakdown.subtotal.investment',
     ledgerSubtotal: 'assetsBreakdown.subtotal.ledger',
     frame: 'assetsBreakdown.frame',
     // 月割り台帳の 1 行（残存価値合計・タップで「月割り台帳」へ）

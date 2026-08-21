@@ -436,14 +436,13 @@ export const ja = {
   'matrix.caption': '{from} 〜 {to} の一覧',
   'matrix.noData': '表示できる仕訳データがありません。',
 
-  // 資産の内訳（ホーム「資産」のタップ先）。4 枠（自由 / 自由でない / 投資 / 継続コスト台帳）。
+  // 資産の内訳（ホーム「資産」のタップ先）。3 枠（自由 / 自由でない / 継続コスト台帳）。
   'assets.title': '資産の内訳',
   'assets.intro': '持っているお金・資産の内訳と、月ごとの推移です。',
   'assets.total': '資産合計',
   'assets.trend': '資産の推移',
   'assets.frame.free': '自由に動かせるお金',
   'assets.frame.fixed': '自由に動かせないお金',
-  'assets.frame.investment': '投資',
   'assets.frame.ledger': '月割り台帳',
 
   // 負債の内訳（ホーム「負債」のタップ先）。
@@ -510,7 +509,6 @@ export const ja = {
   'accounts.type.revenue': '収益',
   'accounts.type.expense': '費用',
   'accounts.role.daily-asset': '日常資産（現金・預金）',
-  'accounts.role.investment-asset': '投資資産',
   'accounts.role.continuing-cost-asset': '月割り台帳（内部集約）',
   'accounts.role.payment-liability': '支払用負債（クレジットカード等）',
   'accounts.role.other-liability': 'その他の負債（ローン等）',
@@ -523,7 +521,6 @@ export const ja = {
   // ユーザー向けの「大きな箱」（大分類）。アプリ側が守り、ユーザーは内訳だけを編集する。
   'box.cashFixedHint':
     'Suica・チャージ残高など、支払いには使えるが資金繰りの原資には数えないお金。',
-  'box.investment': '投資',
   'box.shortTermDebt': 'カード・未払',
   'box.longTermDebt': 'ローン',
   // 純資産の箱 = equity 科目そのもの。恒等行の「純資産」（資産 − 負債）と

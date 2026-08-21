@@ -173,7 +173,6 @@ describe('ADJUSTABLE_ACCOUNT_ROLES（補正対象の正本）', () => {
     expect([...ADJUSTABLE_ACCOUNT_ROLES].sort()).toEqual(
       [
         'daily-asset',
-        'investment-asset',
         'payment-liability',
         'other-liability',
         'income-category',

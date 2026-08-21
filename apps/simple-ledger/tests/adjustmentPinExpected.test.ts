@@ -37,7 +37,7 @@ const ACCOUNTS: Account[] = [
   account('salary', 'revenue', 'income-category'),
   account('adj-exp', 'expense', 'system-adjustment'),
   account('adj-rev', 'revenue', 'system-adjustment'),
-  account('invest', 'asset', 'investment-asset'),
+  { ...account('invest', 'asset', 'daily-asset'), movable: false },
   account('gain', 'revenue', 'income-category'),
 ];
 

@@ -90,7 +90,13 @@ describe('補正 pin の削除ガード（metadata 正本・v13.14 §5-1）', ()
   it('metadata だけが参照する科目は区分・役割も変更できない（同じ 1 本で追従）', async () => {
     await loadLedger();
     await upsertAccount(assetAccount('adj-x', '対象X'));
-    await upsertAccount(assetAccount('adj-y', '相手Y'));
+    // role 変更の確認は負債側で行う（v13.18 で investment-asset が消え、資産にはユーザーが
+    // 選べる別 role が無くなったため。ガードの正本は role 全般に効く）。
+    await upsertAccount({
+      ...assetAccount('adj-y', '相手Y'),
+      type: 'liability',
+      role: 'payment-liability',
+    });
     await injectMismatchedPin('adj-x', 'adj-y');
 
     const typeChange = await caught(
@@ -102,7 +108,11 @@ describe('補正 pin の削除ガード（metadata 正本・v13.14 §5-1）', ()
     );
     expect(typeChange.code).toBe('error.account.typeLocked');
     const roleChange = await caught(
-      upsertAccount({ ...assetAccount('adj-y', '相手Y'), role: 'investment-asset' }),
+      upsertAccount({
+        ...assetAccount('adj-y', '相手Y'),
+        type: 'liability',
+        role: 'other-liability',
+      }),
     );
     expect(roleChange.code).toBe('error.account.roleLocked');
   });

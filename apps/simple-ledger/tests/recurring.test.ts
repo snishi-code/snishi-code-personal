@@ -466,7 +466,7 @@ describe('定期ルールの完全導出', () => {
 
   it('簿記編集: クレカ積立を「カード → 投資」で毎月導出できる', async () => {
     const card = await accountByName('クレジットカード'); // payment-liability
-    const invest = await accountByName('投資'); // investment-asset
+    const invest = await accountByName('投資'); // daily-asset + movable:false（旧・投資 role は v13.18 撤去）
     const rule = await createRecurringRule({
       name: 'クレカ積立',
       amount: 10000,
@@ -1515,7 +1515,7 @@ describe('月割りするルール（spreadExpenseAccountId・継続コスト化
 
   it('費用・収入以外の行き先（資産・負債など）も台帳経由で保存する（勘定科目で動作を変えない）', async () => {
     const bank = await accountByName('預金');
-    const invest = await accountByName('投資'); // investment-asset
+    const invest = await accountByName('投資'); // daily-asset + movable:false（旧・投資 role は v13.18 撤去）
     // 行き先 = 投資（積立）・支払い元 = 銀行。費用/収入カテゴリでなくても保存形は一形。
     const rule = await createRecurringRule({
       name: '投信積立',

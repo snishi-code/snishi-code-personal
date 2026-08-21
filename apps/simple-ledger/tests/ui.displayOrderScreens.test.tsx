@@ -114,7 +114,7 @@ describe('勘定科目画面の箱', () => {
   });
 });
 
-describe('資産の内訳の 4 枠', () => {
+describe('資産の内訳の 3 枠', () => {
   it('枠の並びが ASSET_GROUP_KEYS（= 箱の並びの射影）どおり', async () => {
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.name === '現金')!;
@@ -148,6 +148,7 @@ describe('資産の内訳の 4 枠', () => {
       (ui) => shown.includes(ui),
     );
     expect(shown).toEqual(expected);
-    expect(shown.length).toBeGreaterThanOrEqual(3);
+    // 投資は「自由に動かせない」枠に合流（v13.18）。残高があるのは free / fixed の 2 枠。
+    expect(shown.length).toBeGreaterThanOrEqual(2);
   });
 });

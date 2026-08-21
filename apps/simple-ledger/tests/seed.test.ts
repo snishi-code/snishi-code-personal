@@ -7,6 +7,7 @@ import {
   isDefaultSettings,
 } from '../src/data/seed';
 import { roleAllowsType } from '../src/domain/accountRoles';
+import { isFreeAsset } from '../src/domain/cashflow';
 import { ledgerExportPackageSchema } from '../src/domain/schema';
 import sample from '../src/data/sample.json';
 
@@ -20,6 +21,13 @@ describe('初期設定 JSON（seed.json）', () => {
     }
     const ids = new Set(accounts.map((a) => a.id));
     expect(ids.size).toBe(accounts.length);
+  });
+
+  it('投資は普通の資産（daily-asset + movable:false）で、資金繰りの原資に入らない (v13.18)', () => {
+    const invest = defaultAccounts().find((a) => a.name === '投資')!;
+    expect(invest.role).toBe('daily-asset');
+    expect(invest.movable).toBe(false);
+    expect(isFreeAsset(invest)).toBe(false);
   });
 
   it('既定設定は 通貨=円 / 表示桁数 0（locale は v11 で撤去済み）', () => {
@@ -45,6 +53,15 @@ describe('fixture 投入の安全判定（初期 seed そのまま判定）', ()
   it('科目の追加だけでも false', () => {
     const accounts = defaultAccounts();
     accounts.push({ ...accounts[0]!, name: '臨時口座' });
+    expect(isDefaultSeedAccounts(accounts)).toBe(false);
+  });
+
+  it('movable の切替（投資を「自由に動かせる」へ）でも false', () => {
+    const accounts = defaultAccounts();
+    const i = accounts.findIndex((a) => a.name === '投資');
+    const freed = { ...accounts[i]! };
+    delete freed.movable;
+    accounts[i] = freed;
     expect(isDefaultSeedAccounts(accounts)).toBe(false);
   });
 

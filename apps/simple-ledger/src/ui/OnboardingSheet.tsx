@@ -21,7 +21,7 @@ import type { OpeningInput } from '../data/repository';
 
 // オンボーディングで残高を聞く対象（ユーザーが直接編集できる BS 科目のみ）。
 // 継続コスト資産・内部集約系は専用導線で作るため、ここには出さない。
-const ASSET_ROLES: ReadonlySet<string> = new Set(['daily-asset', 'investment-asset']);
+const ASSET_ROLES: ReadonlySet<string> = new Set(['daily-asset']);
 const LIABILITY_ROLES: ReadonlySet<string> = new Set(['payment-liability', 'other-liability']);
 
 export function OnboardingSheet({ onClose }: { onClose: () => void }) {

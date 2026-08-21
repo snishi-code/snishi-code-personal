@@ -47,6 +47,9 @@ export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
  * **投資の利回り投影の撤去（v13.17・作者決定 2026-08-21）も同じ version 14 に含む**:
  * Account の宣言フィールド（想定利回り・投影の計上先）を削除（optional + strip の
  * 自己修復により受理面の版上げは不要。旧レコードの残骸は保存のたびに剥がれる）。
+ * **investment-asset role の撤去（v13.18・作者決定 Q6=B 2026-08-21）も同じ version 14 に
+ * 含む**: role の enum から削除 = 受理面のハード変更（旧 JSON の investment-asset は
+ * 変換スクリプトが daily-asset + movable:false へ付け替える）。資産の枠 4 → 3・箱 9 → 8。
  * 旧 v13 実データは _workspace-management/scripts/convert-ledger-v13-to-v14.mjs で単発変換する。
  * version 12 = 継続コストの同日刻み化（作者決定 2026-08-15）。ルール由来 item
  * （id = `ccr-{ruleId}-{YYYY-MM}`）の endDate の意味が「周期末の月末」から

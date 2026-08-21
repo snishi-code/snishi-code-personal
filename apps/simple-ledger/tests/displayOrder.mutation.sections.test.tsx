@@ -73,7 +73,6 @@ describe('mutation: 6 分類の並びを反転すると全画面が追従する'
     expect(rows.map((row) => row.id)).toEqual([
       'box:assetFree',
       'box:assetFixed',
-      'box:investment',
       'box:continuingCost',
       'box:shortTermDebt',
       'box:longTermDebt',

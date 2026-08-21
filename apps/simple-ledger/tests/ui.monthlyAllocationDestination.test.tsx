@@ -57,7 +57,7 @@ function account(
 async function addCandidateFixtures() {
   await loadLedger();
   const fixtures = {
-    investment: account('allocation-investment', '行き先・投資資産', 'asset', 'investment-asset'),
+    investment: account('allocation-investment', '行き先・投資', 'asset', 'daily-asset'),
     liability: account(
       'allocation-liability',
       '行き先・その他負債',
@@ -96,7 +96,7 @@ async function expectBroadCandidates(container: HTMLElement, excludedNames: stri
   await waitFor(() => {
     for (const name of [
       '現金',
-      '行き先・投資資産',
+      '行き先・投資',
       'クレジットカード',
       '行き先・その他負債',
       '初期残高',
@@ -115,7 +115,6 @@ describe('継続コスト資産の費用の行き先候補', () => {
   it('共通候補は通常科目を全会計区分から返し、内部・調整・アーカイブを除外する', () => {
     const roleType: Record<AccountRole, AccountType> = {
       'daily-asset': 'asset',
-      'investment-asset': 'asset',
       'continuing-cost-asset': 'asset',
       'payment-liability': 'liability',
       'other-liability': 'liability',
@@ -141,7 +140,6 @@ describe('継続コスト資産の費用の行き先候補', () => {
     expect(ids).toEqual(
       expect.arrayContaining([
         'role-daily-asset',
-        'role-investment-asset',
         'role-payment-liability',
         'role-other-liability',
         'role-equity',
@@ -224,7 +222,7 @@ describe('継続コスト資産の費用の行き先候補', () => {
     await waitFor(() => {
       for (const name of [
         '現金',
-        '行き先・投資資産',
+        '行き先・投資',
         'クレジットカード',
         '行き先・その他負債',
         '初期残高',

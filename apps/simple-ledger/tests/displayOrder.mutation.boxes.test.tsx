@@ -23,7 +23,7 @@ vi.mock('../src/domain/displayOrder', async () => {
   return {
     ...actual,
     DISPLAY_BOX_KEYS: boxKeys,
-    // 資産 4 グループの並びは箱の並びの射影なので、同じだけ反転する。
+    // 資産 3 グループの並びは箱の並びの射影なので、同じだけ反転する。
     ASSET_GROUP_KEYS: [...actual.ASSET_GROUP_KEYS].reverse(),
     displayBoxIndex: indexOf,
     sortByDisplayBox: <T,>(items: readonly T[], keyOf: (item: T) => DisplayBoxKey) =>
@@ -83,7 +83,6 @@ const REVERSED_BOXES: DisplayBoxKey[] = [
   'longTermDebt',
   'shortTermDebt',
   'continuingCost',
-  'investment',
   'assetFixed',
   'assetFree',
 ];
@@ -91,13 +90,12 @@ const REVERSED_BOXES: DisplayBoxKey[] = [
 describe('mutation: 箱の並びを反転すると全画面が追従する', () => {
   it('タイムラインの箱・勘定科目画面の箱定義がマスタに従う', () => {
     expect(TIMELINE_ACCOUNT_BOXES.map((box) => box.key)).toEqual(REVERSED_BOXES);
-    // 勘定科目画面は 7 箱（聖域 2 箱を持たない）。相対順は反転後のマスタと一致する。
+    // 勘定科目画面は 6 箱（聖域 2 箱を持たない）。相対順は反転後のマスタと一致する。
     expect(ACCOUNT_BOXES.map((box) => box.key)).toEqual([
       'expense',
       'income',
       'longTermDebt',
       'shortTermDebt',
-      'investment',
       'cashFixed',
       'cash',
     ]);
@@ -130,13 +128,12 @@ describe('mutation: 箱の並びを反転すると全画面が追従する', () 
       // 純資産 = 資産 − 負債 → 反転後の「負債の最後の箱」= shortTermDebt の直後。
       'identity:netAssets',
       'box:continuingCost',
-      'box:investment',
       'box:assetFixed',
       'box:assetFree',
     ]);
-    // 科目の子も箱の所属どおりに付く（投資の箱に投資科目）。
-    const investmentBox = rows.find((row) => row.id === 'box:investment')!;
-    expect(investmentBox.children.map((child) => child.accountId)).toContain(invest.id);
+    // 科目の子も箱の所属どおりに付く（投資 = daily-asset + movable:false は「動かせない」箱）。
+    const fixedBox = rows.find((row) => row.id === 'box:assetFixed')!;
+    expect(fixedBox.children.map((child) => child.accountId)).toContain(invest.id);
   });
 
   it('勘定科目画面の箱見出しがマスタの順で描画される', async () => {
@@ -153,7 +150,6 @@ describe('mutation: 箱の並びを反転すると全画面が追従する', () 
       `${UI.accounts.box}.income`,
       `${UI.accounts.box}.longTermDebt`,
       `${UI.accounts.box}.shortTermDebt`,
-      `${UI.accounts.box}.investment`,
       `${UI.accounts.box}.cashFixed`,
       `${UI.accounts.box}.cash`,
     ]);
@@ -185,8 +181,8 @@ describe('mutation: 箱の並びを反転すると全画面が追従する', () 
     await waitFor(() => {
       expect(document.querySelector(`[data-ui="${UI.assetsBreakdown.view}"]`)).toBeInTheDocument();
     });
+    // 投資（daily-asset + movable:false）はチャージ残高と同じ「動かせない」枠に入る。
     expect(uiOrder(`${UI.assetsBreakdown.frame}.`)).toEqual([
-      `${UI.assetsBreakdown.frame}.investment`,
       `${UI.assetsBreakdown.frame}.fixed`,
       `${UI.assetsBreakdown.frame}.free`,
     ]);

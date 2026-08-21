@@ -174,23 +174,23 @@ describe('科目区分(type)の変更ルール', () => {
 
   it('使用中の role 変更は拒否する（大きな箱の移動に相当・fail-closed）', async () => {
     const ledger = await loadLedger();
-    const cash = ledger.accounts.find((a) => a.name === '現金')!;
+    const card = ledger.accounts.find((a) => a.name === 'クレジットカード')!;
     const food = ledger.accounts.find((a) => a.name === '変動費')!;
-    await addEntryRef(food.id, cash.id);
-    // 現金(daily-asset) を investment-asset へ（type は asset のまま）→ 使用中なので拒否。
+    await addEntryRef(food.id, card.id);
+    // カード(payment-liability) を other-liability へ（type は liability のまま）→ 使用中なので拒否。
     await expect(
-      upsertAccount({ ...cash, role: 'investment-asset', updatedAt: 'y' }),
+      upsertAccount({ ...card, role: 'other-liability', updatedAt: 'y' }),
     ).rejects.toMatchObject({ code: 'error.account.roleLocked' });
     const after = await loadLedger();
-    expect(after.accounts.find((a) => a.id === cash.id)?.role).toBe('daily-asset');
+    expect(after.accounts.find((a) => a.id === card.id)?.role).toBe('payment-liability');
   });
 
   it('未使用なら role 変更できる', async () => {
     const ledger = await loadLedger();
-    const charge = ledger.accounts.find((a) => a.name === 'チャージ残高')!;
-    await upsertAccount({ ...charge, role: 'investment-asset', updatedAt: 'y' });
+    const card = ledger.accounts.find((a) => a.name === 'クレジットカード')!;
+    await upsertAccount({ ...card, role: 'other-liability', updatedAt: 'y' });
     const after = await loadLedger();
-    expect(after.accounts.find((a) => a.id === charge.id)?.role).toBe('investment-asset');
+    expect(after.accounts.find((a) => a.id === card.id)?.role).toBe('other-liability');
   });
 });
 
@@ -2570,10 +2570,10 @@ describe('「自由に動かせる」フラグ（Account.movable）の保存境�
 
   it('daily-asset 以外に付いた movable は保存境界で剥がす（fail-soft）', async () => {
     const ledger = await loadLedger();
-    const invest = ledger.accounts.find((a) => a.name === '投資')!;
-    await upsertAccount({ ...invest, movable: false, updatedAt: 'y' });
+    const card = ledger.accounts.find((a) => a.name === 'クレジットカード')!;
+    await upsertAccount({ ...card, movable: false, updatedAt: 'y' });
     const after = await loadLedger();
-    const saved = after.accounts.find((a) => a.id === invest.id)! as unknown as Record<
+    const saved = after.accounts.find((a) => a.id === card.id)! as unknown as Record<
       string,
       unknown
     >;

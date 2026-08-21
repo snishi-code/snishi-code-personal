@@ -29,6 +29,7 @@ import './setup';
 import { reportEntriesForAsOf } from '../src/domain/reportEntries';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
 import { accountExistsAt } from '../src/domain/accountLifetime';
+import { isFreeAsset } from '../src/domain/cashflow';
 import { addMonthsToDate } from '../src/domain/allocation';
 import { todayLocal } from '../src/util/time';
 import type { Account, JournalEntry, MonthlyCostItem, RecurringRule } from '../src/domain/types';
@@ -88,7 +89,8 @@ function investmentDeclarations(pkg: RawPackage): RawInvestmentDeclaration[] {
   const byId = new Map(pkg.accounts.map((a) => [a.id, a] as const));
   const out: RawInvestmentDeclaration[] = [];
   for (const account of pkg.accounts) {
-    if (account.role !== 'investment-asset') continue;
+    // v13 の生 role（investment-asset は v13.18 で現行 enum から撤去済み）を文字列で見る。
+    if ((account.role as string) !== 'investment-asset') continue;
     const raw = account as unknown as { annualReturnBp?: number; projectionAccountId?: string };
     const bp = raw.annualReturnBp;
     if (bp === undefined || bp === 0 || !Number.isInteger(bp) || bp < -9999 || bp > 100_000) {
@@ -299,6 +301,26 @@ describe.skipIf(!v13Path || !v14Path)('v13→v14 の残高照合（手動ゲー�
     // 突き合わせて説明できること）。実データでは 0 件想定。
     expect(missing).toEqual([]);
   });
+
+  it('旧 investment-asset 科目は daily-asset + movable:false で、資金繰りの原資に入らない（v13.18・新規回帰①）', () => {
+    // mutation (a): 変換スクリプトの movable:false 付与を外すと isFreeAsset が true になり落ちる。
+    const v13 = JSON.parse(readFileSync(v13Path!, 'utf8')) as RawPackage;
+    const v14 = JSON.parse(readFileSync(v14Path!, 'utf8')) as RawPackage;
+    const oldInvestmentIds = v13.accounts
+      .filter((account) => (account.role as string) === 'investment-asset')
+      .map((account) => account.id);
+    expect(oldInvestmentIds.length).toBeGreaterThan(0); // 実データ想定 = 「投資」1 科目
+    for (const id of oldInvestmentIds) {
+      const converted = v14.accounts.find((account) => account.id === id)!;
+      expect(converted.role).toBe('daily-asset');
+      expect(converted.movable).toBe(false);
+      expect(isFreeAsset(converted)).toBe(false);
+    }
+    // 出力のどこにも旧 role が残らない（撤去の完了条件）。
+    expect(v14.accounts.some((account) => (account.role as string) === 'investment-asset')).toBe(
+      false,
+    );
+  });
 });
 
 /* ── 照合ロジック自体の回帰テスト（fixture・常時実行） ──
@@ -471,12 +493,13 @@ const investAccountsV13: Account[] = [
     id: 'invest',
     name: '投資',
     type: 'asset',
-    role: 'investment-asset',
+    role: 'daily-asset',
     archived: false,
     createdAt: TS,
     updatedAt: TS,
-    // v13 の生フィールド（現行 Account 型からは撤去済みなので生 JSON と同じ形で持たせる）。
-    ...({ annualReturnBp: 1200, projectionAccountId: 'gain' } as object),
+    // v13 の生フィールド（現行の型からは撤去済みなので生 JSON と同じ形で持たせる。
+    // role の生値 investment-asset も v13.18 で enum から消えたため同じ経路で上書き）。
+    ...({ annualReturnBp: 1200, projectionAccountId: 'gain', role: 'investment-asset' } as object),
   },
   {
     id: 'gain',
@@ -545,13 +568,17 @@ const investV13: RawPackage = {
   monthlyCostItems: [],
   recurringRules: [],
 };
-/** 変換スクリプトの strip 出力と同じ形（宣言フィールドだけが消えた同一データ）。 */
+/** 変換スクリプトの出力と同じ形（宣言フィールドの strip + v13.18 の role 付け替え）。 */
 const investV14: RawPackage = {
   ...investV13,
   accounts: investAccountsV13.map((a) => {
     const next = { ...a } as Record<string, unknown>;
     delete next.annualReturnBp;
     delete next.projectionAccountId;
+    if (next.role === 'investment-asset') {
+      next.role = 'daily-asset';
+      next.movable = false;
+    }
     return next as unknown as Account;
   }),
 };

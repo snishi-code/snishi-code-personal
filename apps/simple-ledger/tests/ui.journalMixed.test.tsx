@@ -217,7 +217,7 @@ describe('仕訳一覧の混合表示', () => {
     // v13: 保存 rec- は無くなり、今日ぶんの回も未来の回と同じ導出行として出る。
     const ledger = await loadLedger();
     const cash = ledger.accounts.find((a) => a.role === 'daily-asset')!;
-    const invest = ledger.accounts.find((a) => a.role === 'investment-asset')!;
+    const invest = ledger.accounts.find((a) => a.name === '投資')!;
     const today = todayLocal();
     const rule = await createRecurringRule({
       name: '今日ぶんの積立',

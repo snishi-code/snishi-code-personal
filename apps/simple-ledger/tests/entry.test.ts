@@ -21,12 +21,12 @@ describe('transferFlowValid（振替の役割組み合わせ）', () => {
     expect(transferFlowValid('other-liability', 'daily-asset')).toBe(true);
     expect(transferFlowValid('payment-liability', 'daily-asset')).toBe(true);
   });
-  it('負債 → 負債 や 費用・収入・投資資産が絡む組み合わせは invalid', () => {
+  it('負債 → 負債 や 費用・収入・内部集約が絡む組み合わせは invalid', () => {
     expect(transferFlowValid('other-liability', 'payment-liability')).toBe(false);
     expect(transferFlowValid('expense-category', 'daily-asset')).toBe(false);
     expect(transferFlowValid('daily-asset', 'expense-category')).toBe(false);
     expect(transferFlowValid('income-category', 'daily-asset')).toBe(false);
-    expect(transferFlowValid('daily-asset', 'investment-asset')).toBe(false);
+    expect(transferFlowValid('daily-asset', 'continuing-cost-asset')).toBe(false);
   });
 });
 

@@ -208,12 +208,11 @@ function renderView({
 }
 
 describe('TimelineCalendarView', () => {
-  it('既存の順序と色を再利用した大きな箱を9分類持つ', () => {
-    expect(TIMELINE_ACCOUNT_BOXES).toHaveLength(9);
+  it('既存の順序と色を再利用した大きな箱を8分類持つ', () => {
+    expect(TIMELINE_ACCOUNT_BOXES).toHaveLength(8);
     expect(TIMELINE_ACCOUNT_BOXES.map((box) => box.key)).toEqual([
       'assetFree',
       'assetFixed',
-      'investment',
       'continuingCost',
       'shortTermDebt',
       'longTermDebt',
@@ -223,11 +222,11 @@ describe('TimelineCalendarView', () => {
     ]);
   });
 
-  it('箱は 9 つ + 恒等行 2 つが常に並び、子を持つ箱だけが開く（開閉はズーム変更後も残る）', () => {
+  it('箱は 8 つ + 恒等行 2 つが常に並び、子を持つ箱だけが開く（開閉はズーム変更後も残る）', () => {
     const view = renderView();
 
-    // 骨格（9 箱）はデータの有無によらず並ぶ。恒等行（収支・純資産）も列に出る。
-    expect(document.querySelectorAll(`[data-ui="${UI.timeline.boxRow}"]`)).toHaveLength(9);
+    // 骨格（8 箱）はデータの有無によらず並ぶ。恒等行（収支・純資産）も列に出る。
+    expect(document.querySelectorAll(`[data-ui="${UI.timeline.boxRow}"]`)).toHaveLength(8);
     const detailRows = () =>
       document.querySelectorAll(`[data-ui="${UI.timeline.detailRow}"]`).length;
     // 既定は全部たたんだ状態 = 見えている非箱行は恒等行の 2 つだけ。
@@ -279,8 +278,8 @@ describe('TimelineCalendarView', () => {
     );
     expect(document.querySelector(`[data-ui="${UI.timeline.popover}"]`)).toHaveTextContent('1,200');
     expect(document.querySelector('.timeline-calendar__connector line')).toBeInTheDocument();
-    // つながっている 2 行（預金の箱・支出の箱）以外は薄くなる = 骨格の残り 9 行。
-    expect(document.querySelectorAll('.timeline-calendar__row--dimmed')).toHaveLength(9);
+    // つながっている 2 行（預金の箱・支出の箱）以外は薄くなる = 骨格の残り 8 行。
+    expect(document.querySelectorAll('.timeline-calendar__row--dimmed')).toHaveLength(8);
 
     fireEvent.click(document.querySelector(`[data-ui="${UI.timeline.open}"]`)!);
     expect(onOpenTarget).toHaveBeenCalledWith({ kind: 'entry', entryId: 'entry-1' });

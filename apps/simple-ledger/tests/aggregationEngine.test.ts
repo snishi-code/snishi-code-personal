@@ -93,8 +93,9 @@ function item(
 
 const cash = account('cash', '現金', 'asset', 'daily-asset');
 const bank = account('bank', '銀行', 'asset', 'daily-asset');
-// 投資（利回り投影は v13.17 で撤去。実仕訳のみで動く投資科目として残す）。
-const invest: Account = account('invest', '投資', 'asset', 'investment-asset');
+// 投資（利回り投影は v13.17・investment-asset role は v13.18 で撤去。
+// daily-asset + movable:false の普通の資産として残す）。
+const invest: Account = { ...account('invest', '投資', 'asset', 'daily-asset'), movable: false };
 const gain = account('gain', '投資益', 'revenue', 'income-category');
 const ledger = account(
   CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
@@ -293,7 +294,7 @@ describe('恒等式: Δ純資産 = 収支 + equity自然増減', () => {
  * 総資産・総負債は箱ではないので、箱を足して accounting 系と突き合わせる
  * （= 箱の合計が BS の総額と一致することも同時に固定される）。
  */
-const ASSET_BOXES: DisplayBoxKey[] = ['assetFree', 'assetFixed', 'investment', 'continuingCost'];
+const ASSET_BOXES: DisplayBoxKey[] = ['assetFree', 'assetFixed', 'continuingCost'];
 const LIABILITY_BOXES: DisplayBoxKey[] = ['shortTermDebt', 'longTermDebt'];
 function boxSum(
   matrix: ReturnType<typeof buildPeriodMatrix>,

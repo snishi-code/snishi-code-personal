@@ -17,8 +17,7 @@ import { isLedgerDate, MAX_LEDGER_DATE, MIN_LEDGER_DATE } from '../domain/calend
 // 理論残高は「この pin を置いたあとの世界での pin 直前残高」（v13.5 C-3）。
 // repository の保存側（createAdjustment / updateAdjustment）と**同じヘルパ**を通す
 // ——ずれると、シートが見せた差分と実際に按分されるスライス合計が食い違う。
-// 投資科目では、pin を置いた区間の月次複利は按分に置き換わるので理論残高に含めない
-// （利回りの起点は最後の pin。adjustmentSpread.ts が値の正本）。
+// （adjustmentSpread.ts が値の正本）。
 import { adjustmentPinExpectedBalanceForLedger } from '../domain/reportEntries';
 import { formatMinorForInput, parseAmountToMinor, sanitizeSignedAmountText } from './amountText';
 import { useMoneyDigits } from './money';

@@ -3,8 +3,8 @@
  * 旧・財務諸表（PL/BS トグル）を「項目ごとの内訳 + 推移」に分解したもの。
  *
  *  - revenue（収入・フロー）: 期間の収入科目内訳 + 収入の推移（bar）。
- *  - asset（資産・ストック）: 期間末時点の資産内訳を 4 枠で表示 + 資産の推移（line）。
- *    枠 = 自由に動かせるお金 / 自由に動かせないお金 / 投資 / 継続コスト台帳（1 行 = 残存価値
+ *  - asset（資産・ストック）: 期間末時点の資産内訳を 3 枠で表示 + 資産の推移（line）。
+ *    枠 = 自由に動かせるお金 / 自由に動かせないお金 / 継続コスト台帳（1 行 = 残存価値
  *    合計・タップで「月割り台帳」へ）。各枠に小計・最後に全体合計。
  *  - liability（負債・ストック）: 同上 + 資金繰り/返済計画への導線。
  *  - equity（純資産・ストック）: 元手 + 今期の損益 + 純資産の推移（line）。
@@ -26,7 +26,7 @@ import type { AccountBalance } from '../../domain/types';
 import type { MessageKey } from '../../i18n';
 import type { Screen } from '../navigation';
 import type { JournalFilter } from './Journal';
-import { ACCOUNT_ACCENTS, boxByKey, displayBoxLook, type AccountAccent } from '../accountBoxes';
+import { ACCOUNT_ACCENTS, displayBoxLook, type AccountAccent } from '../accountBoxes';
 import {
   ASSET_GROUP_KEYS,
   displayBoxIncludes,
@@ -113,18 +113,16 @@ const CONFIG: Record<BreakdownSection, SectionConfig> = {
   },
 };
 
-/** 資産の 4 枠の見た目（分類そのものは domain/assetGroups が正本）。 */
+/** 資産の 3 枠の見た目（分類そのものは domain/assetGroups が正本）。 */
 const ASSET_FRAME_SUBTOTAL_UI: Record<AssetGroupKey, string> = {
   free: UI.assetsBreakdown.freeSubtotal,
   fixed: UI.assetsBreakdown.fixedSubtotal,
-  investment: UI.assetsBreakdown.investmentSubtotal,
   ledger: UI.assetsBreakdown.ledgerSubtotal,
 };
 
 const ASSET_FRAME_ACCENTS: Record<AssetGroupKey, AccountAccent> = {
   free: ACCOUNT_ACCENTS.assetFree,
   fixed: ACCOUNT_ACCENTS.assetFixed,
-  investment: boxByKey('investment').accent,
   ledger: ACCOUNT_ACCENTS.continuingCost,
 };
 

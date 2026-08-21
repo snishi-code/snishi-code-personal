@@ -65,7 +65,6 @@ describe('表示順マスタ（箱）', () => {
     expect([...DISPLAY_BOX_KEYS]).toEqual([
       'assetFree',
       'assetFixed',
-      'investment',
       'continuingCost',
       'shortTermDebt',
       'longTermDebt',
@@ -75,28 +74,28 @@ describe('表示順マスタ（箱）', () => {
     ]);
   });
 
-  it('タイムラインの箱・勘定科目画面の箱・資産 4 グループはすべてマスタの射影', () => {
-    // タイムラインは 9 箱そのまま。
+  it('タイムラインの箱・勘定科目画面の箱・資産 3 グループはすべてマスタの射影', () => {
+    // タイムラインは 8 箱そのまま。
     expect(TIMELINE_ACCOUNT_BOXES.map((box) => box.key)).toEqual([...DISPLAY_BOX_KEYS]);
     // 勘定科目画面は聖域（継続コスト台帳・純資産）を除いた部分集合で、相対順はマスタと一致。
     expect(ACCOUNT_BOXES.map((box) => box.box)).toEqual(
       orderedDisplayBoxes(ACCOUNT_BOXES.map((box) => box.box)),
     );
-    // 資産 4 グループの並びも箱の並びから導出される。
-    expect([...ASSET_GROUP_KEYS]).toEqual(['free', 'fixed', 'investment', 'ledger']);
+    // 資産 3 グループの並びも箱の並びから導出される。
+    expect([...ASSET_GROUP_KEYS]).toEqual(['free', 'fixed', 'ledger']);
   });
 
   it('箱 → 所属科目は科目の正本順で返る（accountsInDisplayBox）', () => {
     const accounts = [
       roleAcc('現金B', 'asset', 'daily-asset', 1),
       roleAcc('現金A', 'asset', 'daily-asset', 0),
-      roleAcc('投資', 'asset', 'investment-asset', 0),
+      { ...roleAcc('投資', 'asset', 'daily-asset', 0), movable: false as const },
     ];
     expect(accountsInDisplayBox('assetFree', accounts).map((a) => a.id)).toEqual([
       '現金A',
       '現金B',
     ]);
-    expect(accountsInDisplayBox('investment', accounts).map((a) => a.id)).toEqual(['投資']);
+    expect(accountsInDisplayBox('assetFixed', accounts).map((a) => a.id)).toEqual(['投資']);
   });
 
   it('資産はどの箱にも入らないことがない（箱の合計 = 総資産を壊さない）', () => {
@@ -131,7 +130,6 @@ describe('表示順マスタ（6 分類）', () => {
     expect(buildLensRowTree([]).map((row) => row.id)).toEqual([
       'box:assetFree',
       'box:assetFixed',
-      'box:investment',
       'box:continuingCost',
       'box:shortTermDebt',
       'box:longTermDebt',
@@ -159,9 +157,8 @@ describe('compareAccountOrder', () => {
     expect(sorted.map((a) => a.name)).toEqual(['ん', 'さ', 'か', 'あ']);
   });
 
-  it('資産は現預金 → 継続コスト → 投資の role 優先順にする', () => {
+  it('資産は現預金 → 継続コストの role 優先順にする', () => {
     const list = [
-      roleAcc('投資', 'asset', 'investment-asset', 0),
       roleAcc('継続', 'asset', 'continuing-cost-asset', 0),
       roleAcc('現金B', 'asset', 'daily-asset', 1),
       roleAcc('現金A', 'asset', 'daily-asset', 0),
@@ -171,7 +168,6 @@ describe('compareAccountOrder', () => {
       '現金A',
       '現金B',
       '継続',
-      '投資',
     ]);
   });
 
@@ -199,7 +195,6 @@ describe('compareAccountOrder', () => {
 describe('loadLedger の科目順', () => {
   it('保存順に依存せず role の単一正本で並べて返す', async () => {
     const inserted = [
-      roleAcc('sort-investment', 'asset', 'investment-asset', 0),
       roleAcc(CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 'asset', 'continuing-cost-asset', 0),
       roleAcc('sort-daily', 'asset', 'daily-asset', 99),
     ];
@@ -210,7 +205,7 @@ describe('loadLedger の科目順', () => {
       .filter((account) => ids.has(account.id))
       .map((account) => account.id);
 
-    expect(ordered).toEqual(['sort-daily', CONTINUOUS_COST_LEDGER_ACCOUNT_ID, 'sort-investment']);
+    expect(ordered).toEqual(['sort-daily', CONTINUOUS_COST_LEDGER_ACCOUNT_ID]);
   });
 });
 
@@ -219,7 +214,6 @@ describe('ACCOUNT_BOXES と role 順の整合', () => {
     expect(ACCOUNT_BOXES.map((box) => box.key)).toEqual([
       'cash',
       'cashFixed', // 現預金の movable 分割（作者決定 2026-08-14・保存形式は不変）
-      'investment',
       'shortTermDebt',
       'longTermDebt',
       'income',
