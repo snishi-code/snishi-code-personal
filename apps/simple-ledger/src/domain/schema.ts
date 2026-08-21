@@ -214,11 +214,11 @@ export const recurringRuleSchema = z
     // 清算（v13）: ルール由来 item の早期終了の上書き。相互整合はパッケージ superRefine。
     settlements: z.array(z.object({ month: monthSchema, endDate: isoDate })).optional(),
     /**
-     * ルール×ローン併用（v13.15 予定）の**予約ブロック**（v14 では形式のみ・UI / 導出は無し。
-     * groupId 予約の前例）。起票のたびにローン item（返済元 + 完済まで repaymentMonths か月）を
-     * 生む宣言になる予定。「loan ブロックあり ⇒ 源泉の role が負債」だけを wire で固定する
-     * （パッケージ superRefine。源泉負債でも loan ブロック無しの通常ルール〔クレカ定期支出〕は
-     * 現行どおり合法のまま）。
+     * ルール×ローン併用（v14 で予約・**v13.15 で活性化**）。起票のたびにローン item
+     * （ccl-）を導出する宣言。ここは形の検証だけで、意味の検証（源泉負債〔片方向〕・
+     * 返済元の存在/postable/非同一・ccl 一括返済の整合）はパッケージ superRefine が
+     * 保存境界と共通の単一正本（ruleLoanChecks）で行う — 形式検証だけでよいという
+     * 誤読をしないこと（v13.19 監査 minor）。
      */
     loan: z
       .object({

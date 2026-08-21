@@ -254,10 +254,13 @@ export interface RecurringRule {
    */
   settlements?: RuleSettlement[];
   /**
-   * ルール×ローン併用（v13.15 予定）の**予約ブロック**（v14 では形式のみ・UI / 導出は無し。
-   * groupId 予約の前例）。起票のたびにローン item（返済元 + repaymentMonths か月で完済）を
-   * 生む宣言になる予定。wire は「loan ブロックあり ⇒ 源泉（creditAccountId）の role が負債」
-   * だけを固定する（源泉負債でも loan 無しの通常定期支出〔クレカ〕は合法のまま）。
+   * ルール×ローン併用（v14 で予約・**v13.15 で活性化**）: 起票のたびにローン item
+   * （`ccl-{ruleId}-{month}`・計上先 = 源泉の負債・完済日 = 起票日 + repaymentMonths か月）を
+   * **導出**し、返済行は loan.ts のエンジンへ流れる。源泉（creditAccountId）は負債で、
+   * 周期をまたいで 1 つを再利用する収集器。検証は wire / 保存境界とも単一正本
+   * （ruleLoanChecks: 源泉負債〔片方向〕+ 返済元の存在・postable・非同一）。清算
+   * （settlements）は持ち物・ローンの両 item に一様に効き、一括返済の実仕訳
+   * （loanSettlement）は導出 ccl- の決定的 ID を参照する。
    */
   loan?: { repaymentSourceAccountId: string; repaymentMonths: number };
   createdAt: string;
