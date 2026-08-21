@@ -217,7 +217,6 @@ export const UI = {
       debitAccount: 'journal.entry.debitAccount',
       creditAccount: 'journal.entry.creditAccount',
       amount: 'journal.entry.amount',
-      memo: 'journal.entry.memo',
     },
   },
   accounts: {

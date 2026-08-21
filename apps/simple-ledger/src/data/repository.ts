@@ -3172,7 +3172,6 @@ export interface LoanPurchaseInput {
   repaymentEndDate: string;
   /** 持ち物としても登録する場合（費用化 = 持ち物・返済 = ローン item、が両立する）。 */
   continuousCost?: { name: string; endDate?: string };
-  memo?: string;
 }
 
 export interface LoanPurchaseResult {
@@ -3317,7 +3316,6 @@ async function createLoanPurchaseUnlocked(input: LoanPurchaseInput): Promise<Loa
         loanItemId: loanItem.id,
         ...(item !== undefined ? { monthlyCostId: item.id } : {}),
       },
-      ...(input.memo !== undefined && input.memo.trim() !== '' ? { memo: input.memo.trim() } : {}),
       createdAt: ts,
       updatedAt: ts,
     },

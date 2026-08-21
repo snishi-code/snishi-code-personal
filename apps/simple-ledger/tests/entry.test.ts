@@ -103,14 +103,12 @@ describe('toSimpleInput', () => {
       debitAccountId: 'food',
       creditAccountId: 'cash',
       amount: 1000,
-      memo: 'メモ',
     });
     const input = toSimpleInput(e);
     expect(input).toMatchObject({
       debitAccountId: 'food',
       creditAccountId: 'cash',
       amount: 1000,
-      memo: 'メモ',
     });
   });
 });

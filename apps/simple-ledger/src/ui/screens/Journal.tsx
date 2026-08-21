@@ -215,7 +215,7 @@ export function Journal({
       // 検索対象 = 摘要・メモ + 借方/貸方の勘定科目名（「食費」で検索 → 食費が絡む仕訳が出る）。
       // 正規化は listQuery.matchesQuery が唯一の正本（月割り台帳画面と同じ規則）。
       const accountNames = e.lines.map((l) => map.get(l.accountId)?.name ?? '').join(' ');
-      return matchesQuery([e.description, e.memo, accountNames], query);
+      return matchesQuery([e.description, accountNames], query);
     });
   }, [source, query, from, to, accountFilterId, normalExpenseOnly, map]);
 

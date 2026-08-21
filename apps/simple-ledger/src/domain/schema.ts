@@ -373,7 +373,6 @@ export const journalEntrySchema = z
     date: isoDate,
     description: z.string().min(1).max(200),
     lines: z.array(journalLineSchema).min(2),
-    memo: z.string().max(1000).optional(),
     kind: z.enum(['normal', 'opening']),
     metadata: storableEntryMetadataSchema.optional(),
     // 諸口のグループ ID。v12 は**予約のみ**（UI・集計は未実装）なので形式だけを見る。

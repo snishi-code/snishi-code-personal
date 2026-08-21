@@ -285,7 +285,6 @@ export interface JournalEntry {
   date: string;
   description: string;
   lines: JournalLine[];
-  memo?: string;
   /** 'opening' は UI で「初期残高」として見せる。集計上は通常の仕訳と同じ。 */
   kind: JournalEntryKind;
   /** 付帯情報（入力方法・逆仕訳リンク・自動生成の由来など）。任意。 */

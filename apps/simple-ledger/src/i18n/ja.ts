@@ -284,7 +284,6 @@ export const ja = {
   'entry.debitAccount': '借方（増える・使う側）',
   'entry.creditAccount': '貸方（支払い元・減る側）',
   'entry.amount': '金額',
-  'entry.memo': 'メモ',
   'entry.error.date-required': '日付を入力してください。',
   'entry.error.description-required': '項目を入力してください。',
   'entry.error.debit-required': '借方の科目を選んでください。',
@@ -344,7 +343,7 @@ export const ja = {
     '返済期間が上限（{max} か月）を超えています。完済日を近づけてください。',
   'entry.source.manual': '左側（貸方）',
   'entry.destination.manual': '右側（借方）',
-  'entry.detailToggle': '詳細（メモ）',
+  'entry.detailToggle': '詳細（項目名）',
   // 逆仕訳・特殊編集は日常の「詳細」と分け、簿記編集として明示する。
   'entry.manualSwitch': '簿記編集（左→右を直接指定）',
   'entry.noAccounts': '候補の科目がありません。「勘定科目」で追加してください。',

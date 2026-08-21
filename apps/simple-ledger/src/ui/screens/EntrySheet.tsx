@@ -8,7 +8,7 @@
 import { useState } from 'react';
 import { Modal } from '../overlays';
 import { ConfirmDialog, useDirtyGuard } from '../overlays';
-import { TextArea, TextInput } from '@snishi/foundation/ui/Field';
+import { TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { AccountPicker } from '../AccountPicker';
 import { FlowField } from '../FlowField';
@@ -105,7 +105,6 @@ function emptyInput(): SimpleEntryInput {
     debitAccountId: '',
     creditAccountId: '',
     amount: 0,
-    memo: '',
     kind: 'normal',
   };
 }
@@ -171,7 +170,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               debitAccountId: init.fixed.side === 'debit' ? init.fixed.accountId : '',
               creditAccountId: init.fixed.side === 'credit' ? init.fixed.accountId : '',
               amount: init.fixed.amount ?? 0,
-              memo: '',
               kind: 'normal',
             }
           : emptyInput(),
@@ -432,7 +430,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                 },
               }
             : {}),
-          ...(toSave.memo !== undefined && toSave.memo !== '' ? { memo: toSave.memo } : {}),
         });
         onClose();
       } catch {
@@ -671,15 +668,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       {t('entry.reversal.overWarning')}
     </div>
   ) : null;
-
-  const memoField = (
-    <TextArea
-      label={t('entry.memo')}
-      value={form.memo ?? ''}
-      onChange={(v) => setForm((f) => ({ ...f, memo: v }))}
-      dataUi={UI.journal.entry.memo}
-    />
-  );
 
   // 継続コスト化中の行き先側: 継続コスト資産の名前 + 戻すボタン（支出フロー・簿記編集で共用）。
   const ccNameField = (
@@ -1200,7 +1188,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               </button>
             ) : null}
             {ccDetailField}
-            {canCreateContinuousCost && ccMode ? null : memoField}
             {deleteSection}
           </>
         ) : activeStep === 'loan' ? (
@@ -1240,7 +1227,9 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             {reversalOverWarning}
             {renderFlow()}
 
-            {fixed ? null : (
+            {/* メモ欄は v14 で全廃（作者決定 2026-08-21）。詳細の折りたたみは
+                振替の任意の項目名だけが残る（他のモードでは畳むものが無い）。 */}
+            {fixed || mode !== 'transfer' ? null : (
               <>
                 <button
                   type="button"
@@ -1252,12 +1241,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                   <Icon name={showDetails ? 'expand' : 'chevronRight'} size={16} />
                   {t('entry.detailToggle')}
                 </button>
-                {showDetails ? (
-                  <div className="stack">
-                    {mode === 'transfer' ? itemField : null}
-                    {memoField}
-                  </div>
-                ) : null}
+                {showDetails ? <div className="stack">{itemField}</div> : null}
               </>
             )}
 

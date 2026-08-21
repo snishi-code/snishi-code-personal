@@ -36,7 +36,6 @@ export interface SimpleEntryInput {
   debitAccountId: string;
   creditAccountId: string;
   amount: number;
-  memo?: string;
   kind?: JournalEntryKind;
   metadata?: EntryMetadata;
   /**
@@ -97,7 +96,6 @@ export function buildSimpleEntry(
       { accountId: input.debitAccountId, side: 'debit', amount: input.amount },
       { accountId: input.creditAccountId, side: 'credit', amount: input.amount },
     ],
-    ...(input.memo && input.memo.trim() !== '' ? { memo: input.memo.trim() } : {}),
     kind: input.kind ?? 'normal',
     ...(metadata ? { metadata } : {}),
     createdAt: existing?.createdAt ?? ts,
@@ -115,7 +113,6 @@ export function toSimpleInput(entry: JournalEntry): SimpleEntryInput {
     debitAccountId: debit?.accountId ?? '',
     creditAccountId: credit?.accountId ?? '',
     amount: debit?.amount ?? credit?.amount ?? 0,
-    ...(entry.memo !== undefined ? { memo: entry.memo } : {}),
     kind: entry.kind,
     ...(entry.metadata ? { metadata: entry.metadata } : {}),
   };

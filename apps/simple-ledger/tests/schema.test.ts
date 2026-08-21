@@ -1629,3 +1629,16 @@ describe('月割りするルールの schema（周期にかかわらず台帳経
     ).toBe(false);
   });
 });
+
+describe('メモ欄の全廃（v14・作者決定 2026-08-21）', () => {
+  it('仕訳の memo は受けずに strip される（自己修復・保存されない）', () => {
+    const withMemo = { ...validEntry, memo: '旧データのメモ' };
+    const parsed = journalEntrySchema.safeParse(withMemo);
+    // 取り込み自体は通る（撤去済みフィールドの残骸で立ち往生させない）。
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      // v14 wire は memo を持たない = 出力から落ちる（黙って保存し続けない）。
+      expect((parsed.data as unknown as Record<string, unknown>).memo).toBeUndefined();
+    }
+  });
+});
