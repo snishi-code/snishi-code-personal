@@ -32,8 +32,11 @@ import { assertSafeAmount } from './safeSum';
 import type { AccountRole } from './accountRoles';
 import type { JournalEntry, MonthlyCostItem } from './types';
 
-/** 完済日クイックチップの年数（持ち物の [1年][3年][5年] と同じ並び）。 */
-export const LOAN_QUICK_YEARS: readonly number[] = [1, 3, 5];
+/**
+ * 完済日・月割り終了日クイックチップの年数（ローンと持ち物で同じ定数を使う・v13.15 §2.2）。
+ * 10 年は作者の車ユース（10 年ごとに車を買い替え、10 年ローン + 10 年月割り）のため。
+ */
+export const LOAN_QUICK_YEARS: readonly number[] = [1, 3, 5, 10];
 
 /** 負債の役割（カード・ローン）。 */
 export function isLiabilityRole(role: AccountRole | undefined): boolean {

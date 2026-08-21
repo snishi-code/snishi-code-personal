@@ -107,11 +107,11 @@ describe('ローンで払う（支出シート）', () => {
     expect(q(UI.journal.entry.save)).toBeInTheDocument();
   });
 
-  it('1/3/5 年チップが完済日を入れ、回数と月々の額（合計 = 借入額ちょうど）を見せる', async () => {
+  it('1/3/5/10 年チップが完済日を入れ、回数と月々の額（合計 = 借入額ちょうど）を見せる', async () => {
     await seed();
     await openLoanMode();
     const chips = qa(UI.journal.entry.loanQuickSpan);
-    expect(chips.map((c) => c.textContent)).toEqual(['1年', '3年', '5年']);
+    expect(chips.map((c) => c.textContent)).toEqual(['1年', '3年', '5年', '10年']);
 
     fireEvent.click(chips[0]!);
     // 完済日 = 購入日 + 1 年（inclusive）→ 刻みはちょうど 12 回。
@@ -119,7 +119,7 @@ describe('ローンで払う（支出シート）', () => {
       loanQuickEndDate(todayLocal(), 1),
     );
     // 借入額 1,200,000 を 12 回に割る（割り切れる例。合計は常に借入額と厳密一致）。
-    expect(q(UI.journal.entry.loanPreview)).toHaveTextContent('毎月 100,000 円 × 12 回');
+    expect(q(UI.journal.entry.loanPreview)).toHaveTextContent('100,000 円 × 12 回');
     expect(q(UI.journal.entry.loanPreview)).toHaveTextContent('合計はちょうど 1,200,000 円');
 
     fireEvent.click(chips[2]!);

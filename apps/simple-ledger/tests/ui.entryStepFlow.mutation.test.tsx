@@ -176,3 +176,50 @@ describe('支出登録のページ分け', () => {
     expect(ledger.monthlyCostItems.map((m) => m.name)).toContain('自動車');
   });
 });
+
+/*
+ * 持ち物ページの解剖（v13.15 §2.2）: ローンページと同一骨格 —
+ * 名前 → 計上先（base の使い道から自動）→ 終了日 + [1/3/5/10 年] チップ → 下部まとめカード。
+ * チップはローンと同じ定数（LOAN_QUICK_YEARS）から出る。
+ */
+describe('持ち物ページの解剖（v13.15 §2.2）', () => {
+  async function openItemStep() {
+    await seed();
+    await openExpense();
+    pick(UI.journal.entry.flowSource, '現金');
+    fireEvent.click(q(UI.journal.entry.ccToggle)!);
+    await waitFor(() => expect(q(UI.journal.entry.ccSelected)).toBeInTheDocument());
+    fireEvent.click(q(UI.journal.entry.next)!);
+    await waitFor(() => expect(q(UI.journal.entry.ccCategory)).toBeInTheDocument());
+  }
+
+  it('計上先は base の使い道から自動で入り、チップは 1/3/5/10 年（ローンと同じ定数）', async () => {
+    await openItemStep();
+    // 名前 → 計上先 → 終了日の順（ローンページと同一解剖）。
+    expect(value(UI.journal.entry.ccName)).toBe('自動車');
+    const picked = within(q(UI.journal.entry.ccCategory)!).getByRole('radio', {
+      name: '固定費',
+    }) as HTMLInputElement;
+    expect(picked.checked).toBe(true);
+    const chips = qa(UI.journal.entry.ccQuickSpan);
+    expect(chips.map((c) => c.textContent)).toEqual(['1年', '3年', '5年', '10年']);
+  });
+
+  it('終了日を入れると下部まとめカード（月あたり × か月・合計一致）が出る', async () => {
+    await openItemStep();
+    expect(q(UI.journal.entry.ccPreview)).not.toBeInTheDocument();
+    // 10 年チップ = 開始月 + 119 か月の月末（quickSpanEndDate の既存規約）→ 刻み 119 回。
+    // 1,200,000 ÷ 119 の先頭刻み = 10,084 円（端数は先頭で調整）。
+    fireEvent.click(qa(UI.journal.entry.ccQuickSpan)[3]!);
+    expect(q(UI.journal.entry.ccPreview)).toHaveTextContent('月あたり');
+    expect(q(UI.journal.entry.ccPreview)).toHaveTextContent('10,084 円 × 119 か月');
+    expect(q(UI.journal.entry.ccPreview)).toHaveTextContent('合計はちょうど 1,200,000 円');
+  });
+
+  it('同日通過なしの終了日は「終了日に全額 1 本」の縮退を名乗る', async () => {
+    await openItemStep();
+    // 終了日 = 今日（購入日と同じ）→ 刻み 0 = 終了日に全額。
+    fireEvent.change(q(UI.journal.entry.ccEndDate)!, { target: { value: todayLocal() } });
+    expect(q(UI.journal.entry.ccPreview)).toHaveTextContent('全額 1,200,000 円');
+  });
+});

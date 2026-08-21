@@ -22,6 +22,7 @@ import {
 } from '../entryModes';
 import { quickSpanEndDate } from '../ccQuickSpan';
 import { EntryLoanStep } from '../sheets/EntryLoanStep';
+import { EntryItemStep } from '../sheets/EntryItemStep';
 import {
   MONTHLY_AMOUNTS_HARD_CAP,
   monthlyAmounts,
@@ -29,7 +30,11 @@ import {
   monthsBetween,
 } from '../../domain/allocation';
 import { dayCutCount } from '../../domain/monthlyCost';
-import { loanFirstRepaymentDate, loanInstallmentPreviewCount } from '../../domain/loan';
+import {
+  LOAN_QUICK_YEARS,
+  loanFirstRepaymentDate,
+  loanInstallmentPreviewCount,
+} from '../../domain/loan';
 import { MAX_AMOUNT_MINOR } from '../../domain/schema';
 import {
   exactDigitsFor,
@@ -259,6 +264,19 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   // 月々の額 = 先頭刻み（monthlyAmounts の先頭）。ガード済み入力なので投げない。
   const loanFirstAmount =
     loanCount >= 1 && loanAmountValid ? (monthlyAmounts(form.amount, loanCount)[0] ?? 0) : 0;
+
+  /*
+   * 持ち物ページのまとめカード用導出（ローンページと同一解剖・v13.15 §2.2）。
+   * 刻み規約は allocationCuts の単一正本と同じ: n = dayCutCount・n = 0 は終了日に全額 1 本。
+   * 終了日は空でよい（空なら割り振らない = カードも出さない）。
+   */
+  const ccEnd = ccEndDate.trim();
+  const ccEndValid = ccEnd !== '' && isValidIsoDate(ccEnd) && ccEnd >= form.date;
+  const ccCount = ccEndValid ? dayCutCount(form.date, ccEnd) : 0;
+  const ccFirstAmount =
+    ccEndValid && ccCount >= 1 && loanAmountValid
+      ? (monthlyAmounts(form.amount, ccCount)[0] ?? 0)
+      : 0;
 
   /*
    * マルチステップ登録（v13.7 I3・作者決定 2026-08-18）。1 画面 1 決定にする:
@@ -530,6 +548,12 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     // 名前は摘要から引き継ぐ（ページを分けても一度書いた語を書き直させない）。
     if (nextStep === 'loan' && loanName.trim() === '') setLoanName(form.description);
     if (nextStep === 'item' && ccTargetName.trim() === '') setCcTargetName(form.description);
+    // 計上先は base の使い道から引き継ぐ（v13.15 §2.2・モックの「使い道から自動」）。
+    // 引き継げるのは月割りの計上先に使える役割のときだけ（袋小路を作らない）。
+    if (nextStep === 'item' && ccCategoryId === '' && form.debitAccountId !== '') {
+      const role = accounts.find((a) => a.id === form.debitAccountId)?.role;
+      if (role !== undefined && isRecurringPostableRole(role)) setCcCategoryId(form.debitAccountId);
+    }
     setStep(nextStep);
   }
 
@@ -920,13 +944,14 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           dataUi={UI.journal.entry.ccEndDate}
         />
         <div className="row-actions">
-          {[1, 3, 5].map((years) => (
+          {LOAN_QUICK_YEARS.map((years) => (
             <button
               key={years}
               type="button"
               className="btn btn--ghost"
               style={{ minHeight: 'var(--tap)' }}
               onClick={() => setCcEndDate(quickSpanEndDate(form.date, years))}
+              data-ui={UI.journal.entry.ccQuickSpan}
             >
               {t('ccItem.quickSpan', { years })}
             </button>
@@ -1119,11 +1144,37 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             />
           </>
         ) : activeStep === 'item' ? (
-          // 最後のページ: 持ち物だけの画面（名前 → 終了日 → 計上先）。
+          // 持ち物だけの画面（名前 → 計上先 → 終了日 → まとめカード・ローンページと同一解剖）。
           <>
             {stepIndicator}
-            {ccNameField}
-            {ccDetailField}
+            <EntryItemStep
+              accounts={accounts}
+              currency={currency}
+              fractionDigits={fractionDigits}
+              amount={form.amount}
+              purchaseDate={form.date}
+              name={ccTargetName}
+              categoryId={ccCategoryId}
+              endDate={ccEndDate}
+              nameError={ccNameError}
+              categoryError={categoryError}
+              derived={{
+                end: ccEndValid ? ccEnd : '',
+                count: ccCount,
+                firstAmount: ccFirstAmount,
+                amountValid: loanAmountValid,
+              }}
+              onNameChange={(v) => {
+                setCcTargetName(v);
+                setCcNameError(false);
+              }}
+              onCategoryChange={(id) => {
+                setCcCategoryId(id);
+                setCategoryError(false);
+              }}
+              onEndDateChange={setCcEndDate}
+              onDisable={disableCcMode}
+            />
           </>
         ) : (
           <>

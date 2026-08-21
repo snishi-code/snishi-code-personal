@@ -193,6 +193,8 @@ export const UI = {
       ccName: 'journal.entry.ccName',
       ccCategory: 'journal.entry.ccCategory',
       ccEndDate: 'journal.entry.ccEndDate',
+      ccQuickSpan: 'journal.entry.ccQuickSpan',
+      ccPreview: 'journal.entry.ccPreview',
       // ローンで払う（v13.6 H4）。持ち物と同じ片側切替で、押すと支払い元が
       // 「新しいローンの名前」に変わる（既存ローンへ足す導線は無い）。
       loanArrange: 'journal.entry.loanArrange',

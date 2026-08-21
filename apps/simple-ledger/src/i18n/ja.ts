@@ -366,8 +366,13 @@ export const ja = {
   'entry.loanEndDateHint':
     '初回の返済は {date}。完済日から回数と月々の額が決まり、合計は借入額にちょうど一致します。',
   'entry.loanFrom': '返済元',
-  'entry.loanPreview': '毎月 {amount} × {count} 回（合計はちょうど {total}・端数は先頭で調整）',
+  // 下部まとめカード（ローン・持ち物ページの同一解剖・v13.15 §2.2 = モック正本）。
+  'entry.loanPreview': '{amount} × {count} 回',
   'entry.loanPreviewLump': '完済日 {date} に全額 {total} を 1 回で返します。',
+  'entry.previewTotalNote': '合計はちょうど {total}（端数は先頭で調整）',
+  'entry.ccPreview': '{amount} × {count} か月',
+  'entry.ccPreviewLump': '終了日 {date} に全額 {total} を費用化します。',
+  'entry.ccCategoryHint': '使い道から自動で入ります（変更できます）。',
 
   'journal.reverseAction': '取消/返金を記録',
   // 行ボタンは短い動詞（v13.2: 記号は伝わらない。既存タグ「取消/返金」と同じ語）。

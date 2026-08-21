@@ -28,6 +28,7 @@ import {
 import { MAX_LEDGER_DATE, MIN_LEDGER_DATE } from '../../domain/calendar';
 import { nowIso, todayLocal } from '../../util/time';
 import { quickSpanEndDate } from '../ccQuickSpan';
+import { LOAN_QUICK_YEARS } from '../../domain/loan';
 import { formatMinorForInput, parseAmountToMinor, sanitizeAmountText } from '../amountText';
 import { useMoneyDigits } from '../money';
 import { errorText, t } from '../../i18n';
@@ -234,7 +235,7 @@ export function ContinuousCostItemSheet({
             dataUi={UI.allocations.editEndDate}
           />
           <div className="row-actions" data-ui={UI.allocations.editQuickSpan}>
-            {[1, 3, 5].map((years) => (
+            {LOAN_QUICK_YEARS.map((years) => (
               <button
                 key={years}
                 type="button"

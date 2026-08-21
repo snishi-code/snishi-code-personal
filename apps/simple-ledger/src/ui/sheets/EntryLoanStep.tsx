@@ -11,6 +11,7 @@ import { LOAN_QUICK_YEARS, loanQuickEndDate } from '../../domain/loan';
 import { MAX_LEDGER_DATE, MIN_LEDGER_DATE } from '../../domain/calendar';
 import { RECURRING_POSTABLE_ROLES } from '../../domain/recurring';
 import { moneyText } from '../money';
+import { StepSummaryCard } from './StepSummaryCard';
 import type { Account } from '../../domain/types';
 import type { FractionDigits } from '../../util/format';
 import { t } from '../../i18n';
@@ -143,21 +144,32 @@ export function EntryLoanStep({
           error={fromError ? t('entry.error.loanFrom') : undefined}
           dataUi={UI.journal.entry.loanFrom}
         />
-        {derived.count >= 1 && derived.amountValid ? (
-          <p className="field__hint" data-ui={UI.journal.entry.loanPreview}>
-            {derived.lump
+      </div>
+      {derived.count >= 1 && derived.amountValid ? (
+        // 下部まとめカード（月あたり × 回数・v13.15 §2.2 = モック正本）。縮退は完済日 1 本を名乗る。
+        <StepSummaryCard
+          label={t('monthlyCost.monthly')}
+          value={
+            derived.lump
+              ? '—'
+              : t('entry.loanPreview', {
+                  amount: moneyText(derived.firstAmount, currency, fractionDigits),
+                  count: derived.count,
+                })
+          }
+          note={
+            derived.lump
               ? t('entry.loanPreviewLump', {
                   date: derived.end,
                   total: moneyText(amount, currency, fractionDigits),
                 })
-              : t('entry.loanPreview', {
-                  amount: moneyText(derived.firstAmount, currency, fractionDigits),
-                  count: derived.count,
+              : t('entry.previewTotalNote', {
                   total: moneyText(amount, currency, fractionDigits),
-                })}
-          </p>
-        ) : null}
-      </div>
+                })
+          }
+          dataUi={UI.journal.entry.loanPreview}
+        />
+      ) : null}
     </>
   );
 }
