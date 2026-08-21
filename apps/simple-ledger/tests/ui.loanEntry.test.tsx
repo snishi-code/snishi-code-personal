@@ -1,9 +1,10 @@
 /*
- * 支出の「ローンで払う」（v13.6 H4）。登録導線は**持ち物の参照**:
+ * 支出の「ローンで払う」（v13.13: 保存先はルールではなく**ローン item**）。
  *  - 押すと支払い元が「新しいローンの名前」に変わり、摘要が自動で入る。
- *  - 終了日は 1/3/5 年チップ（任意日も可）。回数・月額は終了日からの導出をその場に出す。
+ *  - 完済日（inclusive）は 1/3/5 年チップ（任意日も可）。回数・月々の額は完済日から導出し、
+ *    合計は借入額にちょうど一致する（端数の明示は不要になった）。
  *  - 返済元は**全科目**から選べる（自由に動かせるお金に限定しない = 無差別原則）。
- *  - 保存 = 負債科目 + 購入の仕訳 + 返済ルール（+ 持ち物）を 1 tx。
+ *  - 保存 = 負債科目 + 借入の仕訳（loanItemId）+ ローン item（+ 持ち物）を 1 tx。ルールは作らない。
  *  - **既存ローンへ足す導線は無い**（毎回 1 本組む）。
  */
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -15,7 +16,7 @@ import { EntrySheet } from '../src/ui/screens/EntrySheet';
 import { createOpenings, loadLedger } from '../src/data/repository';
 import { addMonthsToDate } from '../src/domain/allocation';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from '../src/domain/constants';
-import { loanFirstRepaymentDate, loanRuleEndDate } from '../src/domain/loan';
+import { isLoanItem, loanQuickEndDate } from '../src/domain/loan';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { todayLocal } from '../src/util/time';
@@ -106,36 +107,35 @@ describe('ローンで払う（支出シート）', () => {
     expect(q(UI.journal.entry.save)).toBeInTheDocument();
   });
 
-  it('1/3/5 年チップが終了日を入れ、回数と月額を導出して見せる', async () => {
+  it('1/3/5 年チップが完済日を入れ、回数と月々の額（合計 = 借入額ちょうど）を見せる', async () => {
     await seed();
     await openLoanMode();
     const chips = qa(UI.journal.entry.loanQuickSpan);
     expect(chips.map((c) => c.textContent)).toEqual(['1年', '3年', '5年']);
 
     fireEvent.click(chips[0]!);
-    const first = loanFirstRepaymentDate(todayLocal());
+    // 完済日 = 購入日 + 1 年（inclusive）→ 刻みはちょうど 12 回。
     expect((q(UI.journal.entry.loanEndDate) as HTMLInputElement).value).toBe(
-      loanRuleEndDate(first, 12),
+      loanQuickEndDate(todayLocal(), 1),
     );
-    // 借入額 1,200,000 を 12 回に割る（月額は導出。回数も終了日からの導出）。
+    // 借入額 1,200,000 を 12 回に割る（割り切れる例。合計は常に借入額と厳密一致）。
     expect(q(UI.journal.entry.loanPreview)).toHaveTextContent('毎月 100,000 円 × 12 回');
-    expect(q(UI.journal.entry.loanPreview)).toHaveTextContent('合計 1,200,000 円');
-    expect(q(UI.journal.entry.loanRemainder)).not.toBeInTheDocument();
+    expect(q(UI.journal.entry.loanPreview)).toHaveTextContent('合計はちょうど 1,200,000 円');
 
     fireEvent.click(chips[2]!);
     expect(q(UI.journal.entry.loanPreview)).toHaveTextContent('× 60 回');
 
     // 金額は 1 ページ目の欄。「戻る」で直しても、進むとローンの入力は残っている。
+    // 割り切れない額（10,000 ÷ 60）でも端数の注意書きは出ない（合計厳密一致・v13.13）。
     fireEvent.click(q(UI.journal.entry.stepBack)!);
     await waitFor(() => expect(q(UI.journal.entry.amount)).toBeInTheDocument());
     fireEvent.change(q(UI.journal.entry.amount)!, { target: { value: '10000' } });
     fireEvent.click(q(UI.journal.entry.next)!);
     await waitFor(() => expect(q(UI.journal.entry.loanEndDate)).toBeInTheDocument());
     expect((q(UI.journal.entry.loanEndDate) as HTMLInputElement).value).toBe(
-      loanRuleEndDate(first, 60),
+      loanQuickEndDate(todayLocal(), 5),
     );
-    // 割り切れない額では、最後に残る差額を明示する（丸めて消さない）。
-    expect(q(UI.journal.entry.loanRemainder)).toBeInTheDocument();
+    expect(q(UI.journal.entry.loanPreview)).toHaveTextContent('合計はちょうど 10,000 円');
   });
 
   it('返済元は全科目から選べる（収入カテゴリも候補に出る）', async () => {
@@ -149,7 +149,7 @@ describe('ローンで払う（支出シート）', () => {
     expect(within(from).queryByRole('radio', { name: '月割り台帳' })).not.toBeInTheDocument();
   });
 
-  it('保存で負債科目・購入の仕訳・返済ルールが 1 tx で生まれる', async () => {
+  it('保存で負債科目・借入の仕訳・ローン item が 1 tx で生まれる（ルールは作らない）', async () => {
     const { cash } = await seed();
     await openLoanMode();
     fireEvent.click(qa(UI.journal.entry.loanQuickSpan)[0]!);
@@ -158,35 +158,32 @@ describe('ローンで払う（支出シート）', () => {
 
     const ledger = await waitFor(async () => {
       const next = await loadLedger();
-      expect(next.recurringRules).toHaveLength(1);
+      expect(next.monthlyCostItems).toHaveLength(1);
       return next;
     });
+    expect(ledger.recurringRules).toHaveLength(0);
     const liability = ledger.accounts.find((a) => a.name === '自動車')!;
     expect(liability.role).toBe('other-liability');
     expect(liability.type).toBe('liability');
 
-    // 購入の仕訳: 借方 費用カテゴリ / 貸方 その負債。
+    // ローン item: 計上先 = 負債・返済元 = 現金・完済日 = 購入日 + 1 年（inclusive）。
+    const loanItem = ledger.monthlyCostItems[0]!;
+    expect(isLoanItem(loanItem)).toBe(true);
+    expect(loanItem.expenseAccountId).toBe(liability.id);
+    expect(loanItem.repaymentSourceAccountId).toBe(cash.id);
+    expect(loanItem.startDate).toBe(todayLocal());
+    expect(loanItem.endDate).toBe(loanQuickEndDate(todayLocal(), 1));
+    expect(loanItem.amount).toBe(120000000);
+
+    // 借入の仕訳: 借方 費用カテゴリ / 貸方 その負債・loanItemId 付き（item とミラー）。
     const purchase = ledger.journalEntries.find((e) => e.description === '自動車')!;
     expect(purchase.date).toBe(todayLocal());
+    expect(purchase.metadata?.loanItemId).toBe(loanItem.id);
     expect(purchase.lines.find((l) => l.side === 'credit')!.accountId).toBe(liability.id);
     expect(purchase.lines.find((l) => l.side === 'debit')!.amount).toBe(120000000);
-
-    // 返済ルール: 計上先 = 負債 / 源泉 = 返済元 / 借方 = 月割り台帳（全ルール共通の保存形）。
-    const rule = ledger.recurringRules[0]!;
-    expect(rule.name).toBe('自動車');
-    expect(rule.spreadExpenseAccountId).toBe(liability.id);
-    expect(rule.creditAccountId).toBe(cash.id);
-    expect(rule.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
-    expect(rule.everyMonths).toBe(1);
-    expect(rule.amount).toBe(10000000);
-    // 存在期間は借りた日から・終了日は初回返済 + 12 ヶ月（排他）。
-    expect(rule.startDate).toBe(todayLocal());
-    expect(rule.endDate).toBe(loanRuleEndDate(loanFirstRepaymentDate(todayLocal()), 12));
-    // 持ち物は作らない（併用したときだけ生まれる）。
-    expect(ledger.monthlyCostItems).toHaveLength(0);
   });
 
-  it('持ち物として登録すると、費用化の item と返済ルールが両立する（ローン → 持ち物 → 保存）', async () => {
+  it('持ち物として登録すると、費用化の item とローン item が両立する（ローン → 持ち物 → 保存）', async () => {
     await seed();
     // 1 ページ目で両方を選ぶ（入力はまだしない）。
     await selectLoan();
@@ -214,37 +211,60 @@ describe('ローンで払う（支出シート）', () => {
 
     const ledger = await waitFor(async () => {
       const next = await loadLedger();
-      expect(next.monthlyCostItems).toHaveLength(1);
+      expect(next.monthlyCostItems).toHaveLength(2);
       return next;
     });
-    const item = ledger.monthlyCostItems[0]!;
-    const purchase = ledger.journalEntries.find((e) => e.metadata?.monthlyCostId === item.id)!;
+    const loanItem = ledger.monthlyCostItems.find((m) => isLoanItem(m))!;
+    const item = ledger.monthlyCostItems.find((m) => !isLoanItem(m))!;
+    // 借入の仕訳は 1 本で、持ち物の購入とローンの借入を兼ねる（monthlyCostId + loanItemId）。
+    const purchase = ledger.journalEntries.find((e) => e.metadata?.loanItemId === loanItem.id)!;
+    expect(purchase.metadata?.monthlyCostId).toBe(item.id);
     // 購入の借方は月割り台帳（持ち物の規約）・貸方は新しいローン。
     expect(purchase.lines.find((l) => l.side === 'debit')!.accountId).toBe(
       CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
     );
     const liability = ledger.accounts.find((a) => a.name === '自動車')!;
     expect(purchase.lines.find((l) => l.side === 'credit')!.accountId).toBe(liability.id);
-    // 返済ルールも同じ tx でできている。
-    expect(ledger.recurringRules).toHaveLength(1);
-    expect(ledger.recurringRules[0]!.spreadExpenseAccountId).toBe(liability.id);
+    expect(loanItem.expenseAccountId).toBe(liability.id);
+    // ルールは作られない。
+    expect(ledger.recurringRules).toHaveLength(0);
   });
 
-  it('1 回も返済できない終了日は保存せず理由を示す（起票ゼロの不変則）', async () => {
+  it('完済日 = 今日（1 か月未満の縮退）も保存できる（完済日に全額 1 本・起票ゼロ拒否の廃止）', async () => {
     await seed();
     await openLoanMode();
     fireEvent.change(q(UI.journal.entry.loanEndDate)!, {
       target: { value: todayLocal() },
     });
+    // 縮退のプレビュー: 完済日に全額 1 回。
+    await waitFor(() =>
+      expect(q(UI.journal.entry.loanPreview)).toHaveTextContent(/完済日 .* に全額 1,200,000 円/),
+    );
+    pick(UI.journal.entry.loanFrom, '現金');
+    fireEvent.click(q(UI.journal.entry.save)!);
+    const ledger = await waitFor(async () => {
+      const next = await loadLedger();
+      expect(next.monthlyCostItems).toHaveLength(1);
+      return next;
+    });
+    expect(ledger.monthlyCostItems[0]!.endDate).toBe(todayLocal());
+  });
+
+  it('購入日より前の完済日は保存せず理由を示す', async () => {
+    await seed();
+    await openLoanMode();
+    fireEvent.change(q(UI.journal.entry.loanEndDate)!, {
+      target: { value: '2000-01-01' },
+    });
     pick(UI.journal.entry.loanFrom, '現金');
     fireEvent.click(q(UI.journal.entry.save)!);
     await waitFor(() =>
       expect(q(UI.journal.entry.loanPanel)).toHaveTextContent(
-        '1 回以上返済できる終了日を入れてください。',
+        '購入日以降の完済日を入れてください。',
       ),
     );
     const ledger = await loadLedger();
-    expect(ledger.recurringRules).toHaveLength(0);
+    expect(ledger.monthlyCostItems).toHaveLength(0);
     expect(ledger.accounts.some((a) => a.name === '自動車')).toBe(false);
   });
 });

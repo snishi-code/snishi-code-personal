@@ -889,6 +889,20 @@ export const ledgerExportPackageSchema = z
           `定期ルール「${r.name}」の計上先に内部集約・残高調整の科目は使えません`,
           at('spreadExpenseAccountId'),
         );
+      else {
+        // v14: 計上先が負債のルール = 旧形ローンルールは保存されない（ローンは月割り台帳の
+        // item・v13.13）。判定軸は計上先だけ — 源泉が負債〔クレカ〕の通常定期支出は合法のまま
+        // （監査 #3）。既存データは変換スクリプトがローン item 化する。
+        const spreadRoleValue = accountRole.get(r.spreadExpenseAccountId) as
+          | AccountRole
+          | undefined;
+        if (spreadRoleValue === 'payment-liability' || spreadRoleValue === 'other-liability') {
+          issue(
+            `定期ルール「${r.name}」の計上先が負債です（v14 ではローンは月割り台帳の item として保存されます）`,
+            at('spreadExpenseAccountId'),
+          );
+        }
+      }
 
       // ルール×ローン併用の予約ブロック（v14 は形式のみ）: loan ブロックあり ⇒ 源泉が負債。
       // 逆向きは課さない（源泉 = 負債〔クレカ〕の通常定期支出は現行から合法で v14 でも合法）。

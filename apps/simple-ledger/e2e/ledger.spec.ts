@@ -225,7 +225,7 @@ test('表示桁数 0 で小数点を貼り付けても逐次入力しても 100 
   expect(storedAmount, '12.34 を表示桁 0 で打つと 12（=1200 minor）。1234 ではない').toBe(1200);
 });
 
-test('ローンで払う → 台帳にルールとして並び、資金繰りの負債行から台帳へ戻る (v13.6 H4)', async ({
+test('ローンで払う → 台帳に item カードとして並び、資金繰りの負債行から台帳へ戻る (v13.13)', async ({
   page,
 }) => {
   await boot(page);
@@ -263,17 +263,18 @@ test('ローンで払う → 台帳にルールとして並び、資金繰りの
   await page.locator(ui('journal.entry.save')).click();
   await expect(page.locator(ui('journal.entry.save'))).toBeHidden();
 
-  // ③ 月割り台帳: 専用セクションではなく、くり返し記帳の一覧に混ざって並ぶ。
+  // ③ 月割り台帳: ローンは item カードとして持ち物の一覧に混ざって並ぶ（v13.13）。
   await page.locator(ui('nav.menu.button')).click();
   await page.locator(ui('nav.allocations')).click();
   await expect(page.locator(ui('allocations.view'))).toBeVisible();
-  const loanRow = page.locator(`${ui('allocations.recurring.list')} li`).first();
-  await expect(loanRow).toContainText('E2E自動車');
+  const loanCard = page.locator(ui('allocations.item')).first();
+  await expect(loanCard).toContainText('E2E自動車');
   await expect(page.locator(ui('allocations.loan.remaining'))).toContainText('12');
-  // 旧「支払用負債」セクションは撤去済み。
+  // ルールは作られない（旧形ローンルールの廃止）・旧「支払用負債」セクションも無い。
+  await expect(page.locator(ui('allocations.recurring.list'))).toHaveCount(0);
   await expect(page.locator('[data-ui="allocations.liability.list"]')).toHaveCount(0);
 
-  // ④ 資金繰り: 負債行に残高が出て、タップで台帳の該当行へ戻る。
+  // ④ 資金繰り: 負債行に残高が出て、タップで台帳の該当カードへ戻る。
   await page.locator(ui('nav.menu.button')).click();
   await page.locator(ui('nav.cashflow')).click();
   await expect(page.locator(ui('cashflow.view'))).toBeVisible();
@@ -281,7 +282,5 @@ test('ローンで払う → 台帳にルールとして並び、資金繰りの
   await expect(debtRow).toContainText('E2E自動車');
   await debtRow.click();
   await expect(page.locator(ui('allocations.view'))).toBeVisible();
-  await expect(page.locator(`${ui('allocations.recurring.list')} li`).first()).toContainText(
-    'E2E自動車',
-  );
+  await expect(page.locator(ui('allocations.item')).first()).toContainText('E2E自動車');
 });

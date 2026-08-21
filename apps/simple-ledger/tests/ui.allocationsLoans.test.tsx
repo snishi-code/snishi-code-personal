@@ -1,12 +1,14 @@
 /*
- * ローン = 台帳のルール（v13.6 H4）。旧「支払用負債」セクションの試験を置き換える。
+ * ローン = 月割り台帳の item（v13.13）。旧「ローン = 台帳のルール」の試験を置き換える。
  *
- *  - **区別はルールの有無**: 計上先が負債科目のルール（= ローン）だけが月割り台帳に出る。
- *    クレカ（ルールを持たない負債）は残高があっても台帳に居ない ← mutation check ①
- *  - ローン行は持ち物・定期と同じ一覧に混在し、同じ検索・並び替えが効く。
- *  - 資金繰りからの遷移（target.liabilityAccountId）は該当**ルール行**へ着地する
- *    （シートは開かない）。ルールが無い負債を指しても何も起きない（fail-closed）。
- *  - 返済ルールの導出は `借方 負債 / 貸方 返済元` の月次刻み（合成後）＝残高が毎月減る。
+ *  - **区別は item の有無**: ローン item を持つ負債だけが月割り台帳に出る。
+ *    クレカ（item を持たない負債）は残高があっても台帳に居ない。
+ *  - ローン item は持ち物と同じカード一覧に混在し、同じ検索・並び替えが効く。
+ *    行の動詞は「（タップ =）編集」「終了」——ルールの「切替」はローンから消えた（仕様差 3）。
+ *  - 資金繰りからの遷移（target.liabilityAccountId）は該当**ローン item カード**へ着地する
+ *    （シートは開かない）。item が無い負債を指しても何も起きない（fail-closed）。
+ *  - 返済の導出は `借方 負債 / 貸方 返済元` の**直接 1 本**＝資金の出と負債の減りが同日
+ *    （旧・台帳経由 2 本の 1 刻み遅れは構造的に解消）。完済日で負債はちょうど 0（厳密一致）。
  */
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
@@ -39,7 +41,6 @@ afterEach(() => {
 });
 
 const ui = (name: string) => document.querySelector<HTMLElement>(`[data-ui="${name}"]`);
-const all = (name: string) => [...document.querySelectorAll<HTMLElement>(`[data-ui="${name}"]`)];
 
 function View({ period, target }: { period: ReportPeriod; target?: AllocationsTarget | null }) {
   return (
@@ -81,7 +82,7 @@ async function seed() {
   return { cash, card, expense };
 }
 
-/** 12 回払いのローンを 1 本組む（購入は費用カテゴリへ）。 */
+/** 12 回払いのローンを 1 本組む（購入は費用カテゴリへ・完済日 = 12 か月後 inclusive）。 */
 async function makeLoan(name = '自動車ローン', amount = 12000000) {
   const { cash, expense } = await seed();
   const created = await createLoanPurchase({
@@ -90,36 +91,40 @@ async function makeLoan(name = '自動車ローン', amount = 12000000) {
     description: name,
     amount,
     expenseAccountId: expense.id,
-    repaymentFromAccountId: cash.id,
-    // 初回 = 1 ヶ月後・12 回 → 排他的終了日 = 13 ヶ月後。
-    repaymentEndDate: addMonthsToDate(todayLocal(), 13),
+    repaymentSourceAccountId: cash.id,
+    repaymentEndDate: addMonthsToDate(todayLocal(), 12),
   });
   return { ...created, cash, expense };
 }
 
-describe('台帳の出し分け（ルールの有無）', () => {
-  it('ルールを持つローンは一覧に出て、残回数と負債の色を名乗る', async () => {
-    const { rule } = await makeLoan();
+describe('台帳の出し分け（ローン item の有無）', () => {
+  it('ローン item はカード一覧に出て、残回数・返済元・負債の色を名乗る', async () => {
+    const { liability } = await makeLoan();
     await renderReady();
-    await waitFor(() => expect(ui(UI.allocations.recurringList)).toBeInTheDocument());
+    await waitFor(() => expect(ui(UI.allocations.item)).toBeInTheDocument());
 
-    const rows = all(UI.allocations.recurringList)[0]!.querySelectorAll('li');
-    expect(rows).toHaveLength(1);
-    const row = rows[0]!;
-    expect(row).toHaveTextContent('自動車ローン');
-    // 種別は形からの導出（計上先が負債 = ローン）。
-    expect(row).toHaveTextContent('ローン（返済）');
-    // 残回数は終了日からの導出（今日の断面で 12 回残っている）。
+    // ルールは無い（旧形ローンルールの廃止）。
+    expect(ui(UI.allocations.recurringList)).not.toBeInTheDocument();
+    const card = ui(UI.allocations.item)!;
+    expect(card).toHaveTextContent('自動車ローン');
+    expect(card).toHaveTextContent('ローン');
+    // 残回数は完済日からの導出（今日の断面で 12 回残っている）。
     expect(ui(UI.allocations.loanRemaining)).toHaveTextContent('残り 12 回');
-    // 月額 = 120,000 / 12。負債の数字色（絶対値のまま・記号なし）。
-    const amount = row.querySelector('.row-trailing .list__amount span')!;
+    // 返済元と、月あたり = 先頭刻み（120,000 / 12 = 10,000）。
+    expect(card).toHaveTextContent('返済元');
+    expect(card).toHaveTextContent('現金');
+    // 借入総額は負債の数字色（絶対値のまま・記号なし）。
+    const amount = card.querySelector('.row-trailing .list__amount span')!;
     expect(amount).toHaveClass('amount--liability');
-    expect(amount.textContent).toContain('10,000');
-    // 資金繰りからの着地点として、行が負債科目を名乗る。
-    expect(row).toHaveAttribute('data-account-id', rule.spreadExpenseAccountId);
+    // 行の動詞は「終了」（一括返済）。ルールの「切替」はローンに無い（仕様差 3）。
+    expect(ui(UI.allocations.loanSettle)).toBeInTheDocument();
+    expect(ui(UI.allocations.recurringSwitch)).not.toBeInTheDocument();
+    expect(ui(UI.allocations.archive)).not.toBeInTheDocument();
+    // 資金繰りからの着地点として、カードが負債科目を名乗る。
+    expect(card).toHaveAttribute('data-account-id', liability.id);
   });
 
-  it('ルールを持たない負債（クレカ）は残高があっても台帳に出ない', async () => {
+  it('item を持たない負債（クレカ）は残高があっても台帳に出ない', async () => {
     const { cash, card } = await seed();
     await createOpenings([{ accountId: card.id, amount: 3000000, date: '2000-01-01' }]);
     await createRepaymentEntries({
@@ -133,33 +138,32 @@ describe('台帳の出し分け（ルールの有無）', () => {
 
     await renderReady();
     await waitFor(() => expect(ui(UI.allocations.view)).toBeInTheDocument());
-    // 台帳は空（ルールも持ち物も無い）。手動返済だけの負債は資金繰りと勘定科目に居る。
-    expect(ui(UI.allocations.recurringList)).not.toBeInTheDocument();
+    // 台帳は空（item もルールも無い）。手動返済だけの負債は資金繰りと勘定科目に居る。
+    expect(ui(UI.allocations.item)).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain(card.name);
   });
 
-  it('ローンは持ち物・定期と同じ検索欄・同じ並び替えの下に並ぶ', async () => {
+  it('ローンは持ち物と同じ検索欄の下に並び、負債の科目名（= ローン名）でも当たる', async () => {
     await makeLoan();
     await renderReady();
     await waitFor(() => expect(ui(UI.allocations.filterFrame)).toBeInTheDocument());
 
-    // 検索は負債の科目名（= ローン名）でも当たる。
     const search = ui(UI.allocations.search) as HTMLInputElement;
     fireEvent.change(search, { target: { value: '自動車' } });
-    await waitFor(() => expect(ui(UI.allocations.recurringList)).toBeInTheDocument());
-    expect(ui(UI.allocations.searchCount)).toHaveTextContent('くり返し記帳 1 件');
+    await waitFor(() => expect(ui(UI.allocations.item)).toBeInTheDocument());
+    expect(ui(UI.allocations.searchCount)).toHaveTextContent('持ち物 1 件');
 
     fireEvent.change(search, { target: { value: 'ありえない語' } });
     await waitFor(() => expect(ui(UI.allocations.searchEmpty)).toBeInTheDocument());
-    expect(ui(UI.allocations.recurringList)).not.toBeInTheDocument();
+    expect(ui(UI.allocations.item)).not.toBeInTheDocument();
   });
 });
 
 describe('資金繰りからの遷移（target.liabilityAccountId）', () => {
-  it('該当のルール行へ着地する（シートは開かない）', async () => {
+  it('該当のローン item カードへ着地する（シートは開かない）', async () => {
     const { liability } = await makeLoan();
     const { rerender } = await renderReady();
-    await waitFor(() => expect(ui(UI.allocations.recurringList)).toBeInTheDocument());
+    await waitFor(() => expect(ui(UI.allocations.item)).toBeInTheDocument());
 
     rerender(
       <View
@@ -168,32 +172,59 @@ describe('資金繰りからの遷移（target.liabilityAccountId）', () => {
       />,
     );
     await waitFor(() => {
-      expect(document.querySelector(`li[data-account-id="${liability.id}"]`)).toBeInTheDocument();
+      expect(
+        document.querySelector(
+          `[data-ui="${UI.allocations.item}"][data-account-id="${liability.id}"]`,
+        ),
+      ).toBeInTheDocument();
     });
-    // 行が目的地。編集シートの類は開かない。
-    expect(ui(UI.allocations.recurringSheet)).not.toBeInTheDocument();
+    // カードが目的地。編集シートの類は開かない。
+    expect(ui(UI.allocations.loanSheet)).not.toBeInTheDocument();
     expect(ui(UI.allocations.editDialog)).not.toBeInTheDocument();
   });
 
-  it('ルールを持たない負債を指しても何も開かない（fail-closed）', async () => {
+  it('item を持たない負債を指しても何も開かない（fail-closed）', async () => {
     const { card } = await seed();
     await createOpenings([{ accountId: card.id, amount: 3000000, date: '2000-01-01' }]);
     await renderReady({ target: { liabilityAccountId: card.id } });
     await waitFor(() => expect(ui(UI.allocations.view)).toBeInTheDocument());
-    expect(ui(UI.allocations.recurringSheet)).not.toBeInTheDocument();
+    expect(ui(UI.allocations.loanSheet)).not.toBeInTheDocument();
     expect(ui(UI.allocations.editDialog)).not.toBeInTheDocument();
   });
 });
 
-describe('返済ルールの導出（借方 負債 / 貸方 返済元 の月次刻み）', () => {
-  /*
-   * 全ルールが月割り台帳を経由する（v13.1 c 案）ため、1 回の返済は 2 本に分かれる:
-   *  - 返済日: `借方 台帳 / 貸方 返済元`（現金が出ていく）
-   *  - その 1 刻み後: `借方 負債 / 貸方 台帳`（負債が減る）
-   * = 負債の減りは現金の出より 1 刻み遅れ、差額は台帳が持つ（純資産は常に正しい）。
-   * 最後の刻みが落ちる日 = ルールの排他的終了日 = 完済日。
-   */
-  it('返済日に現金が出て、1 刻み後に負債が減る（完済日 = 終了日）', async () => {
+describe('シートの動詞（編集 = カードタップ / 終了 = 一括返済）', () => {
+  it('カードタップでローンの編集シートが開く（名前・金額・完済日・返済元）', async () => {
+    await makeLoan();
+    await renderReady();
+    const card = await waitFor(() => {
+      const found = ui(UI.allocations.item);
+      expect(found).toBeInTheDocument();
+      return found!;
+    });
+    fireEvent.click(card);
+    await waitFor(() => expect(ui(UI.allocations.loanSheet)).toBeInTheDocument());
+    expect(ui(UI.allocations.loanSheetName)).toBeInTheDocument();
+    expect(ui(UI.allocations.loanSheetEndDate)).toBeInTheDocument();
+    expect(ui(UI.allocations.loanSheetSource)).toBeInTheDocument();
+    // 開始日は読み取り専用（借入の仕訳のミラー）+ 仕訳への導線。
+    expect(ui(UI.allocations.loanSheetOpenBorrow)).toBeInTheDocument();
+  });
+
+  it('「終了」で一括返済シートが開き、既定額 = その日の理論残債が入る', async () => {
+    await makeLoan();
+    await renderReady();
+    await waitFor(() => expect(ui(UI.allocations.loanSettle)).toBeInTheDocument());
+    fireEvent.click(ui(UI.allocations.loanSettle)!);
+    await waitFor(() => expect(ui(UI.allocations.loanSettleSheet)).toBeInTheDocument());
+    // 今日 = 購入当日: 刻みはまだ 1 本も経過していないので理論残債 = 借入総額。
+    expect((ui(UI.allocations.loanSettleAmount) as HTMLInputElement).value).toBe('120000');
+    expect(ui(UI.allocations.loanSettleSource)).toBeInTheDocument();
+  });
+});
+
+describe('返済の導出（借方 負債 / 貸方 返済元 の直接 1 本・同日一致）', () => {
+  it('刻み日に現金の出と負債の減りが同日に起き、完済日でちょうど 0 になる', async () => {
     const { liability, cash } = await makeLoan();
     const ledger = await loadLedger();
     const balanceAt = (asOf: string) => {
@@ -208,15 +239,13 @@ describe('返済ルールの導出（借方 負債 / 貸方 返済元 の月次�
     // 購入当日: 借入額まるごと負債（現金は動かない）。
     expect(balanceAt(today).loan).toBe(12000000);
     expect(balanceAt(today).cash).toBe(500000000);
-    // 1 回目の返済日: 現金は出たが、負債の減りはまだ台帳の中（1 刻み遅れ）。
+    // 1 回目の刻み日: 現金の出と負債の減りが**同日**（旧・1 刻み遅れの解消）。
     const after1 = balanceAt(addMonthsToDate(today, 1));
     expect(after1.cash).toBe(500000000 - 1000000);
-    expect(after1.loan).toBe(12000000);
-    // その 1 刻み後に負債が 1 回ぶん減る。
-    expect(balanceAt(addMonthsToDate(today, 2)).loan).toBe(12000000 - 1000000);
-    // 12 回で現金は出きり、その 1 刻み後（= 排他的終了日）に負債がちょうど 0 になる。
-    const after12 = balanceAt(addMonthsToDate(today, 12));
-    expect(after12.cash).toBe(500000000 - 12000000);
-    expect(balanceAt(addMonthsToDate(today, 13)).loan).toBe(0);
+    expect(after1.loan).toBe(12000000 - 1000000);
+    // 完済日（購入 + 12 か月 = 最終刻み）で負債はちょうど 0・現金は総額ぶん出ている。
+    const atEnd = balanceAt(addMonthsToDate(today, 12));
+    expect(atEnd.loan).toBe(0);
+    expect(atEnd.cash).toBe(500000000 - 12000000);
   });
 });

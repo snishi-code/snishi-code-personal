@@ -1,25 +1,29 @@
 /*
- * mutation 検証 ②（ローン作成の 1 tx 原子性）。
+ * mutation 検証 ②（ローン作成の 1 tx 原子性・v13.13）。
  *
- * 「ローンで払う」は負債科目・購入の仕訳・返済ルール（+ 持ち物）を**1 トランザクション**で
- * 作る。テスト内で domain/loan の月額計算を壊し（0 = 保存できない金額）、**最後の工程である
- * ルールの検証だけが失敗する**状況を作る。それでも先に組み立てた負債科目・購入の仕訳・
- * 持ち物が 1 件も残らないこと = 途中まで書いて止まる経路が無いことを見る（fail-closed）。
+ * 「ローンで払う」は負債科目・借入の仕訳・ローン item（+ 持ち物）を**1 トランザクション**で
+ * 作る。テスト内で**最後の検証工程**（assertEndedAssetLiabilityBalances が使う
+ * accountEndingBalanceViolations）を必ず失敗させ、先に組み立てた負債科目・借入の仕訳・
+ * item が 1 件も残らないこと = 途中まで書いて止まる経路が無いことを見る（fail-closed）。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../src/domain/loan', async () => {
-  const actual = await vi.importActual<typeof import('../src/domain/loan')>('../src/domain/loan');
+vi.mock('../src/domain/accountEnding', async () => {
+  const actual = await vi.importActual<typeof import('../src/domain/accountEnding')>(
+    '../src/domain/accountEnding',
+  );
   return {
     ...actual,
-    // 反転: 月額が上限超え（amountSchema の max が拒む）＝ルールの検証（最終工程）だけが
-    // 必ず失敗する。0 にしない: 月額 < 1 は v13.8 監査 D の早期ガードで工程の頭で
-    // 弾かれるようになり、「最後の工程で失敗しても何も残らない」の検証にならない。
-    loanMonthlyAmount: () => 10 ** 12 + 1,
+    // 反転: 全保存経路の共通検証（最終工程）が必ず違反を報告する。
+    accountEndingBalanceViolations: () => [
+      { account: { id: 'x', name: 'x' } } as unknown as ReturnType<
+        typeof actual.accountEndingBalanceViolations
+      >[number],
+    ],
   };
 });
 
-const { createLoanPurchase, createOpenings, loadLedger } = await import('../src/data/repository');
+const { createLoanPurchase, loadLedger } = await import('../src/data/repository');
 const { addMonthsToDate } = await import('../src/domain/allocation');
 const { todayLocal } = await import('../src/util/time');
 await import('./setup');
@@ -32,12 +36,13 @@ async function seed() {
   const ledger = await loadLedger();
   const cash = ledger.accounts.find((a) => a.name === '現金')!;
   const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
-  await createOpenings([{ accountId: cash.id, amount: 500000000, date: '2000-01-01' }]);
+  // opening は張らない: 事前の opening 自体も同じ共通検証（反転済み）で失敗するため。
+  // ローンの登録に残高は要らない（残高 0 の現金を返済元にできる = 無差別原則）。
   return { cash, expense };
 }
 
-describe('mutation: ルールの保存に失敗したら何も残らない', () => {
-  it('負債科目・購入の仕訳・ルールのどれも書かれない（費用カテゴリ払い）', async () => {
+describe('mutation: 最終検証に失敗したら何も残らない', () => {
+  it('負債科目・借入の仕訳・ローン item のどれも書かれない（費用カテゴリ払い）', async () => {
     const { cash, expense } = await seed();
     const before = await loadLedger();
 
@@ -48,21 +53,20 @@ describe('mutation: ルールの保存に失敗したら何も残らない', () 
         description: '自動車',
         amount: 12000000,
         expenseAccountId: expense.id,
-        repaymentFromAccountId: cash.id,
-        repaymentEndDate: addMonthsToDate(todayLocal(), 13),
+        repaymentSourceAccountId: cash.id,
+        repaymentEndDate: addMonthsToDate(todayLocal(), 12),
       }),
     ).rejects.toThrow();
 
     const after = await loadLedger();
     expect(after.accounts.map((a) => a.id)).toEqual(before.accounts.map((a) => a.id));
     expect(after.journalEntries).toHaveLength(before.journalEntries.length);
-    expect(after.recurringRules).toHaveLength(0);
     expect(after.monthlyCostItems).toHaveLength(0);
     // 版も進めない（書込 transaction そのものへ入っていない）。
     expect(after.meta.revision).toBe(before.meta.revision);
   });
 
-  it('持ち物との併用でも item が残らない（4 ストアぶんまとめて中断）', async () => {
+  it('持ち物との併用でも item が残らない（複数ストアぶんまとめて中断）', async () => {
     const { cash, expense } = await seed();
     const before = await loadLedger();
 
@@ -73,8 +77,8 @@ describe('mutation: ルールの保存に失敗したら何も残らない', () 
         description: '自動車',
         amount: 12000000,
         expenseAccountId: expense.id,
-        repaymentFromAccountId: cash.id,
-        repaymentEndDate: addMonthsToDate(todayLocal(), 13),
+        repaymentSourceAccountId: cash.id,
+        repaymentEndDate: addMonthsToDate(todayLocal(), 12),
         continuousCost: { name: '自動車', endDate: addMonthsToDate(todayLocal(), 60) },
       }),
     ).rejects.toThrow();

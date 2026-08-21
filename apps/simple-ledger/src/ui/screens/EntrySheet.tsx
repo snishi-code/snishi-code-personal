@@ -21,15 +21,20 @@ import {
   type FormMode,
 } from '../entryModes';
 import { quickSpanEndDate } from '../ccQuickSpan';
-import { MONTHLY_AMOUNTS_HARD_CAP } from '../../domain/allocation';
+import {
+  MONTHLY_AMOUNTS_HARD_CAP,
+  monthlyAmounts,
+  monthOf,
+  monthsBetween,
+} from '../../domain/allocation';
+import { dayCutCount } from '../../domain/monthlyCost';
 import {
   LOAN_QUICK_YEARS,
   loanFirstRepaymentDate,
-  loanInstallmentCount,
-  loanMonthlyAmount,
-  loanRuleEndDate,
-  loanScheduledTotal,
+  loanInstallmentPreviewCount,
+  loanQuickEndDate,
 } from '../../domain/loan';
+import { MAX_AMOUNT_MINOR } from '../../domain/schema';
 import {
   exactDigitsFor,
   formatMinorForInput,
@@ -52,7 +57,7 @@ import type { AccountRole } from '../../domain/accountRoles';
 import { RECURRING_POSTABLE_ROLES, isRecurringPostableRole } from '../../domain/recurring';
 import { t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
-import { MAX_LEDGER_DATE, MIN_LEDGER_DATE } from '../../domain/calendar';
+import { isValidIsoDate, MAX_LEDGER_DATE, MIN_LEDGER_DATE } from '../../domain/calendar';
 import { todayLocal } from '../../util/time';
 import { UI } from '../../ui-contract';
 
@@ -233,7 +238,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
   const [loanFromAccountId, setLoanFromAccountId] = useState('');
   const [loanNameError, setLoanNameError] = useState(false);
   const [loanEndDateError, setLoanEndDateError] = useState(false);
-  const [loanMonthlyError, setLoanMonthlyError] = useState(false);
   const [loanFromError, setLoanFromError] = useState(false);
   const loanActive = canArrangeLoan && loanMode;
   const enableLoanMode = () => {
@@ -242,11 +246,25 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     // 支払い元は「新しいローン」に決まる = 選択済みの貸方は意味を失う。
     setForm((f) => ({ ...f, creditAccountId: '' }));
   };
+  /*
+   * 完済日（inclusive）から回数・月々の額を導出する（v13.13: 端数は monthlyAmounts の
+   * 合計厳密一致に乗るので「差額の明示」は不要になった）。プレビューは保存境界と同じ式
+   * （allocationCuts 系の正本）を通し、render で投げないよう入力を先に検証する。
+   */
   const loanFirstDate = loanFirstRepaymentDate(form.date);
+  const loanEnd = loanEndDate.trim();
+  const loanEndValid = loanEnd !== '' && isValidIsoDate(loanEnd) && loanEnd >= form.date;
+  const loanMonths = loanEndValid ? monthsBetween(monthOf(form.date), monthOf(loanEnd)) + 1 : 0;
+  const loanTermTooLong = loanEndValid && loanMonths > MONTHLY_AMOUNTS_HARD_CAP;
+  // 縮退（完済日が購入 1 か月後より前）は「完済日に全額 1 本」。
+  const loanLump = loanEndValid && !loanTermTooLong && dayCutCount(form.date, loanEnd) === 0;
   const loanCount =
-    loanEndDate.trim() === '' ? 0 : loanInstallmentCount(loanFirstDate, loanEndDate.trim());
-  const loanMonthly = loanMonthlyAmount(form.amount, loanCount);
-  const loanScheduled = loanScheduledTotal(loanMonthly, loanCount);
+    loanEndValid && !loanTermTooLong ? loanInstallmentPreviewCount(form.date, loanEnd) : 0;
+  const loanAmountValid =
+    Number.isInteger(form.amount) && form.amount >= 1 && form.amount <= MAX_AMOUNT_MINOR;
+  // 月々の額 = 先頭刻み（monthlyAmounts の先頭）。ガード済み入力なので投げない。
+  const loanFirstAmount =
+    loanCount >= 1 && loanAmountValid ? (monthlyAmounts(form.amount, loanCount)[0] ?? 0) : 0;
 
   /*
    * マルチステップ登録（v13.7 I3・作者決定 2026-08-18）。1 画面 1 決定にする:
@@ -336,21 +354,17 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
 
   /**
    * ローンの入力検証（保存境界 createLoanPurchase と同じ式で先に理由を示す）。
-   * 回数は**終了日から導出**する（終了日が正）: 1 回も返済が起きない終了日は
-   * 起票ゼロのルールになるので、保存境界と同じく拒否する。
+   * 完済日が正: 回数・月々の額は完済日から導出する。1 回も刻みが立たない完済日は
+   * 「完済日に全額 1 本」の縮退なので拒否しない（旧・起票ゼロ拒否は廃止・v13.13）。
    */
   function validateLoan(): boolean {
     const nameBad = loanName.trim() === '';
     const fromBad = loanFromAccountId === '';
-    const endBad =
-      loanEndDate.trim() === '' || loanCount < 1 || loanCount > MONTHLY_AMOUNTS_HARD_CAP;
-    // 月額は切り捨て（監査 D）: 月額 1 未満（回数 > 総額）は保存境界が拒否するので先に示す。
-    const monthlyBad = !endBad && form.amount >= 1 && loanMonthly < 1;
+    const endBad = !loanEndValid || loanTermTooLong;
     setLoanNameError(nameBad);
     setLoanFromError(fromBad);
     setLoanEndDateError(endBad);
-    setLoanMonthlyError(monthlyBad);
-    return !nameBad && !fromBad && !endBad && !monthlyBad;
+    return !nameBad && !fromBad && !endBad;
   }
 
   async function onSave() {
@@ -408,7 +422,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
           description: toSave.description,
           amount: toSave.amount,
           expenseAccountId: ccActive ? ccCategoryId : toSave.debitAccountId,
-          repaymentFromAccountId: loanFromAccountId,
+          repaymentSourceAccountId: loanFromAccountId,
           repaymentEndDate: loanEndDate.trim(),
           ...(ccActive
             ? {
@@ -975,7 +989,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
 
   /*
    * ローンの 4 項目（持ち物の参照）: 名前（お金の流れの左辺）・借入額（金額欄）・
-   * 開始日（仕訳の日付）・**終了日**。終了日が正で、回数と月額はそこから導出する。
+   * 購入日（仕訳の日付）・**完済日（inclusive）**。完済日が正で、回数と月々の額は
+   * そこから導出する（端数は monthlyAmounts の合計厳密一致 = 差額の明示は不要・v13.13）。
    * 返済元は自由に動かせるお金に限定せず、全科目（RECURRING_POSTABLE_ROLES）から選べる。
    */
   const loanDetailField = loanActive ? (
@@ -991,17 +1006,14 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         onChange={(v) => {
           setLoanEndDate(v);
           setLoanEndDateError(false);
-          setLoanMonthlyError(false);
         }}
         error={
           loanEndDateError
-            ? loanCount > MONTHLY_AMOUNTS_HARD_CAP
-              ? // 上限超過は「短すぎ」と別の理由（v13.9 監査 #4）。黙って飽和せず理由を名乗る。
+            ? loanTermTooLong
+              ? // 上限超過は「不正な日付」と別の理由。黙って飽和せず理由を名乗る。
                 t('entry.error.loanTermTooLong', { max: MONTHLY_AMOUNTS_HARD_CAP })
               : t('entry.error.loanEndDate')
-            : loanMonthlyError
-              ? t('entry.error.loanMonthlyZero')
-              : undefined
+            : undefined
         }
         dataUi={UI.journal.entry.loanEndDate}
       />
@@ -1013,9 +1025,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             className="btn btn--ghost"
             style={{ minHeight: 'var(--tap)' }}
             onClick={() => {
-              setLoanEndDate(loanRuleEndDate(loanFirstDate, years * 12));
+              setLoanEndDate(loanQuickEndDate(form.date, years));
               setLoanEndDateError(false);
-              setLoanMonthlyError(false);
             }}
             data-ui={UI.journal.entry.loanQuickSpan}
           >
@@ -1040,26 +1051,19 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
         error={loanFromError ? t('entry.error.loanFrom') : undefined}
         dataUi={UI.journal.entry.loanFrom}
       />
-      {loanCount >= 1 &&
-      loanCount <= MONTHLY_AMOUNTS_HARD_CAP &&
-      form.amount >= 1 &&
-      loanMonthly >= 1 ? (
-        <>
-          <p className="field__hint" data-ui={UI.journal.entry.loanPreview}>
-            {t('entry.loanPreview', {
-              amount: moneyText(loanMonthly, currency, fractionDigits),
-              count: loanCount,
-              total: moneyText(loanScheduled, currency, fractionDigits),
-            })}
-          </p>
-          {loanScheduled !== form.amount ? (
-            <p className="field__hint" data-ui={UI.journal.entry.loanRemainder}>
-              {t('entry.loanRemainder', {
-                diff: moneyText(form.amount - loanScheduled, currency, fractionDigits),
+      {loanCount >= 1 && loanAmountValid ? (
+        <p className="field__hint" data-ui={UI.journal.entry.loanPreview}>
+          {loanLump
+            ? t('entry.loanPreviewLump', {
+                date: loanEnd,
+                total: moneyText(form.amount, currency, fractionDigits),
+              })
+            : t('entry.loanPreview', {
+                amount: moneyText(loanFirstAmount, currency, fractionDigits),
+                count: loanCount,
+                total: moneyText(form.amount, currency, fractionDigits),
               })}
-            </p>
-          ) : null}
-        </>
+        </p>
       ) : null}
     </div>
   ) : null;

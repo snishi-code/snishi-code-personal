@@ -73,8 +73,10 @@ interface LedgerContextValue {
   createEntries: (inputs: SimpleEntryInput[]) => Promise<void>;
   /** 継続コスト資産の登録（購入の仕訳 + item を 1 tx で。creditAccountId 未指定 = 持ち込み）。 */
   createContinuousCost: (input: ContinuousCostInput) => Promise<void>;
-  /** ローンで払う（負債科目 + 購入の仕訳 + 返済ルール、任意で持ち物を 1 tx で）。 */
+  /** ローンで払う（負債科目 + 借入の仕訳 + ローン item、任意で持ち物を 1 tx で・v13.13）。 */
   createLoanPurchase: (input: LoanPurchaseInput) => Promise<void>;
+  /** ローンの終了 = 一括返済（endDate + 実仕訳を 1 tx で・v13.13 §2.4）。 */
+  settleLoan: (input: repo.LoanSettleInput) => Promise<void>;
   saveMonthlyCost: (item: MonthlyCostItem) => Promise<void>;
   removeMonthlyCost: (id: string) => Promise<void>;
   /** アーカイブ = 終了日の設定（+ 残存価値の回収の振替を同一 tx で任意に）。 */
@@ -280,6 +282,13 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const archiveMonthlyCost = useCallback<LedgerContextValue['archiveMonthlyCost']>(
     async (input) => {
       await runMutation(() => repo.archiveMonthlyCost(input));
+    },
+    [runMutation],
+  );
+
+  const settleLoan = useCallback<LedgerContextValue['settleLoan']>(
+    async (input) => {
+      await runMutation(() => repo.settleLoan(input));
     },
     [runMutation],
   );
@@ -543,6 +552,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveMonthlyCost,
       removeMonthlyCost,
       archiveMonthlyCost,
+      settleLoan,
       createRecurringRule,
       saveRecurringRule,
       removeRecurringRule,
@@ -580,6 +590,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveMonthlyCost,
       removeMonthlyCost,
       archiveMonthlyCost,
+      settleLoan,
       createRecurringRule,
       saveRecurringRule,
       removeRecurringRule,

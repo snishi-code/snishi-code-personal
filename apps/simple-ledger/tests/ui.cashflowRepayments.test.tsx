@@ -234,7 +234,7 @@ describe('資金繰り', () => {
       description: '自動車',
       amount: 12000000,
       expenseAccountId: ledger.accounts.find((a) => a.role === 'expense-category')!.id,
-      repaymentFromAccountId: cash.id,
+      repaymentSourceAccountId: cash.id,
       repaymentEndDate: addMonthsToDate(todayLocal(), 13),
     });
 

@@ -77,10 +77,15 @@ import {
 } from '../../domain/accountLifetime';
 import { cardTapProps, rowActionClick } from '../cardTap';
 import {
-  isLoanRule,
-  loanRemainingInstallments,
-  loanRuleForLiability,
-  loanSortAmount,
+  isLoanItem,
+  LOAN_QUICK_YEARS,
+  loanItemForLiability,
+  loanItemRemainingInstallments,
+  loanItemSortAmount,
+  loanQuickEndDate,
+  loanRemainingDebt,
+  loanSettledAmountsByItem,
+  loanSpreadTotalOf,
 } from '../../domain/loan';
 import { quickSpanEndDate } from '../ccQuickSpan';
 import {
@@ -158,9 +163,11 @@ export function Allocations({
   const [archiving, setArchiving] = useState<MonthlyCostItem | null>(null);
   const [chooserOpen, setChooserOpen] = useState(false);
   const [ruleSheet, setRuleSheet] = useState<{ existing?: RecurringRule } | null>(null);
-  // 資金繰りから来た負債行の着地点（該当ルール行までスクロールする）。
-  const [focusedRuleId, setFocusedRuleId] = useState<string | null>(null);
-  const focusedRuleRef = useRef<HTMLLIElement | null>(null);
+  // 資金繰りから来た負債行の着地点（該当ローン item カードまでスクロールする・v13.13）。
+  const [focusedItemId, setFocusedItemId] = useState<string | null>(null);
+  const focusedItemRef = useRef<HTMLDivElement | null>(null);
+  // ローンの終了（一括返済）シート。
+  const [settlingLoan, setSettlingLoan] = useState<MonthlyCostItem | null>(null);
   // 状態を変える操作は必ず確認を挟む（2026-08-15 作者合意）: 終了は終了日シート。
   const [endingRule, setEndingRule] = useState<RecurringRule | null>(null);
   // 切り替え = この日から別の線分（シートそのものが確認面なので前置きの確認は無い）。
@@ -183,15 +190,23 @@ export function Allocations({
   // 遡及して再配分されるため、ヘッダーの断面を変えても同じ item の月額は変わらない。
   // 検索の毎打鍵で再レンダーが走るため、全仕訳走査は useMemo で 1 回にする。
   const recovered = useMemo(() => recoveredAmountsByItem(ledger?.journalEntries ?? []), [ledger]);
-  // 式は domain の単一正本（continuousCost.spreadTotalOf）に委譲する。
-  const spreadTotalOf = (m: MonthlyCostItem): number => computeSpreadTotal(m, recovered);
+  // ローンの一括返済の合計（spreadTotal = 借入総額 − 一括返済。回収の振替と同じ流儀）。
+  const settled = useMemo(() => loanSettledAmountsByItem(ledger?.journalEntries ?? []), [ledger]);
+  // 式は domain の単一正本（continuousCost.spreadTotalOf / loan.loanSpreadTotalOf）に委譲する。
+  const spreadTotalOf = (m: MonthlyCostItem): number =>
+    isLoanItem(m) ? loanSpreadTotalOf(m, settled) : computeSpreadTotal(m, recovered);
   // 購入の仕訳（item と 1:1・最初に一致した 1 件 = 従来の find と同じ規則）。
+  // ローン item は借入の仕訳（loanItemId・loanSettlement なし）が同じ役を担う。
   const purchaseEntryByItem = useMemo(() => {
     const map = new Map<string, JournalEntry>();
     for (const e of ledger?.journalEntries ?? []) {
       const id = e.metadata?.monthlyCostId;
       if (id !== undefined && e.metadata?.monthlyCostRecovery !== true && !map.has(id)) {
         map.set(id, e);
+      }
+      const loanId = e.metadata?.loanItemId;
+      if (loanId !== undefined && e.metadata?.loanSettlement !== true && !map.has(loanId)) {
+        map.set(loanId, e);
       }
     }
     return map;
@@ -222,9 +237,6 @@ export function Allocations({
     [ledger],
   );
   const startedRules = allRules.filter((r) => effectiveRecurringRuleStartDate(r) <= asOf);
-  // ローン判定（計上先が負債科目のルール）。行の色・残回数・資金繰りからの着地に使う。
-  const ruleIsLoan = (r: RecurringRule): boolean =>
-    isLoanRule(r, (id) => accountsMap.get(id)?.role);
   // 「終了分も表示」の出現条件は検索前の全件で判定する（検索で 0 件になっても、
   // 母集合を変える唯一のコントロールを消さない）。
   const hasEndedAtAsOf =
@@ -250,7 +262,11 @@ export function Allocations({
           return a.name.localeCompare(b.name, 'ja');
         }
       : sort.key === 'amount'
-        ? (a: MonthlyCostItem, b: MonthlyCostItem) => (a.amount - b.amount) * dir
+        ? // ローン item の額は負として比べる（v13.7 I4 の規約を item へ継承）。昇順で
+          // −10,000 が 3,300 より前に来る＝返済と持ち物が絶対値で混ざらない。
+          // 表示は絶対値 + 負債色のまま（loanItemSortAmount）。
+          (a: MonthlyCostItem, b: MonthlyCostItem) =>
+            (loanItemSortAmount(a) - loanItemSortAmount(b)) * dir
         : (a: MonthlyCostItem, b: MonthlyCostItem) => a.name.localeCompare(b.name, 'ja') * dir;
   const ruleCompare =
     sort.key === 'date'
@@ -261,12 +277,7 @@ export function Allocations({
           return a.name.localeCompare(b.name, 'ja');
         }
       : sort.key === 'amount'
-        ? // ローンの額は負として比べる（v13.7 I4）。昇順で −4,167 が 3,300 より前に来る
-          // ＝返済と支出が絶対値で混ざらない。表示は絶対値 + 負債色のまま（loanSortAmount）。
-          (a: RecurringRule, b: RecurringRule) =>
-            (loanSortAmount(a, (id) => accountsMap.get(id)?.role) -
-              loanSortAmount(b, (id) => accountsMap.get(id)?.role)) *
-            dir
+        ? (a: RecurringRule, b: RecurringRule) => (a.amount - b.amount) * dir
         : (a: RecurringRule, b: RecurringRule) => a.name.localeCompare(b.name, 'ja') * dir;
   // loadLedger は終了が近い順で返すが、編集直後の state 由来でも順序が崩れないよう再ソートする。
   // この基準順は金額・名称の軸で同値になった行の相対順（applySort は安定ソート）も決める。
@@ -322,9 +333,9 @@ export function Allocations({
 
   // 資金繰りから来た負債行を画面内へ運ぶ（消費は下の target 解決・スクロールは描画後）。
   useEffect(() => {
-    if (focusedRuleId === null) return;
-    focusedRuleRef.current?.scrollIntoView?.({ block: 'center' });
-  }, [focusedRuleId]);
+    if (focusedItemId === null) return;
+    focusedItemRef.current?.scrollIntoView?.({ block: 'center' });
+  }, [focusedItemId]);
 
   // 仕訳一覧の計算で生まれた行タップからの遷移: 対象のシートを開く。
   // effect ではなく「render 中の派生調整」パターン（同一 target は 1 回だけ消費する）。
@@ -338,15 +349,15 @@ export function Allocations({
       target.itemId !== undefined ? allItems.find((m) => m.id === target.itemId) : undefined;
     const targetRule =
       target.ruleId !== undefined ? allRules.find((r) => r.id === target.ruleId) : undefined;
-    // 負債は「行そのもの」が目的地。シートは開かず、該当ルール行を視界へ入れる
-    // （ルールが無ければ何も起きない = fail-closed。資金繰り側が勘定科目へ振り分ける）。
-    const targetLoanRule =
+    // 負債は「行そのもの」が目的地。シートは開かず、該当ローン item カードを視界へ入れる
+    // （ローン item が無ければ何も起きない = fail-closed。資金繰り側が勘定科目へ振り分ける）。
+    const targetLoanItem =
       target.liabilityAccountId !== undefined
-        ? loanRuleForLiability(allRules, target.liabilityAccountId)
+        ? loanItemForLiability(allItems, target.liabilityAccountId)
         : undefined;
     if (targetItem) setItemSheet({ existing: targetItem });
     else if (targetRule) setRuleSheet({ existing: targetRule });
-    else if (targetLoanRule) setFocusedRuleId(targetLoanRule.id);
+    else if (targetLoanItem) setFocusedItemId(targetLoanItem.id);
   }
 
   return (
@@ -488,20 +499,12 @@ export function Allocations({
                     : { label: t('recurring.statusEnded'), tone: 'neutral' }
                   : // 終了点なしは canClose 側に必ず入る（startedRules が開始 <= asOf を保証）。
                     { label: t('recurring.ruleNoEnd'), tone: 'neutral' };
-              // ローン（計上先が負債のルール）は残回数を名乗り、金額を負債の色で出す
-              // （v13.5 その3 の規約。表示は絶対値のままで符号は付けない）。
-              const loan = ruleIsLoan(r);
-              const remaining = loan ? loanRemainingInstallments(r, asOf) : undefined;
               return (
                 // 行そのものをタップ = そのルールの編集シート（カードタップ = 編集の単一正本）。
                 // 行の中に終了・切替のボタンが残るため <button> にはできない（入れ子不正）。
                 // 削除・解除は編集シート最下部（動詞体系 v13.1）・再開は撤去
                 //（実体は新規登録と同じで「終了の Undo」と誤読させるため）。
-                <li
-                  key={r.id}
-                  ref={focusedRuleId === r.id ? focusedRuleRef : undefined}
-                  {...(loan ? { 'data-account-id': r.spreadExpenseAccountId } : {})}
-                >
+                <li key={r.id}>
                   <div
                     className="list__item"
                     {...cardTapProps(`${t('common.edit')}: ${r.name}`, () =>
@@ -527,11 +530,6 @@ export function Allocations({
                           currency={currency}
                         />
                       </div>
-                      {remaining !== undefined ? (
-                        <div className="list__sub" data-ui={UI.allocations.loanRemaining}>
-                          {t('repay.installmentsLeft', { count: remaining })}
-                        </div>
-                      ) : null}
                       {ruleRefBroken(r) ? (
                         <div className="field__error" role="alert">
                           {t('recurring.refBroken')}
@@ -541,11 +539,7 @@ export function Allocations({
                     {/* 右列 = 上段 金額 / 下段 操作（または状態）。行をまたいで縦に揃う。 */}
                     <div className="row-trailing">
                       <span className="list__amount">
-                        <Money
-                          amount={r.amount}
-                          currency={currency}
-                          {...(loan ? { tone: 'liability' as const } : {})}
-                        />
+                        <Money amount={r.amount} currency={currency} />
                       </span>
                       {/* 一等地の動詞は tonal ボタン（v13.2: 押せる面を持たせる）。 */}
                       {canClose ? (
@@ -595,7 +589,9 @@ export function Allocations({
             {items.map((m) => {
               // 回収は実仕訳（monthlyCostRecovery）から導出する。導出 item も決定的 ID で
               // 同じ回収に到達する（清算後の spreadTotal = amount − 回収額）。
+              // ローン item の spreadTotal は 借入総額 − 一括返済（loanSettlement）。
               const spreadTotal = spreadTotalOf(m);
+              const loan = isLoanItem(m);
               // ルール由来 item は読み取り専用（作者決定 2026-08-15）。行アクションは出さず、
               // タップは由来ルールへ。判定は単一正本 generatedItemRuleId。
               const originRule = rulesById.get(generatedItemRuleId(m) ?? '');
@@ -611,14 +607,16 @@ export function Allocations({
               const ending = isEndingSoon(m, asOf);
               const monthly = representativeMonthlyAmount(m, spreadTotal);
               return (
-                // カードそのものをタップ = 編集。手で登録した item は継続コスト資産シート、
-                // ルール由来（保存済み・未起票を問わず）は由来のルールのシートを開く。
+                // カードそのものをタップ = 編集。手で登録した item は継続コスト資産シート
+                // （ローンはローンの編集シート）、ルール由来は由来のルールのシートを開く。
                 <div
                   className={`card card--pad${ending ? ' card--ending' : ''}`}
                   key={m.id}
+                  ref={focusedItemId === m.id ? focusedItemRef : undefined}
                   data-ui={UI.allocations.item}
                   data-ending={ending ? 'true' : undefined}
                   data-derived-rule={fromRuleItem ? originRule?.id : undefined}
+                  {...(loan ? { 'data-account-id': m.expenseAccountId } : {})}
                   {...(open !== undefined
                     ? cardTapProps(`${t('common.edit')}: ${originRule?.name ?? m.name}`, open)
                     : {})}
@@ -635,10 +633,23 @@ export function Allocations({
                       gap: 'var(--space-3)',
                     }}
                   >
-                    <span>{m.name}</span>
+                    <span>
+                      {m.name}
+                      {loan ? (
+                        <>
+                          {' '}
+                          <span className="tag tag--teal">{t('monthlyCost.loanTag')}</span>
+                        </>
+                      ) : null}
+                    </span>
                     <span className="row-trailing">
                       <span className="list__amount">
-                        <Money amount={m.amount} currency={currency} />
+                        {/* ローンの額は負債の色（表示は絶対値のまま・符号は付けない）。 */}
+                        <Money
+                          amount={m.amount}
+                          currency={currency}
+                          {...(loan ? { tone: 'liability' as const } : {})}
+                        />
                       </span>
                       {fromRuleItem /* ルール由来 item は読み取り専用: 終了も削除も出さない
                            （導出カードは実在しないので元から対象が無い。保存済み ccr- も
@@ -646,6 +657,18 @@ export function Allocations({
                            ボタンの代わりに由来を名乗るチップを同じ位置へ置く（v13.2:
                            縦揃えを崩さず「なぜボタンが無いか」も読める）。 */ ? (
                         <span className="tag tag--teal">{t('monthlyCost.fromRule')}</span>
+                      ) : loan ? (
+                        // ローンの「終了」= 一括返済（§2.4）。ルールの「切替」は無い —
+                        // 条件変更 = 編集（全期間引き直し）か 終了 の 2 択（仕様差 3）。
+                        <button
+                          type="button"
+                          className="btn btn--tonal"
+                          onClick={rowActionClick(() => setSettlingLoan(m))}
+                          aria-label={`${t('loan.settleTitle')}: ${m.name}`}
+                          data-ui={UI.allocations.loanSettle}
+                        >
+                          {t('recurring.end')}
+                        </button>
                       ) : (
                         <button
                           type="button"
@@ -676,11 +699,23 @@ export function Allocations({
                     </span>
                   </div>
                   <div className="kv">
-                    <span className="muted">{t('ccItem.remainingValue')}</span>
+                    <span className="muted">
+                      {loan ? t('loan.remainingDebt') : t('ccItem.remainingValue')}
+                    </span>
                     <span>
                       <Money amount={remainingValue(m, asOf, spreadTotal)} currency={currency} />
                     </span>
                   </div>
+                  {loan ? (
+                    <div className="kv" data-ui={UI.allocations.loanRemaining}>
+                      <span className="muted">{t('loan.installments')}</span>
+                      <span>
+                        {t('repay.installmentsLeft', {
+                          count: loanItemRemainingInstallments(m, asOf, spreadTotal),
+                        })}
+                      </span>
+                    </div>
+                  ) : null}
                   <div className="kv">
                     <span className="muted">{t('monthlyCost.thisMonth')}</span>
                     <span>
@@ -694,6 +729,12 @@ export function Allocations({
                     <span className="muted">{t('monthlyCost.expenseCategory')}</span>
                     <span>{name(m.expenseAccountId)}</span>
                   </div>
+                  {loan ? (
+                    <div className="kv">
+                      <span className="muted">{t('loan.repaymentSource')}</span>
+                      <span>{name(m.repaymentSourceAccountId)}</span>
+                    </div>
+                  ) : null}
                 </div>
               );
             })}
@@ -702,14 +743,23 @@ export function Allocations({
       )}
 
       {itemSheet ? (
-        <ContinuousCostItemSheet
-          {...(itemSheet.existing !== undefined ? { existing: itemSheet.existing } : {})}
-          {...(itemSheet.existing !== undefined
-            ? { purchaseEntry: purchaseEntryOf(itemSheet.existing) }
-            : {})}
-          onOpenPurchase={onEditEntry}
-          onClose={() => setItemSheet(null)}
-        />
+        itemSheet.existing !== undefined && isLoanItem(itemSheet.existing) ? (
+          <LoanItemSheet
+            existing={itemSheet.existing}
+            purchaseEntry={purchaseEntryOf(itemSheet.existing)}
+            onOpenPurchase={onEditEntry}
+            onClose={() => setItemSheet(null)}
+          />
+        ) : (
+          <ContinuousCostItemSheet
+            {...(itemSheet.existing !== undefined ? { existing: itemSheet.existing } : {})}
+            {...(itemSheet.existing !== undefined
+              ? { purchaseEntry: purchaseEntryOf(itemSheet.existing) }
+              : {})}
+            onOpenPurchase={onEditEntry}
+            onClose={() => setItemSheet(null)}
+          />
+        )
       ) : null}
 
       {archiving ? (
@@ -717,6 +767,14 @@ export function Allocations({
           item={archiving}
           spreadTotal={spreadTotalOf(archiving)}
           onClose={() => setArchiving(null)}
+        />
+      ) : null}
+
+      {settlingLoan ? (
+        <LoanSettleSheet
+          item={settlingLoan}
+          spreadTotal={spreadTotalOf(settlingLoan)}
+          onClose={() => setSettlingLoan(null)}
         />
       ) : null}
 
@@ -791,19 +849,18 @@ function AddChooserSheet({
 }
 
 /** 一覧で導出表示する種別。保存フィールドではない。 */
-type SheetKind = RecurringKind | 'manual' | 'loan';
+type SheetKind = RecurringKind | 'manual';
 
 /**
  * ルールの表示・編集用の種別（保存しない）。利用者が指定した論理的な行き先と
  * 源泉の role から導出する（費用ルールの保存上の借方=内部台帳は判定に使わない）。
- * 計上先が負債科目なら**ローン**（返済ルール）。新しいフラグは持たず、ここでも
- * 判定の正本は domain/loan.ts の isLoanRule に委ねる。
+ * v13.13: 計上先が負債のルール（旧形ローン）は保存境界・wire が拒否するので、
+ * ここにローンの分岐は無い（ローンは item カード側の世界）。
  */
 function sheetKindForRule(
   rule: RecurringRule,
   roleOf: (id: string) => AccountRole | undefined,
 ): SheetKind {
-  if (isLoanRule(rule, roleOf)) return 'loan';
   return (
     recurringKindOf(roleOf(recurringDestinationAccountId(rule)), roleOf(rule.creditAccountId)) ??
     'manual'
@@ -845,6 +902,11 @@ function RecurringRuleSheet({
   const accounts = sortAccounts(ledger?.accounts ?? []);
   const currency = ledger?.settings.currency ?? '';
 
+  // 計上先から負債を除く（v13.13: 計上先が負債のルール = 旧形ローンは保存境界が拒否する。
+  // 選べて保存だけ失敗する袋小路を作らない。源泉は従来どおり全 postable = クレカ払いは合法）。
+  const destinationRoles = RECURRING_POSTABLE_ROLES.filter(
+    (role) => role !== 'payment-liability' && role !== 'other-liability',
+  );
   const initialFromGroups = groupedAccountsByRole(
     accounts,
     [...RECURRING_POSTABLE_ROLES],
@@ -854,11 +916,7 @@ function RecurringRuleSheet({
   const [creditAccountId, setCreditAccountId] = useState(existing?.creditAccountId ?? firstFromId);
   // 正規化済みの月割りルールでも内部台帳ではなく、利用者が指定した行き先を見せる。
   const existingDebit = existing ? recurringDestinationAccountId(existing) : undefined;
-  const initialToGroups = groupedAccountsByRole(
-    accounts,
-    [...RECURRING_POSTABLE_ROLES],
-    existingDebit,
-  );
+  const initialToGroups = groupedAccountsByRole(accounts, destinationRoles, existingDebit);
   const firstToId =
     initialToGroups
       .flatMap((group) => group.accounts)
@@ -870,7 +928,7 @@ function RecurringRuleSheet({
     creditAccountId,
   );
   // 行き先は源泉と同一科目を除く（振替の 預金→預金 を防ぐ）。
-  const toGroups = groupedAccountsByRole(accounts, [...RECURRING_POSTABLE_ROLES], debitAccountId)
+  const toGroups = groupedAccountsByRole(accounts, destinationRoles, debitAccountId)
     .map((group) => ({
       ...group,
       accounts: group.accounts.filter((account) => account.id !== creditAccountId),
@@ -1763,6 +1821,389 @@ function ContinuousCostItemSheet({
         />
       ) : null}
     </>
+  );
+}
+
+/**
+ * ローンの編集シート（v13.13）。編集できるのは 名前・金額（借入の仕訳と双方向ミラー）・
+ * 完済日・返済元。開始日（購入日）は借入の仕訳の日付のミラーなので読み取り専用
+ * （変えるのは仕訳側）。計上先（負債科目）は構造なので出さない。
+ */
+function LoanItemSheet({
+  existing,
+  purchaseEntry,
+  onOpenPurchase,
+  onClose,
+}: {
+  existing: MonthlyCostItem;
+  purchaseEntry?: JournalEntry | undefined;
+  onOpenPurchase: (entry: JournalEntry) => void;
+  onClose: () => void;
+}) {
+  const { ledger, saveMonthlyCost, removeMonthlyCost } = useLedger();
+  const accounts = sortAccounts(ledger?.accounts ?? []);
+  const [pendingDelete, setPendingDelete] = useState(false);
+
+  const [name, setName] = useState(existing.name);
+  const fractionDigits = useMoneyDigits();
+  const initialAmountText = formatMinorForInput(existing.amount, fractionDigits);
+  const [amountText, setAmountText] = useState(initialAmountText);
+  // 変更判定はフラグではなく値（初期表示と同じ文字列に戻れば無変更 = 保存済み minor を保持）。
+  const amountDirty = amountText !== initialAmountText;
+  const [endDate, setEndDate] = useState(existing.endDate ?? '');
+  const [sourceAccountId, setSourceAccountId] = useState(existing.repaymentSourceAccountId ?? '');
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [submitting, setSubmitting] = useState(false);
+
+  const effectiveAmount = amountDirty ? (parseAmountToMinor(amountText) ?? 0) : existing.amount;
+  // 過去から再計算される項目の変更予告（破壊的操作の予告なので削らない）。
+  const pastFieldsChanged =
+    effectiveAmount !== existing.amount ||
+    endDate !== (existing.endDate ?? '') ||
+    sourceAccountId !== (existing.repaymentSourceAccountId ?? '');
+
+  async function submit() {
+    if (submitting) return;
+    const amount = effectiveAmount;
+    if (!Number.isInteger(amount) || amount < 1) {
+      setError(t('error.common.amountInvalid'));
+      return;
+    }
+    if (endDate.trim() === '') {
+      setError(t('entry.error.loanEndDate'));
+      return;
+    }
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await saveMonthlyCost({
+        ...existing,
+        name: name.trim(),
+        amount,
+        endDate: endDate.trim(),
+        repaymentSourceAccountId: sourceAccountId,
+        updatedAt: nowIso(),
+      });
+      onClose();
+    } catch (e) {
+      setError(errorText(e));
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <>
+      <Modal
+        title={t('loan.editTitle')}
+        onClose={onClose}
+        dismissMode="if-clean"
+        dataUi={UI.allocations.loanSheet}
+        footer={
+          <>
+            <button type="button" className="btn btn--ghost" onClick={onClose}>
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={submit}
+              disabled={
+                submitting ||
+                name.trim() === '' ||
+                amountText === '' ||
+                endDate === '' ||
+                sourceAccountId === ''
+              }
+              data-ui={UI.allocations.loanSheetSave}
+            >
+              {t('common.save')}
+            </button>
+          </>
+        }
+      >
+        <div className="stack">
+          {error ? (
+            <div className="field__error" role="alert">
+              <Icon name="alert" size={14} />
+              {error}
+            </div>
+          ) : null}
+          {pastFieldsChanged ? (
+            <div
+              className="field__warning"
+              role="status"
+              data-ui={UI.allocations.editImpactWarning}
+            >
+              <Icon name="alert" size={14} />
+              {t('loan.pastRecalcWarning')}
+            </div>
+          ) : null}
+          <TextInput
+            label={t('monthlyCost.name')}
+            required
+            value={name}
+            onChange={setName}
+            dataUi={UI.allocations.loanSheetName}
+          />
+          <TextInput
+            label={t('loan.amount')}
+            required
+            inputMode={fractionDigits === 0 ? 'numeric' : 'decimal'}
+            value={amountText}
+            onChange={(v) => {
+              setAmountText(sanitizeAmountText(v, fractionDigits, amountText));
+            }}
+            hint={t('loan.amountHint')}
+            dataUi={UI.allocations.loanSheetAmount}
+          />
+          {/* 開始日（購入日）= 借入の仕訳の日付。変えるときは仕訳側（タップで開く）。 */}
+          <div className="kv" data-ui={UI.allocations.editStartDate}>
+            <span className="muted">{t('loan.purchaseDate')}</span>
+            <span>{existing.startDate}</span>
+          </div>
+          {purchaseEntry ? (
+            <button
+              type="button"
+              className="collapse-toggle"
+              onClick={() => {
+                onClose();
+                onOpenPurchase(purchaseEntry);
+              }}
+              data-ui={UI.allocations.loanSheetOpenBorrow}
+            >
+              <Icon name="chevronRight" size={16} />
+              {t('loan.openBorrow')}
+            </button>
+          ) : null}
+          <TextInput
+            label={t('entry.loanEndDate')}
+            type="date"
+            required
+            value={endDate}
+            onChange={setEndDate}
+            min={MIN_LEDGER_DATE}
+            max={MAX_LEDGER_DATE}
+            dataUi={UI.allocations.loanSheetEndDate}
+          />
+          <div className="row-actions" data-ui={UI.allocations.editQuickSpan}>
+            {LOAN_QUICK_YEARS.map((years) => (
+              <button
+                key={years}
+                type="button"
+                className="btn btn--ghost"
+                style={{ minHeight: 'var(--tap)' }}
+                onClick={() => setEndDate(loanQuickEndDate(existing.startDate, years))}
+              >
+                {t('ccItem.quickSpan', { years })}
+              </button>
+            ))}
+          </div>
+          <AccountPicker
+            label={t('loan.repaymentSource')}
+            required
+            value={sourceAccountId}
+            groups={groupedAccountsByRole(accounts, [...RECURRING_POSTABLE_ROLES], sourceAccountId)
+              .map((group) => ({
+                ...group,
+                // 計上先（負債自身）は返済元にできない（自己振替）。
+                accounts: group.accounts.filter(
+                  (account) => account.id !== existing.expenseAccountId,
+                ),
+              }))
+              .filter((group) => group.accounts.length > 0)}
+            onChange={setSourceAccountId}
+            dataUi={UI.allocations.loanSheetSource}
+          />
+          {/* 破壊的なほど下（動詞体系 v13.1）。削除 = 借入の記録を丸ごと消す cascade。 */}
+          <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
+            <button
+              type="button"
+              className="btn btn--danger"
+              style={{ minHeight: 'var(--tap)' }}
+              disabled={submitting}
+              onClick={() => setPendingDelete(true)}
+              data-ui={UI.allocations.loanSheetDelete}
+            >
+              {t('loan.deleteAction')}
+            </button>
+            <p className="field__hint">{t('loan.deleteDangerHint')}</p>
+          </div>
+        </div>
+      </Modal>
+      {pendingDelete ? (
+        <ConfirmDialog
+          title={t('loan.deleteConfirmTitle')}
+          body={t('loan.deleteConfirmBody', { name: existing.name })}
+          confirmLabel={t('common.delete')}
+          danger
+          onCancel={() => setPendingDelete(false)}
+          onConfirm={async () => {
+            try {
+              await removeMonthlyCost(existing.id);
+            } catch {
+              // 失敗 = 未保存: 閉じない（エラーは store が toast 済み）。
+              return;
+            }
+            setPendingDelete(false);
+            onClose();
+          }}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * ローンの終了 = 一括返済シート（v13.13 §2.4）。持ち物のアーカイブシートと**完全同型**:
+ *  1. **終了日 D**: 既定 = 今日（購入日より前にはできない）。
+ *  2. **一括返済額**: 既定 = D 時点の理論残債（編集可）。終了日を動かすと、まだ手で
+ *     直していない限り既定が追従する（判定はフラグでなく値）。**0 = 単なる短縮**
+ *     （全額が [start, D] へ按分し直し = 「編集で完済日を早める」と同じ。編集との違いは
+ *     実仕訳が立つかどうか）。
+ *  3. **返済元**: 既定 = ローンの返済元・変更可（別口座からの一括返済を許す）。
+ * 保存は endDate = D + 一括返済の実仕訳（0〜1 本）を同一トランザクションで（settleLoan）。
+ */
+function LoanSettleSheet({
+  item,
+  spreadTotal,
+  onClose,
+}: {
+  item: MonthlyCostItem;
+  spreadTotal: number;
+  onClose: () => void;
+}) {
+  const { ledger, settleLoan } = useLedger();
+  const accounts = sortAccounts(ledger?.accounts ?? []);
+  const currency = ledger?.settings.currency ?? '';
+  const displayDigits = useMoneyDigits();
+  const [endDate, setEndDate] = useState(() => {
+    const today = todayLocal();
+    return today < item.startDate ? item.startDate : today;
+  });
+  const [sourceAccountId, setSourceAccountId] = useState(item.repaymentSourceAccountId ?? '');
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+
+  // 上限（2100 年）超えの終了日で刻みの走査を伸ばさない（保存境界でも拒否される）。
+  const dateValid = isLedgerDate(endDate) && endDate >= item.startDate;
+  // 理論残債 = 変更前スケジュールでの D 時点の残り（loanRemainingDebt が単一正本。
+  // 既存の一括返済は spreadTotal に織り込み済み = 二重に引かない）。
+  const remaining = loanRemainingDebt(item, dateValid ? endDate : todayLocal(), spreadTotal);
+  // 表示桁 0 の設定でも、この欄だけは端数を隠さない（見えている値 = 保存される値）。
+  const digits = Math.max(displayDigits, exactDigitsFor(remaining)) as typeof displayDigits;
+
+  // 一括返済額の既定は終了日に追従する（過返済で負なら 0）。
+  const defaultAmountText = formatMinorForInput(Math.max(remaining, 0), digits);
+  const [amountText, setAmountText] = useState(defaultAmountText);
+  const autoAmountRef = useRef(defaultAmountText);
+  useEffect(() => {
+    if (defaultAmountText === autoAmountRef.current) return;
+    const previousAuto = autoAmountRef.current;
+    autoAmountRef.current = defaultAmountText;
+    // 既定のままなら追従し、手で直してあればその値を尊重する（判定はフラグではなく値）。
+    setAmountText((current) => (current === previousAuto ? defaultAmountText : current));
+  }, [defaultAmountText]);
+
+  const settleAmount = parseAmountToMinor(amountText) ?? 0;
+  const canSave = dateValid && (settleAmount === 0 || sourceAccountId !== '');
+
+  async function submit(): Promise<void> {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await settleLoan({
+        id: item.id,
+        endDate,
+        ...(settleAmount > 0 ? { settlement: { amount: settleAmount, sourceAccountId } } : {}),
+      });
+      onClose();
+    } catch (e) {
+      setError(errorText(e));
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={t('loan.settleTitle')}
+      onClose={onClose}
+      dataUi={UI.allocations.loanSettleSheet}
+      footer={
+        <>
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={submit}
+            disabled={submitting || !canSave}
+            data-ui={UI.allocations.loanSettleConfirm}
+          >
+            {t('loan.settleConfirm')}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        {error ? (
+          <div className="field__error" role="alert">
+            <Icon name="alert" size={14} />
+            {error}
+          </div>
+        ) : null}
+        <div className="list__title">{item.name}</div>
+        {/* 「編集（過去も引き直す契約条件の変更）」との違いを学習面として名乗る。 */}
+        <p className="field__hint">{t('loan.settleIntro')}</p>
+        <TextInput
+          label={t('loan.settleDate')}
+          type="date"
+          required
+          value={endDate}
+          onChange={setEndDate}
+          min={item.startDate}
+          max={MAX_LEDGER_DATE}
+          dataUi={UI.allocations.loanSettleDate}
+        />
+        <div className="kv">
+          <span className="muted">{t('loan.remainingDebt')}</span>
+          <span>{moneyText(remaining, currency, digits)}</span>
+        </div>
+        <TextInput
+          label={t('loan.settleAmount')}
+          inputMode={digits === 0 ? 'numeric' : 'decimal'}
+          value={amountText}
+          onChange={(v) => setAmountText(sanitizeAmountText(v, digits, amountText))}
+          hint={t('loan.settleAmountHint')}
+          dataUi={UI.allocations.loanSettleAmount}
+        />
+        {/* 一括返済額 0 = 作る仕訳が無い。返済元は出さない（選ばせて捨てない）。 */}
+        {settleAmount > 0 ? (
+          <AccountPicker
+            label={t('loan.settleSource')}
+            required
+            value={sourceAccountId}
+            onChange={setSourceAccountId}
+            groups={groupedAccountsByRole(
+              accounts,
+              [...RECURRING_POSTABLE_ROLES],
+              sourceAccountId,
+              dateValid ? endDate : undefined,
+            )
+              .map((group) => ({
+                ...group,
+                accounts: group.accounts.filter((account) => account.id !== item.expenseAccountId),
+              }))
+              .filter((group) => group.accounts.length > 0)}
+            dataUi={UI.allocations.loanSettleSource}
+          />
+        ) : null}
+      </div>
+    </Modal>
   );
 }
 

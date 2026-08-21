@@ -339,11 +339,9 @@ export const ja = {
     'ローン（その他負債）は通常の支出の支払い元にできません。持ち物として登録するか、借入として振替で実行してください。',
   // ローンの必須検証（保存境界 createLoanPurchase と同じ条件を先に示す）。
   'entry.error.loanFrom': '返済元の科目を選んでください。',
-  'entry.error.loanEndDate': '1 回以上返済できる終了日を入れてください。',
+  'entry.error.loanEndDate': '購入日以降の完済日を入れてください。',
   'entry.error.loanTermTooLong':
-    '返済回数が上限（{max} 回）を超えています。終了日を近づけてください。',
-  'entry.error.loanMonthlyZero':
-    '毎月の返済額が 0 になります。終了日を近づけて回数を減らしてください。',
+    '返済期間が上限（{max} か月）を超えています。完済日を近づけてください。',
   'entry.source.manual': '左側（貸方）',
   'entry.destination.manual': '右側（借方）',
   'entry.detailToggle': '詳細（メモ）',
@@ -364,12 +362,13 @@ export const ja = {
   'entry.loanArrangeBack': 'ローンをやめる',
   'entry.loanName': 'ローンの名前',
   'entry.loanNamePlaceholder': '例: 自動車ローン',
-  'entry.loanNameHint': 'この名前で負債の科目と返済のルールを作ります。',
-  'entry.loanEndDate': '返済の終了日',
-  'entry.loanEndDateHint': '初回の返済は {date} です。終了日から回数と月額が決まります。',
+  'entry.loanNameHint': 'この名前で負債の科目と月割り台帳のローンを作ります。',
+  'entry.loanEndDate': '完済日（最終返済日）',
+  'entry.loanEndDateHint':
+    '初回の返済は {date}。完済日から回数と月々の額が決まり、合計は借入額にちょうど一致します。',
   'entry.loanFrom': '返済元',
-  'entry.loanPreview': '毎月 {amount} × {count} 回（合計 {total}）',
-  'entry.loanRemainder': '借入額との差 {diff} は最後に残ります（手仕訳や補正で調整できます）。',
+  'entry.loanPreview': '毎月 {amount} × {count} 回（合計はちょうど {total}・端数は先頭で調整）',
+  'entry.loanPreviewLump': '完済日 {date} に全額 {total} を 1 回で返します。',
 
   'journal.reverseAction': '取消/返金を記録',
   // 行ボタンは短い動詞（v13.2: 記号は伝わらない。既存タグ「取消/返金」と同じ語）。
@@ -763,6 +762,33 @@ export const ja = {
   'repay.balance': '残高',
   'repay.nextDue': '次回支払日',
   'repay.installmentsLeft': '残り {count} 回',
+  // ローン item（v13.13: ローン = 持ち物の負債版。台帳の item カードに混ざって並ぶ）。
+  'monthlyCost.loanTag': 'ローン',
+  'loan.remainingDebt': '残り（残債）',
+  'loan.installments': '返済',
+  'loan.repaymentSource': '返済元',
+  'loan.editTitle': 'ローンを編集',
+  'loan.amount': '借入総額',
+  'loan.amountHint': '利息込みの総額。借入の仕訳の金額と連動します（変えると両方が変わります）。',
+  'loan.purchaseDate': '購入日',
+  'loan.openBorrow': '借入の仕訳を開く',
+  'loan.pastRecalcWarning':
+    '金額・完済日・返済元の変更は全期間を引き直します（過去の返済の刻みも変わります）。',
+  'loan.deleteAction': 'このローンを削除…',
+  'loan.deleteConfirmTitle': 'ローンを削除',
+  'loan.deleteConfirmBody':
+    '「{name}」を削除すると、借入の仕訳・一括返済の仕訳（同じ借入で登録した持ち物があればそれも）が一緒に消えます。取引をなかったことにする操作です。',
+  'loan.deleteDangerHint':
+    '削除は借入の記録を丸ごと消します。返し終えただけなら削除ではなく「終了」を使ってください。',
+  'loan.settleTitle': 'ローンの終了（一括返済）',
+  'loan.settleIntro':
+    '実際に残りをまとめて返した日を記録します。過去の返済の刻みはほぼそのまま残ります。条件変更（過去も引き直す）は「編集」を使ってください。',
+  'loan.settleDate': '終了日（一括返済の日）',
+  'loan.settleAmount': '一括返済額',
+  'loan.settleAmountHint':
+    '既定はその日の理論残債。0 にすると仕訳は作らず、完済日を早めるだけになります（全額を期間へ按分し直し）。',
+  'loan.settleSource': '返済元（この一括返済の支払い元）',
+  'loan.settleConfirm': 'この内容で終了する',
   'error.repay.countInvalid': '返済回数は 1〜{max} の整数で入力してください。',
   'error.settings.invalid':
     '台帳の設定を保存できませんでした（名前は 1〜120 文字・単位は 1〜8 文字で入力してください）。',
@@ -772,12 +798,20 @@ export const ja = {
   'error.amount.overflow': '金額の合計が扱える範囲を超えました。',
   'error.repay.totalTooSmall': '返済総額が回数より少なく、金額 0 の回ができるため登録できません。',
   'error.repay.liabilityRequired': '返済先はカード・未払 / ローンの負債科目を選んでください。',
-  'error.loan.noRepayment':
-    '返済が 1 回も起きない終了日です。初回の返済日より後の終了日を選んでください。',
-  'error.loan.monthlyTooSmall':
-    '借入額が返済回数より少なく、毎月の返済額が 0 になるため登録できません。終了日を近づけて回数を減らしてください。',
   'error.loan.termTooLong':
-    '返済回数が上限（{max} 回）を超えるため登録できません。終了日を近づけてください。',
+    '返済期間が上限（{max} か月）を超えるため登録できません。完済日を近づけてください。',
+  'error.loan.structure':
+    'ローンの構造が不正です（計上先は負債・完済日は必須・借入の仕訳の貸方は固定です）。',
+  'error.loan.repaymentSource': '返済元に使えない科目です。別の科目を選んでください。',
+  'error.loan.overSettled':
+    '一括返済の合計が借入総額を超えるため保存できません（負債がマイナス残高になります）。',
+  'error.loan.settlementBeforeStart': '一括返済より後ろへ購入日を動かせません。',
+  'error.entry.loanLinked':
+    '借入の仕訳はローンと 1 対 1 です。削除はローン側（月割り台帳）から行ってください。',
+  'error.recurring.liabilityDestination':
+    '計上先が負債の定期ルールは作れません。ローンは支出の「ローンで払う」で登録してください。',
+  'error.monthlyCost.liabilityExpense':
+    '計上先が負債の持ち物は登録できません。ローンは支出の「ローンで払う」で登録してください。',
 
   // 月割り台帳（くり返し記帳 = 実仕訳の自動起票 / 継続コスト資産 = 月割りの導出）
   'monthly.title': '月割り台帳',

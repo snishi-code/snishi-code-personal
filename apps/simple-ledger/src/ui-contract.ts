@@ -367,9 +367,24 @@ export const UI = {
     archiveRemainderSpread: 'allocations.archive.remainder.spread',
     archiveRemainderExpense: 'allocations.archive.remainder.expense',
     archiveConfirm: 'allocations.archive.confirm',
-    // ローン行（= 計上先が負債のルール）の残回数。行そのものは recurring.list に混ざる
-    // （v13.6 H4 で「支払用負債」セクションと返済シートは撤去した）。
+    // ローン item カード（v13.13: ローン = 持ち物の負債版。item カードに混ざって並ぶ）。
     loanRemaining: 'allocations.loan.remaining',
+    // 終了（一括返済）: 行アクションとシート。
+    loanSettle: 'allocations.loan.settle',
+    loanSettleSheet: 'allocations.loan.settleSheet',
+    loanSettleDate: 'allocations.loan.settle.date',
+    loanSettleAmount: 'allocations.loan.settle.amount',
+    loanSettleSource: 'allocations.loan.settle.source',
+    loanSettleConfirm: 'allocations.loan.settle.confirm',
+    // ローンの編集シート（名前・金額・完済日・返済元。開始日は借入の仕訳のミラー）。
+    loanSheet: 'allocations.loan.sheet',
+    loanSheetName: 'allocations.loan.sheet.name',
+    loanSheetAmount: 'allocations.loan.sheet.amount',
+    loanSheetEndDate: 'allocations.loan.sheet.endDate',
+    loanSheetSource: 'allocations.loan.sheet.source',
+    loanSheetSave: 'allocations.loan.sheet.save',
+    loanSheetDelete: 'allocations.loan.sheet.delete',
+    loanSheetOpenBorrow: 'allocations.loan.sheet.openBorrow',
     // 負債行の展開 = 登録済みの返済（基準日より後の保存仕訳）。タップで仕訳の編集シートへ
     repaymentsToggle: 'allocations.repayments.toggle',
     repaymentsList: 'allocations.repayments.list',

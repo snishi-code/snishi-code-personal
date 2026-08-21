@@ -38,7 +38,13 @@ import type { ReportPeriod } from '../../domain/reportPeriod';
 import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
 import { addMonths, monthOf, monthsBetween } from '../../domain/allocation';
-import { loanRuleForLiability } from '../../domain/loan';
+import {
+  loanItemForLiability,
+  loanItemRemainingInstallments,
+  loanRepaymentSchedule,
+  loanSettledAmountsByItem,
+  loanSpreadTotalOf,
+} from '../../domain/loan';
 import { todayLocal } from '../../util/time';
 import { entryOpenPlan } from '../entryOpen';
 import type { AllocationsTarget } from './Allocations';
@@ -290,23 +296,36 @@ export function Cashflow({
         <ul className="card list" data-ui={UI.cashflow.liabilityList}>
           {liabilitySummary.map((l) => {
             /*
-             * 行は**表示オンリー**（v13.4 ④）。タップ先は v13.6 H4 で振り分ける:
-             *  - 返済ルールを持つローン → 月割り台帳の**その行**（返済の正本はルール）
-             *  - ルールを持たない負債（クレカ等）→ **勘定科目**のその科目
+             * 行は**表示オンリー**（v13.4 ④）。タップ先は**ローン item の有無**で振り分ける
+             * （v13.13: 区別はルールの有無 → item の有無へ）:
+             *  - ローン item を持つ負債 → 月割り台帳の**そのカード**（返済の正本は item）
+             *  - item を持たない負債（クレカ等）→ **勘定科目**のその科目
              *    （台帳に居ないものを台帳へ送らない = 空振りする導線を作らない）
              * 高さは .list__row-btn の min-height = var(--tap)（44px）。
              */
-            const loanRule = loanRuleForLiability(ledger?.recurringRules ?? [], l.id);
+            const loanItem = loanItemForLiability(ledger?.monthlyCostItems ?? [], l.id);
+            // 次回支払日・残回数は item の刻みから引く（返済は導出 = 保存仕訳に無い・§2.3）。
+            const loanSpread = loanItem
+              ? loanSpreadTotalOf(loanItem, loanSettledAmountsByItem(ledger?.journalEntries ?? []))
+              : 0;
+            const loanNextDue = loanItem
+              ? loanRepaymentSchedule(loanItem, loanSpread).find(
+                  (cut) => cut.date > anchorDate && cut.amount !== 0,
+                )?.date
+              : undefined;
+            const loanCount = loanItem
+              ? loanItemRemainingInstallments(loanItem, anchorDate, loanSpread)
+              : 0;
             return (
               <li key={l.id} className="list__row">
                 <button
                   type="button"
                   className="list__row-btn"
                   onClick={() =>
-                    loanRule ? onOpenAllocations({ liabilityAccountId: l.id }) : onOpenAccount(l.id)
+                    loanItem ? onOpenAllocations({ liabilityAccountId: l.id }) : onOpenAccount(l.id)
                   }
                   aria-label={t(
-                    loanRule ? 'cashflow.debtOpenInAllocations' : 'cashflow.debtOpenInAccounts',
+                    loanItem ? 'cashflow.debtOpenInAllocations' : 'cashflow.debtOpenInAccounts',
                     { name: l.name },
                   )}
                   data-ui={UI.cashflow.liabilityRow}
@@ -319,13 +338,20 @@ export function Cashflow({
                       {t('repay.balance')}:{' '}
                       <Money amount={l.balance} currency={currency} tone="liability" />
                     </div>
-                    {l.count > 0 ? (
+                    {loanItem ? (
+                      loanCount > 0 ? (
+                        <div className="list__sub">
+                          {t('repay.nextDue')}: {loanNextDue ?? '—'}・
+                          {t('repay.installmentsLeft', { count: loanCount })}
+                        </div>
+                      ) : null
+                    ) : l.count > 0 ? (
                       <div className="list__sub">
                         {t('repay.nextDue')}: {l.nextDue ?? '—'}・
                         {t('repay.installmentsLeft', { count: l.count })}・{t('repay.balance')}{' '}
                         <Money amount={l.remaining} currency={currency} />
                       </div>
-                    ) : loanRule ? null : (
+                    ) : (
                       <div className="list__sub amount--neg">{t('cashflow.debtNoPlan')}</div>
                     )}
                   </div>

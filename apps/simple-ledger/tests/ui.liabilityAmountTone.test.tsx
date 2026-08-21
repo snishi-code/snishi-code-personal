@@ -16,13 +16,13 @@ import { Allocations } from '../src/ui/screens/Allocations';
 import { Accounts } from '../src/ui/screens/Accounts';
 import { Cashflow } from '../src/ui/screens/Cashflow';
 import {
+  createLoanPurchase,
   createOpenings,
-  createRecurringRule,
   loadLedger,
   upsertAccount,
 } from '../src/data/repository';
 import { debitSignedBalance } from '../src/domain/accounting';
-import { monthOf } from '../src/domain/allocation';
+import { addMonthsToDate } from '../src/domain/allocation';
 import { UI } from '../src/ui-contract';
 import { _resetOverlaysForTests } from '../src/ui/overlays';
 import { todayLocal } from '../src/util/time';
@@ -93,17 +93,19 @@ describe('自然符号の金額ソート', () => {
 });
 
 describe('負債残高の数字色', () => {
-  it('月割り台帳のローン行（計上先が負債のルール）の月額に専用クラスが付く', async () => {
+  it('月割り台帳のローン item カードの借入総額に専用クラスが付く（v13.13）', async () => {
     const { cash } = await seed();
-    // ローン = 計上先が負債科目のルール（返済）。行は他のルールと同じ一覧に混ざる。
-    await createRecurringRule({
-      name: '住宅ローンの返済',
+    const ledger = await loadLedger();
+    const expense = ledger.accounts.find((a) => a.role === 'expense-category')!;
+    // ローン = 月割り台帳の item（負債版）。カードは持ち物と同じ一覧に混ざる。
+    await createLoanPurchase({
+      loanName: '車のローン',
+      date: todayLocal(),
+      description: '車のローン',
       amount: 5000000,
-      dayOfMonth: 10,
-      debitAccountId: LOAN.id,
-      creditAccountId: cash.id,
-      startMonth: monthOf(todayLocal()),
-      startDate: todayLocal(),
+      expenseAccountId: expense.id,
+      repaymentSourceAccountId: cash.id,
+      repaymentEndDate: addMonthsToDate(todayLocal(), 12),
     });
     render(
       <View>
@@ -111,10 +113,10 @@ describe('負債残高の数字色', () => {
       </View>,
     );
     await waitFor(() => {
-      expect(all(UI.allocations.recurringList)).toHaveLength(1);
+      expect(all(UI.allocations.item)).toHaveLength(1);
     });
     const amount = document.querySelector(
-      `[data-ui="${UI.allocations.recurringList}"] .row-trailing .list__amount span`,
+      `[data-ui="${UI.allocations.item}"] .row-trailing .list__amount span`,
     );
     expect(amount).toHaveClass('amount--liability');
     expect(amount?.textContent ?? '').not.toContain('-');

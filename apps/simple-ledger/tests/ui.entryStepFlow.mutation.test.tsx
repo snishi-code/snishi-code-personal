@@ -166,12 +166,13 @@ describe('支出登録のページ分け', () => {
 
     pick(UI.journal.entry.ccCategory, '固定費');
     fireEvent.click(q(UI.journal.entry.save)!);
+    // v13.13: ローン item + 持ち物 item の 2 枚（ルールは作らない）。
     const ledger = await waitFor(async () => {
       const next = await loadLedger();
-      expect(next.monthlyCostItems).toHaveLength(1);
+      expect(next.monthlyCostItems).toHaveLength(2);
       return next;
     });
-    expect(ledger.recurringRules).toHaveLength(1);
-    expect(ledger.monthlyCostItems[0]!.name).toBe('自動車');
+    expect(ledger.recurringRules).toHaveLength(0);
+    expect(ledger.monthlyCostItems.map((m) => m.name)).toContain('自動車');
   });
 });
