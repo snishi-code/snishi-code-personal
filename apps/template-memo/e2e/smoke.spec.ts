@@ -200,6 +200,62 @@ test('freeText を外した場所には自由入力欄が出ない', async ({ pa
   await expect(projectionCard.locator(ui(UI.projection.freeText))).toHaveCount(3);
 });
 
+// ── 名簿の見た目 (作者レビュー 2026-08-20): 左揃え・番号と名前の間隔・縦カラム揃え ──
+
+test('名簿の行は左揃えで表示される', async ({ page }) => {
+  await addPatient(page, '101', '検証対象A');
+  const card = page.locator(ui(UI.patient.card), { hasText: '101 検証対象A' });
+  // 中央揃えへの回帰を防ぐ (名簿として見づらい・作者レビュー)。
+  await expect(card).toHaveCSS('justify-content', 'flex-start');
+  await expect(card).toHaveCSS('text-align', 'left');
+});
+
+test('名簿の番号と名前は半角スペース 1 個より広い間隔で並ぶ', async ({ page }) => {
+  await addPatient(page, '101', '検証対象A');
+  const card = page.locator(ui(UI.patient.card), { hasText: '101 検証対象A' });
+  const room = card.locator(ui(UI.patient.cardRoom));
+  const name = card.locator(ui(UI.patient.cardName));
+  await expect(room).toHaveText('101');
+  await expect(name).toHaveText('検証対象A');
+  // 番号スパン右端と名前スパン左端の実間隔が「半角スペース 1 個 (≒0.25em)」を超えること。
+  const roomBox = await room.boundingBox();
+  const nameBox = await name.boundingBox();
+  const fontSize = await card.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  expect(roomBox && nameBox && fontSize).toBeTruthy();
+  const gap = (nameBox?.x ?? 0) - ((roomBox?.x ?? 0) + (roomBox?.width ?? 0));
+  expect(gap).toBeGreaterThan(0.25 * fontSize);
+});
+
+test('名簿の番号列と名前列は桁数が違っても縦に揃う', async ({ page }) => {
+  // スマホ幅 = 名簿が 1 列になる幅で見る (広い幅では 2 列になり行が横に並ぶ)。
+  await page.setViewportSize({ width: 375, height: 640 });
+  // 桁数の違う位置 (1 と 100)。位置順ソートでこの順に並ぶ。
+  await addPatient(page, '1', '検証対象A');
+  await addPatient(page, '100', '検証対象B');
+  const cardA = page.locator(ui(UI.patient.card), { hasText: '1 検証対象A' });
+  const cardB = page.locator(ui(UI.patient.card), { hasText: '100 検証対象B' });
+  const roomA = await cardA.locator(ui(UI.patient.cardRoom)).boundingBox();
+  const roomB = await cardB.locator(ui(UI.patient.cardRoom)).boundingBox();
+  const nameA = await cardA.locator(ui(UI.patient.cardName)).boundingBox();
+  const nameB = await cardB.locator(ui(UI.patient.cardName)).boundingBox();
+  expect(roomA && roomB && nameA && nameB).toBeTruthy();
+  // 番号の頭・名前の頭がそれぞれ縦に揃う (列として一致)。
+  expect(Math.abs((roomA?.x ?? 0) - (roomB?.x ?? 0))).toBeLessThan(0.5);
+  expect(Math.abs((nameA?.x ?? 0) - (nameB?.x ?? 0))).toBeLessThan(0.5);
+
+  // 位置未入力の行も、空の番号スパンが列を確保して名前の頭が揃う。
+  await page.locator(ui(UI.home.addPatient)).click();
+  const popup = page.locator(ui(UI.patient.editPopup));
+  await expect(popup).toBeVisible();
+  await popup.locator(ui(UI.patient.name)).fill('検証対象C');
+  await popup.getByRole('button', { name: '閉じる' }).click();
+  await expect(popup).toBeHidden();
+  const cardC = page.locator(ui(UI.patient.card), { hasText: '検証対象C' });
+  const nameC = await cardC.locator(ui(UI.patient.cardName)).boundingBox();
+  expect(nameC).toBeTruthy();
+  expect(Math.abs((nameC?.x ?? 0) - (nameA?.x ?? 0))).toBeLessThan(0.5);
+});
+
 test('ホームの縦位置は詳細から戻っても保たれ、一番上へ戻るボタンで先頭へ返れる', async ({
   page,
 }) => {

@@ -6,7 +6,14 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { ensurePatientOrder, patientRoomCompare, sanitizeRoomInput } from './patientDisplay';
+import {
+  ensurePatientOrder,
+  formatPatientLabel,
+  patientLabelParts,
+  patientRoomCompare,
+  roomColumnCh,
+  sanitizeRoomInput,
+} from './patientDisplay';
 import { STATUS, type Patient } from '../domain/types';
 
 function patient(pid: string, room: string): Patient {
@@ -42,6 +49,45 @@ describe('sanitizeRoomInput', () => {
 
   it('非文字列は空文字へ倒す', () => {
     expect(sanitizeRoomInput(undefined as unknown as string)).toBe('');
+  });
+});
+
+describe('patientLabelParts / formatPatientLabel', () => {
+  it('番号と名前を別部品で返し、結合ラベルと一致する（名簿の列描画と読み上げがずれない）', () => {
+    const p = { ...patient('p1', '101'), name: '検証対象A' };
+    expect(patientLabelParts(p, '1')).toEqual({ room: '101', name: '検証対象A' });
+    expect(formatPatientLabel(p, '1')).toBe('101 検証対象A');
+  });
+
+  it('位置は前後空白を落とし、未入力は空文字（結合ラベルに余計な区切りを入れない）', () => {
+    const p = { ...patient('p1', ' 101 '), name: '検証対象A' };
+    expect(patientLabelParts(p, '1').room).toBe('101');
+    const noRoom = { ...patient('p2', ''), name: '検証対象B' };
+    expect(patientLabelParts(noRoom, '2')).toEqual({ room: '', name: '検証対象B' });
+    expect(formatPatientLabel(noRoom, '2')).toBe('検証対象B');
+  });
+
+  it('名前未入力は fallback（通し番号）へ倒す', () => {
+    const p = { ...patient('p1', '101'), name: '' };
+    expect(patientLabelParts(p, '7')).toEqual({ room: '101', name: '7' });
+    expect(patientLabelParts(null, '7')).toEqual({ room: '', name: '7' });
+  });
+});
+
+describe('roomColumnCh', () => {
+  it('最長の位置の文字数を返す（1 と 100 なら 3）', () => {
+    expect(roomColumnCh([patient('a', '1'), patient('b', '100')])).toBe(3);
+    expect(roomColumnCh([patient('a', 'A012')])).toBe(4);
+  });
+
+  it('位置が 1 件も無ければ 0（列を作らない）', () => {
+    expect(roomColumnCh([])).toBe(0);
+    expect(roomColumnCh([patient('a', ''), patient('b', '  ')])).toBe(0);
+  });
+
+  it('全角文字は 2ch で数え、前後空白は数えない', () => {
+    expect(roomColumnCh([patient('a', '３階')])).toBe(4);
+    expect(roomColumnCh([patient('a', ' 101 ')])).toBe(3);
   });
 });
 

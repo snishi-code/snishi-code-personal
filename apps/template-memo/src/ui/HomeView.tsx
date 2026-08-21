@@ -1,7 +1,7 @@
 // ホーム: 患者グリッド (タップで詳細へ / ステータス変更 / 転記用QR / 患者追加)、
 // ラウンド開始 (= 記録クリア: snapshot → clear → fail-closed 保存 → rollback)。
 
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { Button } from '@snishi/foundation/ui/Button';
 import { Icon } from '@snishi/foundation/ui/Icon';
 import { ConfirmDialog } from '@snishi/foundation/ui/ConfirmDialog';
@@ -12,7 +12,14 @@ import { applyRoundStartClear } from '../domain/clearPolicy';
 import { roundStartClearTagNames } from '../domain/tags';
 import { REASON, countActivePatients } from '../data/snapshots';
 import { useRevision, type AppRuntime } from './appRuntime';
-import { ensurePatientOrder, formatPatientLabel, statusClass, STATUS_MARK } from './patientDisplay';
+import {
+  ensurePatientOrder,
+  formatPatientLabel,
+  patientLabelParts,
+  roomColumnCh,
+  statusClass,
+  STATUS_MARK,
+} from './patientDisplay';
 import { DetailQrDialog } from './DetailQrDialog';
 import { PatientEditPopup } from './PatientEditPopup';
 import { StatusPickerPopup } from './StatusPicker';
@@ -37,6 +44,10 @@ export function HomeView({
 
   // 描画前の自動ソート (in-place・冪等。表示中は動かさない)。部屋番号順。
   ensurePatientOrder(appState.patients);
+
+  // 番号 (位置) 列の共通幅。タグ絞り込みでは変えない — フィルタ操作のたびに
+  // 列幅が揺れると行の見た目が安定しないため、表示前の全件で決める。
+  const roomCol = roomColumnCh(appState.patients);
 
   const [clearConfirm, setClearConfirm] = useState(false);
   // 患者追加直後に開く編集ポップアップの対象 (部屋番号入力でソートされても取り違えない
@@ -103,12 +114,17 @@ export function HomeView({
 
       {archive ? <div className="banner trashBanner">{s.archive.banner}</div> : null}
 
-      <div className="grid" data-ui={UI.home.grid}>
+      <div
+        className="grid"
+        data-ui={UI.home.grid}
+        style={{ '--room-col': `${roomCol}ch` } as CSSProperties}
+      >
         {appState.patients.map((p, idx) => {
           // タグ絞り込み (AND)。
           if (!patientMatchesTagFilter(p)) return null;
           const no = idx + 1;
           const label = formatPatientLabel(p, String(no));
+          const parts = patientLabelParts(p, String(no));
           const cls = statusClass(p.status);
           return (
             <div key={p.pid} className="patientCardRow">
@@ -128,7 +144,9 @@ export function HomeView({
                 </button>
               ) : null}
               {/* 中央: 患者ボタン (部屋 + 氏名のみ)。最重要情報 = 部屋番号 + 患者名。タグのチップは
-                  カードに出さない (患者シートに集約・絞り込みはタグフィルタで行う)。 */}
+                  カードに出さない (患者シートに集約・絞り込みはタグフィルタで行う)。
+                  番号と名前は別スパン (間隔は CSS の gap。半角スペース 1 個では詰まって見える
+                  — 実ユーズレビュー②)。読み上げは aria-label の結合ラベルで従来どおり。 */}
               <button
                 type="button"
                 className={`patientBtn ${cls}`}
@@ -136,7 +154,21 @@ export function HomeView({
                 data-ui={UI.patient.card}
                 onClick={() => onOpenPatient(no)}
               >
-                {label}
+                {roomCol > 0 ? (
+                  // 番号列は一覧に位置が 1 件でもあれば全行に置く (未入力行も空スパンで
+                  // 列を確保し、名前の頭を縦に揃える)。幅は .grid の --room-col。
+                  // スパン間の {' '} は flex レイアウトでは描画されない空白テキストノード。
+                  // textContent を結合ラベル「番号 名前」と一致させる (テストの hasText・コピー時の体裁)。
+                  <>
+                    <span className="patientBtnRoom" data-ui={UI.patient.cardRoom}>
+                      {parts.room}
+                    </span>
+                    {parts.room ? ' ' : null}
+                  </>
+                ) : null}
+                <span className="patientBtnName" data-ui={UI.patient.cardName}>
+                  {parts.name}
+                </span>
               </button>
               {/* 右端: 埋め込み QR (ホームから直接その患者の転記用 QR を出す)。 */}
               {!archive ? (
