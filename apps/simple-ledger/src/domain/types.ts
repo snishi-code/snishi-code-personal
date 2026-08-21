@@ -123,14 +123,28 @@ export interface EntryMetadata {
   /** 回収の振替の印（monthlyCostId とペア。貸方 = 継続コスト台帳）。 */
   monthlyCostRecovery?: true;
   /**
+   * ローン item に紐づく保存仕訳の印（v13.13。monthlyCostId ミラーと同型）。
+   *  - `loanSettlement` なし = **借入の仕訳**（貸方 = 負債 = item の計上先）。item と 1:1 で、
+   *    金額・日付は item の amount / startDate と双方向ミラー。削除不可（item 削除で cascade）。
+   *    持ち物併用時は 1 仕訳に monthlyCostId と loanItemId が両方乗る。
+   *  - `loanSettlement: true` = **一括返済の仕訳**（借方 負債 / 貸方 返済元。item の「終了」が
+   *    作る。monthlyCostRecovery と同型 = 普通の振替として編集・削除できる）。
+   */
+  loanItemId?: string;
+  /** 一括返済の仕訳の印（loanItemId とペア。借方 = 負債）。 */
+  loanSettlement?: true;
+  /**
    * 継続コスト（資産経由モデル）の仮想仕訳の印。これらは **保存されない導出専用**で、
    * `reportEntriesForAsOf` の結果にのみ現れる。実仕訳(`journalEntries`)・保存系・export には入れない。
    */
   virtual?: true;
   /** 仮想仕訳が属する MonthlyCostItem(継続コスト)の ID。 */
   continuousCostId?: string;
-  /** 仮想仕訳の種別。funding=資産化（支払元→対象資産）/ monthly-allocation=月割り（対象資産→月割り先）。 */
-  ccKind?: 'funding' | 'monthly-allocation';
+  /**
+   * 仮想仕訳の種別。funding=資産化（支払元→対象資産）/ monthly-allocation=月割り
+   * （対象資産→月割り先）/ loan-repayment=ローンの返済（負債→返済元・v13.13）。
+   */
+  ccKind?: 'funding' | 'monthly-allocation' | 'loan-repayment';
   /**
    * 投資の利回り導出の仮想仕訳の印（対象の投資科目 ID）。保存されない導出専用で、
    * `reportEntriesForAsOf` の結果にのみ現れる（v13.4 ② で保存不変条件へ合流した。
@@ -192,6 +206,14 @@ export interface MonthlyCostItem {
   endDate?: string;
   /** 計上先（費用カテゴリのほか、給与など収入カテゴリも可。内部集約・残高調整は不可）。 */
   expenseAccountId: string;
+  /**
+   * 返済元（v13.13）。**これの有無がローン item の判別子**（構造による判別・isLoanItem が
+   * 単一正本。role 分岐のフラグは増やさない）。wire + 保存境界の不変条件（fail-closed・
+   * 双方向）: `repaymentSourceAccountId` あり ⇔ `expenseAccountId` の role が負債。
+   * さらに: 返済元 ≠ 計上先・返済元は postable（RECURRING_POSTABLE_ROLES）・
+   * ローン item は endDate（完済日・inclusive）必須。
+   */
+  repaymentSourceAccountId?: string;
   createdAt: string;
   updatedAt: string;
 }
