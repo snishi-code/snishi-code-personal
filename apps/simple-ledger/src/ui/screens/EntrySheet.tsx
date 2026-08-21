@@ -1449,7 +1449,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                 end: ccEndValid ? ccEnd : '',
                 count: ccCount,
                 firstAmount: ccFirstAmount,
-                amountValid: loanAmountValid,
+                totalValid: loanAmountValid,
               }}
               onNameChange={(v) => {
                 setCcTargetName(v);

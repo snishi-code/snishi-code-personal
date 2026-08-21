@@ -25,7 +25,11 @@ export interface EntryItemDerived {
   count: number;
   /** 月あたり = 先頭刻み。 */
   firstAmount: number;
-  amountValid: boolean;
+  /**
+   * 購入額（base の金額欄 = 割り振る総額）が有効か。まとめカードの表示条件
+   * （旧名 amountValid — 「この枠の金額」ではなく総額の検証・v13.19 minor③で改名）。
+   */
+  totalValid: boolean;
 }
 
 export function EntryItemStep({
@@ -119,7 +123,7 @@ export function EntryItemStep({
           ))}
         </div>
       </div>
-      {derived.end !== '' && derived.amountValid ? (
+      {derived.end !== '' && derived.totalValid ? (
         // 下部まとめカード（月あたり × か月・v13.15 §2.2 = モック正本）。縮退は終了日 1 本を名乗る。
         <StepSummaryCard
           label={t('monthlyCost.monthly')}
