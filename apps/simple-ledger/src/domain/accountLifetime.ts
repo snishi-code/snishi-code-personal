@@ -7,6 +7,7 @@
  * 生んでいたため。明示 startDate の fail-closed 検証は不変。
  * 参照期間の収集は import schema と repository の保存境界で共有する。
  */
+import { addMonthsToDate } from './allocation';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from './constants';
 import type { Account, JournalEntry, MonthlyCostItem, RecurringRule } from './types';
 
@@ -331,12 +332,28 @@ export function accountReferenceIntervals(
     }
   }
   for (const item of collections.monthlyCostItems) {
+    const isLoan = item.repaymentSourceAccountId !== undefined;
     // expenseAccountId と、仮想月割り行の貸方になる集約台帳が item の期間中ずっと存在する。
-    if (item.expenseAccountId === accountId || accountId === CONTINUOUS_COST_LEDGER_ACCOUNT_ID) {
+    // ローン item は台帳を経由しない（返済行 = 負債 ⇄ 返済元）ので、台帳の区間は課さない。
+    if (
+      item.expenseAccountId === accountId ||
+      (!isLoan && accountId === CONTINUOUS_COST_LEDGER_ACCOUNT_ID)
+    ) {
       intervals.push({
         kind: 'monthlyCost',
         from: item.startDate,
         ...(item.endDate !== undefined ? { to: item.endDate } : {}),
+      });
+    }
+    // 返済元は返済の導出行（先頭刻み〜完済日）が触れる。先頭刻み = 購入日の 1 か月後
+    // （同日通過なしの縮退は完済日に全額 1 本）。購入日からは拘束しない —
+    // 借入の仕訳は返済元に触れないため（源泉を購入日から縛る誤りを作らない）。
+    if (isLoan && item.repaymentSourceAccountId === accountId && item.endDate !== undefined) {
+      const firstCut = addMonthsToDate(item.startDate, 1);
+      intervals.push({
+        kind: 'monthlyCost',
+        from: firstCut <= item.endDate ? firstCut : item.endDate,
+        to: item.endDate,
       });
     }
   }

@@ -10,6 +10,7 @@ import {
   investmentProjectionResult,
   type InvestmentProjectionTruncation,
 } from './investmentProjection';
+import { isLoanItem, loanRepaymentEntries } from './loan';
 import { deriveRecurringOutputs, generatedEntryRuleId, generatedItemRuleId } from './recurring';
 import type { Ledger, JournalEntry, MonthlyCostItem } from './types';
 
@@ -247,11 +248,17 @@ function deriveBase(ledger: ReportEntrySource, asOf: string): DerivedBase {
     // 表示する実仕訳と仮想行の日付だけを asOf で切るため、後日の回収による再配分は
     // 過去・現在・未来のどの断面でも同じになる。回収の振替は実仕訳のまま
     // journalEntries を走査する（導出 item も決定的 ID で同じ回収に到達する）。
+    // ローン item（負債版）は台帳を経由しないので月割りエンジンから除き、
+    // 第 3 の導出源（返済行）として別途合流させる。
     ...continuousCostEntries(
-      reportMonthlyCostItems(ledger, derived.items),
+      reportMonthlyCostItems(ledger, derived.items).filter((item) => !isLoanItem(item)),
       ledger.journalEntries,
       horizon,
     ),
+    // ローンの返済行（v13.13）: `借方 負債 / 貸方 返済元` を item の刻みで直接導出する。
+    // 一括返済（loanSettlement 仕訳）は実仕訳のまま journalEntries を走査して控除する
+    // （回収の振替と同じ流儀）。補正の按分より前に合流するので pin は自動でこの世界を見る。
+    ...loanRepaymentEntries(ledger.monthlyCostItems, ledger.journalEntries, horizon),
     ...derived.entries,
   ];
   return { base, adjustments, horizon, maxAdjustmentDate };

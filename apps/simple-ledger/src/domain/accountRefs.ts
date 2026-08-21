@@ -12,9 +12,12 @@ export interface AccountRefCollections {
 }
 
 function monthlyCostRefs(m: MonthlyCostItem): (string | undefined)[] {
-  // 4項目モデルの参照は費用の行き先だけ。支払い元は購入の仕訳（保存される仕訳）が参照する。
+  // 4項目モデルの参照は費用の行き先と、ローン item の返済元（v13.13 監査 #5・critical）。
+  // 返済の導出行は毎回仮想で**保存仕訳が返済元への参照を持たない**ため、ここに入れないと
+  // 返済元科目を削除できてしまう（削除ガード・区分変更・使用中バッジが同じ 1 本で追従する）。
+  // 支払い元は購入/借入の仕訳（保存される仕訳）が参照する。
   // 継続コスト台帳は定数参照（保護は deleteAccount の role ガード）。
-  return [m.expenseAccountId];
+  return [m.expenseAccountId, m.repaymentSourceAccountId];
 }
 
 function recurringRuleRefs(r: RecurringRule): (string | undefined)[] {
