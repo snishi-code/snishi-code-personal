@@ -265,9 +265,21 @@ function ruleProjectionContext(
     return null;
   const referenceStart = recurringRuleReferenceStartDate(rule);
   if (referenceStart === undefined) return null;
-  // recurringKindOf(continuing-cost-asset, …) は null を返すため、起票形
-  // （借方 台帳 / 貸方 源泉 = 費用ルールと同一）に合わせて 'expense' 直指定。
-  const inputMode: InputMode = 'expense';
+  /*
+   * 導出仕訳の inputMode はルールの実際の種類から決める（v13.15 §2.4b — 旧実装は
+   * 'expense' 固定で、収入・振替ルールの導出行まで「支出」と印付けされていた）。
+   * 起票形は常に 借方 台帳 / 貸方 源泉 なので recurringKindOf は使えず、
+   * 計上先（= 利用者が指定した行き先）と源泉の role で分類する:
+   *  - 源泉が収入カテゴリ → 'income'（収入 × ルールの写像形: 計上先 = 資金）
+   *  - 計上先が損益科目（費用・収入カテゴリ）→ 'expense'（費用ルール・給与控除ルール）
+   *  - それ以外（資金 → 資金の積立など）→ 'transfer'
+   */
+  const inputMode: InputMode =
+    credit.role === 'income-category'
+      ? 'income'
+      : destination.role === 'expense-category' || destination.role === 'income-category'
+        ? 'expense'
+        : 'transfer';
   return {
     rule,
     destination,

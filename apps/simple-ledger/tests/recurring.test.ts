@@ -464,6 +464,50 @@ describe('定期ルールの完全導出', () => {
     );
   });
 
+  it('導出仕訳の inputMode はルールの種類から決まる（v13.15 §2.4b・expense 固定の修正）', async () => {
+    const bank = await accountByName('預金');
+    const invest = await accountByName('投資'); // daily-asset
+    const salary = await accountByName('給与'); // income-category
+    const fixed = await accountByName('固定費'); // expense-category
+    // 振替 × ルール（積立: 資金 → 資金）→ 'transfer'。
+    const transferRule = await createRecurringRule({
+      name: '積立',
+      amount: 10000,
+      dayOfMonth: 1,
+      debitAccountId: invest.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-07',
+      startDate: '2026-07-01',
+    });
+    // 収入 × ルール（源泉 = 収入カテゴリ・計上先 = 資金）→ 'income'。
+    const incomeRule = await createRecurringRule({
+      name: '給料',
+      amount: 300000,
+      dayOfMonth: 25,
+      debitAccountId: bank.id,
+      creditAccountId: salary.id,
+      startMonth: '2026-07',
+      startDate: '2026-07-25',
+    });
+    // 支出 × ルール（計上先 = 費用）→ 'expense'（従来どおり）。
+    const expenseRule = await createRecurringRule({
+      name: '家賃',
+      amount: 80000,
+      dayOfMonth: 27,
+      debitAccountId: fixed.id,
+      creditAccountId: bank.id,
+      startMonth: '2026-07',
+      startDate: '2026-07-27',
+    });
+
+    const { entries } = await derivedFor('2026-07-31');
+    const modeOf = (ruleId: string) =>
+      entries.find((e) => e.metadata?.recurringRuleId === ruleId)?.metadata?.inputMode;
+    expect(modeOf(transferRule.id)).toBe('transfer');
+    expect(modeOf(incomeRule.id)).toBe('income');
+    expect(modeOf(expenseRule.id)).toBe('expense');
+  });
+
   it('簿記編集: クレカ積立を「カード → 投資」で毎月導出できる', async () => {
     const card = await accountByName('クレジットカード'); // payment-liability
     const invest = await accountByName('投資'); // daily-asset + movable:false（旧・投資 role は v13.18 撤去）
@@ -478,8 +522,9 @@ describe('定期ルールの完全導出', () => {
     });
     const { entries, items } = await derivedFor('2026-07-23');
     const posted = entries.find((e) => e.metadata?.recurringRuleId === rule.id)!;
-    // 全ルールが台帳経由なので導出形は費用ルールと同一（inputMode も 'expense' に揃う）。
-    expect(posted.metadata?.inputMode).toBe('expense');
+    // 全ルールが台帳経由で導出形（行の形）は費用ルールと同一だが、inputMode は
+    // ルールの種類から決まる（v13.15 §2.4b）: 資金 → 資金の積立は 'transfer'。
+    expect(posted.metadata?.inputMode).toBe('transfer');
     expect(posted.lines).toEqual([
       { accountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID, side: 'debit', amount: 10000 },
       { accountId: card.id, side: 'credit', amount: 10000 },
@@ -1720,7 +1765,8 @@ describe('収入・振替ルールも台帳経由の一形で導出する（ス�
     // v13.1（c 案）: 収入ルールも保存形は一形（借方 = 台帳・計上先 = 利用者が選んだ行き先）。
     expect(saved.spreadExpenseAccountId).toBe(bank.id);
     expect(saved.debitAccountId).toBe(CONTINUOUS_COST_LEDGER_ACCOUNT_ID);
-    // 導出行の全フィールドを固定する（inputMode は常に 'expense'・monthlyCostId が必ず付く）。
+    // 導出行の全フィールドを固定する（inputMode はルールの種類から: 源泉 = 収入カテゴリ →
+    // 'income'〔v13.15 §2.4b〕・monthlyCostId が必ず付く）。
     // 過去も未来も同じ規則で並ぶ = 「起票済み」と「投影」の区別が無い。
     const purchase = (month: string, date: string): JournalEntry => ({
       id: ruleEntryId(rule.id, month),
@@ -1733,7 +1779,7 @@ describe('収入・振替ルールも台帳経由の一形で導出する（ス�
       ],
       metadata: {
         virtual: true,
-        inputMode: 'expense',
+        inputMode: 'income',
         recurringRuleId: rule.id,
         recurringMonth: month,
         monthlyCostId: ruleItemId(rule.id, month),
@@ -1794,7 +1840,8 @@ describe('収入・振替ルールも台帳経由の一形で導出する（ス�
       ],
       metadata: {
         virtual: true,
-        inputMode: 'expense',
+        // 資金 → 資金の積立ルールは 'transfer'（v13.15 §2.4b）。
+        inputMode: 'transfer',
         recurringRuleId: rule.id,
         recurringMonth: month,
         monthlyCostId: ruleItemId(rule.id, month),
