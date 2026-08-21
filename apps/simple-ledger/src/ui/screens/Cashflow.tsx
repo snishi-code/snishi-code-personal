@@ -55,7 +55,6 @@ import { useMoneyDigits } from '../money';
 import { formatMoney } from '../../util/format';
 import { UI } from '../../ui-contract';
 import { ScrollTopButton } from '../ScrollTopButton';
-import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 
 /** 展開の地平の年（下回り日を探す範囲・グラフを伸ばせる上限）。 */
 const HORIZON_YEAR = Number.parseInt(CONTINUOUS_COST_HARD_CAP.slice(0, 4), 10);
@@ -235,11 +234,6 @@ export function Cashflow({
       <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
         {t('cashflow.intro')}
       </p>
-
-      <InvestmentProjectionTruncationNotice
-        truncations={display?.investmentProjectionTruncations ?? []}
-        accounts={ledger?.accounts ?? []}
-      />
 
       <div className="stat-grid stat-grid--single" data-ui={UI.cashflow.summary}>
         <div className="stat">

@@ -36,7 +36,6 @@ import {
 import { ASSET_GROUP_LABEL_KEYS, assetGroupOf, type AssetGroupKey } from '../../domain/assetGroups';
 import { ScrollTopButton } from '../ScrollTopButton';
 import { sumAmounts } from '../../domain/safeSum';
-import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 
 export type BreakdownSection = 'revenue' | 'asset' | 'liability' | 'equity';
 
@@ -50,7 +49,7 @@ interface SectionConfig {
   totalLabelKey: MessageKey;
   trendKey: MessageKey;
   trendVariant: 'bar' | 'line';
-  series: keyof Omit<SectionTrends, 'drillable' | 'investmentProjectionTruncations'>;
+  series: keyof Omit<SectionTrends, 'drillable'>;
 }
 
 interface BreakdownFrame {
@@ -207,8 +206,6 @@ export function Breakdown({
 
   const trends = useMemo(() => buildSectionTrends(period, ledger, today), [period, ledger, today]);
   const trendData = trends ? trends[cfg.series] : null;
-  const visibleProjectionTruncations =
-    trends?.investmentProjectionTruncations ?? reportDisplay?.investmentProjectionTruncations ?? [];
 
   // ドリルの窓はフロー・ストックで同じ（reportBasis の flowRange = 月初〜断面、
   // 休眠モード（year/all）もフローと同じ range）。ストックだけ from を落とすと、
@@ -247,11 +244,6 @@ export function Breakdown({
       <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
         {t(cfg.introKey)}
       </p>
-
-      <InvestmentProjectionTruncationNotice
-        truncations={visibleProjectionTruncations}
-        accounts={ledger?.accounts ?? []}
-      />
 
       {cfg.kind === 'flow' ? (
         <p className="section-label">{periodLabel(period)}</p>

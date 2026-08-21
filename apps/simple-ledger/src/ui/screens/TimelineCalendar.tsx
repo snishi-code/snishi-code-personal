@@ -58,7 +58,6 @@ import type { Screen } from '../navigation';
 import { visibleIndexRange, type ScrollEdge } from '../scrollWindow';
 import { useHorizonScroll } from '../horizonScroll';
 import { ScrollTopButton } from '../ScrollTopButton';
-import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 import { PeriodMatrixTable } from '../components/PeriodMatrixTable';
 import { StockSeriesChart } from '../components/StockSeriesChart';
 
@@ -1726,12 +1725,6 @@ export function TimelineCalendar({
       <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
         {t('timeline.intro')}
       </p>
-      <InvestmentProjectionTruncationNotice
-        truncations={display?.investmentProjectionTruncations ?? []}
-        accounts={ledger?.accounts ?? []}
-        dataUi={UI.timeline.truncatedNote}
-      />
-
       {/* レンズ（見え方）と窓送り。ズーム（日/月/年）はヘッダーにあり、ここには置かない
           （同じ意味のボタンを 2 つ出さない）。
           左右ボタンは v13.6 H2-3 の連続スクロール後も残す: (a) キーボード・支援技術からの

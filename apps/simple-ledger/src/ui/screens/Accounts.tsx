@@ -43,7 +43,6 @@ import { nowIso, todayLocal } from '../../util/time';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';
 import { ScrollTopButton } from '../ScrollTopButton';
-import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 
 export function Accounts({
   period = { mode: 'all' },
@@ -159,11 +158,6 @@ export function Accounts({
       <p className="field__hint" style={{ marginBottom: 'var(--space-3)' }}>
         {t('accounts.intro')}
       </p>
-
-      <InvestmentProjectionTruncationNotice
-        truncations={display?.investmentProjectionTruncations ?? []}
-        accounts={ledger?.accounts ?? []}
-      />
 
       <div
         style={{

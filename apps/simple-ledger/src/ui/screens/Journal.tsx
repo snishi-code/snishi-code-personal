@@ -49,7 +49,6 @@ import type { Account, JournalEntry } from '../../domain/types';
 import { formatMoney } from '../../util/format';
 import { useMoneyDigits } from '../money';
 import { ScrollTopButton } from '../ScrollTopButton';
-import { InvestmentProjectionTruncationNotice } from '../components/InvestmentProjectionTruncationNotice';
 import { AdjustmentUnspreadNotice } from '../components/AdjustmentUnspreadNotice';
 import { assertSafeAmount } from '../../domain/safeSum';
 
@@ -257,10 +256,6 @@ export function Journal({
         {t('journal.title')}
       </h1>
 
-      <InvestmentProjectionTruncationNotice
-        truncations={sourceDisplay?.investmentProjectionTruncations ?? []}
-        accounts={ledger?.accounts ?? []}
-      />
       <AdjustmentUnspreadNotice unspread={sourceDisplay?.unspreadAdjustments ?? []} />
 
       {/* 絞り込み額縁: 検索・期間・タグ・並び替え・件数を sticky で上端に固定し、

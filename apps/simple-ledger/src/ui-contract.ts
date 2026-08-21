@@ -129,8 +129,6 @@ export const UI = {
     popover: 'timeline.popover',
     flowList: 'timeline.popover.flows',
     open: 'timeline.popover.open',
-    // 桁あふれで投影を打ち切った科目の注記（レンズによらず画面の頭で名乗る）
-    truncatedNote: 'timeline.projectionTruncatedNote',
     // 数値レンズの表（月ズーム = 月列 / 年ズーム = 年列）。横スクロールは表の枠の中だけ。
     matrix: 'timeline.matrix',
     matrixNote: 'timeline.matrix.projectionNote',
@@ -244,9 +242,6 @@ export const UI = {
     // 返済設定（負債の編集シートのみ）
     repaymentAccount: 'accounts.repaymentAccount',
     repaymentDay: 'accounts.repaymentDay',
-    // 投資の利回り投影（投資科目の編集シートのみ・年率% ⇄ bp + 計上先セレクタ）
-    annualReturn: 'accounts.annualReturn',
-    projectionAccount: 'accounts.projectionAccount',
     // 並び替えモード（箱内・上下ボタン式）
     reorderToggle: 'accounts.reorder.toggle',
     moveUp: 'accounts.reorder.up',

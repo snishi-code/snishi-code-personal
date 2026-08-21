@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { deriveBalanceSheet, deriveProfitAndLoss } from '../src/domain/accounting';
-import { displayEntriesResultForAsOf, reportEntriesForAsOf } from '../src/domain/reportEntries';
+import { reportEntriesForAsOf } from '../src/domain/reportEntries';
 import { reportBasis } from '../src/domain/reportPeriod';
 import { SCHEMA_VERSION } from '../src/domain/constants';
 import type { Account, JournalEntry, Ledger } from '../src/domain/types';
@@ -93,43 +93,6 @@ describe('buildSectionTrends（画面サマリーと同じ期間基準）', () =
 
     expect(summary.totalAssets).toBe(100_000);
     expect(july?.value).toBe(summary.totalAssets);
-  });
-
-  it('現在年の本体が今日止まりでも、12月までの推移で起きる投影打ち切りを返す', () => {
-    const investment: Account = {
-      ...accounts[0]!,
-      id: 'investment',
-      name: '投資',
-      role: 'investment-asset',
-      annualReturnBp: 100_000,
-      projectionAccountId: 'gain',
-    };
-    const gain: Account = {
-      ...accounts[2]!,
-      id: 'gain',
-      name: '投資益',
-      type: 'revenue',
-      role: 'income-category',
-    };
-    const hugeLedger: Ledger = {
-      ...ledgerOf([]),
-      accounts: [...accounts, investment, gain],
-      journalEntries: [
-        // 実効開始 2026-01-01 起点の複利が、today(7/27) までは安全域・8 月刻みで超える額。
-        entry('investment-opening', '2026-01-01', 'investment', 'opening', 1_200_000_000_000_000),
-      ],
-    };
-
-    // reportBasis(current year) の本体 asOf=today だけなら、まだ打ち切りは起きない。
-    expect(displayEntriesResultForAsOf(hugeLedger, today).investmentProjectionTruncations).toEqual(
-      [],
-    );
-
-    // 推移は12月末まで表示するため、その最大地平で起きる打ち切りを画面へ返す。
-    const trends = buildSectionTrends({ mode: 'year', year: 2026 }, hugeLedger, today);
-    expect(trends?.investmentProjectionTruncations).toEqual([
-      { accountId: 'investment', month: '2026-08', date: '2026-08-01', at: 'step' },
-    ]);
   });
 
   it('当期フローだけを今日で止め、初期残高−支出と純資産を一致させる', () => {

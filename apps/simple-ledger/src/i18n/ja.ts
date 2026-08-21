@@ -423,9 +423,6 @@ export const ja = {
   // 「未来だけが投影」ではなくなったので、表全体が導出込みであることを先に名乗る。
   'matrix.projectionNote':
     '表は定期ルール・持ち物・投資利回りの導出を含みます。未来列にはまだ起きていない予定も含みます。',
-  // 桁あふれで投影を打ち切った科目の注記（アプリ都合の端点を名乗る・仮の数字が本物の顔をしない）。
-  'projection.truncatedNotice':
-    '「{name}」の投影は金額が計算上限を超えるため {month} で打ち切りました。それ以降の投影は表示に含まれません。',
   'adjust.unspreadNotice':
     '補正「{description}」（{date}）は計上先が見つからないため按分できず、記録どおりの仕訳のまま集計しています（復旧表示）。科目を復元するか、補正を削除して作り直してください。',
   'matrix.monthLabel': '{month}月',
@@ -741,17 +738,8 @@ export const ja = {
     '返済口座・返済日はカード・未払 / ローンの科目にのみ設定できます。',
   'error.account.repaymentDayInvalid': '返済日は 1〜31 で入力してください。',
 
-  // 投資の利回り投影（投資科目の編集シート・§D）
+  // 投資の利回り導出（v13.17 で撤去）の残置キー: 導出エンジンが消えるまで使う。
   'projection.entryDescription': '投影: {name}',
-  'projection.suggestedAccountName': '投資益',
-  'accounts.projectionAccountArchivedHint':
-    '計上先は終了済みのため、投影は生成されません。別の収入科目を選ぶか、終了を解除してください。',
-  'accounts.annualReturn': '想定利回り（年率%）',
-  'accounts.annualReturnHint':
-    '空欄 = 投影なし。設定すると、未来の断面にだけ毎月「計上先 → この科目」の評価益（投影）が現れます。',
-  'accounts.projectionAccount': '投影の計上先',
-  'accounts.projectionAccountHint':
-    '評価益を計上する収入科目（例: 投資益）。利回りとセットで設定します。',
   'error.account.returnOnlyInvestment': '想定利回りは投資の科目にのみ設定できます。',
   'error.account.returnInvalid': '想定利回りは -99.99〜1000%（小数第2位まで）で入力してください。',
   'error.account.projectionPair': '想定利回りと投影の計上先はセットで設定してください。',

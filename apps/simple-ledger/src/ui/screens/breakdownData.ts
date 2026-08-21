@@ -17,7 +17,6 @@ import {
   type ReportPeriod,
 } from '../../domain/reportPeriod';
 import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
-import type { InvestmentProjectionTruncation } from '../../domain/investmentProjection';
 import { assertSafeAmount } from '../../domain/safeSum';
 import type { Ledger } from '../../domain/types';
 import type { TrendPoint } from '../components/TrendChart';
@@ -37,8 +36,6 @@ export interface SectionTrends {
   netAssets: TrendPoint[];
   /** all モードのとき、年キーでその年へドリルできる。 */
   drillable: boolean;
-  /** カードと推移グラフが実際に展開した最大地平までの投影打ち切り。 */
-  investmentProjectionTruncations: InvestmentProjectionTruncation[];
 }
 
 /**
@@ -67,20 +64,10 @@ export function buildSectionTrends(
   const assets: TrendPoint[] = [];
   const liabilities: TrendPoint[] = [];
   const netAssets: TrendPoint[] = [];
-  const truncations = new Map<string, InvestmentProjectionTruncation>();
-  for (const truncation of basisDisplay.investmentProjectionTruncations) {
-    truncations.set(truncation.accountId, truncation);
-  }
 
   for (const b of buckets) {
     const display = displayEntriesResultForAsOf(ledger, b.asOf);
     const entries = display.entries;
-    for (const truncation of display.investmentProjectionTruncations) {
-      const previous = truncations.get(truncation.accountId);
-      if (!previous || truncation.month < previous.month) {
-        truncations.set(truncation.accountId, truncation);
-      }
-    }
     const pl = deriveProfitAndLoss(accounts, entries, b.range);
     const bs = deriveBalanceSheet(accounts, entries, b.asOf);
     const livingB = livingCostForRange(accounts, entries, b.range);
@@ -101,6 +88,5 @@ export function buildSectionTrends(
     liabilities,
     netAssets,
     drillable: period.mode === 'all',
-    investmentProjectionTruncations: [...truncations.values()],
   };
 }
