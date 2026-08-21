@@ -203,6 +203,14 @@ export const UI = {
       loanPanel: 'journal.entry.loanPanel',
       loanEndDate: 'journal.entry.loanEndDate',
       loanQuickSpan: 'journal.entry.loanQuickSpan',
+      // 「ルールにする」（v13.15 §2.2・全モード直交トグル）と rule ページ。
+      nature: 'journal.entry.nature',
+      ruleToggle: 'journal.entry.ruleToggle',
+      ruleToggleBack: 'journal.entry.ruleToggleBack',
+      ruleEvery: 'journal.entry.ruleEvery',
+      rulePostingDate: 'journal.entry.rulePostingDate',
+      rulePreview: 'journal.entry.rulePreview',
+      ccFoldedByRule: 'journal.entry.ccFoldedByRule',
       loanFrom: 'journal.entry.loanFrom',
       loanPreview: 'journal.entry.loanPreview',
       date: 'journal.entry.date',
@@ -325,6 +333,9 @@ export const UI = {
     recurringSettlementRemainder: 'allocations.recurring.settlement.remainder',
     recurringSettlementRemainderSpread: 'allocations.recurring.settlement.remainder.spread',
     recurringSettlementRemainderExpense: 'allocations.recurring.settlement.remainder.expense',
+    // ローンの一括返済（ルール×ローン併用の清算・v13.15 §2.4）。
+    recurringSettlementLoanAmount: 'allocations.recurring.settlement.loan.amount',
+    recurringSettlementLoanSource: 'allocations.recurring.settlement.loan.source',
     // 終了の Undo（編集シート下部・終了済みのときだけ表示）。
     recurringClearEndDate: 'allocations.recurring.clearEndDate',
     recurringClearEndDateConfirm: 'allocations.recurring.clearEndDate.confirm',

@@ -6,6 +6,8 @@
 import { test, expect, type Page } from '@playwright/test';
 
 const ui = (name: string) => `[data-ui="${name}"]`;
+// 性質トグル（v13.15）: input は sr-only なので実クリックは親の chip ラベルへ当てる。
+const natureChip = (name: string) => `label.chip:has([data-ui="${name}"])`;
 
 async function boot(page: Page) {
   // 初回オンボーディング（初期残高の一括登録）を既読化してから起動する
@@ -239,7 +241,7 @@ test('ローンで払う → 台帳に item カードとして並び、資金繰
     .locator(`${ui('journal.entry.flow.destination')} label.chip`)
     .first()
     .click();
-  await page.locator(ui('journal.entry.loanArrange')).click();
+  await page.locator(natureChip('journal.entry.loanArrange')).click();
   await expect(page.locator(ui('journal.entry.flow.source'))).toBeHidden();
   await expect(page.locator(ui('journal.entry.loanSelected'))).toBeVisible();
   await expect(page.locator(ui('journal.entry.loanEndDate'))).toBeHidden();
@@ -283,4 +285,91 @@ test('ローンで払う → 台帳に item カードとして並び、資金繰
   await debtRow.click();
   await expect(page.locator(ui('allocations.view'))).toBeVisible();
   await expect(page.locator(ui('allocations.item')).first()).toContainText('E2E自動車');
+});
+
+test('ルールにする → ルールだけが保存され、台帳と仕訳一覧に導出行が並ぶ (v13.15)', async ({
+  page,
+}) => {
+  await boot(page);
+
+  // 仕訳一覧への導線（ホームの「すべて見る」）は保存仕訳が 1 件あると出る。
+  // ルールは実仕訳を保存しないため、先に通常の支出を 1 本入れておく。
+  await page.locator(ui('dashboard.entry.expense')).click();
+  await page.locator(ui('journal.entry.item')).fill('E2E通常支出');
+  await page.locator(ui('journal.entry.amount')).fill('500');
+  await page
+    .locator(`${ui('journal.entry.flow.destination')} label.chip`)
+    .first()
+    .click();
+  await page
+    .locator(`${ui('journal.entry.flow.source')} label.chip`)
+    .first()
+    .click();
+  await page.locator(ui('journal.entry.save')).click();
+  await expect(page.locator(ui('journal.entry.save'))).toBeHidden();
+
+  // 支出 + ルール: 性質トグル列（下部）の「ルールにする」を ON → rule ページで保存。
+  await page.locator(ui('dashboard.entry.expense')).click();
+  await page.locator(ui('journal.entry.item')).fill('E2E家賃');
+  await page.locator(ui('journal.entry.amount')).fill('80000');
+  await page
+    .locator(`${ui('journal.entry.flow.destination')} label.chip`)
+    .first()
+    .click();
+  await page
+    .locator(`${ui('journal.entry.flow.source')} label.chip`)
+    .first()
+    .click();
+  // ルール ON: 持ち物トグルは畳まれ、主ボタンが「ルールを入力する」になる。
+  await page.locator(natureChip('journal.entry.ruleToggle')).click();
+  await expect(page.locator(ui('journal.entry.ccToggle'))).toBeHidden();
+  await expect(page.locator(ui('journal.entry.ccFoldedByRule'))).toBeVisible();
+  await expect(page.locator(ui('journal.entry.next'))).toContainText('ルールを入力する');
+  await page.locator(ui('journal.entry.next')).click();
+  // rule ページ = 周期 + 起票日 + まとめカード（説明帯なし・起票日は日付欄から自動）。
+  await expect(page.locator(ui('journal.entry.ruleEvery'))).toHaveValue('1');
+  await expect(page.locator(ui('journal.entry.rulePreview'))).toContainText('80,000');
+  await expect(page.locator(ui('journal.entry.save'))).toContainText('ルールを登録');
+  await page.locator(ui('journal.entry.save')).click();
+  await expect(page.locator(ui('journal.entry.save'))).toBeHidden();
+
+  // 台帳: ルール行が並ぶ（初回起票日 = 今日なので導出済み）。
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.allocations')).click();
+  await expect(page.locator(ui('allocations.view'))).toBeVisible();
+  await expect(page.locator(ui('allocations.recurring.list'))).toContainText('E2E家賃');
+
+  // 仕訳一覧: 導出行（rec-）が出る（実仕訳は保存されていないが、一覧は導出を混ぜて見せる）。
+  await page.locator(ui('nav.footer.home')).click();
+  await expect(page.locator(ui('dashboard.view'))).toBeVisible();
+  await page.locator(ui('dashboard.journal.openAll')).click();
+  await expect(page.locator(ui('journal.view'))).toBeVisible();
+  await expect(page.locator(ui('journal.entry.list'))).toContainText('E2E家賃');
+});
+
+test('振替 × ルール → 定期積立（源泉 → 行き先の写像）がホームから登録できる (v13.15 直交性)', async ({
+  page,
+}) => {
+  await boot(page);
+  await page.locator(ui('dashboard.entry.transfer')).click();
+  await page.locator(ui('journal.entry.amount')).fill('33333');
+  await page
+    .locator(`${ui('journal.entry.flow.source')} label.chip`)
+    .first()
+    .click();
+  await page
+    .locator(`${ui('journal.entry.flow.destination')} label.chip`)
+    .nth(1)
+    .click();
+  // 振替でもルールトグルが出る（ローントグルは出ない = 支出のみ）。
+  await expect(page.locator(ui('journal.entry.loanArrange'))).toHaveCount(0);
+  await page.locator(natureChip('journal.entry.ruleToggle')).click();
+  await page.locator(ui('journal.entry.next')).click();
+  await expect(page.locator(ui('journal.entry.ruleEvery'))).toBeVisible();
+  await page.locator(ui('journal.entry.save')).click();
+  await expect(page.locator(ui('journal.entry.save'))).toBeHidden();
+  // 台帳のルール一覧に積立ルールが出る（摘要は自動 = 「A → B」）。
+  await page.locator(ui('nav.menu.button')).click();
+  await page.locator(ui('nav.allocations')).click();
+  await expect(page.locator(ui('allocations.recurring.list'))).toContainText('→');
 });

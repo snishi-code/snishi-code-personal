@@ -358,6 +358,22 @@ export const ja = {
   // 支出の支払い元（左辺）のローン導線（v13.6 H4）。押すと支払い元が「新しいローンの名前」に
   // 変わる（持ち物として登録すると同じ片側切替）。既存ローンへ足す導線は作らない。
   'entry.loanArrange': 'ローンで払う',
+  // 「ルールにする」と性質トグル列（v13.15 §2.2）。
+  'entry.natureLabel': 'この仕訳の性質',
+  'entry.natureHint': '性質は組み合わせできます。選んだぶんだけ入力ページが増えます。',
+  'entry.ruleToggle': 'ルールにする（この仕訳を繰り返す）',
+  'entry.ruleBack': 'ルールをやめる',
+  'entry.stepTitleRule': 'ルールの入力',
+  'entry.stepNextRule': 'ルールを入力する',
+  'entry.saveRule': 'ルールを登録',
+  'entry.ruleEveryYearsHint': '= {years} 年ごと',
+  'entry.rulePostingDateHint': '日付欄から自動で入ります。ルールの開始 = 初回の起票日です。',
+  'entry.rulePreview':
+    '{every} か月ごとに「{name} {amount}」を起票します。保存されるのはルールだけで、仕訳は毎周期自動で並びます。',
+  'entry.rulePreviewLoan':
+    '{every} か月ごとに「{name} {amount}」を起票し、そのたびに持ち物（月割り）とローン（毎月 {monthly} の返済）が作られます。',
+  'entry.ccFoldedByRule':
+    'ルールは毎周期、月割りの持ち物を自動で作ります（持ち物の指定は畳まれます）。',
   'entry.loanArrangeBack': 'ローンをやめる',
   'entry.loanName': 'ローンの名前',
   'entry.loanNamePlaceholder': '例: 自動車ローン',
@@ -771,6 +787,9 @@ export const ja = {
     '既定はその日の理論残債。0 にすると仕訳は作らず、完済日を早めるだけになります（全額を期間へ按分し直し）。',
   'loan.settleSource': '返済元（この一括返済の支払い元）',
   'loan.settleConfirm': 'この内容で終了する',
+  // ルール×ローン併用の清算（v13.15 §2.4）。
+  'recurring.settlementLoanHint':
+    '既定は切り替え日時点の理論残債。0 のままなら仕訳は作らず、残りは完済日までの返済へ按分し直します。',
   'error.repay.countInvalid': '返済回数は 1〜{max} の整数で入力してください。',
   'error.settings.invalid':
     '台帳の設定を保存できませんでした（名前は 1〜120 文字・単位は 1〜8 文字で入力してください）。',

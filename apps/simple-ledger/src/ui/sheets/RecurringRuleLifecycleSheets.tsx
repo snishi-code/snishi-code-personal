@@ -24,13 +24,15 @@ import {
   recoveredAmountsByItem,
   spreadTotalOf as computeSpreadTotal,
 } from '../../domain/continuousCost';
-import { parseRuleItemId } from '../../domain/recurringIds';
+import { parseRuleItemId, parseRuleLoanItemId } from '../../domain/recurringIds';
+import { loanRemainingDebt, loanSettledAmountsByItem, loanSpreadTotalOf } from '../../domain/loan';
 import type {} from '../../domain/accountRoles';
-import { groupedRecoveryDestinationAccounts } from '../accountOptions';
+import { groupedAccountsByRole, groupedRecoveryDestinationAccounts } from '../accountOptions';
 import { isLedgerDate, MAX_LEDGER_DATE, MIN_LEDGER_DATE } from '../../domain/calendar';
 import { todayLocal } from '../../util/time';
 import {
   CATCH_UP_HARD_CAP_MONTHS,
+  RECURRING_POSTABLE_ROLES,
   deriveRecurringOutputs,
   firstRecurringPostingDate,
   minRecurringRuleCloseDate,
@@ -81,23 +83,39 @@ function lineageRules(rules: readonly RecurringRule[], ruleId: string): Recurrin
   return rules.filter((rule) => ids.has(rule.id));
 }
 
-/** 清算できる 1 件（導出 item + その日の残存価値と既定の回収額）。 */
+/**
+ * 清算できる 1 件 = **起票月**（v13.15 §2.4 で月単位へ再編）。清算の保存形は
+ * RuleSettlement { month, endDate } で、その月の持ち物 item（ccr-）とローン item（ccl-・
+ * loan ブロック付きルールのみ）の**両方に一様に効く**ため、keep/end の決定は月に 1 つ。
+ * 控除実仕訳の形だけが item の性質から変わる: 持ち物 → 回収の振替／ローン → 一括返済。
+ */
 interface SettlementCandidate {
-  item: MonthlyCostItem;
-  /** その item を導出した線分（系譜内のどれか）と起票月 = ccr-{ruleId}-{month}。 */
+  /** その月を導出した線分（系譜内のどれか）と起票月。 */
   ruleId: string;
   month: string;
+  /** 持ち物 item（ccr-）。残存価値 > 0 のときだけ載る（回収欄の表示条件）。 */
+  item?: MonthlyCostItem;
   remaining: number;
   digits: FractionDigits;
   defaultRecoveryText: string;
+  /** ローン item（ccl-）。残債 > 0 のときだけ載る（一括返済欄の表示条件）。 */
+  loanItem?: MonthlyCostItem;
+  loanRemaining: number;
+  loanDigits: FractionDigits;
+  defaultLoanRepaymentText: string;
+  /** 表示（名前・期間）の代表 item。 */
+  display: MonthlyCostItem;
 }
 
-/** 1 件ぶんの選択（意味論はアーカイブシートと同一）。 */
+/** 1 月ぶんの選択（回収の意味論はアーカイブシートと同一・一括返済は §2.4）。 */
 interface SettlementDraft {
   mode: 'keep' | 'end';
   recoveryText: string;
   recoveryAccountId: string;
   remainderMode: 'spread' | 'expense';
+  /** ローンの一括返済（既定額 = 理論残債・既定返済元 = loan ブロック）。 */
+  loanRepaymentText: string;
+  loanSourceAccountId: string;
 }
 
 interface RecurringSettlementState {
@@ -116,7 +134,14 @@ function defaultSettlementDraft(candidate: SettlementCandidate): SettlementDraft
     recoveryText: candidate.defaultRecoveryText,
     recoveryAccountId: '',
     remainderMode: 'spread',
+    loanRepaymentText: candidate.defaultLoanRepaymentText,
+    loanSourceAccountId: candidate.loanItem?.repaymentSourceAccountId ?? '',
   };
+}
+
+/** 月候補のキー（drafts の索引）。 */
+function candidateKey(candidate: Pick<SettlementCandidate, 'ruleId' | 'month'>): string {
+  return `${candidate.ruleId}\u0000${candidate.month}`;
 }
 
 /**
@@ -136,6 +161,10 @@ function useRecurringSettlements(
   // 持ち込まない。上限内なら展開は高々 2100 年まで = 有界）。
   const dateValid = isLedgerDate(effectiveDate);
   const recovered = useMemo(() => recoveredAmountsByItem(ledger?.journalEntries ?? []), [ledger]);
+  const loanSettled = useMemo(
+    () => loanSettledAmountsByItem(ledger?.journalEntries ?? []),
+    [ledger],
+  );
 
   const candidates = useMemo<SettlementCandidate[]>(() => {
     // 台帳を経由しないルールは item を生まない = 清算する対象がそもそも無い。
@@ -148,56 +177,103 @@ function useRecurringSettlements(
       ledger?.accounts ?? [],
       effectiveDate,
     );
-    return items
-      .filter(
-        (item) =>
-          item.startDate < effectiveDate &&
-          (item.endDate === undefined || item.endDate > effectiveDate),
-      )
-      .flatMap((item) => {
-        const origin = parseRuleItemId(item.id);
-        if (origin === undefined) return [];
+    // 月単位のグループ（v13.15 §2.4）: 同じ起票月の 持ち物（ccr-）とローン（ccl-）は
+    // 1 つの清算（endDate = 切り替え日）で一様に締まるため、候補も 1 行にまとめる。
+    const byMonth = new Map<string, SettlementCandidate>();
+    for (const item of items) {
+      const inFlight =
+        item.startDate < effectiveDate &&
+        (item.endDate === undefined || item.endDate > effectiveDate);
+      if (!inFlight) continue;
+      const ccrOrigin = parseRuleItemId(item.id);
+      const cclOrigin = parseRuleLoanItemId(item.id);
+      const origin = ccrOrigin ?? cclOrigin;
+      if (origin === undefined) continue;
+      const key = candidateKey(origin);
+      const group =
+        byMonth.get(key) ??
+        ({
+          ruleId: origin.ruleId,
+          month: origin.month,
+          remaining: 0,
+          digits: displayDigits,
+          defaultRecoveryText: '',
+          loanRemaining: 0,
+          loanDigits: displayDigits,
+          defaultLoanRepaymentText: '',
+          display: item,
+        } as SettlementCandidate);
+      if (ccrOrigin !== undefined) {
         const remaining = remainingValue(item, effectiveDate, computeSpreadTotal(item, recovered));
         // 残存価値が尽きている item は「終える」ことに意味が無い（作る仕訳も無い）。
-        if (remaining <= 0) return [];
-        // 表示桁 0 の設定でも、この欄だけは端数を隠さない（見えている値 = 保存される値）。
-        const digits = Math.max(displayDigits, exactDigitsFor(remaining)) as FractionDigits;
-        return [
-          {
-            item,
-            ruleId: origin.ruleId,
-            month: origin.month,
-            remaining,
-            digits,
-            defaultRecoveryText: formatMinorForInput(remaining, digits),
-          },
-        ];
-      })
-      .sort((a, b) => (a.item.startDate < b.item.startDate ? -1 : 1));
-  }, [ledger, rule, effectiveDate, dateValid, recovered, displayDigits]);
+        if (remaining > 0) {
+          // 表示桁 0 の設定でも、この欄だけは端数を隠さない（見えている値 = 保存される値）。
+          const digits = Math.max(displayDigits, exactDigitsFor(remaining)) as FractionDigits;
+          group.item = item;
+          group.remaining = remaining;
+          group.digits = digits;
+          group.defaultRecoveryText = formatMinorForInput(remaining, digits);
+          group.display = item;
+        }
+      } else {
+        // ローン側: 既定の一括返済額 = 切り替え日の理論残債（loan.ts の単一正本）。
+        const spread = loanSpreadTotalOf(item, loanSettled);
+        const loanRemaining = loanRemainingDebt(item, effectiveDate, spread);
+        if (loanRemaining > 0) {
+          const digits = Math.max(displayDigits, exactDigitsFor(loanRemaining)) as FractionDigits;
+          group.loanItem = item;
+          group.loanRemaining = loanRemaining;
+          group.loanDigits = digits;
+          group.defaultLoanRepaymentText = formatMinorForInput(loanRemaining, digits);
+          if (group.item === undefined) group.display = item;
+        }
+      }
+      if (group.item !== undefined || group.loanItem !== undefined) byMonth.set(key, group);
+    }
+    return [...byMonth.values()].sort((a, b) =>
+      a.display.startDate < b.display.startDate ? -1 : 1,
+    );
+  }, [ledger, rule, effectiveDate, dateValid, recovered, loanSettled, displayDigits]);
 
   const [drafts, setDrafts] = useState<Record<string, SettlementDraft>>({});
-  // 回収額の既定は切り替え日に追従する。既定のままなら追従し、手で直してあればその値を
-  // 尊重する（判定はフラグではなく値 = アーカイブシートと同じ流儀）。
+  // 回収額・一括返済額の既定は切り替え日に追従する。既定のままなら追従し、手で直してあれば
+  // その値を尊重する（判定はフラグではなく値 = アーカイブシートと同じ流儀）。
   const autoRecoveryRef = useRef<Record<string, string>>({});
+  const autoLoanRef = useRef<Record<string, string>>({});
   useEffect(() => {
-    const pending = candidates.filter(
-      (candidate) => autoRecoveryRef.current[candidate.item.id] !== candidate.defaultRecoveryText,
-    );
+    const pending = candidates.filter((candidate) => {
+      const key = candidateKey(candidate);
+      return (
+        autoRecoveryRef.current[key] !== candidate.defaultRecoveryText ||
+        autoLoanRef.current[key] !== candidate.defaultLoanRepaymentText
+      );
+    });
     if (pending.length === 0) return;
     const previousAuto: Record<string, string | undefined> = {};
+    const previousLoanAuto: Record<string, string | undefined> = {};
     for (const candidate of pending) {
-      previousAuto[candidate.item.id] = autoRecoveryRef.current[candidate.item.id];
-      autoRecoveryRef.current[candidate.item.id] = candidate.defaultRecoveryText;
+      const key = candidateKey(candidate);
+      previousAuto[key] = autoRecoveryRef.current[key];
+      previousLoanAuto[key] = autoLoanRef.current[key];
+      autoRecoveryRef.current[key] = candidate.defaultRecoveryText;
+      autoLoanRef.current[key] = candidate.defaultLoanRepaymentText;
     }
     setDrafts((current) => {
       const next = { ...current };
       let changed = false;
       for (const candidate of pending) {
-        const draft = next[candidate.item.id];
+        const key = candidateKey(candidate);
+        const draft = next[key];
         if (draft === undefined) continue; // まだ触られていない行は draftOf の既定が追従する。
-        if (draft.recoveryText === previousAuto[candidate.item.id]) {
-          next[candidate.item.id] = { ...draft, recoveryText: candidate.defaultRecoveryText };
+        let patched = draft;
+        if (draft.recoveryText === previousAuto[key]) {
+          patched = { ...patched, recoveryText: candidate.defaultRecoveryText };
+        }
+        if (draft.loanRepaymentText === previousLoanAuto[key]) {
+          patched = { ...patched, loanRepaymentText: candidate.defaultLoanRepaymentText };
+        }
+        if (patched !== draft) {
+          next[key] = patched;
           changed = true;
         }
       }
@@ -206,12 +282,12 @@ function useRecurringSettlements(
   }, [candidates]);
 
   const draftOf = (candidate: SettlementCandidate): SettlementDraft =>
-    drafts[candidate.item.id] ?? defaultSettlementDraft(candidate);
+    drafts[candidateKey(candidate)] ?? defaultSettlementDraft(candidate);
   const update = (candidate: SettlementCandidate, patch: Partial<SettlementDraft>): void => {
     setDrafts((current) => ({
       ...current,
-      [candidate.item.id]: {
-        ...(current[candidate.item.id] ?? defaultSettlementDraft(candidate)),
+      [candidateKey(candidate)]: {
+        ...(current[candidateKey(candidate)] ?? defaultSettlementDraft(candidate)),
         ...patch,
       },
     }));
@@ -220,25 +296,41 @@ function useRecurringSettlements(
   const selected = candidates.filter((candidate) => draftOf(candidate).mode === 'end');
   const inputs: RecurringRuleSettlementInput[] = selected.map((candidate) => {
     const draft = draftOf(candidate);
-    const amount = parseAmountToMinor(draft.recoveryText) ?? 0;
     const recoveries: { destinationAccountId: string; amount: number }[] = [];
-    if (amount > 0) {
-      recoveries.push({ destinationAccountId: draft.recoveryAccountId, amount });
+    if (candidate.item !== undefined) {
+      const amount = parseAmountToMinor(draft.recoveryText) ?? 0;
+      if (amount > 0) {
+        recoveries.push({ destinationAccountId: draft.recoveryAccountId, amount });
+      }
+      // 第 2 の回収の振替（借方 = item の計上先 / 貸方 = 継続コスト台帳）。
+      const rest = candidate.remaining - amount;
+      if (rest > 0 && draft.remainderMode === 'expense') {
+        recoveries.push({ destinationAccountId: candidate.item.expenseAccountId, amount: rest });
+      }
     }
-    // 第 2 の回収の振替（借方 = item の計上先 / 貸方 = 継続コスト台帳）。
-    const rest = candidate.remaining - amount;
-    if (rest > 0 && draft.remainderMode === 'expense') {
-      recoveries.push({ destinationAccountId: candidate.item.expenseAccountId, amount: rest });
-    }
+    // ローンの一括返済（§2.4）: 額 0 = 実仕訳なし（= D までに全額返済された宣言）も合法。
+    const loanAmount =
+      candidate.loanItem !== undefined ? (parseAmountToMinor(draft.loanRepaymentText) ?? 0) : 0;
     return {
       ruleId: candidate.ruleId,
       month: candidate.month,
       ...(recoveries.length > 0 ? { recoveries } : {}),
+      ...(loanAmount > 0
+        ? { loanRepayment: { sourceAccountId: draft.loanSourceAccountId, amount: loanAmount } }
+        : {}),
     };
   });
   const canSave = selected.every((candidate) => {
     const draft = draftOf(candidate);
-    return (parseAmountToMinor(draft.recoveryText) ?? 0) === 0 || draft.recoveryAccountId !== '';
+    const recoveryOk =
+      candidate.item === undefined ||
+      (parseAmountToMinor(draft.recoveryText) ?? 0) === 0 ||
+      draft.recoveryAccountId !== '';
+    const loanOk =
+      candidate.loanItem === undefined ||
+      (parseAmountToMinor(draft.loanRepaymentText) ?? 0) === 0 ||
+      draft.loanSourceAccountId !== '';
+    return recoveryOk && loanOk;
   });
 
   return { candidates, draftOf, update, inputs, canSave };
@@ -266,31 +358,42 @@ function RecurringSettlementPanel({
       {state.candidates.map((candidate) => {
         const draft = state.draftOf(candidate);
         const recoveryAmount = parseAmountToMinor(draft.recoveryText) ?? 0;
+        const loanRepaymentAmount = parseAmountToMinor(draft.loanRepaymentText) ?? 0;
         // 残り = 残存価値 − 回収額。負（超過回収）なら spreadTotal が負になり、過去に
         // わたる費用減として按分される＝「終了日に全額」は選べない。
         const rest = candidate.remaining - recoveryAmount;
         const remainderChoosable = rest > 0;
         const expenseAccountName =
-          accounts.find((a) => a.id === candidate.item.expenseAccountId)?.name ??
-          candidate.item.expenseAccountId;
+          candidate.item !== undefined
+            ? (accounts.find((a) => a.id === candidate.item?.expenseAccountId)?.name ??
+              candidate.item.expenseAccountId)
+            : '';
         return (
           <div
             className="card card--pad"
-            key={candidate.item.id}
+            key={candidateKey(candidate)}
             data-ui={UI.allocations.recurringSettlementItem}
-            data-item-id={candidate.item.id}
+            data-item-id={candidate.display.id}
           >
-            <div className="list__title">{candidate.item.name}</div>
+            <div className="list__title">{candidate.display.name}</div>
             <div className="kv">
               <span className="muted">{t('ccItem.period')}</span>
               <span>
-                {candidate.item.startDate} 〜 {candidate.item.endDate ?? '—'}
+                {candidate.display.startDate} 〜 {candidate.display.endDate ?? '—'}
               </span>
             </div>
-            <div className="kv">
-              <span className="muted">{t('ccItem.remainingValue')}</span>
-              <span>{moneyText(candidate.remaining, currency, candidate.digits)}</span>
-            </div>
+            {candidate.item !== undefined ? (
+              <div className="kv">
+                <span className="muted">{t('ccItem.remainingValue')}</span>
+                <span>{moneyText(candidate.remaining, currency, candidate.digits)}</span>
+              </div>
+            ) : null}
+            {candidate.loanItem !== undefined ? (
+              <div className="kv">
+                <span className="muted">{t('loan.remainingDebt')}</span>
+                <span>{moneyText(candidate.loanRemaining, currency, candidate.loanDigits)}</span>
+              </div>
+            ) : null}
             <div className="picker__chips" style={{ marginTop: 'var(--space-2)' }}>
               {(
                 [
@@ -302,7 +405,7 @@ function RecurringSettlementPanel({
                   <input
                     type="radio"
                     className="sr-only"
-                    name={`rule-settlement-${candidate.item.id}`}
+                    name={`rule-settlement-${candidate.display.id}`}
                     value={mode}
                     checked={draft.mode === mode}
                     onChange={() => state.update(candidate, { mode })}
@@ -317,20 +420,59 @@ function RecurringSettlementPanel({
             </div>
             {draft.mode === 'end' ? (
               <div className="stack" style={{ marginTop: 'var(--space-3)' }}>
-                <TextInput
-                  label={t('ccItem.archiveRecovery')}
-                  inputMode={candidate.digits === 0 ? 'numeric' : 'decimal'}
-                  value={draft.recoveryText}
-                  onChange={(v) =>
-                    state.update(candidate, {
-                      recoveryText: sanitizeAmountText(v, candidate.digits, draft.recoveryText),
-                    })
-                  }
-                  hint={t('ccItem.archiveRecoveryHint')}
-                  dataUi={UI.allocations.recurringSettlementRecoveryAmount}
-                />
+                {/* ローンの一括返済（§2.4）: 既定額 = 理論残債・既定返済元 = loan ブロック。
+                    額 0 = 実仕訳なし（= D までに全額返済された宣言）も合法。 */}
+                {candidate.loanItem !== undefined ? (
+                  <>
+                    <TextInput
+                      label={t('loan.settleAmount')}
+                      inputMode={candidate.loanDigits === 0 ? 'numeric' : 'decimal'}
+                      value={draft.loanRepaymentText}
+                      onChange={(v) =>
+                        state.update(candidate, {
+                          loanRepaymentText: sanitizeAmountText(
+                            v,
+                            candidate.loanDigits,
+                            draft.loanRepaymentText,
+                          ),
+                        })
+                      }
+                      hint={t('recurring.settlementLoanHint')}
+                      dataUi={UI.allocations.recurringSettlementLoanAmount}
+                    />
+                    {loanRepaymentAmount > 0 ? (
+                      <AccountPicker
+                        label={t('loan.settleSource')}
+                        required
+                        value={draft.loanSourceAccountId}
+                        onChange={(id) => state.update(candidate, { loanSourceAccountId: id })}
+                        groups={groupedAccountsByRole(
+                          accounts,
+                          [...RECURRING_POSTABLE_ROLES],
+                          draft.loanSourceAccountId,
+                          effectiveDate,
+                        )}
+                        dataUi={UI.allocations.recurringSettlementLoanSource}
+                      />
+                    ) : null}
+                  </>
+                ) : null}
+                {candidate.item !== undefined ? (
+                  <TextInput
+                    label={t('ccItem.archiveRecovery')}
+                    inputMode={candidate.digits === 0 ? 'numeric' : 'decimal'}
+                    value={draft.recoveryText}
+                    onChange={(v) =>
+                      state.update(candidate, {
+                        recoveryText: sanitizeAmountText(v, candidate.digits, draft.recoveryText),
+                      })
+                    }
+                    hint={t('ccItem.archiveRecoveryHint')}
+                    dataUi={UI.allocations.recurringSettlementRecoveryAmount}
+                  />
+                ) : null}
                 {/* 回収額 0 = 作る仕訳が無い。回収先は出さない（選ばせて捨てない）。 */}
-                {recoveryAmount > 0 ? (
+                {candidate.item !== undefined && recoveryAmount > 0 ? (
                   <AccountPicker
                     label={t('ccItem.archiveRecoveryTo')}
                     required
@@ -344,58 +486,60 @@ function RecurringSettlementPanel({
                     dataUi={UI.allocations.recurringSettlementRecoveryTo}
                   />
                 ) : null}
-                <fieldset
-                  className="field picker"
-                  data-ui={UI.allocations.recurringSettlementRemainder}
-                >
-                  <legend className="field__label">
-                    {t('ccItem.archiveRemainder', {
-                      amount: moneyText(rest, currency, candidate.digits),
-                    })}
-                  </legend>
-                  <span className="field__hint">
-                    {remainderChoosable
-                      ? draft.remainderMode === 'expense'
-                        ? t('ccItem.archiveRemainderExpenseHint', { account: expenseAccountName })
-                        : t('ccItem.archiveRemainderSpreadHint')
-                      : t('ccItem.archiveRemainderNoneHint')}
-                  </span>
-                  <div className="picker__chips">
-                    {(
-                      [
+                {candidate.item !== undefined ? (
+                  <fieldset
+                    className="field picker"
+                    data-ui={UI.allocations.recurringSettlementRemainder}
+                  >
+                    <legend className="field__label">
+                      {t('ccItem.archiveRemainder', {
+                        amount: moneyText(rest, currency, candidate.digits),
+                      })}
+                    </legend>
+                    <span className="field__hint">
+                      {remainderChoosable
+                        ? draft.remainderMode === 'expense'
+                          ? t('ccItem.archiveRemainderExpenseHint', { account: expenseAccountName })
+                          : t('ccItem.archiveRemainderSpreadHint')
+                        : t('ccItem.archiveRemainderNoneHint')}
+                    </span>
+                    <div className="picker__chips">
+                      {(
                         [
-                          'spread',
-                          'ccItem.archiveRemainderSpread',
-                          UI.allocations.recurringSettlementRemainderSpread,
-                        ],
-                        [
-                          'expense',
-                          'ccItem.archiveRemainderExpense',
-                          UI.allocations.recurringSettlementRemainderExpense,
-                        ],
-                      ] as const
-                    ).map(([mode, labelKey, dataUi]) => (
-                      <label className="chip" key={mode}>
-                        <input
-                          type="radio"
-                          className="sr-only"
-                          name={`rule-settlement-remainder-${candidate.item.id}`}
-                          value={mode}
-                          checked={
-                            remainderChoosable ? draft.remainderMode === mode : mode === 'spread'
-                          }
-                          disabled={!remainderChoosable}
-                          onChange={() => state.update(candidate, { remainderMode: mode })}
-                          data-ui={dataUi}
-                        />
-                        <span className="chip__check" aria-hidden="true">
-                          <Icon name="check" size={14} />
-                        </span>
-                        <span className="chip__text">{t(labelKey)}</span>
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
+                          [
+                            'spread',
+                            'ccItem.archiveRemainderSpread',
+                            UI.allocations.recurringSettlementRemainderSpread,
+                          ],
+                          [
+                            'expense',
+                            'ccItem.archiveRemainderExpense',
+                            UI.allocations.recurringSettlementRemainderExpense,
+                          ],
+                        ] as const
+                      ).map(([mode, labelKey, dataUi]) => (
+                        <label className="chip" key={mode}>
+                          <input
+                            type="radio"
+                            className="sr-only"
+                            name={`rule-settlement-remainder-${candidate.display.id}`}
+                            value={mode}
+                            checked={
+                              remainderChoosable ? draft.remainderMode === mode : mode === 'spread'
+                            }
+                            disabled={!remainderChoosable}
+                            onChange={() => state.update(candidate, { remainderMode: mode })}
+                            data-ui={dataUi}
+                          />
+                          <span className="chip__check" aria-hidden="true">
+                            <Icon name="check" size={14} />
+                          </span>
+                          <span className="chip__text">{t(labelKey)}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                ) : null}
               </div>
             ) : null}
           </div>

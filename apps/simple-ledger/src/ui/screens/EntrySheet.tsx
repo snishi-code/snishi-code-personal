@@ -23,6 +23,7 @@ import {
 import { quickSpanEndDate } from '../ccQuickSpan';
 import { EntryLoanStep } from '../sheets/EntryLoanStep';
 import { EntryItemStep } from '../sheets/EntryItemStep';
+import { EntryRuleStep } from '../sheets/EntryRuleStep';
 import {
   MONTHLY_AMOUNTS_HARD_CAP,
   monthlyAmounts,
@@ -91,7 +92,7 @@ export interface TransferFixed {
  * 登録のページ（v13.7 I3）。`base` = 支出そのもの（ローン・持ち物は使うかどうかの選択だけ）、
  * `loan` = ローンの入力、`item` = 持ち物の入力。選んだものだけが順に足される。
  */
-type EntryStep = 'base' | 'loan' | 'item';
+type EntryStep = 'base' | 'loan' | 'item' | 'rule';
 
 export type EntryInit =
   | { kind: 'create'; mode: FormMode }
@@ -124,7 +125,14 @@ function errorText(
 }
 
 export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => void }) {
-  const { ledger, saveEntry, createContinuousCost, createLoanPurchase, removeEntry } = useLedger();
+  const {
+    ledger,
+    saveEntry,
+    createContinuousCost,
+    createLoanPurchase,
+    createRecurringRule,
+    removeEntry,
+  } = useLedger();
   const accounts = ledger?.accounts ?? [];
   const currency = ledger?.settings.currency ?? '';
   // 破壊的操作は編集シート最下部（動詞体系 v13.1）。確認ダイアログとの 2 段防御は従来どおり。
@@ -245,6 +253,30 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     // 支払い元は「新しいローン」に決まる = 選択済みの貸方は意味を失う。
     setForm((f) => ({ ...f, creditAccountId: '' }));
   };
+
+  /*
+   * 「ルールにする」（v13.15 §2.2）: 勘定科目の箱・入力種別に依存しない**直交トグル**。
+   * 収入・支出・振替の全モードで出す（簿記編集 = manual は 1 枚のまま扱うので出さない）。
+   * ON で steps に 'rule' ページが足され、保存はルール保存 API だけになる（完全導出 —
+   * 単発仕訳は保存されない）。写像は全モード単一規則: 計上先 = base の借方 / 源泉 = base の貸方。
+   */
+  const canMakeRule =
+    init.kind === 'create' && (mode === 'income' || mode === 'expense' || mode === 'transfer');
+  const [ruleMode, setRuleMode] = useState(false);
+  const ruleActive = canMakeRule && ruleMode;
+  const [ruleEveryText, setRuleEveryText] = useState('1');
+  const [rulePostingDate, setRulePostingDate] = useState('');
+  const [ruleEveryError, setRuleEveryError] = useState(false);
+  const [rulePostingDateError, setRulePostingDateError] = useState(false);
+  // ルール ON は持ち物トグルを畳む（§2.3: 毎周期の item は台帳経由で自動 = 個別指定は不要）。
+  const enableRuleMode = () => {
+    setRuleMode(true);
+    setCcMode(false);
+  };
+  const disableRuleMode = () => {
+    setRuleMode(false);
+    setStep('base');
+  };
   /*
    * 完済日（inclusive）から回数・月々の額を導出する（v13.13: 端数は monthlyAmounts の
    * 合計厳密一致に乗るので「差額の明示」は不要になった）。プレビューは保存境界と同じ式
@@ -279,6 +311,23 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       : 0;
 
   /*
+   * rule ページのまとめカード用導出（v13.15 §2.2）。起票日の既定 = base の日付。
+   * ローン併用時の月々の返済は保存形と同じ相対月数（起票日 → 完済日）で出す。
+   */
+  const ruleEveryValue = ruleEveryText === '' ? Number.NaN : Number.parseInt(ruleEveryText, 10);
+  const ruleEveryValid =
+    Number.isInteger(ruleEveryValue) &&
+    ruleEveryValue >= 1 &&
+    ruleEveryValue <= MONTHLY_AMOUNTS_HARD_CAP;
+  const rulePd = rulePostingDate.trim() === '' ? form.date : rulePostingDate.trim();
+  const ruleLoanMonths =
+    loanActive && loanEndValid ? monthsBetween(monthOf(rulePd), monthOf(loanEnd)) : 0;
+  const ruleLoanMonthly =
+    ruleLoanMonths >= 1 && ruleLoanMonths <= MONTHLY_AMOUNTS_HARD_CAP && loanAmountValid
+      ? (monthlyAmounts(form.amount, ruleLoanMonths)[0] ?? 0)
+      : 0;
+
+  /*
    * マルチステップ登録（v13.7 I3・作者決定 2026-08-18）。1 画面 1 決定にする:
    * 支出の画面ではローン・持ち物を**使うかどうかだけ**選び、入力そのものは次のページへ送る
    * （選ぶと保存ボタンが「ローンを入力する」「持ち物を入力する」に変わる）。
@@ -292,7 +341,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       : [
           'base',
           ...(canArrangeLoan && loanMode ? (['loan'] as const) : []),
-          ...(canCreateContinuousCost && ccMode ? (['item'] as const) : []),
+          ...(canCreateContinuousCost && ccMode && !ruleActive ? (['item'] as const) : []),
+          ...(ruleActive ? (['rule'] as const) : []),
         ];
   // 選択を外したページに留まらない（steps から消えたら基本の画面へ戻る）。
   const activeStep: EntryStep = steps.includes(step) ? step : 'base';
@@ -319,6 +369,9 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     loanEndDate,
     loanFromAccountId,
     ccEndDate,
+    ruleMode,
+    ruleEveryText,
+    rulePostingDate,
   });
   const [initialSnapshot] = useState(snapshot);
   const dirty = snapshot !== initialSnapshot;
@@ -410,7 +463,55 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       return;
     }
 
-    const ccActive = canCreateContinuousCost && ccMode;
+    const ccActive = canCreateContinuousCost && ccMode && !ruleActive;
+
+    /*
+     * ルールにする（v13.15 §2.2）: **ルールだけが保存される**（完全導出 — 単発仕訳は
+     * 保存されず、初回起票日 = base の日付なら導出行が即日並ぶ）。
+     * 写像は全モード単一規則: 計上先（spread）= base の借方 / 源泉 = base の貸方。
+     * ローン併用（§2.4）は「新しいローン」の負債 + loan ブロック付きルールを 1 tx で作る。
+     */
+    if (ruleActive) {
+      const every = ruleEveryText === '' ? Number.NaN : Number.parseInt(ruleEveryText, 10);
+      const everyBad = !Number.isInteger(every) || every < 1 || every > MONTHLY_AMOUNTS_HARD_CAP;
+      const pd = rulePostingDate.trim() === '' ? toSave.date : rulePostingDate.trim();
+      const pdBad = !isValidIsoDate(pd);
+      setRuleEveryError(everyBad);
+      setRulePostingDateError(pdBad);
+      if (everyBad || pdBad) return;
+      let loanBlock: { repaymentSourceAccountId: string; repaymentMonths: number } | undefined;
+      if (loanActive) {
+        // 完済日（絶対日付の入力）→ repaymentMonths（相対月数）。相対にするのは
+        // 周期ごとに完済日がずれるため（§2.4 の保存形）。
+        const months = monthsBetween(monthOf(pd), monthOf(loanEndDate.trim()));
+        if (months < 1 || months > MONTHLY_AMOUNTS_HARD_CAP) {
+          setLoanEndDateError(true);
+          setStep('loan');
+          return;
+        }
+        loanBlock = { repaymentSourceAccountId: loanFromAccountId, repaymentMonths: months };
+      }
+      setSubmitting(true);
+      try {
+        await createRecurringRule({
+          name: toSave.description.trim(),
+          amount: toSave.amount,
+          dayOfMonth: Number.parseInt(pd.slice(8, 10), 10),
+          everyMonths: every,
+          debitAccountId: toSave.debitAccountId,
+          creditAccountId: loanBlock !== undefined ? '' : toSave.creditAccountId,
+          ...(loanBlock !== undefined
+            ? { newLoanAccount: { name: loanName.trim() }, loan: loanBlock }
+            : {}),
+          startMonth: monthOf(pd),
+          startDate: pd,
+        });
+        onClose();
+      } catch {
+        setSubmitting(false);
+      }
+      return;
+    }
 
     // ローンで払う: 負債科目 + 購入の仕訳 + 返済ルール（+ 持ち物）を 1 tx で作る。
     if (loanActive) {
@@ -548,6 +649,8 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     // 名前は摘要から引き継ぐ（ページを分けても一度書いた語を書き直させない）。
     if (nextStep === 'loan' && loanName.trim() === '') setLoanName(form.description);
     if (nextStep === 'item' && ccTargetName.trim() === '') setCcTargetName(form.description);
+    // 初回の起票日は base の日付から引き継ぐ（モックの「日付欄から自動」）。
+    if (nextStep === 'rule' && rulePostingDate.trim() === '') setRulePostingDate(form.date);
     // 計上先は base の使い道から引き継ぐ（v13.15 §2.2・モックの「使い道から自動」）。
     // 引き継げるのは月割りの計上先に使える役割のときだけ（袋小路を作らない）。
     if (nextStep === 'item' && ccCategoryId === '' && form.debitAccountId !== '') {
@@ -801,29 +904,16 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               </button>
             </div>
           ) : (
-            <>
-              <AccountPicker
-                flat
-                label={t(flowDef.source.labelKey)}
-                required
-                value={form.creditAccountId}
-                groups={srcGroups}
-                onChange={(id) => setSide('credit', id)}
-                error={errorText(errors, 'credit-required') ?? sameAccount}
-                dataUi={UI.journal.entry.flowSource}
-              />
-              {canArrangeLoan ? (
-                <button
-                  type="button"
-                  className="collapse-toggle"
-                  onClick={enableLoanMode}
-                  data-ui={UI.journal.entry.loanArrange}
-                >
-                  <Icon name="add" size={16} />
-                  {t('entry.loanArrange')}
-                </button>
-              ) : null}
-            </>
+            <AccountPicker
+              flat
+              label={t(flowDef.source.labelKey)}
+              required
+              value={form.creditAccountId}
+              groups={srcGroups}
+              onChange={(id) => setSide('credit', id)}
+              error={errorText(errors, 'credit-required') ?? sameAccount}
+              dataUi={UI.journal.entry.flowSource}
+            />
           )
         }
         destination={
@@ -847,29 +937,16 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             // 購入の仕訳の借方 = 継続コスト台帳（固定）。日付・金額・貸方だけ編集できる。
             readOnlyAccount(flowDef.destination.labelKey, form.debitAccountId)
           ) : (
-            <>
-              <AccountPicker
-                flat
-                label={t(flowDef.destination.labelKey)}
-                required
-                value={form.debitAccountId}
-                groups={dstGroups}
-                onChange={(id) => setSide('debit', id)}
-                error={errorText(errors, 'debit-required')}
-                dataUi={UI.journal.entry.flowDestination}
-              />
-              {canCreateContinuousCost ? (
-                <button
-                  type="button"
-                  className="collapse-toggle"
-                  onClick={enableCcMode}
-                  data-ui={UI.journal.entry.ccToggle}
-                >
-                  <Icon name="add" size={16} />
-                  {t('entry.ccToggle')}
-                </button>
-              ) : null}
-            </>
+            <AccountPicker
+              flat
+              label={t(flowDef.destination.labelKey)}
+              required
+              value={form.debitAccountId}
+              groups={dstGroups}
+              onChange={(id) => setSide('debit', id)}
+              error={errorText(errors, 'debit-required')}
+              dataUi={UI.journal.entry.flowDestination}
+            />
           )
         }
       />
@@ -1006,13 +1083,74 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
       </button>
     ) : null;
 
+  /*
+   * 性質トグル列（v13.15 §2.2・モック正本）: base ページ下部に ローン → 持ち物 → ルール の順。
+   * 「ルールにする」は全モード直交（ローンは支出のみ）。ルール ON は持ち物トグルを畳み、
+   * 理由はヒント 1 行で名乗る（説明帯は置かない・§2.3）。
+   */
+  const natureToggle = (checked: boolean, onToggle: () => void, label: string, dataUi: string) => (
+    <label className="chip">
+      <input
+        type="checkbox"
+        className="sr-only"
+        checked={checked}
+        onChange={onToggle}
+        data-ui={dataUi}
+      />
+      <span className="chip__check" aria-hidden="true">
+        <Icon name="check" size={14} />
+      </span>
+      <span className="chip__text">{label}</span>
+    </label>
+  );
+  const natureSection =
+    init.kind === 'create' && !isManual ? (
+      <div className="field" data-ui={UI.journal.entry.nature}>
+        <span className="field__label">{t('entry.natureLabel')}</span>
+        <div className="picker__chips">
+          {canArrangeLoan
+            ? natureToggle(
+                loanMode,
+                () => (loanMode ? disableLoanMode() : enableLoanMode()),
+                t('entry.loanArrange'),
+                UI.journal.entry.loanArrange,
+              )
+            : null}
+          {canCreateContinuousCost && !ruleActive
+            ? natureToggle(
+                ccMode,
+                () => (ccMode ? disableCcMode() : enableCcMode()),
+                t('entry.ccToggle'),
+                UI.journal.entry.ccToggle,
+              )
+            : null}
+          {canMakeRule
+            ? natureToggle(
+                ruleMode,
+                () => (ruleMode ? disableRuleMode() : enableRuleMode()),
+                t('entry.ruleToggle'),
+                UI.journal.entry.ruleToggle,
+              )
+            : null}
+        </div>
+        {ruleActive && canCreateContinuousCost ? (
+          <p className="field__hint" data-ui={UI.journal.entry.ccFoldedByRule}>
+            {t('entry.ccFoldedByRule')}
+          </p>
+        ) : null}
+        <p className="field__hint">{t('entry.natureHint')}</p>
+      </div>
+    ) : null;
+
   // ページの名前（1 枚しかないときは出さない = 従来の見た目を変えない）。
   const stepTitle =
     activeStep === 'loan'
       ? t('entry.stepTitleLoan')
       : activeStep === 'item'
         ? t('entry.stepTitleItem')
-        : title;
+        : activeStep === 'rule'
+          ? t('entry.stepTitleRule')
+          : title;
   const stepIndicator =
     steps.length > 1 ? (
       <p className="field__hint" data-ui={UI.journal.entry.step}>
@@ -1056,7 +1194,11 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
                 ? t('entry.stepNextLoan')
                 : nextStep === 'item'
                   ? t('entry.stepNextItem')
-                  : t('common.save')}
+                  : nextStep === 'rule'
+                    ? t('entry.stepNextRule')
+                    : ruleActive
+                      ? t('entry.saveRule')
+                      : t('common.save')}
             </button>
           </>
         }
@@ -1176,6 +1318,46 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
               onDisable={disableCcMode}
             />
           </>
+        ) : activeStep === 'rule' ? (
+          // 最後のページ: ルールだけの画面（周期 → 起票日 → まとめカード・モック正本の並び）。
+          <>
+            {stepIndicator}
+            <EntryRuleStep
+              everyText={ruleEveryText}
+              postingDate={rulePd}
+              everyError={ruleEveryError}
+              postingDateError={rulePostingDateError}
+              summary={
+                ruleEveryValid && isValidIsoDate(rulePd) && loanAmountValid
+                  ? {
+                      firstPostingDate: rulePd,
+                      sentence:
+                        loanActive && ruleLoanMonths >= 1
+                          ? t('entry.rulePreviewLoan', {
+                              every: ruleEveryValue,
+                              name: effectiveForm().description,
+                              amount: moneyText(form.amount, currency, fractionDigits),
+                              monthly: moneyText(ruleLoanMonthly, currency, fractionDigits),
+                            })
+                          : t('entry.rulePreview', {
+                              every: ruleEveryValue,
+                              name: effectiveForm().description,
+                              amount: moneyText(form.amount, currency, fractionDigits),
+                            }),
+                    }
+                  : null
+              }
+              onEveryTextChange={(v) => {
+                setRuleEveryText(v);
+                setRuleEveryError(false);
+              }}
+              onPostingDateChange={(v) => {
+                setRulePostingDate(v);
+                setRulePostingDateError(false);
+              }}
+              onDisable={disableRuleMode}
+            />
+          </>
         ) : (
           <>
             {stepIndicator}
@@ -1198,6 +1380,7 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             {/* 反対仕訳は常に簿記編集（上の分岐）だが、日常入力側にも同じ位置で置いておく。 */}
             {reversalOverWarning}
             {renderFlow()}
+            {natureSection}
 
             {/* メモ欄は v14 で全廃（作者決定 2026-08-21）。詳細の折りたたみは
                 振替の任意の項目名だけが残る（他のモードでは畳むものが無い）。 */}

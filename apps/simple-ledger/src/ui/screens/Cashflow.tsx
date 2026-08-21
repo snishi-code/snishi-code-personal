@@ -35,7 +35,8 @@ import {
 } from '../../domain/cashflow';
 import type { TimelineZoom } from '../../domain/timelineCalendar';
 import type { ReportPeriod } from '../../domain/reportPeriod';
-import { displayEntriesResultForAsOf } from '../../domain/reportEntries';
+import { displayEntriesResultForAsOf, reportMonthlyCostItems } from '../../domain/reportEntries';
+import { deriveRecurringOutputs } from '../../domain/recurring';
 import { CONTINUOUS_COST_HARD_CAP } from '../../domain/continuousCost';
 import { addMonths, monthOf, monthsBetween } from '../../domain/allocation';
 import {
@@ -160,6 +161,18 @@ export function Cashflow({
     [ledger],
   );
   const entries = useMemo(() => display?.entries ?? [], [display]);
+  // 負債行の item 解決はルール由来の導出ローン（ccl-・v13.15 §2.4）も含める
+  // （台帳一覧と同じ単一正本 reportMonthlyCostItems。地平は負債行の表示なので anchorDate で足りる）。
+  const allItems = useMemo(
+    () =>
+      ledger
+        ? reportMonthlyCostItems(
+            ledger,
+            deriveRecurringOutputs(ledger.recurringRules, ledger.accounts, anchorDate).items,
+          )
+        : [],
+    [ledger, anchorDate],
+  );
 
   const { projection, liabBalById, freeIds } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
@@ -297,7 +310,7 @@ export function Cashflow({
              *    （台帳に居ないものを台帳へ送らない = 空振りする導線を作らない）
              * 高さは .list__row-btn の min-height = var(--tap)（44px）。
              */
-            const loanItem = loanItemForLiability(ledger?.monthlyCostItems ?? [], l.id);
+            const loanItem = loanItemForLiability(allItems, l.id);
             // 次回支払日・残回数は item の刻みから引く（返済は導出 = 保存仕訳に無い・§2.3）。
             const loanSpread = loanItem
               ? loanSpreadTotalOf(loanItem, loanSettledAmountsByItem(ledger?.journalEntries ?? []))
