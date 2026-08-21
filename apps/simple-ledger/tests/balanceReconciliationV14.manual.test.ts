@@ -46,9 +46,28 @@ interface RawPackage {
 
 const LIABILITY_ROLES = new Set(['payment-liability', 'other-liability']);
 
+/**
+ * v13 の生 role を現行 enum へ写像してからエンジンに通す（v13.18: investment-asset は
+ * daily-asset + movable:false へ付け替え済み）。role は導出のガード（postable 等）にだけ
+ * 効き会計 type には触れないため、写像しても残高の意味は変わらない。写像しないと、
+ * 現行エンジンが旧 role の科目を行き先に持つルールを fail-soft で落とし、v13 側の
+ * 導出行だけが消えて照合が偽陽性になる（2026-08-22 の実データ再変換で実際に発生）。
+ */
+function engineReadable(pkg: RawPackage): RawPackage {
+  if (!pkg.accounts.some((a) => (a.role as string) === 'investment-asset')) return pkg;
+  return {
+    ...pkg,
+    accounts: pkg.accounts.map((a) =>
+      (a.role as string) === 'investment-asset'
+        ? { ...a, role: 'daily-asset' as const, movable: a.movable ?? false }
+        : a,
+    ),
+  };
+}
+
 /** asOf 断面の科目別の借方純額（借方 +・貸方 −）。 */
 function balancesAt(pkg: RawPackage, asOf: string): Map<string, number> {
-  const entries = reportEntriesForAsOf(pkg, asOf);
+  const entries = reportEntriesForAsOf(engineReadable(pkg), asOf);
   const map = new Map<string, number>();
   for (const entry of entries) {
     if (entry.date > asOf) continue;
@@ -126,8 +145,9 @@ function projectedGainThrough(
   const account = v13.accounts.find((a) => a.id === declaration.accountId)!;
   const projectionAccount = v13.accounts.find((a) => a.id === declaration.projectionAccountId)!;
   const cap = account.endDate !== undefined && account.endDate < asOf ? account.endDate : asOf;
-  // フロー = 現行エンジンの導出込み世界（按分スライスの対象科目側の行は旧エンジンと同一）。
-  const flows = reportEntriesForAsOf(v13, asOf)
+  // フロー = 現行エンジンの導出込み世界（按分スライスの対象科目側の行は旧エンジンと同一。
+  // 旧 role はエンジンに通す前に写像する — v13BalancesAt 側の balancesAt と同じ約束）。
+  const flows = reportEntriesForAsOf(engineReadable(v13), asOf)
     .filter((entry) => entry.lines.some((line) => line.accountId === declaration.accountId))
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   const pins = v13.journalEntries
