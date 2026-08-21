@@ -181,6 +181,18 @@ export function recurringRuleItemEndDateFor(rule: RecurringRule, month: string):
     : recurringRuleItemEndDate(month, rule.everyMonths, rule.dayOfMonth);
 }
 
+/**
+ * loan ブロック付きルールが month の起票で生む**ローン item** の完済日（v13.15 §2.4）。
+ * 既定 = 起票日 + repaymentMonths か月（相対月数 — 周期ごとに完済日がずれるため絶対日付に
+ * しない）。その月に清算（settlement）があれば持ち物 item と**一様に**上書きされる
+ * （「この周期を D で締める」の一貫した意味・清算の統一意味論）。
+ */
+export function recurringRuleLoanItemEndDateFor(rule: RecurringRule, month: string): string {
+  const settlement = rule.settlements?.find((s) => s.month === month);
+  if (settlement !== undefined) return settlement.endDate;
+  return addMonthsToDate(ruleFirstDate(month, rule.dayOfMonth), rule.loan?.repaymentMonths ?? 0);
+}
+
 /*
  * ルール由来の参照区間の終端は**役割別**（v13.9 項目 3・作者の設計指摘 2026-08-20）。
  * ルールと勘定科目は別世界で、門番が見るべきは「その科目に実際に触れるフローの終端」:
@@ -204,6 +216,19 @@ export function recurringRuleSpreadReferenceEndDate(rule: RecurringRule): string
   const lastPostingMonth = recurringRuleLastPostingMonth(rule);
   if (lastPostingMonth === undefined) return recurringRuleLastExistingDate(rule);
   return recurringRuleItemEndDateFor(rule, lastPostingMonth);
+}
+
+/**
+ * loan ブロック付きルールの返済フローの参照終端 = 最終起票のローン item の完済日
+ * （清算があれば前倒し）。返済の導出行（借方 負債 / 貸方 返済元）が最終起票日を越えて
+ * 走るため、負債（源泉）と返済元の参照はここまで伸びる。未終了ルールは開区間。
+ */
+export function recurringRuleLoanReferenceEndDate(rule: RecurringRule): string | undefined {
+  if (rule.loan === undefined) return undefined;
+  if (rule.endDate === undefined) return undefined;
+  const lastPostingMonth = recurringRuleLastPostingMonth(rule);
+  if (lastPostingMonth === undefined) return recurringRuleLastExistingDate(rule);
+  return recurringRuleLoanItemEndDateFor(rule, lastPostingMonth);
 }
 
 export interface RecurringLineageViolation {
@@ -364,11 +389,25 @@ export function accountReferenceIntervals(
     const postingSide = rule.creditAccountId === accountId;
     const spreadSide =
       rule.spreadExpenseAccountId === accountId || rule.debitAccountId === accountId;
-    if (!postingSide && !spreadSide) continue;
+    // loan ブロック（v13.15 §2.4）: 返済の導出行（借方 負債 / 貸方 返済元）が最終起票日を
+    // 越えて完済日まで走る。負債（= 源泉）と返済元の両方をその終端まで拘束する。
+    const loanSourceSide =
+      rule.loan !== undefined && rule.loan.repaymentSourceAccountId === accountId;
+    if (!postingSide && !spreadSide && !loanSourceSide) continue;
     const referenceStart = recurringRuleReferenceStartDate(rule);
     if (referenceStart === undefined) continue;
+    const loanEnd = recurringRuleLoanReferenceEndDate(rule);
     if (postingSide) {
-      const to = recurringRulePostingReferenceEndDate(rule);
+      const postingEnd = recurringRulePostingReferenceEndDate(rule);
+      // 負債（源泉）は返済の借方として完済日まで触れられる（loan 無しは従来どおり最終起票日）。
+      const to =
+        rule.loan === undefined
+          ? postingEnd
+          : loanEnd === undefined || postingEnd === undefined
+            ? undefined
+            : loanEnd > postingEnd
+              ? loanEnd
+              : postingEnd;
       intervals.push({
         kind: 'recurringRule',
         from: referenceStart,
@@ -381,6 +420,16 @@ export function accountReferenceIntervals(
         kind: 'recurringRule',
         from: referenceStart,
         ...(to !== undefined ? { to } : {}),
+      });
+    }
+    if (loanSourceSide) {
+      // 返済元は先頭刻み（初回起票日の 1 か月後）から触れられる。購入日から拘束しない
+      // （保存 loan item の返済元と同じ向き — 借入の仕訳は返済元に触れないため）。
+      const firstCut = addMonthsToDate(referenceStart, 1);
+      intervals.push({
+        kind: 'recurringRule',
+        from: loanEnd !== undefined && firstCut > loanEnd ? loanEnd : firstCut,
+        ...(loanEnd !== undefined ? { to: loanEnd } : {}),
       });
     }
   }

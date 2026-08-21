@@ -16,13 +16,15 @@
 import { addMonths, monthOf, monthsBetween } from './allocation';
 import { ACCOUNT_ROLES, isInternalRole, type AccountRole } from './accountRoles';
 import { CONTINUOUS_COST_LEDGER_ACCOUNT_ID } from './constants';
-import { ruleEntryId, ruleItemId } from './recurringIds';
+import { isLiabilityRole } from './loan';
+import { ruleEntryId, ruleItemId, ruleLoanItemId } from './recurringIds';
 import {
   accountExistsAt,
   nextDate,
   recurringRuleItemEndDate,
   recurringRuleItemEndDateFor,
   recurringRuleLastExistingDate,
+  recurringRuleLoanItemEndDateFor,
   recurringRuleReferenceStartDate,
   ruleExistsAt,
 } from './accountLifetime';
@@ -35,8 +37,10 @@ export {
   generatedItemRuleId,
   parseRuleEntryId,
   parseRuleItemId,
+  parseRuleLoanItemId,
   ruleEntryId,
   ruleItemId,
+  ruleLoanItemId,
 } from './recurringIds';
 
 /** 表示用の種別（保存しない。勘定の役割から導出する）。 */
@@ -244,6 +248,12 @@ interface RuleProjectionContext {
   expenseAccountId: string;
   referenceStart: string;
   inputMode: InputMode;
+  /**
+   * loan ブロック（v13.15 §2.4）が有効に導出できるか。wire / 保存境界が保証する不変条件
+   * （loan あり ⇒ 源泉が負債・返済元が postable）を読み取り側でも確認し、壊れたデータでは
+   * ローン item を導出しない（fail-soft — 起票・持ち物 item の導出は従来どおり続ける）。
+   */
+  loanReady: boolean;
 }
 
 function ruleProjectionContext(
@@ -280,6 +290,14 @@ function ruleProjectionContext(
       : destination.role === 'expense-category' || destination.role === 'income-category'
         ? 'expense'
         : 'transfer';
+  const loanSource =
+    rule.loan !== undefined ? byId.get(rule.loan.repaymentSourceAccountId) : undefined;
+  const loanReady =
+    rule.loan !== undefined &&
+    isLiabilityRole(credit.role) &&
+    loanSource !== undefined &&
+    isRecurringPostableRole(loanSource.role) &&
+    loanSource.id !== credit.id;
   return {
     rule,
     destination,
@@ -289,6 +307,7 @@ function ruleProjectionContext(
     expenseAccountId,
     referenceStart,
     inputMode,
+    loanReady,
   };
 }
 
@@ -362,6 +381,26 @@ export function deriveRecurringOutputs(
       // 上書き規則の正本は recurringRuleItemEndDateFor（参照区間・保存境界と同一・v13.9 項目 3）。
       const endDate = recurringRuleItemEndDateFor(rule, posting.month);
       items.push(endDate === item.endDate ? item : { ...item, endDate });
+      /*
+       * ルール×ローン併用（v13.15 §2.4）: 起票ごとにローン item も導出する。
+       * 計上先 = 負債（= 源泉。周期をまたいで 1 つを再利用する収集器）・
+       * 完済日 = 起票日 + repaymentMonths（清算があれば持ち物と一様に前倒し）。
+       * 返済行への展開は v13.13 のエンジン（loanRepaymentEntries）にそのまま流れる
+       * （reportEntries が導出 item を含めて渡す・二重実装しない）。
+       */
+      if (rule.loan !== undefined && ctx.loanReady) {
+        items.push({
+          id: ruleLoanItemId(rule.id, posting.month),
+          name: rule.name,
+          amount: rule.amount,
+          startDate: posting.date,
+          endDate: recurringRuleLoanItemEndDateFor(rule, posting.month),
+          expenseAccountId: rule.creditAccountId,
+          repaymentSourceAccountId: rule.loan.repaymentSourceAccountId,
+          createdAt: rule.createdAt,
+          updatedAt: rule.updatedAt,
+        });
+      }
     }
   }
   return { entries, items };

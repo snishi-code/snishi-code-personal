@@ -35,7 +35,7 @@ import {
 import { accountEndingBalanceViolations } from './accountEnding';
 import { isValidIsoDate, isValidIsoMonth, MAX_LEDGER_DATE, MIN_LEDGER_DATE } from './calendar';
 import { CATCH_UP_HARD_CAP_MONTHS, clampDayToMonth, isRecurringPostableRole } from './recurring';
-import { parseRuleEntryId, parseRuleItemId } from './recurringIds';
+import { parseRuleEntryId, parseRuleItemId, parseRuleLoanItemId } from './recurringIds';
 
 const isoDate = z
   .string()
@@ -510,6 +510,20 @@ export const ledgerExportPackageSchema = z
       const date = clampDayToMonth(month, rule.dayOfMonth);
       return ruleExistsAt(rule, date) ? date : undefined;
     };
+    // ルール由来の導出ローン item（ccl-{ruleId}-{month}・v13.15 §2.4）。
+    // 一括返済（loanSettlement）の実仕訳だけが参照してよい（借入の仕訳は導出されるので
+    // 保存されない）。導出条件 = loan ブロック付きルール + そのルールが導出する起票月。
+    const derivedLoanItemOf = (
+      itemId: string,
+    ): { startDate: string; liabilityAccountId: string; amount: number } | undefined => {
+      const ref = parseRuleLoanItemId(itemId);
+      if (!ref) return undefined;
+      const rule = recurringRuleById.get(ref.ruleId);
+      if (!rule || rule.loan === undefined) return undefined;
+      const startDate = derivedItemStartDateOf(ref.ruleId, ref.month);
+      if (startDate === undefined) return undefined;
+      return { startDate, liabilityAccountId: rule.creditAccountId, amount: rule.amount };
+    };
     // item ごとの購入の仕訳（monthlyCostId あり・monthlyCostRecovery なし）。不変条件⑥⑦に使う。
     const purchaseEntriesByItem = new Map<string, (typeof pkg.journalEntries)[number][]>();
 
@@ -753,19 +767,31 @@ export const ledgerExportPackageSchema = z
       const loanId = e.metadata?.loanItemId;
       if (loanId !== undefined) {
         const loanItem = loanItemById.get(loanId);
-        if (loanItem === undefined) {
+        // ルール由来の導出ローン item（ccl-・v13.15 §2.4）は保存されないため、
+        // 参照解決は導出条件から行う（回収が ccr- を参照する既存前例と同型）。
+        const derivedLoan = loanItem === undefined ? derivedLoanItemOf(loanId) : undefined;
+        if (loanItem === undefined && derivedLoan === undefined) {
           issue(`仕訳の loanItemId(${loanId})に対応するローンがありません`, [
             'journalEntries',
             ei,
             'metadata',
             'loanItemId',
           ]);
+        } else if (loanItem === undefined && e.metadata?.loanSettlement !== true) {
+          // 借入の仕訳は導出される（rec-）ので、保存仕訳が導出ローンを名乗るのは二重計上。
+          issue(
+            `借入の仕訳「${e.description}」がルール由来の導出ローン(${loanId})を参照しています（借入は導出されるため保存できません）`,
+            ['journalEntries', ei, 'metadata', 'loanItemId'],
+          );
         } else if (e.metadata?.loanSettlement === true) {
           // 一括返済: 借方 = 負債（item の計上先）/ 貸方 = 返済に使った科目（postable）。
           // 日付は購入（startDate）以降（回収の振替と同じ向きの下限）。
-          if (debitLine?.accountId !== loanItem.expenseAccountId) {
+          // 導出ローンでは負債 = ルールの源泉・購入日 = その月の起票日。
+          const liabilityAccountId = loanItem?.expenseAccountId ?? derivedLoan!.liabilityAccountId;
+          const loanStartDate = loanItem?.startDate ?? derivedLoan!.startDate;
+          if (debitLine?.accountId !== liabilityAccountId) {
             issue(
-              `一括返済の仕訳「${e.description}」は借方がローンの負債(${loanItem.expenseAccountId})である必要があります`,
+              `一括返済の仕訳「${e.description}」は借方がローンの負債(${liabilityAccountId})である必要があります`,
               ['journalEntries', ei, 'lines'],
             );
           }
@@ -778,9 +804,9 @@ export const ledgerExportPackageSchema = z
               ['journalEntries', ei, 'lines'],
             );
           }
-          if (e.date < loanItem.startDate) {
+          if (e.date < loanStartDate) {
             issue(
-              `一括返済の仕訳「${e.description}」の日付(${e.date})が購入日(${loanItem.startDate})より前です`,
+              `一括返済の仕訳「${e.description}」の日付(${e.date})が購入日(${loanStartDate})より前です`,
               ['journalEntries', ei, 'date'],
             );
           }
@@ -788,7 +814,7 @@ export const ledgerExportPackageSchema = z
             loanId,
             (settledTotalByItem.get(loanId) ?? 0) + (debitLine?.amount ?? 0),
           );
-        } else {
+        } else if (loanItem !== undefined) {
           // 借入の仕訳: 貸方 = 負債（item の計上先）。金額・日付は item と双方向ミラー
           // （持ち物の購入の仕訳 ⑥ と同型。持ち物併用時は monthlyCostId も同じ仕訳に乗る）。
           if (creditLine?.accountId !== loanItem.expenseAccountId) {
@@ -815,6 +841,19 @@ export const ledgerExportPackageSchema = z
         }
       }
     });
+
+    // 導出ローン item（ccl-）への一括返済の過返済も wire で拒否する（stored loan の
+    // 「Σ 一括返済 > 借入総額」検査と同型。導出 item は monthlyCostItems の走査に
+    // 乗らないため、ここで合計を締める）。
+    for (const [itemId, settled] of settledTotalByItem) {
+      const derivedLoan = derivedLoanItemOf(itemId);
+      if (derivedLoan !== undefined && settled > derivedLoan.amount) {
+        issue(
+          `ルール由来のローン(${itemId})の一括返済の合計(${settled})が借入総額(${derivedLoan.amount})を超えています`,
+          ['journalEntries'],
+        );
+      }
+    }
 
     // 定期ルール(recurringRules)の参照整合性。
     const seenRuleIds = new Set<string>();
@@ -1042,6 +1081,10 @@ export const ledgerExportPackageSchema = z
           `v13 ではルール由来の持ち物(ccr-)は保存されません（ルールから導出されます）`,
           at('id'),
         );
+      }
+      // ルール由来のローン item（ccl-・v13.15 §2.4）も同じ完全導出の原則で保存しない。
+      if (parseRuleLoanItemId(mc.id) !== undefined) {
+        issue(`ルール由来のローン(ccl-)は保存されません（ルールから導出されます）`, at('id'));
       }
     });
 

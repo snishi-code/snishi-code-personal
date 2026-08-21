@@ -29,9 +29,11 @@ import {
   effectiveRecurringRuleStartDate,
   recurringLineageViolations,
   recurringRuleItemEndDate,
+  recurringRuleLoanReferenceEndDate,
   recurringRulePostingReferenceEndDate,
   recurringRuleReferenceStartDate,
   recurringRuleSpreadReferenceEndDate,
+  ruleExistsAt,
   type AccountReferenceInterval,
 } from '../domain/accountLifetime';
 import {
@@ -55,8 +57,10 @@ import {
   generatedItemRuleId,
   parseRuleEntryId,
   parseRuleItemId,
+  parseRuleLoanItemId,
   recurringExpenseAccountId,
   ruleItemId,
+  ruleLoanItemId,
 } from '../domain/recurring';
 import type {
   Account,
@@ -1075,16 +1079,28 @@ async function upsertEntryUnlocked(entry: JournalEntry): Promise<void> {
 
   // ── 一括返済の仕訳（loanSettlement）: 普通の振替として編集できるが、形は固定する ──
   if (existingLoanSettlement) {
-    if (!loanItem || !isLoanItem(loanItem)) throw new LedgerError('error.monthlyCost.notFound');
+    // ルール由来の導出ローン（ccl-・v13.15 §2.4）は保存されないため、参照解決は
+    // 由来ルール（loan ブロック + 導出条件）から行う（負債 = 源泉・購入日 = 起票日・
+    // 借入総額 = rule.amount）。
+    const derivedLoan =
+      !loanItem && existingLoanId !== undefined
+        ? await derivedRuleLoanItemFor(existingLoanId)
+        : undefined;
+    if ((!loanItem || !isLoanItem(loanItem)) && derivedLoan === undefined)
+      throw new LedgerError('error.monthlyCost.notFound');
+    const liabilityAccountId = loanItem?.expenseAccountId ?? derivedLoan!.liabilityAccountId;
+    const loanStartDate = loanItem?.startDate ?? derivedLoan!.startDate;
+    const loanAmountCap = loanItem?.amount ?? derivedLoan!.amount;
+    const capItemId = loanItem?.id ?? existingLoanId!;
     // 借方 = ローンの負債（動かすと spreadTotal の帰属が壊れる）。貸方（返済元）は自由。
-    if (savable.lines.find((l) => l.side === 'debit')?.accountId !== loanItem.expenseAccountId) {
+    if (savable.lines.find((l) => l.side === 'debit')?.accountId !== liabilityAccountId) {
       throw new LedgerError('error.loan.structure');
     }
-    if (savable.date < loanItem.startDate) {
+    if (savable.date < loanStartDate) {
       throw new LedgerError('error.loan.settlementBeforeStart');
     }
     const nextAmount = savable.lines.find((l) => l.side === 'debit')?.amount ?? 0;
-    if (otherSettledOf(loanItem.id) + nextAmount > loanItem.amount) {
+    if (otherSettledOf(capItemId) + nextAmount > loanAmountCap) {
       throw new LedgerError('error.loan.overSettled');
     }
     await assertEndedBalancesAfterEntryChange(ctx, entries, {
@@ -1596,6 +1612,17 @@ export interface RecurringRuleInput {
    */
   debitAccountId: string;
   creditAccountId: string;
+  /**
+   * ルール×ローン併用（v13.15 §2.4）: 起票のたびにローン item（返済元 + 起票日から
+   * repaymentMonths か月で完済）を導出する宣言。指定時は源泉（creditAccountId）が
+   * 負債科目であること（newLoanAccount 併用時はこの tx で作る負債が源泉になる）。
+   */
+  loan?: { repaymentSourceAccountId: string; repaymentMonths: number };
+  /**
+   * 「新しいローン」: この名前の負債科目（other-liability）を同じ tx で作り源泉にする
+   * （creditAccountId は無視される）。loan と同時にだけ使える。
+   */
+  newLoanAccount?: { name: string };
   /** 起票開始月。未指定は今日の月。 */
   startMonth?: string;
   /** ルール自体が存在し始める日。未指定は周期上の最初の起票日。起票周期の基準日とは独立。 */
@@ -1647,12 +1674,32 @@ function assertRecurringRuleSavable(
     // 参照区間は役割別（v13.9 項目 3・accountReferenceIntervals と同じ規則）:
     // 源泉（起票の両側）= 最終起票日まで / 受け口・集約台帳 = 最終 item の配分終端まで。
     const postingEnd = recurringRulePostingReferenceEndDate(rule);
+    // loan ブロック付きは返済の導出行が最終起票日を越えて完済日まで走る（v13.15 §2.4）:
+    // 負債（源泉）の参照終端をそこまで伸ばす（accountReferenceIntervals と同じ規則）。
+    const loanEnd = recurringRuleLoanReferenceEndDate(rule);
+    const creditEnd =
+      rule.loan === undefined
+        ? postingEnd
+        : loanEnd === undefined || postingEnd === undefined
+          ? undefined
+          : loanEnd > postingEnd
+            ? loanEnd
+            : postingEnd;
     const postingReference: AccountReferenceInterval = {
       kind: 'recurringRule',
       from: referenceStart,
-      ...(postingEnd !== undefined ? { to: postingEnd } : {}),
+      ...(creditEnd !== undefined ? { to: creditEnd } : {}),
     };
     assertReferenceInsideAccount(ctx.byId.get(rule.creditAccountId), postingReference);
+    if (rule.loan !== undefined) {
+      // 返済元は先頭刻み（初回起票日の 1 か月後）〜完済日に触れられる（同上）。
+      const firstCut = addMonthsToDate(referenceStart, 1);
+      assertReferenceInsideAccount(ctx.byId.get(rule.loan.repaymentSourceAccountId), {
+        kind: 'recurringRule',
+        from: loanEnd !== undefined && firstCut > loanEnd ? loanEnd : firstCut,
+        ...(loanEnd !== undefined ? { to: loanEnd } : {}),
+      });
+    }
     const spreadEnd = recurringRuleSpreadReferenceEndDate(rule);
     const spreadReference: AccountReferenceInterval = {
       kind: 'recurringRule',
@@ -1701,6 +1748,16 @@ function assertRecurringRuleSavable(
   if (isLiabilityRole(spreadAccount.role)) {
     throw new LedgerError('error.recurring.liabilityDestination');
   }
+  // ルール×ローン併用（v13.15 §2.4）: loan ブロックあり ⇒ 源泉が負債（片方向・wire と同一。
+  // 逆は課さない — loan 無しで源泉 = 負債〔クレカ〕の通常定期支出は合法のまま）。
+  // 返済元は postable で源泉と別科目（stored loan item の返済元と同じ正本）。
+  if (rule.loan !== undefined) {
+    if (!isLiabilityRole(credit.role)) throw new LedgerError('error.recurring.flowInvalid');
+    const source = ctx.byId.get(rule.loan.repaymentSourceAccountId);
+    if (!source || !isRecurringPostableRole(source.role) || source.id === credit.id) {
+      throw new LedgerError('error.loan.repaymentSource');
+    }
+  }
 }
 
 /** 保存後候補の全ルールに、import と同じ系譜内非重複を適用する。 */
@@ -1725,6 +1782,31 @@ async function createRecurringRuleUnlocked(input: RecurringRuleInput): Promise<R
   // UI は登録日を明示して渡す。内部 API で省略された場合も保存データには必ず開始点を持たせ、
   // 呼び出し側が指定した周期 anchor 上の最初の起票日を安全な既定にする。
   const startDate = input.startDate ?? clampDayToMonth(startMonth, input.dayOfMonth);
+  // 「新しいローン」（v13.15 §2.4）: 負債科目をこの tx で作り源泉にする
+  // （createLoanPurchase の負債作成と同じ形。端点は書かない = 過去へ開いた線分）。
+  let newLiability: Account | undefined;
+  let renamedForLiability: Account[] = [];
+  if (input.newLoanAccount !== undefined) {
+    if (input.loan === undefined) throw new LedgerError('error.recurring.invalidStructure');
+    const liabilityName = input.newLoanAccount.name.trim();
+    if (liabilityName === '') throw new LedgerError('error.common.nameRequired');
+    newLiability = {
+      id: newId(),
+      name: liabilityName,
+      type: 'liability',
+      role: 'other-liability',
+      archived: false,
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    if (!accountSchema.safeParse(newLiability).success)
+      throw new LedgerError('error.account.periodInvalid');
+    renamedForLiability = resolveAccountNameConflicts(
+      [...ctx.byId.values()],
+      newLiability.name,
+      newLiability.id,
+    );
+  }
   const rule: RecurringRule = {
     id: newId(),
     name: input.name.trim(),
@@ -1733,10 +1815,11 @@ async function createRecurringRuleUnlocked(input: RecurringRuleInput): Promise<R
     everyMonths: input.everyMonths ?? 1,
     spreadExpenseAccountId: expenseAccountId,
     debitAccountId: CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
-    creditAccountId: input.creditAccountId,
+    creditAccountId: newLiability !== undefined ? newLiability.id : input.creditAccountId,
     startMonth,
     startDate,
     ...(input.endDate !== undefined ? { endDate: input.endDate } : {}),
+    ...(input.loan !== undefined ? { loan: input.loan } : {}),
     createdAt: ts,
     updatedAt: ts,
   };
@@ -1751,6 +1834,14 @@ async function createRecurringRuleUnlocked(input: RecurringRuleInput): Promise<R
   if (ledgerAccount) validationCtx.byId.set(ledgerAccount.id, ledgerAccount);
   const accountsToPut = new Map<string, Account>();
   if (ledgerWriteNeeded && ledgerAccount) accountsToPut.set(ledgerAccount.id, ledgerAccount);
+  for (const renamed of renamedForLiability) {
+    validationCtx.byId.set(renamed.id, renamed);
+    accountsToPut.set(renamed.id, renamed);
+  }
+  if (newLiability !== undefined) {
+    validationCtx.byId.set(newLiability.id, newLiability);
+    accountsToPut.set(newLiability.id, newLiability);
+  }
   assertRecurringRuleSavable(rule, validationCtx);
   assertRecurringLineagesSavable([...recurringRules, rule]);
   assertEndedAssetLiabilityBalances({
@@ -1972,6 +2063,26 @@ async function upsertRecurringRuleUnlocked(
  * (b) 購入の借方が消えて台帳残高が負に落ちる。継続コスト item 単体の削除
  * （deleteMonthlyCostUnlocked）でも回収の振替は一緒に消しており、規則はそちらと同じ。
  */
+/**
+ * ルール由来の導出ローン item（ccl-{ruleId}-{month}・v13.15 §2.4）の保存境界向け解決。
+ * loan ブロック付きルールが実際にその月を導出するときだけ形を返す（schema の
+ * derivedLoanItemOf と同じ規則）。
+ */
+async function derivedRuleLoanItemFor(
+  loanId: string,
+): Promise<{ liabilityAccountId: string; startDate: string; amount: number } | undefined> {
+  const ref = parseRuleLoanItemId(loanId);
+  if (!ref) return undefined;
+  const rules = await getAll<RecurringRule>(STORE.recurringRules);
+  const rule = rules.find((r) => r.id === ref.ruleId);
+  if (!rule || rule.loan === undefined) return undefined;
+  const span = monthsBetween(rule.startMonth, ref.month);
+  if (span < 0 || span % Math.max(1, rule.everyMonths) !== 0) return undefined;
+  const date = clampDayToMonth(ref.month, rule.dayOfMonth);
+  if (!ruleExistsAt(rule, date)) return undefined;
+  return { liabilityAccountId: rule.creditAccountId, startDate: date, amount: rule.amount };
+}
+
 function planRecurringCascade(
   ruleId: string,
   entries: readonly JournalEntry[],
@@ -1989,7 +2100,13 @@ function planRecurringCascade(
     const linkedToRuleItem =
       linkedItemId !== undefined &&
       (itemIds.has(linkedItemId) || parseRuleItemId(linkedItemId)?.ruleId === ruleId);
-    if (generated || linkedToRuleItem) entryIds.add(entry.id);
+    // ルール由来の導出ローン（ccl-）への一括返済の実仕訳も道連れ（v13.15 §2.4）。
+    // 参照先 item が保存されない以上、残すと loanItemId が宙に浮き export が拒否される
+    //（stored loan の削除が一括返済を同乗させる規則と同じ向き）。
+    const linkedLoanId = entry.metadata?.loanItemId;
+    const linkedToRuleLoanItem =
+      linkedLoanId !== undefined && parseRuleLoanItemId(linkedLoanId)?.ruleId === ruleId;
+    if (generated || linkedToRuleItem || linkedToRuleLoanItem) entryIds.add(entry.id);
   }
   return { entryIds, itemIds };
 }
@@ -2019,6 +2136,13 @@ export interface RecurringRuleSettlementInput {
    * 1 本目 = 回収先へ R・2 本目 = 「終了日に全額」の第 2 振替（費用の行き先へ）。
    */
   recoveries?: readonly { destinationAccountId: string; amount: number }[];
+  /**
+   * ローンの一括返済（v13.15 §2.4・loan ブロック付きルールのみ・日付 = 切り替え日）。
+   * `借方 負債（源泉）/ 貸方 sourceAccountId` の実仕訳を、その月の導出ローン item の
+   * 決定的 ID（ccl-）を参照して立てる。控除実仕訳の形が item の性質から変わるだけで、
+   * 保存される清算（RuleSettlement）は month + endDate のまま（統一意味論）。
+   */
+  loanRepayment?: { sourceAccountId: string; amount: number };
 }
 
 export interface RecurringRuleSwitchInput {
@@ -2159,6 +2283,50 @@ async function switchRecurringRuleUnlocked(input: RecurringRuleSwitchInput): Pro
               inputMode: 'transfer',
               monthlyCostId: ruleItemId(owner.id, settlement.month),
               monthlyCostRecovery: true,
+            },
+            createdAt: ts,
+            updatedAt: ts,
+          },
+          ctx,
+        ),
+      );
+    }
+
+    // ローンの一括返済（v13.15 §2.4）: loan ブロック付きルールの清算だけが持てる。
+    // 金銭の事実は実仕訳（借方 負債 / 貸方 返済元・導出 ccl- を参照）で記録し、
+    // spreadTotal から控除される（v13.13 の返済導出エンジンにそのまま乗る）。
+    if (settlement.loanRepayment !== undefined) {
+      if (owner.loan === undefined) throw new LedgerError('error.recurring.settlementInvalid');
+      const { amount, sourceAccountId } = settlement.loanRepayment;
+      if (!Number.isInteger(amount) || amount <= 0)
+        throw new LedgerError('error.common.amountInvalid');
+      const source = ctx.byId.get(sourceAccountId);
+      if (!source || !isRecurringPostableRole(source.role) || source.id === owner.creditAccountId)
+        throw new LedgerError('error.loan.repaymentSource');
+      // 過返済ガード: この月の導出ローンの借入総額（= rule.amount）を超える返済は拒否する
+      // （wire の Σ 検査と同じ向き。既存の一括返済との合算）。
+      const loanItemIdValue = ruleLoanItemId(owner.id, settlement.month);
+      const alreadySettled = entries
+        .filter(
+          (e) => e.metadata?.loanItemId === loanItemIdValue && e.metadata.loanSettlement === true,
+        )
+        .reduce((sum, e) => sum + (e.lines.find((l) => l.side === 'debit')?.amount ?? 0), 0);
+      if (alreadySettled + amount > owner.amount) throw new LedgerError('error.loan.overSettled');
+      recoveryEntries.push(
+        assertEntrySavable(
+          {
+            id: newId(),
+            date: effectiveDate,
+            description: owner.name,
+            kind: 'normal',
+            lines: [
+              { accountId: owner.creditAccountId, side: 'debit', amount },
+              { accountId: source.id, side: 'credit', amount },
+            ],
+            metadata: {
+              inputMode: 'transfer',
+              loanItemId: loanItemIdValue,
+              loanSettlement: true,
             },
             createdAt: ts,
             updatedAt: ts,
@@ -3441,8 +3609,8 @@ export interface MonthlyCostArchiveInput {
  * 「回収 0 でアーカイブ」= recoveries なし＝残存価値は終了日までの期間へ割り振られる。
  */
 async function archiveMonthlyCostUnlocked(input: MonthlyCostArchiveInput): Promise<void> {
-  // ルール由来の持ち物は個別にアーカイブできない（終わらせたいならルール側を終了する）。
-  if (parseRuleItemId(input.id) !== undefined) {
+  // ルール由来（持ち物 ccr- / ローン ccl-）は個別にアーカイブできない（ルール側を終了する）。
+  if (parseRuleItemId(input.id) !== undefined || parseRuleLoanItemId(input.id) !== undefined) {
     throw new LedgerError('error.recurring.generatedReadOnly');
   }
   if (!isValidIsoDate(input.endDate)) throw new LedgerError('error.monthlyCost.endBeforeStart');
@@ -3571,6 +3739,10 @@ export interface LoanSettleInput {
  * fail-closed: 一括返済合計 > amount（過返済でマイナス残高）は拒否する。
  */
 async function settleLoanUnlocked(input: LoanSettleInput): Promise<void> {
+  // ルール由来の導出ローン（ccl-）は個別に終了できない（清算はルールの切り替え/終了で・§2.4）。
+  if (parseRuleLoanItemId(input.id) !== undefined) {
+    throw new LedgerError('error.recurring.generatedReadOnly');
+  }
   if (!isValidIsoDate(input.endDate)) throw new LedgerError('error.monthlyCost.endBeforeStart');
   const [items, entries] = await Promise.all([
     getAll<MonthlyCostItem>(STORE.monthlyCostItems),
@@ -3670,7 +3842,8 @@ async function settleLoanUnlocked(input: LoanSettleInput): Promise<void> {
  *    「返済だけ残る」事故は構造的に起きない（★6 をローン item 自身には適用しない・§2.3）。
  */
 async function deleteMonthlyCostUnlocked(id: string): Promise<void> {
-  if (parseRuleItemId(id) !== undefined) {
+  // ルール由来（持ち物 ccr- / ローン ccl-）は個別に消せない（調整は由来ルール側で）。
+  if (parseRuleItemId(id) !== undefined || parseRuleLoanItemId(id) !== undefined) {
     throw new LedgerError('error.recurring.generatedReadOnly');
   }
   const [entries, accounts, monthlyCostItems, recurringRules] = await Promise.all([

@@ -23,7 +23,14 @@ function monthlyCostRefs(m: MonthlyCostItem): (string | undefined)[] {
 function recurringRuleRefs(r: RecurringRule): (string | undefined)[] {
   // 定期ルールは未起票でも科目を参照する。ここに入れないと、ルールだけが参照する科目を
   // 削除でき、起票不能 + export が schema の参照検証で拒否される（監査 P1-7）。
-  return [r.debitAccountId, r.creditAccountId, r.spreadExpenseAccountId];
+  // loan ブロックの返済元も同列（v13.15 §2.4 — 返済の導出行は保存されないため、
+  // ここに入れないと返済元科目を削除できてしまう。stored loan item の返済元と同じ理由）。
+  return [
+    r.debitAccountId,
+    r.creditAccountId,
+    r.spreadExpenseAccountId,
+    r.loan?.repaymentSourceAccountId,
+  ];
 }
 
 /**

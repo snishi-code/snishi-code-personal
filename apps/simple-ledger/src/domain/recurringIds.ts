@@ -4,6 +4,7 @@ import type { JournalEntry, MonthlyCostItem } from './types';
 const ISO_MONTH_SUFFIX = '(\\d{4}-(?:0[1-9]|1[0-2]))';
 const RULE_ITEM_ID_PATTERN = new RegExp(`^ccr-(.+)-${ISO_MONTH_SUFFIX}$`);
 const RULE_ENTRY_ID_PATTERN = new RegExp(`^rec-(.+)-${ISO_MONTH_SUFFIX}$`);
+const RULE_LOAN_ITEM_ID_PATTERN = new RegExp(`^ccl-(.+)-${ISO_MONTH_SUFFIX}$`);
 
 export interface RecurringRuleItemOrigin {
   ruleId: string;
@@ -23,6 +24,20 @@ export function ruleItemId(ruleId: string, month: string): string {
 /** ruleId 自体にハイフンを含めても、末尾の起票月だけを分離する。 */
 export function parseRuleItemId(itemId: string): RecurringRuleItemOrigin | undefined {
   const match = RULE_ITEM_ID_PATTERN.exec(itemId);
+  if (!match) return undefined;
+  return { ruleId: match[1]!, month: match[2]! };
+}
+
+/**
+ * ルール×ローン併用（v13.15 §2.4）: loan ブロック付きルールが起票ごとに導出する
+ * ローン item の決定的 ID。ccr-（持ち物 item）と同じ規約の別 namespace。
+ */
+export function ruleLoanItemId(ruleId: string, month: string): string {
+  return `ccl-${ruleId}-${month}`;
+}
+
+export function parseRuleLoanItemId(itemId: string): RecurringRuleItemOrigin | undefined {
+  const match = RULE_LOAN_ITEM_ID_PATTERN.exec(itemId);
   if (!match) return undefined;
   return { ruleId: match[1]!, month: match[2]! };
 }
@@ -53,7 +68,7 @@ export function generatedEntryRuleId(entry: JournalEntry): string | undefined {
   return entry.metadata?.recurringRuleId ?? parseRuleEntryId(entry.id)?.ruleId;
 }
 
-/** ルールが起票した保存済み item の由来ルール ID。 */
+/** ルールが起票した保存済み item の由来ルール ID（持ち物 ccr- とローン ccl- の両 namespace）。 */
 export function generatedItemRuleId(item: MonthlyCostItem): string | undefined {
-  return parseRuleItemId(item.id)?.ruleId;
+  return parseRuleItemId(item.id)?.ruleId ?? parseRuleLoanItemId(item.id)?.ruleId;
 }

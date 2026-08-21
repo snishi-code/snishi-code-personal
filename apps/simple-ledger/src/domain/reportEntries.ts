@@ -211,7 +211,13 @@ function deriveBase(ledger: ReportEntrySource, asOf: string): DerivedBase {
     // ローンの返済行（v13.13）: `借方 負債 / 貸方 返済元` を item の刻みで直接導出する。
     // 一括返済（loanSettlement 仕訳）は実仕訳のまま journalEntries を走査して控除する
     // （回収の振替と同じ流儀）。補正の按分より前に合流するので pin は自動でこの世界を見る。
-    ...loanRepaymentEntries(ledger.monthlyCostItems, ledger.journalEntries, horizon),
+    // 対象は手動 loan item + ルール由来の導出 loan item（ccl-・v13.15 §2.4）の合併
+    // = reportMonthlyCostItems（isLoanItem の絞り込みはエンジン側が行う）。
+    ...loanRepaymentEntries(
+      reportMonthlyCostItems(ledger, derived.items),
+      ledger.journalEntries,
+      horizon,
+    ),
     ...derived.entries,
   ];
   return { base, adjustments, horizon };
