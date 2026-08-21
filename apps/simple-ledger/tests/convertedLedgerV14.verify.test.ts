@@ -274,6 +274,35 @@ describe.skipIf(CONVERTER === undefined)('v13→v14 変換（合成フィクス�
     expect(runConverterExpectFail(liabilityItem)).toContain('計上先が負債');
   });
 
+  it('旧・投資投影の宣言を strip し、件数と科目名をログへ報告する（v13.17）', () => {
+    const base = v13Package() as ReturnType<typeof v13Package> & { accounts: unknown[] };
+    base.accounts.push(
+      {
+        id: 'invest',
+        name: '投資',
+        type: 'asset',
+        role: 'investment-asset',
+        archived: false,
+        createdAt: TS,
+        updatedAt: TS,
+        annualReturnBp: 300,
+        projectionAccountId: 'gain',
+      },
+      account({ id: 'gain', name: '投資益', type: 'revenue', role: 'income-category' }),
+    );
+    const { out, stdout } = runConverter(base);
+    const invest = (out as { accounts: Record<string, unknown>[] }).accounts.find(
+      (a) => a.id === 'invest',
+    )!;
+    expect('annualReturnBp' in invest).toBe(false);
+    expect('projectionAccountId' in invest).toBe(false);
+    // 黙って落とさない（mutation (b): strip の報告を外すとこのログ検査が落ちる・§6-5）。
+    expect(stdout).toContain('投資（利回り投影）宣言の strip（v13.17 撤去・1 科目）');
+    expect(stdout).toContain('投資（invest）');
+    expect(stdout).toContain('annualReturnBp=300');
+    expect(ledgerExportPackageSchema.safeParse(out).success).toBe(true);
+  });
+
   it('壊れた補正 pin を修復して出力する（相手科目消失 → 付け替え / 対象消失 → 削除）', () => {
     const base = v13Package() as ReturnType<typeof v13Package> & {
       journalEntries: JournalEntry[];
