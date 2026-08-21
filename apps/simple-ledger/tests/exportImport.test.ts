@@ -343,11 +343,11 @@ describe('export package 形状', () => {
     expect(pkg).toHaveProperty('settings');
   });
 
-  it('schemaVersion 12 で、廃止済みフィールドを含まない', async () => {
+  it('現行 schemaVersion（14）で、廃止済みフィールドを含まない', async () => {
     const ledger = await seedWithEntry();
     const pkg = buildExportPackage(ledger);
     expect(pkg.schemaVersion).toBe(SCHEMA_VERSION);
-    expect(pkg.schemaVersion).toBe(13);
+    expect(pkg.schemaVersion).toBe(14);
     expect(pkg).not.toHaveProperty('cashflowSchedules');
     // v13 で撤去したタグも含まない。
     expect(pkg).not.toHaveProperty('tags');

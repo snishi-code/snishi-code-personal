@@ -194,17 +194,32 @@ export const adjustmentMetaSchema = z.object({
   counterpartAccountId: z.string().min(1),
 });
 
-export const entryMetadataSchema = z.object({
-  inputMode: inputModeSchema.optional(),
-  reversalOfEntryId: z.string().min(1).optional(),
-  adjustment: adjustmentMetaSchema.optional(),
-  // 継続コスト資産に紐づく保存仕訳の印。recovery なし = 購入の仕訳 / あり = 回収の振替。
-  monthlyCostId: z.string().min(1).optional(),
-  monthlyCostRecovery: z.literal(true).optional(),
-  // 定期ルールからの自動起票の由来（両方セットで持つ。整合はパッケージ superRefine）。
-  recurringRuleId: z.string().min(1).optional(),
-  recurringMonth: monthSchema.optional(),
-});
+export const entryMetadataSchema = z
+  .object({
+    inputMode: inputModeSchema.optional(),
+    reversalOfEntryId: z.string().min(1).optional(),
+    adjustment: adjustmentMetaSchema.optional(),
+    // 継続コスト資産に紐づく保存仕訳の印。recovery なし = 購入の仕訳 / あり = 回収の振替。
+    monthlyCostId: z.string().min(1).optional(),
+    monthlyCostRecovery: z.literal(true).optional(),
+    // ローン item に紐づく保存仕訳の印（v14）。loanSettlement なし = 借入の仕訳 /
+    // あり = 一括返済の仕訳。参照整合はパッケージ superRefine。
+    loanItemId: z.string().min(1).optional(),
+    loanSettlement: z.literal(true).optional(),
+    // 定期ルールからの自動起票の由来（両方セットで持つ。整合はパッケージ superRefine）。
+    recurringRuleId: z.string().min(1).optional(),
+    recurringMonth: monthSchema.optional(),
+  })
+  .superRefine((meta, ctx) => {
+    // 一括返済の印は必ず loanItemId とペア（monthlyCostRecovery ⇔ monthlyCostId と同型）。
+    if (meta.loanSettlement === true && meta.loanItemId === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '一括返済の仕訳は loanItemId が必要です',
+        path: ['loanSettlement'],
+      });
+    }
+  });
 
 export const recurringRuleSchema = z
   .object({
@@ -227,6 +242,19 @@ export const recurringRuleSchema = z
     endDate: isoDate.optional(),
     // 清算（v13）: ルール由来 item の早期終了の上書き。相互整合はパッケージ superRefine。
     settlements: z.array(z.object({ month: monthSchema, endDate: isoDate })).optional(),
+    /**
+     * ルール×ローン併用（v13.15 予定）の**予約ブロック**（v14 では形式のみ・UI / 導出は無し。
+     * groupId 予約の前例）。起票のたびにローン item（返済元 + 完済まで repaymentMonths か月）を
+     * 生む宣言になる予定。「loan ブロックあり ⇒ 源泉の role が負債」だけを wire で固定する
+     * （パッケージ superRefine。源泉負債でも loan ブロック無しの通常ルール〔クレカ定期支出〕は
+     * 現行どおり合法のまま）。
+     */
+    loan: z
+      .object({
+        repaymentSourceAccountId: z.string().min(1),
+        repaymentMonths: z.number().int().min(1).max(CATCH_UP_HARD_CAP_MONTHS),
+      })
+      .optional(),
     createdAt: isoDateTime,
     updatedAt: isoDateTime,
   })
@@ -261,12 +289,33 @@ export const monthlyCostItemSchema = z
     amount: amountSchema,
     startDate: isoDate,
     // 終了日は任意。未設定 = 費用の割り振りをしない（残存価値 = 全額）。
+    // ローン item（repaymentSourceAccountId あり）では**完済日として必須**（下の superRefine）。
     endDate: isoDate.optional(),
     expenseAccountId: z.string().min(1),
+    // 返済元（v14）。有無がローン item の判別子。role 整合はパッケージ superRefine。
+    repaymentSourceAccountId: z.string().min(1).optional(),
     createdAt: isoDateTime,
     updatedAt: isoDateTime,
   })
   .superRefine((item, ctx) => {
+    if (item.repaymentSourceAccountId !== undefined) {
+      // ローン item は完済日（inclusive）が必須（終わらない返済を作らない・fail-closed）。
+      if (item.endDate === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'ローンには完済日（終了日）が必要です',
+          path: ['endDate'],
+        });
+      }
+      // 返済元 = 計上先（負債自身からの返済）は自己振替なので拒否する。
+      if (item.repaymentSourceAccountId === item.expenseAccountId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'ローンの返済元に計上先（負債自身）は指定できません',
+          path: ['repaymentSourceAccountId'],
+        });
+      }
+    }
     if (item.endDate === undefined) return;
     // 日で比較・例外なしの単一条件。
     if (item.endDate < item.startDate) {
@@ -475,6 +524,16 @@ export const ledgerExportPackageSchema = z
     // 継続コスト ID 集合（仕訳の monthlyCostId 参照検証に使う）。
     const monthlyCostIdSet = new Set(pkg.monthlyCostItems.map((m) => m.id));
     const monthlyCostById = new Map(pkg.monthlyCostItems.map((m) => [m.id, m]));
+    // ローン item（repaymentSourceAccountId あり）。借入仕訳・一括返済の参照検証に使う。
+    const loanItemById = new Map(
+      pkg.monthlyCostItems
+        .filter((m) => m.repaymentSourceAccountId !== undefined)
+        .map((m) => [m.id, m]),
+    );
+    // item ごとの借入の仕訳（loanItemId あり・loanSettlement なし）。1:1 ミラーの検証に使う。
+    const borrowEntriesByItem = new Map<string, (typeof pkg.journalEntries)[number][]>();
+    // item ごとの一括返済合計（過返済 = Σ > amount を wire でも拒否する・fail-closed 双方向）。
+    const settledTotalByItem = new Map<string, number>();
     const recurringRuleById = new Map(pkg.recurringRules.map((r) => [r.id, r] as const));
     // ルール由来の導出 item（ccr-{ruleId}-{month}）の開始日 = そのルールが month に導出する
     // 起票日。位相外・存在期間外は undefined（= 導出されない）。
@@ -669,6 +728,15 @@ export const ledgerExportPackageSchema = z
             );
           }
         }
+        // 回収の振替がローン item を指すのも拒否（ローンの早期終了は loanSettlement が担う）。
+        if (mcId !== undefined && loanItemById.has(mcId)) {
+          issue(`回収の振替「${e.description}」はローン item を指せません`, [
+            'journalEntries',
+            ei,
+            'metadata',
+            'monthlyCostId',
+          ]);
+        }
         const recoveryStart =
           mcRef !== undefined
             ? derivedItemStartDateOf(mcRef.ruleId, mcRef.month)
@@ -715,6 +783,72 @@ export const ledgerExportPackageSchema = z
         list.push(e);
         purchaseEntriesByItem.set(mcId, list);
       }
+
+      // ── ローン item に紐づく保存仕訳（v14）: 借入の仕訳 / 一括返済の仕訳 ──
+      const loanId = e.metadata?.loanItemId;
+      if (loanId !== undefined) {
+        const loanItem = loanItemById.get(loanId);
+        if (loanItem === undefined) {
+          issue(`仕訳の loanItemId(${loanId})に対応するローンがありません`, [
+            'journalEntries',
+            ei,
+            'metadata',
+            'loanItemId',
+          ]);
+        } else if (e.metadata?.loanSettlement === true) {
+          // 一括返済: 借方 = 負債（item の計上先）/ 貸方 = 返済に使った科目（postable）。
+          // 日付は購入（startDate）以降（回収の振替と同じ向きの下限）。
+          if (debitLine?.accountId !== loanItem.expenseAccountId) {
+            issue(
+              `一括返済の仕訳「${e.description}」は借方がローンの負債(${loanItem.expenseAccountId})である必要があります`,
+              ['journalEntries', ei, 'lines'],
+            );
+          }
+          const creditRole2 = creditLine
+            ? (accountRole.get(creditLine.accountId) as AccountRole | undefined)
+            : undefined;
+          if (!isRecurringPostableRole(creditRole2)) {
+            issue(
+              `一括返済の仕訳「${e.description}」の返済元に内部集約・残高調整の科目は使えません`,
+              ['journalEntries', ei, 'lines'],
+            );
+          }
+          if (e.date < loanItem.startDate) {
+            issue(
+              `一括返済の仕訳「${e.description}」の日付(${e.date})が購入日(${loanItem.startDate})より前です`,
+              ['journalEntries', ei, 'date'],
+            );
+          }
+          settledTotalByItem.set(
+            loanId,
+            (settledTotalByItem.get(loanId) ?? 0) + (debitLine?.amount ?? 0),
+          );
+        } else {
+          // 借入の仕訳: 貸方 = 負債（item の計上先）。金額・日付は item と双方向ミラー
+          // （持ち物の購入の仕訳 ⑥ と同型。持ち物併用時は monthlyCostId も同じ仕訳に乗る）。
+          if (creditLine?.accountId !== loanItem.expenseAccountId) {
+            issue(
+              `借入の仕訳「${e.description}」は貸方がローンの負債(${loanItem.expenseAccountId})である必要があります`,
+              ['journalEntries', ei, 'lines'],
+            );
+          }
+          // 借方 = 計上先（費用カテゴリ等）か、持ち物併用時の月割り台帳（⑧が monthlyCostId を
+          // 要求するので、台帳借方は必ず購入の仕訳 ⑦ の検証も通る）。
+          const debitRole2 = debitLine
+            ? (accountRole.get(debitLine.accountId) as AccountRole | undefined)
+            : undefined;
+          if (!debitLedger && !isRecurringPostableRole(debitRole2)) {
+            issue(`借入の仕訳「${e.description}」の借方に内部集約・残高調整の科目は使えません`, [
+              'journalEntries',
+              ei,
+              'lines',
+            ]);
+          }
+          const list = borrowEntriesByItem.get(loanId) ?? [];
+          list.push(e);
+          borrowEntriesByItem.set(loanId, list);
+        }
+      }
     });
 
     // 定期ルール(recurringRules)の参照整合性。
@@ -755,6 +889,18 @@ export const ledgerExportPackageSchema = z
           `定期ルール「${r.name}」の計上先に内部集約・残高調整の科目は使えません`,
           at('spreadExpenseAccountId'),
         );
+
+      // ルール×ローン併用の予約ブロック（v14 は形式のみ）: loan ブロックあり ⇒ 源泉が負債。
+      // 逆向きは課さない（源泉 = 負債〔クレカ〕の通常定期支出は現行から合法で v14 でも合法）。
+      if (r.loan !== undefined) {
+        const creditRoleValue = accountRole.get(r.creditAccountId) as AccountRole | undefined;
+        if (creditRoleValue !== 'payment-liability' && creditRoleValue !== 'other-liability') {
+          issue(
+            `定期ルール「${r.name}」の loan ブロックは源泉が負債科目のときだけ持てます`,
+            at('loan'),
+          );
+        }
+      }
 
       // 清算（settlements）: 清算月は一意・そのルールが導出する月であること・
       // 終了日は起票日〜既定の終了日（次回起票日）の範囲。
@@ -814,37 +960,101 @@ export const ledgerExportPackageSchema = z
       monthlyCostIds.add(mc.id);
 
       // 費用の行き先: 内部集約・残高調整以外の勘定科目（定期ルールと同じ正本）。
+      const expenseRole = accountRole.get(mc.expenseAccountId) as AccountRole | undefined;
       if (!accountType.has(mc.expenseAccountId))
         issue(`持ち物「${mc.name}」の expenseAccountId が存在しません`, at('expenseAccountId'));
-      else if (
-        !isRecurringPostableRole(accountRole.get(mc.expenseAccountId) as AccountRole | undefined)
-      )
+      else if (!isRecurringPostableRole(expenseRole))
         issue(
           `持ち物「${mc.name}」の expenseAccountId に内部集約・残高調整の科目は使えません`,
           at('expenseAccountId'),
         );
 
-      // 購入の仕訳がちょうど 1 件・金額と日付が item と完全一致（日レベル。
-      // 月レベルにすると初月クランプが効かず台帳マイナスが再発する）。
-      const purchases = purchaseEntriesByItem.get(mc.id) ?? [];
-      if (purchases.length !== 1) {
+      // ── ローン item の不変条件（v14・fail-closed 双方向・監査 #4）──
+      // 「返済元あり ⇔ 計上先の role が負債」。片方だけの状態は取り込まない:
+      //  - 返済元あり + 計上先が負債でない = 返済の導出先が壊れる。
+      //  - 計上先が負債 + 返済元なし = 返済が導出されず負債が減らない（v13 では合法だった形。
+      //    変換スクリプトが列挙して作者判断でローン item 化 or 計上先変更する）。
+      const isLiabilityExpense =
+        expenseRole === 'payment-liability' || expenseRole === 'other-liability';
+      const isLoan = mc.repaymentSourceAccountId !== undefined;
+      if (isLoan && !isLiabilityExpense) {
+        issue(`ローン「${mc.name}」の計上先は負債科目である必要があります`, at('expenseAccountId'));
+      }
+      if (!isLoan && isLiabilityExpense) {
         issue(
-          `持ち物「${mc.name}」の購入の仕訳がちょうど 1 件必要です（現在 ${purchases.length} 件）`,
-          at('id'),
+          `持ち物「${mc.name}」の計上先が負債です（ローンには返済元が必要です）`,
+          at('repaymentSourceAccountId'),
         );
-      } else {
-        const purchase = purchases[0]!;
-        if (purchase.date !== mc.startDate)
+      }
+      if (isLoan) {
+        const sourceRole = accountRole.get(mc.repaymentSourceAccountId!) as AccountRole | undefined;
+        if (!accountType.has(mc.repaymentSourceAccountId!))
+          issue(`ローン「${mc.name}」の返済元が存在しません`, at('repaymentSourceAccountId'));
+        else if (!isRecurringPostableRole(sourceRole))
           issue(
-            `持ち物「${mc.name}」の開始日(${mc.startDate})が購入の仕訳の日付(${purchase.date})と一致しません`,
-            at('startDate'),
+            `ローン「${mc.name}」の返済元に内部集約・残高調整の科目は使えません`,
+            at('repaymentSourceAccountId'),
           );
-        const debitAmount = purchase.lines.find((l) => l.side === 'debit')?.amount;
-        if (debitAmount !== mc.amount)
+      }
+
+      if (isLoan) {
+        // ローン item は台帳（継続コスト資産）を経由しない: monthlyCostId でローン item を
+        // 指す購入の仕訳・回収の振替は意味を持たないので拒否する（導出の二重系統を作らない）。
+        if ((purchaseEntriesByItem.get(mc.id) ?? []).length > 0) {
+          issue(`ローン「${mc.name}」を monthlyCostId で指す購入の仕訳は保存できません`, at('id'));
+        }
+        // 借入の仕訳がちょうど 1 件・金額と日付が item と完全一致（購入の仕訳 ⑥ のローン版）。
+        const borrows = borrowEntriesByItem.get(mc.id) ?? [];
+        if (borrows.length !== 1) {
           issue(
-            `持ち物「${mc.name}」の金額(${mc.amount})が購入の仕訳の金額(${debitAmount})と一致しません`,
+            `ローン「${mc.name}」の借入の仕訳がちょうど 1 件必要です（現在 ${borrows.length} 件）`,
+            at('id'),
+          );
+        } else {
+          const borrow = borrows[0]!;
+          if (borrow.date !== mc.startDate)
+            issue(
+              `ローン「${mc.name}」の購入日(${mc.startDate})が借入の仕訳の日付(${borrow.date})と一致しません`,
+              at('startDate'),
+            );
+          const creditAmount = borrow.lines.find((l) => l.side === 'credit')?.amount;
+          if (creditAmount !== mc.amount)
+            issue(
+              `ローン「${mc.name}」の借入総額(${mc.amount})が借入の仕訳の金額(${creditAmount})と一致しません`,
+              at('amount'),
+            );
+        }
+        // 過返済の拒否: 一括返済の合計 > 借入総額 はマイナス残高を作るので取り込まない。
+        const settled = settledTotalByItem.get(mc.id) ?? 0;
+        if (settled > mc.amount) {
+          issue(
+            `ローン「${mc.name}」の一括返済の合計(${settled})が借入総額(${mc.amount})を超えています`,
             at('amount'),
           );
+        }
+      } else {
+        // 購入の仕訳がちょうど 1 件・金額と日付が item と完全一致（日レベル。
+        // 月レベルにすると初月クランプが効かず台帳マイナスが再発する）。
+        const purchases = purchaseEntriesByItem.get(mc.id) ?? [];
+        if (purchases.length !== 1) {
+          issue(
+            `持ち物「${mc.name}」の購入の仕訳がちょうど 1 件必要です（現在 ${purchases.length} 件）`,
+            at('id'),
+          );
+        } else {
+          const purchase = purchases[0]!;
+          if (purchase.date !== mc.startDate)
+            issue(
+              `持ち物「${mc.name}」の開始日(${mc.startDate})が購入の仕訳の日付(${purchase.date})と一致しません`,
+              at('startDate'),
+            );
+          const debitAmount = purchase.lines.find((l) => l.side === 'debit')?.amount;
+          if (debitAmount !== mc.amount)
+            issue(
+              `持ち物「${mc.name}」の金額(${mc.amount})が購入の仕訳の金額(${debitAmount})と一致しません`,
+              at('amount'),
+            );
+        }
       }
 
       // v13: ルール由来の item は保存しない（完全導出）。

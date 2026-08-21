@@ -456,7 +456,7 @@ describe('金額以外のフィールドの open→save 往復', () => {
     const after = (await loadLedger()).settings;
     expect(JSON.stringify(after)).toBe(JSON.stringify(before));
     // 「保存はできるのに export だけ落ちる」を 1 行で拾う。
-    expect(exportToJsonText(await loadLedger())).toContain('"schemaVersion": 13');
+    expect(exportToJsonText(await loadLedger())).toContain('"schemaVersion": 14');
   });
 });
 

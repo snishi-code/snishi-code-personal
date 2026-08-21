@@ -268,6 +268,13 @@ export interface RecurringRule {
    * 回収の振替は従来どおり実仕訳（monthlyCostRecovery + 導出 item の決定的 ID 参照）。
    */
   settlements?: RuleSettlement[];
+  /**
+   * ルール×ローン併用（v13.15 予定）の**予約ブロック**（v14 では形式のみ・UI / 導出は無し。
+   * groupId 予約の前例）。起票のたびにローン item（返済元 + repaymentMonths か月で完済）を
+   * 生む宣言になる予定。wire は「loan ブロックあり ⇒ 源泉（creditAccountId）の role が負債」
+   * だけを固定する（源泉負債でも loan 無しの通常定期支出〔クレカ〕は合法のまま）。
+   */
+  loan?: { repaymentSourceAccountId: string; repaymentMonths: number };
   createdAt: string;
   updatedAt: string;
 }

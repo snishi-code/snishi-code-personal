@@ -11,7 +11,9 @@
 export const DB_NAME = 'simple-ledger-v2' as const;
 
 /**
- * IndexedDB のバージョン。version 13 は SCHEMA_VERSION 13（完全導出）と対で上げ、
+ * IndexedDB のバージョン。version 14 は SCHEMA_VERSION 14（ローンの item 化）と対で上げた
+ * （store 構成は不変だが、版対応 1:1 の方針で DB_VERSION も上げる）。
+ * version 13 は SCHEMA_VERSION 13（完全導出）と対で上げ、
  * tags を現行構成から外した（機能・受理とも撤去。既存 DB のストアは「未知レガシー」として
  * 温存し、復旧面の DB 初期化でのみ消える＝「黙って削除しない」原則は維持・監査 P1-1）。
  * version 12 は SCHEMA_VERSION 12（継続コストの同日刻み化ほか）と
@@ -27,7 +29,7 @@ export const DB_NAME = 'simple-ledger-v2' as const;
  * schemaVersion 検査で復旧面へ送られ、復旧面の「DB 初期化」= DB 削除でのみ消える。
  * 黙って削除しない・監査 P1-1）。
  */
-export const DB_VERSION = 13 as const;
+export const DB_VERSION = 14 as const;
 
 /** エクスポート/import 照合用のアプリ ID（封筒 appId）。v1 とは別 ID。 */
 export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
@@ -35,6 +37,14 @@ export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
 /**
  * 現行スキーマ版。v2 は v1 の最終形（v16 相当の最新モデル）を **1** として開始した
  * （レガシー migration は持たない・仕様§16）。互換性のない変更ごとに +1 する。
+ * version 14 = ローンの item 化（v13.13・作者決定 2026-08-20）。ローンをルール帰属
+ * （計上先 = 負債の定期ルール）から月割り台帳 item へ移し、`MonthlyCostItem.
+ * repaymentSourceAccountId`（返済元・有無がローンの判別子）と仕訳 metadata の
+ * `loanItemId` / `loanSettlement`（借入の仕訳・一括返済の仕訳の印）を追加。
+ * 計上先が負債の定期ルールは wire で拒否（旧形ローンルール）。
+ * あわせて JournalEntry.memo（メモ欄）を全廃し、`RecurringRule.loan`
+ * （ルール×ローン併用・v13.15 予定）を**予約のみ**で追加。
+ * 旧 v13 実データは _workspace-management/scripts/convert-ledger-v13-to-v14.mjs で単発変換する。
  * version 12 = 継続コストの同日刻み化（作者決定 2026-08-15）。ルール由来 item
  * （id = `ccr-{ruleId}-{YYYY-MM}`）の endDate の意味が「周期末の月末」から
  * **「次回起票日と同日」**（= clampDayToMonth(起票月 + everyMonths, dayOfMonth)）へ変わる。
@@ -69,7 +79,7 @@ export const APP_ID = 'snishi-code.simple-ledger-v2' as const;
  * migration step は追加しない（作者決定＝後方互換を持たない）。旧版 JSON /
  * スナップショットは unsupported-version として fail-closed に拒否される。
  */
-export const SCHEMA_VERSION = 13 as const;
+export const SCHEMA_VERSION = 14 as const;
 
 /**
  * revision は JSON / IndexedDB の双方で安全な整数だけを扱う。
