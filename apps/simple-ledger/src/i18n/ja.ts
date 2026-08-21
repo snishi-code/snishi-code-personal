@@ -832,8 +832,6 @@ export const ja = {
   'recurring.kind.income': '収入（給与など）',
   'recurring.kind.transfer': '振替（積立など）',
   'recurring.kind.manual': '簿記編集（科目を直接指定）',
-  // 計上先が負債科目のルール = ローン（返済）。新しいフラグではなく形からの導出。
-  'recurring.kind.loan': 'ローン（返済）',
   'recurring.name': '摘要',
   'recurring.nameHint': '起票される仕訳の名前（例: NISA積立 / 給与 / Netflix）。',
   'recurring.amount': '金額',

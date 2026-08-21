@@ -206,7 +206,6 @@ export const UI = {
       loanQuickSpan: 'journal.entry.loanQuickSpan',
       loanFrom: 'journal.entry.loanFrom',
       loanPreview: 'journal.entry.loanPreview',
-      loanRemainder: 'journal.entry.loanRemainder',
       date: 'journal.entry.date',
       description: 'journal.entry.description',
       item: 'journal.entry.item',

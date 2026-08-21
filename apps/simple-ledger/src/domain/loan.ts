@@ -25,15 +25,12 @@
  *
  * 「**ローン item を持つ負債だけが台帳に出る**」（クレカが台帳に出ない区別は不変）。
  */
-import { addMonthsToDate, monthOf } from './allocation';
+import { addMonthsToDate } from './allocation';
 import { allocationCuts, dayCutCount, type AllocationCut } from './monthlyCost';
 import { CONTINUOUS_COST_HARD_CAP } from './continuousCost';
-import { recurringPostingsDue } from './recurring';
-import { recurringRuleLastExistingDate } from './accountLifetime';
-import { CATCH_UP_HARD_CAP_MONTHS } from './recurringLimits';
 import { assertSafeAmount } from './safeSum';
 import type { AccountRole } from './accountRoles';
-import type { JournalEntry, MonthlyCostItem, RecurringRule } from './types';
+import type { JournalEntry, MonthlyCostItem } from './types';
 
 /** 完済日クイックチップの年数（持ち物の [1年][3年][5年] と同じ並び）。 */
 export const LOAN_QUICK_YEARS: readonly number[] = [1, 3, 5];
@@ -216,73 +213,4 @@ export function loanItemSortAmount(item: MonthlyCostItem): number {
 export function loanInstallmentPreviewCount(startDate: string, endDate: string): number {
   const n = dayCutCount(startDate, endDate);
   return n === 0 ? 1 : n;
-}
-
-/* ── 旧モデル（ローン = 台帳のルール・v13.6 H4）。v13.13 バッチ内で消費側ごと撤去する ── */
-
-/** @deprecated 旧ルール帰属の判定。ローンは item（isLoanItem）へ移行済み。 */
-export function isLoanRule(
-  rule: Pick<RecurringRule, 'spreadExpenseAccountId'>,
-  roleOf: (id: string) => AccountRole | undefined,
-): boolean {
-  return isLiabilityRole(roleOf(rule.spreadExpenseAccountId));
-}
-
-/** @deprecated 旧ルール帰属。loanItemForLiability へ移行済み。 */
-export function loanRuleForLiability(
-  rules: readonly RecurringRule[],
-  liabilityAccountId: string,
-): RecurringRule | undefined {
-  return rules.find((rule) => rule.spreadExpenseAccountId === liabilityAccountId);
-}
-
-/** @deprecated 旧ルール帰属。loanItemSortAmount へ移行済み。 */
-export function loanSortAmount(
-  rule: Pick<RecurringRule, 'amount' | 'spreadExpenseAccountId'>,
-  roleOf: (id: string) => AccountRole | undefined,
-): number {
-  return isLoanRule(rule, roleOf) ? -rule.amount : rule.amount;
-}
-
-/** @deprecated 排他的終了日はルール帰属の概念。完済日（inclusive）= loanQuickEndDate へ。 */
-export function loanRuleEndDate(firstRepaymentDate: string, count: number): string {
-  return addMonthsToDate(firstRepaymentDate, count);
-}
-
-/** @deprecated 回数は dayCutCount / loanInstallmentPreviewCount から導出する。 */
-export function loanInstallmentCount(firstRepaymentDate: string, endDateExclusive: string): number {
-  let count = 0;
-  while (count <= CATCH_UP_HARD_CAP_MONTHS) {
-    if (addMonthsToDate(firstRepaymentDate, count) >= endDateExclusive) break;
-    count++;
-  }
-  return count;
-}
-
-/** @deprecated floor 月額は廃止（端数は monthlyAmounts の合計厳密一致で解決）。 */
-export function loanMonthlyAmount(total: number, count: number): number {
-  if (!Number.isInteger(total) || total < 1 || !Number.isInteger(count) || count < 1) return 0;
-  return Math.floor(total / count);
-}
-
-/** @deprecated floor 月額 × 回数。廃止予定。 */
-export function loanScheduledTotal(monthly: number, count: number): number {
-  return monthly * count;
-}
-
-/** @deprecated 旧ルール帰属の残回数。item 版 loanItemRemainingInstallments へ移行済み。 */
-export function loanRemainingInstallments(rule: RecurringRule, asOf: string): number | undefined {
-  const last = recurringRuleLastExistingDate(rule);
-  if (rule.endDate === undefined || last === undefined) return undefined;
-  return recurringPostingsDue(rule, last).filter((posting) => posting.date > asOf).length;
-}
-
-/** @deprecated ルールの位相はローンから消える。 */
-export function loanStartMonth(firstRepaymentDate: string): string {
-  return monthOf(firstRepaymentDate);
-}
-
-/** @deprecated ルールの起票日はローンから消える。 */
-export function loanDayOfMonth(firstRepaymentDate: string): number {
-  return Number.parseInt(firstRepaymentDate.slice(8, 10), 10);
 }
