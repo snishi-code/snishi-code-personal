@@ -633,6 +633,8 @@ export const ja = {
   'error.account.nameConflict': '同じ名前の内訳が既にあります（別の箱でも重複できません）。',
   'error.account.nameConflictArchived': '同じ名前の終了済み内訳があります。',
   'error.account.deleteInUse': 'この科目は使用中のため削除できません。終了してください。',
+  'error.account.deleteInUseAdjustment':
+    '残高補正がこの科目を参照しています。先に補正を削除してください。',
   'error.account.periodInvalid': '科目の開始日・終了日を確認してください。',
   'error.account.referenceOutsidePeriod':
     'この科目を使う仕訳・予定・ルールが存在期間の外にあります。先に開始日・終了日または参照先を見直してください。',

@@ -15,6 +15,7 @@ import { ConfirmDialog } from '../overlays';
 import { SelectInput, TextInput } from '@snishi/foundation/ui/Field';
 import { useLedger } from '../../state/store';
 import type { Account } from '../../domain/types';
+import { adjustmentRefs } from '../../domain/accountRefs';
 import { findAccountNameConflicts, planArchiveRenames } from '../../domain/accountNames';
 import { sortAccounts } from '../../domain/displayOrder';
 import { newId } from '../../domain/ids';
@@ -44,8 +45,10 @@ export function AccountSheet({
   const [pendingDelete, setPendingDelete] = useState(false);
   const deleteRefs = existing
     ? {
-        entries: (ledger?.journalEntries ?? []).filter((e) =>
-          e.lines.some((l) => l.accountId === existing.id),
+        entries: (ledger?.journalEntries ?? []).filter(
+          (e) =>
+            e.lines.some((l) => l.accountId === existing.id) ||
+            adjustmentRefs(e).includes(existing.id),
         ).length,
         items: (ledger?.monthlyCostItems ?? []).filter((m) => m.expenseAccountId === existing.id)
           .length,

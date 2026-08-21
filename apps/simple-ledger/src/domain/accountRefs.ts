@@ -1,5 +1,5 @@
 /*
- * 勘定科目の「使用中」判定。仕訳・継続コスト・定期ルールのいずれかから
+ * 勘定科目の「使用中」判定。仕訳・補正 pin（metadata）・継続コスト・定期ルールのいずれかから
  * 参照されていれば使用中。UI（科目一覧・編集シート）と repository（区分変更/削除の fail-closed）で
  * 同じ判定を使う。
  */
@@ -26,9 +26,23 @@ function recurringRuleRefs(r: RecurringRule): (string | undefined)[] {
   return [r.debitAccountId, r.creditAccountId, r.spreadExpenseAccountId];
 }
 
+/**
+ * 補正 pin の参照 = 対象科目 + 記録相手科目（= 実効計上先・v13.14）。
+ * pin の正本は metadata（仕訳の行から対象科目を推測しない）なので、lines と独立に数える。
+ * lines 走査だけに頼ると、metadata と食い違う破損データで pin の参照先を削除でき、
+ * unspread（復旧表示）の新規発生経路になる。UI の紐づき件数（AccountSheet）と
+ * 削除の理由付き拒否（repository）も同じ 2 参照を見る。
+ */
+export function adjustmentRefs(e: JournalEntry): (string | undefined)[] {
+  const adj = e.metadata?.adjustment;
+  return adj ? [adj.accountId, adj.counterpartAccountId] : [];
+}
+
 export function isAccountReferenced(id: string, c: AccountRefCollections): boolean {
   return (
-    c.entries.some((e) => e.lines.some((l) => l.accountId === id)) ||
+    c.entries.some(
+      (e) => e.lines.some((l) => l.accountId === id) || adjustmentRefs(e).includes(id),
+    ) ||
     c.monthlyCostItems.some((m) => monthlyCostRefs(m).includes(id)) ||
     c.recurringRules.some((r) => recurringRuleRefs(r).includes(id))
   );
@@ -37,7 +51,10 @@ export function isAccountReferenced(id: string, c: AccountRefCollections): boole
 /** 参照されている科目 ID の集合（一覧表示の「使用中」バッジ用）。 */
 export function referencedAccountIds(c: AccountRefCollections): Set<string> {
   const set = new Set<string>();
-  for (const e of c.entries) for (const l of e.lines) set.add(l.accountId);
+  for (const e of c.entries) {
+    for (const l of e.lines) set.add(l.accountId);
+    for (const ref of adjustmentRefs(e)) if (ref) set.add(ref);
+  }
   for (const m of c.monthlyCostItems) {
     for (const ref of monthlyCostRefs(m)) if (ref) set.add(ref);
   }

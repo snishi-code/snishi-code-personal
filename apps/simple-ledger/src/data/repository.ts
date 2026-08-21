@@ -17,7 +17,11 @@ import {
 } from '../domain/constants';
 import { ADJUSTABLE_ACCOUNT_ROLES, roleAllowsType, type AccountRole } from '../domain/accountRoles';
 import { compareAccountOrder } from '../domain/displayOrder';
-import { isAccountReferenced, type AccountRefCollections } from '../domain/accountRefs';
+import {
+  adjustmentRefs,
+  isAccountReferenced,
+  type AccountRefCollections,
+} from '../domain/accountRefs';
 import {
   accountExistsAt,
   accountLifetimeViolation,
@@ -785,9 +789,15 @@ async function reorderAccountsUnlocked(ids: string[]): Promise<void> {
   });
 }
 
-/** 使用中（仕訳/継続コスト/定期ルールから参照中）の科目は削除できない（アーカイブを使う）。fail-closed。 */
+/** 使用中（仕訳/補正 pin/継続コスト/定期ルールから参照中）の科目は削除できない（アーカイブを使う）。fail-closed。 */
 async function deleteAccountUnlocked(id: string): Promise<void> {
   const refs = await loadReferencingCollections();
+  // 補正 pin の参照（対象・記録相手 = metadata 正本）は理由が判る文言で先に弾く（v13.14）:
+  // 補正は専用画面で削除できるので「先に補正を削除」が実行可能な導線として案内できる。
+  // pin 以外の参照が同居していても、補正を消した後の再試行で下の一般文言に到達する。
+  if (refs.entries.some((e) => adjustmentRefs(e).includes(id))) {
+    throw new LedgerError('error.account.deleteInUseAdjustment');
+  }
   if (isAccountReferenced(id, refs)) {
     throw new LedgerError('error.account.deleteInUse');
   }
