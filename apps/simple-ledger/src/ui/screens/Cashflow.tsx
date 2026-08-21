@@ -173,6 +173,12 @@ export function Cashflow({
         : [],
     [ledger, anchorDate],
   );
+  // 一括返済の合計は台帳 1 走査で済む: 行ごとの再計算（毎レンダー × 負債行数）をしない
+  // （v13.19 監査 minor②）。
+  const loanSettled = useMemo(
+    () => loanSettledAmountsByItem(ledger?.journalEntries ?? []),
+    [ledger],
+  );
 
   const { projection, liabBalById, freeIds } = useMemo(() => {
     const accounts = ledger?.accounts ?? [];
@@ -312,9 +318,7 @@ export function Cashflow({
              */
             const loanItem = loanItemForLiability(allItems, l.id);
             // 次回支払日・残回数は item の刻みから引く（返済は導出 = 保存仕訳に無い・§2.3）。
-            const loanSpread = loanItem
-              ? loanSpreadTotalOf(loanItem, loanSettledAmountsByItem(ledger?.journalEntries ?? []))
-              : 0;
+            const loanSpread = loanItem ? loanSpreadTotalOf(loanItem, loanSettled) : 0;
             const loanNextDue = loanItem
               ? loanRepaymentSchedule(loanItem, loanSpread).find(
                   (cut) => cut.date > anchorDate && cut.amount !== 0,
