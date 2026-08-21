@@ -34,8 +34,8 @@ import { boxForAccount, groupAccountsByBox, type AccountBox } from '../accountBo
 import { cardTapProps, rowActionClick } from '../cardTap';
 import { ConfirmDialog } from '../overlays';
 import { AccountSheet } from './AccountSheet';
-import { AdjustmentCreateSheet } from '../AdjustmentSheet';
-import { OpeningRegisterSheet } from '../OpeningSheet';
+import { AdjustmentCreateSheet } from '../sheets/AdjustmentSheet';
+import { OpeningRegisterSheet } from '../sheets/OpeningSheet';
 import { EntrySheet } from './EntrySheet';
 import { Money } from '../money';
 import { periodLabel } from '../periodLabel';

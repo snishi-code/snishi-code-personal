@@ -21,8 +21,8 @@ import {
 } from '../ListSearchSort';
 import { applySort, directionSign, matchesQuery, type SortDirection } from '../listQuery';
 import { useLedger } from '../../state/store';
-import { AdjustmentEditSheet } from '../AdjustmentSheet';
-import { OpeningEditSheet } from '../OpeningSheet';
+import { AdjustmentEditSheet } from '../sheets/AdjustmentSheet';
+import { OpeningEditSheet } from '../sheets/OpeningSheet';
 import { Money } from '../money';
 import { t } from '../../i18n';
 import { UI } from '../../ui-contract';

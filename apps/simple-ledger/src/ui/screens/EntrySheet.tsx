@@ -21,6 +21,7 @@ import {
   type FormMode,
 } from '../entryModes';
 import { quickSpanEndDate } from '../ccQuickSpan';
+import { EntryLoanStep } from '../sheets/EntryLoanStep';
 import {
   MONTHLY_AMOUNTS_HARD_CAP,
   monthlyAmounts,
@@ -28,12 +29,7 @@ import {
   monthsBetween,
 } from '../../domain/allocation';
 import { dayCutCount } from '../../domain/monthlyCost';
-import {
-  LOAN_QUICK_YEARS,
-  loanFirstRepaymentDate,
-  loanInstallmentPreviewCount,
-  loanQuickEndDate,
-} from '../../domain/loan';
+import { loanFirstRepaymentDate, loanInstallmentPreviewCount } from '../../domain/loan';
 import { MAX_AMOUNT_MINOR } from '../../domain/schema';
 import {
   exactDigitsFor,
@@ -54,7 +50,7 @@ import {
 } from '../../domain/entry';
 import type { EntryMetadata, InputMode, JournalEntry } from '../../domain/types';
 import type { AccountRole } from '../../domain/accountRoles';
-import { RECURRING_POSTABLE_ROLES, isRecurringPostableRole } from '../../domain/recurring';
+import { isRecurringPostableRole } from '../../domain/recurring';
 import { t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
 import { isValidIsoDate, MAX_LEDGER_DATE, MIN_LEDGER_DATE } from '../../domain/calendar';
@@ -693,33 +689,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     </>
   );
 
-  // ローンの名前（ローンのページの先頭）。摘要から引き継いだ値が既に入っている。
-  const loanNameField = loanActive ? (
-    <>
-      <TextInput
-        label={t('entry.loanName')}
-        required
-        value={loanName}
-        placeholder={t('entry.loanNamePlaceholder')}
-        hint={t('entry.loanNameHint')}
-        onChange={(v) => {
-          setLoanName(v);
-          setLoanNameError(false);
-        }}
-        error={loanNameError ? t('entry.error.description-required') : undefined}
-        dataUi={UI.journal.entry.loanName}
-      />
-      <button
-        type="button"
-        className="collapse-toggle"
-        onClick={disableLoanMode}
-        data-ui={UI.journal.entry.loanArrangeBack}
-      >
-        {t('entry.loanArrangeBack')}
-      </button>
-    </>
-  ) : null;
-
   const flowDef = isManual ? null : MODE_FLOW[mode as FlowMode];
   // 固定側 pass-through: 相手側の候補（振替先/振替元）。台帳・アーカイブ対象は候補に出さない。
   const FIXED_COUNTERPART_ROLES = ['daily-asset', 'payment-liability', 'other-liability'] as const;
@@ -976,87 +945,6 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
     ) : null;
 
   /*
-   * ローンの 4 項目（持ち物の参照）: 名前（お金の流れの左辺）・借入額（金額欄）・
-   * 購入日（仕訳の日付）・**完済日（inclusive）**。完済日が正で、回数と月々の額は
-   * そこから導出する（端数は monthlyAmounts の合計厳密一致 = 差額の明示は不要・v13.13）。
-   * 返済元は自由に動かせるお金に限定せず、全科目（RECURRING_POSTABLE_ROLES）から選べる。
-   */
-  const loanDetailField = loanActive ? (
-    <div className="field" data-ui={UI.journal.entry.loanPanel}>
-      <TextInput
-        label={t('entry.loanEndDate')}
-        type="date"
-        required
-        value={loanEndDate}
-        min={MIN_LEDGER_DATE}
-        max={MAX_LEDGER_DATE}
-        hint={t('entry.loanEndDateHint', { date: loanFirstDate })}
-        onChange={(v) => {
-          setLoanEndDate(v);
-          setLoanEndDateError(false);
-        }}
-        error={
-          loanEndDateError
-            ? loanTermTooLong
-              ? // 上限超過は「不正な日付」と別の理由。黙って飽和せず理由を名乗る。
-                t('entry.error.loanTermTooLong', { max: MONTHLY_AMOUNTS_HARD_CAP })
-              : t('entry.error.loanEndDate')
-            : undefined
-        }
-        dataUi={UI.journal.entry.loanEndDate}
-      />
-      <div className="row-actions">
-        {LOAN_QUICK_YEARS.map((years) => (
-          <button
-            key={years}
-            type="button"
-            className="btn btn--ghost"
-            style={{ minHeight: 'var(--tap)' }}
-            onClick={() => {
-              setLoanEndDate(loanQuickEndDate(form.date, years));
-              setLoanEndDateError(false);
-            }}
-            data-ui={UI.journal.entry.loanQuickSpan}
-          >
-            {t('ccItem.quickSpan', { years })}
-          </button>
-        ))}
-      </div>
-      <AccountPicker
-        label={t('entry.loanFrom')}
-        required
-        value={loanFromAccountId}
-        groups={groupedAccountsByRole(
-          accounts,
-          [...RECURRING_POSTABLE_ROLES],
-          loanFromAccountId,
-          loanFirstDate,
-        )}
-        onChange={(id) => {
-          setLoanFromAccountId(id);
-          setLoanFromError(false);
-        }}
-        error={loanFromError ? t('entry.error.loanFrom') : undefined}
-        dataUi={UI.journal.entry.loanFrom}
-      />
-      {loanCount >= 1 && loanAmountValid ? (
-        <p className="field__hint" data-ui={UI.journal.entry.loanPreview}>
-          {loanLump
-            ? t('entry.loanPreviewLump', {
-                date: loanEnd,
-                total: moneyText(form.amount, currency, fractionDigits),
-              })
-            : t('entry.loanPreview', {
-                amount: moneyText(loanFirstAmount, currency, fractionDigits),
-                count: loanCount,
-                total: moneyText(form.amount, currency, fractionDigits),
-              })}
-        </p>
-      ) : null}
-    </div>
-  ) : null;
-
-  /*
    * 削除セクション（編集時のみ・最下部）。購入の仕訳は item と 1:1 なので削除できない
    * （持ち物側の削除に同乗する）: 理由ごと見せて不活性にする（fail-closed の理由開示）。
    * 実取引の取り消しは反対仕訳（行アクション側の動詞）— 注意文で誘導する。
@@ -1191,11 +1079,44 @@ export function EntrySheet({ init, onClose }: { init: EntryInit; onClose: () => 
             {deleteSection}
           </>
         ) : activeStep === 'loan' ? (
-          // 2 ページ目: ローンだけの画面（名前 → 終了日 → 返済元 → 導出のプレビュー）。
+          // 2 ページ目: ローンだけの画面（名前 → 完済日 → 返済元 → 導出のプレビュー）。
           <>
             {stepIndicator}
-            {loanNameField}
-            {loanDetailField}
+            <EntryLoanStep
+              accounts={accounts}
+              currency={currency}
+              fractionDigits={fractionDigits}
+              amount={form.amount}
+              purchaseDate={form.date}
+              name={loanName}
+              endDate={loanEndDate}
+              fromAccountId={loanFromAccountId}
+              nameError={loanNameError}
+              endDateError={loanEndDateError}
+              fromError={loanFromError}
+              derived={{
+                firstDate: loanFirstDate,
+                end: loanEnd,
+                count: loanCount,
+                lump: loanLump,
+                firstAmount: loanFirstAmount,
+                amountValid: loanAmountValid,
+                termTooLong: loanTermTooLong,
+              }}
+              onNameChange={(v) => {
+                setLoanName(v);
+                setLoanNameError(false);
+              }}
+              onEndDateChange={(v) => {
+                setLoanEndDate(v);
+                setLoanEndDateError(false);
+              }}
+              onFromChange={(id) => {
+                setLoanFromAccountId(id);
+                setLoanFromError(false);
+              }}
+              onDisable={disableLoanMode}
+            />
           </>
         ) : activeStep === 'item' ? (
           // 最後のページ: 持ち物だけの画面（名前 → 終了日 → 計上先）。

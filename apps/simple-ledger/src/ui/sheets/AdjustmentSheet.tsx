@@ -5,29 +5,29 @@
  * 費用・収入の「実残高」はその日までの実際の累計額（accountBalance が type で符号を決める）。
  */
 import { useMemo, useState } from 'react';
-import { ConfirmDialog, Modal } from './overlays';
+import { ConfirmDialog, Modal } from '../overlays';
 import { TextInput } from '@snishi/foundation/ui/Field';
 import { Icon } from '@snishi/foundation/ui/Icon';
-import { useLedger } from '../state/store';
-import { ADJUSTABLE_ACCOUNT_ROLES } from '../domain/accountRoles';
-import { isAdjustableAccountType } from '../domain/adjustment';
+import { useLedger } from '../../state/store';
+import { ADJUSTABLE_ACCOUNT_ROLES } from '../../domain/accountRoles';
+import { isAdjustableAccountType } from '../../domain/adjustment';
 // isLedgerDate = 暦 + 上限（2100 年）。上限超えの日付で理論残高のライブ導出を走らせない
 // （遠未来の pin 候補は月次展開を数万月ぶん走らせ、保存前にシートが固まる。v13.8 監査 E）。
-import { isLedgerDate, MAX_LEDGER_DATE, MIN_LEDGER_DATE } from '../domain/calendar';
+import { isLedgerDate, MAX_LEDGER_DATE, MIN_LEDGER_DATE } from '../../domain/calendar';
 // 理論残高は「この pin を置いたあとの世界での pin 直前残高」（v13.5 C-3）。
 // repository の保存側（createAdjustment / updateAdjustment）と**同じヘルパ**を通す
 // ——ずれると、シートが見せた差分と実際に按分されるスライス合計が食い違う。
 // （adjustmentSpread.ts が値の正本）。
-import { adjustmentPinExpectedBalanceForLedger } from '../domain/reportEntries';
-import { formatMinorForInput, parseAmountToMinor, sanitizeSignedAmountText } from './amountText';
-import { useMoneyDigits } from './money';
-import { groupedAccountsByRole } from './accountOptions';
-import { AccountPicker } from './AccountPicker';
-import { Money } from './money';
-import { todayLocal } from '../util/time';
-import type { Account, JournalEntry } from '../domain/types';
-import { t } from '../i18n';
-import { UI } from '../ui-contract';
+import { adjustmentPinExpectedBalanceForLedger } from '../../domain/reportEntries';
+import { formatMinorForInput, parseAmountToMinor, sanitizeSignedAmountText } from '../amountText';
+import { useMoneyDigits } from '../money';
+import { groupedAccountsByRole } from '../accountOptions';
+import { AccountPicker } from '../AccountPicker';
+import { Money } from '../money';
+import { todayLocal } from '../../util/time';
+import type { Account, JournalEntry } from '../../domain/types';
+import { t } from '../../i18n';
+import { UI } from '../../ui-contract';
 
 export function AdjustmentCreateSheet({
   account,

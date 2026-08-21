@@ -7,8 +7,8 @@ import { Dashboard } from '../src/ui/screens/Dashboard';
 import { Accounts } from '../src/ui/screens/Accounts';
 import { Breakdown } from '../src/ui/screens/Breakdown';
 import { Allocations } from '../src/ui/screens/Allocations';
-import { AdjustmentCreateSheet, AdjustmentEditSheet } from '../src/ui/AdjustmentSheet';
-import { OpeningEditSheet, OpeningRegisterSheet } from '../src/ui/OpeningSheet';
+import { AdjustmentCreateSheet, AdjustmentEditSheet } from '../src/ui/sheets/AdjustmentSheet';
+import { OpeningEditSheet, OpeningRegisterSheet } from '../src/ui/sheets/OpeningSheet';
 import {
   createContinuousCost,
   createOpenings,

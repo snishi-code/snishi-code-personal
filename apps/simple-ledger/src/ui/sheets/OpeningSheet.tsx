@@ -7,16 +7,16 @@
  * 通常の仕訳編集で opening を壊さない（opening は開始時点の残高設定、補正とは会計的に別物）。
  */
 import { useState } from 'react';
-import { ConfirmDialog, Modal } from './overlays';
+import { ConfirmDialog, Modal } from '../overlays';
 import { TextInput } from '@snishi/foundation/ui/Field';
-import { useLedger } from '../state/store';
-import { formatMinorForInput, parseAmountToMinor, sanitizeSignedAmountText } from './amountText';
-import { useMoneyDigits } from './money';
-import { MAX_LEDGER_DATE, MIN_LEDGER_DATE } from '../domain/calendar';
-import { todayLocal } from '../util/time';
-import type { Account, JournalEntry } from '../domain/types';
-import { t } from '../i18n';
-import { UI } from '../ui-contract';
+import { useLedger } from '../../state/store';
+import { formatMinorForInput, parseAmountToMinor, sanitizeSignedAmountText } from '../amountText';
+import { useMoneyDigits } from '../money';
+import { MAX_LEDGER_DATE, MIN_LEDGER_DATE } from '../../domain/calendar';
+import { todayLocal } from '../../util/time';
+import type { Account, JournalEntry } from '../../domain/types';
+import { t } from '../../i18n';
+import { UI } from '../../ui-contract';
 
 /** opening 仕訳の対象（equity でない側）の科目と金額。 */
 export function openingTarget(
