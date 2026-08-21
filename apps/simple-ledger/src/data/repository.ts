@@ -28,8 +28,8 @@ import {
   accountReferenceIntervals,
   effectiveRecurringRuleStartDate,
   recurringLineageViolations,
-  recurringRuleItemEndDate,
   recurringRuleLoanReferenceEndDate,
+  recurringRuleSettlementEndCap,
   recurringRulePostingReferenceEndDate,
   recurringRuleReferenceStartDate,
   recurringRuleSpreadReferenceEndDate,
@@ -1735,12 +1735,10 @@ function assertRecurringRuleSavable(
     if (span < 0 || span % Math.max(1, rule.everyMonths) !== 0 || !insideRule) {
       throw new LedgerError('error.recurring.settlementInvalid');
     }
-    const defaultEnd = recurringRuleItemEndDate(
-      settlement.month,
-      rule.everyMonths,
-      rule.dayOfMonth,
-    );
-    if (settlement.endDate < postingDate || settlement.endDate > defaultEnd) {
+    // 上限 = 清算の統一意味論の cap（通常 = 周期終端 / loan 付きは大きい方 = ローン終端。
+    // 単一正本 = recurringRuleSettlementEndCap・v13.19 監査 #3）。
+    const endCap = recurringRuleSettlementEndCap(rule, settlement.month);
+    if (settlement.endDate < postingDate || settlement.endDate > endCap) {
       throw new LedgerError('error.recurring.settlementInvalid');
     }
   }
@@ -2244,12 +2242,9 @@ async function switchRecurringRuleUnlocked(input: RecurringRuleSwitchInput): Pro
     if (span < 0 || span % Math.max(1, owner.everyMonths) !== 0 || !insideOwner) {
       throw new LedgerError('error.recurring.settlementInvalid');
     }
-    const defaultEnd = recurringRuleItemEndDate(
-      settlement.month,
-      owner.everyMonths,
-      owner.dayOfMonth,
-    );
-    if (effectiveDate < postingDate || effectiveDate > defaultEnd) {
+    // 上限は保存検証と同じ cap（loan 付きはローン終端まで = 正当な早期完済を弾かない）。
+    const endCap = recurringRuleSettlementEndCap(owner, settlement.month);
+    if (effectiveDate < postingDate || effectiveDate > endCap) {
       throw new LedgerError('error.recurring.settlementInvalid');
     }
     const next: RecurringRule = {

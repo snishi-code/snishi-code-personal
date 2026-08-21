@@ -29,7 +29,7 @@ import {
   accountReferenceIntervals,
   effectiveRecurringRuleStartDate,
   recurringLineageViolations,
-  recurringRuleItemEndDate,
+  recurringRuleSettlementEndCap,
   ruleExistsAt,
 } from './accountLifetime';
 import { accountEndingBalanceViolations } from './accountEnding';
@@ -955,10 +955,12 @@ export const ledgerExportPackageSchema = z
           );
           return;
         }
-        const defaultEnd = recurringRuleItemEndDate(settlement.month, r.everyMonths, r.dayOfMonth);
-        if (settlement.endDate < postingDate || settlement.endDate > defaultEnd) {
+        // 上限 = 保存境界と同じ cap（通常 = 周期終端 / loan 付きは大きい方 = ローン終端。
+        // 単一正本 = recurringRuleSettlementEndCap・v13.19 監査 #3）。
+        const endCap = recurringRuleSettlementEndCap(r, settlement.month);
+        if (settlement.endDate < postingDate || settlement.endDate > endCap) {
           issue(
-            `定期ルール「${r.name}」の清算の終了日(${settlement.endDate})は起票日(${postingDate})から既定の終了日(${defaultEnd})の間である必要があります`,
+            `定期ルール「${r.name}」の清算の終了日(${settlement.endDate})は起票日(${postingDate})から上限(${endCap})の間である必要があります`,
             [...at('settlements', si), 'endDate'],
           );
         }

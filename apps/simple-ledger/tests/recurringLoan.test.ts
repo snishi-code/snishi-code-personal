@@ -226,6 +226,84 @@ describe('ルール×ローン併用（v13.15 §2.4）', () => {
     expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(true);
   });
 
+  it('清算 D の上限はローン終端（v13.19 #3）: 周期末 < D < 完済日の早期完済が受理される', async () => {
+    // 周期 6 か月・返済 24 か月の loan ルール（everyMonths ≠ repaymentMonths の分岐）。
+    const bank = await accountByName('預金');
+    const fixed = await accountByName('固定費');
+    const rule = await createRecurringRule({
+      name: '設備入替',
+      amount: 240_000,
+      dayOfMonth: 1,
+      everyMonths: 6,
+      debitAccountId: fixed.id,
+      creditAccountId: '',
+      newLoanAccount: { name: '設備ローン' },
+      loan: { repaymentSourceAccountId: bank.id, repaymentMonths: 24 },
+      startMonth: '2020-04',
+      startDate: '2020-04-01',
+    });
+    // D = 2021-04-01（周期末 2020-10-01 より先・ローン終端 2022-04-01 より手前）。
+    await switchRecurringRule({
+      ruleId: rule.id,
+      effectiveDate: '2021-04-01',
+      successor: null,
+      settlements: [
+        {
+          ruleId: rule.id,
+          month: '2020-04',
+          loanRepayment: { sourceAccountId: bank.id, amount: 120_000 },
+        },
+      ],
+    });
+    const ledger = await loadLedger();
+    const saved = ledger.recurringRules.find((r) => r.id === rule.id)!;
+    expect(saved.settlements).toEqual([{ month: '2020-04', endDate: '2021-04-01' }]);
+    // 導出: ローン item は D で締まり、持ち物 item は自分の終端（周期末）を超えない。
+    const derived = deriveRecurringOutputs(ledger.recurringRules, ledger.accounts, '2022-12-31');
+    expect(derived.items.find((m) => m.id === ruleLoanItemId(rule.id, '2020-04'))!.endDate).toBe(
+      '2021-04-01',
+    );
+    expect(derived.items.find((m) => m.id === ruleItemId(rule.id, '2020-04'))!.endDate).toBe(
+      '2020-10-01',
+    );
+    // 一括返済と合わせて D 以降の負債残高は 0。
+    expect(await balanceAt(saved.creditAccountId, '2022-12-31')).toBe(0);
+    // wire も同じ cap（D はローン終端の内側 = 受理・終端超えは拒否）。
+    const pkg = buildExportPackage(await loadLedger());
+    expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(true);
+    const beyond = {
+      ...pkg,
+      recurringRules: pkg.recurringRules.map((r) =>
+        r.id === rule.id ? { ...r, settlements: [{ month: '2020-04', endDate: '2022-05-01' }] } : r,
+      ),
+    };
+    expect(ledgerExportPackageSchema.safeParse(beyond).success).toBe(false);
+  });
+
+  it('通常ルール（loan なし）の清算上限は従来どおり周期終端のまま', async () => {
+    const bank = await accountByName('預金');
+    const fixed = await accountByName('固定費');
+    const rule = await createRecurringRule({
+      name: '通常半年払い',
+      amount: 60_000,
+      dayOfMonth: 1,
+      everyMonths: 6,
+      debitAccountId: fixed.id,
+      creditAccountId: bank.id,
+      startMonth: '2020-04',
+      startDate: '2020-04-01',
+    });
+    // D = 周期終端（2020-10-01）より後 → 従来どおり拒否。
+    await expect(
+      switchRecurringRule({
+        ruleId: rule.id,
+        effectiveDate: '2021-04-01',
+        successor: null,
+        settlements: [{ ruleId: rule.id, month: '2020-04' }],
+      }),
+    ).rejects.toMatchObject({ code: 'error.recurring.settlementInvalid' });
+  });
+
   it('実仕訳を伴わない清算も合法（= D までに全額返済された宣言）', async () => {
     const { ruleId, liabilityId } = await createCarRule();
     await switchRecurringRule({

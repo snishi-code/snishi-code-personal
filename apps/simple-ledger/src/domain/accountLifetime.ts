@@ -175,22 +175,45 @@ function recurringRuleLastPostingMonth(rule: RecurringRule): string | undefined 
  * `deriveRecurringOutputs` の導出と、参照区間・保存境界の検証が同じ規則を共有する）。
  */
 export function recurringRuleItemEndDateFor(rule: RecurringRule, month: string): string {
+  const defaultEnd = recurringRuleItemEndDate(month, rule.everyMonths, rule.dayOfMonth);
   const settlement = rule.settlements?.find((s) => s.month === month);
-  return settlement !== undefined
-    ? settlement.endDate
-    : recurringRuleItemEndDate(month, rule.everyMonths, rule.dayOfMonth);
+  if (settlement === undefined) return defaultEnd;
+  // 清算はその月の両 item（持ち物・ローン）に一様に効くが、**各 item は自分の終端を
+  // 超えない**（v13.19 監査 #3 — 清算日の上限がローン終端まで開いたため、持ち物側は
+  // ここで clamp する。旧上限〔everyMonths 基準〕の既存データでは無変化）。
+  return settlement.endDate < defaultEnd ? settlement.endDate : defaultEnd;
+}
+
+/** loan ブロック付きルールが month の起票で生むローン item の**既定**完済日（清算を見ない）。 */
+export function recurringRuleLoanItemDefaultEndDate(rule: RecurringRule, month: string): string {
+  return addMonthsToDate(ruleFirstDate(month, rule.dayOfMonth), rule.loan?.repaymentMonths ?? 0);
 }
 
 /**
  * loan ブロック付きルールが month の起票で生む**ローン item** の完済日（v13.15 §2.4）。
  * 既定 = 起票日 + repaymentMonths か月（相対月数 — 周期ごとに完済日がずれるため絶対日付に
  * しない）。その月に清算（settlement）があれば持ち物 item と**一様に**上書きされる
- * （「この周期を D で締める」の一貫した意味・清算の統一意味論）。
+ * （「この周期を D で締める」の一貫した意味・清算の統一意味論）。自分の終端は超えない
+ * （recurringRuleItemEndDateFor と同じ clamp・v13.19 監査 #3）。
  */
 export function recurringRuleLoanItemEndDateFor(rule: RecurringRule, month: string): string {
+  const defaultEnd = recurringRuleLoanItemDefaultEndDate(rule, month);
   const settlement = rule.settlements?.find((s) => s.month === month);
-  if (settlement !== undefined) return settlement.endDate;
-  return addMonthsToDate(ruleFirstDate(month, rule.dayOfMonth), rule.loan?.repaymentMonths ?? 0);
+  if (settlement === undefined) return defaultEnd;
+  return settlement.endDate < defaultEnd ? settlement.endDate : defaultEnd;
+}
+
+/**
+ * 清算（RuleSettlement.endDate）が取れる**上限**（v13.19 監査 #3・wire と保存境界の単一正本）。
+ * 通常ルール = 持ち物 item の既定終端（everyMonths 基準・従来どおり）。loan ブロック付きは
+ * **大きい方 = ローン終端（repaymentMonths 基準）**まで開く — 周期末より先・ローン終端より
+ * 手前の正当な早期完済 D を弾かない。各 item の導出は上の clamp で自分の終端を超えない。
+ */
+export function recurringRuleSettlementEndCap(rule: RecurringRule, month: string): string {
+  const itemEnd = recurringRuleItemEndDate(month, rule.everyMonths, rule.dayOfMonth);
+  if (rule.loan === undefined) return itemEnd;
+  const loanEnd = recurringRuleLoanItemDefaultEndDate(rule, month);
+  return loanEnd > itemEnd ? loanEnd : itemEnd;
 }
 
 /*
