@@ -84,6 +84,7 @@ import {
 } from '../domain/allocation';
 import { compareMonthlyCostItems } from '../domain/monthlyCost';
 import { isLiabilityRole, isLoanItem, loanSettledAmountsByItem } from '../domain/loan';
+import { loanBlockViolation } from '../domain/ruleLoanChecks';
 import {
   buildAdjustmentEntry,
   counterpartName,
@@ -1759,15 +1760,15 @@ function assertRecurringRuleSavable(
   if (isLiabilityRole(spreadAccount.role)) {
     throw new LedgerError('error.recurring.liabilityDestination');
   }
-  // ルール×ローン併用（v13.15 §2.4）: loan ブロックあり ⇒ 源泉が負債（片方向・wire と同一。
-  // 逆は課さない — loan 無しで源泉 = 負債〔クレカ〕の通常定期支出は合法のまま）。
-  // 返済元は postable で源泉と別科目（stored loan item の返済元と同じ正本）。
-  if (rule.loan !== undefined) {
-    if (!isLiabilityRole(credit.role)) throw new LedgerError('error.recurring.flowInvalid');
-    const source = ctx.byId.get(rule.loan.repaymentSourceAccountId);
-    if (!source || !isRecurringPostableRole(source.role) || source.id === credit.id) {
-      throw new LedgerError('error.loan.repaymentSource');
-    }
+  // ルール×ローン併用（v13.15 §2.4）: loan ブロックの検証は wire と共通の単一正本
+  // （domain/ruleLoanChecks.loanBlockViolation・v13.19 監査 #2）。
+  // 源泉負債は片方向（loan 無しで源泉 = 負債〔クレカ〕の通常定期支出は合法のまま）。
+  const loanViolation = loanBlockViolation(rule, (id) => ctx.byId.get(id)?.role);
+  if (loanViolation === 'credit-not-liability') {
+    throw new LedgerError('error.recurring.flowInvalid');
+  }
+  if (loanViolation !== undefined) {
+    throw new LedgerError('error.loan.repaymentSource');
   }
 }
 

@@ -36,6 +36,7 @@ import { accountEndingBalanceViolations } from './accountEnding';
 import { isValidIsoDate, isValidIsoMonth, MAX_LEDGER_DATE, MIN_LEDGER_DATE } from './calendar';
 import { CATCH_UP_HARD_CAP_MONTHS, clampDayToMonth, isRecurringPostableRole } from './recurring';
 import { parseRuleEntryId, parseRuleItemId, parseRuleLoanItemId } from './recurringIds';
+import { loanBlockViolation } from './ruleLoanChecks';
 
 const isoDate = z
   .string()
@@ -908,15 +909,30 @@ export const ledgerExportPackageSchema = z
         }
       }
 
-      // ルール×ローン併用の予約ブロック（v14 は形式のみ）: loan ブロックあり ⇒ 源泉が負債。
-      // 逆向きは課さない（源泉 = 負債〔クレカ〕の通常定期支出は現行から合法で v14 でも合法）。
-      if (r.loan !== undefined) {
-        const creditRoleValue = accountRole.get(r.creditAccountId) as AccountRole | undefined;
-        if (creditRoleValue !== 'payment-liability' && creditRoleValue !== 'other-liability') {
+      // ルール×ローン併用（v13.15 で活性化）: loan ブロックの検証は保存境界と共通の
+      // 単一正本（ruleLoanChecks.loanBlockViolation・v13.19 監査 #2）。源泉負債は片方向
+      // （loan 無しで源泉 = 負債〔クレカ〕の通常定期支出は合法のまま）。返済元の
+      // 存在・postable・源泉非同一も wire で検証する — 欠けると受理後に導出ガード
+      // （loanReady）が黙って返済を落とし「静かな欠損」になるため。
+      {
+        const violation = loanBlockViolation(
+          r,
+          (id) => accountRole.get(id) as AccountRole | undefined,
+        );
+        if (violation === 'credit-not-liability') {
           issue(
             `定期ルール「${r.name}」の loan ブロックは源泉が負債科目のときだけ持てます`,
             at('loan'),
           );
+        } else if (violation === 'source-missing') {
+          issue(`定期ルール「${r.name}」の返済元科目が存在しません`, at('loan'));
+        } else if (violation === 'source-not-postable') {
+          issue(
+            `定期ルール「${r.name}」の返済元に内部集約・残高調整の科目は使えません`,
+            at('loan'),
+          );
+        } else if (violation === 'source-same-as-credit') {
+          issue(`定期ルール「${r.name}」の返済元が源泉（負債）と同一です`, at('loan'));
         }
       }
 

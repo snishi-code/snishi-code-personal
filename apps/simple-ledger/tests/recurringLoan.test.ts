@@ -270,6 +270,36 @@ describe('ルール×ローン併用（v13.15 §2.4）', () => {
     expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(true);
   });
 
+  it('wire: 返済元の 存在・postable・源泉非同一 も拒否する（保存境界と単一正本・v13.19 #2）', async () => {
+    const { ruleId, liabilityId } = await createCarRule();
+    const pkg = buildExportPackage(await loadLedger());
+    const mutate = (loan: { repaymentSourceAccountId: string; repaymentMonths: number }) => ({
+      ...pkg,
+      recurringRules: pkg.recurringRules.map((r) => (r.id === ruleId ? { ...r, loan } : r)),
+    });
+    // ① 返済元が存在しない。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        mutate({ repaymentSourceAccountId: 'no-such-account', repaymentMonths: 120 }),
+      ).success,
+    ).toBe(false);
+    // ② 返済元が postable でない（内部台帳）。
+    const ledgerAccount = pkg.accounts.find((a) => a.role === 'continuing-cost-asset')!;
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        mutate({ repaymentSourceAccountId: ledgerAccount.id, repaymentMonths: 120 }),
+      ).success,
+    ).toBe(false);
+    // ③ 返済元 = 源泉（負債）と同一。
+    expect(
+      ledgerExportPackageSchema.safeParse(
+        mutate({ repaymentSourceAccountId: liabilityId, repaymentMonths: 120 }),
+      ).success,
+    ).toBe(false);
+    // 正しい loan はそのまま通る（対照）。
+    expect(ledgerExportPackageSchema.safeParse(pkg).success).toBe(true);
+  });
+
   it('wire: loan ブロックあり ⇒ 源泉負債・借入仕訳は導出 ccl- を参照できない', async () => {
     const { ruleId, liabilityId } = await createCarRule();
     const pkg = buildExportPackage(await loadLedger());
