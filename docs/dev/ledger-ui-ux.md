@@ -7,9 +7,9 @@ medical 側のコードは参照せず、snishi-code 系の抽象 UI 規約に�
 
 - **表示順の正本は `domain/displayOrder` の 1 モジュールだけ**（v13.6 H1）。画面は独自の
   並び配列・並べ替え比較を持たない。3 つの並びを持つ:
-  - **箱の並び**（`DISPLAY_BOX_KEYS`。自由に動かせるお金 → 自由に動かせないお金 → 投資 →
+  - **箱の並び**（`DISPLAY_BOX_KEYS`。自由に動かせるお金 → 自由に動かせないお金 →
     月割り台帳 → カード・未払 → ローン → 収入 → 費用 → 純資産）。**ユーザー並び替え不可**の
-    コード定数。勘定科目画面の 7 箱・タイムラインの 9 箱・内訳の枠（資産 4 / 負債 2）は
+    コード定数。勘定科目画面の 6 箱・タイムラインの 8 箱・内訳の枠（資産 3 / 負債 2）は
     すべてこの並びの部分集合（`orderedDisplayBoxes`）。
   - **科目の並び**（`compareAccountOrder` / `sortAccounts`）。role の優先順 → ユーザーが
     並び替えた順（`sortIndex`）→ 名前順。箱の並びとは別軸で、片方から他方を導出しない。
@@ -19,7 +19,7 @@ medical 側のコードは参照せず、snishi-code 系の抽象 UI 規約に�
     どの箱がどの分類の内訳かは `displaySectionOfBox`。タイムラインの共通ラベル列
     （`domain/lensRows`）はこれを使って**恒等行をその分類の最後の箱の直後へ**差し込む
     ＝ 恒等行の位置も並びから導出され、どこにも直書きしない。
-  - どの箱に属するかの**分類**は、資産 4 グループだけ `domain/assetGroups`（`assetGroupOf`）が
+  - どの箱に属するかの**分類**は、資産 3 グループだけ `domain/assetGroups`（`assetGroupOf`）が
     正本で、それ以外は `displayBoxIncludes`。**分類と並びを 2 か所で書き分けない**。
   - 並びは保存しない（wire / schema 非接触）。保存項目は従来どおり科目の `sortIndex` だけ。
 - スプレッドシート風 UI にしない。操作入口を少なくする。
@@ -67,10 +67,10 @@ medical 側のコードは参照せず、snishi-code 系の抽象 UI 規約に�
   負債の内訳は **カード・未払**（`payment-liability`）と **ローン**
   （`other-liability`）の 2 枠に分け、各枠の小計と全体合計を出す。空枠は出さない。
   推移は **単一正本** `breakdownData.buildSectionTrends`（ホーム・各内訳ページが同じ定義を使い数字をズラさない）。
-  - **資産の内訳は 4 枠**: 預金など（自由に動かせる現預金 = `movable !== false` の daily-asset）→
-    自由に動かせないやつ（`movable === false`）→ 投資 → **月割り台帳（1 行 = 残存価値の合計・
-    タップで「月割り台帳」へ**。内訳は台帳画面で見る・`assetsBreakdown.ledgerRow`）。各枠に小計
-    （`assetsBreakdown.subtotal.free` / `.fixed` / `.investment` / `.ledger`）+ 全体合計。投資を分けたければ
+  - **資産の内訳は 3 枠**: 預金など（自由に動かせる現預金 = `movable !== false` の daily-asset）→
+    自由に動かせないやつ（`movable === false`。投資もここ・v13.18）→ **月割り台帳（1 行 =
+    残存価値の合計・タップで「月割り台帳」へ**。内訳は台帳画面で見る・`assetsBreakdown.ledgerRow`）。
+    各枠に小計（`assetsBreakdown.subtotal.free` / `.fixed` / `.ledger`）+ 全体合計。投資を分けたければ
     科目を増やせば分かれる（専用機能は作らない）。枠**分け**の正本は `domain/assetGroups`
     （`assetGroupOf`）、枠の**並び**は `domain/displayOrder`（`ASSET_GROUP_KEYS` = 箱の並びの
     射影）で、**タイムラインの数値レンズの資産行の展開と共有**する。
@@ -88,7 +88,7 @@ medical 側のコードは参照せず、snishi-code 系の抽象 UI 規約に�
     交換するだけ**のもので、左の列（箱と科目の木・箱ごとの色分け・タップで科目を露出）は
     線分 / 数値 / グラフで同じ 1 つを共有する。**レンズごとの独自ラベル列・独自凡例は無い**。
     - 木の正本は `domain/lensRows`（`buildLensRowTree`）。並びは表示順マスタそのままで、
-      **箱（`DISPLAY_BOX_KEYS` の 9 つ）→ 科目（`compareAccountOrder`）**。
+      **箱（`DISPLAY_BOX_KEYS` の 8 つ）→ 科目（`compareAccountOrder`）**。
       箱はデータの有無によらず並ぶ（アプリが守る固定の骨格）。
     - **恒等行**（収支・純資産）も列に出す。**子は持たず、位置はマスタから導く**:
       式の右辺の最後の項（`identitySectionsAfter`）に対応する**最後の箱の直後**へ自動で入る

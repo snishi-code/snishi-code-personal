@@ -71,8 +71,10 @@ simple-ledger は取引を記帳する帳簿ではなく、**生活の資金の�
   `role` は UI 用の役割で、日常入力（収入/支出/振替）の候補制御に使う。正本は
   [`apps/simple-ledger/src/domain/accountRoles.ts`](../../apps/simple-ledger/src/domain/accountRoles.ts)。
   `role` は `type` と整合する（`roleAllowsType`）。
-  - `daily-asset`（現金・預金）/ `investment-asset`（投資）/
+  - `daily-asset`（現金・預金）/
     `continuing-cost-asset`（月割り台帳＝集約口座・内部）… `type=asset`
+    （`investment-asset` は v13.18 で撤去 — 投資はただの `daily-asset` +
+    「自由に動かせる」OFF として扱う・作者決定 Q6=B 2026-08-21）
   - `payment-liability`（クレジットカード等）/ `other-liability`（ローン等）… `type=liability`
   - `income-category`（`revenue`）/ `expense-category`（`expense`）/ `equity`（`equity`）
   - `system-adjustment`（残高調整費/収入。`expense|revenue`。自動生成・通常入力に出さない）
@@ -559,12 +561,13 @@ simple-ledger は**監査証跡を固定する帳簿ではなく、生活上の�
 - **負債一覧は基準日断面**: 導出残高 ≠ 0 の負債だけを出す（未来に始まるローンは基準日を
   進めれば現れ、完済済みは消える）。「残高 0 だが返済予定だけ残っている」行は作らない。
 
-## ホーム→資産の内訳は 4 枠
+## ホーム→資産の内訳は 3 枠
 
-**預金など（自由に動かせる現預金）→ 自由に動かせないやつ → 投資 → 月割り台帳**の順に
+**預金など（自由に動かせる現預金）→ 自由に動かせないやつ → 月割り台帳**の順に
 枠で分け、各枠の合計 + 全体合計を出す。月割り台帳は 1 行（残存価値の合計・タップで
-「月割り台帳」へ＝内訳は台帳画面で見る）。投資を科目で分けたければ（NISA / iDeCo）科目を
-増やせば分かれる — 専用機能は作らない。
+「月割り台帳」へ＝内訳は台帳画面で見る）。投資は「自由に動かせないやつ」枠の普通の資産
+（v13.18 で専用の箱を撤去）。科目で分けたければ（NISA / iDeCo）科目を増やせば分かれる —
+専用機能は作らない。
 
 負債の内訳も同じ構造で、**カード・未払（payment-liability）→ ローン（other-liability）**
 の 2 枠に分け、各枠の小計 + 全体合計を出す。
