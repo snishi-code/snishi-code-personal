@@ -82,7 +82,6 @@ function renderTimeline(period: ReportPeriod = { mode: 'date', date: BASIS }) {
       onNavigate={() => undefined}
       onOpenEntry={() => undefined}
       onOpenAllocations={() => undefined}
-      onOpenAccount={() => undefined}
     />,
   );
   return { view, periodChanges };

@@ -2,7 +2,7 @@
  * 仕訳カードをタップしたとき何を開くかの単一正本。
  *
  * アプリ全体の原則（作者決定 2026-08-14）: 仕訳カードはタップで**編集**できるか、
- * その仕訳を**生み出した宣言**（定期ルール・継続コスト項目・投資科目）へ辿れる。
+ * その仕訳を**生み出した宣言**（定期ルール・継続コスト項目）へ辿れる。
  * くり返し記帳が起票した実仕訳は後者（作者決定 2026-08-15）。ルールは定期起票するだけの
  * 軽い道具で、生まれたものへの個別操作は持たない＝未起票の投影と同じ行き先になる。
  * 画面ごとにこの分岐を手書きすると「ホームだけ仕訳一覧へ飛ぶ」「資金繰りだけ
@@ -27,8 +27,6 @@ export type EntryOpenPlan =
   | { kind: 'rule'; ruleId: string }
   /** 継続コストの月割り・購入投影 → その項目（月割り台帳）。 */
   | { kind: 'item'; itemId: string }
-  /** 投資の利回り投影 → 利回りを宣言した科目（勘定科目）。 */
-  | { kind: 'account'; accountId: string }
   /** 由来を名乗らない導出行 → 開く先が無い（既定の遷移先へ流さない＝誤遷移させない）。 */
   | { kind: 'none' };
 
@@ -42,8 +40,6 @@ export function entryOpenPlan(entry: JournalEntry): EntryOpenPlan {
         return { kind: 'rule', ruleId: origin.recurringRuleId };
       case 'monthlyCost':
         return { kind: 'item', itemId: origin.monthlyCostId };
-      case 'investmentAccount':
-        return { kind: 'account', accountId: origin.accountId };
       case 'adjustmentEntry':
         return { kind: 'adjustment', entryId: origin.entryId };
     }

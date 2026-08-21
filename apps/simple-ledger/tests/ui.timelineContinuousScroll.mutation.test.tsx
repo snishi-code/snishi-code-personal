@@ -111,7 +111,6 @@ function renderTimeline(lens: TimelineLens, zoom: TimelineZoom = 'month') {
         onNavigate={() => undefined}
         onOpenEntry={() => undefined}
         onOpenAllocations={() => undefined}
-        onOpenAccount={() => undefined}
       />
     );
   }

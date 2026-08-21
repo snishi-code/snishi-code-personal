@@ -105,7 +105,6 @@ export function Journal({
   onEditEntry,
   onReverse,
   onOpenAllocations,
-  onOpenAccount,
   filter,
   period,
   targetEntryId,
@@ -115,8 +114,6 @@ export function Journal({
   onReverse: (entry: JournalEntry) => void;
   /** 計算で生まれた行のタップ: 「月割り台帳」へ遷移し、元の項目/ルールのシートを開く。 */
   onOpenAllocations: (target: AllocationsTarget) => void;
-  /** 投資利回りの投影行のタップ: 勘定科目へ遷移し、その投資科目の編集シートを開く。 */
-  onOpenAccount: (accountId: string) => void;
   filter: JournalFilter | null;
   period: ReportPeriod;
   /** タイムラインなど外部画面から開く保存仕訳。種類ごとの既存編集シートへ解決する。 */
@@ -458,15 +455,13 @@ export function Journal({
                   ? () => onOpenAllocations({ ruleId: plan.ruleId })
                   : plan.kind === 'item'
                     ? () => onOpenAllocations({ itemId: plan.itemId })
-                    : plan.kind === 'account'
-                      ? () => onOpenAccount(plan.accountId)
-                      : plan.kind === 'adjustment'
-                        ? adjustmentPin
-                          ? () => setEditingAdjustment(adjustmentPin)
-                          : undefined
-                        : plan.kind === 'opening'
-                          ? () => setEditingOpening(entry)
-                          : () => onEditEntry(entry);
+                    : plan.kind === 'adjustment'
+                      ? adjustmentPin
+                        ? () => setEditingAdjustment(adjustmentPin)
+                        : undefined
+                      : plan.kind === 'opening'
+                        ? () => setEditingOpening(entry)
+                        : () => onEditEntry(entry);
             // バッジは摘要の後ろ（v13.1 その6・実ユーズ指摘）: 行の読み出しは摘要から始まり、
             // バッジ・ボタンは摘要と金額の間に並ぶ（「月割り台帳」の種別タグと同位置）。
             const title = (

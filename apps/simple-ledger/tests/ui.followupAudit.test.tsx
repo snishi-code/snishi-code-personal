@@ -50,7 +50,6 @@ function dashboard(period: ReportPeriod) {
         onNavigate={() => undefined}
         onOpenJournal={() => undefined}
         onOpenAllocations={() => undefined}
-        onOpenAccount={() => undefined}
         onOpenEntry={() => undefined}
       />
     </Providers>

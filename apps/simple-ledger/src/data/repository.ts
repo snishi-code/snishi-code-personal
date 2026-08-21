@@ -83,7 +83,6 @@ import {
   isAdjustableAccountType,
 } from '../domain/adjustment';
 import { accountBalance, filterByDateRange } from '../domain/accounting';
-import { ANNUAL_RETURN_BP_MAX, ANNUAL_RETURN_BP_MIN } from '../domain/investmentProjection';
 import {
   adjustmentPinExpectedBalanceForLedger,
   reportEntriesForAsOf,
@@ -685,38 +684,6 @@ async function upsertAccountUnlocked(input: Account, opts?: AccountSaveOptions):
   ) {
     throw new LedgerError('error.account.roleTypeMismatch');
   }
-  // 投資の利回り投影（想定利回り + 計上先・§D）の保存境界（fail-closed）:
-  //  - investment-asset 以外には保存しない。片方だけの設定は拒否（セットで意味を持つ）。
-  //  - 計上先は自分自身不可。参照は soft reference（accountRefs の使用中判定に入れない）
-  //    なので、**値を設定/変更するときだけ**存在と role（income-category）を検証する。
-  //    参照先が後から消えても既存科目の編集（改名等）は保存できる（投影エンジンが
-  //    fail-closed に生成を止める＝§A の「暗黙値で編集不能」を繰り返さない）。
-  if ((account.annualReturnBp !== undefined) !== (account.projectionAccountId !== undefined)) {
-    throw new LedgerError('error.account.projectionPair');
-  }
-  if (account.annualReturnBp !== undefined) {
-    if (account.role !== 'investment-asset') {
-      throw new LedgerError('error.account.returnOnlyInvestment');
-    }
-    if (
-      !Number.isInteger(account.annualReturnBp) ||
-      account.annualReturnBp < ANNUAL_RETURN_BP_MIN ||
-      account.annualReturnBp > ANNUAL_RETURN_BP_MAX
-    ) {
-      throw new LedgerError('error.account.returnInvalid');
-    }
-  }
-  if (account.projectionAccountId !== undefined) {
-    if (account.projectionAccountId === account.id) {
-      throw new LedgerError('error.account.projectionAccountInvalid');
-    }
-    if (account.projectionAccountId !== prev?.projectionAccountId) {
-      const target = accounts.find((a) => a.id === account.projectionAccountId);
-      if (!target || target.role !== 'income-category') {
-        throw new LedgerError('error.account.projectionAccountInvalid');
-      }
-    }
-  }
   // 端点の整合（明示 startDate > endDate の拒否）は accountSchema の superRefine が担う。
   // startDate 未設定は過去へ開いた線分なので、endDate 単独でも常に適法（§A 案1）。
   const parsedAccount = accountSchema.safeParse(account);
@@ -761,17 +728,11 @@ async function upsertAccountUnlocked(input: Account, opts?: AccountSaveOptions):
   // （保存仕訳だけで判定すると、月割りの行き先科目など「画面では残高がある」科目を
   // アーカイブできてしまう・監査 P1-2）。残高があるなら先に振替（archiveAccount の振替導線）。
   // アーカイブ解除はチェック不要。
-  // 発火条件はアーカイブ化・終了日変更に加えて**投影条件（想定利回り・計上先）の変更**も含む
-  // （監査 F: アーカイブ後に annualReturnBp だけ変えると導出益が変わり、終了残高 0 の
-  // 不変条件を成功保存で壊せた）。判定は post-state（保存後の姿の accounts）で行う
-  // （pre-state だと変更後の投影条件・終了日が導出に効かない）。
-  const projectionChanged =
-    prev !== undefined &&
-    (prev.annualReturnBp !== account.annualReturnBp ||
-      prev.projectionAccountId !== account.projectionAccountId);
+  // 判定は post-state（保存後の姿の accounts）で行う
+  // （pre-state だと変更後の終了日が導出に効かない）。
   if (
     account.archived &&
-    (!prev?.archived || prev.endDate !== account.endDate || projectionChanged) &&
+    (!prev?.archived || prev.endDate !== account.endDate) &&
     (account.type === 'asset' || account.type === 'liability')
   ) {
     const asOf = account.endDate ?? todayLocal();
@@ -838,11 +799,6 @@ async function deleteAccountUnlocked(id: string): Promise<void> {
   if (accounts.find((a) => a.id === id)?.role === 'continuing-cost-asset') {
     throw new LedgerError('error.account.deleteInUse');
   }
-  // 投影計上先（soft reference）は使用中判定に乗らないが、消すと参照元の導出益ごと消える
-  // （投影エンジンが fail-closed に生成を止める）。その益込みで終了点残高 0 を成立させている
-  // 終了済み投資科目があると、削除の成功直後に残高が非ゼロへ変わる = 不変条件の逆伝播破り
-  // （監査 G）。post-state（この科目を除いた世界）で依存科目を再検証し、壊れるなら拒否する。
-  assertProjectionDependentsIntact(accounts, refs, id, (a) => (a.id === id ? false : a));
   const ts = nowIso();
   const cleared = accounts
     .filter((a) => a.repaymentAccountId === id)
@@ -856,41 +812,6 @@ async function deleteAccountUnlocked(id: string): Promise<void> {
     for (const a of cleared) store.put(a);
     store.delete(id);
   });
-}
-
-/**
- * 投影計上先（projectionAccountId）に id を指す**終了済み投資科目**の終了点残高が、
- * post-state（transform を適用した後の科目集合）でも 0 のままかを検証する（監査 G）。
- * 壊れるなら操作全体を拒否する（依存科目名を理由に載せる）。
- */
-function assertProjectionDependentsIntact(
-  accounts: Account[],
-  refs: AccountRefCollections,
-  id: string,
-  transform: (a: Account) => Account | false,
-): void {
-  const dependents = accounts.filter(
-    (a) => a.projectionAccountId === id && a.archived && a.type === 'asset',
-  );
-  if (dependents.length === 0) return;
-  const postAccounts: Account[] = [];
-  for (const a of accounts) {
-    const next = transform(a);
-    if (next !== false) postAccounts.push(next);
-  }
-  const violations = accountEndingBalanceViolations(
-    {
-      accounts: postAccounts,
-      journalEntries: refs.entries,
-      monthlyCostItems: refs.monthlyCostItems,
-      recurringRules: refs.recurringRules,
-    },
-    new Set(dependents.map((a) => a.id)),
-  );
-  const first = violations[0];
-  if (first !== undefined) {
-    throw new LedgerError('error.account.projectionDependents', { name: first.account.name });
-  }
 }
 
 /**
@@ -961,14 +882,6 @@ async function archiveAccountUnlocked(id: string, transferEntry?: JournalEntry):
       recurringRules,
     },
     new Set([candidate.id, ...(savable?.lines.map((line) => line.accountId) ?? [])]),
-  );
-  // 投影計上先の終了（endDate 付与）も削除と同様に逆伝播し得る: 計上先の存在期間外の
-  // 投影行が消え、その益込みで 0 だった終了済み投資科目の残高が変わる（監査 G）。
-  assertProjectionDependentsIntact(
-    accounts,
-    { entries: withTransfer, monthlyCostItems, recurringRules },
-    id,
-    (a) => (a.id === candidate.id ? candidate : a),
   );
   await writeWithRevision([STORE.accounts, STORE.journalEntries], (t) => {
     if (savable) t.objectStore(STORE.journalEntries).put(savable);

@@ -18,20 +18,14 @@
  *  - 刻み日と端数は**月割り台帳と同じ規約**（monthlyCost.ts の allocationCuts）。
  *    1 ヶ月未満（同日通過なし）は p_i 当日に全額 1 本。
  *  - 借貸の向きは buildAdjustmentEntry と同じ（counterpartRole の符号規約）。
- *  - 計上先は pin が記録した相手科目（残高調整費 / 収入）。**投資科目だけ**は利回り投影と
- *    同じ計上先（projectionAccountId）へ寄せる（評価損益は調整費ではなく投資の損益）。
+ *  - 計上先は pin が記録した相手科目（残高調整費 / 収入）。
  *
  * 不変条件: **各 pin の日以降の残高は、按分前（stored の補正をそのまま集計した世界）と
  * 完全に一致する**。スライスは区間内（p_i 以前）にしか置かれず、合計は必ず G_i になる。
- *
- * v13.4 ②: **最後の pin は投資の利回り導出の起点でもある**（`lastAdjustmentAnchors`）。
- * pin より手前の区間は按分が支配し、月次複利はその後ろだけに効く。だから利回りをいつ
- * 変えても pin 区間の過去は 1 円も動かない。
  */
 import { isDebitNormal, naturalDelta } from './accounting';
 import { isAdjustableAccountType } from './adjustment';
 import { addMonthsToDate, monthOf, monthsBetween } from './allocation';
-import { investmentReturnDeclaration } from './investmentProjection';
 import { allocationCuts, type AllocationCut } from './monthlyCost';
 import { CATCH_UP_HARD_CAP_MONTHS as MONTHLY_AMOUNTS_HARD_CAP } from './recurringLimits';
 import { assertSafeAmount } from './safeSum';
@@ -55,20 +49,6 @@ export interface AdjustmentSpreadResult {
    * **stored のまま集計へ戻す**: 除外だけして置き換えないと差額が黙って消える。
    */
   unspread: JournalEntry[];
-}
-
-/**
- * 1 つの pin の計上先。既定は pin が記録した相手科目（残高調整費 / 収入）。
- * 投資科目（想定利回りと計上先を宣言済み）だけは利回り導出と同じ計上先へ寄せる。
- * 宣言が無効（計上先が消えた・収入カテゴリでない・自分自身）なら既定へ fail-soft。
- * 宣言の有効性判定は investmentProjection.ts が単一正本（ここで再実装しない）。
- */
-function counterpartFor(
-  target: Account,
-  byId: ReadonlyMap<string, Account>,
-  fallback: string,
-): string {
-  return investmentReturnDeclaration(target, byId)?.projectionAccountId ?? fallback;
 }
 
 /** その仕訳が対象科目にもたらす自然符号の増減（複数行あっても合算する）。 */
@@ -98,13 +78,6 @@ function comparePins(a: JournalEntry, b: JournalEntry): number {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
-/** 宣言が確定させた 1 点。「この日、この科目の実残高は actualBalance だった」。 */
-export interface AdjustmentAnchor {
-  date: string;
-  /** 自然符号の実残高（借方正規なら借方が正）。 */
-  actualBalance: number;
-}
-
 interface CollectedPins {
   /** 科目 ID → その科目の pin（走査順 = comparePins）。 */
   pinsByAccount: Map<string, JournalEntry[]>;
@@ -118,14 +91,13 @@ interface CollectedPins {
 
 /**
  * **pin の読み方の単一正本**（対象科目 = metadata.adjustment.accountId・順序 = comparePins）。
- * 按分（adjustmentSpread）と投資の複利起点（lastAdjustmentAnchors）が同じ解釈を共有する。
  * 仕訳の行から対象科目を推測しない——metadata が正本。
  *
  * 按分できる pin の条件は**完全整合性**（v13.8 監査 H）:
  *  1. 対象科目が引けて、補正できる type であること
- *  2. 実効計上先（投資は投影計上先・それ以外は記録された相手科目）が引けて、
- *     対象科目と別であること——欠けたまま按分すると、存在しない科目へのスライスや
- *     自己相殺スキップで pin の残高保証が黙って壊れる
+ *  2. 実効計上先（= 記録された相手科目）が引けて、対象科目と別であること——
+ *     欠けたまま按分すると、存在しない科目へのスライスや自己相殺スキップで
+ *     pin の残高保証が黙って壊れる
  * どれか欠ける pin は unspread（stored のまま集計へ戻す = 復旧表示）。
  */
 function collectPins(
@@ -142,15 +114,12 @@ function collectPins(
       unspread.push(pin);
       continue;
     }
-    // 実効計上先 = counterpartFor と同じ解決（投資の宣言が有効なら投影計上先へ寄る。
-    // 宣言の無い科目は記録された相手科目そのもの）。存在しない・対象と同一なら按分不能。
-    const declared = investmentReturnDeclaration(target, byId)?.projectionAccountId;
+    // 実効計上先 = pin が記録した相手科目そのもの。存在しない・対象と同一なら按分不能。
     const storedCounterpartId = pin.metadata?.adjustment?.counterpartAccountId;
     const effectiveCounterpartId =
-      declared ??
-      (storedCounterpartId !== undefined && byId.has(storedCounterpartId)
+      storedCounterpartId !== undefined && byId.has(storedCounterpartId)
         ? storedCounterpartId
-        : undefined);
+        : undefined;
     if (effectiveCounterpartId === undefined || effectiveCounterpartId === accountId) {
       unspread.push(pin);
       continue;
@@ -161,28 +130,6 @@ function collectPins(
   }
   for (const pins of pinsByAccount.values()) pins.sort(comparePins);
   return { pinsByAccount, unspread };
-}
-
-/**
- * 科目ごとの**最後の宣言**。その日の残高は按分によって actualBalance に確定する。
- *
- * 投資の利回り導出はここを複利の起点にする（`investmentProjectionResult`）。
- * 最後の pin より手前は按分が支配する区間なので、利回りは 1 円も関与しない。
- */
-export function lastAdjustmentAnchors(
-  accounts: readonly Account[],
-  adjustments: readonly JournalEntry[],
-): Map<string, AdjustmentAnchor> {
-  const anchors = new Map<string, AdjustmentAnchor>();
-  if (adjustments.length === 0) return anchors;
-  for (const [accountId, pins] of collectPins(accounts, adjustments).pinsByAccount) {
-    const last = pins.at(-1)!;
-    anchors.set(accountId, {
-      date: last.date,
-      actualBalance: last.metadata!.adjustment!.actualBalance,
-    });
-  }
-  return anchors;
 }
 
 /** 科目に触れる集計対象仕訳（実効開始 anchor_0 と区間内フローの走査に使う）。 */
@@ -199,8 +146,7 @@ interface PinWalkStep {
   anchor: string;
   /**
    * **この pin が存在する世界での pin 直前残高**（= 非補正フロー + それ以前の pin の
-   * スライス合計）。投資の複利はこの値に入らない——pin を置いた瞬間、その区間の複利は
-   * 按分に置き換わるため（利回り導出の起点は最後の pin）。
+   * スライス合計）。
    */
   expected: number;
   /** 差額 G = actualBalance − expected。0 なら 1 行も作らない。 */
@@ -270,11 +216,7 @@ const PROBE_SORT_KEY = '9999-12-31T23:59:59.999Z';
  * 見るための単一正本。`adjustmentSpread` の走査そのものを通すので、シートが見せた差分は
  * 必ず按分されるスライスの合計（G）と一致する。
  *
- * 投資科目で従来値（`accountBalance` に利回り導出を含めた残高）とずれるのが本題:
- * pin を置くとその区間の月次複利は按分に置き換わるので、複利込みの残高は「pin を置いた
- * あとの世界」には存在しない。非投資科目（複利が 1 円も無い科目）では従来値と一致する。
- *
- * `baseEntries` は**補正を除いた**集計対象行（利回り導出も含めない）。
+ * `baseEntries` は**補正を除いた**集計対象行。
  * `adjustments` に予定 pin 自身を含めない（編集時は呼び出し側が除いて渡す）。
  * 対象科目が引けない / 補正できない type なら 0（保存境界が別途 fail-closed に弾く）。
  */
@@ -351,11 +293,8 @@ export function adjustmentSpread(
 
       // 向きは buildAdjustmentEntry と同じ規約（借方正規なら gap>0 で対象が借方）。
       const targetOnDebit = isDebitNormal(account.type) ? gap > 0 : gap < 0;
-      const counterpartAccountId = counterpartFor(
-        account,
-        byId,
-        pin.metadata!.adjustment!.counterpartAccountId,
-      );
+      // 実効計上先 = pin が記録した相手科目（collectPins が存在・非同一を検証済み）。
+      const counterpartAccountId = pin.metadata!.adjustment!.counterpartAccountId;
       const debitAccountId = targetOnDebit ? accountId : counterpartAccountId;
       const creditAccountId = targetOnDebit ? counterpartAccountId : accountId;
       // 対象と計上先が同じ科目になる破損データでは行を作らない（自己相殺の 2 行は無意味）。

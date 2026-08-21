@@ -34,7 +34,6 @@ import {
 } from './accountLifetime';
 import { accountEndingBalanceViolations } from './accountEnding';
 import { isValidIsoDate, isValidIsoMonth, MAX_LEDGER_DATE, MIN_LEDGER_DATE } from './calendar';
-import { ANNUAL_RETURN_BP_MAX, ANNUAL_RETURN_BP_MIN } from './investmentProjection';
 import { CATCH_UP_HARD_CAP_MONTHS, clampDayToMonth, isRecurringPostableRole } from './recurring';
 import { parseRuleEntryId, parseRuleItemId } from './recurringIds';
 
@@ -94,17 +93,6 @@ export const accountSchema = z
     // 返済設定（負債科目のみ。相互参照の整合はパッケージ superRefine で確認する）。
     repaymentAccountId: z.string().min(1).optional(),
     repaymentDay: z.number().int().min(1).max(31).optional(),
-    // 想定利回り（投資科目のみ・年率 bp 整数）と投影の計上先。必ずセットで持つ
-    // （superRefine）。計上先は soft reference: 参照先の存在・role はここで検証しない
-    // （参照先が消えた後の export を取り込めなくしない。投影エンジンが fail-closed に生成を止める）。
-    annualReturnBp: z
-      .number()
-      .int()
-      .min(ANNUAL_RETURN_BP_MIN)
-      .max(ANNUAL_RETURN_BP_MAX)
-      .finite()
-      .optional(),
-    projectionAccountId: z.string().min(1).optional(),
     // 箱内の表示順（並び替え機能）。
     sortIndex: z.number().int().min(0).optional(),
     createdAt: isoDateTime,
@@ -140,28 +128,6 @@ export const accountSchema = z
         code: z.ZodIssueCode.custom,
         message: '終了日を持つ勘定科目はアーカイブ状態である必要があります。',
         path: ['archived'],
-      });
-    }
-    // 想定利回り + 投影の計上先: investment-asset のみ・必ずセット・自分自身不可（§D）。
-    if ((a.annualReturnBp === undefined) !== (a.projectionAccountId === undefined)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: '想定利回りと投影の計上先はセットで設定する必要があります。',
-        path: ['annualReturnBp'],
-      });
-    }
-    if (a.annualReturnBp !== undefined && a.role !== 'investment-asset') {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: '想定利回りは投資科目(investment-asset)にのみ設定できます。',
-        path: ['annualReturnBp'],
-      });
-    }
-    if (a.projectionAccountId !== undefined && a.projectionAccountId === a.id) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: '投影の計上先に自分自身は指定できません。',
-        path: ['projectionAccountId'],
       });
     }
   })
@@ -347,7 +313,7 @@ const DERIVED_ONLY_METADATA_KEYS = [
 
 /**
  * 保存できる仕訳メタ = entryMetadataSchema + **導出専用メタの明示拒否**（v13.8 監査 機構3）。
- * 未知キーの strip（自己修復）に任せると、導出行（按分スライス・利回り投影・月割り行）が
+ * 未知キーの strip（自己修復）に任せると、導出行（按分スライス・月割り行・旧利回り投影）が
  * **実仕訳として**取り込まれて二重計上になる。rec- / recurringRuleId の明示拒否
  * （パッケージ superRefine）と同じ扱いに揃える。strip は superRefine の後に走るため、
  * 生のキーを先に見る record 段を挟む。

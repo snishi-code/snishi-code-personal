@@ -4,9 +4,8 @@
  * 補正シートが見せる「理論残高 / 差分」と repository が保存する expectedBalance は
  * **同じヘルパ**（adjustmentPinExpectedBalanceForLedger → adjustmentSpread の走査）を通る。
  * ここで固定するのは 2 つ:
- *  1. 投資科目（利回り宣言あり）で **差分 = 実際に按分されるスライスの合計**。
- *     pin を置くと区間の月次複利は按分に置き換わるので、理論残高に複利は入らない。
- *  2. 非投資科目では**従来値**（その日までの導出残高）と一致する = 回帰。
+ *  1. **差分 = 実際に按分されるスライスの合計**（投資科目を含む全科目）。
+ *  2. 従来値（その日までの導出残高）と一致する = 回帰。
  */
 import { describe, expect, it } from 'vitest';
 import './setup';
@@ -38,10 +37,7 @@ const ACCOUNTS: Account[] = [
   account('salary', 'revenue', 'income-category'),
   account('adj-exp', 'expense', 'system-adjustment'),
   account('adj-rev', 'revenue', 'system-adjustment'),
-  account('invest', 'asset', 'investment-asset', {
-    annualReturnBp: 1200,
-    projectionAccountId: 'gain',
-  }),
+  account('invest', 'asset', 'investment-asset'),
   account('gain', 'revenue', 'income-category'),
 ];
 
@@ -122,11 +118,10 @@ function sliceTotalFor(
 describe('投資科目: シートの差分 = 実際に按分されるスライスの合計', () => {
   const opening = flow('open', '2026-01-10', 'invest', 'equity', 100_000);
 
-  it('理論残高は区間の複利を含まない（pin を置くと複利は按分へ置き換わる）', () => {
+  it('理論残高は非補正フローそのもの（利回りの導出益は存在しない・v13.17）', () => {
     const src = source([opening]);
-    // pin が無い世界の残高は複利込みで元本より大きい。
-    expect(legacyExpected(src, 'invest', 'asset', '2027-01-10')).toBeGreaterThan(100_000);
-    // pin を置いたあとの世界の pin 直前残高 = 非補正フローそのもの。
+    // 投資科目でも従来値（導出残高）と理論残高が一致する（複利の導出は撤去済み）。
+    expect(legacyExpected(src, 'invest', 'asset', '2027-01-10')).toBe(100_000);
     expect(
       adjustmentPinExpectedBalanceForLedger(src, { accountId: 'invest', date: '2027-01-10' }),
     ).toBe(100_000);
@@ -148,7 +143,7 @@ describe('投資科目: シートの差分 = 実際に按分されるスライ�
     expect(accountBalance('invest', 'asset', reportEntriesForAsOf(saved, date))).toBe(actual);
   });
 
-  it('2 本目の pin も同じ（1 本目の宣言を織り込み、複利は挟まらない）', () => {
+  it('2 本目の pin も同じ（1 本目の宣言を織り込む）', () => {
     const first = pin({
       id: 'p1',
       accountId: 'invest',

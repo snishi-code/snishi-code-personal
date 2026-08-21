@@ -109,7 +109,6 @@ function renderTimeline(options: { initialZoom?: TimelineZoom; initialLens?: Tim
         onNavigate={() => undefined}
         onOpenEntry={() => undefined}
         onOpenAllocations={() => undefined}
-        onOpenAccount={() => undefined}
       />
     );
   }

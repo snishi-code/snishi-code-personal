@@ -48,7 +48,6 @@ function DashboardTap({
       onNavigate={() => undefined}
       onOpenJournal={() => undefined}
       onOpenAllocations={onOpenAllocations as never}
-      onOpenAccount={() => undefined}
       onOpenEntry={() => undefined}
     />
   ) : null;
@@ -65,7 +64,6 @@ function DashboardWhenReady({ period }: { period: ReportPeriod }) {
       onNavigate={() => undefined}
       onOpenJournal={() => undefined}
       onOpenAllocations={() => undefined}
-      onOpenAccount={() => undefined}
       onOpenEntry={() => undefined}
     />
   ) : null;

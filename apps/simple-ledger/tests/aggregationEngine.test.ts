@@ -93,12 +93,8 @@ function item(
 
 const cash = account('cash', '現金', 'asset', 'daily-asset');
 const bank = account('bank', '銀行', 'asset', 'daily-asset');
-// 投資 + 利回り投影（今日より未来の月初へ評価益の仮想仕訳が生まれる）。
-const invest: Account = {
-  ...account('invest', '投資', 'asset', 'investment-asset'),
-  annualReturnBp: 800,
-  projectionAccountId: 'gain',
-};
+// 投資（利回り投影は v13.17 で撤去。実仕訳のみで動く投資科目として残す）。
+const invest: Account = account('invest', '投資', 'asset', 'investment-asset');
 const gain = account('gain', '投資益', 'revenue', 'income-category');
 const ledger = account(
   CONTINUOUS_COST_LEDGER_ACCOUNT_ID,
@@ -158,7 +154,7 @@ function buildFixtureSource(): {
   const journalEntries: JournalEntry[] = [
     entry('opening-cash', '2019-12-31', 'cash', 'capital', 1_000_000, { kind: 'opening' }),
     entry('opening-bank', '2019-12-31', 'bank', 'capital', 3_000_000, { kind: 'opening' }),
-    // 投資: 過去の元本 + 今日より未来の積立（利回り投影が織り込む）。
+    // 投資: 過去の元本 + 今日より未来の積立（実仕訳のみ）。
     entry('opening-invest', '2019-12-31', 'invest', 'capital', 2_000_000, { kind: 'opening' }),
     entry('invest-deposit-future', '2026-09-10', 'invest', 'bank', 300_000),
   ];
@@ -251,11 +247,11 @@ function buildFixtureSource(): {
 }
 
 const fixtureSource = buildFixtureSource();
-// 表示用の導出込み仕訳 = 実仕訳 + 月割り + ルール投影 + 投資利回り投影（displayEntries）。
+// 表示用の導出込み仕訳 = 実仕訳 + 月割り + ルール投影（displayEntries）。
 const expandedEntries = displayEntriesForAsOf(fixtureSource, FIXTURE_AS_OF);
 
 describe('恒等式: Δ純資産 = 収支 + equity自然増減', () => {
-  it('生成データが実データ規模で、導出行（月割り・ルール導出・利回り投影）を含む', () => {
+  it('生成データが実データ規模で、導出行（月割り・ルール導出）を含む', () => {
     expect(fixtureSource.journalEntries.length).toBeGreaterThan(3_000);
     expect(expandedEntries.length).toBeGreaterThan(fixtureSource.journalEntries.length);
     expect(expandedEntries.some((e) => e.id.startsWith('cc-alloc-'))).toBe(true);
@@ -263,7 +259,11 @@ describe('恒等式: Δ純資産 = 収支 + equity自然増減', () => {
     expect(
       expandedEntries.some((e) => e.id.startsWith('rec-') && e.metadata?.virtual === true),
     ).toBe(true);
-    expect(expandedEntries.some((e) => e.id.startsWith('inv-proj-'))).toBe(true);
+    // 利回り投影（inv-proj-）は撤去済み: どの断面にも現れない（受け入れ基準 1）。
+    expect(expandedEntries.some((e) => e.id.startsWith('inv-proj-'))).toBe(false);
+    expect(expandedEntries.some((e) => e.metadata?.investmentProjectionOf !== undefined)).toBe(
+      false,
+    );
     expect(expandedEntries.some((e) => e.kind === 'opening')).toBe(true);
   });
 

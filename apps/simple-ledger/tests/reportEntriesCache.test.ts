@@ -2,13 +2,13 @@
  * 導出キャッシュ（v13.5 B）。
  *
  * ledger が変わったときだけ全地平（2100）まで 1 回導出し、断面（asOf）の切り替えは
- * 日付昇順配列の二分探索と打ち切り診断のフィルタだけで済ませる。根拠は過去断面の決定性
+ * 日付昇順配列の二分探索だけで済ませる。根拠は過去断面の決定性
  * （asOf を動かしても過去の値は変わらない）。ここで固定するのは 1 点に尽きる:
  *
  *   **切り出した断面 === その asOf で直接導出した結果**（`…ForAsOfUncached`）。
  *
  * これが崩れたら「速いが違う数字」になるので、複数の ledger × 多数の asOf で総当たりする。
- * 加えて切り出しの 2 系統（二分探索の境界・truncations のフィルタ）を単体で固定する。
+ * 加えて二分探索の境界を単体で固定する。
  */
 import { describe, expect, it } from 'vitest';
 import './setup';
@@ -105,10 +105,7 @@ const ACCOUNTS: Account[] = [
   account('food', '食費', 'expense', 'expense-category'),
   account('fixed', '固定費', 'expense', 'expense-category'),
   account('salary', '給与', 'revenue', 'income-category'),
-  account('invest', '投資', 'asset', 'investment-asset', {
-    annualReturnBp: 1200,
-    projectionAccountId: 'gain',
-  }),
+  account('invest', '投資', 'asset', 'investment-asset'),
   account('gain', '投資益', 'revenue', 'income-category'),
   account('adj-exp', '残高調整費', 'expense', 'system-adjustment'),
   account('adj-rev', '残高調整収入', 'revenue', 'system-adjustment'),
@@ -154,7 +151,7 @@ const RULE: RecurringRule = {
   updatedAt: TS,
 };
 
-/** 実仕訳・継続コスト・ルール導出・按分スライス・利回りの全部が乗った台帳。 */
+/** 実仕訳・継続コスト・ルール導出・按分スライスの全部が乗った台帳。 */
 function fullSource(): Source {
   return {
     accounts: ACCOUNTS,
@@ -199,10 +196,12 @@ function plainSource(): Source {
   };
 }
 
-/** 桁あふれで利回り導出が打ち切られる台帳（刻みは 20 日 = 月半ばの断面を作れる）。 */
-function truncatingSource(): Source {
+/**
+ * 巨大な残高の台帳（安全整数域ぎりぎり）。導出キャッシュが金額規模に依存しないことの確認用。
+ */
+function hugeSource(): Source {
   return {
-    accounts: ACCOUNTS.map((a) => (a.id === 'invest' ? { ...a, annualReturnBp: 100_000 } : a)),
+    accounts: ACCOUNTS,
     journalEntries: entriesForTotal(
       'huge-opening',
       '2026-01-20',
@@ -220,20 +219,6 @@ function truncatingSource(): Source {
 function normalize(entries: JournalEntry[]): JournalEntry[] {
   return [...entries].sort((a, b) =>
     a.date !== b.date ? (a.date < b.date ? -1 : 1) : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
-  );
-}
-
-function normalizeTruncations<T extends { accountId: string; month: string }>(list: T[]): T[] {
-  return [...list].sort((a, b) =>
-    a.accountId !== b.accountId
-      ? a.accountId < b.accountId
-        ? -1
-        : 1
-      : a.month < b.month
-        ? -1
-        : a.month > b.month
-          ? 1
-          : 0,
   );
 }
 
@@ -261,9 +246,9 @@ describe('導出キャッシュ: 切り出し === 直接導出', () => {
   // （組み立て直すと補正の updatedAt が実時刻で変わり、比較が中身以外で落ちる）。
   const sources: [string, Source, number][] = [
     ['実仕訳だけ', plainSource(), 60],
-    ['補正なし（継続コスト + ルール + 利回り）', noAdjustmentSource(), 60],
+    ['補正なし（継続コスト + ルール）', noAdjustmentSource(), 60],
     ['全部乗せ（未来の pin つき）', fullSource(), 60],
-    ['桁あふれで打ち切る', truncatingSource(), 12],
+    ['巨大残高', hugeSource(), 12],
   ];
 
   for (const [name, source, randomCount] of sources) {
@@ -281,10 +266,6 @@ describe('導出キャッシュ: 切り出し === 直接導出', () => {
         const direct = reportEntriesResultForAsOfUncached(source, asOf);
         const sliced = reportEntriesResultForAsOf(source, asOf);
         expect(normalize(sliced.entries), `entries @ ${asOf}`).toEqual(normalize(direct.entries));
-        expect(
-          normalizeTruncations(sliced.investmentProjectionTruncations),
-          `truncations @ ${asOf}`,
-        ).toEqual(normalizeTruncations(direct.investmentProjectionTruncations));
       }
     }, 30_000);
   }
@@ -378,7 +359,7 @@ describe('導出キャッシュ: 二分探索の境界', () => {
     expect(reportEntriesResultForAsOf(source, '2099-12-31').entries).toHaveLength(4);
   });
 
-  it('導出行（月割り・ルール・利回り）も刻みの当日から現れる', () => {
+  it('導出行（月割り・ルール）も刻みの当日から現れる', () => {
     const src = noAdjustmentSource();
     // 年払いの最初の刻み = 購入日（2026-01-10）の同日通過 = 2026-02-10。
     const before = reportEntriesResultForAsOf(src, '2026-02-09').entries;
@@ -386,82 +367,6 @@ describe('導出キャッシュ: 二分探索の境界', () => {
     expect(before.some((e) => e.date === '2026-02-10')).toBe(false);
     expect(on.filter((e) => e.date === '2026-02-10')).not.toHaveLength(0);
     expect(on).toHaveLength(before.length + on.filter((e) => e.date === '2026-02-10').length);
-  });
-});
-
-describe('導出キャッシュ: truncations のフィルタ', () => {
-  const source = truncatingSource();
-  // 起点 2026-01-20 の同日刻み: 2026-02-20 に 1 本生成し、2026-03-20 で桁あふれ。
-  const truncationDate = '2026-03-20';
-
-  it('打ち切りの**日**より前の断面では名乗らない（月で切ると月半ばで嘘になる）', () => {
-    expect(
-      reportEntriesResultForAsOf(source, '2026-02-28').investmentProjectionTruncations,
-    ).toEqual([]);
-    expect(
-      reportEntriesResultForAsOf(source, '2026-03-19').investmentProjectionTruncations,
-    ).toEqual([]);
-  });
-
-  it('打ち切りの日に達したら名乗る（以降の断面でも消えない）', () => {
-    for (const asOf of [truncationDate, '2026-12-31', '2100-12-31']) {
-      expect(reportEntriesResultForAsOf(source, asOf).investmentProjectionTruncations).toEqual([
-        { accountId: 'invest', month: '2026-03', date: truncationDate, at: 'step' },
-      ]);
-    }
-  });
-
-  /*
-   * 刻みへ入る前（起点残高の畳み込み）で諦める打ち切りは、asOf ではなく**展開地平**で
-   * 見え始める: 未来の補正があると導出はそこまで広がるので、その科目に触れる行が asOf の
-   * 先にあっても直接導出は打ち切りを名乗る。asOf だけで切ると切り出しが 1 件足りなくなる。
-   */
-  it('起点の畳み込みで諦めた打ち切りは、補正で伸びた地平の側で判定する', () => {
-    const openingDate = '2030-01-15';
-    // 1 日ぶんの合算だけで安全整数域（2^53-1 ≈ 9.007e15）を出る量を積む。
-    const overflow: JournalEntry[] = Array.from({ length: 9_010 }, (_, i) =>
-      entry(`over-${i}`, openingDate, 'invest', 'capital', MAX_AMOUNT_MINOR, 'opening'),
-    );
-    const src: Source = {
-      accounts: ACCOUNTS,
-      journalEntries: [
-        ...overflow,
-        // **別科目**の未来の pin。これで展開地平が asOf より先へ伸びる。
-        pin({ id: 'pin-cash-future', date: '2031-06-30', actual: 50_000, accountId: 'cash' }),
-      ],
-      monthlyCostItems: [],
-      recurringRules: [],
-    };
-
-    const expected = [{ accountId: 'invest', month: '2030-01', date: openingDate, at: 'opening' }];
-    for (const asOf of ['2026-12-31', '2030-01-14', openingDate, '2031-12-31']) {
-      const sliced = reportEntriesResultForAsOf(src, asOf);
-      expect(sliced.investmentProjectionTruncations, `@ ${asOf}`).toEqual(expected);
-      expect(sliced.investmentProjectionTruncations, `@ ${asOf}`).toEqual(
-        reportEntriesResultForAsOfUncached(src, asOf).investmentProjectionTruncations,
-      );
-    }
-
-    // 補正が無ければ地平は asOf のまま = その科目に触れる行がまだ 1 本も無い断面では
-    // 打ち切りも起きていない（全地平のキャッシュに載っていても見せない）。
-    const noPin: Source = { ...src, journalEntries: overflow };
-    expect(reportEntriesResultForAsOf(noPin, '2029-12-31').investmentProjectionTruncations).toEqual(
-      [],
-    );
-    expect(
-      reportEntriesResultForAsOfUncached(noPin, '2029-12-31').investmentProjectionTruncations,
-    ).toEqual([]);
-    expect(reportEntriesResultForAsOf(noPin, openingDate).investmentProjectionTruncations).toEqual(
-      expected,
-    );
-  });
-
-  it('直接導出と同じ断面で現れる（境界の総当たり）', () => {
-    for (const asOf of ['2026-03-18', '2026-03-19', truncationDate, '2026-03-21']) {
-      expect(reportEntriesResultForAsOf(source, asOf).investmentProjectionTruncations).toEqual(
-        reportEntriesResultForAsOfUncached(source, asOf).investmentProjectionTruncations,
-      );
-    }
   });
 });
 

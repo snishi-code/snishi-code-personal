@@ -1457,6 +1457,55 @@ describe('accountSchema の movable（「自由に動かせる」フラグ）正
   });
 });
 
+describe('旧・投資投影フィールドの strip（v13.17 撤去・自己修復）', () => {
+  const invest = {
+    id: 'nisa',
+    name: 'NISA',
+    type: 'asset',
+    role: 'investment-asset',
+    archived: false,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+
+  it('annualReturnBp / projectionAccountId 残骸つき旧 JSON は strip されて通り、出力に残らない', () => {
+    const parsed = accountSchema.safeParse({
+      ...invest,
+      annualReturnBp: 300,
+      projectionAccountId: 'gain',
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect('annualReturnBp' in parsed.data).toBe(false);
+      expect('projectionAccountId' in parsed.data).toBe(false);
+    }
+  });
+
+  it('package（import 経路）を通しても同じ（変異検査: strip を外すと残骸が残る）', () => {
+    const pkg = {
+      appId: APP_ID,
+      schemaVersion: SCHEMA_VERSION,
+      ledgerId: 'ledger',
+      exportedAt: '2026-06-01T00:00:00.000Z',
+      deviceId: 'd',
+      revision: 0,
+      accounts: [{ ...invest, annualReturnBp: 1200, projectionAccountId: 'gone' }],
+      journalEntries: [],
+      tags: [],
+      monthlyCostItems: [],
+      recurringRules: [],
+      settings: { ledgerName: '家計簿', currency: 'JPY', displayFractionDigits: 0 },
+    };
+    const parsed = ledgerExportPackageSchema.safeParse(pkg);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      const account = parsed.data.accounts[0] as unknown as Record<string, unknown>;
+      expect('annualReturnBp' in account).toBe(false);
+      expect('projectionAccountId' in account).toBe(false);
+    }
+  });
+});
+
 describe('月割りするルールの schema（周期にかかわらず台帳経由・支払い元は全 role）', () => {
   const spreadRule = {
     id: 'r-rent',

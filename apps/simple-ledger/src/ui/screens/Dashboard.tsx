@@ -97,7 +97,6 @@ export function Dashboard({
   onNavigate,
   onOpenJournal,
   onOpenAllocations,
-  onOpenAccount,
   onOpenEntry,
 }: {
   period: ReportPeriod;
@@ -108,7 +107,6 @@ export function Dashboard({
   onOpenJournal: (filter: { from?: string; to?: string }) => void;
   /** 仕訳タップの行き先（entryOpenPlan の実行先）。仕訳一覧と同じ resolver を使う。 */
   onOpenAllocations: (target: AllocationsTarget) => void;
-  onOpenAccount: (accountId: string) => void;
   onOpenEntry: (entryId: string) => void;
 }) {
   const { ledger } = useLedger();
@@ -290,16 +288,14 @@ export function Dashboard({
                       ? () => onOpenAllocations({ ruleId: plan.ruleId })
                       : plan.kind === 'item'
                         ? () => onOpenAllocations({ itemId: plan.itemId })
-                        : plan.kind === 'account'
-                          ? () => onOpenAccount(plan.accountId)
-                          : plan.kind === 'edit'
-                            ? () => onEditEntry(entry)
-                            : // opening / adjustment は専用シートが要る。仕訳一覧の該当行を
-                              // 直接開く（シートが開いた状態で遷移する既存の resolver を使う）。
-                              // 補正は按分スライスなので、開くのは宣言した stored の pin。
-                              plan.kind === 'adjustment'
-                              ? () => onOpenEntry(plan.entryId)
-                              : () => onOpenEntry(entry.id);
+                        : plan.kind === 'edit'
+                          ? () => onEditEntry(entry)
+                          : // opening / adjustment は専用シートが要る。仕訳一覧の該当行を
+                            // 直接開く（シートが開いた状態で遷移する既存の resolver を使う）。
+                            // 補正は按分スライスなので、開くのは宣言した stored の pin。
+                            plan.kind === 'adjustment'
+                            ? () => onOpenEntry(plan.entryId)
+                            : () => onOpenEntry(entry.id);
                 return (
                   <EntryListItem
                     key={entry.id}

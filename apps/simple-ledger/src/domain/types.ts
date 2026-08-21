@@ -62,20 +62,6 @@ export interface Account {
   repaymentAccountId?: string;
   /** 毎月の返済日（1〜31）。31 など月に無い日はその月の月末として扱う。 */
   repaymentDay?: number;
-  /**
-   * 想定利回り（投資科目のみ: investment-asset）。年率のベーシスポイント整数
-   * （300 = 3.00%・範囲 -9999〜100000）。浮動小数は保存しない。
-   * 未設定 or 0 = 投影なし。projectionAccountId と必ずセットで設定する（片方だけは保存拒否）。
-   * 表示専用の導出（domain/investmentProjection.ts）にだけ使い、保存判断には影響しない。
-   */
-  annualReturnBp?: number;
-  /**
-   * 利回り投影の計上先（income-category の科目・soft reference）。毎月
-   * 「計上先 → この科目」の評価益が仮想仕訳として生まれる（継続コストの月割りと対の掛け算）。
-   * soft reference = accountRefs の「使用中」判定に入れない。参照先が消えたら
-   * 投影エンジンが fail-closed に生成を止める（保存は壊さない）。
-   */
-  projectionAccountId?: string;
   /** 箱内での表示順（並び替え機能）。未設定は名前順で末尾。 */
   sortIndex?: number;
   createdAt: string;
@@ -146,15 +132,14 @@ export interface EntryMetadata {
    */
   ccKind?: 'funding' | 'monthly-allocation' | 'loan-repayment';
   /**
-   * 投資の利回り導出の仮想仕訳の印（対象の投資科目 ID）。保存されない導出専用で、
-   * `reportEntriesForAsOf` の結果にのみ現れる（v13.4 ② で保存不変条件へ合流した。
-   * 利回りは仮の数字ではなく作者の宣言）。実仕訳・保存系・export には入れない。
+   * 旧・投資の利回り導出の仮想仕訳の印（機能は v13.17 で撤去）。生成源はもう無く、
+   * **wire の明示拒否のためだけ**に型を残す（旧データ・手作り JSON の持ち込みを塞ぐ）。
    */
   investmentProjectionOf?: string;
   /**
    * 残高補正の按分スライスの印（宣言した補正仕訳＝ pin の ID）。保存されない導出専用で、
    * `reportEntriesForAsOf` の結果にのみ現れる（実仕訳・保存系・export には入れない。
-   * `investmentProjectionOf` と同じく schema の entryMetadata に無い＝保存境界で剥がれる）。
+   * schema の entryMetadata に無い＝保存境界で剥がれる）。
    * 補正の stored 仕訳は集計から外れ、代わりにこの印を持つスライスが区間へ並ぶ。
    */
   adjustmentSliceOf?: string;

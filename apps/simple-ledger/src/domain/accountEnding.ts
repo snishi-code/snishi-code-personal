@@ -61,7 +61,6 @@ export function accountEndingBalanceViolations(
  *  - 持ち物 ×2（月割り行は借方・貸方の 2 行 × 合計 ≤ amount。購入の仕訳は上で計上済み)
  *  - 定期ルール = 起票回数 ×4（購入の仕訳 2 行 + 導出 item の月割り 2 行）。終了なしの
  *    ルールは導出地平の上限（MAX_LEDGER_DATE）までの回数で数える（導出はそこで止まる）
- * 利回り導出は対象外: investmentProjection が算術限界で自主打ち切りする（throw しない）。
  * 上界なので実際の限界より手前で止まるが、拒否が起きる規模（合計 10^15 minor 級）は
  * 家計の実用域から桁違いに遠い（fail-closed の防御的検査）。
  */

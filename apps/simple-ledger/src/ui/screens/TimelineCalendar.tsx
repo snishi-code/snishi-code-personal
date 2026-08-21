@@ -166,8 +166,6 @@ interface TimelineCalendarProps {
   onNavigate: (screen: Screen) => void;
   onOpenEntry: (entryId: string) => void;
   onOpenAllocations: (target: { itemId?: string; ruleId?: string }) => void;
-  /** 投資利回りの投影行の「開く」: その利回りを宣言した投資科目の編集シートへ。 */
-  onOpenAccount: (accountId: string) => void;
 }
 
 /**
@@ -1412,7 +1410,6 @@ export function TimelineCalendar({
   onNavigate,
   onOpenEntry,
   onOpenAllocations,
-  onOpenAccount,
 }: TimelineCalendarProps) {
   const { ledger } = useLedger();
   const today = todayLocal();
@@ -1682,9 +1679,6 @@ export function TimelineCalendar({
         return;
       case 'recurringRule':
         onOpenAllocations({ ruleId: target.recurringRuleId });
-        return;
-      case 'investmentAccount':
-        onOpenAccount(target.accountId);
         return;
       case 'adjustmentEntry':
         // 按分スライスは宣言した補正仕訳（stored）へ。既存の resolver が補正シートを開く。

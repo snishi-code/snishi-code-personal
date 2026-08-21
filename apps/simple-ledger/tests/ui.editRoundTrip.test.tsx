@@ -387,15 +387,12 @@ describe('金額以外のフィールドの open→save 往復', () => {
   const ignoreVolatile = <T extends object>(o: T) =>
     JSON.stringify(Object.fromEntries(Object.entries(o).filter(([k]) => k !== 'updatedAt')));
 
-  it('勘定科目: 利回り・返済日・note・開始日を持つ科目が無変更保存で変わらない', async () => {
+  it('勘定科目: note・開始日を持つ科目が無変更保存で変わらない', async () => {
     const ledger = await loadLedger();
     const invest = ledger.accounts.find((a) => a.role === 'investment-asset')!;
-    const income = ledger.accounts.find((a) => a.role === 'income-category')!;
     const seeded: Account = {
       ...invest,
       note: '引き継ぐだけのメモ',
-      annualReturnBp: 350,
-      projectionAccountId: income.id,
       startDate: '2026-01-01',
     };
     await upsertAccount(seeded);

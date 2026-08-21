@@ -233,9 +233,9 @@ describe('buildTimelineCalendar', () => {
     });
   });
 
-  it('投資利回りの投影行もフローに出し、開く先 = 利回りを宣言した投資科目に解決する', () => {
-    // 起票元の対応表は derivedEntryOrigin（単一正本）。ここが 2 画面に手書きされていた頃、
-    // タイムラインは投影行を黙って捨てていた（監査 2026-08-12 の回帰）。
+  it('旧・利回り投影の印を持つ導出行もフローから捨てない（開く先だけが無い）', () => {
+    // 生成源は撤去済みだが、導出行の扱いは「由来を名乗らない virtual」と同じ:
+    // 黙って捨てると画面間で数字がずれる。target なしのフローとして出す。
     const model = build({
       entries: [
         entry('inv-proj-cash-a-2026-01', '2026-01-01', 'cash-a', 'income', 949, {
@@ -247,7 +247,7 @@ describe('buildTimelineCalendar', () => {
     const allFlows = model.boxes.flatMap((box) => box.dots.flatMap((dot) => dot.flows));
     const flow = allFlows.find((candidate) => candidate.id === 'inv-proj-cash-a-2026-01');
     expect(flow).toBeDefined();
-    expect(flow!.target).toEqual({ kind: 'investmentAccount', accountId: 'cash-a' });
+    expect(flow!.target).toBeUndefined();
   });
 
   it('由来を名乗らない導出行もフローから捨てない（開く先だけが無い）', () => {

@@ -79,7 +79,6 @@ describe('ホームの 6 カード', () => {
           onNavigate={() => undefined}
           onOpenJournal={() => undefined}
           onOpenAllocations={() => undefined}
-          onOpenAccount={() => undefined}
           onOpenEntry={() => undefined}
         />
       </Providers>,

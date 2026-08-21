@@ -377,14 +377,12 @@ export function Cashflow({
                   ? () => onOpenAllocations({ ruleId: plan.ruleId })
                   : plan.kind === 'item'
                     ? () => onOpenAllocations({ itemId: plan.itemId })
-                    : plan.kind === 'account'
-                      ? () => onOpenAccount(plan.accountId)
-                      : plan.kind === 'edit'
-                        ? () => onEditEntry(f.entry)
-                        : // 補正は按分スライスなので、開くのは宣言した stored の pin。
-                          plan.kind === 'adjustment'
-                          ? () => onOpenEntry(plan.entryId)
-                          : () => onOpenEntry(f.entry.id);
+                    : plan.kind === 'edit'
+                      ? () => onEditEntry(f.entry)
+                      : // 補正は按分スライスなので、開くのは宣言した stored の pin。
+                        plan.kind === 'adjustment'
+                        ? () => onOpenEntry(plan.entryId)
+                        : () => onOpenEntry(f.entry.id);
             const body = (
               <>
                 <div className="list__main">

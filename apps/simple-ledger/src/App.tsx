@@ -358,7 +358,6 @@ export function App() {
             onNavigate={go}
             onOpenJournal={goJournalFiltered}
             onOpenAllocations={goAllocationsFor}
-            onOpenAccount={goAccountFor}
             onOpenEntry={goJournalEntry}
           />
         ) : null}
@@ -414,7 +413,6 @@ export function App() {
             onEditEntry={openEdit}
             onReverse={openReversal}
             onOpenAllocations={goAllocationsFor}
-            onOpenAccount={goAccountFor}
             filter={journalFilter}
             period={period}
             targetEntryId={journalTargetEntryId}
@@ -432,7 +430,6 @@ export function App() {
             onNavigate={go}
             onOpenEntry={goJournalEntry}
             onOpenAllocations={goAllocationsFor}
-            onOpenAccount={goAccountFor}
           />
         ) : null}
         {screen === 'allocations' ? (

@@ -108,7 +108,6 @@ function renderTimeline(lens: TimelineLens) {
       onNavigate={() => undefined}
       onOpenEntry={() => undefined}
       onOpenAllocations={() => undefined}
-      onOpenAccount={() => undefined}
     />,
   );
 }

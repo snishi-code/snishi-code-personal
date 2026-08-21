@@ -35,10 +35,7 @@ const ACCOUNTS: Account[] = [
   account('salary', 'revenue', 'income-category'),
   account('adj-exp', 'expense', 'system-adjustment'),
   account('adj-rev', 'revenue', 'system-adjustment'),
-  account('invest', 'asset', 'investment-asset', {
-    annualReturnBp: 300,
-    projectionAccountId: 'gain',
-  }),
+  account('invest', 'asset', 'investment-asset'),
   account('gain', 'revenue', 'income-category'),
 ];
 
@@ -482,10 +479,12 @@ describe('向き（資産 / 負債 / 費用 / 収入 × G±）', () => {
   }
 });
 
-describe('投資科目の計上先', () => {
+describe('投資科目の計上先（v13.17 §D 例外解消の固定）', () => {
   const seed = flow('buy', '2026-01-10', 'invest', 'cash', 100_000);
 
-  it('想定利回りと計上先を宣言した投資科目は、利回り投影と同じ計上先へ寄る', () => {
+  it('投資科目への補正も記録相手科目（残高調整）へ按分される — 投影計上先へ寄せない', () => {
+    // 実効計上先の解決に投資分岐を戻す変異（旧 counterpartFor / collectPins の
+    // investmentReturnDeclaration 分岐）は、この gain=0 の固定で落ちる（mutation (a)）。
     const src = source([
       seed,
       pin({
@@ -499,17 +498,21 @@ describe('投資科目の計上先', () => {
     ]);
     const rows = slices(reportEntriesForAsOf(src, '2026-12-31'));
     expect(rows).toHaveLength(3);
-    for (const row of rows) expect(sides(row)).toEqual({ debit: 'invest', credit: 'gain' });
-    // 残高調整科目は 1 円も動かない（評価損益は調整費ではない）。
-    expect(balanceAt(src, 'adj-rev', 'revenue', '2026-12-31')).toBe(0);
-    // 宣言の日までは按分だけが効く（利回りの複利は最後の pin より後・v13.4 ②）。
-    expect(balanceAt(src, 'gain', 'revenue', '2026-04-10')).toBe(3_000);
+    for (const row of rows) expect(sides(row)).toEqual({ debit: 'invest', credit: 'adj-rev' });
+    // 収入科目（旧・投影計上先の候補）は 1 円も動かない。
+    expect(balanceAt(src, 'gain', 'revenue', '2026-12-31')).toBe(0);
+    expect(balanceAt(src, 'adj-rev', 'revenue', '2026-04-10')).toBe(3_000);
+    // pin 日の残高保証は不変。
     expect(balanceAt(src, 'invest', 'asset', '2026-04-10')).toBe(103_000);
   });
 
-  it('計上先の宣言が無効なら相手科目へ fail-soft（生成を止めない）', () => {
-    const brokenAccounts = ACCOUNTS.map((a) =>
-      a.id === 'invest' ? { ...a, projectionAccountId: 'food' } : a,
+  it('旧・投資宣言の残骸（annualReturnBp / projectionAccountId）が accounts に残っていても按分は記録相手で成立する', () => {
+    // 旧 fixture 相当: strip 前のオブジェクトが読まれても、実効計上先の解決は
+    // 記録相手科目のみ（宣言フィールドは参照されない）。
+    const legacyAccounts = ACCOUNTS.map((a) =>
+      a.id === 'invest'
+        ? ({ ...a, annualReturnBp: 300, projectionAccountId: 'gain' } as Account)
+        : a,
     );
     const src = source(
       [
@@ -523,34 +526,12 @@ describe('投資科目の計上先', () => {
           expected: 100_000,
         }),
       ],
-      brokenAccounts,
+      legacyAccounts,
     );
     const rows = slices(reportEntriesForAsOf(src, '2026-12-31'));
     expect(rows).toHaveLength(3);
     for (const row of rows) expect(sides(row)).toEqual({ debit: 'invest', credit: 'adj-rev' });
-  });
-
-  it('利回りを宣言していない投資科目は従来どおり相手科目', () => {
-    const plainAccounts = ACCOUNTS.map((a) =>
-      a.id === 'invest' ? account('invest', 'asset', 'investment-asset') : a,
-    );
-    const src = source(
-      [
-        seed,
-        pin({
-          id: 'pin1',
-          accountId: 'invest',
-          accountType: 'asset',
-          date: '2026-04-10',
-          actual: 103_000,
-          expected: 100_000,
-        }),
-      ],
-      plainAccounts,
-    );
-    for (const row of slices(reportEntriesForAsOf(src, '2026-12-31'))) {
-      expect(sides(row)).toEqual({ debit: 'invest', credit: 'adj-rev' });
-    }
+    expect(balanceAt(src, 'gain', 'revenue', '2026-12-31')).toBe(0);
   });
 });
 

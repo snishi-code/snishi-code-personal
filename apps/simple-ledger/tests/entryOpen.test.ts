@@ -57,7 +57,7 @@ describe('entryOpenPlan', () => {
     ).toEqual({ kind: 'adjustment', entryId: 'pin1' });
   });
 
-  it('導出行は由来へ（ルール・継続コスト・投資科目）、名乗らないものは開かない', () => {
+  it('導出行は由来へ（ルール・継続コスト）、名乗らないものは開かない', () => {
     expect(
       entryOpenPlan(
         base({ metadata: { inputMode: 'manual', virtual: true, recurringRuleId: 'r1' } }),
@@ -68,11 +68,12 @@ describe('entryOpenPlan', () => {
         base({ metadata: { inputMode: 'manual', virtual: true, continuousCostId: 'm1' } }),
       ),
     ).toEqual({ kind: 'item', itemId: 'm1' });
+    // 旧・利回り投影の印は由来として解決しない（機能撤去済み・生成源も無い）。
     expect(
       entryOpenPlan(
         base({ metadata: { inputMode: 'manual', virtual: true, investmentProjectionOf: 'acc1' } }),
       ),
-    ).toEqual({ kind: 'account', accountId: 'acc1' });
+    ).toEqual({ kind: 'none' });
     expect(entryOpenPlan(base({ metadata: { inputMode: 'manual', virtual: true } }))).toEqual({
       kind: 'none',
     });

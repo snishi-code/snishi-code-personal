@@ -128,7 +128,6 @@ function JournalWhenReady() {
       onEditEntry={() => undefined}
       onReverse={() => undefined}
       onOpenAllocations={() => undefined}
-      onOpenAccount={() => undefined}
       filter={null}
       period={{ mode: 'all' }}
       onClearFilter={() => undefined}

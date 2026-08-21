@@ -419,10 +419,9 @@ export const ja = {
   'netIncome.trend': '収支の推移',
 
   // 数値レンズの表（旧「年間・全体」画面。v13.5 D で時間平面のレンズへ吸収）。
-  // v13.4 ②で利回りも導出（保存境界と同じもの）になり、過去列にも導出行が出る。
-  // 「未来だけが投影」ではなくなったので、表全体が導出込みであることを先に名乗る。
+  // 過去列にも導出行（按分スライス等）が出るため、表全体が導出込みであることを先に名乗る。
   'matrix.projectionNote':
-    '表は定期ルール・持ち物・投資利回りの導出を含みます。未来列にはまだ起きていない予定も含みます。',
+    '表は定期ルール・持ち物の導出を含みます。未来列にはまだ起きていない予定も含みます。',
   'adjust.unspreadNotice':
     '補正「{description}」（{date}）は計上先が見つからないため按分できず、記録どおりの仕訳のまま集計しています（復旧表示）。科目を復元するか、補正を削除して作り直してください。',
   'matrix.monthLabel': '{month}月',
@@ -672,8 +671,6 @@ export const ja = {
   'error.entry.ledgerAccount': '月割り台帳の科目は持ち物の登録からだけ使えます。',
   'error.account.archiveBalance':
     '残高が残っている科目は終了できません。先に振替で残高を 0 にしてください。',
-  'error.account.projectionDependents':
-    'この科目は終了済み投資科目「{name}」の投影計上先です。この操作で「{name}」の終了点残高が 0 でなくなるため実行できません。先に投資科目側の利回り設定や残高を調整してください。',
   'error.recurring.everyMonthsInvalid': '周期は 1〜1200 か月の整数で入力してください。',
   'error.recurring.dayOfMonthInvalid': '起票日は 1〜31 日の整数で入力してください。',
   'error.recurring.periodInvalid': 'ルールの開始日・終了日を確認してください。',
@@ -738,12 +735,6 @@ export const ja = {
     '返済口座・返済日はカード・未払 / ローンの科目にのみ設定できます。',
   'error.account.repaymentDayInvalid': '返済日は 1〜31 で入力してください。',
 
-  // 投資の利回り導出（v13.17 で撤去）の残置キー: 導出エンジンが消えるまで使う。
-  'projection.entryDescription': '投影: {name}',
-  'error.account.returnOnlyInvestment': '想定利回りは投資の科目にのみ設定できます。',
-  'error.account.returnInvalid': '想定利回りは -99.99〜1000%（小数第2位まで）で入力してください。',
-  'error.account.projectionPair': '想定利回りと投影の計上先はセットで設定してください。',
-  'error.account.projectionAccountInvalid': '投影の計上先には既存の収入科目を選んでください。',
   // 負債の残高・返済（資金繰りの負債行と、台帳のローン行が共有する文言）。
   'repay.none': 'この日の時点で残高のある負債はありません。',
   'repay.balance': '残高',

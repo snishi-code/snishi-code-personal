@@ -66,7 +66,6 @@ function renderTimeline(
         onNavigate={(options.onNavigate ?? (() => undefined)) as never}
         onOpenEntry={() => undefined}
         onOpenAllocations={() => undefined}
-        onOpenAccount={() => undefined}
       />
     );
   }
