@@ -16,6 +16,7 @@ import './setup';
 import {
   archiveMonthlyCost,
   createRecurringRule,
+  upsertRecurringRule,
   deleteMonthlyCost,
   deleteRecurringRule,
   loadLedger,
@@ -319,6 +320,39 @@ describe('ルール×ローン併用（v13.15 §2.4）', () => {
     );
     expect(await balanceAt(liabilityId, '2025-04-01')).toBe(0);
     expect(await balanceAt(liabilityId, '2020-05-01')).toBe(3_000_000 - 50_000);
+  });
+
+  it('retroactive 変更は既存 ccl 一括返済を新条件で再検証する（v13.19 #4）', async () => {
+    const { ruleId } = await createCarRule();
+    const bank = await accountByName('預金');
+    // 5 年後に理論残債 150 万を一括返済してルールを終了（loanSettlement 実仕訳が残る）。
+    await switchRecurringRule({
+      ruleId,
+      effectiveDate: '2025-04-01',
+      successor: null,
+      settlements: [
+        {
+          ruleId,
+          month: '2020-04',
+          loanRepayment: { sourceAccountId: bank.id, amount: 1_500_000 },
+        },
+      ],
+    });
+    const saved = (await loadLedger()).recurringRules.find((r) => r.id === ruleId)!;
+    // ① 金額を一括返済合計未満へ減額する retroactive 編集は過返済になるので拒否。
+    await expect(
+      upsertRecurringRule({ ...saved, amount: 1_000_000 }, { amountChangeMode: 'retroactive' }),
+    ).rejects.toMatchObject({ code: 'error.loan.overSettled' });
+    // ② 過返済にならない減額（>= 150 万）は通る。
+    await upsertRecurringRule({ ...saved, amount: 2_000_000 }, { amountChangeMode: 'retroactive' });
+    expect((await loadLedger()).recurringRules.find((r) => r.id === ruleId)!.amount).toBe(
+      2_000_000,
+    );
+    // ③ 位相の変更で ccl 参照月（2020-04）が導出されなくなる編集は宙参照になるので拒否。
+    const after = (await loadLedger()).recurringRules.find((r) => r.id === ruleId)!;
+    await expect(upsertRecurringRule({ ...after, startMonth: '2020-05' })).rejects.toMatchObject({
+      code: 'error.recurring.settlementInvalid',
+    });
   });
 
   it('ルール削除は loanSettlement 実仕訳（ccl- 参照）を道連れにする', async () => {

@@ -36,7 +36,11 @@ import { accountEndingBalanceViolations } from './accountEnding';
 import { isValidIsoDate, isValidIsoMonth, MAX_LEDGER_DATE, MIN_LEDGER_DATE } from './calendar';
 import { CATCH_UP_HARD_CAP_MONTHS, clampDayToMonth, isRecurringPostableRole } from './recurring';
 import { parseRuleEntryId, parseRuleItemId, parseRuleLoanItemId } from './recurringIds';
-import { loanBlockViolation } from './ruleLoanChecks';
+import {
+  derivedRuleLoanItemRef,
+  loanBlockViolation,
+  ruleLoanSettlementViolation,
+} from './ruleLoanChecks';
 
 const isoDate = z
   .string()
@@ -514,16 +518,21 @@ export const ledgerExportPackageSchema = z
     // ルール由来の導出ローン item（ccl-{ruleId}-{month}・v13.15 §2.4）。
     // 一括返済（loanSettlement）の実仕訳だけが参照してよい（借入の仕訳は導出されるので
     // 保存されない）。導出条件 = loan ブロック付きルール + そのルールが導出する起票月。
+    // 導出条件の判定は保存境界と共通の単一正本（derivedRuleLoanItemRef・v13.19 監査 #4）。
     const derivedLoanItemOf = (
       itemId: string,
     ): { startDate: string; liabilityAccountId: string; amount: number } | undefined => {
       const ref = parseRuleLoanItemId(itemId);
       if (!ref) return undefined;
       const rule = recurringRuleById.get(ref.ruleId);
-      if (!rule || rule.loan === undefined) return undefined;
-      const startDate = derivedItemStartDateOf(ref.ruleId, ref.month);
-      if (startDate === undefined) return undefined;
-      return { startDate, liabilityAccountId: rule.creditAccountId, amount: rule.amount };
+      if (!rule) return undefined;
+      const derived = derivedRuleLoanItemRef(rule, ref.month);
+      if (derived === undefined) return undefined;
+      return {
+        startDate: derived.postingDate,
+        liabilityAccountId: derived.liabilityAccountId,
+        amount: derived.amount,
+      };
     };
     // item ごとの購入の仕訳（monthlyCostId あり・monthlyCostRecovery なし）。不変条件⑥⑦に使う。
     const purchaseEntriesByItem = new Map<string, (typeof pkg.journalEntries)[number][]>();
@@ -845,12 +854,13 @@ export const ledgerExportPackageSchema = z
 
     // 導出ローン item（ccl-）への一括返済の過返済も wire で拒否する（stored loan の
     // 「Σ 一括返済 > 借入総額」検査と同型。導出 item は monthlyCostItems の走査に
-    // 乗らないため、ここで合計を締める）。
-    for (const [itemId, settled] of settledTotalByItem) {
-      const derivedLoan = derivedLoanItemOf(itemId);
-      if (derivedLoan !== undefined && settled > derivedLoan.amount) {
+    // 乗らないため、ここで合計を締める）。検査は保存境界の retroactive 再検証と共通の
+    // 単一正本（ruleLoanSettlementViolation・v13.19 監査 #4 — 3 箇所目を作らない。
+    // over-settled 以外の種別は上の per-entry 検査が科目・日付つきで issue 済み）。
+    for (const r of pkg.recurringRules) {
+      if (ruleLoanSettlementViolation(r, pkg.journalEntries) === 'over-settled') {
         issue(
-          `ルール由来のローン(${itemId})の一括返済の合計(${settled})が借入総額(${derivedLoan.amount})を超えています`,
+          `定期ルール「${r.name}」の導出ローンへの一括返済の合計が借入総額(${r.amount})を超えています`,
           ['journalEntries'],
         );
       }

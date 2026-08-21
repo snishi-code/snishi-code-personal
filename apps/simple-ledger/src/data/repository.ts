@@ -33,7 +33,6 @@ import {
   recurringRulePostingReferenceEndDate,
   recurringRuleReferenceStartDate,
   recurringRuleSpreadReferenceEndDate,
-  ruleExistsAt,
   type AccountReferenceInterval,
 } from '../domain/accountLifetime';
 import {
@@ -84,7 +83,11 @@ import {
 } from '../domain/allocation';
 import { compareMonthlyCostItems } from '../domain/monthlyCost';
 import { isLiabilityRole, isLoanItem, loanSettledAmountsByItem } from '../domain/loan';
-import { loanBlockViolation } from '../domain/ruleLoanChecks';
+import {
+  derivedRuleLoanItemRef,
+  loanBlockViolation,
+  ruleLoanSettlementViolation,
+} from '../domain/ruleLoanChecks';
 import {
   buildAdjustmentEntry,
   counterpartName,
@@ -1927,6 +1930,10 @@ async function splitRecurringRuleAtDate(args: {
   // 旧線分は後継へ寿命を引き継いだ残余（起票ゼロを許す）。宣言は後継が担う。
   assertRecurringRuleSavable(predecessor, validationCtx, { residualOfSwitch: true });
   assertRecurringRuleSavable(successor, validationCtx);
+  // ccl 一括返済の参照は旧線分の id に付く。endDate 短縮で参照先の月が導出されなくなる
+  // 変更は拒否する（v13.19 監査 #4。後継は新 id なので参照ゼロ = 素通り）。
+  assertRuleLoanSettlementsConsistent(predecessor, entries);
+  assertRuleLoanSettlementsConsistent(successor, entries);
   assertRecurringLineagesSavable(candidateRules);
   assertEndedAssetLiabilityBalances({
     accounts: [...validationCtx.byId.values()],
@@ -2027,6 +2034,9 @@ async function upsertRecurringRuleUnlocked(
 
   const { validationCtx, accountsToPut } = prepareRecurringRuleAccountsForSave(saved, ctx, ts);
   assertRecurringRuleSavable(saved, validationCtx);
+  // 既存の ccl 一括返済実仕訳を**新条件で**再検証する（v13.19 監査 #4 — 金額の減額・
+  // 周期/存在期間/loan ブロックの変更が過返済・宙参照の window を開かない）。
+  assertRuleLoanSettlementsConsistent(saved, entries);
   const candidateRules = rules.map((candidate) => (candidate.id === saved.id ? saved : candidate));
   assertRecurringLineagesSavable(candidateRules);
   // v13: 金額・周期の変更で保存行は書き換えない。導出が全期間を現在のルール値で
@@ -2075,8 +2085,7 @@ async function upsertRecurringRuleUnlocked(
  */
 /**
  * ルール由来の導出ローン item（ccl-{ruleId}-{month}・v13.15 §2.4）の保存境界向け解決。
- * loan ブロック付きルールが実際にその月を導出するときだけ形を返す（schema の
- * derivedLoanItemOf と同じ規則）。
+ * 導出条件の判定は wire（schema）と共通の単一正本（derivedRuleLoanItemRef・v13.19 監査 #4）。
  */
 async function derivedRuleLoanItemFor(
   loanId: string,
@@ -2085,12 +2094,31 @@ async function derivedRuleLoanItemFor(
   if (!ref) return undefined;
   const rules = await getAll<RecurringRule>(STORE.recurringRules);
   const rule = rules.find((r) => r.id === ref.ruleId);
-  if (!rule || rule.loan === undefined) return undefined;
-  const span = monthsBetween(rule.startMonth, ref.month);
-  if (span < 0 || span % Math.max(1, rule.everyMonths) !== 0) return undefined;
-  const date = clampDayToMonth(ref.month, rule.dayOfMonth);
-  if (!ruleExistsAt(rule, date)) return undefined;
-  return { liabilityAccountId: rule.creditAccountId, startDate: date, amount: rule.amount };
+  if (!rule) return undefined;
+  const derived = derivedRuleLoanItemRef(rule, ref.month);
+  if (derived === undefined) return undefined;
+  return {
+    liabilityAccountId: derived.liabilityAccountId,
+    startDate: derived.postingDate,
+    amount: derived.amount,
+  };
+}
+
+/**
+ * ルール条件の変更後も、既存の ccl 一括返済実仕訳（loanSettlement）が新条件で整合して
+ * いること（v13.19 監査 #4 — retroactive 変更・切り替え・分割の保存時に fail-closed）。
+ * 検査規則は wire と共通の単一正本（ruleLoanSettlementViolation）。
+ */
+function assertRuleLoanSettlementsConsistent(
+  rule: RecurringRule,
+  entries: readonly JournalEntry[],
+): void {
+  const violation = ruleLoanSettlementViolation(rule, entries);
+  if (violation === undefined) return;
+  if (violation === 'over-settled') throw new LedgerError('error.loan.overSettled');
+  if (violation === 'debit-mismatch') throw new LedgerError('error.loan.structure');
+  if (violation === 'before-posting') throw new LedgerError('error.loan.settlementBeforeStart');
+  throw new LedgerError('error.recurring.settlementInvalid');
 }
 
 function planRecurringCascade(
@@ -2410,6 +2438,12 @@ async function switchRecurringRuleUnlocked(input: RecurringRuleSwitchInput): Pro
   if (successor !== undefined) assertRecurringRuleSavable(successor, validationCtx);
   assertRecurringLineagesSavable(candidateRules);
   const candidateEntries = [...entries, ...recoveryEntries];
+  // 既存 + この tx で作る ccl 一括返済実仕訳を、切り替え後の各線分の条件で再検証する
+  // （v13.19 監査 #4 — endDate の短縮・後継の周期変更で参照が宙に浮く/過返済になる変更を拒否）。
+  for (const rule of updatedById.values()) {
+    assertRuleLoanSettlementsConsistent(rule, candidateEntries);
+  }
+  if (successor !== undefined) assertRuleLoanSettlementsConsistent(successor, candidateEntries);
   assertEndedAssetLiabilityBalances({
     accounts: [...validationCtx.byId.values()],
     journalEntries: candidateEntries,
