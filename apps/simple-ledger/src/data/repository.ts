@@ -3535,12 +3535,6 @@ async function upsertMonthlyCostUnlocked(item: MonthlyCostItem): Promise<void> {
   // 保存値は strip 済みを使う＝編集のたびに撤去済みフィールドの残骸が落ちて自己修復する。
   const saved: MonthlyCostItem = assertMonthlyCostItemSavable(merged, ctx);
 
-  // ローンの追加検証: 借入総額を一括返済の合計より小さくできない（過返済を作らない）。
-  if (isLoanItem(saved)) {
-    const settled = loanSettledAmountsByItem(entries).get(saved.id) ?? 0;
-    if (settled > saved.amount) throw new LedgerError('error.loan.overSettled');
-  }
-
   // 金額のミラー: 購入の仕訳（回収フラグなし）または借入の仕訳。日付は仕訳側が正本なので触らない。
   const updatedEntries: JournalEntry[] = [];
   const mirroredSiblings: MonthlyCostItem[] = [];
@@ -3579,6 +3573,18 @@ async function upsertMonthlyCostUnlocked(item: MonthlyCostItem): Promise<void> {
       }
     }
     // 終了日を過去に縮めても購入日以降であることは上の endBeforeStart が保証する。
+  }
+
+  // ローンの追加検証: 借入総額を一括返済の合計より小さくできない（過返済を作らない）。
+  // 検査対象は saved 単体ではなく **この保存で金額が動く全ローン item**（v13.20・監査 #1）。
+  // 持ち物併用（1 仕訳が monthlyCostId + loanItemId を両持ち）では持ち物側から減額しても
+  // ミラー先のローン item が同額まで下がるため、saved が loan でない経路を検査しないと
+  // 過返済が素通りする。ミラーの中身が要るので mirroredSiblings を組み立てた後に回す。
+  const settledByItem = loanSettledAmountsByItem(entries);
+  for (const target of [saved, ...mirroredSiblings]) {
+    if (!isLoanItem(target)) continue;
+    if ((settledByItem.get(target.id) ?? 0) > target.amount)
+      throw new LedgerError('error.loan.overSettled');
   }
 
   const updatedEntryById = new Map(updatedEntries.map((entry) => [entry.id, entry]));

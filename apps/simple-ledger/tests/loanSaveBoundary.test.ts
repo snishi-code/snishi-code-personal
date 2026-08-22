@@ -282,3 +282,85 @@ describe('借入の仕訳・ローン item の削除規約', () => {
     expect(ledger.journalEntries.some((e) => e.metadata?.loanItemId !== undefined)).toBe(false);
   });
 });
+
+/*
+ * 持ち物併用（1 仕訳が monthlyCostId + loanItemId を両持ち = 三点ミラー）の編集境界。
+ * 作者の原則: ルール由来は編集不可・編集できるのは単発だけ・**単発でも金額はずれてはいけない**。
+ * v13.20（監査 #1）以前は過返済チェックが saved 単体（isLoanItem）にしか掛かっておらず、
+ * 持ち物側から減額するとミラー先のローン item が無検査で下がって過返済を作れた。
+ */
+describe('持ち物併用ローンの編集境界（三点ミラーの過返済）', () => {
+  /** 借入 10,000 / 一括返済 6,000 = これ以上は減らせない下限が 6,000 の併用ローン。 */
+  async function makeMirrored() {
+    const { cash, expense } = await seed();
+    const created = await createLoanPurchase({
+      loanName: '自動車ローン',
+      date: todayLocal(),
+      description: '自動車',
+      amount: 10000,
+      expenseAccountId: expense.id,
+      repaymentSourceAccountId: cash.id,
+      repaymentEndDate: addMonthsToDate(todayLocal(), 6),
+      continuousCost: { name: '自動車' },
+    });
+    await settleLoan({
+      id: created.loanItem.id,
+      endDate: addMonthsToDate(todayLocal(), 2),
+      settlement: { amount: 6000, sourceAccountId: cash.id },
+    });
+    return { ...created, cash, expense };
+  }
+
+  async function itemById(id: string) {
+    return (await loadLedger()).monthlyCostItems.find((m) => m.id === id)!;
+  }
+
+  it('持ち物側から減額しても過返済はミラー先の検査で弾かれる（v13.20 の本体）', async () => {
+    const { item } = await makeMirrored();
+    const before = await loadLedger();
+    await expect(
+      upsertMonthlyCost({ ...(await itemById(item!.id)), amount: 5999 }),
+    ).rejects.toThrow('error.loan.overSettled');
+    // 三点（持ち物 item・ローン item・借入の仕訳）のどれも動かさない。
+    const after = await loadLedger();
+    expect(after.monthlyCostItems).toEqual(before.monthlyCostItems);
+    expect(after.journalEntries).toEqual(before.journalEntries);
+  });
+
+  it('ローン側から減額しても従来どおり弾かれる（併用でも非退行）', async () => {
+    const { loanItem } = await makeMirrored();
+    await expect(
+      upsertMonthlyCost({ ...(await itemById(loanItem.id)), amount: 5999 }),
+    ).rejects.toThrow('error.loan.overSettled');
+  });
+
+  it('過返済にならない範囲の減額は持ち物側から通り、三点へミラーされる', async () => {
+    const { item, loanItem, purchase } = await makeMirrored();
+    await upsertMonthlyCost({ ...(await itemById(item!.id)), amount: 6000 });
+    const after = await loadLedger();
+    expect(after.monthlyCostItems.find((m) => m.id === item!.id)!.amount).toBe(6000);
+    expect(after.monthlyCostItems.find((m) => m.id === loanItem.id)!.amount).toBe(6000);
+    const borrow = after.journalEntries.find((e) => e.id === purchase.id)!;
+    expect(borrow.lines.map((l) => l.amount)).toEqual([6000, 6000]);
+  });
+
+  it('ルール由来 item（ccr- / ccl-）は編集そのものが通らない（作者原則①の固定）', async () => {
+    const { item, loanItem } = await makeMirrored();
+    // 判定は ID の namespace だけ（generatedItemRuleId）。読み取り専用は他の検証より先に塞ぐ＝
+    // 過返済になる金額を積んでも overSettled ではなく generatedReadOnly を名乗る。
+    await expect(
+      upsertMonthlyCost({ ...(await itemById(item!.id)), id: 'ccr-rule-1-2026-08' }),
+    ).rejects.toThrow('error.recurring.generatedReadOnly');
+    await expect(
+      upsertMonthlyCost({ ...(await itemById(loanItem.id)), id: 'ccl-rule-1-2026-08', amount: 1 }),
+    ).rejects.toThrow('error.recurring.generatedReadOnly');
+  });
+
+  it('併用の仕訳（購入 = 借入）は単独削除できない（作者原則④の固定）', async () => {
+    const { purchase } = await makeMirrored();
+    // 1 本の仕訳が両方の契約に該当する。assertEntryDeletable は monthlyCostId を先に見るので
+    // 購入側の契約を名乗る（借入だけの仕訳は error.entry.loanLinked = 上の削除規約テスト）。
+    await expect(deleteEntry(purchase.id)).rejects.toThrow('error.entry.monthlyCost');
+    expect((await loadLedger()).journalEntries.some((e) => e.id === purchase.id)).toBe(true);
+  });
+});
